@@ -134,7 +134,7 @@ equivalent explicitly on every node that has one.
 
 ## 7. Creating and editing
 
-- **TUI, Tools screen:** `J`/`K` select a published Skill. `c` opens a new instruction
+- **TUI, Tools screen:** `j`/`k` select a published Skill. `c` opens a new instruction
   Skill in `$EDITOR`, `C` a composition starter. `e` edits the selected exact revision.
   `Enter` loads that revision's evidence: recorded activations and the latest completed
   composition run.

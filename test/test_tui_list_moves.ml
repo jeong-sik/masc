@@ -1,7 +1,8 @@
 (* The move keys of the lists RFC tui-one-screen-grammar §3.1 names, as
    decisions over the TUI state: which list a move key walks on the surface
    on screen, which place each key selects, that no move key folds or
-   unfolds a group, and that a detail beside or above a list keeps one
+   unfolds a group, that the Tools lists move their selection rather than
+   scroll the page, and that a detail beside or above a list keeps one
    height for every selection (§8). Nothing here reads drawn text.
 
    Every move goes through [Masc_tui_list_moves.moves], the choice the
@@ -29,8 +30,12 @@ let keeper_rows state () =
 (* Overview has no row cursor, so the dispatcher hands over none. *)
 let no_rows () = None
 
-let press ?(rows = fun () -> None) state move =
-  match Moves.moves state ~rows with
+(* Only the Tools lists ask the frame to follow their selection; anywhere
+   else a call means a surface walked the wrong list. *)
+let no_follow _ = Alcotest.fail "only a Tools list asks to follow its selection"
+
+let press ?(rows = fun () -> None) ?(follow = no_follow) state move =
+  match Moves.moves state ~rows ~follow with
   | Some moves -> moves move
   | None -> Alcotest.fail "no list answered the move key"
 
@@ -368,6 +373,272 @@ let test_a_detail_keeps_the_tallest_height () =
        (Masc_tui_detail_height.fit ~budget:20 ~rows:[ 2; 15 ] ~detail:detail_of
           ~too_tall:Masc_tui_detail_height.Fold ~blank:"-" (detail_of 2)))
 
+(* The Tools surface: the Available pane's Skill list and the async request
+   list. The QA sweep's case (F06): j and k scrolled the whole page a row
+   while the selected Skill stayed put, and only J and K moved it, which a
+   Hangul keyboard cannot send. *)
+module Tools = Masc.Tui_decode_tools
+
+let skill name : Tools.effective_skill_profile =
+  let reference =
+    match
+      Skill_reference.of_yojson
+        (`Assoc
+           [ ( "identity"
+             , `Assoc
+                 [ "source_id", `String "workspace"; "package_id", `String name
+                 ; "name", `String name ] )
+           ; "content_revision", `String (String.make 64 'a') ])
+    with
+    | Ok reference -> reference
+    | Error _ -> Alcotest.failf "the reference of %s does not decode" name
+  in
+  { esp_reference = reference; esp_name = name
+  ; esp_surface = Masc.Keeper_skill_observability.Instruction_skill
+  ; esp_body_bytes = 0; esp_discovery_bytes = 0
+  ; esp_load_reasons = []; esp_node_count = 0; esp_batch_count = 0
+  ; esp_max_parallelism = 0; esp_flow = None; esp_io = Model_orchestrated }
+
+let tools_surface count =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Tools;
+  state.tools_pane <- Tools_surface;
+  let inventory : Tools.tool_snapshot =
+    { ts_tools = []; ts_count = 0; ts_freshness = Settled
+    ; ts_effective =
+        Some
+          (Effective_surface_available
+             { ets_keeper_name = "keeper"; ets_runtime_id = "runtime"
+             ; ets_official_client_kind = "client"
+             ; ets_tool_delivery = Effective_tools_delivered; ets_native_posture = None
+             ; ets_skill_snapshot_revision = "snapshot"
+             ; ets_skill_resource_read_max_bytes = None; ets_skills_left_out = []
+             ; ets_unavailable_skill_names = []
+             ; ets_skill_profiles = List.init count (fun index -> skill (Printf.sprintf "skill-%d" index))
+             ; ets_tool_surface_bytes = None; ets_skill_tool_surface_bytes = None
+             ; ets_skill_discovery_bytes = 0; ets_skill_body_bytes = None; ets_tools = []
+             ; ets_tool_surface_sha256 = None })
+    ; ts_usage = None; ts_volume_gc_report = None
+    ; ts_storage = { st_host_disk = Host_disk_absent; st_keeper_cleanup = Keeper_cleanup_absent } }
+  in
+  state.tools_inventory <- Some inventory;
+  state
+
+(* A press that records which list asked to follow. *)
+let press_tools state move =
+  let followed = ref [] in
+  press ~follow:(fun list -> followed := list :: !followed) state move;
+  !followed
+
+let test_tools_skill_list_walks_the_selection () =
+  let state = tools_surface 5 in
+  state.tools_scroll <- 7;
+  Alcotest.(check bool) "the Skill list answers the move keys" true
+    (Moves.tools_list state = Some Moves.Tools_skills);
+  let followed = press_tools state Move.Line_down in
+  Alcotest.(check int) "j selects the next Skill" 1 state.tools_skill_cursor;
+  Alcotest.(check int) "j does not scroll the page by itself" 7 state.tools_scroll;
+  Alcotest.(check bool) "the frame is asked to follow the Skill list" true
+    (followed = [ Moves.Tools_skills ]);
+  List.iter
+    (fun (from, move, expected) ->
+      state.tools_skill_cursor <- from;
+      ignore (press_tools state move);
+      Alcotest.(check int) (Printf.sprintf "from Skill %d" from) expected state.tools_skill_cursor)
+    Move.
+      [ 0, Line_up, 0; 4, Line_down, 4; 1, Line_up, 0; 0, To_end, 4; 3, To_top, 0
+      ; 0, Page_down 3, 3; 3, Page_down 3, 4; 4, Page_up 3, 1; 1, Page_up 3, 0 ];
+  (* With no Skill there is nothing to walk, and the page under the empty
+     list still has its tool table to scroll. *)
+  Alcotest.(check bool) "an empty Skill list leaves the keys to the page" true
+    (Option.is_none (Moves.moves (tools_surface 0) ~rows:no_rows ~follow:no_follow))
+
+(* Enter on Available turns the keys from the Skill list to the page under
+   it. The tool table and the evidence are drawn below the Skills, and while
+   the keys only walked the list, nothing past the last Skill was reachable. *)
+let test_tools_enter_reads_the_page_and_esc_returns () =
+  let state = tools_surface 5 in
+  state.tools_skill_cursor <- 2;
+  Moves.read_skill_page state;
+  Alcotest.(check bool) "after Enter the move keys scroll the page" true
+    (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow));
+  Alcotest.(check int) "reading the page keeps the selected Skill" 2 state.tools_skill_cursor;
+  Moves.read_skill_page state;
+  Alcotest.(check bool) "Enter while reading stays on the page" true
+    (Option.is_none (Moves.tools_list state));
+  Alcotest.(check bool) "Esc is spent giving the keys back to the list" true
+    (Moves.choose_skill_again state);
+  ignore (press_tools state Move.Line_down);
+  Alcotest.(check int) "j walks on from the Skill that was read" 3 state.tools_skill_cursor;
+  Alcotest.(check bool) "the next Esc goes further out" false (Moves.choose_skill_again state);
+  (* Leaving the pane ends the reading: Available comes back on its list. *)
+  Moves.read_skill_page state;
+  Moves.show_tools_pane state Tools_async;
+  Moves.show_tools_pane state Tools_surface;
+  Alcotest.(check bool) "switching pane gives the keys back to the list" true
+    (Moves.tools_list state = Some Moves.Tools_skills);
+  (* No Skill, nothing to read; other panes keep their own Enter and Esc. *)
+  let empty = tools_surface 0 in
+  Moves.read_skill_page empty;
+  Alcotest.(check bool) "Enter with no Skill reads no page" false (Moves.choose_skill_again empty);
+  state.tools_pane <- Tools_usage;
+  Moves.read_skill_page state;
+  state.tools_pane <- Tools_surface;
+  Alcotest.(check bool) "Enter on another pane reads no Skill page" true
+    (Moves.tools_list state = Some Moves.Tools_skills)
+
+let request id : Tui_decode.async_request_row =
+  { ar_request_id = id; ar_submitted_by = "operator"; ar_keeper_name = "keeper"
+  ; ar_phase = Async_running; ar_submitted_at = 0.; ar_ownership = Async_runtime_owned }
+
+let target id : Masc.Tui_decode_async_request.target =
+  { submitted_by = "operator"; request_id = id; keeper_name = "keeper" }
+
+let tools_async ids =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Tools;
+  state.tools_pane <- Tools_async;
+  state.tools_async_observation <-
+    Some
+      (Async_ready
+         { summary =
+             { ars_active = List.length ids; ars_runtime_owned = List.length ids
+             ; ars_ownership_unknown = 0; ars_record_errors = 0 }
+         ; requests = List.map request ids; recovery = None });
+  state
+
+let selected_request state =
+  Option.map (fun (selected : Masc.Tui_decode_async_request.target) -> selected.request_id)
+    state.tools_async_selection
+
+let test_tools_async_list_walks_the_selection () =
+  let state = tools_async [ "a"; "b"; "c" ] in
+  Alcotest.(check bool) "the request list answers the move keys" true
+    (Moves.tools_list state = Some Moves.Tools_async_requests);
+  List.iter
+    (fun (from, move, expected) ->
+      state.tools_async_selection <- Some (target from);
+      let followed = press_tools state move in
+      Alcotest.(check (option string)) (Printf.sprintf "from request %s" from) (Some expected)
+        (selected_request state);
+      Alcotest.(check bool) "the frame is asked to follow the request list" true
+        (followed = [ Moves.Tools_async_requests ]))
+    Move.
+      [ "a", Line_down, "b"; "c", Line_down, "c"; "a", Line_up, "a"; "a", To_end, "c"
+      ; "c", To_top, "a"; "a", Page_down 9, "c" ];
+  (* A selection the list no longer holds starts again at an edge. *)
+  state.tools_async_selection <- Some (target "gone");
+  ignore (press_tools state Move.Line_down);
+  Alcotest.(check (option string)) "a lost selection steps to the first request" (Some "a")
+    (selected_request state);
+  state.tools_async_selection <- Some (target "gone");
+  ignore (press_tools state Move.To_end);
+  Alcotest.(check (option string)) "a lost selection's End is the last request" (Some "c")
+    (selected_request state);
+  Alcotest.(check bool) "an empty request list leaves the keys to the page" true
+    (Option.is_none (Moves.moves (tools_async []) ~rows:no_rows ~follow:no_follow));
+  (* An open request is a reading: its keys scroll it, as they did. *)
+  state.tools_async_detail_open <- true;
+  Alcotest.(check bool) "an open request answers no list move" true
+    (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow))
+
+(* The other panes have no selection on screen and stay readings. *)
+let test_tools_readings_answer_no_list_move () =
+  let state = tools_surface 3 in
+  List.iter
+    (fun pane ->
+      state.tools_pane <- pane;
+      Alcotest.(check bool) "a reading pane answers no list move" true
+        (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow)))
+    [ Tools_activations; Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list
+    ; Tools_catalog (Tools_catalog_volumes { catalog_scroll = 0 }) ];
+  (* The source picker walks its own list while it is open. *)
+  state.tools_pane <- Tools_surface;
+  state.tools_skill_source_picker <-
+    Some
+      { ssp_sources = [ "workspace" ]; ssp_composition = false
+      ; ssp_list = Masc_tui_pick_list.closed; ssp_authority = state.workspace_authority
+      ; ssp_identity = None; ssp_port = 0 };
+  Alcotest.(check bool) "the source picker keeps the move keys" true
+    (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow))
+
+(* The footer's j/k and Esc words come from [tools_keys], which reads the
+   state the keys read. A footer that said "move" on a reading or "features"
+   on a Skill's page named a key the dispatcher does not run there. *)
+let test_tools_keys_say_what_the_keys_do () =
+  let module Keys = Masc_tui_keys in
+  let keys =
+    Alcotest.testable
+      (fun ppf (value : Keys.tools_keys) ->
+        Format.pp_print_string ppf
+          (match value with
+           | Keys.Tools_walks_list -> "walks the list"
+           | Keys.Tools_reads_skill_page -> "reads the Skill's page"
+           | Keys.Tools_reads_request -> "reads the open request"
+           | Keys.Tools_reads_original_task -> "reads the original Task"
+           | Keys.Tools_reads_page -> "reads the page"))
+      ( = )
+  in
+  let state = tools_surface 3 in
+  Alcotest.check keys "the Skill list" Keys.Tools_walks_list (Moves.tools_keys state);
+  Moves.read_skill_page state;
+  Alcotest.check keys "after Enter, the Skill's page" Keys.Tools_reads_skill_page
+    (Moves.tools_keys state);
+  ignore (Moves.choose_skill_again state);
+  Alcotest.check keys "after Esc, the list again" Keys.Tools_walks_list (Moves.tools_keys state);
+  Alcotest.check keys "an empty Skill list scrolls" Keys.Tools_reads_page
+    (Moves.tools_keys (tools_surface 0));
+  List.iter
+    (fun pane ->
+      state.tools_pane <- pane;
+      Alcotest.check keys "a pane with no list scrolls" Keys.Tools_reads_page (Moves.tools_keys state))
+    [ Tools_activations; Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list ];
+  let async = tools_async [ "a"; "b" ] in
+  Alcotest.check keys "the request list" Keys.Tools_walks_list (Moves.tools_keys async);
+  (* Esc steps out one layer at a time -- original Task, request, list -- and
+     the footer names the layer Esc goes to. *)
+  async.tools_async_detail_open <- true;
+  Alcotest.check keys "an open request scrolls and Esc returns to the list"
+    Keys.Tools_reads_request (Moves.tools_keys async);
+  let target : Masc.Tui_decode_async_request.target =
+    { submitted_by = "operator"; request_id = "a"; keeper_name = "keeper" }
+  in
+  let source : tools_async_task_source =
+    { ats_request = { target; request_context = `Assoc [ "composition_run_id", `String "run-1" ] }
+    ; ats_run_id = "run-1"; ats_task_id = "task-1"; ats_observed_at = 1.; ats_retained = false }
+  in
+  async.tools_async_task_source <- Some source;
+  Alcotest.check keys "the original Task scrolls and Esc returns to the request"
+    Keys.Tools_reads_original_task (Moves.tools_keys async);
+  async.tools_async_task_source <- None;
+  Alcotest.check keys "closing the Task leaves the request open" Keys.Tools_reads_request
+    (Moves.tools_keys async);
+  async.tools_async_detail_open <- false;
+  Alcotest.check keys "closing the request gives the keys back to the list" Keys.Tools_walks_list
+    (Moves.tools_keys async)
+
+(* The frame finds the selection where it is drawn now, so the follow runs
+   after the key moved it. A follow that ran first would hold the window on
+   the row the key left, and j on the window's last row would walk the
+   selection off screen. *)
+let test_tools_follow_sees_where_the_key_landed () =
+  let state = tools_surface 5 in
+  let seen = ref [] in
+  let note_skill _ = seen := state.tools_skill_cursor :: !seen in
+  press ~follow:note_skill state Move.Line_down;
+  press ~follow:note_skill state Move.To_end;
+  press ~follow:note_skill state (Move.Page_up 2);
+  Alcotest.(check (list int)) "each follow sees the Skill its key selected" [ 2; 4; 1 ]
+    !seen;
+  let state = tools_async [ "a"; "b"; "c" ] in
+  state.tools_async_selection <- Some (target "a");
+  let seen = ref [] in
+  let note_request _ = seen := selected_request state :: !seen in
+  press ~follow:note_request state Move.Line_down;
+  press ~follow:note_request state Move.To_end;
+  Alcotest.(check (list (option string))) "each follow sees the request its key selected"
+    [ Some "c"; Some "b" ] !seen
+
 let () =
   Alcotest.run "tui list moves"
     [ ( "keeper list"
@@ -387,6 +658,20 @@ let () =
             test_row_lists_move_their_cursor
         ; Alcotest.test_case "an overlay moves its own rows" `Quick
             test_an_overlay_moves_its_own_rows
+        ] )
+    ; ( "tools"
+      , [ Alcotest.test_case "the Skill list walks the selection" `Quick
+            test_tools_skill_list_walks_the_selection
+        ; Alcotest.test_case "Enter reads the page and Esc returns" `Quick
+            test_tools_enter_reads_the_page_and_esc_returns
+        ; Alcotest.test_case "the async request list walks the selection" `Quick
+            test_tools_async_list_walks_the_selection
+        ; Alcotest.test_case "the readings answer no list move" `Quick
+            test_tools_readings_answer_no_list_move
+        ; Alcotest.test_case "the follow sees where the key landed" `Quick
+            test_tools_follow_sees_where_the_key_landed
+        ; Alcotest.test_case "the footer's keys say what the keys do" `Quick
+            test_tools_keys_say_what_the_keys_do
         ] )
     ; ( "detail height"
       , [ Alcotest.test_case "a detail keeps the tallest height" `Quick

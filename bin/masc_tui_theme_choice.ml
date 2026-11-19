@@ -106,6 +106,12 @@ let swatch_cells (entry : entry) =
   |> String.concat ""
 ;;
 
+let default_truecolor_theme = "tokyo-night-storm-truecolor"
+let terminal_choice_name = "terminal"
+
+let observed_terminal_palette : Palette.t option ref = ref None
+let explicit_theme_active = ref false
+
 (* The reader's own choice, held beside the terminal's answer rather than
    inside it: the terminal keeps reporting whatever it reports, and this says
    whether masc listens. Publishing goes through the same generation the OSC
@@ -118,8 +124,20 @@ let apply name =
     (match Catalog.to_palette scheme with
      | None -> false
      | Some palette ->
+       explicit_theme_active := true;
+       Masc_tui_theme.set_direct_truecolor true;
        Palette.set_current (Some palette);
        true)
 ;;
 
-let follow_terminal () = Palette.set_current None
+let follow_terminal () =
+  explicit_theme_active := false;
+  Masc_tui_theme.set_direct_truecolor false;
+  Palette.set_current !observed_terminal_palette
+;;
+
+let record_terminal_palette palette =
+  observed_terminal_palette := palette;
+  if not !explicit_theme_active then
+    Palette.set_current palette
+;;

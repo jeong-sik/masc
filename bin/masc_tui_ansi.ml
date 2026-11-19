@@ -87,6 +87,7 @@ module Theme = struct
   type resolved =
     { generation : int
     ; lift_enabled : bool
+    ; direct_truecolor : bool
     ; ok : string
     ; warn : string
     ; bad : string
@@ -187,9 +188,13 @@ module Theme = struct
     let probed = Masc_tui_terminal_palette.snapshot () in
     let generation = Masc_tui_terminal_palette.snapshot_generation probed in
     let lift_enabled = Masc_tui_theme.lift_is_enabled () in
+    let direct_truecolor = Masc_tui_theme.direct_truecolor_is_enabled () in
     let previous = Atomic.get cache in
     match previous with
-    | Some cached when cached.generation = generation && cached.lift_enabled = lift_enabled -> cached
+    | Some cached
+      when cached.generation = generation
+           && cached.lift_enabled = lift_enabled
+           && cached.direct_truecolor = direct_truecolor -> cached
     | Some _ | None ->
       let palette = Masc_tui_terminal_palette.snapshot_palette probed in
       let of_state = Masc_tui_theme.status_readable ~surface palette in
@@ -198,6 +203,7 @@ module Theme = struct
       let next =
         { generation
         ; lift_enabled
+        ; direct_truecolor
         ; ok = of_state Masc_tui_theme.Ok
         ; warn = of_state Masc_tui_theme.Warn
         ; bad = of_state Masc_tui_theme.Bad
@@ -271,7 +277,7 @@ module Theme = struct
 
   (* The frame's one accent: a key letter in a hint row, a label, a column the
      reader scans for. Bright cyan reads under 4.5:1 against the page in 11 of
-     the 53 bundled themes, so it goes through the same lift as every other
+     the 54 bundled themes, so it goes through the same lift as every other
      colour here. It is the same cyan as [info] and [hue_cyan]: a screen that
      drew two cyans would not say which one is the accent. *)
   let accent () = (resolved ()).hue_cyan
@@ -303,7 +309,7 @@ module Theme = struct
   (* A focused card's border, the border.focused token. RFC
      tui-one-screen-grammar section 7.3 gives status.info to "under way" and
      to focus, so it is [info] and goes through the same lift: a raw bright
-     cyan reads under 4.5:1 in 11 of the 53 bundled themes. *)
+     cyan reads under 4.5:1 in 11 of the 54 bundled themes. *)
   let border_focus () = (resolved ()).info
   let border_muted () = (resolved ()).border_muted
 

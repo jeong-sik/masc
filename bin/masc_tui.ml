@@ -24815,13 +24815,25 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
           | Some sort -> state.board_sort <- sort
           | None -> add_event state "error" ("Unknown saved Board sort: " ^ value)));
   (* A theme named in runtime.toml's [tui] section is applied, so the reader's
-     pick survives a restart instead of being re-chosen each session. Absent
-     or unknown, the TUI follows the terminal: Theme_choice.apply returns false
-     for a name no scheme carries, and the [when] guard then leaves
-     theme_choice unset. *)
+     pick survives a restart instead of being re-chosen each session. When no
+     preference is stored on a Truecolor terminal, activate the curated
+     Truecolor default theme; storing [terminal] opts back into following the
+     terminal's own palette. *)
   if unpicked Key.Theme then
+    let apply_default_if_truecolor () =
+      if state.theme_choice = None
+         && Masc_tui_theme.color_depth () = Masc_tui_theme.Truecolor
+         && Masc_tui_theme_choice.apply Masc_tui_theme_choice.default_truecolor_theme
+      then state.theme_choice <- Some Masc_tui_theme_choice.default_truecolor_theme
+    in
     (match settings.theme, state.theme_before_preview with
-     | None, (Some _ | None) -> ()
+     | None, None -> apply_default_if_truecolor ()
+     | None, Some _ -> ()
+     | Some name, None when String.equal name Masc_tui_theme_choice.terminal_choice_name ->
+         Masc_tui_theme_choice.follow_terminal ();
+         state.theme_choice <- None
+     | Some name, Some _ when String.equal name Masc_tui_theme_choice.terminal_choice_name ->
+         state.theme_before_preview <- Some None
      (* A preview is on screen. The stored theme becomes what Esc puts back,
         and the preview stays where the reader is looking. *)
      | Some name, Some _ ->
@@ -32627,10 +32639,6 @@ let main
      kept, and the reader would find the old one back after a restart with
      nothing having told them. *)
   let store_theme_choice choice = store_preference state (Masc.Tui_preference.Theme_chosen choice) in
-  (* A scheme named in runtime.toml was applied at boot, before this existed.
-     Sending it here is what makes a saved choice survive a restart with its
-     background rather than only its ink. *)
-  sync_theme_page state;
   Masc_tui_terminal_out.write mouse_tracking_enable;
   enable_bracketed_paste ();
   (* Only terminals with an extended profile receive this opt-in. Apple
@@ -33099,6 +33107,11 @@ let main
      NO_COLOR omits OSC 10/11; the independent graphics query still runs. *)
   let palette_requested = Masc_tui_theme.colors_enabled in
   write_to_terminal (Masc_tui_terminal_probe.query ~palette:palette_requested);
+  (* Push any startup theme AFTER sending the palette query so the terminal
+     answers OSC 10/11/4 with its own unmodified colors before the startup
+     scheme overrides them. Pressing [x] ("Follow terminal") later can then
+     restore that genuine observed terminal palette. *)
+  sync_theme_page state;
   (* The original child owns stdin/buffer while collecting. The loop may draw
      meanwhile; it installs this exact decoder before ordinary input consumes
      replay or the unread terminal-buffer tail. No finish at early handoff. *)
@@ -33109,7 +33122,7 @@ let main
     | Some _ | None -> Masc_tui_graphics.Unsupported_protocol in
   let apply_terminal_observation (observation : Masc_tui_terminal_probe.observation) =
     withdraw_resource_diagram_pending state;
-    Masc_tui_terminal_palette.set_current observation.palette;
+    Masc_tui_theme_choice.record_terminal_palette observation.palette;
     let proto = match observation.graphics with
       | Some Masc_tui_graphics.Supported -> Masc_tui_graphics.Kitty_protocol
       | Some (Masc_tui_graphics.Refused _) | None -> fallback_graphics_protocol in
@@ -44795,17 +44808,15 @@ Use relative paths for resources already held in the package. -->
            handle_runtime_param_clear ()
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_themes ->
-           (* Back to whatever the terminal reports. Not a theme named
-              "terminal" -- there is nothing to name, only the absence of a
-              choice, which is where masc started. The stored key goes with
-              it, for the same reason: absence is the state, so it is written
-              by removing the key rather than by naming one. *)
+           (* Back to whatever the terminal reports. Persist the explicit
+              [terminal] sentinel so restarts honour terminal-follow instead
+              of re-applying the Truecolor default scheme. *)
            Masc_tui_theme_choice.follow_terminal ();
            state.theme_choice <- None;
            state.theme_before_preview <- None;
            (* Withdrawing the choice withdraws the background with it. *)
            sync_theme_page state;
-           store_theme_choice None
+           store_theme_choice (Some Masc_tui_theme_choice.terminal_choice_name)
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets

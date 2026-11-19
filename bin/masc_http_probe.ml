@@ -200,8 +200,9 @@ let trials ~env ~args ~token ~send =
           (ms_of_ns elapsed) detail
   done
 
-(* [masc_tui.ml]'s [maximum_input_wait_seconds]. The shape below is only a
-   control if it waits the way the TUI waits. *)
+(* The 16 ms key wait of the polling loop these controls model, one frame
+   interval. The TUI's loop no longer polls (RFC tui-idle-wait); a control
+   here measures that shape, not the current loop. *)
 let tui_input_wait_seconds = 0.016
 
 (* The TUI's main loop, reduced to the two things that decide who gets to

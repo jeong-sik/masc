@@ -606,24 +606,54 @@ let record_owner_absence
     Ok persisted
 ;;
 
+(* The stop has decided already; nothing is checked before the line. *)
+type no_check = |
+
 let remove_session_dir ~config operation =
   if operation.cleanup_intent.remove_session
   then (
-    let session_dir =
-      Filename.concat
-        (Keeper_types_profile.session_base_dir config)
-        (Keeper_id.Trace_id.to_string operation.trace_id)
+    let trace = Keeper_id.Trace_id.to_string operation.trace_id in
+    let session_dir = Filename.concat (Keeper_types_profile.session_base_dir config) trace in
+    let remove () =
+      match
+        Keeper_checkpoint_store.with_session_lock ~session_dir (fun session_dir ->
+          match remove_tree session_dir with
+          | Error _ as error -> error
+          | Ok () ->
+            Keeper_fs_durable_directory.invalidate session_dir;
+            Ok ())
+      with
+      | Error _ as error -> error
+      | Ok result -> result
+    in
+    (* RFC librarian-call-only-proposes §5.2: the turn log line goes first,
+       every time, without reading the head. The directory holds the history
+       and the two official-client files, so all three end at nothing. A
+       line that is not written keeps the session, and the step fails. *)
+    let after (mark : Keeper_turn_log.mark) =
+      { mark with trace; closed_messages = 0; history_bytes = 0; internal_bytes = 0 }
+    in
+    let place : Keeper_turn_log_recorder.place =
+      { keepers_dir = Workspace.keepers_runtime_dir config
+      ; base_path = config.Workspace.base_path
+      ; keeper_name = operation.keeper_name
+      ; session_dir
+      ; session_id = trace
+      }
     in
     match
-      Keeper_checkpoint_store.with_session_lock ~session_dir (fun session_dir ->
-        match remove_tree session_dir with
-        | Error _ as error -> error
-        | Ok () ->
-          Keeper_fs_durable_directory.invalidate session_dir;
-          Ok ())
+      Keeper_turn_log_reset.run ~at:(Time_compat.now ())
+        ~new_log_id:(Keeper_turn_log.Log_id.fresh ()) place
+        ~prepare:(fun () : (unit, no_check) result -> Ok ())
+        ~line:(fun () -> Keeper_turn_log_reset.Drop { after })
+        ~change:remove
     with
-    | Error _ as error -> error
-    | Ok result -> result)
+    | Ok result -> result
+    | Error (Path_refused (_ : no_check)) -> .
+    | Error ((Open_not_closed _ | Line_not_written _ | Line_not_planned) as refusal) ->
+      Error
+        ("the session was kept: "
+         ^ Keeper_turn_log_reset.refusal_to_string (function (_ : no_check) -> .) refusal))
   else Ok ()
 ;;
 
@@ -1161,6 +1191,7 @@ module For_testing = struct
 
   let paused_meta = paused_meta
   let remove_volumes_after_teardown = remove_volumes_after_teardown
+  let remove_session_dir = remove_session_dir
 
   let remove_pending_confirms_by_target ~config ~target_type ~target_id =
     Atomic.get remove_pending_confirms_by_target_callback config ~target_type ~target_id

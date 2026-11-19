@@ -171,9 +171,20 @@ let status_tool_name = "keeper_composition_status"
 let cancel_tool_name = "keeper_composition_cancel"
 let skill_tool_name = "keeper_skill"
 
+let execution_modes = [ Inline; Async ]
+
 let execution_mode_to_string = function
   | Inline -> "inline"
   | Async -> "async"
+;;
+
+(* The inverse of [execution_mode_to_string] over [execution_modes], so a mode
+   is spelled in one place. The TOML reader and the TUI's profile decoder each
+   wrote the spelling again. *)
+let execution_mode_of_string text =
+  List.find_opt
+    (fun mode -> String.equal (execution_mode_to_string mode) text)
+    execution_modes
 ;;
 
 let tool_kind (entry : entry) =
@@ -729,9 +740,9 @@ let parse_composition ~descriptors ~index value =
     | Some true -> Tool_definition_toml.Deferrable
     | Some false | None -> Tool_definition_toml.Always_loaded in
   let* raw_execution = required_string ~path "execution" fields in
-  let* execution = match raw_execution with
-    | "inline" -> Ok Inline | "async" -> Ok Async
-    | mode -> Error (Invalid_execution_mode { path; mode }) in
+  let* execution = match execution_mode_of_string raw_execution with
+    | Some mode -> Ok mode
+    | None -> Error (Invalid_execution_mode { path; mode = raw_execution }) in
   let* encoded = plan_json_of_fields ~path fields in
   let* params = parse_params ~path fields in
   let* plan = parse_plan ~descriptors ~path ~name ~encoded fields in

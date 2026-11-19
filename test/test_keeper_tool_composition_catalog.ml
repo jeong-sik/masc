@@ -193,6 +193,32 @@ value = {}
   | Error _ | Ok _ -> fail "composition execution mode was inferred"
 ;;
 
+(* The execution modes are spelled once, in execution_mode_to_string, and the
+   TOML reader and the TUI's profile decoder read them back through
+   execution_mode_of_string over execution_modes. *)
+let test_execution_modes_list_every_constructor () =
+  let every_constructor = [ Catalog.Inline; Catalog.Async ] in
+  (* Adding a constructor makes this match non-exhaustive, which points here. *)
+  List.iter
+    (fun (mode : Catalog.execution_mode) ->
+      match mode with
+      | Catalog.Inline | Catalog.Async ->
+        check bool (Catalog.execution_mode_to_string mode ^ " is listed") true
+          (List.mem mode Catalog.execution_modes);
+        check bool (Catalog.execution_mode_to_string mode ^ " round-trips") true
+          (Catalog.execution_mode_of_string (Catalog.execution_mode_to_string mode)
+           = Some mode))
+    every_constructor;
+  check int "one entry per constructor" (List.length every_constructor)
+    (List.length Catalog.execution_modes);
+  check int "no two modes share a spelling" (List.length Catalog.execution_modes)
+    (List.length
+       (List.sort_uniq String.compare
+          (List.map Catalog.execution_mode_to_string Catalog.execution_modes)));
+  check bool "a spelling no mode has" true
+    (Option.is_none (Catalog.execution_mode_of_string "sync"))
+;;
+
 let test_catalog_accepts_async_readonly_tools () =
   let catalog =
     match Catalog.parse (one_node_async_composition "lane-background") with
@@ -1541,6 +1567,8 @@ let () =
             "requires explicit execution mode"
             `Quick
             test_catalog_requires_explicit_execution_mode
+        ; test_case "execution modes list every constructor" `Quick
+            test_execution_modes_list_every_constructor
         ; test_case
             "accepts async statically read-only plan"
             `Quick

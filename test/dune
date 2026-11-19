@@ -3042,6 +3042,7 @@
 (include stanzas/test_fact_cell.inc)
 (include stanzas/test_file_system_named.inc)
 (include stanzas/test_keeper_decision_row_kept.inc)
+(include stanzas/test_masc_test_workspace_names.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)

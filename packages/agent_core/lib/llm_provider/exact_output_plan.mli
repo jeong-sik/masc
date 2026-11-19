@@ -81,7 +81,9 @@ type incomplete_stop =
 
 (** What an answer stopped at the context window carried. *)
 type window_output =
-  | No_output  (** No content block: the empty answer. *)
+  | No_output
+      (** The empty answer: {!Complete_common.has_no_output}, the reading
+          every completion consumer uses. *)
   | Partial_output  (** At least one content block. *)
 
 val stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason

@@ -765,6 +765,40 @@ let normalize_response response_format (response : Types.api_response) =
 
 let normalize (plan : t) response = normalize_response plan.response_format response
 
+let%test "a window stop reads its output as every completion consumer does" =
+  let stopped ?(unreadable = []) content : Types.api_response =
+    { id = "window"
+    ; model = "fixture"
+    ; unreadable_tool_uses = unreadable
+    ; stop_reason = Types.ContextWindowExceeded
+    ; content
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let unreadable_call : Types.unreadable_tool_use =
+    { tool_use_id = "call-1"
+    ; tool_name = "tool"
+    ; tool_use_ordinal = 0
+    ; arguments = "{"
+    ; arguments_problem = Tool_call_input.Not_object
+    ; arguments_assembly = None
+    }
+  in
+  let output response =
+    match normalize_response Types.JsonMode response with
+    | Error (Window_stopped output) -> Some output
+    | Ok _
+    | Error
+        ( Output_limit_stopped | Incomplete_structured_response _ | Missing_structured_text
+        | Ambiguous_structured_text _ | Unexpected_structured_content | Invalid_json _ ) -> None
+  in
+  output (stopped []) = Some No_output
+  && output (stopped ~unreadable:[ unreadable_call ] []) = Some Partial_output
+  && output (stopped [ Types.Text "" ]) = Some Partial_output
+  && output (stopped [ Types.Text "{" ]) = Some Partial_output
+;;
+
 let%test "JsonMode records syntax-only validation provenance" =
   let fail fmt = Printf.ksprintf failwith ("JsonMode provenance test: " ^^ fmt) in
   let response : Types.api_response =

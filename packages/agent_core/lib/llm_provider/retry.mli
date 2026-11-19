@@ -36,10 +36,11 @@ type invalid_request_reason =
           failures here. *)
   | Unclassified_status of { status : int }
       (** From {!classify_error}: a status that no other arm names (3xx, 405,
-          408, 409, ...). Not a 400 or 422 refusal of the request, so it is
-          kept apart from {!Unknown_invalid_request}; a consumer that reads a
-          refusal of the request as a defect in what it sent must not read
-          this one that way. *)
+          408, 409, ...). Kept apart from {!Unknown_invalid_request} because
+          it is not a 400 or 422 refusal of the request. The consumers that
+          existed before it read it exactly as {!Unknown_invalid_request};
+          only the Librarian slot outcome (RFC librarian §7.2) reads it
+          differently, as a slot that did not answer. *)
 
 type input_capacity_reason =
   | Serving_constraint_rejected of Serving_constraint.admission_error

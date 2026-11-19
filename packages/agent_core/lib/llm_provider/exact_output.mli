@@ -322,11 +322,13 @@ val stop_reason_of_incomplete_stop : incomplete_stop -> Types.stop_reason
 (** What a response that stopped at the model's window had produced. *)
 type window_output = Exact_output_plan.window_output =
   | No_output
-      (** The answer carried no content block, whether the provider parser
-          reported it as an empty completion or it reached normalization. *)
+      (** The empty answer as every completion consumer reads it
+          ({!Complete_common.has_no_output}): no content block and no tool
+          call that could not be read. The provider parser may have reported
+          it as an empty completion, or it reached normalization. *)
   | Partial_output
-      (** The answer carried at least one content block, and it was not one
-          structured output. *)
+      (** The answer carried a content block or a tool call that could not be
+          read, and it was not one structured output. *)
 
 (** Why one dispatched or dispatching attempt failed. Every cause belongs to
     the binding or to its answer, never to masc's wiring: the plan parsed its

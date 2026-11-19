@@ -205,7 +205,7 @@ let ensure_nonempty_completion
       (result : (Types.api_response, Http_client.http_error) result)
   =
   match result with
-  | Ok ({ content = []; unreadable_tool_uses = []; stop_reason; _ } : Types.api_response) ->
+  | Ok ({ stop_reason; _ } as response : Types.api_response) when has_no_output response ->
     (match stop_reason with
      | Refusal | MaxTokens | ContentFilter | RepetitionTruncation -> result
      | EndTurn | StopToolUse | StopSequence | ContextWindowExceeded

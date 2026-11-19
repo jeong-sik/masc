@@ -223,11 +223,6 @@ let work_tasks_projection (state : state) ~cols ~budget =
   let window = work_list_window ~rows:geometry.list_rows ~count ~selected in
   context, geometry, window
 
-let work_tasks_page_rows state ~terminal_rows ~cols =
-  let budget = surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows in
-  let _, _, window = work_tasks_projection state ~cols ~budget in
-  max 1 window.capacity
-
 let task_preview_lines (state : state) ~cells ~rows (task : Tui_decode.task) =
   if rows <= 0 then [] else
   let text ko en = ui_text state ~ko ~en in
@@ -415,6 +410,7 @@ let render_work_tasks (state : state) =
     ~hints:(Masc_tui_keys.footer_hints_work_tasks ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let context, geometry, window = work_tasks_projection state ~cols ~budget in
+      report_drawn_list Task_entries ~height:window.capacity;
       List.iter c.push context;
       let count = List.length rows in
       let list_lines =
@@ -791,7 +787,6 @@ let render_planning_list (state : state) =
   let now = Ptime_clock.now () in
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
-  let list_page_rows = ref 1 in
   let goals = match state.planning with
     | None -> []
     | Some snapshot -> planning_visible_goals ~filter:state.planning_filter
@@ -812,7 +807,7 @@ let render_planning_list (state : state) =
   let badge = "  " ^ connection_badge state in
   let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" ~after:badge ^ badge in
   surface_chrome_keys
-    ~overflow:(Self_scrolled (fun () -> Planning_list_page_rows !list_page_rows))
+    ~overflow:Paged_by_cursor
     state ~terminal_rows ~cols ~surface_key:"planning-list" ~title
     ~keys:(Masc_tui_keys.footer_row_planning_goal_list ~lang:state.ui_language ~has_rows:(count > 0))
     ~body:(fun ~budget c ->
@@ -858,7 +853,7 @@ let render_planning_list (state : state) =
            let geometry = work_panels ~inner:(framed_inner_width cols) ~rows:(budget - !used) in
            let window = work_list_window ~rows:geometry.list_rows ~count
                ~selected:(Some state.planning_cursor) in
-           list_page_rows := max 1 window.capacity;
+           report_drawn_list Goal_entries ~height:window.capacity;
            let list_lines =
              (if count = 0 then
                 [text (if snapshot.pl_goals = [] then "아직 Goal 없음" else "필터에 맞는 Goal 없음 · f:필터")
@@ -2000,6 +1995,7 @@ let render_schedule_list (state : state) =
              else 0
            in
            let scs_rows_window = Rows.of_list ~first:scroll_offset ~height:content_height snapshot.scs_rows in
+           report_drawn_list Schedule_rows ~height:content_height;
            c.position (Masc_tui_value.Position.row ~selected:(Some state.schedule_cursor) ~total:(List.length snapshot.scs_rows));
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in

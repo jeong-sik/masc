@@ -5848,10 +5848,10 @@ type scrolled = {
    page key reads that height back ([lists_drawn]) rather than working one
    out per surface in the key handler: the Memory list shares its body with
    the selected Keeper's detail, and the handler's guess paged thirteen rows
-   while three were on screen. [Masc_tui_render_work] draws three lists and
-   reports none of them yet: the Task and Goal lists page by the height read
-   from the projection they are drawn with ([Masc_tui_list_moves.Projected]),
-   and [Schedule_rows] has no report, so its page key moves one row. *)
+   while three were on screen. A list whose entries take more than one row
+   reports the entries it drew, because its cursor counts entries: the Task
+   and Goal lists draw two rows an entry, and a Skill or an async request
+   wraps over as many rows as its words need. *)
 type paged_list =
   | Context_inspector_items
   | Repository_change_rows
@@ -5872,7 +5872,11 @@ type paged_list =
   | Code_tree_entries
   | Board_post_rows
   | Approval_items
+  | Task_entries
+  | Goal_entries
   | Schedule_rows
+  | Skill_entries
+  | Async_request_entries
   | Fusion_entries
   | Resource_entries
   | Activity_events
@@ -11146,7 +11150,6 @@ type state = {
   mutable planning_error: string option;
   mutable planning_cursor: int;
   mutable planning_scroll: planning_scroll;
-  mutable planning_list_page_rows: int;
   (* The lists the last built frame drew and the rows it drew each in. A
      page key moves its list by that height less one row; a list the frame
      did not draw has no page and moves a row. *)
@@ -21836,7 +21839,6 @@ let create_state
   planning_error = None;
   planning_cursor = 0;
   planning_scroll = Planning_scroll_offset 0;
-  planning_list_page_rows = 1;
   lists_drawn = [];
   runtime_mode = Runtime_lanes;
   planning_mode = Planning_list;
@@ -23287,7 +23289,6 @@ type clamped_scroll =
   | System_log_detail_scroll of int
   | Planning_confirmation_scroll of int * Masc_tui_planning_detail.confirmation option
   | Planning_detail_scroll of int
-  | Planning_list_page_rows of int
   | Lane_run_detail_scroll of { scroll : int; content_height : int }
   (* An open diff's rows are built by the drawing, out of the recorded before
      and after text, so the keypress cannot count them. It steps unbounded and
@@ -23347,7 +23348,7 @@ type clamped_scroll =
 
 let approval_detail_viewport_of_reader = function
   | Some (Approval_detail_scroll (_, viewport)) -> viewport
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23362,7 +23363,7 @@ let approval_detail_viewport_of_reader = function
 
 let task_detail_of_reader = function
   | Some (Task_detail (offset, viewport)) -> Some (offset, viewport)
-  | Some (Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23377,7 +23378,7 @@ let task_detail_of_reader = function
 
 let play_card_of_reader = function
   | Some (Play_invite_scroll (card, _)) -> Some card
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23393,7 +23394,7 @@ let play_card_of_reader = function
 
 let queue_owner_of_reader = function
   | Some (Queue_panel_presented owner) -> Some owner
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23408,7 +23409,7 @@ let queue_owner_of_reader = function
 
 let help_is_presented = function
   | Some Help_presented -> true
-  | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
+  | Some (Task_detail _ | Board_read _ | Message_scroll _ | Schedule_detail_scroll _
          | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _ | Keeper_logs_scroll _ | Acting _
          | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
          | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -23441,7 +23442,7 @@ let resource_scroll_position = function
   | Changes_diff_scroll _ | Repository_changes_diff_scroll _ | Metrics_scroll _
   | Approval_detail_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
   | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Context_inspector_scroll _
-  | Context_inspector_response_scroll _ | Planning_list_page_rows _ | Queue_panel_presented _
+  | Context_inspector_response_scroll _ | Queue_panel_presented _
   | Help_presented -> None
 
 let clamped_scroll_end = max_int
@@ -23496,7 +23497,6 @@ let apply_clamped_scroll (state : state) = function
       state.planning_scroll <- (match state.planning_scroll with
         | Planning_scroll_offset _ -> Planning_scroll_offset value
         | Planning_scroll_candle _ -> Planning_scroll_candle value)
-  | Planning_list_page_rows value -> state.planning_list_page_rows <- max 1 value
   | Lane_run_detail_scroll { scroll; content_height } ->
       state.lane_run_detail_scroll <- scroll;
       state.lane_run_detail_content_height <- content_height

@@ -6,21 +6,15 @@ type row_list = {
   rl_place : int -> unit;
 }
 
-type page_height =
-  | Drawn of paged_list
-  | Projected of int
-
 type on_screen = {
-  os_page : page_height;
+  os_list : paged_list;
   os_rows : row_list option;
 }
 
-let page_height (state : state) = function
-  | Drawn list ->
-      List.find_map
-        (fun (drawn : drawn_list) -> if drawn.dl_list = list then Some drawn.dl_height else None)
-        state.lists_drawn
-  | Projected height -> Some height
+let page_height (state : state) list =
+  List.find_map
+    (fun (drawn : drawn_list) -> if drawn.dl_list = list then Some drawn.dl_height else None)
+    state.lists_drawn
 
 (* With no height there is no page to move by, so a page key moves a row:
    short of a page, it passes no row unseen. *)
@@ -44,7 +38,7 @@ let over_rows (rows : row_list) move =
 (* A key on the list on screen moves [walk] by a page of the rows that list
    drew, and no other height reaches the walk. *)
 let keyed state walk (list : on_screen) key =
-  walk (cursor_move ~height:(page_height state list.os_page) key)
+  walk (cursor_move ~height:(page_height state list.os_list) key)
 
 let its_rows state (list : on_screen) =
   Option.map (fun rows -> keyed state (over_rows rows) list) list.os_rows
@@ -116,6 +110,12 @@ let move_tools_list state list move =
   | Tools_skills -> move_tools_skill state move
   | Tools_async_requests -> move_tools_async_selection state move
 
+(* The name the frame reports each Tools list drawn under
+   ([Masc_tui_render_tools.display]'s entries). *)
+let tools_drawn_list = function
+  | Tools_skills -> Skill_entries
+  | Tools_async_requests -> Async_request_entries
+
 (* Named rather than caught, like the dispatcher's [row_list]: a surface that
    walks something other than its rows is added here once, and a [_] would
    send it to its rows without a word. *)
@@ -130,10 +130,8 @@ let moves (state : state) ~on_screen ~follow =
        other list, then hands the landing to [follow]. *)
     | Tools ->
         Option.map (fun list key ->
-          let height =
-            Option.bind (on_screen ()) (fun (shown : on_screen) -> page_height state shown.os_page)
-          in
-          move_tools_list state list (cursor_move ~height key);
+          move_tools_list state list
+            (cursor_move ~height:(page_height state (tools_drawn_list list)) key);
           follow list)
           (tools_list state)
     | Keepers (Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick)

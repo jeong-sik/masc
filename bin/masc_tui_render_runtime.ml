@@ -1154,6 +1154,9 @@ let render_tools (state : state) =
   in
   let max_scroll = max 0 (drawable - content_height) in
   let scroll = max 0 (min (tools_task_render_scroll state) max_scroll) in
+  Option.iter
+    (fun (list, height) -> report_drawn_list list ~height)
+    (Render_tools.drawn_page display ~rows:content_height);
   frame_tools_task := Option.map (fun owner ->
     {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
      ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;

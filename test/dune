@@ -4887,7 +4887,10 @@
  (libraries alcotest masc masc_tui_types masc_tui_render_prim masc_tui_render_board
   masc_tui_render_config masc_tui_ansi masc_tui_render_schedule masc_tui_theme
   masc_tui_frame_presenter masc_tui_fetched masc_tui_model_runtime_table
-  masc_tui_runtime_config_view masc_tui_account_login))
+  masc_tui_runtime_config_view masc_tui_account_login masc_tui_render_work
+  masc_tui_render_tools masc_tui_list_moves masc_tui_scroll masc_tui_overview_tasks
+  goal_measure_fixture masc.goal_measure masc.masc_goal masc.masc_types
+  masc.masc_schedule masc.skill_reference yojson))
 
 (test
  (name test_tui_render_memory)

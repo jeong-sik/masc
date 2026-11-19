@@ -10,12 +10,20 @@ type read =
   | Unreadable of string
 
 (* The recent-tool walk looks at the newest metrics rows the store keeps as
-   text ([Keeper_status_metrics.newest_metrics_lines_result]), and the newest
-   turn's audit is a kept fact of the same store. In the process that writes
-   the store both are answered from memory, so the read has no cache of its
-   own and no pool job: what it answers is what the store holds now. *)
-let read config (meta : Keeper_meta_contract.keeper_meta) =
-  match Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name:meta.name with
+   text. [newest_lines] is what
+   [Keeper_status_metrics.newest_metrics_lines_result] answered for the
+   Keeper: the row asks that once and gives the answer to this read and to
+   its recent activity. The newest turn's audit is a kept fact of the same
+   store.
+
+   A fact the store holds is answered from memory. One it does not hold is
+   read from the store's files. The answer is kept from then on when the
+   process keeps facts, the read succeeds and no append landed while it
+   ran. Otherwise the next call reads the files again: a process that keeps
+   no facts and a store the strict read refuses read them on every call.
+   This read adds no cache and no job of its own to that. *)
+let read config (meta : Keeper_meta_contract.keeper_meta) ~newest_lines =
+  match newest_lines with
   | Error error -> Unreadable (Dated_jsonl.read_error_to_string error)
   | Ok lines ->
     (match

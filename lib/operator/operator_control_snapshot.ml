@@ -324,8 +324,18 @@ let keepers_json
                     in
                     let diagnostic = diagnostic_observation.json in
                     let t_audit = Time_compat.now () in
+                    (* The newest metrics lines are asked for once: the tool
+                       audit and the recent activity both read them. *)
+                    let newest_metrics_lines =
+                      Keeper_status_metrics.newest_metrics_lines_result
+                        config
+                        ~keeper_name:meta.name
+                    in
                     let tool_audit =
-                      Operator_control_snapshot_tool_audit.read config meta
+                      Operator_control_snapshot_tool_audit.read
+                        config
+                        meta
+                        ~newest_lines:newest_metrics_lines
                     in
                     dt_audit := Time_compat.now () -. t_audit;
                     let status =
@@ -431,7 +441,8 @@ let keepers_json
                                    let lines =
                                      Keeper_status_metrics.recent_activity_lines
                                        config
-                                       ~keeper_name:name
+                                       ~keeper_name:meta.name
+                                       ~newest_lines:newest_metrics_lines
                                    in
                                    let parsed, _ =
                                      Fs_compat.parse_jsonl_lines

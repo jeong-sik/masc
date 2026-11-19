@@ -356,7 +356,7 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
   | `tool_calls` | `Dated_jsonl.last_rows` 의 읽기. `read_recent_result` 와 같은 엄격한 읽기다 | 깨진 줄도 한 줄로 센다. 읽기 색인 파일은 곁 파일로 건너뛴다(아래) |
   | `receipt` | `find_latest_entry_result` 로 가장 새 온전한 줄(`dated_jsonl.mli:275`) | `read_latest_receipt` 가 지금 쓰는 읽기다(`keeper_execution_receipt.ml:769-779`) |
   | `turn_record` | `read_recent_result` 로 한 줄 | TurnRecord reader 는 지금도 실패를 돌려준다(`keeper_context_observation_projection.ml:73-117`) |
-  | `metrics_recent` | 같은 함수로 120줄 | 최근 활동 5줄도 이 값의 끝에서 얻는다(`Keeper_status_metrics.recent_activity_lines`). 엄격한 읽기가 거부한 저장소는 전처럼 너그럽게 5줄만 읽는다. 120줄을 다 읽으러 가면 엄격한 읽기가 거부한 그 파일까지 가고, 너그러운 읽기는 못 여는 날짜 파일에서 예외를 낸다. 그 예외는 Keeper 행을 통째로 뺀다 |
+  | `metrics_recent` | 같은 함수로 120줄 | 최근 활동 5줄도 이 값의 끝에서 얻는다(`Keeper_status_metrics.recent_activity_lines`). 엄격한 읽기가 거부한 저장소는 전처럼 너그럽게 5줄을 읽는다. 새 날짜 파일부터 5줄이 찰 때까지 거슬러 열고, 못 열거나 읽다가 잘린 날짜 파일에서 예외를 낸다(`Sys_error`, `End_of_file`). 그 예외는 Keeper 행을 통째로 뺀다. 이 RFC 이전과 같다. 120줄을 다 읽으러 가면 엄격한 읽기가 거부한 그 파일까지 가므로 5줄만 묻는다 |
   | `turn_audit` | `find_latest_entry_result` 에 `tool_audit_of_metrics_row` 를 넘긴 엄격한 찾기 | `Dated_jsonl.newest_selected` 의 읽기다 |
 
 - 엄격한 읽기는 `YYYY-MM/DD.jsonl` 모양의 일반 파일만 받는다. symlink 와 낯선 이름은 `Error` 다(`dated_jsonl.mli:267-273`). 그런 저장소의 칸은 채워지지 않고, 행은 지금 reader 로 읽는다. 보이는 값은 그대로다.
@@ -383,8 +383,8 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 ### 3.5 행과 루프에서 바뀌는 것
 
 - trust, tool audit, 최근 활동, context, blocker 와 `masc_keeper_list` 의 receipt 는 칸을 읽는다. `Dated_jsonl` 저장소는 `read_fact` 로, 결정 기록은 `Keeper_row_facts` 로 읽는다.
-- 행 하나에서 registry 와 승인 큐를 한 번씩만 읽는다. receipt 칸도 한 번만 읽고, 두 reader 가 그 값을 같이 쓴다.
-- 이 값들만 읽는 행 helper 에서는 `read_policy` 의 뜻이 없다. 쓰는 중이 아니면 메모리 값이 파일과 같아서다. tool audit helper(`Operator_control_snapshot_tool_audit.read`)는 `read_policy` 를 받지 않고, 10초 캐시도 pool job 도 거치지 않는다. 그래서 그 캐시의 timeout 이 만들던 `timed_out` 상태도 없다. trust helper 는 아래 캐시 때문에 `read_policy` 를 받는다. quarantine inventory(`operator_control_snapshot.ml:674-689`), snapshot 캐시(`:789-793`), briefing, execution 의 `read_policy` 는 그대로 둔다.
+- 행 하나에서 registry 와 승인 큐를 한 번씩만 읽는다. receipt 칸도 한 번만 읽고, 두 reader 가 그 값을 같이 쓴다. metrics 120줄 칸도 행이 한 번 묻고, 그 답을 tool audit 와 최근 활동에 넘긴다(`~newest_lines`). 두 reader 는 스스로 묻지 않는다.
+- 이 값들만 읽는 행 helper 에서는 `read_policy` 의 뜻이 없다. 쓰는 중이 아니면 메모리 값이 파일과 같아서다. tool audit helper(`Operator_control_snapshot_tool_audit.read`)는 `read_policy` 를 받지 않고, 자기 몫의 10초 캐시와 그 캐시를 채우던 pool job 이 없다. 그래서 그 캐시의 timeout 이 만들던 `timed_out` 상태도 없다. 칸이 든 값은 메모리에서 답한다. 칸이 비었으면 저장소의 job 하나로 파일을 읽어 채운다. 엄격한 읽기가 거부하는 저장소는 칸이 채워지지 않아서 부를 때마다 그 읽기를 한다. trust helper 는 아래 캐시 때문에 `read_policy` 를 받는다. quarantine inventory(`operator_control_snapshot.ml:674-689`), snapshot 캐시(`:789-793`), briefing, execution 의 `read_policy` 는 그대로 둔다.
 - tool audit 는 Keeper 행, briefing(`dashboard_briefing_assembly.ml`), Keeper 상세(`keeper_status_detail.ml`)가 같은 함수(`latest_tool_audit_snapshot_from_files`)로 읽는다. 셋이 같은 칸을 읽는다(L3a).
 - 10초 trust 캐시(`operator:keeper-runtime-trust:compact:v1:*`)는 승인 audit 와 workspace 대기 승인 목록 읽기도 덮는다(`keeper_runtime_trust_snapshot.ml:689-702`). 이 RFC 는 그 둘을 옮기지 않는다. 그래서 §8.1 이 정해질 때까지 캐시는 그 둘 몫으로 남긴다.
 

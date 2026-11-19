@@ -81,7 +81,13 @@ let kept config =
 let answer = result (list int) string
 
 (* The rows the recent activity of the Keeper row shows. *)
-let shown config = numbers (Keeper_status_metrics.recent_activity_lines config ~keeper_name)
+let shown config =
+  numbers
+    (Keeper_status_metrics.recent_activity_lines
+       config
+       ~keeper_name
+       ~newest_lines:(Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name))
+;;
 
 let meta =
   lazy
@@ -92,7 +98,12 @@ let meta =
 
 (* The recent tools of a Keeper row. *)
 let recent_tools config =
-  match Operator_control_snapshot_tool_audit.read config (Lazy.force meta) with
+  match
+    Operator_control_snapshot_tool_audit.read
+      config
+      (Lazy.force meta)
+      ~newest_lines:(Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name)
+  with
   | Operator_control_snapshot_tool_audit.Read audit ->
     audit.Operator_control_snapshot_tool_audit.recent_tool_names
   | Operator_control_snapshot_tool_audit.Unreadable detail -> fail detail

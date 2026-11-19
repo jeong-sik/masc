@@ -6,8 +6,8 @@
     again from that line.
 
     Nothing here waits, takes the writer's lock or uses Eio. The writer holds
-    [<keeper>.memory.lock] for as long as it lives and calls {!commit_direct}
-    where it cannot be cancelled. *)
+    [<keeper>.memory.lock] for as long as it lives and calls the commits
+    where they cannot be cancelled. *)
 
 module Current := Keeper_memory_os_current_types
 module Digest := Agent_core.Checkpoint_objects
@@ -100,6 +100,36 @@ val commit_direct
   -> trace:string
   -> Librarian_direct.write
   -> Librarian_effects.t
+  -> committed
+
+(** Commits an answer whose plan is [plan] ({!Librarian_plan.of_answer} of
+    [t]'s Memory at the same [at]), in the steps of {!commit_direct}. The
+    line moves reading to [question.reach]: [covers_through] is [Through]
+    its [line] and [within], and [covered] and [turn_log_offset] are its
+    own. The turn log is the one the last line names. A [Replaced] working
+    state is the line's as the answer wrote it, so [Replaced ""] leaves the
+    empty text; [Kept] and [Not_valid_alone] carry the last line's.
+
+    The cause is a [Read] of the question's id, trace and missing parts, by
+    [slot]. Effects that add, see or remove a fact rewrite the snapshot with
+    [librarian] as its source on [question.trace]. Effects that do none of
+    these leave it: [after] is [basis] and the snapshot is not written. *)
+val commit_read
+  :  t
+  -> at:float
+  -> question:Librarian_read_result.question
+  -> slot:string
+  -> Librarian_plan.t
+  -> committed
+
+(** Passes [hole] with no answer, in the steps of {!commit_direct}: the line
+    moves reading to [reach] as {!commit_read} does, has no effects, keeps
+    the working state, and leaves the snapshot: [after] is [basis]. *)
+val commit_skip
+  :  t
+  -> at:float
+  -> hole:Librarian_log.hole
+  -> Librarian_read_result.reach
   -> committed
 
 type adoption_refusal =

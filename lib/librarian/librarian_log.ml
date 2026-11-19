@@ -11,6 +11,13 @@ type position =
       ; within : within
       }
 
+type hole =
+  | Content_missing of Librarian_unit.missing_at list
+  | Unknown_span of
+      { before : Keeper_turn_log.mark
+      ; after : Keeper_turn_log.mark
+      }
+
 type cause =
   | Direct of
       { by : Librarian_effects.actor
@@ -21,6 +28,14 @@ type cause =
       { by : string
       ; observed : Digest.digest
       }
+  | Read of
+      { question : Librarian_question_id.t
+      ; shown_memory : bool
+      ; slot : string
+      ; trace : string
+      ; missing : Librarian_unit.missing_at list
+      }
+  | Skip of { hole : hole }
 
 type commit =
   { seq : int

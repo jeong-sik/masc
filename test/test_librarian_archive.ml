@@ -54,16 +54,17 @@ let log_path (place : Machine.place) =
   Log_store.path_for_keepers_dir ~keepers_dir:place.memory_dir ~keeper_id
 ;;
 
-let memory : Machine.state -> Types.fact list = function
-  | Idle store -> (Store.memory store).facts
-  | Stopped (_ : Store.stop) -> fail "the store of the fixture is stopped"
+let memory (value : Machine.t) =
+  match value.state with
+  | Idle { store; seen_length = (_ : int option) } -> (Store.memory store).facts
+  | Asking _ | Resting _ | Stopped _ -> fail "the store of the fixture is not idle"
 ;;
 
 (* A write that has to commit a line. *)
 let write state ~at w =
   match Machine.write state ~at ~by:Effects.Keeper ~trace:"turn" w with
   | state, Written (_ : Masc.Librarian_log.commit) -> state
-  | ( (_ : Machine.state)
+  | ( (_ : Machine.t)
     , (Already_held | Already_done | Already_absent | Refused _ | Not_a_snapshot _ | Unavailable _)
     ) -> fail "the write of the fixture was not committed"
 ;;
@@ -99,7 +100,9 @@ let archive_text place ~current =
 (* Three facts, the third derived from the first. Then the first is
    retracted and the second superseded. *)
 let after_two_removals place =
-  let state = Machine.boot place ~at:100.0 in
+  let state =
+    Machine.booted place ~at:100.0 ~lane:None ~last_ask:0 (Machine.boot place ~at:100.0)
+  in
   let state = write state ~at:201.0 (remember port) in
   let state = write state ~at:202.0 (remember owner) in
   let state =

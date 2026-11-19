@@ -64,11 +64,33 @@ let rewritten ~(previous : Current.t) ~at ~(effects : Effects.t) ~source =
      | bytes -> Ok (Rewritten { snapshot; bytes }))
 ;;
 
+(* The snapshot holds the facts; the rest of an answer's effects is the
+   line's. An answer that adds, sees and removes nothing changes no byte. *)
+let changes_facts (effects : Effects.t) =
+  not
+    (List.is_empty effects.added
+     && List.is_empty effects.touched
+     && List.is_empty effects.removed)
+;;
+
 let next ~previous ~at (cause : Log.cause) effects =
   match cause with
   | Adopt { by = (_ : string); observed = (_ : Digest.digest) } -> Ok Unchanged
+  | Skip { hole = (_ : Log.hole) } -> Ok Unchanged
   | Direct { by = (_ : Effects.actor); trace; write } ->
     rewritten ~previous ~at ~effects ~source:(source_of_direct ~trace write)
+  | Read
+      { trace
+      ; question = (_ : Librarian_question_id.t)
+      ; shown_memory = (_ : bool)
+      ; slot = (_ : string)
+      ; missing = (_ : Librarian_unit.missing_at list)
+      } ->
+    if changes_facts effects
+    then
+      rewritten ~previous ~at ~effects
+        ~source:({ kind = Librarian; trace_id = trace } : Current.source)
+    else Ok Unchanged
 ;;
 
 let after ~(previous : Current.t) (commit : Log.commit) =

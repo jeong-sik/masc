@@ -19,18 +19,41 @@
       "working_state": null }
     v}
 
-    A fact is written as the snapshot writes it, a mark as a turn log line
-    writes it, and the claim of an op that was left out as the answer writes
-    it. The fact codec raises [Invalid_argument] on a blank claim, a time that
-    is not finite, and a derivation {!Keeper_memory_os_types.derived} refuses.
-    A commit whose effects a plan made has none of them. *)
+    An answer and a skip are committed lines whose cause is one of these:
+
+    {v
+    { "kind": "read", "question": { "front": "<32 hex>", "back": "<32 hex>" },
+      "memory": "shown", "slot": "…", "trace": "…",
+      "missing": [ { "line": 120,
+                     "parts": [ { "kind": "bundle",
+                                  "slice": { "bundle": "<sha256 hex>", "skip": 0, "take": 2 } },
+                                { "kind": "chat_bytes", "from": 0, "until": 64 },
+                                { "kind": "undecodable_history_line", "offset": 10 },
+                                { "kind": "undecodable_external_row", "row": 3 } ] } ] }
+    { "kind": "skip", "hole": { "kind": "content_missing", "missing": [ … ] } }
+    { "kind": "skip", "hole": { "kind": "unknown_span", "before": { … }, "after": { … } } }
+    v}
+
+    ["memory"] is ["not_shown"] for a question that showed one item alone.
+    A byte or row part is [history_bytes], [internal_bytes], [chat_bytes] or
+    [external_rows] with [from] and [until]; an undecodable line of the
+    official client's internal file is [undecodable_internal_line].
+
+    A fact is written as the snapshot writes it, a mark and a slice as a turn
+    log line writes them, and the claim of an op that was left out as the
+    answer writes it. The fact codec raises [Invalid_argument] on a blank
+    claim, a time that is not finite, and a derivation
+    {!Keeper_memory_os_types.derived} refuses. A commit whose effects a plan
+    made has none of them. *)
 
 val to_json : Librarian_log.line -> Yojson.Safe.t
 
 (** Every object has exactly its fields. Counts and offsets are not negative,
-    a line's [at] is finite, and a Memory id has the shape of one. Text a write carried (a claim, a
-    reason, a name) is read as it was written: the reader does not refuse a
-    line the writer could have written. *)
+    a line's [at] is finite, a Memory id has the shape of one, and each half
+    of a question id is {!Librarian_question_id.half_length} lowercase
+    hexadecimal characters. Text a write carried (a claim, a reason, a name)
+    is read as it was written: the reader does not refuse a line the writer
+    could have written. *)
 val of_json
   :  Yojson.Safe.t
   -> (Librarian_log.line, Keeper_memory_os_types.wire_error) result

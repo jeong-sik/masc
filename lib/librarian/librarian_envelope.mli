@@ -40,8 +40,11 @@ type refusal =
     rewrites it: the facts are {!Librarian_effects.apply} of the effects, the
     revision is the one after [previous]'s, it was updated at [at], and its
     source is the write ([explicit_retract] for a retraction,
-    [explicit_write] otherwise) on the trace the cause carries. An adoption
-    leaves the bytes the operator named. Never [Revision_not_next]. *)
+    [explicit_write] otherwise) on the trace the cause carries. An answer
+    rewrites it the same way with [librarian] as the source's kind, when its
+    effects add, see or remove a fact; an answer that does none of these
+    leaves the bytes. A skip and an adoption leave the bytes. Never
+    [Revision_not_next]. *)
 val next
   :  previous:Current.t
   -> at:float

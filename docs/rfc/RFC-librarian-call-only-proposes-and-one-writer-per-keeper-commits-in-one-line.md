@@ -754,7 +754,7 @@ type bottom = { with_memory : judged option; alone : judged option }  (* 맨 앞
 쉬는 시각은 없다. `Resting` 은 값을 갖지 않는다.
 
 - pulse(서버 maintenance tick, 60초)가 오면 `lane_held` 를 본다. 선언한 slot 이 모두 provider 가 잡아 둔 slot 이면 아무것도 읽지 않고 `Resting` 에 남는다. 아니면 다시 묻는다.
-- `lane_held lane ~now` 는 순수 함수다. HTTP 는 `order(lane).held_http`, CLI 는 `Keeper_lane_cli_oneshot.order_slots` 가 잡은 쪽을 읽는다.
+- `lane_held ~now lane` 은 이 프로세스가 남긴 기록을 읽는다. HTTP 는 `order(lane).held_http`, CLI 는 `Keeper_lane_cli_oneshot.order_slots` 가 잡은 쪽을 읽는다.
 - 그래서 멀리 있는 reset 시각 하나가 lane 전체를 쉬게 하지 못한다. provider 가 말한 시각이 지난 뒤 늦는 것은 pulse 한 번까지다.
 - 바닥에서 쉬는 Keeper 는 pulse 마다 크기 사실을 주지 않은 slot 에만 묻는다. 한 항목과 Memory 를 실은 질문을 먼저 만들고, 모두 입력 크기로 판정돼 있으면 부르지 않고 그 항목만 실은 질문으로 넘어간다.
 - pulse 는 등록된 Keeper 를 모두 돈다. Keeper 마다 `ensure` 를 부르고 그 쓰는 쪽에 `Pulse` 를 보낸다(§8.6). 등록부에 없는 Keeper 의 쓰는 쪽에는 `Retire` 를 보낸다.
@@ -1110,8 +1110,8 @@ type state =
   | Retired
 and asking =
   { ask : int; since : float; asked : ask
-  ; lane : Sha256.t                                  (* 묻기를 시작할 때의 lane 값 *)
-  ; removed_since : (int * Memory_id.t list) list }  (* 묻는 사이 직접 쓰기가 지운 fact *)
+  ; lane : Librarian_memory_lane.t                   (* 묻기를 시작할 때의 lane 값 *)
+  ; removed_since : (Memory_id.t * int) list }       (* 묻는 사이 직접 쓰기가 지운 fact 와 그 줄의 seq *)
 type store_stop =
   | Log_diverged of { expected : Sha256.t; observed : Sha256.t }
   | Memory_unreadable | Log_unreadable | Store_unwritable

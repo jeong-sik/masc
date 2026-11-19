@@ -218,12 +218,20 @@ let input fixture tail : Ask.input =
   }
 ;;
 
-let boot fixture = ref (Machine.boot fixture.place ~at:boot_at)
+(* A writer that holds no lane value, so its boot asks nothing. *)
+let boot fixture =
+  ref
+    (Machine.booted fixture.place ~at:boot_at ~lane:None ~last_ask:0
+       (Machine.boot fixture.place ~at:boot_at))
+;;
 
 (* The tail an open writer shows, as [Librarian_writer.status] does. *)
-let tail_of state () : Librarian_log.line option =
-  match !state with
-  | Machine.Idle store -> Some (Store.tail store)
+let tail_of (state : Machine.t ref) () : Librarian_log.line option =
+  let value = !state in
+  match value.state with
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : Machine.asking) }
+  | Resting store -> Some (Store.tail store)
   | Stopped (_ : Store.stop) -> None
 ;;
 

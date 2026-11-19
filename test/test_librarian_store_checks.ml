@@ -128,12 +128,13 @@ let test_memory_log () =
   @@ fun ~base_path place ->
   start_turn_log place;
   check outcome "no commit log is no line" ((0, 0), None) (checked D.Id.Memory_log ~base_path);
+  let booted ~at = Machine.booted place ~at ~lane:None ~last_ask:0 (Machine.boot place ~at) in
   (match
-     Machine.write (Machine.boot place ~at:100.0) ~at:201.0 ~by:Effects.Keeper ~trace:"turn"
+     Machine.write (booted ~at:100.0) ~at:201.0 ~by:Effects.Keeper ~trace:"turn"
        (remember "the port is 8935")
    with
-   | (_ : Machine.state), Written (_ : Masc.Librarian_log.commit) -> ()
-   | ( (_ : Machine.state)
+   | (_ : Machine.t), Written (_ : Masc.Librarian_log.commit) -> ()
+   | ( (_ : Machine.t)
      , (Already_held | Already_done | Already_absent | Refused _ | Not_a_snapshot _ | Unavailable _)
      ) -> fail "the write of the fixture was not committed");
   check outcome "the line that starts the log and one commit" ((2, 0), None)
@@ -150,11 +151,11 @@ let test_memory_log () =
     ((3, 1), Some (Printf.sprintf "%s offset %d: not JSON" keeper_id tail_at))
     (checked D.Id.Memory_log ~base_path);
   (match
-     Machine.adopt place (Machine.boot place ~at:300.0) ~at:301.0 ~by:"operator-1"
+     Machine.adopt place (booted ~at:300.0) ~at:301.0 ~by:"operator-1"
        ~observed:(Digest.digest_of_bytes (file_bytes (snapshot_path place)))
    with
-   | (_ : Machine.state), Done -> ()
-   | (_ : Machine.state), Not_done (_ : Machine.act_refusal) ->
+   | (_ : Machine.t), Done -> ()
+   | (_ : Machine.t), Not_done (_ : Machine.act_refusal) ->
      fail "the snapshot of the fixture was not adopted");
   check outcome "the tail an operator adopted past stays in the file and is a row"
     ((4, 0), None)

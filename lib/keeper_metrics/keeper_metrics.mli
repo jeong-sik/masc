@@ -176,6 +176,7 @@ type t =
   | MemorySnapshotBytes         (* gauge: rendered fact bytes of a keeper's Memory after its last rewriting commit *)
   | LibrarianAbsorbSources      (* counter: sources of a finished absorb-gate judgment, by keeper, forward outcome and the choice they got *)
   | LibrarianAbsorbCopyChecks   (* counter: reverse copy checks of a finished absorb-gate judgment, by keeper and verdict *)
+  | LibrarianLateAnswers        (* counter: Librarian answers that arrived after their ask had stopped being the writer's current one, by keeper; none is committed *)
 
 val to_string : t -> string
 

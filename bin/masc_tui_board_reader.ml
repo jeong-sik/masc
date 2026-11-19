@@ -48,7 +48,7 @@ let open_read ?(content_kind=Document) ~key t=
   | Started (source,ticket) ->
     let request={ticket;job=ref ()} in
     {t with opened=Some key;source;read_request=Some request;presentation=Source;content_kind;
-      document=notice key "Reading original bytes…"},Some request
+      document=notice key "Reading original bytes"},Some request
 let validate key original=
   if String.length original<>key.bytes then Error "Attachment byte length differs from the selected reference"
   else if Agent_core_sha256.(digest_string original |> to_hex)<>key.sha256
@@ -62,7 +62,7 @@ let complete t request result=
     | Ok _ | Error _ -> result in
   let source=F.complete ~equal:equal_key t.source request.ticket result in
   let key=F.request_key request.ticket in
-  let document=notice key (match result with Ok _ -> "Preparing original reading…" | Error error -> error ^ "\nPress r to retry.") in
+  let document=notice key (match result with Ok _ -> "Preparing original reading" | Error error -> error ^ "\nPress r to retry.") in
   {t with source;document}
 let select presentation t=
   {t with presentation;preparation=F.clear t.preparation;preparation_request=None}

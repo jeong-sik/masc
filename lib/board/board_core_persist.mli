@@ -326,7 +326,7 @@ val update_post_with_outcome :
   unit ->
   (post_edit, board_error) result
 
-(** RFC-0233 §7: maintain the [posts_by_turn_ref] / [posts_by_run_id]
+(** Maintain the [posts_by_turn_ref] / [posts_by_run_id]
     secondary indexes from a post's [origin].  Idempotent; a [None] origin is
     a no-op.  Called on create and on load so the two paths stay in lockstep. *)
 val index_post_origin : store -> post -> unit

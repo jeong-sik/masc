@@ -43,7 +43,7 @@ let test_rate_limit_delayed_observation_keeps_newer_hint () =
     (Option.is_none (rate_limit_after ~now:23. delayed))
 ;;
 
-(* RFC-0458 §3.4: a failed attempt names no time, so no clock ends it. *)
+(* A failed attempt names no time, so no clock ends it. *)
 let test_failed_attempt_has_no_expiry () =
   let noted =
     State.note_failed_attempt ~noted_at:10. ~failure:State.Provider_timeout
@@ -76,7 +76,7 @@ let test_failed_attempt_delayed_observation_keeps_newer () =
       Alcotest.fail "an older failure replaced a newer one"
 ;;
 
-(* RFC-0458 §3.4 (2026-09-23): the Keeper that saw the candidate fail last is
+(* The Keeper that saw the candidate fail last is
    the recorder, because its next cycle is the one that tries it again. *)
 let test_a_newer_failure_names_its_own_recorder () =
   let first =

@@ -243,7 +243,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/shell" (fun state req reqd ->
          let light = Server_utils.bool_query_param req "light" ~default:false in
          let timing = Server_timing.create () in
-         (* RFC-0138 Phase 3 Step 1: wait-free read via
+         (* wait-free read via
             [Dashboard_snapshot.current ()] when the refresh fiber has
             published; falls back to [dashboard_shell_http_json] for
             light variant + first-request cold start. *)
@@ -254,7 +254,7 @@ let add_routes ~sw ~clock router =
          in
          Http.Response.json_value ~compress:true ~request:req ~extra_headers:(Server_timing.extra_header timing) json reqd
        )
-  (* RFC-0266 §7 Phase 4: read-only snapshot of the in-memory fusion run registry
+  (* read-only snapshot of the in-memory fusion run registry
      (in-progress + recently completed). The fusion panel fetches this on load and
      re-fetches on the [fusion_run_status] SSE event. Registry reads are O(runs)
      in-memory, so no Dashboard_cache layer; each run serializes through the shared
@@ -287,7 +287,7 @@ let add_routes ~sw ~clock router =
            json
            reqd
        ))
-  (* RFC-0361 D4: read-only snapshot of the completion-authority review registry
+  (* read-only snapshot of the completion-authority review registry
      (in-progress + recently completed). Sibling of the fusion route above and
      shaped identically; each run serializes through the shared
      Verification_run_registry.run_to_yojson so the panel and any later SSE delta
@@ -602,7 +602,7 @@ let add_routes ~sw ~clock router =
                  (`Assoc [ ("ok", `Bool false); ("error", `String message) ])
                  reqd)
        )
-  (* RFC-0049 — surface/section open counters. Aggregate Otel_metric_store
+  (* surface/section open counters. Aggregate Otel_metric_store
      counters only; the request body is discarded after increment. *)
   |> Server_route.post Server_route.Public_read "/api/v1/dashboard/nav-event" (fun _state req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
@@ -629,7 +629,7 @@ let add_routes ~sw ~clock router =
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/project-snapshot" (fun state req reqd ->
          let timing = Server_timing.create () in
-         (* RFC-0138 Phase 3 Step 3: wait-free read via
+         (* wait-free read via
             [Dashboard_snapshot.current ()].namespace_truth when the
             refresh fiber has populated it.  Cold start (or refresh
             spawned without ~state) falls through to the synchronous
@@ -724,8 +724,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/keeper-memory-health" (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
          (* [?keeper=] answers that Keeper's row alone, so a reader told that
-            one Keeper's row moved reads that row instead of the fleet
-            (RFC-0487). *)
+            one Keeper's row moved reads that row instead of the fleet. *)
          match Option.map String.trim (Server_utils.query_param req "keeper") with
          | None ->
            respond_cached_read ~request:req ~reqd
@@ -993,7 +992,7 @@ let add_routes ~sw ~clock router =
        )
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/tools" (fun state req reqd ->
            let request = req in let timing = Server_timing.create () in
-           (* RFC-0138 Phase 3 Step 2: wait-free read via
+           (* wait-free read via
               [Dashboard_snapshot.current ()] for the global catalog. An exact
               Keeper selector computes the effective surface beside it. *)
            let response =
@@ -1238,7 +1237,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/telemetry" handle_telemetry
   |> Server_route.get Server_route.Public_read "/api/v1/dashboard/telemetry/summary" (fun state req reqd ->
          let timing = Server_timing.create () in
-         (* RFC-0138 Phase 3 Step 2: wait-free read via
+         (* wait-free read via
             [Dashboard_snapshot.current ()].telemetry_summary when the
             refresh fiber has published; falls back through the same
             [Dashboard_cache] + [Telemetry_unified.summary_json] path

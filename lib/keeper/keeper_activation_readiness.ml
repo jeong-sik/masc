@@ -67,7 +67,7 @@ type t =
   ; autonomous_activation : autonomous_activation
   }
 
-(* RFC-0297 P0-1: the autonomous and proactive gates are resolved through the
+(* The autonomous and proactive gates are resolved through the
    single SSOT [Keeper_lifecycle_gate_env.enabled] (global kill-switch AND the
    per-keeper flag), rather than re-deriving the enabled state from
    [(Keeper_activation_mode.restore_owner meta.activation_mode)] / [(Keeper_activation_mode.spontaneous meta.activation_mode)] here. This is the same

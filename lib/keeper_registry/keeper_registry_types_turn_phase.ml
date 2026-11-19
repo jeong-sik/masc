@@ -6,7 +6,7 @@
 
     @since Keeper 500-line decomposition *)
 
-(** Pure control-flow signal for immediate fiber termination (RFC-0002).
+(** Pure control-flow signal for immediate fiber termination.
     Carries no state — failure reason must be pre-stored via
     [set_failure_reason] before raising. *)
 exception Keeper_fiber_crash
@@ -54,7 +54,7 @@ let packed_turn_phase_label : packed_turn_phase -> string = function
   | Packed Turn_exhausted -> "Turn_exhausted"
 ;;
 
-(* RFC-0072 Phase 4: GADT-encoded turn_phase transitions.  Idempotent
+(* GADT-encoded turn_phase transitions.  Idempotent
    self-loops are NOT represented (they are mutator-boundary no-ops; the
    resolver returns [Resolved_turn_idempotent] for them).  This module
    enumerates the 23 valid cross-state transitions of the 7-variant
@@ -118,7 +118,7 @@ module Turn_phase_transition = struct
   ;;
 end
 
-(* RFC-0072 Phase 4: typed error for turn_phase transition spec violations.
+(* Typed error for turn_phase transition spec violations.
    Each of the 19 forbidden pairs has its own constructor. *)
 type turn_phase_transition_spec_violation =
   | Idle_to_routing
@@ -147,7 +147,7 @@ let turn_phase_transition_spec_violation_to_tag = function
   | Exhausted_to_finalizing -> "exhausted->finalizing"
 ;;
 
-(* RFC-0072 Phase 5: typed exception for forbidden turn_phase transitions.
+(* Typed exception for forbidden turn_phase transitions.
    The typed [turn_phase_transition_spec_violation] payload travels on the
    exception instead of through a string message. Raised by
    [set_turn_phase] / [set_turn_phase_direct]. The registered
@@ -181,7 +181,7 @@ let () =
     | _ -> None)
 ;;
 
-(* RFC-0072 Phase 4: resolver for turn_phase transitions. *)
+(* Resolver for turn_phase transitions. *)
 type turn_phase_resolve_outcome =
   | Resolved_turn_transition of Turn_phase_transition.packed
   | Resolved_turn_idempotent

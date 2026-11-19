@@ -1370,7 +1370,7 @@ val fold_jsonl_lines
 (** [read_slice ~path ~from ~len] returns the byte slice
     [[from, from+len)] of the file, clamped to its current size.
     Missing file or empty clamped range returns [""]. Callers bound
-    [len], so one call never scales with file size (RFC-0228 P1). *)
+    [len], so one call never scales with file size. *)
 val read_slice : path:string -> from:int -> len:int -> string
 
 (** [fold_appended_lines ~path ~from ~init ~f] folds [f] over the raw

@@ -1,5 +1,4 @@
-(** Keeper_lane_mentions — boundary mention parser for keeper chat lanes
-    (RFC-0232 §3.3).
+(** Keeper_lane_mentions — boundary mention parser for keeper chat lanes.
 
     The legacy [line_mentions] tokenizer ran at {e read} time inside the
     world-observation scan, re-deriving mention semantics from

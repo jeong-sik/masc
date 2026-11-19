@@ -1,4 +1,4 @@
-(* RFC-0232 P5: shared immutable Surface_ref.
+(* Shared immutable Surface_ref.
 
    Pinned here:
    1. Codec totality — every variant round-trips through JSON; unknown

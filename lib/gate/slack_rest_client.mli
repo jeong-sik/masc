@@ -7,7 +7,7 @@
 
     Slack's Web API always answers HTTP 200 with [{ ok: bool, error?: string }]
     even on logical failure, so failures surface as {!Slack_api}, not HTTP
-    status. See RFC-0317. *)
+    status. *)
 
 type error =
   | Network of string

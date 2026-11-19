@@ -1,4 +1,4 @@
-(* Operator entry point for the RFC-0374 probe lane.
+(* Operator entry point for the probe lane.
 
    [Keeper_capability_probe] exists so that asking "can runtime R reach tool T"
    stops costing a durable keeper turn: on 2026-08-12 the probe traffic itself

@@ -1,6 +1,6 @@
 open Alcotest
 
-(** RFC-0084 PR-4 — [Tool_capability] typed sum + Set tests.
+(** [Tool_capability] typed sum + Set tests.
 
     Verifies:
     - Every [kind] variant round-trips through [to_string] / [of_string]

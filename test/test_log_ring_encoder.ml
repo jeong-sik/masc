@@ -1,4 +1,4 @@
-(* RFC-0079: Log.Ring typed encoder/decoder tests.
+(* Log.Ring typed encoder/decoder tests.
 
    Asserts that:
    1. Every [level] / [source] variant round-trips through entry_to_json

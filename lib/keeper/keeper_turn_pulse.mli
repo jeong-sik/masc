@@ -6,7 +6,7 @@
     pulse is seeded: recording prunes the slots that lie more than
     {!window_seconds} before the newest slot and moves [known_since] up to that
     boundary, and reading computes nothing.
-    So a keeper's row carries the same pulse until its next turn (RFC-0481),
+    So a keeper's row carries the same pulse until its next turn,
     and the number of slots a keeper holds is set by time, not by how many
     turns it ran.
 

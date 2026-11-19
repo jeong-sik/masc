@@ -1,5 +1,4 @@
-(** Startup removal of the checkpoint objects no root head reaches
-    (RFC-0476 §3.6).
+(** Startup removal of the checkpoint objects no root head reaches.
 
     A session's objects under [<session>/objects/] are kept when a root head
     names them, directly or through the segments behind its last one. The

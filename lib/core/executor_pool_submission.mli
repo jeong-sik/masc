@@ -7,4 +7,4 @@ val submit : Eio.Executor_pool.t -> weight:float -> name:string -> (unit -> 'a) 
     Pool choice, worker marking and IO/CPU weights belong to the caller.
     The caller's {!Pool_lane} at submission keys the wait, run and abandoned
     times it records in {!Pool_wait}; [name] names the work there and labels
-    the job's run as an Eio trace span (RFC-0474 L4c). *)
+    the job's run as an Eio trace span. *)

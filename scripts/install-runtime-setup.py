@@ -2824,8 +2824,8 @@ def quick_sandbox(binary, base_path, backend):
             return None
 
 
-# What imp can use once setup ends, offered as one checklist
-# (RFC setup-web-search-and-browser-lane section 4.3). The web search and
+# What imp can use once setup ends, offered as one checklist.
+# The web search and
 # GitHub rows start marked; the browser route, which acts with the reader's
 # own logins, does not. Nothing
 # is installed or written until the reader confirms the list, and a quick

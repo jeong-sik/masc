@@ -5,7 +5,7 @@
     [masc_workspace_telemetry_drop_total{event_family=...,event_kind=...}] must
     increment so dropped audit/telemetry writes remain observable.
 
-    RFC-0088 §4 Option A (2026-05-15): [For_testing.warn_telemetry_drop]
+    [For_testing.warn_telemetry_drop]
     now takes a typed [Workspace_telemetry_drop_event.t] instead of two free
     strings. The Otel_metric_store label values remain byte-for-byte identical
     (["agent_lifecycle", "session_ended"] / ["agent_lifecycle", "session_bound"]) so the
@@ -53,7 +53,7 @@ let test_lifecycle_drop_join_label () =
     "drop counter increments by exactly 1 for the session_bound label"
     1.0 (after -. before)
 
-(* RFC-0088 §4 Option A: confirm the wire mapping is byte-for-byte
+(* Confirm the wire mapping is byte-for-byte
    compatible with the pre-typed call sites. If a future refactor
    accidentally rewires the wire labels (e.g. drops the snake_case),
    Grafana dashboards built on the existing labels would silently

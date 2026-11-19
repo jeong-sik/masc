@@ -1,4 +1,4 @@
-(** The keeper fleet reading as events (RFC-0477).
+(** The keeper fleet reading as events.
 
     The server encodes and the terminal client decodes with this one module, so
     neither side keeps its own copy of the field names. The decoder is exact: a

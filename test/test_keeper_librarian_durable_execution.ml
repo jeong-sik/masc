@@ -6814,7 +6814,7 @@ let run_until_done ?(wakes=ref 0) fixture =
       go (attempts-1)
     | result -> result in
   go 16
-(* RFC-0500. The attempt a stopped server leaves: started by another
+(* The attempt a stopped server leaves: started by another
    incarnation, with no outcome and no proof. *)
 let test_interrupted_original_settles_and_its_range_is_read_again ()=with_fixture (fun ~sw:_ fixture ->
   let arrived,signal=Eio.Promise.create () and release,unblock=Eio.Promise.create () in

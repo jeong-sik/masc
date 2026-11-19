@@ -405,7 +405,7 @@ let test_a_turn_without_reasoning_reports_nothing_cut () =
   check yojson "nothing was cut" (`Int 0)
     (bundle |> member "thinking_blocks_omitted")
 
-(* RFC-0422 §3.3: what the box refused reaches the judge whole, and only when
+(* What the box refused reaches the judge whole, and only when
    a box ran -- so a judge can tell "nothing was tried" from "it was tried". *)
 let test_the_judge_sees_what_the_box_refused () =
   with_temp_dir "hitl-observation" @@ fun base_path ->
@@ -2785,7 +2785,7 @@ let test_source_resolution_preserves_prior_failure () =
   | _ -> Alcotest.fail "prior provider failure was cancelled"
 ;;
 
-(* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ────────
+(* ── CLI lane-slot fallback ─────────────────────────────────────────
    The walk engages only after every catalog slot is exhausted. These drive
    the real worker flow against an unreachable HTTP slot and an injected cli
    runner; the runtime table below is what lets [is_official_client] admit

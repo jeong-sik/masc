@@ -266,7 +266,7 @@ let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd ~accoun
       "Codex usage not read after a quota refusal: background scheduling failed"
 ;;
 
-(* RFC-0501 §2.2. Every state the run passed through is compared with the
+(* Every state the run passed through is compared with the
    final one, not each state with the next: a revert after a setup refusal
    names again the thread the claim had dropped, and that thread stays. *)
 let forgotten_threads ~keeper_name ~visited ~final =
@@ -683,7 +683,7 @@ let codex_error_to_core_error = function
       (Llm_provider.Error.ProviderUnavailable
          { provider = "codex_app_server"
          ; detail = Process_eio.spawn_refusal_to_string refusal })
-  (* RFC-0454 P2. The client died or its stdout reached EOF. This shared the
+  (* The client died or its stdout reached EOF. This shared the
      [ProviderUnavailable] above until the chat pane had to tell the two
      apart and could only do it by reading the rendered sentence back
      ("Provider 'codex_app_server' unavailable: stdout closed"). The typed
@@ -2002,7 +2002,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
 ;;
 
 
-(* RFC claude-code-context-overflow-bounded-restart §6.3, same rule as the
+(* Same rule as the
    Claude Code runtime: the same-run shrink retry is the one re-entry an
    input rejection admits. [on_shrink_retry] fires only after the sequence
    verified the typed observation-free overflow and the strictly smaller

@@ -1,4 +1,4 @@
-(** RFC-0084 §3.2 — Typed tool capability.
+(** Typed tool capability.
 
     The closed-sum [kind] and [Set]-based granted/required model reads
     capability truth from [Tool_catalog.metadata]. Dispatch owns routing,

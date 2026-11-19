@@ -819,7 +819,7 @@ let test_recovery_is_scoped_to_max_tokens_rejections () =
        ~result:(max_tokens_rejection ()) ~checkpoint:None)
 
 let test_accept_rejected_threads_stop_reason () =
-  (* RFC-0271 §4.5 slice 1: apply_accept preserves the provider's typed
+  (* apply_accept preserves the provider's typed
      stop_reason on the rejected turn's Accept_rejected, so a MaxTokens
      truncation is later distinguishable from a clean EndTurn no-progress
      terminal. Behaviour-neutral groundwork — no classification change yet. *)

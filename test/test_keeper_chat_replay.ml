@@ -1,4 +1,4 @@
-(* RFC-0412 stage 2 — since_seq replay. The journaled suffix re-folded from
+(* since_seq replay. The journaled suffix re-folded from
    [Projection.initial] reproduces the live SSE bytes, frame ids are journal
    seqs (so entries that project to [None] leave gaps), the stream request
    parser admits [since_seq] only absent or as an integer >= 0, the reconnect dedup

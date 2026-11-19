@@ -6,7 +6,7 @@
  * Adapters (headless-preact/use-focus-scope.ts)
  * call activate() on mount and deactivate() on unmount.
  *
- * MVP scope (RFC 0001 §"createFocusScope"):
+ * MVP scope:
  *   - Tabbable element collector (a, button, input, select, textarea,
  *     [tabindex] not -1, contenteditable; disabled/hidden filtered out)
  *   - Tab / Shift+Tab cycling within the container
@@ -14,7 +14,7 @@
  *     deactivate
  *   - initialFocus: 'first' | 'container' | () => HTMLElement | null
  *
- * Out of scope (will land later, RFC 0001 §"Open question 1"):
+ * Out of scope (will land later):
  *   - Roving Tabindex (tablist, radiogroup, toolbar)
  *   - Visibility filter beyond `disabled` + `tabindex="-1"`
  *     (CSS display:none / visibility:hidden / aria-hidden=true detection

@@ -23,7 +23,7 @@ type config =
         [session/setModel] selection on every resumed session.
         [None] takes the host's default and is never checked. *)
   ; native : Runtime_native_tools.posture
-    (** Built-in tool posture (RFC-0390), sent as the session's approval
+    (** Built-in tool posture, sent as the session's approval
         mode. Full uses [allowAll] under the managed sandbox profile. Read uses
         [promptUnmatched] and passes [--disable-write --disable-shell] to the
         host: native writes and shell execution are disabled independently
@@ -109,7 +109,7 @@ type storage =
           [run_turn] has reaped its process, so no session survives to be
           resumed, and [Resume] is refused before spawn. *)
   | Keeper_owned of string
-      (** The one directory a Keeper's Muse turns share (RFC-0495). It holds
+      (** The one directory a Keeper's Muse turns share. It holds
           the session the Keeper remembers, so it takes [Start] and [Resume]. *)
 
 val ensure_storage_dirs : string -> unit
@@ -299,7 +299,7 @@ val reported_model : turn_result -> string option
     reported no call (hosts before 1.4.0 send no [session/tokenUsage]). *)
 
 (** What a turn that ended with a typed terminal ([completed] or [failed])
-    shows it may have done outside the host's own session (RFC-0509). *)
+    shows it may have done outside the host's own session. *)
 type turn_items =
   | Turn_quiet
       (** The turn's contiguous durable range holds only [userMessage] and

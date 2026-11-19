@@ -172,7 +172,7 @@ let run_case source () =
     (List.exists (fun text -> contains ~needle:"[system context]" text &&
        contains ~needle:"### Active Goals" text) content);
   (* Each Goal's latest measurement rides the trailing carrier, not the System
-     that precedes the history (RFC-goal-observations-leave-the-system-prompt). *)
+     that precedes the history. *)
   let carrier = String.concat "" (List.filter (contains ~needle:"[system context]") content) in
   (match source, goal, measurement with
    | Current, Some goal, Some observation ->

@@ -1,4 +1,4 @@
-(** RFC-0267 Phase 2 — explicit, validated task->goal assignment.
+(** Explicit, validated task->goal assignment.
 
     See {!Task_goal_assignment} (the .mli) for the contract. *)
 

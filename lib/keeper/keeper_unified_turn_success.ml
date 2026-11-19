@@ -6,7 +6,7 @@ module KUM = Keeper_unified_metrics
 module KTP = Keeper_terminal_effect_policy
 open Keeper_meta_contract
 
-(* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
+(* success-path keeper-facing metric label = external boundary; redact via SSOT. *)
 let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
 (* cost_usd is accounted independently of token-count trust (token⊥cost), so the
@@ -589,7 +589,7 @@ let handle
     then acknowledge_pending_messages updated_meta observation
     else updated_meta
   in
-  (* RFC-0303 Phase 3: the no-progress loop detector is retired, so the
+  (* The no-progress loop detector is retired, so the
      metrics-updated meta flows through unchanged (no loop-detection rebind). *)
   let terminal_outcome = terminal_outcome_of_result result in
   append_metrics_snapshot

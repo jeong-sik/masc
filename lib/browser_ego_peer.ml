@@ -938,7 +938,7 @@ let reload t id =
       "  }" ]))
 
 (* Location, locale and time zone go through the Page's CDP session, as the
-   viewport does (RFC-browser-ego-cdp-capabilities §3.3). The page's own Intl
+   viewport does. The page's own Intl
    first names the time zone and locale it would take: Chromium answers an
    unknown or differently cased time zone with no error and keeps the old
    one (ego lite 0.6.2.7), so a name the page does not know is refused before
@@ -1321,7 +1321,7 @@ let storage_names t args =
          "    emit(await (" ^ storage_names_script ^ ")(page, args, reason));" ])) in
   storage_receipt ~tab value
 
-(* The tab's network log (RFC-browser-ego-cdp-capabilities §3.4). ego's Page
+(* The tab's network log. ego's Page
    session already has the Network domain on, so the step only drains the
    Page's event buffer through the shared Page_events script and answers the
    log it keeps for the Page in this SDK process. The drain keeps every other
@@ -1657,7 +1657,7 @@ let motion_fields = function
 (* Touch through the Page's CDP session, with no touch emulation. On ego lite
    0.6.2.7 the page got trusted touch and pointer events without it, and
    turning it on changed the page's maxTouchPoints and pointer media until it
-   was turned off (RFC-browser-ego-cdp-capabilities §3.3). A touch left down
+   was turned off. A touch left down
    turns the next touchStart into a move of it, so a gesture that fails after
    its press sends touchCancel; a new SDK process starts with no touch down. *)
 let touch_lines = [

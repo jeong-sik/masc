@@ -1,4 +1,4 @@
-(** The wiki's [log.md] read back (RFC-wiki-lint-and-page-contracts §7).
+(** The wiki's [log.md] read back.
 
     A log line is
 

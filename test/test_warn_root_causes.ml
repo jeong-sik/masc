@@ -37,7 +37,7 @@ let publication_recovery_turn_context ~registry ~keeper_name =
     }
 ;;
 
-(* RFC-0393: the keeper meta carries one name and nothing derived from it. *)
+(* The keeper meta carries one name and nothing derived from it. *)
 let make_meta ?(name = "test-keeper") () : Keeper_meta_contract.keeper_meta =
   match Masc_test_deps.meta_of_json_fixture
     (`Assoc [("name", `String name);

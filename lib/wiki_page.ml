@@ -1,7 +1,7 @@
 (** The wiki page contract: header values, the [source] vocabulary, the
     frontmatter a page carries and how a page is rendered. Pure: it reads and
-    writes no file, so a tool and the lint read a page by one definition
-    (RFC-wiki-lint-and-page-contracts §4.4, step 1a). Moved out of
+    writes no file, so a tool and the lint read a page by one definition.
+    Moved out of
     [Tool_wiki] without changing a line of its behaviour. *)
 
 open Printf

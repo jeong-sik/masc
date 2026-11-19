@@ -202,7 +202,7 @@ let decide_after_observation request ~observe =
           channel cannot see attempts after "A" anyway (that needs SECCOMP_RET_USER_NOTIF or audit
           logs, a separate observation path). Until that path exists the
           main-line rule holds: every refused observe keeps the judge, and
-          the refusal travels to the judge for weighing (RFC-0422 §3.3). *)
+          the refusal travels to the judge for weighing. *)
        let () =
          Log.Keeper.info
            ~keeper_name:request.keeper_name

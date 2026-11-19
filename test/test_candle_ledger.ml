@@ -192,7 +192,7 @@ let current_payment ~goal_id (stored : Candle_payment.t) =
   |> ok_or_fail
 ;;
 
-(* RFC-0481 §3.2: the server learns of appends through this observer. *)
+(* The server learns of appends through this observer. *)
 let test_appends_are_reported_to_the_observer () =
   with_base_path @@ fun base_path ->
   let reported = ref [] in

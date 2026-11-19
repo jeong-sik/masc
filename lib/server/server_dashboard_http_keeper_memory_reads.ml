@@ -167,7 +167,7 @@ let handle_facts_get state req reqd name =
   else (
     let config = Mcp_server.workspace_config state in
     let keepers_dir = memory_os_keepers_dir config in
-    (* What happened to each fact (RFC-0418): retrievals from the events
+    (* What happened to each fact: retrievals from the events
        sidecar, retractions and revisions from the memory journal the commits
        wrote, projected at read time and stored nowhere. A sidecar line the
        reader could not decode is counted, not dropped. A history that could

@@ -40,7 +40,7 @@ type microvm_delivery =
         (** the Keeper uid and gid the agent's hello must report *)
       }
       (** one connection per request to the guest agent
-          ([masc-exec-shim --serve], RFC microvm-guest-agent-over-socket) *)
+          ([masc-exec-shim --serve]) *)
 
 type microvm =
   { container_name : string  (** the running guest *)
@@ -215,13 +215,13 @@ val invalidate_preflight : t -> unit
     login changes the remote workspace or identity. *)
 
 val observe_supported : t -> bool
-(** Whether this endpoint's shim advertises the box (RFC-0422): the
+(** Whether this endpoint's shim advertises the box: the
     [observe] capability in its [--probe] answer. Probes the endpoint once
     per process when nothing has asked yet, and remembers the answer with
     the endpoint's shared state. A probe that fails, or a shim that predates
     the box, is [false]; the caller then leaves the request with the judge. *)
 
-(** {1 Lane report (RFC-0427 D-1)}
+(** {1 Lane report}
 
     What this process knows about the endpoint from its own probes and
     dispatches: a projection kept with the endpoint's shared state, never
@@ -270,7 +270,7 @@ type probe_report =
           (** The MASC release the shim was built from, as it named itself in
               the probe. [None] from a shim built before the field existed,
               which the server treats as a skew and says so once
-              ([remote_shim_outdated], RFC-0427 B-3). *)
+              ([remote_shim_outdated]). *)
       ; observed_at : float
           (** Unix time this process got the probe's answer. The answer is
               kept for the life of the process, so it is the shim as of this

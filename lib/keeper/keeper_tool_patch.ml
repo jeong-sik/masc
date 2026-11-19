@@ -1,4 +1,4 @@
-(* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
+(* Replace [old] with [new] in [text]. When
    [replace_all=false], requires exactly one occurrence so accidental
    multi-edits are rejected (mirrors Edit semantics). Pure, so the host
    handler and the remote-lane handler apply the same patch. *)

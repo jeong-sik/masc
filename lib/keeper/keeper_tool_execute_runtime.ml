@@ -344,7 +344,7 @@ type dispatch_bundle =
         result
   ; observed_github_secret_files : unit -> string list
   ; observe_route : unit -> Keeper_sandbox_shell_ir_target.observe_route
-    (* Where this call can run boxed before the judge is asked (RFC-0422).
+    (* Where this call can run boxed before the judge is asked.
        Lazy: resolving it may acquire the guest. *)
   ; cleanup : unit -> unit
   }
@@ -637,7 +637,7 @@ let handle_tool_execute_typed
         (* Lower the validated typed input exactly once. The resulting Shell IR
            is the neutral dispatch representation; it carries no product or
            inferred authorization semantics. *)
-        (* RFC tools-as-shell-commands: the one conversion point.  Stages
+        (* The one conversion point.  Stages
            whose program is the bare reserved word [masc] become delegated
            tool calls before dispatch.  Every caller supplies a surface, and
            a lane with no turn to look a tool up in supplies the one that
@@ -731,7 +731,7 @@ let handle_tool_execute_typed
           ; sandbox_profile = Some dispatch_bundle.sandbox_profile
           }
         in
-        (* RFC-0422: the box the gate may ask for, after every cheaper
+        (* The box the gate may ask for, after every cheaper
            authority has declined. The same IR, the same cwd and budget, a
            target whose runner asks the shim for [Observe]; no output
            streaming, because until the gate has read the answer this run is
@@ -790,7 +790,7 @@ let handle_tool_execute_typed
            gate_decision
          with
          | Keeper_gate.Deferred { approval_id; reason; audit_receipts } ->
-           (* RFC-0422 §3.3: a keeper whose request the box refused is told
+           (* A keeper whose request the box refused is told
               what was refused, in the same bytes the judge reads, so it can
               choose an observation-only path instead of waiting. *)
            let observation_fields =
@@ -887,7 +887,7 @@ let handle_tool_execute_typed
              effect inside the dispatch path — while nothing in the
              repository, shell config, or deployment scripts ever set it,
              and its parse accepted every value except the exact string
-             "false" (RFC-0371 B7). *)
+             "false". *)
           let stream_ended = ref false in
           let finish_stream status =
             finish_execute_stream ~keeper_name:meta.name ~stream_id ~task_id
@@ -928,7 +928,7 @@ let handle_tool_execute_typed
             let data = Keeper_secret_redaction.redact_stream_chunk state data in
             record_stream_chunk stream data
           in
-          (* RFC execute-subset-dispositions step 1.  A script that arrived
+          (* A script that arrived
              inside [argv:["sh";"-c";...]] is invisible to everything else on
              this path, so it is counted here and nowhere else.  Recognition
              and classification only -- the dispatch below is unchanged, and
@@ -1045,7 +1045,7 @@ let handle_tool_execute_typed
           in
           match dispatch_result with
           | Error (Keeper_tooling.Execute_shell_ir.Gate_reject diagnostic) ->
-            (* RFC-0208 P1: gate denial audit line. *)
+            (* Gate denial audit line. *)
             Log.Keeper.warn
               "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
               meta.name
@@ -1097,7 +1097,7 @@ let handle_tool_execute_typed
                     (Keeper_tooling.Subset_rewrite.to_string
                        (Keeper_tooling.Subset_rewrite.of_reason reason))))
           | Error (Keeper_tooling.Execute_shell_ir.Path_reject e) ->
-            (* RFC-0208 P1: path-policy denial audit line. *)
+            (* path-policy denial audit line. *)
             Log.Keeper.warn
               "shell_ir path_reject keeper=%s cmd=%s reason=%s"
               meta.name
@@ -1249,8 +1249,8 @@ let handle_tool_execute_typed
                  | Command_result_observed -> exit_report.Keeper_tool_execute_exit_report.timeout_fields
                  | Command_request_not_sent | Command_effect_unknown -> [] in
                (* [execution_location] stays with the model: it is the
-                  observation channel for where a call ran
-                  (RFC-keeper-workspace-root-only §3.3, §3.6). So do the
+                  observation channel for where a call ran.
+                  So do the
                   conditions it ran under, read beside the exit they may
                   explain (#32799). *)
                let payload =

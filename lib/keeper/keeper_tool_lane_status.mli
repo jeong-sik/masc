@@ -1,4 +1,4 @@
-(** [keeper_lane_status] (RFC-0427 D-1): the execution lane's own account of
+(** [keeper_lane_status]: the execution lane's own account of
     itself. A projection of {!Keeper_sandbox_remote.report}, which is what
     this process learned from its own probes and dispatches to the keeper's
     endpoint. Reads endpoint declarations, dispatches nothing, stores nothing

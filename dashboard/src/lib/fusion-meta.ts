@@ -90,7 +90,7 @@ export type FusionEvidence = {
   question?: string | null
   panel: FusionPanelEntry[]
   judge: FusionJudgeView | null
-  // RFC-0284 per-judge-node observation array. Additive alongside the canonical
+  // per-judge-node observation array. Additive alongside the canonical
   // singular `judge`; `[]` when the meta predates the `judges` array. Carries the
   // execution topology (JoJ / refine / simple) for the board evidence card.
   judges: FusionJudgeNode[]
@@ -169,7 +169,7 @@ export type FusionJudgeNode = {
 export type FusionJudgeShape = 'single' | 'refine' | 'judge-of-judges' | 'custom'
 
 /**
- * Normalize the RFC-0284 `judges` observation array. Each element is a
+ * Normalize the `judges` observation array. Each element is a
  * Synthesized node (role/identity + synthesis sections + per-node usage) or a
  * Judge_failed node (role/identity + status:"failed" + error + usage); only the
  * Judge_failed node carries `status`, so absence of `status === 'failed'` marks

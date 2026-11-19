@@ -154,7 +154,7 @@ type post_origin = {
 
 val keeper_authored_origin :
   ?turn_ref:Ids.Turn_ref.t -> source:string -> unit -> post_origin
-(** RFC-0233 §7: build the [origin] of a keeper-authored board post.
+(** Build the [origin] of a keeper-authored board post.
     [fusion_run_id] is always [None] (fusion has its own origin at the sink);
     [source] names the producing channel; [turn_ref] is the turn-level join key
     and is [None] only when no mint-once-safe reference is reachable. *)
@@ -1118,9 +1118,9 @@ type store = {
   sub_boards_by_slug : (string, string) Hashtbl.t;
   (** slug -> sub_board id index for O(1) slug lookup. *)
   posts_by_turn_ref : (string, string) Hashtbl.t;
-  (** RFC-0233 §7: [Ids.Turn_ref.to_string] -> post id. Maintained on
+  (** [Ids.Turn_ref.to_string] -> post id. Maintained on
       create, rebuilt on load. *)
   posts_by_run_id : (string, string) Hashtbl.t;
-  (** RFC-0233 §7: fusion run_id -> post id. Maintained on create, rebuilt
+  (** Fusion run_id -> post id. Maintained on create, rebuilt
       on load. *)
 }

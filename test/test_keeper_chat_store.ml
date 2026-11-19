@@ -1011,7 +1011,7 @@ let test_load_redacts_raw_persisted_secret_rows () =
       | messages ->
           Alcotest.failf "expected 1 message, got %d" (List.length messages))
 
-(* RFC-0223 P1 — speaker identity round-trips on the user line only. *)
+(* Speaker identity round-trips on the user line only. *)
 
 let speaker_label (msg : K.chat_message) =
   match msg.speaker with
@@ -1050,7 +1050,7 @@ let test_speaker_external_roundtrip () =
       | messages ->
           Alcotest.failf "expected 2 messages, got %d" (List.length messages))
 
-(* RFC-0226: an inbound line recorded at delivery time stands alone —
+(* An inbound line recorded at delivery time stands alone —
    no paired assistant turn — and a later reply-path assistant append
    joins it on the same lane without duplicating the user line. *)
 let test_append_user_message_roundtrip () =
@@ -1191,7 +1191,7 @@ let test_unknown_speaker_authority_reported_not_guessed () =
         (drop_value invalid_payload -. before))
 
 let test_unknown_role_row_dropped () =
-  (* RFC-0232 P1: a role label outside the closed sum cannot participate
+  (* A role label outside the closed sum cannot participate
      in lane semantics; the row is dropped and reported, never defaulted. *)
   let base_dir = temp_base_path "keeper-chat-store-role-bad" in
   Fun.protect
@@ -1508,7 +1508,7 @@ let test_identified_tool_only_history_is_not_trimmed () =
         Alcotest.failf "expected one identified tool row, got %d"
           (List.length messages))
 
-(* RFC-0226 P2: a lane larger than the tail-read bound must still
+(* A lane larger than the tail-read bound must still
    yield exactly the window a full scan would — the bound only caps
    bytes read, never changes window semantics. 5,200 x ~1 KiB lines
    ≈ 5.3 MiB > the 4 MiB tail bound, so [load] starts mid-file. *)
@@ -1554,7 +1554,7 @@ let test_tail_bounded_load_matches_full_scan_window () =
              "assistant" (K.Role.to_label last.K.role)
        | [] -> Alcotest.fail "expected non-empty window"))
 
-(* RFC-0228 P1 — backward paging. Raw JSONL with controlled ts so the
+(* Backward paging. Raw JSONL with controlled ts so the
    page boundaries are exact. *)
 let write_numbered_lane ~path ~total ~pad_bytes =
   let padding = String.make pad_bytes 'x' in
@@ -1915,7 +1915,7 @@ let json_audio_expired = function
       | _ -> false)
   | _ -> false
 
-(* RFC-0235 P3: the history endpoint marks audio clips as expired when the
+(* The history endpoint marks audio clips as expired when the
    underlying MP3 has been reaped, so the dashboard can show a fallback
    instead of a broken native player. *)
 let test_audio_clip_marked_expired_when_file_missing () =
@@ -2036,7 +2036,7 @@ let test_invalid_audio_token_treated_as_expired () =
       Alcotest.(check bool) "invalid token marks clip expired" true
         (json_audio_expired (List.hd rows)))
 
-(* RFC-0235 P3: backend-driven rich chat blocks. *)
+(* backend-driven rich chat blocks. *)
 
 let json_blocks = function
   | `Assoc fields -> (
@@ -2417,7 +2417,7 @@ let test_append_assistant_message_redacts_audio () =
       | messages ->
         Alcotest.failf "expected 1 message, got %d" (List.length messages))
 
-(* RFC-0233 §7: append_turn stamps the supplied turn_ref on every row of the
+(* append_turn stamps the supplied turn_ref on every row of the
    completed turn, it round-trips through load, and to_json_array exposes it
    for the history endpoint. *)
 let test_turn_ref_persisted_on_turn_rows () =

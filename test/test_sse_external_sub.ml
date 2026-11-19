@@ -376,7 +376,7 @@ let make_test_response ~clock =
 let make_test_sse_conn ~clock ?(session_id = "test") () =
   Conn.make_sse_conn ~session_id ~client_id:0 ~response:(make_test_response ~clock) ()
 
-(* RFC-0204 Phase 3 prerequisite: [close_sse_conn] resolves a one-shot stop
+(* [close_sse_conn] resolves a one-shot stop
    promise.  Two close paths can race across domains once serving moves off the
    main domain (a client disconnect on the serving domain vs keeper-driven
    eviction / shutdown on the main domain).  The [claim_close] primitive must

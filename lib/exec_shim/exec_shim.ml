@@ -1,5 +1,5 @@
 (* Core of the masc-exec-shim remote execution shim.  See the .mli for the
-   contract; normative spec: docs/superpowers/specs/2026-08-27-openssh-microvm-exec-design.md §4.2. *)
+   contract. *)
 
 (* pdeathsig is Linux-only; the C stub is a no-op elsewhere (the pgid-kill
    policy is the primary reaper there).  The signal is fixed to SIGKILL
@@ -13,7 +13,7 @@ external set_pdeathsig : unit -> unit = "ocaml_prctl_set_pdeathsig"
    runtime's own table. *)
 external host_signal_number : int -> int = "ocaml_shim_host_signal_number"
 
-(* The box (RFC-0422). [observe_support_abi] is the Landlock ABI the kernel
+(* The box. [observe_support_abi] is the Landlock ABI the kernel
    enforces, 0 where the shim cannot box a payload (no Landlock, no seccomp,
    or not Linux). [restrict_self scratch deny_fs deny_net] is applied in the
    child right before exec; see observe_stub.c for what each flag denies. *)
@@ -588,7 +588,7 @@ let rec write_all fd s off len =
     | n -> write_all fd s (off + n) (len - n)
     | exception Unix.Unix_error (Unix.EINTR, _, _) -> write_all fd s off len
 
-(* {1 Execution plan (RFC-0422)} *)
+(* {1 Execution plan} *)
 
 type execution_plan =
   | Run_effect

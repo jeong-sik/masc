@@ -277,7 +277,7 @@ let summary_of_cause = function
      | Some summary -> one_line summary
      (* No summary yet means the chat row's only carrier for the cause is its
         text, so the envelope has to survive: the pane reads it back to draw
-        the lifecycle badge until the row carries the value (RFC-0454 D3).
+        the lifecycle badge until the row carries the value.
         Regenerating it from the value keeps this the same string the carrier
         was built from. *)
      | None ->

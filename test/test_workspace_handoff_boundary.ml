@@ -1,5 +1,4 @@
-(** Tests for {!Workspace_task_transition_executor} handoff ownership
-    (RFC-0365).
+(** Tests for {!Workspace_task_transition_executor} handoff ownership.
 
     A handoff note is authored on the way out and read on the way in. Before
     this change the field was replaced by the caller's argument on every

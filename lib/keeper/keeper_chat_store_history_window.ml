@@ -49,7 +49,7 @@ let drop_leading_orphan_tool_messages messages =
     (([] | { role = Role.User | Role.Assistant | Role.System | Role.Tool; _ } :: _) as rest) ->
     rest
 
-(* RFC-0226 P2: [load] serves a fixed window ([max_total_lines]) but
+(* [load] serves a fixed window ([max_total_lines]) but
    used to read and JSON-parse the whole file to build it, so its cost
    scaled with lane size — the same pathology family as the
    2026-06-09 telemetry-JSONL incident (multi-MB files starving the
@@ -59,7 +59,7 @@ let drop_leading_orphan_tool_messages messages =
    degrades to a shorter window, never to an error or a full scan. *)
 let tail_read_bytes = 4 * 1024 * 1024
 
-(* RFC-0228 P1: binary-search probes for [before]-paging are tiny
+(* binary-search probes for [before]-paging are tiny
    bounded reads; a probe only needs to span a handful of lines. A
    probe landing inside an oversized line degrades the cut estimate
    (shorter window), never correctness — the final ts filter discards

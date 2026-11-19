@@ -1,4 +1,4 @@
-(** RFC-0476 §3.6: the startup sweep keeps the checkpoint objects a root head
+(** The startup sweep keeps the checkpoint objects a root head
     reaches and removes the rest of a session's [objects/]. *)
 
 open Alcotest

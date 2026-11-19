@@ -1,5 +1,5 @@
 (* See the interface.  The type and JSON codec are moved verbatim from
-   Keeper_external_attention (RFC-0232 §3.6); [Agent] and [lane_label]
+   Keeper_external_attention; [Agent] and [lane_label]
    are the additions that let the chat lane drop its open [source]
    strings. *)
 

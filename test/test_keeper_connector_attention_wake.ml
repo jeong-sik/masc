@@ -40,7 +40,7 @@ let contains ~needle haystack =
   in
   nl = 0 || loop 0
 
-(* keeper_cycle_decision resolves a runtime id unconditionally (RFC-0206 §2.1),
+(* keeper_cycle_decision resolves a runtime id unconditionally,
    so a minimal default runtime must exist — same setup the other cycle-decision
    unit tests use. *)
 let runtime_toml =

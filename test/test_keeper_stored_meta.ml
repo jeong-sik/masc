@@ -27,7 +27,7 @@ module List_row = Masc.Keeper_tool_surface_ops
 module Usage = Masc.Keeper_usage_resolution
 
 (* A Keeper list row resolves the default runtime id, which fails closed when
-   no runtime is loaded (RFC-0206 §2.1). Minimal catalog, loaded once for the
+   no runtime is loaded. Minimal catalog, loaded once for the
    executable. *)
 let runtime_toml =
   {|

@@ -1,5 +1,5 @@
-(** What each built-in Lane is, derived from its id by exhaustive functions
-    (RFC every-lane-is-one-row-in-one-registry §2.2). Nothing here is stored,
+(** What each built-in Lane is, derived from its id by exhaustive functions.
+    Nothing here is stored,
     so a new constructor in [Lane_id.builtin], [Standalone_lane.t],
     [Browser_lane.Lane_name.t], [Machine_lane.t] or
     [Tool_schemas_misc.misc_operation] does not compile until these functions

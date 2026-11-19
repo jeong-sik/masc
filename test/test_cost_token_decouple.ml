@@ -315,7 +315,7 @@ let test_native_decode_rate_uses_current_field_only () =
   check_absent_field payload "provider_tokens_per_second"
 ;;
 
-(* RFC-0382: llama-server/Ollama wire timings carry [cache_n] (KV-cache
+(* llama-server/Ollama wire timings carry [cache_n] (KV-cache
    reused prompt tokens) and [prompt_n] (freshly prefilled prompt tokens).
    Both must land on the cost-ledger payload so the per-turn KV reuse ratio
    is reconstructible from the ledger alone. *)

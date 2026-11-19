@@ -99,7 +99,7 @@ let stop_container_for_github_identity_refresh ?timeout_sec t =
 let prepare_github_identity_secret_files ?timeout_sec t =
   (* App-identity keepers get a fresh installation token before any lane
      consumes their hosts file; shared-identity keepers pass through
-     untouched (RFC keeper-github-apps). A stale token whose mint fails is
+     untouched. A stale token whose mint fails is
      an error — projecting a credential known to be expired is worse. *)
   match
     Keeper_github_app_broker.ensure_fresh

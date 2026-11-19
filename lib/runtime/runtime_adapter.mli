@@ -4,7 +4,7 @@ val default_http_request_path :
   kind:Llm_provider.Provider_config.provider_kind -> base_url:string -> string
 (** The uncatalogued HTTP surface, normalized against the endpoint. *)
 
-(** Single-binding → hot-path [Provider_config.t] materialization (RFC-0206 §5).
+(** Single-binding → hot-path [Provider_config.t] materialization.
 
     Covers only the binding materialization path. Routing layers — aliases, routes,
     system_targets, capability profiles, [Runtime_strategy] mapping, the

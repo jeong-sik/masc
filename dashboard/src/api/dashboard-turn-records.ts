@@ -1,4 +1,4 @@
-// MASC Dashboard — Keeper turn records / transcript (RFC-0233).
+// MASC Dashboard — Keeper turn records / transcript.
 // Extracted from dashboard.ts (domain split). Public symbols re-exported
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
@@ -135,7 +135,7 @@ export type TurnRecordEntry = {
   request_runtime_profile: string | null
   request_body_bytes: number | null
   runtime_profile: string
-  // RFC-0233 §2.3 — exact selected model from the successful runtime attempt.
+  // Exact selected model from the successful runtime attempt.
   // Absent (undefined) when the producer observed no selected model; the
   // inspector renders absence, never a fabricated value.
   selected_model?: string
@@ -163,7 +163,7 @@ export type TurnRecordEntry = {
   // than a fabricated zero.
   cache_creation_input_tokens?: number
   cache_read_input_tokens?: number
-  // RFC-0233 §8 — runtime model metadata. context_window is the keeper-resolved
+  // Runtime model metadata. context_window is the keeper-resolved
   // configured token budget (occupancy fallback when no provider window is reported);
   // the two prices are USD
   // per 1M tokens declared on the runtime binding. Absent (undefined) when the
@@ -189,7 +189,7 @@ export type TurnRecordEntry = {
   response_observed_model_input: TurnResponseObservedModelInput | null
   price_input_per_million?: number
   price_output_per_million?: number
-  // RFC-0233 §9 — wall-clock duration of the provider call (ms), sourced from
+  // wall-clock duration of the provider call (ms), sourced from
   // Agent Core inference_telemetry.request_latency_ms. Absent when the turn errored
   // before a response existed; the inspector renders "측정 없음" rather than a
   // fabricated duration for the response-generation phase.
@@ -1302,12 +1302,12 @@ export async function fetchKeeperTurnRecords(
   })
 }
 
-// ── Keeper turn transcript (RFC-0233 §7) ────────────────
+// ── Keeper turn transcript ──────────────────────────────
 // The operator request + keeper response for one turn, joined server-side
 // on the turn_ref "<trace_id>#<absolute_turn>". Lazily fetched by the turn
 // inspector so the transcript (which can be large) never bloats the
 // turn-records list. Content is the same load-time redacted view the chat
-// history endpoint serves (RFC-0132). The v2 producer reads retained history;
+// history endpoint serves. The v2 producer reads retained history;
 // incomplete reads are errors. `found` describes the selected user/assistant
 // arrays, with the returned source bound to this request.
 

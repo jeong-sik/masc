@@ -64,7 +64,7 @@ val listen_socket :
     the listening-socket resource owned by the supplied switch.
     [address] is the one {!make_http_config} wrote into [config]. *)
 
-(** The HTTPS listener of one boot (RFC-0512 D6): its port, the TLS
+(** The HTTPS listener of one boot: its port, the TLS
     configuration built from {!Server_tls_material}, and where the
     certificate came from. *)
 type https_listener =
@@ -247,7 +247,7 @@ val serve_tls :
   h2_error_handler:
     (Eio.Net.Sockaddr.stream -> ?request:H2.Request.t -> H2.Server_connection.error -> (H2.Headers.t -> H2.Body.Writer.t) -> unit) ->
   unit
-(** [serve_tls] is the HTTPS accept loop (RFC-0512 D6). Every accepted
+(** [serve_tls] is the HTTPS accept loop. Every accepted
     connection runs the TLS handshake with [tls]; the ALPN result picks the
     connection handler: [h2] runs {!serve_h2_connection} with a payload
     capacity shared by this listener's HTTP/2 connections, [http/1.1] and no

@@ -7,7 +7,7 @@ let generate_trace_id ?(now = Time_compat.now ()) () : string =
   let seq = Atomic.fetch_and_add trace_counter 1 land 0xFFFFF in
   Printf.sprintf "trace-%d-%05x" ts seq
 
-(* RFC-0393: the alias/nickname canonicalizer chain is gone. A keeper's
+(* The alias/nickname canonicalizer chain is gone. A keeper's
    id is its keeper_name, trimmed and case-folded; non-keeper authors
    (humans, external bots) mint comparable ids from their own name the
    same way. Whether a name denotes a keeper is a registry/meta lookup

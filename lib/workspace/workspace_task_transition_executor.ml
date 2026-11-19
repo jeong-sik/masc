@@ -14,7 +14,7 @@ type transition_backlog_update =
   ; replaced_unreadable_handoff : Masc_domain.replaced_unreadable_handoff option
   }
 
-(* RFC-0365. A handoff note is authored on the way out and read on the way in,
+(* A handoff note is authored on the way out and read on the way in,
    so the two classes of transition must treat the field differently.
 
    Exit-class takes the argument: the closing owner is stating what it leaves

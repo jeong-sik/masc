@@ -1,4 +1,4 @@
-(** Keeper Transition Audit — Structured audit trail (RFC-0002).
+(** Keeper Transition Audit — Structured audit trail.
 
     Records every decision point for observability and replay.
 

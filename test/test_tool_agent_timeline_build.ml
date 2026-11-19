@@ -44,7 +44,7 @@ let summary_int json key =
   let open Yojson.Safe.Util in
   json |> member "summary" |> member key |> to_int
 
-(* RFC-0393: a keeper's activity is recorded under its keeper_name, and the
+(* A keeper's activity is recorded under its keeper_name, and the
    timeline queried by that same name surfaces it. *)
 let test_surfaces_turn_completed_for_the_keeper_name () =
   with_config (fun config ->

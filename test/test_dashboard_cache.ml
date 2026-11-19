@@ -416,7 +416,7 @@ let test_seed_stale_if_missing_refreshes_in_background ~clock () =
   check_json "background refresh stores fresh value"
     (`String "fresh") refreshed
 
-(* RFC-0474 L4d. A key that names a generation of its data: the read after a
+(* A key that names a generation of its data: the read after a
    write finds the new generation's key empty. Seeded from the previous
    generation, it answers with that page at once (same bytes, same entity
    tag) and fills the new generation in the background. The new compute
@@ -1503,7 +1503,7 @@ let test_runtime_git_probes_skip_when_command_is_unavailable () =
     false
     (Runtime.git_probe_command_available ~getenv ())
 
-(* RFC-0372 Phase 5 — the compute must leave the caller's domain.
+(* The compute must leave the caller's domain.
 
    HTTP connections are fibers on one domain, and a pure compute never yields,
    so a dashboard read run inline stops every sibling fiber for its duration.

@@ -38,7 +38,7 @@ val browser_goto_schema : Masc_domain.tool_schema
 val browser_act_schema : Masc_domain.tool_schema
 val browser_interact_schema : Masc_domain.tool_schema
 val browser_lane_schemas : Masc_domain.tool_schema list
-(** Browser-lane reader tools (docs/design/browser-lane.md). *)
+(** Browser-lane reader tools. *)
 
 val schemas : Masc_domain.tool_schema list
 (** [schemas] is the generated [Masc_domain.tool_schema list] for misc tools.

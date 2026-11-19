@@ -410,7 +410,7 @@ let recovery_failure_for_attempt ~current ~admission error =
    not read. Only the host's refusal of [turn/start] itself, an error answer
    to the one request then outstanding, proves that no turn ran. After the
    host acknowledged the turn, only that turn's own durable range read after
-   its typed failure can prove it quiet (RFC-0509); the [Turn_items_read]
+   its typed failure can prove it quiet; the [Turn_items_read]
    event carries that proof, and every other ending stays unknown. *)
 let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) =
   match admission with
@@ -2099,7 +2099,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     | true | false -> ()
   in
   (* A quiet turn's own durable range proves the host did nothing outside
-     its session (RFC-0509). That settles the uncertainty its acknowledgement
+     its session. That settles the uncertainty its acknowledgement
      raised; an effect MASC observed itself stays. *)
   let observe_quiet_turn () =
     match

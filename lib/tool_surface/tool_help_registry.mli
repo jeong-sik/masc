@@ -25,7 +25,7 @@ type help_entry = {
           [details_markdown] so prompt builders can splice them
           without dragging the full body). *)
   examples : string list;
-      (** RFC-0195 P0 — Anthropic MCP guidance: examples > longer
+      (** Anthropic MCP guidance: examples > longer
           descriptions for parameter accuracy. Empty list means
           "no curated example yet"; entries are short, copy-able
           invocation snippets. *)

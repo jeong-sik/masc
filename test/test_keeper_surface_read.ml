@@ -1,4 +1,4 @@
-(* RFC-0223 P3 — Keeper_surface_read lane filter + roster fold.
+(* Keeper_surface_read lane filter + roster fold.
 
    Pure-module tests: chat_message fixtures in, JSON out. The store
    I/O path (Keeper_chat_store.load) is covered by

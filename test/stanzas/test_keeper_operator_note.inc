@@ -1,4 +1,4 @@
-; RFC-0366. The lifetime is the contract: a note renders once and the record
+; The lifetime is the contract: a note renders once and the record
 ; stays. A note that renders twice is the defect this store prevents.
 
 (test

@@ -5,7 +5,7 @@
     full-duplex communication.
 
     Upgrade path: GET /ws with Connection: Upgrade header.
-    Uses ws-direct for the WebSocket protocol on top of httpun (RFC-0287):
+    Uses ws-direct for the WebSocket protocol on top of httpun:
     the HTTP 101 handshake is written on the httpun reqd, then the post-101
     connection is driven by a ws-direct Endpoint via the gluten adapter.
 
@@ -50,7 +50,7 @@ type dashboard_auth_state =
   | Unauthenticated
   | Authenticated of { agent : string option }
 
-(* RFC-0287: inbound frame reassembly + UTF-8 validation live in the
+(* Inbound frame reassembly + UTF-8 validation live in the
    ws-direct Connection layer, which delivers complete messages via the
    Endpoint [on_message] handler. The size-cap knobs are fed to
    [Endpoint.create] as [max_message] / [max_frame]. *)
@@ -88,7 +88,7 @@ type ws_session = {
       fresh list with [Atomic.set]; the SSE fanout reads it lock-free with
       [Atomic.get].  An immutable snapshot is never mutated in place, so a
       reader on the serving domain cannot observe a torn list or trip a
-      [Hashtbl] resize on the keeper-loop broadcast path (RFC-0204 Phase 3). *)
+      [Hashtbl] resize on the keeper-loop broadcast path. *)
   dashboard_slices: string list Atomic.t;
   dashboard_seq: int Atomic.t;
   (** Last seq value the client has acknowledged.  0 until the first ack
@@ -113,7 +113,7 @@ type ws_session = {
       {!session_is_backpressured}.  As independent [Atomic.t]s a cross-domain
       reader may observe a one-tick-stale pair; that is benign for the stale-ACK
       backpressure heuristic, which is monotonic and re-evaluates on the next
-      delta (RFC-0204 Phase 3 — deliberate, not an oversight). *)
+      delta (deliberate, not an oversight). *)
   dashboard_last_delta_seq: int Atomic.t;
   dashboard_last_delta_at: float Atomic.t;
   inbound_dispatches: int Atomic.t;
@@ -1016,7 +1016,7 @@ let missed_pong_threshold () =
 
 let __test_missed_pong_threshold = missed_pong_threshold
 
-(* Exposed for the cross-domain delivery-state gate (RFC-0204 Phase 3): the gate
+(* Exposed for the cross-domain delivery-state gate: the gate
    drives two domains through the seq allocator and asserts the final counter
    equals the total number of calls (no lost updates). *)
 let __test_next_dashboard_seq = next_dashboard_seq
@@ -1108,7 +1108,7 @@ let start_upgrade_heartbeat ~scope ?clock session_id session =
       "[ws-upgrade] session %s heartbeat disabled (missing clock)"
       session_id
 
-(* RFC-0287: ping->pong is automatic in the ws-direct Endpoint, so the former
+(* ping->pong is automatic in the ws-direct Endpoint, so the former
    [send_upgrade_pong] is gone; [record_pong] still fires from the [on_pong]
    handler to refresh the liveness timestamp. *)
 
@@ -1117,7 +1117,6 @@ let start_upgrade_heartbeat ~scope ?clock session_id session =
     protocol — session registration, SSE broadcast subscription,
     liveness heartbeat, and frame opcode handling.  Reached through the
     same-origin HTTP upgrade in [Server_routes_http_routes_frontend].
-    RFC-0281 S3.2.
 
     [scope] is the connection's own switch: the fiber that writes to [wsd]
     and the heartbeat run under it, on the connection's domain, and end with
@@ -1170,7 +1169,7 @@ let mcp_websocket_handler
       "WebSocket session %s not started (%s): its connection is ending"
       session_id
       origin_label;
-  (* RFC-0287: ws-direct reassembles fragments + validates UTF-8 + enforces the
+  (* ws-direct reassembles fragments + validates UTF-8 + enforces the
      size caps internally, so [on_message] receives a complete message and a
      protocol/size violation surfaces as [on_close]/[on_error] with the right
      close code — no frame-opcode switch or manual reassembly here. Ping is
@@ -1191,13 +1190,12 @@ let mcp_websocket_handler
 (** Perform the HTTP/1.1 -> WebSocket upgrade and drive the resulting
     connection.  Single source of truth for attaching an upgraded
     socket to a ws-direct [Ws_endpoint] (Server role) packaged as a
-    [Gluten.impl] — drop-in for the former [Httpun_ws.Server_connection.t]
-    (RFC-0287 §4.1): it sends the 101 via
+    [Gluten.impl] — drop-in for the former [Httpun_ws.Server_connection.t]:
+    it sends the 101 via
     [respond_with_upgrade], then hands the connection to the Gluten
     runtime via [upgrade].  Omitting the [upgrade] call (the
     pre-RFC-0281 defect) left the connection undriven, so inbound frames
     — including the client hello and protocol pongs — were never read.
-    RFC-0281 S3.1.
 
     [handler] builds the per-connection [input_handlers] from the
     [Wsd.t]; the MCP session ({!mcp_websocket_handler}) and the IDE LSP
@@ -1247,7 +1245,7 @@ let respond_and_drive_upgrade
     in
     (* Sends the 101 on the reqd, then the callback attaches the post-101
        socket: a ws-direct Endpoint (Server role) packaged as a Gluten.impl,
-       drop-in for the former Httpun_ws.Server_connection. RFC-0287 §4.1. *)
+       drop-in for the former Httpun_ws.Server_connection. *)
     upgrade.Http_reqd.switch_protocols headers (fun () ->
       let endpoint =
         Ws_endpoint.create Ws_endpoint.Server ~max_message ~max_frame handler

@@ -1,6 +1,5 @@
 (** The filesystem tools MCP clients receive, read from
-    [config/tools/tool_*.toml] and [config/tools/keeper_ide_annotate.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/tool_*.toml] and [config/tools/keeper_ide_annotate.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a

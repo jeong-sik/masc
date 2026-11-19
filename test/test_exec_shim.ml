@@ -160,7 +160,7 @@ let test_parse_config_ok () =
     check (list string) "payload path defaults to the fixed base"
       Exec_shim.default_payload_path c.Exec_shim.payload_path
 
-(* RFC-0422: the box. *)
+(* The box. *)
 let has_code code message =
   let n = String.length code and h = String.length message in
   let rec scan i = i + n <= h && (String.sub message i n = code || scan (i + 1)) in

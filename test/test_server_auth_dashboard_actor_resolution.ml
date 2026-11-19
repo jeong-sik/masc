@@ -290,7 +290,7 @@ let test_authenticated_owner_overrides_request_hint () =
   check (option string) "authenticated projection" (Some "credential-owner")
     (project ~base_path request)
 
-(* RFC play-link-for-the-shared-machine: a Player bearer is admitted only
+(* A Player bearer is admitted only
    where CanPlayMachine is asked for. The /mcp transport and the observer
    stream ask for CanReadState, so an invited Player cannot open them. *)
 let test_a_player_reaches_only_the_seat () =

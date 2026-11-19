@@ -1,6 +1,6 @@
 (** Runtime = Provider + Model + Spec(binding).
 
-    runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
+    runtime→Runtime 전환. runtime 의 routes/runtime_id/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
 
@@ -34,7 +34,7 @@ let exact_output_registry_stale_ref : exact_output_registry_stale option Atomic.
 let exact_output_registry_stale () = Atomic.get exact_output_registry_stale_ref
 
 (* The lanes and their ids are [Standalone_lane]'s. The Verifier lane
-   (RFC-0361 D7(a)) is the single selector for completion-authority judgement
+   is the single selector for completion-authority judgement
    calls: admitted slots in frozen declaration order, fail over in that
    order. *)
 type exact_lane = Standalone_lane.t =
@@ -219,7 +219,7 @@ let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source)
        | Runtime_execution.Vibe_cli _ ), (Some _ | None) -> false)
 ;;
 
-(* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
+(* An HTTP slot of an exact-output lane is
    built from its binding, and its whole-request deadline is the provider's
    [exact-body-timeout-s]. Without it plan admission refuses every request on
    that slot ([Missing_deadline]) and the lane falls to its cli_slots with one
@@ -584,7 +584,7 @@ let materialize_config
      below can only describe an id something else referenced. *)
   let* () = validate_no_dangling_bindings ~dropped_bindings in
   let assignments = cfg.keeper_assignments in
-  (* Assignments name a declared lane or a runtime (RFC-0457), so they are
+  (* Assignments name a declared lane or a runtime, so they are
      validated with the materialized lanes, like every other route id (#25394).
      A typo'd lane candidate can now surface before a typo'd assignment — the
      lane list the assignment names is the thing that had to exist first.
@@ -952,8 +952,8 @@ let exact_output_targets runtimes =
             ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
             ; (* A model the catalog has no row for is a slot only through what
                  runtime.toml states for the five reads [Runtime_exact_reads]
-                 names; a provider preset does not stand in for one of them
-                 (RFC-0514 §2.2). The capability override alone says nothing
+                 names; a provider preset does not stand in for one of them.
+                 The capability override alone says nothing
                  about that: on the Anthropic wire the adapter copies the
                  catalog answer into it when the model states nothing
                  ([Runtime_adapter.with_client_history_replay]). Where all five
@@ -1256,7 +1256,7 @@ let dashboard_runtime_defaults_snapshot () =
 
 (* Admitted [verifier_exact] slot ids in frozen declaration order from the
    published exact-output registry — the single provider-selection SSOT for
-   completion-authority judgement calls (RFC-0361 D7(a)). [Error] names why the
+   completion-authority judgement calls. [Error] names why the
    lane cannot judge (registry not published, lane unconfigured, or no admitted
    slots); there is no fallback to another route. *)
 (* The one answer to "can this runtime judge a completion review?".
@@ -1535,7 +1535,7 @@ let get_lane_by_id (id : string) : Runtime_lane.t option =
     (runtime_state ()).lanes
 ;;
 
-(* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
+(* Resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the requested runtime assignment (or the
    default) instead of unconditionally the default; an
    unknown id returns [None] so the driver fails fast (no silent substitution —
@@ -1721,7 +1721,7 @@ let quota_scope_of_runtime_id (id : string) : Runtime_quota_window.scope option 
   | None -> None
 ;;
 
-(* RFC-0233 §8 — per-million-token pricing declared on the [id] binding's
+(* per-million-token pricing declared on the [id] binding's
    runtime.toml table. Projects straight off the retained [rt.binding]
    (price_input/price_output are [Runtime_schema.binding] option fields),
    same shape as [max_context_of_runtime_id]. Returns (None, None) when the
@@ -2265,7 +2265,7 @@ let rejected_exact_slot_causes ~runtimes ~gaps resolver_snapshot rejected_slots 
   (* A slot whose binding names a model the catalog has no row for, under a
      provider it has a row for, is left out by the resolver ([Target_model])
      while runtime.toml leaves one of the five reads [Runtime_exact_reads]
-     names unstated (RFC-0514 §2.2). The diagnosis would call it a binding that
+     names unstated. The diagnosis would call it a binding that
      resolved to no catalog row; it is named with the keys to write instead.
      Only runtime bindings are targets; under a full replacement catalog none
      is. *)

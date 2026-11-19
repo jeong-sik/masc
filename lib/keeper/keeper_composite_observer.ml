@@ -424,7 +424,7 @@ let observe
     fsm_guard_violation_breakdown = fsm_guard_violation_breakdown ();
   }
 
-(* JSON serialisation (RFC-0003 §7) *)
+(* JSON serialisation *)
 
 let invariants_to_json (inv : invariants_check) : Yojson.Safe.t =
   `Assoc [

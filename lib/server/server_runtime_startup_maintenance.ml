@@ -45,8 +45,8 @@ let prune_flat_jsonl_older_than ~days dir =
 let keeper_scoped_flat_stores = [ "raw-traces"; "runtime-manifests" ]
 
 (* A Keeper's memory health row reads the newest turn record that carries a
-   response observation, so removing its old day files can change the row
-   (RFC-0487 §2.7). No other dated store is read by the row. *)
+   response observation, so removing its old day files can change the row.
+   No other dated store is read by the row. *)
 let pruned_store ~masc_root location =
   match Dated_jsonl.Store.keeper_store location with
   | Some (keeper, Dated_jsonl.Store.Keeper.Turn_records) ->
@@ -177,7 +177,7 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
       outcomes
 ;;
 
-(* RFC-0498 §4.4. The links are read whole (about 2.7GB on 2026-11-06), so
+(* The links are read whole (about 2.7GB on 2026-11-06), so
    the sweep takes a worker domain instead of holding back readiness. *)
 let startup_sweep_unowned_exact (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
@@ -199,7 +199,7 @@ let startup_sweep_unowned_exact (state : Mcp_server.server_state) =
       report.removed_observation_bytes
 ;;
 
-(* RFC-0497 section 6, layer one: the pass counts instances every minute; the
+(* The pass counts instances every minute; the
    bytes are read here once, because the observation tree holds hundreds of
    thousands of files. *)
 let startup_count_superseded_lanes (state : Mcp_server.server_state) =

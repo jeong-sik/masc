@@ -89,7 +89,7 @@ let repository_json ~base_path (repo : Repo_manager_types.repository) =
       ("id", `String repo.id);
       ("name", `String repo.name);
       ("url", `String repo.url);
-      (* RFC-0378 §5.3b: the server is the only slug mint — clients carry
+      (* The server is the only slug mint — clients carry
          this value into co-view context and scope queries instead of
          re-deriving it from the url. [`Null] when the url cannot
          canonicalize (blank or local-path remote). *)

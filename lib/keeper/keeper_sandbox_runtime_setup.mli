@@ -109,7 +109,7 @@ val docker_network_args :
   Keeper_types_profile_sandbox.network_mode -> (string list * string, string) result
 (** [Network_policy] is refused here: the Docker egress boundary has not been
     measured, and a mode that is policy on one backend and advice on another
-    is worse than one that says no (RFC-0415). *)
+    is worse than one that says no. *)
 val docker_nofile_args : unit -> string list
 val container_masc_runtime_base : container_root:'a -> string
 val container_masc_dir : container_root:'a -> string

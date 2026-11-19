@@ -1,4 +1,4 @@
-(* RFC-0223 P2 — Gate_surface unit tests.
+(* Gate_surface unit tests.
 
    - [label] projects the current typed presence variants.
    - [connected_surfaces_for_keeper] presence derivation against a

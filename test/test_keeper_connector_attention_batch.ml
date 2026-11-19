@@ -3,7 +3,7 @@
 
    Live data (2026-08-08..08-13) showed every delivered continuation
    obligation (48/48) bound 1:1 to a single distinct inbound message: a turn
-   admitted exactly one Connector_attention stimulus (RFC-0020 Rule 4), so a
+   admitted exactly one Connector_attention stimulus, so a
    backlog of N pending messages in the same conversation took N turns to
    drain, and inbound-to-reply lag grew monotonically (438s to 4,461s,
    median 1,533s) as live traffic outran the one-per-turn drain rate.
@@ -11,7 +11,7 @@
    This suite pins the fix: once [heartbeat_event_intake]'s primary
    selection is a [Connector_attention] stimulus, it drains every OTHER
    pending [Connector_attention] stimulus for the same conversation into the
-   same turn, in arrival order (RFC-0377 S3) — and the durable queue
+   same turn, in arrival order — and the durable queue
    lifecycle applies to every admitted member, not only the primary: a turn
    completion acknowledges the delivered connector batch and a turn failure
    retains it. HITL cohorts additionally require each input's own continuation
@@ -110,7 +110,7 @@ let discord_surface ~channel_id =
    message. That is exactly why [Keeper_continuation_channel.same_route]
    cannot be the batching predicate: two pending messages from the same
    conversation never share a [same_route] value. [same_conversation]
-   (channel_id-only, RFC-0377) is what lets this batch form at all. *)
+   (channel_id-only) is what lets this batch form at all. *)
 let connector_attention_stimulus
       ~base_path ~keeper_name ~channel_id ~message_id ~arrived_at ~content
   : Q.stimulus
@@ -1446,7 +1446,7 @@ let test_batch_retires_permanent_board_poison_between_connector_matches () =
          (Q.to_list queued)))
 ;;
 
-(* RFC-0377 S5.2: batch admitted, then the turn fails with a transient
+(* Batch admitted, then the turn fails with a transient
    provider failure. Unlike the earlier version of this test (which
    assumed [Defer_to_queue_tail] and mutated the queue), the disposition here
    comes from a REAL

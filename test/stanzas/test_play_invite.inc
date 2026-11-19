@@ -1,4 +1,4 @@
-; RFC play-link-for-the-shared-machine §2.4: issuing, listing and revoking
+; Issuing, listing and revoking
 ; invites against a real credential store in a temp workspace.
 
 (test

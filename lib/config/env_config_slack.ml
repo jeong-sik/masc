@@ -1,4 +1,4 @@
-(** Env_config_slack — Slack connector env accessors (RFC-0317).
+(** Env_config_slack — Slack connector env accessors.
 
     Centralizes the Slack Socket Mode env reads at the config boundary so the
     in-process gateway ({!Server_slack_in_process_gateway}) holds no direct

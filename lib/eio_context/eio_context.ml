@@ -41,7 +41,7 @@ let current_mono_clock : Eio.Time.Mono.ty Eio.Resource.t option Atomic.t = Atomi
    prevents the switch and owner identity from drifting across concurrent reads
    or temporary test snapshots. *)
 let current_sw : root_switch_binding option Atomic.t = Atomic.make None
-(* RFC-0107 Phase D.2c — full Eio standard environment, required by
+(* Full Eio standard environment, required by
    piaf [Client.create] (and any other API needing more than just
    [net]/[clock]).  Set once at server bootstrap; read by long-lived
    consumers like [Masc_http_client] that initialize their per-process

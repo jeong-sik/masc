@@ -736,7 +736,7 @@ let test_live_route () =
           check string "a press makes the old DOS since stale" "changed"
             (string_member "state" (body_json (get (dos_live ^ since)))))))))))
 
-(* RFC play-link-for-the-shared-machine §2.3: live asks for CanPlayMachine,
+(* Live asks for CanPlayMachine,
    so an invited Player watches the machine through it while every
    CanReadState route on the same router stays closed to it. A Worker holds
    both and keeps watching. *)

@@ -77,7 +77,7 @@ let read_file path = In_channel.with_open_bin path In_channel.input_all
 let write_file path bytes = Out_channel.with_open_bin path (fun ch -> output_string ch bytes)
 let replace_file path bytes =
   match Fs_compat.save_file_atomic path bytes with Ok () -> () | Error detail -> fail detail
-(* A reference names the head's content digest (RFC-0476 §3.2). *)
+(* A reference names the head's content digest. *)
 let content_digest_of_head bytes =
   match Agent_core.Checkpoint_objects.head_of_string bytes with
   | Ok head -> (Agent_core.Checkpoint_objects.head_content_digest head :> string)

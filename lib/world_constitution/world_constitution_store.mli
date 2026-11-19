@@ -1,4 +1,4 @@
-(** Article ledger for one world (RFC-0442).
+(** Article ledger for one world.
 
     The ledger is an append-only JSONL file under
     [<base_path>/.masc/constitution/]. Each line is one move — a norm written
@@ -92,8 +92,7 @@ type ledger = {
           end, because that is when the world decided to keep it. A line whose
           subject [resolve_subject] refused admits no norm and withholds the
           ids it affects. Neither its new text nor the earlier text it
-          disputed is the world's to render without resolving that move
-          (RFC-0504 §2.4). *)
+          disputed is the world's to render without resolving that move. *)
   entries : World_constitution_types.entry list;
       (** Every decoded move, in ledger order. Removed entries retain who,
           when and why; the preceding Added entry retains the removed text.
@@ -108,7 +107,7 @@ type ledger = {
       (** Lines that decoded but whose subject [resolve_subject] refused, in
           file order. They stay in the file and in [entries]; a reader
           reports them beside [rejected], because a norm that stopped
-          rendering must not vanish quietly (RFC-0504 §2.4). *)
+          rendering must not vanish quietly. *)
 }
 
 type read_error =
@@ -129,8 +128,8 @@ val load :
 
     [resolve_subject] names the roster: a decoded line whose subject it
     refuses is not admitted, and the article ids it affects are withheld
-    from [articles]. The line and its ids land in [isolated] instead
-    (RFC-0504 §2.4); skipping the line must not revive the earlier version
+    from [articles]. The line and its ids land in [isolated] instead;
+    skipping the line must not revive the earlier version
     of a withdrawn or edited norm. Production callers pass their world's keeper
     registry; a test that owns no roster passes one that holds every
     subject it wrote. *)

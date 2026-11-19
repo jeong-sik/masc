@@ -5,7 +5,7 @@
 
     @since God file decomposition — extracted from tool_task.ml *)
 
-(* RFC-0337 decision 4: shared element-level predicate for evidence-ref
+(* Shared element-level predicate for evidence-ref
    boundary checks. The masc_transition handoff boundary rejects entries
    this predicate flags instead of silently dropping them; the
    keeper_task_done parser (keeper_tool_task_runtime.ml) enforces the same

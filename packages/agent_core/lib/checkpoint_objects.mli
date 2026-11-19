@@ -1,5 +1,4 @@
-(** A checkpoint held as one small head and content-addressed objects
-    (RFC-0476 §3.2-3.5).
+(** A checkpoint held as one small head and content-addressed objects.
 
     Every message is written once as a {e message object}: the validated bytes
     {!Checkpoint.to_string} would write for it. A closed Keeper turn is written

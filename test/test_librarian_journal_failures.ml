@@ -1,4 +1,4 @@
-(* RFC-0361 Part 5 — the memory journal records failed librarian passes, not
+(* The memory journal records failed librarian passes, not
    only committed ones, and a reader decodes both without guessing.
 
    Before this suite the journal had exactly one consumer in the tree and it

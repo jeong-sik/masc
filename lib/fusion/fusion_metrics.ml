@@ -1,4 +1,4 @@
-(** Fusion deliberation OTel metrics (RFC-0284).
+(** Fusion deliberation OTel metrics.
 
     Observation records produced by the orchestrator are mirrored as counters
     so operators can distinguish "no fusion traffic" from "fusion traffic that

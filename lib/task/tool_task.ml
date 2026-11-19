@@ -47,7 +47,7 @@ let handle_transition ~tool_name ~start_time ctx args =
   in
   if Stdlib.List.length unknown > 0 then
     let names = String.concat ", " (List.map fst unknown) in
-    (* RFC-0189: schema-rejection — operator passed an unknown
+    (* schema-rejection — operator passed an unknown
        argument name. [Workflow_rejection]. *)
     Tool_result.error
       ~failure_class:Tool_result.Workflow_rejection
@@ -71,7 +71,7 @@ let handle_transition ~tool_name ~start_time ctx args =
   | Ok task_id ->
   let action_raw = get_string args "action" "" in
   if String.equal action_raw "" then
-    (* RFC-0189: required-field violation. [Workflow_rejection]. *)
+    (* required-field violation. [Workflow_rejection]. *)
     Tool_result.error
       ~failure_class:Tool_result.Workflow_rejection
       ~tool_name ~start_time
@@ -79,7 +79,7 @@ let handle_transition ~tool_name ~start_time ctx args =
   else
   match Masc_domain.task_action_of_string action_raw with
   | Error msg ->
-      (* RFC-0189: caller passed an unknown action enum value. *)
+      (* Caller passed an unknown action enum value. *)
       Tool_result.error
         ~failure_class:Tool_result.Workflow_rejection
         ~tool_name ~start_time msg
@@ -105,7 +105,7 @@ let handle_transition ~tool_name ~start_time ctx args =
   in
   match handoff_context with
   | Error error ->
-      (* RFC-0189: handoff_context parse error — caller passed
+      (* handoff_context parse error — caller passed
          malformed payload. *)
       Tool_result.error
         ~failure_class:Tool_result.Workflow_rejection
@@ -337,7 +337,7 @@ let list_tasks ~tool_name ~start_time ctx args =
     (match Masc_domain.Task_status_tag.of_string raw with
      | Some status -> list ~status ()
      | None ->
-       (* RFC-0189: caller passed an unknown status enum value. Answering
+       (* Caller passed an unknown status enum value. Answering
           "No tasks." would read as an empty board. *)
        refuse
          (Printf.sprintf "unknown status %S; expected one of: %s" raw

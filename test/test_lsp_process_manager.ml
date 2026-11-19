@@ -202,7 +202,7 @@ let test_spawn_rejects_directory_path_entry () =
 ;;
 
 (* [shutdown] must close ALL THREE held pipe FDs (stdin_w, stdout_r, stderr_r),
-   not just two. RFC-0261 / #21546: a missing [stderr_r] close leaks 1 FD per
+   not just two. #21546: a missing [stderr_r] close leaks 1 FD per
    failed init, still climbing monotonically and tripping the FD admission gate.
 
    To prove a reader FD is *closed* (rather than merely hitting EOF because the

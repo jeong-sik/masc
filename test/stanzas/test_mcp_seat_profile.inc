@@ -1,4 +1,4 @@
-; RFC play-link-for-the-shared-machine §2.7: the seat door /mcp/play admits an
+; The seat door /mcp/play admits an
 ; invite's Player credential and answers the handshake and the CanPlayMachine
 ; tools only.
 

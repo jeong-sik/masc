@@ -10,7 +10,7 @@
 (* Helpers                                                           *)
 (* ================================================================ *)
 
-(* Delegation to the canonical clamped reader (RFC-0371 B7); this was one of
+(* Delegation to the canonical clamped reader; this was one of
    four raw copies of the same helper. *)
 let int_of_env_default name ~default ~min_v ~max_v =
   Env_config_core.get_int_clamped ~default ~min_v ~max_v name

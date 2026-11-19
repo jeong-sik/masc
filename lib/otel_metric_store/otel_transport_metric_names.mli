@@ -74,13 +74,13 @@ val metric_discord_ambient_record : string
 val metric_discord_outbound_replies : string
 
 (** Slack Socket Mode gateway events surfaced by the in-process gateway.
-    Labels: [event], [route]. RFC-0317. *)
+    Labels: [event], [route]. *)
 val metric_slack_gateway_events : string
 
 (** Triggered Slack inbound messages after keeper binding lookup.
     Labels: [outcome] =
     [dropped_unbound | dispatch_unavailable | gate_error | empty_reply |
-     reply_sent | reply_send_error]. RFC-0317. *)
+     reply_sent | reply_send_error]. *)
 val metric_slack_inbound_dispatch : string
 
 (** Record-only ambient Slack messages (RFC-0226 parity with Discord).
@@ -90,7 +90,7 @@ val metric_slack_inbound_dispatch : string
 val metric_slack_ambient_record : string
 
 (** Slack REST replies attempted by the gateway reply path.
-    Labels: [outcome] = [sent | send_error | empty]. RFC-0317. *)
+    Labels: [outcome] = [sent | send_error | empty]. *)
 val metric_slack_outbound_replies : string
 
 (** Dashboard execution render phase latency histogram. Labels:

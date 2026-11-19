@@ -1,6 +1,4 @@
-(** RFC execute-subset-dispositions, step 1.
-
-    [argv:["sh";"-c";S]] and [command:S] are the same text, but only the second
+(** [argv:["sh";"-c";S]] and [command:S] are the same text, but only the second
     crosses the gate.  These tests pin what the recogniser accepts and what the
     classifier calls the text underneath, because the distribution of those
     tags over live traffic is what decides which constructs the subset resolves
@@ -65,7 +63,7 @@ let test_names_what_the_gate_would_have_said () =
   (* Text the IR can hold: nothing is hidden by the costume. *)
   Alcotest.(check string) "plain command" "representable" (tag_of "echo hi");
   Alcotest.(check string) "connector" "representable" (tag_of "true && echo hi");
-  (* [;] is a Shell_ir connector now (RFC-0391), so the costume hides nothing
+  (* [;] is a Shell_ir connector now, so the costume hides nothing
      the typed path could not have said. *)
   Alcotest.(check string) "separator" "representable" (tag_of "false; echo hi");
   (* Brace expansion builds argv before exec -- category A in the RFC. *)
@@ -84,7 +82,7 @@ let test_measured_dispositions () =
   let case script expected = Alcotest.(check string) script expected (tag_of script) in
   case "ls *.ml" "representable";
   case "echo hi > out.txt" "representable";
-  (* $( ) parses and executes now (RFC shell-ir-typed-command-substitution);
+  (* $( ) parses and executes now;
      the cmd_subst tag survives for backticks only. *)
   case "echo $(date)" "representable";
   case "echo `date`" "cmd_subst";

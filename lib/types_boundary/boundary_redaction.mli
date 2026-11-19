@@ -38,6 +38,5 @@ val to_string : public_label -> string
 (** Redacted lane label for external observability metric labels
     ([model] / [model_used]). Callers that serialize labels must use
     [to_string runtime_lane_label]. SSOT consolidating the previously-duplicated
-    [to_string runtime_model_label] expression at keeper emit sites
-    (RFC-0132 §3). *)
+    [to_string runtime_model_label] expression at keeper emit sites. *)
 val runtime_lane_label : public_label

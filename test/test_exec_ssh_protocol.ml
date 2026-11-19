@@ -30,7 +30,7 @@ let test_frame_roundtrip () =
          (Exec_ssh_protocol.mode_to_string req'.mode);
        check string "stdin" "" stdin)
 
-(* RFC-0422: the mode is a closed set on the wire. *)
+(* The mode is a closed set on the wire. *)
 let test_mode_roundtrip () =
   List.iter
     (fun mode ->
@@ -445,7 +445,7 @@ let test_probe_roundtrip () =
     check string "version" p.version p'.version;
     check (result int string) "major read" (Ok 3) (major_int p')
 
-(* RFC-0427 B-3. The shim names the release it was built from, beside the
+(* The shim names the release it was built from, beside the
    protocol version and without touching it. A shim built before the field
    existed sends no key, which reads as None rather than as a broken probe:
    the two sides are one release apart on purpose and have to keep talking. *)

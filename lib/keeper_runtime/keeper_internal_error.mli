@@ -94,7 +94,7 @@ type transcript_quarantine_reason =
   | Structurally_invalid
   | Unresolved_tool_results
 
-(** Which host decision stopped a turn that was already running (RFC-0454 P2).
+(** Which host decision stopped a turn that was already running.
 
     These stops end the invocation rather than grant a cooperative resume.
     The original session and its effect evidence remain authoritative. *)
@@ -119,7 +119,7 @@ type gate_replay_repair_stage =
   | Replay_stale_grant_retirement
   | Replay_invalid_resolution_state
 
-(** What failed the provider attempt a fence closed over (RFC-0454 D1).
+(** What failed the provider attempt a fence closed over.
 
     A MASC error that arrives on the carrier is kept as the value it is;
     anything else is agent-core's typed projection. Neither arm holds a
@@ -148,7 +148,7 @@ and masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
-      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+      (* Typed provider stop_reason for the rejected response.
          [MaxTokens] on an empty/thinking_only shape marks a truncation, distinct
          from a clean [EndTurn] no-progress terminal. Groundwork slice: threaded
          and serialized, not yet consumed by classification. *)
@@ -201,7 +201,7 @@ and masc_internal_error =
     }
       (** The turn ended because the host stopped it, not because the provider
           failed. The runtime flattened this into a sentence and the chat pane
-          read the sentence back to decide what to draw (RFC-0454 §1.3); it is
+          read the sentence back to decide what to draw; it is
           the value now, so the screen matches a constructor. *)
   | Runtime_connection_closed of {
       runtime_id : string;

@@ -207,7 +207,7 @@ val execution_mode_of_string : string -> execution_mode option
 (** The mode {!execution_mode_to_string} spells as this text, or [None] for a
     spelling no mode has. *)
 
-(** Execution-semantics kind (RFC-0386) declared by the entry's execution
+(** Execution-semantics kind declared by the entry's execution
     mode: [Inline] entries are [Composition_tool], [Async] entries are
     [Async_composition_tool]. *)
 val tool_kind : entry -> Keeper_tool_descriptor.tool_kind

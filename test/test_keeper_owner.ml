@@ -280,7 +280,7 @@ let test_operation_payload_preserves_connector_route () =
     true
     (Result.is_error (Keeper_chat_operation_payload.source_of_json unknown));
   (* One source names one speaker: a connector person and a sender Keeper
-     cannot both be on it (RFC-0468 §3.2). *)
+     cannot both be on it. *)
   let keeper_id =
     match Keeper_identity.Keeper_id.of_string "masc-the-leader" with
     | Some keeper_id -> keeper_id
@@ -757,7 +757,7 @@ let test_identity_and_delete_guards () =
   check bool "delete clears metadata" true (Option.is_none (Owner.projection empty).meta)
 ;;
 
-(* RFC-0487: a Keeper's memory health row measures the Librarian gap on the
+(* A Keeper's memory health row measures the Librarian gap on the
    meta's trace and has none to measure without a meta. The Owner tells the
    row's readers when the meta is created, removed or moves to a new trace,
    and not for a change that keeps the trace. *)
@@ -1074,7 +1074,7 @@ let test_stopping_cancels_and_joins_autonomous_child () =
    transitions, 0 violations.
 
    The test states the blocked lane, not just the fact of blocking, because the
-   holder's identity is what a fairness change would alter (RFC-0373). *)
+   holder's identity is what a fairness change would alter. *)
 (* The release signal states availability, not completion. A listener woken by
    "a turn ended" would find the slot already taken whenever a chat operation
    was queued behind it, defer, and wait out its own cadence again — the exact
@@ -1613,7 +1613,7 @@ let test_health_observer_wakes_after_persistence_exception () =
       (!observations = [ Some true; None; Some true ]))
 ;;
 
-(* RFC-0481 §3.2: every metadata write the Owner attempts tells the roster
+(* Every metadata write the Owner attempts tells the roster
    readers of its own workspace to reread that Keeper's row. *)
 let hearing_row_changes ~base_path ?(on_heard = fun _ -> ()) f =
   let id = Printf.sprintf "keeper-owner-row-changed-%d-%s" (Unix.getpid ())
@@ -1648,7 +1648,7 @@ let start_owner_in ~sw ~base_path ~store (meta : Keeper_meta_contract.keeper_met
   |> owner_ok
 ;;
 
-(* RFC-0481 §3.4: a chat control token rotation tells the turns readers to
+(* A chat control token rotation tells the turns readers to
    read again, after the new token is in place. *)
 let test_a_token_rotation_announces_the_keeper_turns () =
   let base_path = Masc_test_deps.setup_test_workspace () in

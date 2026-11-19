@@ -1,6 +1,6 @@
 open Result.Syntax
 
-(* Same resolver SSOT the SSH lane uses (RFC-0121): runtime.toml lives under
+(* Same resolver SSOT the SSH lane uses: runtime.toml lives under
    .masc/config/, and a hand-built path under the base has never named it. *)
 let runtime_config_path ~base_path =
   let workspace_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in

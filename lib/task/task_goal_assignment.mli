@@ -1,4 +1,4 @@
-(** RFC-0267 Phase 2 — explicit, validated task->goal assignment.
+(** Explicit, validated task->goal assignment.
 
     Backend entry point of the MCP tool [masc_task_set_goal]. The link is
     persisted in the [goal_task_links] registry ([Workspace_goal_index]); the

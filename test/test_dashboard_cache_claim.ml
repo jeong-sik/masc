@@ -1,6 +1,6 @@
 open Alcotest
 
-(* RFC-0204 §3.4 L4b. One pool, as small as the read pool can be. The owner
+(* One pool, as small as the read pool can be. The owner
    is a fiber outside the pool whose compute is a pool job; a waiter is a pool
    job that looks the same key up. *)
 

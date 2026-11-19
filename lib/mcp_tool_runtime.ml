@@ -7,7 +7,7 @@
 
     Keeps MCP-only server helpers that need per-request server state.
 
-    RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
+    Handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
 
 (** Re-export shared types so callers can use
@@ -69,7 +69,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
       Mcp_tool_runtime_board.dispatch ~reader:ctx.board_reader ~config ~agent_name ~arguments ~state ~name
 
 (* ================================================================ *)
-(* Tool_spec registration (RFC-0182 §3.2)                           *)
+(* Tool_spec registration                                           *)
 (* ================================================================ *)
 
 (* MCP server-local workspace tools register through Tool_spec.

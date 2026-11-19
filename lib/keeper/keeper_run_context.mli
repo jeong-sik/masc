@@ -25,7 +25,7 @@ type run_context =
   ; saved_history : saved_history
   ; system : Keeper_turn_system.t
         (** The System every request of the turn sends, with the amendments
-            its end context carries (RFC-0491 §3.2). *)
+            its end context carries. *)
   ; workspace_root : string
   ; ctx_work : working_context
   ; resume_agent_core_checkpoint : Agent_core.Checkpoint.t option

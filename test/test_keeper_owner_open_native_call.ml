@@ -628,7 +628,7 @@ let test_owned_input_wait ?response fixture () =
          | Missing_retained -> Unix.unlink retained
          | Corrupt_retained -> Fs_compat.save_file retained "corrupt retained"
          | Changed_retained ->
-           (* Other content under the same name (RFC-0476 §3.2). *)
+           (* Other content under the same name. *)
            Fs_compat.save_file retained
              (Masc_test_deps.checkpoint_head_bytes_with_field (Fs_compat.load_file retained)
                 "turn_count" (`Int 1000))

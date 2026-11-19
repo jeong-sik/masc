@@ -561,7 +561,7 @@ let task_completed_at (task : Masc_domain.task) =
   | Masc_domain.AwaitingVerification _ -> None
 ;;
 
-(* RFC-0267 Phase 1: pick a goal_id for the wire so the Work board can nest
+(* Pick a goal_id for the wire so the Work board can nest
    jobs under goals. The task record carries no goal_id; the goal_task_links
    registry holds the association.
 
@@ -771,7 +771,7 @@ let render_observation ~read_policy ~effective_actor ~light ~config ~sw ~clock ~
          so other fibers (SSE, health checks) can progress. *)
     Eio.Fiber.yield ();
     let tasks = tasks_safe config in
-    (* RFC-0267 Phase 1: build the task→goals index once; task_json projects the
+    (* Build the task→goals index once; task_json projects the
        canonical goal_id per task from it (registry is SSOT for the linkage). *)
     let goal_task_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let operation_contexts = build_operation_contexts ~tasks in

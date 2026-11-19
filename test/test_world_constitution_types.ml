@@ -1,4 +1,4 @@
-(** Unit tests for the constitution article vocabulary (RFC-0442). *)
+(** Unit tests for the constitution article vocabulary. *)
 
 open Masc.World_constitution_types
 module Wire = Masc.World_constitution_wire

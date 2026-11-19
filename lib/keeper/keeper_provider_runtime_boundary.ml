@@ -101,7 +101,7 @@ type t =
   | Provider_timeout of provider_timeout
   | No_timeout_observed
 
-(* Direct variant-to-variant translation (RFC-0371 B12): this used to render
+(* Direct variant-to-variant translation: this used to render
    the agent-core phase to its label and re-parse the label into the MASC
    vocabulary — a typed->string->typed round trip inside one function. Both
    matches are exhaustive and total, so a new constructor on either side is
@@ -191,7 +191,7 @@ let provider_runtime_error_looks_like_timeout ~code =
 ;;
 
 let classify_provider_runtime_error_record ?agent_core_timeout ~code () =
-  (* Typed observation first (RFC-0371 §6.1(3)): records built while the
+  (* Typed observation first: records built while the
      original agent-core error was in hand carry it, and no string is
      consulted. The prefix parse below survives only for records rehydrated
      from persisted wire, where the string is all that remains. *)

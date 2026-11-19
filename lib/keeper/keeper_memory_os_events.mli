@@ -1,4 +1,4 @@
-(** Memory history events (RFC-0418).
+(** Memory history events.
 
     This module records retrieval as typed events in a per-keeper append-only
     sidecar, [<keeper>.memory-events.jsonl], and projects them at read time

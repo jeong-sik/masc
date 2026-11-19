@@ -378,7 +378,7 @@ val peek : address:Address.t -> length:int -> (string, error) result
 (** Reads [length] (1..{!peek_max_bytes}) bytes starting at [address] as hex
     pairs, and takes a full 64K snapshot of the machine for the next
     {!ram_diff}. The range must end inside the address space. Read-only:
-    writing is the cheat the lane refuses (RFC-0439). *)
+    writing is the cheat the lane refuses. *)
 
 val ram_diff : unit -> (ram_diff, error) result
 (** Changes since the last {!peek}: consecutive differing bytes as runs with

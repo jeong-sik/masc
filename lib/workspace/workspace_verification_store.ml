@@ -224,7 +224,7 @@ let valid_producer_relative_path path =
    disagree about where a file is. *)
 let evidence_body_directory = "evidence"
 
-(* Where a binary artifact's bytes are filed (RFC-0436 §4.2): the
+(* Where a binary artifact's bytes are filed: the
    verification-owned evidence directory, one file per item index. The path
    recorded on the item is spelled relative to the workspace's masc
    directory so the judge's side resolves it under any base_path. Returns
@@ -242,7 +242,7 @@ let persist_binary_body ~base_path ?request_id ?index data =
   | _ -> None
 
 (* Why a filed body did not come back as base64. Each case is a different
-   posture for the judge (RFC-0436 §4.4/§4.5): the item was never an image
+   posture for the judge: the item was never an image
    block candidate, the body was never filed (decoded from persistence, not
    captured), the file is gone or unreadable, or the body is above the
    delivery ceiling and is judged on its recorded hash and size. A caller
@@ -344,8 +344,7 @@ let inspect_producer_relative_artifact ?artifact_read ?request_id ?index ~base_p
         | Error reason -> Evidence_artifact_unreadable { reference; reason }
         | Ok (Binary_payload { data; bytes; sha256; format }) ->
             (* Bytes that are not text are evidence too: the snapshot keeps
-               the hash and the size, and the bytes are filed as the body
-               (RFC-0436 §4.1). *)
+               the hash and the size, and the bytes are filed as the body. *)
             let body =
               persist_binary_body ~base_path ?request_id ?index data
             in

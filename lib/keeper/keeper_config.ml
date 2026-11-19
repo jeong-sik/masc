@@ -70,7 +70,7 @@ let keeper_hitl_thinking_blocks_rp =
 let keeper_hitl_thinking_blocks () : int =
   Runtime_params.get keeper_hitl_thinking_blocks_rp
 
-(* RFC-0422 step 3b. What a refused observe run wrote to stderr travels to
+(* What a refused observe run wrote to stderr travels to
    the judge on the approval row. The tail is what is kept, because the
    refusal is the last thing a program reports; the bound is there because
    the row is durable and a program can print megabytes before its first

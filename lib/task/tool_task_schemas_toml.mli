@@ -1,5 +1,5 @@
-(** The task tools whose declarations moved to [config/tools/masc_*.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2), read from the
+(** The task tools whose declarations moved to [config/tools/masc_*.toml],
+    read from the
     binary-embedded config tree.
 
     Each value is decoded once at module initialization. A missing file or a

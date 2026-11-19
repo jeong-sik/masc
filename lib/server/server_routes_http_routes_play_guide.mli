@@ -1,5 +1,5 @@
 (** Server_routes_http_routes_play_guide — how an agent handed an invite link
-    joins the shared DOS machine (RFC play-link-for-the-shared-machine §2.7).
+    joins the shared DOS machine.
 
     [GET /play/agent.md] ({!Play_invite.agent_guide_path}) is public and
     answers [text/markdown]: the prompt [play.agent_guide] with this server's

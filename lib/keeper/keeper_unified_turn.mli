@@ -100,7 +100,7 @@ type turn_success =
 val continuation_channel_of_wake :
   Keeper_registry.wake_reason -> Keeper_continuation_channel.t option
 (** The channel a turn woken by [wake] continues on: a single payload's
-    routable channel, or for a batch (RFC-0377) the last member's channel when
+    routable channel, or for a batch the last member's channel when
     every member has a routable channel and all are the same conversation
     ([Keeper_continuation_channel.same_conversation]). Intake orders the wake
     by the queue's urgency-stable order, not arrival, so "last" is not

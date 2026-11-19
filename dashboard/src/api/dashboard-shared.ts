@@ -76,7 +76,7 @@ export type TelemetryCoverageGap = {
   keeper_name?: string | null
   trace_id?: string | null
   error?: string | null
-  // RFC-0154 PR-2: backend-classified typed tag. Values are the short tags
+  // backend-classified typed tag. Values are the short tags
   // from `System_error_class.to_short_tag` ("fd_exhaustion" /
   // "disk_exhaustion" / "permission_denied" / "connection_refused" /
   // "timeout" / "other"). Null means the row carries no classification --

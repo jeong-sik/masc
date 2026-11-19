@@ -6,7 +6,7 @@
 // (the StatusChip lineage, generalised): semantic tones, a `volt` accent,
 // and `uppercase` / `mono` / `soft` / `dot` modifiers.
 //
-// Convergence path (see docs/design/dashboard-pill-convergence.md):
+// Convergence path:
 //   - `status-chip.ts` delegates its class assembly here (no fork; 33 callers
 //     keep their API + `data-*` contract; output is byte-identical).
 //   - Forked tone-pills across feature components migrate to `<Pill>` in

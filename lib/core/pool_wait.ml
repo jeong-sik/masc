@@ -22,7 +22,7 @@ let histogram () =
   }
 ;;
 
-(* RFC-0474 L4a. Eio's executor counts a job's weight in millionths and a
+(* Eio's executor counts a job's weight in millionths and a
    worker admits jobs until the weights it runs reach one million, whether
    those jobs use the CPU or wait. A lane holds as many workers' worth of
    weight as this sum divided by [units_per_worker]. *)
@@ -39,7 +39,7 @@ let in_flight_bucket_count = 4
    the two. *)
 let declared_cpu_weight = 0.5
 
-(* RFC-0474 L4c. Each submission names the work (its call site's
+(* Each submission names the work (its call site's
    [__FUNCTION__], or the store a [Dated_jsonl] read reads), so a lane's wait
    and run time can be told apart by who submitted it. *)
 type named =

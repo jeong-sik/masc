@@ -1,5 +1,5 @@
 (** History-side content: the same blocks and messages as
-    {!Llm_provider.Types}, with media held by reference (RFC-0476 §3.4, D5).
+    {!Llm_provider.Types}, with media held by reference.
 
     A history media block has no base64 carrier. Raw media bytes live in a
     {!media_store}; the block keeps their {!stored} digest and length, or an

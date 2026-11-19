@@ -1,5 +1,5 @@
 (** Sends {!Keeper_skill_activations_changed_event} when a Keeper's skill
-    activation ledger takes a record (RFC-0483 §4.2). *)
+    activation ledger takes a record. *)
 
 val keeper_of_trace :
   Keeper_registry.registry_entry list -> Keeper_id.Trace_id.t -> string option

@@ -120,8 +120,8 @@ type tool_bundle =
         callable. *)
   ; agent_core_tools : Agent_core.Tool.t list
     (** The same turn for the Agent Core lane, with the attached-service
-        schemas replaced by one listing tool that hands them over on request
-        (RFC-attached-service-tool-scoping). Only this lane can widen a
+        schemas replaced by one listing tool that hands them over on request.
+        Only this lane can widen a
         running turn's tool set. *)
   ; on_demand_tool_names : string list
     (** The names in [tools] an official client loads on demand: every

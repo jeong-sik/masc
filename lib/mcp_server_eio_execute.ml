@@ -687,7 +687,7 @@ let execute_tool_eio
                          (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))
 ;;
 
-(* RFC-0182 §3.1 — register Tool_workspace.dispatch with the dependency
+(* Register Tool_workspace.dispatch with the dependency
    inversion ref so
    [Keeper_tool_in_process_runtime.handle_masc_workspace_with_outcome]
    (compiled early) can dispatch workspace tools without statically importing

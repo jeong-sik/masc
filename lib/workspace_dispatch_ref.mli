@@ -1,4 +1,4 @@
-(** RFC-0182 §3.1 — workspace dispatch dependency inversion ref.
+(** Workspace dispatch dependency inversion ref.
 
     See [workspace_dispatch_ref.ml] for the rationale. *)
 

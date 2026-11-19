@@ -6,7 +6,7 @@ module Http = Http_server_eio
     unparseable [n_param] -> bounded default (windowed vs not). Returns a
     {!Telemetry_unified.read_limit}, so no caller can express an unbounded
     read: explicit n=0, once the #20659 all-in-window opt-out, now clamps to
-    [Telemetry_unified.max_read_entries] and reports [truncated] (RFC-0372).
+    [Telemetry_unified.max_read_entries] and reports [truncated].
     Exposed for the freeze-guard test. *)
 val resolve_telemetry_limit :
   has_time_window:bool -> n_param:string option -> Telemetry_unified.read_limit

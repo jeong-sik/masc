@@ -1,6 +1,6 @@
 (** The [keeper_code_query] tool: ask the language server about a name.
 
-    RFC a-language-server-the-keeper-can-ask. [Lsp_workspace_pool] holds the
+    [Lsp_workspace_pool] holds the
     servers and [Lsp_questions] asks them; this is the surface a Keeper reaches
     them through, and it is where the Keeper's sandbox bounds the question.
 

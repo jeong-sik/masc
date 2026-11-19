@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Coding-outcome eval runner (RFC-0396 W2).
+# Coding-outcome eval runner.
 #
 # For every selected case x model x repeat: boot nothing new per run — one
 # isolated MASC server serves the whole invocation — copy the case workspace
 # fresh, create one keeper, send it the task, wait for the episode to finish,
 # then run the case's verify script. The verify exit code is the entire pass
-# verdict (RFC-0396 D2); this script records evidence and never re-judges.
+# verdict; this script records evidence and never re-judges.
 #
 # Evidence: one JSON file per run plus runs.jsonl rebuilt before reporting, then
 # test/coding_eval_report_cli.exe turns rows into pass@k / buckets. A run

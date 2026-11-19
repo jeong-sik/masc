@@ -90,7 +90,7 @@ let keeper_execution_receipt_store config name : Dated_jsonl.t =
   in
   Eio_guard.with_mutex execution_receipt_store_mu lookup
 
-(* RFC-0233 PR-3: TurnRecord JSONL store next to the receipt store. *)
+(* TurnRecord JSONL store next to the receipt store. *)
 let turn_record_store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 8
 let turn_record_store_mu = Eio.Mutex.create ()
 

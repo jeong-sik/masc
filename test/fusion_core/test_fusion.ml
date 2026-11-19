@@ -1,4 +1,4 @@
-(* Standalone alcotest for the pure fusion core (RFC-0252 §6/§9, RFC-0252-A).
+(* Standalone alcotest for the pure fusion core.
    Proves: deterministic gate branches, TOML config validation + heterogeneous
    panel-group parsing + legacy flat desugar (byte-identity), depth guard, and
    the pure judge-arg derivations that keep a single-group preset behaving as
@@ -22,7 +22,7 @@ let base_group : Fusion_policy.panel_group =
   ; timeout_s = None
   }
 
-(* RFC-0280: presets는 [Validated_preset.t]라 private — of_preset로만 생성. 테스트
+(* presets는 [Validated_preset.t]라 private — of_preset로만 생성. 테스트
    리터럴은 유효하므로 get_ok (실패하면 테스트 setup 버그). *)
 let validated (p : Fusion_policy.preset) : Fusion_policy.Validated_preset.t =
   match Fusion_policy.Validated_preset.of_preset p with
@@ -64,7 +64,7 @@ let req ?(preset = "trio") ?(depth = Fusion_depth.Top) ?(trigger = Explicit_tool
 
 let decide ?(policy = base_policy) r = Fusion_policy.decide ~policy r
 
-(* --- gate branches (RFC-0252 §6) --- *)
+(* --- gate branches --- *)
 
 let test_disabled () =
   let policy = { base_policy with Fusion_policy.enabled = false } in
@@ -94,7 +94,7 @@ let test_allow () =
   let r = req () in
   Alcotest.check gate "all pass -> allow" (Allow r) (decide r)
 
-(* --- config (RFC-0252 §9, RFC-0252-A) --- *)
+(* --- config --- *)
 
 let parse s = Otoml.Parser.from_string s
 
@@ -142,7 +142,7 @@ let test_config_valid () =
     Alcotest.failf "expected Ok, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
-(* JoJ-capable preset: [[fusion.presets.X.judges]] array-of-tables 파싱 경로 (RFC-0283).
+(* JoJ-capable preset: [[fusion.presets.X.judges]] array-of-tables 파싱 경로.
    config/runtime.toml [fusion.presets.quorum] 의 구조를 미러한다(모델 id는 placeholder).
    topology=judge_of_judges는 orchestrator 런타임에서 judges >= 2 를 요구하므로
    (fusion_orchestrator.run_judge_of_judges), JoJ를 키퍼가 실제로 쓰려면 judges>=2 preset이
@@ -236,8 +236,8 @@ let test_config_panels_golden () =
     Alcotest.check preset_t "length-1 panels-list == flat desugar"
       (raw (List.hd flat.Fusion_policy.presets))
       (raw (List.hd grouped.Fusion_policy.presets));
-    (* legacy(라벨 없음) 패널 정체성 = model 그대로 → 정체성 축도 byte-identical
-       (RFC-0278). 라벨이 도입돼도 기존 config의 정체성은 변하지 않는다. *)
+    (* legacy(라벨 없음) 패널 정체성 = model 그대로 → 정체성 축도 byte-identical.
+       라벨이 도입돼도 기존 config의 정체성은 변하지 않는다. *)
     Alcotest.(check (list string)) "legacy panelist ids = models"
       [ "a"; "b"; "c" ]
       (Fusion_policy.preset_panelist_ids (raw (List.hd flat.Fusion_policy.presets)))
@@ -825,7 +825,7 @@ judge_max_output_tokens = -1
          es)
   | Ok _ -> Alcotest.fail "expected Error Invalid_max_output_tokens"
 
-(* 데드라인 축(RFC-0252 §9). [panel_timeout_s]/[judge_timeout_s]/1차 심판
+(* 데드라인 축. [panel_timeout_s]/[judge_timeout_s]/1차 심판
    [timeout_s]는 오랫동안 운영 config에 존재하면서 파서에 소비자가 없었다 —
    subscription CLI 패널이 실측 34.7s까지 걸려 240s를 선언해 뒀는데 그 값이 어디에도
    도달하지 않았다. 파싱·검증·per-judge 폴백을 핀한다. *)
@@ -1013,7 +1013,7 @@ let test_config_disabled_with_preset () =
     Alcotest.failf "seed [fusion] must parse, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
-(* --- RFC-0280: Validated_preset.of_preset smart constructor (검증 SSOT) ---
+(* --- Validated_preset.of_preset smart constructor (검증 SSOT) ---
    config의 config_error 매핑과 별개로 smart constructor 자체를 직접 핀한다. 각 테스트는
    목표 결함 하나만 두고 나머지는 유효하게 해, 검증 순서(size→prompt→judge→dup→mtc)에서
    그 변형이 발화하는지 확인한다. private 타입이라 외부는 of_preset로만 t를 만든다. *)
@@ -1070,7 +1070,7 @@ let test_validated_bad_max_output_tokens () =
   | Error (Fusion_policy.Validated_preset.Bad_max_output_tokens 0) -> ()
   | _ -> Alcotest.fail "expected Bad_max_output_tokens 0"
 
-(* --- JOJ 1차 심판 목록 검증 (RFC-0283) --- *)
+(* --- JOJ 1차 심판 목록 검증 --- *)
 
 let base_judge : Fusion_policy.judge_spec =
   { Fusion_policy.jmodel = "jm"
@@ -1152,7 +1152,7 @@ let test_staged_judge_groups_bad_size () =
   | Error (Fusion_policy.Staged_group_size_below_min 1) -> ()
   | _ -> Alcotest.fail "expected Staged_group_size_below_min"
 
-(* --- JOJ 1차 심판 TOML 파싱 (RFC-0283). parse_judge_spec + finish_preset의
+(* --- JOJ 1차 심판 TOML 파싱. parse_judge_spec + finish_preset의
        [[...judges]] array-of-tables 리더를 end-to-end로 검증한다. 위 of_preset
        검증 테스트는 OCaml record를 직접 구성해 config 레이어를 우회하므로, TOML 키
        이름(model/label/system_prompt/web_tools/max_output_tokens)과 getter
@@ -1246,7 +1246,7 @@ let test_judge_args_multi_group () =
   Alcotest.(check bool) "any group may request judge web tools" true
     (Fusion_policy.judge_web_tools_of ~req_web_tools:false [ g_no_web; g_web4 ])
 
-(* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
+(* --- judge LLM-facing JSON parse --- *)
 
 let jdecision = Alcotest.testable pp_judge_decision equal_judge_decision
 
@@ -1606,7 +1606,7 @@ let test_render_empty_lists () =
   check_contains "blind spots header" "BLIND SPOTS:" r;
   check_contains "none placeholder" "(none)" r
 
-(* --- RFC-0284: judge_outcome 관측 record yojson round-trip ---
+(* --- judge_outcome 관측 record yojson round-trip ---
    판 노드 관측이 직렬화/역직렬화 무손실인지(board judges:[] emit + 디스크/SSE 호환).
    First는 panelist_id를, decision 닫힌 합 3변형을, 성공/실패 노드를 모두 핀한다. *)
 let test_judge_outcome_roundtrip () =
@@ -1867,7 +1867,7 @@ let test_tool_trace_merge_caps_with_explicit_drops () =
     (List.length merged.observed_actors)
 ;;
 
-(* --- 실행별 명단 (RFC fusion-seat-routes §2.4): Fusion_policy.with_roster --- *)
+(* --- 실행별 명단: Fusion_policy.with_roster --- *)
 
 let roster ?judge ?panel () = { judge_route = judge; panel_routes = panel }
 

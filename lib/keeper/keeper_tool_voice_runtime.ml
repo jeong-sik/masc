@@ -140,7 +140,7 @@ let handle_speak_with_outcome
             { Voice_bridge.completion = Voice_bridge.Spoken | Voice_bridge.Synthesized
             ; payload = json
             } ->
-          (* RFC-0235 P1 3b: record the utterance to the keeper's chat so a
+          (* Record the utterance to the keeper's chat so a
              connected device can read AND hear it, not just the server's
              speakers. The audio clip carries the token of the synthesized
              file so the dashboard can fetch /api/v1/voice/audio/<token>. *)

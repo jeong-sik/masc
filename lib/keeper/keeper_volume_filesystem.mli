@@ -1,5 +1,4 @@
-(** The ext4 error state the kernel recorded in a Keeper volume's superblock
-    (RFC keeper-volume-filesystem-repair §3.1).
+(** The ext4 error state the kernel recorded in a Keeper volume's superblock.
 
     Apple [container] keeps each Keeper volume as an ext4 image on the host.
     When the guest kernel meets a filesystem error it sets the superblock's

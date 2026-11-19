@@ -230,7 +230,7 @@ let is_local_runtime (runtime : t) = is_local_provider runtime.provider
    which the runtime adapter cannot build a provider_config for ...") instead of
    the misleading "not found among N runtimes", which points the operator at a
    typo that does not exist. Materialize failure stays fail-closed: the binding
-   is still excluded from [runtimes] (RFC-0206 §2.1). *)
+   is still excluded from [runtimes]. *)
 let partition_bindings (cfg : config) (bindings : binding list)
   : t list * (string * drop_reason) list
   =

@@ -1,5 +1,4 @@
-(** No-LLM contracts for the coding-eval corpus and report pipeline
-    (RFC-0396 W1/W2).
+(** No-LLM contracts for the coding-eval corpus and report pipeline.
 
     Three contracts keep the corpus honest without touching a model:
     every case declaration decodes; a pristine workspace fails its verify

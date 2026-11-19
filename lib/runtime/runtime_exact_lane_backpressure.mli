@@ -12,7 +12,7 @@
     candidate order, and write what its own flow observed back to the same
     cell. A slot resting on a rest MASC chose is demoted behind its siblings,
     never removed: a demoted slot still answers when the others cannot, and
-    its answer clears the evidence (RFC-0370 §3.3). A slot whose provider
+    its answer clears the evidence. A slot whose provider
     stated a time is held: the lane does not call it before that time, and
     returns it with the time so a caller can tell a resting lane from a lane
     without slots (RFC-exact-lane-waits-for-a-stated-reset). *)

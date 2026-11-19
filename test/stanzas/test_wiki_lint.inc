@@ -1,5 +1,5 @@
 ; Wiki lint rules, link graph, sources section and the log parser: pure
-; functions (RFC-wiki-lint-and-page-contracts, step 1b and step 2)
+; functions
 
 (test
  (name test_wiki_lint)

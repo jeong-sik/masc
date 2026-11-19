@@ -1,4 +1,4 @@
-(* RFC-0481 §3.5: a write to the preview a Keeper's turns answer shows tells
+(* A write to the preview a Keeper's turns answer shows tells
    that workspace's turns readers, at most once per interval for a burst. *)
 
 open Alcotest

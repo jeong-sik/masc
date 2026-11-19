@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS cursors (
 |}
 
 (* [on_record] says whether the observation is also written beside its
-   continuity record (RFC-0474 L4h), so a write that failed is tried again by
+   continuity record, so a write that failed is tried again by
    the next read rather than left out until the file changes. *)
 type observed = { stamp : Unix.stats; on_record : bool }
 
@@ -568,7 +568,7 @@ let save_continuity path (held : continuity) =
   Fs_compat.mkdir_p (continuity_dir (ledger_dir_of_day_path path));
   Fs_compat.save_file_atomic_strict (continuity_path path) (Yojson.Safe.to_string json)
 
-(* RFC-0474 L4h. The unchanged-observation fast path lived only in this
+(* The unchanged-observation fast path lived only in this
    process's [store.observations], so a new process proved every day file's
    prefix again from its first byte: on 2026-10-29 the live ledger held 4.7 GB
    in 25 files, the witness reads about 175 MB/s, and the first reads after a

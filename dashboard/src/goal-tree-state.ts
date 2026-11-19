@@ -23,7 +23,7 @@ export const goalTreeLoading = signal(false)
 export const goalTreeError = signal<string | null>(null)
 export const goalTreeApprovalQueueState = signal<KeeperApprovalQueueState | null>(null)
 /**
- * RFC-0444 §2.3 row 4: the parsed Goal store failure, kept beside the rendered
+ * The parsed Goal store failure, kept beside the rendered
  * line so the Goal tree can draw file · reason · reset step and the create
  * form can refuse submission. Null whenever the last observation was not a
  * `goal_store_unavailable` envelope.

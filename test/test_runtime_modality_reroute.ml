@@ -1,4 +1,4 @@
-(* RFC-0265 — capability-driven proactive runtime reroute (modality-gated).
+(* capability-driven proactive runtime reroute (modality-gated).
 
    Pure-decision tests for [Runtime_agent.decide_modality_reroute] and the shared
    [caps_admit_required_modalities] accept predicate. The decision takes data (a
@@ -311,7 +311,7 @@ let test_caps_admit_required_modalities () =
        (caps ~image:true ())
        [ "image"; "hologram" ])
 
-(* RFC-0265 follow-up — graceful media degrade. [strip_unsupported_modality_blocks]
+(* Graceful media degrade. [strip_unsupported_modality_blocks]
    drops the image/audio/document blocks a text-only runtime cannot accept —
    inside tool results as well as at the top level — and reports the per-modality
    drop count; text and tool blocks themselves are retained. *)
@@ -810,7 +810,7 @@ supports-image-input = true
       []
       (ids (Runtime_agent.media_candidates_of ~runtimes ~media_failover:[])))
 
-(* RFC-0440 — the media walk keeps only the candidates that take every
+(* The media walk keeps only the candidates that take every
    modality the run requires, in candidate order; a text run has no walk. *)
 let test_media_walk_holds_only_capable_candidates () =
   let fixture =

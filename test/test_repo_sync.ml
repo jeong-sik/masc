@@ -104,7 +104,7 @@ let test_sync_all_no_due_repos () =
           | Ok synced -> Alcotest.(check int) "no due repos" 0 (List.length synced)
           | Error e -> Alcotest.fail ("sync_all failed: " ^ e)))
 
-(* --- RFC-0210 working-tree advance: real-git fixtures --- *)
+(* --- working-tree advance: real-git fixtures --- *)
 
 let run_cmd ~cwd argv =
   let prev = Sys.getcwd () in

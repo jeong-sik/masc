@@ -1991,7 +1991,7 @@ let test_metrics_cache_retains_last_good () =
       check bool "recovery clears the failure" true
         (recovered |> member "cache" |> member "last_error" = `Null)))
 
-(* RFC-0204 §3.1: the cold fill is the read the request waits on; the
+(* The cold fill is the read the request waits on; the
    refresh forked for a stale entry is not, so it must not take the read
    pool. No pool is set here, so compute runs inline and sees its lane. *)
 let test_metrics_cache_refresh_runs_as_background () =

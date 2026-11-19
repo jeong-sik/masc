@@ -8,7 +8,7 @@ open Tool_args
 
 module String_map = Map.Make (String)
 
-(* RFC-0189 PR-1b.2 — handlers in this module return the typed
+(* Handlers in this module return the typed
    [Tool_result.result] variant directly. *)
 
 let attachment_error ~tool_name ~start_time error : Tool_result.result =

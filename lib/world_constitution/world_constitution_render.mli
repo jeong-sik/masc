@@ -1,4 +1,4 @@
-(** Rendering the articles a world holds into prompt text (RFC-0442). *)
+(** Rendering the articles a world holds into prompt text. *)
 
 val articles : World_constitution_types.t list -> string
 (** One line per article, id first so a keeper can name the one it wants taken

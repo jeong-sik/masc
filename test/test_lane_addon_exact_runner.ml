@@ -1586,7 +1586,7 @@ let test_original_undispatched_cli_visit_order () =
   check bool "an exhausted declaration set cannot hide reordered original failures" true
     (Result.is_error (Receipt.of_json reversed))
 
-(* RFC-0498 §4.4: once the Curator original is settled, nothing owns the
+(* Once the Curator original is settled, nothing owns the
    Exact record and execution link its run left. The sweep deletes them, and
    a rerun gets the same refusal before and after. *)
 module Sweep = Server_unowned_exact_sweep

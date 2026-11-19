@@ -258,7 +258,7 @@ let test_unregistered_snapshot_is_typed () =
    creation supplies one. What the Task stores is unchanged -- an exact
    reference, revision included -- so the durable record does not move; only the
    asking does. Before this, of 292 Tasks recorded on this workspace, 0 named a
-   Skill, because naming one meant typing a 64-hex digest. RFC-0411 §4.2. *)
+   Skill, because naming one meant typing a 64-hex digest. *)
 let test_a_task_may_name_a_skill_without_its_revision () =
   with_workspace @@ fun base_path config ctx ->
   write_skill base_path ~source:"skills" ~package:"review" ~name:"review"

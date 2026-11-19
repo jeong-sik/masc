@@ -1,4 +1,4 @@
-(** The constitution slot in the assembled keeper system prompt (RFC-0442). *)
+(** The constitution slot in the assembled keeper system prompt. *)
 
 module KP = Masc.Keeper_prompt
 module Render = Masc.World_constitution_render
@@ -109,7 +109,7 @@ let test_the_world_block_precedes_the_keeper_blocks () =
       true (article_at < identity_at)
   | _ -> Alcotest.fail "the assembled prompt lost a block"
 
-(* RFC-0491 §3.2: a System keeps the articles it was rendered with, and the
+(* A System keeps the articles it was rendered with, and the
    end context names what changed since, by id. An added article carries its
    text with the System's escape; a removed one only its id. *)
 let test_amendments_name_added_and_removed_articles_by_id () =

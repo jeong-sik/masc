@@ -105,7 +105,7 @@ type keeper_chat_stream_request = {
           after the last journal seq the client received, or the whole turn
           — which is also what an absent field, a first submit, says. When
           the owner already holds the operation the handler replays the
-          journaled suffix before the live sink attaches (RFC-0412 §3.2).
+          journaled suffix before the live sink attaches.
           Decoded by {!Keeper_chat_event_log.replay_position_of_wire}: absent
           or an integer [>= 0]; anything else fails the parse. *)
 }
@@ -167,8 +167,8 @@ val handle_keeper_chat_stream :
   Http_reqd.t ->
   keeper_chat_stream_request ->
   unit
-(** Drives the [POST /api/keeper/chat-stream] SSE response
-    (RFC-0493 §3.2). One fiber forked on [sw] submits the operation while
+(** Drives the [POST /api/keeper/chat-stream] SSE response.
+    One fiber forked on [sw] submits the operation while
     the retry frame waits for the socket, then is the stream's only sender:
     it writes the acceptance and the reconnect replay, then serves the live
     events of the turn through

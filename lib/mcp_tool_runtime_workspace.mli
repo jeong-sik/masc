@@ -7,7 +7,7 @@
     [Tool_result.result option] — [Some] when the tool name matches,
     [None] when the dispatcher should fall through to a default handler.
 
-    RFC-0062 Phase 4c-2: handlers now accept [~tool_name ~start_time]
+    Handlers now accept [~tool_name ~start_time]
     and return structured [Tool_result.result] instead of [(bool * string)]. *)
 
 val handle_start :

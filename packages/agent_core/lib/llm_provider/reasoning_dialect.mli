@@ -183,7 +183,7 @@ val ignores_sampling_param
     [thinking.clear_thinking = not p] for a declared [preserve_thinking = Some p]
     and no member for an undeclared one: its replay then keeps every assistant
     message as sent, so whichever default the endpoint applies agrees with the
-    request (RFC-0488 §3.2). On that wire a row without a toggle wire of its own
+    request. On that wire a row without a toggle wire of its own
     writes an explicit enable as [thinking.type = "enabled"] in the same
     object, and its receipt is [Explicit_enable_not_encoded]: such a row is
     admitted by [supports_reasoning], not by a toggle it does not declare. An

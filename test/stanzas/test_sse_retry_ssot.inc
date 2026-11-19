@@ -1,4 +1,4 @@
-; Per-file dune stanza for the SSE retry-interval SSOT suite (RFC-0089).
+; Per-file dune stanza for the SSE retry-interval SSOT suite.
 ; Lives here per test/stanzas/README.md to avoid the conflict-runtime hotspot
 ; in the legacy grouped (tests ...) stanza.
 

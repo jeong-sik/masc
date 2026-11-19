@@ -707,7 +707,7 @@ module KeeperKeepalive = struct
   (** Explicit idle-gap timeout for streaming AGENT_CORE provider responses.
       This bounds time between streamed lines, not total turn duration.
       Unset means no explicit value: the resolved layer substitutes
-      [stream_idle_failsafe_floor_sec] (RFC-0345); MASC and AGENT_CORE do not
+      [stream_idle_failsafe_floor_sec]; MASC and AGENT_CORE do not
       synthesize a provider/model default.  A configured value must be finite
       and strictly positive; malformed values are operator configuration
       errors, never a fallback.

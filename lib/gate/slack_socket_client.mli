@@ -4,9 +4,7 @@
     [apps.connections.open], open it with {!Discord_wss_connection} (the same
     ws-direct+TLS transport Discord uses — Slack WSS URLs are the same shape),
     parse envelopes, feed them to {!Slack_gateway_state.step}, and run the
-    returned effects (ack each envelope, emit events, reconnect on backoff).
-
-    See: docs/rfc/RFC-0317-slack-builtin-gateway.md *)
+    returned effects (ack each envelope, emit events, reconnect on backoff). *)
 
 (** Re-export the caller-facing types so callers don't reach into the state
     machine module directly. *)

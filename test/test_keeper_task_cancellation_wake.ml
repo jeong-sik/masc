@@ -148,7 +148,7 @@ let test_cross_keeper_cancellation_is_delivered () =
       failf "expected one queued cancellation, got %d" (List.length queued))
 ;;
 
-(* RFC-0393: the keeper cancels under its own keeper_name — there is no
+(* The keeper cancels under its own keeper_name — there is no
    other spelling of the same identity. *)
 let test_self_cancellation_is_silent () =
   with_workspace (fun config ->

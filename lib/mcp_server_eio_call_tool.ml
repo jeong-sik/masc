@@ -629,7 +629,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         ~start_time
         "Authentication configuration unavailable"
     | Workspace.Not_initialized ->
-      (* RFC-0189: server bootstrap incomplete — Masc_domain
+      (* Server bootstrap incomplete — Masc_domain
          System NotInitialized.  [Runtime_failure] (caller
          cannot fix; the operator must initialise MASC). *)
       Tool_result.error
@@ -652,7 +652,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       let trace = Printexc.get_backtrace () in
       let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
       (Log.Mcp.error "tools/call crashed: %s" err_detail;
-         (* RFC-0189: catch-all for unexpected exceptions —
+         (* catch-all for unexpected exceptions —
             [Runtime_failure].  Could become more specific via
             [of_exn] once the exception variants are typed; for
             now blanket Runtime preserves operator-visible
@@ -695,7 +695,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     Option.map (fun (_failure_class, detail) -> detail) failure_observation
   in
   let otel_trace_id = Otel_spans.current_trace_id () in
-  (* RFC-0233 PR-1: one mint per execution at this dispatch boundary. The
+  (* One mint per execution at this dispatch boundary. The
      tool_calls row, the trajectory row and the [Tool_called] telemetry event
      all carry this value, so a reader of two streams can tell one physical
      call reported twice from two calls. Minted only when a keeper owns the

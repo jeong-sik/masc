@@ -61,7 +61,7 @@ const GateConnectorInfoRawSchema = object({
   connected: fallback(boolean(), false),
   stale: fallback(boolean(), false),
   stale_after_sec: fallback(number(), 0),
-  // In-process gateway machine state (RFC-0203 / #20813): disconnected /
+  // In-process gateway machine state (#20813): disconnected /
   // awaiting_hello / identifying / resuming / connected /
   // reconnect_pending / failed. Empty means "not advertised".
   gateway_state: fallback(string(), ''),

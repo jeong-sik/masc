@@ -138,7 +138,7 @@ let observer_sse_auth_token_from_request request =
 
 let ide_lsp_upgrade_path = "/api/v1/ide/lsp"
 
-(* The page an invite link opens (RFC play-link-for-the-shared-machine §2.6).
+(* The page an invite link opens.
    Public, because the page itself carries nothing: it reads the bearer from
    the link's fragment and sends it on every data request. *)
 let play_page_path = Play_invite.play_path
@@ -180,7 +180,7 @@ let internal_keeper_agent_from_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "x-masc-keeper-name" with
   | None -> None
   | Some raw ->
-      (* RFC-0393: the header carries the keeper_name itself — no wrapper
+      (* The header carries the keeper_name itself — no wrapper
          spelling to strip or re-mint. *)
       let normalized =
         raw |> Uri.pct_decode |> String.trim |> String.lowercase_ascii

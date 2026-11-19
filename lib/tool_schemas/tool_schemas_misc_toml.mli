@@ -15,7 +15,7 @@ val browser_act : Masc_domain.tool_schema
 val browser_interact : Masc_domain.tool_schema
 
 
-(** An MSX lane tool's schema (RFC-0439 §3.5), read from
+(** An MSX lane tool's schema, read from
     config/tools/masc_msx_*.toml. Every {!Msx_tool.t} is read when the module
     initializes, so a missing definition refuses the boot. *)
 val msx_schema : Msx_tool.t -> Masc_domain.tool_schema

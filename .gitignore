@@ -5,7 +5,7 @@ _build/
 # that symlink and every CI dune build then fails on open(_build/.lock) (#39561).
 /_build
 _build_*/
-# Dune build trace dumps (RFC-0209: env serialization footgun — DUNE_BUILD_DIR=_build-* writes trace.csexp with full env including API keys)
+# Dune build trace dumps (env serialization footgun — DUNE_BUILD_DIR=_build-* writes trace.csexp with full env including API keys)
 _build-*/
 trace.csexp
 *.install

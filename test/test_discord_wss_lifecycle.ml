@@ -1,4 +1,4 @@
-(* RFC-0287 P0 — the gateway reader's lifetime must be the connection's, not
+(* The gateway reader's lifetime must be the connection's, not
    the gateway's.
 
    [Discord_wss_connection.spawn] forks a fiber on the connection's session

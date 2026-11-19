@@ -211,7 +211,7 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
           (Yojson.Safe.to_string payload))
 ;;
 
-(* RFC spawn-a-process-that-outlives-the-call §1.0. The advice for [&] says
+(* The advice for [&] says
    the call waits for the backgrounded child anyway; if that stops being true
    the sentence becomes wrong, so it is pinned here. A lower bound, because
    the point is that the call does not return early. *)

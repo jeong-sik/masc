@@ -151,7 +151,7 @@ let test_a_stated_drop_removes_and_an_unnamed_fact_survives_exactly () =
       (List.hd selection.dropped).reason
 ;;
 
-(* RFC-0418: a new claim that continues a dropped memory names it with
+(* A new claim that continues a dropped memory names it with
    [supersedes]; the parser translates the short id and pairs the two by exact
    memory id. The old memory must be in [dropped] in the same answer, and it
    must exist. Null or absent is a claim that continues nothing. *)
@@ -192,7 +192,7 @@ let test_supersedes_must_name_a_known_memory () =
   | Ok _ -> fail "an unknown short id must be rejected"
 ;;
 
-(* RFC-0456 §4.2: a new claim names the current memories it now says in
+(* A new claim names the current memories it now says in
    [absorbs]. They leave the facts like a drop, but as absorbed statements
    pointing at the new claim, so their rows can be kept rather than lost. *)
 let test_absorbs_moves_the_named_memories_into_the_new_claim () =
@@ -436,7 +436,7 @@ let test_rendered_fact_states_when_it_was_recorded () =
     (contains (Masc_domain.iso8601_of_unix_seconds 1_000_000.))
 ;;
 
-(* RFC-0456. The librarian used to have to restate every current identity, and
+(* The librarian used to have to restate every current identity, and
    a single slip threw the pass away. It now names only what changes, and a
    memory it never mentions is kept -- which is what the apply step always did
    with the list it was handed. *)
@@ -547,7 +547,7 @@ let test_two_claims_with_the_same_text_are_one () =
 ;;
 
 (* Dropping a memory and restating it in the same answer says both "gone" and
-   "kept" (RFC-0397 D3). A correction whose text is the memory it supersedes is
+   "kept". A correction whose text is the memory it supersedes is
    that shape too: the supersede requires the drop. *)
 let test_a_restated_memory_the_answer_drops_is_refused () =
   expect_parse_error "drop and restate the same text"
@@ -1385,7 +1385,7 @@ let test_prompt_carries_keeper_instructions () =
     (List.assoc "keeper_instructions" (Librarian.prompt_variables ~source_lines:[] blank))
 ;;
 
-(* RFC-0468 §3.2: each User message's header names the speaker the host
+(* Each User message's header names the speaker the host
    stamped when it created the message. A message from before the speaker
    existed says unknown, and a broken entry says it is broken. *)
 let test_conversation_headers_carry_the_stamped_speaker () =
@@ -1911,7 +1911,7 @@ let test_rendered_prompt_is_the_template_with_every_slot_filled () =
       (user_text_of_messages messages)
 ;;
 
-(* RFC-0468 §3.1: every librarian prompt names the Keeper it curates for, as
+(* Every librarian prompt names the Keeper it curates for, as
    host data. Structure only, no prose: each pass supplies the id, each
    template has the slot, and the rendered prompt carries the id once, on a
    line of its own. *)
@@ -2312,7 +2312,7 @@ let test_input_metadata_is_not_accepted_as_claim_output () =
     ; "basis", `Assoc ["kind", `String "observed"] ]
 ;;
 
-(* RFC-0456 §4.1: a claim's [evidence] names the observations of this input it
+(* A claim's [evidence] names the observations of this input it
    relied on. The fixture input has one conversation message ([turn=0]),
    three tool observations ([index] 0..2), no counterpart block and no
    historical task context. *)

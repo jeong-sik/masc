@@ -1,5 +1,4 @@
-(** One repair of a Keeper volume that recorded ext4 errors, and its receipt
-    (RFC keeper-volume-filesystem-repair §3.3).
+(** One repair of a Keeper volume that recorded ext4 errors, and its receipt.
 
     The caller holds the Keeper's maintenance lane, so no turn boots a guest
     while {!repair} runs.

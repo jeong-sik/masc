@@ -148,10 +148,10 @@
   masc.masc_tool_surface
   masc.masc_tool_dispatch))
 
-;; runtime_materialize (RFC-0058 §9 Phase 9.3): retired. The CLI's only
+;; runtime_materialize: retired. The CLI's only
 ;; purpose was to pre-write the old derived JSON artifact.
 
-;; Offline deterministic checkpoint purge CLI (RFC-0351 S1): duplicate
+;; Offline deterministic checkpoint purge CLI: duplicate
 ;; collapse, unsigned reasoning strip, tool-result content clear. Dry-run by
 ;; default; --apply backs up, then installs over the head it read. A purge that
 ;; drops a broken tail writes the Keeper's turn log line first.
@@ -207,7 +207,7 @@
  (package masc)
  (libraries masc masc.masc_random_id masc.runtime masc_workspace masc.masc_process fs_compat exec_shim cmdliner unix eio eio_main))
 
-;; RFC-0374 capability probe runner.  Answers "can runtime R reach tool T"
+;; Capability probe runner.  Answers "can runtime R reach tool T"
 ;; without writing to the keeper's chat, checkpoint, or memory, which is what
 ;; made the 2026-08-12 sweep measure its own traffic (masc#28414).
 
@@ -313,7 +313,7 @@
  (modules masc_tui_operator_projection)
  (libraries masc masc.operator masc.masc_core yojson))
 
-;; RFC tui-server-lifecycle: opt-in on-demand server start from the TUI.
+;; opt-in on-demand server start from the TUI.
 ;; Own library so the pure discovery/argv/health-wait logic unit-tests
 ;; without a TTY (task-550 pattern). Depends only on the detached-spawn
 ;; primitives in masc.masc_process.
@@ -717,8 +717,8 @@
   ;; reach it.
   masc.keeper_contract
   ;; An interrupted turn's cause is Keeper_internal_error's closed sum, read
-  ;; through its own decoder instead of by searching the row's words
-  ;; (RFC-0454 P2). implicit_transitive_deps is false, so naming masc alone
+  ;; through its own decoder instead of by searching the row's words.
+  ;; implicit_transitive_deps is false, so naming masc alone
   ;; does not reach it.
   masc.keeper_runtime
   masc.keeper_chat_delivery_identity
@@ -1728,7 +1728,7 @@
  (modules masc_tui_refresh_pace))
 
 ;; Which Keeper rows, or the whole roster, the TUI owes a read after the
-;; server says they changed (RFC-0481 section 3.3). Pure; the main loop
+;; server says they changed. Pure; the main loop
 ;; starts the reads.
 (library
  (name masc_tui_roster_owed)
@@ -3426,7 +3426,7 @@
   masc.agent_core
   masc.agent_core.llm_provider))
 
-;; RFC-0252 standalone fusion harness: on-demand panel+judge deliberation vs
+;; Standalone fusion harness: on-demand panel+judge deliberation vs
 ;; single-model baseline, side by side. Makes live LLM calls (NOT a test —
 ;; CI determinism rules forbid network calls in test/). Calls Fusion_panel.run
 ;; + Fusion_judge.run directly (bypasses the orchestrator's gate/budget/sink).

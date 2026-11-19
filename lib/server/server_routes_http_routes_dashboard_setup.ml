@@ -40,7 +40,7 @@ let default_windowed_telemetry_limit = 2000
    (windowed: [default_windowed_telemetry_limit], else
    [default_telemetry_limit]).
 
-   RFC-0372: the result is a [Telemetry_unified.read_limit], not an int, so
+   The result is a [Telemetry_unified.read_limit], not an int, so
    "unbounded" cannot leave this function. #20659 preserved an explicit n=0 as
    an all-in-window contract; that form is now clamped to
    [Telemetry_unified.max_read_entries] and answered with [truncated = true]

@@ -1001,7 +1001,7 @@ let test_content_parts_cover_modalities () =
     (member "input_audio" audio |> member "format" |> to_string)
 
 let test_content_parts_reference_carriers () =
-  (* RFC-0430: the two reference carriers stop dying at base64_data_url's
+  (* The two reference carriers stop dying at base64_data_url's
      unsupported-source rejection and reach their native wire forms — an
      external URL stays the image_url, a Files API id becomes the [file]
      part's file_id. *)
@@ -1027,7 +1027,7 @@ let test_content_parts_reference_carriers () =
 ;;
 
 let test_non_base64_media_source_fails_closed () =
-  (* RFC-0430: the openai-chat image URL carrier no longer fails closed — it
+  (* The openai-chat image URL carrier no longer fails closed — it
      passes through as the image_url (see the reference-carriers test). The
      fail-closed contract that remains is for backends with no native form
      for the carrier: ollama rejects a URL image, and the responses surface

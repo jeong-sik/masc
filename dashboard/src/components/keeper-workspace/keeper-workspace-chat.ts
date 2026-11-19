@@ -555,7 +555,7 @@ function TurnInspectorDrawer({
 }
 
 
-// RFC keeper-conversation-hitl-flow §4.1-A: the compact header badge is
+// The compact header badge is
 // read-only and links to Approvals, which remains the single approve/reject
 // act-point with the complete risk and input evidence.
 // Pending approval queue scoped to this keeper. Reads Gate

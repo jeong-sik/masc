@@ -1,7 +1,5 @@
 (** Keeper_turn_driver_wrappers — convenience wrappers around
-    {!Keeper_turn_driver.run_named}.
-
-    @since RFC-0048 PR-2 *)
+    {!Keeper_turn_driver.run_named}. *)
 
 
 (** {1 MASC tool bridging} *)

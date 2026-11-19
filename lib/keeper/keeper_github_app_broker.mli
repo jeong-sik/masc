@@ -1,4 +1,4 @@
-(** Per-keeper GitHub App installation tokens (RFC keeper-github-apps).
+(** Per-keeper GitHub App installation tokens.
 
     A keeper opts into App identity by carrying
     [keepers/<name>/github-app/{app-id,installation-id,private-key.pem}].

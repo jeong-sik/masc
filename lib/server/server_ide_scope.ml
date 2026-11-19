@@ -15,7 +15,7 @@ let nonempty_query_param uri key =
   | None -> None
 ;;
 
-(* RFC-0378 §5.3b/§5.2: one wire key, one store. The scope carries the
+(* One wire key, one store. The scope carries the
    canonical slug itself — the store directory name and the co-view
    value — validated by the same acceptance the address mint applies.
    The keeper-lane scope died with the orphan store it existed to

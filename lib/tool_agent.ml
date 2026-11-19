@@ -7,7 +7,7 @@ type context = {
   agent_name: string;
 }
 
-(* RFC-0189 PR-1b.14 — typed result helpers.
+(* Typed result helpers.
 
    [json_ok]    : Yojson.Safe.t passes as [~data:json] first-class
                   (drops the [Yojson.Safe.to_string] round-trip).

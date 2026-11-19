@@ -35,7 +35,7 @@ type admission =
 
 let marker_key = "masc.approval_input_admission"
 
-(* The input speaker (RFC-0468 §3.2) is attribution, not evidence: the digest
+(* The input speaker is attribution, not evidence: the digest
    leaves it out, so a message admitted before its speaker was stamped still
    matches the stamped copy of the same input and is not admitted again. *)
 let digest (message : Agent_core.Types.message) =

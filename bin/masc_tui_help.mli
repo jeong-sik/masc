@@ -30,10 +30,13 @@ type block =
   | Whole of string list
       (** A section with its heading, or a block such as the Candle details.
           A column sets a blank row ahead of it when another block is above. *)
-  | Continued of string list
-      (** The keys {!one_section} cut from the section before it. It runs
-          straight on under that section in one column, and starts level with
-          that section's first key when it opens the right column. *)
+  | Parted of { first : string list; rest : string list }
+      (** One section whose keys {!one_section} parted: [first] is the heading
+          and the keys before the cut, [rest] the keys after it. The two parts
+          are one value, so the keys after a cut always follow their own
+          heading. In one column [rest] runs straight on under [first]; when
+          the columns are cut between them, [rest] opens the right column
+          level with the first key of [first]. *)
 
 val sheet : cols:int -> block list -> string list
 (** The rows drawn at this width: the blocks down one column, or -- once a
@@ -46,8 +49,9 @@ val one_section : heading:string -> string list list -> block list
     rows, a wrapped sentence kept with its key. {!sheet} sets whole blocks
     under its two columns, so one section alone would stand in the left
     column beside an empty right one; here the section's keys are parted at
-    the key nearest the middle, and the second part is {!Continued}. A sheet
-    of one column draws the two parts as one section. *)
+    the key nearest the middle into one {!Parted} block. A sheet of one
+    column draws the two parts as one section. A section whose keys do not
+    part is {!Whole}. *)
 
 val filter_sections :
   query:string ->

@@ -1054,6 +1054,59 @@ let test_replacement_without_the_runtime_root =
     else Alcotest.skip ())
 ;;
 
+(* The place of the runtime root of the person holds a link that leads
+   nowhere, as when the volume it led to is away. Making the folder finds
+   the name there, and no file under it is reached: the replacement is
+   turned down before its record. With the folder back, nothing of the
+   account was changed. *)
+let test_replacement_under_a_root_that_leads_nowhere =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let away = runtime_root ^ ".away" in
+    Unix.rename runtime_root away;
+    Unix.symlink (runtime_root ^ ".nowhere") runtime_root;
+    let answer =
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.unlink runtime_root;
+          Unix.rename away runtime_root)
+        (fun () -> replace alice ~base_path account (replacement_body second_key))
+    in
+    answered
+      "under a runtime root that leads nowhere"
+      answer
+      ~status:503
+      ~code:(Some "replacement_not_recorded");
+    says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
+    unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
+    Alcotest.(check bool) "the account is one to spend" true (spent alice account);
+    let again = replace alice ~base_path account (replacement_body third_key) in
+    answered "the replacement, asked again" again ~status:200 ~code:None;
+    Alcotest.(check int) "it took the next generation" 2 (generation_of alice account))
+;;
+
+(* The runtime root of the person was taken away whole, with the home and
+   the key of the account in it. The replacement makes the root and the
+   home again, and puts its key in place. *)
+let test_replacement_after_the_runtime_root_went =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    remove_tree runtime_root;
+    let answer = replace alice ~base_path account (replacement_body second_key) in
+    answered "over a runtime root that went" answer ~status:200 ~code:None;
+    Alcotest.(check int) "it took the next generation" 2 (generation_of alice account);
+    let key_file = key_file_of alice ~runtime_root account in
+    Alcotest.(check string) "its key reads back" ("key:" ^ second_key) (read_name key_file);
+    Alcotest.(check (list string)) "and is in that file alone" [ key_file ] (holding ~text:second_key root);
+    Alcotest.(check bool) "the home of the account is there" true (Sys.is_directory (home_of ~runtime_root account)))
+;;
+
 (* The log takes the intent of a replacement and not its record, and stops.
    The request that found it so is answered as every request after it is:
    the 503 of a zone that cannot be trusted, which has no code. At the next
@@ -1349,6 +1402,8 @@ let () =
         ; Alcotest.test_case "a key that is not stored, and the next one" `Quick test_replacement_not_stored
         ; Alcotest.test_case "a key that is not stored, and its folder gone" `Quick test_replacement_not_stored_and_the_folder_gone
         ; Alcotest.test_case "a runtime root that is not reached" `Quick test_replacement_without_the_runtime_root
+        ; Alcotest.test_case "a runtime root that leads nowhere" `Quick test_replacement_under_a_root_that_leads_nowhere
+        ; Alcotest.test_case "a runtime root that went" `Quick test_replacement_after_the_runtime_root_went
         ; Alcotest.test_case "a file in the place of the new key" `Quick test_replacement_over_a_file_in_its_place
         ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up
         ; Alcotest.test_case "a log another process holds for a moment" `Quick test_replacement_under_a_held_log

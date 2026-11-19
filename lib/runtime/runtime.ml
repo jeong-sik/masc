@@ -92,18 +92,26 @@ let exact_lane_reference ~owner ~key id =
    "cli lane slot ... is not an official-client runtime" 192 times in one
    server log before this file refused to load it (RFC:
    [exact_lane_cli_slot_references] below covers every lane; only the
-   catalog-namespaced [slots] rule above stays verifier-specific). *)
-let verifier_exact_slot_references
-      (decls : Runtime_schema.exact_output_lane_decl list)
-  =
-  match
-    List.find_opt
-      (fun (lane : Runtime_schema.exact_output_lane_decl) ->
-         Runtime_schema.equal_exact_lane_owner lane.owner (Runtime_schema.Builtin Verifier))
-      decls
-  with
-  | None -> []
-  | Some lane -> List.map (exact_lane_reference ~owner:lane.owner ~key:"slots") lane.slot_ids
+   catalog-namespaced [slots] rule above stays verifier-specific).
+
+   [librarian_memory] reads its [slots] ids as runtimes too:
+   [Librarian_memory_lane.resolve] takes every slot's window from its runtime
+   binding (RFC librarian-call-only-proposes §9, §18.1). A catalog-only id
+   would be admitted by the registry and then leave the lane without a value
+   on every pass, with nothing at load saying why. *)
+let slots_name_runtimes : exact_lane -> bool = function
+  | Verifier | Librarian_memory -> true
+  | Librarian | Hitl_auto_judge | Board_attention | Candle_appraiser -> false
+;;
+
+let runtime_slot_references (decls : Runtime_schema.exact_output_lane_decl list) =
+  List.concat_map
+    (fun (lane : Runtime_schema.exact_output_lane_decl) ->
+       match lane.owner with
+       | Runtime_schema.Builtin builtin when slots_name_runtimes builtin ->
+         List.map (exact_lane_reference ~owner:lane.owner ~key:"slots") lane.slot_ids
+       | Runtime_schema.Builtin _ | Runtime_schema.Addon _ -> [])
+    decls
 ;;
 
 (* Every declared exact-output lane's [cli_slots], over every lane
@@ -222,7 +230,8 @@ let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source)
 
    Only a slot that names a configured HTTP runtime carries the rule. A slot
    naming no runtime is a catalog id: the registry resolves or drops it, and
-   [verifier_exact_slot_references] already refuses one on the verifier lane.
+   [runtime_slot_references] already refuses one on the verifier and
+   librarian_memory lanes.
    An official-client runtime is not an HTTP target (cli_slots are not read
    here at all). Under a replacement catalog the bindings are not the
    targets, so this file's providers say nothing about the deadline.
@@ -639,7 +648,7 @@ let materialize_config
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
-      (verifier_exact_slot_references active_exact_output_lanes)
+      (runtime_slot_references active_exact_output_lanes)
   in
   let* () =
     validate_runtime_references ~dropped_bindings runtimes lanes
@@ -1053,7 +1062,8 @@ let exact_output_runtime_observations ~origin runtimes =
       match runtime.execution with
       | Runtime_execution.Agent_core _ ->
         Some (runtime.id, Runtime_exact_output_registry.{
-          candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope })
+          candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope
+        ; window = Option.map fst (Runtime_instance.resolve_max_context_of_runtime runtime) })
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
       | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
       | Runtime_execution.Vibe_cli _ -> None) runtimes

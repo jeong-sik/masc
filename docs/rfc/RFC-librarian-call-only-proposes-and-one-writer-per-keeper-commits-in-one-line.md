@@ -935,6 +935,7 @@ type write =
 | `Retract` | id 가 없다 | `Already_absent`. 성공도 거절도 아니다 |
 | `Remember`, `Supersede` | 새 claim 이 파생인데 쓴 뒤에 그 근거가 Memory 에 없다 | `Refused (Premises_missing _)`. 없는 근거의 id 를 싣는다. 바꾸지 않는다 |
 | `Remember`, `Supersede` | 파생 basis 의 모양이 틀렸다 | `Refused Malformed_derivation` |
+| `Remember`, `Supersede` | 새 claim 이 비었다 | `Refused Blank_claim`. 스냅샷 codec 이 빈 claim 을 쓰지 않는다 |
 
 - 표는 순수 함수 하나다(`Librarian_direct.plan`). 지금 Memory 와 쓰기에서 답을 낸다.
 - 쓴 뒤에 근거를 본다. 근거를 잃은 파생 fact 는 같은 줄에서 `Support_lost` 로 지운다. 철회한 fact 에 기댄 fact 가 그렇게 같이 나간다.

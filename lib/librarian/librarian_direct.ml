@@ -22,6 +22,7 @@ type write =
 type refusal =
   | Unknown_fact
   | Supersedes_itself
+  | Blank_claim
   | Malformed_derivation
   | Premises_missing of string list
 
@@ -38,23 +39,28 @@ type t =
 let refusal_kind = function
   | Unknown_fact -> "unknown_fact"
   | Supersedes_itself -> "supersedes_itself"
+  | Blank_claim -> "blank_claim"
   | Malformed_derivation -> "malformed_derivation"
   | Premises_missing _ -> "premises_missing"
 ;;
 
 let held id facts = List.find_opt (fun fact -> String.equal (memory_id fact) id) facts
 
-(* The fact a write states. *)
+(* The fact a write states. The snapshot codec does not write a blank claim,
+   so one is refused before it reaches a commit. *)
 let stated ~at ~trace_id ~claim ~category basis =
   let origin : origin = { kind = Authored; trace_id } in
-  match basis with
-  | Observed observation ->
-    let fact : fact = observed ~claim ~category ~now:at ~origin in
-    Ok { fact with basis = Observed observation }
-  | Derived derivations ->
-    (match derived ~claim ~category ~now:at ~origin ~derivations with
-     | Ok fact -> Ok fact
-     | Error (_ : string) -> Error Malformed_derivation)
+  if String.equal (String.trim claim) ""
+  then Error Blank_claim
+  else (
+    match basis with
+    | Observed observation ->
+      let fact : fact = observed ~claim ~category ~now:at ~origin in
+      Ok { fact with basis = Observed observation }
+    | Derived derivations ->
+      (match derived ~claim ~category ~now:at ~origin ~derivations with
+       | Ok fact -> Ok fact
+       | Error (_ : string) -> Error Malformed_derivation))
 ;;
 
 (* Same category and basis, as the snapshot writes them. *)

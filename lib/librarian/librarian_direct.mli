@@ -20,6 +20,8 @@
     - [Supersede], neither held: [Refused Unknown_fact]. The claim is not
       added.
     - [Supersede], [old] is the claim itself: [Refused Supersedes_itself].
+    - [Remember] or [Supersede] of a blank claim: [Refused Blank_claim]. The
+      snapshot does not write one.
     - [Retract], fact held: it leaves as {!Librarian_effects.Retracted}.
     - [Retract], fact not held: {!Already_absent}.
 
@@ -51,6 +53,7 @@ type write =
 type refusal =
   | Unknown_fact
   | Supersedes_itself
+  | Blank_claim
   | Malformed_derivation
   (** The basis is derived and {!Keeper_memory_os_types.derived} does not
       accept its derivations. *)

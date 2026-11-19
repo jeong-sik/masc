@@ -46,6 +46,7 @@ let outcome_text : Direct.t -> string = function
   | Already_absent -> "already absent"
   | Refused Unknown_fact -> "refused: unknown fact"
   | Refused Supersedes_itself -> "refused: supersedes itself"
+  | Refused Blank_claim -> "refused: blank claim"
   | Refused Malformed_derivation -> "refused: malformed derivation"
   | Refused (Premises_missing missing) -> "refused: premises missing " ^ String.concat "," missing
 ;;
@@ -256,6 +257,11 @@ let test_derived_claim_needs_its_premises () =
     (claims after)
 ;;
 
+let test_blank_claim () =
+  check string "remember" "refused: blank claim" (outcome (remember " \n"));
+  check string "supersede" "refused: blank claim" (outcome (supersede port ""))
+;;
+
 let test_malformed_derivation () =
   check string "no derivation" "refused: malformed derivation"
     (outcome
@@ -296,6 +302,7 @@ let () =
             test_derived_claim_needs_its_premises
         ; test_case "a malformed derivation" `Quick test_malformed_derivation
         ] )
+    ; "claim", [ test_case "a blank claim" `Quick test_blank_claim ]
     ; "repeat", [ test_case "the same write twice" `Quick test_same_write_twice ]
     ]
 ;;

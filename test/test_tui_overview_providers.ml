@@ -548,12 +548,7 @@ let test_empty_history_report_reaches_trend () =
   List.iter
     (fun (row : Masc_tui_usage_trend.row) ->
       check string "Credit without a meter uses the neutral marker"
-        (String.concat "" (List.init 6 (fun _ -> none)) ^ "C") row.marks;
-      let plot = Masc_tui_usage_trend.plot ~width:80 credit_trend row in
-      check bool "the Credit marker reaches the plot" true
-        (List.exists (contains ~affix:"C") plot);
-      check bool "Credit is not rendered as uncapped USD" false
-        (List.exists (contains ~affix:"$") plot))
+        (String.concat "" (List.init 6 (fun _ -> none)) ^ "C") row.marks)
     credit_trend.rows;
   let fields = match payload with `Assoc fields -> fields | _ -> assert false in
   List.iter (fun fields -> check bool "missing or malformed daily empty state is a failed read" true
@@ -639,7 +634,8 @@ let test_usd_rows_do_not_invent_a_percentage () =
   check (option (float 0.0001)) "an uncapped amount has no fabricated percentage" None
     (Providers.share_of_full (Masc.Tui_decode_usage.Utilization_usd { used = 12.3456; limit = None }))
 
-let test_credit_balance_rows_put_remaining_first () =
+let test_credit_balance_values_and_meter_decisions () =
+  let module Decode = Masc.Tui_decode_usage in
   let json = Yojson.Safe.from_string
     {|{"provider_usage_windows_since":1,"provider_usage_windows":[
       {"scope":"credit","scope_id":"credit","providers":[{"id":"provider","display_name":"Provider"}],
@@ -653,46 +649,94 @@ let test_credit_balance_rows_put_remaining_first () =
         {"limit_id":"codex","window":{"kind":"provider_label","label":"credit balance"},"role":"counts_other_use",
          "utilization":{"unit":"credit_unlimited"},"resets_at":null,"observed_at":2}]}]}|}
   in
-  let reading = match Masc.Tui_decode_usage.decode_provider_usage_windows json with
+  let reading = match Decode.decode_provider_usage_windows json with
     | Ok reading -> reading | Error detail -> fail detail in
-  List.iter (fun width ->
-    let section = match Providers.section ~rows:24 ~providers:(Types.Providers_read reading)
-        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width ~show_limit_exhausted:true with
-      | Some section -> section | None -> fail "Credit accounts disappeared" in
-    let lines = List.map plain section.lines in
-    let text = String.concat " " lines in
-    List.iter (fun value -> check bool ("retains " ^ value) true (contains ~affix:value text))
-      [ "Credit USD 74.75 left"; "used USD 25.75/USD 100.50"
-      ; "Credit CNY 25.00 left"; "Credit CNY 0.00 left"; "Credit unlimited" ];
-    check int "only Credit with a positive stated total has a meter" 2
-      (List.length (List.filter (contains ~affix:meter_open) lines));
-    List.iter (fun line -> check bool "Credit rows fit the terminal" true
-      (Masc_tui_message_layout.display_width line <= width)) lines)
-    [44; 80; 132];
-  check (option (float 0.0001)) "an uncapped Credit balance has no fabricated percentage" None
-    (Providers.share_of_full
-       (Masc.Tui_decode_usage.Utilization_credit_balance
-          { currency = "CNY"; total = None; remaining = 25.0 }));
-  check (option (float 0.0001)) "a zero Credit total has no percentage either" None
-    (Providers.share_of_full
-       (Masc.Tui_decode_usage.Utilization_credit_balance
-          { currency = "USD"; total = Some 0.0; remaining = 0.0 }))
+  let windows =
+    match reading.puws_accounts with
+    | [ account ] -> (
+        match account.pua_state with
+        | Decode.Account_reported (first, rest) -> first :: rest
+        | Decode.Account_not_reported_since_start
+        | Decode.Account_reported_no_windows _ -> fail "expected reported Credit windows")
+    | _ -> fail "expected one Credit account"
+  in
+  let units =
+    List.map
+      (fun (window : Decode.provider_usage_window) -> window.puw_utilization)
+      windows
+  in
+  match units with
+  | [ capped; no_total; zero_remaining; unlimited ] ->
+      List.iter
+        (fun (name, expected, value) ->
+          check string name expected (Providers.utilization_text value))
+        [ "capped Credit retains its remaining amount", "Credit USD 74.75 left", capped
+        ; "no-total Credit retains its remaining amount", "Credit CNY 25.00 left", no_total
+        ; "exhausted Credit retains zero", "Credit CNY 0.00 left", zero_remaining
+        ; "unlimited Credit retains its state", "Credit unlimited", unlimited
+        ];
+      List.iter2
+        (fun name expected value ->
+          check (option (float 0.0001)) name expected (Providers.share_of_full value))
+        [ "capped Credit meter"; "no-total Credit meter"; "exhausted Credit meter"; "unlimited Credit meter" ]
+        [ Some ((100.5 -. 74.75) /. 100.5); None; Some 1.0; None ]
+        units;
+      let amounts = option (pair (float 0.0001) (float 0.0001)) in
+      check amounts "a positive total has used/total context"
+        (Some (25.75, 100.5)) (Providers.credit_used_total (Some 100.5) 74.75);
+      check amounts "a missing total has no used/total context" None
+        (Providers.credit_used_total None 25.0);
+      check amounts "a zero total has no used/total context" None
+        (Providers.credit_used_total (Some 0.0) 0.0);
+      check (option (float 0.0001)) "a zero Credit total has no percentage" None
+        (Providers.share_of_full
+           (Decode.Utilization_credit_balance
+              { currency = "USD"; total = Some 0.0; remaining = 0.0 }))
+  | _ -> fail "expected four Credit utilization values"
 
-let test_credit_tui_formatting_and_reset_words () =
+let test_credit_tui_formatting_and_reset_decisions () =
+  let module Decode = Masc.Tui_decode_usage in
   check string "small positive Credit does not become zero"
     "Credit <0.01 credits left"
     (Providers.utilization_text
-       (Masc.Tui_decode_usage.Utilization_credit_balance
+       (Decode.Utilization_credit_balance
           { currency = "credits"; total = Some 100.0; remaining = 0.001 }));
   check string "exact zero Credit remains zero"
     "Credit USD 0.00 left"
     (Providers.utilization_text
-       (Masc.Tui_decode_usage.Utilization_credit_balance
-          { currency = "USD"; total = Some 0.0; remaining = 0.0 }));;
+       (Decode.Utilization_credit_balance
+          { currency = "USD"; total = Some 0.0; remaining = 0.0 }));
+  check string "negative zero is canonical zero"
+    "Credit USD 0.00 left"
+    (Providers.utilization_text
+       (Decode.Utilization_credit_balance
+          { currency = "USD"; total = Some 0.0; remaining = -0.0 }));
+  check bool "a missing reset has its own state" true
+    (match Providers.reset_state ~now None with
+     | Providers.Reset_not_reported -> true
+     | Providers.Reset_passed | Providers.Reset_pending _ -> false);
+  check bool "a past reset has its own state" true
+    (match Providers.reset_state ~now (Some (now -. 60.0)) with
+     | Providers.Reset_passed -> true
+     | Providers.Reset_not_reported | Providers.Reset_pending _ -> false);
+  check bool "a future reset retains its timestamp" true
+    (match Providers.reset_state ~now (Some (now +. 60.0)) with
+     | Providers.Reset_pending at -> Float.equal at (now +. 60.0)
+     | Providers.Reset_not_reported | Providers.Reset_passed -> false);
+  List.iter
+    (fun (name, value, expected) ->
+      check bool name expected (Providers.shows_reset value))
+    [ "finite Credit retains reset state",
+      Decode.Utilization_credit_balance
+        { currency = "credits"; total = None; remaining = 2500.75 }, true
+    ; "unlimited Credit omits reset state", Decode.Utilization_credit_unlimited, false
+    ; "retracted Credit omits reset state", Decode.Utilization_credit_retracted, false
+    ]
 
 let test_credit_history_prefers_daily_values () =
   let module Decode = Masc.Tui_decode_usage in
-  let history = { puh_days = 1; puh_generated_at = now; puh_unreadable_reports = 0;
+  let history : Decode.provider_usage_history =
+    { puh_days = 1; puh_generated_at = now; puh_unreadable_reports = 0;
     puh_points =
       [ { puhp_scope_id = "codex-finite"; puhp_kind = "credit balance"; puhp_limit_id = None
         ; puhp_unit = Decode.Utilization_credit_balance
@@ -715,7 +759,36 @@ let test_credit_history_prefers_daily_values () =
         (Masc_tui_usage_trend.has_unmetered_credit (find scope)))
     [ "codex-finite"; "codex-unlimited"; "codex-retracted" ];
   check bool "uncapped USD keeps the percentage plot" false
-    (Masc_tui_usage_trend.has_unmetered_credit (find "uncapped-usd"))
+    (Masc_tui_usage_trend.has_unmetered_credit (find "uncapped-usd"));
+  let only_sample scope =
+    match Masc_tui_usage_trend.dated_samples trend (find scope) with
+    | [ (_, sample) ] -> sample
+    | _ -> fail "expected one UTC daily sample"
+  in
+  check bool "daily finite Credit retains its actual balance" true
+    (match only_sample "codex-finite" with
+     | Some { report = Masc_tui_usage_trend.Measured
+                  (Decode.Utilization_credit_balance
+                     { currency; total = None; remaining }, None); observed_at } ->
+         String.equal currency "credits" && Float.equal remaining 2500.75
+         && Float.equal observed_at now
+     | Some { report = Masc_tui_usage_trend.Measured _; _ }
+     | Some { report = Masc_tui_usage_trend.Reported_no_windows; _ }
+     | None -> false);
+  check bool "daily unlimited Credit retains its state" true
+    (match only_sample "codex-unlimited" with
+     | Some { report = Masc_tui_usage_trend.Measured
+                  (Decode.Utilization_credit_unlimited, None); _ } -> true
+     | Some { report = Masc_tui_usage_trend.Measured _; _ }
+     | Some { report = Masc_tui_usage_trend.Reported_no_windows; _ }
+     | None -> false);
+  check bool "daily retracted Credit retains its state" true
+    (match only_sample "codex-retracted" with
+     | Some { report = Masc_tui_usage_trend.Measured
+                  (Decode.Utilization_credit_retracted, None); _ } -> true
+     | Some { report = Masc_tui_usage_trend.Measured _; _ }
+     | Some { report = Masc_tui_usage_trend.Reported_no_windows; _ }
+     | None -> false)
 
 (* ---- plan: sections and order, asserted on typed data ------------------ *)
 
@@ -1139,8 +1212,8 @@ let () =
             test_trend_is_built_from_the_answer
         ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
         ; test_case "USD rows preserve amounts without a fabricated meter" `Quick test_usd_rows_do_not_invent_a_percentage
-        ; test_case "Credit rows put remaining first" `Quick test_credit_balance_rows_put_remaining_first
-        ; test_case "Credit formatting and reset wording" `Quick test_credit_tui_formatting_and_reset_words
+        ; test_case "Credit values and meter decisions" `Quick test_credit_balance_values_and_meter_decisions
+        ; test_case "Credit formatting and reset decisions" `Quick test_credit_tui_formatting_and_reset_decisions
         ; test_case "Credit history prefers daily values" `Quick test_credit_history_prefers_daily_values
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion

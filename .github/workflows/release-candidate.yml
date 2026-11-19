@@ -84,6 +84,8 @@ jobs:
           needs = json.loads(os.environ['CANDIDATE_RESULTS'])
           results = {name: needs[name]['result'] for name in ('compile', 'behavior', 'installation')}
           passed = all(result == 'success' for result in results.values())
+          behavior_raw = (os.environ.get('CANDIDATE_BEHAVIOR') or '').strip()
+          behavior_scope = json.loads(behavior_raw) if behavior_raw else None
           receipt = {
               'schema_version': 2,
               'commit': os.environ['CANDIDATE_COMMIT'],
@@ -92,7 +94,7 @@ jobs:
               'run_url': os.environ['CANDIDATE_RUN'],
               'results': results,
               'checks_passed': passed,
-              'behavior_scope': json.loads(os.environ['CANDIDATE_BEHAVIOR']),
+              'behavior_scope': behavior_scope,
               'published': False,
           }
           Path('candidate-verification.json').write_text(json.dumps(receipt, indent=2) + '\n')
@@ -101,9 +103,12 @@ jobs:
               for name, result in results.items():
                   summary.write('- ' + name + ': ' + result + '\n')
               scope = receipt['behavior_scope']
-              summary.write('\nBehavior profile: `' + scope['profile'] + '`\n')
-              summary.write('Manifest SHA-256: `' + scope['manifest_sha256'] + '`\n')
-              summary.write('Selected suites: ' + ', '.join(scope['suites']) + '\n')
+              if scope is None:
+                  summary.write('\nBehavior profile: unavailable (validate did not produce one; the run is red).\n')
+              else:
+                  summary.write('\nBehavior profile: `' + scope['profile'] + '`\n')
+                  summary.write('Manifest SHA-256: `' + scope['manifest_sha256'] + '`\n')
+                  summary.write('Selected suites: ' + ', '.join(scope['suites']) + '\n')
               summary.write('Coverage is selected release behavior; full regression and production readiness are not established.\n')
               summary.write('\nPublication: not performed.\n')
           PYCODE

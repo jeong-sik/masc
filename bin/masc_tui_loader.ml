@@ -90,9 +90,9 @@ let summarize_errors label errors =
 (* Every refresh read all ten meta files whole, and in a thirty-second sample
    not one of them changed. A file nothing has written to since the last read
    still decodes to what it decoded then, so the read is skipped and that value
-   reused -- the same size-and-modification-time test [Workspace_backlog]
-   already applies to the backlog. [Unix.stat] carries sub-second times here, so
-   a write cannot land inside one without moving it. *)
+   reused when the size and the modification time hold. [Unix.stat] carries
+   sub-second times here, so a write cannot land inside one without moving
+   it. *)
 type cached_keeper_meta = {
   cached_mtime : float;
   cached_size : int;
@@ -170,44 +170,80 @@ let load_keepers (base_path : string) : keeper list * string option =
       ( List.sort (fun a b -> String.compare a.k_name b.k_name) (keepers @ declarations)
       , summarize_errors "keeper metadata read failed" errors )
 
-(* The tasks [masc_gc] moved out of the backlog, for the flow's windows.
-   The archive is megabytes and only a GC rewrites it, so it is parsed again
-   only when its size or modification time changed. A row that does not
-   decode is counted and named, not dropped quietly. *)
-type cached_archive = {
-  archive_path : string;
-  archive_mtime : float;
-  archive_size : int;
-  archive_read : Masc_domain.task list * int;
+(* The tasks [masc_gc] moved out of the backlog, for the flow's windows. The
+   archive is megabytes and only a GC rewrites it, so it is decoded only when
+   its file version moves; a refresh takes the kept value like any read. It
+   is kept as the ids and parsed times the windows count, never as tasks. A
+   row that does not decode is counted and named, not dropped quietly. *)
+type archive_reading = {
+  archived : Masc_tui_task_flow.Archived.t;
+  undecoded : int;
 }
 
-let archive_seen : cached_archive option ref = ref None
+let no_archive = { archived = Masc_tui_task_flow.Archived.empty; undecoded = 0 }
 
-let read_archived_tasks path : (Masc_domain.task list * int, string) result =
-  match Unix.stat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok ([], 0)
+let archive_cache : archive_reading File_version_cache.t = File_version_cache.create ()
+
+(* Which [tasks] lists the archive object has had so far. *)
+type archive_tasks =
+  | No_tasks_list
+  | Tasks_list of archive_reading
+  | Repeated_tasks_list
+
+(* The lexer reads the channel, and one archived task at a time is a JSON
+   tree, reduced before the next one is read. Read whole, the file was a
+   string, the lexer's copy of it and a tree alive at once. *)
+let decode_archive_channel ~path channel =
+  let lexbuf = Lexing.from_channel channel in
+  let lexer = Yojson.init_lexer ~fname:path () in
+  let read_task reading lexer lexbuf =
+    match Masc_domain.task_of_yojson (Yojson.Safe.read_json lexer lexbuf) with
+    | Ok task ->
+        { reading with archived = Masc_tui_task_flow.Archived.add reading.archived task }
+    | Error _ -> { reading with undecoded = reading.undecoded + 1 }
+  in
+  let read_member tasks name lexer lexbuf =
+    match name, tasks with
+    | "tasks", No_tasks_list ->
+        Tasks_list (Yojson.Safe.read_sequence read_task no_archive lexer lexbuf)
+    | "tasks", (Tasks_list _ | Repeated_tasks_list) ->
+        Yojson.Safe.skip_json lexer lexbuf;
+        Repeated_tasks_list
+    | _, (No_tasks_list | Tasks_list _ | Repeated_tasks_list) ->
+        Yojson.Safe.skip_json lexer lexbuf;
+        tasks
+  in
+  match
+    Yojson.Safe.read_space lexer lexbuf;
+    let tasks = Yojson.Safe.read_fields read_member No_tasks_list lexer lexbuf in
+    Yojson.Safe.read_space lexer lexbuf;
+    tasks, Yojson.Safe.read_eof lexbuf
+  with
+  | Tasks_list reading, true -> Ok reading
+  | No_tasks_list, true -> Error "the archive has no tasks list"
+  | Repeated_tasks_list, true -> Error "the archive has more than one tasks list"
+  | (No_tasks_list | Tasks_list _ | Repeated_tasks_list), false ->
+      Error "the archive has more after its object"
+  | exception Yojson.Json_error detail -> Error detail
+  | exception (Yojson.End_of_array | Yojson.End_of_object | Yojson.End_of_input) ->
+      Error "the archive ends early"
+  | exception Sys_error detail -> Error detail
+
+let decode_archive_file path =
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok no_archive
   | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)
-  | { Unix.st_mtime; st_size; _ } ->
-    (match !archive_seen with
-     | Some cached when String.equal cached.archive_path path
-                        && Float.equal cached.archive_mtime st_mtime
-                        && cached.archive_size = st_size -> Ok cached.archive_read
-     | Some _ | None ->
-       (match Safe_ops.read_json_file_safe path with
-        | Error error -> Error error
-        | Ok json ->
-          let read =
-            List.fold_right
-              (fun entry (tasks, undecoded) ->
-                match Masc_domain.task_of_yojson entry with
-                | Ok task -> task :: tasks, undecoded
-                | Error _ -> tasks, undecoded + 1)
-              (Workspace_task_id.archive_entries_of_json json) ([], 0)
-          in
-          archive_seen := Some {archive_path = path; archive_mtime = st_mtime;
-                                archive_size = st_size; archive_read = read};
-          Ok read))
-;;
+  | descriptor ->
+      let channel = Unix.in_channel_of_descr descriptor in
+      Fun.protect ~finally:(fun () -> close_in_noerr channel)
+        (fun () -> decode_archive_channel ~path channel)
+
+(* The decode runs on the CPU pool, as the whole-file parse did, so a GC's
+   rewrite does not hold the screen's domain for the length of the file. *)
+let read_archive path : (archive_reading, string) result =
+  File_version_cache.load archive_cache path ~decode:(fun () ->
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+      decode_archive_file path))
 
 (** Load tasks from the canonical workspace backlog: the active rows for the
     Overview list, plus the full domain rows the detail view reads. Terminal
@@ -259,16 +295,17 @@ let load_active_tasks ~fresh (base_path : string) :
         | Goal_links_not_read | Goal_links_read_failed _ -> fun _ -> []
       in
       let archived, archive_error =
-        match read_archived_tasks (Workspace_utils_paths_backend.archive_path config) with
-        | Ok (tasks, 0) -> tasks, None
-        | Ok (tasks, undecoded) ->
-          ( tasks
+        match read_archive (Workspace_utils_paths_backend.archive_path config) with
+        | Ok { archived; undecoded = 0 } -> archived, None
+        | Ok { archived; undecoded } ->
+          ( archived
           , Some
               (Printf.sprintf "%d archived tasks could not be read; the day bars miss them"
                  undecoded) )
         | Error error ->
           report (Workspace_utils_paths_backend.archive_path config) error;
-          [], Some ("task archive unavailable, the day bars miss archived tasks: " ^ error)
+          ( Masc_tui_task_flow.Archived.empty
+          , Some ("task archive unavailable, the day bars miss archived tasks: " ^ error) )
       in
       ( Masc_tui_overview_tasks.Rows_read
           (Tui_decode.active_tasks_of_domain ~goals_for_task
@@ -623,9 +660,7 @@ let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
 
 let read_local_workspace ?(fresh = false) base_path =
   with_local_read_mutex local_work_read_mutex
-    (fun () ->
-      if fresh then archive_seen := None;
-      read_local_work_unlocked ~fresh base_path)
+    (fun () -> read_local_work_unlocked ~fresh base_path)
 
 (* Whether the named Keeper's metadata file is not the one the last local
    read decoded: written since, created, or removed. The server announces a

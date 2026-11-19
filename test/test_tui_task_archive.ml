@@ -65,11 +65,14 @@ let day_rows (flow : Masc_tui_task_flow.t) =
                created completed cancelled))
     flow.daily
 
-let flow_of_archive_file path =
-  match Masc_tui_loader.read_archived_tasks path with
+let read_archive path =
+  match Masc_tui_loader.read_archive path with
   | Error error -> fail error
-  | Ok (archived, undecoded) ->
-      Masc_tui_task_flow.of_tasks ~now ~archived live, undecoded
+  | Ok reading -> reading
+
+let flow_of_archive_file path =
+  let reading = read_archive path in
+  Masc_tui_task_flow.of_tasks ~now ~archived:reading.archived live, reading.undecoded
 
 let test_counts_with_the_archive () =
   with_archive_file (fun path ->
@@ -90,9 +93,75 @@ let test_counts_with_the_archive () =
     check int "the board count is the backlog's" 1 flow.current.completed;
     check int "open on the board is the backlog's" 1 flow.current.todo)
 
+(* A replacement the way writers make one: a new file renamed over the old.
+   [keep_stat] gives it the old file's modification time, which
+   [Unix.utimes] copies exactly only when it is whole seconds. *)
+let replace path contents ~keep_stat =
+  let before = Unix.stat path in
+  let replacement = path ^ ".replacement" in
+  Out_channel.with_open_bin replacement (fun channel ->
+    Out_channel.output_string channel contents);
+  if keep_stat then Unix.utimes replacement before.Unix.st_atime before.Unix.st_mtime;
+  Unix.rename replacement path;
+  before, Unix.stat path
+
+let test_kept_until_the_file_version_moves () =
+  with_archive_file (fun path ->
+    let first = read_archive path in
+    check bool "an unchanged archive is not decoded again" true (read_archive path == first);
+    (* Same bytes, new inode: the version moved, so the value is replaced
+       even though nothing it counts changed. *)
+    let original = In_channel.with_open_bin path In_channel.input_all in
+    let _, _ = replace path original ~keep_stat:false in
+    let stamp = Float.floor (Unix.gettimeofday ()) -. 1. in
+    Unix.utimes path stamp stamp;
+    let second = read_archive path in
+    check bool "a new file version is decoded again" false (second == first);
+    check bool "and then kept" true (read_archive path == second);
+    (* Same size and modification time, other content: only the inode
+       tells it apart. *)
+    let swapped =
+      Str.global_replace (Str.regexp_string "\"done-recent\"") "\"done-recenT\"" original
+    in
+    check int "the swap keeps the size" (String.length original) (String.length swapped);
+    let before, after = replace path swapped ~keep_stat:true in
+    check bool "the replacement keeps size and modification time" true
+      (before.Unix.st_size = after.Unix.st_size
+       && Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+    let third = read_archive path in
+    check bool "a same-stat replacement is decoded again" false (third == second))
+
+let test_archive_shapes () =
+  let dir = Filename.temp_dir "masc-task-archive-shapes-" "" in
+  let path = Filename.concat dir "tasks-archive.json" in
+  Fun.protect
+    ~finally:(fun () -> (try Sys.remove path with Sys_error _ -> ()); Sys.rmdir dir)
+    (fun () ->
+      (match Masc_tui_loader.read_archive path with
+       | Ok reading ->
+           check bool "a missing archive is empty" true (reading == Masc_tui_loader.no_archive)
+       | Error error -> fail error);
+      let refused contents =
+        Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel contents);
+        (* A fresh inode each time, so no kept value answers. *)
+        let copy = path ^ ".copy" in
+        Out_channel.with_open_bin copy (fun channel -> Out_channel.output_string channel contents);
+        Unix.rename copy path;
+        Result.is_error (Masc_tui_loader.read_archive path)
+      in
+      check bool "no tasks list is an error" true (refused "{\"last_updated\":\"x\"}");
+      check bool "two tasks lists are an error" true (refused "{\"tasks\":[],\"tasks\":[]}");
+      check bool "a list is not an archive" true (refused "[]");
+      check bool "a cut file is an error" true (refused "{\"tasks\":[");
+      check bool "an empty tasks list reads" false (refused "{\"tasks\":[]}\n"))
+
 let () =
   Eio_main.run (fun _env ->
     run "tui_task_archive"
       [ ( "flow",
           [ test_case "the archive's days, window and leftovers" `Quick
-              test_counts_with_the_archive ] ) ])
+              test_counts_with_the_archive ] );
+        ( "reader",
+          [ test_case "kept until the file version moves" `Quick
+              test_kept_until_the_file_version_moves;
+            test_case "archive shapes" `Quick test_archive_shapes ] ) ])

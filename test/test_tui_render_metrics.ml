@@ -370,7 +370,7 @@ let test_retained_task_outcomes () =
       task "invalid" "invalid timestamp" Todo;
       task "future" "2026-09-08T10:00:00Z" Todo ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:Masc_tui_task_flow.Archived.empty tasks in
   check int "new registrations in the window" 3 flow.recent.created;
   check int "completion is independent of creation time" 1 flow.recent.completed;
   check int "cancellation is separate" 1 flow.recent.cancelled;
@@ -414,7 +414,7 @@ let test_tasks_error_is_sanitized () =
     (contains output "\\x1B[2J");
   check bool "the error text is still visible" true (contains output "boom");
   let flow =
-    Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived:[] []
+    Masc_tui_task_flow.of_tasks ~now:(Unix.gettimeofday ()) ~archived:Masc_tui_task_flow.Archived.empty []
   in
   let state = make_state () in
   state.task_flow <- Some flow;
@@ -449,7 +449,7 @@ let test_assignee_work_and_daily_flow () =
         (Cancelled { cancelled_by = "polisher"; cancelled_at = "2026-09-11T05:00:00Z";
           reason = None }) ]
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:Masc_tui_task_flow.Archived.empty tasks in
   let rows = flow.by_assignee in
   check int "only states that carry an assignee open a row" 2 (List.length rows);
   let row name =
@@ -510,6 +510,9 @@ let test_archived_tasks_count_in_the_day_bars_only () =
       (* Restored to the backlog, still in the archive: counted once. *)
       task "live" "2026-09-11T00:00:00Z" (done_by "matrix-reader" "2026-09-11T02:00:00Z") ]
   in
+  let archived =
+    List.fold_left Masc_tui_task_flow.Archived.add Masc_tui_task_flow.Archived.empty archived
+  in
   let flow = Masc_tui_task_flow.of_tasks ~now ~archived live in
   let completed_in_span =
     List.fold_left (fun n (d : Masc_tui_task_flow.day) -> n + d.d_completed) 0 flow.daily
@@ -530,7 +533,7 @@ let test_assignee_rows_capped () =
       task (Printf.sprintf "t%02d" index) "2026-09-11T00:00:00Z"
         (Masc_domain.Claimed { assignee = who; claimed_at = "2026-09-11T01:00:00Z" }))
   in
-  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:[] tasks in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:Masc_tui_task_flow.Archived.empty tasks in
   check int "every assignee is retained in the snapshot" 13 (List.length flow.by_assignee);
   let state = make_state () in
   state.task_flow <- Some flow;

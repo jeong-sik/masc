@@ -59,11 +59,28 @@ type t = private {
           gap. *)
 }
 
-val of_tasks : now:float -> archived:Masc_domain.task list -> Masc_domain.task list -> t
+(** The tasks [masc_gc] moved out of the backlog, as the flow counts them:
+    for each, its id, its registration time and how it ended (still open,
+    completed at, cancelled at), with the times parsed. Nothing else of the
+    task is kept. The ids stay because a task restored to the backlog counts
+    once, as live, and the backlog moves; the times stay because the 24 hour
+    window moves with the clock. *)
+module Archived : sig
+  type t
+
+  val empty : t
+
+  val add : t -> Masc_domain.task -> t
+  (** One more archived task. A repeated id is another task, as in the
+      archive file. *)
+end
+
+val of_tasks : now:float -> archived:Archived.t -> Masc_domain.task list -> t
 (** Counts current states plus creation/terminal timestamps within the preceding
     24 hours. Cancellation stays separate from completion. Invalid timestamps
-    remain a visible count and do not become zero-time events. [archived] are
-    the tasks [masc_gc] moved out of the backlog: they count in [recent] and
-    [daily] only, and one whose id is also live is counted once, as live. *)
+    remain a visible count and do not become zero-time events. [archived]
+    counts in [recent], [daily], the invalid timestamps and the oldest open
+    registration, never in [current] or [by_assignee], and one whose id is
+    also live is counted once, as live. *)
 val open_count : counts -> int
 val total_count : counts -> int

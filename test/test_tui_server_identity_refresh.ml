@@ -2712,13 +2712,16 @@ let test_archive_cache_does_not_cross_equal_stat_files () =
     Alcotest.(check bool) "distinct archive files have equal cache stat keys" true
       ((Unix.stat first).Unix.st_size = (Unix.stat second).Unix.st_size
        && Float.equal (Unix.stat first).Unix.st_mtime (Unix.stat second).Unix.st_mtime);
-    let undecoded path = match Masc_tui_loader.read_archived_tasks path with
-      | Ok (_, undecoded) -> undecoded
+    let undecoded path = match Masc_tui_loader.read_archive path with
+      | Ok reading -> reading.undecoded
       | Error detail -> Alcotest.fail detail in
     Alcotest.(check int) "first archive retains invalid-row evidence" 1 (undecoded first);
     Alcotest.(check int) "second path cannot reuse first archive evidence" 0 (undecoded second))
 
-let test_fresh_local_work_reloads_equal_stat_archive () =
+(* Writers replace the archive with a rename. A replacement that keeps the
+   size and the modification time is still another inode, so any work read
+   decodes it; no refresh has to drop what was kept. *)
+let test_local_work_reloads_equal_stat_archive_replacement () =
   let dir = Filename.temp_file "tui-archive-refresh-" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o700;
@@ -2728,6 +2731,7 @@ let test_fresh_local_work_reloads_equal_stat_archive () =
   Unix.mkdir tasks 0o700;
   let backlog = Filename.concat tasks "backlog.json" in
   let archive = Filename.concat masc "tasks-archive.json" in
+  let replacement = archive ^ ".replacement" in
   let write path contents =
     Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel contents) in
   let previous_fs = Fs_compat.get_fs_opt () in
@@ -2750,20 +2754,19 @@ let test_fresh_local_work_reloads_equal_stat_archive () =
       Unix.utimes archive stamp stamp;
       Eio_main.run (fun env ->
         Fs_compat.set_fs (Eio.Stdenv.fs env);
-        let observe ?(fresh = false) () =
-          (Masc_tui_loader.read_local_workspace ~fresh dir).lr_tasks_error in
+        let observe () = (Masc_tui_loader.read_local_workspace dir).lr_tasks_error in
         let error = Some "1 archived tasks could not be read; the day bars miss them" in
         Alcotest.(check (option string)) "unreadable archive is visible" error (observe ());
         let before = Unix.stat archive in
-        write archive "{\"tasks\":[] }";
-        Unix.utimes archive before.Unix.st_atime before.Unix.st_mtime;
+        write replacement "{\"tasks\":[] }";
+        Unix.utimes replacement before.Unix.st_atime before.Unix.st_mtime;
+        Unix.rename replacement archive;
         let after = Unix.stat archive in
-        Alcotest.(check bool) "archive replacement keeps cache stat" true
+        Alcotest.(check bool) "archive replacement keeps size and modification time" true
           (before.Unix.st_size = after.Unix.st_size
            && Float.equal before.Unix.st_mtime after.Unix.st_mtime);
-        Alcotest.(check (option string)) "ordinary read retains its cache" error (observe ());
-        Alcotest.(check (option string)) "fresh work read clears archive error" None
-          (observe ~fresh:true ())))
+        Alcotest.(check (option string)) "the next work read decodes the replacement" None
+          (observe ())))
 
 let test_local_cache_cancel_releases_source_for_followup () =
   let exception Read_replaced in
@@ -7259,8 +7262,8 @@ let () =
             test_observer_initial_identity_ownership
         ; Alcotest.test_case "archive cache does not cross equal-stat source files" `Quick
             test_archive_cache_does_not_cross_equal_stat_files
-        ; Alcotest.test_case "fresh local work reloads equal-stat archive" `Quick
-            test_fresh_local_work_reloads_equal_stat_archive
+        ; Alcotest.test_case "local work reloads an equal-stat archive replacement" `Quick
+            test_local_work_reloads_equal_stat_archive_replacement
         ; Alcotest.test_case "created Keeper waits for owned metadata without Work" `Quick
             test_created_keeper_waits_for_owned_metadata_without_work
         ; Alcotest.test_case "fresh metadata confirms deletion without detail retargeting" `Quick

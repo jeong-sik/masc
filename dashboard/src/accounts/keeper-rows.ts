@@ -22,10 +22,11 @@ export interface Choice {
   readonly label: string
 }
 
-/** The Runtimes a Keeper can run on here, in the order of the subscriptions panel. */
+/** The Runtimes a Keeper can run on here, in the order of the subscriptions
+    panel: those of the accounts whose card says a Keeper can run. */
 export function runtimeChoices(integrations: readonly Integration[], owned: Owned): readonly Choice[] {
-  return accountFacts(integrations, owned).flatMap(({ account, offered, runtimes }) => {
-    if (offered === null || offered.calls.kind !== 'allowed') return []
+  return accountFacts(integrations, owned).flatMap(({ account, offered, runtimes, keeper }) => {
+    if (offered === null || keeper.kind !== 'can_run') return []
     const subscription = `${integrationName(offered)} 계정 ${idTail(account.id)}`
     return runtimes.flatMap((runtime) => (runtime.model.read ? [{ runtimeId: runtime.id, label: `${runtime.model.value} · ${subscription}` }] : []))
   })

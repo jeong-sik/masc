@@ -9,10 +9,10 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { checkLimitMinutes } from './check'
 import type { Check, CheckFailure, ChecksModel } from './check'
-import type { RemovalRefusal, RemovalsModel, Removing } from './key-remove'
+import type { RemovalStopped, RemovalsModel, Removing } from './key-remove'
 import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
-import type { CallRefusal, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
+import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Runtime, Withheld } from './wire'
 
 // ---- what the panel knows of each account ----
 
@@ -40,17 +40,26 @@ export type KeeperOn =
   /** As `needs_model`, and the server offers no model of the subscription to check. */
   | { readonly kind: 'no_model' }
   | { readonly kind: 'refused'; readonly refusal: CallRefusal }
+  /** As `can_run`, on a key account whose key the server did not find
+      readable when it listed the account: it refuses a turn on the account
+      before it starts a client
+      (lib/server/server_setup_account_login.ml, `person_runtime`). */
+  | { readonly kind: 'key_not_readable' }
   /** The account's subscription is not known, or the server no longer offers it. */
   | { readonly kind: 'not_offered' }
   /** A removal of the account did not go through. The server refuses every
       use of it, whatever its subscription lets a Keeper do. */
   | { readonly kind: 'removal_left' }
 
+/** Whether a call of the account has what it runs on: a login, or a key
+    the server read when it listed the account. */
+const holdsWhatItRunsOn = (held: Held): boolean => held.kind === 'login' || held.key === 'readable'
+
 function keeperOn(account: ProviderAccount, offered: Integration | null, checked: boolean): KeeperOn {
   if (account.removal !== null) return { kind: 'removal_left' }
   if (offered === null) return { kind: 'not_offered' }
   if (offered.calls.kind === 'refused') return { kind: 'refused', refusal: offered.calls.refusal }
-  if (checked) return { kind: 'can_run' }
+  if (checked) return holdsWhatItRunsOn(account.held) ? { kind: 'can_run' } : { kind: 'key_not_readable' }
   return checkable(offered) ? { kind: 'needs_model' } : { kind: 'no_model' }
 }
 
@@ -100,15 +109,31 @@ function keyWords(key: KeyState): string | null {
   }
 }
 
+/** Whether the key of an account a removal was left on is still on the
+    server. It is what the server found of the key file when it listed the
+    account, not a guess from where the removal stopped: a removal that never
+    started can be of an account whose key file was never made. */
+function keyLeftWords(held: Held): string {
+  if (held.kind === 'login') return ''
+  switch (held.key) {
+    case 'readable': return ' key 가 아직 이 서버에 있어요.'
+    case 'key_missing': return ' key 파일은 이 서버에 없어요.'
+    case 'key_unreadable': return ' key 파일이 이 서버에 남아 있어요.'
+    case 'not_looked_at':
+    case 'unrecognised':
+      return ' key 파일이 이 서버에 남아 있을 수 있어요.'
+  }
+}
+
 /** What a removal that did not go through left on the server
     (lib/auth_preview.ml, `removal_code`). */
-function removalWords(removal: Removal): string {
-  const unused = '이 계정으로는 아무것도 실행되지 않아요.'
+function removalWords(removal: Removal, held: Held): string {
+  const left = `${keyLeftWords(held)} 이 계정으로는 아무것도 실행되지 않아요.`
   switch (removal) {
-    case 'key_not_removed': return `이 계정을 없애다가 멈췄어요. key 가 아직 이 서버에 있어요. ${unused}`
-    case 'home_not_removed': return `이 계정을 없애다가 멈췄어요. key 는 지워졌고, 계정의 다른 파일이 이 서버에 남아 있어요. ${unused}`
-    case 'start_given_up': return `이 계정을 없애려다 시작하지 못했어요. key 가 아직 이 서버에 있어요. ${unused}`
-    case 'unrecognised': return `이 계정을 없애는 일이 끝나지 않았어요. ${unused}`
+    case 'key_not_removed': return `이 계정을 없애다가 멈췄어요.${left}`
+    case 'home_not_removed': return `이 계정을 없애다가 멈췄어요. 계정의 다른 파일이 이 서버에 남아 있어요.${left}`
+    case 'start_given_up': return `이 계정을 없애려다 시작하지 못했어요.${left}`
+    case 'unrecognised': return `이 계정을 없애는 일이 끝나지 않았어요.${left}`
   }
 }
 
@@ -125,6 +150,8 @@ function removeLineWords(removing: Removing | undefined, sure: boolean, again: b
   switch (removing?.kind) {
     case undefined: return ''
     case 'sending': return '없애고 있어요…'
+    // On the page only until the list that was asked for comes.
+    case 'removed': return removing.already ? '서버에 이 계정이 없어요.' : '서버가 이 계정을 없앴다고 답했어요.'
     case 'leaving': return sessionEndedWords
     case 'refused':
     case 'unknown':
@@ -132,8 +159,10 @@ function removeLineWords(removing: Removing | undefined, sure: boolean, again: b
   }
 }
 
-/** Why the server did not remove an account, and what the person does next. */
-function removalRefusedWords(code: RemovalRefusal): string {
+/** Why the server did not remove an account, and what the person does
+    next. A refusal with no code of the route is said in the words every
+    part of the console shares (notes.ts, `ProblemNote`). */
+function removalRefusedWords(code: Exclude<RemovalStopped, 'unrecognised'>): string {
   switch (code) {
     case 'account_call_running': return '이 계정으로 호출이 돌고 있어요. 끝난 뒤 다시 없애 주세요.'
     case 'removal_not_recorded': return '서버가 없애기를 기록하지 못했어요. 다시 없애 주세요.'
@@ -141,9 +170,25 @@ function removalRefusedWords(code: RemovalRefusal): string {
     case 'home_not_removed': return '서버가 key 는 지웠고, 계정의 다른 파일을 지우지 못했어요. 다시 없애 주세요.'
     case 'removal_refused': return '내 계정이 지금 쓸 수 있는 상태가 아니라서 없애지 못했어요.'
     case 'not_a_key_account': return '로그인으로 연결한 계정이라 여기서 없앨 수 없어요.'
-    case 'unknown_account': return '서버에 이 계정이 없어요.'
-    case 'unrecognised': return '이 화면이 모르는 까닭으로 없애지 못했어요.'
   }
+}
+
+/** What the page heard of a removal it has no word of the server on. */
+function unheardWords(answer: Extract<Removing, { kind: 'unknown' }>['answer']): string {
+  switch (answer) {
+    case 'none': return '서버의 답을 받지 못했어요. 서버가 계정을 없앴을 수도 있어요.'
+    case 'unreadable': return '서버의 답을 읽지 못했어요. 서버가 계정을 없앴을 수도 있어요.'
+    case 'server_failed': return '서버 쪽이 오류로 답했고, 없애지 않았다고는 말하지 않았어요. 서버가 계정을 없앴을 수도 있어요.'
+  }
+}
+
+/** The alert of a removal the server refused or did not finish. */
+function StoppedNote({ removing }: { readonly removing: Extract<Removing, { kind: 'refused' }> }): VNode {
+  const title = '계정을 없애지 못했어요'
+  if (removing.code === 'unrecognised') {
+    return html`<${ProblemNote} title=${title} failure=${{ problem: { kind: 'refused', status: removing.status, reason: removing.reason }, attempts: removing.attempts }} />`
+  }
+  return html`<${Callout} title=${title} lines=${[removalRefusedWords(removing.code)]} reason=${removing.reason} attempts=${removing.attempts} />`
 }
 
 /** Why a Keeper does not run on an account of the subscription `name` here. */
@@ -242,7 +287,7 @@ function Chips({ facts }: { readonly facts: AccountFacts }): VNode {
       ${held}
       <span class=${checked ? 'chip' : 'chip chip-todo'}>${checked ? '모델 확인됨' : keeper.kind === 'no_model' ? '확인할 모델 없음' : '모델 확인 필요'}</span>
       ${keeper.kind === 'can_run' ? html`<span class="chip">Keeper 실행 가능</span>` : null}
-      ${keeper.kind === 'refused' ? html`<span class="chip chip-todo">Keeper 실행 불가</span>` : null}
+      ${keeper.kind === 'refused' || keeper.kind === 'key_not_readable' ? html`<span class="chip chip-todo">Keeper 실행 불가</span>` : null}
     </p>
   `
 }
@@ -389,16 +434,10 @@ function RemoveArea({ accountId, removals, card, again }: {
       ${sure ? html`<button id=${backId} type="button" aria-labelledby=${`${backId} ${card}`} onClick=${back}>취소</button>` : null}
     </p>
     <p id=${line} class="hint" role="status">${removeLineWords(removing, sure, again)}</p>
-    ${removing?.kind === 'refused'
-      ? html`<${Callout} key=${removing.attempts} title="계정을 없애지 못했어요" lines=${[removalRefusedWords(removing.code)]}
-          reason=${removing.reason} attempts=${removing.attempts} />`
-      : null}
+    ${removing?.kind === 'refused' ? html`<${StoppedNote} key=${removing.attempts} removing=${removing} />` : null}
     ${removing?.kind === 'unknown'
       ? html`<${Callout} key=${removing.attempts} title="계정을 없앴는지 알 수 없어요" reason=${null} attempts=${removing.attempts}
-          lines=${[
-            removing.answer === 'none' ? '서버의 답을 받지 못했어요. 서버가 계정을 없앴을 수도 있어요.' : '서버의 답을 읽지 못했어요. 서버가 계정을 없앴을 수도 있어요.',
-            '이 계정이 그대로 보이면 다시 없애 주세요.',
-          ]} />`
+          lines=${[unheardWords(removing.answer), '이 계정이 그대로 보이면 다시 없애 주세요.']} />`
       : null}
   `
 }
@@ -430,7 +469,7 @@ function AccountRow({ facts, checks, removals }: {
       <h3 ref=${title} id=${titleId} class="row-title" tabindex="-1">${name}</h3>
       <p id=${accountLine} class="hint">계정 <span class="mono">${idTail(account.id)}</span></p>
       <${Chips} facts=${facts} />
-      ${removal !== null ? html`<p class="hint">${removalWords(removal)}</p>` : html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`}
+      ${removal !== null ? html`<p class="hint">${removalWords(removal, account.held)}</p>` : html`<${InUse} facts=${facts} name=${name} checks=${checks} card=${`${titleId} ${accountLine}`} />`}
       ${account.held.kind === 'key'
         ? html`<${RemoveArea} accountId=${account.id} removals=${removals} card=${`${titleId} ${accountLine}`} again=${removal !== null} />`
         : null}

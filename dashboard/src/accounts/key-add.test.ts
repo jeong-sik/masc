@@ -88,7 +88,9 @@ describe('sending a key', () => {
     ['an answer that names an account of another kind', json(200, { provider_account_id: 'acct_new', kind: 'login' }), { kind: 'unreadable' }],
     ['an answer that says all is well and names no account', json(200, { kind: 'key' }), { kind: 'unreadable' }],
     ['an answer that says all is well and is not JSON', new Response('<html>sign in</html>', { status: 200 }), { kind: 'unreadable' }],
-    ['a code it does not know', refusedAs(503, 'volume_away'), { kind: 'refused', status: 503, code: 'unrecognised', reason: 'The server said volume_away.', accountId: null }],
+    ['a refusal with a code it does not know', refusedAs(409, 'volume_away'), { kind: 'refused', status: 409, code: 'unrecognised', reason: 'The server said volume_away.', accountId: null }],
+    ['a failure with a code it does not know', refusedAs(503, 'volume_away'), { kind: 'server_failed' }],
+    ['a failure that is not JSON', new Response('Bad Gateway', { status: 502 }), { kind: 'server_failed' }],
     ['a refusal with no code', json(403, { error: 'the request carried no token' }), { kind: 'refused', status: 403, code: 'unrecognised', reason: 'the request carried no token', accountId: null }],
     ['a body that was too large', new Response('The body is larger than 16384 bytes.', { status: 413 }), { kind: 'refused', status: 413, code: 'unrecognised', reason: null, accountId: null }],
   ])('reads %s', async (_name, answer, sent) => {
@@ -149,7 +151,7 @@ describe('the giving of a key', () => {
 
   it.each([
     ['key_not_stored', 503], ['registration_not_recorded', 503], ['configuration_unavailable', 503], ['registration_refused', 403],
-    ['internal_error', 500], ['invalid_request', 400], ['volume_away', 503],
+    ['internal_error', 500], ['invalid_request', 400], ['volume_away', 409],
   ])('reads nothing again after the refusal %s', async (code, status) => {
     const { model, refresh } = adding([refusedAs(status, code)])
     model.open()
@@ -169,6 +171,7 @@ describe('the giving of a key', () => {
   it.each([
     ['no answer', 'no answer' as const, 'none'],
     ['an answer it cannot read', json(200, { provider_accounts: [] }), 'unreadable'],
+    ['a failure with no code of the route', new Response('Bad Gateway', { status: 502 }), 'server_failed'],
   ])('drops the key after %s, for the server may have stored it, and reads the subscriptions again', async (_name, answer, read) => {
     const { model, refresh } = adding([answer])
     model.open()
@@ -264,7 +267,8 @@ describe('the area where a key is given', () => {
     ['a key on its way', { kind: 'sending', failure: null }],
     ['a key the server refused', { kind: 'open', failure: refused }],
     ['an account the server left behind', { kind: 'open', failure: { kind: 'refused', status: 503, code: 'account_not_removed', reason: 'left', accountId: 'acct_left', attempts: 2 } }],
-    ['a refusal for a reason not known', { kind: 'open', failure: { kind: 'refused', status: 502, code: 'unrecognised', reason: null, accountId: null, attempts: 1 } }],
+    ['a refusal with no code', { kind: 'open', failure: { kind: 'refused', status: 403, code: 'unrecognised', reason: null, accountId: null, attempts: 1 } }],
+    ['a key the server failed on with no code', { kind: 'open', failure: { kind: 'unknown', answer: 'server_failed', attempts: 1 } }],
     ['a key with no answer', { kind: 'open', failure: { kind: 'unknown', answer: 'none', attempts: 1 } }],
     ['a key with an answer it cannot read', { kind: 'open', failure: { kind: 'unknown', answer: 'unreadable', attempts: 3 } }],
     ['a key sent again after a refusal', { kind: 'sending', failure: refused }],
@@ -289,7 +293,7 @@ describe('the area where a key is given', () => {
 
   it('says an add that came to nothing where a screen reader announces it', () => {
     expect(count('[role=alert]')).toEqual(named(
-      'a key the server refused', 'an account the server left behind', 'a refusal for a reason not known',
+      'a key the server refused', 'an account the server left behind', 'a refusal with no code', 'a key the server failed on with no code',
       'a key with no answer', 'a key with an answer it cannot read', 'a key sent again after a refusal',
     ))
   })

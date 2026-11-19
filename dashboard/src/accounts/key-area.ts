@@ -9,7 +9,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef } from 'preact/hooks'
 import type { VNode } from 'preact'
 import type { AddFailure, AddRefusal, AddView, KeyAddModel } from './key-add'
-import { Callout, fell, idTail, keyStaysValidWords, sessionEndedWords } from './notes'
+import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, sessionEndedWords } from './notes'
 import { integrationName } from './wire'
 import type { Integration } from './wire'
 
@@ -24,8 +24,10 @@ const notes = [
 ] as const
 
 /** Why the server did not store a key, and what the person does next.
-    `accountId` is the account the server left behind, if it left one. */
-function refusedWords(code: AddRefusal, accountId: string | null): string {
+    `accountId` is the account the server left behind, if it left one. A
+    refusal with no code of the route is said in the words every part of the
+    console shares (notes.ts, `ProblemNote`). */
+function refusedWords(code: Exclude<AddRefusal, 'unrecognised'>, accountId: string | null): string {
   switch (code) {
     case 'not_a_key': return 'key 로 읽을 수 없는 값이에요. key 하나만 넣어 주세요. 비어 있거나, 줄바꿈 같은 제어 문자가 있거나, JSON 문서면 받지 않아요.'
     case 'invalid_request': return '서버가 이 요청을 읽지 못했어요. 저장된 것은 없어요.'
@@ -40,7 +42,15 @@ function refusedWords(code: AddRefusal, accountId: string | null): string {
       return accountId === null
         ? '서버가 key 파일을 만들지 못했고, 만들던 계정도 다 없애지 못했어요. 아래 목록에서 그 계정을 없앤 뒤 다시 보내 주세요.'
         : `서버가 key 파일을 만들지 못했고, 만들던 계정도 다 없애지 못했어요. 아래 목록에서 계정 ${idTail(accountId)}을 없앤 뒤 다시 보내 주세요.`
-    case 'unrecognised': return '이 화면이 모르는 까닭으로 거절됐어요.'
+  }
+}
+
+/** What the page heard of a key it has no word of the server on. */
+function unheardWords(answer: Extract<AddFailure, { kind: 'unknown' }>['answer']): string {
+  switch (answer) {
+    case 'none': return '서버의 답을 받지 못했어요. 서버가 key 를 저장했을 수도 있어요.'
+    case 'unreadable': return '서버의 답을 읽지 못했어요. 서버가 key 를 저장했을 수도 있어요.'
+    case 'server_failed': return '서버 쪽이 오류로 답했고, 저장하지 않았다고는 말하지 않았어요. 서버가 key 를 저장했을 수도 있어요.'
   }
 }
 
@@ -49,12 +59,15 @@ function refusedWords(code: AddRefusal, accountId: string | null): string {
 function FailureNote({ failure }: { readonly failure: AddFailure }): VNode {
   switch (failure.kind) {
     case 'refused':
+      if (failure.code === 'unrecognised') {
+        return html`<${ProblemNote} title="key 를 저장하지 못했어요" failure=${{ problem: { kind: 'refused', status: failure.status, reason: failure.reason }, attempts: failure.attempts }} />`
+      }
       return html`<${Callout} title="key 를 저장하지 못했어요" lines=${[refusedWords(failure.code, failure.accountId)]}
         reason=${failure.reason} attempts=${failure.attempts} />`
     case 'unknown':
       return html`<${Callout} title="key 가 저장됐는지 알 수 없어요" reason=${null} attempts=${failure.attempts}
         lines=${[
-          failure.answer === 'none' ? '서버의 답을 받지 못했어요. 서버가 key 를 저장했을 수도 있어요.' : '서버의 답을 읽지 못했어요. 서버가 key 를 저장했을 수도 있어요.',
+          unheardWords(failure.answer),
           '아래 목록에 「API key 로 연결」 계정이 새로 생겼는지 봐 주세요. 생겼으면 다시 보내지 마세요. 같은 key 를 다시 보내면 계정이 하나 더 생겨요.',
           '새 계정이 없으면 key 를 다시 넣어 주세요.',
         ]} />`

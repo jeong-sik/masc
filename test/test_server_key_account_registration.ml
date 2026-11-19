@@ -562,7 +562,7 @@ let test_files_not_made =
 (* The files are not made and the removal does not go through: the answer
    gives the account, the records say how far its removal went, and its
    owner removes it. The modes that keep a folder closed do not keep the
-   superuser out, so this case says nothing when the superuser runs it. *)
+   superuser out, so this case is skipped when the superuser runs it. *)
 let test_account_stays =
   with_zone (fun ~zone ~root ~base_path ->
     if Unix.geteuid () <> 0
@@ -600,7 +600,8 @@ let test_account_stays =
       Alcotest.(check (list (pair string string)))
         "the records say the removal went through"
         [ Provider_account_id.to_string account, "purged" ]
-        (List.map (fun (id, status) -> Provider_account_id.to_string id, status) (removals alice))))
+        (List.map (fun (id, status) -> Provider_account_id.to_string id, status) (removals alice)))
+    else Alcotest.skip ())
 ;;
 
 (* ---- the replacement of a key (the same RFC, 3.7) ---- *)
@@ -799,7 +800,7 @@ let test_replacement_refused =
 
 (* A removal that stopped on the account: its key is not replaced, and the
    account is removed. The modes that keep a folder closed do not keep the
-   superuser out, so this case and the next say nothing when the superuser
+   superuser out, so this case and the next are skipped when the superuser
    runs them. *)
 let test_replacement_after_removal =
   with_zone (fun ~zone ~root ~base_path ->
@@ -825,7 +826,8 @@ let test_replacement_after_removal =
         (replace alice ~base_path account (replacement_body second_key))
         ~status:404
         ~code:(Some "unknown_account");
-      Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root)))
+      Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root))
+    else Alcotest.skip ())
 ;;
 
 (* The record goes in and the key file does not: the account has no key, and
@@ -873,7 +875,8 @@ let test_replacement_not_stored =
         ("key:" ^ third_key)
         (read_name (key_file_of alice ~runtime_root account));
       Alcotest.(check (list string)) "the key of the first generation is gone" [] (holding ~text:the_key root);
-      Unix.chmod stuck 0o700))
+      Unix.chmod stuck 0o700)
+    else Alcotest.skip ())
 ;;
 
 (* What the list of the accounts of the person says is on the account. *)
@@ -891,7 +894,7 @@ let spent (person : Login.person) id =
 (* The log takes the intent of a replacement and not its record. At the next
    start of the server the intent is one that was given up: it blocks the
    account, and the same request closes it (the same RFC, 3.7). The
-   superuser writes a file whatever its mode is, so the case says nothing
+   superuser writes a file whatever its mode is, so the case is skipped
    when the superuser runs it. *)
 let test_replacement_given_up =
   with_zone (fun ~zone ~root ~base_path ->
@@ -927,7 +930,8 @@ let test_replacement_given_up =
         "its key reads back from the file the records say"
         ("key:" ^ third_key)
         (read_name (key_file_of alice ~runtime_root account));
-      Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root)))
+      Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root))
+    else Alcotest.skip ())
 ;;
 
 (* The server stopped between the new key of a replacement and the removal
@@ -1016,7 +1020,8 @@ let test_left_keys_under_a_stopped_log =
       Alcotest.(check string)
         "the key the records say reads back"
         ("key:" ^ second_key)
-        (read_name (key_file_of alice ~runtime_root account))))
+        (read_name (key_file_of alice ~runtime_root account)))
+    else Alcotest.skip ())
 ;;
 
 (* The key before of a key account, where a stopped server leaves it. *)
@@ -1095,7 +1100,8 @@ let test_left_keys_of_two_accounts =
         (holding ~text:first.key root);
       Unix.chmod stuck 0o700;
       at_start ();
-      Alcotest.(check bool) "the next start removes what stayed" false (Sys.file_exists stuck)))
+      Alcotest.(check bool) "the next start removes what stayed" false (Sys.file_exists stuck))
+    else Alcotest.skip ())
 ;;
 
 let () =

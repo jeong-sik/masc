@@ -480,7 +480,7 @@ repository_id = "masc"
 - **Approvals** lists installation questions beside Keeper questions, labelled with the installation title. Answering uses the same keys and editor. The answer posts to the K4 route.
   - The banner reads "<title> is waiting on you".
   - The answer receipt offers a jump to that installation's Results. The key is chosen in L7 from the keys Approvals leaves free.
-- **Lanes list:** a package row lists its declared exact outputs with their binding state: bound, unbound, off, or a table with no declaration. Each entry opens the preview-checked `runtime.toml` editor at `[runtime.addon_exact_lanes.<id>.<name>]`, the editor `e` opens for built-in exact lanes (`docs/guides/TUI-KEYS.md:449`).
+- **Lanes list:** a package row lists its declared exact outputs with their binding state: bound, unbound, off, or a table with no declaration. Each entry opens the preview-checked `runtime.toml` editor at `[runtime.addon_exact_lanes.<id>.<name>]`, the editor `e` opens for built-in exact lanes (`bin/masc_tui_keys.ml`, TUI `?`).
 - **Add-on detail:** a "Host requests" view lists the requests of the last listing and the host's state for each: done, waiting for an answer, or refused with its typed reason.
 - Nothing here names a quiz.
 

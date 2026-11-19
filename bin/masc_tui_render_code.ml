@@ -734,7 +734,7 @@ let render_code (state : state) =
                ^ Terminal_text.single_line detail ^ Ansi.reset
            | Some (_, Masc_tui_fetched.Loading) ->
                with_note ^ "  " ^ Theme.recede ()
-               ^ ui_text state ~ko:"blame 읽는 중…" ~en:"reading blame…" ^ Ansi.reset
+               ^ ui_text state ~ko:"blame 읽는 중" ~en:"reading blame" ^ Ansi.reset
            | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent))
            | None -> with_note)
       | None ->
@@ -916,7 +916,7 @@ let render_code (state : state) =
        | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) -> say (Theme.bad ()) detail
        | Some (path, Masc_tui_fetched.Loading) ->
            say (Theme.recede ())
-             (ui_text state ~ko:(path ^ " 읽는 중…") ~en:("reading " ^ path ^ "…"))
+             (ui_text state ~ko:(path ^ " 읽는 중") ~en:("reading " ^ path))
        | Some (_, Masc_tui_fetched.Absent) | None ->
            draw_list_idle pane_buf pane_cols ~ko:(state.ui_language = Lang_ko)
              ~empty:empty_directory ~height:content_height listing_idle

@@ -476,7 +476,7 @@ let render_palette (state : state) =
         List.map Terminal_text.single_line
           (match code_worktrees_view state with
            | Masc_tui_fetched.Absent -> [ "Worktrees are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ "Reading worktrees…" ]
+           | Masc_tui_fetched.Loading -> [ "Reading worktrees" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
                [ Printf.sprintf "%s · %s%s"
@@ -489,7 +489,7 @@ let render_palette (state : state) =
         List.map Terminal_text.single_line
           (match code_branches_view state with
            | Masc_tui_fetched.Absent -> [ "Branches are no longer active; Esc returns to Code" ]
-           | Masc_tui_fetched.Loading -> [ "Reading branches…" ]
+           | Masc_tui_fetched.Loading -> [ "Reading branches" ]
            | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> [ detail ]
            | Masc_tui_fetched.Ready listing ->
                [ Printf.sprintf "%s · %s%s"
@@ -508,7 +508,7 @@ let render_palette (state : state) =
                     | None -> "the checkout"
                     | Some dir -> "under " ^ dir) ]
            | Some (key, Masc_tui_fetched.Loading) ->
-               [ "Searching for " ^ key.css_query ^ "…" ]
+               [ "Searching for " ^ key.css_query ]
            | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
                [ detail ]
            | Some (_, Masc_tui_fetched.Ready search) ->
@@ -526,7 +526,7 @@ let render_palette (state : state) =
     | Palette_files _ ->
         let catalog_note = match code_finder_catalog state with
           | Masc_tui_fetched.Absent -> "File finder is no longer active; Esc returns to Code"
-          | Masc_tui_fetched.Loading -> "Reading checkout files…"
+          | Masc_tui_fetched.Loading -> "Reading checkout files"
           | Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail) -> detail
           | Masc_tui_fetched.Ready catalog ->
               Printf.sprintf "%s · %s"
@@ -535,7 +535,7 @@ let render_palette (state : state) =
                 (if String.equal catalog.wfc_root "" then "workspace checkout"
                  else catalog.wfc_root) in
         let file_notes = match Masc_tui_fetched.current state.code_finder_file with
-          | Some (_, Masc_tui_fetched.Loading) -> ["Opening selected file…"]
+          | Some (_, Masc_tui_fetched.Loading) -> ["Opening selected file"]
           | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) -> [detail]
           | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _)) -> [] in
         List.map Terminal_text.single_line (catalog_note :: file_notes)
@@ -1086,7 +1086,7 @@ let render_queue_panel (state : state) (panel : queue_panel) =
   let status = if not (server_authority_ready state) then
     "Workspace unconfirmed; any receipt is from the previous observation"
   else match panel.qp_reading, panel.qp_notice with
-    | Queue_loading, _ -> "Reading or sending…"
+    | Queue_loading, _ -> "Reading or sending"
     | (Queue_current | Queue_unavailable), Some (Queue_info text | Queue_error text) -> Terminal_text.single_line text
     | Queue_current, None ->
       (match panel.qp_observation with

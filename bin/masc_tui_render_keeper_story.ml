@@ -347,7 +347,7 @@ let turns_source (state : Masc_tui_types.state) ~keeper_name =
     Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name
   with
   | Masc_tui_fetched.Absent -> [], [ Notice "turns not read yet" ]
-  | Masc_tui_fetched.Loading -> [], [ Notice "turns reading…" ]
+  | Masc_tui_fetched.Loading -> [], [ Notice "turns reading" ]
   | Masc_tui_fetched.Ready turns -> turns, []
   | Masc_tui_fetched.Stale ([], Masc_tui_types.Request_failed detail)
   | Masc_tui_fetched.Failed (Masc_tui_types.Request_failed detail) ->
@@ -375,7 +375,7 @@ let refresh_note refresh text =
 let wakes_source (state : Masc_tui_types.state) ~keeper_name =
   match schedules state ~keeper_name with
   | Not_read -> [], [ Notice "wakes not read yet" ]
-  | Reading -> [], [ Notice "wakes reading…" ]
+  | Reading -> [], [ Notice "wakes reading" ]
   | Read_failed detail ->
       [], [ Caution (with_detail "wakes unknown, the schedule read failed" detail) ]
   | Read_kept_back notice -> [], [ Caution notice ]
@@ -476,7 +476,7 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
   in
   match schedules state ~keeper_name with
   | Not_read -> [ dim "  ◷ this Keeper's schedules are not read yet" ]
-  | Reading -> [ dim "  ◷ reading this Keeper's schedules…" ]
+  | Reading -> [ dim "  ◷ reading this Keeper's schedules" ]
   | Read_failed detail ->
       [ warn ("  ◷ schedule read failed: " ^ Terminal_text.single_line detail) ]
   | Read_kept_back notice -> [ warn ("  ◷ " ^ Terminal_text.single_line notice) ]

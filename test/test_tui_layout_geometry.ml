@@ -408,6 +408,23 @@ let widths_add_up () =
     card_layouts;
   expect_none "column widths and gaps add up to the inner width" !failures
 
+(* The selection as a grid takes it beside each card: out of reach of every
+   card, within reach of every card, and held by the first card of the first
+   column. What the selection can reach decides which cards may squash, so
+   the sweep runs every case. *)
+let selection_cases =
+  [ ("unselectable", fun _ _ -> Card.Unselectable)
+  ; ("selectable", fun _ _ -> Card.Selectable)
+  ; ( "held"
+    , fun column index ->
+        if column = 0 && index = 0 then Card.Holds_selected_row else Card.Selectable )
+  ]
+
+let with_selection selection_of stack =
+  List.mapi
+    (fun column cards -> List.mapi (fun index card -> (card, selection_of column index)) cards)
+    stack
+
 let grid_fits_its_rectangle () =
   let failures = ref [] in
   let fail fmt = Printf.ksprintf (fun text -> failures := text :: !failures) fmt in
@@ -420,30 +437,42 @@ let grid_fits_its_rectangle () =
                  let columns = Card.columns_that_fit ~inner_width ~gap ~min_card_width ~max_columns in
                  List.iteri
                    (fun shape stack ->
-                      let at = Printf.sprintf "ko %b, min %d gap %d, inner %d, shape %d"
-                          ko min_card_width gap inner_width shape in
-                      let layout max_rows =
-                        Card.grid ~ko ~style ~inner_width ~gap ~row_gap:1 ~max_rows stack in
-                      match layout max_int with
-                      | None -> fail "%s: no grid with unbounded rows" at
-                      | Some natural ->
-                          let height = List.length natural in
-                          List.iteri
-                            (fun row line ->
-                               let width = Layout.display_width line in
-                               if width <> inner_width then
-                                 fail "%s: row %d is %d cells" at row width)
-                            natural;
-                          List.iter
-                            (fun max_rows ->
-                               match layout max_rows with
-                               | Some rows when height <= max_rows && List.length rows = height -> ()
-                               | Some rows ->
-                                   fail "%s: %d rows asked, %d drawn of %d" at max_rows
-                                     (List.length rows) height
-                               | None when height > max_rows -> ()
-                               | None -> fail "%s: %d rows asked, %d needed, none drawn" at max_rows height)
-                            body_rows_list)
+                      List.iter
+                        (fun (selection, selection_of) ->
+                           let at = Printf.sprintf "ko %b, min %d gap %d, inner %d, shape %d, %s"
+                               ko min_card_width gap inner_width shape selection in
+                           let layout max_rows =
+                             Card.grid ~ko ~style ~inner_width ~gap ~row_gap:1 ~max_rows
+                               (with_selection selection_of stack) in
+                           let check_width asked rows =
+                             List.iteri
+                               (fun row line ->
+                                  let width = Layout.display_width line in
+                                  if width <> inner_width then
+                                    fail "%s: %s rows asked, row %d is %d cells" at asked row width)
+                               rows in
+                           match layout max_int with
+                           | None -> fail "%s: no grid with unbounded rows" at
+                           | Some natural ->
+                               let height = List.length natural in
+                               check_width "unbounded" natural;
+                               List.iter
+                                 (fun max_rows ->
+                                    match layout max_rows with
+                                    | Some rows ->
+                                        let drawn = List.length rows in
+                                        check_width (string_of_int max_rows) rows;
+                                        if drawn > max_rows then
+                                          fail "%s: %d rows asked, %d drawn" at max_rows drawn
+                                        else if height <= max_rows && drawn <> height then
+                                          fail "%s: %d rows asked, %d drawn of %d that fit" at
+                                            max_rows drawn height
+                                    | None when height > max_rows -> ()
+                                    | None ->
+                                        fail "%s: %d rows asked, %d needed, none drawn" at
+                                          max_rows height)
+                                 body_rows_list)
+                        selection_cases)
                    (stacks ~columns))
               inner_widths)
          card_layouts)

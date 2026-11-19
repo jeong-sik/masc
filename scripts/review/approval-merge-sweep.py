@@ -44,7 +44,15 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         number isDraft mergeable isCrossRepository
         baseRefName headRefName headRefOid
-        statusCheckRollup { state }
+        statusCheckRollup {
+          contexts(first: 100) {
+            nodes {
+              __typename
+              ... on CheckRun { conclusion }
+              ... on StatusContext { state }
+            }
+          }
+        }
         files(first: 100) {
           totalCount
           nodes { path }
@@ -260,7 +268,24 @@ def clean_branches(repo, started, dry_run):
     return record
 
 
-DECISIVE_CHECK_FAILURES = frozenset({'FAILURE', 'ERROR'})
+# A check run speaks about the code by failing, timing out, not starting, or
+# needing a human. CANCELLED says nothing: Approval merge request cancels its
+# own older runs (cancel-in-progress), and GitHub keeps the cancelled run in
+# the rollup, whose aggregate state then reads FAILURE on a pull request with
+# nothing wrong. A commit status speaks through its state.
+DECISIVE_CHECK_RUN_CONCLUSIONS = frozenset(
+    {'FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED'})
+DECISIVE_STATUS_STATES = frozenset({'FAILURE', 'ERROR'})
+
+
+def decisively_failed(check):
+    """A finished check that said no; a kind this does not know says nothing."""
+    kind = check.get('__typename') if isinstance(check, dict) else None
+    if kind == 'CheckRun':
+        return check.get('conclusion') in DECISIVE_CHECK_RUN_CONCLUSIONS
+    if kind == 'StatusContext':
+        return check.get('state') in DECISIVE_STATUS_STATES
+    return False
 
 
 def merged_closers(repo, issues):
@@ -327,19 +352,16 @@ def ready(row):
     approvers = {review['author']['login'] for review in reviews
                  if review['state'] == 'APPROVED' and review['author'] is not None and
                  review['commit'] is not None and review['commit']['oid'] == row['headRefOid']}
-    # A completed FAILURE or ERROR check is a merge refusal GitHub has
-    # already decided; selecting the pull request again spends a worker run
-    # on the same answer every 30 minutes (#51479 family 1). Pending and
-    # expected rolls stay selectable — the worker still holds on them, but a
-    # later run can see them pass without new evidence.
-    roll = row.get('statusCheckRollup') or []
-    if isinstance(roll, dict):
-        # GitHub can collapse a single-member rollup to the object itself
-        # (run 43618358575): iterating that object yields its keys, not the
-        # checks — wrap it so the members stay dicts.
-        roll = [roll]
-    if any(isinstance(check, dict) and check.get('state') in DECISIVE_CHECK_FAILURES
-           for check in roll):
+    # A finished check that failed is a merge refusal GitHub has already
+    # decided; selecting the pull request again spends a worker run on the
+    # same answer every 30 minutes (#51479 family 1). The checks are read one
+    # by one because the rollup's own state also counts a cancelled run as
+    # FAILURE. Pending and expected checks stay selectable — the worker still
+    # holds on them, but a later run can see them pass without new evidence.
+    # The listing is capped at 100 checks; a failure past the cap falls
+    # through and the worker's own answer still records the case.
+    checks = ((row.get('statusCheckRollup') or {}).get('contexts') or {}).get('nodes') or []
+    if any(decisively_failed(check) for check in checks):
         return False
     # Workflow-file pull requests cannot be merged by this token at all
     # (#51452 family 3): GitHub refuses the arming itself, and only the human

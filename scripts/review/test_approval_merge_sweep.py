@@ -43,6 +43,19 @@ def row(number, base='main', *, approvals=2, **changes):
     return dict(value, **changes)
 
 
+def check_run(conclusion):
+    return {'__typename': 'CheckRun', 'conclusion': conclusion}
+
+
+def commit_status(state):
+    return {'__typename': 'StatusContext', 'state': state}
+
+
+def rollup(*checks):
+    """The head commit's checks as the listing query returns them."""
+    return {'contexts': {'nodes': list(checks)}}
+
+
 def never(number):
     raise AssertionError(f'#{number} needed no stack lookup')
 
@@ -62,29 +75,47 @@ class Selection(unittest.TestCase):
                 refused, row(9, isCrossRepository=True)]
         self.assertEqual(SWEEP.select(rows, never), [])
 
-    def test_a_decisively_failed_check_stops_repeated_entry(self):
-        failed = row(11, statusCheckRollup=[{'state': 'FAILURE'}])
-        errored = row(12, statusCheckRollup=[{'state': 'SUCCESS'}, {'state': 'ERROR'}])
-        self.assertEqual(SWEEP.select([failed, errored], never), [])
+    def test_a_check_that_said_no_stops_repeated_entry(self):
+        for conclusion in ('FAILURE', 'TIMED_OUT', 'STARTUP_FAILURE', 'ACTION_REQUIRED'):
+            with self.subTest(conclusion=conclusion):
+                failed = row(11, statusCheckRollup=rollup(check_run('SUCCESS'),
+                                                          check_run(conclusion)))
+                self.assertEqual(SWEEP.select([failed], never), [])
+        for state in ('FAILURE', 'ERROR'):
+            with self.subTest(state=state):
+                refused = row(12, statusCheckRollup=rollup(commit_status('SUCCESS'),
+                                                           commit_status(state)))
+                self.assertEqual(SWEEP.select([refused], never), [])
 
-    def test_a_pending_or_expected_rollup_stays_selectable(self):
-        pending = row(13, statusCheckRollup=[{'state': 'PENDING'}])
-        expected = row(14, statusCheckRollup=[{'state': 'EXPECTED'}])
-        passed = row(15, statusCheckRollup=[{'state': 'SUCCESS'}])
-        self.assertEqual(SWEEP.select([pending, expected, passed], never), [13, 14, 15])
+    def test_a_cancelled_check_says_nothing(self):
+        # Approval merge request cancels its own older runs and the cancelled
+        # run stays in the rollup, whose aggregate state reads FAILURE. #53381
+        # was approved on its head and mergeable, UNSTABLE for that alone, and
+        # no sweep picked it.
+        cancelled = row(13, statusCheckRollup=rollup(check_run('SUCCESS'),
+                                                     check_run('CANCELLED')))
+        self.assertEqual(SWEEP.select([cancelled], never), [13])
+
+    def test_a_check_that_has_not_decided_stays_selectable(self):
+        # A running check has no conclusion yet; a pending or expected status
+        # can still pass on a later run.
+        undecided = [check_run(None), check_run('SKIPPED'), check_run('NEUTRAL'),
+                     commit_status('PENDING'), commit_status('EXPECTED'),
+                     commit_status('SUCCESS')]
+        rows = [row(20 + offset, statusCheckRollup=rollup(check))
+                for offset, check in enumerate(undecided)]
+        self.assertEqual(SWEEP.select(rows, never), [20, 21, 22, 23, 24, 25])
 
     def test_a_row_without_a_rollup_stays_selectable(self):
-        self.assertEqual(SWEEP.select([row(1)], never), [1])
+        self.assertEqual(SWEEP.select([row(1), row(2, statusCheckRollup=None)], never), [1, 2])
 
-    def test_a_single_object_rollup_does_not_crash_the_selection(self):
-        # GitHub can collapse a single-member statusCheckRollup to the object
-        # itself (run 43618358575): its keys must not be mistaken for checks.
-        collapsed = row(19, statusCheckRollup={'state': None})
-        self.assertEqual(SWEEP.select([collapsed], never), [19])
-
-    def test_a_collapsed_decisive_rollup_still_stops_entry(self):
-        collapsed = row(20, statusCheckRollup={'state': 'FAILURE'})
-        self.assertEqual(SWEEP.select([collapsed], never), [])
+    def test_a_failure_among_unknown_kinds_still_stops_entry(self):
+        # The listing is a union; a member this code does not know says nothing,
+        # and a null member must not hide the failed check beside it.
+        mixed = row(14, statusCheckRollup=rollup({'__typename': 'Something'}, None,
+                                                 check_run('FAILURE')))
+        unknown = row(15, statusCheckRollup=rollup({'__typename': 'Something'}, None))
+        self.assertEqual(SWEEP.select([mixed, unknown], never), [15])
 
     def test_a_workflow_file_pull_request_is_left_to_the_human_path(self):
         touched = row(16, files={'totalCount': 1,

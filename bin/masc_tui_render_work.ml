@@ -136,7 +136,7 @@ let work_entry_lines ~cells ~height ~selected ~title ~summary ~compact =
     else [lead ^ Terminal_text.single_line title; "  " ^ summary] in
   List.map (fun line ->
     if selected then
-      Masc_tui_theme.selection ^ Message_layout.fit_width (Masc_tui_theme.strip_sgr line) cells ^ Ansi.reset
+      Theme.selection_style () ^ Message_layout.fit_width (Masc_tui_theme.strip_sgr line) cells ^ Ansi.reset
     else Message_layout.fit_width line cells) lines
 
 let work_preview_field ~cells label value =

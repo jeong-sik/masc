@@ -1949,7 +1949,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
       ~push_selected:(fun text ->
-        collect (Theme.selection ^ fit_width text fact_inner_cols ^ Ansi.reset))
+        collect (Theme.selection_style () ^ fit_width text fact_inner_cols ^ Ansi.reset))
       ~push_divider:(fun () ->
         collect (Theme.recede () ^ draw_hline fact_inner_cols ^ Ansi.reset))
       ~push_empty:(fun () -> collect "");
@@ -2006,7 +2006,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
       (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
        |> List.map (fun (category, text) ->
            let text = fit_width ("  " ^ text) width in
-           let style = if category = state.memory_facts_category then Theme.selection else Theme.recede () in
+           let style = if category = state.memory_facts_category then Theme.selection_style () else Theme.recede () in
            Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
     let facts = List.rev !facts in
     let height = max (List.length facts) (min budget (List.length rail)) in

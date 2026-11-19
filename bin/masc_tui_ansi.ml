@@ -274,6 +274,26 @@ module Theme = struct
      drew two cyans would not say which one is the accent. *)
   let accent () = (resolved ()).hue_cyan
   let selection = Masc_tui_theme.selection
+  let selection_style_cache : (int * string) option Atomic.t = Atomic.make None
+
+  let rec selection_style () =
+    let probed = Masc_tui_terminal_palette.snapshot () in
+    let generation = Masc_tui_terminal_palette.snapshot_generation probed in
+    let previous = Atomic.get selection_style_cache in
+    match previous with
+    | Some (cached_generation, style) when cached_generation = generation ->
+      style
+    | Some _ | None ->
+      let style =
+        Masc_tui_theme.selection_style
+          (Masc_tui_terminal_palette.snapshot_palette probed)
+      in
+      if Atomic.compare_and_set selection_style_cache previous
+           (Some (generation, style))
+      then style
+      else selection_style ()
+  ;;
+
   let sidebar_selection () =
     Masc_tui_terminal_palette.snapshot ()
     |> Masc_tui_terminal_palette.snapshot_palette
@@ -1208,16 +1228,17 @@ let detail_heading ~cols ~lead ~id ~after ~tail =
   in
   lead ^ id ^ after ^ tail
 
-(* The selected row of a borderless list: one reverse-video band across the
-   full row, box_line's geometry (the frame's margin each side, content width
-   {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is also the
-   selection signal a colourless terminal keeps. Content must carry no SGR
-   of its own -- an inner reset would cut the band short; callers fold a
-   styled row with [Masc_tui_theme.strip_sgr] first. *)
+(* The selected row of a borderless list: one full-width selection band
+   (Truecolor accent-tinted on Truecolor terminals, reverse video otherwise),
+   matching box_line's geometry (the frame's margin each side, content width
+   {!framed_inner_width}). Reverse survives NO_COLOR by contract, so this is
+   also the selection signal a colourless terminal keeps. Content must carry
+   no SGR of its own -- an inner reset would cut the band short; callers fold
+   a styled row with [Masc_tui_theme.strip_sgr] first. *)
 let box_line_selected buf cols content =
   let inner = framed_inner_width cols in
   add_row buf
-    [ Masc_tui_theme.selection; frame_margin; fit_width content inner; frame_margin
+    [ Theme.selection_style (); frame_margin; fit_width content inner; frame_margin
     ; Ansi.reset ]
 
 let box_empty buf cols =

@@ -185,9 +185,10 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
       let shown = List.drop offset rows |> List.take budget in
       quiet (Table.header_row (event_cells ~ko ~now ~cols:cells first))
       :: List.mapi (fun i event ->
-          let row = Table.row ~close:(if i = 0 then Ansi.reset ^ Theme.selection else Ansi.reset)
+          let sel = Theme.selection_style () in
+          let row = Table.row ~close:(if i = 0 then Ansi.reset ^ sel else Ansi.reset)
             (event_cells ~selected:(i = 0) ~ko ~now ~cols:cells event) in
-          if i = 0 then Theme.selection ^ row ^ Ansi.reset else row) shown
+          if i = 0 then sel ^ row ^ Ansi.reset else row) shown
       @ [quiet ("Enter "
           ^ text "전문  ·  [.] 변화 카드 · Ctrl-O 연결 트리" "full text  ·  [.] change cards · Ctrl-O connected tree")] in
   let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in

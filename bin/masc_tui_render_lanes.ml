@@ -845,7 +845,7 @@ let render_lanes_overview (state : state) =
           ^ fit_width label label_width ^ "  " ^ fit_width (summary row) status_width in
         let marked text = pressable (Press_lane_row (Masc_tui_lane_inventory.identity row))
             (fit_width text list_cells) in
-        if selected_position = Some index then Theme.selection ^ marked plain ^ Ansi.reset
+        if selected_position = Some index then Theme.selection_style () ^ marked plain ^ Ansi.reset
         else
           let recede = if Masc_tui_lane_standing.recedes observed then Theme.recede () else "" in
           marked (Masc_tui_lane_standing.colour observed

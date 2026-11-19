@@ -576,11 +576,12 @@ let render_code (state : state) =
           in
           let line =
             if selected then
-              Theme.selection ^ " " ^ marker ^ name
+              let plain_marker = Masc_tui_theme.strip_sgr marker in
+              Theme.selection_style () ^ " " ^ plain_marker ^ name
               ^ String.make
                   (max 0
                      (framed_inner_width pane_cols - 3
-                      - Message_layout.display_width (marker ^ name)))
+                      - Message_layout.display_width (plain_marker ^ name)))
                   ' '
               ^ Ansi.reset
             else " " ^ marker ^ name

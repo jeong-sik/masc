@@ -1239,7 +1239,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           (skill_source_picker_prefix (Say.of_ko_flag (fun ~ko -> Masc_tui_pick_list.summary ~ko view))
            @ (if view.rows = [] then [Theme.warn (), Say.both ~ko:" 맞는 출처 없음" ~en:" No matching source"] else
                List.mapi (fun index source ->
-                 (if view.selected_row = Some index then Theme.selection else Ansi.dim),
+                 (if view.selected_row = Some index then Theme.selection_style () else Ansi.dim),
                  Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
     ; cursor = None
     ; card = None
@@ -1439,7 +1439,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  else rows lines
                in
                rows heading
-               @ [ (if selected then Cursor (Theme.selection, skill_row)
+               @ [ (if selected then Cursor (Theme.selection_style (), skill_row)
                     else Row (Ansi.dim, skill_row)) ]
                @ entry_rows (match profile.esp_load_reasons, chosen with
                    | [], _ ->

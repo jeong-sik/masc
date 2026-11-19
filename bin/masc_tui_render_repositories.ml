@@ -419,7 +419,7 @@ let render_repository_list (state : state) =
           | Some r ->
               let line = row r in
               if idx = state.repositories_cursor then
-                Theme.selection ^ fit_width line row_width ^ Ansi.reset
+                Theme.selection_style () ^ fit_width line row_width ^ Ansi.reset
               else line)
       in
       if shown > 0 then

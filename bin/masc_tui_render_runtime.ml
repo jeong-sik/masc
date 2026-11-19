@@ -1163,7 +1163,7 @@ let render_tools (state : state) =
     (header
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:drawable));
   box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
-  box_line_styled buf cols ~style:Theme.selection
+  box_line_styled buf cols ~style:(Theme.selection_style ())
     (Render_tools.tools_selection_line ~cols state);
   box_divider buf cols;
   (match (selected_tools_error state) with

@@ -2255,7 +2255,7 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
         , framed_line
         , framed_line_styled
         , (fun buf cols content ->
-            framed_line_styled buf cols ~style:Masc_tui_theme.selection content)
+            framed_line_styled buf cols ~style:(Theme.selection_style ()) content)
         , framed_divider
         , framed_empty
         , framed_bottom )
@@ -6348,7 +6348,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           (fun index (item : Inspector.exact_input_item) ->
              let selected = index = state.context_inspector_cursor in
              let marker, style =
-               if selected then ">", Theme.selection else " ", Ansi.reset
+               if selected then ">", Theme.selection_style () else " ", Ansi.reset
              in
              let label_width = max 8 (width - 22) in
              (* The list carries the producer's colour the summary above it
@@ -6579,17 +6579,23 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           (fun index (row : Inspector.input_map_row) ->
              let selected = index = state.context_inspector_cursor in
              let marker, selection =
-               if selected then ">", Theme.selection else " ", Ansi.reset
+               if selected then ">", Theme.selection_style () else " ", Ansi.reset
              in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
+             let label =
+               fit_width (Inspector.input_component_label row.component) label_width
+             in
+             let badge = context_evidence_badge row.evidence in
+             let component_style, after_label, shown_badge =
+               if selected then "", "", Masc_tui_theme.strip_sgr badge
+               else context_component_style row.component, Ansi.reset, badge
+             in
              Printf.sprintf "%s %s %s %s%s%s \xe2\x89\x88%6s tok %s%s"
                selection marker branch
-               (context_component_style row.component)
-               (fit_width (Inspector.input_component_label row.component) label_width)
-               Ansi.reset
+               component_style label after_label
                (Inspector.format_tokens
                   (Masc_tui_token_scale.estimate scale row.bytes))
-               (context_evidence_badge row.evidence)
+               shown_badge
                Ansi.reset)
           rows
       in

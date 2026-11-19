@@ -1528,6 +1528,8 @@ let run_turn
                       ~checkpoint_sink
                       ~initial_messages
                       ~argument_demotion_seed
+                      ~this_turn_opening:
+                        (Keeper_run_prompt.this_turn_opening prompt_user_turn_record)
                       ~model_input_projection
                       ~hooks
                       ?approval_gate

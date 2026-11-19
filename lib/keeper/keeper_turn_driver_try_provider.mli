@@ -92,6 +92,21 @@ val absorbed_history :
     be used ({!continuity_for_request}) (RFC keeper-context-window-in-tokens
     section 13.6). *)
 
+(** Whether the [Opened] this run wrote comes before this turn's input
+    (RFC librarian-lifecycle §4.10, rules 7 and 8). The driver reads where
+    this turn began from that line's baseline only for
+    [Opened_before_its_input]. *)
+type this_turn_opening =
+  | Opened_before_its_input
+      (** This run put the turn's input into the history after its
+          [Opened]: the line's baseline is where the turn began. *)
+  | Opened_after_its_input
+      (** A resumed checkpoint (native resume, direct resume, HITL) already
+          holds this turn's input and maybe its progress, and an earlier run
+          closed them. This run's [Opened] is written after them, so its
+          baseline names no start: resending from it would leave the turn's
+          own request out. *)
+
 type turn_starts =
   { boundary : Keeper_carried_front.turn_start
         (** Where a request with no absorbed point starts (RFC
@@ -103,9 +118,11 @@ type turn_starts =
             then opens on the newest atom alone and its origin says so,
             rather than on the whole history. *)
   ; this_turn : int option
-        (** Where this turn began: the baseline of the log's open [Opened].
-            Rule 8 resends from it, and rule 7 bounds the front rule 8 held
-            by it (RFC librarian-lifecycle §4.10). [None] with no open turn,
+        (** Where this turn began: the baseline of the log's open [Opened],
+            for a run that wrote it before the turn's input
+            ({!this_turn_opening}; the driver decides). Rule 8 resends from
+            it, and rule 7 bounds the front rule 8 held by it (RFC
+            librarian-lifecycle §4.10). [None] with no open turn,
             a [Reset] after its [Opened], a baseline of another trace, or a
             history shorter than the baseline. *)
   }

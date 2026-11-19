@@ -30,6 +30,11 @@ type user_turn_record =
       (** The resumed AGENT_CORE checkpoint already owns this exact user turn. Do not
           append or persist a second copy before replay. *)
 
+let this_turn_opening = function
+  | Record_user_turn -> Keeper_turn_driver_try_provider.Opened_before_its_input
+  | Skip_already_checkpointed_user_turn -> Keeper_turn_driver_try_provider.Opened_after_its_input
+;;
+
 type extra_system_context_assembly = Keeper_context_assembly.t
 
 let sanitize_user_message = Inference_utils.sanitize_text_utf8

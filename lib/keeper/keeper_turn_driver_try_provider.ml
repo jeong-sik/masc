@@ -144,6 +144,10 @@ let covered_messages ~end_atom messages =
    history the reset replaced), a baseline of another trace, or a history
    shorter than the baseline names no start: rule 8 then has nothing to
    resend from, and rule 7 bounds by the boundary alone. *)
+type this_turn_opening =
+  | Opened_before_its_input
+  | Opened_after_its_input
+
 type turn_starts =
   { boundary : Keeper_carried_front.turn_start
   ; this_turn : int option

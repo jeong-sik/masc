@@ -27,6 +27,15 @@ type user_turn_record =
     checkpoint that already contains the exact current input, so replay does
     not append a duplicate. The distinction is typed, not inferred from text. *)
 
+val this_turn_opening :
+  user_turn_record -> Keeper_turn_driver_try_provider.this_turn_opening
+(** Whether the [Opened] this run writes comes before this turn's input, for
+    rules 7 and 8 of RFC librarian-lifecycle §4.10: [Opened_before_its_input]
+    for [Record_user_turn], and [Opened_after_its_input] for
+    [Skip_already_checkpointed_user_turn]. A resumed checkpoint already holds
+    this turn's input and maybe its progress, and the earlier run closed
+    them, so this run's [Opened] baseline is not where the turn began. *)
+
 type extra_system_context_assembly = Keeper_context_assembly.t
 
 val sanitize_user_message : string -> string

@@ -2285,6 +2285,7 @@ let run_named
     ?required_native_posture
     ?(initial_messages = [])
     ?argument_demotion_seed
+    ?(this_turn_opening = Keeper_turn_driver_try_provider.Opened_after_its_input)
     ?model_input_projection
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
@@ -3923,7 +3924,11 @@ let run_named
             ; input_runtime = Some runtime
             ; error_runtime_id
             ; turn_boundary = Eio.Lazy.force turn_boundary
-            ; this_turn_start = (Eio.Lazy.force turn_starts).Keeper_turn_driver_try_provider.this_turn
+            ; this_turn_start =
+                (match this_turn_opening with
+                 | Keeper_turn_driver_try_provider.Opened_before_its_input ->
+                   (Eio.Lazy.force turn_starts).Keeper_turn_driver_try_provider.this_turn
+                 | Keeper_turn_driver_try_provider.Opened_after_its_input -> None)
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection
             ; prepare_request_media =

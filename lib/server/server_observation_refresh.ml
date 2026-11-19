@@ -5,7 +5,7 @@ type surface = Execution_trust | Execution | Transport_health | Mission | Operat
 let affects_trust = function
   | Input.Keeper { change =
       (Phase _ | Composite | Row | Turn | Tool_approval_waits
-      | Tool_approval_mode | Gate_settings | Event_queue | Waiting_inventory _); _ }
+      | Tool_approval_mode | Event_queue | Waiting_inventory _); _ }
   | Every_keeper_row | Gate _ | Connector _
   | Keeper_tool_call _ | Keeper_approval_audit _ -> true
   | Telemetry_gap { source = Some Execution_receipt; _ } -> true
@@ -38,7 +38,7 @@ let affects_execution input =
   | Dataset (Clients | Goals | Skill_catalog | Keeper_metrics _
       | Skill_activations _ | Keeper_costs | Verification_requests) -> true
   | Keeper {change = (Phase _ | Composite | Row | Turn | Tool_approval_waits
-      | Tool_approval_mode | Gate_settings | Event_queue | Waiting_inventory _); _}
+      | Tool_approval_mode | Event_queue | Waiting_inventory _); _}
   | Gate _ | Connector _ | Keeper_tool_call _ | Keeper_approval_audit _
   | Store (Runtime_config | Tools)
   | Dataset (Runtime_config | Connectors | Runtime_probe | Provider_standing | Runtime_metrics)
@@ -77,7 +77,7 @@ let affects_mission input = match input with
        | Dataset _
        | Keeper {change = (Phase _ | Composite | Row | Turn | Chat | Native_tasks | Child_content
            | Memory_journal | Async_requests | Asks | Tool_approval_waits | Tool_approval_mode
-           | Gate_settings | Event_queue | Waiting_inventory _); _}
+           | Event_queue | Waiting_inventory _); _}
        | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _ | Board_attention _
        | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
        | Keeper_tool_call _ | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _ ->
@@ -91,7 +91,7 @@ let affects_snapshot input = match input with
   | Dataset _
   | Keeper {change = (Phase _ | Composite | Row | Turn | Chat | Native_tasks | Child_content
       | Memory_journal | Async_requests | Asks | Tool_approval_waits | Tool_approval_mode
-      | Gate_settings | Event_queue | Waiting_inventory _); _}
+      | Event_queue | Waiting_inventory _); _}
   | Every_keeper_row | Chat_operation _ | Gate _ | Connector _ | Store _ | Board_attention _
   | Execution_invalidated | Agent_core _ | Telemetry_sample | Telemetry_gap _
   | Keeper_tool_call _ | Keeper_approval_audit _ | Workspace_agent_signal _ | Workspace_messages _

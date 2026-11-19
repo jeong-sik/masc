@@ -10,7 +10,6 @@ type setup_error =
   | Registry_fenced
   | Registry_unavailable
   | Lane_unavailable
-  | Lane_preference_unavailable of string
   | Lane_resolved_without_slots
   | Candidate_invalid of
       { position : int
@@ -157,7 +156,7 @@ let registry_setup_error = function
     Registry_unavailable
 ;;
 
-let prepare ~base_path ~keeper_name ~net candidate =
+let prepare ~base_path ~net candidate =
   match
     ( Keeper_board_attention_candidate.status_view
         candidate.Keeper_board_attention_candidate.status
@@ -202,14 +201,8 @@ let prepare ~base_path ~keeper_name ~net candidate =
       Runtime_exact_output_registry.resolve_lane registry ~lane_id
       |> Result.map_error (fun _ -> Lane_unavailable)
     in
-    let* (ordered : Runtime_exact_lane_backpressure.ordered) =
-      (Keeper_exact_lane_preference.apply
-         ~base_path
-         ~keeper_name
-         ~lane_id
-         resolved)
-      |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
-      |> Result.map Runtime_exact_lane_backpressure.order
+    let (ordered : Runtime_exact_lane_backpressure.ordered) =
+      Runtime_exact_lane_backpressure.order resolved
     in
     let resolved = ordered.lane in
     let* candidates = flow_candidates resolved.selected_slots in

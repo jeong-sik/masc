@@ -19,7 +19,7 @@ let components_of_topic : Sse_event.Types.dashboard_observation_topic -> compone
 let components_of_input input =
   let extra = match input with
     | Input.Keeper {change = Asks | Tool_approval_waits | Tool_approval_mode
-        | Gate_settings | Event_queue | Waiting_inventory _; _}
+        | Event_queue | Waiting_inventory _; _}
     | Gate _ | Connector _ -> [Tools]
     | Execution_invalidated -> [Shell; Telemetry]
     | Keeper {change = Phase _ | Composite | Row; _}

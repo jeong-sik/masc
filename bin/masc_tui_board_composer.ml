@@ -85,7 +85,7 @@ let format_addressing_hint ~max_cells kind =
         (String.concat ", " selectors)
         Ansi.reset
   | Discoverable_unaddressed ->
-      Printf.sprintf "%s[Tip: Unmentioned posts are Discoverable — use @<keeper> or @@all to wake keepers]%s"
+      Printf.sprintf "%s[Tip: Unmentioned posts are Discoverable · use @<keeper> or @@all to wake keepers]%s"
         Ansi.dim Ansi.reset
 ;;
 

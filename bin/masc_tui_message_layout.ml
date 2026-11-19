@@ -3111,7 +3111,7 @@ let folded_thought_summary ~mark ~width ~line_count ~body =
     Printf.sprintf "%s Thought \xc2\xb7 %d %s \xc2\xb7 Ctrl-R"
       mark line_count unit_word
   in
-  let sep = " \xe2\x80\x94 " in
+  let sep = " \xc2\xb7 " in
   let overhead = display_width compact + display_width sep in
   let preview_budget = min 64 (width - overhead) in
   if preview_budget < 12 then compact

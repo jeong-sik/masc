@@ -540,8 +540,8 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
            then "저장된 확인과 증거를 끝까지 읽고 [a]를 눌러 완료 처리를 재개합니다. Esc는 취소합니다."
            else "Read the recorded confirmation and evidence, then [a] to resume completion; Esc cancels."
          | None -> if ko
-           then "이 증명을 확인합니다 — 증거를 끝까지 읽은 뒤 [a], 그만두려면 Esc"
-           else "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels")
+           then "이 증명을 확인합니다 · 증거를 끝까지 읽은 뒤 [a], 그만두려면 Esc"
+           else "CONFIRM THIS PROOF · read through evidence, then [a]; Esc cancels")
   in
   let promise =
     labelled ~tone:Plain (text "제목" "Title") criterion.title
@@ -854,7 +854,7 @@ let timeline ~ko ~now ~width ~goal_id
     | Masc_tui_fetched.Failed (Timeline_kept_back notice) -> wrapped ~width Unreadable
         ("  " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ { tone = Quiet; text = (text "  기록 미조회" "  timeline not requested") } ]
-    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = (text "  조회 중" "  loading...") } ]
+    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = (text "  조회 중" "  loading") } ]
   in
   let pending =
     if not (Masc_tui_fetched.in_flight loaded) then []

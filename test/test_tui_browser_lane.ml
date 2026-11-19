@@ -418,7 +418,7 @@ let test_picker_empty_row () =
   let row = Masc_tui_types.browser_lane_picker_empty_line ~ko:false in
   expect "nothing asked yet is unread" (row (create ()) = Some (Masc_tui_types.page_unread_note ~ko:false));
   expect "a discovery in flight waits"
-    (row (discover (create ())) = Some "  Waiting for active connections\xe2\x80\xa6");
+    (row (discover (create ())) = Some "  Waiting for active connections");
   let failed, _ = accept_clients ~generation:30 (Error "connection refused") (discover (create ())) in
   expect "a failed discovery holds no list" (failed.clients = None && listed_clients failed = []);
   expect "a failed discovery is not an empty one" (row failed = Some (Masc_tui_types.page_failed_note ~ko:false));

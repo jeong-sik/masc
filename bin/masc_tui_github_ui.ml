@@ -105,7 +105,7 @@ let start_login (state : state) ~login =
     <- Some
          ( keeper.k_name
          , [ "# github login"
-           ; "(starting gh device flow with " ^ asked ^ "\xe2\x80\xa6)"
+           ; "(starting gh device flow with " ^ asked ^ ")"
            ] );
     login keeper.k_name
   | None -> ()

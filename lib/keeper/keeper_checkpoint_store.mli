@@ -682,6 +682,8 @@ type checkpoint_installation =
   | Not_installed of not_installed_checkpoint
   | Installed of installed_checkpoint
 
+val checkpoint_cas_error_to_string : checkpoint_cas_error -> string
+
 val checkpoint_installation_auxiliary_to_string :
   checkpoint_installation_auxiliary -> string
 

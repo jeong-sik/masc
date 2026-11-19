@@ -50,6 +50,24 @@ let zoom_out = function
   | Full -> Half
   | Half | Normal -> Normal
 
+let step_zoom ~zoom ~direction ~activity_available ~roster_available =
+  match direction with
+  | `In -> (
+      if not activity_available && not roster_available then None
+      else
+        match zoom with
+        | Normal ->
+            if activity_available then Some Half
+            else Some Full
+        | Half ->
+            if roster_available then Some Full
+            else Some Half
+        | Full -> Some Full)
+  | `Out -> (
+      match zoom with
+      | Full -> if activity_available then Some Half else Some Normal
+      | Half | Normal -> Some Normal)
+
 let hides_activity = function
   | Normal -> false
   | Half | Full -> true

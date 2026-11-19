@@ -134,7 +134,27 @@ let test_zoom_steps_and_saturates_cleanly () =
             check_bool "zoom label is non-empty" true
               (String.length (Pane.zoom_label ~ko z) > 0))
          [ true; false ])
-    [ Pane.Normal; Pane.Half; Pane.Full ]
+    [ Pane.Normal; Pane.Half; Pane.Full ];
+  Alcotest.(check (option zoom_testable))
+    "refuses zoom-in when no side pane is available" None
+    (Pane.step_zoom ~zoom:Pane.Normal ~direction:`In
+       ~activity_available:false ~roster_available:false);
+  Alcotest.(check (option zoom_testable))
+    "activity-only stops at Half without silently entering Full" (Some Pane.Half)
+    (Pane.step_zoom ~zoom:Pane.Half ~direction:`In
+       ~activity_available:true ~roster_available:false);
+  Alcotest.(check (option zoom_testable))
+    "roster-only jumps directly Normal -> Full" (Some Pane.Full)
+    (Pane.step_zoom ~zoom:Pane.Normal ~direction:`In
+       ~activity_available:false ~roster_available:true);
+  Alcotest.(check (option zoom_testable))
+    "roster-only zooms out directly Full -> Normal" (Some Pane.Normal)
+    (Pane.step_zoom ~zoom:Pane.Full ~direction:`Out
+       ~activity_available:false ~roster_available:true);
+  Alcotest.(check (option zoom_testable))
+    "zoom-out still recovers Normal even after narrowing" (Some Pane.Normal)
+    (Pane.step_zoom ~zoom:Pane.Full ~direction:`Out
+       ~activity_available:false ~roster_available:false)
 
 let () =
   Alcotest.run "tui_roster_pane"

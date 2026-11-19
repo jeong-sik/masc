@@ -18892,13 +18892,15 @@ let goal_drop_reason_for (state : state) (goal_id : string) =
    pane draws only when the terminal is wide enough for it
    ([Masc_tui_acting_pane.drawn_cols]). An explicit reader choice applies on
    every surface and survives surface changes. *)
+let stored_acting_pane_layout (state : state) =
+  match state.acting_pane_preference with
+  | Chosen_acting_pane layout -> layout
+  | Default_acting_pane -> Masc_tui_acting_pane.Narrow
+
 let acting_pane_layout (state : state) =
   if Masc_tui_roster_pane.hides_activity state.pane_zoom then
     Masc_tui_acting_pane.Hidden
-  else
-    match state.acting_pane_preference with
-    | Chosen_acting_pane layout -> layout
-    | Default_acting_pane -> Masc_tui_acting_pane.Narrow
+  else stored_acting_pane_layout state
 
 (* Requests retain receipts and unresolved declarations across withdrawal.
    Successful creation releases its retry body; receipts grant no authority. *)

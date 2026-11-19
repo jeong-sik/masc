@@ -56,6 +56,18 @@ val zoom_in : zoom -> zoom
 val zoom_out : zoom -> zoom
 (** Step one stage back toward normal split ([Full -> Half -> Normal]). *)
 
+val step_zoom :
+  zoom:zoom ->
+  direction:[ `In | `Out ] ->
+  activity_available:bool ->
+  roster_available:bool ->
+  zoom option
+(** Availability-aware zoom step. Stepping [`In] returns [None] when neither
+    side pane can actually be hidden on the current surface/width (leaving
+    stored [pane_zoom] untouched), skips stages whose pane is not shown, and
+    stops once every visible side pane is already collapsed. Stepping [`Out]
+    always allows returning to [Normal] even after narrowing the terminal. *)
+
 val hides_activity : zoom -> bool
 (** Whether [zoom] temporarily collapses the right Activity pane. *)
 

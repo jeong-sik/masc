@@ -382,6 +382,18 @@ let replacement_not_recorded =
      again."
 ;;
 
+(* A folder that is not there for this server, or is not a private folder
+   of its user, is the server's to mend: the same request gets the same
+   answer until then. An error that passes is answered so too, so the
+   sentence leaves the next request to the person. *)
+let files_not_reached =
+  refused
+    R.Service_unavailable_503
+    ~code:"files_not_reached"
+    "This server could not use the folder of this account. Nothing was recorded, and the key of the \
+     account was not changed. If the answer stays the same, tell the person who runs this server."
+;;
+
 let replacement_unexpected =
   refused
     R.Internal_error_500
@@ -426,7 +438,7 @@ let replacement_error person : Replacement.error -> R.answer = function
       R.Conflict_409
       ~code:"account_call_running"
       "A call of this account is running. Try again when it ends."
-  | Replacement.Files_not_reached -> replacement_not_recorded
+  | Replacement.Files_not_reached -> files_not_reached
   | Replacement.Not_recorded error ->
     (match not_recorded_of error with
      | Refused_by_state refusal ->

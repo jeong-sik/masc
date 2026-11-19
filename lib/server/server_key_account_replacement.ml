@@ -42,14 +42,15 @@ let held (person : Login.person) id =
    under the real path of the root, the path the store and the removal of
    the folder of the keys spell theirs from.
 
-   A replacement whose store is known to fail is not recorded: the record
-   would take the key before out of use and put none in its place. Under a
-   root that is not reached, a store that failed could not clear the
-   folder of the keys either. A home that is no private folder of this
-   user is turned down the same way, although the folder of the keys could
-   be cleared beside it: the account keeps the key it has until the home
-   is mended. A root that goes away between this and the store is not
-   held. *)
+   Under a root or a home that is not reached the replacement is turned
+   down while no record is written: the store would fail, and the record
+   would take the key before out of use and put none in its place. Under
+   such a root a store that failed could not clear the folder of the keys
+   either. The file of the key stays. Under a home that is no private
+   folder of this user every use of the account is refused as well, until
+   the folder is mended. The folder of the keys is not looked at here: a
+   store that fails there is recorded ([Key_not_stored]). A root that goes
+   away between this and the store is not held. *)
 let reached (person : Login.person) ~base_path id =
   match Login.person_runtime_root person ~base_path with
   | Error (_ : string) ->

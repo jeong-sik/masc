@@ -482,7 +482,7 @@ let test_exact_source_retraction_preserves_and_reconsiders () =
    pending ones. The queue pass compares against what it was shown instead,
    so the same capture makes no second model call. *)
 let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun keepers_dir ->
-  let module Queue = Keeper_librarian_queue_refresh.For_testing in
+  let module Pass = Keeper_working_context_pass in
   let keeper_name = "unchanged-capture" in
   let settled = source "event:settled" "an event the Keeper already handled" in
   let a = source "event:a" "campaign" in
@@ -491,7 +491,7 @@ let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun kee
   let captured : Context.input =
     {sources = [a]; previous = Some first; unavailable = ["chat store not yet available"];
      execution_basis = None} in
-  let needed inp = Queue.context_pass_needed ~keepers_dir ~keeper_name inp in
+  let needed inp = Pass.needed ~keepers_dir ~keeper_name inp in
   check bool "a new pending input needs a pass" true (needed captured);
   let committed = ok (Context.commit ~keepers_dir ~keeper_id:keeper_name
       ~expected_version:(Some (Context.version first)) ~sources:[a]
@@ -501,7 +501,7 @@ let test_unchanged_capture_needs_no_second_queue_pass () = with_store @@ fun kee
     (List.map (fun (s : Context.source) -> s.reference) committed.sources |> List.sort String.compare);
   let recaptured = {captured with previous = Some committed} in
   check bool "stored references alone make the same capture look changed" true (needed recaptured);
-  Queue.remember_context_pass ~keepers_dir ~keeper_name captured (Context.version committed);
+  Pass.remember ~keepers_dir ~keeper_name captured (Context.version committed);
   check bool "the same capture makes no second model call" false (needed recaptured);
   check bool "a new pending input still needs a pass" true
     (needed {recaptured with sources = [a; question]});

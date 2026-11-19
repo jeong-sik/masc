@@ -1251,6 +1251,15 @@ Memory 를 바꾼 쓰기 뒤에는 새 질문을 slot 마다 한 번 묻는다. 
 - `Resume` 의 답 `Done` 은 boot 가 돌았다는 뜻이다. 어떻게 끝났는지는 상태가 말한다.
 - `Adopt` 가 줄을 덧붙이다 I/O 로 실패하면 `Refused (Store_stopped Store_unwritable)` 로 답한다. 상태는 멈춘 그대로다.
 - 계획의 효과로 스냅샷이 만들어지지 않으면 쓰기를 거절하고 아무것도 쓰지 않는다. 계획과 스냅샷 codec 이 어긋났다는 뜻이라 일어나면 결함이다.
+
+fiber 는 잠금을 잡고, boot 하고, mailbox 에서 사건을 하나씩 꺼낸다(`Librarian_writer`).
+
+- 잠금은 기다리지 않고 잡는다. 못 잡으면 `Stopped Store_unwritable` 이고 `Resume` 이 다시 잡아 본다. 한번 잡으면 fiber 가 끝날 때까지 쥔다.
+- 쓰는 쪽은 사건에 답하기 전에 바뀐 상태를 내놓는다. 그래서 답을 받은 쪽이 읽는 상태는 그 답 뒤의 상태다.
+- 읽는 쪽은 mailbox 를 거치지 않는다. 쓰는 쪽이 내놓은 값 하나를 읽는다. 열린 저장소에서는 반영 기록의 꼬리 줄이다.
+- 끝난 쓰는 쪽은 mailbox 를 꺼내지 않는다. 그래서 보낸 쪽은 답과 쓰는 쪽의 끝을 함께 기다린다. 끝이 먼저 오면 `Keeper_retired` 로 답한다.
+- `Retire` 의 답은 잠금을 놓은 뒤에 간다. Keeper 를 지우는 경로가 그 답을 받고 파일을 지운다.
+- 저장소가 멈추면 이유를 Keeper 이름과 함께 로그에 적는다. 잠금을 못 잡은 이유도 적는다.
 꺼진 Keeper 의 안 읽은 단위는 꺼져 있는 동안 읽지 않는다. 다시 켜면 boot 가 반영 기록의 자리에서 이어 읽는다. 지금은 autoboot 가 띄우지 않은 Keeper 의 것도 따라잡는다(`server_bootstrap_loops.ml:2197-2206`). 그 점이 달라진다.
 
 ### 9.4 읽기가 서 있는 곳
@@ -1907,7 +1916,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5e | Keeper 하나의 Memory 저장소(`Librarian_store`): boot 표와 직접 쓰기의 반영 2~5단계. 잠금과 fiber 는 없다. 턴 기록의 첫 줄을 읽는 함수(`Keeper_turn_log_store.read_start`). 줄에서 만든 스냅샷이 바이트와 함께 나온다(`Librarian_envelope.next`) | boot 표의 행마다 하나. 반영이 `basis` 와 `after` 로 이어진다. 스냅샷이 한 줄 늦으면 boot 가 그 줄에서 다시 쓰고, 두 번 해도 같다. 밖에서 바꾼 스냅샷은 반영과 boot 를 `Log_diverged` 로 세운다. 읽은 뒤에 다른 줄이 붙으면 덧붙이지 않는다. 스냅샷 쓰기만 실패하는 갈래는 시험이 없다 |
 | L5f | 맡김(`Librarian_store.adopt`, §8.7). 해석되지 않는 꼬리가 줄이 끝나는 곳을 함께 알린다 | 밖에서 바꾼 스냅샷을 맡기면 줄 하나가 붙고 boot 가 열린다. 다음 반영이 그 줄에 이어진다. sha 가 다르거나 해석되지 않으면 거절하고 쓰지 않는다. 꼬리가 해석되지 않으면 `Started` 를 그 뒤에 쓰고 `seq` 를 1 부터 센다 |
 | L5g | 상태표의 판단(`Librarian_machine`): boot, 직접 쓰기, `Resume`, `Adopt` 가 `Idle`, `Stopped` 에서 하는 일. `Retired` 는 등록부가 답한다. 동기 함수고 fiber 가 없다. 묻기의 상태와 사건은 그것을 만드는 층이 더한다 | 칸마다 하나. 줄을 쓰지 않는 답은 상태와 반영 기록을 그대로 둔다. 밖에서 바꾼 스냅샷을 만난 쓰기가 저장소를 세우고, 그 뒤의 쓰기는 거절된다. 파일을 되돌리고 `Resume` 하면 열린다. `Adopt` 는 `Log_diverged` 와 `Log_unreadable` 에서 받고 그 뒤의 쓰기가 이어진다 |
-| L5 | **전환.** 쓰는 쪽(fiber, mailbox, 잠금, 직접 쓰기를 받는 문), 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L5h | 쓰는 쪽 fiber(`Librarian_writer`): 잠금, boot, mailbox, 읽는 쪽이 보는 상태, `Retire`. 사건마다 `Librarian_machine` 을 부른다. 등록부와 pulse 는 없다 | boot 전에 온 쓰기가 boot 뒤에 답을 받는다. 쓰기는 온 순서대로 반영된다. 턴 기록이 없으면 멈추고, 생긴 뒤 `Resume` 하면 열린다. 같은 Keeper 의 둘째 쓰는 쪽은 잠금을 못 잡는다. 등록된 Keeper 의 `Retire` 는 버린다. 끝난 쓰는 쪽은 `Keeper_retired` 로 답하고, 잠금이 풀려 둘째가 이어서 쓴다 |
+| L5 | **전환.** 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |

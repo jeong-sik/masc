@@ -10,7 +10,8 @@
     + The published state says the account is a key account of the person
       on which no removal began or stopped ({!Authz_state.key_to_replace}).
       It is asked before the call of the account is taken, and again inside
-      it.
+      it. The runtime root of the person is made or found there too: under
+      a root that is not reached no record is written.
     + The record [key_replaced] of the next generation is written
       ({!Authz_provider_account.replace_key}).
     + The key file of that generation is written, and then every other file
@@ -33,6 +34,9 @@ type error =
       (** What the state said of the request before any record was written:
           nothing was changed. *)
   | Account_busy  (** A call of the account runs. Nothing was changed. *)
+  | Files_not_reached
+      (** The runtime root of the person was not made or found, so no record
+          was tried. Nothing was changed. *)
   | Not_recorded of Authz_provider_account.error
       (** The record did not go into the log. Nothing was changed, except
           that a replacement whose intent was written and given up blocks
@@ -77,8 +81,12 @@ val replace
     A log that went back alone stops the start before this runs. A log and
     an external store that went back together are not told from ones that
     did not: the files of a generation after the one their records say go
-    too. The file of the generation they say went at the replacement, so
-    the account reads no key until its key is sent again.
+    too. The file of the generation they say went at the replacement after
+    it, so the account reads no key until its key is sent again. Where that
+    replacement left it ([old_keys_removed] false) and no start came since,
+    the file is there, and the account reads the key from before the
+    replacement. An account registered after the point the files went back
+    to is not in the records, so its key file is not looked at and stays.
 
     The accounts are those the records hold when it starts: one registered
     after that has no file a stopped server left, and its replacements

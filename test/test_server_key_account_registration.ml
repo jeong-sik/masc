@@ -860,6 +860,34 @@ let test_replacement_refused =
    folder of the keys goes, so the account reads no key, and neither that
    file nor the key before stays on disk. The next replacement puts its key
    in place. *)
+(* The record goes in and the key file is refused, in a folder the server
+   can remove: the folder of the keys goes with the key before in it, and
+   the home of the account stays. A folder of keys that others read is one
+   no key is written into. *)
+let test_replacement_not_stored_and_the_folder_gone =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let keys = Filename.dirname (key_file_of alice ~runtime_root account) in
+    Unix.chmod keys 0o755;
+    let answer = replace alice ~base_path account (replacement_body second_key) in
+    answered "under a folder of keys that others read" answer ~status:503 ~code:(Some "key_not_stored");
+    Alcotest.(check int) "the record went in" 2 (generation_of alice account);
+    Alcotest.(check bool) "the folder of the keys is gone" false (Sys.file_exists keys);
+    Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root);
+    Alcotest.(check (list string)) "nor the key sent" [] (holding ~text:second_key root);
+    Alcotest.(check bool) "the home of the account stays" true (Sys.is_directory (home_of ~runtime_root account));
+    let next = replace alice ~base_path account (replacement_body third_key) in
+    answered "the next replacement" next ~status:200 ~code:None;
+    Alcotest.(check int) "it took the next generation" 3 (generation_of alice account);
+    Alcotest.(check string)
+      "its key reads back"
+      ("key:" ^ third_key)
+      (read_name (key_file_of alice ~runtime_root account)))
+;;
+
 let test_replacement_over_a_file_in_its_place =
   with_zone (fun ~zone ~root ~base_path ->
     declare ~base_path;
@@ -928,7 +956,9 @@ let test_replacement_after_removal =
 ;;
 
 (* The record goes in and the key file does not: the account has no key, and
-   the key before is not read again. The next replacement puts a key in
+   the key before is not read again. The folder of the keys of the case is
+   one nothing is written into, so the server does not remove it either,
+   and the key before stays on disk. The next replacement puts a key in
    place and takes the files before it away. *)
 let test_replacement_not_stored =
   with_zone (fun ~zone ~root ~base_path ->
@@ -951,7 +981,10 @@ let test_replacement_not_stored =
         "key_missing"
         (read_name (key_file_of alice ~runtime_root account));
       Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root);
-      Alcotest.(check (list string)) "the key before is on disk, where nothing reads it" [ first_file ] (holding ~text:the_key root);
+      Alcotest.(check (list string))
+        "the key before is on disk, in the folder that did not go, where nothing reads it"
+        [ first_file ]
+        (holding ~text:the_key root);
       (* A file of the folder that does not go: the new key is in place all
          the same, and the answer says a file stayed. *)
       let stuck = Filename.concat keys "0-stuck" in
@@ -986,6 +1019,39 @@ let blocked_of (person : Login.person) id =
 
 let spent (person : Login.person) id =
   Result.is_ok (Authz_provider_account.availability (state_of person) ~user_id:person.Login.user_id id)
+;;
+
+(* The runtime root of the person is not reached: the replacement is turned
+   down before its record and changes nothing. The superuser reaches a
+   folder whatever its mode is, so the case is skipped when the superuser
+   runs it. *)
+let test_replacement_without_the_runtime_root =
+  with_zone (fun ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let above = Filename.dirname runtime_root in
+      Unix.chmod above 0o000;
+      let answer =
+        Fun.protect
+          ~finally:(fun () -> Unix.chmod above 0o700)
+          (fun () -> replace alice ~base_path account (replacement_body second_key))
+      in
+      answered
+        "under a runtime root that is not reached"
+        answer
+        ~status:503
+        ~code:(Some "replacement_not_recorded");
+      says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
+      unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
+      Alcotest.(check bool) "the account is one to spend" true (spent alice account);
+      let again = replace alice ~base_path account (replacement_body third_key) in
+      answered "the replacement, asked again" again ~status:200 ~code:None;
+      Alcotest.(check int) "it took the next generation" 2 (generation_of alice account))
+    else Alcotest.skip ())
 ;;
 
 (* The log takes the intent of a replacement and not its record, and stops.
@@ -1281,6 +1347,8 @@ let () =
         ; Alcotest.test_case "a refused request changes nothing" `Quick test_replacement_refused
         ; Alcotest.test_case "an account a removal stopped on" `Quick test_replacement_after_removal
         ; Alcotest.test_case "a key that is not stored, and the next one" `Quick test_replacement_not_stored
+        ; Alcotest.test_case "a key that is not stored, and its folder gone" `Quick test_replacement_not_stored_and_the_folder_gone
+        ; Alcotest.test_case "a runtime root that is not reached" `Quick test_replacement_without_the_runtime_root
         ; Alcotest.test_case "a file in the place of the new key" `Quick test_replacement_over_a_file_in_its_place
         ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up
         ; Alcotest.test_case "a log another process holds for a moment" `Quick test_replacement_under_a_held_log

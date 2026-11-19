@@ -298,7 +298,8 @@ type start_choice =
     a-sent-request-prefix-changes-only-when-the-window-moves §4, D1): at a
     turn's first request, the window the pair's ledger last carried passes
     the binding's max-context once the next turn grows as much as the largest
-    turn grew under it ({!Keeper_model_input_ledger.next_turn_peak}). *)
+    turn grew since the ledger started
+    ({!Keeper_model_input_ledger.next_turn_peak}). *)
 type past_max_context =
   { window_first_atom : int
         (** Where the ledger's last request opened its range. *)

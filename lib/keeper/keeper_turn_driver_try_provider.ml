@@ -1281,11 +1281,11 @@ let from_librarian_point ~accepted ~history_digest_at ~turn_boundary ~history_at
 
 (* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4 (D1). The
    window the pair's ledger last carried passes the binding's max-context
-   once the next turn grows as much as the largest turn grew under it, so it
-   moves to the turn boundary before a provider refuses it: a refusal that
-   is not typed fails the turn instead of moving the window. Every value is
-   one the provider counted or the operator declared, and an unknown one
-   gives no signal. *)
+   once the next turn grows as much as the largest turn grew since the ledger
+   started, so it moves to the turn boundary before a provider refuses it: a
+   refusal that is not typed fails the turn instead of moving the window.
+   Every value is one the provider counted or the operator declared, and an
+   unknown one gives no signal. *)
 type past_max_context =
   { window_first_atom : int
   ; turn_boundary : Keeper_carried_front.seed

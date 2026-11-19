@@ -134,6 +134,7 @@ type forecast_carried_origin =
   | Carried_turn_start_after_librarian_refusal
   | Carried_this_turn_start_after_seed_refusal
   | Carried_this_turn_start_after_librarian_refusal
+  | Carried_turn_start_at_max_context
   | Carried_turn_start of { end_atom : int }
   | Carried_turn_start_unknown of { reason : string }
   | Carried_librarian_snapshot of { end_atom : int; boundary_line : int }
@@ -1146,6 +1147,8 @@ let rec decode_forecast_origin = function
       Ok Carried_this_turn_start_after_seed_refusal
     else if String.equal kind "this_turn_start_after_librarian_refusal" then
       Ok Carried_this_turn_start_after_librarian_refusal
+    else if String.equal kind "turn_start_at_max_context" then
+      Ok Carried_turn_start_at_max_context
     else if String.equal kind "past_librarian_point" then
       let* end_atom_json = field "librarian_end_atom" fields in
       let* librarian_end_atom = nonnegative_int "origin.librarian_end_atom" end_atom_json in
@@ -1154,7 +1157,7 @@ let rec decode_forecast_origin = function
       (match front with
        | Carried_from_ledger | Carried_from_turn_record _ | Carried_turn_start_after_seed_refusal
        | Carried_turn_start_after_librarian_refusal | Carried_this_turn_start_after_seed_refusal
-       | Carried_this_turn_start_after_librarian_refusal ->
+       | Carried_this_turn_start_after_librarian_refusal | Carried_turn_start_at_max_context ->
          Ok (Carried_past_librarian_point { librarian_end_atom; front })
        | Carried_turn_start _ | Carried_turn_start_unknown _ | Carried_librarian_snapshot _
        | Carried_librarian_progress _ | Carried_past_librarian_point _ ->

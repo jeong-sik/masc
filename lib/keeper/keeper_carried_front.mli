@@ -64,9 +64,9 @@ type source =
   | Turn_start_at_max_context
       (** No provider refused anything: at the turn's first request the
           window stayed where the last request opened it, and that request's
-          count plus the largest growth one turn made under it passed the
-          binding's max-context. The front moved to the turn boundary for the
-          rest of the turn (RFC
+          count plus the largest growth one turn made since the ledger
+          started passed the binding's max-context. The front moved to the
+          turn boundary for the rest of the turn (RFC
           a-sent-request-prefix-changes-only-when-the-window-moves §4), with
           a Librarian point or without one. *)
 
@@ -322,7 +322,7 @@ val origin_to_json : origin -> Yojson.Safe.t
     [turn_record] with [turn]; [turn_start_after_seed_refusal];
     [turn_start_after_librarian_refusal];
     [this_turn_start_after_seed_refusal];
-    [this_turn_start_after_librarian_refusal];
+    [this_turn_start_after_librarian_refusal]; [turn_start_at_max_context];
     [librarian_snapshot] with [end_atom] and [boundary_line];
     [librarian_progress] with [end_atom]; [past_librarian_point] with
     [librarian_end_atom] and [front], the {!Carried} object of its source;

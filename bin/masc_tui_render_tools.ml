@@ -41,19 +41,30 @@ let refusal_text ~request refusal =
   Say.of_ko_flag (fun ~ko -> workspace_refusal_text ~ko ~request refusal)
 
 (* What a section of this screen hands the frame. A [Row] holds its words in
-   both languages. A [Cursor] is the row of the entry the list keys act on: it
-   draws as a [Row], and {!tools_display} says which physical row it starts
-   on, so the key handler brings it into view by that number rather than by
-   looking for its colour. A [Laid_out] block is rows fitted to a width by a
-   step that has to see the words first -- a boxed card wraps its rows, a
-   table keeps its columns only if its header fits, a chart sizes its bars
-   beside its names -- so how many rows it takes depends on the language, and
-   it gets the language when the frame draws ({!draw}). A [Cursor] handed to
-   a [Laid_out] block is drawn but not counted; the Skill list is in none. *)
+   both languages. A [Cursor] is a row of the entry the list keys act on --
+   the Skill's own row and the rows that say why it was loaded: it draws as a
+   [Row] in its own style, and {!tools_display} says which physical rows the
+   entry takes, so the key handler brings it into view by those numbers
+   rather than by looking for its colour. A [Laid_out] block is rows fitted to
+   a width by a step that has to see the words first -- a boxed card wraps
+   its rows, a table keeps its columns only if its header fits, a chart sizes
+   its bars beside its names -- so how many rows it takes depends on the
+   language, and it gets the language when the frame draws ({!draw}). A
+   [Measurement_card] is laid out the same way, and {!tools_display} says
+   which rows the selected Skill's measurement card takes. A [Cursor] handed
+   to a [Laid_out] block is drawn but not counted; the Skill list is in
+   none. *)
 type piece =
   | Row of string * Say.t
   | Cursor of string * Say.t
   | Laid_out of (Say.language -> (string * string) list)
+  | Measurement_card of (Say.language -> (string * string) list)
+
+(* Which of {!tools_display}'s runs a drawn row belongs to. *)
+type mark =
+  | Unmarked
+  | Entry
+  | Card
 
 let rows lines = List.map (fun (style, text) -> Row (style, text)) lines
 
@@ -62,13 +73,14 @@ let rows lines = List.map (fun (style, text) -> Row (style, text)) lines
    layer; until then the frame takes its rows as they are. *)
 let written_elsewhere lines = Laid_out (fun _ -> lines)
 
-(* Each drawn row, paired with whether it is the [Cursor]'s. *)
+(* Each drawn row, paired with the run it belongs to. *)
 let draw_marked language pieces =
   List.concat_map
     (function
-      | Row (style, text) -> [ (style, Say.render language text), false ]
-      | Cursor (style, text) -> [ (style, Say.render language text), true ]
-      | Laid_out lay -> List.map (fun row -> row, false) (lay language))
+      | Row (style, text) -> [ (style, Say.render language text), Unmarked ]
+      | Cursor (style, text) -> [ (style, Say.render language text), Entry ]
+      | Laid_out lay -> List.map (fun row -> row, Unmarked) (lay language)
+      | Measurement_card lay -> List.map (fun row -> row, Card) (lay language))
     pieces
 
 let draw language pieces = List.map fst (draw_marked language pieces)
@@ -1171,7 +1183,13 @@ let skill_source_picker_page state ~terminal_rows =
 
 let surface_title = Say.both ~ko:" Keeper 호출 범위" ~en:" Effective Keeper Surface"
 
-type display = { lines : (string * string) list; cursor_row : int option }
+type cursor_rows = { first_row : int; last_row : int }
+
+type display =
+  { lines : (string * string) list
+  ; cursor : cursor_rows option
+  ; card : cursor_rows option
+  }
 
 let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
   let language = say_language state in
@@ -1189,7 +1207,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                List.mapi (fun index source ->
                  (if view.selected_row = Some index then Theme.selection else Ansi.dim),
                  Say.code " " ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
-    ; cursor_row = None }
+    ; cursor = None
+    ; card = None }
   | None ->
   let registered_tools =
     match state.tools_inventory with
@@ -1378,10 +1397,16 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  ++ Say.code (Printf.sprintf "%s discovery=%dB body=%dB"
                       flow profile.esp_discovery_bytes profile.esp_body_bytes)
                in
+               (* The rows that say why the selected Skill was loaded are
+                  its rows too, so following the cursor brings them in. *)
+               let entry_rows lines =
+                 if selected then List.map (fun (style, text) -> Cursor (style, text)) lines
+                 else rows lines
+               in
                rows heading
                @ [ (if selected then Cursor (Theme.selection, skill_row)
                     else Row (Ansi.dim, skill_row)) ]
-               @ rows (match profile.esp_load_reasons, chosen with
+               @ entry_rows (match profile.esp_load_reasons, chosen with
                    | [], _ ->
                        [ ( Theme.warn ()
                          , Say.both ~ko:"     불러온 이유: 알 수 없음" ~en:"     why loaded: unattributed" ) ]
@@ -1722,12 +1747,14 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                   [ Theme.info (), Say.both ~ko:"실측 조회 중 · 이전 관측이 있으면 함께 표시합니다"
                                      ~en:"Reading measurements · an earlier observation stays shown" ]
               | Some _, Some _ | Some _, None | None, Some _ | None, None -> [] in
-            [ card ~cols
-                (rows
-                   ((Ansi.bold, Say.both ~ko:"Skill 실측 · " ~en:"Skill performance · "
-                                ++ Say.as_received (Terminal_text.single_line profile.esp_name))
-                    :: pending)
-                 @ card_body) ]
+            let card_pieces =
+              rows
+                ((Ansi.bold, Say.both ~ko:"Skill 실측 · " ~en:"Skill performance · "
+                             ++ Say.as_received (Terminal_text.single_line profile.esp_name))
+                 :: pending)
+              @ card_body
+            in
+            [ Measurement_card (fun language -> skill_usage_box ~cols (draw language card_pieces)) ]
         in
         rows
           [ Ansi.bold,
@@ -1737,13 +1764,18 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  | Say.Ko -> Printf.sprintf "도구 %d개" (List.length ets_tools)
                  | Say.En -> Masc_tui_message_layout.count_noun (List.length ets_tools) "tool")
             ++ Say.code ")" ]
-        @ performance_card
         @ rows
             ([ delivery_tone, Say.both ~ko:"   Runtime 도구 전달: " ~en:"   Runtime tool delivery: " ++ delivery ]
              @ diagnostics_lines)
         (* The keys that move through this list are in section 5 of the
            frame, so the list carries no hint row of its own. *)
         @ skill_profile_lines
+        (* The selected Skill's card stands under the list, with the rest of
+           its detail. Above the list it took one row for an instruction
+           Skill and about twelve for a Composition with loaded measurements,
+           so each j moved every Skill row under it (RFC
+           tui-one-screen-grammar section 8). *)
+        @ performance_card
         @ rows
           ((match selected_tools_skill_profile state with
              | None -> [] | Some profile -> skill_io_lines ~cols profile.esp_io)
@@ -2708,14 +2740,14 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
   in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
   (* The one place this screen's rows take a language. *)
-  let wrap pieces = List.concat_map (fun ((style, text), cursor) ->
+  let wrap pieces = List.concat_map (fun ((style, text), mark) ->
        (* Fitted tables and usage cards already own their alignment. Only
           overlong rows need physical wrapping; never render metadata as
-          Markdown or shorten its identities to fit the frame. A cursor row
-          that wraps is found by its first row. *)
-       if Masc_tui_message_layout.display_width text <= width then [ (style, text), cursor ]
+          Markdown or shorten its identities to fit the frame. Every row a
+          wrapped marked row becomes keeps the mark, so its run is whole. *)
+       if Masc_tui_message_layout.display_width text <= width then [ (style, text), mark ]
        else Masc_tui_message_layout.wrap_words ~max_cells:width text
-            |> List.mapi (fun row line -> (style, line), cursor && row = 0))
+            |> List.map (fun line -> (style, line), mark))
        (draw_marked language pieces) in
   let drafts = List.map (fun draft ->
       Theme.warn (),
@@ -2737,7 +2769,23 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       wrap prefix @ draw_marked language pane_lines
     else wrap (prefix @ pane_lines)
   in
-  { lines = List.map fst marked; cursor_row = List.find_index snd marked }
+  (* The first and the last row wearing [wanted]. The [Cursor] pieces are the
+     adjacent rows of one Skill and the card is one piece, so each run is
+     whole. *)
+  let span wanted =
+    List.fold_left
+      (fun (index, span) (_, mark) ->
+         let span =
+           match mark = wanted, span with
+           | false, _ -> span
+           | true, None -> Some { first_row = index; last_row = index }
+           | true, Some rows -> Some { rows with last_row = index }
+         in
+         index + 1, span)
+      (0, None) marked
+    |> snd
+  in
+  { lines = List.map fst marked; cursor = span Entry; card = span Card }
 ;;
 
 let tools_display_lines ?cols ?terminal_rows state = (tools_display ?cols ?terminal_rows state).lines

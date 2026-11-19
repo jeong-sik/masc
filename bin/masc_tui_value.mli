@@ -306,6 +306,8 @@ module Count : sig
     | File  (** One file a keeper wrote. *)
     | Task  (** One Task of the Work hub. *)
     | Open_task  (** A Task not yet done or cancelled. *)
+    | Claim  (** One claim in the workspace memory ledger. *)
+    | Conflict  (** Two claims in that ledger that disagree. *)
 
   val reading : ko:bool -> noun -> int -> string
   (** The count and what it counts, in the screen's language: [3 keepers],
@@ -325,10 +327,10 @@ module Count : sig
 
   val partial : ko:bool -> loaded:int -> total:int -> string
   (** A list read in part: the rows read, then how many the server holds,
-      [50 · 전체 2,000] and [50 · of 2,000]. The word ahead of the total is the
-      one {!Position.text} writes, so a card edge and the position on the
-      same screen say a partial read the same way (RFC tui-one-screen-grammar,
-      section 2). *)
+      [50 · 전체 2,000] and [50 · of 2,000]. Zone 2 writes a {!Position.Partial}
+      with this count after the selected row, so a card edge and the position
+      on the same screen say a partial read the same way (RFC
+      tui-one-screen-grammar, section 2). *)
 
   val more : ko:bool -> int -> string
   (** Rows that were cut off, not where the reader is: [외 3], [3 more]
@@ -343,19 +345,38 @@ module Hash : sig
       that draws a digest this way offers the whole value as a copy. *)
 end
 
-(** Where the reader is in what the screen holds. *)
+(** Where the reader is in what the screen holds (RFC tui-one-screen-grammar,
+    section 2). A screen hands one of these to the frame, and only the
+    function that draws zone 2 turns it into text: a body has no way to write
+    a position of its own. The constructors are private, so a window that
+    shows every row, or a selected row outside its list, cannot be built. *)
 module Position : sig
-  type t =
+  type t = private
     | Row of { at : int; total : int }
-        (** The selected row, counted from one, and how many rows there
-            are: [7/29]. Nothing selected is [at = 0] and draws a dash in
-            the row's place. *)
+        (** A list with its selected row, counted from one, among [total]
+            rows: [7/29]. [at = 0] is a list with nothing selected. *)
+    | Window of { first : int; last : int; total : int }
+        (** A reading window over [total] rows, its first and last rows
+            counted from one: [1–49/75]. Only a window that hides rows is one;
+            [first = 0] is a window too short to show any. *)
     | Partial of { at : int; loaded : int; total : int }
-        (** A list read in part: the selected row among the rows read, and
-            how many the server holds: [1/50 · 전체 8,347],
-            [1/50 · of 8,347]. *)
+        (** A list read in part: the selected row among the [loaded] rows
+            read, and how many the server holds: [1/50 · 전체 8,347]. *)
 
-  val text : ko:bool -> t -> string
-  (** [7/29], or [1/50 · 전체 8,347] and [1/50 · of 8,347] for a list read in
-      part. *)
+  val row : selected:int option -> total:int -> t
+  (** The list of [total] rows with the row at index [selected], counted from
+      zero, chosen. An index past either end names the nearest row; [None],
+      or an empty list, selects nothing. A list names its selected row even
+      when every row is on screen. *)
+
+  val partial : selected:int option -> loaded:int -> total:int -> t
+  (** {!row} over the [loaded] rows read of a list the server says holds
+      [total]. *)
+
+  val window : first:int -> shown:int -> total:int -> t option
+  (** The window of [shown] rows from index [first] over [total] rows.
+      [None] when [total] fits in [shown]: a reading with nothing hidden
+      hands no position. [first] is held inside the list, and the window
+      ends at the last row there is, so it names the rows a body that
+      starts at [first] draws. *)
 end

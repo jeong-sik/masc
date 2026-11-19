@@ -4772,9 +4772,21 @@ let render_keeper_message (state : state) =
       in
       title, mode_suffix
     in
-    let inner_cells = framed_inner_width chat_cols in
+    (* While the command menu is open it hears j/k, so its selected command
+       is where the reader stands. *)
+    let position =
+      match command_window with
+      | Some (menu, _) when menu.Masc_tui_command.items <> [] ->
+          Some
+            (Masc_tui_value.Position.row ~selected:(Some menu.Masc_tui_command.selected)
+               ~total:(List.length menu.Masc_tui_command.items))
+      | Some _ | None -> None
+    in
     let title_row =
-      Message_layout.chat_title_row ~inner_cells ~title ~mode_suffix
+      zone_two_title ~cols:chat_cols state ~position
+        ~title:(fun ~cols ->
+          Message_layout.chat_title_row ~inner_cells:(framed_inner_width cols)
+            ~title ~mode_suffix)
     in
     let status_cells = keeper_status_cells ~cols in
     let status_block =
@@ -5243,8 +5255,7 @@ let render_keeper_message (state : state) =
      | None -> ()
      | Some (menu, entries) ->
        box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
-         (Printf.sprintf (if state.ui_language = Lang_ko then "  명령  %d/%d" else "  Commands  %d/%d")
-            (menu.selected + 1) (List.length menu.items));
+         (if state.ui_language = Lang_ko then "  명령" else "  Commands");
        let label_cells = min 26 (max 8 ((framed_inner_width chat_cols - 5) / 3)) in
        List.iter (fun (selected, (item : Masc_tui_command.menu_item)) ->
          let label = fit_width (Terminal_text.single_line item.label) label_cells in

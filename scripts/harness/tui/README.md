@@ -9,6 +9,7 @@ These tools measure what each TUI screen costs while nobody presses a key. They 
 | `idle.py` | Starts one TUI per screen through the relay, brings it to its screen and measures an idle window. |
 | `summary.py` | Prints one line per screen, and with `--reads` what the TUI read in each window. |
 | `key_steps.py` | Presses navigation keys after a window and captures the screen after each (`idle.py --keys`). |
+| `screen_steps.py` | The screens `idle.py` measures, the keys that reach each, and the allow-list those keys must stay inside. |
 | `vte.py`, `pty_driver.py` | The terminal emulator and the pseudo-terminal driver `idle.py` uses. |
 | `relay_files.py` | The decision log and the recording format that the relay and the frozen server share. |
 
@@ -27,9 +28,13 @@ python3 scripts/harness/tui/idle.py \
   --idle 20 --steps overview,keepers
 ```
 
-`--out` must be a new directory. Without `--steps`, all screens in the `STEPS` table of `idle.py` run in table order. A row of that table names a screen and the keys that reach it. Each screen starts a fresh TUI, so its keys start from the screen the TUI opens on: a command palette jump (`:go Work`), then single keys for that screen. The palette entries come from `bin/masc_tui_palette.ml` and the keys from `bin/masc_tui_keys.ml`. The Keeper list opens on the view `tui-keepers.toml` stores, so the table has no row per Keeper list view.
+`--out` must be a new directory. Without `--steps`, all screens in the `STEPS` table of `screen_steps.py` run in table order. A row of that table names a screen and the keys that reach it. Each screen starts a fresh TUI, so its keys start from the screen the TUI opens on: a command palette jump (`:go Work`), then single keys for that screen. The palette entries come from `bin/masc_tui_palette.ml` and the keys from `bin/masc_tui_keys.ml`. The Keeper list opens on the view `tui-keepers.toml` stores, so the table has no row per Keeper list view.
 
-`idle.py` exits 0 when every screen opened and reached its keys and the relay's refusals were read. It exits 2 when the run stopped early (a bad argument, `/health` not answering through the relay, a stop signal) and 3 when it ran to the end but a screen failed, the relay log could not be read or the preferences could not be put back; `idle.json` says which.
+A step jumps to a `Destination` and then presses `Move`s. A destination is one whole `go ...` palette entry, because the palette runs whichever entry ranks first for the typed text and some entries act (`gate ...`, `language: ...`, `keeper ...`). A move is allowed only from the screens `MOVES` lists for it, because one key means different things on different screens: `p` switches Usage to Telemetry but pauses a Keeper on the Keeper list. `idle.py` refuses a step whose moves leave `MOVES` before any TUI starts. A row opens with Right, not Enter: on the Keeper list Enter opens the Story window, and on the Keeper detail's Services tab it starts a login. The Keeper detail rows (`keeper_info` to `keeper_terminal`) press Right twice and then walk `[` or `]` to their tab. The list puts its cursor on row 0, and when that row's group starts folded (the age view folds UPDATED WITHIN 24H), the cursor stands on the group's heading: the first Right unfolds it and rests on its first row, and the second opens that Keeper's detail. When row 0 is no heading, the first Right opens the detail and the second does nothing there.
+
+`MOVES` records what the code says a key does, so `idle.py` also checks where the keys left the TUI. The keys stop at the first that fails, such as a jump that finds no palette, and then no window runs: the moves after it would reach the screen the failure left. Every place in `screen_steps.py` names the surface the TUI draws there, the `surface_key` its frames carry into the frame report. The surface on screen when the window starts must be the one the step's last place names. A surface covers a whole screen, not its tab or view: every Keeper detail tab is `keeper-detail`, and Usage is `metrics` on Plan, Calls and Telemetry alike, so `top_rows` still tell those apart. A step can land elsewhere because the workspace lacks what it opens: `work_request_detail` stays on `approvals` when no request waits.
+
+`idle.py` exits 0 when every screen opened, reached its keys and landed on its surface, and the relay's refusals were read. It exits 2 when the run stopped early (a bad argument, `/health` not answering through the relay, a stop signal) and 3 when it ran to the end but a screen failed, the relay log could not be read or the preferences could not be put back; `idle.json` says which.
 
 A run that exits 0 may list refusals in `relay.refused`, most often those preference posts as `rest-write`. A workspace that still shows the help hint posts one on each screen's first key, the palette's `:`. The refusals are the evidence that only reads went through, so they do not fail the run, and a run without any is just as normal.
 
@@ -37,11 +42,12 @@ The relay ends every log line with a newline. When the last line has none and is
 
 For each screen, `idle.json` records:
 
-- `opened` (the first frame arrived), `keys` and `keys_ok` (each palette jump found the palette open), and `top_rows`, the first three screen rows when the window starts, which show where the keys landed;
+- `opened` (the first frame arrived), `keys` and `keys_ok` (each palette jump found the palette open; `keys` ends at the first that failed), and `top_rows`, the first three screen rows when the window starts, which show where the keys landed;
+- `landed`: the surface the step's last place names (`expected`), the one on screen when the window started (`shown`, null when the frame report does not say), and `ok`;
 - `window`: wall-clock start and end, the same span in nanoseconds since the TUI started, and whether the terminal closed during it;
 - `idle`: PTY bytes and bursts in the window (a burst is output after at least 8 ms of silence), and the CPU percent that `ps` reports for the TUI;
 - `rss_mb` when the window ends, and `row_changes`: the rows that changed most, with the first column that changed and the text there;
-- `frames`: the frames the TUI recorded in the window through `MASC_TUI_FRAME_TIMING`, with build and present times, bytes presented and surface tags. The TUI keeps only its first 512 frames per phase. When the window reaches past them, `covered` is false and the counts are a lower bound;
+- `frames`: the frames the TUI recorded in the window through `MASC_TUI_FRAME_TIMING`, with build and present times, bytes presented and surface tags, and `surface_at_start`, the surface of the last frame presented before the window. The TUI keeps only its first 512 frames per phase. When the window reaches past them, `covered` is false and the counts are a lower bound;
 - with `--probes N`, `key_latency_ms` for N Down and N Up presses, each timed from the write to the first byte back. A press is skipped while the screen is still drawing, and a press that draws nothing within 1 s is not counted;
 - with `--png-font FONT` (needs Pillow), `<screen>.png`: the screen at the window start drawn with that font. Use a font that has the glyphs of the workspace's language. Repeat `--png-font` to add fallback fonts: the first sets the cell size and each glyph uses the first font that has it. Many monospace fonts lack braille, so graph rows draw blank without a fallback that has it (on macOS, `/System/Library/Fonts/Apple Symbols.ttf`);
 - with `--keys`, `key_steps`: what each key did, described below.
@@ -59,7 +65,7 @@ python3 scripts/harness/tui/summary.py --reads "$IDLE_OUT"
 python3 scripts/harness/tui/idle.py ... --steps overview --keys j,j,k --png-font "$FONT"
 ```
 
-`--keys` takes key names separated by commas: `j`, `k`, `PgUp`, `PgDn`, `Home`, `End` and `Tab`. Any other name stops the run before it starts. These keys only move. Keys that act on some screens, such as `p`, `w`, `s`, `x`, `g` and `U`, cannot be pressed, and neither can Esc. After each screen's idle window, before the probes, `idle.py` waits for the screen to go quiet, captures it, and then presses the keys one at a time. After each key the TUI has 1 s to draw. Once it draws, the capture waits for 0.5 s without output, for up to 5 s.
+`--keys` takes key names separated by commas: `j`, `k`, `PgUp`, `PgDn`, `Home`, `End` and `Tab`. Any other name stops the run before it starts. Keys that act on some screens, such as `p`, `w`, `s`, `x`, `g` and `U`, cannot be pressed, and neither can Esc. `MOVES` does not hold these keys or the Down and Up of `--probes`: they are pressed on every screen as navigation, and a screen may move a different cursor with them, such as the provider cursor of the Keeper detail's Services tab. On the palette `j` and `k` would become query text, so `--keys` are not pressed there and `key_steps` holds `skipped`. After each screen's idle window, before the probes, `idle.py` waits for the screen to go quiet, captures it, and then presses the keys one at a time. After each key the TUI has 1 s to draw. Once it draws, the capture waits for 0.5 s without output, for up to 5 s.
 
 `key_steps` in `idle.json` holds:
 
@@ -107,7 +113,7 @@ Run `idle.py` once per binary against the same frozen server with the same `--si
 python3 scripts/harness/tui/summary.py --reads "$OUT_A" "$OUT_B"
 ```
 
-The header line of each directory shows the binary's SHA-256. Compare a screen only when its `top_rows` match in both runs, so both binaries were on the same screen.
+The header line of each directory shows the binary's SHA-256. Compare a screen only when `landed.ok` is true and its `top_rows` match in both runs, so both binaries were on the same screen.
 
 ## Safety
 
@@ -146,7 +152,8 @@ Keep them in a directory outside the repository.
 
 ```sh
 python3 -m unittest scripts.tests.test_tui_frozen_server scripts.tests.test_tui_readonly_proxy \
-  scripts.tests.test_tui_relay_log scripts.tests.test_tui_key_steps scripts.tests.test_tui_vte_png
+  scripts.tests.test_tui_relay_log scripts.tests.test_tui_key_steps scripts.tests.test_tui_screen_steps \
+  scripts.tests.test_tui_idle_landing scripts.tests.test_tui_vte_png
 ```
 
-`test_tui_frozen_server` writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. `test_tui_readonly_proxy` starts the relay in front of a stand-in server that records what reaches it, and checks that writes get 403 and never reach it while a GET and a read tool do. `test_tui_relay_log` reads decision logs with a cut last line. `test_tui_key_steps` checks which keys may be pressed, the layout kind of drawn screens with cards, without cards and with stray glyphs, the shape of the per-key report, and that a key written to a pseudo-terminal whose child has exited reports `closed` instead of raising. `test_tui_vte_png` draws a reverse-video wide character and checks that its second half is drawn. It needs Pillow and a font with Hangul, and is skipped without them. None of these tests needs a MASC server or a TUI binary. CI does not run them.
+`test_tui_frozen_server` writes a small synthetic recording, starts `frozen_server.py` on a free loopback port and checks a plain answer, the 304 that keeps the `x-masc-*` header, a held event stream that sends only comments, and `/mcp` answers that carry the request id. `test_tui_readonly_proxy` starts the relay in front of a stand-in server that records what reaches it, and checks that writes get 403 and never reach it while a GET and a read tool do. `test_tui_relay_log` reads decision logs with a cut last line. `test_tui_key_steps` checks which keys may be pressed, the layout kind of drawn screens with cards, without cards and with stray glyphs, the shape of the per-key report, and that a key written to a pseudo-terminal whose child has exited reports `closed` instead of raising. `test_tui_screen_steps` checks that every step of the screen table stays inside the allow-list and that a move off its screen is refused. Checks that do not trust `MOVES` hold even when a move is added to it: no move sends `p w s x g U e y n`, Enter or a lone Esc (the one exception is `p` from Usage, a Navigate binding there), the Keeper screens take only Right, `[` and `]`, every destination is a whole `go` label the palette source offers, and every surface a place names is a `surface_key` some drawing in `bin/` passes. It also checks that step names are unique. `test_tui_idle_landing` reads synthetic frame reports for the surface on screen when the window starts, also after dropped frames, and checks that a screen on another surface fails and that the keys stop at the first that fails. `test_tui_vte_png` draws a reverse-video wide character and checks that its second half is drawn. It needs Pillow and a font with Hangul, and is skipped without them. None of these tests needs a MASC server or a TUI binary. CI does not run them.

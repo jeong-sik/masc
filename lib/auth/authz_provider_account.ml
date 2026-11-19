@@ -113,7 +113,13 @@ type shown =
 
 (* The log writes two reductions on a credential: the start of a purge and
    the replacement of a key. A removal that stopped is read first, so an
-   account both stopped on shows its removal: it is removed next. *)
+   account both stopped on shows its removal: it is removed next.
+
+   A third reduction on a credential would block the account
+   ([availability]) with no word for it here. Whoever writes one names it in
+   [blocked]: until then the list hides the Runtimes of such an account
+   ({!Auth_preview.provider_accounts} asks [availability]) and says no
+   reason. *)
 let shown (state : Authz_state.t) user_id =
   List.filter_map
     (fun provider_account_id ->

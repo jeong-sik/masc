@@ -131,7 +131,8 @@ val keeper_conversation_reader
       spends it either, and its owner asks for the replacement again or
       removes the account. An account with both has ["removal"] only.
     - The Runtimes they own ({!Authz_runtime.owned}) on the accounts shown
-      with neither on them, as
+      that a turn would be let onto ({!Authz_provider_account.availability}),
+      so none of an account with a removal or a replacement on it, as
       [{"runtime_id":...,"provider_account_id":...,"model":...}]: the model
       of the binding of the account's template that makes the Runtime id
       ({!Runtime_account_runtime.binding_of}), the binding a turn of the

@@ -121,7 +121,10 @@ val key_replacement_given_up : t -> Authz_types.Provider_account_id.t -> bool
 
 (** The generation of the key of [provider_account_id] that [user_id] may
     replace now, as a record that replaces it is read
-    ({!Authz_provider_account_state.key_to_replace}). *)
+    ({!Authz_provider_account_state.key_to_replace}). It asks about the
+    account and whether the person is active. The record is refused for
+    more than that: while a reduction of its author that was given up is
+    held, and while the accounts are off. *)
 val key_to_replace
   :  t
   -> user_id:Authz_types.User_id.t

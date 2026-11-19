@@ -67,25 +67,13 @@ let recorded (person : Login.person) id ~integration_id =
        Error (Not_recorded error))
 ;;
 
-let files_detail = function
-  | Files.Home_not_made detail -> "the home was not made: " ^ detail
-  | Files.Key_not_written (Runtime_api_key_file.Root_unavailable detail) ->
-    "no key file is spelled under the runtime root: " ^ detail
-  | Files.Key_not_written (Runtime_api_key_file.Folder_not_private path) ->
-    "a folder of the keys is no private folder of this user: " ^ path
-  | Files.Key_not_written Runtime_api_key_file.Generation_taken ->
-    "a file of the generation was there"
-  | Files.Key_not_written (Runtime_api_key_file.Not_written detail) ->
-    "the key file was not written: " ^ detail
-;;
-
 (* The third step: the runtime root of the person, the home of the account,
    and then its key file. *)
 let made (person : Login.person) ~base_path id ~generation key =
   match Login.person_runtime_root person ~base_path with
   | Error (_ : string) -> Error "the runtime root of the person was not made"
   | Ok runtime_root ->
-    Files.make ~runtime_root ~account_id:id ~generation key |> Result.map_error files_detail
+    Files.make ~runtime_root ~account_id:id ~generation key |> Result.map_error Files.make_error_detail
 ;;
 
 let register ~(person : Login.person) ~base_path ~integration_id key =

@@ -256,18 +256,6 @@ let test_narrow_planning_rollup_and_clause_packing () =
   assert_packed_rows "backlog_rows" backlog_rows;
   assert_packed_rows "change_rows" change_rows
 
-let test_work_tasks_budget_and_window_bounds () =
-  check int "budget at or below header_rows leaves 0 task rows" 0
-    (Masc_tui_render_prim.work_tasks_room ~budget:3 ~header_rows:3 ~count:6);
-  check int "one row above header_rows draws 1 task row without overflow line" 1
-    (Masc_tui_render_prim.work_tasks_room ~budget:4 ~header_rows:3 ~count:6);
-  let room =
-    Masc_tui_render_prim.work_tasks_room ~budget:7 ~header_rows:3 ~count:6
-  in
-  check int "four rows above header_rows reserves 1 row for [tasks a-b/n] when overflowing" 3 room;
-  check string "overflow window text reports visible slice" "1-3/6"
-    (Masc_tui_scroll.window_text ~scroll:0 ~height:room 6)
-
 let test_studio_panel_top_border () =
   let rows =
     Masc_tui_render_prim.studio_panel ~width:24 ~title:"Workspace Studio"
@@ -297,8 +285,6 @@ let () =
         ; test_case "suspension visibility and restore keys" `Quick test_suspension_visibility_and_keys
         ; test_case "narrow 80-col rollup and clause packing" `Quick
             test_narrow_planning_rollup_and_clause_packing
-        ; test_case "work_tasks budget and window bounds" `Quick
-            test_work_tasks_budget_and_window_bounds
         ; test_case "studio_panel top border" `Quick
             test_studio_panel_top_border
         ; test_case "default filter is Active" `Quick

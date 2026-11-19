@@ -35,6 +35,16 @@ let make ~runtime_root ~account_id ~generation key =
     |> Result.map_error (fun error -> Key_not_written error)
 ;;
 
+let make_error_detail = function
+  | Home_not_made detail -> "the home was not made: " ^ detail
+  | Key_not_written (Runtime_api_key_file.Root_unavailable detail) ->
+    "no key file is spelled under the runtime root: " ^ detail
+  | Key_not_written (Runtime_api_key_file.Folder_not_private path) ->
+    "a folder of the keys is no private folder of this user: " ^ path
+  | Key_not_written Runtime_api_key_file.Generation_taken -> "a file of the generation was there"
+  | Key_not_written (Runtime_api_key_file.Not_written detail) -> "the key file was not written: " ^ detail
+;;
+
 type remove_error =
   | Key_not_removed of string
   | Home_not_removed of string
@@ -135,4 +145,64 @@ let key_state ~runtime_root ~account_id ~generation =
        (match Runtime_api_key_file.read file with
         | Ok (_ : Runtime_api_key_file.key) -> Key_readable
         | Error error -> Key_not_read error))
+;;
+
+(* ---- the replacement of a key ---- *)
+
+(* The names in the folder [keys], in their order: a folder gives them in
+   no order of its own, and what is reported of them is the same at each
+   asking. A folder that is not there holds none. What stands in its place
+   and is no folder is not read: a link would lead to the files of another
+   place. *)
+let names_in keys =
+  match Unix.lstat keys with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok []
+  | exception Unix.Unix_error (error, call, argument) -> Error (unix_detail error call argument)
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    (match Sys.readdir keys with
+     | names -> Ok (List.sort String.compare (Array.to_list names))
+     | exception Sys_error detail -> Error detail)
+  | { Unix.st_kind = Unix.S_REG | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK; _ }
+    -> Error (keys ^ ": it is not a folder")
+;;
+
+let remove_other_keys ~runtime_root ~account_id ~generation =
+  let* there = root_there ~runtime_root in
+  if not there
+  then Ok 0
+  else
+    let* kept = Layout.key_file ~runtime_root ~account_id ~generation in
+    let keys = Filename.dirname kept in
+    let* names = Fs_compat.Systhread_host.run ~label:thread_label (fun () -> names_in keys) in
+    (* Each of them can hold a key, so each is tried whatever became of the
+       one before it. The first that stayed is the one reported. *)
+    let gone, first_left =
+      List.fold_left
+        (fun (gone, first_left) name ->
+          if String.equal name (Filename.basename kept)
+          then gone, first_left
+          else (
+            match removed (Filename.concat keys name), first_left with
+            | Ok (), (None | Some (_ : string)) -> gone + 1, first_left
+            | Error detail, None -> gone, Some detail
+            | Error (_ : string), Some (_ : string) -> gone, first_left))
+        (0, None)
+        names
+    in
+    (match first_left with
+     | None -> Ok gone
+     | Some detail -> Error detail)
+;;
+
+type other_keys =
+  | Other_keys_removed
+  | Other_keys_left of string
+
+let replace ~runtime_root ~account_id ~generation key =
+  match make ~runtime_root ~account_id ~generation key with
+  | Error error -> Error error
+  | Ok () ->
+    (match remove_other_keys ~runtime_root ~account_id ~generation with
+     | Ok (_ : int) -> Ok Other_keys_removed
+     | Error detail -> Ok (Other_keys_left detail))
 ;;

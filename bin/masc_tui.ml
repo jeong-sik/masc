@@ -365,9 +365,9 @@ let require_interactive_terminal () =
    worked out from the full body while the frame draws half of it is not a
    bound, and the rows past the shortened list stop being reachable. *)
 let surface_body_height ~rows
-    { sc_count; sc_chrome; sc_overflow_takes_row; sc_preview_keep } =
+    { sc_count; sc_chrome; sc_preview_keep } =
   Masc_tui_scroll.content_height ~rows ~chrome:sc_chrome ~count:sc_count
-    ~preview_keep:sc_preview_keep ~overflow_takes_row:sc_overflow_takes_row
+    ~preview_keep:sc_preview_keep
 
 let move_surface_scroll (state : state) ~rows ~delta ~current =
   match scrolled_surface state state.view with

@@ -3085,12 +3085,16 @@ let schedule_counts_line counts =
 
 (* Why the modify editor does not open on a row: the store refuses rows in
    that status (as last read), or this build cannot read the recurrence or the
-   delivery the form would carry back, so saving would put a default over it. *)
+   delivery the form would carry back, so saving would put a default over it,
+   or it does not know the row's kind, so saving would put another kind over
+   it. *)
 type schedule_modify_refusal =
   | Schedule_status_not_modifiable of string
   | Schedule_recurrence_unreadable of string
   | Schedule_delivery_unreadable of { delivery : string; detail : string }
   | Schedule_delivery_not_a_string
+  | Schedule_payload_kind_unknown of string option
+      (* The kind word the server sent with the row, when it sent one. *)
 
 let schedule_modify_refusal_text ~ko = function
   | Schedule_status_not_modifiable status ->
@@ -3128,6 +3132,21 @@ let schedule_modify_refusal_text ~ko = function
       else
         "the schedule's delivery is not a string; the form would save a \
          default over it"
+  | Schedule_payload_kind_unknown (Some kind) ->
+      if ko then
+        Printf.sprintf
+          "이 빌드가 일정 종류를 모름(%S) \xc2\xb7 저장하면 다른 종류로 바뀜"
+          kind
+      else
+        Printf.sprintf
+          "this build does not name the schedule's kind %S; the form would \
+           save another kind over it"
+          kind
+  | Schedule_payload_kind_unknown None ->
+      if ko then "서버가 일정 종류를 보내지 않음 \xc2\xb7 저장하면 다른 종류로 바뀜"
+      else
+        "the server sent no kind for this schedule; the form would save \
+         another kind over it"
 
 (** Why the store would refuse a modify, read before the editor opens.
 
@@ -3187,14 +3206,35 @@ let schedule_form_delivery (row : schedule_row) =
        | Some _ -> Error Schedule_delivery_not_a_string)
   | _ -> Ok Schedule_supported_kinds.default_keeper_wake_delivery
 
-let schedule_modify_form (row : schedule_row) recurrence ~delivery =
+(* The row's payload kind, read the way the projection that dispatches the row
+   reads it. The update replaces the whole definition and the server takes the
+   replacement's kind from the fields the call carries, so a form of another
+   kind would save that kind over the row. A word this build does not name
+   opens no form, and neither does a row the server sent no kind for. *)
+let schedule_form_payload_kind (row : schedule_row) =
+  match row.sch_payload_kind with
+  | None -> Error (Schedule_payload_kind_unknown None)
+  | Some word ->
+      (match Masc.Schedule_payload_projection.classify_kind word with
+       | Some kind -> Ok kind
+       | None -> Error (Schedule_payload_kind_unknown (Some word)))
+
+(* The schedule request's own fields, which a modify form carries whatever the
+   row's payload kind: when it is due, how it recurs and where it came from,
+   and below them when it expires. The update replaces the whole definition,
+   so the form of each kind carries all of these. *)
+let schedule_form_request_fields (row : schedule_row) recurrence =
+  [ "due_at_iso", `String (Option.value ~default:"" row.sch_due_at_iso)
+  ; "recurrence_kind", `String (Schedule_domain.recurrence_kind_to_string recurrence)
+  ; "source", `String row.sch_source
+  ]
+
+let schedule_form_expiry_fields (row : schedule_row) =
+  Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
+  |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
+
+let schedule_keeper_wake_modify_form (row : schedule_row) recurrence ~delivery =
   let body = schedule_payload_body row.sch_payload in
-  let recurrence_kind = Schedule_domain.recurrence_kind_to_string recurrence in
-  let recurrence_fields = schedule_form_fields_of_recurrence recurrence in
-  let expires =
-    Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
-    |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
-  in
   (* The update replaces the whole definition, so a form without the run or
      commit watch removes it on save. Creation refuses a body whose watch does
      not decode, so only a hand-edited store file reaches the [Error] arm. *)
@@ -3237,12 +3277,32 @@ let schedule_modify_form (row : schedule_row) recurrence ~delivery =
      ; "title", `String (schedule_json_string "title" body)
      ]
      @ delivery_and_urgency
-     @ [ "due_at_iso", `String (Option.value ~default:"" row.sch_due_at_iso)
-     ; "recurrence_kind", `String recurrence_kind
-     ; "source", `String row.sch_source
-     ; "allow_unregistered_keeper", `Bool false
-     ]
-     @ run_watch @ checks_watch @ recurrence_fields @ expires)
+     @ schedule_form_request_fields row recurrence
+     @ [ "allow_unregistered_keeper", `Bool false ]
+     @ run_watch @ checks_watch
+     @ schedule_form_fields_of_recurrence recurrence
+     @ schedule_form_expiry_fields row)
+  |> Yojson.Safe.pretty_to_string
+
+(* A Lane action row's form: the fields the update tool reads a Lane action
+   from, as the store holds them, and the same timing as a Keeper wake form.
+   It carries no Keeper wake field: the server takes the replacement's kind
+   from the fields the call carries, and refuses a call that carries fields of
+   both kinds. A field the stored body does not hold is left out, so the server
+   refuses the save instead of taking a default for it. *)
+let schedule_lane_action_modify_form (row : schedule_row) recurrence =
+  let stored field =
+    match schedule_payload_body row.sch_payload with
+    | `Assoc fields ->
+        List.assoc_opt field fields
+        |> Option.fold ~none:[] ~some:(fun value -> [ field, value ])
+  in
+  `Assoc
+    ([ "schedule_id", `String row.sch_schedule_id ]
+     @ List.concat_map stored Masc.Tool_schedule.lane_act_arg_names
+     @ schedule_form_request_fields row recurrence
+     @ schedule_form_fields_of_recurrence recurrence
+     @ schedule_form_expiry_fields row)
   |> Yojson.Safe.pretty_to_string
 
 (** The form the modify editor opens with, or why it does not open.
@@ -3250,16 +3310,24 @@ let schedule_modify_form (row : schedule_row) recurrence ~delivery =
     [Error] first carries {!schedule_modify_refusal}. A row whose recurrence
     this build cannot read is refused too: the update replaces the whole
     definition, so a form built without that recurrence would save a default
-    over it. *)
+    over it. The form is of the row's own payload kind for the same reason: a
+    Keeper wake form saved over a Lane action row would replace the action
+    with a wake. *)
 let schedule_update_form_json (row : schedule_row)
     : (string, schedule_modify_refusal) result =
   match schedule_modify_refusal row, row.sch_recurrence with
   | Some reason, (Ok _ | Error _) -> Error reason
   | None, Error detail -> Error (Schedule_recurrence_unreadable detail)
   | None, Ok recurrence ->
-      Result.map
-        (fun delivery -> schedule_modify_form row recurrence ~delivery)
-        (schedule_form_delivery row)
+      (match schedule_form_payload_kind row with
+       | Error reason -> Error reason
+       | Ok Masc.Schedule_payload_projection.Keeper_wake ->
+           Result.map
+             (fun delivery ->
+               schedule_keeper_wake_modify_form row recurrence ~delivery)
+             (schedule_form_delivery row)
+       | Ok Masc.Schedule_payload_projection.Lane_act ->
+           Ok (schedule_lane_action_modify_form row recurrence))
 
 let schedule_create_form_json () =
   `Assoc
@@ -5768,9 +5836,6 @@ let take_scoped_refresh_followup ~full_refresh_inflight
 type scrolled = {
   sc_count : int;  (** rows of content the surface has *)
   sc_chrome : int;  (** rows it spends on its own frame *)
-  sc_overflow_takes_row : bool;
-      (** [true] when an overflow indicator is drawn from the remaining body
-          instead of already being reserved in [sc_chrome]. *)
   sc_preview_keep : int option;
       (** rows the list keeps when the surface draws a preview under it, or
           [None] when the list has the whole body. A surface that adds a
@@ -5780,9 +5845,9 @@ type scrolled = {
 }
 
 (* These seven draw the same fixed frame around their content, and spend two
-   more rows when a load error is on screen. A conditional overflow row is
-   declared separately in [sc_overflow_takes_row]; a surface whose chrome
-   moves has to move the typed layout in the same change. *)
+   more rows when a load error is on screen. A surface whose chrome moves has
+   to move the typed layout in the same change. Where the window stands is
+   on the title row, so no row under the list is kept for it. *)
 let listing_chrome ~error = if Option.is_some error then 9 else 7
 
 (* The verdict list also draws the newest recorded timestamp above its column
@@ -12131,13 +12196,12 @@ let queue_panel_fixed_rows ~items panel =
   1 + (match panel.qp_receipt with Some _ -> 1 | None -> 0)
     + (match queue_panel_selection_note ~items panel with Some _ -> 1 | None -> 0)
 
-let queue_panel_window_height ~count ~budget =
-  let budget = max 0 budget in
-  if count > budget then max 0 (budget - 1) else budget
+(* Where the window stands is on the title row, so the list keeps every row
+   its budget has. *)
+let queue_panel_window_height ~budget = max 0 budget
 
 let queue_panel_list_height ~items ~budget panel =
-  queue_panel_window_height ~count:(List.length items)
-    ~budget:(budget - queue_panel_fixed_rows ~items panel)
+  queue_panel_window_height ~budget:(budget - queue_panel_fixed_rows ~items panel)
 
 let queue_panel_scroll ~items ~height panel =
   let count = List.length items in
@@ -23727,7 +23791,6 @@ let surface_body_rows (state : state) ~terminal_rows =
 let tools_scroll_layout state ~count =
   { sc_count = count
   ; sc_chrome = if Option.is_some (selected_tools_error state) then 9 else 7
-  ; sc_overflow_takes_row = Option.is_none state.tools_skill_source_picker
   ; sc_preview_keep = None }
 ;;
 
@@ -23735,7 +23798,7 @@ let tools_content_rows state ~terminal_rows ~count =
   let layout = tools_scroll_layout state ~count in
   Masc_tui_scroll.content_height ~rows:(surface_body_rows state ~terminal_rows)
     ~chrome:layout.sc_chrome ~count:layout.sc_count
-    ~preview_keep:layout.sc_preview_keep ~overflow_takes_row:layout.sc_overflow_takes_row
+    ~preview_keep:layout.sc_preview_keep
 ;;
 
 (* Parameters split their body between the cursor-following list and the
@@ -23743,7 +23806,8 @@ let tools_content_rows state ~terminal_rows ~count =
    the full-surface page is taller than this document and skips unread lines. *)
 let runtime_params_viewport (state : state) ~terminal_rows =
   let rows = surface_body_rows state ~terminal_rows in
-  (* The document position has its own row; hints cannot hide it at 40 cells. *)
+  (* The row under the document counts the rows it leaves out; hints cannot
+     hide it at 40 cells. *)
   let chrome = if Option.is_some state.runtime_param_edit then 11 else 8 in
   let content_height = max 1 (rows - chrome) in
   let list_height = min 8 (max 1 (content_height / 3)) in
@@ -24407,7 +24471,6 @@ let memory_overview_scrolled ~header_rows ~refused_rows ~context_rows (state : s
       + (if memory_overview_query state <> "" then 1 else 0)
       + (if Option.is_some state.memory_health_error then 2 else 0)
       + refused_rows
-  ; sc_overflow_takes_row = true
   ; sc_preview_keep = None
   }
 
@@ -25145,7 +25208,6 @@ let lanes_scrolled (state : state) ~cols:_ =
            | None -> 0
            | Some runs -> List.length runs)
       ; sc_chrome = listing_chrome ~error:state.lane_runs_error
-      ; sc_overflow_takes_row = true
       ; sc_preview_keep = None
       }
   | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
@@ -25154,7 +25216,6 @@ let lanes_scrolled (state : state) ~cols:_ =
          dimensions and is counted by [lanes_overview_projection] below. *)
       { sc_count = 0
       ; sc_chrome = 0
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
 
@@ -25168,7 +25229,6 @@ type lanes_overview_projection = {
   lop_detail_width : int;
   lop_list_height : int;
   lop_detail_height : int;
-  lop_position : bool;
   lop_tail : string list option;
   lop_scroll : scrolled;
 }
@@ -25246,15 +25306,14 @@ let lanes_overview_projection (state : state) ~rows ~cols =
     if split then pane_rows, pane_rows
     else (pane_rows + 1) / 2, pane_rows / 2 in
   let count = List.length (lane_inventory_entries state) in
-  let position = list_slots > 1 && count > list_slots in
-  let list_height = max 0 (list_slots - if position then 1 else 0) in
+  let list_height = list_slots in
   { lop_links = links; lop_observation = observation;
     lop_notices = notices; lop_boxed = boxed; lop_split = split;
     lop_list_width = list_width; lop_detail_width = detail_width;
     lop_list_height = list_height; lop_detail_height = detail_height;
-    lop_position = position; lop_tail = tail;
+    lop_tail = tail;
     lop_scroll = {sc_count = count; sc_chrome = rows - list_height;
-      sc_overflow_takes_row = false; sc_preview_keep = None} }
+      sc_preview_keep = None} }
 
 (* The active name field or second-[D] confirmation owns the Runtime body. *)
 type runtime_lane_prompt =
@@ -25633,7 +25692,8 @@ type runtime_parent_projection =
   ; rpp_rows : runtime_parent_line list
   ; rpp_notices : int
   ; rpp_page : int
-  ; rpp_position : string option
+  ; rpp_position : Masc_tui_value.Position.t option
+      (** The selected slot among the call order, for the title row. *)
   }
 
 (* Drawing and page keys use this same current selection and physical budget.
@@ -25698,8 +25758,10 @@ let runtime_parent_projection ~terminal_rows ~cols (state : state) =
               if Some index = selected then Parent_focus line else Parent_text line) in
         { rpp_parent = parent; rpp_rows = context @ rows @ notice_rows;
           rpp_notices = List.length notices; rpp_page = height;
-          rpp_position = if Option.is_some selected && count > height then Some
-              (Masc_tui_scroll.window_text ~scroll:first ~height count) else None }
+          rpp_position =
+            (match selected with
+             | Some _ when count > 0 -> Some (Masc_tui_value.Position.row ~selected ~total:count)
+             | Some _ | None -> None) }
     | Runtime_prompt_parent prompt ->
         let input draft =
           let label = text "새 이름 › " "Name › " in
@@ -26674,7 +26736,6 @@ let runtime_scrolled ~rows ~cols (state : state) : scrolled option =
            | Some s, Runtime_all ->
                List.length s.Tui_decode.rss_resolved.Tui_decode.rrs_runtimes)
       ; sc_chrome = runtime_surface_listing_chrome ~rows ~cols state
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
 
@@ -26683,7 +26744,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
     Some
       { sc_count = count
       ; sc_chrome = listing_chrome ~error
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
   in
@@ -26705,7 +26765,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
              | None -> 0
              | Some _ -> List.length (visible_system_log_entries state))
         ; sc_chrome = listing_chrome ~error:(System_logs_view.current state.system_logs).lp_error
-        ; sc_overflow_takes_row = true
         ; sc_preview_keep = None
         }
   | Verification ->
@@ -26716,11 +26775,8 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
            what the join could not read or resolve. They are frame rows too;
            a count without them puts the footer past the frame's last row.
 
-           The view row is unconditional, so it is counted here rather than
-           through [sc_overflow_takes_row]: that flag drops its row when the
-           list is not cut, and this row is drawn either way. It carries the
-           window text a cut page used to draw on its own line, so the two
-           are one row, not two. *)
+           The view row is unconditional, so it is counted here. Where the
+           window stands is on the title row, not on this one. *)
         (* Nothing is drawn under the list before a read answers, so the
            count is zero there rather than reserving a row the frame leaves
            blank. The view row is inside this match for the same reason. *)
@@ -26746,7 +26802,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
               + under_list
               + (if Option.is_some state.verification_verdict_armed then 1 else 0)
               + (if Option.is_some state.verification_verdict_error then 1 else 0)
-          ; sc_overflow_takes_row = false
           ; sc_preview_keep = None
           }
   | Lanes ->
@@ -26772,7 +26827,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
                | None -> 0
                | Some s -> List.length s.Tui_decode.hs_verdicts)
           ; sc_chrome = harness_listing_chrome ~error:state.harness_error
-          ; sc_overflow_takes_row = true
           ; sc_preview_keep = None
           }
   | Repositories ->
@@ -26802,7 +26856,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
         ; sc_chrome =
             listing_chrome ~error:state.changes_error
             + changes_budget_note_rows state
-        ; sc_overflow_takes_row = true
         ; sc_preview_keep = Some changes_preview_keep_rows
         }
   | Code when state.repository_changes_open -> repository_changes_listing ()
@@ -26838,7 +26891,6 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
               List.length
                 (Masc_tui_runtime_config_view.summary_lines
                    ~ko:(state.ui_language = Lang_ko) r.rcv_metadata))
-        ; sc_overflow_takes_row = false
         ; sc_preview_keep = None
         }
   | Config ->

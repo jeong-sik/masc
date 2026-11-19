@@ -36,8 +36,17 @@ let render_runtime_params (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
   box_top buf cols;
+  (* The list has the cursor, so its selected row is the position. *)
   box_line buf cols
-    (config_pane_title ~cols state);
+    (zone_two_title ~cols state ~title:(config_pane_title state)
+       ~position:
+         (match state.runtime_params with
+          | None | Some [] -> None
+          | Some rows ->
+              Some
+                (Masc_tui_value.Position.row
+                   ~selected:(Some state.runtime_params_cursor)
+                   ~total:(List.length rows))));
   (* Where the overrides live leads, because it is the only thing on this row
      the reader cannot get anywhere else, and it was what the row cut first:
      at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
@@ -259,17 +268,22 @@ let render_runtime_params (state : state) =
      end);
   let scroll = Masc_tui_scroll.normalize ~count:(List.length selected_lines)
       ~height:(max 1 detail_height) state.config_scroll in
-  let reading = Masc_tui_scroll.window_reading ~noun:(ui_text state ~ko:"상세" ~en:"Detail") ~scroll
-      ~height:detail_height (List.length selected_lines) in
+  (* How many detail rows the window leaves out. It is a count, not a
+     position: the title row names the selected setting's place. *)
+  let hidden = List.length selected_lines - detail_height in
+  let cut =
+    if hidden <= 0 then ""
+    else Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden
+  in
   let detail_window = Rows.of_list ~first:scroll ~height:detail_height selected_lines in
   let visible_lines = List.init detail_height (fun index ->
       Option.value (Rows.at detail_window (scroll + index)) ~default:"") in
   let panel_title = Option.map (fun row ->
       ui_text state ~ko:"선택한 설정 · " ~en:"Selected setting · " ^ Terminal_text.single_line row.Tui_decode.rpr_key
-      ^ " · " ^ reading) selected in
-  (* The panel replaces the divider and position row, so the document keeps
-     the shared paging height. Use plain rows when panel borders would trim
-     any exact JSON row or hide the document position. *)
+      ^ (if cut = "" then "" else " · " ^ cut)) selected in
+  (* The panel replaces the divider and the row under the document, so the
+     document keeps the shared paging height. Use plain rows when panel
+     borders would trim any exact JSON row or the count of rows left out. *)
   (match panel_title with
    | Some title
      when Message_layout.display_width title <= panel_cells
@@ -281,7 +295,7 @@ let render_runtime_params (state : state) =
    | Some _ | None ->
        box_divider buf cols;
        List.iter (box_line buf cols) visible_lines;
-       box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ reading));
+       box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ cut));
   (match state.runtime_param_edit with
    | None -> ()
    | Some edit ->
@@ -579,11 +593,15 @@ let render_prompts_detail state buf ~cols ~height ~selected =
   let rendered = prompts_detail_lines state ~cols in
   let total = List.length rendered in
   let scroll = Masc_tui_scroll.normalize ~count:total ~height state.config_scroll in
+  (* How many detail rows the window leaves out: a count, not a position.
+     The title row names the selected prompt's place. *)
+  let hidden = total - height in
   box_line_styled buf cols ~style:(Theme.recede ())
     (row_with_field ~cols ~lead:"  " ~field:(Terminal_text.single_line selected)
-       ~tail:(Printf.sprintf " · %s [%d-%d/%d]"
-         (ui_text state ~ko:"상세" ~en:"Detail")
-         (if total = 0 then 0 else scroll + 1) (min total (scroll + height)) total));
+       ~tail:
+         (" · " ^ ui_text state ~ko:"상세" ~en:"Detail"
+          ^ (if hidden <= 0 then ""
+             else " · " ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden)));
   let window = Rows.of_list ~first:scroll ~height rendered in
   for index = 0 to height - 1 do
     match Rows.at window (scroll + index) with
@@ -662,7 +680,10 @@ let render_prompt_registry (state : state) =
       Ansi.reset
   in
   box_line buf cols
-    (config_pane_title ~cols ~reading state);
+    (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
+       ~position:
+         (if total = 0 then None
+          else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)));
   box_divider buf cols;
   (* One row that says where the catalog is. An empty list used to mean both
      "still reading" and "nothing here". *)
@@ -749,11 +770,16 @@ let render_runtime_prompt_assets (state : state) =
       (ui_text state ~ko:"읽기 전용" ~en:"read only") Ansi.reset
   in
   box_line buf cols
-    (config_pane_title ~cols
-       ~path:
-         [ ui_text state ~ko:"프롬프트" ~en:"prompts"
-         ; ui_text state ~ko:"런타임 자산" ~en:"runtime assets" ]
-       ~reading state);
+    (zone_two_title ~cols state
+       ~title:
+         (config_pane_title
+            ~path:
+              [ ui_text state ~ko:"프롬프트" ~en:"prompts"
+              ; ui_text state ~ko:"런타임 자산" ~en:"runtime assets" ]
+            ~reading state)
+       ~position:
+         (if total = 0 then None
+          else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)));
   box_line_styled buf cols ~style:(Theme.recede ())
     (ui_text state ~ko:"  배포된 .txt 지시문 · 프롬프트 재정의 대상 아님"
        ~en:"  Distributed .txt instructions · not registry overrides");
@@ -1040,7 +1066,7 @@ let preset_pane_heights (state : state) ~rows ~count ~presets_count =
   let list_height = min (max 1 presets_count) (min 8 (max 1 (combined_height / 3))) in
   let detail_rows = max 1 (combined_height - list_height) in
   let detail_height = Masc_tui_scroll.content_height ~rows:detail_rows ~chrome:0
-      ~count ~preview_keep:None ~overflow_takes_row:true
+      ~count ~preview_keep:None
   in
   list_height, detail_height
 
@@ -1082,7 +1108,10 @@ let render_presets (state : state) =
   box_top buf cols;
   let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
-    (config_pane_title ~cols ~reading state);
+    (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
+       ~position:
+         (if total = 0 then None
+          else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)));
   box_divider buf cols;
   let detail = preset_detail_lines state ~cols ~selected in
   let count = List.length detail in
@@ -1170,10 +1199,6 @@ let render_presets (state : state) =
       box_line_styled buf cols ~style ("  " ^ row.text)
     | None -> box_empty buf cols
   done;
-  if count > detail_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [%s %s]" (ui_text state ~ko:"행" ~en:"lines")
-         (Masc_tui_scroll.window_text ~scroll ~height:detail_height count));
   (match state.preset_save_draft with
    | Some draft ->
      box_line buf cols
@@ -1521,13 +1546,29 @@ let render_config_models (state : state) =
   let projection = config_models_projection state ~terminal_rows ~cols in
   box_top buf cols;
   let path_note = config_path_note state in
+  (* The cursor walks bindings, so the selected binding among them is the
+     position whether the table or the stacked items are drawn. *)
+  let position =
+    match state.runtime_model_form, state.runtime_model_jump,
+          config_models_read_error state, state.runtime_config_view with
+    | None, None, None, Some _ ->
+        let total = List.length (config_models_drawn_rows state) in
+        if total = 0 then None
+        else
+          Some
+            (Masc_tui_value.Position.row ~selected:(Some state.config_models_cursor) ~total)
+    | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
+  in
   box_line buf cols
-    (config_pane_title ~cols
-       ~reading:(if Option.is_none state.runtime_model_form
-                    && Option.is_none state.runtime_model_jump
-                    && Option.is_none (config_models_read_error state)
-                 then projection.model_reading_hint else "")
-       ~note:path_note state);
+    (zone_two_title ~cols state
+       ~title:
+         (config_pane_title
+            ~reading:(if Option.is_none state.runtime_model_form
+                         && Option.is_none state.runtime_model_jump
+                         && Option.is_none (config_models_read_error state)
+                      then projection.model_reading_hint else "")
+            ~note:path_note state)
+       ~position);
   box_divider buf cols;
   let content_height = max 1 (rows_avail - 5) in
   (match state.runtime_model_form with
@@ -1635,7 +1676,6 @@ let config_models_scrolled (state : state) : scrolled =
   | Some _, _ | None, None ->
       { sc_count = 0
       ; sc_chrome = chrome_error
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
   | None, Some _ ->
@@ -1643,7 +1683,6 @@ let config_models_scrolled (state : state) : scrolled =
       let projection = config_models_projection state ~terminal_rows ~cols in
       { sc_count = List.length projection.model_document
       ; sc_chrome = 5 + List.length projection.model_prefix
-      ; sc_overflow_takes_row = false
       ; sc_preview_keep = None
       }
 
@@ -1792,7 +1831,10 @@ let render_runtime_config_status state =
       ~en:"v/Esc:settings source  j/k:scroll  PgUp/PgDn:page  Home/End:top/end  r:reload")
     ~body:(fun ~budget c ->
       let lines = runtime_config_status_rows state ~cols in
-      let scroll = min state.runtime_config_status_scroll (max 0 (List.length lines - budget)) in
+      let total = List.length lines in
+      let scroll = min state.runtime_config_status_scroll (max 0 (total - budget)) in
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total);
       lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + budget)
       |> List.iter (fun (style, text) -> c.push_styled ~style text))
 
@@ -2043,12 +2085,10 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 2048 in
   let head = Buffer.create 256 in
+  (* Two selectors move at once, each under its own keys, so neither is the
+     screen's one position; each names the choice it holds. *)
   let selector label items cursor draw =
-    let position =
-      if items = [] then "0/0"
-      else Printf.sprintf "%d/%d" (cursor + 1) (List.length items)
-    in
-    let prefix = Printf.sprintf "  %s %s: " label position in
+    let prefix = Printf.sprintf "  %s: " label in
     let value =
       match List.nth_opt items cursor with
       | None -> Masc_tui_theme.Glyph.no_value
@@ -2283,7 +2323,7 @@ let render_config (state : state) =
   (* The frame, its fill and the footer are the contract's. The surface
      subtracted a literal 7 and drew six fixed rows, so the footer stood one
      row above the composer; the key handler read the same short number. *)
-  surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"config" ~title
+  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"config" ~title
     ~hints:
       (* Projected from the key table rather than spelled here. The literal
          named five keys and no way out -- not because the row ran out of
@@ -2356,6 +2396,10 @@ let render_config (state : state) =
           let total = List.length rows in
           let max_scroll = max 0 (total - content_height) in
           let scroll = max 0 (min state.config_scroll max_scroll) in
+          (* The file has a cursor line, so the selected line is the
+             position, as in any list. *)
+          c.position
+            (Masc_tui_value.Position.row ~selected:(Some state.runtime_config_cursor) ~total);
           let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
           for i = 0 to content_height - 1 do
             match Rows.at rows_window (scroll + i) with

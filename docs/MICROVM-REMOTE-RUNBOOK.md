@@ -138,7 +138,9 @@ keeper 를 돌리지 않는 호스트는 `--no-guest-shim` 으로 건너뛴다.
 같은 버전이 이미 깔려 있으면 설치기는 shim 도 그대로 둔다. shim 만 다시 받으려면
 `scripts/install.sh --version vX.Y.Z --force --base-path <workspace>` 로 돌린다.
 
-평소 로컬 빌드 설치는 게스트 shim 을 그대로 두며 릴리즈를 조회하지 않는다.
+평소 로컬 빌드 설치는 릴리즈 shim(sidecar 가 있는 shim)을 그대로 두며 릴리즈를 조회하지 않는다.
+sidecar 가 없는 shim 은 소스 빌드다. 이 shim 의 소스 신원이 새 서버와 다르면
+설치가 서버를 바꾸기 전에 같은 checkout 에서 shim 을 다시 빌드한다(아래 「직접 빌드」).
 microVM 에 서버·shim 변경을 배포하거나 `remote_shim_outdated` 를 해결할 때는
 `scripts/install-local-build.sh --refresh-guest-shim` 으로 이미 있는 릴리즈 shim 을
 맞춘다. 빌드가 끝났으면 `--skip-build` 도 붙인다. 새로 놓지는 않는다.
@@ -151,7 +153,7 @@ microVM 에 서버·shim 변경을 배포하거나 `remote_shim_outdated` 를 �
 |---|---|
 | shim 이 없다 | 아무것도 안 한다 |
 | shim 이 이미 그 릴리즈의 것 | 체크섬은 조회하고, 바이너리는 다시 받지 않는다 |
-| sidecar 가 없다 (손으로 빌드한 shim) | 건드리지 않는다 |
+| sidecar 가 없다 (소스로 빌드한 shim) | 이 옵션은 건드리지 않는다. 기본 설치가 다시 빌드한다(아래 「직접 빌드」) |
 | sidecar 에 릴리즈 자산 이름이 없다 | shim 을 그대로 두고 WARN 한 줄, 설치는 계속 |
 | 릴리즈를 읽을 수 없거나, 릴리즈에 그 자산이 없다 | shim 을 그대로 두고 WARN 한 줄(curl 이 말한 이유 포함), 설치는 계속. 다음 명시적 갱신 때 다시 받는다 |
 | 받은 자산이 `SHA256SUMS` 와 다르다 | 아무것도 설치하지 않고 멈춘다 |
@@ -194,8 +196,12 @@ microsandbox) 모두에서 그 게스트를 건드리기 전에 난다.
 릴리즈 서버는 같은 태그의 자산이 맞는다(`scripts/install.sh --version vX.Y.Z
 --force`). checkout 으로 빌드한 서버는 어떤 릴리즈 자산과도 맞지 않으니, 같은
 checkout 에서 shim 을 빌드한다. `install-local-build.sh --refresh-guest-shim` 도
-이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 릴리즈 없이
-지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
+이 경우 릴리즈 shim 을 깔지 않고 멈춘다. 작업 공간의 shim 에 sidecar 가 없으면
+`install-local-build.sh` 가 설치할 때 아래 빌드를 대신 한다. 아키텍처는 옛 shim 의
+ELF 헤더에서 읽는다. 옛 shim 은 옆에 `masc-exec-shim.previous` 로 남는다. 이 파일은
+마지막으로 바꾼 shim 하나만 담고, 다음 빌드가 덮어쓴다.
+빌드가 실패하면(Docker 가 꺼져 있을 때 등) 아무것도 설치하지 않고 아래 명령을 알려 준다.
+릴리즈 없이 지금 트리로 만들어야 할 때는 아래처럼 직접 빌드한다. 손으로 빌드한
 shim 에는 sidecar 가 없어야 한다. 없으면 부팅이 검증 없이 돌리고 로그에 그렇게
 적는다.
 

@@ -2263,13 +2263,13 @@ let keeper_list_position ~stop rows : Masc_tui_value.Position.t option =
   match rows with
   | [] -> None
   | _ :: _ ->
-      let at =
+      let selected =
         match stop with
-        | Some (Keeper_list_model.Stop_row position) -> position + 1
+        | Some (Keeper_list_model.Stop_row position) -> Some position
         | Some (Keeper_list_model.Stop_world | Keeper_list_model.Stop_heading _)
-        | None -> 0
+        | None -> None
       in
-      Some (Row { at; total = List.length rows })
+      Some (Masc_tui_value.Position.row ~selected ~total:(List.length rows))
 
 let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pulse_headers =
   let text ko en = ui_text state ~ko ~en in
@@ -2352,7 +2352,6 @@ type keeper_plain_projection =
   ; kpp_entry_rows : int
   ; kpp_window : keeper_display_entry list
   ; kpp_scroll : int
-  ; kpp_overflow : bool
   ; kpp_count : int
   ; kpp_density : Keeper_list_model.density
   ; kpp_selected_reading : Keeper_control.reading option
@@ -2435,16 +2434,14 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
     | Keeper_list_model.One_line -> Keeper_list_model.One_line
   in
   let heights = List.map (keeper_plain_entry_height density) entries in
-  let primary_entry_height = List.fold_left max 1 heights in
-  let overflowing = content_rows > primary_entry_height
-    && List.fold_left ( + ) 0 heights > content_rows in
-  let entry_rows = max 0 (content_rows - if overflowing then 1 else 0) in
+  (* Where the cursor stands is on the title row, so every row draws entries. *)
+  let entry_rows = content_rows in
   let cursor = Option.value ~default:0 (List.find_index (keeper_entry_selected stop) entries) in
   let scroll, count = Masc_tui_scroll.window_of_heights ~heights ~cursor ~rows:entry_rows state.keeper_list_scroll in
   { kpp_headers = headers; kpp_list_width = list_width; kpp_detail_width = detail_width
   ; kpp_detail_lines = detail_lines; kpp_list_rows = list_rows; kpp_entry_rows = entry_rows
   ; kpp_window = List.take count (List.drop scroll entries); kpp_scroll = scroll
-  ; kpp_overflow = overflowing; kpp_count = List.length reading.klr_rows
+  ; kpp_count = List.length reading.klr_rows
   ; kpp_density = density
   ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary }
 
@@ -2529,21 +2526,6 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
      else [])
     @ content
     @ List.init (max 0 (projection.kpp_entry_rows - List.length content)) (fun _ -> "")
-    @ if projection.kpp_overflow then
-        let range =
-          Printf.sprintf "  %d–%d / %d · "
-            (if projection.kpp_window = [] then 0 else projection.kpp_scroll + 1)
-            (projection.kpp_scroll + List.length projection.kpp_window)
-            projection.kpp_count
-        in
-        let overflow_line =
-          Theme.recede () ^ range ^ Ansi.reset
-          ^ Ansi.bold ^ Theme.accent () ^ "j/k" ^ Ansi.reset
-          ^ Theme.recede () ^ " · " ^ Ansi.reset
-          ^ Ansi.bold ^ Theme.accent () ^ "PgUp/PgDn" ^ Ansi.reset
-        in
-        [ fit_width overflow_line width ]
-      else []
 
 let render_keeper_plain (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3021,9 +3003,8 @@ let render_keeper_axes (state : state) =
     portrait;
 
   let heights = List.map entry_lines entries in
-  let total_entry_lines = List.fold_left ( + ) 0 heights in
-  let overflowing = content_rows > 0 && total_entry_lines > content_rows in
-  let entry_rows = if overflowing then max 0 (content_rows - 1) else content_rows in
+  (* Where the cursor stands is on the title row, so every row draws entries. *)
+  let entry_rows = content_rows in
   let selected_entry =
     Option.value ~default:0 (List.find_index (keeper_entry_selected stop) entries)
   in
@@ -3144,26 +3125,6 @@ let render_keeper_axes (state : state) =
     | None, Axis_row.Grid _ -> box_line buf cols ""
   done;
   List.iter (fun line -> box_line_styled buf cols ~style:(Theme.recede ()) line) legend;
-
-  if overflowing then begin
-    (* Positions rather than a count of the rows drawn above, since a
-       folded group above the window draws none of its rows. *)
-    let positions =
-      List.filter_map
-        (function
-          | Keeper_display_row (position, _) -> Some position
-          | Keeper_world | Keeper_group_heading _ -> None)
-        entries_window
-    in
-    let range =
-      match positions with
-      | [] -> "0/" ^ string_of_int keeper_count
-      | first :: rest ->
-          Printf.sprintf "%d–%d/%d" (first + 1) (List.fold_left max first rest + 1) keeper_count
-    in
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [keepers %s]" range)
-  end;
 
   (* The window follows the list cursor and takes its rows out of the list's.
      A heading selects no Keeper, so the window has none to show there. *)
@@ -3559,9 +3520,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Item_account.item_name item) facts (if is_worn item then equipped_word else "")
     in
     let headline =
-      [ Printf.sprintf "  Items · %s · %d/%d · %s"
+      [ Printf.sprintf "  Items · %s · %s · %s"
           (Item_account.filter_name state.item_filter)
-          (if items = [] then 0 else cursor + 1) (List.length items)
+          (Masc_tui_value.Count.grouped (List.length items))
           (if state.item_preview && selected_item <> None then "try on" else "current outfit")
       ; account_line ]
     in
@@ -4979,65 +4940,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Detail_runs | Detail_terminal -> None
     in
 
-    (* Top border *)
-    box_top buf cols;
-
-    (* Title, with the tab walk on the same row so the chrome height the
-       scroll math counts does not move. *)
-    (* The tab you are on carries the mark the surface strip puts on the
-       surface you are on. Bold and underline said it alone before, so the
-       answer was gone from a monochrome terminal, from one that drops
-       underline, and from every text capture -- a frame dump, a screenshot
-       pasted into an issue, the keyboard-input fixtures.
-
-       Drawn through [tab_strip] with the row's width: ten tabs are wider
-       than the row beside the roster pane, and cut from the right the mark
-       on Runs was the part that went. *)
-    let entries =
-      List.map
-        (fun tab ->
-          ( Masc_tui_types.keeper_detail_tab_title ~ko:(state.ui_language = Lang_ko) tab
-          , tab = state.detail_tab
-          , tab ))
-        Masc_tui_types.keeper_detail_tabs
-    in
-    (* The strip keeps the cells its current tab needs; a name longer than
-       what is left folds in the middle. Drawn whole, a long name took the
-       row and the strip drew nothing, so the row no longer said which tab
-       the body below it is. *)
-    let name =
-      Message_layout.truncate_middle
-        (max heading_id_floor
-           (here_steps_room ~cols state ~steps:1
-              ~after:
-                (Message_layout.display_width tab_strip_gap
-                 + tab_strip_min_width entries)))
-        (Terminal_text.single_line k.k_name)
-    in
-    let before =
-      here_path state ~path:[ Ansi.bold ^ name ^ Ansi.reset ] ^ tab_strip_gap
-    in
-    let tabs =
-      tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
-        ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
-        entries
-    in
-    let title = before ^ tabs in
-    box_line buf cols title;
-
-    (* Divider *)
-    box_divider buf cols;
 
     (* Content area with scrolling. Chrome is 4 rows (top, title, divider,
-       bottom); the indicator, when the content overflows, spends one
-       content row rather than growing the pane, so the pane's height is
-       rows - 1 in both cases and the split's two bottoms stay level. *)
+       bottom). Where the window stands is on the title row, so the content
+       keeps every row. *)
     let terminal_tab = state.detail_tab = Detail_terminal in
     let content_height =
       (* The Terminal's status row is there whether or not the output
          overflows, so the output never moves when it starts to. *)
-      if total_lines > base_height || terminal_tab then max 0 (base_height - 1)
-      else base_height
+      if terminal_tab then max 0 (base_height - 1) else base_height
     in
     let visible_lines = min content_height total_lines in
     (* How far back from the bottom this window can go, and how far it is. *)
@@ -5066,6 +4977,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                   ~height:(max 1 content_height) scroll)
               identity_cursor_line
     in
+    (* Top border *)
+    box_top buf cols;
+
+    (* The Terminal tab's own row says what its view is doing; every other
+       tab names its window on the title row. *)
+    box_line buf cols
+      (zone_two_title ~cols state
+         ~title:(keeper_detail_title state ~keeper_name:k.k_name)
+         ~position:
+           (if terminal_tab then None
+            else
+              Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+                ~total:total_lines));
+
+    (* Divider *)
+    box_divider buf cols;
+
     let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
 
     (* Real pixels go over the blank cells the band left, from the first
@@ -5093,14 +5021,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       box_empty buf cols
     done;
 
-    (* Scroll indicator; on the Terminal tab the row says what the view is
-       doing instead. *)
-    if terminal_tab then box_line buf cols (Lazy.force terminal).terminal_status
-    else
-      Option.iter
-        (fun row ->
-          box_line buf cols ((Theme.recede ()) ^ row ^ Ansi.reset))
-        (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height total_lines);
+    (* On the Terminal tab one row says what the view is doing. *)
+    if terminal_tab then box_line buf cols (Lazy.force terminal).terminal_status;
 
     (* Bottom border *)
     box_bottom buf cols;
@@ -5214,13 +5136,26 @@ let render_keeper_logs (state : state) =
       | Ready _ | Stale _ ->
           count_reading state Masc_tui_value.Count.Entry total_entries in
 
+    let log_rows = Masc_tui_types.keeper_log_rows state ~cols in
+    let row_count = List.length log_rows in
+    let content_height =
+      Metrics_tail.content_height ~terminal_rows:rows ~error:None
+    in
+    let scroll =
+      Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
+        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
+    in
+
     (* Header *)
     let header =
       here_row ~cols state
         ~path:
           [ Terminal_text.single_line k.k_name
           ; ui_text state ~ko:"로그" ~en:"logs" ]
-        ~readings:[ reading_label ] ~position:None
+        ~readings:[ reading_label ]
+        ~position:
+          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+             ~total:row_count)
     in
 
     box_top buf cols;
@@ -5231,15 +5166,6 @@ let render_keeper_logs (state : state) =
       "  TIME  KIND  LATENCY · full facts below";
     box_divider buf cols;
 
-    let log_rows = Masc_tui_types.keeper_log_rows state ~cols in
-    let row_count = List.length log_rows in
-    let content_height =
-      Metrics_tail.content_height ~terminal_rows:rows ~error:None
-    in
-    let scroll =
-      Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
-        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
-    in
     let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in
     for index = 0 to content_height - 1 do
       if row_count = 0 && index = 0 then
@@ -5254,11 +5180,6 @@ let render_keeper_logs (state : state) =
             box_line_styled buf cols ~style line
         | None -> box_empty buf cols
     done;
-    if row_count > content_height then
-      box_line_styled buf cols ~style:(Theme.recede ())
-        (Printf.sprintf "  [newest rows %d-%d of %d]" (scroll + 1)
-           (min row_count (scroll + content_height)) row_count)
-    else box_empty buf cols;
 
     box_bottom buf cols;
 

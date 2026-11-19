@@ -42,6 +42,13 @@ let execution_label = function
   | Composition_skill mode -> Keeper_tool_composition_catalog.execution_mode_to_string mode
 ;;
 
+let surfaces =
+  Instruction_skill
+  :: List.map
+       (fun mode -> Composition_skill mode)
+       Keeper_tool_composition_catalog.execution_modes
+;;
+
 type io =
   | Model_orchestrated
   | Composition_io of

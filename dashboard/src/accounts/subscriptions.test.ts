@@ -16,6 +16,8 @@ import { addPath, createKeyAdds } from './key-add'
 import type { KeyAddModel } from './key-add'
 import { createRemovals, removePath } from './key-remove'
 import type { RemovalsModel } from './key-remove'
+import { createReplacements } from './key-replace'
+import type { ReplacementsModel } from './key-replace'
 import type { View } from './console'
 import { loginPath } from './login'
 import { slowAfterMs } from './notes'
@@ -71,6 +73,8 @@ const idleChecks = (): ChecksModel =>
 /** A giving of a key no test here drives: the panel only needs one to be there. */
 const idleAdds = (): KeyAddModel =>
   createKeyAdds({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
+/** Replacements no test here drives: the panel only needs them to be there. */
+const idleReplacements = (): ReplacementsModel => createReplacements({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
 /** Removals no test here drives: the panel only needs them to be there. */
 const idleRemovals = (): RemovalsModel =>
   createRemovals({ send: () => Promise.reject(new Error('nothing is sent')), leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() })
@@ -276,7 +280,7 @@ describe('following the console', () => {
       view: signal<PanelView>({ kind: 'waiting' }),
       load: vi.fn((_session: Session) => Promise.resolve()),
       retry: vi.fn(() => Promise.resolve()),
-      connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(),
+      connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(), replacing: idleReplacements(),
       stop: vi.fn(),
     } satisfies SubscriptionsModel
     const stop = follow(frame, panel)
@@ -654,7 +658,7 @@ describe('the panel', () => {
   /** The panel of one state, over a model that only counts what it is asked. */
   const drawn = (view: PanelView) => {
     const model = {
-      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(), stop: vi.fn(),
+      view: signal(view), load: vi.fn(() => Promise.resolve()), retry: vi.fn(() => Promise.resolve()), connecting: idleConnect(), checking: idleChecks(), adding: idleAdds(), removing: idleRemovals(), replacing: idleReplacements(), stop: vi.fn(),
     } satisfies SubscriptionsModel
     return { container: render(html`<${SubscriptionsPanel} model=${model} />`).container, model }
   }
@@ -706,9 +710,18 @@ describe('the panel', () => {
     const removeButtons = (name: string): number[] => {
       const view = views.find(([one]) => one === name)?.[1]
       if (view === undefined) throw new Error(`no view ${name}`)
-      return [...drawn(view).container.querySelectorAll('li.row')].map((row) => row.querySelectorAll('.actions button').length)
+      return [...drawn(view).container.querySelectorAll('li.row')].map((row) => row.querySelectorAll('button[id^="remove-"]').length)
     }
     expect([removeButtons('key accounts'), removeButtons('accounts of each kind').every((buttons) => buttons === 0)]).toEqual([[1, 1], true])
+  })
+
+  it('offers another key on a key account, and none on an account a removal was left on', () => {
+    const replaceButtons = (name: string): number[] => {
+      const view = views.find(([one]) => one === name)?.[1]
+      if (view === undefined) throw new Error(`no view ${name}`)
+      return [...drawn(view).container.querySelectorAll('li.row')].map((row) => row.querySelectorAll('button[id^="replace-"]').length)
+    }
+    expect([replaceButtons('key accounts'), replaceButtons('accounts of each kind').every((buttons) => buttons === 0)]).toEqual([[1, 0], true])
   })
 
   it('names, before anything is connected, only the subscriptions with a model to check', () => {

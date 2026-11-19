@@ -388,8 +388,9 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 
 ### 5.4 안 읽은 것과 읽지 못하는 것
 
-쓰는 쪽은 첫 안 읽은 줄의 바이트 offset(`turn_log_offset`)을 반영 기록에 적는다(§8).
+쓰는 쪽은 다 읽지 않은 첫 줄의 바이트 offset(`turn_log_offset`)을 반영 기록에 적는다(§8). 첫 boot 의 `Started` 에서는 0, 곧 `Log_started` 줄이다. 반쯤 읽은 단위에서는 그 단위의 줄이고, `covered` 는 그 단위가 시작하는 자리다.
 읽는 쪽은 거기서부터 읽는다. 첫 줄부터 훑는 일은 없다.
+턴 안에서 읽기 시작하면 그 턴의 `Closed` 가 가리키는 `Opened` 부터 그 `Closed` 앞까지만 다시 읽는다. Task, runtime, `baseline` 과, 그 사이에 `Reset` 이 있는지를 거기서 얻는다. 그래서 같은 단위는 몇 번째 읽기든 똑같이 나뉜다.
 읽는 쪽은 해석하지 못하는 줄이나 `Unannounced` reset 을 만나면 거기서 멈춘다. 그 앞에 항목이 든 단위가 있으면 그것을 평소대로 먼저 묻는다.
 
 `Unannounced` reset 은 「그사이에 무엇이 닫혔는지 모른다」는 줄이다. 줄을 쓰는 쪽이 head 가 다른 trace 에 있거나, 마지막 끝자리보다 아래이거나, 해석되지 않는 것을 보고 쓴다. session 을 지우는 정지도 쓴다(§5.2).
@@ -577,7 +578,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 ### 7.1 묻기 하나는 걷기 하나다
 
 묻는 fiber 는 쓰는 쪽이 정한 질문 하나를 만들고, slot 을 한 번 걷고, 결과를 돌려준다.
-폭을 줄이지 않는다. 상태를 갖지 않는다. 폭과 바닥의 판단은 모두 쓰는 쪽의 순수 함수다.
+폭을 줄이지 않는다. 상태를 갖지 않는다. 폭과 바닥의 판단은 모두 쓰는 쪽의, 모델을 기다리지 않는 동기 함수다.
 
 1. 쓰는 쪽이 메모리에 둔 마지막 줄의 값을 읽는다. 스냅샷 sha, 읽은 자리, 턴 기록의 offset 이다.
 2. 스냅샷 바이트를 읽고 그 값을 다시 읽는다. 값이 그대로인데 바이트의 sha 가 다르면 `Memory_diverged` 로 끝난다. 값이 달라졌으면 처음부터 다시 읽는다.
@@ -587,22 +588,20 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 6. 선언한 slot 마다 결과를 하나씩 붙여 돌려준다.
 
 ```ocaml
-type offered = { units : int; head_items : int }     (* 이 질문이 실은 단위 수와, 맨 앞 단위의 항목 수 *)
-type ask_result =
-  | Answered of { question : question; answer : answer; slot : string; offered : offered }
+type ask_result =                        (* 코드는 Librarian_read_result.t *)
+  | Answered of { question : question; answer : answer; slot : string }
   | Nothing_to_ask
-  | Refused_by_lane of lane_result       (* 답한 slot 이 없고, 질문을 거절한 slot 이 하나는 있다 *)
-  | Silent_lane of lane_result           (* 답한 slot 도, 질문을 거절한 slot 도 없다 *)
-  | Nothing_readable of { through : item_ref; missing : missing_part list }
-  | Span_unknown of { line : int; before : mark; after : mark }
+  | No_answer of { slots : (slot_key * slot_outcome) list }   (* 답한 slot 이 없다 *)
+  | Nothing_readable of { reach : reach; missing : missing_at list }
+  | Span_unknown of { before : mark; reach : reach }          (* reach 는 그 reset 줄까지 Whole *)
   | Memory_diverged of { expected : Sha256.t; observed : Sha256.t }
   | Input_fault of input_fault
   | Ask_failed of failed
-and lane_result =
-  { question : Question_id.t; basis : Sha256.t; head : item_ref; offered : offered
-  ; slots : (slot_key * slot_outcome) list }
-and failed = Raised | Flow_stopped
+and reach = { line : int; within : within; covered : mark; turn_log_offset : int }   (* 반영 줄이 그대로 적는 값 *)
+and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed: 턴 기록이나 단위의 파일을 읽지 못했다 *)
 ```
+
+- `Refused_by_lane` 은 지금 선언된 slot 가운데 질문을 거절한 slot 이 하나는 있는 `No_answer` 이고, `Silent_lane` 은 그런 slot 이 없는 `No_answer` 다. 둘은 `decide` 의 조건이다(§9.3). 폭이 드는 `offered` 와 `lane_result` 의 나머지 칸(`question`, `basis`, `head`)은 L7 이 더한다.
 
 - 폭과 반영한 수는 결과의 `offered` 에서 읽는다. 쓰는 쪽이 따로 세지 않는다. fiber 가 읽은 뒤에 턴이 닫혔을 수 있다.
 - 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
@@ -624,6 +623,7 @@ type slot_outcome = Slot_answered | Refused of refusal | Silent of silence
 - 분류는 함수 하나다. `classify : slot_visit -> slot_outcome` 이고 결과 타입마다 와일드카드 없는 `match` 다.
 - 생성자마다 한 행인 표는 근거 폴더에 있다. 타입 16개의 생성자 163개이고 행은 168개다. 다섯 생성자는 타입 있는 칸으로 둘로 나뉜다. 스크립트가 코드에서 생성자를 뽑아 표와 맞춘다. 행이 없는 생성자, 생성자가 없는 행, 겹치는 행이 있으면 실패한다.
 - **선언한 slot 은 모두 결과가 있다.** 묻기는 선언한 slot 목록(HTTP, 그다음 CLI)을 돌면서 slot 마다 방문을 찾는다. 방문이 없으면 `Silent Not_called` 다. 그래서 「모든 slot」이라는 조건은 빠짐없는 목록 위의 fold 다.
+- registry 가 받아들이지 않은 선언 slot 은 `Silent Unavailable` 로 센다. lane 값이 그 id 를 싣는다(L7).
 - 판단이 읽는 것은 넷뿐이다. 답했다, 입력 크기로 거절했다, 다르게 거절했다, 말이 없다. 나머지 갈래는 운영자의 행에 쓴다.
 
 | 갈래 | HTTP (Agent-Core) | CLI |
@@ -674,7 +674,7 @@ Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #5
 
 ### 7.3 결과마다 쓰는 쪽이 하는 일
 
-`decide` 는 순수 함수다. 아래에서 「다시 묻는다」는 §9.2 의 「다음 묻기」다. lane 이 켜져 있고 안 읽은 것이 있으면 폭 기억이 정한 폭으로 묻고, 아니면 `Idle` 이다.
+`decide` 는 모델을 기다리지 않는 동기 함수다. 반영에 드는 저장소 I/O 는 그 안에서 한다. 아래에서 「다시 묻는다」는 §9.2 의 「다음 묻기」다. lane 이 켜져 있고 안 읽은 것이 있으면 폭 기억이 정한 폭으로 묻고, 아니면 `Idle` 이다.
 
 | 결과 | 조건 | 하는 일 |
 |---|---|---|
@@ -843,14 +843,14 @@ type effects =
 
 type hole =
   | Item_exceeds_window
-  | Content_missing of missing_part list
+  | Content_missing of missing_at list
   | Line_unreadable of { offset : int; sha : Sha256.t }
   | Unknown_span of { before : mark; after : mark }
   | Turn_log_replaced of { from : Turn_log_id.t; to_ : Turn_log_id.t }
   | Position_lost of { offset : int; length : int }
   | Operator_skipped of { by : string }
 type cause =
-  | Read of { question : Question_id.t; shown_memory : bool; slot : string; missing : missing_part list }
+  | Read of { question : Question_id.t; shown_memory : bool; slot : string; trace : string; missing : missing_at list }
   | Make_room of { question : Question_id.t; after : item_ref; slot : string }
   | Direct of { by : actor; trace : string; write : write }
   | Skip of { hole : hole }
@@ -928,7 +928,7 @@ type log_line =
 
 ### 8.4 읽은 자리가 움직이는 규칙
 
-- `Read` 반영은 질문이 시작한 자리가 `covers_through` 바로 다음일 때만 받는다. 받으면 `covers_through` 를 질문이 끝난 자리로 옮긴다.
+- `Read` 반영이 질문이 시작한 자리에서 이어지는 것은 묻기 번호와 취소 규칙이 지킨다. 읽은 자리를 옮기는 사건은 가던 묻기를 취소하고, 다른 묻기의 답은 늦은 답으로 버린다(§9.2). 받으면 `covers_through` 를 질문이 끝난 자리로 옮긴다.
 - `Skip` 은 자기가 이름 붙인 것만 지나간다.
 - `Restart_reading` 은 그 턴 기록의 처음으로 옮긴다.
 - 그 밖에는 아무것도 자리를 옮기지 않는다. `Direct`, `Make_room`, `Adopt` 반영은 자리를 그대로 둔다.
@@ -1584,7 +1584,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | F11 선언을 바꾸면 읽기가 멈춘다 | 질문 id 가 선언을 담는다. 질문 쪽 선언이 바뀌면 가던 묻기를 취소한다. 늦게 온 답은 세고 버린다. 그 밖에 들고 있는 것이 없다 | 호출 중에 프롬프트를 바꾼다. 버린 답 하나가 세어지고 다음 질문이 새 선언을 담는다. slot 목록만 바꾸면 가던 묻기의 답이 반영된다 | L6 |
 | F12 처리량이 도착의 20분의 1 이다 | §15. 묻기가 턴 도착을 따라간다 | 재생 스크립트와 출력(근거 폴더). 배포 뒤 fleet 행 | L0, L9 |
 | F13 운영자가 볼 수 없다 | §12 | 상태, 원인, 경보 생성자마다 해석 시험. 재시작 뒤 안 읽은 단위가 있으면 첫 묻기가 끝날 때까지 경고가 켜져 있다 | L9 |
-| F14 두 consumer 가 같은 범위를 보낸다 | 쓰는 쪽 하나가 사는 동안 잠금을 쥔다. 묻기는 한 번에 하나다. 읽은 자리 규칙(§8.4) | 둘째 프로세스는 `<k>.memory.lock` 을 못 잡는다. 시작 자리가 읽은 자리 다음이 아닌 `Read` 는 거절된다 | L5, L6 |
+| F14 두 consumer 가 같은 범위를 보낸다 | 쓰는 쪽 하나가 사는 동안 잠금을 쥔다. 묻기는 한 번에 하나다. 읽은 자리 규칙(§8.4) | 둘째 프로세스는 `<k>.memory.lock` 을 못 잡는다. 읽은 자리를 옮기는 사건 뒤에 온 답은 늦은 답으로 버려진다 | L5, L6 |
 | F15 서버와 worker 의 버전이 어긋난다 | Librarian 에 worker 와 add-on package 가 없다 | preflight 가 `keeper-librarian` add-on 이 남은 base path 를 거절한다 | L11 |
 | F16 잠깐의 실패가 Keeper 를 세워 둔다 | 말 없음은 폭을 줄이지도 세우지도 않는다. 쉬는 Keeper 는 pulse 마다 같은 폭으로 다시 묻는다 | 모든 slot 이 N 번 시간 초과한 뒤 답한다. 운영자 행동 없이 반영되고, 질문의 폭이 처음과 같다 | L7 |
 
@@ -1621,7 +1621,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | I1 | 턴은 빠지지 않고 순서가 지켜진다. 읽지 않고 지나가는 것은 타입 있는 구멍으로만, 기록과 함께 한다 | 읽은 자리 규칙(§8.4). 내용은 끝자리의 차라 이어진다. 지나친 것은 모두 `Skip` 줄에 이름이 있다 | `LibrarianTurnLog`: `NoSilentSkip`, `EveryClosedInOneUnit`, `PassedAccounted`, `SkipRecorded`. `LibrarianWriter`: `PositionMoves`, `PositionHasLine` |
 | I2 | Memory 가 먼저고 읽은 자리가 나중이다 | 말을 고친다. Memory 변화와 읽은 자리가 한 줄에 같이 반영된다. 스냅샷은 boot 가 그 줄에서 다시 쓴다. boot 가 끝나기 전의 읽기는 한 줄 늦은 스냅샷을 볼 수 있고, 그 읽기는 「확인 전」을 같이 싣는다(§11.5). 두 파일 사이의 순서였던 것이 한 줄이 되어, 틀릴 순서가 없다 | `LibrarianWriter`: `Chain`, `SnapshotLag`. buggy 설정 `position-first` 가 깨진다 |
 | I3 | 한 범위의 fact 는 많아야 한 번 적용된다 | 범위는 이어지고 겹치지 않는다. 쓰는 쪽이 하나다. 쓰기 전에 스냅샷의 sha 를 본다(2단계). op 마다 거절하는 것은 CAS 가 지키던 것(그사이 지워진 fact 를 건드리지 않는다)을 답을 버리지 않고 지킨다 | `LibrarianWriter`: `AnswerAtMostOnce`, `NoUndoRetract`. buggy 설정 `undo-a-retract` 가 깨진다 |
-| I4 | 답은 자기가 답한 입력에만 적용된다. 받은 답을 말없이 버리지 않는다 | 말을 고친다. 답은 한 번 적용되거나 적용되지 않는다. 늦은 답은 세고 버린다. 되돌려 적은 id, 묻기 번호, 읽은 자리 규칙이 본다. 답을 받고 줄을 쓰기 전에 죽으면 그 답은 없고, 다시 묻는다 | `LibrarianWriter`: `AnswerOnlyWhenCurrent`. buggy 설정 `apply-stale-answer` 가 깨진다 |
+| I4 | 답은 자기가 답한 입력에만 적용된다. 받은 답을 말없이 버리지 않는다 | 말을 고친다. 답은 한 번 적용되거나 적용되지 않는다. 늦은 답은 세고 버린다. 되돌려 적은 id 를 보고, 시작 자리는 묻기 번호와 취소 규칙이 지킨다. 답을 받고 줄을 쓰기 전에 죽으면 그 답은 없고, 다시 묻는다 | `LibrarianWriter`: `AnswerOnlyWhenCurrent`. buggy 설정 `apply-stale-answer` 가 깨진다 |
 | I5 | 모르는 것을 없음, 실패, 기본값으로 바꿔 쓰지 않는다 | slot 결과는 와일드카드 없는 `match` 하나다(§7.2). 해석되지 않는 반영 기록은 `Log_unreadable` 이다. 없는 반영 기록은 「읽었다는 기록이 없다」로만 읽는다(§8.6). 풀리지 않는 시작점은 `Front_unresolved` 다. 알리지 않은 reset 은 `Unknown_span` 이다 | `LibrarianTurnLog`: `UnknownRecorded`. `classify` 의 생성자별 시험(L2, L6) |
 | I6 | 잃는 것은 기록과 함께만 잃는다. 답에서 빠진 fact 는 지워지지 않는다. 합쳐진 원본은 찾을 수 있다 | 지운 fact 는 줄에 통째로 남는다. 컷 뒤로 그렇다. 컷 이전 기록은 지운다(§22.1) | F4 시험(L5) |
 | I7 | Keeper 는 Librarian 을 기다리지 않는다. 진행이 굶지 않는다. Keeper 끼리 떨어져 있다 | 쓰기에 모델이 필요 없다. Keeper 경로는 쓰는 쪽의 잠금을 잡지 않는다. 턴 기록 덧붙임이 실패해도 턴을 거절하지 않는다. 쓰는 쪽이 Keeper 마다 하나다. provider 자리를 Keeper 턴과 나누는 것은 §15.3 이 다룬다 | F7 시험(L6). 덧붙임 실패 시험(L3a) |

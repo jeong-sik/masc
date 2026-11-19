@@ -715,6 +715,66 @@ let test_task_source_preserves_failed_refresh () =
     (classify ~workspace_ready:true ~source:Task_source_failed ~metadata_failed:false
        ~task_id:None = Task_refresh_failed)
 
+(* A row that names a keeper and then states something about it gives up
+   the name first (RFC tui-one-screen-grammar §6.6). The focus header is that
+   row: with a current record and without one, and with a name that alone
+   fills the row, the name is the span that is cut, it is cut with the mark,
+   and something still follows it. A row cut at the edge without the mark
+   reads as whole: the empty-feed sentence lost its negation that way. *)
+let test_a_long_name_gives_way_before_its_state () =
+  let cols = 32 in
+  let ends_in_mark text = String.ends_with ~suffix:Masc_tui_message_layout.cut_mark text in
+  let header_of name input =
+    (Pane.lines ~rows:12 ~cols ~scroll:0 input).Pane.rows
+    |> List.find (fun (line : Pane.line) ->
+           List.exists
+             (fun (span : Pane.span) ->
+               span.tone = Pane.Accent && String.length span.text > 0 && span.text.[0] = name.[0])
+             line)
+  in
+  let check_header what name input =
+    let line = header_of name input in
+    check int (what ^ ": the row is the pane's width") cols (width line);
+    let rec after_name = function
+      | [] -> fail (what ^ ": no name span")
+      | (span : Pane.span) :: rest when span.tone = Pane.Accent -> span, rest
+      | _ :: rest -> after_name rest
+    in
+    let name_span, rest = after_name line in
+    check bool (what ^ ": the name is cut with the mark") true (ends_in_mark name_span.Pane.text);
+    check bool (what ^ ": no span after the name is cut") false
+      (List.exists (fun (span : Pane.span) -> ends_in_mark span.Pane.text) rest);
+    check bool (what ^ ": the state follows the name") true
+      (List.exists
+         (fun (span : Pane.span) -> String.trim span.Pane.text <> "")
+         rest)
+  in
+  let quiet name =
+    { fixture with
+      Pane.keepers = Some []
+    ; selected = Some name
+    ; approvals = []
+    ; chunks = []
+    }
+  in
+  let busy name =
+    let correlation = "trace-" ^ name in
+    { (quiet name) with
+      Pane.chunks =
+        chunks [ name ]
+          (entries
+             [ (980., agent_core ~kind:Observer.Turn_started ~turn:5 ~at:980. ~correlation lane)
+             ; (981., agent_core ~tool:"Read" ~turn:5 ~tool_use_id:"a" ~at:981. ~correlation lane)
+             ])
+    }
+  in
+  let long = String.make 60 'r' in
+  let filling = String.make (cols - 1) 'f' in
+  check_header "no events, a long name" long (quiet long);
+  check_header "a current record, a long name" long (busy long);
+  check_header "no events, a name that fills the row" filling (quiet filling);
+  check_header "a current record, a name that fills the row" filling (busy filling)
+
 let () =
   run "tui acting pane"
     [ ( "viewport allocation"
@@ -791,5 +851,9 @@ let () =
     ; ( "ages"
       , [ test_case "an age the clocks cannot give draws the no-value mark" `Quick
             test_an_age_the_clocks_cannot_give_draws_the_no_value_mark
+        ] )
+    ; ( "cuts"
+      , [ test_case "a long name gives way before its state" `Quick
+            test_a_long_name_gives_way_before_its_state
         ] )
     ]

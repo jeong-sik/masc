@@ -33,6 +33,32 @@ val link_key
   -> integration_id:Authz_types.Integration_id.t
   -> (unit, error) result
 
+(** Why the key of an account was not replaced. *)
+type replace_error =
+  | Not_replaced of Authz_provider_account_state.refusal
+      (** The records of now refuse it, and nothing was written: the account
+          is not a key account of the person, its removal began or stopped,
+          or the person is not active. *)
+  | Replace_failed of error
+      (** The record was not built, or the zone did not take it. A commit can
+          answer an error after its record went in. *)
+
+(** Writes the record that replaces the key of [provider_account_id] of
+    [user_id] with one of the next generation, and answers that generation
+    (RFC a-persons-api-key-is-their-own-provider-account 3.7). The intent of
+    the replacement goes to the external store before the record. The route
+    that replaces a key writes it before the file of the new key, inside the
+    call of the account.
+
+    The account is not asked whether it is spent now ({!availability}): a
+    record that replaces a key closes the given-up start of a replacement,
+    which blocks the account until then. *)
+val replace_key
+  :  Authz_zone.t
+  -> user_id:Authz_types.User_id.t
+  -> provider_account_id:Authz_types.Provider_account_id.t
+  -> (Authz_types.Key_generation.t, replace_error) result
+
 (** The accounts the person owns, in the order of their ids. *)
 val owned : Authz_state.t -> Authz_types.User_id.t -> Authz_types.Provider_account_id.t list
 
@@ -47,8 +73,9 @@ type unavailable =
           ({!Authz_state.provider_account_status}). *)
   | Reduction_given_up
       (** A reduction of the account wrote its intent and no record: the start
-          of a purge that was given up. It blocks the account until its owner
-          asks for the purge again (design 8.3). *)
+          of a purge, or of a replacement of its key, that was given up. It
+          blocks the account until its owner asks for the same again (design
+          8.3). *)
 
 val unavailable_to_string : unavailable -> string
 
@@ -76,12 +103,24 @@ type removal =
   | Stayed of Authz_purge_event.account_failed_stage
       (** The removal ended with this stage still there. *)
 
+(** What stopped on an account and blocks it. Nothing spends the account
+    ({!availability}). An account a removal and a replacement both stopped
+    on shows the removal: it is removed next, and a replacement of its key
+    is refused until then. *)
+type blocked =
+  | Removal of removal
+  | Replacement_start_given_up
+      (** The start of a replacement of its key wrote its intent and no record
+          (design 8.3). Its owner asks for the replacement again, or removes
+          the account. *)
+
 (** An account as a list of the accounts of its owner shows it (RFC
-    a-persons-api-key-is-their-own-provider-account 3.6 and 3.8). *)
+    a-persons-api-key-is-their-own-provider-account 3.6 and 3.8). The
+    Runtimes of an account something is [blocked] on are not listed. *)
 type shown =
   { provider_account_id : Authz_types.Provider_account_id.t
   ; kind : Authz_provider_account_state.kind
-  ; removal : removal option
+  ; blocked : blocked option
   }
 
 (** The accounts of the person that a list shows, in the order of their ids:

@@ -926,7 +926,7 @@ let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.t
    save's reason ends in the verification code and detail, the part that says
    what to do. *)
 let visible_lines ~height ~width t =
-  if height <= 0 then [] else
+  if height <= 0 then [], None else
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
     | [] -> [Text ""]
     | wrapped -> List.map (fun line -> Text line) wrapped in
@@ -943,23 +943,28 @@ let visible_lines ~height ~width t =
   let rows = notice @ body in
   if results then (
     let count = List.length rows in
-    let overflow = height >= 2 && count > height in
-    let content_height = height - if overflow then 1 else 0 in
+    let content_height = max 0 height in
     t.saved_scroll_max <- max 0 (count - content_height);
     let scroll = min t.saved_scroll_max (max 0 t.result_scroll) in
     t.result_scroll <- scroll;
     let visible = List.filteri (fun index _ -> index >= scroll && index < scroll + content_height) rows in
-    visible @ if overflow then
-      [Text (Masc_tui_message_layout.fit_width
-        (Printf.sprintf "[결과 %d-%d/%d · j/k:스크롤]" (scroll + 1)
-          (min count (scroll + content_height)) count) width)]
-      else [])
+    visible, Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:count)
   else
-    let skip = match t.phase with
-      | Providers _ | Models | Refreshing_models | Preparing_context _ -> max 0 (t.cursor + List.length notice + 1 - height)
-      | Removal _ -> 0
-      | Loading | Logging | Documented_context _ | Saving | Removing | Finished _ | Failed -> max 0 (List.length rows - height) in
-    List.filteri (fun index _ -> index >= skip && index < skip + height) rows
+    (* A list names its selected row, hidden rows or not; the other phases
+       hand the window they draw when it hides rows. *)
+    let window skip = Masc_tui_value.Position.window ~first:skip ~shown:height ~total:(List.length rows) in
+    let skip, position = match t.phase with
+      | Providers _ | Models | Refreshing_models | Preparing_context _ ->
+          ( max 0 (t.cursor + List.length notice + 1 - height),
+            (match body with
+             | [] -> None
+             | _ :: _ ->
+                 Some (Masc_tui_value.Position.row ~selected:(Some t.cursor) ~total:(List.length body))) )
+      | Removal _ -> 0, window 0
+      | Loading | Logging | Documented_context _ | Saving | Removing | Finished _ | Failed ->
+          let skip = max 0 (List.length rows - height) in
+          skip, window skip in
+    List.filteri (fun index _ -> index >= skip && index < skip + height) rows, position
 
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

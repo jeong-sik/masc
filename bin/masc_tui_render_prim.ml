@@ -122,6 +122,7 @@ let frame_panes = ref Masc_tui_pane_selection.no_panes
 
 
 
+
 (* The value [Masc_tui_types.apply_clamped_scroll] writes, read back from
    [state]; the two are the same table read in opposite directions. A frame
    says which scroll is on screen; a notch moves that scroll from where it is
@@ -704,6 +705,9 @@ let zone4_action_text (state : state) ~action_text ~preferred_action =
               (Masc_tui_read_failure.notice_text ~ko ~now:(Unix.gettimeofday ())
                  ~next_try:(Masc_tui_refresh_pace.next_try state.refresh_pace) failure))
 
+(* [position] reaches the footer only through [Footer_hints], which the chat
+   uses for its "back from newest" marker. Every other position is a value
+   drawn on the title row. *)
 let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
     (state : state) ~max_cells ~keys =
   (* Hints off trades the key text for status room. "?:help" stays only
@@ -898,16 +902,20 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
     ~dim:(Theme.recede ()) ~reset:Ansi.reset ~max_cells ~hints ()
 
 (* A row a footer spelled itself and filtered to the keys that answer. *)
-let footer_line ?help_door ?status ?position ?recovery_in_slot ?choices state ~max_cells
+let footer_line_with ?help_door ?status ?position ?recovery_in_slot ?choices state ~max_cells
     ~hints =
   footer_line_keys ?help_door ?status ?position ?recovery_in_slot ?choices state ~max_cells
     ~keys:(Masc_tui_footer.Written hints)
 
 
+let footer_line ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~hints =
+  footer_line_with ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~hints
+
 (* The slash word being typed, painted: the run already pressed in the accent,
    a word that is no command in the bad tone. [restore] is the colour the row
    around it is drawn in, so a painted span hands that back rather than
    resetting it. *)
+
 let slash_hint_text ~restore draft =
   let paint (span : Masc_tui_command.hint_span) =
     match span with
@@ -1926,7 +1934,7 @@ let finish_frame_beside_acting_pane (state : state) ?clamped ?roster ?(recovery_
    | No_footer -> ()
    | Footer_hints { hints; position } ->
        Buffer.add_string buf
-         (footer_line ?help_door ?position ~recovery_in_slot state ~max_cells:cols ~hints)
+         (footer_line_with ?help_door ?position ~recovery_in_slot state ~max_cells:cols ~hints)
    | Footer_choices { choices; hints } ->
        Buffer.add_string buf
          (footer_line ?help_door ~choices ~recovery_in_slot state ~max_cells:cols ~hints));
@@ -1967,7 +1975,104 @@ type chrome_body = {
           content will start -- where a picture placed over body rows goes.
           Holds while the body stays inside its budget, which a [Fits] body
           does. *)
+  position : Masc_tui_value.Position.t -> unit;
+      (** Where the reader stands in what the body holds. The contract draws
+          it at the right of the title row once the body has finished; the
+          last one handed is drawn. *)
 }
+
+(* The cells kept clear ahead of the position. *)
+let here_position_gap_cells = 2
+
+(* The mark in a position's row place when no row is selected or none is
+   shown (RFC section 6.4). *)
+let no_position_mark = "\xe2\x80\x94"
+
+(* The one place a position becomes text (RFC section 2): [7/29],
+   [1–49/75], [1/50 · 전체 8,347]. Not exported: a body hands the value and
+   cannot draw it. *)
+let position_text ~ko : Masc_tui_value.Position.t -> string =
+  let grouped = Masc_tui_value.Count.grouped in
+  let row at = if at = 0 then no_position_mark else grouped at in
+  function
+  | Row { at; total } -> row at ^ "/" ^ grouped total
+  | Window { first = 0; last = _; total } -> no_position_mark ^ "/" ^ grouped total
+  | Window { first; last; total } ->
+      grouped first ^ "\xe2\x80\x93" ^ grouped last ^ "/" ^ grouped total
+  | Partial { at; loaded; total } ->
+      row at ^ "/" ^ Masc_tui_value.Count.partial ~ko ~loaded ~total
+
+(* The position as zone 2 draws it. *)
+let zone_two_position (state : state) position =
+  Option.map
+    (fun position ->
+      Ansi.dim ^ position_text ~ko:(state.ui_language = Lang_ko) position ^ Ansi.reset)
+    position
+
+(* The cells the position and its gap take from the end of zone 2's row. *)
+let zone_two_position_cells = function
+  | None -> 0
+  | Some text ->
+      Message_layout.display_width (Masc_tui_theme.strip_sgr text)
+      + here_position_gap_cells
+
+(* Zone 2's row: [left], laid out in the cells the position leaves, then the
+   position at the right-hand end, where it keeps its column whatever the
+   left says. *)
+let zone_two_row ~cols ~left = function
+  | None -> left
+  | Some text ->
+      let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
+      left
+      ^ String.make
+          (max here_position_gap_cells
+             (framed_inner_width cols - cells left - cells text))
+          ' '
+      ^ text
+
+(* A title row a surface lays out itself, with the position at its right.
+
+   The title is asked for at the frame width its text really has: the row's
+   own, less the cells the position and its gap take. A title that lays out
+   its parts against a frame width -- a tab strip that drops whole entries,
+   a heading that keeps its badge -- then lays them out in those cells, and
+   the row cuts nothing it laid out. Handed text built for the whole row, the
+   row had to cut its end to keep the position, and the end was what those
+   rows exist to keep: the last tab or the mark counting the hidden ones,
+   and the connection badge (#53217 review). *)
+let titled_room ~cols (state : state) ~position =
+  max 0 (framed_inner_width cols - zone_two_position_cells (zone_two_position state position))
+
+(* The title is asked for at the frame width whose inner width is [room]. *)
+let zone_two_title_text ~cols (state : state) ~position ~title =
+  let room = titled_room ~cols state ~position in
+  (room, title ~cols:(cols - (framed_inner_width cols - room)))
+
+let zone_two_title_head ~cols (state : state) ~position ~title =
+  let room, text = zone_two_title_text ~cols state ~position ~title in
+  Message_layout.take_cells text room
+
+let zone_two_title ~cols (state : state) ~position ~title =
+  let room, text = zone_two_title_text ~cols state ~position ~title in
+  (* A title laid out in [room] fits it. One that does not was laid out for
+     more cells than it has, and its end goes so the position keeps its
+     column. *)
+  let left =
+    match Message_layout.take_cells text room with
+    | Message_layout.Whole text -> text
+    | Message_layout.Cut _ -> Message_layout.truncate_end room text
+  in
+  zone_two_row ~cols ~left (zone_two_position state position)
+
+(* WORKAROUND: a title handed as text was laid out before the row knew the
+   position's cells, so when it filled the row its end is cut.
+   [surface_chrome] takes every surface's title as text, and two rows in
+   masc_tui_render_work.ml call this while another change owns that file.
+   Root fix: [surface_chrome] takes [title : cols:int -> string] the way
+   [zone_two_title] does, those two rows call [zone_two_title], and this
+   goes (issue #53287). *)
+let titled_row ~cols (state : state) ~title ~position =
+  zone_two_title ~cols state ~position ~title:(fun ~cols:_ -> title)
 
 (* top + title + divider + bottom + footer: the rows [surface_chrome] draws
    itself. Everything else is the body's budget. The framed panels count the
@@ -1998,14 +2103,46 @@ type overflow =
   | Scrolled of { scroll : int; report : int -> clamped_scroll }
   | Self_scrolled of (unit -> clamped_scroll)
 
-(* The window a [Scrolled] body gets out of [count] rows: the budget, less the
-   position row when they overflow. The key handler that bounds the scroll and
-   the frame that draws it both ask this. *)
+(* The window a [Scrolled] body gets out of [count] rows: the whole budget,
+   since its position is on the title row. The key handler that bounds the
+   scroll and the frame that draws it both ask this. *)
 let surface_window_height state ~terminal_rows ~count =
   Masc_tui_scroll.content_height
     ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
     ~chrome:surface_chrome_rows ~count ~preview_keep:None
-    ~overflow_takes_row:true
+
+(* The window the contract cuts out of a [Scrolled] body of [count] rows,
+   as its height and the scroll it draws from. The other kinds window
+   themselves, or need no window. *)
+let chrome_window (state : state) ~terminal_rows ~count = function
+  | Fits | Paged_by_cursor | Self_scrolled _ -> None
+  | Scrolled { scroll; report = _ } ->
+      let height = surface_window_height state ~terminal_rows ~count in
+      Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
+
+(* A scrolled body's window is the contract's, so its position is too; any
+   other body is drawn with the last position it handed. *)
+let chrome_position ~window ~count ~handed =
+  match window with
+  | Some (height, scroll) ->
+      Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count
+  | None -> handed
+
+let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let count = ref 0 and handed = ref None in
+  let pushed () = incr count in
+  body ~budget:(max 1 (rows - surface_chrome_rows))
+    { push = (fun _ -> pushed ())
+    ; push_styled = (fun ~style:_ _ -> pushed ())
+    ; push_selected = (fun _ -> pushed ())
+    ; push_divider = pushed
+    ; push_empty = pushed
+    ; next_origin = (fun () -> (0, 0))
+    ; position = (fun position -> handed := Some position) };
+  chrome_position
+    ~window:(chrome_window state ~terminal_rows ~count:!count overflow)
+    ~count:!count ~handed:!handed
 
 let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar
     (state : state) ~terminal_rows ~cols ~surface_key ~title ~keys
@@ -2039,17 +2176,23 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
         , framed_empty
         , framed_bottom )
   in
-  top buf cols;
-  line buf cols title;
-  divider buf cols;
-  (* The lines drawn above the body, counted from what was drawn rather than
-     by hand, and the strip [finish_surface] puts above them. *)
-  let body_top = strip_rows + lines_ended_since buf ~start:0 in
+  (* The title row waits for the body, which is the only one that knows where
+     its reader stands. The lines above the body are counted from the rows
+     drawn there rather than by hand, with the strip [finish_surface] puts
+     above them; the title is one row whatever it says. *)
+  let body_top =
+    let head = Buffer.create 256 in
+    top head cols;
+    line head cols "";
+    divider head cols;
+    strip_rows + lines_ended_since head ~start:0
+  in
   let budget = max 1 (rows - surface_chrome_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
      says so reads, are the contract's to work out, not the body's. *)
   let pushed = ref [] in
+  let handed = ref None in
   let hold draw = pushed := draw :: !pushed in
   let body_pushers =
     { push = (fun text -> hold (fun () -> line buf cols text))
@@ -2061,6 +2204,7 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
     ; next_origin =
         (fun () -> (body_top + List.length !pushed,
                     sidebar_cols + Masc_tui_ansi.framed_content_column))
+    ; position = (fun position -> handed := Some position)
     }
   in
   Masc_tui_frame_timing.finish_stage ~name:"surface.setup" setup_started;
@@ -2070,6 +2214,15 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
+  let window = chrome_window state ~terminal_rows ~count overflow in
+  let position = chrome_position ~window ~count ~handed:!handed in
+  top buf cols;
+  (* A title that already carries a position, laid out by [here_row], keeps
+     it: only a position the body handed is placed here. *)
+  (match position with
+   | None -> line buf cols title
+   | Some _ -> line buf cols (titled_row ~cols state ~title ~position));
+  divider buf cols;
   (* No row is drawn past the budget: one more shoves the bottom rule and the
      footer off the screen. *)
   let used = ref 0 in
@@ -2101,15 +2254,14 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
            exists: a body that windows part of itself cannot say what it
            clamped to before it has drawn. *)
         Some (read ())
-    | Scrolled { scroll; report } ->
-        let height = surface_window_height state ~terminal_rows ~count in
-        let scroll = Masc_tui_scroll.normalize ~count ~height scroll in
+    | Scrolled { scroll = _; report } ->
+        let height, scroll =
+          Option.value window ~default:(count, 0)
+        in
         List.iteri
           (fun index draw ->
             if index >= scroll && index < scroll + height then draw_row draw)
           held;
-        Option.iter draw_note
-          (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
         Some (report scroll)
   in
   for _ = !used + 1 to budget do
@@ -2325,8 +2477,6 @@ let surface_connection_badge (state : state) ~width =
    of the thing being read, and the steps before it are how to get back. *)
 let here_step_separator = " \xe2\x80\xba "
 
-(* The cells kept clear ahead of the position. *)
-let here_position_gap_cells = 2
 
 (* The top-row screen the current one belongs to, by the name the top row
    draws for it. *)
@@ -2396,25 +2546,11 @@ let here_row ~cols (state : state) ~path ~readings ~position =
      that needs a style of its own is drawn with [here_path], by a caller
      that lays out its own row. *)
   let path = List.map Terminal_text.single_line path in
-  let position =
-    Option.map
-      (fun position ->
-        Ansi.dim
-        ^ Masc_tui_value.Position.text
-            ~ko:(state.ui_language = Lang_ko) position
-        ^ Ansi.reset)
-      position
-  in
+  let position = zone_two_position state position in
   let cells text = Message_layout.display_width (Masc_tui_theme.strip_sgr text) in
-  (* The position ends the row: the path and the readings are laid out in the
-     cells left of it, then padded, so it keeps its column whatever the path
-     says. *)
-  let position_cells =
-    match position with
-    | Some text -> cells text + here_position_gap_cells
-    | None -> 0
-  in
-  let left_cols = cols - position_cells in
+  (* The path and the readings are laid out in the cells left of the
+     position. *)
+  let left_cols = cols - zone_two_position_cells position in
   (* Reads come and go with every refresh, and a row that changed with them
      would never sit still. Each screen says what it is still reading in its
      own body; the row speaks up only for what went wrong. *)
@@ -2455,15 +2591,50 @@ let here_row ~cols (state : state) ~path ~readings ~position =
                 (if index = 0 then "  " else reading_separator) ^ reading))
       ~tail
   in
-  match position with
-  | None -> left
-  | Some position ->
-      left
-      ^ String.make
-          (max here_position_gap_cells
-             (framed_inner_width cols - cells left - cells position))
-          ' '
-      ^ position
+  zone_two_row ~cols ~left position
+
+(* A Keeper detail's title ahead of its position: where the reader is, the
+   Keeper's name, and the walk of tabs on the same row, so the chrome height
+   the scroll math counts does not move.
+
+   The tab you are on carries the mark the surface strip puts on the
+   surface you are on. Bold and underline said it alone before, so the
+   answer was gone from a monochrome terminal, from one that drops
+   underline, and from every text capture -- a frame dump, a screenshot
+   pasted into an issue, the keyboard-input fixtures.
+
+   Drawn through [tab_strip] with the row's width: ten tabs are wider than
+   the row beside the roster pane, and cut from the right the mark on Runs
+   was the part that went. *)
+let keeper_detail_title (state : state) ~keeper_name ~cols =
+  let entries =
+    List.map
+      (fun tab ->
+        ( keeper_detail_tab_title ~ko:(state.ui_language = Lang_ko) tab
+        , tab = state.detail_tab
+        , tab ))
+      keeper_detail_tabs
+  in
+  (* The strip keeps the cells its current tab needs; a name longer than
+     what is left folds in the middle. Drawn whole, a long name took the
+     row and the strip drew nothing, so the row no longer said which tab
+     the body below it is. *)
+  let name =
+    Message_layout.truncate_middle
+      (max heading_id_floor
+         (here_steps_room ~cols state ~steps:1
+            ~after:
+              (Message_layout.display_width tab_strip_gap
+               + tab_strip_min_width entries)))
+      (Terminal_text.single_line keeper_name)
+  in
+  let before =
+    here_path state ~path:[ Ansi.bold ^ name ^ Ansi.reset ] ^ tab_strip_gap
+  in
+  before
+  ^ tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
+      ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
+      entries
 
 (* The step the Runtime screens take from System, and a keeper's runtime
    takes from that keeper. *)
@@ -2670,12 +2841,21 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   let capacity = available - List.length details - List.length action in
   let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
   let window = Rows.of_list ~first ~height:capacity state.keepers in
-  let count_label =
-    if count > capacity && capacity > 0 then
-      Printf.sprintf "%d–%d/%d" (first + 1) (first + Rows.length window) count
-    else string_of_int count
+  (* The heading counts the roster and, when the rows hide some of it, how
+     many: a cut count, not a position. The selected Keeper's place is the
+     title row's to say. *)
+  let hidden = count - Rows.length window in
+  let header =
+    [ ""
+    ; sidebar_heading ~cols ~title:"KEEPERS"
+        ~count:
+          (Masc_tui_value.Count.grouped count
+          ^ (if hidden <= 0 then ""
+             else
+               " \xc2\xb7 "
+               ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) hidden))
+    ; rule ]
   in
-  let header = [ ""; sidebar_heading ~cols ~title:"KEEPERS" ~count:count_label; rule ] in
   List.iter (draw ~style:(Theme.Side_pane.recede ())) (List.take header_rows header);
   for i = 0 to capacity - 1 do
     match Rows.at window (first + i) with
@@ -2709,14 +2889,27 @@ let keeper_roster_pane ?(focused = false) (state : state) ~rows ~cols buf =
   List.iter (fun (style, text) -> draw ~style text) action
 
 
-(* What a boxed listing draws under its rows: the scroll line -- a row whether
-   or not there is anything to report, so a list that overflows does not push
-   the help line off the bottom -- then the frame's bottom, then the footer.
+(* What a boxed listing draws under its rows: the frame's bottom, then the
+   footer. Where the window stands is on the title row, so no scroll line sits
+   between the rows and the bottom.
 
    Named once because three surfaces were tallying their whole chrome by hand,
    and being one row over the budget is not a visible mistake: [finish_surface]
    drops the last rows, and the last row is the footer. *)
-let listing_rows_below_the_body = 3
+let listing_rows_below_the_body = 2
+
+(* The rows a boxed surface opens on: the top edge, the title row and the
+   divider under it. A surface whose title names where its window stands
+   draws them after its rows, so it counts them first. *)
+let boxed_head buf cols title =
+  box_top buf cols;
+  box_line buf cols title;
+  box_divider buf cols
+
+let boxed_head_rows cols =
+  let probe = Buffer.create 256 in
+  boxed_head probe cols "";
+  count_frame_lines probe
 
 ;;
 
@@ -3206,8 +3399,9 @@ let ask_question_viewport (state : state) =
                    draw_ask_context b cols ~row) in
              String.split_on_char '\n' text |> List.filter (fun line -> line <> ""))
   in
-  (* title, progress, help, two dividers, outer edges and footer *)
-  let room = max 1 (rows - 9) in
+  (* title, progress, help, the divider under them, outer edges and footer.
+     The keys are on the help row, so no row under the text repeats them. *)
+  let room = max 1 (rows - 7) in
   (lines, room)
 
 ;;
@@ -3523,13 +3717,6 @@ let pack_planning_summary_rows ~cols (clauses : string list) =
   let summary_inner = max 1 (framed_inner_width cols - 2) in
   Message_layout.pack_clauses ~max_cells:summary_inner clauses
   |> List.map (fun row -> "  " ^ row)
-
-let work_tasks_room ~budget ~header_rows ~count =
-  if budget <= header_rows then 0
-  else if budget - header_rows = 1 then 1
-  else
-    Masc_tui_scroll.content_height ~rows:budget ~chrome:header_rows
-      ~count ~preview_keep:None ~overflow_takes_row:true
 
 (* The retained-history count above the Goal list. The row carried two numbers
    joined by the same separator the Backlog counts use for disjoint parts, but
@@ -3902,11 +4089,9 @@ let fusion_run_progress_text = function
   | Fusion_stage_failed -> "failed"
 
 
+(* A run's start in a list of runs: a column moment. *)
 let fusion_run_clock run =
-  let tm = Unix.localtime run.fur_started_at in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min
+  Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) run.fur_started_at
 
 
 
@@ -4209,10 +4394,6 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     | Some diff -> diff.Masc.Tui_decode.gd_rows
   in
   let total = List.length diff_rows in
-  let header =
-    here_row ~cols state ~path:(ds.ds_path @ [ ds.ds_address ])
-      ~readings:[ "vs HEAD" ] ~position:None
-  in
   if rows < diff_surface_minimum_rows then begin
     Buffer.add_string buf (Message_layout.fit_width
       " Git diff needs a larger terminal; resize to inspect (Esc:back)"
@@ -4221,6 +4402,14 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   end else begin
   let geometry = diff_surface_geometry ~rows ~context_lines:ds.ds_context_lines
       ~has_error:(Option.is_some ds.ds_error) in
+  let content_height = geometry.dsg_content_height in
+  let max_scroll = max 0 (total - content_height) in
+  let scroll = max 0 (min ds.ds_scroll max_scroll) in
+  let header =
+    here_row ~cols state ~path:(ds.ds_path @ [ ds.ds_address ])
+      ~readings:[ "vs HEAD" ]
+      ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
+  in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
@@ -4239,9 +4428,6 @@ let render_diff_surface (state : state) (ds : diff_surface) =
          ("  " ^ Keeper_chat.terminal_safe_text detail);
        if count = 2 then box_divider buf cols
    | Some _, _ -> ());
-  let content_height = geometry.dsg_content_height in
-  let max_scroll = max 0 (total - content_height) in
-  let scroll = max 0 (min ds.ds_scroll max_scroll) in
   let diff_rows_window = Rows.of_list ~first:scroll ~height:content_height diff_rows in
   if Option.is_some ds.ds_error && geometry.dsg_error_rows = 0 then
     box_line_styled buf cols ~style:(Theme.bad ()) (page_failed_note ~ko:(state.ui_language = Lang_ko))
@@ -4270,11 +4456,8 @@ let render_diff_surface (state : state) (ds : diff_surface) =
           box_line_span buf cols (tree_diff_row_span ~hscroll:ds.ds_hscroll ~width:(framed_inner_width cols) row)
     done;
   (* The status line carries the esc hint at every count, so it is one of
-     the fixed chrome rows above and the reading needs no row of its own. *)
-  Option.iter
-    (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height
-       ~hint:ds.ds_esc_hint total);
+     the fixed chrome rows above. *)
+  box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ ds.ds_esc_hint);
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);
@@ -4566,23 +4749,6 @@ let config_metadata_summary (state : state) =
        | _ -> lines)
 
 
-(* The sheet's masthead: the product's name and a blank row. It carries no keys
-   and no surface name: both scroll away with it, and both are said by rows
-   that do not. The overlay's title row is fixed chrome that says whether hints
-   are on, the footer row under the frame draws h and Esc, and the sheet's
-   first section names the active surface two rows under this.
-
-   It was a three-row box-drawing logo with a tagline and a rule under it, five
-   rows at 72 columns and up. The title row above already says MASC Cheat
-   Sheet, so on a 30-row terminal those rows came out of the keys the sheet is
-   opened to read. *)
-let help_masthead (_state : state) =
-  [ "  " ^ Ansi.bold ^ Theme.accent () ^ "MASC"
-    ^ Ansi.reset ^ Ansi.dim ^ " \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
-  ; ""
-  ]
-
-
 (* The rows one help entry takes in [width] cells: [lead] (its key or usage,
    [lead_cells] wide) with the start of [text], and the rest of [text] on rows
    that start at [column], where every entry's text starts.
@@ -4637,16 +4803,19 @@ let help_lines ~width (state : state) =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
     in
     (* One heading style, named as the key table names the section. The
-       surface being read wears the filled mark; every other section the hollow
-       one. The current section used to read "ACTIVE: OVERVIEW" in capitals,
-       Global was renamed "GLOBAL NAVIGATION", and the rest were mixed case, so
-       three spellings sat on one sheet and the table's own names appeared on
-       only one of them. *)
+       surface being read wears the mark the tab row gives the current tab;
+       every other heading stands where that mark's title starts. The current
+       section used to read "ACTIVE: OVERVIEW" in capitals, Global was renamed
+       "GLOBAL NAVIGATION", and the rest were mixed case, so three spellings
+       sat on one sheet and the table's own names appeared on only one of
+       them. The marks were a filled and a hollow diamond in the info colour:
+       the filled one means a person's turn and the hollow one is no status,
+       and info is for work under way (RFC tui-one-screen-grammar 7.2, 7.3). *)
     let header_line =
       if is_current then
-        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ heading title ^ Ansi.reset
+        Masc_tui_theme.Glyph.current_entry ^ " " ^ Ansi.bold ^ heading title ^ Ansi.reset
       else
-        Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
+        "  " ^ Ansi.bold ^ title ^ Ansi.reset
     in
     (* The key as the table spells it, in its own column. Each key used to be
        wrapped in brackets unless it already started and ended with one, so
@@ -4681,7 +4850,7 @@ let help_lines ~width (state : state) =
   in
   let section titled =
     let header_line, entry_rows = section_parts titled in
-    (header_line :: List.concat entry_rows) @ [ "" ]
+    Masc_tui_help.Whole (header_line :: List.concat entry_rows)
   in
   let commands =
     List.filter
@@ -4693,7 +4862,8 @@ let help_lines ~width (state : state) =
     match commands with
     | [] -> []
     | _ :: _ ->
-    (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    [ Masc_tui_help.Whole
+    (("  " ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
     :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
@@ -4720,8 +4890,7 @@ let help_lines ~width (state : state) =
              summary_rows
                (Printf.sprintf "  %s%s%s%s" (Theme.warn ()) text Ansi.reset padding)
                (2 + Message_layout.display_width (text ^ padding)))
-         commands
-    @ [ "" ]
+         commands) ]
   in
   (* After any live Candle details, the first key section is the reader's
      own surface.
@@ -4736,13 +4905,17 @@ let help_lines ~width (state : state) =
     | [] -> []
     | _ :: _ when not (String.equal query "") -> []
     | lines ->
-      (Ansi.bold ^ "Candle details" ^ Ansi.reset)
-      :: (List.concat_map
-            (fun line -> Message_layout.wrap_words ~max_cells:(max 1 width)
-              (Terminal_text.single_line line)) lines @ [ "" ])
+      [ Masc_tui_help.Whole
+          (("  " ^ Ansi.bold ^ "Candle details" ^ Ansi.reset)
+           :: List.concat_map
+                (fun line ->
+                  List.map (fun row -> "  " ^ row)
+                    (Message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+                       (Terminal_text.single_line line)))
+                lines) ]
   in
   let _, cols = get_terminal_size () in
-  let rows =
+  let blocks =
     candle
     @ (match
          Masc_tui_help.filter_sections ~query ~heading
@@ -4751,19 +4924,20 @@ let help_lines ~width (state : state) =
        | [] -> slash_commands
        | first :: rest ->
            if Masc_tui_help.shows_everything state.help_filter state.help_scope
-           then section first @ slash_commands @ List.concat_map section rest
+           then (section first :: slash_commands) @ List.map section rest
            else
              (* The reader's own screen and nothing behind it. The sections
                 after it are another screen's keys, and they followed the
                 first with no line between a reader could stop at. *)
              let header_line, entry_rows = section_parts first in
-             Masc_tui_help.one_section ~cols ~heading:header_line entry_rows)
+             Masc_tui_help.one_section ~heading:header_line entry_rows)
   in
-  match rows with
-  | _ :: _ -> rows
+  match blocks with
+  | _ :: _ -> blocks
   | [] ->
-      [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
-          (Terminal_text.single_line query) Ansi.reset ]
+      [ Masc_tui_help.Whole
+          [ Printf.sprintf "%s  No key or command matches \"%s\".%s" Ansi.dim
+              (Terminal_text.single_line query) Ansi.reset ] ]
 
 
 module Context_bars = Masc_tui_context_bars
@@ -6601,10 +6775,7 @@ let keeper_deletions_lines (state : state) ~cols =
       errors @ (match selected with
         | None -> [ say "저장된 키퍼 삭제 기록이 없습니다." "No saved keeper deletion records." ]
         | Some row ->
-          [Printf.sprintf "%d / %d · %s · %s"
-             (state.keeper_deletions_cursor + 1) (List.length inventory.operations)
-             (Keeper_control.deletion_keeper_name row)
-             (Keeper_control.deletion_status ~ko row)]
+          [Keeper_control.deletion_keeper_name row ^ " · " ^ Keeper_control.deletion_status ~ko row]
           @ (if row.Keeper_control.can_retry then []
              else [ say "이 단계는 정리 재시도 대상이 아닙니다." "This phase cannot retry cleanup." ])
           @ [ say "종료 원장 원문 (설정·파일 정리 실패 원인 포함):"
@@ -6670,8 +6841,8 @@ let answering_preview_rows = 3
    sits above both panes, so each pane gives up one row to it. *)
 let pane_surface_title_rows = 1
 
-let pane_surface_title (state : state) ~cols ~path =
-  here_row ~cols state ~path ~readings:[] ~position:None
+let pane_surface_title (state : state) ~cols ~path ~position =
+  here_row ~cols state ~path ~readings:[] ~position
 
 (* The row between the strip and the title, then the title. Every other
    surface draws that row first -- a gap on its own, the box's top edge beside
@@ -6681,9 +6852,9 @@ let pane_surface_title (state : state) ~cols ~path =
    than on every other screen, and the heading read as a second, detached
    block. Beside the other pane the list's box draws its top edge on that row,
    so a split frame keeps it there. The row count is the same either way. *)
-let pane_surface_header buf cols (state : state) ~path ~split =
+let pane_surface_header buf cols (state : state) ~path ~split ~position =
   if not split then box_top buf cols;
-  box_line buf cols (pane_surface_title state ~cols ~path)
+  box_line buf cols (pane_surface_title state ~cols ~path ~position)
 
 let pane_surface_content_height ~rows =
   max 1 (framed_content_height ~rows - pane_surface_title_rows)

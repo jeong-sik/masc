@@ -126,6 +126,7 @@ type reopen_outcome =
   | Proof_reset of record
 
 val reopen_goal :
+  ?effects:(Goal_store.goal -> reopen_outcome * bool -> Goal_store.transition_effects) ->
   Workspace_utils.config -> goal_id:string -> actor:string -> note:string option ->
   (Goal_store.goal * reopen_outcome * bool, string) result
 (** Re-evaluates Reopen under the Goal lock, archives/resets proof under the
@@ -133,7 +134,10 @@ val reopen_goal :
     reports an actual phase change. Archive failure leaves the prior phase.
     Already-Executing preserves every existing proof and pending request. Call outside an existing Goal transaction. Archive
     or ledger writes followed by later persistence failure may be retried; this
-    is serialized across the two stores, not a cross-file atomic filesystem write. *)
+    is serialized across the two stores, not a cross-file atomic filesystem write.
+
+    [effects] goes to {!Goal_store.transact_goal}: it runs only when the phase
+    is written, and its events and notifications commit in that same write. *)
 
 val mark_proof_pending :
   ?submitted_evidence:Workspace_verification_store.submitted_evidence_item list ->

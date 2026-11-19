@@ -971,11 +971,9 @@ or completion.
 
 | Keys | What it does |
 |---|---|
-| `+` | a current snapshot |
-| `!` | read, with something to look at |
-| `-` | no current snapshot |
-| `s` | source facts only |
-| `x` | starving, or the read failed |
+| `●` | a current snapshot |
+| `▲` | read, with something to look at: a warning, a stopped Librarian, no current snapshot, or source facts only |
+| `✕` | starving, or the read failed |
 | `?` | world line: not read yet or still being read; nothing is known, and it is not zero |
 | `read failed` | world line: the inventory could not be read just now; any count beside it is from an earlier read. After it, why: workspace unconfirmed (reading is suspended), or the failure as received, cut with … or left out when the row is short |
 | `no ledger` | world line: the server found no curator ledger file when it looked; that is a value, not an unknown |

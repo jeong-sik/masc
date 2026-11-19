@@ -48,7 +48,7 @@ val of_history :
 val latest : row -> sample option
 (** Most recent report in the answered window, not the answer's generation time. *)
 
-val dated_samples : t -> row -> (Unix.tm * sample option) list
+val dated_samples : t -> row -> (Masc_tui_value.Utc_day.t * sample option) list
 (** The row's samples paired with their UTC days, oldest first. *)
 
 val compact : width:int -> row -> bool

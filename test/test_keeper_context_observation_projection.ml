@@ -516,7 +516,7 @@ let test_every_projected_shape_decodes () =
 (* This executable stands for the server, the process that writes the
    TurnRecords, so the stores keep their newest row in memory. *)
 let () =
-  Dated_jsonl.keep_facts_in_this_process ();
+  Fact_cell.keep_in_this_process ();
   run
     "keeper_context_observation_projection"
     [ ( "projection"

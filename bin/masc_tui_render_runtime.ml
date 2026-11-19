@@ -405,10 +405,8 @@ let runtime_detail_lines state target ~width =
         match runtime.ro_rate_limited, runtime.ro_rate_limit_resets_at with
         | false, _ -> []
         | true, Some resets_at ->
-          let tm = Unix.localtime resets_at in
           fact ~tone:Page_line.Attention "Rate limit"
-            (Printf.sprintf "until %02d:%02d or the next successful answer"
-               tm.Unix.tm_hour tm.Unix.tm_min)
+            (Printf.sprintf "until %s or the next successful answer" (runtime_moment_text resets_at))
         | true, None ->
           fact ~tone:Page_line.Attention "Rate limit"
             "no wait stated, cleared by the next successful answer"
@@ -417,10 +415,8 @@ let runtime_detail_lines state target ~width =
         match runtime.ro_credential_refused_at with
         | None -> []
         | Some at ->
-          let tm = Unix.localtime at in
           fact ~tone:Page_line.Attention "Credential"
-            (Printf.sprintf "refused %02d-%02d %02d:%02d, until a call on it is answered"
-               (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min)
+            (Printf.sprintf "refused %s, until a call on it is answered" (runtime_moment_text at))
       in
       let probe_lines =
         match probe with
@@ -501,10 +497,7 @@ let runtime_detail_lines state target ~width =
                 let limit = match window.puw_limit_id with
                   | Some id -> Terminal_text.single_line id
                   | None -> "account" in
-                let tm = Unix.localtime window.puw_observed_at in
-                let observed = Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-                    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-                    tm.Unix.tm_hour tm.Unix.tm_min in
+                let observed = runtime_moment_text window.puw_observed_at in
                 fact ~tone:Page_line.Attention "Spent limit"
                   (limit ^ " (observed " ^ observed ^ ")")) windows
       in
@@ -541,16 +534,17 @@ let render_runtime_detail (state : state) target =
     | Runtime_lane_candidate { lane_id; runtime_id } -> lane_id ^ " / " ^ runtime_id
     | Runtime_catalog_entry { runtime_id } -> runtime_id
   in
-  box_top buf cols;
-  box_line buf cols
-    (here_row ~cols state ~path:[ runtime_step state; target_label ]
-       ~readings:[] ~position:None);
-  box_divider buf cols;
   let lines = runtime_detail_lines state target ~width:(max 1 (framed_inner_width cols - 4)) in
   let total = List.length lines in
   let content_height = max 1 (rows - 5) in
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.runtime_detail_scroll max_scroll) in
+  box_top buf cols;
+  box_line buf cols
+    (here_row ~cols state ~path:[ runtime_step state; target_label ]
+       ~readings:[]
+       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total));
+  box_divider buf cols;
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
     match Rows.at lines_window (scroll + index) with
@@ -558,15 +552,8 @@ let render_runtime_detail (state : state) target =
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
   box_bottom buf cols;
-  let position =
-    if total > content_height then
-      Some
-        (Printf.sprintf (if state.ui_language = Lang_ko then "행 %s" else "lines %s")
-           (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
-    else None
-  in
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols ?position
+    (footer_line state ~max_cells:cols
        ~hints:
          (Masc_tui_keys.footer_hints_runtime_detail
             ~lang:state.ui_language
@@ -707,9 +694,7 @@ let render_runtime_reading (state : state) =
         (match Masc_domain.parse_iso8601_opt snapshot.rss_resolved.rrs_generated_at_iso with
          | None -> if ko then "관측 시각 없음" else "reading time unavailable"
          | Some generated_at ->
-             let recorded = Unix.localtime generated_at in
-             Printf.sprintf (if ko then "관측 %02d:%02d:%02d" else "reading %02d:%02d:%02d")
-               recorded.Unix.tm_hour recorded.Unix.tm_min recorded.Unix.tm_sec)
+             Printf.sprintf (if ko then "관측 %s" else "reading %s") (runtime_moment_text generated_at))
   in
   let header =
     match state.runtime_surface with
@@ -772,19 +757,15 @@ let render_runtime_reading (state : state) =
     else scroll in
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
   let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
-  let scroll_hint =
-    if shown > content_height then
-      Printf.sprintf (if ko then "[행 %s]  " else "[rows %s]  ")
-        (Masc_tui_scroll.window_text ~scroll ~height:content_height shown)
-    else ""
-  in
   let hints =
-    scroll_hint
-    ^ Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
-        ~mode:state.runtime_mode ~picker:None
+    Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language
+      ~mode:state.runtime_mode ~picker:None
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"runtime" ~title:header ~hints
     ~body:(fun ~budget:_ c ->
+  if shown > 0 then
+    c.position
+      (Masc_tui_value.Position.row ~selected:(Some state.runtime_cursor) ~total:shown);
   let authority_style =
     match state.runtime_surface with
     | Some snapshot when Option.is_some snapshot.rss_probe_error -> (Theme.warn ())
@@ -1055,29 +1036,34 @@ let render_runtime_parent state ~terminal_rows ~cols projection =
     | Runtime_prompt_parent (Lane_remove_prompt lane) ->
         text "제거 확인 / " "Remove / " ^ Terminal_text.single_line lane in
   let header = if projection.rpp_notices = 0 then
-    here_row ~cols state ~path:[ title ] ~readings:[] ~position:None
+    here_row ~cols state ~path:[ title ] ~readings:[] ~position:projection.rpp_position
   else
     let door = match projection.rpp_parent with
       | Runtime_media_parent | Runtime_prompt_parent (Lane_remove_prompt _) -> "v"
       | Runtime_prompt_parent (Lane_name_prompt _ | Lane_rename_prompt _) -> "PgUp" in
     let lead = Printf.sprintf (if ko then "안내 %d · %s · " else "%d notices · %s · ")
         projection.rpp_notices door in
-    let width = framed_inner_width cols in
-    let available = max 0 (width - Message_layout.display_width lead) in
-    let connection = match reading_connection_notice state with
-      | None -> ""
-      | Some _ -> reading_connection_summary
-          ~width:(max 0 (available - Message_layout.display_width " ")) state |> String.trim in
-    let connection = if Message_layout.display_width connection = 0 then "" else connection in
-    let separator = if String.equal connection "" then "" else " " in
-    let label_width = max 0 (available - Message_layout.display_width (separator ^ connection)) in
-    (* Own notice count/reader key survive a one-row body even when a global
-       connection warning also needs the title. Identity uses what is left. *)
-    screen_title lead ^ Message_layout.fit_middle label_width title ^ separator ^ connection in
-  let position = match projection.rpp_position with
-    | None -> ""
-    | Some position -> Printf.sprintf "[%s]  " position in
-  let hints = position ^ Masc_tui_keys.footer_hints_runtime_parent
+    (* The parts share what the position leaves, so the cut never reaches
+       the connection notice at the end. Own notice count/reader key survive
+       a one-row body even when a global connection warning also needs the
+       title. Identity uses what is left. *)
+    zone_two_title ~cols state ~position:projection.rpp_position
+      ~title:(fun ~cols ->
+        let available =
+          max 0 (framed_inner_width cols - Message_layout.display_width lead) in
+        let connection = match reading_connection_notice state with
+          | None -> ""
+          | Some _ -> reading_connection_summary
+              ~width:(max 0 (available - Message_layout.display_width " ")) state
+              |> String.trim in
+        let connection =
+          if Message_layout.display_width connection = 0 then "" else connection in
+        let separator = if String.equal connection "" then "" else " " in
+        let label_width =
+          max 0 (available - Message_layout.display_width (separator ^ connection)) in
+        screen_title lead ^ Message_layout.fit_middle label_width title
+        ^ separator ^ connection) in
+  let hints = Masc_tui_keys.footer_hints_runtime_parent
       ~lang:state.ui_language ~parent:projection.rpp_parent in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"runtime-parent"
@@ -1143,13 +1129,28 @@ let render_tools (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let header =
+  let header ~position =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"도구·스킬" ~en:"tools & skills" ]
-      ~readings:[] ~position:None
+      ~readings:[] ~position
   in
+  let display_lines = Render_tools.tools_display_lines ~cols ~terminal_rows state in
+  let layout = tools_scrolled_for_lines state display_lines in
+  let drawable = layout.sc_count in
+  let content_height =
+    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
+      ~count:drawable ~preview_keep:layout.sc_preview_keep
+  in
+  let max_scroll = max 0 (drawable - content_height) in
+  let scroll = max 0 (min (tools_task_render_scroll state) max_scroll) in
+  frame_tools_task := Option.map (fun owner ->
+    {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
+     ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;
+     ttf_cols=cols}) (tools_task_display_owner state);
   box_top buf cols;
-  box_line buf cols header;
+  box_line buf cols
+    (header
+       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total:drawable));
   box_line buf cols (" " ^ Render_tools.tools_pane_strip ~cols state);
   box_line_styled buf cols ~style:Theme.selection
     (Render_tools.tools_selection_line ~cols state);
@@ -1162,29 +1163,12 @@ let render_tools (state : state) =
             (request_failure_text ~ko:(state.ui_language = Lang_ko)
                ~request:Kept_request.Tool_inventory_read failure));
        box_divider buf cols);
-  let display_lines = Render_tools.tools_display_lines ~cols ~terminal_rows state in
-  let layout = tools_scrolled_for_lines state display_lines in
-  let drawable = layout.sc_count in
-  let content_height =
-    Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
-      ~count:drawable ~preview_keep:layout.sc_preview_keep
-      ~overflow_takes_row:layout.sc_overflow_takes_row
-  in
-  let max_scroll = max 0 (drawable - content_height) in
-  let scroll = max 0 (min (tools_task_render_scroll state) max_scroll) in
-  frame_tools_task := Option.map (fun owner ->
-    {ttf_owner=owner; ttf_count=drawable; ttf_height=content_height;
-     ttf_offset=scroll; ttf_waiting=tools_task_waiting state ~source:owner.tto_source ~cols;
-     ttf_cols=cols}) (tools_task_display_owner state);
   let display_lines_window = Rows.of_list ~first:scroll ~height:content_height display_lines in
   for i = 0 to content_height - 1 do
     match Rows.at display_lines_window (i + scroll) with
     | None -> box_empty buf cols
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
-  if drawable > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [rows %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height drawable));
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
@@ -1202,7 +1186,7 @@ let provider_history_lines ~cols ~rows (state : state) =
           state.provider_history_days (Terminal_text.single_line reason) ]
   | Provider_history_read trend ->
       let days = trend.Masc_tui_usage_trend.days in
-      let as_of = Unix.gmtime trend.generated_at in
+      let as_of = Masc_tui_value.Utc_day.of_moment trend.generated_at in
       let scopes =
         match state.overview_providers with
         | Providers_read reading -> reading.puws_accounts
@@ -1262,10 +1246,8 @@ let provider_history_lines ~cols ~rows (state : state) =
         let latest = match Masc_tui_usage_trend.latest row with
           | None -> "No reports in this window"
           | Some sample ->
-            let time = Unix.gmtime sample.observed_at in
-            Printf.sprintf "Latest report %s · %02d-%02d %02d:%02d UTC"
-              (daily_value (Some sample))
-              (time.Unix.tm_mon + 1) time.Unix.tm_mday time.Unix.tm_hour time.Unix.tm_min in
+            Printf.sprintf "Latest report %s · %s"
+              (daily_value (Some sample)) (runtime_moment_text sample.observed_at) in
         let name = text (label row.scope_id) in
         let full_name =
           if not bare && Message_layout.display_width name <= inner then []
@@ -1276,9 +1258,7 @@ let provider_history_lines ~cols ~rows (state : state) =
           else
             "Daily values (UTC)" ::
             List.map (fun (day, sample) ->
-              Printf.sprintf "%04d-%02d-%02d %s"
-                (day.Unix.tm_year + 1900) (day.Unix.tm_mon + 1) day.Unix.tm_mday
-                (daily_value sample))
+              Masc_tui_value.Utc_day.date day ^ " " ^ daily_value sample)
               (Masc_tui_usage_trend.dated_samples trend row)
             |> List.concat_map wrap in
         let body = full_name @ wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
@@ -1307,12 +1287,14 @@ let provider_history_lines ~cols ~rows (state : state) =
           List.init height (fun index -> prefix ^ row left index ^ "  " ^ row right index)
           @ [""] @ arrange rest
         | row :: rest -> List.map (fun line -> prefix ^ line) (chart row) @ [""] @ arrange rest in
-      let first = Unix.gmtime (trend.generated_at -. float_of_int (days - 1) *. 86400.0) in
+      let first =
+        Masc_tui_value.Utc_day.of_moment (trend.generated_at -. float_of_int (days - 1) *. 86400.0)
+      in
       (Printf.sprintf
-         " Quota scope trend (%d UTC days) · latest report per day · as of %02d-%02d %02d:%02d UTC"
-         days (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday as_of.Unix.tm_hour as_of.Unix.tm_min)
-      :: Printf.sprintf " %02d-%02d → %02d-%02d UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
-           (first.Unix.tm_mon + 1) first.Unix.tm_mday (as_of.Unix.tm_mon + 1) as_of.Unix.tm_mday
+         " Quota scope trend (%d UTC days) · latest report per day · as of %s"
+         days (runtime_moment_text trend.generated_at))
+      :: Printf.sprintf " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use"
+           (Masc_tui_value.Utc_day.month_day first) (Masc_tui_value.Utc_day.month_day as_of)
       :: " ↓ below zero · ↑ above limit"
       :: (match trend.unreadable_reports with
           | 0 -> []
@@ -1397,12 +1379,9 @@ let usage_lines ~cols ~rows (state : state) =
               Some ("[" ^ Overview_providers.meter ~cells:bar_cells share ^ "]")
           | _ -> None
         in
-        let generated = Unix.gmtime kuw_generated_at in
         [ Printf.sprintf " Keeper usage · last %s · recorded turn metrics"
             (Overview_providers.minutes_label kuw_window_minutes)
-        ; Printf.sprintf " As of %04d-%02d-%02d %02d:%02d UTC"
-            (generated.Unix.tm_year + 1900) (generated.Unix.tm_mon + 1)
-            generated.Unix.tm_mday generated.Unix.tm_hour generated.Unix.tm_min
+        ; " As of " ^ runtime_moment_text kuw_generated_at
         ; " Bars: relative to largest read value per metric; not quota."
         ; " Partial rows: no bars. Missing values can understate totals."
         ; Printf.sprintf " Scale: tokens %s · cost %s"
@@ -1568,6 +1547,7 @@ let render_metrics (state : state) =
             drawn_metrics_scroll := scroll;
             drawn_metrics_height := height;
             drawn_metrics_card_rows := Some card_rows)
+          ~hand_position:c.position
           ~push:c.push ~push_styled:c.push_styled
           ~push_selected:c.push_selected ~push_divider:c.push_divider
           ~push_empty:c.push_empty
@@ -1628,23 +1608,19 @@ let render_metrics (state : state) =
         (* Put variable-length status details after account rows: refreshes do
            not move the account the reader is already scrolling through. *)
         let lines = usage_lines ~cols ~rows:content_budget state @ connection_rows in
-        let overflow_rows = if content_budget >= 2 && List.length lines > content_budget then 1 else 0 in
-        let height = content_budget - overflow_rows in
+        let height = content_budget in
         let max_scroll = max 0 (List.length lines - height) in
         let scroll = min max_scroll (max 0 state.metrics_scroll) in
         drawn_metrics_scroll := scroll;
         drawn_metrics_height := height;
         drawn_metrics_card_rows := Some 0;
+        Option.iter c.position
+          (Masc_tui_value.Position.window ~first:scroll ~shown:height
+             ~total:(List.length lines));
         List.iteri
           (fun index line ->
             if index >= scroll && index < scroll + height then c.push line)
-          lines;
-        if overflow_rows > 0 then
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf (if state.ui_language = Lang_ko then
-                 "  [줄 %s · j/k:스크롤]" else "  [rows %s · j/k to scroll]")
-               (Masc_tui_scroll.window_text ~scroll ~height
-                  (List.length lines)))
+          lines
       end)
 
 (** Render the runtime picker: the dispatchable catalogue, with the keeper it
@@ -1689,7 +1665,14 @@ let render_runtime_pick (state : state) =
          ~readings:
            [ Ansi.dim ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
              ^ Ansi.reset ]
-         ~position:None)
+         ~position:
+           (* The cursor indexes the list the filter keeps. *)
+           (if view.Masc_tui_pick_list.shown = 0 then None
+            else
+              Some
+                (Masc_tui_value.Position.row
+                   ~selected:(Some state.runtime_pick_list.Masc_tui_pick_list.cursor)
+                   ~total:view.Masc_tui_pick_list.shown)))
     ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language (Keepers Keeper_runtime_pick))
     ~body:(fun ~budget:_ c ->
       c.push_styled ~style:(Theme.info ())

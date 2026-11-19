@@ -10,6 +10,8 @@ module Hash = Masc_tui_value.Hash
 module Ongoing = Masc_tui_value.Ongoing
 module Redraw = Masc_tui_value.Redraw
 module Position = Masc_tui_value.Position
+module Utc_day = Masc_tui_value.Utc_day
+module Local_hour = Masc_tui_value.Local_hour
 
 (* [Unix.tm] counts years from 1900. *)
 let tm_year_origin = 1900
@@ -67,6 +69,78 @@ let test_new_year_ends_the_year () =
        ~now:(day ~year:2027 ~yday:0 ~hour:0 ~minute:1)
        (day ~year:2026 ~yday:last_day_of_the_year ~hour:23 ~minute:59))
 
+(* The decision a dated moment rests on, read on whole epochs in one fixed
+   zone. 2026-11-18 20:29 UTC read at 2026-11-19 04:28 UTC is eight hours
+   old and yesterday: the Features status line drew it as a bare 20:29:21. *)
+let evening_before = 1_795_033_740.
+let small_hours_after = 1_795_062_480.
+
+let test_eight_hours_back_across_midnight_is_another_day () =
+  Alcotest.check distance "20:29 yesterday read at 04:28" Instant.Same_year
+    (Instant.day_of ~localtime:Unix.gmtime ~now:small_hours_after evening_before)
+
+let test_an_hour_back_before_midnight_is_today () =
+  Alcotest.check distance "19:29 read at 20:29" Instant.Same_day
+    (Instant.day_of ~localtime:Unix.gmtime ~now:evening_before (evening_before -. 3600.))
+
+(* Whether the moment carries a date is the value module's decision: today
+   it is the clock and nothing else, another day it is that clock with the
+   date in front. Checked against the module's own clock, not a wording. *)
+let test_only_another_day_adds_a_date () =
+  let clock at = Instant.clock_within_day Instant.To_minute (Unix.gmtime at) in
+  let detail ~now at = Instant.detail_text ~localtime:Unix.gmtime Instant.To_minute ~now at in
+  let today = evening_before -. 3600. in
+  Alcotest.(check bool) "today: the clock alone" true
+    (String.equal (detail ~now:evening_before today) (clock today));
+  let yesterday = detail ~now:small_hours_after evening_before in
+  Alcotest.(check bool) "yesterday: more than the clock" true
+    (String.length yesterday > String.length (clock evening_before));
+  Alcotest.(check bool) "yesterday: still ends on the clock" true
+    (String.ends_with ~suffix:(clock evening_before) yesterday)
+
+(* A UTC day is the server's bucket. 23:59 and 00:00 UTC are two days, and
+   a moment's UTC day does not follow the operator's zone: the day is decided
+   from the epoch, not from a local breakdown. *)
+let test_a_utc_day_turns_at_utc_midnight () =
+  let midnight = 1_763_510_400. (* 2025-11-19T00:00:00Z *) in
+  let before = Utc_day.of_moment (midnight -. 1.) and after = Utc_day.of_moment midnight in
+  Alcotest.(check int) "a second before midnight is the 18th" 18 (Utc_day.day_of_month before);
+  Alcotest.(check int) "midnight starts the 19th" 19 (Utc_day.day_of_month after);
+  Alcotest.(check int) "a whole day later is the next day" 20
+    (Utc_day.day_of_month (Utc_day.of_moment (midnight +. 86_400.)))
+
+(* Two breakdowns of the same wall-clock hour on either side of a
+   daylight-saving change are two hours: the chat draws a heading between
+   them. *)
+let test_a_repeated_hour_is_another_hour () =
+  let tm = Unix.gmtime 1_763_510_400. in
+  let standard = Local_hour.of_tm { tm with Unix.tm_isdst = false }
+  and daylight = Local_hour.of_tm { tm with Unix.tm_isdst = true } in
+  Alcotest.(check bool) "the same breakdown is the same hour" true
+    (Local_hour.equal standard (Local_hour.of_tm { tm with Unix.tm_isdst = false }));
+  Alcotest.(check bool) "daylight time is another hour" false (Local_hour.equal standard daylight)
+
+(* A ruler mark stands only where an hour starts. The test runs with no TZ,
+   so the local zone is UTC and hours start on multiples of 3600 s. *)
+let test_a_ruler_marks_only_the_start_of_an_hour () =
+  let hour = 1_763_510_400. in
+  Alcotest.(check bool) "an hour's start is marked" true
+    (Option.is_some (Instant.axis_hour hour));
+  Alcotest.(check bool) "half past is not" true (Option.is_none (Instant.axis_hour (hour +. 1800.)))
+
+(* The day's start is a local midnight at or before the moment, on the same
+   day. *)
+let test_a_day_starts_at_its_midnight () =
+  let at = 1_763_550_000. in
+  match Instant.day_start at with
+  | None -> Alcotest.fail "a representable moment has a day start"
+  | Some start ->
+      Alcotest.(check bool) "at or before the moment" true (start <= at);
+      Alcotest.check distance "on the moment's day" Instant.Same_day
+        (Instant.day_of ~now:at start);
+      Alcotest.check distance "a second earlier is the day before" Instant.Same_year
+        (Instant.day_of ~now:at (start -. 1.))
+
 (* East of Greenwich the local day turns first. At 00:30 on January 1 in
    UTC+9 it is still December 31 in UTC, in another year with a larger day
    number: the clock fields alone would put the zone fifteen hours behind. *)
@@ -113,20 +187,57 @@ let test_only_one_is_singular () =
         (Count.reading ~ko:false Count.Entry count))
     [ (0, "0 entries"); (1, "1 entry"); (2, "2 entries"); (8347, "8,347 entries") ]
 
-(* A card edge counts a list read in part with the rows read, the word for
-   the whole and the server's total. The position on the same screen says the
-   selected row ahead of the same three, so the two cannot drift apart. *)
-let test_a_partial_count_reads_like_the_position () =
-  List.iter
-    (fun (ko, expected) ->
-      let count = Count.partial ~ko ~loaded:50 ~total:2000 in
-      Alcotest.(check string) "the card edge's count" expected count;
-      Alcotest.(check string) "the position ends with the same count"
-        ("1/" ^ count)
-        (Position.text ~ko (Position.Partial { at = 1; loaded = 50; total = 2000 })))
-    [ (true, "50 \xc2\xb7 \xec\xa0\x84\xec\xb2\xb4 2,000")
-    ; (false, "50 \xc2\xb7 of 2,000")
-    ]
+(* Which position a screen hands, and its numbers: a window that hides rows
+   and none for one that shows them all, a list's selected row held inside
+   the list, and a list read in part. The text zone 2 draws from them is not
+   checked here (RFC tui-one-screen-grammar, section 10). *)
+let window_numbers = function
+  | Some (Position.Window { first; last; total }) -> Some (first, last, total)
+  | Some (Position.Row _ | Position.Partial _) | None -> None
+
+let test_a_window_is_handed_only_when_it_hides_rows () =
+  let check label expected ~first ~shown ~total =
+    Alcotest.(check (option (triple int int int))) label expected
+      (window_numbers (Position.window ~first ~shown ~total))
+  in
+  check "every row shown hands nothing" None ~first:0 ~shown:10 ~total:10;
+  check "a short reading hands nothing" None ~first:4 ~shown:10 ~total:3;
+  check "an empty reading hands nothing" None ~first:0 ~shown:10 ~total:0;
+  check "a middle window counts from one" (Some (6, 15, 30)) ~first:5 ~shown:10 ~total:30;
+  check "a window near the end ends at the last row" (Some (26, 30, 30))
+    ~first:25 ~shown:10 ~total:30;
+  check "a window past the end is held at the last row" (Some (30, 30, 30))
+    ~first:99 ~shown:10 ~total:30;
+  check "a window above the top starts at the top" (Some (1, 10, 30))
+    ~first:(-4) ~shown:10 ~total:30;
+  check "a window with no rows shows none of them" (Some (0, 0, 3))
+    ~first:0 ~shown:0 ~total:3
+
+let test_a_list_names_its_selected_row () =
+  Alcotest.(check bool) "the seventh of 29" true
+    (match Position.row ~selected:(Some 6) ~total:29 with
+     | Position.Row { at = 7; total = 29 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "a list that fits still names its row" true
+    (match Position.row ~selected:(Some 0) ~total:3 with
+     | Position.Row { at = 1; total = 3 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "nothing selected is row zero" true
+    (match Position.row ~selected:None ~total:31 with
+     | Position.Row { at = 0; total = 31 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "a cursor past the end names the last row" true
+    (match Position.row ~selected:(Some 40) ~total:29 with
+     | Position.Row { at = 29; total = 29 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "an empty list selects nothing" true
+    (match Position.row ~selected:(Some 0) ~total:0 with
+     | Position.Row { at = 0; total = 0 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false);
+  Alcotest.(check bool) "a list read in part names the row among those read" true
+    (match Position.partial ~selected:(Some 0) ~loaded:50 ~total:2000 with
+     | Position.Partial { at = 1; loaded = 50; total = 2000 } -> true
+     | Position.Row _ | Position.Window _ | Position.Partial _ -> false)
 
 (* What a card cut off is a number of rows in the screen's language, grouped
    like any other count. *)
@@ -361,6 +472,20 @@ let () =
         ; Alcotest.test_case "the same date last year" `Quick
             test_the_same_date_last_year_is_another_year
         ; Alcotest.test_case "new year ends the year" `Quick test_new_year_ends_the_year
+        ; Alcotest.test_case "eight hours back across midnight" `Quick
+            test_eight_hours_back_across_midnight_is_another_day
+        ; Alcotest.test_case "an hour back before midnight" `Quick
+            test_an_hour_back_before_midnight_is_today
+        ; Alcotest.test_case "only another day adds a date" `Quick
+            test_only_another_day_adds_a_date
+        ; Alcotest.test_case "a UTC day turns at UTC midnight" `Quick
+            test_a_utc_day_turns_at_utc_midnight
+        ; Alcotest.test_case "a repeated hour is another hour" `Quick
+            test_a_repeated_hour_is_another_hour
+        ; Alcotest.test_case "a ruler marks only the start of an hour" `Quick
+            test_a_ruler_marks_only_the_start_of_an_hour
+        ; Alcotest.test_case "a day starts at its midnight" `Quick
+            test_a_day_starts_at_its_midnight
         ] )
     ; ( "zone",
         [ Alcotest.test_case "offset across new year, east" `Quick
@@ -373,10 +498,14 @@ let () =
     ; ( "count",
         [ Alcotest.test_case "a sign is not a digit" `Quick test_a_sign_is_not_a_digit
         ; Alcotest.test_case "only one is singular" `Quick test_only_one_is_singular
-        ; Alcotest.test_case "a partial count reads like the position" `Quick
-            test_a_partial_count_reads_like_the_position
         ; Alcotest.test_case "cut rows are counted in the screen's language" `Quick
             test_cut_rows_are_counted_in_the_screens_language
+        ] )
+    ; ( "position",
+        [ Alcotest.test_case "a window is handed only when it hides rows" `Quick
+            test_a_window_is_handed_only_when_it_hides_rows
+        ; Alcotest.test_case "a list names its selected row" `Quick
+            test_a_list_names_its_selected_row
         ] )
     ; ( "hash",
         [ Alcotest.test_case "a hash keeps its head" `Quick test_a_hash_keeps_its_head ] )

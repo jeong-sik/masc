@@ -69,7 +69,18 @@ val handle_goal_measure
     and commits the phase and audit intent together. A committed cancellation
     remains a success when effect delivery is deferred; [effect_delivery]
     reports that separately. A repeated drop preserves the original Goal and drains the
-    pending outbox without duplicating its event or verifier cancellation. *)
+    pending outbox without duplicating its event or verifier cancellation.
+
+    [request_complete] and [reopen] also commit the phase and its audit intent
+    in one Goal write and report [effect_delivery]. When the audit ledger
+    refuses the append, the transition remains a success and the intent stays
+    in the outbox: the maintenance pass or a later Goal transition delivers it
+    once. So does a repeated [reopen], which reports [effect_delivery] again.
+
+    A [reopen] that has a proof to archive is the exception. It appends the
+    archive row to the ledger inside the transaction, after the pending
+    intents, so while the ledger refuses appends that reopen is refused and
+    the phase stays where it was. *)
 val handle_goal_transition
   :  tool_name:string
   -> start_time:Tool_timing.started
@@ -164,4 +175,11 @@ val confirm_completion : ?after_confirmation:confirmation_step ->
     ledger and before the phase is written. It also runs when the confirmation
     is repeated for a Goal that is already [Completed], so it must give the
     same answer the second time. When it refuses, the confirmation stays
-    recorded, the phase does not move, and confirming again runs it again. *)
+    recorded, the phase does not move, and confirming again runs it again.
+
+    The completed phase and its audit intent commit in one Goal write, and the
+    outbox is drained before this returns; [effect_delivery] in the answer says
+    what that drain did. When the audit ledger refuses the append, the
+    confirmation is still [Ok] and the intent stays in the outbox: the
+    maintenance pass, a later Goal transition or this call repeated delivers
+    it once. *)

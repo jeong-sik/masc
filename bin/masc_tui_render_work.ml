@@ -116,21 +116,18 @@ type work_list_window =
   { entry_height : int
   ; capacity : int
   ; first : int
-  ; position : bool
   }
 
 (* Cursors and page keys count entries; the list budget counts physical rows.
-   Reserve a position row only while one whole entry still fits. *)
+   Where the cursor stands is on the title row, so no row is kept for it. *)
 let work_list_window ~rows ~count ~selected =
   let rows = max 0 rows in
   let entry_height = if rows >= 2 then 2 else 1 in
-  let slots = rows / entry_height in
-  let position = count > slots && rows > entry_height in
-  let capacity = min count ((rows - if position then 1 else 0) / entry_height) in
+  let capacity = min count (rows / entry_height) in
   let first = match selected with
     | None -> 0
     | Some index -> if capacity = 0 then 0 else max 0 (index - capacity + 1) in
-  { entry_height; capacity; first; position }
+  { entry_height; capacity; first }
 
 let work_entry_lines ~cells ~height ~selected ~title ~summary ~compact =
   let lead = if selected then "› " else "  " in
@@ -142,12 +139,6 @@ let work_entry_lines ~cells ~height ~selected ~title ~summary ~compact =
       Masc_tui_theme.selection ^ Message_layout.fit_width (Masc_tui_theme.strip_sgr line) cells ^ Ansi.reset
     else Message_layout.fit_width line cells) lines
 
-let work_list_position window ~count =
-  if window.position then
-    [Theme.recede () ^ Masc_tui_scroll.window_text
-       ~scroll:window.first ~height:window.capacity count ^ Ansi.reset]
-  else []
-
 let work_preview_field ~cells label value =
   let value = Terminal_text.single_line value in
   Message_layout.truncate_middle (max 1 cells) (label ^ value)
@@ -158,7 +149,7 @@ let work_preview_body ~cells ~rows text =
   let shown = List.take rows lines in
   if List.length lines <= rows then shown
   else List.mapi (fun index line ->
-    if index = rows - 1 then Message_layout.take_cells line (max 0 (cells - 1)) ^ "…"
+    if index = rows - 1 then Message_layout.truncate_end cells line
     else line) shown
 
 (* The rows on screen are the last reading that arrived. A read still in
@@ -309,7 +300,7 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
 
 let task_detail_height ~rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
-    ~preview_keep:None ~overflow_takes_row:true
+    ~preview_keep:None
 
 let task_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -324,21 +315,21 @@ let task_detail_viewport (state : state) =
 let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let header = screen_title (ui_text state ~ko:" 작업" ~en:" Task")
     ^ "  " ^ connection_badge state in
-  box_top buf cols;
-  box_line buf cols header;
-  box_divider buf cols;
   let lines = task_detail_lines state ~cols task in
   let count = List.length lines in
   let height = task_detail_height ~rows ~count in
   let scroll = Masc_tui_scroll.normalize ~count ~height (task_detail_render_scroll state) in
+  box_top buf cols;
+  box_line buf cols
+    (titled_row ~cols state ~title:header
+       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
+  box_divider buf cols;
   let window = Rows.of_list ~first:scroll ~height lines in
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
     | None -> box_empty buf cols
     | Some line -> box_line buf cols line
   done;
-  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
   box_bottom buf cols;
   scroll, count, height
 ;;
@@ -436,8 +427,9 @@ let render_work_tasks (state : state) =
                ^ Theme.recede () ^ " · " ^ owner ^ Ansi.reset in
              work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
                ~selected:(Some index = selected) ~title:task.title ~summary
-               ~compact:status))
-        @ work_list_position window ~count in
+               ~compact:status)) in
+      if count > 0 then
+        c.position (Masc_tui_value.Position.row ~selected ~total:count);
       let selected_task = Overview_tasks.work_selected_task state.tasks
           ~selected:(Overview_tasks.selection state.task_focus) in
       let preview_title, preview_lines = match selected_task with
@@ -888,8 +880,11 @@ let render_planning_list (state : state) =
                       ^ Ansi.reset in
                   work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
                     ~selected:(index = state.planning_cursor) ~title:goal.pg_title ~summary
-                    ~compact:(phase ^ due ^ linked)))
-             @ work_list_position window ~count in
+                    ~compact:(phase ^ due ^ linked))) in
+           if count > 0 then
+             c.position
+               (Masc_tui_value.Position.row ~selected:(Some state.planning_cursor)
+                  ~total:count);
            let preview_lines = match List.nth_opt goals state.planning_cursor with
              | None -> [text "목표를 선택하세요" "Select a Goal"]
              | Some goal -> planning_preview_lines state ~now ~cells:geometry.preview_width ~rows:geometry.preview_rows goal in
@@ -1288,7 +1283,7 @@ let planning_detail_header_rows (state : state) ~cols (goal : planning_goal) =
 
 let planning_detail_height ~rows ~header_rows ~action_rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + max 0 (header_rows - 1) + action_rows)
-    ~count ~preview_keep:None ~overflow_takes_row:true
+    ~count ~preview_keep:None
 
 let planning_detail_fits ~rows ~header_rows ~action_rows ~count =
   let height = planning_detail_height ~rows ~header_rows ~action_rows ~count in
@@ -1316,12 +1311,8 @@ let planning_detail_viewport (state : state) =
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
   let headers = planning_detail_header_rows state ~cols goal in
-  box_top buf cols;
-  List.iter (box_line buf cols) headers;
-  box_divider buf cols;
   let actions = planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols ~armed
       ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal in
-  List.iter (box_line buf cols) actions;
   let lines, candle_scroll = planning_detail_content state ~confirmation ~cols goal in
   let count = List.length lines in
   let height = planning_detail_height ~rows ~header_rows:(List.length headers)
@@ -1330,14 +1321,22 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | Planning_scroll_offset value -> value
     | Planning_scroll_candle _ -> candle_scroll in
   let scroll = Masc_tui_scroll.normalize ~count ~height requested_scroll in
+  box_top buf cols;
+  (match headers with
+   | [] -> ()
+   | title :: rest ->
+       box_line buf cols
+         (titled_row ~cols state ~title
+            ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
+       List.iter (box_line buf cols) rest);
+  box_divider buf cols;
+  List.iter (box_line buf cols) actions;
   let window = Rows.of_list ~first:scroll ~height lines in
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
     | None -> box_empty buf cols
     | Some line -> box_line_styled buf cols ~style:(planning_detail_tone line.Planning_detail.tone) line.text
   done;
-  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
   box_bottom buf cols;
   let seen = match confirmation with
     | `Inspect (Masc_tui_fetched.Ready proof) ->
@@ -1462,13 +1461,12 @@ let schedule_status_word_cells =
     0 Schedule_contract_values.schedule_status_strings
 
 
-(* The width of the request clock column, read off the format rather than
-   typed. [short_timestamp] answers a parsed stamp in this shape, but an
-   unparsed one comes back as the source text and an absent one as "(never)",
-   and either of those pulls the three columns after it out of line -- the
-   same shape as the printf padding this row gave up. *)
-let schedule_requested_clock_cells =
-  Message_layout.display_width (Terminal_text.short_timestamp_of_unix 0.)
+(* The width of the request clock column: the widest column moment
+   ([Terminal_text.column_timestamp]), not a measured row. An unparsed stamp
+   comes back as the source text and an absent one as "(never)", and either
+   of those pulls the three columns after it out of line -- the same shape
+   as the printf padding this row gave up. *)
+let schedule_requested_clock_cells = Terminal_text.column_timestamp_cells
 
 (* The screen's words for the two projection axes. Both arrive as the
    schedule contract's closed variants, so each value has its own arm here and
@@ -1881,6 +1879,7 @@ let render_schedule_list (state : state) =
              else 0
            in
            let scs_rows_window = Rows.of_list ~first:scroll_offset ~height:content_height snapshot.scs_rows in
+           c.position (Masc_tui_value.Position.row ~selected:(Some state.schedule_cursor) ~total:(List.length snapshot.scs_rows));
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in
              match Rows.at scs_rows_window idx with
@@ -1889,7 +1888,7 @@ let render_schedule_list (state : state) =
                let is_selected = idx = state.schedule_cursor in
                let due =
                  match row.sch_due_at_iso with
-                 | Some iso -> Terminal_text.short_timestamp iso
+                 | Some iso -> Terminal_text.column_timestamp iso
                  | None -> Masc_tui_theme.Glyph.no_value
                in
                (* The payload target names who the wake reaches (a keeper for
@@ -2217,9 +2216,9 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
     Option.value ~default:(t "(페이로드 요약 없음)" "(no payload summary)") row.sch_payload_summary
   in
   let keeper_wake =
-    match row.sch_payload_kind with
-    | Some ("keeper_wake" | "masc.keeper_wake") -> true
-    | Some _ | None -> false
+    match Option.bind row.sch_payload_kind Masc.Schedule_payload_projection.classify_kind with
+    | Some Masc.Schedule_payload_projection.Keeper_wake -> true
+    | Some Masc.Schedule_payload_projection.Lane_act | None -> false
   in
   let target_link =
     match keeper_wake, row.sch_payload_target with
@@ -2362,7 +2361,7 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
 
 let schedule_detail_height ~rows ~warning_rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + warning_rows) ~count
-    ~preview_keep:None ~overflow_takes_row:true
+    ~preview_keep:None
 
 let schedule_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -2378,6 +2377,15 @@ let schedule_detail_viewport (state : state) =
   count, schedule_detail_height ~rows ~warning_rows ~count
 
 let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row) buf =
+  (* Source freshness governs every evidence row, so it stays visible while
+     the reader moves. The complete warning also remains in the reader for
+     narrow viewports or a refusal longer than the fixed status summary. *)
+  let warning = schedule_source_warning state in
+  let warning_rows = match warning with None -> 0 | Some _ -> 1 in
+  let lines = schedule_detail_content state ~cols ~runner row in
+  let count = List.length lines in
+  let height = schedule_detail_height ~rows ~warning_rows ~count in
+  let scroll = Masc_tui_scroll.normalize ~count ~height state.schedule_scroll in
   box_top buf cols;
   box_line buf cols
     (here_row ~cols state
@@ -2388,26 +2396,15 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
          [ Printf.sprintf "%s[%s]%s"
              (schedule_status_color row.sch_status)
              (Terminal_text.single_line row.sch_status) Ansi.reset ]
-       ~position:None);
+       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
   box_divider buf cols;
-  (* Source freshness governs every evidence row, so it stays visible while
-     the reader moves. The complete warning also remains in the reader for
-     narrow viewports or a refusal longer than the fixed status summary. *)
-  let warning_rows = match schedule_source_warning state with
-    | None -> 0
-    | Some error -> box_line buf cols (data_unreliable_row ~cols error); 1 in
-  let lines = schedule_detail_content state ~cols ~runner row in
-  let count = List.length lines in
-  let height = schedule_detail_height ~rows ~warning_rows ~count in
-  let scroll = Masc_tui_scroll.normalize ~count ~height state.schedule_scroll in
+  Option.iter (fun error -> box_line buf cols (data_unreliable_row ~cols error)) warning;
   let lines_window = Rows.of_list ~first:scroll ~height lines in
   for index = 0 to height - 1 do
     match Rows.at lines_window (scroll + index) with
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
-  Option.iter (box_line_styled buf cols ~style:(Theme.recede ()))
-    (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count);
   box_bottom buf cols;
   scroll, Masc_tui_scroll.maximum ~count ~height
 ;;

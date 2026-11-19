@@ -35,6 +35,20 @@ val read_file_tail_lines_with_completion :
     reached the file's start. The window's leading partial line is already
     dropped by the reader. *)
 
+type tail_of_file =
+  | No_file
+  | Tail of tail_lines
+
+val read_tail_of_file :
+  string -> max_bytes:int -> max_lines:int
+  -> (tail_of_file, Keeper_memory_recall_exn_class.t) result
+(** The tail of a file as {!read_file_tail_lines_with_completion} reads it,
+    for a caller that keeps the answer. [No_file] is answered only when
+    opening the path says there is no such file ([ENOENT]); a path that
+    cannot be opened for any other reason is an [Error], where
+    {!read_file_tail_lines_with_completion} answers with no lines.
+    [max_lines] is positive. *)
+
 val read_file_tail_lines_result :
   string -> max_bytes:int -> max_lines:int
   -> (string list, Keeper_memory_recall_exn_class.t) result

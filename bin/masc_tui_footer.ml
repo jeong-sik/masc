@@ -924,9 +924,12 @@ let rec fit_body ?literal_prefix ?action_text ?position ~more_key ~styled_more_k
          Masc_tui_message_layout.display_width rendered <= room
          && not (String.ends_with ~suffix:cut_marker rendered)
        then
-         Masc_tui_message_layout.fit_width
-           (Masc_tui_message_layout.take_cells rendered marker_room) marker_room
-         ^ cut_marker
+         (* The cut marker follows, so this head carries no mark of its own. *)
+         let head =
+           match Masc_tui_message_layout.take_cells rendered marker_room with
+           | Masc_tui_message_layout.Whole head | Masc_tui_message_layout.Cut head -> head
+         in
+         Masc_tui_message_layout.fit_width head marker_room ^ cut_marker
        else Masc_tui_message_layout.fit_width rendered room ^ styled_more_key)
 
 (** What the caller would rather the notice slot said than [action_text],

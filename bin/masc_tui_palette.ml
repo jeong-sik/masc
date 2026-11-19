@@ -388,9 +388,8 @@ let branch_label (branch : Masc.Tui_decode.git_branch) =
            @ (if behind > 0 then [ Printf.sprintf "↓%d" behind ] else []))
   in
   let date =
-    let tm = Unix.gmtime (float_of_int branch.gb_commit_epoch) in
-    Printf.sprintf "%04d-%02d-%02d" (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1)
-      tm.Unix.tm_mday
+    Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute
+      ~now:(Unix.gettimeofday ()) (float_of_int branch.gb_commit_epoch)
   in
   Printf.sprintf "%s %s  %s  %s  %s"
     (if branch.gb_current then "*" else " ")

@@ -1027,7 +1027,7 @@ let grid_failure_since ~now ~room (runtime : keeper_runtime option) trail =
   in
   match failing, trail with
   | Masc_tui_keeper_pulse.Failing_since at, (Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound) ->
-      let clock = Grid.dated_clock_text ~now ~localtime:Unix.localtime at in
+      let clock = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at in
       let worded = Keeper_mark.grid_since_word ^ " " ^ clock in
       (* The word goes first, so a cut never leaves a minute that reads as data. *)
       if Message_layout.display_width worded <= room then worded else clock
@@ -2263,13 +2263,13 @@ let keeper_list_position ~stop rows : Masc_tui_value.Position.t option =
   match rows with
   | [] -> None
   | _ :: _ ->
-      let at =
+      let selected =
         match stop with
-        | Some (Keeper_list_model.Stop_row position) -> position + 1
+        | Some (Keeper_list_model.Stop_row position) -> Some position
         | Some (Keeper_list_model.Stop_world | Keeper_list_model.Stop_heading _)
-        | None -> 0
+        | None -> None
       in
-      Some (Row { at; total = List.length rows })
+      Some (Masc_tui_value.Position.row ~selected ~total:(List.length rows))
 
 let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pulse_headers =
   let text ko en = ui_text state ~ko ~en in
@@ -2352,7 +2352,6 @@ type keeper_plain_projection =
   ; kpp_entry_rows : int
   ; kpp_window : keeper_display_entry list
   ; kpp_scroll : int
-  ; kpp_overflow : bool
   ; kpp_count : int
   ; kpp_density : Keeper_list_model.density
   ; kpp_selected_reading : Keeper_control.reading option
@@ -2435,16 +2434,14 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
     | Keeper_list_model.One_line -> Keeper_list_model.One_line
   in
   let heights = List.map (keeper_plain_entry_height density) entries in
-  let primary_entry_height = List.fold_left max 1 heights in
-  let overflowing = content_rows > primary_entry_height
-    && List.fold_left ( + ) 0 heights > content_rows in
-  let entry_rows = max 0 (content_rows - if overflowing then 1 else 0) in
+  (* Where the cursor stands is on the title row, so every row draws entries. *)
+  let entry_rows = content_rows in
   let cursor = Option.value ~default:0 (List.find_index (keeper_entry_selected stop) entries) in
   let scroll, count = Masc_tui_scroll.window_of_heights ~heights ~cursor ~rows:entry_rows state.keeper_list_scroll in
   { kpp_headers = headers; kpp_list_width = list_width; kpp_detail_width = detail_width
   ; kpp_detail_lines = detail_lines; kpp_list_rows = list_rows; kpp_entry_rows = entry_rows
   ; kpp_window = List.take count (List.drop scroll entries); kpp_scroll = scroll
-  ; kpp_overflow = overflowing; kpp_count = List.length reading.klr_rows
+  ; kpp_count = List.length reading.klr_rows
   ; kpp_density = density
   ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary }
 
@@ -2529,21 +2526,6 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
      else [])
     @ content
     @ List.init (max 0 (projection.kpp_entry_rows - List.length content)) (fun _ -> "")
-    @ if projection.kpp_overflow then
-        let range =
-          Printf.sprintf "  %d–%d / %d · "
-            (if projection.kpp_window = [] then 0 else projection.kpp_scroll + 1)
-            (projection.kpp_scroll + List.length projection.kpp_window)
-            projection.kpp_count
-        in
-        let overflow_line =
-          Theme.recede () ^ range ^ Ansi.reset
-          ^ Ansi.bold ^ Theme.accent () ^ "j/k" ^ Ansi.reset
-          ^ Theme.recede () ^ " · " ^ Ansi.reset
-          ^ Ansi.bold ^ Theme.accent () ^ "PgUp/PgDn" ^ Ansi.reset
-        in
-        [ fit_width overflow_line width ]
-      else []
 
 let render_keeper_plain (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -3021,9 +3003,8 @@ let render_keeper_axes (state : state) =
     portrait;
 
   let heights = List.map entry_lines entries in
-  let total_entry_lines = List.fold_left ( + ) 0 heights in
-  let overflowing = content_rows > 0 && total_entry_lines > content_rows in
-  let entry_rows = if overflowing then max 0 (content_rows - 1) else content_rows in
+  (* Where the cursor stands is on the title row, so every row draws entries. *)
+  let entry_rows = content_rows in
   let selected_entry =
     Option.value ~default:0 (List.find_index (keeper_entry_selected stop) entries)
   in
@@ -3145,26 +3126,6 @@ let render_keeper_axes (state : state) =
   done;
   List.iter (fun line -> box_line_styled buf cols ~style:(Theme.recede ()) line) legend;
 
-  if overflowing then begin
-    (* Positions rather than a count of the rows drawn above, since a
-       folded group above the window draws none of its rows. *)
-    let positions =
-      List.filter_map
-        (function
-          | Keeper_display_row (position, _) -> Some position
-          | Keeper_world | Keeper_group_heading _ -> None)
-        entries_window
-    in
-    let range =
-      match positions with
-      | [] -> "0/" ^ string_of_int keeper_count
-      | first :: rest ->
-          Printf.sprintf "%d–%d/%d" (first + 1) (List.fold_left max first rest + 1) keeper_count
-    in
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [keepers %s]" range)
-  end;
-
   (* The window follows the list cursor and takes its rows out of the list's.
      A heading selects no Keeper, so the window has none to show there. *)
   Option.iter
@@ -3281,6 +3242,15 @@ type terminal_drawing = { terminal_rows : string list; terminal_status : string 
 
 let terminal_drawing (state : state) ~width =
   let module Execute_terminal = Masc_tui_execute_terminal in
+  let module Say = Masc_tui_say in
+  (* The tab's own words take the screen's language here, once. *)
+  let say =
+    Say.render
+      (match state.ui_language with
+       | Lang_ko -> Say.Ko
+       | Lang_en -> Say.En)
+  in
+  let text ~ko ~en = say (Say.both ~ko ~en) in
   let hold = Masc_tui_types.keeper_terminal_hold state in
   let live = keeper_execute_view state in
   let observation = match hold with
@@ -3301,7 +3271,10 @@ let terminal_drawing (state : state) ~width =
         List.map terminal_line_of_execute_line snapshot.kes_lines in
   let drawn_rows (reading : keeper_execute_reading) =
     match reading with
-    | Keeper_execute_none -> note "No Execute output observed in this server process."
+    | Keeper_execute_none ->
+        note
+          (text ~ko:"이 서버 프로세스에서 본 Execute 출력 없음"
+             ~en:"No Execute output observed in this server process.")
     | Keeper_execute_snapshot snapshot ->
         let rows = Execute_terminal.rows (lines_of reading) in
         let tagged = Execute_terminal.tagged rows in
@@ -3339,15 +3312,19 @@ let terminal_drawing (state : state) ~width =
             | Outcome (phase, outcome) ->
                 let what = match phase with
                   | Execute_terminal.Command -> ""
-                  | Gate_observation -> "gate observation " in
+                  | Gate_observation -> text ~ko:"Gate 관측 " ~en:"gate observation " in
                 (match outcome with
-                 | Execute_terminal.Result_unknown -> Theme.warn (), what ^ "result unknown"
-                 | Request_not_sent -> Theme.warn (), what ^ "request not sent"
-                 | Observation_ended -> Theme.recede (), what ^ "ended")
+                 | Execute_terminal.Result_unknown ->
+                     Theme.warn (), what ^ text ~ko:"결과 알 수 없음" ~en:"result unknown"
+                 | Request_not_sent ->
+                     Theme.warn (), what ^ text ~ko:"요청 보내지 않음" ~en:"request not sent"
+                 | Observation_ended -> Theme.recede (), what ^ text ~ko:"끝남" ~en:"ended")
             | Rejected { why; reason } ->
                 Theme.bad (),
-                "rejected: " ^ why ^ (match reason with Some r -> " (" ^ r ^ ")" | None -> "")
-            | Unrecognized text -> Theme.recede (), "status " ^ text in
+                text ~ko:"거절: " ~en:"rejected: " ^ why
+                ^ (match reason with Some r -> " (" ^ r ^ ")" | None -> "")
+            | Unrecognized status_text ->
+                Theme.recede (), text ~ko:"상태 " ~en:"status " ^ status_text in
           wrapped (tag row ^ tone ^ "\xc2\xb7 " ^ sanitize label) in
         let drawn (row : Execute_terminal.row) =
           match row.kind with
@@ -3369,21 +3346,32 @@ let terminal_drawing (state : state) ~width =
         let running = List.filter (fun (stream : keeper_execute_stream) ->
           not (List.mem stream.kes_id started)) snapshot.kes_active in
         (if snapshot.kes_first_seq > 1 then
-           note (Printf.sprintf "Earlier output is no longer kept (before sequence %d)."
-                   snapshot.kes_first_seq)
+           note
+             (text
+                ~ko:(Printf.sprintf "앞선 출력은 보관하지 않음 (순번 %s 이전)"
+                       (Masc_tui_value.Count.grouped snapshot.kes_first_seq))
+                ~en:(Printf.sprintf "Earlier output is no longer kept (before sequence %s)."
+                       (Masc_tui_value.Count.grouped snapshot.kes_first_seq)))
          else [])
         @ (if snapshot.kes_lines_omitted > 0 then
-             note (Printf.sprintf "%d older rows are not in this view." snapshot.kes_lines_omitted)
+             note
+               (text
+                  ~ko:(Printf.sprintf "이전 %s줄은 이 보기에 없음"
+                         (Masc_tui_value.Count.grouped snapshot.kes_lines_omitted))
+                  ~en:(Printf.sprintf "%s older rows are not in this view."
+                         (Masc_tui_value.Count.grouped snapshot.kes_lines_omitted)))
            else [])
         @ List.concat_map (fun (stream : keeper_execute_stream) ->
-            note ("running: " ^ stream.kes_command)) running
+            note (text ~ko:"실행 중: " ~en:"running: " ^ stream.kes_command)) running
         @ List.concat_map drawn rows in
   let rows = match observation with
-    | Masc_tui_fetched.Absent -> note "Execute output has not been read."
-    | Loading -> note "Reading Execute output\xe2\x80\xa6"
+    | Masc_tui_fetched.Absent ->
+        note (text ~ko:"Execute 출력을 아직 읽지 않음" ~en:"Execute output has not been read.")
+    | Loading -> note (text ~ko:"Execute 출력 읽는 중\xe2\x80\xa6" ~en:"Reading Execute output\xe2\x80\xa6")
     | Failed detail ->
         wrapped (Theme.bad () ^ sanitize
-          ("Execute output unavailable: " ^ keeper_execute_failure_detail detail))
+          (text ~ko:"Execute 출력 없음: " ~en:"Execute output unavailable: "
+           ^ keeper_execute_failure_detail detail))
     | Ready (reading, _) | Stale ((reading, _), _) -> drawn_rows reading in
   (* The live stream can stop while a historical view is held. Put recovery
      in the fixed status row, leaving the output and its scroll math alone. *)
@@ -3400,16 +3388,25 @@ let terminal_drawing (state : state) ~width =
         Execute_terminal.unseen ~seen:(lines_of frozen.ktf_reading) ~latest:(lines_of live_reading)
     | (Execute_terminal.Paused _ | Execute_terminal.Following), (Some _ | None) -> 0 in
   let mode, mode_facts = match hold with
-    | Execute_terminal.Following -> "following", []
+    | Execute_terminal.Following -> text ~ko:"따라가는 중" ~en:"following", []
     | Paused _ ->
-        "paused", [ Message_layout.count_noun newer "newer row"; "End:follow" ] in
+        text ~ko:"멈춰 둠" ~en:"paused",
+        [ text
+            ~ko:(Printf.sprintf "새 줄 %s개" (Masc_tui_value.Count.grouped newer))
+            ~en:(Message_layout.count_noun newer "newer row")
+        ; text ~ko:"End:따라가기" ~en:"End:follow" ] in
   let facts = match observation with
     | Masc_tui_fetched.Ready (Keeper_execute_snapshot snapshot, observed_at)
     | Stale ((Keeper_execute_snapshot snapshot, observed_at), _) ->
-        let time = Unix.localtime observed_at in
-        [ (if snapshot.kes_active_count > 0 then Printf.sprintf "%d active" snapshot.kes_active_count
-           else if snapshot.kes_closed then "closed" else "state unknown")
-        ; Printf.sprintf "%02d:%02d:%02d" time.Unix.tm_hour time.tm_min time.tm_sec ]
+        [ (if snapshot.kes_active_count > 0 then
+             text
+               ~ko:(Printf.sprintf "실행 중 %s개"
+                      (Masc_tui_value.Count.grouped snapshot.kes_active_count))
+               ~en:(Printf.sprintf "%s active"
+                      (Masc_tui_value.Count.grouped snapshot.kes_active_count))
+           else if snapshot.kes_closed then text ~ko:"끝남" ~en:"closed"
+           else text ~ko:"상태 알 수 없음" ~en:"state unknown")
+        ; Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) observed_at ]
     | Ready (Keeper_execute_none, _) | Stale ((Keeper_execute_none, _), _)
     | Absent | Loading | Failed _ -> [] in
   let facts = mode_facts @ facts in
@@ -3417,25 +3414,46 @@ let terminal_drawing (state : state) ~width =
     | Masc_tui_fetched.Stale (_, Execute_stream_stopped _) when Option.is_some stopped -> []
     | Masc_tui_fetched.Stale
         (_, ((Execute_stream_stopped _ | Execute_read_failed _ | Execute_stream_retrying _) as detail)) ->
-        [ Theme.bad () ^ "stale: " ^ sanitize (keeper_execute_failure_detail detail) ^ Ansi.reset ]
+        [ Theme.bad () ^ text ~ko:"오래된 화면: " ~en:"stale: "
+          ^ sanitize (keeper_execute_failure_detail detail) ^ Ansi.reset ]
     | Ready _ | Absent | Loading | Failed _ -> [] in
-  let status = Theme.recede () ^ String.concat " \xc2\xb7 " (mode :: facts) ^ Ansi.reset
+  (* A stopped stream has nothing to follow, so "following" beside "stream
+     stopped" would say two opposite things. A held view keeps its word: it
+     still shows what was read before the stop. *)
+  let shown = match stopped, hold with
+    | Some _, Execute_terminal.Following -> facts
+    | Some _, Execute_terminal.Paused _ | None, (Execute_terminal.Following | Paused _) ->
+        mode :: facts in
+  let status = Theme.recede () ^ String.concat " \xc2\xb7 " shown ^ Ansi.reset
     ^ String.concat "" (List.map (fun part -> " \xc2\xb7 " ^ part) stale) in
   let status = match stopped with
     | None -> status
     | Some (reason, detail) ->
       let cause = match reason with
         | Masc_tui_execute_stream_job.Http_status status -> Printf.sprintf "HTTP %d" status
-        | Unattested_response _ -> "unattested"
-        | Invalid_stream_response _ -> "invalid stream"
-        | Unexpected_error -> "error" in
-      let prefix = "Retry[] " ^ cause in
+        | Unattested_response _ -> text ~ko:"확인 안 된 응답" ~en:"unattested"
+        | Invalid_stream_response _ -> text ~ko:"잘못된 스트림" ~en:"invalid stream"
+        | Unexpected_error -> text ~ko:"오류" ~en:"error" in
+      (* A stopped stream stays stopped while the tab is open: the stream plan
+         keeps it for the same key. Leaving the tab ends it and coming back
+         opens a new one, so the row says that instead of naming a retry key
+         there is none of. *)
+      let prefix = text ~ko:"연결 멈춤: " ~en:"stream stopped: " ^ cause in
+      let reopen = text ~ko:"탭을 다시 열면 다시 연결" ~en:"reopen the tab to reconnect" in
       let lead = Theme.bad () ^ prefix ^ Ansi.reset in
       (* A truncation mark consumes a cell. At exactly the prefix width,
          leave the prefix whole instead of cutting its last character. *)
       if width <= Message_layout.display_width prefix then lead
-      else lead ^ " \xc2\xb7 " ^ status
-        ^ " \xc2\xb7 " ^ Theme.bad () ^ sanitize detail ^ Ansi.reset in
+      else
+        (* With no reading the body's first row already carries the detail. *)
+        let detail_part = match observation with
+          | Masc_tui_fetched.Failed _ -> []
+          | Absent | Loading | Ready _ | Stale _ ->
+              [ Theme.bad () ^ sanitize detail ^ Ansi.reset ] in
+        String.concat " \xc2\xb7 "
+          ([ lead; Theme.recede () ^ reopen ^ Ansi.reset ]
+           @ (if shown = [] then [] else [ status ])
+           @ detail_part) in
   { terminal_rows = rows; terminal_status = status }
 
 let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
@@ -3560,9 +3578,9 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         (Item_account.item_name item) facts (if is_worn item then equipped_word else "")
     in
     let headline =
-      [ Printf.sprintf "  Items · %s · %d/%d · %s"
+      [ Printf.sprintf "  Items · %s · %s · %s"
           (Item_account.filter_name state.item_filter)
-          (if items = [] then 0 else cursor + 1) (List.length items)
+          (Masc_tui_value.Count.grouped (List.length items))
           (if state.item_preview && selected_item <> None then "try on" else "current outfit")
       ; account_line ]
     in
@@ -4709,7 +4727,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                let rule_cells =
                  min table_inner (Message_layout.display_width header) in
                let occurrence_clock = function
-                 | Some iso -> Terminal_text.short_timestamp iso
+                 | Some iso -> Terminal_text.column_timestamp iso
                  | None -> Masc_tui_theme.Glyph.no_value
                in
                let row_line (row : schedule_row) =
@@ -4755,7 +4773,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                          Terminal_text.single_line row.sch_recurrence_summary
                      ; krow_by = Terminal_text.single_line row.sch_requested_by
                      ; krow_requested =
-                         Terminal_text.short_timestamp row.sch_requested_at_iso
+                         Terminal_text.column_timestamp row.sch_requested_at_iso
                      ; krow_what =
                          Terminal_text.single_line
                            (Option.value ~default:row.sch_schedule_id
@@ -4980,65 +4998,15 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Detail_runs | Detail_terminal -> None
     in
 
-    (* Top border *)
-    box_top buf cols;
-
-    (* Title, with the tab walk on the same row so the chrome height the
-       scroll math counts does not move. *)
-    (* The tab you are on carries the mark the surface strip puts on the
-       surface you are on. Bold and underline said it alone before, so the
-       answer was gone from a monochrome terminal, from one that drops
-       underline, and from every text capture -- a frame dump, a screenshot
-       pasted into an issue, the keyboard-input fixtures.
-
-       Drawn through [tab_strip] with the row's width: ten tabs are wider
-       than the row beside the roster pane, and cut from the right the mark
-       on Runs was the part that went. *)
-    let entries =
-      List.map
-        (fun tab ->
-          ( Masc_tui_types.keeper_detail_tab_title ~ko:(state.ui_language = Lang_ko) tab
-          , tab = state.detail_tab
-          , tab ))
-        Masc_tui_types.keeper_detail_tabs
-    in
-    (* The strip keeps the cells its current tab needs; a name longer than
-       what is left folds in the middle. Drawn whole, a long name took the
-       row and the strip drew nothing, so the row no longer said which tab
-       the body below it is. *)
-    let name =
-      Message_layout.truncate_middle
-        (max heading_id_floor
-           (here_steps_room ~cols state ~steps:1
-              ~after:
-                (Message_layout.display_width tab_strip_gap
-                 + tab_strip_min_width entries)))
-        (Terminal_text.single_line k.k_name)
-    in
-    let before =
-      here_path state ~path:[ Ansi.bold ^ name ^ Ansi.reset ] ^ tab_strip_gap
-    in
-    let tabs =
-      tab_strip ~width:(tab_strip_width ~cols ~before ~after:"")
-        ~press:(fun tab text -> pressable (Press_keeper_tab tab) text)
-        entries
-    in
-    let title = before ^ tabs in
-    box_line buf cols title;
-
-    (* Divider *)
-    box_divider buf cols;
 
     (* Content area with scrolling. Chrome is 4 rows (top, title, divider,
-       bottom); the indicator, when the content overflows, spends one
-       content row rather than growing the pane, so the pane's height is
-       rows - 1 in both cases and the split's two bottoms stay level. *)
+       bottom). Where the window stands is on the title row, so the content
+       keeps every row. *)
     let terminal_tab = state.detail_tab = Detail_terminal in
     let content_height =
       (* The Terminal's status row is there whether or not the output
          overflows, so the output never moves when it starts to. *)
-      if total_lines > base_height || terminal_tab then max 0 (base_height - 1)
-      else base_height
+      if terminal_tab then max 0 (base_height - 1) else base_height
     in
     let visible_lines = min content_height total_lines in
     (* How far back from the bottom this window can go, and how far it is. *)
@@ -5067,6 +5035,23 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                   ~height:(max 1 content_height) scroll)
               identity_cursor_line
     in
+    (* Top border *)
+    box_top buf cols;
+
+    (* The Terminal tab's own row says what its view is doing; every other
+       tab names its window on the title row. *)
+    box_line buf cols
+      (zone_two_title ~cols state
+         ~title:(keeper_detail_title state ~keeper_name:k.k_name)
+         ~position:
+           (if terminal_tab then None
+            else
+              Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+                ~total:total_lines));
+
+    (* Divider *)
+    box_divider buf cols;
+
     let all_lines_window = Rows.of_list ~first:scroll ~height:visible_lines all_lines in
 
     (* Real pixels go over the blank cells the band left, from the first
@@ -5094,14 +5079,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       box_empty buf cols
     done;
 
-    (* Scroll indicator; on the Terminal tab the row says what the view is
-       doing instead. *)
-    if terminal_tab then box_line buf cols (Lazy.force terminal).terminal_status
-    else
-      Option.iter
-        (fun row ->
-          box_line buf cols ((Theme.recede ()) ^ row ^ Ansi.reset))
-        (Masc_tui_scroll.position_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height total_lines);
+    (* On the Terminal tab one row says what the view is doing. *)
+    if terminal_tab then box_line buf cols (Lazy.force terminal).terminal_status;
 
     (* Bottom border *)
     box_bottom buf cols;
@@ -5215,13 +5194,26 @@ let render_keeper_logs (state : state) =
       | Ready _ | Stale _ ->
           count_reading state Masc_tui_value.Count.Entry total_entries in
 
+    let log_rows = Masc_tui_types.keeper_log_rows state ~cols in
+    let row_count = List.length log_rows in
+    let content_height =
+      Metrics_tail.content_height ~terminal_rows:rows ~error:None
+    in
+    let scroll =
+      Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
+        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
+    in
+
     (* Header *)
     let header =
       here_row ~cols state
         ~path:
           [ Terminal_text.single_line k.k_name
           ; ui_text state ~ko:"로그" ~en:"logs" ]
-        ~readings:[ reading_label ] ~position:None
+        ~readings:[ reading_label ]
+        ~position:
+          (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+             ~total:row_count)
     in
 
     box_top buf cols;
@@ -5232,15 +5224,6 @@ let render_keeper_logs (state : state) =
       "  TIME  KIND  LATENCY · full facts below";
     box_divider buf cols;
 
-    let log_rows = Masc_tui_types.keeper_log_rows state ~cols in
-    let row_count = List.length log_rows in
-    let content_height =
-      Metrics_tail.content_height ~terminal_rows:rows ~error:None
-    in
-    let scroll =
-      Metrics_tail.normalize_scroll ~entry_count:row_count ~content_height
-        (if state.log_wrap_cols = Some cols then state.log_scroll else 0)
-    in
     let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in
     for index = 0 to content_height - 1 do
       if row_count = 0 && index = 0 then
@@ -5255,11 +5238,6 @@ let render_keeper_logs (state : state) =
             box_line_styled buf cols ~style line
         | None -> box_empty buf cols
     done;
-    if row_count > content_height then
-      box_line_styled buf cols ~style:(Theme.recede ())
-        (Printf.sprintf "  [newest rows %d-%d of %d]" (scroll + 1)
-           (min row_count (scroll + content_height)) row_count)
-    else box_empty buf cols;
 
     box_bottom buf cols;
 

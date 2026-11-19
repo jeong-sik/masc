@@ -32,6 +32,101 @@ let observed_fields ~trace_id =
         ] )
   ]
 
+(* A TurnRecord of [load_keeper], as the server writes one. *)
+let load_trace = "trace-1780648779957-00000"
+
+let turn_record ~absolute_turn ~input_tokens : Turn_record.t =
+  { request_observations = []
+  ; execution_ids = []
+  ; keeper = "beta"
+  ; agent_name = "beta-agent"
+  ; turn_kind = Turn_record.Direct
+  ; trace_id = load_trace
+  ; absolute_turn
+  ; turn_ref = Ids.Turn_ref.make ~trace_id:load_trace ~absolute_turn
+  ; blocks =
+      [ { Turn_record.block = Prompt_block_id.Keeper_instructions
+        ; bytes = 4
+        ; digest = Agent_core_sha256.(to_hex (digest_string "aaaa"))
+        }
+      ]
+  ; input_components = Some [ { component = Turn_record.Tool_schemas; bytes = 8192 } ]
+  ; tool_surface_ref = None
+  ; runtime_profile = "glm-coding.glm-5-turbo"
+  ; selected_model = Some "glm-5-turbo"
+  ; finish_reason = Some "completed"
+  ; context_window = Some 131_072
+  ; provider_context_window = None
+  ; price_input_per_million = None
+  ; price_output_per_million = None
+  ; request_latency_ms = Some 1234
+  ; ttfrc_ms = None
+  ; request_wire_observation =
+      Some { runtime_profile = "glm-coding.glm-5-turbo"; body_bytes = 4096 }
+  ; model_input_window = None
+  ; response_observed_model_input = None
+  ; refused_model_input = None
+  ; raw_trace_run_ref = None
+  ; sampling =
+      { temperature = None; top_p = None; max_tokens = None; enable_thinking = Some true }
+  ; usage =
+      { input_tokens = Some input_tokens
+      ; output_tokens = Some 412
+      ; cache_creation_input_tokens = None
+      ; cache_read_input_tokens = None
+      ; scope = Runtime_usage_scope.Per_request
+      ; input_provenance = Some Turn_input_provenance.Measured_request
+      }
+  ; turn_output_tokens = None
+  ; ts = 1_781_200_000.5
+  }
+
+let load_keeper =
+  { keeper with
+    Decode.k_name = "beta"
+  ; k_identity =
+      Ok
+        { Decode.k_trace_id = load_trace
+        ; k_created_at = "2026-08-21T00:00:00Z"
+        ; k_updated_at = "2026-08-21T00:00:00Z"
+        }
+  }
+
+(* The TUI is not the process that writes the TurnRecords: the server is.
+   This executable links what the TUI links and, like the TUI, never says it
+   holds the writer lease. So every [load] reads the files, and a row that
+   reached them after one load is what the next load shows. A TUI that kept
+   the first row would show it for good (#53145). *)
+let test_every_load_reads_what_the_server_wrote () =
+  let base_path = Filename.temp_dir "tui-context-load-" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_path in
+      let store = Masc.Keeper_types_support.keeper_turn_record_store config "beta" in
+      let line ~absolute_turn ~input_tokens =
+        Yojson.Safe.to_string (Turn_record.to_json (turn_record ~absolute_turn ~input_tokens)) ^ "\n"
+      in
+      let tokens () =
+        match Context_state.load ~config load_keeper with
+        | Ok (Decode.Context_observed { tokens; _ }) -> Some tokens
+        | Ok (Decode.Context_unavailable _) -> None
+        | Error detail -> fail detail
+      in
+      Dated_jsonl.append store (Turn_record.to_json (turn_record ~absolute_turn:1 ~input_tokens:18_000));
+      check (option int) "the first load" (Some 18_000) (tokens ());
+      let day_file =
+        match Dated_jsonl.month_dir_paths_newest_first_result store with
+        | Ok (month :: _) ->
+          (match Dated_jsonl.day_file_paths_newest_first_result month with
+           | Ok (day_file :: _) -> day_file
+           | Ok [] | Error _ -> fail "the store has no day file")
+        | Ok [] | Error _ -> fail "the store has no month directory"
+      in
+      Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o600 day_file
+        (fun channel -> output_string channel (line ~absolute_turn:2 ~input_tokens:21_000));
+      check (option int) "the next load shows the row the server wrote" (Some 21_000) (tokens ()))
+
 let observation_exn keeper =
   match Context_state.resolve_with keeper
           ~project:(fun ~keeper_name:_ ~current_trace_id -> observed_fields ~trace_id:current_trace_id) with
@@ -113,6 +208,8 @@ let () =
   run "tui_context_state"
     [ "ownership", [
         test_case "projection keeps captured trace" `Quick test_projection_keeps_captured_identity;
+        test_case "every load reads what the server wrote" `Quick
+          test_every_load_reads_what_the_server_wrote;
         test_case "selection and clear retire previous completions" `Quick
           test_selection_and_clear_retire_previous_completion;
         test_case "workspace and trace cannot borrow values" `Quick test_identity_scope_and_base_do_not_borrow_values;

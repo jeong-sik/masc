@@ -91,23 +91,6 @@ val dir : location -> string
 val absolute_dir : location -> string
 (** {!dir}, joined to the working directory when it is relative. *)
 
-type directory_name =
-  | Existing of string
-      (** Something is at {!dir}. This is the name the file system gives it
-          ([realpath]): symbolic links are followed and each piece is the
-          directory entry's own name, so on a file system that folds letter
-          case [keepers/Alpha] and [keepers/alpha] get one name. Two
-          locations are one directory exactly when they get the same name. *)
-  | Not_yet of string
-      (** Nothing is at {!dir}. The nearest ancestor that exists is named by
-          the file system and the pieces below it are as spelled. The answer
-          can change once the directory is made, for example when another
-          spelling makes it first. *)
-
-val directory_name : location -> directory_name
-(** Ask the file system what it calls the store's directory. This makes
-    system calls, one for each piece of the path. *)
-
 val of_location : location -> t
 (** The store the location was made for. *)
 
@@ -132,6 +115,22 @@ type retention =
   | Kept  (** Never removed by date. *)
 
 val retention : t -> retention
+
+(** Whether the process that holds the workspace's writer lease may keep a
+    fact of the store's files in memory ([Dated_jsonl.read_fact]). A kept
+    fact is moved by the appends of the process it is kept in and by no
+    other. *)
+type facts =
+  | Kept_by_the_lease_holder
+      (** Every change of the store's files is made through [Dated_jsonl] by
+          the process that holds the lease. This is said of a store once its
+          writers have been gone through. *)
+  | Read_from_the_files
+      (** The files are read each time: another process changes them too, or
+          the store's writers have not been gone through. *)
+
+val facts : t -> facts
+(** Each store answers for itself, so a new store has to. *)
 
 val is_side_file : t -> string -> bool
 (** Whether the store's owner keeps the entry named [name] in the store's

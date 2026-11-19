@@ -5,6 +5,9 @@
   ;; The modify gate is checked against the schedule contract's own status
   ;; vocabulary, so the test reads that list instead of keeping a copy.
   masc.masc_schedule
+  ;; The update tool's own schema, so a modify form is checked the way the
+  ;; schedule route checks it before the tool runs.
+  masc.tool_schemas masc.masc_types
   ;; [Standalone_lane.t] is what the lane rows and lane views carry.
   masc.runtime
   masc_tui_mcp masc_tui_resource_catalog masc_tui_types masc_tui_keeper_list_model masc_tui_config masc_tui_detail_reading masc_tui_queue_inspection masc_tui_presented masc_tui_frame masc_tui_frame_presenter masc_tui_operator_projection masc_tui_lane_inventory

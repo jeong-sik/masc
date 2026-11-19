@@ -489,12 +489,12 @@ let render_board_list (state : state) =
          | None -> None
          | Some _ when count = 0 -> None
          | Some _ ->
-             let at = state.board_cursor + 1 in
+             let selected = Some state.board_cursor in
              Some
                (match holding with
                 | Some total when total > count ->
-                    Masc_tui_value.Position.Partial { at; loaded = count; total }
-                | Some _ | None -> Masc_tui_value.Position.Row { at; total = count }))
+                    Masc_tui_value.Position.partial ~selected ~loaded:count ~total
+                | Some _ | None -> Masc_tui_value.Position.row ~selected ~total:count))
   in
 
   let layout = board_layout ~cols in
@@ -765,18 +765,19 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         list_post
   in
 
-  let header =
+  (* The title names where the focused half stands, known once the rows are
+     laid out, so the pane is drawn first and the title put above it. *)
+  let header ~position =
     here_row ~cols state
       ~path:
         (board_step state
          :: (match Terminal_text.optional_single_line post.bp_hearth with
              | None -> []
              | Some hearth -> [ "#" ^ hearth ]))
-      ~readings:[] ~position:None
+      ~readings:[] ~position
   in
-
-  box_top buf cols;
-  box_line buf cols header;
+  let outer = buf in
+  let buf = Buffer.create 8192 in
 
   let title_line = Printf.sprintf "%s%s%s%s"
     (if focus = Right_pane && not state.board_comments_focused
@@ -1183,28 +1184,16 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
         end;
         (scroll, content_height, comment_height)
   in
-  (* Reading without a position is guessing: the post body and the comment
-     thread each name where they stand, in the window the other reading
-     surfaces draw.
-
-     Both halves count wrapped rows, and the row says so. The comment half
-     read "comments 1-10/6085" beside a header drawing the thread's own
-     "157", because a comment becomes an identity row, a timestamp row and
-     one row per wrapped line. Two numbers under one word on one screen, and
-     the larger one is the one a reader has no way to place. *)
-  if
-    total_lines > body_lines_drawn || detail_line_count > comment_lines_drawn
-  then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "%s%s"
-         (Masc_tui_scroll.window_reading ~noun:(words state "본문 행" "post rows")
-            ~scroll:scroll.body_offset ~height:body_lines_drawn total_lines)
-         (if detail_line_count > comment_lines_drawn then
-            "  \xc2\xb7  "
-            ^ Masc_tui_scroll.window_reading ~noun:(words state "댓글 행" "comment rows")
-                ~scroll:scroll.comment_offset ~height:comment_lines_drawn
-                detail_line_count
-          else ""));
+  (* The focused half names where its window stands, on the title row. Both
+     halves count wrapped rows. *)
+  let position =
+    if state.board_comments_focused then
+      Masc_tui_value.Position.window ~first:scroll.comment_offset
+        ~shown:comment_lines_drawn ~total:detail_line_count
+    else
+      Masc_tui_value.Position.window ~first:scroll.body_offset
+        ~shown:body_lines_drawn ~total:total_lines
+  in
   (* What the numbered attachment keys last did, or why one could not.
      Recede-styled like the readings above; replaced by the next action and
      cleared when another post is opened. *)
@@ -1215,6 +1204,9 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
          (Printf.sprintf "  %s" (fit_width status (framed_inner_width cols - 2)))
    | None -> ());
   box_bottom buf cols;
+  box_top outer cols;
+  box_line outer cols (header ~position);
+  Buffer.add_buffer outer buf;
   Masc_tui_frame_timing.finish_stage ~name:"board.frame_rows" rows_started;
   Masc_tui_types.board_read_presented_frame state ~post_id:list_post.bp_id
     ~body:(total_lines, body_lines_drawn)

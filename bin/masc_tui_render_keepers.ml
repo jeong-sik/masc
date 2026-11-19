@@ -1608,8 +1608,12 @@ let keeper_view_tabs ~ko ~cols ~sort ~density view =
   let sort_chip =
     dim "< " ^ Keeper_list_model.sort_title ~ko sort ^ dim " >"
   in
-  let density_chip = dim (Keeper_list_model.density_title ~ko density) in
-  let full_controls = "  " ^ sort_chip ^ "  " ^ density_chip in
+  let full_controls =
+    if Keeper_list_model.supports_density view then
+      let density_chip = dim (Keeper_list_model.density_title ~ko density) in
+      "  " ^ sort_chip ^ "  " ^ density_chip
+    else "  " ^ sort_chip
+  in
   let compact_controls = "  " ^ sort_chip in
   let inner = max 1 (framed_inner_width cols) in
   let min_tabs_width = 18 in
@@ -2107,14 +2111,14 @@ let keeper_waiting_refresh_line state =
           ~en:("  waiting refresh pending · last observation · " ^ elapsed)
       ^ Ansi.reset
 
-(* One row above the list that is always drawn, so a reading going stale or
-   current does not push every Keeper row down and back. A lost fleet stream
-   takes it first: every reading on the screen is the last one then, the
-   waiting list included. A failure that has its own row ([failure]) keeps
-   it, and the stream's trouble then needs a second row. *)
+(* Observation status warnings drawn above the divider only when a stream
+   trouble, slow waiting refresh, or read failure is active. Returns [[]] when
+   healthy so no blank row sits above or below column headers. *)
 let keeper_observation_status_rows state ~now ~failure =
   match keeper_fleet_trouble_line state ~now, failure with
-  | None, None -> [ keeper_waiting_refresh_line state ]
+  | None, None ->
+      let line = keeper_waiting_refresh_line state in
+      if String.equal line "" then [] else [ line ]
   | Some trouble, None -> [ trouble ]
   | None, Some failure -> [ failure ]
   | Some trouble, Some failure -> [ trouble; failure ]
@@ -2355,24 +2359,27 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
              ^ keeper_plain_turn_record state ~now ~keeper_name:name)
         @ [""] @ List.map fit routes
 
-let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_row all_rows =
+let keeper_pulse_counts_header (state : state) ~now ~inner ~selected_row all_rows =
   let selected = Option.map (fun row -> row.Keeper_list_model.keeper.Tui_decode.k_name) selected_row in
   let header = Masc_tui_keeper_strip.header ~ko:(state.ui_language = Lang_ko) ~now ~cells:inner
       ~view:state.keeper_list_view ~selected
       ~age:(fun row -> (Masc_tui_keeper_axis.outside state ~now
           ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name).age) all_rows in
-  header :: (match state.keeper_list_view with
-  | Keeper_list_model.By_age -> []
+  if String.equal header "" then [] else [ header ]
+
+let keeper_grid_fleet_row (state : state) ~now ~(grid : Grid.t) all_rows =
+  match state.keeper_list_view with
+  | Keeper_list_model.By_age -> None
   | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-      (match Masc_tui_keeper_strip.fleet_cells ~ko:(state.ui_language = Lang_ko) ~now ~grid
-          ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now
-            ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows with
-       | None -> []
-       | Some fleet ->
-           [(grid_line grid
+      Option.map
+        (fun (fleet : Masc_tui_keeper_strip.fleet_cells) ->
+           grid_line grid
              { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
              ; pulse = fleet.pulse; now_cell = grid_blank_now; strip = fleet.strip
-             ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' })]))
+             ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' })
+        (Masc_tui_keeper_strip.fleet_cells ~ko:(state.ui_language = Lang_ko) ~now ~grid
+           ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now
+             ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows)
 
 let keeper_selected_summary (state : state) ~now (row : Keeper_list_model.row) =
   let keeper_name = row.keeper.Tui_decode.k_name in
@@ -2464,13 +2471,22 @@ let keeper_list_position ~stop rows : Masc_tui_value.Position.t option =
       in
       Some (Masc_tui_value.Position.row ~selected ~total:(List.length rows))
 
-let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pulse_headers =
-  let text ko en = ui_text state ~ko ~en in
-  let warning prefix reason = Theme.warn () ^ "  " ^ prefix ^ Terminal_text.single_line reason ^ Ansi.reset in
-  (* One failing read at most names itself with its reason; several at once
-     fold into a single summary line. Either way the header grows by one line
-     instead of one per failure, so a burst of read errors cannot shove the
-     whole list up and down. *)
+(* Shared top header stack across every Keeper List view:
+   1. Zone 2 title & position (row 2 — no leading blank line)
+   2. View tab strip + sort/(optional density) controls (locked on row 3 so
+      cycling [v] never shifts the tabs vertically)
+   3. Single compact fleet line
+   4. Concise health counts summary
+   5. Optional folded observation/roster/fleet warnings (0 lines when healthy),
+      capped by [cap_keeper_headers] so a burst of warnings never evicts the
+      roster. *)
+let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
+    ~selected_row ~stop ~model_rows ~all_rows =
+  let ko = state.ui_language = Lang_ko in
+  let text k e = ui_text state ~ko:k ~en:e in
+  let warning prefix reason =
+    Theme.warn () ^ "  " ^ prefix ^ Terminal_text.single_line reason ^ Ansi.reset
+  in
   let cells = max 0 (inner - 2) in
   let errors =
     match keeper_observation_errors state with
@@ -2480,10 +2496,23 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
           ("! " ^ label ^ ": " ^ Terminal_text.single_line reason) cells) ]
     | many ->
       let prefix =
-        if state.ui_language = Lang_ko then Printf.sprintf "! 원문 · 오류 %d종: " (List.length many)
+        if ko then Printf.sprintf "! 원문 · 오류 %d종: " (List.length many)
         else Printf.sprintf "! details · %d errors: " (List.length many) in
       let labels = String.concat " · " (List.map fst many) in
       [ warning "" (Message_layout.fit_width (prefix ^ labels) cells) ]
+  in
+  let fleet_gaps =
+    match fleet_stream_view state with
+    | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; _ } ->
+        List.map
+          (fun (color, label, names) ->
+            Printf.sprintf "%s  %s: %s%s" color label
+              (Terminal_text.single_line names) Ansi.reset)
+          (keeper_fleet_gap_lines ~ko fleet)
+    | Masc_tui_fleet_stream.Awaiting_first_reading
+    | Masc_tui_fleet_stream.Unreachable _
+    | Masc_tui_fleet_stream.Cannot_read _
+    | Masc_tui_fleet_stream.Unavailable _ -> []
   in
   let roster = match Keeper_control.roster_view state.keeper_roster with
     | Keeper_control.Roster_partial { observed; total } ->
@@ -2506,10 +2535,8 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
   let failure = match state.keeper_waiting_failure with
     | Some (Tui_decode.Keeper_waiting_invalid reason) -> Some (warning (text "대기 관측 조회 실패: " "waiting read failed: ") reason)
     | Some (Tui_decode.Keeper_waiting_sources_unavailable errors) ->
-        (* One line like the read errors above. The reasons come right after
-           the failure, so a narrow frame cuts the closing note first. *)
         let failure = text "대기 원본을 읽지 못했습니다" "waiting sources unavailable" in
-        let failure = match keeper_waiting_failure_reasons ~ko:(state.ui_language = Lang_ko) errors with
+        let failure = match keeper_waiting_failure_reasons ~ko errors with
           | [] -> failure
           | reasons -> failure ^ ": " ^ String.concat ", " reasons
         in
@@ -2520,23 +2547,49 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
   in
   let waiting = keeper_observation_status_rows state ~now ~failure in
   let waiting_failed = Option.is_some state.keeper_waiting_failure in
-  [ here_row ~cols state
-      ~path:[ text "일과 도움" "work and help" ]
-      ~readings:
-        (if errors <> [] || roster <> [] || waiting_failed then
-           [ Theme.warn () ^ text "일부 관측" "partial reading" ^ Ansi.reset ]
-         else [])
-      ~position:
-        (keeper_list_position ~stop:(keeper_list_stop state)
-           (keeper_list_reading state).klr_rows) ]
+  let keepers_error = Terminal_text.optional_single_line state.keepers_error in
+  let title_readings =
+    match state.keepers, keeper_rows_page state ~error:keepers_error with
+    | [], (Page_unread | Page_failed) ->
+        [ here_missing_reading state ~error:keepers_error ]
+    | (_ :: _ | []), (Page_empty | Page_unread | Page_failed) ->
+        if errors <> [] || roster <> [] || waiting_failed then
+          [ Theme.warn () ^ text "일부 관측" "partial reading" ^ Ansi.reset ]
+        else []
+  in
+  [ here_row ~cols state ~path:[]
+      ~readings:title_readings
+      ~position:(keeper_list_position ~stop model_rows)
+  ; keeper_view_tabs ~ko ~cols
+      ~sort:state.keeper_list_sort ~density:state.keeper_list_density
+      state.keeper_list_view
+  ]
   @ keeper_plain_fleet_lines state ~now ~inner
-  @ errors @ roster @ waiting
-  @ [keeper_view_tabs ~ko:(state.ui_language = Lang_ko) ~cols
-       ~sort:state.keeper_list_sort ~density:state.keeper_list_density
-       state.keeper_list_view]
-  @ pulse_headers
+  @ keeper_pulse_counts_header state ~now ~inner ~selected_row all_rows
+  @ errors @ fleet_gaps @ roster @ waiting
   @ Option.to_list (Option.map (warning (text "보기 설정: " "view preferences: ")) state.keeper_list_preference_notice)
   @ Option.to_list (local_source_pending_note state Local_keepers)
+
+let cap_keeper_headers (state : state) ~inner ~budget headers =
+  if List.length headers <= budget then headers
+  else match List.take budget headers with
+    | [] -> []
+    | kept ->
+        let last = List.length kept - 1 in
+        let suffix =
+          Theme.recede ()
+          ^ ui_text state
+              ~ko:(Printf.sprintf " · 보기 %d행 생략" (List.length headers - budget))
+              ~en:(Printf.sprintf " · %d header rows omitted" (List.length headers - budget))
+          ^ Ansi.reset
+        in
+        let suffix_cells = Message_layout.display_width suffix in
+        List.mapi (fun index row ->
+          if index <> last then row
+          else if inner > suffix_cells then
+            fit_width row (inner - suffix_cells) ^ suffix
+          else
+            fit_width suffix inner) kept
 
 type keeper_plain_projection =
   { kpp_headers : string list
@@ -2585,31 +2638,19 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
     | None, Some row when rows - 1 - 2 > list_floor -> Some (keeper_selected_summary state ~now row)
     | (Some _ | None), (Some _ | None) -> None in
   let summary_rows = match selected_summary with Some _ -> 1 | None -> 0 in
-  let pulse_headers = keeper_pulse_headers state ~now ~inner ~grid:(Grid.layout ~cols:inner)
-      ~selected_row reading.klr_all_rows in
-  let headers = keeper_plain_headers state ~now ~cols ~inner ~selected_reading ~pulse_headers in
+  let headers =
+    keeper_list_top_headers state ~now ~cols ~inner ~selected_reading
+      ~selected_row ~stop ~model_rows:reading.klr_rows ~all_rows:reading.klr_all_rows
+  in
   (* A long list of failed reads must not evict the selectable Keeper or the
-     action footer. Keep a useful list and its selected summary first; source
-     errors and Pulse headers then take rows before optional card detail and
-     preference metadata. The title still qualifies retained readings. *)
+     action footer. Keep a useful list and its selected summary first; top
+     headers then take rows up to [header_budget] above the header divider. *)
   let body_floor = min (list_floor + summary_rows) (max 1 (rows - 1 - 2 - 1)) in
   let header_budget = max 0 (rows - 1 - 2 - body_floor) in
-  let headers =
-    if List.length headers <= header_budget then headers
-    else match List.take header_budget headers with
-      | [] -> []
-      | kept ->
-          let last = List.length kept - 1 in
-          List.mapi (fun index row ->
-            if index <> last then row else row ^ Theme.recede ()
-              ^ ui_text state
-                  ~ko:(Printf.sprintf " · 보기 %d행 생략" (List.length headers - header_budget))
-                  ~en:(Printf.sprintf " · %d header rows omitted" (List.length headers - header_budget))
-              ^ Ansi.reset) kept
-  in
-  (* The initial blank and the divider/footer have the same ownership as the
-     axis renderer. Both keyboard paging and drawing use this allocation. *)
-  let body_rows = max 0 (rows - 1 - List.length headers - 2 - summary_rows) in
+  let headers = cap_keeper_headers state ~inner ~budget:header_budget headers in
+  (* One divider sits below [headers] and two rows (divider + footer) sit below
+     the body; there is no leading blank line so Zone 2 starts on row 2. *)
+  let body_rows = max 0 (rows - List.length headers - 1 - 2 - summary_rows) in
   let detail_budget = match detail_width with
     | Some _ -> body_rows
     | None ->
@@ -2718,8 +2759,8 @@ let render_keeper_plain (state : state) =
   let projection = keeper_plain_projection state ~terminal_rows ~cols ~now in
   report_drawn_list Keeper_stops ~height:projection.kpp_page;
   let buf = Buffer.create 4096 in
-  Buffer.add_char buf '\n';
   List.iter (box_line buf cols) projection.kpp_headers;
+  box_divider buf cols;
   let roster = keeper_plain_list_lines state ~now projection in
   (match projection.kpp_detail_width with
    | None ->
@@ -2765,204 +2806,42 @@ let render_keeper_axes (state : state) =
   in
   let keepers_error = Terminal_text.optional_single_line state.keepers_error in
 
-  Buffer.add_char buf '\n';
-
   (* One observation time for stale fleet readings and roster turn ages. *)
   let now_unix = Unix.gettimeofday () in
   let grid = Grid.layout ~cols:inner in
-  (* The roster is the surface an operator watches to see which keepers are
-     up. Whether the reading is live is the top row's word; a list that could
-     not be read says so here, and the position counts the rows drawn. *)
-  let heading =
-    here_row ~cols state ~path:[]
-      ~readings:
-        (match state.keepers, keeper_rows_page state ~error:keepers_error with
-         | _ :: _, _ | [], Page_empty -> []
-         | [], (Page_unread | Page_failed) ->
-             [ here_missing_reading state ~error:keepers_error ])
-      ~position:(keeper_list_position ~stop model_rows)
-  in
-  box_line buf cols heading;
   let ko = state.ui_language = Lang_ko in
-  let text korean english = if ko then korean else english in
-  (* The fleet rows open with the same words the plain list opens with. *)
-  let fleet_lead = text "  운영 관측: " "  fleet: " in
-  box_line buf cols
-    (keeper_view_tabs ~ko ~cols ~sort:state.keeper_list_sort
-       ~density:state.keeper_list_density state.keeper_list_view);
-  List.iter (box_line buf cols)
-    (keeper_pulse_headers state ~now:now_unix ~inner ~grid ~selected_row all_rows);
-  Option.iter
-    (fun message -> box_line buf cols
-      (Theme.warn () ^ text "  보기 설정: " "  preferences: "
-       ^ Terminal_text.single_line message ^ Ansi.reset))
-    state.keeper_list_preference_notice;
-
-  (match fleet_stream_view state with
-   | Masc_tui_fleet_stream.Awaiting_first_reading -> ()
-   | Masc_tui_fleet_stream.Unreachable { since } ->
-       box_line buf cols
-         ((Theme.warn ()) ^ fleet_lead
-          ^ Masc_tui_fleet_line.unreachable_text ~ko ~now:now_unix ~since
-          ^ Ansi.reset)
-   | Masc_tui_fleet_stream.Cannot_read failure ->
-       box_line buf cols
-         ((Theme.bad ()) ^ fleet_lead ^ Masc_tui_fleet_line.failure_text ~ko failure
-          ^ Ansi.reset)
-   | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
-       box_line buf cols
-         ((Theme.warn ()) ^ fleet_lead
-          ^ Masc_tui_fleet_line.unavailable_text ~ko ~now:now_unix ~degradation ~disconnected_since
-          ^ Ansi.reset)
-   | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
-       let tone, lead =
-         let status = Masc_tui_fleet_line.status_text ~ko fleet.fs_status in
-         match trouble with
-         | None ->
-             let tone =
-               if fleet.fs_operator_action_required then Theme.bad ()
-               else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then Theme.ok ()
-               else Theme.warn ()
-             in
-             tone, text ("  운영 관측: " ^ status) ("  fleet " ^ status)
-         | Some
-             (Masc_tui_fleet_stream.Scans_failing _
-             | Masc_tui_fleet_stream.Disconnected _) ->
-             (* The grade, counts and blocker below all belong to the retained
-                reading. Qualify that same row before any stale zero or blocker
-                can be read as the fleet's current state. *)
-             ( Theme.warn ()
-             , text "  마지막 운영 관측: " "  fleet last observed: " ^ status )
-       in
-       let running =
-         Printf.sprintf "%s %d/%d" (text "실행" "running") fleet.fs_running_count
-           fleet.fs_bootable_count
-       in
-       let turn_capacity =
-         Printf.sprintf "%s %d/%d" (text "턴 여력" "turn capacity")
-           (fleet.fs_target_reaction_capacity
-           - fleet.fs_reaction_capacity_shortfall)
-           fleet.fs_target_reaction_capacity
-       in
-       (* The blocker and the task-owner count, each once: the task-owner
-          blocker carries its count in the blocker's place, and a count beside
-          another blocker, or with none, stays in the counts row. *)
-       let causes =
-         Masc_tui_fleet_line.cause_rows ~blocker:fleet.fs_blocker
-           (Masc_tui_fleet_line.owner_count fleet)
-       in
-       let blocker_reading =
-         List.filter_map
-           (function
-             | (Masc_tui_fleet_line.Blocker_alone _ | Masc_tui_fleet_line.Blocker_with_owners _)
-               as row ->
-                 Some (Masc_tui_fleet_summary.Blocker, Masc_tui_fleet_line.cause_row_text ~ko row)
-             | Masc_tui_fleet_line.Owners_alone _ -> None)
-           causes
-       in
-       let owners_alone =
-         List.filter_map
-           (function
-             | Masc_tui_fleet_line.Owners_alone _ as row ->
-                 Some (Masc_tui_fleet_line.cause_row_text ~ko row)
-             | Masc_tui_fleet_line.Blocker_alone _ | Masc_tui_fleet_line.Blocker_with_owners _ ->
-                 None)
-           causes
-       in
-       (* [select] keeps a prefix, so the last reading is the first a narrow
-          screen drops. The proactive interval goes last: it is a setting the
-          operator chose, the same on every scan, while the counts and the
-          blocker are what changed and what needs an answer. *)
-       let readings =
-         [ Masc_tui_fleet_summary.Running, running
-         ; Masc_tui_fleet_summary.Turn_capacity, turn_capacity
-         ]
-         @ blocker_reading
-         @ [ ( Masc_tui_fleet_summary.Proactive_interval
-             , Masc_tui_fleet_line.proactive_text ~ko fleet ) ]
-       in
-       let separator = "   " in
-       let selected =
-         readings
-         |> List.map (fun (reading, text) ->
-                (reading, Message_layout.display_width text))
-         |> Masc_tui_fleet_summary.select ~cells:inner
-              ~lead_cells:(Message_layout.display_width lead)
-              ~separator_cells:(Message_layout.display_width separator)
-       in
-       let joined =
-         match selected with
-         | [] -> ""
-         | _ ->
-             separator
-             ^ String.concat separator
-                 (List.map (fun reading -> List.assoc reading readings) selected)
-       in
-       box_line buf cols
-         (Printf.sprintf "%s%s%s%s%s" tone lead Ansi.reset joined Ansi.reset);
-       let failing_entry =
-         Option.to_list (Masc_tui_fleet_line.failing_text ~ko fleet)
-       in
-       let entry label n =
-         if n > 0 then [ Printf.sprintf "%s %d" label n ] else []
-       in
-       (* An owner count the blocker above does not carry keeps its place in
-          the row and brings its own shortfall, which is the only reading that
-          says the scan came up short: an unread Keeper does not move the
-          fleet status. *)
-       let counts =
-         failing_entry
-         @ entry (text "일시정지" "paused") fleet.fs_paused_count
-         @ owners_alone
-         @ entry (text "판정 대기" "awaiting verdict") fleet.fs_completion_authority_pending_count
-       in
-       if counts <> [] then
-         box_line buf cols
-           (Theme.recede () ^ "  " ^ String.concat "   " counts ^ Ansi.reset);
-       List.iter
-         (fun (color, label, names) ->
-            box_line buf cols
-              (Printf.sprintf "%s  %s: %s%s" color label
-                 (Terminal_text.single_line names) Ansi.reset))
-         (keeper_fleet_gap_lines ~ko fleet));
-
-  (* The roster's own failure. The rows below still come from disk so they stay
-     on screen; this says the live half of every one of them is missing, which
-     does not prevent confirmed deletion through the authoritative server. *)
-  (match state.keeper_roster_error with
-   | Some err ->
-       box_line buf cols
-         ((Theme.warn ()) ^ "  " ^ Terminal_text.single_line err ^ Ansi.reset)
-   | None -> ());
-  (match Keeper_control.roster_view state.keeper_roster with
-   | Keeper_control.Roster_invalid { errors; _ } ->
-       box_line buf cols
-         (Theme.warn () ^ "  "
-          ^ text
-              (Printf.sprintf "설정 읽기 오류 %d개 · Keeper 를 고르면 원문 표시" (List.length errors))
-              (Printf.sprintf "configuration errors: %d; select a keeper for details"
-                 (List.length errors))
-          ^ Ansi.reset);
-       (match selected_reading with
-        | Some { Keeper_control.name; liveness = Keeper_control.Invalid detail; _ } ->
-            box_line buf cols ((Theme.warn ()) ^ "  "
-              ^ Terminal_text.single_line (name ^ ": " ^ detail) ^ Ansi.reset)
-        | Some
-            { Keeper_control.liveness =
-                ( Keeper_control.Unobserved | Keeper_control.Absent
-                | Keeper_control.Present _ )
-            ; _
-            }
-        | None -> ())
-   | Keeper_control.Roster_partial { observed; total } ->
-       box_line buf cols
-         (Theme.warn () ^ "  "
-          ^ text
-              (Printf.sprintf "일부 관측 %d/%d · 나머지는 미조회" (List.length observed) total)
-              (Printf.sprintf "partial reading: live status covers %d of %s; the rest not read"
-                 (List.length observed) (Masc_tui_message_layout.count_noun total "keeper"))
-          ^ Ansi.reset)
-   | Keeper_control.Roster_unobserved | Keeper_control.Roster_complete _ -> ());
+  let shape = Axis_row.shape_of_view state.keeper_list_view in
+  let matrix = match state.keeper_list_view with
+    | Keeper_list_model.By_runtime -> Some (runtime_matrix ~inner model_rows)
+    | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall) -> None in
+  let grid_fleet_row =
+    match matrix, shape with
+    | None, Axis_row.Grid _ -> keeper_grid_fleet_row state ~now:now_unix ~grid all_rows
+    | Some _, _ | None, (Axis_row.Wall_columns | Axis_row.List_columns) -> None
+  in
+  let col_header_rows =
+    match matrix, shape with
+    | Some _, _ -> 1
+    | None, Axis_row.Wall_columns -> 2
+    | None, Axis_row.List_columns -> 1
+    | None, Axis_row.Grid _ -> 1 + if Option.is_some grid_fleet_row then 1 else 0
+  in
+  (* Cap top headers just like [keeper_plain_projection] so observation or
+     fleet warnings never evict the roster rows or footer. *)
+  let summary_floor =
+    if Option.is_none state.keeper_story && Option.is_some selected_row then 1 else 0
+  in
+  let max_headers = max 0 (rows - 1 (* divider *) - col_header_rows - 2 (* footer *)) in
+  let top_header_budget =
+    min max_headers
+      (max 2 (rows - 1 (* divider *) - col_header_rows - 2 (* min roster *) - summary_floor - 2 (* footer *)))
+  in
+  let top_headers =
+    keeper_list_top_headers state ~now:now_unix ~cols ~inner ~selected_reading
+      ~selected_row ~stop ~model_rows ~all_rows
+    |> cap_keeper_headers state ~inner ~budget:top_header_budget
+  in
+  List.iter (box_line buf cols) top_headers;
 
   (* Measured over every reading rather than the rows on screen, so the
      columns do not move while a reader scrolls. The measured sentence is not
@@ -3025,79 +2904,24 @@ let render_keeper_axes (state : state) =
       ~prioritize_runtime:has_failing_keeper ~inner_width:inner
       ~widest_runtime ~widest_detail ()
   in
-  let shape = Axis_row.shape_of_view state.keeper_list_view in
-  let matrix = match state.keeper_list_view with
-    | Keeper_list_model.By_runtime -> Some (runtime_matrix ~inner model_rows)
-    | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall) -> None in
   let peak_lag = axis_peak_lag state model_rows in
   let peak_facts = axis_peak_facts state model_rows in
-  box_line buf cols "";
+  box_divider buf cols;
   (match matrix, shape with
    | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
        box_line_styled buf cols ~style:(Theme.recede ())
-         (matrix_header ~ko:(state.ui_language = Lang_ko) matrix)
+         (matrix_header ~ko matrix)
    | None, Axis_row.Wall_columns ->
        box_line buf cols
-         (Masc_tui_keeper_wall.header ~ko:(state.ui_language = Lang_ko) ~cols:inner ~now:now_unix);
-       box_line buf cols (Masc_tui_keeper_wall.fleet ~ko:(state.ui_language = Lang_ko)
+         (Masc_tui_keeper_wall.header ~ko ~cols:inner ~now:now_unix);
+       box_line buf cols (Masc_tui_keeper_wall.fleet ~ko
          ~cols:inner ~now:now_unix (List.map keeper_row_runtime model_rows))
    | None, Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ())
-         (keeper_column_header ~ko:(state.ui_language = Lang_ko) columns)
-   | None, Axis_row.Grid grid_columns -> box_line buf cols (grid_header state grid grid_columns));
-
-  (match keepers_error with
-   | Some err -> box_line buf cols ((Theme.bad ()) ^ "  " ^ err ^ Ansi.reset)
-   | None -> ());
-  (* A read the workspace guard stopped is drawn as its kept-back notice
-     alone, never under a failure label (RFC §2). *)
-  let kept_back request refusal =
-    box_line buf cols
-      (Theme.warn () ^ "  " ^ Terminal_text.single_line
-         (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal) ^ Ansi.reset) in
-  (match state.keeper_turns_error with
-   | Some (Request_failed err) ->
-       box_line buf cols
-         (Theme.warn () ^ "  turn/waiting observation: "
-          ^ Terminal_text.single_line err ^ Ansi.reset)
-   | Some (Request_withdrawn refusal) ->
-       kept_back Kept_request.Turn_observation_read refusal
-   | None -> ());
-  (* The stream's trouble moved here from under the fleet line: drawn
-     there, it came and went with every reconnect and moved the list. *)
-  let failure = match state.keeper_waiting_error with
-    | Some (Request_failed err) ->
-        Some (Theme.warn () ^ "  waiting refresh failed: " ^ Terminal_text.single_line err ^ Ansi.reset)
-    | Some (Request_withdrawn refusal) ->
-        Some (Theme.warn () ^ "  " ^ Terminal_text.single_line
-          (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-             ~request:Kept_request.Waiting_list_read refusal) ^ Ansi.reset)
-    | None -> None
-  in
-  List.iter (box_line buf cols)
-    (keeper_observation_status_rows state ~now:now_unix ~failure);
-  (match state.keeper_waiting_failure with
-   | None -> ()
-   | Some failure ->
-       let detail =
-         match failure with
-         | Tui_decode.Keeper_waiting_sources_unavailable errors ->
-             String.concat ", "
-               (keeper_waiting_failure_reasons ~ko:(state.ui_language = Lang_ko) errors)
-         | Tui_decode.Keeper_waiting_invalid detail -> Terminal_text.single_line detail
-       in
-       box_line buf cols
-         (Theme.warn () ^ "  fleet waiting observation unavailable: " ^ detail ^ Ansi.reset));
-  (match state.tools_async_observation_error with
-   | Some (Request_failed err) ->
-       box_line buf cols
-         (Theme.warn () ^ "  async observation: "
-          ^ Terminal_text.single_line err ^ Ansi.reset)
-   | Some (Request_withdrawn refusal) -> kept_back Kept_request.Async_requests_read refusal
-   | None -> ());
-
-  Option.iter (fun note -> box_line buf cols note)
-    (local_source_pending_note state Local_keepers);
+         (keeper_column_header ~ko columns)
+   | None, Axis_row.Grid grid_columns ->
+       box_line buf cols (grid_header state grid grid_columns);
+       Option.iter (box_line buf cols) grid_fleet_row);
 
   let chrome_rows = count_frame_lines buf in
   let footer_rows = 2 in

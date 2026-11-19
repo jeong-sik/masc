@@ -6,8 +6,8 @@ val header :
   age:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_list_model.memory_age) ->
   Masc_tui_keeper_list_model.row list -> string
 (** Four fixed known groups; unknown readings keep an explicit [?] count.
-    Every non-empty group's count is reserved before marks; remaining width
-    shows individual marks (with the selected Keeper bold) or [+n] overflow. *)
+    Each non-empty group draws its status mark and count once without
+    per-member glyph repetition. *)
 
 type wake_style =
   | Keeper_wakes

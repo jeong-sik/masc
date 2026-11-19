@@ -187,13 +187,6 @@
   시작 실패·재조회 실패는 수요를 보존하되 즉시 반복 실행하지 않는다. 명시/기존 조회 경로가
   다시 시작한다. 조회 중·재조회 대기·시작 실패와 마지막 정상 관측을 화면에서 구분한다.
   이 상태는 UI가 소유한 요청/수요이며 실제 worker 종료·paint 완료 증거가 아니다.
-  원래 composition 경계는 `docs/audits/2026-10-19-tui-connectors-composed-workspace-reads.md`,
-  후속 수요의 As-Is/To-Be와 미실행 시나리오는
-  `docs/audits/2026-10-19-tui-connectors-held-reread-owner.md`를 따른다.
-  상태 우선 전달과 바인딩 조작 연속성은
-  `docs/audits/2026-10-19-tui-connectors-early-status.md`를 따른다.
-  write 뒤 재활성과 실제 정리의 분리는
-  `docs/audits/2026-10-19-tui-connectors-write-reactivation.md`를 따른다.
 
 - `/listen`은 원래 대화의 선택 media와 opaque ticket을 캡처한다. 내려받기는 원래
   workspace precondition과 응답 receipt를 확인하고, 로컬 읽기·decode·cache 저장·MIDI

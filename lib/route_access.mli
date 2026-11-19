@@ -6,9 +6,8 @@
 
 (** Why a route authenticates the request itself instead of using one of the
     other kinds. Each reason is a route family whose handler answers a missing
-    credential on its own; the A1 baseline
-    (docs/evidence/2026-10-28-auth-route-baseline/) measured how these families
-    answer without one. *)
+    credential on its own; the A1 baseline (2026-10-28) measured how these
+    families answer without one. *)
 type self_authenticated_reason =
   | Mcp_transport
       (** [/mcp] and its profiles, and the observer streams [/ag-ui/events] and

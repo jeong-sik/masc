@@ -217,9 +217,8 @@ against reading that user's files.
 
 Scripted protocol cases and installed browser behavior are separate evidence scopes. New production changes require
 their own recorded verification; a historical passing run does not prove the
-current installed runtime. Follow the
-[lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence)
-and [issue #44150](https://github.com/jeong-sik/masc/issues/44150).
+current installed runtime. Follow
+[issue #44150](https://github.com/jeong-sik/masc/issues/44150).
 
 An Ego answer reports `inputReadiness: release_uncertain` when an
 input-holding command ended without the SDK declaring its release. Later input

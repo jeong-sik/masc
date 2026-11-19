@@ -39,7 +39,7 @@ llama-server의 프리픽스 캐시는 요청 토큰열이 슬롯의 기존 열�
 2. **변동 정보는 꼬리로**: world_state·타임스탬프·recall 주입은 extra_system_context로 히스토리 **뒤에** 붙는다 (`agent_turn.ml:31`). 프리픽스 헤드에 매턴 변하는 내용을 넣으면 재처리 비용이 히스토리 길이에 비례해 커진다 — 실측 31배 (RFC-0382 §3.1).
 3. **reasoning 보존**: `preserve_thinking` 활성 시 이전 턴 생성물(thinking 포함)의 KV가 그대로 이어져 턴당 prefill이 새 user 메시지 분량(26~34 tok)으로 수렴한다.
 
-실측 요약 (Qwen3.8-27B, 4턴, max_tokens 512 — 원값 `docs/evidence/kv-cache-harness-2026-08-16.jsonl`):
+실측 요약 (Qwen3.8-27B, 4턴, max_tokens 512):
 
 | 히스토리 정책 | 턴4 재처리 |
 |---|---|

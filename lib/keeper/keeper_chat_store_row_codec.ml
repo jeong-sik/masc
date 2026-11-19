@@ -110,8 +110,8 @@ let validate_row_fields fields =
      surface").
 
      The retired row-level [kind] label is absent from this list on purpose,
-     and unlike [source] it stays refused.  docs/evidence/godfiles-20261008/kind-contract.md
-     closes that row shape with no compatibility or migration path: a row
+     and unlike [source] it stays refused.  The row shape is closed with no
+     compatibility or migration path: a row
      still carrying [kind] is unknown row metadata, not assistant speech, so
      it is dropped with [unknown chat row field "kind"] rather than read.
      test/test_keeper_chat_store.ml, "retired kind row dropped

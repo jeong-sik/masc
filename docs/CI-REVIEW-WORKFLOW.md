@@ -36,8 +36,8 @@ scripts it invokes) must be byte-identical to main's, or the dispatch fails;
 toolchain PRs re-dispatch with `trust-head-toolchain=true`, which is recorded
 in the settled status and receipt. Non-documentation inputs identical to an
 already built SHA settle instantly by input identity (docs-only heads build
-nothing — no dune rule in the four-executable closure reads `docs/`,
-`docs-site/` or `changelog.d/`); anything else builds asynchronously —
+nothing — no dune rule in the four-executable closure reads `docs/` or
+`changelog.d/`); anything else builds asynchronously —
 dispatch fire-and-forget. The record describes the head that was built; a new
 head needs a separate record. The status and freshness against the merge target
 are advisory for ordinary stacks.
@@ -103,9 +103,7 @@ verification and does not grant merge permission.
 
 `ci.yml` and `test.yml` are reusable components. The operator explicitly approved
 retaining the daily `test.yml` full behavior run on 2026-10-12: 17:43 UTC
-(02:43 KST), with its existing failure issue reporting. The
-[approval record](evidence/2026-10-12-nightly-ci-operator-approval.md) addresses
-the missing authorization raised on #42290. This regression observation does
+(02:43 KST), with its existing failure issue reporting. This regression observation does
 not grant PR approval or replace verification of a fixed release candidate.
 
 Full type checking, release

@@ -19,7 +19,7 @@ related: ["0377", "backlog-never-preempts-a-running-turn", "arrived-stimuli-reac
 - 다루는 것: 채팅 작업 줄(`Chat_operation_store.claim_next`)의 묶음, 요청별 답, 빈 슬롯을 누가 받는지, 큐가 멈추는 경로.
 - 다루지 않는 것: 업무 종류별 갈래, 이벤트 큐 안의 순서, runtime 과 실행 시간(#52410). 끝나지 않는 턴은 따로 RFC 로 다룬다(§7-1).
 - 근거 기준: 코드는 이 브랜치의 base `15e3c60e915c` 에서 읽었다.
-- 측정: [`docs/evidence/chat-queue-wait-2026-11-16/`](../evidence/chat-queue-wait-2026-11-16/README.md). 2026-11-16 03:56Z 에 읽었다.
+- 측정: 2026-11-16 03:56Z 에 읽었다.
   아직 시작하지 않은 작업은 창 끝까지 기다린 것으로 세므로, 같은 창도 읽는 시각에 따라 합이 달라진다.
 
 ## 0. 요약

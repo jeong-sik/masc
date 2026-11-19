@@ -65,7 +65,7 @@ else if row.reading.Masc_tui_keeper_control.paused then Paused
 
 ### 1.2 한 시점의 실측
 
-읽은 방법과 한계는 [근거 기록](../evidence/research/2026-11-06-keepers-list-past-now-next/README.md)에 있다. 한 워크스페이스의 한 시점이라 일반화하지 않는다. TUI 는 실행하지 않았다.
+한 워크스페이스의 한 시점이라 일반화하지 않는다. TUI 는 실행하지 않았다.
 
 | 읽은 것 | 값 |
 | --- | --- |
@@ -307,7 +307,4 @@ L2 가 끝나면 첫째와 셋째는 출력이 없고, 둘째는 제목 문자�
 
 ## 9. 참고
 
-- 연구 문서: [`docs/research/2026-11-06-keepers-list-past-now-next.md`](../research/2026-11-06-keepers-list-past-now-next.md)
-- 근거 기록: [`docs/evidence/research/2026-11-06-keepers-list-past-now-next/README.md`](../evidence/research/2026-11-06-keepers-list-past-now-next/README.md)
-- 시안(설계 보조 자료, 실행되는 TUI 가 아니다): [`docs/research/2026-11-06-keepers-list-past-now-next-preview.html`](../research/2026-11-06-keepers-list-past-now-next-preview.html)
 - 워크벤치 RFC §4.2 와 S3-2 도 `Failing` 묶음을 그린다. 이 RFC 는 그중 서버 변경 없이 되는 부분만 좁혀서 낸다. §4.2 의 예시 값(`다음 시도 16:06:51`, `28회 연속`)은 서버가 내지 않는다. 이 RFC 를 받아들이면 §4.2 가 이 문서를 가리키게 고친다.

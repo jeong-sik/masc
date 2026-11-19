@@ -252,9 +252,7 @@ Contract harness는 hermetic bootstrap으로 실행된다. 사전 서버 실행�
 
 ## 7. Coverage
 
-100% coverage closeout uses the checklist in
-`docs/qa/BISECT-COVERAGE-CLOSEOUT-RUNBOOK.md`. Do not close a coverage goal from
-stale `_coverage` files or from the existence of `*_coverage.ml` supplement
+Do not close a coverage goal from stale `_coverage` files or from the existence of `*_coverage.ml` supplement
 tests alone.
 
 ### 7.1 bisect_ppx

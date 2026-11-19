@@ -9,7 +9,7 @@ Use the benchmark whose evidence matches the question being asked.
 ```
 
 This runs the `control` phase and writes a machine-readable `summary.json` plus
-the phase log. See [INTEGRATED-BENCHMARK-RUNBOOK.md](./INTEGRATED-BENCHMARK-RUNBOOK.md).
+the phase log.
 
 ## Tool-Calling Quality
 

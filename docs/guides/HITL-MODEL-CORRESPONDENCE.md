@@ -68,8 +68,6 @@ receipt; the filename alone is not used as version evidence.
 | `KeeperHitlDeferred-restart-buggy.cfg` | Exit 13: forgetting a committed decision on restart breaks eventual consumption, even with the same consumer fairness assumption. |
 
 The negative cases check their named invariant or property individually. A parser error,
-missing configuration or unexpected exit does not count as a caught bug. The
-candidate's commands, source hashes, state counts and violation traces are in
-[`hitl-model-verification.json`](../evidence/oldest80-hitl-model-verification.json).
+missing configuration or unexpected exit does not count as a caught bug.
 This is focused model execution and source correspondence, not a new OCaml build,
 formal refinement proof, live Keeper scenario or CI result.

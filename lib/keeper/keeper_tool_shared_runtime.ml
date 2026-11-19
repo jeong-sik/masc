@@ -316,7 +316,7 @@ let search_result_max_bytes = 32_000
    13.0% of the day's tool result bytes, and every result was above the
    65,536-byte inline ceiling of every lane, so the Keeper held a blob marker.
    The other 4,980 matched lines in that window: 4,967 were at most 2,000
-   bytes. See docs/evidence/grep-long-lines-2026-11. *)
+   bytes. *)
 let default_max_line_bytes = 2_000
 
 let cut_to_bytes ~max_bytes text =

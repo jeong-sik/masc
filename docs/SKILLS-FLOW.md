@@ -5,8 +5,7 @@ status: reference
 # Skills — 어떻게 도는가 (흐름 + 코드 경로)
 
 `docs/SKILLS.md`는 SKILL.md를 **어떻게 쓰는가**를 다룬다. 이 문서는 그 선언이
-런타임에서 **어떻게 도는가**를 순서도와 코드 위치로 정리한다. 설계 근거는
-`docs/rfc/RFC-skills-as-tools.md`.
+런타임에서 **어떻게 도는가**를 순서도와 코드 위치로 정리한다.
 
 ## 0. 한 눈에
 

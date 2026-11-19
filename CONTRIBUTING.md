@@ -82,8 +82,8 @@ runs no build.
 
 ## Where things are
 
-Use the [storage guide](docs/guides/WORKSPACE-STORAGE.md) for research, evidence,
-reports and generated run output.
+Use the [storage guide](docs/guides/WORKSPACE-STORAGE.md) for generated run
+output. Proof goes in the PR body and CI artifacts, not in the repository.
 
 ```text
 bin/

@@ -5,7 +5,7 @@
  (name test_verification_authority_tools)
  (modules test_verification_authority_tools)
  (deps fixtures/verifier-image-lookup.png fixtures/verifier-video.mp4
-  ../docs/evidence/2026-09-10-collaboration-baseline/goal-publication/booklet.pdf (source_tree %{workspace_root}/config/prompts))
+  fixtures/verifier-booklet.pdf (source_tree %{workspace_root}/config/prompts))
  (libraries
   masc_test_deps
   ;; The producer runs on the remote_ssh profile: the fixture endpoint row is

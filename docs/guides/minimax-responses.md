@@ -101,14 +101,12 @@ conversation or replay evidence as a way to disable a runtime.
 
 ## Evidence and limits
 
-[The binding evidence](../evidence/2026-10-25-minimax-responses-binding/README.md)
-records failed candidates and the corrected 42-case public contract run:
+The binding evidence records failed candidates and the corrected 42-case public contract run:
 native binding/admission 4, sync replay 16 and SSE replay 22. It includes actual
 cache/message-file/serializer assertions, not vendor HTTP or a complete Agent
 restart. [Issue #27924](https://github.com/jeong-sik/masc/issues/27924) tracks
 Chat tool-choice and model-availability residuals. The sync/SSE/native binding
-stack #45978 and this guide are integrated into main; see the
-[integration and source refresh](../evidence/2026-11-01-minimax-contract-refresh/README.md).
+stack #45978 and this guide are integrated into main.
 
 This guide's TOML was checked for syntax and against the current parser,
 catalog and adapter source. It has not been applied to a live workspace or

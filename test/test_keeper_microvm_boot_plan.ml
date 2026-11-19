@@ -247,8 +247,7 @@ let test_the_parser_reads_published_sockets_and_init () =
 
 (* Apple container 1.6.1 booted a guest from [Sandbox.apple_turn_start_argv]
    of this plan, and the fixture is its [container inspect] while the agent
-   answered (docs/evidence/2026-11-03-microvm-request-transport/
-   agent-plan-boot-results.json). The runtime reported every host path as it
+   answered (2026-11-03). The runtime reported every host path as it
    was given, so the fixture carries this plan's host paths and the plan
    label that covers them. The volume image paths are the runtime's own; the
    parser reads a volume by its name. *)

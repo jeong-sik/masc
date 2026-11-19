@@ -451,10 +451,10 @@ let run ?runner ?observe ~base_dir ~runtime_id ~system_prompt ~requirement ~prom
   | Error (Stopped _) -> .
 ;;
 
-let order_slots slots =
+let order_slots_at ~now slots =
   let rows = List.map (fun id -> id, Runtime.get_runtime_by_id id) slots in
   let split =
-    Runtime_candidate_standing.order_exact ~now:(Time_compat.now ())
+    Runtime_candidate_standing.order_exact ~now
       ~quota_scope_of:(fun (_, runtime) ->
         Option.map Runtime_instance.quota_scope_of_runtime runtime)
       ~candidate_backpressure_of:(fun (_, runtime) ->
@@ -467,6 +467,8 @@ let order_slots slots =
         split.Runtime_candidate_standing.held
   }
 ;;
+
+let order_slots slots = order_slots_at ~now:(Time_compat.now ()) slots
 
 type 'stop walk_end =
   | Slots_exhausted of failure list

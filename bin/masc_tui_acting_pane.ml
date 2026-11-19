@@ -1910,13 +1910,26 @@ let keeper_context_lines ~cols input =
           ^ Terminal_text.single_line id
       | Task_observed { id; refresh_failed = false } ->
           say "관측한 작업 · " "task observed · " ^ Terminal_text.single_line id in
+    (* The waiting lines carry the status marks (RFC tui-one-screen-grammar
+       7.2): [○] waits, in the receding tone, and [—] is a source the read
+       found nothing waiting on, since the heads hold the first row of every
+       source (RFC-an-idle-tui-receives-only-changes-it-draws). A list not
+       read yet is [◌] and a read that failed is [✕] (6.4); the words are
+       RFC-0519's, as a detail sentence may carry them. *)
+    let unknown_lines unknown korean english =
+      let mark = Masc_tui_value.Unknown.glyph unknown in
+      let tone = match unknown with
+        | Masc_tui_value.Unknown.Read_failed -> status_tone Masc_tui_value.Mark.Failed
+        | Unread | Unreported -> Dim in
+      ( one tone (mark ^ " " ^ say ("대기 목록 " ^ korean) ("waiting list " ^ english))
+      , one Dim "  —"
+      , one Dim (mark ^ " " ^ say ("위임 결과 " ^ korean) ("delegate result " ^ english)) ) in
+    let waiting = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting in
+    let none = Masc_tui_theme.Glyph.no_value in
     let schedule, detail, delegate = match summarize_keeper_waiting context with
-      | Waiting_not_observed ->
-          (one Dim (say "◷ 대기 목록 관측 전" "◷ waiting inventory not observed"), one Dim "  —",
-           one Dim (say "↩ 위임 결과 · 관측 전" "↩ delegate result · not observed"))
+      | Waiting_not_observed -> unknown_lines Masc_tui_value.Unknown.Unread "미조회" "not read"
       | Waiting_read_unavailable ->
-          (one Warn (say "◷ 대기 목록 조회 불가" "◷ waiting inventory unavailable"), one Dim "  —",
-           one Dim (say "↩ 위임 결과 · 조회 불가" "↩ delegate result · unavailable"))
+          unknown_lines Masc_tui_value.Unknown.Read_failed "조회 실패" "read failed"
       | Waiting_items { schedules; delegate_result_waiting; read_error } ->
           (* Partial inventory refreshes can retain a row from an older read. *)
           (* The decision comes first so it survives the narrow pane; these
@@ -1927,8 +1940,19 @@ let keeper_context_lines ~cols input =
             else if context.waiting_revalidating then say " · 다시 확인 중" " · revalidating"
             else say " · 마지막 관측" " · last seen" in
           let suffix = qualifier ^ (if read_error then say " · 일부만" " · partial" else "") in
+          (* A source read error leaves a source unread, so an absent row is
+             not a read of none: [?], and the suffix says the read is partial. *)
+          let absent korean_none english_none korean_unread english_unread =
+            if read_error then
+              Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported ^ " "
+              ^ say korean_unread english_unread ^ suffix
+            else none ^ " " ^ say korean_none english_none ^ suffix in
           let schedule, detail = match schedules with
-            | None -> (one Dim (say "◷ 일정 못 봄" "◷ schedule unseen" ^ suffix), one Dim "  —")
+            | None ->
+                ( one Dim
+                    (absent "대기 중인 일정 없음" "no schedule waiting"
+                       "대기 중인 일정" "waiting schedules")
+                , one Dim "  —" )
             | Some (item, count) ->
                 let clock = match item.kwi_due_at with
                   | None -> say "시각 관측 전" "time unobserved"
@@ -1940,19 +1964,22 @@ let keeper_context_lines ~cols input =
                        else
                          let span = Masc_tui_value.Ongoing.since ~now:input.now due in
                          say ("예정 시각 " ^ span ^ " 지남") ("due " ^ span ^ " ago")) in
-                ( one Info
-                    (if input.ko then
-                       Printf.sprintf "◷ 대기 중인 일정 %d개%s" count suffix
-                     else
-                       Printf.sprintf "◷ %d schedule%s waiting%s"
-                         count (if count = 1 then "" else "s") suffix)
+                ( one Dim
+                    (waiting ^ " "
+                     ^ (if input.ko then Printf.sprintf "대기 중인 일정 %d개%s" count suffix
+                        else
+                          Printf.sprintf "%d schedule%s waiting%s"
+                            count (if count = 1 then "" else "s") suffix))
                 , one Plain
                     (say "  첫 항목 · " "  one item · " ^ clock ^ " · "
                      ^ Terminal_text.single_line item.kwi_what) ) in
           let delegate =
             if delegate_result_waiting then
-              one Info (say "↩ 위임 결과 대기 중" "↩ delegate result waiting" ^ suffix)
-            else one Dim (say "↩ 위임 결과 못 봄" "↩ delegate result unseen" ^ suffix) in
+              one Dim (waiting ^ " " ^ say "위임 결과 대기 중" "delegate result waiting" ^ suffix)
+            else
+              one Dim
+                (absent "위임 결과 대기 없음" "no delegate result waiting"
+                   "위임 결과" "delegate result") in
           schedule, detail, delegate in
     (* Keep a fixed-height context across refreshes, so an Activity target
        does not move under the keyboard cursor as waiting items change. *)

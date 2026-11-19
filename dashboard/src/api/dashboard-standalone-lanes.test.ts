@@ -44,6 +44,7 @@ function snapshot() {
       row('librarian_exact', 'no_retained_observation'),
       row('verifier_exact'),
       row('candle_appraiser', 'no_retained_observation'),
+      row('librarian_memory', 'no_retained_observation'),
     ],
   }
 }
@@ -61,7 +62,7 @@ describe('standalone lane snapshot decoder', () => {
   })
   it('keeps all current lane states and observed slot counts', () => {
     const parsed = parseStandaloneLanesSnapshot(snapshot())
-    expect(parsed.lanes).toHaveLength(5)
+    expect(parsed.lanes).toHaveLength(6)
     expect(parsed.lanes[0]?.status).toBe('running')
     expect(parsed.lanes[0]?.selectedSlots).toEqual([{ slotId: 'primary', count: 1 }])
     expect(parsed.lanes[0]?.declaredSlots).toEqual(['primary', 'rejected'])

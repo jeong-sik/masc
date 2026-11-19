@@ -8,6 +8,7 @@ export type StandaloneLaneId =
   | 'librarian_exact'
   | 'candle_appraiser'
   | 'verifier_exact'
+  | 'librarian_memory'
 
 export type StandaloneLaneStatus =
   | 'off'
@@ -88,6 +89,7 @@ export const LANE_IDS = [
   'librarian_exact',
   'candle_appraiser',
   'verifier_exact',
+  'librarian_memory',
 ] as const satisfies readonly StandaloneLaneId[]
 const STATUSES: readonly string[] = ['off', 'running', 'idle', 'degraded', 'no_retained_observation', 'unavailable']
 const CONFIGURATION_STATES: readonly string[] = ['off', 'ready', 'degraded', 'unconfigured', 'unavailable']

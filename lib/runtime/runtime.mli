@@ -618,6 +618,10 @@ type exact_lane = Standalone_lane.t =
   | Verifier
   | Candle_appraiser
       (** Appraises the grade, Task relations and Keeper contribution weights of a confirmed Candle payout. *)
+  | Librarian_memory
+      (** The lane the Librarian asks through for Memory changes
+          ({!Librarian_memory_lane}). Not the working-context pass's
+          [librarian_exact]. *)
 
 val verifier_runtime_admission : t -> (unit, string) result
 (** The one answer to "can this runtime judge a completion review?", used by

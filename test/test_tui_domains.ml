@@ -32,15 +32,15 @@ let test_each_domain_collects_on_its_roles_heap () =
     (Domain_pool.submit_cpu ~name:__FUNCTION__ worker words)
 ;;
 
-(* The decision itself: the domains that allocate while the UI is in use
-   take the large heap, and the one that mostly waits on the network keeps the
-   runtime's. *)
-let test_only_the_request_domain_keeps_the_runtime_heap () =
+(* The decision itself: only the drawing domain, which allocates every frame,
+   takes the large heap. The request domain mostly waits on the network, and
+   the worker decodes a file only when its version moves. *)
+let test_only_the_drawing_domain_takes_the_large_heap () =
   let tuned = function
     | Minor_heap.Tuned -> true
     | Minor_heap.Runtime_default -> false
   in
-  Alcotest.(check (list bool)) "Ui, Io, Worker" [ true; false; true ]
+  Alcotest.(check (list bool)) "Ui, Io, Worker" [ true; false; false ]
     (List.map (fun role -> tuned (Masc_tui_domains.minor_heap role))
        Masc_tui_domains.[ Ui; Io; Worker ])
 ;;
@@ -50,8 +50,8 @@ let () =
     [ ( "minor heap"
       , [ Alcotest.test_case "each domain collects on its role's heap" `Quick
             test_each_domain_collects_on_its_roles_heap
-        ; Alcotest.test_case "only the request domain keeps the runtime heap" `Quick
-            test_only_the_request_domain_keeps_the_runtime_heap
+        ; Alcotest.test_case "only the drawing domain takes the large heap" `Quick
+            test_only_the_drawing_domain_takes_the_large_heap
         ] )
     ]
 ;;

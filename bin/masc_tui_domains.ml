@@ -11,28 +11,32 @@ type t =
    PageUp/PageDown held, the 4M-word heap cut the median key-to-output time
    by about a quarter.
 
-   Worker: a refresh of the overview parses the local task files, several
-   MB of JSON, so this domain fills a heap far faster than the other two.
-   Measured 2026-11-19 against the frozen replay: overview at 120x40,
-   Down/Up every 33 ms, r every 45 presses, key-to-output of the presses
-   within 600 ms of an r, builds interleaved round by round, ms:
+   Worker: it decodes answers and reads the local task files. A refresh
+   used to parse those files whole, several MB of JSON, and on a small heap
+   that lengthened the key-latency tail after r to about twice main's. Since
+   #53335 a refresh decodes a file only when its version moves, and the
+   worker's heap no longer shows in that tail. Measured 2026-11-19 against
+   the frozen replay with #53335 in: overview at 120x40, Down/Up every
+   33 ms, r every 45 presses, key-to-output of the presses within 600 ms of
+   an r, 14 rounds with the builds interleaved, load 227-582, ms:
 
-     worker heap         load 131-370, 6 rounds   load 295-418, 6 rounds
-                         p90    p95    p99        p90    p95    p99
-     256k (runtime)      25.7   63.8   124.4      -      -      -
-     1M                  8.8    20.6   98.6       16.3   33.6   132.1
-     4M                  9.7    19.1   87.7       17.0   32.8   85.2
-     every domain 4M     9.2    17.8   62.7       18.5   33.3   87.4
+     worker heap               p90    p95    p99
+     256k (runtime)            40.1   78.1   137.0
+     1M                        40.6   71.6   132.6
+     4M                        41.5   69.7   129.6
+     every domain 4M           37.4   63.8   124.5
 
    The last row is every domain on 4M words, Io included; the other rows
-   keep Io on the runtime's heap. A 1M worker also kept p99 about 1.5
-   times the last row's in 8 more rounds at load 283-418.
+   keep Io on the runtime's heap. Paired by round, 256k minus the last row
+   is p95 +14 ms [-12, +33] and p99 +13 ms [-24, +41] at 90%, while 256k
+   without #53335 was p99 +159 ms [+56, +283] over 8 rounds: the method
+   sees a refresh tail, and with #53335 there is none to see.
 
-   The worker's heap is also the memory a smaller one saves. Physical
-   footprint after 5 minutes idle at 200x60, eight to ten TUIs at once,
-   two runs per build on the overview and two on Keepers: 4M 223-243 MB,
-   every domain 4M 220-236 MB, 1M 173-200 MB, 256k 171-210 MB. The tail
-   decides. When a refresh stops parsing whole files, measure both again.
+   A smaller worker heap is the memory the TUI saves. Physical footprint
+   after 5 minutes idle at 200x60, eight TUIs at once, two runs per build:
+   256k 138-150 MB on the overview and 153-157 MB on Keepers, 4M 175-177 MB
+   and 179-194 MB. The worker takes the runtime's heap. If a refresh ever
+   decodes whole files again, measure the tail again.
 
    Io: it sends requests and reads answers, and leaves decoding to the
    worker. Its heap changed neither figure beyond the spread between
@@ -40,7 +44,7 @@ type t =
 let minor_heap = function
   | Ui -> Minor_heap.Tuned
   | Io -> Minor_heap.Runtime_default
-  | Worker -> Minor_heap.Tuned
+  | Worker -> Minor_heap.Runtime_default
 ;;
 
 let use_ui_heap () = Minor_heap.apply (minor_heap Ui)

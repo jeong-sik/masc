@@ -4214,7 +4214,14 @@ let test_decode_effective_keeper_surface_keeps_provenance () =
         "profile keeps the exact editable reference"
         (Yojson.Safe.to_string (exact_reference "work-intake" 'b'))
         (Skill_reference.to_yojson profile.esp_reference |> Yojson.Safe.to_string);
-      Alcotest.(check string) "profile execution" "async" profile.esp_execution;
+      Alcotest.(check bool)
+        "profile is an async Composition" true
+        (match profile.esp_surface with
+         | Masc.Keeper_skill_observability.Composition_skill
+             Masc.Keeper_tool_composition_catalog.Async -> true
+         | Masc.Keeper_skill_observability.Instruction_skill
+         | Masc.Keeper_skill_observability.Composition_skill
+             Masc.Keeper_tool_composition_catalog.Inline -> false);
       Alcotest.(check int) "profile nodes" 4 profile.esp_node_count;
       Alcotest.(check int) "profile parallel width" 3 profile.esp_max_parallelism;
       Alcotest.(check bool)
@@ -4367,6 +4374,53 @@ let test_decode_effective_tool_reads_provenance_by_kind () =
    (Keeper_skill_catalog.configured_name_unavailable_to_yojson). Without the
    list the Tools screen would stay silent about a selected Skill that is not
    in the turn catalog. *)
+(* The server writes kind and execution from one surface, so a profile whose
+   pair it never writes is refused rather than drawn with whatever execution
+   string it carried. *)
+let test_decode_skill_profile_refuses_a_kind_and_execution_pair_it_never_writes () =
+  let profile ~kind ~execution ~io =
+    `Assoc
+      [ ( "reference"
+        , `Assoc
+            [ ( "identity"
+              , `Assoc
+                  [ "source_id", `String "project-masc"
+                  ; "package_id", `String "x"
+                  ; "name", `String "x"
+                  ] )
+            ; "content_revision", `String (String.make 64 'a')
+            ] )
+      ; "kind", `String kind
+      ; "execution", `String execution
+      ; "load_reasons", `List []
+      ; "context", `Assoc [ "body_bytes", `Int 0; "discovery_bytes", `Int 0 ]
+      ; "plan", `Assoc [ "node_count", `Int 0; "batch_count", `Int 0; "max_parallelism", `Int 0 ]
+      ; "io", io
+      ]
+  in
+  let instruction_io = `Assoc [ "kind", `String "model_orchestrated" ] in
+  let composition_io =
+    `Assoc [ "kind", `String "composition"; "input_schema", `Assoc []; "exports", `List [] ]
+  in
+  let decodes profile =
+    match minimal_available_surface [] with
+    | `Assoc fields ->
+      Result.is_ok
+        (Masc.Tui_decode_tools.decode_tool_snapshot
+           (tool_snapshot_json
+              ~effective:(`Assoc (fields @ [ "skill_profiles", `List [ profile ] ]))
+              []))
+    | _ -> Alcotest.fail "the minimal surface is not an object"
+  in
+  Alcotest.(check bool) "instruction, on demand" true
+    (decodes (profile ~kind:"instruction" ~execution:"on_demand" ~io:instruction_io));
+  Alcotest.(check bool) "composition, inline" true
+    (decodes (profile ~kind:"composition" ~execution:"inline" ~io:composition_io));
+  Alcotest.(check bool) "an instruction that claims async" false
+    (decodes (profile ~kind:"instruction" ~execution:"async" ~io:instruction_io));
+  Alcotest.(check bool) "a composition run on demand" false
+    (decodes (profile ~kind:"composition" ~execution:"on_demand" ~io:composition_io))
+
 let test_decode_effective_surface_requires_the_unavailable_skill_names () =
   (match decode_surface_tools (minimal_available_surface ~unavailable_skill_names:None []) with
    | Ok _ -> Alcotest.fail "a surface without unavailable_skill_names decoded"
@@ -14098,6 +14152,10 @@ let () =
           test_decode_tool_snapshot_without_inventory_is_an_error;
         Alcotest.test_case "effective surface keeps provenance" `Quick
           test_decode_effective_keeper_surface_keeps_provenance;
+        Alcotest.test_case
+          "a Skill profile's kind and execution are one surface"
+          `Quick
+          test_decode_skill_profile_refuses_a_kind_and_execution_pair_it_never_writes;
         Alcotest.test_case "a tool origin reads its provenance by kind" `Quick
           test_decode_effective_tool_reads_provenance_by_kind;
         Alcotest.test_case "the unavailable skill names are required" `Quick

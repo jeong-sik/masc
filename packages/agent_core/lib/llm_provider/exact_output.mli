@@ -356,8 +356,14 @@ type execution_error_cause =
           output was accepted; distinct from refusal and other incomplete stops. *)
   | Window_reached of { output : window_output }
       (** The provider typed a stop at the model's context window
-          ([Types.ContextWindowExceeded]), with or without text. The input fit
-          and one generation was spent, so this is not a refusal of the input. *)
+          ([Types.ContextWindowExceeded]), with or without text. The provider
+          answered and spent one generation, so this is not a refusal. The
+          input and the output together reached the window: a size fact about
+          the question, with or without text.
+
+          Consumers older than this constructor keep the reading they gave the
+          same answer before it: without text, the input's context overflow;
+          with text, an unusable output. *)
   | Incomplete_output of { stop : incomplete_stop }
       (** The answer stopped for [stop] without one structured output. *)
   | Missing_output

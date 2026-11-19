@@ -505,7 +505,8 @@ let test_named_provider_input_refusals () =
       (original=decoded))
     [refused E.Context_overflow;refused E.Input_capacity;refused E.Request_body_refused;
      refused E.Rate_limited;E.Invalid_json_output;
-     E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch}]
+     E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch};
+     E.Window_reached {output=E.No_output};E.Window_reached {output=E.Partial_output}]
 
 let test_native_context_receipt_flags () =
   let module Shared = Keeper_exact_walk_failure in

@@ -912,7 +912,7 @@ counts (prompt overrides, Keepers with instructions, runtime assignments,
 exact-output lanes). The detail below shows its save time and description, a
 comparison with current settings, this session's last restore report, then the
 saved contents and the Keepers it holds. A directory whose manifest does not
-read is listed with `!` under Read errors.
+read is listed with `✕` under Read errors.
 
 The chat does the same. `/preset` lists the prompt presets the server holds
 under `.masc/presets`.
@@ -932,7 +932,7 @@ is already applied, not that the restore should be repeated. Inspect current
 settings and `_autosave` first: repeating restore replaces the undo snapshot.
 An unreadable response also does not prove that nothing changed.
 `/preset delete <name>` removes that
-preset, including one listed with `!` because it does not load; typing the
+preset, including one listed with `✕` because it does not load; typing the
 name is the confirmation. A directory whose name is not a valid preset name
 is refused.
 The answers land in the chat pane of the keeper selected when the command was

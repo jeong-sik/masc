@@ -29,10 +29,12 @@ val read :
     ({!Keeper_status_metrics.latest_tool_audit_snapshot_from_files}).
 
     Both are facts of the store. One the store holds is answered from
-    memory. One it does not hold is read from the store's files: once, when
-    the process keeps facts and the read succeeds, and on every call
-    otherwise (a process that keeps none, or a store the strict read
-    refuses). The read has no cache of its own and takes no read policy. *)
+    memory. One it does not hold is read from the store's files. The answer
+    is kept from then on when the process keeps facts, the read succeeds and
+    no append landed while it ran. Otherwise the next call reads the files
+    again: a process that keeps no facts and a store the strict read refuses
+    read them on every call. The read has no cache of its own and takes no
+    read policy. *)
 
 val row_fields : read -> (string * Yojson.Safe.t) list
 (** The audit fields of an operator snapshot Keeper row. {!Keeper_status_metrics.tool_audit_read_field} carries the read state and

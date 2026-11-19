@@ -170,6 +170,34 @@ max-concurrent = 1
   | Ok () -> ()
   | Error err -> Alcotest.failf "Runtime.init_default failed: %s" err
 
+(* How many times the newest lines of the Keeper's metrics store have been
+   asked for in this process, however each ask was answered. The store
+   counts every read of one of its facts
+   ([masc_dated_jsonl_fact_reads_total]). *)
+let newest_metrics_lines_asked config keeper_name =
+  let store =
+    Dated_jsonl.Store.pool_job_name
+      (Dated_jsonl.Store.of_location
+         (Keeper_types_support.keeper_store_location
+            config
+            keeper_name
+            Dated_jsonl.Store.Keeper.Metrics))
+  in
+  List.fold_left
+    (fun asked outcome ->
+       asked
+       +. Otel_metric_store_core.metric_value_or_zero
+            Otel_builtin_metric_names.metric_dated_jsonl_fact_reads
+            ~labels:
+              [ "store", store
+              ; "fact", "keeper_metrics_newest_lines"
+              ; "outcome", outcome
+              ]
+            ())
+    0.
+    [ "held"; "read_and_kept"; "read_not_kept"; "read_failed" ]
+;;
+
 let test_snapshot_keeps_context_unobserved_and_usage_separate () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -306,11 +334,18 @@ let test_snapshot_keeps_context_unobserved_and_usage_separate () =
           |> to_int);
       Keeper_registry.For_testing.clear ();
       Operator_control.invalidate_snapshot_cache ();
+      let asked_before = newest_metrics_lines_asked config keeper_name in
       let persisted_json =
         Operator_control.snapshot_json ~view:"summary"
           ~include_keepers:true ~include_messages:false
           (operator_ctx env sw config "owner")
       in
+      (* The row's tool audit and its recent activity both read those lines.
+         The row asks for them once and hands the answer to both. *)
+      Alcotest.(check (float 0.))
+        "the Keeper row asked its metrics store for the newest lines once"
+        1.
+        (newest_metrics_lines_asked config keeper_name -. asked_before);
       let persisted_keeper =
         match
           Yojson.Safe.Util.(

@@ -17,10 +17,11 @@ type read =
    store.
 
    A fact the store holds is answered from memory. One it does not hold is
-   read from the store's files in a job of the store's: once, when the
-   process keeps facts and the read succeeds, and on every call otherwise
-   (a process that keeps none, or a store the strict read refuses). This
-   read adds no cache and no job of its own to that. *)
+   read from the store's files. The answer is kept from then on when the
+   process keeps facts, the read succeeds and no append landed while it
+   ran. Otherwise the next call reads the files again: a process that keeps
+   no facts and a store the strict read refuses read them on every call.
+   This read adds no cache and no job of its own to that. *)
 let read config (meta : Keeper_meta_contract.keeper_meta) ~newest_lines =
   match newest_lines with
   | Error error -> Unreadable (Dated_jsonl.read_error_to_string error)

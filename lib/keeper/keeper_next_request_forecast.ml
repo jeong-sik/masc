@@ -143,7 +143,7 @@ let measure (message : Agent_core.Types.message) =
 ;;
 
 let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~accepted
-      ~turn_start ~history_at_start ~counted_tokens ~atom_count ~digest_at messages =
+      ~turn_start ~this_turn_start ~counted_tokens ~atom_count ~digest_at messages =
   let { Keeper_turn_driver_try_provider.start; outlived_seed = _; moved_at_max_context = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
       ~past_max_context
@@ -153,7 +153,7 @@ let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~ac
       ~accepted
       ~history_digest_at:digest_at
       ~turn_boundary:turn_start
-      ~history_at_start
+      ~this_turn_start
   in
   (* The ledger's count is read for a range its own front opened; any other
      start shows none, the front the size signal moved to among them. *)
@@ -210,10 +210,10 @@ let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~ac
 ;;
 
 let carry ?past_max_context ?held_window ~measure ~continuity ~front ~accepted ~turn_start
-      ~history_at_start ~counted_tokens messages =
+      ~this_turn_start ~counted_tokens messages =
   let atom_count, digest_at = Runtime_model_input_tail_window.atom_opening_index messages in
   carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~accepted
-    ~turn_start ~history_at_start ~counted_tokens ~atom_count ~digest_at messages
+    ~turn_start ~this_turn_start ~counted_tokens ~atom_count ~digest_at messages
 ;;
 
 (* The request in travel order. The system prompt and the tool array are
@@ -440,7 +440,7 @@ type range_reads =
   ; digest_at : int -> string option
   ; continuity : Keeper_turn_driver_try_provider.continuity
   ; turn_start : Keeper_carried_front.turn_start
-  ; history_at_start : Keeper_turn_boundaries.history_at_start
+  ; this_turn_start : int option
   ; seed : Keeper_carried_front.seed option Lazy.t
   }
 
@@ -462,11 +462,12 @@ let read_range ~config ~keeper_name ~trace_id history =
   ; (* Where a candidate with no front starts: the end of the last
        completed turn on this history, as the driver reads it. *)
     turn_start =
-      Keeper_turn_driver_try_provider.turn_start
-        ~config ~keeper_name ~trace_id ~messages:history
-  ; (* The next turn begins from the history as it is stored now, before the
-       wake line. *)
-    history_at_start = Keeper_turn_boundaries.history_at_start_of_messages history
+      (Keeper_turn_driver_try_provider.turn_starts
+         ~config ~keeper_name ~trace_id ~messages:history)
+        .Keeper_turn_driver_try_provider.boundary
+  ; (* The next turn is not open yet. It begins from the history as it is
+       stored now, after its every atom, before the wake line. *)
+    this_turn_start = Some (snd (Runtime_model_input_tail_window.annotate history))
   ; (* Stdlib lazy: private to the synchronous reader of these values, never
        shared across fibers. A ledger that holds needs no store scan unless a
        Librarian point weighs the accepted start; candidates share the one
@@ -522,7 +523,7 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
         ~front
         ~accepted
         ~turn_start:reads.turn_start
-        ~history_at_start:reads.history_at_start
+        ~this_turn_start:reads.this_turn_start
         ~counted_tokens
         ~atom_count:reads.atom_count
         ~digest_at:reads.digest_at

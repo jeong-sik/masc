@@ -64,9 +64,9 @@ val appending_decision : path:string -> row:string -> (unit -> appended) -> unit
     around it. [row] is the text that goes to disk.
 
     The cell is seen before [append] runs and settled after it. A filled
-    cell takes the row when the row is a JSON object of at most half the
-    reader's window with its newline, which is the newest row a read then
-    finds. For any other row the cell is forgotten and the next reader reads
+    cell takes the row when the row is a JSON object that, with its newline,
+    is at least one byte shorter than the reader's window: that is the
+    newest row a read then finds. For any other row the cell is forgotten and the next reader reads
     the file. The cell is also forgotten when another append of the record
     settled first, when the file came to exist under another name than the
     cell was chosen by, and when [append] raises: the file may or may not

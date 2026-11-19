@@ -5,7 +5,11 @@
     start at the file's first byte may have cut its first piece, so the read
     drops that piece. Blank lines are passed over after that, so the piece
     that goes is the one the window cut and not a whole line behind a blank
-    one. *)
+    one.
+
+    The read also stops before [max_bytes] once it has passed more than
+    [max_lines] newlines. What it read then starts where its last chunk
+    starts, and the piece cut there goes the same way. *)
 
 open Alcotest
 open Masc
@@ -19,16 +23,19 @@ let with_file content f =
        f path)
 ;;
 
-(* The lines the read answers with for the last [max_bytes] bytes of a file
-   that holds [content]. *)
-let tail content ~max_bytes =
+(* The lines the read answers with for a file that holds [content]. *)
+let tail_lines content ~max_bytes ~max_lines =
   with_file content
   @@ fun path ->
-  match Keeper_memory_recall.read_tail_of_file path ~max_bytes ~max_lines:100 with
+  match Keeper_memory_recall.read_tail_of_file path ~max_bytes ~max_lines with
   | Ok (Keeper_memory_recall.Tail { Keeper_memory_recall.lines; _ }) -> lines
   | Ok Keeper_memory_recall.No_file -> fail "the file was not found"
   | Error _ -> fail "the file could not be read"
 ;;
+
+(* The same for the last [max_bytes] bytes, with more lines asked for than
+   the file holds. *)
+let tail content ~max_bytes = tail_lines content ~max_bytes ~max_lines:100
 
 let lines = list string
 
@@ -72,6 +79,39 @@ let test_blank_lines_are_passed_over_after_the_drop () =
     (tail content ~max_bytes:(String.length " \n\ntwo\n"))
 ;;
 
+(* The read goes back this many bytes at a time. *)
+let chunk_bytes = 64 * 1024
+
+(* A file whose last chunk is [chunk] and which holds four bytes before it.
+   [chunk] has five newlines, more than the two lines asked for, so the read
+   stops after that one chunk with no byte limit given (a [max_bytes] of
+   zero). *)
+let stopped_after_one_chunk chunk =
+  check int "the fixture's chunk is one chunk of the read" chunk_bytes (String.length chunk);
+  tail_lines ("zero" ^ chunk) ~max_bytes:0 ~max_lines:2
+;;
+
+let test_a_read_that_stops_early_drops_the_piece_its_chunk_cut () =
+  let after_the_long_line = "\n\n\nlast\n" in
+  let long_line bytes = String.make bytes 'f' in
+  let at_a_newline =
+    long_line (chunk_bytes - String.length "\n" - String.length after_the_long_line)
+  in
+  check
+    lines
+    "a chunk that starts at a newline drops no line"
+    [ at_a_newline; "last" ]
+    (stopped_after_one_chunk ("\n" ^ at_a_newline ^ after_the_long_line));
+  let behind_a_cut_line =
+    long_line (chunk_bytes - String.length "o\n" - String.length after_the_long_line)
+  in
+  check
+    lines
+    "a chunk that cuts a line drops what is left of it"
+    [ behind_a_cut_line; "last" ]
+    (stopped_after_one_chunk ("o\n" ^ behind_a_cut_line ^ after_the_long_line))
+;;
+
 let () =
   run
     "keeper_tail_read"
@@ -81,6 +121,10 @@ let () =
             "blank lines are passed over after the drop"
             `Quick
             test_blank_lines_are_passed_over_after_the_drop
+        ; test_case
+            "a read that stops early drops the piece its chunk cut"
+            `Quick
+            test_a_read_that_stops_early_drops_the_piece_its_chunk_cut
         ] )
     ]
 ;;

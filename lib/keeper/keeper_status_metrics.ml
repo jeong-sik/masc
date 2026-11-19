@@ -253,18 +253,20 @@ let newest_metrics_lines_result config ~keeper_name =
 let recent_activity_row_count = 5
 
 (* The rows the recent activity shows, oldest first: the end of the kept
-   lines. This reader shows the rows it can, so a store the strict read
-   refuses is read as it was read before the lines were kept: its newest
-   [recent_activity_row_count] rows, passing over a directory entry that is
-   not the store's.
+   lines. [newest_lines] is what [newest_metrics_lines_result] answered for
+   the Keeper: a Keeper row asks that once and gives the answer to this
+   reader and to its tool audit. This reader shows the rows it can, so a
+   store the strict read refused is read as it was read before the lines
+   were kept: its newest [recent_activity_row_count] rows, passing over a
+   directory entry that is not the store's.
 
    That read asks for no more rows than are shown. It opens day files from
    the newest back until it has them, and a day file it cannot read raises.
    Asking for all [recent_metrics_row_count] rows took it back to the very
    file the strict read had refused, and the raise lost the Keeper's whole
    row. *)
-let recent_activity_lines config ~keeper_name =
-  match newest_metrics_lines_result config ~keeper_name with
+let recent_activity_lines config ~keeper_name ~newest_lines =
+  match newest_lines with
   | Ok lines -> List.drop (max 0 (List.length lines - recent_activity_row_count)) lines
   | Error (_ : Dated_jsonl.read_error) ->
     Dated_jsonl.read_recent_lines

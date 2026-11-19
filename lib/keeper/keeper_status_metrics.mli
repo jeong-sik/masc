@@ -78,15 +78,22 @@ val recent_activity_row_count : int
 (** How many of a Keeper's newest metrics rows the recent activity of a
     Keeper row shows. *)
 
-val recent_activity_lines : Workspace.config -> keeper_name:string -> string list
+val recent_activity_lines :
+  Workspace.config
+  -> keeper_name:string
+  -> newest_lines:(string list, Dated_jsonl.read_error) result
+  -> string list
 (** The text of the Keeper's newest {!recent_activity_row_count} metrics
-    rows, oldest first: the end of {!newest_metrics_lines_result}.
+    rows, oldest first: the end of [newest_lines], which is what
+    {!newest_metrics_lines_result} answered for the Keeper. A Keeper row asks
+    that once and gives the answer to this reader and to its tool audit.
 
-    The recent activity shows the rows it can. When the strict read refuses
-    the store, those rows are read with [Dated_jsonl.read_recent_lines],
-    which passes over a directory entry that is not the store's and answers
-    no row for a directory it cannot list. It asks for
-    {!recent_activity_row_count} rows and no more, so it opens no day file
-    older than the ones that hold them.
+    The recent activity shows the rows it can. When the strict read refused
+    the store ([newest_lines] is an [Error]), those rows are read with
+    [Dated_jsonl.read_recent_lines], which passes over a directory entry that
+    is not the store's and answers no row for a directory it cannot list. It
+    asks for {!recent_activity_row_count} rows and opens day files from the
+    newest back until it has them.
 
-    @raise Sys_error when one of those day files cannot be read. *)
+    @raise Sys_error when one of those day files cannot be opened or read.
+    @raise End_of_file when one of them is cut short while it is read. *)

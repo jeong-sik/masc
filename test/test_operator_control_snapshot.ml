@@ -885,6 +885,16 @@ let test_recent_tool_names_ignore_blank_rows () =
        [ ""; turn_row [ "only" ]; "   " ])
 ;;
 
+(* The tool audit of a Keeper as its row reads it: the newest metrics lines
+   are asked for once and given to the read. *)
+let read_tool_audit config (meta : Keeper_meta_contract.keeper_meta) =
+  Operator_control_snapshot_tool_audit.read
+    config
+    meta
+    ~newest_lines:
+      (Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name:meta.name)
+;;
+
 let test_current_nested_reads_observe_actual_commits_inside_the_request_ttl () =
   Eio_main.run (fun env ->
     ensure_fs env;
@@ -905,7 +915,7 @@ let test_current_nested_reads_observe_actual_commits_inside_the_request_ttl () =
       (* The tool audit takes no read policy: it has no cache of its own, so
          every read sees the row just committed. *)
       let tools () =
-        match Operator_control_snapshot_tool_audit.read config meta with
+        match read_tool_audit config meta with
         | Read audit -> audit.recent_tool_names
         | Unreadable detail -> Alcotest.failf "tool audit unreadable: %s" detail
       in
@@ -943,7 +953,7 @@ let test_a_read_tool_audit_publishes_its_tools () =
       ignore (Workspace.init config ~agent_name:None);
       Keeper_types_support.append_keeper_metrics config meta.name
         (Yojson.Safe.from_string (turn_row ["recorded-tool"]));
-      let read = Operator_control_snapshot_tool_audit.read config meta in
+      let read = read_tool_audit config meta in
       (match read with
        | Read audit ->
          Alcotest.(check (list string)) "the store holds the recorded tool"
@@ -970,7 +980,7 @@ let test_unreadable_metrics_store_is_not_an_empty_tool_audit () =
       let metrics_dir = Keeper_types_support.keeper_metrics_dir config meta.name in
       (* The store refuses a directory at a day file's path. *)
       Fs_compat.mkdir_p (Filename.concat (Filename.concat metrics_dir "2026-01") "01.jsonl");
-      let read = Operator_control_snapshot_tool_audit.read config meta in
+      let read = read_tool_audit config meta in
       (match read with
        | Unreadable _ -> ()
        | Read _ -> Alcotest.fail "an unreadable store read as a tool audit");

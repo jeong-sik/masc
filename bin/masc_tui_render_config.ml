@@ -1287,8 +1287,8 @@ let render_themes (state : state) =
         if entry.lifted = 0 then count + 1 else count)
       0 entries
   in
-  let show_sample = rows >= 20 in
-  let chrome_rows = if show_sample then 10 else 7 in
+  let show_sample = rows >= 21 in
+  let chrome_rows = if show_sample then 11 else 8 in
   let content_height = max 1 (rows - chrome_rows) in
   let cursor =
     max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
@@ -1307,16 +1307,10 @@ let render_themes (state : state) =
          (if entries = [] then None
           else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:(List.length entries))));
   box_divider buf cols;
-  box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") (name_width + 2) ^ " "
-     ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
-     ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
-     ^ fit_width (ui_text state ~ko:"원래 대비" ~en:"raw contrast") 12)
-  ;
   (* The key the way the footer spells it, then the three filters as the
-     product's tab strip draws a choice: the one in force marked. It read
-     "Filter: [f] [All 53] · Dark 40 · Light 13", where the brackets meant a
-     key once and the chosen filter once, on the same row. *)
+     product's tab strip draws a choice: the one in force marked. Placed above
+     the column headers so the table header sits directly on top of the rows
+     it labels. *)
   let explanation =
     if cols >= 92 then
       "  ·  "
@@ -1338,7 +1332,15 @@ let render_themes (state : state) =
         ]
   in
   box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
+  box_line_styled buf cols ~style:(Theme.recede ())
+    ("  " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") (name_width + 2) ^ " "
+     ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
+     ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
+     ^ fit_width (ui_text state ~ko:"원래 대비" ~en:"raw contrast") 12);
+  box_divider buf cols;
   let chosen = state.theme_choice in
+  let sel = Theme.selection_style () in
+  let inner = framed_inner_width cols in
   List.iteri
     (fun index (entry : Theme_choice.entry) ->
       if index >= scroll && index < scroll + content_height then begin
@@ -1348,11 +1350,15 @@ let render_themes (state : state) =
           | None -> false
         in
         let swatch = Theme_choice.swatch_cells entry in
-        let row =
-          Printf.sprintf "  %s %s " (if picked then chosen_mark else " ")
+        let is_selected = index = cursor in
+        let prefix =
+          Printf.sprintf "%s%s %s "
+            (if is_selected then "\xe2\x80\xba " else "  ")
+            (if picked then chosen_mark else " ")
             (fit_width (Terminal_text.single_line entry.name) name_width)
-          ^ swatch
-          ^ "  "
+        in
+        let suffix =
+          "  "
           ^ fit_width (if entry.light then ui_text state ~ko:"밝음" ~en:"light"
                        else ui_text state ~ko:"어두움" ~en:"dark") 9
           ^ " "
@@ -1361,8 +1367,38 @@ let render_themes (state : state) =
                else if entry.lifted = 0 then Printf.sprintf "원래 %d/%d" entry.measured entry.measured
                else Printf.sprintf "부족 %d/%d" entry.lifted entry.measured) 12
         in
-        if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr row)
-        else box_line buf cols row
+        if is_selected then begin
+          if String.equal (Theme.ok ()) "" then
+            (* Under NO_COLOR / monochrome terminals, palette swatches carry no
+               colour escapes, so keep an unbroken reverse selection band. *)
+            box_line_selected buf cols (prefix ^ Masc_tui_theme.strip_sgr swatch ^ suffix)
+          else
+            (* Preserve swatch background SGRs inside the full-width selection
+               band so the chosen theme keeps its 8-colour preview visible. *)
+            let used =
+              Message_layout.display_width prefix
+              + Message_layout.display_width swatch
+              + Message_layout.display_width suffix
+            in
+            let body =
+              if inner <= 0 then ""
+              else if used <= inner then
+                let trail = String.make (inner - used) ' ' in
+                sel ^ prefix ^ Ansi.reset ^ swatch ^ sel ^ suffix ^ trail ^ Ansi.reset
+              else
+                let raw = sel ^ prefix ^ Ansi.reset ^ swatch ^ sel ^ suffix ^ Ansi.reset in
+                let room = max 0 (inner - Message_layout.cut_mark_cells) in
+                let kept =
+                  match Message_layout.take_cells raw room with
+                  | Message_layout.Whole s | Message_layout.Cut s -> s
+                in
+                let pad = String.make (max 0 (room - Message_layout.display_width kept)) ' ' in
+                kept ^ Ansi.reset ^ sel ^ Message_layout.cut_mark ^ pad ^ Ansi.reset
+            in
+            add_row buf
+              [ sel; frame_margin; Ansi.reset; body; Ansi.reset; sel; frame_margin; Ansi.reset ]
+        end else
+          box_line buf cols (prefix ^ swatch ^ suffix)
       end)
     entries;
   let drawn = min content_height (List.length entries) in
@@ -1679,7 +1715,7 @@ let render_config_models (state : state) =
              if table_mode && index = 0 then
                box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line)
              else if index = marked_line then
-               box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+               box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
              else box_line buf cols ("  " ^ line)
          | None -> box_empty buf cols
        done);

@@ -1273,18 +1273,13 @@ let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = agenda_lines state in
   let selected = Agenda.selected_index lines ~selected:state.agenda_selected in
-  let paint ~selected (line : Agenda.line) =
-    let body =
-      match line.Agenda.tone with
-      | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
-      | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
-      | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
-      | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
-      | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
-    in
-    (* Reversed rather than marked with a glyph: the rows are already fitted
-       to the column and a leading mark would push the right half off. *)
-    if selected then Ansi.reverse ^ body ^ Ansi.reset else body
+  let paint (line : Agenda.line) =
+    match line.Agenda.tone with
+    | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
   in
   (* Every key of the panel moves -- j/k, the page keys, g/G, Enter and Esc --
      so zone 5 names none of them (RFC tui-one-screen-grammar section 2) and
@@ -1306,7 +1301,12 @@ let render_agenda (state : state) =
       List.iteri
         (fun index line ->
           if index >= scroll && index < scroll + height then
-            c.push (paint ~selected:(selected = Some index) line))
+            (* Full-width adaptive selection band rather than leading glyph:
+               rows are already fitted to the column. *)
+            if selected = Some index then
+              c.push_selected (Masc_tui_theme.strip_sgr line.Agenda.text)
+            else
+              c.push (paint line))
         lines;
       (* What falls off this panel is not more of the same: measured at 24
          rows and 100 columns, the panel drew sixteen of its twenty coming

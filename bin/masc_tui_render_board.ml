@@ -352,9 +352,10 @@ let board_hearth_census_line ~cols (state : state) =
       let entry (name, text, band) =
         let selected = Option.equal String.equal state.board_hearth (Some name) in
         (* Selection wins over size: which hearth is being read is a different
-           axis from how big it is, and the reverse block says the first
-           without leaving the second unsaid -- the count is in the text. *)
-        if selected then Ansi.reverse ^ text ^ Ansi.reset
+           axis from how big it is, and the adaptive selection highlight says
+           the first without leaving the second unsaid -- the count is in the
+           text. *)
+        if selected then Theme.selection_style () ^ Ansi.bold ^ text ^ Ansi.reset
         else magnitude_tone band ^ text ^ Ansi.reset
       in
       (* What fits, then how many it could not carry. The board here holds

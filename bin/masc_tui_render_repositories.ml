@@ -308,6 +308,7 @@ type repository_studio_geometry = {
   rsg_list_width : int;
   rsg_detail_width : int;
   rsg_detail : string list;
+  rsg_detail_spec : (string * string list) option;
   rsg_errors : string list;
   rsg_content_height : int;
 }
@@ -338,14 +339,17 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
   (* As tall as the longest detail among the loaded repositories (RFC
      tui-one-screen-grammar §8), so j and k move the selection and not the
      card's bottom edge. *)
-  let detail = match selected with
+  let detail_spec = match selected with
     | Some repo when context_budget > 0 ->
         let more = ui_text state ~ko:"v:전체 경로·배정 읽기" ~en:"v:read complete context" in
-        studio_panel ~width:detail_width
-          ~title:(Terminal_text.single_line repo.rp_name)
-          ~lines:(Masc_tui_detail_height.fit ~budget:context_budget ~rows:repos ~detail:preview
-                    ~too_tall:(Masc_tui_detail_height.Cut_with more) ~blank:"" (preview repo))
-    | Some _ | None -> [] in
+        Some
+          ( Terminal_text.single_line repo.rp_name
+          , Masc_tui_detail_height.fit ~budget:context_budget ~rows:repos ~detail:preview
+              ~too_tall:(Masc_tui_detail_height.Cut_with more) ~blank:"" (preview repo) )
+    | Some _ | None -> None in
+  let detail = match detail_spec with
+    | Some (title, lines) -> studio_panel ~width:detail_width ~title ~lines
+    | None -> [] in
   let list_budget = if split then panel_budget else panel_budget - List.length detail in
   let errors = match state.repositories_error with
     | Some reason when boxed && list_budget > 4 ->
@@ -356,7 +360,7 @@ let repository_studio_geometry (state : state) ~cols ~budget ~cursor =
   let content_height = max 1 (min shown room) in
   {rsg_intro = intro; rsg_split = split; rsg_boxed = boxed;
    rsg_list_width = list_width; rsg_detail_width = detail_width;
-   rsg_detail = detail; rsg_errors = errors;
+   rsg_detail = detail; rsg_detail_spec = detail_spec; rsg_errors = errors;
    rsg_content_height = content_height}
 
 let repository_studio_content_height state ~cols ~budget ~cursor =
@@ -430,9 +434,49 @@ let render_repository_list (state : state) =
       (* [j/k] steps over a row; with none, the title does not offer it. *)
       let listing_title =
         ui_text state ~ko:"등록된 저장소" ~en:"Registered repositories" in
-      let listing = if geometry.rsg_boxed then
-          studio_panel ~width:list_width ~title:listing_title ~lines else lines in
-      let detail = geometry.rsg_detail in
+      let listing, detail =
+        if geometry.rsg_split && geometry.rsg_boxed then
+          let detail_title, detail_lines =
+            match geometry.rsg_detail_spec with
+            | Some spec -> spec
+            | None ->
+                let style, note =
+                  if shown > 0 then
+                    Theme.recede (), ui_text state ~ko:"저장소를 선택하세요." ~en:"Select a repository."
+                  else
+                    match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
+                    | Page_failed ->
+                        Theme.bad (),
+                        String.trim (page_failed_note ~ko:(state.ui_language = Lang_ko))
+                    | Page_unread ->
+                        Theme.recede (),
+                        String.trim
+                          (page_unread_note_while ~ko:(state.ui_language = Lang_ko)
+                             ~reading:state.repositories_inflight)
+                    | Page_empty ->
+                        Theme.recede (),
+                        ui_text state ~ko:"등록된 저장소가 없습니다."
+                          ~en:"No registered repositories yet."
+                in
+                ( ui_text state ~ko:"저장소 상세" ~en:"Repository detail"
+                , [ style ^ note ^ Ansi.reset ] )
+          in
+          let panel_max = max 1 (budget - List.length geometry.rsg_intro - 2) in
+          let inner_h =
+            min panel_max (max (List.length lines) (List.length detail_lines))
+          in
+          let pad xs =
+            let shown = List.take inner_h xs in
+            shown @ List.init (max 0 (inner_h - List.length shown)) (fun _ -> "")
+          in
+          ( studio_panel ~width:list_width ~title:listing_title ~lines:(pad lines)
+          , studio_panel ~width:detail_width ~title:detail_title ~lines:(pad detail_lines) )
+        else
+          ( (if geometry.rsg_boxed then
+               studio_panel ~width:list_width ~title:listing_title ~lines
+             else lines)
+          , geometry.rsg_detail )
+      in
       if geometry.rsg_split then begin
         let height = max (List.length listing) (List.length detail) in
         let count = min (budget - List.length geometry.rsg_intro) height in

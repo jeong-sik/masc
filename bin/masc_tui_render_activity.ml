@@ -16,7 +16,7 @@ module Page_line = Masc_tui_page_line
 let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> "\xc2\xb7"
   | System_info -> "\xe2\x80\xa2"
-  | System_warn -> "!"
+  | System_warn -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
   | System_error -> "\xc3\x97"
   | System_level_unknown _ -> "?"
 
@@ -879,8 +879,8 @@ let acting_notices (state : state) ~trace_unavailable =
     ; Option.map warning unseen; Option.map warning replay; trace ]
 
 let acting_content_height ~rows ~notices =
-  (* Title/divider, column heading, then bottom/footer. *)
-  max 1 (rows - (3 + List.length notices + listing_rows_below_the_body))
+  (* Title/divider, column heading/divider, then bottom/footer. *)
+  max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
 
 let acting_list_height state ~terminal_rows =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1064,6 +1064,7 @@ let render_acting (state : state) =
       ~clock:(ui_text state ~ko:"시각" ~en:"TIME")
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
+  box_divider buf cols;
   if shown = 0 then begin
     let nothing_under_filter =
       ui_text state ~ko:"  (이 필터에 해당하는 것 없음 · f 로 전체 보기)"
@@ -1129,7 +1130,7 @@ let render_acting (state : state) =
           in
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
           if selected then
-            let marked = "> " ^ String.sub line 2 (String.length line - 2) in
+            let marked = "\xe2\x80\xba " ^ String.sub line 2 (String.length line - 2) in
             box_line_selected buf cols (Masc_tui_theme.strip_sgr marked)
           else box_line_styled buf cols ~style line
     done;

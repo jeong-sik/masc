@@ -475,6 +475,7 @@ let render_code (state : state) =
     let framed_top = if framed then framed_top else fun _ _ -> () in
     let framed_divider = if framed then framed_divider else box_divider in
     let framed_line = if framed then framed_line else box_line in
+    let styled_line = if framed then framed_line_styled else box_line_styled in
     let framed_empty = if framed then framed_empty else box_empty in
     let framed_bottom = if framed then framed_bottom else box_bottom in
     framed_top pane_buf pane_cols;
@@ -581,19 +582,12 @@ let render_code (state : state) =
                 in
                 colour ^ glyph ^ Ansi.reset ^ " "
           in
-          let line =
-            if selected then
-              let plain_marker = Masc_tui_theme.strip_sgr marker in
-              Theme.selection_style () ^ " " ^ plain_marker ^ name
-              ^ String.make
-                  (max 0
-                     (framed_inner_width pane_cols - 3
-                      - Message_layout.display_width (plain_marker ^ name)))
-                  ' '
-              ^ Ansi.reset
-            else " " ^ marker ^ name
-          in
-          framed_line pane_buf pane_cols line
+          if selected then
+            let plain_marker = Masc_tui_theme.strip_sgr marker in
+            styled_line pane_buf pane_cols ~style:(Theme.sidebar_selection ())
+              (" " ^ plain_marker ^ Masc_tui_theme.strip_sgr name)
+          else
+            framed_line pane_buf pane_cols (" " ^ marker ^ name)
       | None -> framed_empty pane_buf pane_cols
     done;
     framed_bottom pane_buf pane_cols
@@ -1028,10 +1022,11 @@ let render_code (state : state) =
                  let body = Message_layout.drop_cells body hscroll in
                  let row_index = scroll + i in
                  let gutter_style =
-                   (* The cursor line carries the gutter in reverse video:
-                      a full-row band would sit on top of the lexer's own
-                      colours, and the gutter is the row's stable margin. *)
-                   if row_index = state.code_file_cursor then Ansi.reverse
+                   (* The cursor line carries the gutter in the adaptive
+                      selection band: a full-row band would sit on top of the
+                      lexer's own colours, and the gutter is the row's stable
+                      margin. *)
+                   if row_index = state.code_file_cursor then Theme.selection_style ()
                    else Ansi.dim
                  in
                  let mark =

@@ -1134,7 +1134,10 @@ let render_approvals (state : state) =
        row's position, so a queue longer than its rows says so without
        spending one of them. *)
     let approval_total = List.length approvals in
-    let content_height = approval_body_rows in
+    let show_header = approval_body_rows >= 3 in
+    let content_height =
+      if show_header then approval_body_rows - 2 else approval_body_rows
+    in
     let scroll_offset =
       if content_height > 0 && state.approval_cursor >= content_height then
         state.approval_cursor - content_height + 1
@@ -1157,6 +1160,13 @@ let render_approvals (state : state) =
       |> min (max 0 ((framed_inner_width cols - 6) / 2))
       |> min (max 0 (framed_inner_width cols - 6 - phase_width)) in
     let subject_width = max 1 (framed_inner_width cols - name_width - 6) in
+    if show_header then begin
+      box_line_styled buf cols ~style:(Theme.recede ())
+        (Printf.sprintf "    %s  %s"
+           (fit_width (ui_text state ~ko:"요청" ~en:"REQUEST") subject_width)
+           (fit_width (ui_text state ~ko:"요청자" ~en:"ACTOR") name_width));
+      box_divider buf cols
+    end;
     let approvals_window = Rows.of_list ~first:scroll_offset ~height:content_height approvals in
     report_drawn_list Approval_items ~height:content_height;
     for i = 0 to content_height - 1 do
@@ -1184,7 +1194,7 @@ let render_approvals (state : state) =
         in
         let is_selected = idx = state.approval_cursor in
         if is_selected then
-          box_line_selected buf cols (Masc_tui_theme.strip_sgr ("> " ^ line))
+          box_line_selected buf cols (Masc_tui_theme.strip_sgr ("\xe2\x80\xba " ^ line))
         else
           box_line buf cols ("  " ^ line)
       end else

@@ -70,7 +70,9 @@ import {
   activeStreamEntryId,
   activeStreamRequestId,
   holdStopUntilAccepted,
-  noteStreamAcceptance,
+  endAcceptanceWait,
+  closeSendWithHeldStop,
+  KeeperSendClosedBeforeAcceptance,
   appendThreadEntry,
   attachKeeperAudioClip,
   chatHistoryEntriesFromRest,
@@ -299,8 +301,10 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
   // the server before the submit and find nothing, and closing the stream does
   // not take back an operation the server accepts: its turn would run under
   // rows marked cancelled. The stop is held instead, and the send passes it on
-  // when the acceptance arrives. A send that ends without one drops the stop
-  // with its stream, and its rows say how the send ended.
+  // when the acceptance arrives. The hold lasts only while an acceptance can
+  // still come: a send that ends without one drops the stop and its rows say
+  // how the send ended, and the operator can close the send instead of waiting
+  // (closeKeeperSendWithHeldStop).
   const heldReplyRow = holdStopUntilAccepted(keeperName)
   if (heldReplyRow !== null) {
     finalizeAssistantEntry(keeperName, heldReplyRow, { streamState: 'stop_pending' })
@@ -318,6 +322,17 @@ export async function cancelActiveKeeperThreadMessage(name: string): Promise<boo
     return true
   }
   return locallyAborted
+}
+
+/** The way out of a held stop. The operator does not wait for the acceptance
+ *  any longer: the send is closed and the stop is sent nowhere. The reply row
+ *  says so while the send still has one. A row that stored history put in its
+ *  place is the server's and is left as it is. It is its own action, not a
+ *  second press of stop, so that pressing stop twice does not give the wait
+ *  up. */
+export function closeKeeperSendWithHeldStop(name: string): void {
+  const keeperName = name.trim()
+  if (keeperName) closeSendWithHeldStop(keeperName)
 }
 
 export async function interruptKeeperTurn(keeperName: string): Promise<boolean> {
@@ -1032,6 +1047,8 @@ const hydratingKeeperChatOperations = new Set<string>()
 const sendingKeeperThreadMessages = new Set<string>()
 const INCOMPLETE_KEEPER_REPLY_MESSAGE = '응답 일부를 받지 못했고 저장된 대화도 읽지 못했습니다.'
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
+const KEEPER_SEND_CLOSED_BEFORE_ACCEPTANCE_TEXT =
+  '서버의 접수를 확인하기 전에 연결을 끊었습니다. 중지는 서버에 보내지 않았습니다. 서버가 이 요청을 접수했다면 턴이 실행됩니다.'
 
 function keeperThreadMessageSendKey(
   keeperName: string,
@@ -1603,7 +1620,7 @@ export async function sendKeeperThreadMessage(
           }
           operationAccepted = true
           markLiveSendRequestAccepted(acceptedOperationId)
-          stopWasHeld = noteStreamAcceptance(keeperName, operationId)
+          stopWasHeld = endAcceptanceWait(keeperName, operationId)
           upsertTrackedKeeperChatOperation({
             operationId: acceptedOperationId,
             keeperName,
@@ -1795,10 +1812,16 @@ export async function sendKeeperThreadMessage(
       removeTrackedKeeperChatOperation(operationId)
     }
   } catch (err) {
+    // The stream is read no further. A send that failed stays listed while it
+    // reads the stored history below, and a stop pressed in that time has no
+    // acceptance to wait for. A stop held until now is dropped.
+    endAcceptanceWait(keeperName, operationId)
     flushPendingKeeperStreamDeltas(keeperName, assistantId)
-    // A stop is what aborts this stream, and a stop waits for the acceptance.
-    // An abort before it is a failed send like any other: no row says cancelled
-    // for an operation the server was never asked to stop.
+    // A stop aborts this stream only after the acceptance, where it also goes
+    // to the server. An abort before it asked the server nothing: the operator
+    // closed the send instead of waiting, or the abort came from somewhere else
+    // and is a failed send like any other. Both are settled below, and neither
+    // row says cancelled for an operation the server was never asked to stop.
     if (operationAccepted && isAbortError(err)) {
       const durablePendingRequest = trackedKeeperChatOperationsForKeeper(keeperName)
         .find(candidate => candidate.operationId === operationId) ?? null
@@ -1852,10 +1875,21 @@ export async function sendKeeperThreadMessage(
       throw err
     }
 
-    const errorMessage =
+    // The operator closed this send while its stop waited for the acceptance.
+    // The send did not fail and the server was asked nothing, so the reply row
+    // says neither error nor cancelled: it says what was closed and what the
+    // Dashboard does not know. Who closed the stream is read from this send's
+    // own signal. The value the stream threw is the browser's.
+    const signalReason: unknown = controller.signal.reason
+    const operatorClose =
+      signalReason instanceof KeeperSendClosedBeforeAcceptance ? signalReason : null
+    const failureMessage =
       err instanceof Error ? err.message : `Failed to send direct message to ${keeperName}`
+    const errorMessage = operatorClose
+      ? KEEPER_SEND_CLOSED_BEFORE_ACCEPTANCE_TEXT
+      : failureMessage
     finalizeAssistantEntry(keeperName, assistantId, {
-      delivery: 'error' as KeeperConversationDelivery,
+      delivery: operatorClose ? 'interrupted' : 'error',
       streamState: null,
       error: errorMessage,
       timestamp: new Date().toISOString(),
@@ -1876,6 +1910,11 @@ export async function sendKeeperThreadMessage(
         reason: errorMessage,
       }),
     })
+    // A send the operator closed leaves here. It raises no action error: the
+    // reply row carries what happened. It does not read the stored history
+    // first either. That read asks the server the operator stopped waiting
+    // for, and the composer stays busy until it answers or times out.
+    if (operatorClose) throw operatorClose
     try {
       const reconciled = await reconcileOperationFromServerHistory(
         keeperName,

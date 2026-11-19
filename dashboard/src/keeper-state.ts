@@ -66,6 +66,14 @@ export function isKeeperChatHistoryPending(keeperName: string): boolean {
   return keeperChatHistoryHydration.value[name] === undefined
 }
 export const keeperSending = signal<Record<string, boolean>>({})
+// keeperName -> true while a stop is held for the Keeper's first active
+// operation. The stream records hold that fact and are not reactive. This is
+// what the screen reads of it, written where a record's wait changes and where
+// a record is removed. Adding a record changes nothing here: it is the first
+// only when the list was empty, and a new record holds no stop. The reply row
+// cannot carry it: stored history takes that row's place while the stream is
+// still open.
+export const keeperStopHeld = signal<Record<string, boolean>>({})
 export const keeperProbing = signal<Record<string, boolean>>({})
 export const keeperRecovering = signal<Record<string, boolean>>({})
 export const keeperChatHistoryErrors = signal<Record<string, string | null>>({})
@@ -93,11 +101,14 @@ export const THREAD_ENTRY_CAP = 200
 interface KeeperActiveStream {
   entryId: string
   controller: AbortController
-  // Whether this send has read the server's acceptance, and whether the
-  // operator pressed stop while it had read none. It lasts as long as the
-  // stream does, unlike the live-send claim below, which a send that finished
-  // or handed its operation off releases while the stream is still listed.
-  acceptance: 'awaited' | 'awaited_stop_held' | 'observed'
+  // Whether this send still waits for the server's acceptance, and whether
+  // the operator pressed stop while it does. The wait is over when the send
+  // reads the acceptance, and when its stream throws: a send that failed stays
+  // listed while it reads the stored history, with no acceptance coming. The
+  // field lasts as long as the stream does, unlike the live-send claim below,
+  // which a send that finished or handed its operation off releases while the
+  // stream is still listed.
+  acceptance: 'awaited' | 'awaited_stop_held' | 'not_awaited'
 }
 
 // keeperName -> operationId -> stream. Map insertion order is the owner FIFO
@@ -120,6 +131,13 @@ const acceptedLiveSendRequestIds = new Set<string>()
 
 export function _resetActiveKeeperStreamsForTests(): void {
   keeperActiveStreams.clear()
+  keeperStopHeld.value = {}
+}
+
+function publishStopHeld(name: string): void {
+  const first = keeperActiveStreams.get(name)?.values().next().value
+  const held = first?.acceptance === 'awaited_stop_held'
+  if ((keeperStopHeld.value[name] ?? false) !== held) setRecordValue(keeperStopHeld, name, held)
 }
 
 // --- Helpers ---
@@ -1989,6 +2007,7 @@ export function clearActiveStream(name: string, operationId: string): void {
   const streams = keeperActiveStreams.get(name)
   streams?.delete(operationId)
   if (streams?.size === 0) keeperActiveStreams.delete(name)
+  publishStopHeld(name)
   releaseLiveSendRequest(operationId)
 }
 
@@ -2011,37 +2030,68 @@ export function activeStreamRequestId(name: string): string | null {
     : null
 }
 
-/** Keep a stop for the Keeper's first active operation while its send has not
- *  read the server's acceptance. Until then the Dashboard cannot tell whether
+/** Keep a stop for the Keeper's first active operation while its send waits
+ *  for the server's acceptance. Until then the Dashboard cannot tell whether
  *  the server holds the operation: a stop that names it could arrive before
  *  the submit, and closing the stream does not take back an operation the
  *  server accepts. Answers the reply row of the held operation, or null when
- *  there is nothing to hold: no active operation, or one whose acceptance was
- *  read. The held stop lives on the stream's record and goes when the stream
- *  does. */
+ *  there is nothing to hold: no active operation, or one whose wait is over.
+ *  The held stop lives on the stream's record. It ends at the acceptance and
+ *  when the stream throws, which is also how a send the operator closes ends.
+ *  A stream that closes without either takes the held stop with its record. */
 export function holdStopUntilAccepted(name: string): string | null {
   const streams = keeperActiveStreams.get(name)
   const first = streams?.entries().next().value
   if (!streams || !first) return null
   const [operationId, stream] = first
   switch (stream.acceptance) {
-    case 'observed':
+    case 'not_awaited':
       return null
     case 'awaited':
     case 'awaited_stop_held':
       streams.set(operationId, { ...stream, acceptance: 'awaited_stop_held' })
+      publishStopHeld(name)
       return stream.entryId
   }
 }
 
-/** Record that this operation's send read the server's acceptance. Answers
- *  whether a stop was held for it. */
-export function noteStreamAcceptance(name: string, operationId: string): boolean {
+/** End this operation's wait for the server's acceptance: its send read the
+ *  acceptance, or its stream threw and none is coming. Answers whether a stop
+ *  was held for it. At the acceptance the send passes that stop on. A stream
+ *  that threw has nothing to pass it to. No later stop is held for this send. */
+export function endAcceptanceWait(name: string, operationId: string): boolean {
   const streams = keeperActiveStreams.get(name)
   const stream = streams?.get(operationId)
   if (!streams || !stream) return false
-  streams.set(operationId, { ...stream, acceptance: 'observed' })
+  streams.set(operationId, { ...stream, acceptance: 'not_awaited' })
+  publishStopHeld(name)
   return stream.acceptance === 'awaited_stop_held'
+}
+
+/** Why a send's stream was closed when the operator stopped waiting for the
+ *  acceptance its stop was held for. The send reads it from its own signal and
+ *  throws it to its caller, which reads an abort: the send did not fail, and
+ *  the server was not asked to stop anything. */
+export class KeeperSendClosedBeforeAcceptance extends Error {
+  override readonly name = 'AbortError'
+  constructor() {
+    super('The send was closed before it read the acceptance of its operation.')
+  }
+}
+
+/** The operator stops waiting for the acceptance that the stop of the
+ *  Keeper's first active operation is held for. Closes that send's stream:
+ *  the held stop goes nowhere. A send with no stop held is not closed here. */
+export function closeSendWithHeldStop(name: string): void {
+  const first = keeperActiveStreams.get(name)?.values().next().value
+  if (!first) return
+  switch (first.acceptance) {
+    case 'awaited':
+    case 'not_awaited':
+      return
+    case 'awaited_stop_held':
+      first.controller.abort(new KeeperSendClosedBeforeAcceptance())
+  }
 }
 
 // --- Live send ownership (in-session, requestId-keyed) ---

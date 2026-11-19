@@ -4698,7 +4698,7 @@
  (name test_tui_keeper_list_model)
  (modules test_tui_keeper_list_model)
  (libraries alcotest masc masc.masc_types masc_tui_keeper_list_model masc_tui_keeper_control
-  masc_tui_scroll))
+  masc_tui_keeper_mark masc_tui_scroll masc_tui_value))
 
 (include stanzas/test_tui_keeper_axis_row.inc)
 

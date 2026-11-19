@@ -20,12 +20,26 @@ val failing_glyph : string
 (** Opens every line about a failing keeper's past: the FAILING group heading,
     its count in the summary, and the sentence of its last failure. *)
 
+val attention_mark : Masc_tui_keeper_list_model.attention -> Masc_tui_value.Mark.t option
+(** The status mark of a state-view group: the operator's turn, failed,
+    under way, waiting; the inactive group waits too. [None] is the group of
+    activities not read. *)
+
 val activity_mark : Masc_tui_keeper_list_model.activity -> Masc_tui_value.Mark.t option
-(** The status mark of what a Keeper is doing now (§7.2), the mark of its
-    group in the state view ({!Masc_tui_keeper_list_model.group_of_activity}):
-    the operator's turn, failed, under way, or waiting. A pause and offline
-    are paused, and rest is waiting. The word beside the mark says which.
-    [None] is an activity that was not read. *)
+(** The status mark of what a Keeper is doing now (§7.2): the mark of its
+    activity's group ({!attention_mark} of
+    {!Masc_tui_keeper_list_model.group_of_activity}). A pause and offline are
+    paused instead. The word beside the mark says which. A row whose health
+    failed stands under the failing group while its activity keeps its own
+    mark. [None] is an activity that was not read. *)
+
+val row_activity_mark : Masc_tui_keeper_list_model.row -> Masc_tui_value.Mark.t option
+(** {!activity_mark} of the row's activity, except that an offline Keeper
+    which starts on its own and is not paused is a caution: it should be
+    running. *)
+
+val row_activity_glyph : Masc_tui_keeper_list_model.row -> string
+(** {!row_activity_mark}'s glyph, or the not-read-yet mark. *)
 
 val activity_glyph : Masc_tui_keeper_list_model.activity -> string
 (** The compact list's activity mark: {!activity_mark}'s glyph, or the

@@ -46,24 +46,55 @@ let glyph ~paused reading =
   | Some mark -> Status.glyph mark
   | None -> unread_glyph
 
-(* What the Keeper is doing now wears the mark of its group in the state
-   view ([Masc_tui_keeper_list_model.group_of_activity]), so a row and the
-   heading of the group it stands under agree: the operator's turn, failed,
-   under way, waiting. A pause and offline are paused; rest is waiting. [None]
-   is an activity that was not read. *)
+(* The mark of a state-view group. The operator's turn, failed, under way and
+   waiting are the groups' own; the inactive group holds rest as well as
+   pauses, so it wears the waiting mark. [None] is the group of activities
+   that were not read. *)
+let attention_mark : Masc_tui_keeper_list_model.attention -> Status.t option = function
+  | Masc_tui_keeper_list_model.Attention -> Some Status.Yours
+  | Masc_tui_keeper_list_model.Failing -> Some Status.Failed
+  | Masc_tui_keeper_list_model.Active -> Some Status.Under_way
+  | Masc_tui_keeper_list_model.Waiting | Masc_tui_keeper_list_model.Inactive -> Some Status.Waiting
+  | Masc_tui_keeper_list_model.Unobserved -> None
+
+(* What the Keeper is doing now wears the mark of its activity's group in the
+   state view ([Masc_tui_keeper_list_model.group_of_activity]). A pause and
+   offline are paused instead; rest is waiting. [None] is an activity that
+   was not read. *)
 let activity_mark (activity : Masc_tui_keeper_list_model.activity) =
   match activity with
   | Masc_tui_keeper_list_model.Paused | Masc_tui_keeper_list_model.Offline -> Some Status.Paused
   | Held_call | Question | Confirmation | Attempt_failed | Preparing | Streaming | Running
   | Async_working _ | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying
-  | External_waiting | Idle | Unknown -> (
-      match Masc_tui_keeper_list_model.group_of_activity activity with
-      | Masc_tui_keeper_list_model.Attention -> Some Status.Yours
-      | Masc_tui_keeper_list_model.Failing -> Some Status.Failed
-      | Masc_tui_keeper_list_model.Active -> Some Status.Under_way
-      | Masc_tui_keeper_list_model.Waiting | Masc_tui_keeper_list_model.Inactive ->
-          Some Status.Waiting
-      | Masc_tui_keeper_list_model.Unobserved -> None)
+  | External_waiting | Idle | Unknown ->
+      attention_mark (Masc_tui_keeper_list_model.group_of_activity activity)
+
+(* A Keeper that starts on its own and is not paused should be running, so
+   when it is offline it asks for a look; a Keeper started by hand or on
+   demand is offline as expected. *)
+let starts_on_its_own (row : Masc_tui_keeper_list_model.row) =
+  match Masc_tui_keeper_list_model.runtime_of_row row with
+  | Some runtime -> (
+      (not runtime.Reading.kr_paused)
+      &&
+      match runtime.kr_activation_mode with
+      | Reading.Activation_autonomous -> true
+      | Reading.Activation_manual | Reading.Activation_on_demand -> false)
+  | None -> false
+
+let row_activity_mark row =
+  let activity = Masc_tui_keeper_list_model.primary_activity_of_row row in
+  match activity with
+  | Masc_tui_keeper_list_model.Offline when starts_on_its_own row -> Some Status.Caution
+  | Offline | Paused | Held_call | Question | Confirmation | Attempt_failed | Preparing
+  | Streaming | Running | Async_working _ | Deferred | Tool_waiting | Model_waiting
+  | Delegate_result | Verifying | External_waiting | Idle | Unknown ->
+      activity_mark activity
+
+let row_activity_glyph row =
+  match row_activity_mark row with
+  | Some mark -> Status.glyph mark
+  | None -> unread_glyph
 
 let activity_glyph activity =
   match activity_mark activity with

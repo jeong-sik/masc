@@ -1585,15 +1585,10 @@ let acting_pane_input (state : state) =
     let health = Keeper_control.health reading in
     let paused = reading.Keeper_control.paused in
     let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
-    (* The tone of the mark the cell draws, as Theme.status_tone gives it
-       (RFC tui-one-screen-grammar §7.2). *)
     let mark_tone =
       match Masc_tui_keeper_mark.state_mark ~paused reading_of_health with
-      | Some Masc_tui_value.Mark.Settled -> Pane.Ok
-      | Some Masc_tui_value.Mark.Under_way -> Pane.Info
-      | Some (Masc_tui_value.Mark.Waiting | Masc_tui_value.Mark.Paused) | None -> Pane.Dim
-      | Some (Masc_tui_value.Mark.Caution | Masc_tui_value.Mark.Yours) -> Pane.Warn
-      | Some Masc_tui_value.Mark.Failed -> Pane.Bad
+      | Some mark -> Pane.status_tone mark
+      | None -> Pane.Dim
     in
     { Pane.name = keeper.k_name
     ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health

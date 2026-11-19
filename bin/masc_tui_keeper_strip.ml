@@ -65,9 +65,12 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
          Recoveries, caution, say "복구" "recovered", caution_tone;
          Sound, settled, say "정상" "ok", settled_tone;
          Paused, paused, say "일시정지" "paused", paused_tone;
-         (* [Grid.Other]: health not read, or offline with no failure in the
-            window. *)
-         Unknown, unreported, say "읽기 전·꺼짐" "unread or offline", Theme.recede ()] in
+         (* [Grid.Other] holds two kinds: a Keeper whose runtime record is
+            absent, not read yet or unreadable, so its health is not known;
+            and an offline Keeper with no failure in the window. An offline
+            Keeper that failed in the window is a recovery. The group keeps
+            the unreported mark of the first kind, and its word names both. *)
+         Unknown, unreported, say "상태 모름·꺼짐" "health unknown or offline", Theme.recede ()] in
   let readings = List.map (fun row -> row, bucket ~now ~age view row) rows in
   let groups = List.filter_map (fun (key, mark, word, style) ->
     let members = List.filter_map (fun (row, at) -> if at = key then Some row else None) readings in

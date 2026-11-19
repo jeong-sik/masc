@@ -220,9 +220,9 @@ let keeper_activity_word ~ko (activity : Keeper_list_model.activity) =
   | Offline -> text "오프라인" "offline"
   | Unknown -> text "미확인" "unknown"
 
-(* The activity's colour is its mark's (RFC tui-one-screen-grammar §7.2). *)
-let keeper_activity_style (activity : Keeper_list_model.activity) =
-  match Masc_tui_keeper_mark.activity_mark activity with
+(* The row's activity colour is its mark's (RFC tui-one-screen-grammar §7.2). *)
+let keeper_activity_style (row : Keeper_list_model.row) =
+  match Masc_tui_keeper_mark.row_activity_mark row with
   | Some mark -> Theme.status_tone mark
   | None -> Theme.recede ()
 
@@ -457,12 +457,12 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   let status_color =
     match operator_disposition with
     | Some _ -> Theme.status_tone Masc_tui_value.Mark.Yours
-    | None -> keeper_activity_style activity
+    | None -> keeper_activity_style row
   in
   let glyph =
     match operator_disposition with
     | Some _ -> Masc_tui_keeper_mark.activity_glyph Held_call
-    | None -> Masc_tui_keeper_mark.activity_glyph activity
+    | None -> Masc_tui_keeper_mark.row_activity_glyph row
   in
   let status_word =
     match operator_disposition with
@@ -1547,13 +1547,12 @@ let keeper_view_tabs ~ko ~cols view =
          (fun candidate -> Keeper_list_model.view_title ~ko candidate, candidate = view, candidate)
          Keeper_list_model.views)
 
-let keeper_state_heading_style = function
-  | Keeper_list_model.Attention -> Theme.bad ()
-  | Keeper_list_model.Failing -> Theme.warn ()
-  | Keeper_list_model.Active -> Theme.ok ()
-  | Keeper_list_model.Waiting -> Theme.info ()
-  | Keeper_list_model.Inactive -> Theme.recede ()
-  | Keeper_list_model.Unobserved -> Theme.warn ()
+(* A state group's heading takes the colour of the group's mark, the one its
+   rows wear (RFC tui-one-screen-grammar §7.2). *)
+let keeper_state_heading_style attention =
+  match Masc_tui_keeper_mark.attention_mark attention with
+  | Some mark -> Theme.status_tone mark
+  | None -> Theme.recede ()
 
 let keeper_group_heading_style = function
   | Keeper_list_model.Group_state attention -> keeper_state_heading_style attention
@@ -1723,8 +1722,8 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   in
   let detail = keeper_detail_text ~ko:(state.ui_language = Lang_ko) ~now row in
   let now_entries =
-    [ keeper_activity_style activity
-      ^ Masc_tui_keeper_mark.activity_glyph activity ^ " "
+    [ keeper_activity_style row
+      ^ Masc_tui_keeper_mark.row_activity_glyph row ^ " "
       ^ keeper_activity_word ~ko:(state.ui_language = Lang_ko) activity
       ^ Ansi.reset
       ^ (if String.equal detail "" then "" else dim (" · " ^ detail))
@@ -1773,7 +1772,7 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
 let keeper_story_lead ~ko (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   "  " ^ Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
-  ^ keeper_activity_style activity ^ keeper_activity_word ~ko activity ^ Ansi.reset
+  ^ keeper_activity_style row ^ keeper_activity_word ~ko activity ^ Ansi.reset
 
 let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     (row : Keeper_list_model.row option) =
@@ -2115,7 +2114,7 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
       in
       let activity = Keeper_list_model.primary_activity_of_row row in
       let badge_plain =
-        Masc_tui_keeper_mark.activity_glyph activity ^ " "
+        Masc_tui_keeper_mark.row_activity_glyph row ^ " "
         ^ keeper_activity_word ~ko:(state.ui_language = Lang_ko) activity
       in
       let badge_cells = Message_layout.display_width badge_plain in
@@ -2123,7 +2122,7 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
         if (not compact) && width >= badge_cells + 6 then
           let name_cells = width - badge_cells - 2 in
           Ansi.bold ^ Message_layout.fit_width name name_cells ^ Ansi.reset
-          ^ "  " ^ keeper_activity_style activity ^ badge_plain ^ Ansi.reset
+          ^ "  " ^ keeper_activity_style row ^ badge_plain ^ Ansi.reset
         else
           Ansi.bold ^ fit name ^ Ansi.reset
       in

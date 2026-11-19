@@ -170,6 +170,10 @@ val holds_awaiting_verification : verification_holders -> keeper_name:string -> 
     clears it. *)
 val primary_activity_of_row : row -> activity
 
+val runtime_of_row : row -> Masc.Tui_decode.keeper_runtime option
+(** The row's runtime record, or [None] where it is absent, not read or
+    invalid. *)
+
 (** What a Keeper waits on a person for. *)
 type person_wait =
   | Held_tool of Masc.Tui_decode.keeper_tool_approval  (** The tool call held for approval. *)

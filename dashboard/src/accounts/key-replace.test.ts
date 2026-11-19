@@ -128,6 +128,31 @@ describe('the replacement of the key of an account', () => {
     expect([kept, during, refresh.mock.calls.length]).toEqual(['dropped', { kind: 'sending', failure: null }, 1])
   })
 
+  it('shows nothing of an answer whose subscriptions came after a reset', async () => {
+    const reading = later<undefined>()
+    const { send } = answering([replaced()])
+    const model = createReplacements({ send, leave: vi.fn(), token: () => 'token-1', refresh: () => reading.promise })
+    model.open('acct_key')
+    await model.replace('acct_key', key)
+    model.reset()
+    reading.give(undefined)
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(model.replacing.value.get('acct_key')).toBeUndefined()
+  })
+
+  it('keeps an account as left behind when its subscriptions came after the session ended', async () => {
+    const reading = later<undefined>()
+    const { send } = answering([replaced(), noSession()])
+    const model = createReplacements({ send, leave: vi.fn(), token: () => 'token-1', refresh: () => reading.promise })
+    model.open('acct_key')
+    model.open('acct_other')
+    await model.replace('acct_key', key)
+    await model.replace('acct_other', otherKey)
+    reading.give(undefined)
+    await new Promise((resolve) => { setTimeout(resolve, 0) })
+    expect(model.replacing.value.get('acct_key')).toEqual({ kind: 'leaving' })
+  })
+
   // The subscriptions that are asked for again never come.
   it('ends once the answer is read after a refusal that can have changed the account, without the subscriptions it asked for again', async () => {
     const { send } = answering([refusedAs(503, 'key_not_stored')])

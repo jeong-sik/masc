@@ -220,9 +220,19 @@ let turns_of_a_fiber_beside read =
   during
 ;;
 
+(* The server turns the Eio mutex guards on ([bin/main_eio.ml]), and then a
+   store's handle is fetched under an [Eio.Mutex]. The reads below go the way
+   the server's do. *)
+let with_the_servers_guards f =
+  Eio_guard.enable ();
+  Fun.protect ~finally:Eio_guard.disable f
+;;
+
 let test_held_lines_are_answered_without_waiting () =
   with_workspace
   @@ fun config ->
+  with_the_servers_guards
+  @@ fun () ->
   append config (heartbeat 1);
   check answer "read and kept" (Ok [ 1 ]) (kept config);
   check

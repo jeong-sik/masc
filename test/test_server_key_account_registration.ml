@@ -149,8 +149,8 @@ let opened ~root ~base_path =
   | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
 ;;
 
-let with_zone work () =
-  Eio_main.run (fun _env ->
+let with_env_zone work () =
+  Eio_main.run (fun env ->
     let root = Unix.realpath (Filename.temp_dir "server-key-account-registration-" "") in
     Fun.protect
       ~finally:(fun () ->
@@ -180,7 +180,7 @@ let with_zone work () =
            3.3): the lines of every module are read, those of a
            registration that failed among them. *)
         let before = latest_ring_seq () in
-        work ~zone ~root ~base_path;
+        work ~env ~zone ~root ~base_path;
         List.iter
           (fun line ->
             if String_util.contains_substring line key_prefix
@@ -190,6 +190,10 @@ let with_zone work () =
             if String_util.contains_substring line masked
             then Alcotest.failf "a log line of the case holds what the log masked: %d bytes" (String.length line))
           (lines_since before)))
+;;
+
+let with_zone work =
+  with_env_zone (fun ~env:(_ : Eio_unix.Stdenv.base) ~zone ~root ~base_path -> work ~zone ~root ~base_path)
 ;;
 
 (* The runtime.toml of the workspace, where the routes of setup read it. *)
@@ -908,6 +912,49 @@ let test_replacement_given_up =
       Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root)))
 ;;
 
+(* The server stopped between the new key of a replacement and the removal
+   of the files before it: the folder of the keys holds the key of the
+   generation before too. The next start of the server removes it, inside
+   the call of the account (the same RFC, 3.7). *)
+let test_left_keys_at_start =
+  with_env_zone (fun ~env ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let first_file = key_file_of alice ~runtime_root account in
+    answered
+      "the replacement of the case"
+      (replace alice ~base_path account (replacement_body second_key))
+      ~status:200
+      ~code:None;
+    let key_file = key_file_of alice ~runtime_root account in
+    Out_channel.with_open_gen
+      [ Open_wronly; Open_creat; Open_excl; Open_binary ]
+      0o600
+      first_file
+      (fun out -> output_string out the_key);
+    let at_start () = Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path) in
+    (match
+       Login.one_call_of account ~busy:None (fun (_ : Login.in_call) ->
+         at_start ();
+         Ok ())
+     with
+     | Ok () -> ()
+     | Error (_ : unit option) -> Alcotest.fail "the call of the account was not taken");
+    Alcotest.(check (list string))
+      "a start while a call of the account runs leaves the file"
+      [ first_file ]
+      (holding ~text:the_key root);
+    at_start ();
+    Alcotest.(check (list string)) "the next start removes the key before" [] (holding ~text:the_key root);
+    Alcotest.(check string)
+      "the key the records say reads back"
+      ("key:" ^ second_key)
+      (read_name key_file);
+    Alcotest.(check (list string)) "and is in that file alone" [ key_file ] (holding ~text:second_key root))
+;;
+
 let () =
   Alcotest.run
     "server_key_account_registration"
@@ -924,6 +971,7 @@ let () =
         ; Alcotest.test_case "an account a removal stopped on" `Quick test_replacement_after_removal
         ; Alcotest.test_case "a key that is not stored, and the next one" `Quick test_replacement_not_stored
         ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up
+        ; Alcotest.test_case "what a stopped server left in the folder of the keys" `Quick test_left_keys_at_start
         ] )
     ]
 ;;

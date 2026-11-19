@@ -229,3 +229,35 @@ let latest_tool_audit_snapshot_from_files config ~keeper_name =
       ~path:(Dated_jsonl.base_dir store)
       ~detail:(Dated_jsonl.read_error_to_string error);
     Error error
+
+(* How many of a Keeper's newest metrics rows the Keeper list's recent tools
+   and the metrics chart look at. One number, so the two share one fact. *)
+let recent_metrics_row_count = 120
+
+(* Those rows as text, oldest first. The store keeps them in memory in the
+   process that writes the store, as it keeps the tool audit: every row
+   appended moves the window by one. They are text and not JSON because 120
+   parsed rows of 2.8 kB took four times the memory of their text. *)
+let newest_metrics_lines : string list Dated_jsonl.fact =
+  Dated_jsonl.last_lines
+    ~name:"keeper_metrics_newest_lines"
+    ~count:recent_metrics_row_count
+
+let newest_metrics_lines_result config ~keeper_name =
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
+  match Dated_jsonl.read_fact store newest_metrics_lines with
+  | Fact_cell.Held lines
+  | Fact_cell.Read_and_kept lines
+  | Fact_cell.Read_not_kept lines -> Ok lines
+  | Fact_cell.Read_failed error -> Error error
+
+(* For a reader that shows the rows it can. A store the strict read refuses
+   is read as that reader read it before the lines were kept: a directory
+   entry that is not the store's is passed over. *)
+let newest_metrics_lines_passing_over_what_is_not_the_stores config ~keeper_name =
+  match newest_metrics_lines_result config ~keeper_name with
+  | Ok lines -> lines
+  | Error (_ : Dated_jsonl.read_error) ->
+    Dated_jsonl.read_recent_lines
+      (Keeper_types_support.keeper_metrics_store config keeper_name)
+      recent_metrics_row_count

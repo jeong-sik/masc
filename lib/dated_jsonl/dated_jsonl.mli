@@ -380,6 +380,11 @@ val last_lines : name:string -> count:int -> string list fact
 
     @raise Invalid_argument when [count] is less than 1. *)
 
+val parse_line : string -> (Yojson.Safe.t, string) result
+(** One row's text as the strict reads decode it: its JSON, or what the
+    parser said of a row that is not JSON ({!Malformed_json}). For a reader
+    of {!last_lines}. *)
+
 val newest_parsed_row : Yojson.Safe.t option fact
 (** The store's newest row that is JSON, as {!find_latest_entry_result} finds
     it when it selects every {!Parsed} row: rows that are not JSON are passed

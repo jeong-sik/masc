@@ -1009,7 +1009,7 @@ let not_committed_of_failure ~detail (evidence : Failure_evidence.t) =
   }
 ;;
 
-let fit_continuity ~capacity ~base_path:_ ~keeper_id:_ ~source_lines ~input_for prepared =
+let fit_continuity ~capacity ~source_lines ~input_for prepared =
   let open Result.Syntax in
   let* _, cli_slots, _ = resolve_librarian_slots ()
     |> Result.map_error extraction_error_to_string in

@@ -3755,7 +3755,7 @@
  (name masc_tui_render_identity)
  (wrapped false)
  (modules masc_tui_render_identity)
- (libraries masc_tui_identity_model masc_tui_ansi masc_tui_message_layout))
+ (libraries masc_tui_identity_model masc_tui_ansi masc_tui_message_layout masc_tui_theme))
 
 (library
  (name masc_tui_identity_input)

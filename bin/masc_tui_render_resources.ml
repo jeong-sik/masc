@@ -175,8 +175,8 @@ let list_cells ~ko ({ layout; flex; width; _ } : list_layout) reading =
     Masc_tui_table.cell ~header ~fold ~style ~width:cell_width
       (Terminal_text.single_line value)) layout.shown
 
-let selected_marker = " \xe2\x96\xb8 "
-let unselected_marker = "   "
+let selected_marker = "\xe2\x80\xba "
+let unselected_marker = "  "
 let marker_cells = String.length unselected_marker
 
 let save_prompt_height state = if Option.is_some state.resource_save_prompt then 3 else 0
@@ -297,7 +297,7 @@ let render_resources (state : state) =
     let list_focused = state.resource_focus = Left_pane in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)
-       ^ (if list_focused then " \xe2\x96\xb8 " else " ")
+       ^ (if list_focused then " \xe2\x96\xb8 " else "   ")
        ^ Catalog.scope_label ~ko:(state.ui_language = Lang_ko) state.resource_scope
        ^ (if total = 0 then "" else Printf.sprintf " (%d)" total)
        ^ Ansi.reset);
@@ -407,7 +407,7 @@ let render_resources (state : state) =
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
       ((if state.resource_focus = Right_pane then Ansi.bold else Ansi.dim)
-       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else " ")
+       ^ (if state.resource_focus = Right_pane then " \xe2\x96\xb8 " else "   ")
        ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;

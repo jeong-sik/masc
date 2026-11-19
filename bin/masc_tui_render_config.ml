@@ -252,7 +252,8 @@ let render_runtime_params (state : state) =
            let value_width = max 4 (min 16 ((framed_inner_width cols - 7) / 3)) in
            let key_width = max 1 (framed_inner_width cols - 7 - value_width) in
            let line =
-             Printf.sprintf "    %s %s %s"
+             Printf.sprintf "%s  %s %s %s"
+               (if row_index = cursor then "\xe2\x80\xba " else "  ")
                (Masc_tui_config_mark.param_glyph
                   ~has_override:row.rpr_has_override)
                (Message_layout.fit_middle key_width (Terminal_text.single_line row.rpr_key)
@@ -733,11 +734,11 @@ let render_prompt_registry (state : state) =
         let label = mark ^ " "
             ^ authoring_mark
             ^ Message_layout.fit_middle
-                (max 1 (framed_inner_width cols - 3 - authoring_cells))
+                (max 1 (framed_inner_width cols - 4 - authoring_cells))
                 (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
-          box_line_selected buf cols (" " ^ Masc_tui_theme.strip_sgr label)
-        else box_line buf cols (" " ^ label)
+          box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr label)
+        else box_line buf cols ("  " ^ label)
       end)
     prompt_rows;
   for _ = 1 to list_height - !drawn do
@@ -1176,9 +1177,9 @@ let render_presets (state : state) =
           | Some (Restore_armed _ | Delete_armed _ | Save_armed _ | Save_workspace_armed _) | None -> " "
         in
         let label =
-          row_with_field ~cols ~lead:(" " ^ mark ^ " ")
+          row_with_field ~cols ~lead:((if index = cursor then "\xe2\x80\xba " else "  ") ^ mark ^ " ")
             ~field:(Masc_tui_preset_text.pane_row ~ko:(state.ui_language = Lang_ko)
-                      ~max_cells:(max 1 (framed_inner_width cols - 3)) manifest)
+                      ~max_cells:(max 1 (framed_inner_width cols - 4)) manifest)
             ~tail:""
         in
         if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr label)
@@ -1333,7 +1334,7 @@ let render_themes (state : state) =
   in
   box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
   box_line_styled buf cols ~style:(Theme.recede ())
-    ("  " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") (name_width + 2) ^ " "
+    ("    " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") name_width ^ " "
      ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
      ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
      ^ fit_width (ui_text state ~ko:"원래 대비" ~en:"raw contrast") 12);
@@ -2520,11 +2521,13 @@ let render_config (state : state) =
                    reads. The runtime config is TOML and the lexer already
                    answers for it; what was missing was anyone asking. *)
                 let line = String.concat "" (List.map lexed_span segments) in
+                let is_selected = scroll + i = state.runtime_config_cursor in
                 let line =
-                  Printf.sprintf "%s%4d%s  %s" Ansi.dim (scroll + i + 1)
-                    Ansi.reset line
+                  Printf.sprintf "%s%s%4d%s  %s"
+                    (if is_selected then "\xe2\x80\xba " else "  ")
+                    Ansi.dim (scroll + i + 1) Ansi.reset line
                 in
-                if scroll + i = state.runtime_config_cursor then
+                if is_selected then
                   c.push_selected (Masc_tui_theme.strip_sgr line)
                 else c.push line
             | None -> ()

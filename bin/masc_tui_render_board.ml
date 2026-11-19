@@ -74,7 +74,7 @@ let board_document_markdown ~width body =
 
 (* The header and rows use one title-first column layout inside the frame. *)
 let board_layout ~cols =
-  Render_schedule.board_layout ~inner_width:(framed_inner_width cols)
+  Render_schedule.board_layout ~inner_width:(max 1 (framed_inner_width cols - 2))
 
 (* Colour here, the glyph in {!Masc_tui_board_kind_mark}, which the help sheet
    reads from the same function. Nothing explained these marks anywhere before:
@@ -525,7 +525,7 @@ let render_board_list (state : state) =
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
-              (Render_schedule.board_header_row ~ko ~age_header ~layout))
+              ("  " ^ Render_schedule.board_header_row ~ko ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -629,8 +629,8 @@ let render_board_list (state : state) =
               Render_schedule.board_row ~ko ~styles ~age_header ~layout values
             in
             if is_selected then
-              c.push_selected (Masc_tui_theme.strip_sgr content)
-            else c.push content
+              c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr content)
+            else c.push ("  " ^ content)
         done
       end)
 
@@ -651,7 +651,7 @@ let comment_gutter = String.make Board_read_layout.comment_gutter_cells ' '
 
 (* Same cell count as [comment_gutter]: a marker cell, then blanks. *)
 let selected_comment_gutter () =
-  Theme.accent () ^ Ansi.bold ^ ">" ^ Ansi.reset
+  Theme.accent () ^ Ansi.bold ^ "\xe2\x80\xba" ^ Ansi.reset
   ^ String.make (Board_read_layout.comment_gutter_cells - 1) ' '
 
 let comment_row_gutter ~focus (state : state) =
@@ -737,7 +737,7 @@ let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
         (Ansi.bold
         ^ Printf.sprintf (if state.ui_language = Lang_ko then "%s댓글 (%d)" else "%sComments (%d)")
             (if focus = Right_pane && state.board_comments_focused
-             then "> " else "  ")
+             then "\xe2\x96\xb8 " else "  ")
             detail_comment_count
         ^ Ansi.reset)
     else if i < side_budget.comment_rows then
@@ -785,7 +785,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
 
   let title_line = Printf.sprintf "%s%s%s%s"
     (if focus = Right_pane && not state.board_comments_focused
-     then "> " else "  ")
+     then "\xe2\x96\xb8 " else "  ")
     Ansi.bold
     (fit_width (Terminal_text.single_line post.bp_title) (framed_inner_width cols - 2))
     Ansi.reset
@@ -1177,7 +1177,7 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
           box_line buf cols
             (Ansi.bold
              ^ (if focus = Right_pane && state.board_comments_focused
-                then words state "> 댓글" "> Comments" else words state "  댓글" "  Comments")
+                then words state "\xe2\x96\xb8 댓글" "\xe2\x96\xb8 Comments" else words state "  댓글" "  Comments")
              ^ Ansi.reset);
           let gutter = comment_row_gutter ~focus state in
           for i = 0 to comment_height - 1 do

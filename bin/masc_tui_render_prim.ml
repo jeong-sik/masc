@@ -3271,7 +3271,7 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
   (* The caret is the only thing saying where the cursor is: which question
      [a] opens while browsing, and which one the digits land on while
      answering. A blank on every row reads as no selection at all. *)
-  let caret = if selected_question then ">" else " " in
+  let caret = if selected_question then "\xe2\x80\xba" else " " in
   box_wrapped_field buf cols
     ~head:
       (Printf.sprintf " %s%s%s%s%s  " caret
@@ -6359,7 +6359,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
           (fun index (item : Inspector.exact_input_item) ->
              let selected = index = state.context_inspector_cursor in
              let marker, style =
-               if selected then ">", Theme.selection_style () else " ", Ansi.reset
+               if selected then "\xe2\x80\xba", Theme.selection_style () else " ", Ansi.reset
              in
              let label_width = max 8 (width - 22) in
              (* The list carries the producer's colour the summary above it
@@ -6398,7 +6398,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         let selected = List.nth_opt items cursor in
         (* The caret names the pane that hears j/k, the way the roster and
            the board say it; the keys themselves stay in the footer. *)
-        let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
+        let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
           (Ansi.bold
            ^ "╭─ " ^ caret Left_pane ^ "REQUEST ITEMS"
@@ -6590,7 +6590,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
           (fun index (row : Inspector.input_map_row) ->
              let selected = index = state.context_inspector_cursor in
              let marker, selection =
-               if selected then ">", Theme.selection_style () else " ", Ansi.reset
+               if selected then "\xe2\x80\xba", Theme.selection_style () else " ", Ansi.reset
              in
              let branch = if index = List.length rows - 1 then "└─" else "├─" in
              let label =
@@ -6617,7 +6617,7 @@ let context_input_map_lines ~cols ~scale state (record : Turn_record.t)
             ~count:(List.length rows)
             state.context_inspector_cursor
         in
-        let caret pane = if state.context_inspector_focus = pane then "▸ " else "" in
+        let caret pane = if state.context_inspector_focus = pane then "▸ " else "  " in
         let left =
           (Ansi.bold
            ^ "╭─ " ^ caret Left_pane ^ "CONTEXT STACK"

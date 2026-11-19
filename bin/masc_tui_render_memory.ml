@@ -597,7 +597,7 @@ let memory_deviation_style (k : Masc.Tui_decode_memory_health.memory_keeper_heal
         Some (Theme.warn ())
     | Memory_ordinary -> None
 
-let memory_row_line ~unit columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+let memory_row_line ?(selected = false) ~unit columns (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let no_value = Masc_tui_theme.Glyph.no_value in
   let ordinary_reading value = if k.mkh_snapshot_present then value () else no_value in
   let source =
@@ -619,7 +619,7 @@ let memory_row_line ~unit columns (k : Masc.Tui_decode_memory_health.memory_keep
   let state_style = deviation in
   let size_style = if k.mkh_snapshot_present then "" else deviation in
   let delta_style = if k.mkh_removed > 0 then Theme.warn () else "" in
-  "  "
+  (if selected then "\xe2\x80\xba " else "  ")
   ^ Render_schedule.memory_row ~state_style ~size_style ~delta_style columns
       { Render_schedule.mrow_state = memory_state_cell (memory_state k)
       ; mrow_name = k.mkh_keeper_id
@@ -1520,7 +1520,7 @@ let memory_overview_scrolled ~cols ~budget (state : state) =
    word. A reading that is off wears its colour on the mark and the word, so a
    stopped Librarian reads as a warning from across the screen; an ordinary
    one wears it on the mark alone. Both were the plain text colour. *)
-let memory_selector_line ~cols (state : state) keeper =
+let memory_selector_line ?(selected = false) ~cols (state : state) keeper =
   let width = max 1 (framed_inner_width cols - 2) in
   let name_cells = max 1 (width / 2) in
   let status_cells = max 1 (width - name_cells - 3) in
@@ -1530,7 +1530,8 @@ let memory_selector_line ~cols (state : state) keeper =
     | None -> Theme.ok (), ""
   in
   let word = Message_layout.fit_width (memory_operator_state state keeper) status_cells in
-  "  " ^ mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset ^ " "
+  (if selected then "\xe2\x80\xba " else "  ")
+  ^ mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset ^ " "
   ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
   ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
@@ -1662,10 +1663,12 @@ let render_memory_body ~cols ~budget (state : state)
       match Rows.at keepers_window idx with
       | None -> push_empty ()
       | Some k ->
+          let is_selected = idx = cursor in
           let line =
-            if state.memory_overview_detail then memory_row_line ~unit:state.memory_unit columns k
-            else memory_selector_line ~cols state k in
-          if idx = cursor then
+            if state.memory_overview_detail then
+              memory_row_line ~selected:is_selected ~unit:state.memory_unit columns k
+            else memory_selector_line ~selected:is_selected ~cols state k in
+          if is_selected then
             push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;
@@ -1922,7 +1925,14 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
       | None -> push_empty ()
       | Some row ->
           let line = memory_fact_row_line ~ko ~is_fleet ~sort:state.memory_facts_sort ~cols row in
-          if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
+          if idx = cursor then
+            let plain = Masc_tui_theme.strip_sgr line in
+            let marked =
+              if String.length plain >= 2 && plain.[0] = ' ' && plain.[1] = ' ' then
+                "\xe2\x80\xba " ^ String.sub plain 2 (String.length plain - 2)
+              else "\xe2\x80\xba " ^ plain
+            in
+            push_selected marked
           else push line
     done;
     hand_position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total)
@@ -1985,10 +1995,10 @@ let render_memory_facts_body ~cols ~budget (state : state)
           Message_layout.truncate_end room name
         in
         Message_layout.wrap_words ~max_cells:(width - 2) (name ^ suffix)
-        |> List.map (fun text -> category, text)) in
+        |> List.mapi (fun line_index text -> category, line_index = 0, text)) in
     let selected_indices =
       entries
-      |> List.mapi (fun index (category, _) -> index, category)
+      |> List.mapi (fun index (category, _, _) -> index, category)
       |> List.filter (fun (_, category) -> category = state.memory_facts_category)
       |> List.map fst in
     let start_row, end_row = match selected_indices with
@@ -2004,9 +2014,11 @@ let render_memory_facts_body ~cols ~budget (state : state)
     in
     let rail = header @
       (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
-       |> List.map (fun (category, text) ->
-           let text = fit_width ("  " ^ text) width in
-           let style = if category = state.memory_facts_category then Theme.selection_style () else Theme.recede () in
+       |> List.map (fun (category, is_first, text) ->
+           let is_selected = category = state.memory_facts_category in
+           let lead = if is_selected && is_first then "\xe2\x80\xba " else "  " in
+           let text = fit_width (lead ^ text) width in
+           let style = if is_selected then Theme.selection_style () else Theme.recede () in
            Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
     let facts = List.rev !facts in
     let height = max (List.length facts) (min budget (List.length rail)) in

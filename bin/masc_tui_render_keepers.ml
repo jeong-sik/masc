@@ -540,7 +540,7 @@ let keeper_row_runtime (row : Keeper_list_model.row) =
   | Keeper_control.Present runtime -> Some runtime
   | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
 
-let keeper_row_marker ~selected = if selected then " \xe2\x80\xba " (*  ›  *) else "   "
+let keeper_row_marker ~selected = if selected then "\xe2\x80\xba " (* ›  *) else "  "
 
 let keeper_row_name ~width ~yolo (row : Keeper_list_model.row) =
   let name =
@@ -677,7 +677,7 @@ let style_axis_cell (cell : Masc_tui_keeper_axis_cell.t) =
 ;;
 
 (* A second line opens under the name, and its pieces stand this far apart. *)
-let secondary_indent_cells = Render_schedule.keeper_marker_width + 2
+let secondary_indent_cells = Render_schedule.keeper_marker_width
 let secondary_separator = "  ·  "
 
 let keeper_secondary_row_content ~ko ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
@@ -1230,8 +1230,8 @@ let grid_failure_line ~ko (grid : Grid.t) ~now (row : Keeper_list_model.row) =
       runtime trail
   in
   String.concat ""
-    [ grid_gutter_style (Grid.verdict ~now runtime) ^ Keeper_mark.grid_gutter_glyph ^ Ansi.reset
-      ^ String.make (Grid.gutter_cells - 1) ' '
+    [ "  " ^ grid_gutter_style (Grid.verdict ~now runtime) ^ Keeper_mark.grid_gutter_glyph ^ Ansi.reset
+      ^ String.make (max 0 (Grid.gutter_cells - 3)) ' '
     ; (match since with
        | "" -> String.make grid.name_cells ' '
        | since -> Theme.recede () ^ fit_width (grid_since_lead ^ since) grid.name_cells ^ Ansi.reset)
@@ -2833,11 +2833,11 @@ let keeper_plain_list_lines (state : state) ~now projection =
     | Keeper_group_heading (group, count) as entry ->
         let selected = keeper_entry_selected stop entry in
         let heading =
-          (if selected then " › " else "   ")
+          (if selected then "\xe2\x80\xba " else "  ")
           ^ (if List.mem group state.keeper_list_folded then Keeper_mark.grid_folded_mark
              else Keeper_mark.grid_open_mark) ^ " "
           ^ keeper_group_heading_text ~ko:(state.ui_language = Lang_ko)
-              ~available_cells:(max 1 (width - 5)) (keeper_list_rows state) group count in
+              ~available_cells:(max 1 (width - 4)) (keeper_list_rows state) group count in
         [ if selected then
             Theme.sidebar_selection () ^ fit_width (Masc_tui_theme.strip_sgr heading) width ^ Ansi.reset
           else
@@ -2867,7 +2867,7 @@ let keeper_plain_list_lines (state : state) ~now projection =
               | Some request -> Theme.warn () ^ request ^ Ansi.reset
               | None -> Theme.recede () ^ keeper_plain_work ~now state row ^ Ansi.reset
             in
-            [primary; emit ("   " ^ Message_layout.fit_width detail (max 0 (width - 3)))]
+            [primary; emit ("  " ^ Message_layout.fit_width detail (max 0 (width - 2)))]
   in
   let content = List.concat_map entry_lines projection.kpp_window in
   let content = if content <> [] || projection.kpp_entry_rows = 0 then content else
@@ -2879,7 +2879,7 @@ let keeper_plain_list_lines (state : state) ~now projection =
   in
   if projection.kpp_list_rows = 0 then [] else
     (if projection.kpp_list_rows > 1 then
-      let lead = "   " ^ text "Keeper 목록" "Keepers" in
+      let lead = "  " ^ text "Keeper 목록" "Keepers" in
       let sub = text " · 현재 상태 / 일과 대기" " · current status / work and wait" in
       let lead_cells = Message_layout.display_width lead in
       let header_row =
@@ -3202,13 +3202,24 @@ let render_keeper_axes (state : state) =
       | Keeper_group_heading (group, count) as entry ->
           let selected = keeper_entry_selected stop entry in
           let text =
+            let available_cells =
+              match matrix with
+              | Some _ -> max 1 (inner - 4)
+              | None -> inner
+            in
             let title =
-              keeper_group_heading_text ~ko ~available_cells:inner model_rows group count
+              keeper_group_heading_text ~ko ~available_cells model_rows group count
             in
             match matrix with
             | Some _ ->
+                let folded = List.mem group state.keeper_list_folded in
+                let fold_mark =
+                  if folded then Keeper_mark.grid_folded_mark
+                  else Keeper_mark.grid_open_mark
+                in
                 keeper_group_heading_style group
-                ^ (if selected then "› " else "  ") ^ title ^ Ansi.reset
+                ^ (if selected then "\xe2\x80\xba " else "  ")
+                ^ fold_mark ^ " " ^ title ^ Ansi.reset
             | None ->
                 let members = keeper_group_rows list_reading group in
                 grid_group_title state grid ~now:now_unix ~group ~members
@@ -3741,7 +3752,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let facts = if inner < 90 then "" else
         match item_account_facts item with Some facts -> "  " ^ facts | None -> "" in
       Printf.sprintf "  %s %-5s %s%s%s"
-        (if index = cursor then ">" else " ")
+        (if index = cursor then "\xe2\x80\xba" else " ")
         (Keeper_portrait_item.slot_id (Keeper_portrait_item.slot item))
         (Item_account.item_name item) facts (if is_worn item then equipped_word else "")
     in
@@ -3789,7 +3800,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       let visible = min count (max 1 (base_height - reserved)) in
       let first = max 0 (min (cursor - visible / 2) (count - visible)) in
       let rows = List.filter_map (fun (index, item) ->
-        if index < first || index >= first + visible then None else Some (item_row index item))
+        if index < first || index >= first + visible then None
+        else
+          let line = item_row index item in
+          Some
+            (if index = cursor then
+               Theme.selection_style () ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset
+             else line))
         (List.mapi (fun index item -> index, item) items) in
       let listing = match portrait with
         | Some band -> Masc_tui_keeper_portrait.beside band (headline @ rows @ empty)
@@ -4468,7 +4485,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      ~tail_cells:(Message_layout.display_width tail)
                  in
                  let line =
-                   "  " ^ (if index = selected_index then "▸ " else "  ")
+                   "  " ^ (if index = selected_index then "\xe2\x80\xba " else "  ")
                    ^ fit_width
                        (Terminal_text.single_line connector.cn_display_name)
                        name_cells
@@ -4557,7 +4574,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                       in
                       let line =
                         Printf.sprintf "    %s %s → %s%s%s"
-                          (if selected then Masc_tui_theme.Glyph.current_entry else " ")
+                          (if selected then "\xe2\x80\xba" else " ")
                           (binding_reference binding)
                           (Terminal_text.single_line binding.cb_keeper_name)
                           (if here then t "  (이 Keeper)" "  (this Keeper)"

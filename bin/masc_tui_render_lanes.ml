@@ -691,7 +691,7 @@ let render_exact_lane_provider_editor (state : state) editor =
               in
               let line =
                 Printf.sprintf "  %s %d/%d  [%s] %s%s"
-                  (if Some index = selected_index then ">" else " ")
+                  (if Some index = selected_index then "\xe2\x80\xba" else " ")
                   (index + 1) count kind
                   (match List.find_opt (fun (runtime : Tui_decode.runtime_option) ->
                      String.equal runtime.ro_id row.Masc_tui_types.sr_slot) catalog with
@@ -824,7 +824,7 @@ let render_lanes_overview (state : state) =
   let status_width = List.fold_left (fun width row -> max width
       (Message_layout.display_width (summary row))) 0 inventory
     |> fun width -> min width (max 1 (list_cells / 3)) in
-  let label_width = max 1 (list_cells - status_width - 4) in
+  let label_width = max 1 (list_cells - status_width - 6) in
   let window = Rows.of_list ~first:scroll ~height entries in
   let listing = List.init height (fun offset ->
     let index = scroll + offset in
@@ -834,22 +834,25 @@ let render_lanes_overview (state : state) =
     | None -> ""
     | Some (Masc_tui_lane_inventory.Category_header category) ->
         Theme.info ()
+        ^ "  "
         ^ Masc_tui_lane_inventory.category_label ~ko:(state.ui_language = Lang_ko) category
         ^ Ansi.reset
     | Some (Masc_tui_lane_inventory.Lane_row row) ->
         let observed = standing row in
+        let is_selected = selected_position = Some index in
+        let cursor_mark = if is_selected then "\xe2\x80\xba " else "  " in
         let label =
           (if not projection.lop_observation && Option.is_some state.standalone_lanes_error
            then ui_text state ~ko:"보존 · " ~en:"Retained · " else "")
           ^ Terminal_text.single_line row.label ^ " · " ^ Terminal_text.single_line row.purpose in
-        let plain = fit_width (Masc_tui_lane_standing.mark observed) 2
+        let plain = cursor_mark ^ fit_width (Masc_tui_lane_standing.mark observed) 2
           ^ fit_width label label_width ^ "  " ^ fit_width (summary row) status_width in
         let marked text = pressable (Press_lane_row (Masc_tui_lane_inventory.identity row))
             (fit_width text list_cells) in
-        if selected_position = Some index then Theme.selection_style () ^ marked plain ^ Ansi.reset
+        if is_selected then Theme.selection_style () ^ marked plain ^ Ansi.reset
         else
           let recede = if Masc_tui_lane_standing.recedes observed then Theme.recede () else "" in
-          marked (Masc_tui_lane_standing.colour observed
+          marked (cursor_mark ^ Masc_tui_lane_standing.colour observed
             ^ fit_width (Masc_tui_lane_standing.mark observed) 2 ^ Ansi.reset
             ^ recede ^ fit_width label label_width ^ "  " ^ Ansi.reset
             ^ Masc_tui_lane_standing.colour observed ^ fit_width (summary row) status_width ^ Ansi.reset)) in
@@ -986,9 +989,8 @@ let render_lanes_overview (state : state) =
                         ~en:"  (same provider as a current slot)"
                     else "" )
               in
-              let mark =
-                if picker.Masc_tui_types.rlp_selected_row = Some offset then ">" else " "
-              in
+              let is_selected = picker.Masc_tui_types.rlp_selected_row = Some offset in
+              let mark = if is_selected then "\xe2\x80\xba" else " " in
               let ctx =
                 Printf.sprintf
                   (if state.ui_language = Lang_ko then " [%s 컨텍스트]" else " [%s context]")
@@ -998,12 +1000,17 @@ let render_lanes_overview (state : state) =
                 if runtime.ro_is_default then ui_text state ~ko:" [기본]" ~en:" [default]"
                 else ""
               in
-              box_line buf cols
-                (Printf.sprintf "  %s %s%s%s%s%s"
-                   mark refusal_prefix
-                   (Masc_tui_types.runtime_model_picker_title runtime)
-                   ctx def
-                   (Ansi.dim ^ note ^ Ansi.reset));
+              let row_text =
+                Printf.sprintf "  %s %s%s%s%s%s"
+                  mark refusal_prefix
+                  (Masc_tui_types.runtime_model_picker_title runtime)
+                  ctx def
+                  (Ansi.dim ^ note ^ Ansi.reset)
+              in
+              if is_selected then
+                box_line_selected buf cols (Masc_tui_theme.strip_sgr row_text)
+              else
+                box_line buf cols row_text;
               box_line_styled buf cols ~style:(Theme.recede ())
                 (ui_text state ~ko:"      쿼터 범위 " ~en:"      Quota scope "
                   ^ Terminal_text.single_line

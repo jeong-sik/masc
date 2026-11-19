@@ -119,14 +119,14 @@ let draw ~cols (view : view) =
            past nine the number is no longer a key an operator can press,
            and the marker is what says which one enter would start. *)
          let here = index = cursor in
-         let marker = if here then Theme.ok () ^ ">" ^ Ansi.reset else " " in
-         (* Padded before it is emphasised: the escape codes are characters
-           to a width specifier and nothing on screen, so padding afterwards
-           shortens the column by however long the codes are. *)
-         let padded = Printf.sprintf "%-24s" (Terminal_text.single_line label) in
+         let marker = if here then "\xe2\x80\xba" else " " in
+         (* Padded in display cells before it is emphasised so multi-byte
+           UTF-8 labels align cleanly with ASCII rows. *)
+         let padded =
+           Masc_tui_message_layout.fit_width (Terminal_text.single_line label) 24
+         in
          let shown =
-           if here then Ansi.bold ^ padded ^ Ansi.reset
-           else if held then padded
+           if held || here then padded
            else Ansi.dim ^ padded ^ Ansi.reset
          in
          let elsewhere =
@@ -158,10 +158,19 @@ let draw ~cols (view : view) =
              Theme.bad () ^ "  · callback unreadable" ^ Ansi.reset
            | None -> ""
          in
-         ( index
-         , held
-         , Printf.sprintf "%s %2d %s %s %s%s%s%s" marker (index + 1) mark shown row_state
-             app own_callback elsewhere ))
+         let row =
+           Printf.sprintf "%s %2d %s %s %s%s%s%s" marker (index + 1) mark shown row_state
+             app own_callback elsewhere
+         in
+         let row =
+           if here then
+             Theme.selection_style ()
+             ^ Masc_tui_message_layout.fit_width
+                 (Masc_tui_theme.strip_sgr row) (framed_inner_width cols)
+             ^ Ansi.reset
+           else row
+         in
+         (index, held, row))
       connectable
   in
   (* Attached first puts a blank row between the services this Keeper holds

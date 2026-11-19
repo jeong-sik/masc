@@ -714,6 +714,10 @@ let rec workspace_contents dir =
 let test_cli_workspace ?(linked_worktree = false) () =
   Eio_main.run @@ fun env ->
   let owner_root = Filename.temp_dir "checkpoint-purge-cli-" "" |> Unix.realpath in
+  (* An apply takes the workspace writer lease before it reads, so even a
+     refused apply leaves the lease file. It sits outside the tree the test
+     compares, as the machine's lease directory sits outside a workspace. *)
+  let lease_root = Filename.temp_dir "checkpoint-purge-cli-lease-" "" |> Unix.realpath in
   let base_path =
     if not linked_worktree then owner_root
     else
@@ -727,7 +731,9 @@ let test_cli_workspace ?(linked_worktree = false) () =
       worktree_root
   in
   Fun.protect
-    ~finally:(fun () -> Fs_compat.remove_tree owner_root)
+    ~finally:(fun () ->
+      Fs_compat.remove_tree owner_root;
+      Fs_compat.remove_tree lease_root)
     (fun () ->
       Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
       let config = Masc.Workspace.default_config base_path in
@@ -794,9 +800,7 @@ let test_cli_workspace ?(linked_worktree = false) () =
         let child_env =
           [ "HOME=" ^ owner_root
           ; "XDG_CONFIG_HOME=" ^ owner_root
-            (* [--apply] takes the workspace writer lease; its file goes
-               under the test's own root, not the machine's temp dir. *)
-          ; "MASC_BASE_PATH_LEASE_DIR=" ^ owner_root
+          ; "MASC_BASE_PATH_LEASE_DIR=" ^ lease_root
           ]
           @ (if from_cwd then [] else [ "MASC_BASE_PATH=" ^ runtime_base_path ])
         in
@@ -900,6 +904,132 @@ let test_cli_workspace ?(linked_worktree = false) () =
              (atom_count purged.messages) moved.position.end_atom;
            Alcotest.(check int) "apply leaves boundary_lines_seen alone"
              fixture_boundary_lines_seen moved.boundary_lines_seen))
+
+(* RFC librarian-call-only-proposes §5.2, §5.6 at the CLI: a recovery closes
+   the open messages, writes the Keeper's turn log line, then installs. A line
+   that is not written leaves the history whole. *)
+let test_cli_recovery_writes_the_turn_log_line () =
+  Eio_main.run
+  @@ fun env ->
+  let owner_root = Filename.temp_dir "checkpoint-purge-recovery-" "" |> Unix.realpath in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree owner_root)
+  @@ fun () ->
+  Masc_test_deps.with_process_env Env_config_core.base_path_env_key None
+  @@ fun () ->
+  let config = Masc.Workspace.default_config owner_root in
+  let keeper_name = "purge-cli-recovery" in
+  let trace = "trace-purge-recovery" in
+  (* Overlapping tool cycles after one sound cycle: Overlapping_tool_cycle. *)
+  let kept = text_message Types.User "(autonomous wake)" :: cycle "a" in
+  let messages =
+    kept
+    @ [ block_message Types.Assistant [ tool_use "c1" ]
+      ; block_message Types.Assistant [ tool_use "c2" ]
+      ; { (block_message Types.Tool [ tool_result "c1" ]) with tool_call_id = Some "c1" }
+      ; { (block_message Types.Tool [ tool_result "c2" ]) with tool_call_id = Some "c2" }
+      ]
+  in
+  let session_dir = Masc.Keeper_fs.keeper_session_dir config trace in
+  let canonical =
+    Masc.Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace
+  in
+  (* The normal save refuses the break, so the head is written as a corrupt
+     one sits on disk: saved mid-turn, every message open. *)
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~boundary:Agent_core.Checkpoint_objects.Turn_continues
+       ~session_dir ~path:canonical
+       { (checkpoint_fixture ()) with Agent_core.Checkpoint.session_id = trace; messages }
+     : string);
+  (match
+     Masc_test_deps.meta_of_json_fixture
+       (`Assoc [ "name", `String keeper_name; "trace_id", `String trace ])
+   with
+   | Error detail -> Alcotest.failf "keeper meta fixture: %s" detail
+   | Ok meta ->
+     (match Masc.Keeper_meta_store.replace_snapshot config meta with
+      | Ok () -> ()
+      | Error detail -> Alcotest.failf "keeper meta: %s" detail));
+  let keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  (match
+     Masc.Keeper_turn_log_recorder.record ~at:1.0
+       ~new_log_id:(Masc.Keeper_turn_log.Log_id.fresh ())
+       { keepers_dir
+       ; base_path = config.Masc.Workspace.base_path
+       ; keeper_name
+       ; session_dir
+       ; session_id = trace
+       }
+       Masc.Keeper_turn_log_writer.Process_start
+   with
+   | Ok (Masc.Keeper_turn_log_recorder.Appended _) -> ()
+   | Ok Nothing_to_append -> Alcotest.fail "the log had started already"
+   | Error error -> Alcotest.fail (Masc.Keeper_turn_log_recorder.not_recorded_to_string error));
+  let log_path = Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+  let log_text () =
+    String.split_on_char '\n' (Fs_compat.load_file log_path)
+    |> List.filter (fun row -> not (String.equal row ""))
+    |> List.map (fun row ->
+      match Masc.Keeper_turn_log_codec.of_json (Yojson.Safe.from_string row) with
+      | Ok (Log_started { mark; _ }) -> Printf.sprintf "started at %d" mark.closed_messages
+      | Ok (Reset { cause = Announced Recovered; before; after; closed_before; _ }) ->
+        Printf.sprintf "reset recovered %d to %d, naming %d" before.closed_messages
+          after.closed_messages
+          (List.fold_left
+             (fun count (slice : Masc.Keeper_turn_log.slice) -> count + slice.take)
+             0 closed_before)
+      | Ok (Opened _ | Closed _ | Reset _) -> "another line"
+      | Error error -> Alcotest.fail (Masc.Keeper_memory_os_types.wire_error_to_string error))
+    |> String.concat "\n"
+  in
+  let head () =
+    match Masc.Keeper_turn_log_head.read ~session_dir ~session_id:trace with
+    | Ok head -> head
+    | Error error ->
+      Alcotest.fail (Masc.Keeper_checkpoint_store_session.checkpoint_load_error_to_string error)
+  in
+  let backups () =
+    Sys.readdir (Masc.Workspace.masc_dir config)
+    |> Array.to_list
+    |> List.filter (String.starts_with ~prefix:("backups-checkpoint-purge-" ^ trace ^ "-"))
+  in
+  let apply ~exit_code =
+    let runtime_base_path =
+      Masc.Workspace.runtime_base_path (Masc.Workspace.Explicit owner_root)
+    in
+    let output =
+      Eio.Process.parse_out
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / owner_root)
+        ~env:
+          [| "HOME=" ^ owner_root
+           ; "XDG_CONFIG_HOME=" ^ owner_root
+           ; "MASC_BASE_PATH_LEASE_DIR=" ^ owner_root
+           ; "MASC_BASE_PATH=" ^ runtime_base_path
+          |]
+        ~is_success:(Int.equal exit_code)
+        (Eio.Stdenv.process_mgr env) Eio.Buf_read.take_all
+        [ Sys.getenv "MASC_TEST_CHECKPOINT_PURGE_EXE" |> Config_dir_resolver.absolute_path
+        ; "--keeper"; keeper_name; "--keep-recent"; "0"; "--base"; owner_root; "--apply"
+        ]
+    in
+    print_string output
+  in
+  let started = Fs_compat.load_file log_path in
+  Fs_compat.save_file log_path (started ^ "not a line\n");
+  apply ~exit_code:1;
+  Alcotest.(check int) "a line that fails leaves every message"
+    (List.length messages) (head ()).closed_messages;
+  Alcotest.(check (list string)) "and backs nothing up" [] (backups ());
+  Fs_compat.save_file log_path started;
+  apply ~exit_code:0;
+  Alcotest.(check string) "the line names every message, the open ones too"
+    (Printf.sprintf "started at 0\nreset recovered %d to %d, naming %d" (List.length messages)
+       (List.length kept) (List.length messages))
+    (log_text ());
+  Alcotest.(check int) "the head ends where the line says" (List.length kept)
+    (head ()).closed_messages;
+  Alcotest.(check int) "with nothing open" 0 (head ()).open_messages;
+  Alcotest.(check int) "the source was backed up" 1 (List.length (backups ()))
+;;
 
 (* A completed turn's line, as the turn driver writes it: [end_atom] atoms,
    and the digest of the message that opens the last of them. *)
@@ -1535,5 +1665,7 @@ let () =
             (fun () -> test_cli_workspace ())
         ; Alcotest.test_case "linked worktree: shared runtime dry-run and apply" `Quick
             (fun () -> test_cli_workspace ~linked_worktree:true ())
+        ; Alcotest.test_case "a recovery writes the turn log line" `Quick
+            test_cli_recovery_writes_the_turn_log_line
         ] )
     ]

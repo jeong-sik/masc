@@ -19,23 +19,23 @@ type wake_style =
 
 val wake_summary : ko:bool -> Masc_tui_keeper_next_run.wake_slot list -> string
 (** State-view summary in the same width as the half-hour window. Counts
-    only known wakes; any unknown slot remains explicit, including beside a
-    positive count. Unknown and known empty windows have different labels.
-    A narrow partial window starts with [?] before the known count. *)
+    only known wakes; a count beside an unknown slot is a lower bound ([3+]).
+    A window with nothing reported is one [?] at its left, and a read window
+    with no run is one [—] (RFC tui-one-screen-grammar 6.4). *)
 
 val wake_strip :
-  ko:bool -> style:wake_style -> Masc_tui_keeper_next_run.wake_slot list -> string
-(** One terminal cell per half hour. An entirely unknown window gets one
-    explicit label; a known empty window says no runs in this window. Mixed
+  style:wake_style -> Masc_tui_keeper_next_run.wake_slot list -> string
+(** One terminal cell per half hour. Mixed
     windows retain every position: positive known counts keep their wake
     glyph even when an unknown shares the slot. Unknown slots without known
     wakes use thin lines; known empty slots use spaces. Only [Wake_counts]
     scales known counts. {!wake_summary} retains the partial-count notice.
-    Narrow labels fall back to one [?] or [-]. *)
+    An entirely unknown window is one [?] at its left, a known empty one a
+    [—]. *)
 
-val history_unknown_label : ko:bool -> cells:int -> string
-(** The past half-hour band when nothing in it was read: one label in the
-    band's width, [?] when the label does not fit, nothing for zero cells. *)
+val history_unknown_label : cells:int -> string
+(** The past half-hour band when nothing in it was read: one [?] at the
+    band's left, padded to its width, nothing for zero cells. *)
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 

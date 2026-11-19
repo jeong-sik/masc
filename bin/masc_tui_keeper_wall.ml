@@ -78,8 +78,8 @@ let marks hours =
 
 (* A band nothing was read for says so once in the band's width, as the roster's
    history column does; a partly read band keeps one mark per half hour. *)
-let band ~ko ~count readings marks_of =
-  if Pulse.nothing_read readings then Masc_tui_keeper_strip.history_unknown_label ~ko ~cells:count
+let band ~count readings marks_of =
+  if Pulse.nothing_read readings then Masc_tui_keeper_strip.history_unknown_label ~cells:count
   else marks_of ()
 
 let row ~ko ~cols ~now ~name runtime =
@@ -89,7 +89,7 @@ let row ~ko ~cols ~now ~name runtime =
      tui-one-screen-grammar §7.2); the wall does not mark a recovery. *)
   let mark =
     Grid.mark Masc_tui_keeper_list_model.Day_wall (Grid.verdict ~now runtime) in
-  prefix name_cells mark name ^ band ~ko ~count [ hours ] (fun () -> marks hours) ^ "┃ "
+  prefix name_cells mark name ^ band ~count [ hours ] (fun () -> marks hours) ^ "┃ "
   ^ Printf.sprintf "%s/%d" (count_text (Pulse.failure_count hours)) count
 
 let fleet ~ko ~cols ~now runtimes =
@@ -100,7 +100,7 @@ let fleet ~ko ~cols ~now runtimes =
       match List.nth_opt hours position with Some hour -> hour | None -> Pulse.Half_hour_unknown) all)) in
   let peak = Pulse.peak_failure_count counts in
   prefix name_cells " " "fleet"
-  ^ band ~ko ~count all (fun () ->
+  ^ band ~count all (fun () ->
       String.concat "" (List.map (function
         | Pulse.Count_unknown -> Pulse.half_hour_mark Pulse.Half_hour_unknown
         | Pulse.Exact 0 -> Pulse.half_hour_mark Pulse.Half_hour_quiet

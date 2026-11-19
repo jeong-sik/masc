@@ -749,8 +749,7 @@ let grid_half_hour_pulse state (grid : Grid.t) ~now pulse =
   else if List.for_all (function
     | Masc_tui_keeper_pulse.Half_hour_unknown -> true
     | Half_hour_quiet | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok -> false) slots then
-    Masc_tui_keeper_strip.history_unknown_label ~ko:(state.ui_language = Lang_ko)
-      ~cells:grid.side_cells
+    Masc_tui_keeper_strip.history_unknown_label ~cells:grid.side_cells
   else String.concat ""
     (List.map
        (fun half_hour ->
@@ -768,7 +767,7 @@ let grid_wake_window state ~style slots =
   match state.keeper_list_view with
   | Keeper_list_model.By_state -> Masc_tui_keeper_strip.wake_summary ~ko slots
   | Plain | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall ->
-      Masc_tui_keeper_strip.wake_strip ~ko ~style slots
+      Masc_tui_keeper_strip.wake_strip ~style slots
 
 (* Scheduled wakes per half hour, the now slot first. Unknown windows get
    one label; the shared renderer keeps mixed unknown and empty slots apart. *)

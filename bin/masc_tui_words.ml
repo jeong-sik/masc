@@ -44,7 +44,7 @@ let span_ago ~ko span = span ^ if ko then " 전" else " ago"
    They are lower case for the middle of a row; a row that starts with one
    capitalises it in English, as its neighbours do. *)
 let workspace_name ~ko = if ko then "워크스페이스" else "workspace"
-let field_unconfirmed ~ko = if ko then "이전 관측" else "unconfirmed"
+let field_unconfirmed ~ko = if ko then "확인 안 됨" else "unconfirmed"
 let workspace_identity_name ~ko = workspace_name ~ko ^ if ko then " 식별" else " identity"
 let workspace_identity_unconfirmed ~ko =
   workspace_identity_name ~ko ^ " " ^ field_unconfirmed ~ko

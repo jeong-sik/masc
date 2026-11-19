@@ -795,6 +795,45 @@ let test_lease_file_presence_is_read_without_making_anything () =
       [ Filename.basename blocked_root ]
       (entries blocked))
 
+(* Only the lease this process holds says that the process keeps store
+   facts. A lease that was released does not, also while a newer lease of
+   the same BasePath is held. The held lease is asked last: what it says is
+   not taken back, and stays said for the tests after this one, none of
+   which reads a store's fact. *)
+let test_only_the_held_lease_keeps_store_facts () =
+  with_base_and_run "startup-takeover-store-facts"
+    (fun ~base_path ~run_dir ->
+      let acquire () =
+        match
+          Server_startup_takeover.acquire_base_path_lock ~run_dir base_path
+        with
+        | Server_startup_takeover.Base_path_acquired lease -> lease
+        | Server_startup_takeover.Base_path_already_owned _ ->
+          Alcotest.fail "fresh lease fixture was already owned"
+        | Server_startup_takeover.Base_path_rejected rejection ->
+          Alcotest.failf
+            "fresh lease fixture was rejected: %s"
+            (Server_startup_takeover.base_path_lock_rejection_to_string
+               rejection)
+      in
+      let says lease =
+        match Server_startup_takeover.keep_store_facts lease with
+        | Server_startup_takeover.Store_facts_kept -> "store facts kept"
+        | Server_startup_takeover.Lease_not_held -> "lease not held"
+      in
+      let released_lease = acquire () in
+      Server_startup_takeover.release_base_path_lease released_lease;
+      Alcotest.(check string) "a released lease" "lease not held" (says released_lease);
+      let held_lease = acquire () in
+      Fun.protect
+        ~finally:(fun () -> Server_startup_takeover.release_base_path_lease held_lease)
+        (fun () ->
+          Alcotest.(check string)
+            "a released lease, while a newer one is held"
+            "lease not held"
+            (says released_lease);
+          Alcotest.(check string) "the held lease" "store facts kept" (says held_lease)))
+
 let test_stale_lease_release_preserves_new_active_lease () =
   with_base_and_run "startup-takeover-stale-release"
     (fun ~base_path ~run_dir ->
@@ -2622,6 +2661,8 @@ let () =
             test_lease_file_presence_is_read_without_making_anything;
           Alcotest.test_case "stale lease release preserves active ownership"
             `Quick test_stale_lease_release_preserves_new_active_lease;
+          Alcotest.test_case "only the held lease keeps store facts" `Quick
+            test_only_the_held_lease_keeps_store_facts;
           Alcotest.test_case "linked runtime directory is rejected" `Quick
             test_base_path_lock_rejects_linked_runtime_directory;
           Alcotest.test_case "linked private lease directory is rejected" `Quick

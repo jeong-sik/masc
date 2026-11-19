@@ -255,6 +255,9 @@ let test_link =
       (read_name (key_file_of ~runtime_root other_account)))
 ;;
 
+(* How often the case of the FIFO looks whether the removal waits on it. *)
+let fifo_watch_s = 0.005
+
 (* A file where the folder of the keys would be holds no key of any account.
    The removal ends there, as the reading of what is present does: were it to
    fail, no later removal would end either. *)
@@ -264,6 +267,37 @@ let test_not_a_folder =
     Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 keys (fun (_ : out_channel) -> ());
     removed "an account under a file in place of the folder of the keys" ~runtime_root account "removed";
     Alcotest.(check bool) "the file is left" true (Sys.file_exists keys))
+;;
+
+(* A FIFO where the folder of the keys would be holds no key either, and the
+   removal does not open it. An open of a FIFO for reading waits until
+   something opens it for writing, and an open for writing that does not
+   wait succeeds only while one waits to read: so the watcher learns whether
+   the removal opened the FIFO, and lets it go on if it did. *)
+let test_a_fifo =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    let keys = Filename.dirname (keys_of ~runtime_root account) in
+    Unix.mkfifo keys 0o600;
+    let opened = ref false in
+    let ended = ref false in
+    let rec watch () =
+      if not !ended
+      then (
+        (match Unix.openfile keys [ Unix.O_WRONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+         | fd ->
+           opened := true;
+           Unix.close fd
+         | exception Unix.Unix_error (Unix.ENXIO, _, _) -> ());
+        Eio_unix.sleep fifo_watch_s;
+        watch ())
+    in
+    Eio.Fiber.both
+      (fun () ->
+        Fun.protect
+          ~finally:(fun () -> ended := true)
+          (fun () -> removed "an account under a FIFO in place of the folder of the keys" ~runtime_root account "removed"))
+      watch;
+    Alcotest.(check bool) "the removal did not open the FIFO" false !opened)
 ;;
 
 (* The modes that keep a folder from being removed do not keep the superuser
@@ -323,6 +357,7 @@ let () =
         ; Alcotest.test_case "an account with no files" `Quick test_nothing_made
         ; Alcotest.test_case "a link is not followed" `Quick test_link
         ; Alcotest.test_case "a file in place of the folder of the keys" `Quick test_not_a_folder
+        ; Alcotest.test_case "a FIFO in place of the folder of the keys" `Quick test_a_fifo
         ; Alcotest.test_case "the key that does not go" `Quick test_key_stays
         ; Alcotest.test_case "the home that does not go" `Quick test_home_stays
         ] )

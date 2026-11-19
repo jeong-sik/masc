@@ -531,7 +531,10 @@ let memory_row ?state_style ?size_style ?delta_style ?close columns values =
    the level's changes with the reading, which is the one thing on this screen
    a colour is for. *)
 
-let system_log_time_width = 8
+(* A log row reads its moment to the second, with the date once the day
+   differs, so the column is as wide as the widest such moment. *)
+let system_log_time_width =
+  Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_second
 let system_log_level_width = 7
 let system_log_module_width = 16
 let system_log_keeper_width = 12
@@ -1397,7 +1400,9 @@ let change_row ~op_style ~result_style ~layout values =
    fourteen in the row, so the column had no end where it was named and an
    invisible one where it was filled. *)
 
-let fusion_time_width = 16
+(* A run list reads its start as a column moment (RFC tui-one-screen-grammar
+   §6.1), so the column is as wide as the widest of those. *)
+let fusion_time_width = Instant.cell_width Instant.To_minute
 let fusion_age_width = 7
 (* A running stage ("recording(3/1)") or how the run ended: a failed run draws
    a code from the delivery set or the judge set.

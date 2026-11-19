@@ -276,10 +276,7 @@ let prepare_code_history_rows (state : state) ~cols =
   in
   let field name text = name ^ ": " ^ Terminal_text.single_line text in
   let date seconds =
-    let t = Unix.localtime seconds in
-    Printf.sprintf "%04d-%02d-%02d %02d:%02d:%02d"
-      (t.Unix.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
-      t.tm_hour t.tm_min t.tm_sec
+    Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) seconds
   in
   match Masc_tui_fetched.current state.code_history with
   | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->

@@ -370,6 +370,7 @@
  (modules masc_tui_usage_trend)
  (libraries
   masc
+  masc_tui_value
   masc_tui_ansi
   masc_tui_braille
   masc_tui_chart
@@ -560,7 +561,7 @@
  (name masc_tui_lane_addons)
  (wrapped false)
  (modules masc_tui_lane_addons)
- (libraries masc masc.masc_types masc_tui_lane_application masc_tui_lane_standing masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_lane_records masc_tui_markdown masc_tui_markdown_theme masc_tui_theme masc_tui_span yojson unix))
+ (libraries masc masc.masc_types masc_tui_lane_application masc_tui_lane_standing masc_tui_message_layout masc_tui_text_block masc_tui_lane_declaration masc_tui_schema_form masc_tui_lane_installer masc_tui_lane_subscriptions masc_tui_lane_records masc_tui_markdown masc_tui_markdown_theme masc_tui_theme masc_tui_span yojson unix masc_tui_value))
 
 ;; The Fusion launch form: what it offers, what a submit means, what the
 ;; overlay says. Names Fusion_types for the topology sum, so it lists
@@ -639,7 +640,7 @@
  (name masc_tui_resource_catalog)
  (wrapped false)
  (modules masc_tui_resource_catalog)
- (libraries masc_tui_mcp masc masc.time_codec unix yojson  masc.agent_core.digest))
+ (libraries masc_tui_mcp masc masc.time_codec masc_tui_value unix yojson  masc.agent_core.digest))
 
 (library
  (name masc_tui_artifact_checks)
@@ -683,8 +684,9 @@
  (modules masc_tui_acting)
  ; masc for the call log's disposition vocabulary, which the observer types
  ; the live rows with and the fold carries through unchanged.
+ ; masc_tui_value for the width of the receipt-time column.
  (libraries masc masc.browser_lane masc_tui_message_layout masc_tui_observer masc_tui_theme
-  masc_tui_words agent_core))
+  masc_tui_value masc_tui_words agent_core))
 
 (library
  (name masc_tui_keeper_chat_queue)
@@ -1269,7 +1271,7 @@
  (name masc_tui_tool_table)
  (wrapped false)
  (modules masc_tui_tool_table)
- (libraries masc_tui_ansi masc_tui_message_layout masc_tui_table))
+ (libraries masc_tui_ansi masc_tui_message_layout masc_tui_say masc_tui_table))
 
 (library
  (name masc_tui_fleet_summary)
@@ -1353,6 +1355,13 @@
  (name masc_tui_words)
  (wrapped false)
  (modules masc_tui_words))
+
+; Screen text in both languages (RFC tui-one-screen-grammar section 7.1).
+; Depends on nothing, like the words table, so every renderer can use it.
+(library
+ (name masc_tui_say)
+ (wrapped false)
+ (modules masc_tui_say))
 
 (library
  (name masc_tui_alloc_profile)
@@ -1461,13 +1470,13 @@
  (name masc_tui_volume_gc)
  (wrapped false)
  (modules masc_tui_volume_gc)
- (libraries masc yojson))
+ (libraries masc masc_tui_say yojson))
 
 (library
  (name masc_tui_storage)
  (wrapped false)
  (modules masc_tui_storage)
- (libraries masc))
+ (libraries masc masc_tui_say))
 
 (library
  (name masc_tui_keeper_mark)
@@ -1911,7 +1920,7 @@
  (name masc_tui_runtime_evidence)
  (wrapped false)
  (modules masc_tui_runtime_evidence)
- (libraries yojson unix))
+ (libraries yojson unix masc_tui_value))
 
 (library
  (name masc_tui_sgr_text)
@@ -2201,6 +2210,7 @@
  (wrapped false)
  (modules masc_tui_keeper_strip)
  (libraries
+  masc_tui_value
   masc
   masc.masc_schedule
   masc_tui_ansi
@@ -2238,7 +2248,7 @@
  (wrapped false)
  (modules masc_tui_home)
  (libraries masc_tui_credential_preparation masc_tui_types masc_tui_ask_projection masc_tui_approvals_model masc_tui_ansi masc_tui_agenda
-  masc_tui_message_layout masc_tui_config masc.keeper_registry masc masc_tui_scroll))
+  masc_tui_message_layout masc_tui_config masc_tui_health_section masc.keeper_registry masc masc_tui_scroll))
 
 ; Which list the move keys walk on the surface on screen (RFC
 ; tui-one-screen-grammar section 3.1), outside the executable so a test links it.
@@ -2247,6 +2257,12 @@
  (wrapped false)
  (modules masc_tui_list_moves)
  (libraries masc_tui_types masc_tui_home masc_tui_scroll))
+
+; The health section an operator action names, decoded from its wire name.
+(library
+ (name masc_tui_health_section)
+ (wrapped false)
+ (modules masc_tui_health_section))
 
 (library
  (name masc_tui_surface_navigation)
@@ -2353,7 +2369,7 @@
  (name masc_tui_memory_lineage)
  (wrapped false)
  (modules masc_tui_memory_lineage)
- (libraries masc masc_tui_message_layout masc_tui_terminal_palette unix yojson))
+ (libraries masc masc_tui_message_layout masc_tui_terminal_palette unix yojson masc_tui_value))
 
 (library
  (name masc_tui_memory_recall_form)
@@ -2416,7 +2432,7 @@
  (wrapped false)
  (modules masc_tui_palette)
  (libraries masc.runtime masc_tui_overview_providers masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows masc_tui_task_dispatch
-  masc_tui_message_layout masc_tui_code_lexer masc_tui_lane_addons masc unix))
+  masc_tui_message_layout masc_tui_code_lexer masc_tui_lane_addons masc_tui_value masc unix))
 
 (library
  (name masc_tui_task_document)
@@ -2430,6 +2446,7 @@
  (wrapped false)
  (modules masc_tui_render_tools)
  (libraries
+  masc_tui_say
   masc_tui_nested_result
   masc_tui_pick_list
   masc_tui_fetched
@@ -2547,7 +2564,9 @@
   masc_tui_layout
   masc_tui_render_schedule
   masc_tui_terminal_palette
-  masc_tui_theme))
+  masc_tui_theme
+  masc_tui_value
+  masc.time_codec))
 
 (library
  (name masc_tui_msx_checkpoint_pending)
@@ -2621,7 +2640,7 @@
  (name masc_tui_next_request_band)
  (wrapped false)
  (modules masc_tui_next_request_band)
- (libraries masc_tui_context_inspector masc_tui_token_scale masc_tui_ansi))
+ (libraries masc_tui_context_inspector masc_tui_token_scale masc_tui_ansi masc_tui_value unix))
 
 (library
  (name masc_tui_render_prim)
@@ -3571,7 +3590,7 @@
  (wrapped false)
  (modules masc_tui_queue_inspection)
  (libraries masc masc.keeper_runtime masc.keeper_chat_operations
-  masc.masc_schedule masc.masc_types masc_tui_command masc_tui_message_layout unix yojson))
+  masc.masc_schedule masc.masc_types masc_tui_command masc_tui_message_layout unix yojson masc_tui_value))
 
 ;; Offline replay of the Librarian read rules over a live workspace (RFC
 ;; librarian-lifecycle §9). Reads the turn-boundary logs and the checkpoints

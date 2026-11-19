@@ -60,8 +60,9 @@ type session_block = {
   kept : session_entry list;  (** Oldest first; the newest is last. *)
 }
 
-val session_block : width:int -> ?room:int -> event list -> session_block
-(** Which TUI session events fit [room] rows, from the log as [state.events]
+val session_block : now:float -> width:int -> ?room:int -> event list -> session_block
+(** Which TUI session events fit [room] rows, each drawn beside its moment as
+    read at [now], from the log as [state.events]
     holds it (newest first). Room is counted in rows, an event is kept or
     left out whole, and when any is left out one row of the room goes to
     counting them. The newest event is kept even when it alone does not fit

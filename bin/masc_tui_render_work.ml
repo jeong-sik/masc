@@ -158,7 +158,7 @@ let work_preview_body ~cells ~rows text =
   let shown = List.take rows lines in
   if List.length lines <= rows then shown
   else List.mapi (fun index line ->
-    if index = rows - 1 then Message_layout.take_cells line (max 0 (cells - 1)) ^ "…"
+    if index = rows - 1 then Message_layout.truncate_end cells line
     else line) shown
 
 (* The rows on screen are the last reading that arrived. A read still in
@@ -1462,13 +1462,12 @@ let schedule_status_word_cells =
     0 Schedule_contract_values.schedule_status_strings
 
 
-(* The width of the request clock column, read off the format rather than
-   typed. [short_timestamp] answers a parsed stamp in this shape, but an
-   unparsed one comes back as the source text and an absent one as "(never)",
-   and either of those pulls the three columns after it out of line -- the
-   same shape as the printf padding this row gave up. *)
-let schedule_requested_clock_cells =
-  Message_layout.display_width (Terminal_text.short_timestamp_of_unix 0.)
+(* The width of the request clock column: the widest column moment
+   ([Terminal_text.column_timestamp]), not a measured row. An unparsed stamp
+   comes back as the source text and an absent one as "(never)", and either
+   of those pulls the three columns after it out of line -- the same shape
+   as the printf padding this row gave up. *)
+let schedule_requested_clock_cells = Terminal_text.column_timestamp_cells
 
 (* The screen's words for the two projection axes. Both arrive as the
    schedule contract's closed variants, so each value has its own arm here and
@@ -1888,7 +1887,7 @@ let render_schedule_list (state : state) =
                let is_selected = idx = state.schedule_cursor in
                let due =
                  match row.sch_due_at_iso with
-                 | Some iso -> Terminal_text.short_timestamp iso
+                 | Some iso -> Terminal_text.column_timestamp iso
                  | None -> Masc_tui_theme.Glyph.no_value
                in
                (* The payload target names who the wake reaches (a keeper for

@@ -56,7 +56,6 @@ let entry_at ?(id = "") at : Tui_types.msg_entry =
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_block = []
-  ; me_timestamp = ""
   ; me_request_id = ""
   ; me_execution_source = None
   ; me_at = at
@@ -85,7 +84,6 @@ let chat_entry ?turn_phase ?turn_sequence ?(operation_seq = 0) ?memory_summary
   ; me_submitted_at = None
   ; me_tool_block = None
   ; me_skill_block = []
-  ; me_timestamp = Printf.sprintf "%.0f" at
   ; me_request_id = request_id
   ; me_execution_source = Some (Masc_tui_keeper_chat_log.Operation request_id)
   ; me_at = at
@@ -4255,7 +4253,7 @@ let test_indexed_timeline_context_matches_the_full_list_functions () =
             ~at:(float_of_int (Random.State.int rng 60)) ()
         in
         if Random.State.int rng 5 = 0
-        then { entry with Tui_types.me_timestamp = ""; me_submitted_at = None }
+        then { entry with Tui_types.me_submitted_at = None }
         else entry)
     in
     let visible = List.combine rows (Tui_types.chat_projected_timeline_ats rows) in

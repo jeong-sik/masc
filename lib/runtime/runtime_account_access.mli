@@ -278,15 +278,22 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
 (** What the log says of a turn of a person's Keeper, judged before the
     account it would run on is read: the part of {!authorize} that looks at
     no account. A server asks it before it takes the call of the account, so
-    a turn the log refuses holds no call and is not told whether one runs.
+    a turn the log refuses here holds no call and is not told whether one
+    runs. A turn it lets through and a record then takes back does take the
+    call: {!authorize} refuses it inside. By then a server has read the key
+    file of a key account to make its runtime; no client is started with
+    the key. That order is the server's, not this module's:
+    lib/server/server_preview_keeper_turn.ml, [run], and the RFC of the key
+    accounts, 3.5, say it where it is decided.
     It gives nothing a client starts on: {!authorize} judges the request
     again inside the call, on the state of that time, with the account.
 
-    [Ok ()] for a request that is no [Keeper_turn], and in a single-user
-    process: {!authorize} judges those whole. So [Ok ()] is no promise that
-    {!authorize} lets the request through: in a multi-account process it
-    refuses an operator's call and a turn of an operator's Keeper, which
-    [admit] does not judge. *)
+    [Error Not_published] for every request before the process published
+    its access. After that, [Ok ()] for a request that is no [Keeper_turn],
+    and in a single-user process: {!authorize} judges those whole. So
+    [Ok ()] is no promise that {!authorize} lets the request through: in a
+    multi-account process it refuses an operator's call and a turn of an
+    operator's Keeper, which [admit] does not judge. *)
 val admit : request -> (unit, refusal) result
 
 (** Authorizes a Muse account for [request] by the access the process

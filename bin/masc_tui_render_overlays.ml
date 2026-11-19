@@ -362,10 +362,9 @@ let render_detail_reading (state : state) reading =
 let help_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let header = help_masthead state in
   let count =
     List.length
-      (Masc_tui_help.sheet ~header ~cols
+      (Masc_tui_help.sheet ~cols
          (help_lines ~width:(Masc_tui_help.line_cells ~cols) state))
   in
   (count, overlay_window_height ~rows ~count)
@@ -840,9 +839,8 @@ let help_hints (state : state) =
    screen -- a narrow filter, a tall terminal -- put the footer mid-screen. *)
 let render_help (state : state) =
   let terminal_rows, cols = get_terminal_size () in
-  let header = help_masthead state in
   let rendered_rows =
-    Masc_tui_help.sheet ~header ~cols
+    Masc_tui_help.sheet ~cols
       (help_lines ~width:(Masc_tui_help.line_cells ~cols) state)
   in
   surface_chrome ~overflow:(Self_scrolled (fun () -> Help_presented)) state ~terminal_rows ~cols ~surface_key:"help"

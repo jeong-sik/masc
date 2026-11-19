@@ -3908,11 +3908,9 @@ let fusion_run_progress_text = function
   | Fusion_stage_failed -> "failed"
 
 
+(* A run's start in a list of runs: a column moment. *)
 let fusion_run_clock run =
-  let tm = Unix.localtime run.fur_started_at in
-  Printf.sprintf "%04d-%02d-%02d %02d:%02d"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min
+  Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) run.fur_started_at
 
 
 
@@ -4572,23 +4570,6 @@ let config_metadata_summary (state : state) =
        | _ -> lines)
 
 
-(* The sheet's masthead: the product's name and a blank row. It carries no keys
-   and no surface name: both scroll away with it, and both are said by rows
-   that do not. The overlay's title row is fixed chrome that says whether hints
-   are on, the footer row under the frame draws h and Esc, and the sheet's
-   first section names the active surface two rows under this.
-
-   It was a three-row box-drawing logo with a tagline and a rule under it, five
-   rows at 72 columns and up. The title row above already says MASC Cheat
-   Sheet, so on a 30-row terminal those rows came out of the keys the sheet is
-   opened to read. *)
-let help_masthead (_state : state) =
-  [ "  " ^ Ansi.bold ^ Theme.accent () ^ "MASC"
-    ^ Ansi.reset ^ Ansi.dim ^ " \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
-  ; ""
-  ]
-
-
 (* The rows one help entry takes in [width] cells: [lead] (its key or usage,
    [lead_cells] wide) with the start of [text], and the rest of [text] on rows
    that start at [column], where every entry's text starts.
@@ -4643,16 +4624,19 @@ let help_lines ~width (state : state) =
       String.ends_with ~suffix:Masc_tui_keys.here_marker title
     in
     (* One heading style, named as the key table names the section. The
-       surface being read wears the filled mark; every other section the hollow
-       one. The current section used to read "ACTIVE: OVERVIEW" in capitals,
-       Global was renamed "GLOBAL NAVIGATION", and the rest were mixed case, so
-       three spellings sat on one sheet and the table's own names appeared on
-       only one of them. *)
+       surface being read wears the mark the tab row gives the current tab;
+       every other heading stands where that mark's title starts. The current
+       section used to read "ACTIVE: OVERVIEW" in capitals, Global was renamed
+       "GLOBAL NAVIGATION", and the rest were mixed case, so three spellings
+       sat on one sheet and the table's own names appeared on only one of
+       them. The marks were a filled and a hollow diamond in the info colour:
+       the filled one means a person's turn and the hollow one is no status,
+       and info is for work under way (RFC tui-one-screen-grammar 7.2, 7.3). *)
     let header_line =
       if is_current then
-        (Theme.info ()) ^ "\xe2\x97\x86 " ^ Ansi.bold ^ heading title ^ Ansi.reset
+        Masc_tui_theme.Glyph.current_entry ^ " " ^ Ansi.bold ^ heading title ^ Ansi.reset
       else
-        Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ title ^ Ansi.reset
+        "  " ^ Ansi.bold ^ title ^ Ansi.reset
     in
     (* The key as the table spells it, in its own column. Each key used to be
        wrapped in brackets unless it already started and ended with one, so
@@ -4699,7 +4683,7 @@ let help_lines ~width (state : state) =
     match commands with
     | [] -> []
     | _ :: _ ->
-    (Ansi.dim ^ "\xe2\x97\x87 " ^ Ansi.reset ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
+    ("  " ^ Ansi.bold ^ "Slash commands" ^ Ansi.reset)
     :: List.concat_map
          (fun (cmd : Masc_tui_command.command_help) ->
            (* The column and its width come from the command module, which the
@@ -4742,10 +4726,14 @@ let help_lines ~width (state : state) =
     | [] -> []
     | _ :: _ when not (String.equal query "") -> []
     | lines ->
-      (Ansi.bold ^ "Candle details" ^ Ansi.reset)
+      ("  " ^ Ansi.bold ^ "Candle details" ^ Ansi.reset)
       :: (List.concat_map
-            (fun line -> Message_layout.wrap_words ~max_cells:(max 1 width)
-              (Terminal_text.single_line line)) lines @ [ "" ])
+            (fun line ->
+              List.map (fun row -> "  " ^ row)
+                (Message_layout.wrap_words ~max_cells:(max 1 (width - 2))
+                   (Terminal_text.single_line line)))
+            lines
+          @ [ "" ])
   in
   let _, cols = get_terminal_size () in
   let rows =

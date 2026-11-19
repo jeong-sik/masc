@@ -290,9 +290,7 @@ let render_resources (state : state) =
     let period = match state.resource_day with
       | None -> if ko then "모든 날짜" else "all dates"
       | Some day ->
-          Printf.sprintf
-            (if ko then "%04d-%02d-%02d (이 장비 시각)" else "%04d-%02d-%02d local")
-            day.year day.month day.day in
+          Masc_tui_value.Local_day.text day ^ (if ko then " (이 장비 시각)" else " local") in
     let today = Catalog.local_day (Unix.gettimeofday ()) in
     let unchecked = match resource_unchecked_today state ~day:today with
       | None -> Theme.muted () ^ (if ko then "모름" else "unknown")
@@ -300,11 +298,9 @@ let render_resources (state : state) =
       | Some count -> Theme.warn () ^ string_of_int count in
     let query = match Masc_tui_fetched.current state.artifact_checks with
       | Some (_, (Ready inventory | Stale (inventory, _))) ->
-        let at = Unix.localtime inventory.received_at in
         Printf.sprintf
-          (if ko then " · 마지막 확인 조회 %02d:%02d:%02d"
-           else " · last check query %02d:%02d:%02d")
-          at.tm_hour at.tm_min at.tm_sec
+          (if ko then " · 마지막 확인 조회 %s" else " · last check query %s")
+          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) inventory.received_at)
       | Some (_, (Absent | Loading | Failed _)) | None ->
           if ko then " · 확인 미조회" else " · checks not read" in
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period

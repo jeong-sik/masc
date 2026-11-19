@@ -39,6 +39,29 @@ let link_key zone ~user_id ~provider_account_id ~integration_id =
     (Authz_provider_account_event.Key_linked { provider_account_id; user_id; integration_id })
 ;;
 
+type replace_error =
+  | Not_replaced of Authz_provider_account_state.refusal
+  | Replace_failed of error
+
+(* The generation is read on the state of the zone now, so a refusal comes
+   back as a refusal of a replacement. The commit decides again. *)
+let replace_key zone ~user_id ~provider_account_id =
+  match
+    Authz_state.key_to_replace (Authz_zone.snapshot zone).Authz_zone.state ~user_id provider_account_id
+  with
+  | Error refusal -> Error (Not_replaced refusal)
+  | Ok held ->
+    let generation = Key_generation.next held in
+    (match
+       write
+         zone
+         ~user_id
+         (Authz_provider_account_event.Key_replaced { provider_account_id; user_id; generation })
+     with
+     | Ok () -> Ok generation
+     | Error error -> Error (Replace_failed error))
+;;
+
 let owned (state : Authz_state.t) user_id =
   Authz_provider_account_state.owned_by state.Authz_state.provider_accounts user_id
 ;;
@@ -78,34 +101,33 @@ type removal =
   | Start_given_up
   | Stayed of Authz_purge_event.account_failed_stage
 
+type blocked =
+  | Removal of removal
+  | Replacement_start_given_up
+
 type shown =
   { provider_account_id : Provider_account_id.t
   ; kind : Authz_provider_account_state.kind
-  ; removal : removal option
+  ; blocked : blocked option
   }
 
+(* The log writes two reductions on a credential: the start of a purge and
+   the replacement of a key. A removal that stopped is read first, so an
+   account both stopped on shows its removal: it is removed next. *)
 let shown (state : Authz_state.t) user_id =
   List.filter_map
     (fun provider_account_id ->
       Option.bind
         (Authz_provider_account_state.find state.Authz_state.provider_accounts provider_account_id)
         (fun { Authz_provider_account_state.owner = (_ : User_id.t); kind } ->
-          let shown removal = Some { provider_account_id; kind; removal } in
-          match
-            Authz_purge_state.find_account
-              state.Authz_state.purges
-              { Authz_purge_event.owner = user_id; provider_account_id }
-          with
-          | Some (Authz_purge_state.Account_pending | Authz_purge_state.Account_purged) -> None
-          | Some (Authz_purge_state.Account_failed { failed_stage }) -> shown (Some (Stayed failed_stage))
-          | None ->
-            (* A reduction held on the credential with no purge record is
-               read as a removal whose start was given up: a purge is the
-               one reduction written on a credential. [Credential_replace]
-               ({!Authz_external_store.Change}) has no writer; with one,
-               this label is wrong for its reductions. *)
-            (match Authz_state.revocation state (Subject.Credential provider_account_id) with
-             | Revocation_state.Pending -> shown (Some Start_given_up)
-             | Revocation_state.Not_pending -> shown None)))
+          let shown blocked = Some { provider_account_id; kind; blocked } in
+          match Authz_state.account_removal state ~owner:user_id provider_account_id with
+          | Authz_state.Removal_begun -> None
+          | Authz_state.Removal_stayed failed_stage -> shown (Some (Removal (Stayed failed_stage)))
+          | Authz_state.Removal_start_given_up -> shown (Some (Removal Start_given_up))
+          | Authz_state.Removal_not_begun ->
+            if Authz_state.key_replacement_given_up state provider_account_id
+            then shown (Some Replacement_start_given_up)
+            else shown None))
     (owned state user_id)
 ;;

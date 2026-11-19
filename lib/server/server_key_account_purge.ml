@@ -36,7 +36,7 @@ let logged id what detail =
   Log.Server.warn "The removal of account %s: %s: %s" (Provider_account_id.to_string id) what detail
 ;;
 
-(* The third and the fourth step: the files, and the record of the end. It
+(* The second and the third step: the files, and the record of the end. It
    takes the call of the account, inside which the files of an account
    change. *)
 let finish (_ : Login.in_call) (person : Login.person) ~base_path id =

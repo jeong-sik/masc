@@ -235,7 +235,7 @@ let pulse_line ~cols (state : state) kpis =
   in
   let text = Printf.sprintf "  %s%s%s  %s| %s%s"
       Ansi.bold turns Ansi.reset (Theme.recede ()) roster Ansi.reset in
-  Layout.take_cells text inner_width ^ Ansi.reset
+  Layout.truncate_end inner_width text ^ Ansi.reset
 
 (* The three sections as a tab strip, drawn the way the surface strip above
    every screen is: a mark on the one being read, the names beside it. It was
@@ -263,9 +263,7 @@ let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
           Masc_tui_press.(pressable (Press_metrics_section section)) text)
         (List.map tab [ Section_fleet; Section_resources; Section_tools ])
   in
-  if Layout.display_width line > inner_width then
-    Layout.take_cells line inner_width ^ Ansi.reset
-  else line
+  Layout.truncate_end inner_width line
 
 let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let ko = state.ui_language = Lang_ko in
@@ -468,15 +466,21 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       (render_card ?status:c3_status ?count:c3_count ~title_style:(Theme.info ()) (say "작업 현황" "TASK SNAPSHOT") [ c3_l1; c3_l2 ])
       (render_card ?status:c4_status ?count:c4_count ~title_style:c4_tone (say "확인 필요" "ATTENTION") [ c4_l1; c4_l2 ])
   else
-    [ Printf.sprintf "  %s[%s]%s %s · %s[%s]%s %s"
-        (Theme.info ()) (say "엔진" "ENGINE") Ansi.reset c1_compact
-        c2_tone (say "지연" "SCHED") Ansi.reset c2_l1
-    ; Printf.sprintf "  %s[%s]%s %s"
-        (Theme.info ()) (say "작업" "TASKS") Ansi.reset c3_l1
-    ; Printf.sprintf "  %s[%s]%s %s · %s"
-        c4_tone (say "확인" "HOLDS") Ansi.reset c4_l1 c4_l2
+    (* One card to a row. Two cards shared the first row and were cut at
+       the edge, which left "최" of 최대 and dropped the figure after it (RFC
+       tui-one-screen-grammar §6.6). Packing them by their current width
+       instead made the row count follow the figures: a latency gaining a
+       digit moved every section below by a row (§8). A card wider than the
+       row on its own wraps; nothing is cut. *)
+    let card tone title text = Printf.sprintf "%s[%s]%s %s" tone title Ansi.reset text in
+    [ card (Theme.info ()) (say "엔진" "ENGINE") c1_compact
+    ; card c2_tone (say "지연" "SCHED") c2_l1
+    ; card (Theme.info ()) (say "작업" "TASKS") c3_l1
+    ; card c4_tone (say "확인" "HOLDS") (c4_l1 ^ " · " ^ c4_l2)
     ]
-    |> List.map (fun line -> if Layout.display_width line > inner_width then Layout.take_cells line inner_width ^ Ansi.reset else line)
+    |> List.concat_map (fun card ->
+           Layout.pack_clauses ~max_cells:(inner_width - 2) [ card ]
+           |> List.map (fun row -> "  " ^ row))
 
 type session_entry = { event : event; run : int; rows : string list }
 type session_block = { earlier : int; kept : session_entry list }
@@ -487,7 +491,7 @@ type session_block = { earlier : int; kept : session_entry list }
    next step after the subject -- "runtime event feed closed: " and then
    why -- so a row cut at the pane's edge loses the part that says what to
    do, at any width. *)
-let session_entry_rows ~width ((event : event), run) =
+let session_entry_rows ~now ~width ((event : event), run) =
   let mark =
     match session_event_mark event with
     | None -> ""
@@ -495,7 +499,9 @@ let session_entry_rows ~width ((event : event), run) =
       Printf.sprintf "%s%s%s%s " Ansi.bold (Theme.bad ()) glyph Ansi.reset
   in
   let lead =
-    Printf.sprintf "    %s[%s]%s %s" (Theme.recede ()) event.timestamp Ansi.reset mark
+    Printf.sprintf "    %s[%s]%s %s" (Theme.recede ())
+      (Masc_tui_value.Instant.cell_text Masc_tui_value.Instant.To_second ~now event.at)
+      Ansi.reset mark
   in
   let lead_cells = Layout.display_width lead in
   let content = Terminal_text.single_line event.content in
@@ -516,13 +522,13 @@ let session_entry_rows ~width ((event : event), run) =
    newest event is kept even when it alone is taller than the room beside
    that count; the section scrolls, and a row pushed below the fold can be
    reached where a sentence cut at the edge cannot. *)
-let session_block ~width ?room events =
+let session_block ~now ~width ?room events =
   let entries =
     Masc_tui_render_schedule.collapse_consecutive ~key:session_event_collapse_key
       events
     |> List.rev
     |> List.map (fun ((event : event), run) ->
-           { event; run; rows = session_entry_rows ~width (event, run) })
+           { event; run; rows = session_entry_rows ~now ~width (event, run) })
   in
   let rows_of entry = List.length entry.rows in
   let all = { earlier = 0; kept = entries } in
@@ -548,7 +554,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
@@ -676,7 +682,8 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     match state.events with
     | [] -> [ say "    (아직 이벤트 없음)" "    (no events yet)" ]
     | events ->
-      let block = session_block ~width:inner_width ?room:session_rows events in
+      let block =
+        session_block ~now:(Unix.gettimeofday ()) ~width:inner_width ?room:session_rows events in
       let rows = List.concat_map (fun entry -> entry.rows) block.kept in
       if block.earlier > 0 then
         Printf.sprintf (if ko then "    %s이전 %s건%s" else "    %s%s earlier%s")
@@ -702,7 +709,7 @@ let age_text = Layout.span_text
 
 let render_section_resources ~cols (state : state) =
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip text = Layout.take_cells text inner_width ^ Ansi.reset in
+  let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   let title text = "  " ^ Ansi.bold ^ Theme.info () ^ text ^ Ansi.reset in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
@@ -798,10 +805,7 @@ let render_section_resources ~cols (state : state) =
               [ Printf.sprintf (if ko then "    외 %s명" else "    %s more")
                   (Count.grouped omitted) ]))
   in
-  let day_label at =
-    let tm = Unix.gmtime at in
-    Printf.sprintf "%02d-%02d" (tm.Unix.tm_mon + 1) tm.tm_mday
-  in
+  let day_label at = Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment at) in
   let daily_title = match state.task_flow with
     | Some flow when flow.Task_flow.daily <> [] ->
       let first = List.hd flow.Task_flow.daily in
@@ -823,7 +827,8 @@ let render_section_resources ~cols (state : state) =
     | None -> [ no_snapshot ]
     | Some flow ->
       let rows =
-        [ say "날짜" "day", (fun (day : Task_flow.day) -> (Unix.gmtime day.d_start).Unix.tm_mday)
+        [ say "날짜" "day", (fun (day : Task_flow.day) ->
+              Masc_tui_value.Utc_day.day_of_month (Masc_tui_value.Utc_day.of_moment day.d_start))
         ; say "새 작업" "created", (fun (day : Task_flow.day) -> day.d_created)
         ; say "완료" "completed", (fun (day : Task_flow.day) -> day.d_completed)
         ; say "취소" "cancelled", (fun (day : Task_flow.day) -> day.d_cancelled) ]
@@ -950,11 +955,7 @@ let render_section_resources ~cols (state : state) =
 let render_section_tools ~cols (state : state) : string list =
   (* Section 3: Memory & Gate Safety *)
   let inner_width = max 20 (framed_inner_width cols) in
-  let clip line =
-    if Layout.display_width line > inner_width then
-      Layout.take_cells line inner_width ^ Ansi.reset
-    else line
-  in
+  let clip line = Layout.truncate_end inner_width line in
   let bar_w = min 60 (max 20 (inner_width - 8)) in
 
   let ko = state.ui_language = Lang_ko in
@@ -1190,8 +1191,4 @@ let render_metrics_body ~cols ~budget ~suffix_lines (state : state)
     | None -> push_empty ()
     | Some row ->
       let inner_width = max 20 (framed_inner_width cols) in
-      let clipped =
-        if Layout.display_width row > inner_width then Layout.take_cells row inner_width
-        else row
-      in
-      push_styled ~style:(Theme.recede ()) clipped
+      push_styled ~style:(Theme.recede ()) (Layout.truncate_end inner_width row)

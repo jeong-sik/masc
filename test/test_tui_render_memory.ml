@@ -370,6 +370,77 @@ let test_memory_list_draws_the_height_its_page_is_cut_from () =
     [ 80, 15; 80, 17; 100, 23; 120, 33; 200, 53 ]
 ;;
 
+(* QA N02 with rejected rows: the rows kept for the selected Keeper's
+   detail decide how many rejected rows fit above the list, so the rows
+   kept are the most any loaded Keeper's detail would take. Kept for the
+   selected Keeper alone, a Keeper with two read errors took two rejected
+   rows away, and the list and every row under it moved with j and k. *)
+let test_memory_rejected_rows_do_not_follow_the_selection () =
+  let module H = Masc.Tui_decode_memory_health in
+  let errors =
+    { (make_keeper_health ~keeper_id:"errors" ~facts:3 ~snapshot_bytes:256) with
+      H.mkh_read_error = Some "ordinary snapshot unreadable"
+    ; mkh_source_read_error = Some "source snapshot unreadable" }
+  in
+  let keepers =
+    errors
+    :: List.init 20 (fun index ->
+         make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:index
+           ~snapshot_bytes:1024)
+  in
+  let refused =
+    List.init 12 (fun index ->
+      { H.mkr_keeper_id = Some (Printf.sprintf "rejected-%02d" index)
+      ; mkr_reason = "row not decoded" })
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_health <-
+    Some { (make_fleet_health errors) with H.mhs_keepers = keepers; mhs_refused_keepers = refused };
+  let count = List.length (Types.visible_memory_keepers state) in
+  (* Where the list starts, how many rows it takes and how many rows the
+     body draws in all. The totals alone stay put when the rejected rows
+     above the list grow by what the detail under it loses. *)
+  let drawn ~cols ~budget cursor =
+    state.memory_health_cursor <- cursor;
+    let calls = ref [] in
+    let note call = calls := call :: !calls in
+    Render_memory.render_memory_body ~cols ~budget state
+      ~hand_position:(fun _ -> note `Hand)
+      ~push:(fun _ -> note `Row) ~push_selected:(fun _ -> note `Row)
+      ~push_empty:(fun () -> note `Row)
+      ~push_styled:(fun ~style:_ _ -> note `Other) ~push_divider:(fun () -> note `Other);
+    let calls = List.rev !calls in
+    let rec until_hand index = function
+      | `Hand :: _ | [] -> index
+      | (`Row | `Other) :: later -> until_hand (index + 1) later
+    in
+    let hand = until_hand 0 calls in
+    let rec list_rows rows = function
+      | `Row :: earlier -> list_rows (rows + 1) earlier
+      | (`Hand | `Other) :: _ | [] -> rows
+    in
+    let rows = list_rows 0 (List.rev (List.take hand calls)) in
+    (hand - rows, rows, List.length calls - 1)
+  in
+  List.iter
+    (fun (cols, budget) ->
+      List.iter
+        (fun detail ->
+          state.memory_overview_detail <- detail;
+          let first = drawn ~cols ~budget 0 in
+          List.iter
+            (fun cursor ->
+              check (triple int int int)
+                (Printf.sprintf "%dx%d, detail %b, Keeper %d: list start, list rows, rows drawn"
+                   cols budget detail cursor)
+                first (drawn ~cols ~budget cursor))
+            (List.init count Fun.id))
+        [ false; true ])
+    [ 80, 17; 80, 21; 100, 23; 120, 33 ]
+;;
+
 (* The Keeper list hands its selected row to the title row; the body writes
    no position of its own (RFC tui-one-screen-grammar, section 2). *)
 let test_memory_list_hands_its_selected_row () =
@@ -886,6 +957,8 @@ let () =
           test_memory_overview_keeps_one_height
       ; test_case "the list draws the height its page is cut from" `Quick
           test_memory_list_draws_the_height_its_page_is_cut_from
+      ; test_case "rejected rows do not follow the selection" `Quick
+          test_memory_rejected_rows_do_not_follow_the_selection
       ; test_case "failed facts refresh retains facts and unread scope" `Quick
           test_a_failed_facts_refresh_keeps_facts_and_unread_scope ]
     ; "one place per fact",

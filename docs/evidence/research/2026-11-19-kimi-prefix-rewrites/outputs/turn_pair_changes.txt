@@ -1,0 +1,9 @@
+kimi consecutive turn pairs (11-18..19): 121
+  ('sys=', 'tools=', 'front_moved') n=45 (37%)  median: sys=41230B msgs=99852B nmsg=32 body=225647B
+  ('sys=', 'tools=', 'rewrite_mid') n=38 (31%)  median: sys=41230B msgs=112696B nmsg=85 body=232398B
+  ('SYS', 'TOOLS', 'rewrite_mid') n=11 (9%)  median: sys=40196B msgs=661468B nmsg=228 body=750676B
+  ('SYS', 'TOOLS', 'front_moved') n=9 (7%)  median: sys=39754B msgs=185656B nmsg=122 body=284663B
+  ('sys=', 'TOOLS', 'front_moved') n=7 (6%)  median: sys=40946B msgs=365232B nmsg=58 body=503506B
+  ('sys=', 'tools=', 'append_only') n=5 (4%)  median: sys=40946B msgs=322445B nmsg=57 body=452472B
+  ('sys=', 'TOOLS', 'rewrite_mid') n=4 (3%)  median: sys=41230B msgs=136069B nmsg=133 body=250892B
+  ('SYS', 'TOOLS', 'append_only') n=2 (2%)  median: sys=39754B msgs=4081143B nmsg=663 body=4131129B

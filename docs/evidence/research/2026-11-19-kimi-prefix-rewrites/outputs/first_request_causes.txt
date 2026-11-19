@@ -1,0 +1,13 @@
+per keeper (est. % of 5h window = 2.5*miss + 20*out + 0.01*read, period 11-18 10:00Z..11-19 01:40Z)
+  code-reviewer-sister   turns= 64 reqs=1021 total= 25.0% | first_miss= 7.0% rest_miss= 9.5% output= 5.5% read= 3.0%
+  e-masc-the-leader      turns= 24 reqs= 208 total= 12.6% | first_miss= 8.8% rest_miss= 1.8% output= 1.8% read= 0.2%
+  wkbl-growth            turns= 23 reqs= 620 total= 21.0% | first_miss= 6.0% rest_miss= 7.1% output= 7.1% read= 0.8%
+  ALL 58.6% {'first_miss': 21.9, 'rest_miss': 18.4, 'output': 14.4, 'read': 4.0}
+first-request miss by cause:
+  first:front_moved        turns= 45 miss= 3.10M ( 7.8% of window) hit=29.2%
+  first:rewrite_mid        turns= 31 miss= 2.09M ( 5.2% of window) hit=40.4%
+  first:system_changed     turns= 17 miss= 1.99M ( 5.0% of window) hit=17.1%
+  first:tools_changed      turns=  9 miss= 0.96M ( 2.4% of window) hit=23.9%
+  first:runtime_changed    turns=  3 miss= 0.36M ( 0.9% of window) hit=25.4%
+  first:append_only        turns=  4 miss= 0.15M ( 0.4% of window) hit=62.5%
+  first:unclassified       turns=  2 miss= 0.10M ( 0.2% of window) hit=44.2%

@@ -29,7 +29,7 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
     (mode_letters @ sandbox_letters);
   List.iter
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
-    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; Masc_tui_keeper_age_ladder.cell_label; "사람 몫"
+    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.grid_due_header; "mem"; Masc_tui_keeper_age_ladder.cell_label; "사람 몫"
     ; Mark.axis_now_header; Mark.grid_now_line; Mark.grid_due_header
     ; Mark.grid_lag_header; Mark.grid_librarian_header; Mark.grid_digest_header
     ; Mark.grid_gap_header; Mark.grid_facts_by_age_header; Mark.grid_saved_header
@@ -128,6 +128,44 @@ let test_work_under_way_wears_the_still_under_way_mark () =
     ; "running", Masc_tui_keeper_list_model.Running ]
 ;;
 
+(* RFC tui-one-screen-grammar §7.2: each activity wears one of the seven
+   status marks, and outside a pause or offline it is the mark of the group
+   the state view sorts the activity into, so a row and its heading agree. *)
+let test_each_activity_wears_its_status_mark () =
+  let module Model = Masc_tui_keeper_list_model in
+  let module Status = Masc_tui_value.Mark in
+  let name = function
+    | None -> "unread"
+    | Some mark -> Status.glyph mark in
+  List.iter
+    (fun (label, activity, expected) ->
+      Alcotest.(check string) label (name expected) (name (Mark.activity_mark activity));
+      match activity with
+      | Model.Paused | Model.Offline -> ()
+      | _ ->
+          Alcotest.(check string) (label ^ " wears its group's mark")
+            (name (Mark.attention_mark (Model.group_of_activity activity)))
+            (name (Mark.activity_mark activity)))
+    [ "a held call is the operator's turn", Model.Held_call, Some Status.Yours
+    ; "a question is the operator's turn", Model.Question, Some Status.Yours
+    ; "a confirmation is the operator's turn", Model.Confirmation, Some Status.Yours
+    ; "a failed attempt failed", Model.Attempt_failed, Some Status.Failed
+    ; "preparing is under way", Model.Preparing, Some Status.Under_way
+    ; "streaming is under way", Model.Streaming, Some Status.Under_way
+    ; "running is under way", Model.Running, Some Status.Under_way
+    ; "a background run is under way", Model.Async_working 1, Some Status.Under_way
+    ; "a deferred turn is under way", Model.Deferred, Some Status.Under_way
+    ; "a tool wait waits", Model.Tool_waiting, Some Status.Waiting
+    ; "a model wait waits", Model.Model_waiting, Some Status.Waiting
+    ; "an external wait waits", Model.External_waiting, Some Status.Waiting
+    ; "a delegate result waits", Model.Delegate_result, Some Status.Waiting
+    ; "a verification waits", Model.Verifying, Some Status.Waiting
+    ; "rest waits", Model.Idle, Some Status.Waiting
+    ; "a pause is paused", Model.Paused, Some Status.Paused
+    ; "offline is paused", Model.Offline, Some Status.Paused
+    ; "an unread activity has no mark", Model.Unknown, None ]
+;;
+
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
@@ -143,5 +181,7 @@ let () =
             test_shows_operator_disposition_activity_filter
         ; Alcotest.test_case "work under way wears the still under-way mark" `Quick
             test_work_under_way_wears_the_still_under_way_mark
+        ; Alcotest.test_case "each activity wears its status mark" `Quick
+            test_each_activity_wears_its_status_mark
         ] )
     ]

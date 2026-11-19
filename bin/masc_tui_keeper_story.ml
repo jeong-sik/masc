@@ -13,6 +13,13 @@ let tab_label = function
   | World -> "world"
 ;;
 
+let tab_parts ~ko = function
+  | Story -> None, if ko then "스토리" else "story"
+  | Schedule -> Some "s", if ko then "일정" else "schedules"
+  | Memory -> Some "m", if ko then "기억" else "memory"
+  | World -> None, if ko then "월드" else "world"
+;;
+
 let next = function
   | Story -> Schedule
   | Schedule -> Memory
@@ -44,7 +51,7 @@ type action =
 let action_of_key ~selection window key =
   let on_keeper = match selection with Keeper_selected -> true | World_selected | No_selection -> false in
   match window, key with
-  | (None | Some (Story | Schedule | Memory | World)), "W" -> Some Open_world
+  | (None | Some (Story | Schedule | Memory | World)), ("W" | "0") -> Some Open_world
   | (None | Some (Story | Schedule | Memory)), ("\r" | "\n" | "enter")
       when selection = World_selected -> Some (Show World)
   | Some World, ("\r" | "\n" | "enter" | "esc") -> Some Close

@@ -50,14 +50,11 @@ val cell :
     it; a header is not a reading. *)
 
 val cell_gap : int
-(** Cells between one column and the next, the same on every table on every
-    screen. Exported for a table whose last column has no widest form and is
-    appended after the cells rather than laid out as one: it spaces that
-    column the way the contract spaces the rest.
-
-    It was each table's own number. Nine of the ten chose one and the Memory
-    table chose two, recording no reason, so moving between two screens moved
-    the columns under the reader's eye. There is nothing to pass now. *)
+(** Two cells between one column and the next, the same on every table on every
+    screen (RFC tui-one-screen-grammar section 2). Exported for a table whose
+    last column has no widest form and is appended after the cells rather than
+    laid out as one: it spaces that column the way the contract spaces the
+    rest. *)
 
 val used_width : cell list -> int
 (** Cells the row occupies, the gaps between columns included. *)
@@ -65,6 +62,9 @@ val used_width : cell list -> int
 type 'col layout = private {
   shown : 'col list;  (** The columns drawn, in display order. *)
   flex_width : int;  (** What the flexible column gets. *)
+  dropped : int;
+      (** How many columns {!fit} dropped to fit [inner_width]
+          (RFC tui-one-screen-grammar section 5.1). *)
 }
 (** Which of a table's columns fit a width, and the flexible column's share.
     Private so a layout comes only from {!fit}. *)
@@ -95,6 +95,17 @@ val fit :
 
 val header_row : cell list -> string
 (** The column names, laid out on the given cells. *)
+
+val dropped_columns_badge : ko:bool -> int -> string option
+(** The right-aligned overflow badge written on a header row when {!fit}
+    dropped columns ([외 N열] / [+N cols]), or [None] when [dropped <= 0]
+    (RFC tui-one-screen-grammar section 5.1). *)
+
+val header_row_with_dropped :
+  ko:bool -> inner_width:int -> dropped:int -> cell list -> string
+(** {!header_row} with {!dropped_columns_badge} placed at the right edge of
+    [inner_width] when [dropped > 0]. When [inner_width] has room for the
+    badge plus {!cell_gap}, the badge is never clipped off the right edge. *)
 
 val row : ?close:string -> cell list -> string
 (** One row's readings, laid out on the same cells as {!header_row}. A reading

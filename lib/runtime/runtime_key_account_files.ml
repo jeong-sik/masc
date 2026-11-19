@@ -166,32 +166,33 @@ let names_in keys =
     -> Error (keys ^ ": it is not a folder")
 ;;
 
+type other_keys_swept =
+  { gone : int
+  ; stayed : string option
+  }
+
 let remove_other_keys ~runtime_root ~account_id ~generation =
   let* there = root_there ~runtime_root in
   if not there
-  then Ok 0
+  then Ok { gone = 0; stayed = None }
   else
     let* kept = Layout.key_file ~runtime_root ~account_id ~generation in
     let keys = Filename.dirname kept in
     let* names = Fs_compat.Systhread_host.run ~label:thread_label (fun () -> names_in keys) in
     (* Each of them can hold a key, so each is tried whatever became of the
        one before it. The first that stayed is the one reported. *)
-    let gone, first_left =
-      List.fold_left
-        (fun (gone, first_left) name ->
-          if String.equal name (Filename.basename kept)
-          then gone, first_left
-          else (
-            match removed (Filename.concat keys name), first_left with
-            | Ok (), (None | Some (_ : string)) -> gone + 1, first_left
-            | Error detail, None -> gone, Some detail
-            | Error (_ : string), Some (_ : string) -> gone, first_left))
-        (0, None)
-        names
-    in
-    (match first_left with
-     | None -> Ok gone
-     | Some detail -> Error detail)
+    Ok
+      (List.fold_left
+         (fun { gone; stayed } name ->
+           if String.equal name (Filename.basename kept)
+           then { gone; stayed }
+           else (
+             match removed (Filename.concat keys name), stayed with
+             | Ok (), (None | Some (_ : string)) -> { gone = gone + 1; stayed }
+             | Error detail, None -> { gone; stayed = Some detail }
+             | Error (_ : string), Some (_ : string) -> { gone; stayed }))
+         { gone = 0; stayed = None }
+         names)
 ;;
 
 type other_keys =
@@ -203,6 +204,6 @@ let replace ~runtime_root ~account_id ~generation key =
   | Error error -> Error error
   | Ok () ->
     (match remove_other_keys ~runtime_root ~account_id ~generation with
-     | Ok (_ : int) -> Ok Other_keys_removed
-     | Error detail -> Ok (Other_keys_left detail))
+     | Ok { gone = (_ : int); stayed = None } -> Ok Other_keys_removed
+     | Ok { gone = (_ : int); stayed = Some detail } | Error detail -> Ok (Other_keys_left detail))
 ;;

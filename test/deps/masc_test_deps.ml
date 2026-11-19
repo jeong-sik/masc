@@ -452,11 +452,12 @@ let test_workspaces_made = Atomic.make 0
     {!cleanup_test_workspace}.
 
     No two workspaces of a process have one name, also when the earlier one
-    was removed. The process remembers things by path: the directories it
-    made ([Fs_compat.mkdir_p_memoized]), the writers it holds open, the facts
-    it keeps beside files. Under a name used before, those would be taken for
-    the new workspace's. The pid and the clock alone do not give that: two
-    tests of one executable start within the same millisecond. *)
+    was removed. The process keeps facts beside files, under the file
+    system's name of their directory ([Dated_jsonl.read_fact],
+    [Keeper_row_facts.newest_decision]), and removing the directory does not
+    empty them. Under a name used before, the earlier workspace's facts would
+    be taken for the new workspace's. The pid and the clock alone do not give
+    that: two tests of one executable start within the same millisecond. *)
 let setup_test_workspace () =
   let unique_id =
     Printf.sprintf "masc-sse-test-%d-%d-%d"

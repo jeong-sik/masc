@@ -63,14 +63,25 @@ val replace
     of its keys that are not the key of the generation the records say (the
     same RFC, 3.7): what a replacement that could not remove them left, and
     what a replacement that a stopped server did not end left. The start of
-    the server runs it.
+    the server runs it, and so does the start of the preview.
 
-    Each account is looked at inside its call, and the generation is read
-    there. An account with a call running is left: the next start looks
-    again, and so do the next replacement and the removal of the account.
-    Nothing is made: an account with no file gets none. How many files of
-    an account went goes to the log of the server, a file that stays goes
-    there too, and so does an exception of one account,
-    after which the others are looked at. Cancellation and the exceptions
-    of a process that cannot go on are raised. *)
+    The records are read where the zone can be trusted ({!Authz_zone.read}),
+    and a zone that cannot be is not acted on: records that went back name
+    a generation before the one on disk, whose file is the key in use.
+
+    The accounts are those the records hold when it starts: one registered
+    after that has no file a stopped server left, and its replacements
+    remove their own. Each account is looked at inside its call, and the
+    generation is read there. An account with a call running is left: the
+    next start looks again, and so do the next replacement and the removal
+    of the account. For the moment an account is looked at, another use of
+    it is answered as one whose call runs.
+
+    Nothing is made: an account with no file gets none. The account of an
+    owner with no membership is not looked at, since no record names the
+    folder of their files (issue #53111). How many files of an account went
+    goes to the log of the server, and so does a file that stays, an
+    account that was not looked at, and an exception of one account, after
+    which the others are looked at. Cancellation and the exceptions of a
+    process that cannot go on are raised. *)
 val remove_left_keys : zone:Authz_zone.t -> base_path:string -> unit

@@ -44,6 +44,9 @@ The command palette is `:`.
 | `;` | held calls, questions, Goal confirmations and tasks on the operator list |
 | `m` | account windows and Keeper usage |
 | `s` | phrases, arrangements and recorded takes; no Keeper or score required |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Work
 
@@ -70,6 +73,9 @@ The command palette is `:`.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 | `H` | in Task detail, extend the observed history with its known earlier page |
 
 ## Keepers
@@ -107,6 +113,9 @@ The command palette is `:`.
 | `Esc` | dashboard |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 Keeper settings `e` opens TOML and `E` opens JSON in the external editor.
 Both read a fresh snapshot asynchronously and use the same guarded save.
@@ -214,7 +223,9 @@ data and paint. A missing finish record remains an unfinished observation.
 | `w` | on Usage: cycle the exact UTC day window for provider report history and tool calls |
 | `1 / 2 / 3` | on Telemetry: Engine, Work, or Tools |
 | `Esc` | Dashboard |
+| `r` | refresh |
 | `Tab` | next |
+| `q` | quit |
 
 ## Work / Board
 
@@ -245,6 +256,9 @@ data and paint. A missing finish record remains an unfinished observation.
 | `/` | jump the cursor to a matching post id, author or title |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Workspace
 
@@ -261,6 +275,9 @@ data and paint. A missing finish record remains an unfinished observation.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## System
 
@@ -308,6 +325,7 @@ data and paint. A missing finish record remains an unfinished observation.
 | `Esc` | back to Dashboard |
 | `r` | reload |
 | `Tab` | next |
+| `q` | quit |
 
 Runtime model and account form saves keep input and its opening revision while
 workspace checks, source reading, preview and guarded commit run outside the
@@ -366,6 +384,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `/` | Actions/Everything: jump the cursor to a matching event, tool or keeper, over the rows the filter leaves; Turns has no cursor to land on |
 | `n / N` | next / previous match |
 | `Home/End` | g and G as well; the ring counts back from the newest, so its top is now |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper detail
 
@@ -456,7 +476,8 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `/approve /deny` | type a command and Enter to answer a tool approval |
 | `/copy` | send the selected Keeper's latest completed reply to the terminal clipboard via OSC 52 |
 | `Q / Ctrl-Q` | Q on an active turn with an empty draft or hidden composer; Ctrl-Q always leaves without interrupting |
-| `Esc` | roster focused: return to the composer; chat focused: back, and during a turn interrupt it |
+| `Esc` | roster focused: return to the composer; chat focused: back without interrupting |
+| `Ctrl-C` | chat focused during a turn: interrupt it; otherwise arm quit |
 
 ## Keepers / Logs
 
@@ -466,6 +487,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `PgUp/PgDn` | page |
 | `Home/End` | now / oldest |
 | `Left / Esc` | back |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keepers / Calls
 
@@ -474,6 +498,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `j/k` | scroll |
 | `Home/End` | top/bottom |
 | `Left / Esc` | back |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keepers / Runtime
 
@@ -506,6 +533,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 | `j/k` | in a lane's run list: move the run cursor |
 | `Right / Enter` | in a lane's run list: open the run's prompt and output |
 | `>` | in a lane's run list: load the next retained-run page from the server |
@@ -522,11 +552,15 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 |---|---|
 | `j/k` | move the roster cursor |
 | `Enter` | read the client's full identity and observation |
-| `p / Esc` | back to Features & plugins |
+| `p` | back to Features & plugins |
+| `Esc` | back to Features & plugins |
 | `/` | jump the cursor to a matching attached name |
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Approvals
 
@@ -552,6 +586,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Esc` | leave the answering mode; with the editor open it drops the draft first |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 When a selected question is too tall for the compact Approvals panel, it keeps
 a short preview from the original question instead of disappearing behind a
@@ -582,6 +619,9 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Work / Task Verdicts
 
@@ -599,6 +639,9 @@ count is drawn beyond the available space.
 | `/` | jump the cursor to a matching task id or title |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Fusion
 
@@ -616,6 +659,9 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `Esc` | leave detail, or return to Dashboard |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keepers / Schedules
 
@@ -633,6 +679,9 @@ count is drawn beyond the available space.
 | `x` | arm / confirm cancellation |
 | `Y` | copy the selected schedule reference |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Memory
 
@@ -651,6 +700,9 @@ count is drawn beyond the available space.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 | `1 / 2 / 3 / 4` | in the facts browser: one Memory browser; changes require an individual Keeper, while storage opens the fleet health view |
 | `j/k` | in the facts browser: move |
 | `Enter` | in the facts browser: read the whole fact in a wide overlay that owns the terminal |
@@ -713,6 +765,9 @@ count is drawn beyond the available space.
 | `Enter (history)` | a commit answers with its pull request, from its (#N) and the repository's remote |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Changes
 
@@ -730,6 +785,9 @@ count is drawn beyond the available space.
 | `o` | open in $EDITOR / $NVIM |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## System / Runtime
 
@@ -755,6 +813,9 @@ count is drawn beyond the available space.
 | `/` | jump the cursor to a matching lane id or runtime id |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Resources
 
@@ -791,6 +852,8 @@ count is drawn beyond the available space.
 | `/` | find a resource name in the list, or text in the loaded detail |
 | `n / N` | next / previous match |
 | `r` | reload |
+| `Tab` | next |
+| `q` | quit |
 
 ## Features & plugins / Tools
 
@@ -809,6 +872,8 @@ count is drawn beyond the available space.
 | `d` | remove the selected published package; press d again on the same row to confirm |
 | `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
+| `Tab` | next |
+| `q` | quit |
 | `Ctrl-S` | in Available, unfold or fold the runtime, digest and byte-budget rows |
 | `Y` | in Available, copy the diagnostics with whole digests and the selected Skill's whole revision |
 | `V` | in All tools, open retired Keeper volumes and request a report; in that reading, an armed V reclaims only the reported names, other input disarms, and Esc returns to the catalog position |
@@ -849,6 +914,9 @@ or completion.
 | `/` | jump the cursor to a matching module, keeper, or message, over the rows the level and category filters leave |
 | `n / N` | next / previous match |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Connectors
 
@@ -863,17 +931,19 @@ or completion.
 | `n / N` | next / previous match |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
+| `r` | refresh |
+| `Tab` | next |
+| `q` | quit |
 
 ## Keeper marks
 
 | Keys | What it does |
 |---|---|
 | `●` | healthy |
-| `!` | failing |
-| `·` | idle |
-| `○` | paused |
-| `×` | offline |
-| `-` | unread |
+| `✕` | failing |
+| `○` | idle |
+| `‖` | paused, or offline |
+| `◌` | unread |
 
 ## Keeper columns
 
@@ -882,7 +952,7 @@ or completion.
 | `NOW` | what the keeper is doing at this moment |
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
-| `◂ │ ● now │ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the │ lines stand in one column: the row mark (! failing, ○ paused, ✓ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the state view's known wake count and any partial observation, or the other views' half hours ahead (▁ a scheduled wake, blank none, ─ an unknown range; entirely unknown or empty windows have one label), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
+| `◂ │ ● now │ next ▹ due lag` | every view but the list draws a keeper on the same columns, fixed from the right edge so the │ lines stand in one column: the row mark (✕ failing, ‖ paused, ▲ recovered in the cause view, ● the rest), the name, the turn pulse, the NOW cell, the state view's known wake count and any partial observation, or the other views' half hours ahead (▁ a scheduled wake, blank none, ─ an unknown range; entirely unknown or empty windows have one label), the next scheduled run (its time within a day, late, held, held? from an earlier reading, ? unknown) and the librarian's unread turns with a level against the keeper furthest behind. The memory and age views pick their own columns. With two lines a failing keeper of the state and cause views adds a line: ◂ since when it fails, the attempts of the failed turn (✗━✗) and the failure word, and the runtime of the next dispatch (▹, or ◌ wait while the path rests) |
 | `◂ turns │ librarian │ lag ▹ digest gap` | the memory view: the turn pulse, how the librarian's last pass ended (no data without a memory row), the unread turns as a bar against the listed keeper furthest behind, the time since the last digest (— before the first) and the atoms requests skip; ? is a value the server did not measure, a pass this server has not seen yet too |
 | `facts by age ▸ │ saved │ lag ▹ stale facts` | the age view: the keeper's facts in the server's 24 age bins, 30d or older on the left and under 1h on the right, on log steps between the edges 1h, 1d, 7d, 30d, two or four bins to a cell on a narrow list; a cell is a level against the row's largest one, · when empty, in the info colour under 1d, the row's own to 7d and dim past that, and a group title adds up its keepers; + the time since its memory snapshot was saved (— no snapshot without one), the unread-turn bar, ×N invalidated sources and the fact count with a level against the keeper with the most facts; ? is a value the server did not measure |
 | `· ▁ ▄ █ ?` | the views' turn pulse: autonomous turn results of the last half hours, one mark per half hour, newest on the right: · no turn / ▁ ok / ▄ failed and ok / █ failed / ? unknown; a rested turn counts as failed, chat turns are not counted, and a half hour from before the server's record of the keeper reads ?. The header names how long the marks span |
@@ -892,7 +962,7 @@ or completion.
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL ▹ prefixes next candidate after turn failure |
-| `◷` | next scheduled run or hold status (Detailed second row; due in the views) |
+| `due` | the views' next scheduled run or hold status; DETAIL's schedule badge says the same |
 | `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row; its lag under lag in the views, and the memory and age views draw their own cells). mem ? is memory health not read yet, or a refused row that may be this keeper's; mem ! is this keeper's row, refused; — is a keeper with no memory snapshot |
 | `facts` | ordinary memory facts by time since first seen, one bar per group oldest first (over 7d, 1–7d, under 1d); bar height is relative to the largest group of the same strip, 0 is none, ? is not measured (Detailed second row; the age view draws the bins under facts by age ▸, · for an empty one) |
 | `사람 몫 / 효과 확인 / 분류 안 됨` | requires human operator action, effect review, or unmapped fault (NOW column) |

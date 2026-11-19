@@ -198,7 +198,14 @@ val skill_source_of_tool_name : string -> string option
     because that file was read, so the path is a fact about how it got here,
     not a guess that it is there. *)
 
+val execution_modes : execution_mode list
+(** [[Inline; Async]], every constructor once. *)
+
 val execution_mode_to_string : execution_mode -> string
+
+val execution_mode_of_string : string -> execution_mode option
+(** The mode {!execution_mode_to_string} spells as this text, or [None] for a
+    spelling no mode has. *)
 
 (** Execution-semantics kind (RFC-0386) declared by the entry's execution
     mode: [Inline] entries are [Composition_tool], [Async] entries are

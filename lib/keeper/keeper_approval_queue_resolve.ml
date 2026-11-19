@@ -8,20 +8,65 @@ open Keeper_approval_queue_entry_update
 open Keeper_approval_queue_delivery
 open Keeper_approval_queue_journal
 
+(* A delivery whose [Resolved] row is not confirmed on the ledger is the
+   decision's only durable copy, so it stays until a retry records it (#38541).
+   The ledger state is read from the store under the lock, not from the
+   caller's copy, which may predate the confirmation. *)
+type delivery_removal =
+  | Delivery_removed
+  | Delivery_kept_until_recorded
+
 let remove_delivery_from_store delivery =
   with_pending_store_lock (fun () ->
     let delivery_map = Atomic.get deliveries in
-    let updated_deliveries = SMap.remove delivery.entry.id delivery_map in
-    match
-      persist_snapshot_unlocked
-        ~base_path:delivery.entry.audit_base_path
-        ~pending_map:(Atomic.get pending)
-        ~delivery_map:updated_deliveries
-    with
-    | Error _ as error -> error
-    | Ok () ->
-      Atomic.set deliveries updated_deliveries;
-      Ok ())
+    let remove () =
+      let updated_deliveries = SMap.remove delivery.entry.id delivery_map in
+      match
+        persist_snapshot_unlocked
+          ~base_path:delivery.entry.audit_base_path
+          ~pending_map:(Atomic.get pending)
+          ~delivery_map:updated_deliveries
+      with
+      | Error _ as error -> error
+      | Ok () ->
+        Atomic.set deliveries updated_deliveries;
+        Ok Delivery_removed
+    in
+    match SMap.find_opt delivery.entry.id delivery_map with
+    | Some { ledger = Ledger_append_pending; _ } -> Ok Delivery_kept_until_recorded
+    | Some { ledger = Ledger_recorded; _ } | None -> remove ())
+;;
+
+type ledger_confirmation =
+  | Ledger_confirmed of persisted_delivery
+  | Ledger_delivery_absent
+
+(* Mark the stored delivery [Ledger_recorded] once its row is known to be on
+   the ledger. Only the ledger field changes: the stored copy may have moved
+   on (a consumed grant) since the caller read it. *)
+let confirm_resolution_recorded delivery =
+  with_pending_store_lock (fun () ->
+    let id = delivery.entry.id in
+    let base_path = delivery.entry.audit_base_path in
+    let delivery_map = Atomic.get deliveries in
+    match SMap.find_opt id delivery_map with
+    | None -> Ok Ledger_delivery_absent
+    | Some current when not (String.equal current.entry.audit_base_path base_path) ->
+      Ok Ledger_delivery_absent
+    | Some ({ ledger = Ledger_recorded; _ } as current) -> Ok (Ledger_confirmed current)
+    | Some ({ ledger = Ledger_append_pending; _ } as current) ->
+      let recorded = { current with ledger = Ledger_recorded } in
+      let updated_deliveries = SMap.add id recorded delivery_map in
+      (match
+         persist_snapshot_unlocked
+           ~base_path
+           ~pending_map:(Atomic.get pending)
+           ~delivery_map:updated_deliveries
+       with
+       | Error _ as error -> error
+       | Ok () ->
+         Atomic.set deliveries updated_deliveries;
+         Ok (Ledger_confirmed recorded)))
 ;;
 
 let approval_decision_equal left right =
@@ -142,23 +187,84 @@ let delivery_occasion_to_string = function
    comes back in the receipt, and it must not erase or re-open the
    authoritative decision. The operator's approval stays in force and the
    missing row is visible as an audit append failure, not as a pending
-   approval the operator must answer again.
+   approval the operator must answer again. The delivery was journaled as
+   [Ledger_append_pending]; it becomes [Ledger_recorded] only after the row is
+   on the ledger, and until then no path removes it. The next install retries
+   the append ([retry_unconfirmed_resolution]) (#38541).
 
    The chat row is not written here. A delivery whose keeper no longer exists
    is retired without one, and whether the keeper exists is known only when
    the wake is enqueued; [project_resolution_chat] writes it then. *)
+let resolution_actor delivery =
+  match delivery.created_by with
+  | Some actor when String.trim actor <> "" -> Some actor
+  | Some _ | None -> None
+;;
+
+(* Whether the row a receipt describes is on the ledger. A settlement
+   failure after the append still left the row there. *)
+let resolution_row_on_ledger = function
+  | Keeper_approval.Audit.Resolved_row_already_present -> true
+  | Keeper_approval.Audit.Resolved_append_attempted { write_result = Ok (); _ } -> true
+  | Keeper_approval.Audit.Resolved_append_attempted { write_result = Error _; _ } -> false
+;;
+
 let record_journaled_resolution delivery =
-  let actor =
-    match delivery.created_by with
-    | Some actor when String.trim actor <> "" -> Some actor
-    | Some _ | None -> None
+  let receipt =
+    resolve_entry
+      ~base_path:delivery.entry.audit_base_path
+      ~resolved_at:delivery.resolved_at
+      delivery.entry
+      ~source:delivery.source
+      ?actor:(resolution_actor delivery)
+      delivery.decision
   in
-  resolve_entry
-    ~base_path:delivery.entry.audit_base_path
-    delivery.entry
-    ~source:delivery.source
-    ?actor
-    delivery.decision
+  (match resolution_row_on_ledger receipt with
+   | false -> ()
+   | true ->
+     (match confirm_resolution_recorded delivery with
+      | Ok (Ledger_confirmed _ | Ledger_delivery_absent) -> ()
+      | Error storage_error ->
+        (* The row is on the ledger but the delivery still says
+           [Ledger_append_pending]; the next install reads the row and
+           confirms it without a second append. *)
+        Log.Keeper.warn
+          ~keeper_name:delivery.entry.keeper_name
+          "approval_queue: resolution ledger confirmation not saved approval=%s: %s"
+          delivery.entry.id
+          (storage_error_to_string storage_error)));
+  receipt
+;;
+
+type ledger_retry =
+  | Ledger_retry_confirmed of persisted_delivery
+  | Ledger_retry_delivery_absent
+  | Ledger_retry_failed of string
+
+(* The install's retry for a delivery whose row was never confirmed: the row
+   is appended only if its day file does not already hold it, so a crash
+   between a successful append and the confirmation writes it once. *)
+let retry_unconfirmed_resolution delivery =
+  let receipt =
+    record_resolution_row
+      ~attempt:Keeper_approval.Audit.Retry_unconfirmed_resolved_append
+      ~base_path:delivery.entry.audit_base_path
+      ~resolved_at:delivery.resolved_at
+      delivery.entry
+      ~source:delivery.source
+      ?actor:(resolution_actor delivery)
+      delivery.decision
+  in
+  match receipt with
+  | Keeper_approval.Audit.Resolved_append_attempted { write_result = Error _; _ } ->
+    Ledger_retry_failed
+      (Yojson.Safe.to_string (Keeper_approval.Audit.resolved_receipt_to_yojson receipt))
+  | Keeper_approval.Audit.Resolved_append_attempted { write_result = Ok (); _ }
+  | Keeper_approval.Audit.Resolved_row_already_present ->
+    (match confirm_resolution_recorded delivery with
+     | Ok (Ledger_confirmed confirmed) -> Ledger_retry_confirmed confirmed
+     | Ok Ledger_delivery_absent -> Ledger_retry_delivery_absent
+     | Error storage_error -> Ledger_retry_failed (storage_error_to_string storage_error))
 ;;
 
 (* The chat row for the decision. [append_approval_lifecycle_once] writes it
@@ -212,10 +318,16 @@ let complete_delivery ~(occasion : delivery_occasion) delivery =
          (match remove_delivery_from_store delivery with
           | Error storage_error ->
             Error (Persistence_failed { approval_id = id; storage_error })
-          | Ok () ->
+          | Ok Delivery_removed ->
             Log.Keeper.info
               ~keeper_name:delivery.entry.keeper_name
               "hitl delivery retired: no such keeper approval=%s"
+              id;
+            Ok { remembered_rule = None; audit_receipts = [] }
+          | Ok Delivery_kept_until_recorded ->
+            Log.Keeper.warn
+              ~keeper_name:delivery.entry.keeper_name
+              "hitl delivery kept: no such keeper, resolution not yet on the audit ledger approval=%s"
               id;
             Ok { remembered_rule = None; audit_receipts = [] })
        | Error (Keeper_registry_event_queue.Hitl_enqueue_failed reason) ->
@@ -293,13 +405,17 @@ let resolve_with_policy
          | Error _ as error -> error
          | Ok (Newly_journaled delivery) ->
            notify_waiting_approval ~source:Approval_count delivery.entry;
-           let resolution_receipt = record_journaled_resolution delivery in
+           let resolution_receipts =
+             match record_journaled_resolution delivery with
+             | Keeper_approval.Audit.Resolved_append_attempted receipt -> [ receipt ]
+             | Keeper_approval.Audit.Resolved_row_already_present -> []
+           in
            (match complete_delivery ~occasion:First_commit delivery with
             | Error _ as error -> error
             | Ok result ->
               Ok
                 { result with
-                  audit_receipts = result.audit_receipts @ [ resolution_receipt ]
+                  audit_receipts = result.audit_receipts @ resolution_receipts
                 })
          | Ok (Previously_journaled delivery) ->
            let same_request =

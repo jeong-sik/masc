@@ -630,6 +630,23 @@ let test_paused_and_offline_hide_stale_activity () =
   Alcotest.(check bool) "offline wins over stale streaming" true
     (Model.primary_activity_of_row offline = Model.Offline && Model.group_of_row offline = Model.Inactive)
 
+(* An offline Keeper that starts on its own and is not paused should be
+   running, so its row asks for a look; one started by hand is offline as
+   expected and paused like a pause. *)
+let test_an_offline_keeper_that_starts_on_its_own_asks_for_a_look () =
+  let mark activation =
+    Masc_tui_keeper_mark.row_activity_mark
+      (row ~health:(health "offline")
+         ~edit:(fun runtime -> { runtime with Decode.kr_activation_mode = activation })
+         "offline")
+  in
+  Alcotest.(check bool) "autonomous and offline is a caution" true
+    (mark Decode.Activation_autonomous = Some Masc_tui_value.Mark.Caution);
+  Alcotest.(check bool) "manual and offline is paused" true
+    (mark Decode.Activation_manual = Some Masc_tui_value.Mark.Paused);
+  Alcotest.(check bool) "on demand and offline is paused" true
+    (mark Decode.Activation_on_demand = Some Masc_tui_value.Mark.Paused)
+
 let test_confirmation_and_inventory_errors_need_attention () =
   let confirmation =
     row ~waiting:(waiting ~items:[waiting_item ~source:Model.Waiting_source_operator_pending_confirm ()] "row") "confirmation"
@@ -843,6 +860,8 @@ let () =
         ; Alcotest.test_case "delegate and verification badges" `Quick test_delegate_and_verification_remain_distinct_badges
         ; Alcotest.test_case "unobserved is not idle" `Quick test_unobserved_is_not_idle
         ; Alcotest.test_case "paused and offline hide stale activity" `Quick test_paused_and_offline_hide_stale_activity
+        ; Alcotest.test_case "an offline Keeper that starts on its own asks for a look" `Quick
+            test_an_offline_keeper_that_starts_on_its_own_asks_for_a_look
         ; Alcotest.test_case "confirmation and inventory errors need attention" `Quick test_confirmation_and_inventory_errors_need_attention
         ; Alcotest.test_case "async phases and preparing remain distinct" `Quick test_async_phases_and_preparing_remain_distinct
         ; Alcotest.test_case "waiting summary counts reasons and background work" `Quick

@@ -104,7 +104,9 @@ let list_head ~ko = function
 type list_layout =
   { layout : list_column Masc_tui_table.layout
   ; flex : list_column  (** The column that takes what the others leave. *)
-  ; width : list_column -> int }
+  ; width : list_column -> int
+  ; inner_width : int
+  ; dropped : int }
 
 (* The columns a list of resources draws at this width. With room for the
    description after the identifying columns the row is type, name, the check
@@ -143,10 +145,9 @@ let list_layout ~ko resources ~today ~inner_width =
       | Col_day -> day_cells
       | Col_detail -> detail_floor_cells
       | Col_meta -> meta_cells in
-    { layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_detail
-        ~drop_order:[Col_meta] (identifying @ marker @ [Col_detail; Col_meta])
-    ; flex = Col_detail
-    ; width }
+    let layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_detail
+      ~drop_order:[Col_meta] (identifying @ marker @ [Col_detail; Col_meta]) in
+    { layout; flex = Col_detail; width; inner_width; dropped = layout.dropped }
   else
     let width = function
       | Col_type -> type_cells
@@ -154,14 +155,13 @@ let list_layout ~ko resources ~today ~inner_width =
       | Col_check -> check_cells
       | Col_day -> day_cells
       | Col_detail | Col_meta -> 0 in
-    { layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_name
-        ~drop_order:[Col_day] (identifying @ marker)
-    ; flex = Col_name
-    ; width }
+    let layout = Masc_tui_table.fit ~inner_width ~width ~flex:Col_name
+      ~drop_order:[Col_day] (identifying @ marker) in
+    { layout; flex = Col_name; width; inner_width; dropped = layout.dropped + 2 }
 
 (* One row on the layout: [reading] gives a column's text and style for one
    resource, and [None] draws the column names. *)
-let list_cells ~ko ({ layout; flex; width } : list_layout) reading =
+let list_cells ~ko ({ layout; flex; width; _ } : list_layout) reading =
   List.map (fun column ->
     let header = list_head ~ko column in
     let fold = match column with
@@ -341,15 +341,19 @@ let render_resources (state : state) =
       ^ Theme.recede () ^ query ^ Ansi.reset);
     let budget = list_rows state ~rows in
     let first = max 0 (cursor - max 1 budget + 1) in
-    let table = list_layout ~ko rows_list ~today
-      ~inner_width:(max 1 (framed_inner_width pane_cols - marker_cells)) in
+    let table_inner_width = max 1 (framed_inner_width pane_cols - marker_cells) in
+    let table = list_layout ~ko rows_list ~today ~inner_width:table_inner_width in
     (* The column names take a row even with nothing to name, so the rows that
        follow start in the same place for an empty list as for a full one. *)
     if total = 0 then framed_empty pane_buf pane_cols
     else
       framed_line pane_buf pane_cols
         (Theme.recede () ^ unselected_marker
-         ^ Masc_tui_table.header_row (list_cells ~ko table None) ^ Ansi.reset);
+         ^ Masc_tui_table.header_row_with_dropped ~ko
+             ~inner_width:table.inner_width
+             ~dropped:table.dropped
+             (list_cells ~ko table None)
+         ^ Ansi.reset);
     let visible = Rows.of_list ~first ~height:budget rows_list in
     for i = 0 to budget - 1 do
       match Rows.at visible (first + i) with

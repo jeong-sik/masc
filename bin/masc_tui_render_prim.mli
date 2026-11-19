@@ -108,8 +108,6 @@ val reader_after_wheel :
     for the Parameters and Presets documents when they cannot move that way.
     A Presets save warning always takes the notch. *)
 
-val navigation_rows : int
-
 val get_terminal_size : unit -> int * int
 
 val lines_ended_since : Buffer.t -> start:int -> int
@@ -195,6 +193,23 @@ val footer_line :
     its keys use the ordinary item fitter. Quit and input-recovery notices
     keep their existing priority. It does not authorize an action. *)
 
+val footer_line_keys :
+  ?help_door:bool ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?position:string ->
+  ?recovery_in_slot:recovery_row option ->
+  ?choices:string ->
+  Masc_tui_types.state -> max_cells:int -> keys:Masc_tui_footer.key_row -> string
+(** {!footer_line} for a row of typed keys: a key that does not answer on the
+    screen as drawn keeps its place in the row's dim when every key fits, and
+    is the first to go when the row is cut. With colours off the dim marks
+    nothing, so such a key is left out at every width. The navigation trace
+    hears only the keys that answer.
+
+    {!footer_line} stays for rows still written by hand. Each goes when its
+    screen builds zone 5 from its action list (RFC tui-one-screen-grammar
+    3.5); then this is the only entry. *)
+
 val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
@@ -202,7 +217,8 @@ val keeper_roster_pane_cols : int
 val strip_rows : int
 (** The lines the surface strip takes above every surface: a row a surface
     counts in its own frame sits this many lines lower in the terminal's. A
-    picture placed over a surface's rows starts from there. *)
+    picture placed over a surface's rows starts from there. It is
+    {!Masc_tui_render_schedule.Viewport.navigation_rows}. *)
 
 val change_row_address : Masc.Tui_decode.file_change -> string
 
@@ -350,6 +366,22 @@ val surface_chrome :
 (** [sidebar] reserves its width from [cols] and draws beside the body,
     above the full-width footer. The body must wrap for the remaining width.
     A complete recovery notice may use the existing bottom row. *)
+
+val surface_chrome_keys :
+  overflow:overflow ->
+  ?help_door:bool ->
+  ?frame:chrome_frame ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  cols:int ->
+  surface_key:string ->
+  title:string ->
+  keys:Masc_tui_footer.key_row ->
+  body:(budget:int -> chrome_body -> unit) ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** {!surface_chrome} whose footer is drawn by {!footer_line_keys}. *)
 
 val connection_badge : Masc_tui_types.state -> string
 (** What a title row adds to the top row's connection word: that the event
@@ -697,10 +729,15 @@ val harness_detail_heading :
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
+(** Which Keeper row the keys are for. The roster names the keys that act
+    (RFC tui-one-screen-grammar section 2); the detail keeps [j/k], its way
+    back, [r] and [q] until it is drawn from the action list. *)
+type keeper_keys = Roster_keys | Detail_keys
+
 val keeper_control_hints :
   ?offers_chat:bool ->
-  ?offers_back:bool ->
   ?taken:string list ->
+  keys:keeper_keys ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
 (** The Keeper keys alone, less any whose single keys are in [taken] -- the
     keys a detail tab answers itself ({!Masc_tui_keys.keeper_detail_tab_taken_keys}).
@@ -918,6 +955,10 @@ val detail_page :
   width:int -> (string * Masc_tui_page_line.t list) list -> (string * string) list
 (** A detail page of headed blocks: each block is its heading and the
     [Masc_tui_page_line] lines under it. One label column serves every block. *)
+
+val section_heading_line : string -> string
+(** A detail's section heading, [── title ─────] in bold on the reader's
+    foreground (RFC tui-one-screen-grammar §5.2, §7.3). *)
 
 val detail_section_lines : ?first:bool -> string -> string list
 (** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)

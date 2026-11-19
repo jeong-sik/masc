@@ -109,6 +109,10 @@ and tone =
   | Bad
   | Info
 
+val status_tone : Masc_tui_value.Mark.t -> tone
+(** The tone of a status mark (RFC tui-one-screen-grammar §7.2), the pane's
+    name for the colour [Masc_tui_ansi.Theme.status_tone] gives it. *)
+
 type approval = {
   approval_keeper : string;
   approval_tool : string;

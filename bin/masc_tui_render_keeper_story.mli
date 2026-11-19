@@ -14,17 +14,17 @@ val rows : budget:int -> int
 
 val draw :
   Buffer.t ->
+  ko:bool ->
   cols:int ->
   rows:int ->
   lead:string ->
   current:Masc_tui_keeper_story.page ->
   string list ->
   unit
-(** [draw buf ~cols ~rows ~lead ~current lines] writes exactly [rows] rows: the
-    rule, the title and then [lines], cut to what is left. [lead] is the styled
-    text at the left of the title and [current] is the page whose tab is drawn
-    reversed. A page longer than its rows ends in a row that counts the lines it
-    leaves out. *)
+(** [draw buf ~ko ~cols ~rows ~lead ~current lines] writes exactly [rows] rows:
+    a single btop-style embedded header rule carrying [lead] and the page tabs
+    with [current] reversed, followed by [lines] cut to what is left. A page
+    longer than its rows ends in a row that counts the lines it leaves out. *)
 
 val next_run_cell :
   Masc_tui_types.state ->
@@ -50,7 +50,7 @@ val schedule_lines :
     open. *)
 
 val body_rows : rows:int -> int
-(** The lines a window of [rows] rows holds: all but its rule and its title. *)
+(** The lines a window of [rows] rows holds: all but its embedded header rule. *)
 
 val feed_lines :
   Masc_tui_types.state -> now:float -> max_lines:int -> keeper_name:string -> string list

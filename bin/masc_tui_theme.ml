@@ -250,6 +250,15 @@ module Box = struct
   let tr_round = "\xe2\x95\xae"
   let bl_round = "\xe2\x95\xb0"
   let br_round = "\xe2\x95\xaf"
+  let h_heavy = "\xe2\x94\x81" (* U+2501 HEAVY HORIZONTAL *)
+  let v_heavy = "\xe2\x94\x83" (* U+2503 HEAVY VERTICAL *)
+  let tl_heavy = "\xe2\x94\x8f" (* U+250F HEAVY DOWN AND RIGHT *)
+  let tr_heavy = "\xe2\x94\x93" (* U+2513 HEAVY DOWN AND LEFT *)
+  let bl_heavy = "\xe2\x94\x97" (* U+2517 HEAVY UP AND RIGHT *)
+  let br_heavy = "\xe2\x94\x9b" (* U+251B HEAVY UP AND LEFT *)
+  let scroll_up = "\xe2\x86\x91" (* U+2191 UPWARDS ARROW *)
+  let scroll_down = "\xe2\x86\x93" (* U+2193 DOWNWARDS ARROW *)
+  let scroll_thumb = "\xe2\x96\x88" (* U+2588 FULL BLOCK *)
   let l = "\xe2\x94\x9c"
   let r = "\xe2\x94\xa4"
 end
@@ -529,14 +538,14 @@ type series =
   | Usage
   | Wakes
 
-type hue = Green | Yellow | Blue | Magenta | Cyan
+type hue = Green | Yellow | Blue | Magenta
 
-(* One place says which hue a quantity draws in. Red is left to status: a
-   bucket in which every call failed is red across every row and the Calls
-   legend says so, so the failures row walks magenta instead. Latency and
+(* One place says which hue a quantity draws in. Red is left to status.danger
+   and Cyan is left to status.info (in-progress and focus, RFC §7.3), so no
+   picture series collides with active/focus or danger tokens. Latency and
    backlog share yellow because both are waiting. *)
 let series_hue = function
-  | Calls -> Cyan
+  | Calls -> Blue
   | Failures -> Magenta
   | Latency -> Yellow
   | Memory -> Magenta
@@ -544,7 +553,7 @@ let series_hue = function
   | Capacity -> Blue
   | Backlog -> Yellow
   | Usage -> Blue
-  | Wakes -> Cyan
+  | Wakes -> Green
 ;;
 
 (* The bright palette entry of each hue, the top of its ramp. *)
@@ -553,7 +562,6 @@ let bright_index = function
   | Yellow -> 11
   | Blue -> 12
   | Magenta -> 13
-  | Cyan -> 14
 ;;
 
 let bright_code = function
@@ -561,7 +569,6 @@ let bright_code = function
   | Yellow -> Sgr.bright_yellow
   | Blue -> Sgr.bright_blue
   | Magenta -> Sgr.bright_magenta
-  | Cyan -> Sgr.bright_cyan
 ;;
 
 let ramp_steps = 100

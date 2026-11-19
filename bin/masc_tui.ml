@@ -1510,7 +1510,7 @@ let handle_message_key (state : state) ~(submit_message : Masc_tui_message_input
     ~(inspect_queue : unit -> unit)
     ~(load_tool_changes : unit -> unit) ~(load_preparation : unit -> unit) ~(drain_queue : unit -> unit)
     ~(start_voice : unit -> unit) ~(toggle_voice_continuous : unit -> unit)
-    ~(interrupt_turn : unit -> bool) (key : string) : bool =
+    (key : string) : bool =
   (* y and n answer a held call, and only while one is held -- otherwise they
      are letters someone is typing. The prompt on screen is what makes them
      mean anything, so it is also what decides whether they are taken. *)
@@ -1597,15 +1597,12 @@ let handle_message_key (state : state) ~(submit_message : Masc_tui_message_input
     true
   | "\t" -> apply_autocomplete Masc_tui_command.Next
   | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
-  (* The footer and this arm read the same table (Masc_tui_esc_interrupt),
-     so the hint the operator sees is the act the key performs: Esc is the
-     first press of an interrupt, the accidental second press inside the
-     grace window, or a request to leave once the interrupt is stale,
-     declined, or errored. Leaving cancels nothing: the interrupt proceeds
-     server-side and the pane can be reopened. *)
+  (* Esc follows RFC §3.1/§3.4 everywhere: close the innermost UI (command menu,
+     voice capture) or leave chat without interrupting a running turn. Active
+     turn interruption is separated onto Ctrl-C in the event loop. *)
   | "esc" ->
-    if interrupt_turn () then true
-    else (leave_keeper_message state ~drain_queue; true)
+    leave_keeper_message state ~drain_queue;
+    true
   (* Q / Ctrl-Q is the leave half of Esc with the interrupt half taken out.
      Esc's first press on a live turn spends itself stopping the turn, so an
      operator who wants to walk away and let the turn run needs a quiet exit.
@@ -10425,6 +10422,66 @@ let launch_owed_repositories state ~mailbox =
       launch_repositories_load state ~mailbox
   end
 
+(* The engine graphs' own [/health] read. It asks which server answers, as
+   the refresh's probe does, outside any workspace scope: [/health] reads no
+   workspace data, and the answer goes to the graphs only. *)
+let launch_engine_sample_read state ~mailbox =
+  let host = server_peer_host and port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox
+        (Engine_sample_read (Masc_tui_engine_samples.reading_of_server result)))
+    (fun () ->
+      Masc_tui_workspace_read.without_binding (fun () ->
+        Masc_tui_workspace_precondition.without (fun () ->
+          Masc_tui_loader.load_server_reading ~host ~port)))
+
+(* The engine graphs' samples (RFC tui-one-screen-grammar section 5.6). Runs
+   on every loop iteration, as the owed reads do, and sets no timer of its
+   own. Off the engine view its samples go and nothing is due. On it, a due
+   sample takes the newest [/health] answer of the last two seconds, whoever
+   asked for it, or asks [/health] itself, one read at a time. When the
+   refresh pass is backing off, times without any answer stay blank. A
+   sample changes the graphs and requests a frame (section 8).
+   The view is on screen only while the surface is the frame: the help sheet,
+   a reader, the account server's screen or the too-small notice draws over
+   the whole terminal, and the graphs under it are not sampled. *)
+let step_engine_samples state ~mailbox ~render_schedule =
+  let terminal_rows, cols = get_terminal_size () in
+  let now = monotonic_now_s () in
+  let capacity =
+    match Masc_tui_render_metrics.engine_graph_capacity ~cols state with
+    | None -> None
+    | Some capacity ->
+      (match
+         Masc_tui_render.frame_choice state ~terminal_rows
+           ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ()))
+           ~now:(Unix.gettimeofday ())
+       with
+       | `Surface -> Some capacity
+       | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette
+       | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
+       | `Keeper_deletions | `Help | `Agenda | `Answering | `Queue _ | `Link
+       | `Client_detail _ -> None)
+  in
+  match capacity with
+  | None -> state.engine_samples <- Masc_tui_engine_samples.hidden state.engine_samples
+  | Some capacity ->
+    let allow_read =
+      Masc_tui_refresh_pace.screen_read_starts ~now Owed_read_due state.refresh_pace
+    in
+    let samples, step =
+      Masc_tui_engine_samples.tick ~allow_read
+        (Masc_tui_engine_samples.shown state.engine_samples ~now ~capacity)
+        ~now ~newest:(Masc_tui_loader.health_answer ())
+    in
+    state.engine_samples <- samples;
+    (match step with
+     | Masc_tui_engine_samples.Nothing -> ()
+     | Masc_tui_engine_samples.Sampled ->
+       Render_schedule.request render_schedule Render_schedule.Background
+     | Masc_tui_engine_samples.Read -> launch_engine_sample_read state ~mailbox)
+
 let memory_health_on_screen state =
   match state.view with
   | Memory | Metrics | Keepers Keeper_list -> true
@@ -12025,6 +12082,37 @@ let interrupt_observed_keeper ?(explicit = false) state ~mailbox keeper_name =
     | None -> Some false
     | Some (started_at, interrupt_token) ->
       Some (launch_keeper_observed_interrupt state ~mailbox ~keeper_name ~started_at ~interrupt_token)
+;;
+
+(* Interrupt the active turn of the Keeper currently shown in chat (RFC §3.4:
+   Ctrl-C interrupts a running turn, while Esc always closes/leaves without
+   accidentally stopping the turn). Returns true when Ctrl-C was spent on the
+   turn (or swallowed inside the grace window) so the caller withdraws quit
+   arming. *)
+let interrupt_active_chat_turn state ~mailbox =
+  match Option.bind state.msg_target_keeper_name
+    (interrupt_observed_keeper state ~mailbox) with
+  | Some handled -> handled
+  | None ->
+    (match state.msg_live with
+     | Some live
+       when state.msg_target_keeper_name = Some (turn_log_keeper_name live) ->
+         (match
+            Masc_tui_esc_interrupt.action
+              ~now_ns:(Mtime_clock.elapsed_ns ())
+              (Keeper_chat_transcript.interrupt live.tl_transcript)
+          with
+          | Masc_tui_esc_interrupt.Launch_interrupt ->
+            (match
+               inflight_by_request_id state (turn_log_request_id live)
+             with
+             | Some request ->
+               launch_keeper_interrupt state ~mailbox request;
+               true
+             | None -> false)
+          | Masc_tui_esc_interrupt.Swallow -> true
+          | Masc_tui_esc_interrupt.Leave -> false)
+     | Some _ | None -> false)
 ;;
 
 (* Ask the server to run this queued message next. Run-next only reorders
@@ -24381,9 +24469,6 @@ let handle_composer_key state ~base_path ~mailbox key =
          failure. *)
       let (_handled : bool) =
         handle_message_key state
-          (* The composer row is not the chat surface: no turn of its own is
-             on screen, so Esc here has nothing to stop. *)
-          ~interrupt_turn:(fun () -> false)
           ~submit_message:(fun _ -> ())
           ~load_older:(fun ~cursor:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
@@ -24828,7 +24913,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_msg (Local_workspace_read (_, _) | Local_keepers_read (_, _)) | Live_context_loaded (_, _, _) | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Keeper_msg (Keeper_composite_loaded (_, _, _))
         | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _) | Lane_msg (Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _)) | Measurement_artifact_loaded (_, _, _)
-        | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Overview_loaded _ | Fusion_msg (Fusion_runs_loaded (_, _)
+        | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Overview_loaded _ | Engine_sample_read _ | Fusion_msg (Fusion_runs_loaded (_, _)
         | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
         | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
         | Memory_msg (Memory_recall_standing_loaded (_, _)) | Repository_msg (Repositories_loaded _)
@@ -30950,6 +31035,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Measurement_artifact_loaded (sha256, generation, result) ->
       accept_measurement_artifact state ~sha256 ~generation result
+  | Engine_sample_read reading ->
+      (* The drain draws a frame for every answer it applies, so a sample
+         this takes needs nothing more to be drawn. *)
+      let samples, (_ : Masc_tui_engine_samples.step), report =
+        Masc_tui_engine_samples.answered state.engine_samples ~now:(monotonic_now_s ()) reading
+      in
+      state.engine_samples <- samples;
+      (match report with
+       | Masc_tui_engine_samples.Quiet -> ()
+       | Masc_tui_engine_samples.Failure_began detail ->
+         add_event state "error" (Terminal_text.single_line detail))
   | Overview_loaded result ->
       state.overview_inflight <- false;
       state.overview_owed <-
@@ -34381,6 +34477,27 @@ Use relative paths for resources already held in the package. -->
                 Render_schedule.request render_schedule Render_schedule.Background;
                 None
             | No_paste, false ->
+                let chat_pane_active =
+                  state.view = Keepers Keeper_message
+                  && state.keeper_message_focus = Right_pane
+                  && not state.keeper_navigation_open
+                  && not (modal_owns_keys state)
+                  && not state.palette_open
+                  && not state.answering_open
+                  && not state.image_open
+                  && not state.msx_open
+                  && Option.is_none state.lane_addons
+                  && Option.is_none state.account_login
+                  && Option.is_none state.voice_agent_voices
+                in
+                if chat_pane_active
+                   && Option.is_none state.quit_armed
+                   && interrupt_active_chat_turn state ~mailbox:async_messages
+                then begin
+                  Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                  Render_schedule.request render_schedule Render_schedule.Background;
+                  None
+                end else begin
                 let confirmed = match interrupt, state.quit_armed,
                     current_quit_confirmation state ~now:(Unix.gettimeofday ()) with
                   | Masc_tui_exit_signals.Interrupt_again, Some arm, Some current ->
@@ -34405,7 +34522,8 @@ Use relative paths for resources already held in the package. -->
                 if Option.is_none state.quit_armed then
                   Masc_tui_exit_signals.withdraw_interrupt exit_signals;
                 Render_schedule.request render_schedule Render_schedule.Background;
-                None)
+                None
+                end)
        | Masc_tui_exit_signals.Continue -> None
       in
       (* One drain deadline for the whole pass: the pre-input drain below and
@@ -36290,6 +36408,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_harness state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
       launch_owed_clients state ~mailbox:async_messages;
+      step_engine_samples state ~mailbox:async_messages ~render_schedule;
       reconcile_system_log_stream state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_ask_followup state ~mailbox:async_messages;
@@ -41025,46 +41144,6 @@ Use relative paths for resources already held in the package. -->
              end else
                let (_handled : bool) =
                  handle_message_key state
-                   ~interrupt_turn:(fun () ->
-                     (* Answers whether the press was spent on the turn. The
-                        keeper the pane is showing is the one Esc can stop:
-                        another keeper's turn is not on screen, and stopping
-                        it from here would be a keypress the reader cannot
-                        see the target of. What the press does is the pure
-                        table in Masc_tui_esc_interrupt: launch on a first
-                        press, swallow an accidental double press inside the
-                        grace window, and leave the view once the signal is
-                        stale, declined, or errored. Leaving cancels nothing
-                        -- the interrupt proceeds server-side, and a turn
-                        parked in an uncancellable section keeps streaming
-                        after its signal (masc #29229), so holding Esc until
-                        the stream settles could hold it forever. *)
-                     match Option.bind state.msg_target_keeper_name
-                       (interrupt_observed_keeper state ~mailbox:async_messages) with
-                     | Some handled -> handled
-                     | None -> match state.msg_live with
-                     | Some live
-                       when state.msg_target_keeper_name
-                            = Some (turn_log_keeper_name live) ->
-                         (match
-                            Masc_tui_esc_interrupt.action
-                              ~now_ns:(Mtime_clock.elapsed_ns ())
-                              (Keeper_chat_transcript.interrupt
-                                 live.tl_transcript)
-                          with
-                          | Masc_tui_esc_interrupt.Launch_interrupt ->
-                            (match
-                               inflight_by_request_id state
-                                 (turn_log_request_id live)
-                             with
-                             | Some request ->
-                               launch_keeper_interrupt state
-                                 ~mailbox:async_messages request;
-                               true
-                             | None -> false)
-                          | Masc_tui_esc_interrupt.Swallow -> true
-                          | Masc_tui_esc_interrupt.Leave -> false)
-                     | Some _ | None -> false)
                    ~submit_message:
                      (send_operator_text state ~base_path
                         ~mailbox:async_messages)

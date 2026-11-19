@@ -59,6 +59,12 @@ val of_count : int -> sample
     below zero is no reading, so it is [Absent], the blank a failed read
     draws. *)
 
+val of_milliseconds : float -> sample
+(** A measured duration in milliseconds, as a count of whole microseconds
+    rounded up, so a duration above zero stays above zero on the scale. A
+    duration that is not a number is no reading ([Absent]); one past the
+    integer range stands at the top. *)
+
 (** {1 Graphs} *)
 
 (** What a graph draws. *)
@@ -76,6 +82,11 @@ type graph =
 val graph_min_cells : int
 (** [4]: a graph needs this many cells of dots or it is replaced by its
     number. *)
+
+val graph_times : width:int -> axis_cells:int -> int
+(** How many times {!braille_graph} draws in [width] cells when its axis text
+    is [axis_cells] wide: two a cell of dots, after the axis column and the
+    one-cell gap beside it. [0] when nothing is left for dots. *)
 
 val graph_maximum : sample list -> int
 (** The largest [Value], or [0] when there is none: the top of an axis scaled
@@ -97,7 +108,8 @@ val braille_graph :
   width:int -> rows:int -> axis:string -> maximum:int -> sample list -> graph
 (** A graph [width] cells wide and [rows] text rows tall, growing up from its
     baseline. [maximum] is the top of the axis: the largest sample
-    ({!graph_maximum}) or a declared limit. [axis] is that top written with its
+    ({!graph_maximum}), a declared limit, or a top the caller holds; a sample
+    above it draws at the top. [axis] is that top written with its
     unit ([123K]), placed at the graph's top-left. The newest [2 * cells]
     samples are drawn; a time before the first sample is blank.
 

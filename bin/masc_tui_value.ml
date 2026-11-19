@@ -314,6 +314,35 @@ module Ongoing = struct
   end
 end
 
+module Interval = struct
+  let seconds_per_minute = 60
+  let seconds_per_hour = 60 * seconds_per_minute
+  let seconds_per_day = 24 * seconds_per_hour
+
+  let text seconds =
+    let lossy () = Ongoing.text (Float.of_int seconds) in
+    if seconds <= 0 then "0s"
+    else if seconds < seconds_per_minute then Printf.sprintf "%ds" seconds
+    else if seconds mod seconds_per_day = 0 then
+      Printf.sprintf "%dd" (seconds / seconds_per_day)
+    else if seconds >= seconds_per_day then
+      if seconds mod seconds_per_hour = 0 then
+        Printf.sprintf "%dd%02dh" (seconds / seconds_per_day)
+          (seconds mod seconds_per_day / seconds_per_hour)
+      else lossy ()
+    else if seconds mod seconds_per_hour = 0 then
+      Printf.sprintf "%dh" (seconds / seconds_per_hour)
+    else if seconds >= seconds_per_hour then
+      if seconds mod seconds_per_minute = 0 then
+        Printf.sprintf "%dh%02dm" (seconds / seconds_per_hour)
+          (seconds mod seconds_per_hour / seconds_per_minute)
+      else lossy ()
+    else if seconds mod seconds_per_minute = 0 then
+      Printf.sprintf "%dm" (seconds / seconds_per_minute)
+    else
+      Printf.sprintf "%dm%02ds" (seconds / seconds_per_minute) (seconds mod seconds_per_minute)
+end
+
 module Mark = struct
   type t =
     | Settled

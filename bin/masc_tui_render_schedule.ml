@@ -149,7 +149,41 @@ module Viewport = struct
   (* This is the largest fixed-row budget declared by a surface, not a promise
      that every variable section already accounts for the viewport. *)
   let minimum_fixed_chrome_rows = 14
-  let requires_compact_frame ~rows = rows < minimum_fixed_chrome_rows
+  let navigation_rows = 1
+
+  (* The composer's row. [finish_surface] draws it at every size, empty when
+     there is nothing to write to, so every budget counts it at every size.
+     Giving the row to the body on a short terminal would make the frame one
+     row taller than the terminal: the composer would fall off the bottom and
+     a focused caret would land on the row above it. *)
+  let composer_rows = 1
+
+  let below_strip ~terminal_rows = max 1 (terminal_rows - navigation_rows)
+
+  let body_rows ~terminal_rows ~agenda_rows =
+    max 1 (terminal_rows - composer_rows - agenda_rows)
+
+  (* The fewest rows below the strip whose body holds the budget. The
+     decision is this comparison, so the count the screen writes and the
+     decision cannot part. *)
+  let rows_needed ~agenda_rows =
+    minimum_fixed_chrome_rows + composer_rows + agenda_rows
+
+  type size = { cols : int; rows : int }
+
+  type too_small =
+    | Rows_short of { have : size; need_rows : int }
+    | Notice_needs_full_frame
+
+  let too_small ~terminal_rows ~terminal_cols ~agenda_rows ~notice_needs_full_frame =
+    let need = rows_needed ~agenda_rows in
+    if terminal_rows >= need then
+      if notice_needs_full_frame () then Some Notice_needs_full_frame else None
+    else
+      Some
+        (Rows_short
+           { have = { cols = terminal_cols; rows = terminal_rows + navigation_rows }
+           ; need_rows = need + navigation_rows })
 end
 
 (* Keeper roster columns.
@@ -1036,19 +1070,6 @@ let kauto_header_row ~ko ~layout =
 
 let kauto_row ~styles ~layout values =
   Table.row (kauto_cells ~styles ~head:no_head ~layout values)
-
-(* The mark a schedule's state draws, from the projection's own status
-   vocabulary. A word this build does not name keeps the middot: the mark
-   says "the pane did not classify this" rather than claiming a liveness the
-   pane never read, the same promise the status word makes by rendering as
-   itself. *)
-let kauto_status_mark = function
-  | "scheduled" -> "\xe2\x97\x8b" (* waiting *)
-  | "due" | "running" -> "\xe2\x97\x90" (* active *)
-  | "succeeded" -> "\xe2\x97\x8f" (* done *)
-  | "failed" -> "\xc3\x97" (* failed *)
-  | "cancelled" | "expired" -> "\xe2\x97\x8b" (* inert; the colour dims it *)
-  | _ -> "\xc2\xb7"
 
 (* The label on the rule that parts the live rows from the closed ones. The
    parts are the page's own counts, in the order the statuses first appear,

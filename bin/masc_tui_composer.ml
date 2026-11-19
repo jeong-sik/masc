@@ -31,13 +31,6 @@ type t = {
   staged_images : int;
 }
 
-(* One row, and only where the surface above can still meet its own fixed-row
-   budget without it. *)
-let rows_for ~terminal_rows =
-  if terminal_rows > Masc_tui_render_schedule.Viewport.minimum_fixed_chrome_rows
-  then 1
-  else 0
-
 let focus_key = "i"
 let release_key = "esc"
 

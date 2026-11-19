@@ -350,7 +350,23 @@ let test_a_detail_keeps_the_tallest_height () =
   Alcotest.(check (list string)) "a list with nothing loaded keeps the shown detail"
     [ "only" ]
     (Masc_tui_detail_height.fit ~budget:9 ~rows:[] ~detail:detail_of ~too_tall:cut ~blank:"-"
-       [ "only" ])
+       [ "only" ]);
+  (* A single unusually tall outlier row is bounded by [default_max_rows] so
+     shorter selections never carry dozens of blank rows (RFC §8). *)
+  let with_outlier = [ 2; 30; 3 ] in
+  List.iter
+    (fun selected ->
+      Alcotest.(check int)
+        (Printf.sprintf "outlier capped to default_max_rows when %d-line detail selected" selected)
+        Masc_tui_detail_height.default_max_rows
+        (List.length
+           (Masc_tui_detail_height.fit ~budget:25 ~rows:with_outlier ~detail:detail_of
+              ~too_tall:cut ~blank:"-" (detail_of selected))))
+    with_outlier;
+  Alcotest.(check int) "Fold without explicit cap respects full budget above default_max_rows" 15
+    (List.length
+       (Masc_tui_detail_height.fit ~budget:20 ~rows:[ 2; 15 ] ~detail:detail_of
+          ~too_tall:Masc_tui_detail_height.Fold ~blank:"-" (detail_of 2)))
 
 let () =
   Alcotest.run "tui list moves"

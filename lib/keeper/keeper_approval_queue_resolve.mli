@@ -10,7 +10,8 @@
     [complete_delivery] wakes the keeper for a delivery; its
     [delivery_occasion] says why. A delivery whose grant is consumed sends no
     wake. A keeper that does not exist retires the delivery from the store
-    ([remove_delivery_from_store]). After the resolution is enqueued it
+    ([remove_delivery_from_store]) once its [Resolved] row is confirmed on the
+    audit ledger; before that the delivery is kept. After the resolution is enqueued it
     remembers the rule the operator asked for ([remember_rule_for_delivery]),
     projects the decision into the chat ([project_resolution_chat]) and
     signals the keeper.
@@ -48,6 +49,18 @@ val complete_delivery :
   (resolution_result,
    resolve_error)
   result
+
+(** The install's retry for a delivery still [Ledger_append_pending]. It
+    appends the decision's [Resolved] row only when the row's day file does
+    not already hold it, then stores the delivery as [Ledger_recorded].
+    [Ledger_retry_failed] carries the read, append or store failure; the
+    delivery then stays [Ledger_append_pending] (#38541). *)
+type ledger_retry =
+  | Ledger_retry_confirmed of persisted_delivery
+  | Ledger_retry_delivery_absent
+  | Ledger_retry_failed of string
+
+val retry_unconfirmed_resolution : persisted_delivery -> ledger_retry
 
 val delivery_wake_was_observed :
   persisted_delivery -> bool

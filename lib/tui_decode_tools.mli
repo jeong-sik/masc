@@ -202,8 +202,10 @@ type skill_io =
 type effective_skill_profile = {
   esp_reference : Skill_reference.t;
   esp_name : string;
-  esp_kind : string;
-  esp_execution : string;
+  esp_surface : Keeper_skill_observability.surface;
+      (** An instruction Skill, or a Composition and whether it runs inline
+          or as an async request: the server's kind and execution read as
+          one value, so a pair it never writes is refused. *)
   esp_body_bytes : int;
   esp_discovery_bytes : int;
   esp_load_reasons : effective_skill_load_reason list;

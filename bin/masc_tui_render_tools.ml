@@ -1300,8 +1300,15 @@ let tools_display_lines ?(cols = 80) ?terminal_rows (state : state) =
             (fun index (profile : Masc.Tui_decode_tools.effective_skill_profile) ->
                let instruction = is_normal profile in
                let execution =
-                 if instruction then Say.both ~ko:"필요할 때" ~en:"on-demand"
-                 else Say.as_received (Terminal_text.single_line profile.esp_execution)
+                 match profile.esp_surface with
+                 | Masc.Keeper_skill_observability.Instruction_skill ->
+                   Say.both ~ko:"필요할 때" ~en:"on-demand"
+                 | Masc.Keeper_skill_observability.Composition_skill
+                     Masc.Keeper_tool_composition_catalog.Inline ->
+                   Say.both ~ko:"동기 실행" ~en:"inline"
+                 | Masc.Keeper_skill_observability.Composition_skill
+                     Masc.Keeper_tool_composition_catalog.Async ->
+                   Say.both ~ko:"비동기 실행" ~en:"async"
                in
                (* An instruction skill is text the model reads; it has no
                   flow, so its node, batch and parallel counts are zero on

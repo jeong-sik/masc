@@ -997,6 +997,14 @@ type write =
 - 물러난 쓰는 쪽은 표에서 빠진다. 표에 있는 것이 그 쓰는 쪽일 때만 뺀다. 그사이 다시 등록된 Keeper 의 새 쓰는 쪽은 그대로 둔다.
 - pulse 는 받은 Keeper 이름마다 `ensure` 를 부르고, 표에 있는데 등록되지 않은 Keeper 의 쓰는 쪽을 물러나게 한다. 물러남의 답을 하나씩 기다린다.
 
+쓰는 쪽은 스냅샷 파일이 새 revision 을 갖게 된 것을 알린다.
+
+- 알리는 때는 둘이다. 스냅샷을 다시 쓴 반영 뒤와 저장소가 열린 때다.
+- 신호는 지금 있는 것이다(`Keeper_memory_commit_notifications`). workspace memory curator 와 Memory 건강 화면이 이 신호로 Memory 를 다시 읽는다.
+- 신호는 깨우기만 한다. 받는 쪽은 스냅샷을 읽는다. 같은 revision 이 두 번 와도 된다.
+- 줄은 붙었는데 스냅샷을 쓰지 못한 반영은 알리지 않는다. 그 스냅샷을 쓰는 boot 가 저장소를 열면서 알린다.
+- 쓰기를 보낸 쪽이 답을 먼저 받는다.
+
 boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬리를 복구한 뒤에 돈다. Keeper 마다 fiber 하나라서, 느린 boot 는 자기 Keeper 의 Memory 만 늦춘다.
 그 전에 턴 기록에는 `Log_started` 가 있다. 프로세스가 시작할 때와 Keeper 를 만들 때 쓴다(§5.2).
 
@@ -1967,6 +1975,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5o | 서버가 큐 신호에 working-context pass 만 싣는다. launch, boot, checkpoint purge 가 durable catch-up 을 싣지 않는다 | launch 가 memory lane 에 아무것도 싣지 않는다. 돌고 있는 unit 뒤에 쌓이는 것이 없다 |
 | L5p | 운영자가 옛 durable pass 를 싣던 두 길을 지운다. `memory-catch-up` route 와 TUI 의 `/memory sync`, history original resolution route 다 | `/memory sync` 는 모르는 명령이다. 두 경로에 route 가 없다 |
 | L5q | workspace 마다 쓰는 쪽의 표 하나를 쥐는 모듈(`keeper_memory_writers`). 표는 서버가 시작하고, 시작한 switch 와 같이 끝난다. 이 층에서는 서버가 아직 시작하지 않는다 | 등록부에 없는 Keeper 는 쓰는 쪽이 없다. 스냅샷과 반영 기록이 Keeper config 디렉터리에 생긴다. 턴 기록이 없는 Keeper 의 저장소는 선다. 시작하지 않은 workspace 에는 표가 없다 |
+| L5r | 쓰는 쪽이 스냅샷의 새 revision 을 알린다(`Keeper_memory_commit_notifications`). 옛 쓰기 경로가 반영 뒤에 하던 일이다 | 저장소가 열릴 때와 반영마다 revision 하나가 들린다. 아무것도 쓰지 않은 답과 선 저장소는 알리지 않는다 |
 | L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |

@@ -132,7 +132,7 @@ val error_to_string : error -> string
 
 (** {1 Scope}
 
-    What a scan reads (RFC-0499 §5.3). Every direct entry of three places is
+    What a scan reads. Every direct entry of three places is
     classified: [<base>/.masc], the directories a {!Place} names below it,
     and the config [keepers/] directory. This library sits below the modules
     that make the names, so the value comes from the caller

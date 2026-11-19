@@ -16,7 +16,7 @@ let validate_coordinates ~turn_count =
 
 (* A 13-109 MB checkpoint hashed in one digestif call held every other domain
    at the next stop-the-world barrier. Agent_core_sha256 feeds bounded slices,
-   so the hash answers those requests between slices (RFC-0474 L2). *)
+   so the hash answers those requests between slices. *)
 let sha256_of_canonical_bytes bytes =
   Agent_core_sha256.(to_hex (digest_string bytes))
 ;;

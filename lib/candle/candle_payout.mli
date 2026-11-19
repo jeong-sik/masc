@@ -123,8 +123,7 @@ val held_window_of : waiting -> Candle_event.t list -> held_window option
     A window closed by an operator release returns [None]. *)
 
 val released_of : waiting -> Candle_event.t list -> bool
-(** Whether an operator release row closed this payout's held window
-    (RFC-0513). *)
+(** Whether an operator release row closed this payout's held window. *)
 
 val candidate_observations_of :
   waiting -> Candle_event.t list -> ((string * Candle_event.task_lookup) list * observation_provenance) option

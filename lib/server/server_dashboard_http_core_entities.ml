@@ -52,7 +52,7 @@ let dashboard_tasks_safe config = Workspace.get_tasks_safe config
 let dashboard_agents_safe config = Workspace.get_active_agents config
 
 let active_agent_summary_json json =
-  (* RFC-0089: classify the agent "status" via the closed agent_status ADT
+  (* Classify the agent "status" via the closed agent_status ADT
      (Masc_domain.agent_status_of_string_opt) instead of string literals, so a
      new status constructor forces a compile error here too. Behavior is
      unchanged: only Active/Busy/Listening yield a summary; Inactive and any

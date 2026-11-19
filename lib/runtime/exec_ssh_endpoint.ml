@@ -91,7 +91,7 @@ type t =
         warned about and ignored at parse time. Default [[]]. *)
   ; private_home : bool
     (** The operator's declaration that this account's home is the keeper's
-        alone (RFC-0422 §3.4). Default [false]. *)
+        alone. Default [false]. *)
   ; allowed_paths : string list
     (** Extra endpoint-side roots an Execute command on this endpoint may
         name, beyond the keeper workdir and [/tmp]. Each entry is absolute

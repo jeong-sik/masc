@@ -1,4 +1,4 @@
-// RFC-0284 judge-node display formatting (i18n). The data layer
+// judge-node display formatting (i18n). The data layer
 // (`classifyFusionJudgeShape` / `normalizeFusionJudgeNodes` in lib/fusion-meta)
 // stays language-free; the Korean labels live here in the component layer and
 // are shared by both render surfaces — the standalone fusion surface

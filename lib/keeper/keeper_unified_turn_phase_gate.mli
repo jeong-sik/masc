@@ -1,5 +1,4 @@
-(** Phase-gate stage extracted from [Keeper_unified_turn.run_keeper_cycle]
-    per RFC-0136 PR-1.
+(** Phase-gate stage extracted from [Keeper_unified_turn.run_keeper_cycle].
 
     Decides whether a keeper turn proceeds to runtime routing or exits at
     one of three terminal outcomes (supervisor stop, non-executable

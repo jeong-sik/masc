@@ -119,7 +119,7 @@ val clear_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t 
     as the handler returns and carries them to that node's row. *)
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
-(** Per-run turn-context carrier (RFC-0225 §3.3). Created once per
+(** Per-run turn-context carrier. Created once per
     [run_turn] invocation and threaded to every context reader of the
     same run, so concurrent runs of one keeper cannot overwrite each
     other's attribution. *)
@@ -192,7 +192,7 @@ val route_evidence_json_of_tool_io :
     [network_mode], [status], and redacted command/cwd/path are added when
     present, from the output or, for a completed Execute, from its
     [execution_evidence]. Composition surface tools are not descriptor-backed;
-    their RFC-0386 [tool_kind] is picked up from the tool's own result payload
+    their [tool_kind] is picked up from the tool's own result payload
     when present. *)
 
 val execution_evidence_metadata : (string * Yojson.Safe.t) list -> Yojson.Safe.t
@@ -388,7 +388,7 @@ val log_call :
     progress declaration in this same authoritative row. It forces a synchronous
     append, independently of any observational sink or bounded queue. Its absence
     means this producer supplied no immutable attribution; readers cannot infer it.
-    [execution_id] is the RFC-0233 canonical join key; ordinary SDK calls share
+    [execution_id] is the canonical join key; ordinary SDK calls share
     it with their trajectory row. A Composition node retains this logical
     identity across result rechecks. [physical_execution_id] identifies the
     exact dispatched invocation instead: a fresh result recheck has a new one,
@@ -443,7 +443,7 @@ val log_call :
     Tool result delivered to the Keeper. Best-effort (failures logged). *)
 
 type index_error = Index_unavailable of string
-(** The derived read index (RFC-0437) could not be opened, advanced, or read
+(** The derived read index could not be opened, advanced, or read
     back; the string is the index's own detail. Every reader below returns it
     rather than an empty list, so a caller can tell a ledger with no rows from
     a ledger it could not read. *)
@@ -476,7 +476,7 @@ val read_recent :
     The answer is exact: [n] rows come back whenever the store holds [n] for
     that keeper, so a short answer means the store is short.
 
-    Answered from the derived read index (RFC-0437), which advances itself to
+    Answered from the derived read index, which advances itself to
     the store's current end before the query and names rows the store is then
     read for - the store stays the authority. An index that cannot be built
     or read is [Error (Index_unavailable detail)] rather than fallen back from

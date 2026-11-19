@@ -670,7 +670,7 @@ let pending_board_event_of_board_observation
       ; replies_after_own_comment = None; latest_external_author; latest_external_preview })
 ;;
 
-(* RFC-0266: fusion answers are the deliberation result the keeper requested,
+(* Fusion answers are the deliberation result the keeper requested,
    so the in-prompt preview is longer than a board headline preview (80). The
    full answer also persists in the sink's board post + chat lane. *)
 let fusion_result_preview_max_len = 480
@@ -690,7 +690,7 @@ let event_row_text key vars ~fallback =
     fallback
 ;;
 
-(* RFC-0266: turn a completed async fusion deliberation into actionable turn
+(* Turn a completed async fusion deliberation into actionable turn
    input. The sink already created a System_post board record carrying the
    panel/judge detail; here we surface that result as a just-arrived
    [pending_board_event]. When the sink failed to create the board post
@@ -1299,7 +1299,7 @@ let pending_board_event_of_stimulus
   (* Job authority has its own typed retry contract in stimulus intake. *)
   | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _
   | Keeper_event_queue.Workspace_message _ ->
-    (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
+    (* Not a board event. The wake
        fires via the trigger itself; [Hitl_resolved] carries no observation to
        inject — the keeper resumes on its own state once the approval is gone
        from the queue. [Workspace_message] carries a pointer to a transcript row
@@ -1976,7 +1976,7 @@ let keeper_cycle_decision
       ; since_last_scheduled_autonomous = None
       }
     | _ ->
-      (* RFC-0297 P0-1: when the reactive gate is disabled, a pending reactive
+      (* When the reactive gate is disabled, a pending reactive
          trigger must not itself starve the scheduled-autonomous decision --
          otherwise a persistent trigger (e.g. a stuck mention) permanently
          blocks proactive turns even when MASC_KEEPER_AUTONOMOUS_ENABLED=true.

@@ -124,7 +124,7 @@ export interface KeeperSkillUsageRow {
   last_used_at: string
 }
 
-/** One Keeper's usage of the catalog, read from its ledger alone (RFC-0483). */
+/** One Keeper's usage of the catalog, read from its ledger alone. */
 export type KeeperSkillUsage =
   | { state: 'ready'; rows: readonly KeeperSkillUsageRow[] }
   | { state: 'no_session' }

@@ -1,4 +1,4 @@
-(* RFC-0042 PR-4: consumer-side closed sum for the keeper disposition
+(* consumer-side closed sum for the keeper disposition
    classifier's view of [receipt.terminal_reason_code]. See the [.mli]
    for why this is a third terminal-reason type and how it relates to
    [Keeper_turn_terminal_code] (producer side) and

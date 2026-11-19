@@ -1,6 +1,5 @@
 (** The attached-service tool listing, read from
-    [config/tools/keeper_tool_search.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/keeper_tool_search.toml].
 
     Only the fixed part is declared there: what the tool does, how to name a
     tool, and what happens to a name that is not passed. The listing itself is

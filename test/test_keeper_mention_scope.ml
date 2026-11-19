@@ -1,7 +1,7 @@
-(* RFC-0230: keeper mention reactivity.
+(* Keeper mention reactivity.
 
    Two pure cores are tested here:
-   - the boundary mention parse + match (RFC-0232 P4: parse at append,
+   - the boundary mention parse + match (parse at append,
      match persisted ids; the substring bug that made "@alicex" /
      "email@alice.com" false-match "@alice" must not recur).
    - pending message acknowledgement: stable row ids advance only through the
@@ -219,7 +219,7 @@ let test_addressed_row_is_not_fleet () =
     (contents (pending_mentions messages))
 ;;
 
-(* RFC-0468 §3.2: another Keeper's direct message is Keeper speech, not the
+(* Another Keeper's direct message is Keeper speech, not the
    operator's, but it was still sent to this Keeper: it stays a watermarked
    scope line, so an unanswered one is raised again, and it is not fleet
    context. A Keeper's broadcast is fleet context and not a scope line. *)

@@ -52,7 +52,7 @@ let task_agent_log_error ~agent_name fmt =
     (fun message -> Log.Task.error "agent_name=%s %s" agent_name message)
     fmt
 
-(* RFC-0189: [Masc_domain] backend Error variants (Task_error /
+(* [Masc_domain] backend Error variants (Task_error /
    Agent_error / etc.) currently surface as caller-actionable
    workflow violations ("task not found", "invalid transition",
    "agent not in workspace") rather than transient/runtime failures.
@@ -137,7 +137,7 @@ type task_skill_authoring_error =
 
 (* Each item is a request, not yet a reference: it may pin a revision or leave
    it to the catalogue. Resolution needs the snapshot, which this function does
-   not have — [resolve_task_skills] does. RFC-0411 §4.2. *)
+   not have — [resolve_task_skills] does. *)
 let parse_task_skills args =
   match Json_util.assoc_member_opt "skills" args with
   | None -> Ok []
@@ -285,7 +285,7 @@ let task_skill_rejection ~tool_name ~start_time error =
 (* The Task stores exact references, and it still does: what a request left
    open is filled in here, from the catalogue as it stands at creation, and the
    Task carries the resolved revision from then on. So the durable record is
-   unchanged — only the asking is. RFC-0411 §4.2, §5.
+   unchanged — only the asking is.
 
    A pinned request is still checked against the catalogue and refused on a
    mismatch, so a revision someone spelled out is never replaced by the one the
@@ -347,7 +347,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
-    (* RFC-0189: schema rejection — operator passed unknown
+    (* Schema rejection — operator passed unknown
        argument names. [Workflow_rejection]. *)
     Tool_result.error
       ~failure_class:Tool_result.Workflow_rejection
@@ -365,7 +365,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
     | Some s when not (String.equal (String.trim s) "") -> Some (String.trim s)
     | _ -> None
   in
-  (* RFC-0323 W2: existence + terminal validation happens in
+  (* Existence + terminal validation happens in
      [Workspace.add_task_with_result] inside the backlog lock (typed
      [Unknown_predecessor] / [Predecessor_not_terminal] errors). *)
   let predecessor_task_id =
@@ -378,7 +378,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   let creation_result = Tool_task_args.parse_task_creation_request_id args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
-  (* RFC-0189: title/priority/goal_id/contract validation — all
+  (* title/priority/goal_id/contract validation — all
      caller-input violations. [Workflow_rejection]. *)
   if String.equal trimmed_title "" then
     Tool_result.error
@@ -463,7 +463,7 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
              ~start_time
              (Workspace.add_task_error_to_string err)))
 
-(* RFC-0267 Phase 2: assign an existing goalless task to a goal. Thin adapter
+(* Assign an existing goalless task to a goal. Thin adapter
    over [Task_goal_assignment.set_task_goal], which holds the precondition
    checks. All caller-input violations are [Workflow_rejection]. *)
 let handle_set_goal ~tool_name ~start_time ctx args =
@@ -695,7 +695,7 @@ let handle_claim_next ~tool_name ~start_time ctx _args =
   | Workspace.Claim_next_no_unclaimed ->
     Tool_result.ok ~tool_name ~start_time "No unclaimed tasks available"
   | Workspace.Claim_next_error e ->
-    (* RFC-0189: Claim_next_error wraps workspace-side reasons like
+    (* Claim_next_error wraps workspace-side reasons like
        "no claimable task", "agent not allowed", "permission denied"
        — all caller-actionable. [Workflow_rejection]. *)
     Tool_result.error

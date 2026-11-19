@@ -646,7 +646,7 @@ let test_ollama_cloud_v1_vendor_rows_preserve_probe_truth () =
 
    Rows that declare supports_reasoning = false keep their own declaration. A
    model that does not reason has no control on either wire, so nothing about
-   the wire is being guessed (RFC-one-provider-two-wires §5). *)
+   the wire is being guessed. *)
 let test_no_ollama_cloud_row_states_a_wire () =
   let catalog =
     Model_catalog_test_support.load_repo_model_catalog

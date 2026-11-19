@@ -1,5 +1,5 @@
 (** The registry tables of the Runtime TOML parser that sit beside the
-    provider layers: SSH exec endpoints, egress allowlists (RFC-0415) and LSP
+    provider layers: SSH exec endpoints, egress allowlists and LSP
     servers. *)
 
 open Runtime_toml_base

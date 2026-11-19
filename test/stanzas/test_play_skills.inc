@@ -1,4 +1,4 @@
-; RFC play-link-for-the-shared-machine §2.7: the attached DOS machine's Skills
+; The attached DOS machine's Skills
 ; through the invite link, with real Lane runtime and Skill snapshot state.
 
 (test

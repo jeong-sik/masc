@@ -8,7 +8,7 @@ type t =
   | Overwrite
   | Append
   | Patch
-  (** RFC-0006 Phase A.4: read-replace-write for the Anthropic Code
+  (** read-replace-write for the Anthropic Code
         [Edit] cognate. Caller supplies [old_string] + [new_string]
         (and optional [replace_all]) instead of [content]. *)
 

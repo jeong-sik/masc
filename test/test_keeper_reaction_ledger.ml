@@ -1478,7 +1478,7 @@ let test_repeated_turn_reactions_advance_recorded_at_timestamps () =
     fail (Keeper_reaction_ledger.event_queue_reaction_evidence_error_to_string error)
 ;;
 
-(* RFC-0020: the stimulus payload is a typed closed variant, so a malformed
+(* The stimulus payload is a typed closed variant, so a malformed
    payload is unrepresentable — the prior [test_malformed_typed_payload_degrades_summary]
    covered a parse-error path that can no longer occur and was removed. *)
 

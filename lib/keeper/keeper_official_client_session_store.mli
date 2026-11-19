@@ -467,7 +467,7 @@ val reconcile_context : claim_plan -> expected:t option -> snapshot_sha256:strin
     [Canonical_source_guard]. A Gate continuation, bound to its original
     session, does not use this: it refuses with {!validate_unchanged_context}. *)
 
-(** The vendor sessions one transition left unnamed (RFC-0501 §2.1).
+(** The vendor sessions one transition left unnamed.
     [Same_client] ids belong to the client and runtime that wrote [after], so
     that runtime can delete them. [Other_client] names the client and runtime
     the ids belong to; the runtime writing [after] cannot reach them. *)

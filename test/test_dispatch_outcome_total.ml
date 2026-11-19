@@ -1,6 +1,6 @@
 open Alcotest
 
-(** RFC-0084 PR-10 — Typed Dispatch_outcome.t sum invariants.
+(** Typed Dispatch_outcome.t sum invariants.
 
     Pins:
     - 2 variant arms exactly (cardinality drift guard). The sum was

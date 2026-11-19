@@ -170,7 +170,7 @@ export interface IdeRunProgressGoal {
 
 export interface IdeActivityPanelProps {
   readonly activeFile?: string | null
-  /** RFC-0378 §5.3b: canonical codebase slug — the wire key. */
+  /** Canonical codebase slug — the wire key. */
   readonly codebase?: string | null
   readonly diffRows?: ReadonlyArray<UnifiedDiffRow>
   readonly compact?: boolean

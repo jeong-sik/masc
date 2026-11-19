@@ -1500,7 +1500,7 @@ let test_addon_exact_output_lane_tables_are_refused_where_wrong () =
       , "[runtime]\naddon_exact_lanes = 1\n"
       , "runtime.addon_exact_lanes" ) ]
 
-(* The routing rebirth (RFC-0206) dropped the lane strategy ADT — a lane is
+(* The routing rebirth dropped the lane strategy ADT — a lane is
    ordered by construction — but a [strategy = "ordered"] line survived in the
    seed config and fixtures because the lane parser silently skipped keys it
    did not read. The concrete unknown key here is that purged line, so a
@@ -1938,7 +1938,7 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
          in
          (* The adapter's own lookup, argument for argument: the branch that
             drops the twelve is the one a model row answers. A provider preset
-            alone takes every key the block writes (RFC-0514). *)
+            alone takes every key the block writes. *)
          (match
             Llm_provider.Capabilities.request_policy_catalog_answer
               (Llm_provider.Capabilities.resolve_snapshot_request_policy
@@ -2087,7 +2087,7 @@ check
        String.equal lane_id "board_attention_exact"
        || String.equal lane_id "hitl_auto_judge")
      lane_signatures);
-(* RFC-0361 D7(a): the completion-authority judgement lane is the single
+(* The completion-authority judgement lane is the single
    provider-selection SSOT and failover follows declaration order. *)
 check
   (option (list string))
@@ -2873,7 +2873,7 @@ let test_runtime_toml_parses_optional_max_concurrent () =
          binding.Runtime_schema.max_concurrent
      | bindings -> failf "expected one binding, got %d" (List.length bindings))
 
-(* RFC-0382 §7: return-progress is a binding-level opt-in (like keep-alive /
+(* return-progress is a binding-level opt-in (like keep-alive /
    num-ctx) that asks an OpenAI-compat server to stream prompt_progress chunks
    during prefill. Omitted must stay None — only an explicit declaration may
    put the field on the wire. *)
@@ -4551,7 +4551,7 @@ let test_sibling_exact_lanes_keep_catalog_only_slots () =
     [ "hitl_auto_judge"; "librarian_exact"; "board_attention_exact" ]
 ;;
 
-(* Rule 3 of RFC-runtime-two-layers (#38779). An exact slot on an HTTP
+(* (#38779) An exact slot on an HTTP
    provider without [exact-body-timeout-s] used to load as valid and then be
    refused on every request, falling to cli_slots with one WARN per request
    that named neither the key nor where it goes. The provider below declares
@@ -5081,7 +5081,7 @@ let test_every_routing_field_names_itself_in_its_diagnostic () =
 
 let test_routing_reference_domains_stay_distinct () =
   let lane = "\n[runtime.lanes.safe]\ncandidates = [\"local.good\"]\n" in
-  (* An assignment names a declared lane or a runtime (RFC-0457): the
+  (* An assignment names a declared lane or a runtime: the
      assignment consumer resolves the lane through [resolve_assignment], so a
      lane target loads. Media_failover stays runtime-only — its consumers
      (Keeper_vision_tool) resolve entries among runtimes alone. *)
@@ -7528,8 +7528,8 @@ let test_wizard_provider_models_share_catalog_authority () =
       (List.exists (fun row -> model_id row = "deepseek-v4-pro") proxy))
 ;;
 
-(* A Tinker sampler checkpoint has no catalog row; only its provider has one
-   (RFC-0514). A binding whose runtime.toml states the five reads an exact
+(* A Tinker sampler checkpoint has no catalog row; only its provider has one.
+   A binding whose runtime.toml states the five reads an exact
    slot needs is an exact slot that answers with what it states. One that
    leaves a read unstated is left out, and the reads it leaves are named; the
    provider preset does not stand in for one. Each read is left out once on

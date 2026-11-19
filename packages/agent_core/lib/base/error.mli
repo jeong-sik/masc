@@ -152,7 +152,7 @@ type orchestration_error =
 
 (** {1 Top-level error} *)
 
-(** Open extension point for host-typed internal payloads (RFC-0371 B12).
+(** Open extension point for host-typed internal payloads.
     agent-core never constructs or inspects extensions: a host extends
     this type with its own constructor, carries its typed error through
     {!Internal_carried}, and downcasts by matching its constructor back

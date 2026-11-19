@@ -135,7 +135,7 @@ let text_of_content (block : Agent_core.Types.content_block) =
   | Agent_core.Types.Audio _ -> Some "[audio omitted]"
 ;;
 
-(* RFC-0468 §3.2: the speaker comes from the metadata the host stamped when it
+(* The speaker comes from the metadata the host stamped when it
    created the message, never from the text. Only a User message has a
    speaker; a message without one says [unknown]. *)
 let speaker_header_field (m : Agent_core.Types.message) =
@@ -212,7 +212,7 @@ let basis_for_prompt ~by_identity = function
    can be told apart as the stale one (#37079). Both are needed: a state that
    returns to an earlier value keeps its old [first_seen] and only moves
    [last_seen]. They are write times, not the times the states held, and not
-   a strength signal (RFC-0418); the prompt says so. *)
+   a strength signal; the prompt says so. *)
 let current_fact_json ~by_identity index fact =
   `Assoc
     [ wire_field_memory_id, `String (surrogate_id_of_index index)
@@ -654,7 +654,7 @@ let evidence_of_json (json : Yojson.Safe.t) : Keeper_memory_os_types.evidence op
 
 (* [supersedes] names, by its short id, the dropped memory this claim
    continues. Absent or null is a claim that continues nothing. [absorbs] names,
-   by short id, the current memories this claim now says (RFC-0456 §4.2);
+   by short id, the current memories this claim now says;
    absent, null or empty absorbs nothing. Any other value, or a list holding
    anything but non-blank strings, rejects the claim like any other malformed
    field. Whether the ids exist, and whether they were dropped, is checked once

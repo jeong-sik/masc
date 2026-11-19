@@ -16,7 +16,7 @@ module Make (Host : HOST) = struct
 
     The observation is text: a DOS text page is characters, and this lane
     hands them over as UTF-8 with code page 437 kept, so a keeper with no
-    vision runtime reads the game directly (RFC-0414). [settled] samples empty keyboard polls and unchanged screen memory;
+    vision runtime reads the game directly. [settled] samples empty keyboard polls and unchanged screen memory;
     it does not establish a final prompt. Machine-step budget consumption,
     actual guest instructions, and emulated clocks are reported separately. *)
 

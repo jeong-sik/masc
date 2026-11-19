@@ -20,7 +20,7 @@ val handle_tool_execute :
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
   shell_ir_rewrite:(Masc_exec.Shell_ir.t -> (Masc_exec.Shell_ir.t, string) result) ->
-    (** The caller's shell surface (RFC tools-as-shell-commands): it turns
+    (** The caller's shell surface: it turns
         [masc] stages into delegated tool calls.  Required, because routing
         lives in the IR's sandbox field — a line that skips it is not refused,
         it runs as a host program named [masc], which is not the effect the
@@ -94,7 +94,7 @@ val handle_tool_execute_with_outcome :
         rest should use, because the one given to this function belongs to the
         calling turn. *)
   shell_ir_rewrite:(Masc_exec.Shell_ir.t -> (Masc_exec.Shell_ir.t, string) result) ->
-    (** The caller's shell surface (RFC tools-as-shell-commands): it turns
+    (** The caller's shell surface: it turns
         [masc] stages into delegated tool calls.  Required, because routing
         lives in the IR's sandbox field — a line that skips it is not refused,
         it runs as a host program named [masc], which is not the effect the

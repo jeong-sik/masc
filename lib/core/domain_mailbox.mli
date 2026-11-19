@@ -10,7 +10,7 @@
     [unhandled] by {!serve}, or refused by {!send}: exactly one of the three,
     so a sender that waits for an answer to its operation always gets one.
 
-    RFC http-transport-runs-on-its-own-domain §3.3: the handler of a request
+    The handler of a request
     runs on the main domain and its response operations cross to the fiber of
     the connection through one of these. *)
 

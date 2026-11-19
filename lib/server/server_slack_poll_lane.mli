@@ -1,5 +1,4 @@
-(** Server_slack_poll_lane — the in-process Slack collection fiber
-    (docs/design/slack-poll-checkpoints.md).
+(** Server_slack_poll_lane — the in-process Slack collection fiber.
 
     Spawned once during server bootstrap next to the Socket Mode gateway.
     Every poll interval it reads the channel→keeper bindings — the same

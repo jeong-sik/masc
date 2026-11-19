@@ -213,7 +213,7 @@ export function isKeeperOperatorTargetable(keeper: KeeperPausedInput & KeeperOff
   return isKeeperPaused(keeper) || !isKeeperOffline(keeper)
 }
 
-// RFC-0135 PR-11 — running predicate excluding `Restarting`.
+// Running predicate excluding `Restarting`.
 //
 // The action panel's `canPause`/`canWake` gates treat `Restarting` as
 // "stuck" (kicked but not yet running), not "running". This subset of
@@ -254,9 +254,9 @@ const RUNNING_HEALTH_TOKENS: ReadonlySet<string> = RUNNING_HEALTH
  *  Strict subset of `deriveKeeperOperationalState(...).kind === 'running'`
  *  — it excludes the `Restarting` phase the typed state currently maps
  *  to `running`. When `KeeperOperationalState` gains a dedicated
- *  `restarting` variant (RFC-0135 follow-up Goal-2), this predicate
+ *  `restarting` variant, this predicate
  *  collapses to that check. */
-// RFC-0135 PR-SSOT: ATTENTION_PHASES — phases that indicate the keeper
+// ATTENTION_PHASES — phases that indicate the keeper
 // needs operator attention (error, recovery, or transitional states).
 // Previously defined locally in monitoring-runtime.ts as a private Set
 // and partially duplicated as BUFFER_PHASES in keeper-phase-indicator.ts.

@@ -63,7 +63,7 @@ let test_body_tools_call_name_extraction () =
     (Http_transport.body_tools_call_name "not json at all");
   check (option string) "non-tools/call method"
     (Some "init")
-    (* RFC-0100 PR-3 body parser is method-agnostic; the gate caller
+    (* Body parser is method-agnostic; the gate caller
        must verify method first via [body_jsonrpc_method]. We pin the
        agnostic behaviour so a future caller does not assume a
        built-in method check that does not exist. *)

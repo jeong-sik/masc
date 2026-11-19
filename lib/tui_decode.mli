@@ -884,7 +884,7 @@ val keeper_of_runtime : keeper_runtime -> keeper
 (** Project the public row into a remote Keeper. No local metadata, task or
     usage measurements are inferred from the runtime state. *)
 
-(** The roster's Candle reading (RFC-0481 §3.7). A ready reading carries the
+(** The roster's Candle reading. A ready reading carries the
     fold's basis, and the TUI computes balances and supply from it when it
     draws them. *)
 type candle_reading =

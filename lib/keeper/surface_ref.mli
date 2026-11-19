@@ -1,4 +1,4 @@
-(** Surface_ref — the shared typed surface vocabulary (RFC-0232 §3.6).
+(** Surface_ref — the shared typed surface vocabulary.
 
     One immutable value names the surface a lane event came from or
     goes to: the dashboard, a Discord/Slack coordinate, a webhook,

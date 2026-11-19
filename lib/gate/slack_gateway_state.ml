@@ -214,7 +214,7 @@ let step t ~now_mono input =
     let emit =
       match event with
       | Some e when passes_policy t.config e -> [ Emit_event { envelope_id; event = e } ]
-      (* RFC-0226 parity with the Discord FSM: a policy-failing message from a
+      (* Parity with the Discord FSM: a policy-failing message from a
          human is still conversation in a channel the bot sits in — surface it
          for record-only ambient handling. Bot/app authors are dropped here
          (loop guard; the gateway keeps its own defense on the turn path). *)

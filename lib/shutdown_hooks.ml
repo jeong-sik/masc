@@ -127,7 +127,7 @@ let run_all () =
       let stop = ref false in
       Eio_guard.protect
         ~finally:(fun () ->
-          (* RFC-0145 — narrow to [Unix.Unix_error] (the only exception
+          (* Narrow to [Unix.Unix_error] (the only exception
              [Unix.closedir] raises on a bad fd). *)
           try Unix.closedir dh with
           | Unix.Unix_error _ -> ())
@@ -175,7 +175,7 @@ let run_all () =
        "[Shutdown] tmp cleanup skipped: MASC_BASE_PATH=%s is not absolute"
        base_path
    | Some base_path ->
-     (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
+     (* Layout SSOT via [Config_dir_resolver]. *)
      let tmp_dir = Config_dir_resolver.tmp_dir ~base_path in
      (match Unix.lstat tmp_dir with
       | exception Unix.Unix_error _ -> ()

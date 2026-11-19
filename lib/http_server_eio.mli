@@ -379,8 +379,7 @@ module Router : sig
 
   (** The Gluten protocol-upgrade capability a handle from
       {!Http_reqd.of_gluten} carries.  WebSocket-upgrade routes ({!ws_get})
-      need it to drive the post-101 connection; plain routes do not.
-      RFC-0281. *)
+      need it to drive the post-101 connection; plain routes do not. *)
   type upgrade = Http_reqd.upgrade
 
   (** A WebSocket route handler. [upgrade] is absent on transports that

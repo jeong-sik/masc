@@ -28,7 +28,7 @@ val panel_meta : Fusion_types.panel_outcome -> Yojson.Safe.t
 val judge_meta : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result -> Yojson.Safe.t
 
 (** [judge_node_meta o] — 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로
-    직렬화 (RFC-0284). [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별
+    직렬화. [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별
     실측 usage, [Judge_failed] → role/identity + status="failed" + error. [judge_meta]와
     같은 5섹션 스키마(judge_synthesis_fields)를 공유한다. role ∈ single|refine|first|meta,
     identity는 [First]면 panelist_id. 프론트는 배열 shape만으로 위상 구조를 렌더한다. *)
@@ -51,7 +51,7 @@ val tool_trace_meta : Fusion_types.tool_trace -> Yojson.Safe.t
     [origin.source]/[origin.fusion_run_id]와 meta_json(question/panel 답변
     전체/judge 종합/observed_usage = panel N + judge 1 합산) 증거를 남긴다. [judge_usage]는
     심판이 소비한 토큰(orchestrator가 [Fusion_judge.run]에서 분리해 주입). [judges]는 실제로
-    실행된 심판 노드 관측 배열(RFC-0284)로 board meta_json [judges] 키에 panel과 동형으로
+    실행된 심판 노드 관측 배열로 board meta_json [judges] 키에 panel과 동형으로
     직렬화된다 — canonical 단일 [judge] 키는 ADDITIVE 유지. [tool_trace]가 있으면
     availability가 아닌 실제 AGENT_CORE Tool event와 명시적 coverage gap을 additive
     [tool_trace] 객체로 남긴다. [base_dir]는 호출자 주입.
@@ -80,7 +80,7 @@ val emit
        (** 자리마다 누가 답했고 그 전에 누가 실패했는지. meta_json [seat_routes]. *)
   -> (unit, string) result
 
-(** RFC-0266: 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
+(** 심의 완료/실패 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
 
     resolved_answer가 다음 키퍼 턴의 actionable 입력으로 도착하게 한다(board post +
     chat append 영속과 별개의 hint+payload 경로). [ok = false]는 denied/sink_failed/
@@ -143,7 +143,7 @@ val emit_failure :
   -> failure:delivery_failure
   -> (unit, string) result
 
-(** RFC-0266 §7 Phase 4: broadcast a [fusion_run_status] SSE event carrying the
+(** Broadcast a [fusion_run_status] SSE event carrying the
     current registry snapshot of [run_id] so the dashboard fusion-runs panel
     reflects running→completed transitions live. Reads the canonical run back
     from [registry] and serializes it via [Fusion_run_registry.run_to_yojson]

@@ -1,4 +1,4 @@
-(* RFC-0042 PR-4 behavioural equivalence + wire round-trip test.
+(* Behavioural equivalence + wire round-trip test.
 
    Two properties are pinned:
 
@@ -2565,7 +2565,7 @@ let () =
     (R.needs_operator_broadcast (fst disposition))
 ;;
 
-(* RFC-0454 D1: a terminal effect failure says what failed as a typed value,
+(* A terminal effect failure says what failed as a typed value,
    and its JSON is objects all the way down. Every constructor survives the
    strict codec, and the codec refuses what it does not know instead of
    filling a default. *)

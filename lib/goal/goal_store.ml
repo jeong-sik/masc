@@ -45,12 +45,12 @@ let ensure_dirs config =
   Workspace_utils.mkdir_p (Workspace_utils.masc_dir config)
 
 (* The one empty state this module constructs. Its only call is the first
-   write on an [Uninitialized] store (RFC-0444 §2.2, criterion 2); no reader
+   write on an [Uninitialized] store; no reader
    builds it. *)
 let default_state : unit -> state = fun () ->
   { version = 1; updated_at = Masc_domain.now_iso (); goals = []; pending_events = []; pending_notifications = [] }
 
-(* {1 Source (RFC-0444 §2.1)} *)
+(* {1 Source} *)
 
 type source =
   | Uninitialized
@@ -527,7 +527,7 @@ let commit_state config prepare =
         match load_source config with
         | Unavailable u -> Error (Store_unavailable u)
         (* The first write creates the store; nothing writes an empty state
-           ahead of it (RFC-0444 §2.2). *)
+           ahead of it. *)
         | Uninitialized -> Ok (default_state ())
         | Available state -> Ok state
       in

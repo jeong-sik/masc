@@ -44,7 +44,7 @@ let source_id () =
   Skill_source_config.source_id_of_string project_agents_source_id
 ;;
 
-(* RFC-0506 §2: one short Board receipt per Skill publish — the name, the
+(* One short Board receipt per Skill publish — the name, the
    source and the publisher — so the next external deletion can be checked
    against a public record of what existed. A receipt failure never fails
    the publish it reports on. *)

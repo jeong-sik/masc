@@ -38,7 +38,7 @@ const VIEW_TAB_BASE = 'ide-view'
 // 'tools' / 'approve' / 'runtime' / 'explode' were removed (masc#24069 #49):
 // they rendered as toggleable chips but had no backing data source or render
 // branch — see ide-editor-blame.ts's IDE_LAYER_ORDER comment for detail. The
-// 'keeper-trace' entry's `conflictsWith: ['runtime']` (RFC-0028 §10) is
+// 'keeper-trace' entry's `conflictsWith: ['runtime']` is
 // dropped with 'runtime': there is nothing left for it to conflict with.
 export const IDE_LAYERS: ReadonlyArray<OverlayLayer> = [
   { kind: 'time', label: 'Time', description: '변경 timestamp gradient' },

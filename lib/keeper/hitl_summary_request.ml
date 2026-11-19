@@ -134,7 +134,7 @@ let project_context_bundle ~host_context ~keep_newest ~(entry : pending_approval
     ; "input", entry.input
     ]
     @
-    (* RFC-0422 §3.3: when the Gate ran the request boxed first, the judge is
+    (* When the Gate ran the request boxed first, the judge is
        shown what the box refused -- the status and the program's own stderr
        -- rather than left to infer what the request would do. Absent when no
        box ran, so a judge can tell "nothing was tried" from "it was tried

@@ -24,7 +24,6 @@ type body_read_error =
   | Internal of exn
 
 (* ── A request whose handler runs on another domain ──
-   (RFC http-transport-runs-on-its-own-domain §3.3)
 
    httpun and h2 writers are not safe across domains, so the handler does not
    touch them. Each thing it asks of the request is one of these, sent
@@ -449,8 +448,8 @@ module Body_writer = struct
        | None -> false)
   ;;
 
-  (* Exhausted capacity resets this stream, as the ledger's own drain did
-     (RFC-0493 §3): the client sees a cut, never a frame reported as sent.
+  (* Exhausted capacity resets this stream, as the ledger's own drain did:
+     the client sees a cut, never a frame reported as sent.
      The reset leaves no line of its own once a response has started, so the
      refusal is logged here. *)
   let write_string t s =
@@ -684,7 +683,7 @@ let read_body_h1 reqd ~reported ~max_bytes ~on_body ~on_error =
     read_loop ()
 ;;
 
-(* RFC-0350: body callbacks arrive on the connection reader, so the delivery
+(* Body callbacks arrive on the connection reader, so the delivery
    and every refusal are deferred to the stream switch through
    [Http_h2_stream.dispatch]; completion is checked again after the deferral
    because the parser can observe a reset after EOF, before the request fiber

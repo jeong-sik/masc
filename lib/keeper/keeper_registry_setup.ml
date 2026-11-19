@@ -48,7 +48,7 @@ let row_fields_changed (before : registry_entry) (after : registry_entry) =
 
 (* Every swap of [registry] goes through [swap_in] or [swap_out], so a
    committed swap that changes what the roster shows announces that Keeper's
-   row (RFC-0481 §3.2): an added or removed entry always, a replaced one when
+   row: an added or removed entry always, a replaced one when
    its phase or failure moved. Both run inside the lifecycle key lock, which
    is why the announcement is one non-yielding broadcast that never raises. *)
 let swap_in ~current ~key (entry : registry_entry) =

@@ -29,7 +29,7 @@
     scope clears it sooner (RFC-provider-path-rest §3.3, 2026-11-06).
     Coarse HTTP 429 / Provider.RateLimit does not establish credential
     ownership; it belongs to {!Runtime_candidate_backpressure}'s candidate-only
-    observation instead. RFC-0370 §3.3, RFC-0433. *)
+    observation instead. *)
 
 type scope
 (** A non-secret quota ownership key.  The representation is deliberately

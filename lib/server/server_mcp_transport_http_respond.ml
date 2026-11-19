@@ -5,7 +5,7 @@ let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
 let json_headers = Server_mcp_transport_http_headers.json_headers
 
-(* RFC-0098 — typed SSOT for transport-boundary error envelopes. *)
+(* Typed SSOT for transport-boundary error envelopes. *)
 
 (** Pure-JSON body builder shared by [respond_mcp_error] and
     SSE batch builders. Splitting it out makes the wire shape diffable

@@ -130,7 +130,7 @@ let retained_run_kind = function
   | Goal_verification_run _ -> Goal_verification
 ;;
 
-(* A skipped verifier scan (RFC-0444 §2.3 row 7) is retained beside the Goal
+(* A skipped verifier scan is retained beside the Goal
    reviews but is not a lane run: no lane admitted it and no model ran. The
    lane overview and the run drill-down read only the reviews; the skipped
    scans are served by the goal-verification-runs route. *)

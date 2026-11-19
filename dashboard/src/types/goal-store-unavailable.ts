@@ -1,4 +1,4 @@
-// RFC-0444 §2.3 row 4: the wire envelope a Goal store this build cannot read
+// The wire envelope a Goal store this build cannot read
 // answers with, parsed into a closed union. The three token lists below are
 // the exact lowercase constructor names the server emits
 // (lib/types/goal_store_unavailable.ml: reason_name, mirror_status_name,

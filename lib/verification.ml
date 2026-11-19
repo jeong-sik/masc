@@ -226,7 +226,7 @@ let save_request base_path req =
            req.id
            (Printexc.to_string exn))
 
-(* RFC-0221 §3.1: compensation for atomic submit. Remove a verification record
+(* Compensation for atomic submit. Remove a verification record
    when the status commit it was written for did not land, so the record store
    and [task_status] are never left disagreeing. A missing file is success
    (idempotent), so the caller can compensate without first checking existence. *)

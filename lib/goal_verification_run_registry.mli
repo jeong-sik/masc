@@ -42,7 +42,7 @@ type run =
   ; status : run_status
   }
 
-(** One retained row (RFC-0444 §2.3 row 7). A [Scan_skipped] row is a
+(** One retained row. A [Scan_skipped] row is a
     verifier scan the goal store refused: it reviewed nothing, so it is its
     own arm rather than a [run] with blank identity, and it carries the whole
     typed value the scan saw. Every stored event and every served row names

@@ -1,6 +1,6 @@
 (** Projects the keeper chat store into the tool timeline's neutral chat
     lines, inverting the keeper -> tool dependency so the tool surface never
-    references the keeper subsystem (RFC-0194 §3). *)
+    references the keeper subsystem. *)
 
 val lines_for :
   base_dir:string -> keeper_name:string -> Tool_agent_timeline.chat_line list

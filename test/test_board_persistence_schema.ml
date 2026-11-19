@@ -561,7 +561,7 @@ let test_sub_board_update_rejects_invalid_members () =
       (List.map Board.Agent_id.to_string current.members)
 ;;
 
-(* Producer side (RFC-0233 §7): the keeper-authored origin constructor used by
+(* Producer side: the keeper-authored origin constructor used by
    keeper_speech (request-help posts) and keeper_alert. Pins that a keeper post
    carries [origin.turn_ref = Some _] and a typed [source], with
    [fusion_run_id = None] (fusion has its own constructor at the sink). *)

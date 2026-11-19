@@ -137,19 +137,19 @@ val audit_orphan_tasks_in_tasks
     callers that project several backlog fields on one authoritative revision
     from triggering a second backlog read. *)
 
-(** RFC-0294 PR-4: typed source of truth for orphan-status classification.
+(** Typed source of truth for orphan-status classification.
     [Some label] for an orphan-eligible status (Claimed / InProgress /
     AwaitingVerification), [None] otherwise. Exhaustive over [task_status] so a
     new constructor is a compile error here rather than a silent gauge drop. *)
 val orphan_status_class_of_status : Masc_domain.task_status -> string option
 
-(** RFC-0294 PR-4: the fixed set of orphan status classes (claimed /
+(** The fixed set of orphan status classes (claimed /
     in_progress / awaiting_verification) — exactly the [Some]-range of
     {!orphan_status_class_of_status}. The orphan gauge reports every class
     so a cleared class resets to 0 instead of going stale. *)
 val orphan_status_classes : string list
 
-(** RFC-0294 PR-4: count orphan-audit results per status class over
+(** Count orphan-audit results per status class over
     {!orphan_status_classes}. Pure (no I/O); the metric emitter is the
     single-owner orchestrator pulse. Always returns one entry per class. *)
 val orphan_counts_by_status_class

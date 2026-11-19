@@ -1,4 +1,4 @@
-(* RFC-0089 — runtime.toml thinking-control-format is a closed enum. An unknown
+(* runtime.toml thinking-control-format is a closed enum. An unknown
    value now fails the whole config load (Error), mirroring how this parser
    already rejects unknown protocols / credential types, instead of silently
    downgrading to No_thinking_control (which hid config typos that disable

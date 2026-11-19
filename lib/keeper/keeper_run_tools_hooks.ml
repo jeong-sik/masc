@@ -104,7 +104,7 @@ type ctx =
        whose TOML says microvm from dispatching Execute as docker (#31178
        drift, observer site). *)
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
-    (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
+    (* per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_agent_core. *)
   ; answer_source_ids : string list
   ; receipt_agent_core_turn_count_ref : int option ref
@@ -324,7 +324,7 @@ let observation_file_path_from_tool_input ~sandbox_root input =
   | Some p -> Some p
 ;;
 
-(* Returns where the tool fact belongs (RFC-0378 §5.1). A call that names
+(* Returns where the tool fact belongs. A call that names
    no file is [Pathless], a keeper-timeline fact with no document; a call
    that names one gets the resolver's attribution, minted once here. *)
 let observation_attribution_for_tool_input ~config ~meta input =
@@ -1006,7 +1006,7 @@ let assemble_hooks
                    [Some false] into a claude_code candidate, whose host refuses
                    any explicit value, and every glm rate limit ended the turn
                    with a config_error instead of failing over (#34899). *)
-                (* RFC-0233 PR-3: every append below also records its
+                (* Every append below also records its
                    (block id, raw text) pair; the snapshot lands in the
                    hook accumulator just before AdjustParams so the
                    receipt/TurnRecord writer can persist typed
@@ -1060,7 +1060,7 @@ let assemble_hooks
                    the keeper prompt reached Skills only through
                    [current_task.skills] / [held_task.skills], and both render
                    only when a task names one — 0 of 292 recorded tasks ever
-                   did (RFC-0411 §1.5). A model that never reads a tool
+                   did. A model that never reads a tool
                    description therefore had no sentence telling it these
                    exist, and 2026-09 measured 250 Skill reads across 108,185
                    tool calls with the busiest runtime at 0 in 24,041.
@@ -1231,7 +1231,7 @@ let assemble_hooks
                    record_block Prompt_block_id.Librarian_working_context
                      (Yojson.Safe.to_string (`Assoc
                         ["status", `String "unavailable"; "guidance_error", `String detail])));
-                (* RFC-0366: last in assembly order. It is the most recent fact
+                (* Last in assembly order. It is the most recent fact
                    the keeper has, and when it disagrees with an earlier block
                    the later text is the one that reads as current. Stamped
                    consumed only after the block is assembled, so a turn that
@@ -1386,7 +1386,7 @@ let assemble_hooks
                    ~observation_token
                    ~base_path:config.base_path
                    meta.name);
-                (* RFC-0233 PR-3 + #20936: snapshot this agent-core turn's
+                (* #20936: snapshot this agent-core turn's
                    assembly into the accumulator the receipt/TurnRecord
                    writer reads. Appended blocks hash their raw appended
                    text; Keeper instructions reuse the prompt-metrics fingerprint

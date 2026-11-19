@@ -1,7 +1,7 @@
 (** Runtime_vibe_acp_readiness — whether Vibe can take a lane call, read over
     [vibe-acp] without a prompt.
 
-    RFC-vibe-official-client-lane §2.2 and §4.2. [vibe-acp] speaks the Agent
+    [vibe-acp] speaks the Agent
     Client Protocol (JSON-RPC, one message per line on stdio). This module
     sends [initialize], the Vibe extension [_auth/status], [session/new] and
     the extension [_account/read], then closes stdin. No prompt is sent, so no

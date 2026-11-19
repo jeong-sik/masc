@@ -5,7 +5,7 @@ import type {
   KeeperTurnOutcome,
 } from './types'
 
-// RFC-0232 P2: closed decode of the producer-typed `turn_outcome` label.
+// Closed decode of the producer-typed `turn_outcome` label.
 // Missing field (older server) or unknown label decodes to null, which
 // consumers treat as a visible reply — the bitten failure mode (#20870)
 // was a reply silently dropped, so decode failure fails toward showing.

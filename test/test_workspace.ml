@@ -1458,7 +1458,7 @@ let find_task config task_id =
   Workspace.get_tasks_raw config
   |> List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id)
 
-(* === RFC-0323 G-3: completion side effects are state-keyed === *)
+(* === Completion side effects are state-keyed === *)
 
 (* Records done-hook dispatch targets while [f] runs, restoring the previous
    hook.  Observes [hebbian_on_task_done_fn] because it receives the assignee
@@ -2062,7 +2062,7 @@ let test_verdict_rejects_blank_rejection_reason () =
       when String.equal assignee test_agent_a -> ()
     | _ -> Alcotest.fail "refused verdict mutated the verification state")
 
-(* === RFC-0323 G-1 (implements RFC-0308): verification-required done guard === *)
+(* === verification-required done guard === *)
 
 let test_default_task_done_requires_verification_submission () =
   with_test_env (fun config ->
@@ -3494,7 +3494,7 @@ let () =
       Alcotest.test_case "xss in agent name" `Quick test_xss_in_agent_name;
     ];
 
-    (* === RFC-0323 G-3: state-keyed completion side effects === *)
+    (* === state-keyed completion side effects === *)
     "done_side_effects", [
       Alcotest.test_case "approve completion credits assignee" `Quick
         test_approve_completion_credits_assignee;
@@ -3514,7 +3514,7 @@ let () =
         test_verdict_rejects_blank_rejection_reason;
     ];
 
-    (* === RFC-0323 G-1: verification-required done guard === *)
+    (* === verification-required done guard === *)
     "verification_guard", [
       Alcotest.test_case "default task done requires verification submission" `Quick
         test_default_task_done_requires_verification_submission;

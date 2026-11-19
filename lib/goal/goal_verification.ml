@@ -611,7 +611,7 @@ let archive_reopened_proof config ~goal_id ~actor ~at completion =
 let reopen_goal ?effects config ~goal_id ~actor ~note =
   let* goal, (outcome, phase_changed) =
     (* The reopen chain is a string [let*]; the store's typed refusal is
-       rendered here at its end (RFC-0444 PR-1). *)
+       rendered here at its end. *)
     Result.map_error Goal_store.write_error_to_string @@
     Goal_store.transact_goal ?effects config ~goal_id (fun goal ->
       let* transition = Goal_phase.decide_transition ~phase:goal.Goal_store.phase

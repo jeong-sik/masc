@@ -397,7 +397,7 @@ let test_codec_and_context_identity_are_strict () =
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "non-normalized Board interests were accepted");
   (* 중복 keeper_context 키를 거부하는지 보던 검사가 있었다. keeper_context 가
-     재료의 필드가 된 뒤로는 그 상태를 만들 수 없어 지웠다. RFC-0424. *)
+     재료의 필드가 된 뒤로는 그 상태를 만들 수 없어 지웠다. *)
   ()
 ;;
 

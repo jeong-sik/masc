@@ -15,14 +15,14 @@ type keeper_profile_defaults = {
   microvm_memory : Keeper_microvm_guest_size.memory option;
   microvm_cpus : Keeper_microvm_guest_size.cpus option;
   observation_run : Keeper_types_profile_sandbox.observation_run option;
-      (** RFC-0422 §3.4: which box a tool_execute runs in before the judge is
+      (** Which box a tool_execute runs in before the judge is
           asked. [None] is [Observe]; read where the route is built. *)
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
   voice_always_allow : bool option;
-  (* RFC-0390: how much of an official client's built-in tool surface this
+  (* How much of an official client's built-in tool surface this
      keeper may use. [None] keeps each runtime's own default posture. *)
   native_tool_posture : Runtime_native_tools.posture option;
   (* Which Claude Code settings layers the CLI may load. [None] keeps the
@@ -33,7 +33,7 @@ type keeper_profile_defaults = {
       exposes none. Names use exact equality against canonical Skill names. *)
   skill_names : string list option;
   attached_tool_allow : string list option;
-      (** RFC-0403. Which of the attached services' tools this keeper takes.
+      (** Which of the attached services' tools this keeper takes.
           [None] is the whole offering, which is what a keeper got before
           this field existed; [Some []] is none of them. Attached tools
           only -- built-ins defer globally through [defer_loading] or per

@@ -71,7 +71,7 @@ type state_storage = Ephemeral | Persistent
 type tool_invocation = Direct | Host_context
 type tool_hook = Validate_input | Validate_output
 (** A browser package's worker serves the one browser source its
-    [browser_backend] names (RFC browser-backends-end-alone). *)
+    [browser_backend] names. *)
 type worker_service = Mcp_tools | Browser_service of Browser_lane.Backend.t
 
 type request_schema_policy = Package_schema_only | Consumer_request_schema

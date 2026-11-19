@@ -118,7 +118,7 @@ val redact_transport_error_detail : string -> string
     URL payloads in operator logs.  Pinned at the contract
     seam: drift would re-leak query content. *)
 
-(** {1 Typed provider error (RFC-0189 PR-2)} *)
+(** {1 Typed provider error} *)
 
 type provider_error =
   | Transport of string  (** network / transport-level failure *)
@@ -241,7 +241,7 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
     rows; [includeContent=true] is then a structural no-op — there are
     no result rows to enrich and the content already rides inline.
 
-    Failure classes (RFC-0189):
+    Failure classes:
     - [Workflow_rejection]: empty query input.
     - [Dependency_unavailable]: no configured provider.
     - [Runtime_failure]: every provider failed. A valid empty result is

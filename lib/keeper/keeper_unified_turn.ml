@@ -298,7 +298,7 @@ let run_keeper_cycle
      Satisfies the FSM contract: active state observed → SupervisorRequestsStop
      (Phase_gating → Phase_gating, stop signal acknowledged) then HonorStopSignal
      (Phase_gating → Cancelled supervisor_stop). *)
-  (* RFC-0136 PR-1: phase gate stage extracted to
+  (* Phase gate stage extracted to
      [Keeper_unified_turn_phase_gate].  The main turn body is wrapped
      as a nested [main_path] function so the caller can match on a
      typed [phase_gate_outcome] and dispatch each terminal outcome at
@@ -339,7 +339,7 @@ let run_keeper_cycle
       (* Concrete runtime health/capacity is owned by AGENT_CORE/provider
          adapters; routing here does not consult it. *)
       (
-         (* RFC-0136 PR-3: pre-dispatch validation extracted to
+         (* pre-dispatch validation extracted to
             [Keeper_unified_turn_pre_dispatch].  profile_defaults stays
             in scope so the retry-loop block below can also call the
             extracted builder with the same defaults. *)
@@ -459,7 +459,7 @@ let run_keeper_cycle
                Eio.Fiber.yield ();
                (* 2. Build unified prompt — diversity entropy recorded in decision_audit
          (keeper_keepalive.ml), not injected into prompt (#6814). *)
-               (* RFC-0315: resolve the claimed task and goal titles here (the
+               (* Resolve the claimed task and goal titles here (the
                   turn runner owns config), so the prompt can render what the
                   keeper holds and why it woke. Task absence, a dangling id,
                   and an unavailable backlog remain distinct typed prompt
@@ -566,7 +566,7 @@ let run_keeper_cycle
                    ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                    ()
                in
-               (* RFC-0225 §3.3: one carrier per cycle. The pre-request hook
+               (* One carrier per cycle. The pre-request hook
                   writes the effective turn policy here; the decision records
                   below read the same cell, so a concurrent run of this keeper
                   can never substitute its own identity. *)
@@ -1251,7 +1251,7 @@ let run_keeper_cycle
                         ~terminal_error_origin:runtime_attribution.terminal_error_origin;
                       Error err
                   in
-                  (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
+                  (* Emit turn_completed telemetry on all exit paths
                      after Agent.run() — success path emits via
                      Keeper_unified_turn_success → keeper_unified_metrics_snapshot;
                      failure path emits here directly. *)

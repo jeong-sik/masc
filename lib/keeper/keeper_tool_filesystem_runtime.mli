@@ -7,7 +7,7 @@ val resolve_write_attribution
   :  base_dir:string
   -> file_path:string
   -> Agent_observation.file_attribution
-(** RFC-0378 §5.1. The system's only [Code_address] mint, used by
+(** The system's only [Code_address] mint, used by
     the tool-event hook to decide where a keeper write belongs.
     Exposed for testing so the sandbox/working-tree join invariant
     can be verified directly.

@@ -1,4 +1,4 @@
-(** The cli lane-slot fallback (RFC cli-runtimes-as-lane-slots): after the HTTP
+(** The cli lane-slot fallback: after the HTTP
     candidates are exhausted, the official-client runtimes the lane declares
     are walked one by one under the same exact-attempt contract.
     [Hitl_summary_worker] includes this module. *)

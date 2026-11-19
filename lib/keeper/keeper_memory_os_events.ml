@@ -1,4 +1,4 @@
-(* Memory history events (RFC-0418). See the interface for the contract. *)
+(* Memory history events. See the interface for the contract. *)
 
 module W = Keeper_memory_os_types
 

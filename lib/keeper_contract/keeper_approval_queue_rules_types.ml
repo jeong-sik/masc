@@ -320,7 +320,7 @@ let authorization_source_of_string = function
   | _ -> None
 ;;
 
-(* ── What the box refused (RFC-0422) ─────────────────────────────────── *)
+(* ── What the box refused ────────────────────────────────────────────── *)
 
 let observed_refusal_kind_to_string = function
   | Socket_rule_not_applied -> "socket_rule_not_applied"

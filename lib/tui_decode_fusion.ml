@@ -96,7 +96,7 @@ type fusion_judge =
       fj_error : string;
     }
 
-(* RFC-0284 judge-node roles: the kind the server's judge_role_projection
+(* judge-node roles: the kind the server's judge_role_projection
    writes, read back through the same closed set it wrote from, so a role
    this build was not taught fails the node instead of drawing it as
    something it is not. [Judge_stage_meta] carries no number on purpose --

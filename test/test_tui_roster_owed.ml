@@ -1,5 +1,5 @@
 (* Which roster read the TUI starts after the server says a row, or every
-   row, changed (RFC-0481 §3.3). The checks are on the read chosen, never on
+   row, changed. The checks are on the read chosen, never on
    the screen. *)
 
 open Alcotest

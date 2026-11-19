@@ -550,7 +550,7 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   created_by: string option; [@default None]
-  (* RFC-0323 W2: write-once lineage pointer to the terminal task this one
+  (* write-once lineage pointer to the terminal task this one
      re-runs. Set only at creation (masc_add_task); every transition carries
      it through unchanged. Distinct from RFC-0267 goal linkage (many-to-many
      side registry). *)

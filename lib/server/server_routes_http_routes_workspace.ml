@@ -196,7 +196,7 @@ let cached_response_with_source_and_base ~source ~base_path req reqd payload =
    listing hides the same components (see [scan_dir]). Anything blocked
    from reads is therefore also hidden from the tree.
 
-   RFC-0128 §4.6 — [.masc-ide/] is keeper metadata about the workspace,
+   [.masc-ide/] is keeper metadata about the workspace,
    not workspace content; listing it exposed the agent's annotation
    store to the IDE (leak observed 2026-05-17 against [?repo_id=masc]).
    The [.masc] prefix rule below subsumes both [.masc] and [.masc-ide]. *)

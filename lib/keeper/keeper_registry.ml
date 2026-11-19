@@ -656,7 +656,7 @@ let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
       (registry_entry_validation_error_to_string err)
 ;;
 
-(* ── RFC-0002 Event Dispatch ───────────────────────────── *)
+(* ── Event Dispatch ────────────────────────────────────── *)
 
 
 let execute_entry_action_observability =

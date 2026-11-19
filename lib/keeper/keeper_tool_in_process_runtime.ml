@@ -2010,7 +2010,7 @@ let handle_voice_with_outcome
     ()
 ;;
 
-(* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
+(* Shared helper. Converts the [Tool_result.result option]
    returned by [Tool_*.dispatch] to the producer-owned execution outcome.
    [None] means the dispatcher does not recognise the name (the descriptor →
    dispatcher mapping is misconfigured if this fires for a tool reachable via
@@ -2065,7 +2065,7 @@ let handle_masc_agent_with_outcome ~(config : Workspace.config) ~(meta : keeper_
   Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_workspace_ cluster. Tool_workspace lies LATE in module
+(* masc_workspace_ cluster. Tool_workspace lies LATE in module
    order (depends on Keeper_runtime which depends on much of the keeper
    layer). Keeper_tool_in_process_runtime is EARLY (transitively imported
    by Keeper_tool_dispatch_runtime). A direct static import here closes a cycle.
@@ -2082,7 +2082,7 @@ let handle_masc_workspace_with_outcome ~(config : Workspace.config) ~(meta : kee
   dispatch_option_to_execution ~name dispatched
 ;;
 
-(* RFC-0182 §3.1 — masc_misc cluster. Active after Turn_mode_codec
+(* masc_misc cluster. Active after Turn_mode_codec
    extraction (2026-05-27) broke the Tool_agent_timeline → Keeper_*
    back edge that previously cycled Config → ... →
    Keeper_tool_in_process_runtime. *)
@@ -2191,7 +2191,7 @@ let handle_masc_schedule_with_outcome
   Tool_schedule.dispatch ctx ~name ~args |> dispatch_option_to_execution ~name
 ;;
 
-(* RFC-0252 — masc_fusion out-of-band panel+judge deliberation.  The
+(* masc_fusion out-of-band panel+judge deliberation.  The
    gate -> fiber fork -> orchestrator logic lives in [Fusion_tool.handle];
    this handler only gathers the keeper context and loads the [fusion] policy
    from runtime.toml. The common async lifecycle owns the canonical run id.
@@ -2249,7 +2249,7 @@ let handle_masc_fusion_with_outcome ~(config : Workspace.config) ~(meta : keeper
             ]))
 ;;
 
-(* RFC-0430 Phase 3 — masc_file_* provider Files tools. Same root-switch+net
+(* masc_file_* provider Files tools. Same root-switch+net
    gate as fusion (the upload posts over provider HTTP), and the API key comes
    from the same env the direct provider binding declares. Results are the
    client's typed decode rendered as JSON — a tool result, never a silent
@@ -2362,7 +2362,7 @@ let handle_masc_file_with_outcome ~name ~args () =
 ;;
 
 
-(* RFC-0266 §7 Phase 3 — masc_fusion_status: read-only view of the caller's
+(* masc_fusion_status: read-only view of the caller's
    fusion runs (in-progress + recently completed). [fusion_status_json] is the
    pure projection over any registry instance, so tests exercise it on an
    isolated [Fusion_run_registry.create ()]; [handle_masc_fusion_status] binds
@@ -2552,7 +2552,7 @@ let handle_masc_local_runtime_with_outcome
   |> dispatch_option_to_execution ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_keeper cluster.  [Keeper_tool_surface] lives in lib/
+(* masc_keeper cluster.  [Keeper_tool_surface] lives in lib/
    (late) but exposes keeper workspace tools.  A direct import here
    closes a cycle, so we dispatch through [Keeper_dispatch_ref], forwarding
    the Eio resources supplied by the Keeper turn.

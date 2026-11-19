@@ -1,5 +1,5 @@
 ---- MODULE Pool_no_double_close ----
-\* RFC-0107 Phase D.2d — connection lifetime exactly-one-owner proof.
+\* Connection lifetime exactly-one-owner proof.
 \*
 \* Models the [Pool.t]'s per-connection lifecycle (lib/masc_http_client/pool.ml):
 \*   create_fresh  -> Idle | InFlight

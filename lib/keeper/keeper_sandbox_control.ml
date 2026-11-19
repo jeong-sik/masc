@@ -1409,8 +1409,8 @@ let live_status_json ?(include_preflight = true)
             preflight
         else `Null );
       ("resource_config", sandbox_resource_config_json ~timeout_sec meta);
-      (* The server's last superblock read of each image-backed volume
-         (RFC keeper-volume-filesystem-repair §3.2); this cached projection
+      (* The server's last superblock read of each image-backed volume;
+         this cached projection
          spawns nothing. The discard default above is a separate fresh read. *)
       ( "volume_filesystem"
       , `List

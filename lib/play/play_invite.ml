@@ -1,4 +1,4 @@
-(* Invites to the shared machine (RFC play-link-for-the-shared-machine §2.4). *)
+(* Invites to the shared machine. *)
 
 let max_name_length = 32
 

@@ -1,4 +1,4 @@
-(* RFC-0297 Phase 1 (P0-1): closed-variant keeper lifecycle gate.
+(* closed-variant keeper lifecycle gate.
    See keeper_lifecycle_gate.mli for the contract. *)
 
 type gate =

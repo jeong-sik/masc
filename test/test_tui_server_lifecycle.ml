@@ -1,4 +1,4 @@
-(* Unit tests for Masc_tui_server_lifecycle (RFC tui-server-lifecycle).
+(* Unit tests for Masc_tui_server_lifecycle.
    The pure discovery/argv/health-wait logic is exercised deterministically
    with injected effects; start/stop spawns a real sleeper and reaps it so
    the alive/dead assertions do not race a zombie. *)

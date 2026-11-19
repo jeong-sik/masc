@@ -91,7 +91,7 @@ let guest_constraint_to_string = function
   | Scratch_tmpfs -> "scratch_tmpfs"
 ;;
 
-(* Where the guest's shim makes a boxed request's scratch (RFC-0422). The
+(* Where the guest's shim makes a boxed request's scratch. The
    boot mounts an in-memory filesystem here, and it is the shim's own
    default when its config names no [scratch_root]; one constant on both
    sides, so the two cannot drift apart without the host writing a key an

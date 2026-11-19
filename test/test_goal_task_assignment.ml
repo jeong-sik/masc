@@ -1,10 +1,10 @@
-(** RFC-0267 Phase 2 — [Task.Goal_assignment.set_task_goal].
+(** [Task.Goal_assignment.set_task_goal].
 
     Pins the validated backend of the MCP tool [masc_task_set_goal]:
     - an unknown task or unknown goal is a typed error (never a silent no-op),
     - a goalless task links cleanly to an existing goal,
     - a task that already carries a link is rejected (reassignment is a
-      deliberate Non-Goal, RFC-0267 §4),
+      deliberate Non-Goal),
     - a finished task ([Done] or [Cancelled]) is rejected, because a link
       carries no timestamp and a task finished before it is linked could not
       be told apart from work done for the goal. *)
@@ -452,7 +452,7 @@ let test_goal_source_failure_blocks_all_bindings () =
       corrupt primary;
       if corrupt_mirror then corrupt recovery
       else (
-        (* RFC-0444: a mirror that still decodes is reported as evidence of
+        (* A mirror that still decodes is reported as evidence of
            the drift and is never served as the Goal. *)
         match Goal_store.find_goal config ~goal_id:"goal-a" with
         | Goal_store.Store_unavailable
@@ -488,7 +488,7 @@ let test_goal_source_failure_blocks_all_bindings () =
     [false; true]
 ;;
 
-(* RFC-0444 PR-2: [masc_add_task] with a goal_id on a store this build cannot
+(* [masc_add_task] with a goal_id on a store this build cannot
    read answers the same envelope as the goal tools, as structured data and
    as the message, with class [Dependency_unavailable]; nothing is written. *)
 let test_add_task_tool_projects_unavailable_envelope () =

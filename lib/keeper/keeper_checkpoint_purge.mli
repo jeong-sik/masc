@@ -1,4 +1,4 @@
-(** Deterministic offline checkpoint purge (RFC-0351 S1).
+(** Deterministic offline checkpoint purge.
 
     Reduces a persisted AGENT_CORE checkpoint with two closed rules, neither of
     which involves an LLM, and neither of which removes a message that opens an

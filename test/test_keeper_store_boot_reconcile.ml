@@ -1,6 +1,6 @@
 (** A store this build cannot decode is settled once, at boot: examined
     without being touched, refused unless the operator accepted the
-    quarantine, and moved aside only then (RFC-0420). The goal store is only
+    quarantine, and moved aside only then. The goal store is only
     read: boot logs one INFO line when it cannot read it, never refuses or
     moves it, and leaves its bytes as they were (RFC-0444 §2.4, criteria 3
     and 7). *)

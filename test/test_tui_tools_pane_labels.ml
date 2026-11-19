@@ -135,7 +135,7 @@ let usage_state () =
 let ready rows = Ok (Masc.Tui_decode_tools.Keeper_usage_ready rows)
 
 (* The Usage pane joins each Keeper's own usage answer to the catalog by
-   exact reference (RFC-0483) and counts the ledgers it read. *)
+   exact reference and counts the ledgers it read. *)
 let test_usage_pane_joins_each_keepers_answer () =
   let state = usage_state () in
   record_keeper_skill_usage state ~keeper:"bravo" (ready [ usage_row 3 ]);

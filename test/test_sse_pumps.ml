@@ -73,7 +73,7 @@ let test_stop_cancels_pumps_and_closes_the_response () =
 ;;
 
 (* A close from any domain only signals: the response belongs to the
-   connection's domain and is left to the supervisor (RFC-0493 §3.2). *)
+   connection's domain and is left to the supervisor. *)
 let test_close_leaves_the_response_to_the_supervisor () =
   Eio_main.run
   @@ fun env ->
@@ -230,7 +230,7 @@ let test_send_raw_waits_for_the_socket () =
 
 module Sse = Masc.Sse
 
-(* RFC-0493 §6 5d: the drain of an MCP GET, AG-UI or presence connection
+(* The drain of an MCP GET, AG-UI or presence connection
    writes the frames already waiting in one send. *)
 
 (* 128 of these fill one batch: 128 x 512 B = 64 KiB. *)

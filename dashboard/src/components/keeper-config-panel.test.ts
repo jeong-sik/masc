@@ -1712,7 +1712,7 @@ describe('KeeperConfigPanel', () => {
     expect(mocks.updateKeeperRuntime).not.toHaveBeenCalled()
   })
 
-  // #38866: an assignment may name a declared lane (RFC-0457), but the select
+  // #38866: an assignment may name a declared lane, but the select
   // offered runtime ids only, so a lane could not be picked from the panel.
   it('offers declared lanes apart from runtimes and patches the picked lane as runtime_id', async () => {
     const execution = {

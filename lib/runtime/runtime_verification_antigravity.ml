@@ -10,7 +10,7 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~host ~oauth_source ~con
       (* Registered first: subprocess/listener releases run before HOME cleanup. *)
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree runtime_root);
       (* The turn runs in the HOME's own empty folder, not in [cwd], which
-         holds the HOME itself (RFC-0490 2.2). *)
+         holds the HOME itself. *)
       match Runtime_antigravity_home.prepare_native ~host ~runtime_root ~owner_leaf:"readiness" ~oauth_source
           ~posture:Runtime_native_tools.Native_none ~workspace:Runtime_antigravity_home.Private_workspace
           ~additional_workspaces:[] with

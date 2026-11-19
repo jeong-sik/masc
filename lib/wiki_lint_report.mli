@@ -1,5 +1,5 @@
 (** The lint report as the tool returns it. Pure: findings and a request go
-    in, JSON text comes out (RFC-wiki-lint-and-page-contracts §4.1, §4.2).
+    in, JSON text comes out.
 
     The report is capped so a tool result stays under the wire limit that
     would turn it into a sealed blob. Counts always describe every finding;

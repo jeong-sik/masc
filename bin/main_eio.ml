@@ -379,7 +379,7 @@ let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
          report.unprotected_files report.unprotected_logical_bytes report.protected_digests
          (original_inventory_elapsed ()) in
        if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
-    (* RFC-0498 layer three a: the settled-archive pass deletes under the same
+    (* The settled-archive pass deletes under the same
        lease, before any settle can run. *)
     let sweep_started = Unix.gettimeofday () in
     (match Server_settled_archive_sweep.run_at_startup ~base_path:canonical_base_path with
@@ -627,7 +627,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
 
-  (* RFC-0372 Phase 3: register the clock with Dashboard_cache so every
+  (* Register the clock with Dashboard_cache so every
      [get_or_compute] runs under a timeout. Without this the 37 call sites that
      do not pass a clock compute without any ceiling. *)
   Dashboard_cache.set_default_clock (Eio.Stdenv.clock env);
@@ -2052,8 +2052,7 @@ let runtime_wizard_provider_record cfg (provider : Runtime_schema.provider) =
          Codex / Antigravity), not an HTTP endpoint and not an .env key: the
          wizard offers it as a subscription and lets that CLI own the login.
          [command] is the binary the installer probes for with `command -v`;
-         whether that CLI is actually signed in is a later, probe-based step
-         (RFC-0408). *)
+         whether that CLI is actually signed in is a later, probe-based step. *)
       (match runtime_wizard_binding_for_provider cfg provider with
        | Error _ as err -> err
        | Ok binding ->
@@ -3792,7 +3791,7 @@ let build_commit_cmd =
   Cmd.v (Cmd.info "build-commit" ~doc) Term.(const build_commit_cmd_exit $ const ())
 
 (* Build one sandbox recipe into one image store, under a tag that names that
-   build. RFC keeper-sandbox-images-have-versions (#38699) §2.2: the tag is never moved
+   build. (#38699) The tag is never moved
    to new content, so a tag already in the store refuses the build instead of
    being rebuilt in place. *)
 

@@ -101,7 +101,7 @@ val keeper_store : location -> (string * Keeper.t) option
 val pool_job_name : t -> string
 (** The store's path below [<base>/.masc], with the keeper's directory
     written as [keeper/]: one name per store, whichever keeper it is. A pool
-    job that reads the store carries it (RFC-0474 L4c). *)
+    job that reads the store carries it. *)
 
 (** How long a store's day files are kept. The prune pass reads it from
     here; a handle carries no retention of its own. *)

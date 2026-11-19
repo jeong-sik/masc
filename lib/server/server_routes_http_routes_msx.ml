@@ -41,7 +41,7 @@ let decode_write_body ~config ~body =
 ;;
 
 (* Frames a press holds its keys down, and the frames the call advances in
-   all, when the body names neither (RFC-0439 §3.3): a tap. *)
+   all, when the body names neither: a tap. *)
 let press_default_hold_frames = 5
 let press_default_step_frames = 15
 
@@ -211,7 +211,7 @@ let handle_load ~state ~agent_name request reqd =
       respond_json_value_with_cors ~status:(status :> Httpun.Status.t) request reqd json)
 ;;
 
-(* Frames per poll-cadence tick (RFC-0439 §3.2). At the TUI's ~3 Hz spectator
+(* Frames per poll-cadence tick. At the TUI's ~3 Hz spectator
    poll this advances ~54 frames a second, close enough to the machine's 60 Hz
    that a game reads as live without a server-side ticker. *)
 let msx_tick_default_frames = 18
@@ -516,8 +516,8 @@ let add_routes router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/msx/activity" (fun state req reqd -> Http.Response.json_value ~compress:true ~request:req
            (activity_json ~config:(Mcp_server.workspace_config state)) reqd)
-  (* The cartridge inventory the TUI load menu reads before it can pick a game
-     (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace state,
+  (* The cartridge inventory the TUI load menu reads before it can pick a game:
+     file names under <.masc>/msx/carts, not workspace state,
      so it stays open under strict auth. Loading a game stays a write, gated
      like the MSX tools. *)
   |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/msx/carts" (fun state req reqd ->

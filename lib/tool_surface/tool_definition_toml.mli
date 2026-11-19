@@ -104,8 +104,8 @@ type loaded =
         sentence; nothing here swaps them, the consumer picks. *)
   ; shell_command : string list option
     (** From the file's [shell_command] key, stored word-split.  The
-        sub-command path this tool answers to inside a keeper's shell line
-        (RFC tools-as-shell-commands); absent means no shell form. *)
+        sub-command path this tool answers to inside a keeper's shell line;
+        absent means no shell form. *)
   ; path_params : string list
     (** The top-level params declared [role = "path"], in file order: the
         string arguments whose value is a file-system path. The runtime

@@ -133,7 +133,7 @@ val match_observation
   -> observation:board_observation
   -> match_result
 (** Match the recorded [audience] of a Board post or comment against [meta]
-    without re-parsing [@name] tokens from text (RFC-at-name-resolves-to-declared-recipient L2d).
+    without re-parsing [@name] tokens from text.
     A [System_post] matches no lane. *)
 
 val check_self_comment_status
@@ -149,7 +149,7 @@ type wake_reason =
   | Reaction_after_self_activity
   | Vote_on_self_post
   | Vote_on_self_comment
-(** Closed set of reasons a keeper wakes for a board signal (RFC-0020).
+(** Closed set of reasons a keeper wakes for a board signal.
     Replaces the prior [string option] contract; consumers match exhaustively
     so the previously dead ["board_activity"] generic bucket is gone. Semantic
     relatedness is intentionally absent: it must enter through an LLM/Judge

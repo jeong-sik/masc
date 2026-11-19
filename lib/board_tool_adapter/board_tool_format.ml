@@ -94,7 +94,7 @@ let board_error_failure_class = function
     Tool_result.Runtime_failure
 ;;
 
-(* RFC-0189 PR-1b.2 — typed helper. Returns [Tool_result.result] directly
+(* Typed helper. Returns [Tool_result.result] directly
    so the [~class_] decision is committed at the catch boundary. Pre-RFC
    version returned legacy [t] with [?failure_class:option] — the new
    shape collapses two illegal states (None-on-failure, Some-on-success)
@@ -545,7 +545,7 @@ let judgment_arg args =
     | `Assoc _ as value -> Some value
     | `List _ as value -> Some value
     | (`Bool _ | `Int _ | `Intlit _ | `Float _) as other ->
-      (* RFC-0093 Phase B Step 4: coerce scalar types to string instead of
+      (* Coerce scalar types to string instead of
          silently dropping them.  LLMs occasionally send judgment: 42 or
          judgment: true; coercing preserves the data. *)
       let coerced = Yojson.Safe.to_string other in
@@ -566,7 +566,7 @@ let normalize_board_post_meta ?(attachments = []) args =
       List.filter (fun (key, _) -> not (String.equal key "attachments")) fields
     | `Null -> []
     | other ->
-      (* RFC-0093 Phase B Step 3: split permissive `_ -> []` into typed
+      (* Split permissive `_ -> []` into typed
          arms.  `Null` is the legitimate "meta field absent" path; any
          other JSON type means the caller passed a wrong-typed meta and
          should be surfaced rather than silently dropped. *)
@@ -735,7 +735,7 @@ let provenance_arg args =
 let with_yojson_boundary ~tool_name ~start_time handler : Tool_result.result =
   try handler () with
   | Yojson.Safe.Util.Type_error (msg, bad_value) ->
-    (* RFC-0189 — JSON type error is caller-input shape violation.
+    (* JSON type error is caller-input shape violation.
        Workflow_rejection (not Runtime_failure) because the request itself
        was malformed at the JSON layer; retrying with the same args won't
        succeed. *)

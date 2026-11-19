@@ -143,7 +143,7 @@ end
      @param build_turn_prompt Callback: receives the base keeper system prompt
             and checkpoint message history, returns the final turn system prompt
     @param user_message The user's message to the keeper
-    @param input_speaker Who said [user_message] (RFC-0468 §3.2). Stamped on
+    @param input_speaker Who said [user_message]. Stamped on
            the User message this turn creates, where it is created; the
            Librarian reads it from the checkpoint. Required so no entry point
            can leave its input unattributed.

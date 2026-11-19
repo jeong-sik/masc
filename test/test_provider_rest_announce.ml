@@ -1,4 +1,4 @@
-(* RFC-0481 §3.2: a provider rest record tells the workspace's roster readers
+(* A provider rest record tells the workspace's roster readers
    which Keepers' shown rest moved, and only those. A record that changes a
    runtime's standing in the resolved document announces that standing, and a
    record that changes nothing announces nothing. *)

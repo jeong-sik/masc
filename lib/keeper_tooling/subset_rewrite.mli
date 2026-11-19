@@ -16,7 +16,7 @@
     What survives is where another form is still the better call: a nested
     pipeline is what {!Connector} names. The typed [pipeline] field is gone
     from the Execute schema, so this arm is unreachable until the Shell IR
-    parser judges [command] (RFC-execute-boundary-is-the-sandbox).
+    parser judges [command].
 
     Everything else answers {!Unrepresentable}: the shell runs the line, and
     the only thing worth adding is why the construct behaves as it does --

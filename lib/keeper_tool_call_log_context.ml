@@ -1,6 +1,6 @@
 (** Turn context state and derived runtime JSON for keeper tool-call logs.
 
-    RFC-0225 §3.3: the context lives in a per-run [cell] threaded from turn
+    The context lives in a per-run [cell] threaded from turn
     setup to every reader of the same run. The previous global table keyed
     by keeper name let concurrent runs of one keeper overwrite each other,
     so tool-call rows carried the wrong trace_id / keeper_turn_id. *)

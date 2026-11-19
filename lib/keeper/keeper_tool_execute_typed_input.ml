@@ -291,9 +291,7 @@ let shell_simple ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd argv =
    ratchet counts the caller files -- so the shell form crosses the same
    boundary a shell frontend would. [gate_raw] has carried this entrypoint,
    with tests, and had no production caller until now. *)
-(* RFC execute-subset-dispositions step 1.
-
-   [argv:["sh";"-c";S]] reaches the gate as one opaque program with two literal
+(* [argv:["sh";"-c";S]] reaches the gate as one opaque program with two literal
    arguments, so whatever S contains is counted as nothing at all.  This walks
    the staged form, recognises the ones that are a script in an argv costume,
    and says what the gate would have made of each.
@@ -327,7 +325,7 @@ let hidden_script_findings ~sandbox { source; _ } =
     Option.to_list (Option.map of_costume (Keeper_tooling.Shell_costume.of_argv argv))
 ;;
 
-(* RFC execute-boundary-is-the-sandbox §4. The command goes to a real shell on
+(* The command goes to a real shell on
    the far side of the keeper's boundary, which is what [argv:["bash";"-c";S]]
    has always reached. [shell_simple] builds the same [Simple] that form
    builds, so the two fields produce the same child for the same text. *)
@@ -339,7 +337,7 @@ let to_shell_ir_unvalidated
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       { source; cwd; timeout_sec = _; intent = _; background = _ }
   =
-  (* RFC execute-boundary-is-the-sandbox §4.1. An argv whose program is a
+  (* An argv whose program is a
      shell with [-c] is a command line wearing an argv costume: it takes the
      same shell path the [command] field does, so there is no second way to
      reach one. Nothing is classified here any more. Whether the subset can

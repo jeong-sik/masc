@@ -488,7 +488,7 @@ let test_entry_to_json_includes_contract_and_radius () =
   Alcotest.(check string) "execution_id persisted" "exec-1000-0001"
     (json |> member "execution_id" |> to_string)
 
-(* RFC-0233 PR-1: the canonical join key survives the JSONL round-trip,
+(* The canonical join key survives the JSONL round-trip,
    and rows written before the field existed decode as [None]. *)
 let test_execution_id_roundtrip () =
   let entry : Trajectory.tool_call_entry = {

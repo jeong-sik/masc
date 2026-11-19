@@ -1,4 +1,4 @@
-(** Tests for masc#25398 (RFC-0348 PR-1): keeper_msg lane admission is bounded.
+(** Tests for masc#25398: keeper_msg lane admission is bounded.
 
     Before the fix, [with_lane_gate] fell back to an unbounded
     [Eio.Mutex.lock] when the lane was contended, so one hung durable write

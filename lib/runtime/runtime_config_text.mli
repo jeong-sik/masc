@@ -12,7 +12,7 @@ val remove_runtime_assignment_text : string -> keeper_name:string -> string
 
 val update_egress_allow_text : string -> keeper_name:string -> allow:string list -> string
 (** runtime.toml text with [keeper_name]'s [\[egress.keepers.<name>\]] table
-    holding exactly [allow] (RFC-0415). The table is replaced or appended,
+    holding exactly [allow]. The table is replaced or appended,
     every other line is kept, and the replacement is wholesale rather than a
     merge: an allowlist is the complete statement of what a keeper may reach,
     so a write that kept unnamed entries would leave an operator unable to

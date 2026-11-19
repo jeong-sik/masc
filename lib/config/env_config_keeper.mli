@@ -298,7 +298,7 @@ module KeeperKeepalive : sig
   val stream_idle_timeout_sec : unit -> float option
   (** Explicit streaming-provider idle-gap timeout as the operator wrote it.
       [None] means no explicit value (the resolved layer substitutes
-      {!stream_idle_failsafe_floor_sec}, RFC-0345); MASC does not infer a
+      {!stream_idle_failsafe_floor_sec}); MASC does not infer a
       timeout from provider/model kind. A configured value must be finite,
       strictly positive and at most {!provider_call_deadline_max_sec}: a
       budget longer than the longest no-progress threshold could never be

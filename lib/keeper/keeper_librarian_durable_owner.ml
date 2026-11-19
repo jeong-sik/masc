@@ -104,7 +104,7 @@ let restore_answer ~store request record =
   | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
   | Outcome_unknown | Not_allowed _ | Request_id_reused ->
     Error (Rejected "Original history publication requires an actual answered host result")
-(* RFC-0500. Whether the retained refusal says the process that started the
+(* Whether the retained refusal says the process that started the
    attempt stopped before it ended. *)
 let unknown_cause ~schema (record:Owner.retained) =
   match Progress.phase record.progress with

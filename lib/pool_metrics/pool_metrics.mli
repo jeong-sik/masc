@@ -1,4 +1,4 @@
-(** RFC-0107 Phase D.4 — snapshot accessor for the piaf-backed
+(** Snapshot accessor for the piaf-backed
     connection pool defined in {!Masc_http_client.Pool}.
 
     Read-only adapter: snapshots [Pool.stats]; the actual sample emission
@@ -33,5 +33,4 @@ val register : unit -> unit
 (** [register ()] is the explicit bootstrap hook.  Metric registration
     itself happens at module-load time inside {!Otel_metric_store.init}, so
     [register] is idempotent and currently a no-op beyond a one-shot
-    snapshot warm-up.  Kept as the public bootstrap API per
-    RFC-0107 Phase D.4 §"register entry point". *)
+    snapshot warm-up.  Kept as the public bootstrap API. *)

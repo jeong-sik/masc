@@ -1,6 +1,6 @@
 /**
  * useLayeredOverlay — Preact adapter over
- * headless-core/createLayeredOverlay (RFC 0020 §3).
+ * headless-core/createLayeredOverlay.
  *
  * Returns the active set as Preact state plus stable callbacks for
  * toggle/clear/isActive. Subscribes to controller changes on mount

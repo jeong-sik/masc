@@ -199,14 +199,14 @@ type judge_synthesis =
   }
 [@@deriving yojson, show, eq]
 
-(* 심판 실행 관측 record (RFC-0284). [panel_outcome]와 구조 동형 — 실제로 실행된 심판
+(* 심판 실행 관측 record. [panel_outcome]와 구조 동형 — 실제로 실행된 심판
    노드를 *사후* record로 보존한다. JOJ의 N개 1차 심판 + meta가 orchestrator 내부에서만
    존재하다 [Result.map fst]로 소실되던 것을, 패널처럼 배열로 board 증거에 남긴다.
    이것은 *관측 데이터*(무엇이 실행됐나)이지 *실행 추상*(어떻게 조립하나 — purge된
    ChainEngine node-graph DSL)이 아니다: 대시보드는 위상 이름 없이 이 배열의 shape만으로
    구조를 렌더한다(1=simple, 2=refine, N+meta=judge-of-judges,
    grouped firsts+stage_meta+final_meta=staged judge-of-judges). 콤비네이터/그래프 어휘는
-   도입하지 않는다(RFC-0284 §4). *)
+   도입하지 않는다. *)
 type judge_role =
   | Single  (** Simple 위상의 단일 심판. *)
   | Refine_pass  (** Refine/Conditional의 2차(재검토) 심판. *)
@@ -547,7 +547,7 @@ type fusion_topology =
       (** panel → judge → (1차 판정이 [Insufficient]일 때만) judge'(refine) → sink.
           애매할 때만 한 단계 더 깊이; 그 외엔 1차 종합 그대로. *)
   | Judge_of_judges
-      (** panel → [N개 1차 심판] → meta-judge → sink (RFC-0283). 서로 다른 N개 1차
+      (** panel → [N개 1차 심판] → meta-judge → sink. 서로 다른 N개 1차
           심판이 같은 패널을 독립 종합하고, meta가 reconcile. preset.judges >= 2 필요. *)
   | Staged_judge_of_judges
       (** panel → [N개 1차 심판] → fixed-size stage meta reducers → final meta reducer

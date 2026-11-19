@@ -1,4 +1,4 @@
-(* RFC-at-name-resolves-to-declared-recipient, layer 1: which of the names
+(* Which of the names
    written after [@] are recipients.
 
    Pinned here:

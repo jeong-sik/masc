@@ -388,7 +388,7 @@ let with_demotion_store f =
     (fun () -> f (Tool_blob_store.create ~base_path))
 ;;
 
-(* --- 2. content_blocks = Some: each text body leaves (RFC-0363 §3.1.2) --- *)
+(* --- 2. content_blocks = Some: each text body leaves --- *)
 
 (* An MCP result as Keepers store it: [content] is the plain copy of its
    text, and the blocks hold the text and a screenshot. *)
@@ -1904,7 +1904,7 @@ let projection_reuses_candidate_measurements () =
 (* The alpha incident shape: parallel WebSearch results joined the assistant
    atom that called them, and that one atom (indivisible to the range) was
    refused on its own. Ordinary demotion cannot help — its boundary excludes
-   the current turn (RFC-0351 §4) — so the turn was stuck, and a failed turn
+   the current turn — so the turn was stuck, and a failed turn
    writes no boundary line, so the next turn composed the same range and was
    refused again. After a size refusal the compositions demote every tool
    result the refused request carried, and the same candidate is asked once
@@ -2025,8 +2025,7 @@ let oversized_newest_atom_is_demoted_after_refusal () =
     (List.length (List.filter Tool_output.is_marker transmitted))
 ;;
 
-(* Without a refusal nothing the range carries is demoted, whatever its size
-   (RFC-0363 §3.4.1). *)
+(* Without a refusal nothing the range carries is demoted, whatever its size. *)
 let an_ordinary_composition_demotes_nothing () =
   let earlier, messages, newest_bytes = oversized_newest_history () in
   let turn_end =

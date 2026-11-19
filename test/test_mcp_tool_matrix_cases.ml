@@ -578,7 +578,7 @@ let prepare_for_name fixture name =
        | Error error -> failwith (Masc.Metrics_store_eio.record_error_to_string error))
   end;
   if name = "masc_task_set_goal" then begin
-    (* masc_task_set_goal links goalless tasks only (RFC-0267 Phase 2), but
+    (* masc_task_set_goal links goalless tasks only, but
        [ensure_task] creates its task already linked to the fixture goal.
        Seed a goalless task first so the shared task-id cache serves it. *)
     let body =

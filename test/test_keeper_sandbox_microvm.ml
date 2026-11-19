@@ -107,7 +107,7 @@ let test_keeps_the_hardening_container_accepts () =
   Alcotest.(check bool) "runs as the caller" true (adjacent ~flag:"--user" ~value:"501:20" a);
   Alcotest.(check bool) "caps memory" true (adjacent ~flag:"--memory" ~value:"2048m" a)
 
-(* RFC-0400: the guest's tree is its work volume. A host playground path on
+(* The guest's tree is its work volume. A host playground path on
    the boot argv would put the tree back on virtiofs, where every file the
    guest touches pins a host vnode -- the mount that panicked the host. *)
 let test_never_mounts_the_host_playground () =
@@ -721,7 +721,7 @@ let test_guest_target_refuses_a_profile_mismatch () =
   assert_mismatch ~factory_meta:docker ~caller_meta:microvm;
   assert_mismatch ~factory_meta:microvm ~caller_meta:docker
 
-(* RFC-0400 C: the guest's tree is its work volume. Every docker-shaped exec
+(* The guest's tree is its work volume. Every docker-shaped exec
    entrypoint refuses a microvm keeper before touching any CLI, so a runtime
    that says it is running needs no container behind it here. *)
 let test_docker_shaped_exec_refuses_a_microvm_keeper () =
@@ -1622,7 +1622,7 @@ let error_exn = function
   | Error e -> e
 ;;
 
-(* ── The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)
+(* ── The build volume
    A volume holding only derived output can be deleted and recreated with
    zero data-loss risk, which is what host disk reclaim needs and the work
    volume holding the checkout cannot offer. Apple_container only; see the
@@ -3557,7 +3557,6 @@ let test_work_volume_trim_argv_grants_only_its_capabilities () =
 
 ;;
 
-(* RFC keeper-volume-filesystem-repair §3.3. *)
 let test_volume_repair_argv_grants_only_sys_admin () =
   let argv =
     M.apple_volume_repair_argv ~keeper_name:"x" ~volume_name:"masc-keeper-work-x" ~image:"masc-sandbox:general"
@@ -4678,7 +4677,7 @@ let test_work_volume_is_named_and_mounted_at_its_root () =
     (M.keeper_work_root ~keeper_name:"lane-smith")
 ;;
 
-(* RFC-0422 §3.4: two spellings of the same choice, the keeper TOML's and the
+(* Two spellings of the same choice, the keeper TOML's and the
    shim request's, mapped in one place so they cannot drift. *)
 let test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for () =
   let mode run =
@@ -4689,7 +4688,7 @@ let test_the_box_the_toml_names_is_the_box_the_shim_is_asked_for () =
   Alcotest.(check string) "guest_local" "guest_local" (mode Profile.Guest_local)
 ;;
 
-(* RFC-0427 B-2: the installer leaves a sha256 sidecar beside the shim, and
+(* The installer leaves a sha256 sidecar beside the shim, and
    the boot reads the pair. A matching pair is verified, a missing sidecar is
    a hand-built shim run unverified, and a binary that disagrees with its
    sidecar -- or a sidecar that is not a digest -- refuses the boot by name. *)
@@ -4790,7 +4789,7 @@ let test_keeper_work_root_is_created_as_root_with_a_mode () =
   Alcotest.(check bool) "creates the keeper root" true (contains "/masc-work/lane-smith" argv)
 ;;
 
-(* Boot invariant (RFC-0052): the mkdir and the write probe above both pass
+(* Boot invariant: the mkdir and the write probe above both pass
    against a writable rootfs directory, so they cannot catch a guest whose
    work volume is not mounted. Only /proc/mounts can. *)
 let mounted_probe_script () =

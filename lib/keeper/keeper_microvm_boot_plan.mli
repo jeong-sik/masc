@@ -20,7 +20,7 @@ type published_socket =
 
 (** A capability given back after [Drop_all_capabilities]: the three a guest
     agent needs to bind its socket as root, remount [/] read-only and drop to
-    the Keeper's ids (RFC microvm-guest-agent-over-socket 3.2). *)
+    the Keeper's ids. *)
 type capability =
   | Cap_setuid
   | Cap_setgid

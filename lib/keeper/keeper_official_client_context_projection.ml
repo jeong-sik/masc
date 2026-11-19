@@ -131,7 +131,7 @@ let history_role_label = function
   | Agent_core.Types.Tool -> "TOOL:\n"
 ;;
 
-(* RFC-0491 §3.1, §3.3. The issuer carries a Completion Authority event and
+(* The issuer carries a Completion Authority event and
    the Goals awaiting proof as blocks of its context carrier, which the Agent
    Core lane sends at the request's tail. An official client puts the
    System-role carrier where the vendor keeps it for the session (Claude

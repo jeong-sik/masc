@@ -898,7 +898,7 @@ let test_only_a_schedule_change_reads_the_schedules () =
        [ schedules_frame ])
 
 (* A Keeper's skill activation ledger change names that Keeper, and a
-   published skill catalog is a store change of its own (RFC-0483 §4.3). *)
+   published skill catalog is a store change of its own. *)
 let test_skill_pushes_name_their_reads () =
   let activations_frame =
     {|data: {"type":"keeper_skill_activations_changed","name":"lane-smith","trace_id":"trace-1","ts_unix":1.0}

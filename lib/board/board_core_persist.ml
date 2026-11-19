@@ -117,7 +117,7 @@ let require_model_reload_allowed store ~path = match store.deletion_state with
     Error (path, Failure "Pending Board deletion requires fresh-store initialization.")
 ;;
 
-(* RFC-0233 §7: maintain the origin secondary indexes. Shared by the create
+(* Maintain the origin secondary indexes. Shared by the create
    path (create_fresh) and the load path (load_persisted_posts) so the two
    stay in lockstep — a single maintenance site, not an N-of-M copy. *)
 let index_post_origin store (post : post) =

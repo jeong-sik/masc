@@ -1781,7 +1781,7 @@ let test_queue_writes_advance_the_projection_revision () =
          (AQ.store_revision_for_workspace ~base_path > after_enqueue))
 ;;
 
-(* RFC-0422 §3.3: what the box refused is written on the row and read back
+(* What the box refused is written on the row and read back
    after a restart, so the judge that runs later sees what the gate saw. *)
 let test_an_observation_survives_the_row_round_trip () =
   let base_path = temp_dir () in

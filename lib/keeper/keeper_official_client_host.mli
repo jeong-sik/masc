@@ -15,7 +15,7 @@ val internal_error : string -> Agent_core.Error.t
 
 type turn_observation
 (** The Completion Authority and Goals Awaiting Proof blocks an official turn
-    takes out of its context carrier (RFC-0491 §3.1, §3.3): an event, and a
+    takes out of its context carrier: an event, and a
     Goal phase, that the vendor's persistent System must not keep past the
     turn. Each is delivered as current-turn input on Start and on every
     Resume, with the issuer's carrier span as its source. *)
@@ -599,7 +599,7 @@ val carried_start_range
     seed whose index this history does not open with the seed's message is
     dropped and reported, and the range starts over as with no seed. *)
 
-(** {1 One window, one decision (RFC-0460)} *)
+(** {1 One window, one decision} *)
 
 type windowed_range =
   { carried : carried_start

@@ -167,7 +167,7 @@ export function recurrenceLabel(request: DashboardScheduledAutomationRequest): s
  * RFC-0234 §10 "Dashboard and operator UX" — a wake-signal feed surfaces the
  * upcoming scheduler wakes ("future rows with ... due time, payload summary,
  * and payload identity") ordered soonest-first. The scheduler is a turn-start channel
- * (RFC-0234 §2: proactive turn mechanisms decide whether an agent should wake);
+ * (proactive turn mechanisms decide whether an agent should wake);
  * this feed answers "what wakes next" rather than auditing every row like the
  * full table below.
  *

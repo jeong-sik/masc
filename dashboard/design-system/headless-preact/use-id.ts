@@ -1,7 +1,7 @@
 /**
  * useId — Preact adapter over headless-core/IdGenerator.
  *
- * Per RFC 0001 §"directory layout". Returns a stable id for the
+ * Returns a stable id for the
  * lifetime of a component instance. Used by interactive primitives
  * (Drawer, Dialog, Popover) to wire `aria-labelledby` / `aria-controls`
  * between Trigger and Content nodes.

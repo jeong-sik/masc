@@ -858,7 +858,7 @@ let notify t command =
    the projection; the detail resurfaces later as a rejected meta commit and
    reads as if that commit were the cause. Log the onset once, at the source. *)
 (* The memory health row measures the Librarian gap on the meta's trace and
-   has none to measure without a meta (RFC-0487). *)
+   has none to measure without a meta. *)
 let memory_health_moved ~base_path ~keeper_name =
   Keeper_memory_health_input.written
     ~keepers_dir:(Common.keepers_runtime_dir_of_base ~base_path)

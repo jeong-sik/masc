@@ -572,7 +572,7 @@ let receipt_key_for_write ~(stored : Schedule_domain.schedule_request option) =
    and the schedule fails (#26092). Reject at creation unless the caller
    explicitly schedules for a keeper that will be registered later. The
    registry lookup arrives via [Workspace_hooks] so this tool module keeps no
-   static keeper dependency (RFC-0194). *)
+   static keeper dependency. *)
 let allow_unregistered_keeper_of_args args =
   match Json_util.assoc_member_opt "allow_unregistered_keeper" args with
   | None | Some `Null -> Ok false

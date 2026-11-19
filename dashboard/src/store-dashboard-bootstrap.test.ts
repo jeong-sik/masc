@@ -101,7 +101,7 @@ describe('refreshDashboard bootstrap', () => {
 
   const readyPlanning = { generated_at: '2026-09-09T03:00:00Z', goals: [], rollup: {} }
   const readyTree = { generated_at: '2026-09-09T03:00:00Z', approval_queue_state: { state: 'ready' }, tree: [], summary: { total_goals: 0 } }
-  // RFC-0444 §2.3 row 4: the typed store failure envelope, HTTP 200, no `error` line.
+  // The typed store failure envelope, HTTP 200, no `error` line.
   const sourceFailure = {
     ok: false, error_code: 'goal_store_unavailable', reason: 'not_json', field: null,
     file: '/srv/masc/.masc/goals.json', mirror: { status: 'mirror_absent', goal_count: null },

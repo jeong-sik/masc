@@ -313,7 +313,7 @@ let native_worker_ended_outside_masc () = with_fixture (fun clock root config ->
   wait clock (fun () -> phase ()="detached" && text "runtime_presence" (inspect ())="retained");
   check string "Detach confirms the native release" "native_released"
     (inspect () |> member "lifecycle" |> member "release" |> text "kind"))
-(* RFC lane-addon-shutdown-detaches-native-instances §6. The 11-06 deploy: the
+(* The 11-06 deploy: the
    stopping server leaves, the operator removes the claim slot as a hard cut
    says, and the next server must still attach the declaration. *)
 let shutdown_detach_lets_the_next_server_attach () = with_fixture (fun clock root config ->

@@ -59,7 +59,7 @@ let test_hybrid provider model () =
     let reset = config ~enable_thinking:true ~preserve_thinking:false provider model in
     Alcotest.(check bool) "explicit history clear still travels" true
       (body reset |> field "thinking" |> field "clear_thinking" |> Yojson.Safe.Util.to_bool);
-    (* RFC-0488 §3.2: a row that declares no preserve_thinking sends no
+    (* A row that declares no preserve_thinking sends no
        clear_thinking member, so the endpoint's own default applies. *)
     Alcotest.(check string) "undeclared row sends no thinking object"
       "null"

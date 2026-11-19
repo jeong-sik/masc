@@ -29,7 +29,7 @@ type context = {
 
 open Tool_args
 
-(* RFC-0189 PR-1b.5 — handlers in this module return typed
+(* Handlers in this module return typed
    [Tool_result.result]. Dispatch returns [Tool_result.result option].
 
    Failure class assignments:

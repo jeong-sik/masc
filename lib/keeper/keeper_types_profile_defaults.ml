@@ -17,7 +17,7 @@ type keeper_profile_defaults = {
   microvm_backend : Keeper_microvm_backend.t option;
   microvm_memory : Keeper_microvm_guest_size.memory option;
   microvm_cpus : Keeper_microvm_guest_size.cpus option;
-  (* RFC-0422 §3.4: which box a tool_execute runs in before the judge is
+  (* Which box a tool_execute runs in before the judge is
      asked. [None] is [Observe]. Read where the route is built, not carried
      on keeper meta, as [remote_endpoint] is. *)
   observation_run : Keeper_types_profile_sandbox.observation_run option;
@@ -27,12 +27,12 @@ type keeper_profile_defaults = {
   telemetry_feedback_window_hours : int option;
   always_allow : bool option;
   voice_always_allow : bool option;
-  (* RFC-0390: how much of an official client's built-in tool surface this
+  (* How much of an official client's built-in tool surface this
      keeper may use. [None] keeps each runtime's own default posture. *)
   native_tool_posture : Runtime_native_tools.posture option;
   (* Profile-only Skill selection; explicit empty is distinct from absence. *)
   skill_names : string list option;
-  (* RFC-0403: which of the attached services' tools this keeper takes.
+  (* Which of the attached services' tools this keeper takes.
      [None] is every tool the attached providers offer, which is what a
      keeper got before this field existed. Attached tools only: built-ins
      defer globally through [defer_loading] or per keeper through

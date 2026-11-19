@@ -2,7 +2,7 @@ open Alcotest
 
 module TR = Masc.Keeper_tool_descriptor_resolution
 
-(** RFC-0084 §1.4, §6.2 — runtime routing projection.
+(** Runtime routing projection.
 
     [Keeper_tool_descriptor_resolution.runtime_decision] is the SSOT entry for
     runtime tool-name routing.

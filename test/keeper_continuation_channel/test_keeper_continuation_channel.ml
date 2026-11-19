@@ -1,4 +1,4 @@
-(* Unit tests for [Keeper_continuation_channel] (RFC-0320 W1).
+(* Unit tests for [Keeper_continuation_channel].
 
    Covers the closed-variant contract:
      - codec round-trips for every constructor,
@@ -284,7 +284,7 @@ let test_same_route () =
   (* two Unrouted values never share a route (no destination to share) *)
   assert (not (same_route (unrouted "a") (unrouted "a")))
 
-(* RFC-0377: [same_conversation] batches pending Connector_attention
+(* [same_conversation] batches pending Connector_attention
    stimuli by "same channel/thread location", deliberately looser than
    [same_route] (which requires the full per-message coordinate, including
    [reply_to_message_id]/[thread_ts], to match). *)

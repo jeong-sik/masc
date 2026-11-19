@@ -105,7 +105,7 @@ type fusion_judge =
       fj_error : string;
     }
 
-(** RFC-0284 judge-node roles, as the server's judge_role_projection writes
+(** judge-node roles, as the server's judge_role_projection writes
     them. Closed on purpose: an untaught role fails its node's decode. *)
 type fusion_judge_role = Fusion_types.judge_role_kind =
   | Judge_single

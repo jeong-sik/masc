@@ -432,7 +432,7 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
-(* RFC-0444 §2.3 row 5: the Goal store envelope as the TUI reads it. The wire
+(* The Goal store envelope as the TUI reads it. The wire
    carries constructor names (reason, mirror.status, reset_step), the refused
    member, the file and the mirror's row count; the payloads the store keeps
    beside them (the Unix error, the parse detail, the mirror stamp) do not
@@ -461,7 +461,7 @@ type goal_store_unavailable_view = {
 }
 
 (* A goal projection body that is a failure envelope instead of the
-   projection: the Goal store (RFC-0444) or the Goal–Task link registry,
+   projection: the Goal store or the Goal–Task link registry,
    which is a different source with its own one-line envelope. *)
 type goal_source_failure =
   | Goal_store_unavailable of goal_store_unavailable_view
@@ -1892,7 +1892,7 @@ type repository = {
   rp_id : string;  (** what the workspace routes' [?repo_id=] resolves *)
   rp_name : string;
   (* The server-minted codebase slug the IDE annotation routes scope by
-     (RFC-0378: clients carry this value, they do not re-derive it from the
+     (clients carry this value, they do not re-derive it from the
      url). [None] when the remote cannot canonicalize. *)
   rp_codebase : string option;
   (* The remote as registered, for building links to it. *)

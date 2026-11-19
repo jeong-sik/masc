@@ -1,5 +1,4 @@
-(** The profile's selection over what the attached services offered
-    (RFC-0403).
+(** The profile's selection over what the attached services offered.
 
     Pure set work on an offering that is built here rather than read from a
     provider: what is under test is which names survive, not how a catalog

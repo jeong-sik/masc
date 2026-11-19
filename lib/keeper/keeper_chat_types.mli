@@ -89,9 +89,8 @@ type user_row_origin =
     message content: the authenticated dashboard route is [Owner];
     anything carrying connector context is [External]; a sender that the
     producing site matched exactly against the Keeper registry is [Keeper],
-    with the Keeper's id in [speaker_id] (RFC-0468 §3.2). Persisted as
-    ["owner"] / ["external"] / ["keeper"] in [speaker_authority]
-    (RFC-0223 §3). *)
+    with the Keeper's id in [speaker_id]. Persisted as
+    ["owner"] / ["external"] / ["keeper"] in [speaker_authority]. *)
 type speaker_authority =
   | Owner
   | External
@@ -117,7 +116,7 @@ type audio_clip = {
   device_id : string option;
   expired : bool;
 }
-(** Persistable audio clip (RFC-0235 P1). Written on an assistant line
+(** Persistable audio clip. Written on an assistant line
     when the keeper synthesized a voice utterance; [token] is the
     [/api/v1/voice/audio/:token] capability, [message_text] doubles as
     the caption. [audio_url] and [device_id] carry transport routing hints
@@ -137,7 +136,7 @@ val keeper_speaker : Keeper_identity.Keeper_id.t -> speaker
     already matched the sender against the Keeper registry; the id is not
     read back from the shape of any string here. [speaker_id] and
     [speaker_name] both carry the Keeper id, since a Keeper has exactly one
-    name (RFC-0393). *)
+    name. *)
 
 type chat_message = {
   id : string;
@@ -170,12 +169,12 @@ type chat_message = {
           [speaker_authority] label fails to parse (reported as a
           persistence read drop, row otherwise kept). *)
   audio : audio_clip option;
-      (** RFC-0235 P1: present when this assistant line was a synthesized
+      (** Present when this assistant line was a synthesized
           voice utterance (keeper_voice_speak). [None] on every other
           line and on rows written before voice transport; the dashboard
           renders a play button when present. *)
   blocks : chat_block list option;
-      (** RFC-0235 P3: rich chat blocks parsed from assistant reply text.
+      (** Rich chat blocks parsed from assistant reply text.
           Persisted server-side so the dashboard can prefer backend blocks
           over its local parser. [None] on rows written before this field
           and on non-assistant rows. *)

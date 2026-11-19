@@ -433,7 +433,7 @@ let test_prepare_resumable_status_gate () =
 
 
 
-(* --- cli tail (RFC cli-runtimes-as-lane-slots) --------------------------- *)
+(* --- cli tail ------------------------------------------------------------ *)
 
 let contains_substring ~needle haystack =
   let n = String.length needle and h = String.length haystack in
@@ -1260,7 +1260,7 @@ let latest_board_attention_run ~actor =
   | [] -> Alcotest.fail "no board attention run was recorded"
 ;;
 
-(* RFC cli-runtimes-as-lane-slots §3: a run a CLI slot answered is recorded
+(* A run a CLI slot answered is recorded
    with [selected_slot] = that runtime id. The record used to close as failed
    on the last HTTP slot before the tail ran (2026-09-19: 12 of 12 runs a CLI
    slot answered read "failed"). *)

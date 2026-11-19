@@ -163,7 +163,7 @@ let test_failure_observer_only_follows_successful_writes () =
       check int "stale lane did not notify" 1 !calls)
 ;;
 
-(* RFC-0481 §3.2: a committed registry swap announces that Keeper's row when
+(* A committed registry swap announces that Keeper's row when
    it added or removed the entry or moved its phase or failure. *)
 let hearing_row_signals ~base_path f =
   let id = Printf.sprintf "keeper-registry-row-signals-%d-%s" (Unix.getpid ())

@@ -1,4 +1,4 @@
-(* RFC-0476 §3.2: the message objects and turn bundles a checkpoint head
+(* The message objects and turn bundles a checkpoint head
    names, one file each at [<session_dir>/objects/<aa>/<sha256>]. A file is
    written once and never changed; only the object sweep removes one. *)
 

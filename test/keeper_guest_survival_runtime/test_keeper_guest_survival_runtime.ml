@@ -2597,7 +2597,7 @@ let test_helper_uncertainty_preserves_guest_on_adopt_and_replace () =
       check bool "the real helper inventory was requested" true
         (List.mem ["list"; "--all"; "--format"; "json"] after);
       (* A guest that matches its plan gets one agent probe before it is
-         adopted (RFC microvm-guest-agent-over-socket 3.6); the probe reads
+         adopted; the probe reads
          the shim's answer and changes nothing. *)
       check bool "refusal only reads provider state" true
         (List.for_all (function ["list"; "--all"; "--format"; "json"] -> true

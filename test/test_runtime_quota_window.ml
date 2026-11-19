@@ -1,5 +1,5 @@
 (* Pins Runtime_quota_window: account-scoped provider quota windows consumed
-   as a lane-ordering preference (RFC-0370 §3.3). [now] is a parameter
+   as a lane-ordering preference. [now] is a parameter
    everywhere, so no time stubbing. *)
 
 module Q = Runtime_quota_window

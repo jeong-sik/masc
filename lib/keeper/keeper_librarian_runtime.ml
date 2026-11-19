@@ -2451,7 +2451,7 @@ let run_pass
                        (List.map Keeper_librarian.claim_field_to_string ignored.differing)))
                selection.ignored_fields;
              (* An absorption the merged claim does not convey is not applied:
-                that memory stays current (RFC-librarian-absorb-gate). The
+                that memory stays current. The
                 gate only narrows the list. A gate switched off, or an
                 excluded Keeper, leaves the answer unchanged; a gate that is
                 on but cannot be asked absorbs nothing; a failed judgment
@@ -2459,7 +2459,7 @@ let run_pass
                 entire Memory range pending, including its proposed claims.
                 On a completed judgment, a new claim that absorbed nothing
                 and only repeats its current sources is a copy and is not
-                applied (RFC-0463 section 2.8). *)
+                applied. *)
              let absorption=absorption_input prompt_input accepted in
              let absorb_gate =
                Keeper_librarian_absorb_gate.run

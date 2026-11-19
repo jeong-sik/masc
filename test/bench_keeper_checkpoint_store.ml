@@ -1,5 +1,5 @@
 (** Measures what the Keeper checkpoint store writes and reads against the
-    size of the history it already holds (RFC-0476 L0).
+    size of the history it already holds.
 
     Each case builds a history of tool cycles shaped like the live fleet on
     2026-10-28: a message body near the 1.3 KB median without media, and,
@@ -18,7 +18,7 @@
     [write_B] counts the average successful logical payload bytes a round
     writes: message objects, the head and history fallbacks, not metadata,
     fsync or device traffic. [file_MiB] is the canonical file, which is the
-    head (RFC-0476 §3.2).
+    head.
     An uncertain archive write stops the case instead of reporting a number.
     [disk_MiB] recursively counts retained regular files once per device/inode.
     New checkpoint object writers must join the same observation boundary.

@@ -1,4 +1,4 @@
-(* RFC-0374 — the deterministic half of the capability probe lane.
+(* The deterministic half of the capability probe lane.
 
    Deliberately has no dependency on the turn driver, the runners, the chat
    store, or the checkpoint store. That absence is the point of the module:
@@ -656,7 +656,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
              let runtime_root = Common.masc_dir_from_base_path ~base_path in
              (* The probe runs in the HOME's own empty folder. [base_path] would
                 make every Keeper's account files under [.masc] its workspace,
-                which agy reads without a rule (RFC-0490 2.2). *)
+                which agy reads without a rule. *)
              (* HIGH-RISK-UNREVIEWED: the probe starts the client on a
                 credential of the host, which a multi-account process shares
                 with no person (plan D3b). *)

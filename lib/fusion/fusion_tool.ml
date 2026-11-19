@@ -51,7 +51,7 @@ let worker_result ~compute ~net ~policy ~topology ~request_id ~keeper ~prompt
              | Some detail -> [ "detail", `String detail ])))
 ;;
 
-(* 실행별 명단 인자 (RFC fusion-seat-routes §2.4). 키가 없으면 preset 의 그 칸을
+(* 실행별 명단 인자. 키가 없으면 preset 의 그 칸을
    그대로 쓴다. 키가 있으면 값이 경로 이름이어야 하고, 틀린 모양은 없는 것으로 읽지
    않고 거절한다. 경로 이름은 앞뒤 공백을 뗀 값으로 적는다. *)
 let judge_arg_error =

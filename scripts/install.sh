@@ -827,7 +827,7 @@ run_wizard() {
     # path offers below -- but report-only. A first-run install must not fail on
     # an unreachable provider; it only surfaces the result so the operator learns
     # it here rather than at the first turn. This is the connectivity signal the
-    # zero-config auto-select (RFC-0408) and any scripted --provider install
+    # zero-config auto-select and any scripted --provider install
     # otherwise never got: the interactive path pinged, the non-TTY path returned
     # blind. A cloud provider is the case this most helps -- its "green" is only
     # "key is present", never "key works", so a wrong key used to surface only at
@@ -1597,7 +1597,7 @@ install_release_companion "$ANTIGRAVITY_HOOK_ASSET" "$ANTIGRAVITY_HOOK_DEST"
 install_release_companion "$ADDON_LAUNCHER_ASSET" "$ADDON_LAUNCHER_DEST"
 install_release_companion "$BROWSER_ADDON_WORKER_ASSET" "$BROWSER_ADDON_WORKER_DEST"
 
-# The guest exec shim (RFC-0427 B-2). The release ships one static Linux
+# The guest exec shim. The release ships one static Linux
 # binary per guest architecture; the guest is arm64 on an Apple Silicon host
 # (Apple's container) and the host's own architecture on Linux. It lands where
 # the server's microvm boot mounts it, with the release's own sha256 beside it

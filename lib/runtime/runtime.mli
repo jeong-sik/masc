@@ -1,6 +1,6 @@
 (** Runtime = Provider + Model + Spec(binding).
 
-    runtime→Runtime 전환 (RFC-0206). runtime 의 routes/runtime_id/tier/profile
+    runtime→Runtime 전환. runtime 의 routes/runtime_id/tier/profile
     간접 레이어를 제거하고, binding(provider × model) 하나를 곧 하나의 Runtime
     으로 본다. 소비자는 Runtime 목록 + default Runtime 을 직접 소비한다.
     선언 스키마는 {!Runtime_schema}, materialized 값은 {!Runtime_instance} 소유. *)
@@ -610,7 +610,7 @@ val dashboard_runtime_defaults_snapshot : unit -> dashboard_runtime_defaults_sna
     each. They are {!Standalone_lane.t}, whose [all], [to_id] and [of_id] list
     and spell them; the equation keeps [Runtime.Librarian] and the other
     constructor paths. [Verifier] is the single selector for completion
-    judgement calls (RFC-0361 D7(a)). *)
+    judgement calls. *)
 type exact_lane = Standalone_lane.t =
   | Librarian
   | Hitl_auto_judge
@@ -777,7 +777,7 @@ val get_runtime_by_id : string -> t option
     {!resolve_assignment} distinguishes a catalog-unavailable configured ID
     from an unknown ID. Used by the keeper turn driver to dispatch to the requested runtime (a
     keeper's runtime assignment or the default); [None] makes the driver
-    fail fast rather than silently substituting the default (RFC-0207). *)
+    fail fast rather than silently substituting the default. *)
 
 val is_local_runtime_id : string -> bool option
 (** Locality classification for a configured runtime id, or [None] when the
@@ -842,7 +842,7 @@ val pricing_of_runtime_id : string -> float option * float option
 (** [(price_input, price_output)] per-million-token USD rates declared on the
     runtime [id] binding in runtime.toml, or [(None, None)] when the runtime is
     not configured or the operator left the rates unset.  Consumed by the
-    turn-record writer (RFC-0233 §8) so the dashboard renders actual cost or
+    turn-record writer so the dashboard renders actual cost or
     absence rather than a fabricated Claude default. *)
 
 val get_default_route : unit -> string
@@ -856,8 +856,8 @@ val get_default_route : unit -> string
 val get_default_runtime_id : unit -> string
 (** The runtime binding where the current default route enters: the route
     itself may be a lane name, which {!get_default_route} returns instead.
-    @raise Failure if {!init_default} has not run. No silent fallback
-    (RFC-0206 §2.1): an unresolved default is a startup-ordering bug, not a
+    @raise Failure if {!init_default} has not run. No silent fallback:
+    an unresolved default is a startup-ordering bug, not a
     recoverable condition. Callers must invoke this at runtime, never as a
     module-level [let] binding (would crash config-less test binaries). *)
 
@@ -1263,7 +1263,7 @@ val with_manifest_config_lock :
 
 (** {1 Typed Lane Requirement x Runtime Capability Admission}
 
-    RFC-any-runtime-serves-an-exact-lane: each lane declares its requirement as
+    Each lane declares its requirement as
     a closed value, each runtime derives its capability from its launch/provider
     profile, and {!admits} decides admission by exhaustive pattern matching
     without wildcards on any capability or requirement variant. *)

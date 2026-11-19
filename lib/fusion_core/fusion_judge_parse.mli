@@ -25,9 +25,7 @@
     [decision.kind]는 ["answer"] | ["recommend"] | ["insufficient"] 중 하나:
     - answer:       [{ "kind": "answer", "answer": "..." }]
     - recommend:    [{ "kind": "recommend", "action": "...", "rationale": "..." }]
-    - insufficient: [{ "kind": "insufficient", "missing": ["..."] }]
-
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
+    - insufficient: [{ "kind": "insufficient", "missing": ["..."] }] *)
 
 (** Wire field names shared by the typed decoder, its derived output schema,
     and prompt fixtures. *)

@@ -1,4 +1,4 @@
-// RFC-0050 PR-1 — extracted from cost-dashboard.ts.
+// Extracted from cost-dashboard.ts.
 // Pure audit-ledger aggregation. Depends only on the AuditEntry shape
 // from the dashboard API. No signals, no render, no module-level state.
 

@@ -1264,7 +1264,7 @@ let patched_keeper_status row ~event ~keepalive_running =
     `String (Keeper_status_runtime.control_plane_status_to_string status)
   | None when not keepalive_running -> `String "offline"
   | None ->
-    (* RFC-0089: classify the row's display status via the typed operator
+    (* Classify the row's display status via the typed operator
        SSOT. busy/active/listening/idle pass through; inactive/offline collapse
        to "offline"; an operator pause survives the patch, because a running
        keepalive fiber does not un-pause a keeper — collapsing it here made

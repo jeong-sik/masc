@@ -146,7 +146,7 @@ val ensure_masc_dir : where:string -> store -> (unit, board_error) result
     The stable-lock precondition rereads all prior bytes on each append. *)
 val append_post : store -> post -> posts_write_outcome
 
-(** RFC-0233 §7: maintain the origin secondary indexes ([posts_by_turn_ref] /
+(** Maintain the origin secondary indexes ([posts_by_turn_ref] /
     [posts_by_run_id]) from a post's [origin].  Used by the load path to
     rebuild the indexes that {!find_post_by_turn_ref} / {!find_post_by_run_id}
     read.  A [None] origin is a no-op. *)
@@ -260,7 +260,7 @@ val mark_dirty_comment : store -> string -> unit
 
 val post_to_yojson : post -> Yojson.Safe.t
 
-(** RFC-0233 §7: encode the typed post origin. Re-exported here so the
+(** Encode the typed post origin. Re-exported here so the
     dashboard board serializer ({!Board_votes.post_to_yojson_with_karma}) can
     reuse the single origin encoder. *)
 val post_origin_to_yojson : post_origin -> Yojson.Safe.t

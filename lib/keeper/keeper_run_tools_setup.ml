@@ -521,7 +521,7 @@ let prepare_agent_setup
              ])
         "An attached service names a tool this turn cannot offer")
     identity_offering.Keeper_identity_tools.unusable;
-  (* RFC-0403: the profile's own selection over what the services offered.
+  (* The profile's own selection over what the services offered.
      Absent selection keeps the whole offering, so a keeper that declares
      nothing sends the same bytes it sent before this existed. *)
   let identity_allow =
@@ -754,7 +754,7 @@ let prepare_agent_setup
   let all_tool_names =
     List.map (fun (tool : Agent_core.Tool.t) -> tool.schema.name) keeper_tools
   in
-  (* The selection, not the offering (RFC-0403). This names what the bundle
+  (* The selection, not the offering. This names what the bundle
      is expected to carry, and the bundle is built from the kept list:
      checking against the whole offering would report every tool the profile
      deliberately left out as a projection defect. *)

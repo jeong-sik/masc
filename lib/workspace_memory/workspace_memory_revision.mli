@@ -1,5 +1,5 @@
 (** Ledger and Briefing states, each stored once under the SHA-256 of its
-    bytes (RFC-workspace-curator-originals-name-ledger-revisions §3.1–3.2).
+    bytes.
 
     A revision is computed from a typed state, never by hashing a published
     file. [ledger.json] holds the same bytes as the ledger's revision file;

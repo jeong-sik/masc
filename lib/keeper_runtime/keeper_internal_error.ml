@@ -202,7 +202,7 @@ let transcript_quarantine_reason_of_string = function
   | _ -> None
 ;;
 
-(* RFC-0454 P2. Which host decision stopped a running turn. See the .mli. *)
+(* Which host decision stopped a running turn. See the .mli. *)
 type host_turn_stop =
   | Host_graceful_shutdown
   | Runtime_reported_interrupt
@@ -248,7 +248,7 @@ let gate_replay_repair_stage_of_string = function
   | _ -> None
 ;;
 
-(* RFC-0454 D1. The fence wraps whatever failed the provider attempt, and that
+(* The fence wraps whatever failed the provider attempt, and that
    can be another MASC error. Written as a string, the inner error's own
    prefixed JSON landed inside a JSON string and every wrap added a layer of
    escaping. [fenced_cause] and [masc_internal_error] are declared together
@@ -277,7 +277,7 @@ and masc_internal_error =
       model : string option;
       reason_kind : accept_rejection_kind option;
       response_shape : accept_response_shape option;
-      (* RFC-0271 §4.5: typed provider stop_reason for the rejected response.
+      (* Typed provider stop_reason for the rejected response.
          [MaxTokens] marks an exhausted output budget and must be
          distinguished from a clean [EndTurn] no-progress terminal. Consumed by
          [accept_no_progress_retry_kind]: it
@@ -926,7 +926,7 @@ let accept_rejection_has_no_progress_retry_hint err =
     true
   | None -> false
 
-(* The typed value rides the carrier (RFC-0371 B12 §6.1(1)); the message
+(* The typed value rides the carrier; the message
    keeps the exact prefixed-JSON spelling so anything that only stringifies
    — logs, receipts, persisted turn state — sees the same wire text as
    before the carrier existed. *)
@@ -1279,7 +1279,7 @@ let classify_masc_internal_error (err : Agent_core.Error.t) :
          })
   in
   match err with
-  (* Live values carry the typed payload (RFC-0371 B12); the string parse
+  (* Live values carry the typed payload; the string parse
      below stays as the boundary for persisted strings and for [Internal]
      values from producers that predate the carrier. *)
   | Agent_core.Error.Internal_carried { carrier = Masc_internal err; _ } -> Some err

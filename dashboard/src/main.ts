@@ -198,6 +198,6 @@ performanceMonitor.start()
 // Snapshot available on window.__MASC_WEB_VITALS__ for test/playwright inspection.
 startWebVitalsCapture()
 
-// RFC-0049 — surface/section open counters to /api/v1/dashboard/nav-event.
+// surface/section open counters to /api/v1/dashboard/nav-event.
 // Aggregate only, no PII. Drives RFC-0048 IA decisions.
 startNavTelemetry()

@@ -719,7 +719,7 @@ let test_register_discovered_skips_existing () =
         | Ok second ->
             Alcotest.(check int) "second count empty" 0 (List.length second))
 
-(* RFC-0128 §4.5 — reverse lookup tests. *)
+(* Reverse lookup tests. *)
 
 let with_two_absolute_repos f =
   with_temp_base_path (fun base_path ->

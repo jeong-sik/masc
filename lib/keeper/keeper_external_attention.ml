@@ -30,7 +30,7 @@ let persistence_surface = "keeper_external_attention"
    that is a rare, harmless duplicate, never data loss. *)
 let dedup_window_bytes = 64 * 1024
 
-(* RFC-0232 P5: the surface vocabulary moved to the shared [Surface_ref]
+(* The surface vocabulary moved to the shared [Surface_ref]
    module; this equation re-exports it so existing consumers keep
    constructing/matching [Keeper_external_attention.Dashboard] etc. *)
 type surface_ref = Surface_ref.t =
@@ -472,7 +472,7 @@ let recorded_item_by_event_id events event_id =
       | Recorded _ -> None)
     events
 
-(* RFC-0377: [load_events] parses the whole file on every call, exactly the
+(* [load_events] parses the whole file on every call, exactly the
    O(file)-per-call shape the [dedup_window_bytes] comment above already
    warns against for [record]'s dedup scan. A caller resolving a *batch* of
    event_ids (e.g. every stimulus admitted into one turn) must not call

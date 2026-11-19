@@ -445,7 +445,7 @@ let receipt_outcome_text ~ko ~current result =
     text ("원래 서버, " ^ workspace ^ ", 운영자를 다시 확인")
       ("reinspect the original server, " ^ workspace ^ " and operator") in
   match current, result with
-  | false, Error _ -> text "결과 미확인" "Outcome unconfirmed" ^ " · " ^ reinspect
+  | false, Error _ -> text "결과 보고 안 됨" "Outcome not reported" ^ " · " ^ reinspect
   | false, Ok _ -> text "응답 보존됨" "Response retained" ^ " · " ^ reinspect
   | true, Ok message -> text "응답: " "Response: " ^ Terminal_text.single_line message
   | true, Error error -> text "오류: " "Error: " ^ Terminal_text.single_line error
@@ -587,7 +587,8 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
           then "Candle 후보는 증명 기록 중 저장된 Snapshot의 연결 작업만 사용합니다."
           else "Candle candidates use the links in the Snapshot saved during proof recording.")
       @ paragraph ~indent:0 Quiet (if ko
-          then "지급 누락 여부: 미확인" else "Missing contributions: unknown.")
+          then "Snapshot 밖 기여가 지급에서 빠졌는지는 보고되지 않습니다."
+          else "Whether contributions outside the Snapshot were left out is not reported.")
     else [] in
   header
   :: (instruction @ (if recorded = [] then [] else blank @ recorded) @ blank @ promise @ blank @ binding
@@ -622,7 +623,7 @@ let verifying_next_step ~ko ~can_retry unreconciled =
   let text korean english = if ko then korean else english in
   if not can_retry then
     ( Unreadable
-    , (text "검증 결속 미확인 · 기존 검토가 진행 중일 수 있습니다. 연결·저장소·런타임을 확인하고 [r]로 재조회하세요. [x]:중단 요청" "verification binding unavailable - a prior review may still run; check connection, server storage and runtime, then [r] refresh; [x] requests drop") )
+    , (text "검증 결속 보고 안 됨 · 기존 검토가 진행 중일 수 있습니다. 연결·저장소·런타임을 확인하고 [r]로 재조회하세요. [x]:중단 요청" "verification binding not reported - a prior review may still run; check connection, server storage and runtime, then [r] refresh; [x] requests drop") )
   else match unreconciled with
   | Some (_ : Tui_decode.verifier_unreconciled) ->
     ( Refused
@@ -658,8 +659,8 @@ let body ~ko ~width proof last_review_note =
       @ note ~ko ~width last_review_note
   | Tui_decode.Proof_idle ->
       (match note ~ko ~width last_review_note with
-       | [] -> [ { tone = Quiet; text = (text "판정 미기록" "no verdict on the ledger") } ]
-       | rows -> { tone = Quiet; text = (text "판정 미기록" "no verdict on the ledger") } :: rows)
+       | [] -> [ { tone = Quiet; text = (text "기록된 판정 없음" "no verdict on the ledger") } ]
+       | rows -> { tone = Quiet; text = (text "기록된 판정 없음" "no verdict on the ledger") } :: rows)
 
 let criterion_review_lines ~width ~ko review =
   let text korean english = if ko then korean else english in
@@ -668,7 +669,7 @@ let criterion_review_lines ~width ~ko review =
       "Criterion feasibility review; completion proof and human confirmation remain separate.") in
   let rows = match (review : Tui_decode.goal_criterion_review) with
     | Tui_decode.Criterion_unchecked ->
-      verdict ~width Quiet (text "성공 기준 검토 미기록" "Criterion review not recorded") None
+      verdict ~width Quiet (text "기록된 성공 기준 검토 없음" "No criterion review recorded") None
     | Tui_decode.Criterion_unavailable detail ->
       verdict ~width Unreadable (text "성공 기준 검토 확인 불가" "Criterion review unavailable") (Some detail)
     | Tui_decode.Criterion_observed observed ->

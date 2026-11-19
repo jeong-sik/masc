@@ -611,7 +611,7 @@
  (name masc_tui_preset_text)
  (wrapped false)
  (modules masc_tui_preset_text)
- (libraries masc masc.runtime masc_tui_fetched masc_tui_message_layout))
+ (libraries masc masc.runtime masc_tui_fetched masc_tui_message_layout masc_tui_value))
 
 ;; The card an issued play invite is drawn as: pure, so a test reads the exact
 ;; rows an operator sees. The QR is drawn by the portraits' half-block mosaic in
@@ -657,7 +657,8 @@
  (name masc_tui_artifact_checks)
  (wrapped false)
  (modules masc_tui_artifact_checks)
- (libraries masc_tui_resource_catalog masc_tui_fetched masc masc_tui_value yojson))
+ (libraries masc_tui_resource_catalog masc_tui_fetched masc masc_tui_message_layout
+   masc_tui_value yojson))
 
 (library
  (name masc_tui_artifact_check_action)
@@ -2386,7 +2387,7 @@
  (name masc_tui_runtime_account_form)
  (wrapped false)
  (modules masc_tui_runtime_account_form)
- (libraries masc.runtime masc_tui_ansi masc_tui_message_layout))
+ (libraries masc.runtime masc_tui_ansi masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_memory_lineage)
@@ -2399,14 +2400,14 @@
  (wrapped false)
  (modules masc_tui_memory_recall_form)
  (libraries masc masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
-  masc_tui_ansi masc_tui_message_layout))
+  masc_tui_ansi masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_typesafeai_exclusion_form)
  (wrapped false)
  (modules masc_tui_typesafeai_exclusion_form)
  (libraries masc.runtime masc.runtime_toml_namespace masc.toml_line_editor
-  masc_tui_ansi masc_tui_message_layout))
+  masc_tui_ansi masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_activity_notice)

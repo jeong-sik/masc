@@ -815,11 +815,11 @@ let evidence_receipt_lines json =
             (match text (member "status" delivery), text (member "error" delivery) with
              | Some "failed", Some error -> [destination ^ " failed: " ^ error ^ " · the bundle stays preserved"]
              | Some "pending_commit", _ -> [destination ^ " queued · workspace commit is pending; retry uses the same request"]
-             | Some "outcome_unknown", _ -> [destination ^ " outcome unknown · evidence preserved; verify before resending"]
+             | Some "outcome_unknown", _ -> [destination ^ " outcome not reported · evidence preserved; verify before resending"]
              | Some "committed", _ -> [destination ^ " committed · Keeper reads and actions are unverified"]
              | Some "accepted", _ -> [destination ^ " accepted · Keeper reads and actions are unverified"]
              | Some status, _ -> [destination ^ " " ^ status]
-             | None, _ -> [destination ^ " status unknown"]) in
+             | None, _ -> [destination ^ " status not reported"]) in
       frozen :: selection @ delivery
 let selected_source_path view =
   Option.bind view.snapshot (fun snapshot ->
@@ -932,7 +932,7 @@ let track_application view target =
         (List.filter_map (fun (d : declaration) -> d.application) configuration.declarations)
 let declaration_application view (declaration : declaration) =
   match declaration.application with
-  | None -> "Application unknown · declaration could not be read"
+  | None -> "Application not reported · declaration could not be read"
   | Some observation -> Application.describe (track_application view observation.target)
 let document_application_lines view session =
   ["Accepted file application · " ^ (match Document.application_target session with
@@ -940,8 +940,23 @@ let document_application_lines view session =
     | Ok target -> Application.describe (track_application view target));
    (if Application.pending view.application_reading then "Refreshing application · draft remains editable"
     else "Application follows visible-pane refresh · r:read now")]
+
+(* A value the server left out is the unreported mark of RFC
+   tui-one-screen-grammar 6.4, never the word "unknown". A parsed
+   declaration always carries its desired revision, and no applied
+   revision there means none was applied; an issue-only declaration was not
+   parsed, so neither revision was reported. *)
+let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+let desired_text (declaration : declaration) =
+  Option.value ~default:unreported declaration.desired
+let applied_text (declaration : declaration) =
+  match declaration.origin, declaration.applied with
+  | (Parsed_declaration | Issue_only), Some revision -> revision
+  | Parsed_declaration, None -> "none"
+  | Issue_only, None -> unreported
+
 let configuration_lines view snapshot = match snapshot.configuration with
-  | None -> ["TOML configuration status unknown"]
+  | None -> ["TOML configuration not reported"]
   | Some config ->
       ["TOML installations · " ^ config.directory ^ (if config.complete then " · inventory complete" else " · inventory partial")]
       @ List.concat (List.mapi (fun index (declaration : declaration) ->
@@ -950,10 +965,10 @@ let configuration_lines view snapshot = match snapshot.configuration with
          (match declaration.enabled with
           | Some false -> "   Configured off"
           | Some true -> "   Configured on"
-          | None -> "   Desired activity unknown");
+          | None -> "   Desired activity not reported");
          "   " ^ declaration_application view declaration;
-         "   desired " ^ Option.value ~default:"unknown" declaration.desired;
-         "   applied " ^ Option.value ~default:"none" declaration.applied]
+         "   desired " ^ desired_text declaration;
+         "   applied " ^ applied_text declaration]
         @ (if Document.editable_source_path ~directory:config.directory declaration.source_path then []
            else ["   Configuration issue; no declaration file to edit"])
         @ List.map (fun message -> "   Error: " ^ message) declaration.issues) config.declarations)
@@ -964,7 +979,7 @@ type technical_part =
 let technical_text lines = List.map (fun line -> Technical_text line) lines
 
 let evidence_text (evidence : Row.evidence) =
-  "Evidence " ^ evidence.uri ^ " · sha256 " ^ Option.value ~default:"unknown" evidence.sha256
+  "Evidence " ^ evidence.uri ^ " · sha256 " ^ Option.value ~default:unreported evidence.sha256
 
 (* One document part as screen rows. JSON is code: it takes the code gutter
    and the lexer colours that every other JSON view draws. *)
@@ -1006,11 +1021,11 @@ let action_parts view = match view.last_action with
     | Some request -> technical_text ["Action request " ^ request.request_id ^ " · t:read status (never replays)";
         "  instance " ^ request.instance_id ^ " · incarnation " ^ request.incarnation]
         @ (match view.action_receipt with
-          | None -> technical_text ["  receipt unknown; t queries this exact request"]
+          | None -> technical_text ["  receipt not read; t queries this exact request"]
           | Some receipt -> technical_text ["  state " ^ (match receipt.Action.state with
               | Action.Queued -> "queued" | Action.Running -> "running" | Action.Confirmed -> "confirmed"
               | Action.Failed_before_effect -> "failed_before_effect" | Action.Outcome_unknown -> "outcome_unknown");
-              "  requester " ^ receipt.requester ^ " · executor " ^ Option.fold ~none:"unknown" ~some:Masc.Lane_addon_lifecycle.resource_to_string receipt.executor]
+              "  requester " ^ receipt.requester ^ " · executor " ^ Option.fold ~none:unreported ~some:Masc.Lane_addon_lifecycle.resource_to_string receipt.executor]
               @ technical_text (match receipt.detail with None -> [] | Some detail -> ["  " ^ detail])
               @ (match receipt.result with None -> [] | Some result -> [Technical_json {value=result;indent=0}]))
 let action_lines view =
@@ -1105,7 +1120,7 @@ let diagnostic_lines view =
 let unread_body_text ~failed_note (view : t) =
   match view.error, view.snapshot_read_error, view.loading with
   | Some _, _, (true | false) | None, Some _, (true | false) -> failed_note
-  | None, None, true -> "Reading…"
+  | None, None, true -> "Reading"
   | None, None, false -> no_reading_yet_text
 
 (* What the status row says about a read or interaction. Kept whole here rather than
@@ -1206,14 +1221,14 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
           | Detail _, _ -> Option.to_list (selected_row view) in
         technical_text ["Raw details";
          "Snapshot " ^ (match snapshot.complete with
-           | Some true -> "complete" | Some false -> "partial" | None -> "unknown")]
+           | Some true -> "complete" | Some false -> "partial" | None -> unreported)]
         @ (if rows=[] then [] else Technical_text "Records" :: List.concat_map raw_row rows)
         @ worker @ technical_text configuration
         @ technical_text (if snapshot.output.coverage=[] then [] else
              "Coverage" :: List.map (fun (source : Row.coverage) ->
                source.source_id ^ " · " ^ (if source.complete then "complete" else "partial")
                ^ " · incarnation " ^ source.incarnation
-               ^ " · cursor " ^ Option.value ~default:"unknown" source.cursor
+               ^ " · cursor " ^ Option.value ~default:unreported source.cursor
                ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail)
                snapshot.output.coverage) in
   let receipt = match view.receipt with
@@ -1234,7 +1249,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
 let installation_detail_lines ~width view =
   let wrap = document_rows ~width in
   let edit = if Option.is_some (selected_source_path view) then ["E:edit TOML"] else [] in
-  let refresh = if view.loading then "Reading …" else "r:refresh" in
+  let refresh = if view.loading then "Reading" else "r:refresh" in
   let body = match view.snapshot with
     | Some ({configuration=Some configuration;_} as snapshot) ->
         (match selected_declaration view with
@@ -1310,7 +1325,7 @@ let instance_controls view (instance : instance) =
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
-  let refresh = if view.loading then "Reading …" else "r:refresh" in
+  let refresh = if view.loading then "Reading" else "r:refresh" in
   if view.help_open then ["Esc:close help"]
   else if Option.is_some view.document_key then
     ["?:help"; "Esc:back"; "Space:on/off draft"; "E:edit"; "R:records"; "s:save"; "l:reload";
@@ -1827,7 +1842,7 @@ let snapshot_coverage_lines coverage =
     [""; "Received snapshot coverage · all Plugins"]
     @ List.map (fun (source : Row.coverage) ->
         source.source_id ^ " · " ^ (if source.complete then "complete" else "PARTIAL")
-        ^ " · cursor " ^ Option.value ~default:"unknown" source.cursor
+        ^ " · cursor " ^ Option.value ~default:unreported source.cursor
         ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail) coverage
 
 let overview_lines ~width view =
@@ -1845,7 +1860,7 @@ let overview_lines ~width view =
         let count = List.length (List.filter (fun item -> not (retained item)) snapshot.instances) in
         let retained_count = List.length (List.filter retained snapshot.instances) in
         let configuration_summary = match snapshot.configuration with
-          | None -> "TOML unknown"
+          | None -> "TOML not reported"
           | Some config ->
               let declared = List.fold_left (fun total (declaration : declaration) ->
                 if Option.is_some declaration.desired then total + 1 else total)
@@ -2373,9 +2388,9 @@ let detail_lines ~height ~width view =
                            ["Current declaration:", (match declaration.enabled with
                               | Some true -> "configured on"
                               | Some false -> "configured off"
-                              | None -> "desired activity unknown");
-                            "Desired:", Option.value ~default:"unknown" declaration.desired;
-                            "Applied:", Option.value ~default:"unknown" declaration.applied] };
+                              | None -> "desired activity not reported");
+                            "Desired:", desired_text declaration;
+                            "Applied:", applied_text declaration] };
                          Fact_text (declaration_application view declaration);
                          Fact_fields { indent = 0; fields = List.map (fun issue -> "Issue:", issue) declaration.issues }]
                    else []) config.declarations)
@@ -2392,7 +2407,7 @@ let detail_lines ~height ~width view =
             @ technical_text (List.map evidence_text row.evidence)
             |> List.concat_map (technical_rows ~width)) record_rows in
       head @ body
-  | Some _, None -> ["Reading Plugins…"]
+  | Some _, None -> ["Reading Plugins"]
 
 let rec action_fields prefix = function
   | `Assoc fields -> List.concat_map (fun (key,value) ->
@@ -2603,7 +2618,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       @ evidence_rows ~width prompt
   | None -> match view.subscription_panel,view.action_menu,view.records with
   | Some panel,_,_ ->
-      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
+      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (document_rows ~width)
   | None,Some menu,_ ->

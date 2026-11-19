@@ -88,7 +88,7 @@ val age_header : string
     them and {!column_legend} names them from these two values. *)
 
 val operator_disposition_word :
-  Masc.Keeper_execution_receipt.operator_disposition_kind -> string
+  ko:bool -> Masc.Keeper_execution_receipt.operator_disposition_kind -> string
 (** The human disposition word displayed in the activity column for a turn
     requiring operator attention. *)
 

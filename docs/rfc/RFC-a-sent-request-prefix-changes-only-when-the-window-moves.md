@@ -81,7 +81,6 @@ Claude 계정 레인은 0.4~1.2% 다.
 system 과 도구 배열의 상세 변경은 같은 시간 범위로 자른 provider 입력 기록의 연속 110쌍에서 셌다(`prefix_change_sources.txt`). 위 표의 111턴은 사용량 기록 기준이다. 별도 탐색 결과인 `turn_pair_changes.txt` 의 121쌍은 11-18~19 UTC 일별 파일에서 시간 범위를 따로 자르지 않고 비교한 수다.
 
 - system 이 바뀐 20쌍은 모두 `### Admitted Request Source` 절이 붙거나 떨어졌다.
-  - 그중 3쌍은 사용량 기록이 없는 턴이라 위 표의 system 줄(17턴)에 없다.
 - 같은 20쌍에서 `keeper_tool_search` 설명의 이름 목록에 `keeper_receipt_wait` 가 들고 났다.
 - 둘 다 그 턴이 채팅 요청을 받았는지에 따라 정해진다(§3.2).
 - 도구 배열만 바뀐 9쌍은 다른 도구 한두 개가 들고 났다.

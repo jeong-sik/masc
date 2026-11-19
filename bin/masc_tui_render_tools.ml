@@ -470,8 +470,8 @@ let async_request_detail_lines ~cols state target =
       physical @ Option.to_list (Option.map (fun notice -> Theme.warn (),
         Say.both ~ko:" 물리 사유: " ~en:" Physical reason: " ++ safe notice) snapshot.notice)
       @ dependencies @ logical @ nested in
-  [Ansi.bold, Say.both ~ko:" 원본 비동기 요청 · t:원본 Task · o:원본 ID 조회 · r:재조회 · Esc:목록"
-                ~en:" Original async request · t:original Task · o:read original ID · r:read again · Esc:list"]
+  [Ansi.bold, Say.both ~ko:" 원본 비동기 요청  t:원본 Task  o:원본 ID 조회  r:재조회  Esc:목록"
+                ~en:" Original async request  t:original Task  o:read original ID  r:read again  Esc:list"]
   @ reading @ failures @ snapshot
 
 let async_source_task_lines ~cols state source =
@@ -508,7 +508,7 @@ let async_source_task_lines ~cols state source =
             |> List.map (fun line -> "",line)) ] in
   rows
   [Ansi.bold, Say.both ~ko:" 원본 Task · " ~en:" Original Task · " ++ Say.as_received source.ats_task_id
-     ++ Say.both ~ko:" · r:본문·이력 재조회 · Esc:원본 요청" ~en:" · r:read body and history again · Esc:original request";
+     ++ Say.both ~ko:"  r:재조회  Esc:원본 요청" ~en:"  r:reread  Esc:original request";
    Ansi.dim, Say.both ~ko:" 출처 run: " ~en:" Source run: " ++ Say.as_received source.ats_run_id
      ++ Say.both ~ko:" · 논리 관측 " ~en:" · logical observation "
      ++ Say.code (Printf.sprintf "%.3f" source.ats_observed_at)
@@ -796,9 +796,9 @@ let storage_lines (state : state) =
        @ [ Ansi.bold, Say.both ~ko:" 은퇴한 Keeper 의 볼륨" ~en:" Retired Keepers' volumes"
          ; volume_tone tone, Say.code "   " ++ report
          ; Ansi.dim,
-           Say.both ~ko:"   회수는 전체 도구 탭에서 " ~en:"   Reclaim them on the All tools tab with "
+           Say.both ~ko:"   회수: 전체 도구 탭  " ~en:"   Reclaim on All tools tab  "
            ++ Say.code Masc_tui_volume_gc.key
-           ++ Say.both ~ko:" 로 합니다." ~en:"." ])
+           ++ Say.both ~ko:":정리" ~en:":reclaim" ])
 ;;
 
 (* Through [tab_strip], the one drawing every in-screen strip shares. This one
@@ -1038,8 +1038,8 @@ let skill_run_history_lines state (evidence : Masc.Tui_decode_skill_evidence.ski
         (Option.fold ~none:"—" ~some:(fun index -> string_of_int (index + 1)) index) (List.length runs) in
     [Ansi.bold,
      Say.per_language (function
-       | Say.Ko -> Printf.sprintf "     원래 실행: %s · [: 이전 · ]: 다음 · Enter: 최신" position
-       | Say.En -> Printf.sprintf "     Original runs: %s · [: older · ]: newer · Enter: latest" position);
+       | Say.Ko -> Printf.sprintf "     원래 실행: %s  [:이전  ]:다음  Enter:최신" position
+       | Say.En -> Printf.sprintf "     Original runs: %s  [:older  ]:newer  Enter:latest" position);
      Ansi.dim, Say.both ~ko:"       실행마다 보존된 마지막 결과 · 앞선 전이는 바뀌었을 수 있음"
                  ~en:"       Each run's latest retained result; earlier transitions may be replaced"]
     @ (match evidence.se_composition_selection, index with
@@ -1211,10 +1211,10 @@ let tools_diagnostics_copy_text (state : state) =
                     @ skill))))
 
 let skill_source_picker_prefix summary =
-  [ Ansi.bold, Say.both ~ko:" 이 package 를 저장할, 쓸 수 있는 출처를 고르세요"
+  [ Ansi.bold, Say.both ~ko:" 패키지 저장 출처 선택 (쓰기 가능)"
                  ~en:" Choose the writable source for this package"
-  ; Ansi.dim, Say.both ~ko:" j/k 나 화살표: 고르기 · Enter: 편집 · /: 거르기 · Esc: 취소"
-                ~en:" j/k or arrows: select · Enter: edit · /:filter · Esc:cancel"
+  ; Ansi.dim, Say.both ~ko:" j/k·화살표:선택  Enter:편집  /:필터  Esc:취소"
+                ~en:" j/k/arrows:select  Enter:edit  /:filter  Esc:cancel"
   ; Ansi.dim, Say.code " " ++ summary ]
 
 let skill_source_picker_page state ~terminal_rows =
@@ -1467,7 +1467,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
           | None -> []
           | Some { Masc.Tui_decode_tools.esp_flow = None; _ } ->
-            [ Ansi.dim, Say.both ~ko:"     흐름: 지침 본문은 필요할 때 불러오고, 도구는 모델이 고릅니다"
+            [ Ansi.dim, Say.both ~ko:"     흐름: 지침 본문 온디맨드 로드 · 도구 모델 자율 선택"
                           ~en:"     Flow: instruction body loads on demand; the model orchestrates tools" ]
           | Some { Masc.Tui_decode_tools.esp_flow = Some flow; _ } ->
             (* Grouped under the batch that runs them, rather than listed
@@ -1777,10 +1777,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                @ Option.fold ~none:[] ~some:(skill_settlement_lines ~cols) evidence.se_composition
                @ coverage_lines)
              | Some _ | None ->
-               rows [ Ansi.dim, Say.both ~ko:"Enter: 고른 revision 실측 불러오기 · f: 다음 Composition 실측"
-                                  ~en:"Enter: load this revision's measurements · f: next Composition's" ],
-               [ Ansi.dim, Say.both ~ko:"     보존된 실측: Enter 로 이 revision 을 불러옵니다"
-                             ~en:"     Retained evidence: Enter to load this exact revision" ])
+               rows [ Ansi.dim, Say.both ~ko:"Enter:선택 revision 실측 읽기  f:다음 Composition 실측"
+                                  ~en:"Enter:load revision measurements  f:next Composition" ],
+               [ Ansi.dim, Say.both ~ko:"     보존 실측  Enter:이 revision 불러오기"
+                             ~en:"     Retained evidence  Enter:load this revision" ])
         in
         let performance_card =
           match selected_tools_skill_profile state with
@@ -1791,13 +1791,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                   rows
                     (* f and the keys that walk the list are in section 5
                        of the frame, so the card names no key of its own. *)
-                    [ Ansi.dim, Say.both ~ko:"지침 Skill · 지침 텍스트에는 executor 실행 시간이 없습니다"
+                    [ Ansi.dim, Say.both ~ko:"지침 Skill · executor 실행 시간 없음"
                         ~en:"Normal Skill · instructions have no executor run time" ]
               | Composition_io _ -> selected_skill_statistics_lines in
             let pending = match state.tools_evidence_reference, state.tools_evidence_request with
               | Some reference, Some _ when Skill_reference.equal reference profile.esp_reference ->
-                  [ Theme.info (), Say.both ~ko:"실측 조회 중 · 이전 관측이 있으면 함께 표시합니다"
-                                     ~en:"Reading measurements · an earlier observation stays shown" ]
+                  [ Theme.info (), Say.both ~ko:"실측 조회 중 · 이전 관측 유지"
+                                     ~en:"Reading measurements · earlier observation retained" ]
               | Some _, Some _ | Some _, None | None, Some _ | None, None -> [] in
             let card_pieces =
               rows

@@ -26,7 +26,8 @@
       question's own text read back, so it is not counted as new grounds.
     - [Drop]: removes the fact.
     - [Merge], [Revise]: remove the named facts and state the new claim as
-      [Add] does. A named fact whose claim is the new claim is kept.
+      [Add] does. A named fact whose claim is the new claim is kept. The new
+      fact keeps the earliest [first_seen] of the facts it replaced.
 
     A fact removed by one op and stated by another leaves and is added as a
     new fact.
@@ -68,8 +69,11 @@ type t =
     [removed_since] names every fact removed since the question was made, with
     the number of the commit that removed it. A fact that was written again
     after it was removed stays listed: an op that names it, or states its
-    claim, is left out. New facts are seen at [at] and carry [trace_id] as
-    their origin. *)
+    claim, is left out. New facts are last seen at [at] and carry [trace_id]
+    as their origin. A new fact that replaces facts by a merge or a revision
+    is first seen when the earliest of them was, and never after [at]:
+    folding what Memory knew into fewer facts does not make it younger. Any
+    other new fact is first seen at [at]. *)
 val of_answer
   :  shown:shown
   -> facts:fact list

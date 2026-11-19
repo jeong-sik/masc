@@ -147,11 +147,11 @@ let operator_actions_reading (state : state) =
   let text ko en = ui_text state ~ko ~en in
   let sections = match operator_action_observation state with
     | None ->
-        [{ Masc_tui_detail_reading.heading = text "조치 원인 미확인" "Reasons unavailable"
-         ; body = text "서버의 구조화된 조치 관측을 아직 확인하지 못했습니다."
-             "The server's structured action observation has not been confirmed." }]
+        [{ Masc_tui_detail_reading.heading = text "조치 원인 미조회" "Reasons not read"
+         ; body = text "서버의 구조화된 조치 관측을 아직 읽지 않았습니다."
+             "The server's structured action observation has not been read yet." }]
     | Some (Tui_decode.Operator_actions_unavailable {diagnostics;error}) ->
-        [{ Masc_tui_detail_reading.heading = text "원래 서버 진단 · 이동 대상 미확인" "Original server diagnostics · targets unknown"
+        [{ Masc_tui_detail_reading.heading = text "원래 서버 진단 · 이동 대상 조회 실패" "Original server diagnostics · targets unreadable"
          ; body = String.concat "\n" diagnostics ^ "\n\n"
              ^ text "구조화된 관측을 읽지 못함: " "Structured observation unavailable: " ^ error }]
     | Some (Tui_decode.Operator_actions_observed []) ->

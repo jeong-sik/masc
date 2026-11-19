@@ -74,7 +74,7 @@ let token_key (state : state) ~save key =
        if not (String.equal token "")
        then (
          state.github_token_save_status
-         <- Some (Ansi.dim ^ "Saving GitHub token…" ^ Ansi.reset);
+         <- Some (Ansi.dim ^ "Saving GitHub token" ^ Ansi.reset);
          save keeper.k_name token)
      | None -> state.github_token_input <- None)
   | s

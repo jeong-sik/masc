@@ -75,9 +75,9 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
                 pending.Tui_decode.gp_auto_judge_detail )
           ; ( "next"
             , match pending.Tui_decode.gp_retry_request with
-              | Some _ -> "R: retry Auto Judge; y/n: decide now"
+              | Some _ -> "R:retry Auto Judge  y/n:decide now"
               | None ->
-                  "y/n: decide now (this exact attempt cannot be replayed)" )
+                  "y/n:decide now (cannot replay this attempt)" )
           ]
         | Gate_human_required ->
           (* Auto Judge handed the row over with its reasons; the person
@@ -368,7 +368,7 @@ let ask_answer_feedback_document (state : state) =
          emit "Original asking turn" Ansi.dim source
      | Decode.Ask_installation { ai_title; _ } ->
          emit "Installation" Ansi.dim
-           ("Esc to return · g: open " ^ ai_title ^ " Results\n"
+           ("Esc:return, then g:open " ^ ai_title ^ " Results\n"
             ^ Yojson.Safe.pretty_to_string (Ask_projection.asker_to_json feedback.af_asker)));
     Option.iter (fun reading ->
       let observed = Ask_projection.followup_view reading in
@@ -465,7 +465,7 @@ let ask_answer_feedback_document (state : state) =
       (match observed.fv_identity, observed.fv_task.fo_value with
        | Some _, Some (Decode.Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _) ->
            emit "Original Task reader" (Theme.info ())
-             "Esc to return · T: inspect this answered Ask's original Task, history and verification evidence"
+             "Esc:return, then T:inspect original Task, history, and verification evidence"
        | Some _, (Some Decode.Ask_task_unlinked | None)
        | None, (Some _ | None) -> ())) followup;
     Option.iter (fun failure ->
@@ -708,7 +708,7 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
               let summary =
                 fit_width (Terminal_text.single_line a.ap_summary) (max 8 (framed_inner_width cols - 30))
               in
-              Printf.sprintf "  %s%s%s  %s[y] Approve  [n] Reject%s"
+              Printf.sprintf "  %s%s%s  %sy:approve  n:reject%s"
                 Ansi.dim summary Ansi.reset
                 (Theme.info ()) Ansi.reset)
     | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
@@ -720,7 +720,7 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
         (* Two rows. This carried a literal "\n" -- backslash and n, printed as
            those two characters -- because a real newline would have drawn a
            row nobody had budgeted for. [detail_extra_rows] above budgets it. *)
-        Printf.sprintf "  %s%s%s  %s[y] Allow  [n] Deny%s\n  %swhy: %s%s"
+        Printf.sprintf "  %s%s%s  %sy:allow  n:deny%s\n  %swhy: %s%s"
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
@@ -749,7 +749,7 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
           Terminal_text.single_line pending.Tui_decode.gp_keeper
         in
         let phase, tone = approval_gate_phase state pending.Tui_decode.gp_phase in
-        let actions = "  " ^ (Theme.info ()) ^ "[y] Approve  [n] Reject" ^ Ansi.reset in
+        let actions = "  " ^ (Theme.info ()) ^ "y:approve  n:reject" ^ Ansi.reset in
         let headline =
           Printf.sprintf "  %s%s → %s · %s%s%s"
             tone
@@ -770,8 +770,8 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
              in
              let next =
                match pending.gp_retry_request with
-               | Some _ -> "R: retry Auto Judge; y/n: decide now"
-               | None -> "y/n: decide now (this exact attempt cannot be replayed)"
+               | Some _ -> "R:retry Auto Judge  y/n:decide now"
+               | None -> "y/n:decide now (cannot replay this attempt)"
              in
              Printf.sprintf "%s\n  %sreason: %s%s\n  %s%s%s"
                headline Ansi.dim
@@ -925,7 +925,6 @@ let render_approvals (state : state) =
                (Masc_tui_value.Position.row ~selected:(Some state.approval_cursor)
                   ~total:(List.length approvals)))
   in
-  box_top buf cols;
   box_line buf cols header;
   let policy_buf = Buffer.create 512 in
   (* Both Gate lanes are always on screen here. The durable rows obey the
@@ -1072,7 +1071,7 @@ let render_approvals (state : state) =
   copy_rows 0 shown_preview;
   if preview_notice then
     Buffer.add_string below_buf (Theme.recede ()
-      ^ fit_width (ui_text state ~ko:"  Enter: 요청 전체 읽기" ~en:"  Enter: read the complete request")
+      ^ fit_width (ui_text state ~ko:"  Enter:요청 전체 읽기" ~en:"  Enter:read full request")
           (max 1 (framed_inner_width cols)) ^ Ansi.reset ^ "\n");
   let around_rows = head_rows + count_frame_lines below_buf + footer_rows in
   let ask_budget = max 0 (rows - around_rows - 1) in
@@ -1270,10 +1269,10 @@ let render_question_reader (state : state) =
     (match state.asks_error with
      | Some error -> "  Question source unavailable · " ^ Terminal_text.single_line error
      | None ->
-       if Option.is_some state.ask_text_entry then "  Enter: save written answer · Esc: cancel writing"
+       if Option.is_some state.ask_text_entry then "  Enter:save answer  Esc:cancel"
        else
-         "  Left/Right: previous/next question · [/]: previous/next ask · "
-         ^ "PgUp/PgDn: page · Home/End: top/bottom · Esc: "
+         "  Left/Right:prev/next question  [/]:prev/next ask  "
+         ^ "PgUp/PgDn:page  Home/End:top/end  Esc:"
          ^ (match state.followed_from with
           | Some (Overview, _) -> "Dashboard"
           | Some ((Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board

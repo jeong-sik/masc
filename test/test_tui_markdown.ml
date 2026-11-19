@@ -435,6 +435,26 @@ let test_mermaid_sources_preserve_closed_snapshots () =
   Alcotest.(check (list string)) "exact closed Mermaid source only"
     [source] (Markdown.mermaid_sources text)
 
+let test_inline_keeps_korean_particles_and_punctuation_attached () =
+  (* At width 16: "다음은 `masc.ml`에서" -> "다음은 " (7) + "masc.ml에서" (11) = 18 > 16,
+     so the entire cluster `masc.ml`에서 wraps together instead of leaving "에서" orphaned. *)
+  let rows = render ~width:16 "다음은 `masc.ml`에서 확인" in
+  Alcotest.(check bool) "particle does not start a line alone" false
+    (List.exists (String.starts_with ~prefix:"에서") rows);
+  (* At width 11: "작업이 " (7) + "완료." (5) = 12 > 11, so the entire **완료**.
+     cluster wraps onto row 2 rather than splitting "." onto its own line. *)
+  let punct_rows = render ~width:11 "작업이 **완료**." in
+  Alcotest.(check bool) "bold+period wraps onto multiple rows" true
+    (List.length punct_rows > 1);
+  Alcotest.(check bool) "period stays attached to bold span" false
+    (List.exists (String.starts_with ~prefix:".") punct_rows);
+  (* Over-wide paths split at '/' rather than mid-segment. *)
+  let path_rows = render ~width:14 "bin/masc_tui_theme.ml" in
+  Alcotest.(check bool) "path breaks after separator" true
+    (List.exists (fun row ->
+       String.ends_with ~suffix:"/" row || String.ends_with ~suffix:"_" row)
+       path_rows)
+
 let () =
   Alcotest.run "tui-markdown"
     [ ( "inline"
@@ -450,6 +470,8 @@ let () =
             test_plain_segments_keep_exact_spacing
         ; Alcotest.test_case "segments name each marker" `Quick
             test_inline_segments_names_each_marker
+        ; Alcotest.test_case "inline clusters keep Korean particles and punctuation attached" `Quick
+            test_inline_keeps_korean_particles_and_punctuation_attached
         ] )
     ; ( "blocks"
       , [ Alcotest.test_case "streaming keeps only closed blocks" `Quick

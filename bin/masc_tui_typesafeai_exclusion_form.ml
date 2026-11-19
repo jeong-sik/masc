@@ -217,7 +217,9 @@ let board_note =
 let applies_note = "저장하면 서버가 바로 읽어요."
 let no_roster = "(키퍼 목록이 비어 있어요)"
 let hint_lead = "  "
-let refusal_lead = "  ! "
+(* A refusal is the failed mark of RFC tui-one-screen-grammar 7.2 (실패·반려);
+   [!] is not a status mark. *)
+let refusal_lead = "  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " "
 
 (* [text] after [lead], on as many rows of [width] cells as it takes. The pane
    cuts a row at its edge, so a sentence longer than the pane is wrapped here

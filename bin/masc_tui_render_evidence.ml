@@ -133,15 +133,15 @@ let section ~ko ~selection ~evidence ~in_flight ~workspace_confirmed ~width ~con
   let rows, pictures = match evidence with
     | Masc_tui_fetched.Absent -> message (wrap ~prefix:"    "
         (if workspace_confirmed
-         then String.capitalize_ascii evidence_unread ^ text " · r로 새로 읽기" " · r to refresh"
+         then String.capitalize_ascii evidence_unread ^ text "  r:새로 읽기" "  r:refresh"
          else workspace_unconfirmed ^ " · " ^ evidence_unread))
     | Loading -> message (wrap ~prefix:"    "
         (if workspace_confirmed
-         then text "원래 검증 증거를 읽는 중…" "Reading the original verification evidence…"
+         then text "원래 검증 증거를 읽는 중" "Reading the original verification evidence"
          else workspace_unconfirmed ^ " · "
               ^ text "증거 읽기 결과 미확인" "the evidence read is unconfirmed"))
     | Failed failure -> message
-        ((if in_flight then wrap ~prefix:"    " (text "증거를 다시 읽는 중…" "Retrying evidence read…")
+        ((if in_flight then wrap ~prefix:"    " (text "증거를 다시 읽는 중" "Retrying evidence read")
           else [])
          @ failure_rows failure)
     | Ready evidence ->

@@ -49,12 +49,15 @@ val invalidate_ide_file_activity : base_path:string -> unit
 (** The scoped IDE file reader and tool-ledger commit notifications share
     this cache family. No unrelated workspace or query family is dropped. *)
 
-val scheduled_automation_cache_key : base_path:string -> string
-(** The key the fleet schedule list ([GET /api/v1/dashboard/scheduled-automation]
-    without a selector) is cached under, for the workspace at [base_path]. *)
+val scheduled_automation_cache_key : base_path:string -> active_only:bool -> string
+(** The key a cached schedule list of [GET /api/v1/dashboard/scheduled-automation]
+    is kept under, for the workspace at [base_path]: the fleet list (no
+    selector) with [active_only:false], the active-only list with
+    [active_only:true]. A target-scoped page, a cursor page and an exact
+    lookup are not cached. *)
 
 val invalidate_scheduled_automation : base_path:string -> unit
-(** Drop the cached fleet schedule list. The schedule runner loop calls it
+(** Drop both cached schedule lists. The schedule runner loop calls it
     after every tick it records, so the list's runner status and holds are the
     newest tick's rather than up to {!live_cache_ttl_s} older. While no tick is
     recorded, a hung one included, the list can still trail the runner by that

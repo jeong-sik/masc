@@ -1186,7 +1186,7 @@ let test_world_shortcut_selects_no_keeper () =
       Alcotest.(check bool) "existing memory/age view is retained" true
         (state.keeper_list_view =
           if Masc_tui_keeper_list_model.has_world view then view
-          else Masc_tui_keeper_list_model.By_age);
+          else Masc_tui_keeper_list_model.By_memory);
       Alcotest.(check bool) "World owns selection" true
         (keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world);
       Alcotest.(check bool) "no Keeper is an action target" true

@@ -6,18 +6,44 @@
     its own mark, and a new member of the health vocabulary is a compile
     error here rather than a keeper that looks fine. *)
 
+val state_mark :
+  paused:bool -> Masc.Tui_decode.keeper_health_reading option -> Masc_tui_value.Mark.t option
+(** The status mark of a Keeper's health (RFC tui-one-screen-grammar §7.2):
+    running is settled, idle waiting, failing failed, and offline or paused
+    is paused. [None] is a roster that was not read -- not a health nothing
+    could name. *)
+
 val glyph : paused:bool -> Masc.Tui_decode.keeper_health_reading option -> string
-(** [None] is a roster that was not read -- not a health nothing could name. *)
+(** {!state_mark}'s glyph, or the not-read-yet mark for [None]. *)
 
 val failing_glyph : string
 (** Opens every line about a failing keeper's past: the FAILING group heading,
     its count in the summary, and the sentence of its last failure. *)
 
+val attention_mark : Masc_tui_keeper_list_model.attention -> Masc_tui_value.Mark.t option
+(** The status mark of a state-view group: the operator's turn, failed,
+    under way, waiting; the inactive group waits too. [None] is the group of
+    activities not read. *)
+
+val activity_mark : Masc_tui_keeper_list_model.activity -> Masc_tui_value.Mark.t option
+(** The status mark of what a Keeper is doing now (§7.2): the mark of its
+    activity's group ({!attention_mark} of
+    {!Masc_tui_keeper_list_model.group_of_activity}). A pause and offline are
+    paused instead. The word beside the mark says which. A row whose health
+    failed stands under the failing group while its activity keeps its own
+    mark. [None] is an activity that was not read. *)
+
+val row_activity_mark : Masc_tui_keeper_list_model.row -> Masc_tui_value.Mark.t option
+(** {!activity_mark} of the row's activity, except that an offline Keeper
+    which starts on its own and is not paused is a caution: it should be
+    running. *)
+
+val row_activity_glyph : Masc_tui_keeper_list_model.row -> string
+(** {!row_activity_mark}'s glyph, or the not-read-yet mark. *)
+
 val activity_glyph : Masc_tui_keeper_list_model.activity -> string
-(** The compact list's activity mark. The renderer adds the activity word.
-    Preparing and running turns wear the still under-way mark
-    ({!Masc_tui_value.Mark.Under_way}). [!] belongs to a held call alone; a
-    failed attempt in an open turn has its own mark. *)
+(** The compact list's activity mark: {!activity_mark}'s glyph, or the
+    not-read-yet mark. The renderer adds the activity word. *)
 
 val attempt_glyph : string
 (** The mark beside an attempt node in the secondary-row attempt chain. *)
@@ -124,8 +150,8 @@ val grid_failing_mark : string
 val grid_paused_mark : string
 val grid_recovered_mark : string
 val grid_ok_mark : string
-(** The row marks: [!] failing, [○] paused, [✓] recovered (the cause view
-    only), [●] the rest. *)
+(** The row marks, status marks of RFC tui-one-screen-grammar §7.2: [✕]
+    failing, [‖] paused, [▲] recovered (the cause view only), [●] the rest. *)
 
 val grid_late_word : string
 val grid_held_word : string

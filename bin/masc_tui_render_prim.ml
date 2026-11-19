@@ -1596,14 +1596,9 @@ let acting_pane_input (state : state) =
     let paused = reading.Keeper_control.paused in
     let reading_of_health = Option.map Tui_decode.keeper_health_reading health in
     let mark_tone =
-      if paused then Pane.Dim
-      else
-        match reading_of_health with
-        | Some Tui_decode.Health_running -> Pane.Ok
-        | Some Tui_decode.Health_idle -> Pane.Dim
-        | Some Tui_decode.Health_failing -> Pane.Warn
-        | Some Tui_decode.Health_offline -> Pane.Bad
-        | None -> Pane.Dim
+      match Masc_tui_keeper_mark.state_mark ~paused reading_of_health with
+      | Some mark -> Pane.status_tone mark
+      | None -> Pane.Dim
     in
     { Pane.name = keeper.k_name
     ; mark = Masc_tui_keeper_mark.glyph ~paused reading_of_health

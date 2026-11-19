@@ -134,6 +134,15 @@ and tone =
   | Bad
   | Info
 
+(* The pane's tones, drawn on its own ground, name the same colour for each
+   status mark as Theme.status_tone does on the page. *)
+let status_tone : Masc_tui_value.Mark.t -> tone = function
+  | Masc_tui_value.Mark.Settled -> Ok
+  | Masc_tui_value.Mark.Under_way -> Info
+  | Masc_tui_value.Mark.Waiting | Masc_tui_value.Mark.Paused -> Dim
+  | Masc_tui_value.Mark.Caution | Masc_tui_value.Mark.Yours -> Warn
+  | Masc_tui_value.Mark.Failed -> Bad
+
 type approval = {
   approval_keeper : string;
   approval_tool : string;

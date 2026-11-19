@@ -42,7 +42,11 @@ let odd_dormant row =
 
 let header ~ko ~now ~cells ~view ~selected ~age rows =
   let say korean english = if ko then korean else english in
-  let unknown = say "미확인" "unknown" in
+  (* A group of Keepers wears the status mark of its verdict, in that mark's
+     colour (RFC tui-one-screen-grammar §7.2); the groups the verdict cannot
+     place keep the unreported mark and say what they hold. *)
+  let status mark = Masc_tui_value.Mark.glyph mark, Theme.status_tone mark in
+  let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
   (* The age words name the bound each bucket is cut at, as [bucket] reads
      it off [Model.age]. *)
   let groups = match view with
@@ -51,13 +55,22 @@ let header ~ko ~now ~cells ~view ~selected ~age rows =
          Today, "▆", say "하루 안" "today", Ansi.reset;
          Cooling, "▃", say "사흘 안" "cooling", Theme.recede ();
          Dormant, "▁", say "더 오래" "dormant", Theme.recede ();
-         Unknown, "?", unknown, Theme.recede ()]
+         Unknown, unreported, say "나이 모름" "age unknown", Theme.recede ()]
     | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-        [Failures, "!", say "실패" "failing", Theme.warn ();
-         Recoveries, "✓", say "복구" "recovered", Theme.ok ();
-         Sound, "●", say "정상" "ok", Theme.ok ();
-         Paused, "○", say "일시정지" "paused", Theme.recede ();
-         Unknown, "?", unknown, Theme.recede ()] in
+        let failed, failed_tone = status Masc_tui_value.Mark.Failed in
+        let caution, caution_tone = status Masc_tui_value.Mark.Caution in
+        let settled, settled_tone = status Masc_tui_value.Mark.Settled in
+        let paused, paused_tone = status Masc_tui_value.Mark.Paused in
+        [Failures, failed, say "실패" "failing", failed_tone;
+         Recoveries, caution, say "복구" "recovered", caution_tone;
+         Sound, settled, say "정상" "ok", settled_tone;
+         Paused, paused, say "일시정지" "paused", paused_tone;
+         (* [Grid.Other] holds two kinds: a Keeper whose runtime record is
+            absent, not read yet or unreadable, so its health is not known;
+            and an offline Keeper with no failure in the window. An offline
+            Keeper that failed in the window is a recovery. The group keeps
+            the unreported mark of the first kind, and its word names both. *)
+         Unknown, unreported, say "상태 모름·꺼짐" "health unknown or offline", Theme.recede ()] in
   let readings = List.map (fun row -> row, bucket ~now ~age view row) rows in
   let groups = List.filter_map (fun (key, mark, word, style) ->
     let members = List.filter_map (fun (row, at) -> if at = key then Some row else None) readings in

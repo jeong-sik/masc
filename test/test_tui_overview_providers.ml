@@ -691,6 +691,7 @@ let test_credit_tui_formatting_and_reset_words () =
           { currency = "USD"; total = Some 0.0; remaining = 0.0 }));;
 
 let test_credit_history_prefers_daily_values () =
+  let module Decode = Masc.Tui_decode_usage in
   let history = { puh_days = 1; puh_generated_at = now; puh_unreadable_reports = 0;
     puh_points =
       [ { puhp_scope_id = "codex-finite"; puhp_kind = "credit balance"; puhp_limit_id = None

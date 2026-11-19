@@ -1013,9 +1013,7 @@ let kind_swap_seconds = 0.3
    The path is a hard link that another hard link is renamed over, so an
    open finds one inode or the other. A symbolic link renamed over would
    bring a failure of its own: on ext4 an open with O_CREAT through such a
-   link fails now and then with EISDIR (34 of 2.3 million opens when the
-   same system calls were run on Linux 7.0; none on tmpfs, none with hard
-   links). *)
+   link fails now and then with EISDIR. Hard links do not. *)
 let test_open_matches_the_kind_under_a_changing_path () =
   let dir = tmpdir "fd_cache_kind_swap" in
   let regular = Filename.concat dir "regular" in
@@ -1031,17 +1029,24 @@ let test_open_matches_the_kind_under_a_changing_path () =
   let staged = Filename.concat dir "swapped.next" in
   Unix.link regular path;
   let stop = Atomic.make false in
+  (* What ended the swapping before it was told to stop. An exception leaves
+     a thread without reaching anyone, and the opens below would go on, and
+     pass, against a path that no longer changes. *)
+  let swapping_ended_by = Atomic.make None in
   let swapper =
     Thread.create
       (fun () ->
         (* The two links always name different files: a rename of one hard
            link over another of the same file does nothing. *)
         let to_regular = ref false in
-        while not (Atomic.get stop) do
-          Unix.link (if !to_regular then regular else fifo) staged;
-          Unix.rename staged path;
-          to_regular := not !to_regular
-        done)
+        try
+          while not (Atomic.get stop) do
+            Unix.link (if !to_regular then regular else fifo) staged;
+            Unix.rename staged path;
+            to_regular := not !to_regular
+          done
+        with
+        | exn -> Atomic.set swapping_ended_by (Some exn))
       ()
   in
   let byte = Bytes.create 1 in
@@ -1080,6 +1085,9 @@ let test_open_matches_the_kind_under_a_changing_path () =
         Unix.close fd;
         if not as_its_kind_needs then incr wrong
       done);
+  (match Atomic.get swapping_ended_by with
+   | None -> ()
+   | Some exn -> failf "the path stopped changing: %s" (Printexc.to_string exn));
   check int "targets opened another way than their kind needs" 0 !wrong
 ;;
 

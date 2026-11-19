@@ -7,32 +7,35 @@ module Reading = Masc_tui_types
    until it has been given a mark and a word.
 
    The words were a literal row the surface drew above every roster, spelled
-   apart from the glyphs the rows below it drew. Colour is the caller's:
-   {!Masc_tui_render_memory} paints the deviation. *)
+   apart from the glyphs the rows below it drew. The glyphs were their own
+   alphabet, [+ ! - s x], where RFC tui-one-screen-grammar 7.2 gives every
+   screen seven marks with one meaning each. The states that share a mark are
+   told apart beside it: the picking rows draw the state's word, and the
+   detail table's facts and source columns read a dash without a current
+   snapshot. Colour is the caller's: {!Masc_tui_render_memory} paints the
+   deviation. *)
 
-let ready_glyph = "+"
-let attention_glyph = "!"
-let no_snapshot_glyph = "-"
-let source_only_glyph = "s"
-let failed_glyph = "x"
+module Mark = Masc_tui_value.Mark
 
-let glyph : Reading.memory_state -> string = function
-  | Reading.Memory_ordinary -> ready_glyph
-  | Reading.Memory_warning | Reading.Memory_degraded -> attention_glyph
-  | Reading.Memory_no_current -> no_snapshot_glyph
-  | Reading.Memory_source_only -> source_only_glyph
-  | Reading.Memory_starving | Reading.Memory_read_error -> failed_glyph
+let mark : Reading.memory_state -> Mark.t = function
+  | Reading.Memory_ordinary -> Mark.Settled
+  | Reading.Memory_warning | Reading.Memory_degraded | Reading.Memory_no_current
+  | Reading.Memory_source_only ->
+      Mark.Caution
+  | Reading.Memory_starving | Reading.Memory_read_error -> Mark.Failed
 
-(* One row per mark, not per state: two states share the attention mark and
+let glyph state = Mark.glyph (mark state)
+
+(* One row per mark, not per state: four states share the caution mark and
    two share the failure mark, and a sheet that listed them separately would
-   print the same glyph twice with two words beside it. The word says what the
-   reading is, not what the glyph looks like. *)
+   print the same glyph four times with four words beside it. The word says
+   what the reading is, not what the glyph looks like. *)
 let legend =
-  [ (ready_glyph, "a current snapshot")
-  ; (attention_glyph, "read, with something to look at")
-  ; (no_snapshot_glyph, "no current snapshot")
-  ; (source_only_glyph, "source facts only")
-  ; (failed_glyph, "starving, or the read failed")
+  [ (Mark.glyph Mark.Settled, "a current snapshot")
+  ; ( Mark.glyph Mark.Caution
+    , "read, with something to look at: a warning, a stopped Librarian, no \
+       current snapshot, or source facts only" )
+  ; (Mark.glyph Mark.Failed, "starving, or the read failed")
   ]
   (* The words of the header's world line follow the marks, its `?` among them:
      they are what a reader of that line would look up. *)

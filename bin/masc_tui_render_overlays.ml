@@ -233,6 +233,16 @@ let render_context_inspector state =
               Masc_tui_scroll.normalize ~count:(List.length right - 1)
                 ~height:body_height state.context_inspector_detail_scroll
             in
+            (* The pane that hears j/k says where its reader is: the
+               selected item, or the window over the detail. *)
+            (match state.context_inspector_focus with
+             | Left_pane ->
+                 if items > 0 then
+                   c.position (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:items)
+             | Right_pane ->
+                 Option.iter c.position
+                   (Masc_tui_value.Position.window ~first:right_offset ~shown:body_height
+                      ~total:(List.length right - 1)));
             context_split_lines ~cols ~left_width:(context_split_width cols)
               ~left:
                 (context_split_window ~height:body_height ~offset:left_offset
@@ -243,22 +253,12 @@ let render_context_inspector state =
             |> List.iter c.push
           end)
 
-(* The height an overlay shows [count] rows in, for the overlays that say
-   which of their lines are showing: one row comes off when they overflow,
-   because the "[lines a-b/n]" row is drawn inside the same body.
-   [Masc_tui_scroll.content_height] owns that rule; the frame supplies the
-   chrome. *)
+(* The height an overlay shows [count] rows in. Where the window stands is
+   on the title row, so the body keeps every row. [Masc_tui_scroll.content_height]
+   owns that rule; the frame supplies the chrome. *)
 let overlay_window_height ~rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
-    ~preview_keep:None ~overflow_takes_row:true
-
-(* The "[lines a-b/n]" ("[줄 a-b/n]") row an overflowing overlay draws under its rows, or
-   nothing when every row fits. The row's height is the one
-   [overlay_window_height] took off. *)
-let overlay_window_row ~ko ~scroll ~height count =
-  Option.map
-    (fun row -> Theme.recede () ^ row ^ Ansi.reset)
-    (Masc_tui_scroll.position_row ~ko ~scroll ~height count)
+    ~preview_keep:None
 
 let detail_reading_action_width cols = max 0 (framed_inner_width cols - 2)
 let detail_reading_width cols = max 1 (detail_reading_action_width cols)
@@ -353,7 +353,9 @@ let render_detail_reading (state : state) reading =
               | Masc_tui_detail_reading.Heading text -> c.push_styled ~style:Ansi.bold ("  " ^ text)
               | Content text -> c.push ("  " ^ text)
               | Note text -> c.push_styled ~style:(Theme.recede ()) ("  " ^ text)) document;
-      if height > 0 then Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      if height > 0 then
+        Option.iter c.position
+          (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 
 (* The sheet's rows and the viewport that shows them, at this width. One
    answer for the two readers -- the keypress that bounds the scroll and the
@@ -543,19 +545,20 @@ let render_palette (state : state) =
        {!Masc_tui_footer} could shed no whole key and keep no door: it fell
        through to the cell cut, where [Esc] survived only when the budget
        happened to reach it. test_a_row_in_another_grammar_loses_its_door
-       measures that across widths. The count keeps no colon on purpose --
-       it is not a key, and it is the first thing a narrow row should give
-       up. *)
+       measures that across widths. The selected row is the title row's
+       position, not a footer item. *)
     ~hints:
       (if Masc_tui_palette.command_enter_has_nothing state then
          (* Nothing is listed, so Enter, the arrows and Home/End have no row to
             act on. The key handler reads the same answer. *)
-         "0/0  Ctrl-U:clear  Esc:close"
+         "Ctrl-U:clear  Esc:close"
        else
-         Printf.sprintf "%d/%d  Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
-           (if total = 0 then 0 else cursor + 1)
-           total action)
+         Printf.sprintf "Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
+           action)
     ~body:(fun ~budget c ->
+      c.position
+        (Masc_tui_value.Position.row
+           ~selected:(if total = 0 then None else Some cursor) ~total);
       List.iter (fun note -> c.push ("   " ^ note)) finder_notes;
       match explicit_question with
       | Some (question, symbol) ->
@@ -682,12 +685,14 @@ let render_link_preview_modal (state : state) =
           (Masc_tui_link_preview.modal_hints ~total_links
              ~has_image:(Option.is_some preview.Masc_tui_link_preview.image_url))
         ~body:(fun ~budget:_ c ->
-          if total_links > 1 then begin
-            c.push_styled ~style:(Theme.warn ())
-              (Printf.sprintf "  link %d of %d" (state.link_modal_cursor + 1)
-                 total_links);
-            c.push_divider ()
-          end;
+          (* Which link of several is the position; a preview taller than
+             its rows is read through a window, which then is. *)
+          if total_links > 1 then
+            c.position
+              (Masc_tui_value.Position.row ~selected:(Some state.link_modal_cursor)
+                 ~total:total_links);
+          Option.iter c.position
+            (Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total);
           List.iteri
             (fun index line ->
               if index >= scroll && index < scroll + content_height then
@@ -774,6 +779,14 @@ let render_keeper_deletions (state : state) =
       let scroll =
         Masc_tui_scroll.normalize ~count ~height state.keeper_deletions_scroll
       in
+      (* The record among the records is the position until its text runs
+         past the rows, and then the window over that text is. *)
+      (match state.keeper_deletions with
+       | Some (Ok inventory) when inventory.Keeper_control.operations <> [] ->
+           c.position
+             (Masc_tui_value.Position.row ~selected:(Some state.keeper_deletions_cursor)
+                ~total:(List.length inventory.Keeper_control.operations))
+       | Some (Ok _ | Error _) | None -> ());
       List.iteri
         (fun index text ->
           if index >= scroll && index < scroll + height then c.push text)
@@ -782,7 +795,8 @@ let render_keeper_deletions (state : state) =
          past every height: at 44 rows it ended mid-object on "kind":
          "delivered", and the footer named the scroll keys without saying how
          far they had to go. *)
-      Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 
 (* The sheet's title: its name, then the filter while there is one, or whether
    the hint rows are on. The end of the filter being typed stays in view, the
@@ -870,7 +884,8 @@ let render_help (state : state) =
       (* Which of them these are. The sheet is longer than any terminal --
          at 150x78 the later sections are still off screen -- so a reader
          pressing [j] had no way of telling a page from a hundred. *)
-      Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 
 (* Rows the agenda panel can show, and how many it has. The keypress bounds
    the scroll from the same pair the frame draws with -- the shape
@@ -951,7 +966,7 @@ let queue_panel_detail_viewport state panel =
   let terminal_rows, cols = get_terminal_size () in
   let count = List.length (queue_panel_detail_lines state panel ~cols) in
   let budget = surface_chrome_budget state ~terminal_rows in
-  let height = queue_panel_window_height ~count ~budget in
+  let height = queue_panel_window_height ~budget in
   count, height
 
 let queue_panel_layout state (panel : queue_panel) =
@@ -997,11 +1012,13 @@ let render_queue_panel (state : state) (panel : queue_panel) =
       ~hints:(Masc_tui_keys.footer_hints_queue state panel)
       ~body:(fun ~budget c ->
         let count = List.length lines in
-        let height = queue_panel_window_height ~count ~budget in
+        let height = queue_panel_window_height ~budget in
         let scroll = Masc_tui_scroll.normalize ~count ~height panel.qp_detail_scroll in
         List.iteri (fun index line ->
           if index >= scroll && index < scroll + height then c.push ("  " ^ line)) lines;
-        if budget > 0 then Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+        if budget > 0 then
+          Option.iter c.position
+            (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
   else
   let placement = queue_panel_layout state panel in
   let context_caption =
@@ -1095,8 +1112,10 @@ let render_queue_panel (state : state) (panel : queue_panel) =
             else row in
           c.push row
         end) items;
-      if budget > queue_panel_fixed_rows ~items panel then
-        Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height (List.length items))) in
+      if items <> [] then
+        c.position
+          (Masc_tui_value.Position.row ~selected:selected_index
+             ~total:(List.length items))) in
   (* Shared chrome has three leading rows and two trailing rows. Its body
      copies as separate documents, even though the terminal writes one row. *)
   frame_panes := Masc_tui_queue_layout.panes placement ~cols
@@ -1201,12 +1220,12 @@ let render_answering (state : state) =
       done;
       (* The fixed preview panel: what the cursor's keeper is doing right now,
          from the turns poll's live glance. Drawn empty rather than omitted so
-         the list above never reflows with the cursor. The rule over it says
-         which of the list's rows are showing when they overflow, so it costs
-         the list no row (#38623). *)
-      (match overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height:content_height (List.length lines) with
-       | Some row -> c.push row
-       | None -> c.push_divider ());
+         the list above never reflows with the cursor. *)
+      if lines <> [] then
+        c.position
+          (Masc_tui_value.Position.row ~selected:(Some state.answering_cursor)
+             ~total:(List.length lines));
+      c.push_divider ();
       List.iter c.push preview_lines)
 ;;
 
@@ -1257,7 +1276,8 @@ let render_agenda (state : state) =
          rows and 100 columns, the panel drew sixteen of its twenty coming
          rows and neither of the two sections under them, and nothing said
          "Waiting on you" and "Stuck on you" were there. *)
-      Option.iter c.push (overlay_window_row ~ko:(state.ui_language = Lang_ko) ~scroll ~height count))
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count))
 ;;
 
 (* The hint names the rows the terminal needs and the key that leaves. The full
@@ -1437,7 +1457,10 @@ let render_account_login state view =
     ~surface_key:"account-login" ~title:(screen_title " MASC Account Login")
     ~hints:(Masc_tui_account_login.hints view)
     ~body:(fun ~budget c ->
-      let lines = Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view
+      let lines, position =
+        Masc_tui_account_login.visible_lines ~height:budget ~width:(framed_inner_width cols) view in
+      Option.iter c.position position;
+      let lines = lines
         |> List.map (function
           | Masc_tui_account_login.Text text -> Masc.Tui_terminal_text.sanitize_terminal_text text
           | Masc_tui_account_login.Terminal line ->
@@ -1506,6 +1529,7 @@ let render_collab state view =
     ~surface_key:"collab" ~title:(screen_title " MASC Collab")
     ~hints:(Masc_tui_collab.hints view)
     ~body:(fun ~budget c ->
+      Option.iter c.position (Masc_tui_collab.position view);
       Masc_tui_collab.lines ~height:budget ~width:(framed_inner_width cols) view
       |> List.iter (fun line -> c.push (fit_width line (framed_inner_width cols))))
 
@@ -1526,6 +1550,8 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
     ~body:(fun ~budget c ->
       let lines = Masc_tui_lane_addons.lines ~height:budget ~width:(framed_inner_width cols) view in
       let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in
+      Option.iter c.position
+        (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total:(List.length lines));
       lines
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
       |> List.iter c.push)

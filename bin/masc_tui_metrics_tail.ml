@@ -178,9 +178,13 @@ let load_keeper ~base_path ~keeper_name ~limit =
   | Some (Workspace_unconfirmed as error) -> Error (error_to_string error)
   | None | Some (Row_errors _) -> Ok snapshot
 
+(* Top, title, divider, column heading, divider, bottom and footer. Where the
+   window stands is on the title row, so no row under the list is kept. *)
+let log_tail_chrome_rows = 7
+
 let content_height ~terminal_rows ~error =
   let diagnostic_rows = if Option.is_some error then 2 else 0 in
-  max 0 (terminal_rows - 8 - diagnostic_rows)
+  max 0 (terminal_rows - log_tail_chrome_rows - diagnostic_rows)
 
 (* The arithmetic is the same for every scrolled list; what is particular to
    the log tail is [content_height] above, which knows this surface's chrome. *)

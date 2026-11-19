@@ -833,14 +833,6 @@ let append_audit_event_after_pending_locked config json =
   let* () = flush_pending_events_locked config in
   append_audit_event config json
 
-let append_audit_event_after_pending config json =
-  try
-    Workspace_utils.with_file_lock config (goals_path config) (fun () ->
-      append_audit_event_after_pending_locked config json)
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (Printexc.to_string exn)
-
 let goal_with_fields ~now ?title ?measure ?procedure ?due_date ?priority
     (existing : goal) =
   let updated =

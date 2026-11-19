@@ -192,18 +192,6 @@ let matches_expected_verification expected (goal : Goal_store.goal) record =
   && Option.equal (Option.equal String.equal) request (Some expected.request_id)
 ;;
 
-let emit_goal_event (ctx : context) ~goal_id ~event_type ~payload =
-  match Goal_store.append_audit_event_after_pending ctx.config
-    (`Assoc
-       [ "ts", `String (Masc_domain.now_iso ())
-       ; "goal_id", `String goal_id
-       ; "event_type", `String event_type
-       ; "payload", payload
-       ]) with
-  | Ok () -> ()
-  | Error detail -> raise (Sys_error detail)
-;;
-
 let goal_event_recording_to_yojson delivery (event : Goal_store.pending_event) =
   let fields = match delivery with
     | Ok () -> [ "status", `String "recorded" ]
@@ -692,7 +680,10 @@ let deliver_goal_effects config =
       `Assoc ["status", `String "deferred"; "durable_retry", `Bool true; "detail", `String detail]
 ;;
 
-let already_goal_response ~tool_name ~start_time ~goal_id ~action ~phase goal verification =
+(* [effect_delivery] is what the outbox drain answered, for a repeated call
+   that drained it. *)
+let already_goal_response ?effect_delivery ~tool_name ~start_time ~goal_id ~action ~phase goal
+    verification =
   ok_result
     ~tool_name
     ~start_time
@@ -702,6 +693,9 @@ let already_goal_response ~tool_name ~start_time ~goal_id ~action ~phase goal ve
      ; "phase", Goal_phase.to_yojson phase
      ; "goal", Goal_store.goal_to_yojson goal
      ]
+     @ (match effect_delivery with
+        | Some delivery -> [ "effect_delivery", delivery ]
+        | None -> [])
      @
      match verification with
      | Some (record : Goal_verification.record) ->
@@ -942,9 +936,16 @@ let proof_request_failure ~tool_name ~start_time = function
 
 (* The phase comes from [Goal_phase.decide_transition], so a proof request
    and a completion request cannot disagree on where the goal goes. Only a goal
-   that now enters [Verifying] gets a pending proof. *)
-let request_current_proof_bound ?evidence_refs ?expected_verification config ~goal_id =
-  transact_or_refuse config ~goal_id (fun goal ->
+   that now enters [Verifying] gets a pending proof. Its phase event is an
+   audit intent in the same Goal write, so an append the ledger refuses now is
+   delivered later from the outbox. *)
+let request_current_proof_bound ?evidence_refs ?expected_verification config ~goal_id ~actor =
+  let effects (goal : Goal_store.goal) _ : Goal_store.transition_effects =
+    { events = [ Goal_store.Phase,
+        `Assoc [ "phase", Goal_phase.to_yojson goal.phase; "actor", `String actor ] ]
+    ; notifications = [] }
+  in
+  transact_or_refuse ~effects config ~goal_id (fun goal ->
     let open Result.Syntax in
     let* () = match expected_verification with
       | None -> Ok ()
@@ -1138,9 +1139,21 @@ let finish_goal_drop ~tool_name ~start_time (ctx : context) ~goal_id ~reason =
         ; "effect_delivery", delivery ]
 ;;
 
+(* The reopened phase and its audit intent share the Goal write: the store
+   asks for [effects] only when it writes the Goal, and a reopen writes it only
+   to move the phase. A repeated reopen finds the Goal already executing and
+   still drains the outbox, so an event the ledger refused earlier is delivered
+   then. A reopen that has a proof to archive is refused while the ledger
+   refuses appends: [Goal_verification.reopen_goal] appends that archive row
+   inside the transaction, before the phase is written. *)
 let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
   let goal_id = goal.Goal_store.id in
-  match Goal_verification.reopen_goal ctx.config ~goal_id ~actor:ctx.agent_name ~note with
+  let effects (reopened : Goal_store.goal) _ : Goal_store.transition_effects =
+    { events = [ Goal_store.Phase,
+        `Assoc [ "phase", Goal_phase.to_yojson reopened.phase; "actor", `String ctx.agent_name ] ]
+    ; notifications = [] }
+  in
+  match Goal_verification.reopen_goal ~effects ctx.config ~goal_id ~actor:ctx.agent_name ~note with
   | Error msg -> error_result_typed ~tool_name ~start_time ~code:Internal_error msg
   | Ok (goal, outcome, phase_changed) ->
     let verification, proof_reset =
@@ -1148,22 +1161,21 @@ let finish_goal_reopen ~tool_name ~start_time (ctx : context) ~note goal =
       | Goal_verification.Proof_unchanged record -> record, false
       | Goal_verification.Proof_reset record -> Some record, true
     in
+    if phase_changed then notify_goal_verification_abandoned ctx ~goal_id;
+    let delivery = deliver_goal_effects ctx.config in
     if not phase_changed && not proof_reset then
-      already_goal_response ~tool_name ~start_time ~goal_id
+      already_goal_response ~effect_delivery:delivery ~tool_name ~start_time ~goal_id
         ~action:Goal_phase.Reopen ~phase:goal.phase goal verification
-    else (
-      if phase_changed then notify_goal_verification_abandoned ctx ~goal_id;
-      emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-        ~payload:(`Assoc
-          [ "phase", Goal_phase.to_yojson goal.phase; "actor", `String ctx.agent_name ]);
+    else
       ok_result ~tool_name ~start_time
         ([ "goal_id", `String goal_id
          ; "action", `String (Goal_phase.action_to_string Goal_phase.Reopen)
          ; "goal", Goal_store.goal_to_yojson goal
+         ; "effect_delivery", delivery
          ]
          @ match verification with
            | None -> []
-           | Some record -> [ "verification", Goal_verification.record_to_yojson_for_goal ~goal record ]))
+           | Some record -> [ "verification", Goal_verification.record_to_yojson_for_goal ~goal record ])
 ;;
 
 (* Suspension decisions use the current complete lifecycle under the same
@@ -1208,18 +1220,17 @@ let finish_goal_suspension ~tool_name ~start_time (ctx : context) ~goal_id ~acti
 let finish_goal_request_complete ?evidence_refs ?expected_verification
     ~tool_name ~start_time (ctx : context) ~goal_id ~action =
   match request_current_proof_bound ?evidence_refs ?expected_verification
-      ctx.config ~goal_id with
+      ctx.config ~goal_id ~actor:ctx.agent_name with
   | Error error -> proof_request_failure ~tool_name ~start_time error
   | Ok (updated_goal, record) ->
-    emit_goal_event ctx ~goal_id ~event_type:"goal_phase"
-      ~payload:(`Assoc [ "phase", Goal_phase.to_yojson updated_goal.phase
-                        ; "actor", `String ctx.agent_name ]);
+    let delivery = deliver_goal_effects ctx.config in
     notify_goal_verification_pending ctx ~goal_id;
     ok_result ~tool_name ~start_time
       [ "goal_id", `String goal_id
       ; "action", `String (Goal_phase.action_to_string action)
       ; "goal", Goal_store.goal_to_yojson updated_goal
-      ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record ]
+      ; "verification", Goal_verification.record_to_yojson_for_goal ~goal:updated_goal record
+      ; "effect_delivery", delivery ]
 ;;
 
 (* A transition targets the ID the caller supplied. The shared string
@@ -1373,9 +1384,24 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args =
   | Error error -> expected_workspace_refusal ~tool_name ~start_time error
 ;;
 
+(* The completed phase and its audit intent share the Goal write: the store
+   asks for [effects] only when it writes the Goal, and a confirmation writes
+   it only to move the phase. The outbox is drained before returning, also for
+   a repeated confirmation that finds the Goal already completed, so an event
+   the ledger refused earlier is delivered then. [effect_delivery] in the
+   answer says what that drain did. *)
 let confirm_completion ?after_confirmation config ~goal_id ~operator_id
     ~request_id ~verification_run_id ~criterion_revision =
-  Goal_store.transact_goal config ~goal_id (fun goal ->
+  let effects (goal : Goal_store.goal) (_, confirming_operator)
+      : Goal_store.transition_effects =
+    { events = [ Goal_store.Phase,
+        `Assoc ["phase", Goal_phase.to_yojson goal.phase;
+          "authority_kind", `String "human_operator"; "actor", `String confirming_operator;
+          "request_id", `String request_id; "verification_run_id", `String verification_run_id;
+          "criterion_revision", `String criterion_revision] ]
+    ; notifications = [] }
+  in
+  Goal_store.transact_goal ~effects config ~goal_id (fun goal ->
     let open Result.Syntax in
     let* record = Goal_verification.get_record_authoritative config ~goal_id in
     let* verdict = match record with
@@ -1400,12 +1426,9 @@ let confirm_completion ?after_confirmation config ~goal_id ~operator_id
     let updated = match transition with
       | Goal_phase.Move_to phase -> goal_after_proof goal phase goal.last_review_note
       | Goal_phase.Already _ -> goal in
-    Ok (updated, (record, updated.phase <> goal.phase, confirming_operator)))
-  |> Result.map (fun ((goal : Goal_store.goal), (record, changed, confirming_operator)) ->
-    if changed then emit_goal_event {config; agent_name = confirming_operator} ~goal_id
-      ~event_type:"goal_phase" ~payload:(`Assoc ["phase", Goal_phase.to_yojson goal.phase;
-        "authority_kind", `String "human_operator"; "actor", `String confirming_operator;
-        "request_id", `String request_id; "verification_run_id", `String verification_run_id;
-        "criterion_revision", `String criterion_revision]);
+    Ok (updated, (record, confirming_operator)))
+  |> Result.map (fun ((goal : Goal_store.goal), (record, _)) ->
+    let delivery = deliver_goal_effects config in
     `Assoc ["goal", Goal_store.goal_to_yojson goal;
-      "verification", Goal_verification.record_to_yojson_for_goal ~goal record])
+      "verification", Goal_verification.record_to_yojson_for_goal ~goal record;
+      "effect_delivery", delivery])

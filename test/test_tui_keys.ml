@@ -423,6 +423,113 @@ let test_schedule_update_form_carries_a_cron_definition () =
     [ "recurrence_interval_sec"; "recurrence_hour"; "recurrence_minute"
     ; "recurrence_second" ]
 
+(* A Lane action row, with the payload projections the server sends for one. *)
+let lane_action : Yojson.Safe.t =
+  `Assoc [ "kind", `String "compose"; "questions", `Int 5 ]
+
+let lane_action_row : schedule_row =
+  { schedule_form_row with
+    sch_schedule_id = "daily-quiz"
+  ; sch_payload =
+      `Assoc
+        [ "kind", `String Schedule_supported_kinds.lane_act
+        ; ( "body"
+          , `Assoc [ "installation_id", `String "operator-quiz"; "action", lane_action ] )
+        ]
+  ; sch_payload_kind = Some Schedule_supported_kinds.lane_act
+  ; sch_payload_dispatch_tool = Some Schedule_supported_kinds.lane_act
+  (* Not the source the update tool takes when a call names none. *)
+  ; sch_source = "automated_request"
+  ; sch_payload_target = Some "lane:operator-quiz"
+  ; sch_payload_keeper_name = None
+  ; sch_payload_summary = Some (Yojson.Safe.to_string lane_action)
+  }
+
+(* What the schedule route does with a posted form before the tool runs: the
+   update tool's own schema. It refuses a field the tool does not declare, a
+   value of another type, and a call that names fields of both payload kinds. *)
+let update_schema_accepts form =
+  match Tool_schemas_schedule.find_definition "masc_schedule_update" with
+  | None -> Alcotest.fail "the update tool has no schema"
+  | Some definition ->
+    let schema : Masc_domain.tool_schema = definition.Tool_schemas_schedule.schema in
+    Masc.Tool_input_validation.validate_args
+      ~schema:schema.input_schema ~name:schema.name ~args:form ()
+    |> Result.is_ok
+
+(* The update replaces the whole definition, and the server takes the
+   replacement's kind from the fields the call carries. A Lane action's form
+   with a Keeper wake field in it is saved as a Keeper wake or refused for
+   carrying fields of both kinds, and one without [installation_id] or
+   [action] has no action to save. *)
+let test_schedule_update_form_keeps_a_lane_action_a_lane_action () =
+  let open Yojson.Safe.Util in
+  let form = update_form lane_action_row in
+  (* By name, not by value: the update tool's schema refuses a Lane action call
+     that names a Keeper wake field even with null in it. *)
+  let carries field = List.mem field (keys form) in
+  check str "stable id" "daily-quiz" (form |> member "schedule_id" |> to_string);
+  check str "the installation as stored" "operator-quiz"
+    (form |> member "installation_id" |> to_string);
+  check Alcotest.bool "the action as stored" true
+    (Yojson.Safe.equal lane_action (form |> member "action"));
+  (* The fields the update tool reads a Keeper wake from, from its own list. *)
+  List.iter
+    (fun field ->
+      check Alcotest.bool (field ^ " is not in a Lane action's form") false
+        (carries field))
+    Masc.Tool_schedule.keeper_wake_arg_names;
+  check Alcotest.bool "the update tool's schema accepts the form" true
+    (update_schema_accepts form);
+  (match Masc.Tool_schedule.payload_from_args form with
+   | Ok payload ->
+     check Alcotest.bool "the update tool reads the stored payload back" true
+       (Yojson.Safe.equal lane_action_row.sch_payload payload)
+   | Error detail -> Alcotest.fail ("the update tool refused the form: " ^ detail));
+  check str "the source as stored" "automated_request"
+    (form |> member "source" |> to_string);
+  check str "due timestamp" "2026-09-02T00:00:00Z"
+    (form |> member "due_at_iso" |> to_string);
+  check str "daily kind" "daily" (form |> member "recurrence_kind" |> to_string);
+  check Alcotest.int "hour" 9 (form |> member "recurrence_hour" |> to_int);
+  check Alcotest.int "minute" 30 (form |> member "recurrence_minute" |> to_int);
+  check Alcotest.int "second" 5 (form |> member "recurrence_second" |> to_int);
+  check str "timezone" "Asia/Seoul"
+    (form |> member "recurrence_timezone" |> to_string);
+  check (Alcotest.float 0.0) "the expiry as stored, 2026-09-30T00:00:00Z" 1790726400.
+    (form |> member "expires_at_unix" |> to_number)
+
+(* The form is of the row's own payload kind, so a row whose kind this build
+   does not name has no form to open: whichever form were saved would put
+   another kind over the row. A row the server sent no kind for is not taken
+   for a Keeper wake either. *)
+let test_modify_refuses_a_payload_kind_this_build_does_not_name () =
+  let refusal row =
+    match Masc_tui_types.schedule_update_form_json row with
+    | Ok _ -> Alcotest.fail "the form opened"
+    | Error reason -> reason
+  in
+  let unnamed = "masc.future_kind" in
+  let unnamed_row =
+    { schedule_form_row with
+      sch_payload =
+        `Assoc [ "kind", `String unnamed; "body", `Assoc [ "subject", `String "ops" ] ]
+    ; sch_payload_kind = Some unnamed
+    ; sch_payload_support = "unsupported"
+    ; sch_payload_dispatch_tool = None
+    ; sch_payload_target = None
+    ; sch_payload_keeper_name = None
+    ; sch_payload_summary = None
+    }
+  in
+  check Alcotest.bool "a kind word this build does not name" true
+    (refusal unnamed_row = Schedule_payload_kind_unknown (Some unnamed));
+  check Alcotest.bool "a row the server sent no kind for" true
+    (refusal { schedule_form_row with sch_payload_kind = None }
+     = Schedule_payload_kind_unknown None);
+  check Alcotest.bool "the same row with its kind sent opens" true
+    (Result.is_ok (Masc_tui_types.schedule_update_form_json schedule_form_row))
+
 let sample_memory_fact ~category ~claim : Masc.Tui_decode_memory_facts.memory_fact =
   { Masc.Tui_decode_memory_facts.mf_keeper = "alpha"
   ; mf_claim = claim
@@ -2609,6 +2716,12 @@ let () =
             test_modify_refuses_a_recurrence_this_build_cannot_read
         ; Alcotest.test_case "schedule update form carries a cron definition"
             `Quick test_schedule_update_form_carries_a_cron_definition
+        ; Alcotest.test_case
+            "schedule update form keeps a Lane action a Lane action" `Quick
+            test_schedule_update_form_keeps_a_lane_action_a_lane_action
+        ; Alcotest.test_case
+            "modify refuses a payload kind this build does not name" `Quick
+            test_modify_refuses_a_payload_kind_this_build_does_not_name
         ; Alcotest.test_case "Memory fact rows follow the category filter"
             `Quick test_memory_fact_rows_follow_the_category_filter
         ; Alcotest.test_case "Memory category cycle returns to All" `Quick

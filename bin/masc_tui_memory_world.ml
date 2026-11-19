@@ -113,20 +113,21 @@ let briefing_clause ~ko status =
    word says so. *)
 let building_clause ~ko (pass : Wire.building_pass) =
   if ko
-  then Printf.sprintf "작성 중, %d개 중 %d개 남음" pass.Wire.target pass.Wire.remaining
-  else Printf.sprintf "%s, %d of %d left" building_word pass.Wire.remaining pass.Wire.target
-
-let count_clause ~ko ~korean_noun ~noun count =
-  if ko
-  then Printf.sprintf "%s %d건" korean_noun count
-  else Masc_tui_message_layout.count_noun count noun
+  then
+    Printf.sprintf "작성 중, %s개 중 %s개 남음"
+      (Masc_tui_value.Count.grouped pass.Wire.target)
+      (Masc_tui_value.Count.grouped pass.Wire.remaining)
+  else
+    Printf.sprintf "%s, %s of %s left" building_word
+      (Masc_tui_value.Count.grouped pass.Wire.remaining)
+      (Masc_tui_value.Count.grouped pass.Wire.target)
 
 let value_clauses ~ko = function
   | Wire.Missing _ -> [ no_ledger_word ~ko ]
   | Wire.Available available ->
     let briefing = available.Wire.briefing in
-    [ count_clause ~ko ~korean_noun:"공유 주장" ~noun:claim_noun available.Wire.claim_count
-    ; count_clause ~ko ~korean_noun:"충돌" ~noun:conflict_noun available.Wire.conflict_count
+    [ Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Claim available.Wire.claim_count
+    ; Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Conflict available.Wire.conflict_count
     ; briefing_clause ~ko briefing.Wire.status
     ]
     @ (match briefing.Wire.building with

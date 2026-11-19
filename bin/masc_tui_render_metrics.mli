@@ -84,6 +84,7 @@ val render_metrics_body :
   suffix_lines:string list ->
   state ->
   report_scroll:(int -> int -> int -> unit) ->
+  hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
   push_selected:(string -> unit) ->
@@ -94,4 +95,5 @@ val render_metrics_body :
     the drawing knows how many lines a section came to -- it formats them out
     of the readings -- so the keypress steps an unbounded value and this says
     where it landed. Without it the stored scroll climbed past the end and
-    coming back took one press per step taken beyond it. *)
+    coming back took one press per step taken beyond it. [hand_position] is
+    handed the window when it hides lines, for the title row. *)

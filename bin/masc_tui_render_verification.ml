@@ -130,7 +130,7 @@ let render_verification_list (state : state) =
     match state.verification with None -> [] | Some s -> s.Masc.Tui_decode.vs_requests
   in
   let shown = List.length requests in
-  let header =
+  let header ~cols =
     match state.verification with
     | None ->
         let reading_note =
@@ -157,18 +157,32 @@ let render_verification_list (state : state) =
            the read happened at all. *)
         let total = snapshot.Masc.Tui_decode.vs_total in
         let window =
-          if total > 0 && shown >= total then ""
-          else
-            Printf.sprintf " (%s of %s)" (Masc_tui_value.Count.grouped shown)
-              (Masc_tui_value.Count.grouped total)
+          if shown > 0 then ""
+          else Printf.sprintf " (0 of %s)" (Masc_tui_value.Count.grouped total)
         in
         Printf.sprintf "%s  %s"
           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window
              ~after:("  " ^ connection_badge state))
           (connection_badge state)
   in
+  (* The selected row, and how much of the server's list is loaded when the
+     page holds less than all of it. *)
+  let position =
+    match state.verification with
+    | None -> None
+    | Some _ when shown = 0 -> None
+    | Some snapshot ->
+        (* Counted in the server's list, not the page: on a later page the
+           selected row and the rows read run on from the rows before it. *)
+        let offset = max 0 snapshot.Masc.Tui_decode.vs_offset in
+        let selected = Some (offset + state.verification_cursor) in
+        let total = snapshot.Masc.Tui_decode.vs_total in
+        if total > offset + shown then
+          Some (Masc_tui_value.Position.partial ~selected ~loaded:(offset + shown) ~total)
+        else Some (Masc_tui_value.Position.row ~selected ~total:(offset + shown))
+  in
   box_top buf cols;
-  box_line buf cols header;
+  box_line buf cols (zone_two_title ~cols state ~title:header ~position);
   box_divider buf cols;
   let col_hdr, request_row =
     judgement_list_columns state ~cols
@@ -191,7 +205,6 @@ let render_verification_list (state : state) =
     | Some layout ->
         Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
           ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-          ~overflow_takes_row:layout.sc_overflow_takes_row
     | None -> max 1 (rows - listing_chrome ~error:state.verification_error)
   in
   let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.verification_cursor
@@ -243,18 +256,10 @@ let render_verification_list (state : state) =
          | Masc.Tui_decode.Awaiting_queue ->
              Printf.sprintf "awaiting %s" (Masc_tui_value.Count.grouped total)
          | Masc.Tui_decode.Full_history ->
-             let total = Masc_tui_value.Count.grouped total in
-             if shown = 0 then Printf.sprintf "history 0 of %s" total
+             if offset = 0 then "history"
              else
-               Printf.sprintf "history %s-%s of %s"
+               Printf.sprintf "history from %s"
                  (Masc_tui_value.Count.grouped (offset + 1))
-                 (Masc_tui_value.Count.grouped (offset + shown)) total
-       in
-       let rows_window =
-         if shown > content_height then
-           Printf.sprintf " \xc2\xb7 rows %s"
-             (Masc_tui_scroll.window_text ~scroll ~height:content_height shown)
-         else ""
        in
        (* Named because the key is not on the footer of a narrow terminal, and
           a page with more behind it that says so is the difference between
@@ -264,7 +269,7 @@ let render_verification_list (state : state) =
          else ""
        in
        box_line_styled buf cols ~style:(Theme.recede ())
-         (Printf.sprintf "[%s%s%s]" place rows_window more);
+         (Printf.sprintf "[%s%s]" place more);
        (* An empty queue carrying a reason is not an empty queue. *)
        (match snapshot.Masc.Tui_decode.vs_backlog_error with
         | Some detail ->
@@ -419,10 +424,12 @@ let verification_evidence_index state request ~width observation =
         request.vr_submitted_by (workspace_name ~ko) in
     let ko = state.ui_language = Lang_ko in
     let say korean english = if ko then korean else english in
+    (* The selected item carries its own number below; this row counts the
+       items, it does not say which is read. *)
     judgement_detail_rows ~width ([Ansi.bold, Printf.sprintf
-        (if ko then "  증거 %d / %d · e/E 다음/이전 · i 목록 · o 열기 · s 저장"
-         else "  Evidence %d / %d · e/E next/previous · i list · o open · s save")
-        (if count = 0 then 0 else index + 1) count]
+        (if ko then "  증거 %s · e/E 다음/이전 · i 목록 · o 열기 · s 저장"
+         else "  Evidence %s · e/E next/previous · i list · o open · s save")
+        (Masc_tui_value.Count.grouped count)]
       @ rows @ [Theme.recede (), location]
       @ List.filter_map (fun (key, saved_index, progress) ->
           if key.vek_request_id = request.vr_request_id
@@ -442,23 +449,6 @@ let verification_evidence_index state request ~width observation =
 
 let verification_detail_pane (state : state) ~rows ~cols
     ~origin:(origin_row, origin_col) request buf =
-  let pane_start = Buffer.length buf in
-  box_top buf cols;
-  box_line buf cols
-    (Printf.sprintf "%s  %s"
-       (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
-          ~after:
-            (Printf.sprintf " \xe2\x96\xb8 details  %s"
-               (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id))
-        ^ " \xe2\x96\xb8 details")
-       (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id));
-  box_divider buf cols;
-  (* The frame cell of the first content row, counted from what was drawn
-     above it, for the pictures placed over the rows under it. *)
-  let content_origin =
-    ( origin_row + lines_ended_since buf ~start:pane_start
-    , origin_col + framed_content_column )
-  in
   let width = max 1 (framed_inner_width cols) in
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
@@ -481,10 +471,10 @@ let verification_detail_pane (state : state) ~rows ~cols
       [ verdict_action ]
     else [ approve; "  " ^ reject ]
   in
-  (* The position and action rows are fixed chrome; subtract exactly what
-     this pane draws so the reported window matches the visible body. *)
+  (* The action rows are fixed chrome; subtract exactly what this pane draws
+     so the window on the title row matches the visible body. *)
   let fixed_rows =
-    1 + List.length verdict_action_rows
+    List.length verdict_action_rows
       + (if Option.is_some armed_note then 1 else 0)
       + (if Option.is_some state.verification_verdict_error then 1 else 0)
   in
@@ -531,6 +521,28 @@ let verification_detail_pane (state : state) ~rows ~cols
   let lines = before @ evidence @ verification_contract_lines state ~width request @ after in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
+  let pane_start = Buffer.length buf in
+  box_top buf cols;
+  box_line buf cols
+    (zone_two_title ~cols state
+       ~position:
+         (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+            ~total:(List.length lines))
+       ~title:(fun ~cols ->
+         Printf.sprintf "%s  %s"
+           (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
+              ~after:
+                (Printf.sprintf " \xe2\x96\xb8 details  %s"
+                   (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id))
+            ^ " \xe2\x96\xb8 details")
+           (Terminal_text.single_line request.Masc.Tui_decode.vr_task_id)));
+  box_divider buf cols;
+  (* The frame cell of the first content row, counted from what was drawn
+     above it, for the pictures placed over the rows under it. *)
+  let content_origin =
+    ( origin_row + lines_ended_since buf ~start:pane_start
+    , origin_col + framed_content_column )
+  in
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
     match Rows.at lines_window (scroll + index) with
@@ -556,12 +568,6 @@ let verification_detail_pane (state : state) ~rows ~cols
       (fit_width ("  " ^ Terminal_text.single_line (verdict_failure_text state failure))
          (framed_inner_width cols)))
     state.verification_verdict_error;
-  (* This reading has its own pane row: pinned footer keys can consume the
-     whole footer at 30 and 40 columns, leaving its trailing position cut. *)
-  box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf "  [rows %s]"
-       (Masc_tui_scroll.window_text ~scroll ~height:content_height
-          (List.length lines)));
   List.iter
     (box_line_styled buf cols ~style:(Theme.warn ()))
     verdict_action_rows;
@@ -707,7 +713,7 @@ let render_harness_list (state : state) =
            Option.is_some v.Masc.Tui_decode.hv_fallback_reason)
          verdicts)
   in
-  let header =
+  let header ~cols =
     match state.harness with
     | None ->
         let reading_note =
@@ -744,7 +750,14 @@ let render_harness_list (state : state) =
           (connection_badge state)
   in
   box_top buf cols;
-  box_line buf cols header;
+  box_line buf cols
+    (zone_two_title ~cols state ~title:header
+       ~position:
+         (if shown = 0 then None
+          else
+            Some
+              (Masc_tui_value.Position.row ~selected:(Some state.harness_cursor)
+                 ~total:shown)));
   box_divider buf cols;
   let verdict_status (verdict : Tui_decode.harness_verdict) =
     let text = Terminal_text.single_line verdict.hv_verdict in
@@ -801,7 +814,6 @@ let render_harness_list (state : state) =
     match scrolled_surface state ~cols Harness with
     | Some layout -> Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
         ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
-        ~overflow_takes_row:layout.sc_overflow_takes_row
     | None -> max 1 (rows - harness_listing_chrome ~error:state.harness_error) in
   let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.harness_cursor
       ~height:content_height state.harness_scroll
@@ -835,9 +847,6 @@ let render_harness_list (state : state) =
           if idx = state.harness_cursor then box_line_selected buf cols line
           else box_line_styled buf cols ~style line
     done;
-  if shown > content_height then
-    box_line_styled buf cols ~style:(Theme.recede ())
-      (Printf.sprintf "  [verdicts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height shown));
   Buffer.add_buffer buf tail;
   finish_surface state ~surface_key:"harness" ~rows:terminal_rows ~cols buf
 
@@ -965,12 +974,6 @@ let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) 
     ]
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
-  box_top buf cols;
-  box_line buf cols
-    (harness_detail_heading state ~cols
-       ~task_id:verdict.Masc.Tui_decode.hv_task_id
-       ~tail:(connection_badge state));
-  box_divider buf cols;
   let lines =
     reading_notice_lines state ~width:(max 1 (framed_inner_width cols))
       ~inflight:state.harness_inflight
@@ -992,21 +995,26 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
            @ List.map (fun line -> Ansi.reset, line) lines)
     |> judgement_detail_rows ~width:(max 1 (framed_inner_width cols))
   in
-  let content_height = max 1 (rows - framed_chrome_rows - 1) in
+  let content_height = max 1 (rows - framed_chrome_rows) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
+  box_top buf cols;
+  box_line buf cols
+    (zone_two_title ~cols state
+       ~title:
+         (harness_detail_heading state
+            ~task_id:verdict.Masc.Tui_decode.hv_task_id
+            ~tail:(connection_badge state))
+       ~position:
+         (Masc_tui_value.Position.window ~first:scroll ~shown:content_height
+            ~total:(List.length lines)));
+  box_divider buf cols;
   let lines_window = Rows.of_list ~first:scroll ~height:content_height lines in
   for index = 0 to content_height - 1 do
     match Rows.at lines_window (scroll + index) with
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
-  (* Keep the reading inside the pane: the way out can occupy the entire
-     key footer at narrow widths, leaving no room for a trailing position. *)
-  box_line_styled buf cols ~style:Ansi.dim
-    (Printf.sprintf "  [rows %s]"
-       (Masc_tui_scroll.window_text ~scroll ~height:content_height
-          (List.length lines)));
   box_bottom buf cols;
   scroll
 ;;

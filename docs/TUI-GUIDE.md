@@ -2393,9 +2393,15 @@ wake reaches (a keeper, for keeper wakes); rows without one fall back to the
 payload summary.
 
 `n` opens a JSON creation form in `$EDITOR`; `e` opens the selected row's
-exact editable definition, including its full message, due time, recurrence,
-expiry, urgency, and stable schedule id. Exiting the editor with zero sends
-the form, while a non-zero exit changes nothing. The form keeps example fields
+exact editable definition, including its due time, recurrence, expiry, and
+stable schedule id. A Keeper wake's form also carries its full message, its
+title, and its urgency (a receipt delivery carries `delivery` in its place). A
+Lane action's form carries its `installation_id` and `action` instead, and no
+Keeper wake field, so saving a changed time leaves the row a Lane action with
+the same action. A row whose payload kind this build does not name, or whose
+kind the server did not send, opens no editor; the footer says why. Exiting
+the editor with zero sends the form, while a non-zero exit changes nothing.
+The form keeps example fields
 for interval, daily, and cron recurrence in place; `recurrence_kind` chooses
 which set the server reads. Modification is one atomic
 store transition: only `scheduled` or `due` rows can be replaced. It preserves

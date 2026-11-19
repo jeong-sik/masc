@@ -227,6 +227,7 @@ let test_memory_diagnostics_escape_control_bytes () =
     state.memory_health_cursor <- cursor;
     let lines = ref [] in
     Render_memory.render_memory_body ~cols:100 ~budget:20 state
+      ~hand_position:ignore
       ~push:(fun line -> lines := line :: !lines)
       ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
       ~push_selected:(fun line -> lines := line :: !lines)
@@ -243,6 +244,24 @@ let test_memory_diagnostics_escape_control_bytes () =
   in
   check bool "the reader's message is escaped" false (contains "\027[31m" unmeasured)
 ;;
+
+(* The Keeper list hands its selected row to the title row; the body writes
+   no position of its own (RFC tui-one-screen-grammar, section 2). *)
+let test_memory_list_hands_its_selected_row () =
+  let state = make_state () in
+  state.memory_health <- Some fleet_health;
+  state.memory_health_cursor <- 1;
+  let handed = ref [] in
+  Render_memory.render_memory_body ~cols:100 ~budget:20 state
+    ~hand_position:(fun position -> handed := position :: !handed)
+    ~push:ignore ~push_styled:(fun ~style:_ _ -> ()) ~push_selected:ignore
+    ~push_divider:ignore ~push_empty:ignore;
+  match !handed with
+  | [ Masc_tui_value.Position.Row { at; total } ] ->
+      check (pair int int) "the second of two Keepers is selected" (2, 2) (at, total)
+  | [] -> fail "the Keeper list hands its row"
+  | [ Masc_tui_value.Position.(Window _ | Partial _) ] | _ :: _ :: _ ->
+      fail "the Keeper list hands one row and no window"
 
 let make_memory_fact ?(keeper = "alpha") category claim : Masc.Tui_decode_memory_facts.memory_fact =
   { mf_keeper = keeper
@@ -736,6 +755,8 @@ let () =
           test_typed_category_filters_select_fact_identities
       ; test_case "Custom category preserves its original identity" `Quick
           test_custom_category_preserves_original_identity
+      ; test_case "the Keeper list hands its selected row" `Quick
+          test_memory_list_hands_its_selected_row
       ; test_case "failed facts refresh retains facts and unread scope" `Quick
           test_a_failed_facts_refresh_keeps_facts_and_unread_scope ]
     ; "one place per fact",

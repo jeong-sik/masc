@@ -90,18 +90,11 @@ let meta =
      | Error detail -> failwith detail)
 ;;
 
-(* The recent tools of a Keeper row, read as a request that does not reuse a
-   cached answer reads them. *)
+(* The recent tools of a Keeper row. *)
 let recent_tools config =
-  match
-    Operator_control_snapshot_tool_audit.read
-      ~read_policy:Dashboard_projection_read.Current
-      config
-      (Lazy.force meta)
-  with
+  match Operator_control_snapshot_tool_audit.read config (Lazy.force meta) with
   | Operator_control_snapshot_tool_audit.Read audit ->
     audit.Operator_control_snapshot_tool_audit.recent_tool_names
-  | Operator_control_snapshot_tool_audit.Timed_out -> fail "the tool audit read timed out"
   | Operator_control_snapshot_tool_audit.Unreadable detail -> fail detail
 ;;
 

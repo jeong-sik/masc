@@ -84,7 +84,7 @@ related: ["0477", "0474", "0204", "http-transport-runs-on-its-own-domain-and-eac
 
 루프는 정해진 주기로 돌지 않는다. 처음 한 번 읽은 뒤에는 바뀐 것이 오거나, 지난 읽기가 돌려준 기한이 되면 읽는다(`proactive_refresh.mli:90-92`, `:108-125`). 간격은 바뀐 것 때문에 읽는 두 번 사이의 최소 시간이다(`:37-41`). Keeper 가 바쁘면 바뀐 것이 늘 와서 간격마다 한 번씩 돈다. 보는 사람이 없어도 돈다.
 
-Current 는 10초 캐시(trust `operator_control_snapshot_trust.ml:5`, audit `operator_control_snapshot_tool_audit.ml:157`)를 일부러 건너뛴다. 10초 안에 들어온 커밋도 봐야 해서다(`operator_control_snapshot_tool_audit.ml:155-156`). 루프와 요청은 16칸 세마포어 하나를 나눠 쓴다(`operator_control_snapshot.ml:41`).
+Current 는 10초 trust 캐시(`operator_control_snapshot_trust.ml:5`)를 일부러 건너뛴다. 10초 안에 들어온 커밋도 봐야 해서다. tool audit 읽기에는 캐시가 없다. 루프와 요청은 16칸 세마포어 하나를 나눠 쓴다(`operator_control_snapshot.ml:41`).
 
 풀 작업 안에서 `Dated_jsonl` 끝 읽기는 그 자리에서 돈다. 풀 밖 Eio fiber 에서 부르면 풀에 IO 작업을 내고 기다린다(`dated_jsonl.ml:582`, `domain_pool_ref.ml:45-51`).
 
@@ -384,10 +384,9 @@ Fact_cell.settle cell seen ~step:(fun held -> fact.step held written)
 
 - trust, tool audit, 최근 활동, context, blocker 와 `masc_keeper_list` 의 receipt 는 칸을 읽는다. `Dated_jsonl` 저장소는 `read_fact` 로, 결정 기록은 `Keeper_row_facts` 로 읽는다.
 - 행 하나에서 registry 와 승인 큐를 한 번씩만 읽는다. receipt 칸도 한 번만 읽고, 두 reader 가 그 값을 같이 쓴다.
-- 이 값들을 읽는 행 helper 에서는 `read_policy` 의 뜻이 없어진다. 쓰는 중이 아니면 메모리 값이 파일과 같아서다. 그 helper 의 Current/Reuse 구분을 지운다. quarantine inventory(`operator_control_snapshot.ml:674-689`), snapshot 캐시(`:789-793`), briefing, execution 의 `read_policy` 는 그대로 둔다.
+- 이 값들만 읽는 행 helper 에서는 `read_policy` 의 뜻이 없다. 쓰는 중이 아니면 메모리 값이 파일과 같아서다. tool audit helper(`Operator_control_snapshot_tool_audit.read`)는 `read_policy` 를 받지 않고, 10초 캐시도 pool job 도 거치지 않는다. 그래서 그 캐시의 timeout 이 만들던 `timed_out` 상태도 없다. trust helper 는 아래 캐시 때문에 `read_policy` 를 받는다. quarantine inventory(`operator_control_snapshot.ml:674-689`), snapshot 캐시(`:789-793`), briefing, execution 의 `read_policy` 는 그대로 둔다.
 - tool audit 는 Keeper 행, briefing(`dashboard_briefing_assembly.ml`), Keeper 상세(`keeper_status_detail.ml`)가 같은 함수(`latest_tool_audit_snapshot_from_files`)로 읽는다. 셋이 같은 칸을 읽는다(L3a).
 - 10초 trust 캐시(`operator:keeper-runtime-trust:compact:v1:*`)는 승인 audit 와 workspace 대기 승인 목록 읽기도 덮는다(`keeper_runtime_trust_snapshot.ml:689-702`). 이 RFC 는 그 둘을 옮기지 않는다. 그래서 §8.1 이 정해질 때까지 캐시는 그 둘 몫으로 남긴다.
-- `dt_profile` 은 값이 들어가지 않는다(`operator_control_snapshot.ml:187`). 같이 지운다.
 
 ## 4. 층
 

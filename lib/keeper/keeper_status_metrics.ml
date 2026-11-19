@@ -48,7 +48,6 @@ let empty_metrics_summary =
 
 type tool_audit_read_state =
   | Tool_audit_read
-  | Tool_audit_timed_out
   | Tool_audit_unreadable
 
 let tool_audit_read_field = "tool_audit_read"
@@ -56,7 +55,6 @@ let tool_audit_read_error_field = "tool_audit_read_error"
 
 let tool_audit_read_state_to_wire = function
   | Tool_audit_read -> "read"
-  | Tool_audit_timed_out -> "timed_out"
   | Tool_audit_unreadable -> "unreadable"
 
 let empty_tool_audit_snapshot =

@@ -20,6 +20,7 @@ let dashboard_board_payload
       ?config
       ?hearth
       ?author_filter
+      ?text_query
       ?(sort_by = Board_dispatch.Hot)
       ?(exclude_system = false)
       ?(exclude_automation = false)
@@ -37,9 +38,17 @@ let dashboard_board_payload
     | None -> "-"
     | Some config -> config.Workspace.base_path
   in
+  (* The query is free text and may hold the [;] that separates key parts,
+     so it is prefixed with its length: two different queries never share a
+     cached payload, and a query cannot read as another key part. *)
+  let text_query_key =
+    match text_query with
+    | Some value -> Printf.sprintf "%d:%s" (String.length value) value
+    | None -> "-"
+  in
   let cache_key =
     Printf.sprintf
-      "board:memory:%s;%s;%s;%s;%b;%b;%d;%d;%s;%s"
+      "board:memory:%s;%s;%s;%s;%b;%b;%d;%d;%s;%s;%s"
       (Masc_board_handlers.Board_access.cache_key reader)
       (Option.value ~default:"-" hearth)
       (Option.value ~default:"-" author_filter)
@@ -50,6 +59,7 @@ let dashboard_board_payload
       offset
       config_key
       (Option.value ~default:"-" voter)
+      text_query_key
   in
   (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
      fleets.  The compute below scans the post store, fetches the
@@ -75,6 +85,7 @@ let dashboard_board_payload
           ~exclude_system
           ~exclude_automation
           ?author_filter
+          ?text_query
           ~limit:probe_fetch
           ()
       in
@@ -125,6 +136,9 @@ let dashboard_memory_http_payload ?config ~reader ~actor request : Dashboard_cac
     |> Fun.flip Option.bind (fun s ->
       if s = "" then None else Some s)
   in
+  (* The Board search box. A blank one is no query, so it shares the
+     unfiltered payload. *)
+  let text_query = String_util.option_trim (query_param request "q") in
   let sort_by = board_sort_order_of_request request in
   let exclude_system = bool_query_param request "exclude_system" ~default:false in
   let exclude_automation = bool_query_param request "exclude_automation" ~default:false in
@@ -141,6 +155,7 @@ let dashboard_memory_http_payload ?config ~reader ~actor request : Dashboard_cac
     ?config
     ?hearth
     ?author_filter
+    ?text_query
     ~sort_by
     ~exclude_system
     ~exclude_automation

@@ -738,7 +738,7 @@ let render_prompt_registry (state : state) =
                 (max 1 (framed_inner_width cols - 3 - authoring_cells))
                 (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
-          box_line buf cols (Theme.selection_style () ^ " " ^ Masc_tui_theme.strip_sgr label ^ Ansi.reset)
+          box_line_selected buf cols (" " ^ Masc_tui_theme.strip_sgr label)
         else box_line buf cols (" " ^ label)
       end)
     prompt_rows;
@@ -816,7 +816,7 @@ let render_runtime_prompt_assets (state : state) =
          let line = mark ^ " "
              ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 3))
                  (Terminal_text.single_line asset.pra_path) in
-         if index = cursor then box_line buf cols (Theme.selection_style () ^ " " ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset)
+         if index = cursor then box_line_selected buf cols (" " ^ Masc_tui_theme.strip_sgr line)
          else box_line buf cols (" " ^ line)
        end)
     assets;
@@ -1184,7 +1184,7 @@ let render_presets (state : state) =
                       ~max_cells:(max 1 (framed_inner_width cols - 3)) manifest)
             ~tail:""
         in
-        if index = cursor then box_line buf cols (Theme.selection_style () ^ Masc_tui_theme.strip_sgr label ^ Ansi.reset)
+        if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr label)
         else box_line buf cols label
       end)
     presets;
@@ -1300,13 +1300,18 @@ let render_themes (state : state) =
   let name_width = theme_name_width ~cols in
   box_top buf cols;
   box_line buf cols
-    (config_pane_title ~cols
-       ~reading:
-         (Printf.sprintf (if state.ui_language = Lang_ko then "%s테마 %d개 · 원래 대비 통과 %d개%s" else "%s%d themes · %d native-pass%s") Ansi.dim
-            (List.length entries) native_count Ansi.reset)
-       state);
+    (zone_two_title ~cols state
+       ~title:
+         (config_pane_title
+            ~reading:
+              (Printf.sprintf (if state.ui_language = Lang_ko then "%s테마 %d개 · 원래 대비 통과 %d개%s" else "%s%d themes · %d native-pass%s") Ansi.dim
+                 (List.length entries) native_count Ansi.reset)
+            state)
+       ~position:
+         (if entries = [] then None
+          else Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:(List.length entries))));
   box_divider buf cols;
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     ("  " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") (name_width + 2) ^ " "
      ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
      ^ fit_width (ui_text state ~ko:"배경" ~en:"page") 9 ^ " "
@@ -1676,12 +1681,11 @@ let render_config_models (state : state) =
          let index = scroll + i in
          match Rows.at table_window index with
          | Some line ->
-             let marked =
-               if table_mode && index = 0 then "  " ^ Ansi.bold ^ line ^ Ansi.reset
-               else if index = marked_line then Ansi.bold ^ Theme.info () ^ "> " ^ line ^ Ansi.reset
-               else "  " ^ line
-             in
-             box_line buf cols marked
+             if table_mode && index = 0 then
+               box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line)
+             else if index = marked_line then
+               box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+             else box_line buf cols ("  " ^ line)
          | None -> box_empty buf cols
        done);
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
@@ -2013,6 +2017,7 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
          [ ui_text state ~ko:"음성" ~en:"voice"
          ; ui_text state ~ko:"설정" ~en:"setup" ]
        state);
+  box_divider head cols;
   voice_body_line buf cols "";
   voice_body_line buf cols
     (Printf.sprintf "  %s%s %s%s  %s" Ansi.dim (ui_text state ~ko:"단계" ~en:"step") position Ansi.reset step_prompt);
@@ -2154,6 +2159,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
          [ ui_text state ~ko:"음성" ~en:"voice"
          ; ui_text state ~ko:"키퍼 목소리" ~en:"keeper voices" ]
        state);
+  box_divider head cols;
   (* Both selected owners stay above the scrolling document. Enter therefore
      acts on the displayed pair even after paging through long metadata. *)
   selector (ui_text state ~ko:"키퍼" ~en:"keeper") session.vas_agents session.vas_agent_cursor
@@ -2255,6 +2261,7 @@ let render_voice (state : state) =
   box_top head cols;
   box_line head cols
     (config_pane_title ~cols state);
+  box_divider head cols;
   let voice_section ?(first = false) title =
     List.iter (fun row -> voice_body_line buf cols row)
       (detail_section_lines ~first title)

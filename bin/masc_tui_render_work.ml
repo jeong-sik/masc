@@ -411,7 +411,7 @@ let render_work_tasks (state : state) =
       ~selected:(Overview_tasks.selection state.task_focus) in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"work-tasks"
-    ~title:(screen_title (text " 작업" " Work"))
+    ~title:(here_row ~cols state ~path:[ text "태스크" "Tasks" ] ~readings:[] ~position:None)
     ~hints:(Masc_tui_keys.footer_hints_work_tasks ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let context, geometry, window = work_tasks_projection state ~cols ~budget in
@@ -2059,13 +2059,10 @@ let render_schedule_list (state : state) =
                             ~summary:row.sch_recurrence_summary row.sch_recurrence)
                    }
                in
-               let content =
-                 if is_selected then
-                   Ansi.reverse ^ ">" ^ Ansi.reset ^ " " ^ line
-                 else
-                   "  " ^ line
-               in
-               c.push content
+               if is_selected then
+                 c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
+               else
+                 c.push ("  " ^ line)
              end
            done;
            (match List.nth_opt snapshot.scs_rows state.schedule_cursor with

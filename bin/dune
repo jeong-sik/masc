@@ -2526,6 +2526,7 @@
   masc_tui_keeper_memory_reading
   masc_tui_message_layout
   masc_tui_render_schedule
+  masc_tui_detail_height
   unix))
 
 (library

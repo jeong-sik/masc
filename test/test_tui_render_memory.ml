@@ -245,6 +245,66 @@ let test_memory_diagnostics_escape_control_bytes () =
   check bool "the reader's message is escaped" false (contains "\027[31m" unmeasured)
 ;;
 
+(* QA N02: the Keeper list changed height on every j and k, because the
+   selected Keeper's detail under it took the rows that Keeper's reading
+   needed. The detail takes the tallest loaded Keeper's rows (RFC
+   tui-one-screen-grammar section 8), so the layout, and with it the rows
+   the list draws in, is the same whichever Keeper is selected. The Keepers
+   differ in warnings: none, two read errors, a stalled Librarian. *)
+let test_memory_overview_keeps_one_height () =
+  let module H = Masc.Tui_decode_memory_health in
+  let plain = make_keeper_health ~keeper_id:"plain" ~facts:10 ~snapshot_bytes:1024 in
+  let errors =
+    { (make_keeper_health ~keeper_id:"errors" ~facts:3 ~snapshot_bytes:256) with
+      H.mkh_read_error = Some "ordinary snapshot unreadable"
+    ; mkh_source_read_error = Some "source snapshot unreadable" }
+  in
+  let stalled =
+    let keeper = make_keeper_health ~keeper_id:"stalled" ~facts:5 ~snapshot_bytes:512 in
+    { keeper with
+      H.mkh_librarian =
+        { keeper.mkh_librarian with
+          H.mlh_stalled = Some (H.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) } }
+  in
+  let keepers =
+    plain :: errors :: stalled
+    :: List.init 30 (fun index ->
+         make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:index
+           ~snapshot_bytes:1024)
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_health <- Some { (make_fleet_health plain) with H.mhs_keepers = keepers };
+  let count = List.length (Types.visible_memory_keepers state) in
+  check int "every Keeper is listed" (List.length keepers) count;
+  (* The rows the body draws: the layout's chrome, and every row pushed. *)
+  let drawn ~cols ~budget cursor =
+    state.memory_health_cursor <- cursor;
+    let rows = ref 0 in
+    let row _ = incr rows in
+    Render_memory.render_memory_body ~cols ~budget state ~hand_position:ignore ~push:row
+      ~push_styled:(fun ~style:_ line -> row line) ~push_selected:row
+      ~push_divider:(fun () -> incr rows) ~push_empty:(fun () -> incr rows);
+    (Render_memory.memory_overview_scrolled ~cols ~budget state).sc_chrome, !rows
+  in
+  List.iter
+    (fun (cols, budget) ->
+      List.iter
+        (fun detail ->
+          state.memory_overview_detail <- detail;
+          let first = drawn ~cols ~budget 0 in
+          List.iter
+            (fun cursor ->
+              check (pair int int)
+                (Printf.sprintf "%dx%d, detail %b, Keeper %d: chrome and rows drawn" cols budget
+                   detail cursor)
+                first (drawn ~cols ~budget cursor))
+            (List.init count Fun.id))
+        [ false; true ])
+    [ 80, 17; 120, 33; 200, 53 ]
+;;
+
 (* The Keeper list hands its selected row to the title row; the body writes
    no position of its own (RFC tui-one-screen-grammar, section 2). *)
 let test_memory_list_hands_its_selected_row () =
@@ -757,6 +817,8 @@ let () =
           test_custom_category_preserves_original_identity
       ; test_case "the Keeper list hands its selected row" `Quick
           test_memory_list_hands_its_selected_row
+      ; test_case "the overview keeps one height for every selection" `Quick
+          test_memory_overview_keeps_one_height
       ; test_case "failed facts refresh retains facts and unread scope" `Quick
           test_a_failed_facts_refresh_keeps_facts_and_unread_scope ]
     ; "one place per fact",

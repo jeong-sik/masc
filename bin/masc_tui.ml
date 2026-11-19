@@ -535,12 +535,11 @@ let move_runtime_config_cursor state ~delta =
    a row the frame will not draw. *)
 (* The rows a surface's list can draw in once the cursor is on [cursor].
 
-   Constant on every surface but one: the Memory overview spends rows on the
-   selected keeper's own alerts and read errors, so its body height is a
-   function of the cursor rather than of the surface. A follow worked out
-   from the layout before the move puts the landing outside the window it
-   measured, and the step key and the jump keys were working that out
-   differently -- the step recomputed, the landing did not. *)
+   The three lists measured here are asked at the landing row: a follow
+   worked out from the layout before the move puts the landing outside the
+   window it measured, and the step key and the jump keys were working that
+   out differently -- the step recomputed, the landing did not. Every other
+   list's [scrolled] is the same at every row. *)
 let surface_body_height_at (state : state) ~cursor scrolled =
   if state.repository_changes_open && Option.is_none state.repository_changes_diff_path then
     let _, cols = get_terminal_size () in
@@ -555,16 +554,7 @@ let surface_body_height_at (state : state) ~cursor scrolled =
     Masc_tui_render_memory.memory_facts_content_height ~cols
       ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
       ~cursor state
-  else
-    let scrolled =
-      if state.view = Memory then
-        let _, cols = get_terminal_size () in
-        Masc_tui_render_memory.memory_overview_scrolled ~cols
-          ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
-          ~cursor state
-      else scrolled
-    in
-    surface_body_height ~rows:(surface_rows state) scrolled
+  else surface_body_height ~rows:(surface_rows state) scrolled
 
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
   match scrolled_surface state state.view with

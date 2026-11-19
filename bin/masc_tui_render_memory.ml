@@ -1347,20 +1347,35 @@ type memory_overview_projection =
 let refused_rows projection =
   List.length projection.refused + if projection.refused_divider then 1 else 0
 
-let memory_overview_rows ~cols ~budget ?cursor (state : state) =
+let memory_overview_rows ~cols ~budget (state : state) =
   let keepers = visible_memory_keepers state in
-  let cursor = Option.value cursor ~default:state.memory_health_cursor in
-  let selected = List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) in
-  let context =
-    match selected with
-    | None -> { rows = []; primary_rows = 0; stalled_row = None }
-    | Some keeper when not state.memory_overview_detail ->
-        memory_axis_context state ~cols ~compact:false keeper
-    | Some keeper ->
-      memory_context_lines ~ko:(state.ui_language = Lang_ko) ~cols ~detail:state.memory_overview_detail
-        ~unit:state.memory_unit
-        ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input ~key:keeper.mkh_keeper_id)
-        keeper
+  let ko = state.ui_language = Lang_ko in
+  (* A Keeper's reading and the compact one that stands in for it on a short
+     frame. [v] keeps the full input and coverage, so it has no compact one. *)
+  let readings keeper =
+    if state.memory_overview_detail then
+      let full =
+        memory_context_lines ~ko ~cols ~detail:state.memory_overview_detail
+          ~unit:state.memory_unit
+          ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
+                    ~key:keeper.mkh_keeper_id)
+          keeper
+      in
+      full, full
+    else
+      memory_axis_context state ~cols ~compact:false keeper,
+      memory_axis_context state ~cols ~compact:true keeper
+  in
+  (* Every loaded Keeper's, because the detail under the list is as tall as
+     the tallest of them (RFC tui-one-screen-grammar §8). Sized by the
+     selected Keeper alone, it moved the list's last row and the divider
+     under it on every j and k (QA N02). *)
+  let all_readings = List.map readings keepers in
+  let no_reading = { rows = []; primary_rows = 0; stalled_row = None } in
+  let context, compact_context =
+    Option.value ~default:(no_reading, no_reading)
+      (List.nth_opt all_readings
+         (max 0 (min state.memory_health_cursor (List.length keepers - 1))))
   in
   let all_refused = memory_refused_keeper_lines state in
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
@@ -1373,18 +1388,18 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
-  (* A compact selected reading keeps its state, an omission marker and an
-     actionable stalled-gap row. [v] retains the full input and coverage. *)
-  let compact_context = match selected with
-    | Some keeper when not state.memory_overview_detail ->
-        memory_axis_context state ~cols ~compact:true keeper
-    | Some _ | None -> context
-  in
-  let context_reserve =
+  (* A compact reading keeps its state, an omission marker and an actionable
+     stalled-gap row. The rows kept for the detail are the most any loaded
+     Keeper's would keep, so the header and the rejected rows above the list
+     do not change with the selection either. *)
+  let reserve (context, compact) =
     if context.rows = [] then 0
     else if state.memory_overview_detail then
       3 + (if Option.is_some context.stalled_row then 1 else 0)
-    else List.length compact_context.rows + 1
+    else List.length compact.rows + 1
+  in
+  let context_reserve =
+    List.fold_left (fun most reading -> max most (reserve reading)) 0 all_readings
   in
   let header_budget = max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve) in
   (* On a very short frame the full list and selected detail must yield before
@@ -1395,9 +1410,9 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     if state.memory_overview_detail then memory_fleet_header_rows ~cols state
     else
       [memory_compact_fleet_row ~cols state]
-      @ (match selected with
-         | Some _ -> []
-         | None ->
+      @ (match keepers with
+         | _ :: _ -> []
+         | [] ->
              let heading, clauses = memory_world_axis state ~room:(max 1 (framed_inner_width cols - 2)) in
              clause_rows ~cols (heading :: clauses))
   in
@@ -1424,14 +1439,22 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     in
     if context.rows = [] || available <= 1 then []
     else
-      let context =
-        if List.length context.rows <= available - 1 then context else compact_context in
-      fold_memory_context_rows ~ko:(state.ui_language = Lang_ko) ~max_rows:(available - 1) context
+      let room = available - 1 in
+      let fold (context, compact) =
+        fold_memory_context_rows ~ko ~max_rows:room
+          (if List.length context.rows <= room then context else compact)
+      in
+      (* Each reading is folded into the room before it is measured, so
+         none is cut here: [fit] only pads the selected one to the tallest. *)
+      Masc_tui_detail_height.fit ~budget:room ~rows:all_readings ~detail:fold
+        ~too_tall:(Masc_tui_detail_height.Cut_with
+                     (if ko then "  … v:전체" else "  … v:full reading"))
+        ~blank:"" (fold (context, compact_context))
   in
   { header; refused; refused_divider; context }
 
-let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
-  let projection = memory_overview_rows ~cols ~budget ?cursor state in
+let memory_overview_scrolled ~cols ~budget (state : state) =
+  let projection = memory_overview_rows ~cols ~budget state in
   memory_overview_scrolled
     ~header_rows:(List.length projection.header)
     ~refused_rows:(refused_rows projection)

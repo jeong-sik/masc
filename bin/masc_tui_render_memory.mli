@@ -84,10 +84,13 @@ val memory_action_reading :
     A missing exact Keeper observation and read errors remain in the capture;
     [None] means the action is not a Memory destination. *)
 
-val memory_overview_scrolled : cols:int -> budget:int -> ?cursor:int -> state -> scrolled
+val memory_overview_scrolled : cols:int -> budget:int -> state -> scrolled
 (** The overview's scroll layout at [cols], with summary, rejected Keeper
     rows and selected Keeper cards limited to the same body [budget] used by
-    the renderer. Short frames use the same compact cards for both counts. *)
+    the renderer. Short frames use the same compact cards for both counts.
+    The selected Keeper's detail takes the rows the tallest loaded Keeper's
+    would (RFC tui-one-screen-grammar §8), so the layout is the same for
+    every selection and the list's height depends on the frame alone. *)
 
 val render_memory_body :
   cols:int ->

@@ -252,7 +252,10 @@ let task_preview_lines (state : state) ~cells ~rows (task : Tui_decode.task) =
     if rows >= 2 then [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
     else [] in
   let room = max 0 (rows - List.length header - List.length hint) in
-  header @ work_preview_body ~cells ~rows:room request @ hint
+  let body_budget = if hint <> [] && room >= 3 then room - 1 else room in
+  let body = work_preview_body ~cells ~rows:body_budget request in
+  let hint_gap = if hint <> [] && body <> [] && List.length body < room then [""] else [] in
+  header @ body @ hint_gap @ hint
 
 
 (* One task's event history, appended after the detail body so it rides the
@@ -284,9 +287,22 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
     @ (match task_goal_reading state ~task_id:task.id with
       | Masc_tui_agenda.Read_failed detail -> [(text " 목표 연결 조회 실패: " " Goal links unavailable: ") ^ detail]
       | Not_read | Read _ -> []) in
-  (failures |> List.concat_map (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))))
-  @ task_document_lines state ~cols Masc_tui_task_document.Body
-  @ ("" :: Masc_tui_task_document.history_heading_rows ~ko:(state.ui_language = Lang_ko) ~width)
+  let failure_rows =
+    failures
+    |> List.concat_map (Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols)))
+  in
+  let body_rows = task_document_lines state ~cols Masc_tui_task_document.Body in
+  let pre_history =
+    match failure_rows, body_rows with
+    | [], [] -> []
+    | [], _ :: _ -> body_rows
+    | _ :: _, [] -> failure_rows
+    | _ :: _, _ :: _ -> failure_rows @ ("" :: body_rows)
+  in
+  let history_heading =
+    Masc_tui_task_document.history_heading_rows ~ko:(state.ui_language = Lang_ko) ~width
+  in
+  (if pre_history = [] then history_heading else pre_history @ ("" :: history_heading))
   @ (Masc_tui_task_document.history_status_lines ~ko:(state.ui_language = Lang_ko) ~width
       ~view:(observation_failure_said (history_failure_said ~ko:(state.ui_language = Lang_ko)
         ~request:Kept_request.Task_history_read) history)
@@ -751,7 +767,10 @@ let planning_preview_lines (state : state) ~now ~cells ~rows (goal : planning_go
   let notices =
     List.take (rows - List.length phase_row) (Option.to_list notice @ Option.to_list due)
     |> List.map (fun (style, detail) -> style ^ field "" detail ^ Ansi.reset) in
-  let header = phase_row @ notices in
+  let header =
+    let raw = phase_row @ notices in
+    if raw <> [] && rows >= List.length raw + 3 then raw @ [""] else raw
+  in
   let hint =
     if rows > List.length header && rows >= 2 then
       [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
@@ -760,7 +779,10 @@ let planning_preview_lines (state : state) ~now ~cells ~rows (goal : planning_go
     text "목표: " "Measure: " ^ Planning_detail.measure_text goal.pg_measure ^ "\n"
     ^ text "측정 방법: " "Procedure: " ^ goal.pg_procedure in
   let room = max 0 (rows - List.length header - List.length hint) in
-  header @ work_preview_body ~cells ~rows:room criterion @ hint
+  let body_budget = if hint <> [] && room >= 3 then room - 1 else room in
+  let body = work_preview_body ~cells ~rows:body_budget criterion in
+  let hint_gap = if hint <> [] && body <> [] && List.length body < room then [""] else [] in
+  header @ body @ hint_gap @ hint
 
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1121,6 +1143,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
        | Some reason -> field ~tone:Planning_detail.Unreadable (text "작업 조회 범위" "Task coverage") reason)
     @ link_notices
     @ field ~tone:(if complete then Planning_detail.Plain else Unreadable) (text "열린 작업" "Open tasks") count_text
+    @ (if linked_tasks = [] then [] else [ { Planning_detail.tone = Plain; text = "" } ])
         (* One row per task, led by its id. Its [Link.reference] is that id
            under a fixed prefix, and only the board scans text for links, so
            a row of its own would repeat the id. *)
@@ -2363,7 +2386,7 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
             (Terminal_text.short_timestamp hold.Tui_decode.srh_due_at_iso)
         ]
   in
-  detail_section_heading ~first:true
+  detail_section_heading ~first:true ~width
     (t "1. 현재 상태 · 다음 실행 · 보류 진단" "1. Status & Delivery")
   @ [ (let status = schedule_status_reading ~ko row.sch_status in
        field ~style:status.tone (t "상태" "Status") status.word)
@@ -2387,7 +2410,7 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
         (t "반응" "Reaction") reaction
     ]
   @ schedule_turn_rows ~ko ~field row
-  @ detail_section_heading (t "2. 최근 실행 이력" "2. Wake History")
+  @ detail_section_heading ~width (t "2. 최근 실행 이력" "2. Wake History")
   @ schedule_wake_lines ~ko ~field ~timestamp ~row ~history:wake_history
       ~history_error:wake_history_error
   @ (if keeper_wake then
@@ -2401,12 +2424,14 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
               "Keeper Calls or Activity between the two recorded times")
        ]
      else [])
-  @ detail_section_heading (t "3. 작업 요약 · 일정 식별자" "3. Summary & Identity")
+  @ detail_section_heading ~width (t "3. 작업 요약 · 일정 식별자" "3. Summary & Identity")
   @ [ Ansi.bold, t "  요약" "  SUMMARY" ]
   @ (Message_layout.wrap_body ~markdown:document_markdown
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
-  @ [ field (t "대상" "Target") (optional row.sch_payload_target) ]
+  @ [ Ansi.dim, ""
+    ; field (t "대상" "Target") (optional row.sch_payload_target)
+    ]
   @ target_link
   @ [ field (t "종류" "Kind") (optional row.sch_payload_kind)
     ; field (t "실행 도구" "Dispatch tool") (optional row.sch_payload_dispatch_tool)
@@ -2421,8 +2446,9 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
     ; field (t "등록자" "Scheduled by") row.sch_scheduled_by
     ; field (t "요청 시각" "Requested") (Terminal_text.short_timestamp row.sch_requested_at_iso)
     ]
-  @ detail_section_heading (t "4. 페이로드 원문" "4. Payload JSON & Digest")
+  @ detail_section_heading ~width (t "4. 페이로드 원문" "4. Payload JSON & Digest")
   @ [ field "Digest" row.sch_payload_digest
+    ; Ansi.dim, ""
     ; Ansi.bold, t "  페이로드 JSON" "  PAYLOAD JSON"
     ]
   @ (document_json ~width:(max 1 (width - 4))
@@ -2469,7 +2495,7 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
         else match Message_layout.wrap_words ~max_cells:width line with
         | [] -> [style, ""]
         | lines -> List.map (fun text -> style, text) lines))
-    (warnings @ fields)
+    (if warnings = [] then fields else warnings @ ((Ansi.dim, "") :: fields))
 
 let schedule_detail_height ~rows ~warning_rows ~count =
   Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + warning_rows) ~count

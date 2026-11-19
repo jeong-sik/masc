@@ -7064,8 +7064,14 @@ let detail_heading_rows ~first lines =
   let heading = List.map (fun line -> section_heading_style, "  " ^ line) lines in
   if first then heading else (Ansi.dim, "") :: heading
 
-let detail_section_heading ?(first = false) title =
-  detail_heading_rows ~first [ section_rule_text title ]
+let detail_section_heading ?(first = false) ?width title =
+  let ruled = section_rule_text title in
+  let lines =
+    match width with
+    | Some w -> Message_layout.wrap_words ~max_cells:(max 1 (w - 2)) ruled
+    | None -> [ ruled ]
+  in
+  detail_heading_rows ~first lines
 
 (* A detail page of headed blocks of [Page_line] lines. One label column
    serves every block, so the values of the whole page start at one cell and
@@ -7137,8 +7143,18 @@ let runtime_config_status_lines state ~cols =
   in
   detail_page ~width:(framed_inner_width cols) blocks
 
-let detail_section_lines ?(first = false) title =
-  let heading = [ "  " ^ section_heading_line title ] in
+let detail_section_lines ?(first = false) ?width title =
+  let heading =
+    match width with
+    | None -> [ "  " ^ section_heading_line title ]
+    | Some w ->
+        let ruled = section_rule_text title in
+        if Message_layout.display_width ruled <= max 1 (w - 2) then
+          [ "  " ^ section_heading_line title ]
+        else
+          Message_layout.wrap_words ~max_cells:(max 1 (w - 2)) ruled
+          |> List.map (fun line -> "  " ^ section_heading_style ^ line ^ Ansi.reset)
+  in
   if first then heading else "" :: heading
 
 let wrap_summary_column_items ~width items =

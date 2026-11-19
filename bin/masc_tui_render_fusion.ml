@@ -748,27 +748,30 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
   let panel_lines =
     evidence.fe_panel
     |> List.mapi (fun index result ->
-           match result with
-           | Fusion_panel_answered answer ->
-               [ ( (Theme.ok ())
-                 , Printf.sprintf
-                     "  Panel %d [answered] %s  (%d in / %d out)"
-                     (index + 1)
-                     (Terminal_text.single_line answer.fpa_model)
-                     answer.fpa_input_tokens answer.fpa_output_tokens )
-               ]
-               @ fusion_markdown_block ~width ~indent:"    "
-                   answer.fpa_answer
-           | Fusion_panel_failed failure ->
-               [ ( (Theme.bad ())
-                 , Printf.sprintf "  Panel %d [failed] %s  [%s]"
-                     (index + 1)
-                     (Terminal_text.single_line failure.fpf_model)
-                     (Terminal_text.single_line failure.fpf_reason_code) )
-               ; Ansi.dim, "    Token usage: not recorded"
-               ]
-               @ fusion_wrapped_block ~width ~indent:"    "
-                   failure.fpf_reason_detail)
+           let body =
+             match result with
+             | Fusion_panel_answered answer ->
+                 [ ( (Theme.ok ())
+                   , Printf.sprintf
+                       "  Panel %d [answered] %s  (%d in / %d out)"
+                       (index + 1)
+                       (Terminal_text.single_line answer.fpa_model)
+                       answer.fpa_input_tokens answer.fpa_output_tokens )
+                 ]
+                 @ fusion_markdown_block ~width ~indent:"    "
+                     answer.fpa_answer
+             | Fusion_panel_failed failure ->
+                 [ ( (Theme.bad ())
+                   , Printf.sprintf "  Panel %d [failed] %s  [%s]"
+                       (index + 1)
+                       (Terminal_text.single_line failure.fpf_model)
+                       (Terminal_text.single_line failure.fpf_reason_code) )
+                 ; Ansi.dim, "    Token usage: not recorded"
+                 ]
+                 @ fusion_wrapped_block ~width ~indent:"    "
+                     failure.fpf_reason_detail
+           in
+           if index = 0 then body else (Ansi.dim, "") :: body)
     |> List.concat
   in
   let panel_token_items =
@@ -802,6 +805,7 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
         ]
         @ fusion_labeled_markdown ~width ~label:"Resolved"
             judge.fj_resolved_answer
+        @ [ Ansi.dim, "" ]
         @ fusion_labeled_markdown ~width ~label:"Reason" judge.fj_reason
     | Fusion_judge_failed failure ->
         [ ( (Theme.bad ())
@@ -855,39 +859,42 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
           nodes
           |> List.filter (fun node -> node.fjn_role = Judge_first)
           |> List.mapi (fun index node ->
-                 match node.fjn_outcome with
-                 | Judge_node_synthesized synthesized ->
-                     [ ( (Theme.info ())
-                       , Printf.sprintf
-                           "  First %d [synthesized] %s  (%d in / %d out)"
-                           (index + 1)
-                           (Terminal_text.single_line node.fjn_identity)
-                           synthesized.fjno_input_tokens
-                           synthesized.fjno_output_tokens )
-                     ]
-                     @ fusion_labeled_markdown ~width
-                         ~label:
-                           (Printf.sprintf "First %d %s" (index + 1)
-                              (Terminal_text.single_line node.fjn_identity))
-                         synthesized.fjno_resolved_answer
-                 | Judge_node_failed failed ->
-                     let clock =
-                       match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
-                       | true, _ -> "  (timed out)"
-                       | false, Some seconds ->
-                           Printf.sprintf "  (%.0fs)" seconds
-                       | false, None -> ""
-                     in
-                     [ ( (Theme.bad ())
-                       , Printf.sprintf
-                           "  First %d [failed] %s  [%s]%s"
-                           (index + 1)
-                           (Terminal_text.single_line node.fjn_identity)
-                           (Terminal_text.single_line failed.fjno_failure_code)
-                           clock )
-                     ]
-                     @ fusion_wrapped_block ~width ~indent:"    "
-                         failed.fjno_error)
+                 let card =
+                   match node.fjn_outcome with
+                   | Judge_node_synthesized synthesized ->
+                       [ ( (Theme.info ())
+                         , Printf.sprintf
+                             "  First %d [synthesized] %s  (%d in / %d out)"
+                             (index + 1)
+                             (Terminal_text.single_line node.fjn_identity)
+                             synthesized.fjno_input_tokens
+                             synthesized.fjno_output_tokens )
+                       ]
+                       @ fusion_labeled_markdown ~width
+                           ~label:
+                             (Printf.sprintf "First %d %s" (index + 1)
+                                (Terminal_text.single_line node.fjn_identity))
+                           synthesized.fjno_resolved_answer
+                   | Judge_node_failed failed ->
+                       let clock =
+                         match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
+                         | true, _ -> "  (timed out)"
+                         | false, Some seconds ->
+                             Printf.sprintf "  (%.0fs)" seconds
+                         | false, None -> ""
+                       in
+                       [ ( (Theme.bad ())
+                         , Printf.sprintf
+                             "  First %d [failed] %s  [%s]%s"
+                             (index + 1)
+                             (Terminal_text.single_line node.fjn_identity)
+                             (Terminal_text.single_line failed.fjno_failure_code)
+                             clock )
+                       ]
+                       @ fusion_wrapped_block ~width ~indent:"    "
+                           failed.fjno_error
+                 in
+                 (Ansi.dim, "") :: card)
           |> List.concat
         in
         [ Ansi.dim, "" ]
@@ -936,12 +943,12 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
           (Masc_tui_fusion_seat_routes.lines routes)
   in
   [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
-  @ detail_section_heading "1. 질문 · 최종 판정 (Question & Judge Synthesis)"
+  @ detail_section_heading ~width "1. 질문 · 최종 판정 (Question & Judge Synthesis)"
   @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
   @ [ Ansi.dim, "" ]
   @ judge_lines
   @ judges_lines
-  @ detail_section_heading "2. 패널 응답 · 토큰 분포 (Panel Responses)"
+  @ detail_section_heading ~width "2. 패널 응답 · 토큰 분포 (Panel Responses)"
   @ [ ( Ansi.dim
       , let usage =
           if answered = 0 then "panel token usage: not recorded"
@@ -953,14 +960,15 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
         in
         Printf.sprintf "  %d answered / %d failed  \xc2\xb7  %s"
           answered failed usage )
-    ; Ansi.dim, ""
     ]
+  @ (if panel_chart_lines = [] && panel_lines = [] then [] else [ Ansi.dim, "" ])
   @ panel_chart_lines
   @ panel_lines
-  @ detail_section_heading "3. 도구 실행 추적 (Tool Executions)"
+  @ detail_section_heading ~width "3. 도구 실행 추적 (Tool Executions)"
   @ tool_lines
-  @ detail_section_heading "4. 시트 라우팅 · 기록 증거 (Seat Routes & Board Link)"
+  @ detail_section_heading ~width "4. 시트 라우팅 · 기록 증거 (Seat Routes & Board Link)"
   @ seat_route_lines
+  @ (if seat_route_lines = [] then [] else [ Ansi.dim, "" ])
   @ [ ( Ansi.dim
       , "  Board link: "
         ^ Link.reference Board_post

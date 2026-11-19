@@ -971,9 +971,10 @@ val studio_panel : width:int -> title:string -> lines:string list -> string list
 (** Framed sub-panel box with a middle-truncated title header and cell-fitted rows. *)
 
 
-val detail_section_heading : ?first:bool -> string -> (string * string) list
-(** Numbered/grouped section header [  [ Title ]] in [(style, text)] pairs for
-    scrollable detail readers. *)
+val detail_section_heading : ?first:bool -> ?width:int -> string -> (string * string) list
+(** Numbered/grouped section header [  ── Title ─────] in [(style, text)] pairs
+    for scrollable detail readers. Wraps at word boundaries when [?width] is
+    supplied. *)
 
 val detail_page :
   width:int -> (string * Masc_tui_page_line.t list) list -> (string * string) list
@@ -984,8 +985,10 @@ val section_heading_line : string -> string
 (** A detail's section heading, [── title ─────] in bold on the reader's
     foreground (RFC tui-one-screen-grammar §5.2, §7.3). *)
 
-val detail_section_lines : ?first:bool -> string -> string list
-(** Numbered/grouped section header [  [ Title ]] as pre-styled strings. *)
+val detail_section_lines : ?first:bool -> ?width:int -> string -> string list
+(** Numbered/grouped section header [  ── Title ─────] as pre-styled strings.
+    Wraps at word boundaries when [?width] is supplied and the heading exceeds
+    [width - 2] cells. *)
 
 val split_summary_columns :
   titled:bool ->

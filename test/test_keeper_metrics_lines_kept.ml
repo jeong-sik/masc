@@ -13,9 +13,11 @@
        the metrics chart answer from them.
     2. The lines are the newest [recent_metrics_row_count] rows, oldest
        first, and are what the files say.
-    3. A store the strict read refuses: the strict reader says so, and the
-       reader that shows what it can reads the rows.
-    4. Held lines are answered without the fiber giving up its turn. *)
+    3. A store the strict read refuses: the strict reader says so and keeps
+       nothing, and the recent activity reads the rows it shows.
+    4. The recent activity reads no further back than the rows it shows: a
+       day entry behind them that cannot be read does not reach it.
+    5. Held lines are answered without the fiber giving up its turn. *)
 
 open Alcotest
 open Masc
@@ -78,13 +80,8 @@ let kept config =
 
 let answer = result (list int) string
 
-(* The rows the reader that shows what it can gives. *)
-let shown config =
-  numbers
-    (Keeper_status_metrics.newest_metrics_lines_passing_over_what_is_not_the_stores
-       config
-       ~keeper_name)
-;;
+(* The rows the recent activity of the Keeper row shows. *)
+let shown config = numbers (Keeper_status_metrics.recent_activity_lines config ~keeper_name)
 
 let meta =
   lazy
@@ -147,7 +144,7 @@ let test_the_lines_follow_the_rows_appended () =
   append config (heartbeat 2);
   append config (turn 3 "second_tool");
   check answer "the rows appended since" (Ok [ 1; 2; 3 ]) (kept config);
-  check (list int) "the reader that shows what it can" [ 1; 2; 3 ] (shown config);
+  check (list int) "the recent activity" [ 1; 2; 3 ] (shown config);
   check
     (list string)
     "the recent tools come from the kept lines"
@@ -176,9 +173,19 @@ let test_the_lines_are_the_newest_rows () =
   check answer "as the files say" (Ok newest) (kept config)
 ;;
 
+let refused config =
+  match Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name with
+  | Ok _ -> fail "the strict reader read a store the strict read refuses"
+  | Error (_ : Dated_jsonl.read_error) -> ()
+;;
+
 (* A name beside the months that the layout does not make. The strict read
-   refuses the store and nothing is kept. The reader that shows what it can
-   passes the name over, as it did before the lines were kept. *)
+   refuses the store and keeps nothing. The recent activity passes the name
+   over, as it did before the lines were kept.
+
+   Nothing kept: the name and the day files then go with nobody told, and
+   the strict read finds a store without a row. Rows kept by the refused
+   read would be answered here. *)
 let test_a_store_the_strict_read_refuses () =
   with_workspace
   @@ fun config ->
@@ -187,12 +194,35 @@ let test_a_store_the_strict_read_refuses () =
   let store = Keeper_types_support.keeper_metrics_store config keeper_name in
   let foreign = Filename.concat (Dated_jsonl.base_dir store) "invalid-layout" in
   Out_channel.with_open_text foreign (fun channel -> output_string channel "not a month");
-  (match Keeper_status_metrics.newest_metrics_lines_result config ~keeper_name with
-   | Ok _ -> fail "the strict reader read a store the strict read refuses"
-   | Error (_ : Dated_jsonl.read_error) -> ());
-  check (list int) "the reader that shows what it can" [ 1; 2 ] (shown config);
+  refused config;
+  check (list int) "the recent activity" [ 1; 2 ] (shown config);
   Sys.remove foreign;
-  check answer "once the name is gone" (Ok [ 1; 2 ]) (kept config)
+  remove_day_files config;
+  check answer "the refused read kept nothing" (Ok []) (kept config)
+;;
+
+(* The newest day file holds more rows than the recent activity shows, and a
+   month behind it holds a day entry that is a directory. The strict read
+   goes back for its whole window and refuses the store. The recent activity
+   has its rows from the newest file and opens nothing behind it; a read
+   that went back for the whole window raised there, and the Keeper's row
+   was lost with it. *)
+let test_the_recent_activity_reads_no_further_back_than_it_shows () =
+  with_workspace
+  @@ fun config ->
+  let shows = Keeper_status_metrics.recent_activity_row_count in
+  for number = 1 to shows + 1 do
+    append config (heartbeat number)
+  done;
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
+  let behind = Filename.concat (Dated_jsonl.base_dir store) "2000-01" in
+  Fs_compat.mkdir_p (Filename.concat behind "01.jsonl");
+  refused config;
+  check
+    (list int)
+    "the newest rows, from the newest file"
+    (List.init shows (fun index -> index + 2))
+    (shown config)
 ;;
 
 (* How many turns a fiber that is ready to run gets while [read] is called
@@ -241,7 +271,7 @@ let test_held_lines_are_answered_without_waiting () =
     0
     (turns_of_a_fiber_beside (fun () ->
        check answer "held" (Ok [ 1 ]) (kept config);
-       check (list int) "held, for the reader that shows what it can" [ 1 ] (shown config)))
+       check (list int) "held, for the recent activity" [ 1 ] (shown config)))
 ;;
 
 (* The rows are appended in the server, the process that writes the store and
@@ -263,6 +293,10 @@ let () =
             "a store the strict read refuses"
             `Quick
             test_a_store_the_strict_read_refuses
+        ; test_case
+            "the recent activity reads no further back than it shows"
+            `Quick
+            test_the_recent_activity_reads_no_further_back_than_it_shows
         ; test_case
             "held lines are answered without waiting"
             `Quick

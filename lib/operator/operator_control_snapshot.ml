@@ -23,9 +23,6 @@ let remote_client_type_of_context = Operator_control_snapshot_runtime_status.rem
 let operator_server_profile_json = Operator_control_snapshot_runtime_status.operator_server_profile_json
 
 
-(* How many of a Keeper's newest metrics rows its recent activity shows. *)
-let recent_activity_rows = 5
-
 let recent_messages_json config =
   Workspace.get_messages_raw config ~since_seq:0 ~limit:20
   |> List.map Masc_domain.message_to_yojson
@@ -435,16 +432,10 @@ let keepers_json
                                let result =
                                  if include_recent_activity
                                  then (
-                                   let kept =
-                                     Keeper_status_metrics
-                                     .newest_metrics_lines_passing_over_what_is_not_the_stores
+                                   let lines =
+                                     Keeper_status_metrics.recent_activity_lines
                                        config
                                        ~keeper_name:name
-                                   in
-                                   let lines =
-                                     List.drop
-                                       (max 0 (List.length kept - recent_activity_rows))
-                                       kept
                                    in
                                    let parsed, _ =
                                      Fs_compat.parse_jsonl_lines

@@ -236,7 +236,7 @@ let task_preview_lines (state : state) ~cells ~rows (task : Tui_decode.task) =
     List.find_opt (fun (full : Masc_domain.task) -> String.equal full.id task.id)
       (task_domain_values state) in
   let request = match original with
-    | None -> text "요청 내용 미확인" "Request not available"
+    | None -> text "요청 내용 미조회" "Request not read"
     | Some full ->
         if String.trim full.description = "" then full.title
         else full.description in
@@ -407,8 +407,8 @@ let render_work_tasks (state : state) =
             | Overview_tasks.Rows_read _ ->
                 if work_task_rows_complete state then text "표시할 열린 작업 없음" "No open Tasks in this reading"
                 else if work_task_rows_current state then
-                  text "이 관측에 열린 작업 없음 · 전체 미확인" "No open Tasks in this reading · total unknown"
-                else text "이전 관측에 열린 작업 없음 · 현재 미확인" "No open Tasks in the previous reading · current unknown"
+                  text "이 관측에 열린 작업 없음 · 일부 관측" "No open Tasks in this reading · partial reading"
+                else text "이전 관측에 열린 작업 없음" "No open Tasks in the earlier reading"
             | Rows_unread | Rows_unavailable _ -> text "열린 작업 목록 미조회" "Open Task list not read"]
          else
            (* A row holds values only. A previous reading draws them faint
@@ -464,9 +464,9 @@ let planning_next_step ~ko (goal : planning_goal) =
     (Theme.warn (), (text "목표 ID가 비어 있거나 앞뒤 공백이 있습니다 · 저장된 ID를 확인하세요" "Goal ID is blank or has disallowed surrounding whitespace; inspect the stored ID"))
   else match goal.pg_phase, goal.pg_proof with
   | Goal_phase.Executing, Tui_decode.Proof_unreadable _ when Option.is_none goal.pg_retry_binding ->
-    (Theme.warn (), (text "검증 결속 미확인 · 근거·서버 저장소·런타임을 확인하고 [r]로 재조회하세요" "verification binding unavailable - inspect proof, server storage and runtime, then [r] refresh"))
+    (Theme.warn (), (text "검증 결속 보고 안 됨 · 근거·서버 저장소·런타임을 확인하고 [r]로 재조회하세요" "verification binding not reported - inspect proof, server storage and runtime, then [r] refresh"))
   | Goal_phase.Executing, _ when Option.is_none goal.pg_retry_binding ->
-    (Theme.warn (), (text "검증 결속 미확인 · 목표와 근거를 확인하고 [r]로 재조회하세요" "verification binding unavailable - inspect the Goal and proof, then [r] refresh"))
+    (Theme.warn (), (text "검증 결속 보고 안 됨 · 목표와 근거를 확인하고 [r]로 재조회하세요" "verification binding not reported - inspect the Goal and proof, then [r] refresh"))
   | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
     ( (Theme.bad ())
     , (text "검증 거절 · 판정 이유에 따라 수정하고 [c]로 다시 제출하세요" "refused - fix what the verdict names below, then [c] to resubmit") )
@@ -613,12 +613,12 @@ let planning_summary_reading ~cols (state : state) =
           | [] -> [text "목록 밖 이력 없음" "No unlisted Goal history"]
           | history ->
               let ended = List.length (List.filter (fun row -> Option.is_some row.pgh_closed_at) history) in
-              (if ko then Printf.sprintf "목록 밖 %d개 · 종결 결과 미기록 %d개" (List.length history) (List.length history - ended)
+              (if ko then Printf.sprintf "목록 밖 %d개 · 종결 결과 보고 안 됨 %d개" (List.length history) (List.length history - ended)
                else planning_goal_history_summary ~unlisted:(List.length history) ~ended)
               :: List.map (fun row ->
                    let name = Option.value row.pgh_title ~default:row.pgh_goal_id |> Terminal_text.single_line in
                    let phase = match row.pgh_final_phase with
-                     | None -> text "단계 미기록" "phase not recorded"
+                     | None -> text "단계 보고 안 됨" "phase not reported"
                      | Some phase ->
                          let shown = if ko then
                              Option.fold ~none:(Terminal_text.single_line phase)
@@ -627,7 +627,7 @@ let planning_summary_reading ~cols (state : state) =
                          text "마지막 단계 " "last phase " ^ shown in
                    let outcome = if Option.is_some row.pgh_closed_at
                      then text "종결 시각 기록됨" "close time recorded"
-                     else text "종결 결과 미기록" "terminal outcome not recorded" in
+                     else text "종결 결과 보고 안 됨" "terminal outcome not reported" in
                    let lifetime = match row.pgh_lifetime_hours with
                      | None -> ""
                      | Some hours ->
@@ -740,7 +740,7 @@ let planning_preview_lines (state : state) ~now ~cells ~rows (goal : planning_go
     | None ->
         (match goal.pg_phase with
          | (Goal_phase.Executing | Verifying) when Option.is_none goal.pg_retry_binding ->
-             Some (Theme.warn (), text "검증 요청 정보 미확인" "Verification request binding unavailable")
+             Some (Theme.warn (), text "검증 요청 정보 보고 안 됨" "Verification request binding not reported")
          | Executing | Verifying | Awaiting_confirmation | Completed | Dropped
          | Paused _ | Blocked _ -> None) in
   let due = Option.map (fun words -> (Theme.warn (), words))
@@ -805,7 +805,7 @@ let render_planning_list (state : state) =
            push_context navigation;
            let note = match Terminal_text.optional_single_line state.planning_error with
              | Some detail -> text "목표 조회 실패: " "Goal reading unavailable: " ^ detail
-             | None -> text "목표 미관측 · r:새로고침" "Goals not observed · r:refresh" in
+             | None -> text "목표 미조회 · r:새로고침" "Goals not read · r:refresh" in
            push (" " ^ Theme.warn () ^ note ^ Ansi.reset)
        | Some snapshot ->
            let scope = " " ^ (if current then Theme.recede () else Theme.warn ())
@@ -923,9 +923,9 @@ let planning_measurement_lines (state : state) ~width (goal : planning_goal) =
              in
              (match row.og_measurement with
               | Goal_measurement_unread ->
-                  line Planning_detail.Waiting (text "실제 측정 미조회" "Actual measurement not observed") @ tasks
+                  line Planning_detail.Waiting (text "실제 측정 미조회" "Actual measurement not read") @ tasks
               | Goal_measurement_not_recorded ->
-                  line Planning_detail.Quiet (text "실제 측정 미기록" "Actual measurement not recorded") @ tasks
+                  line Planning_detail.Quiet (text "기록된 실제 측정 없음" "No actual measurement recorded") @ tasks
               | Goal_measurement_unavailable reason -> unavailable reason @ tasks
               | Goal_measurement_reported { value; evidence; actor; recorded_at } ->
                   (* "Measured:", not "Evidence:": this row is the goal tree's
@@ -1096,16 +1096,16 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
       | Goal_links_read _ -> true, []
       | Goal_links_not_read -> false,
           field ~tone:Planning_detail.Unreadable (text "목표 연결" "Goal links")
-            (ui_text state ~ko:"연결 정보 미관측" ~en:"links not read")
+            (ui_text state ~ko:"연결 정보 미조회" ~en:"links not read")
       | Goal_links_read_failed reason -> false,
           field ~tone:Planning_detail.Unreadable (text "목표 연결" "Goal links") reason in
     let complete = links_complete && work_task_rows_complete state in
     let count = List.length linked_tasks in
     let count_text =
       if complete then string_of_int count
-      else if count = 0 then ui_text state ~ko:"미확인" ~en:"unknown"
-      else if state.ui_language = Lang_ko then Printf.sprintf "%d개 표시 · 전체 수 미확인" count
-      else Printf.sprintf "%d shown · total unknown" count in
+      else if count = 0 then ui_text state ~ko:"일부 관측" ~en:"partial reading"
+      else if state.ui_language = Lang_ko then Printf.sprintf "%d개 표시 · 일부 관측" count
+      else Printf.sprintf "%d shown · partial reading" count in
     gap
     @ section
         (ui_text state ~ko:"연결 작업"
@@ -1158,13 +1158,13 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
         | Snapshot_conflicting -> field ~tone:Planning_detail.Unreadable (text "스냅샷" "Snapshot") (text "확인된 검증 실행의 스냅샷 기록 충돌" "conflicting records for this confirmed run") in
       let payout = function
         | No_recorded_obligation ->
-          field (text "지급" "Payout") (text "이 원장에 지급 의무 미기록 · 이전 이력은 미확인" "no obligation recorded in this ledger; prior history is not established")
+          field (text "지급" "Payout") (text "이 원장에 지급 의무 기록 없음 · 이전 이력은 미조회" "no obligation recorded in this ledger; prior history not read")
         | Inconsistent -> field ~tone:Planning_detail.Unreadable (text "지급" "Payout") (text "원장 상태를 해석할 수 없음" "ledger state could not be interpreted")
         | Owed {identity=id; snapshot=pass; stage} ->
           field ~tone:Planning_detail.Waiting (text "지급" "Payout")
             (match stage with
              | Candidates_unrecorded ->
-               (match pass with Snapshot_matching -> (text "지급 대기 · 후보 미기록 · 대기 사유 미관측" "owed; candidates not recorded; waiting reason not observed")
+               (match pass with Snapshot_matching -> (text "지급 대기 · 후보 기록 없음 · 대기 사유 보고 안 됨" "owed; no candidates recorded; waiting reason not reported")
                 | Snapshot_missing | Snapshot_conflicting -> (text "지급 대기 · 스냅샷 확인 전 후보 준비 대기" "owed; candidate preparation waits for the unresolved Snapshot"))
              | Candidates_consistent -> (text "지급 대기 · 후보 기록됨 · 정산 대기" "owed; candidates recorded; awaiting settlement")
              | Candidates_inconsistent -> (text "지급 대기 · 기록된 후보 근거 불일치" "owed; recorded candidate evidence is inconsistent")
@@ -1176,13 +1176,13 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
               (match origin with Stored -> (text "원장에 기록됨" "recorded in ledger") | Derived_candidates -> (text "기록된 후보에서 도출됨" "derived from recorded candidates"))
           @ snapshot pass @ identity id
           @ (match issues with
-             | Issues_unavailable -> field ~tone:Planning_detail.Unreadable (text "문제" "Issues") (text "보류 상세 미관측" "hold details are not observed")
+             | Issues_unavailable -> field ~tone:Planning_detail.Unreadable (text "문제" "Issues") (text "보류 상세 보고 안 됨" "hold details not reported")
              | Complete_issues issues -> List.concat_map (fun issue ->
                  field ~tone:Planning_detail.Unreadable (text "문제" "Issue") (Candle_payout.window_issue_to_string issue)) issues
              | Snapshot_independent_issues issues ->
                List.concat_map (fun issue ->
                  field ~tone:Planning_detail.Unreadable (text "문제" "Issue") (Candle_payout.window_issue_to_string issue)) issues
-               @ field ~tone:Planning_detail.Unreadable (text "시간 경계" "Time boundary") (text "스냅샷 미확인 동안 추가 문제는 미관측" "additional issues are not observed while the Snapshot is unresolved"))
+               @ field ~tone:Planning_detail.Unreadable (text "시간 경계" "Time boundary") (text "스냅샷이 정해지기 전에는 추가 문제를 볼 수 없음" "additional issues cannot be seen until the Snapshot is resolved"))
           @ (match origin with
              | Stored -> []
              | Derived_candidates -> field ~tone:Planning_detail.Unreadable (text "후보 근거" "Candidate evidence")
@@ -1205,7 +1205,7 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
           field ~tone:Planning_detail.Refused (text "지급" "Payout") (text "지급 기한을 읽지 못한 실패 기록" "failure recorded as unreadable due date") @ identity id in
       field (text "마지막 설정 관측" "Last observed config") config
       @ (match ledger with
-         | Missing -> field ~tone:Planning_detail.Unreadable (text "원장" "Ledger") (text "원장 파일 없음 · 이전 이력 미관측" "file absent; earlier history is not observed")
+         | Missing -> field ~tone:Planning_detail.Unreadable (text "원장" "Ledger") (text "원장 파일 없음 · 이전 이력은 읽을 수 없음" "file absent; earlier history cannot be read")
          | Unavailable reason -> field ~tone:Planning_detail.Unreadable (text "원장" "Ledger")
              (match reason with Locked -> (text "잠김" "locked") | Unreadable -> (text "읽기 실패" "unreadable") | Invalid_row -> (text "유효하지 않은 행" "invalid row"))
          | Observed result -> payout result)

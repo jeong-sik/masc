@@ -749,9 +749,6 @@ let log_event config event_json =
       (Dated_jsonl.Store.at (dated_store_root config) Dated_jsonl.Store.Root.Events)
   in
   let path = dated.Dated_jsonl.Store.path in
-  (* The append's own directory creation is memoized per process, so a month
-     directory removed after its first use would not come back there. *)
-  mkdir_p (Filename.dirname path);
   (* [Fusion_decision.record] appends to the same day file. A server that
      died inside an append leaves bytes after the last newline; this append
      cuts them under the writers' shared locks, so the new row never joins

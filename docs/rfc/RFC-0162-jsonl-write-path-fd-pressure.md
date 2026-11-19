@@ -80,7 +80,7 @@ RFC-0108 (Atomic JSONL Append) 가 다음을 명시적 비목표로 선언:
   ├─ S5. Fleet capacity degraded — keeper turn 실패 누적
   ├─ S6. PULSE idle — journal entry write 실패 → latestEntry undefined
   │       dashboard/src/components/status-tray.ts:321
-  └─ S7. dashboard refresh self-amplification (§1.3 #3)
+  └─ S7. dashboard refresh self-amplification (§1.3 #2)
 ```
 
 S3 의 `Fiber_unresolved` variant 는 RFC-0089 (substring classifier closure) family 의 *carve-out gap* 이다: typed variant 22 종 중 어디에도 `Fd_pressure_blocked` / `Disk_write_failed` 같은 infra-level cause 가 *없다*. 본 RFC §3.5 가 관련 후속 RFC 후보로 명시한다.
@@ -89,7 +89,7 @@ S3 의 `Fiber_unresolved` variant 는 RFC-0089 (substring classifier closure) fa
 
 | Contributor | 위치 | 책임 |
 |---|---|---|
-| **C2. fresh fd 매 호출** | 같은 함수의 `open_out_gen` ... `close_out_noerr` | RFC-0108 §3.3 이 *명시적* 으로 cache 안 함. 결과: append 당 open+close 2 syscall |
+| **C2. fresh fd 매 호출** | `lib/fs_compat/fs_compat.ml:642-661` 의 `open_out_gen` ... `close_out_noerr` | RFC-0108 §3.3 이 *명시적* 으로 cache 안 함. 결과: append 당 open+close 2 syscall |
 | **C3. 무한 disk 누적** | `lib/keeper_tool_call_log.ml:93-103` `retention_days ()` 의 None default | 4 월 데이터가 5 월 운영 fd 압박에 기여. mli 가 *이미 "default is 30 days"* 약속 → ml drift 가 root |
 
 C2 는 RFC-0108 §3.3 결정과 *충돌* — 가정 invalidate 후 변경. C3 은 *문서-구현 drift 회복*.

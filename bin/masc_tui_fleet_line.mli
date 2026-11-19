@@ -14,10 +14,9 @@ val blocker_text : ko:bool -> Masc.Fleet_stream.fleet -> string option
     the count are one row. [None] when the scan names no blocker. *)
 
 val interval_text : Masc.Fleet_stream.Proactive_interval.t -> string
-(** The interval in the largest unit that divides it exactly: [1h] for 3600
-    seconds, [5m] for 300. Any other value is
-    {!Masc_tui_message_layout.span_text}: [1m30s], [45s]. Never rounded, since
-    it names a setting. *)
+(** The interval as {!Masc_tui_value.Interval.text} reads a setting: [1h] for
+    3600 seconds, [5m] for 300, [1m30s] for 90, [1d] for a day. Never
+    rounded where two units can say it. *)
 
 val proactive_text : ko:bool -> Masc.Fleet_stream.fleet -> string
 (** [proactive every <interval>]: how far apart each Keeper's periodic turns

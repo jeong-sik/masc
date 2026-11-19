@@ -172,7 +172,11 @@ let schedule_row_line ~now ((row : Masc_tui_types.schedule_row), due) =
     ; " "
     ; Message_layout.fit_width (relative_text ~now row due) relative_cells
     ; " "
-    ; dim (Terminal_text.single_line row.sch_recurrence_summary ^ " · ")
+    ; dim
+        (Terminal_text.single_line
+           (Masc_tui_schedule_recurrence.text ~ko:false ~now
+              ~summary:row.sch_recurrence_summary row.sch_recurrence)
+         ^ " · ")
     ; what
     ]
 ;;

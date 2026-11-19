@@ -1,3 +1,0 @@
-(executable
- (name spawn_bench)
- (libraries masc.masc_process eio eio_main unix))

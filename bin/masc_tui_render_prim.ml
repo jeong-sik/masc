@@ -2330,8 +2330,10 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
       List.iteri (fun index draw -> if index < budget - 1 then draw_row draw) held;
       let hidden = count - (budget - 1) in
       draw_note
-        (Printf.sprintf "  +%d %s not shown" hidden
-           (if hidden = 1 then "row" else "rows"))
+        (ui_text state
+           ~ko:(Printf.sprintf "  +%d줄 더 있음" hidden)
+           ~en:(Printf.sprintf "  +%d %s not shown" hidden
+                  (if hidden = 1 then "row" else "rows")))
     end
   in
   let clamped =

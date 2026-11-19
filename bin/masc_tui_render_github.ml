@@ -22,10 +22,10 @@ let lines (view : view) ~base =
         else
           String.sub draft 0 4 ^ String.make (len - 8) '*' ^ String.sub draft (len - 4) 4
       in
-      [ Theme.ok () ^ "  ┌─ Set GitHub Personal Access Token (PAT) ─" ^ Ansi.reset
+      [ Theme.ok () ^ "  ╭─ Set GitHub Personal Access Token (PAT) ─" ^ Ansi.reset
       ; "  │ Token: " ^ masked ^ "█"
       ; "  │ " ^ Ansi.dim ^ "Enter:save  Esc:cancel" ^ Ansi.reset
-      ; "  └─────────────────────────────────────────"
+      ; "  ╰─────────────────────────────────────────"
       ; ""
       ]
     | None -> []

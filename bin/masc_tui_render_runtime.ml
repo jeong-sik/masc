@@ -1722,7 +1722,7 @@ let render_runtime_pick (state : state) =
                   (Masc_tui_types.runtime_pick_properties_room ~cols
                      ~target:target_width ~route:route_width))
            in
-           c.push (Ansi.dim ^ header ^ Ansi.reset));
+           c.push_styled ~style:(Theme.recede ()) header);
       List.iteri
         (fun row item ->
           let line =
@@ -1734,8 +1734,8 @@ let render_runtime_pick (state : state) =
             let columns = Masc_tui_types.runtime_pick_columns item in
             let badge_style =
               match item with
-              | Masc_tui_types.Pick_lane _ -> Ansi.cyan
-              | Masc_tui_types.Pick_model _ -> Ansi.dim
+              | Masc_tui_types.Pick_lane _ -> Theme.info ()
+              | Masc_tui_types.Pick_model _ -> Theme.recede ()
             in
             let badge =
               badge_style
@@ -1760,7 +1760,7 @@ let render_runtime_pick (state : state) =
             Printf.sprintf "%s%s  %s  %s" badge target route_col facts
           in
           if view.Masc_tui_pick_list.selected_row = Some row then
-            c.push_selected ("> " ^ Masc_tui_theme.strip_sgr line)
+            c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
           else
             (* The Keeper's own assignment is starred; the cursor row keeps
                its [>], and the title still names the assignment. *)

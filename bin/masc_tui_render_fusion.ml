@@ -240,7 +240,7 @@ let render_fusion_list (state : state) =
           let line = "Board evidence · " ^ Terminal_text.single_line evidence.fhe_title
               ^ " · " ^ Link.reference Board_post evidence.fhe_post_id in
           if row_index = state.fusion_cursor then
-            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+            box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
           else box_line buf cols ("  " ^ line)
       | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
           let state_text =
@@ -258,7 +258,7 @@ let render_fusion_list (state : state) =
               }
           in
           if row_index = state.fusion_cursor then
-            box_line_selected buf cols ("> " ^ Masc_tui_theme.strip_sgr line)
+            box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
           else box_line buf cols ("  " ^ line)
     done;
   (match summary_clauses with

@@ -434,7 +434,7 @@ let render_resources (state : state) =
            | Some (line, mark) ->
                (match mark with
                 | Masc_tui_detail_reading.Current_match ->
-                    box_line_selected pane_buf pane_cols ("> " ^ Masc_tui_theme.strip_sgr line)
+                    box_line_selected pane_buf pane_cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
                 | Match -> box_line_styled pane_buf pane_cols ~style:Ansi.underline
                     ("* " ^ Masc_tui_theme.strip_sgr line)
                 | No_match -> box_line pane_buf pane_cols ("  " ^ line))

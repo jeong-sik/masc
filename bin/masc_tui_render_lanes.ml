@@ -851,11 +851,6 @@ let render_lanes_overview (state : state) =
             ^ fit_width (Masc_tui_lane_standing.mark observed) 2 ^ Ansi.reset
             ^ recede ^ fit_width label label_width ^ "  " ^ Ansi.reset
             ^ Masc_tui_lane_standing.colour observed ^ fit_width (summary row) status_width ^ Ansi.reset)) in
-  let listing = if projection.lop_boxed then
-      studio_panel ~width:list_width
-        ~title:(ui_text state ~ko:"기능" ~en:"Features")
-        ~lines:listing
-    else listing in
   let detail_height = projection.lop_detail_height in
   let detail_cells = max 1 (detail_width - panel_padding) in
   let row_detail row =
@@ -877,11 +872,28 @@ let render_lanes_overview (state : state) =
                                      ~en:"… d: full observation and configuration evidence"))
       ~blank:(Ansi.reset, "") detail in
   let detail = List.map (fun (style, line) -> style ^ line ^ Ansi.reset) visible_detail in
-  let detail = if projection.lop_boxed then
-      studio_panel ~width:detail_width
-        ~title:(ui_text state ~ko:"선택한 기능" ~en:"Selected feature")
-        ~lines:detail
-    else detail in
+  let listing, detail =
+    if split && projection.lop_boxed then
+      let inner_h = max (List.length listing) (List.length detail) in
+      let pad xs = xs @ List.init (max 0 (inner_h - List.length xs)) (fun _ -> "") in
+      ( studio_panel ~width:list_width
+          ~title:(ui_text state ~ko:"기능" ~en:"Features")
+          ~lines:(pad listing)
+      , studio_panel ~width:detail_width
+          ~title:(ui_text state ~ko:"선택한 기능" ~en:"Selected feature")
+          ~lines:(pad detail) )
+    else
+      ( (if projection.lop_boxed then
+           studio_panel ~width:list_width
+             ~title:(ui_text state ~ko:"기능" ~en:"Features")
+             ~lines:listing
+         else listing)
+      , (if projection.lop_boxed then
+           studio_panel ~width:detail_width
+             ~title:(ui_text state ~ko:"선택한 기능" ~en:"Selected feature")
+             ~lines:detail
+         else detail) )
+  in
   if split then begin
     let pane_height = max (List.length listing) (List.length detail) in
     let left = Rows.of_list ~first:0 ~height:pane_height listing in
@@ -1440,9 +1452,8 @@ let lane_run_tool_count_summary tools =
     if count = 0 then None
     else
       Some
-        (Printf.sprintf "%s%s%s %s %s %d %s" style Ansi.reverse Ansi.bold mark
-           (String.uppercase_ascii label) count Ansi.reset))
-  |> String.concat " "
+        (Printf.sprintf "%s%s%s %s %d%s" style Ansi.bold mark label count Ansi.reset))
+  |> String.concat "  "
 
 let lane_run_tool_summary = function
   | Tui_decode.Lane_run_no_tools_by_contract ->

@@ -1942,37 +1942,52 @@ let matrix_header ~ko matrix =
   ^ " " ^ fit_width (if ko then "최근" else "last") 5
   ^ fit_width ("◂ " ^ Grid.window_label ~slots:matrix.matrix_pulse_slots) matrix.matrix_pulse_slots
 
+(* A runtime view row draws the gutter, mark and pulse every grid view draws
+   (RFC tui-one-screen-grammar 7.2): a sound Keeper reads as sound, and only a
+   failed half hour wears the warn tone. *)
 let matrix_keeper_row matrix ~now row =
   let runtime = keeper_row_runtime row in
+  let verdict = Grid.verdict ~now runtime in
   let cells = List.map (fun runtime_id ->
     let cell = Keeper_trail.matrix_cell ~runtime_id runtime in
     let head = match cell.head with
       | Keeper_trail.Head_elsewhere -> " "
-      | Keeper_trail.Head_serving -> Theme.info () ^ "▹"
-      | Keeper_trail.Head_resting -> Theme.recede () ^ "◌"
-      | Keeper_trail.Head_unknown -> Theme.recede () ^ "?" in
+      | Keeper_trail.Head_serving -> Theme.info () ^ Keeper_mark.axis_next_glyph
+      | Keeper_trail.Head_resting -> Theme.recede () ^ Keeper_mark.grid_wait_glyph
+      | Keeper_trail.Head_unknown -> Theme.recede () ^ Keeper_mark.unknown_mark in
     let failure = match cell.failure with
-      | Keeper_trail.Matrix_failed -> Theme.warn () ^ "✗"
+      | Keeper_trail.Matrix_failed -> Theme.warn () ^ Keeper_mark.attempt_glyph
       | Keeper_trail.Matrix_clear -> " "
-      | Keeper_trail.Matrix_unknown -> Theme.recede () ^ "?" in
+      | Keeper_trail.Matrix_unknown -> Theme.recede () ^ Keeper_mark.unknown_mark in
     fit_width (failure ^ head ^ Ansi.reset) matrix.matrix_cell_cells) matrix.matrix_ids in
+  (* The time since the last failed turn: [—] for a Keeper whose trail holds
+     no failure, [?] for a failure with no end the screen can read (6.4). *)
   let last = match Keeper_list_model.trail_of_row row with
     | Keeper_trail.Trail_failed { ended_at = Some at; _ } when at <= now ->
         Masc_tui_value.Ongoing.Narrow.since ~now at
-    | Keeper_trail.Trail_failed _ | Keeper_trail.Trail_sound -> "?" in
+    | Keeper_trail.Trail_failed _ -> Keeper_mark.unknown_mark
+    | Keeper_trail.Trail_sound -> Masc_tui_theme.Glyph.no_value in
   let pulse = Option.bind runtime (fun r -> r.Tui_decode.kr_recent_turns)
     |> Masc_tui_keeper_pulse.half_hours ~now ~count:matrix.matrix_pulse_slots
-    |> List.map Masc_tui_keeper_pulse.half_hour_mark |> String.concat "" in
-  Theme.warn () ^ "▌ ! " ^ Ansi.reset
+    |> List.map (fun half_hour ->
+         grid_half_hour_style half_hour ^ Masc_tui_keeper_pulse.half_hour_mark half_hour
+         ^ Ansi.reset)
+    |> String.concat "" in
+  grid_gutter Keeper_list_model.By_runtime verdict
   ^ fit_width (Terminal_text.single_line row.Keeper_list_model.keeper.Tui_decode.k_name) matrix.matrix_name_cells
-  ^ " " ^ String.concat "" cells ^ " " ^ Theme.recede () ^ fit_width last 5
-  ^ Theme.warn () ^ pulse ^ Ansi.reset
+  ^ " " ^ String.concat "" cells ^ " " ^ Theme.recede () ^ fit_width last 5 ^ Ansi.reset
+  ^ pulse
 
-let matrix_legend ~inner matrix =
+let matrix_legend ~ko ~inner matrix =
   let ids = List.mapi (fun index id -> matrix_letter index ^ " " ^ Terminal_text.single_line id) matrix.matrix_ids in
   let omitted = if matrix.matrix_omitted = 0 then [] else
-    [Printf.sprintf "+%d runtime columns outside this width" matrix.matrix_omitted] in
-  "✗ failed in last walk · ▹ next head · ◌ resting head · ? unread head"
+    [Printf.sprintf (if ko then "이 폭 밖 런타임 열 +%d" else "+%d runtime columns outside this width")
+       matrix.matrix_omitted] in
+  Printf.sprintf
+    (if ko then "%s 지난 순회에서 실패 · %s 다음 실행 · %s 쉬는 중 · %s 못 읽음"
+     else "%s failed in last walk · %s next head · %s resting head · %s unread head")
+    Keeper_mark.attempt_glyph Keeper_mark.axis_next_glyph Keeper_mark.grid_wait_glyph
+    Keeper_mark.unknown_mark
   :: Message_layout.wrap_words ~max_cells:inner (String.concat " · " (ids @ omitted))
 
 let proactive_outcome_word ~ko =
@@ -3107,7 +3122,9 @@ let render_keeper_axes (state : state) =
   let content_rows = max 0 (available_rows - story_rows - summary_rows) in
   let legend = match matrix with
     | None -> []
-    | Some matrix -> List.take (max 0 (content_rows - 2)) (matrix_legend ~inner matrix) in
+    | Some matrix ->
+        List.take (max 0 (content_rows - 2))
+          (matrix_legend ~ko:(state.ui_language = Lang_ko) ~inner matrix) in
   let content_rows = max 0 (content_rows - List.length legend) in
   Option.iter
     (fun (name, portrait) ->

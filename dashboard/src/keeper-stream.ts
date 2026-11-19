@@ -45,6 +45,7 @@ import {
   dropKeeperToolApproval,
 } from './keeper-state'
 import { isRecord, asNumber, asString } from './components/common/normalize'
+import { isInFlightDelivery } from './lib/keeper-delivery'
 import {
   nonBlankToolCallId,
 } from './tool-call-output-store'
@@ -519,13 +520,20 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   if (controller) controller.abort()
   if (entryId) {
     flushPendingThinkingDeltas(keeperName, entryId)
-    finalizeAssistantEntry(keeperName, entryId, {
-      // Preserve partial content; only the response connection has stopped.
-      delivery: 'interrupted',
-      streamState: null,
-      error: null,
-      timestamp: new Date().toISOString(),
-    })
+    // A send whose stream ended wrote how it ended on its row, and it can stay
+    // listed after that: a failed send reads the stored history before it
+    // leaves. A stop pressed then has no response connection to stop, and the
+    // row keeps what the send said.
+    const row = (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === entryId)
+    if (row && isInFlightDelivery(row.delivery)) {
+      finalizeAssistantEntry(keeperName, entryId, {
+        // Preserve partial content; only the response connection has stopped.
+        delivery: 'interrupted',
+        streamState: null,
+        error: null,
+        timestamp: new Date().toISOString(),
+      })
+    }
     clearPendingAgentCoreTextBlockIndex(keeperName, entryId)
   }
   if (operationId) clearActiveStream(keeperName, operationId)

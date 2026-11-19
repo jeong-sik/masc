@@ -2236,13 +2236,25 @@ describe('sendKeeperThreadMessage operation stream', () => {
 
       expect(await cancelActiveKeeperThreadMessage('echo')).toBe(true)
 
+      // The stop frees the composer. The send already said how it ended, and
+      // the stop leaves that said: the row does not turn into an interrupted
+      // reply with its failure gone.
       expect((keeperThreads.value.echo ?? []).some(entry => entry.streamState === 'stop_pending')).toBe(false)
       expect(keeperSending.value.echo).toBe(false)
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'the server did not answer',
+      })
 
       answerHistory([])
       await send
 
-      expect(replyRow()?.streamState).toBeNull()
+      expect(replyRow()).toMatchObject({
+        delivery: 'error',
+        streamState: null,
+        error: 'the server did not answer',
+      })
       expect(cancelKeeperChatOperation).not.toHaveBeenCalled()
       expect(interruptKeeperChatOperation).not.toHaveBeenCalled()
     })

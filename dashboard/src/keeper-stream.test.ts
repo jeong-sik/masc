@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   _resetActiveKeeperStreamsForTests,
   _resetLiveSendRequestOwnersForTests,
+  activeStreamEntryId,
   activeStreamRequestId,
   appendThreadEntry,
   chatHistoryEntriesFromRest,
@@ -1801,6 +1802,43 @@ describe('Keeper operation stream projection', () => {
     expect(first.signal.aborted).toBe(true)
     expect(second.signal.aborted).toBe(false)
     expect(activeStreamRequestId('sangsu')).toBe('kmsg-operation-2')
+  })
+
+  it('settles the row of the stream it stops and leaves a row its send already settled', () => {
+    const live = new AbortController()
+    assistantEntry()
+    setActiveStream('sangsu', 'kmsg-operation-1', 'reply-1', live)
+
+    expect(abortKeeperThreadMessage('sangsu')?.entryId).toBe('reply-1')
+
+    expect(live.signal.aborted).toBe(true)
+    expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toMatchObject({
+      delivery: 'interrupted',
+      streamState: null,
+      error: null,
+    })
+
+    // A send that failed wrote its failure and is still listed while it reads
+    // the stored history. A stop pressed then unlists it and rewrites nothing.
+    const ended = new AbortController()
+    updateThreadEntry('sangsu', 'reply-1', entry => ({
+      ...entry,
+      delivery: 'error',
+      error: 'the send failed',
+      timestamp: '2026-11-19T00:00:00.000Z',
+    }))
+    setActiveStream('sangsu', 'kmsg-operation-2', 'reply-1', ended)
+
+    expect(abortKeeperThreadMessage('sangsu')?.entryId).toBe('reply-1')
+
+    expect(ended.signal.aborted).toBe(true)
+    expect(activeStreamEntryId('sangsu')).toBeNull()
+    expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')).toMatchObject({
+      delivery: 'error',
+      streamState: null,
+      error: 'the send failed',
+      timestamp: '2026-11-19T00:00:00.000Z',
+    })
   })
 
   it('does not return a later accepted request when aborting the first pre-acceptance stream', () => {

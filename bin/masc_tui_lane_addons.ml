@@ -1120,7 +1120,7 @@ let diagnostic_lines view =
 let unread_body_text ~failed_note (view : t) =
   match view.error, view.snapshot_read_error, view.loading with
   | Some _, _, (true | false) | None, Some _, (true | false) -> failed_note
-  | None, None, true -> "Reading…"
+  | None, None, true -> "Reading"
   | None, None, false -> no_reading_yet_text
 
 (* What the status row says about a read or interaction. Kept whole here rather than
@@ -1249,7 +1249,7 @@ let technical_lines ?(height=24) ?(failed_note = "") ~width view =
 let installation_detail_lines ~width view =
   let wrap = document_rows ~width in
   let edit = if Option.is_some (selected_source_path view) then ["E:edit TOML"] else [] in
-  let refresh = if view.loading then "Reading …" else "r:refresh" in
+  let refresh = if view.loading then "Reading" else "r:refresh" in
   let body = match view.snapshot with
     | Some ({configuration=Some configuration;_} as snapshot) ->
         (match selected_declaration view with
@@ -1325,7 +1325,7 @@ let instance_controls view (instance : instance) =
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)
 let overview_hints view =
-  let refresh = if view.loading then "Reading …" else "r:refresh" in
+  let refresh = if view.loading then "Reading" else "r:refresh" in
   if view.help_open then ["Esc:close help"]
   else if Option.is_some view.document_key then
     ["?:help"; "Esc:back"; "Space:on/off draft"; "E:edit"; "R:records"; "s:save"; "l:reload";
@@ -2407,7 +2407,7 @@ let detail_lines ~height ~width view =
             @ technical_text (List.map evidence_text row.evidence)
             |> List.concat_map (technical_rows ~width)) record_rows in
       head @ body
-  | Some _, None -> ["Reading Plugins…"]
+  | Some _, None -> ["Reading Plugins"]
 
 let rec action_fields prefix = function
   | `Assoc fields -> List.concat_map (fun (key,value) ->
@@ -2618,7 +2618,7 @@ let lines ?(height=24) ?(failed_note = "") ~width view =
       @ evidence_rows ~width prompt
   | None -> match view.subscription_panel,view.action_menu,view.records with
   | Some panel,_,_ ->
-      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing…" else "Last received subscription state") (max 1 width)
+      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (document_rows ~width)
   | None,Some menu,_ ->

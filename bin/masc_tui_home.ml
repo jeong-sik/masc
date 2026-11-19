@@ -358,8 +358,8 @@ let notice_lines_of_state state =
   let clean = Masc_tui_ansi.Terminal_text.single_line in
   (match Masc_tui_credential_preparation.status state.credential_preparation with
    | Not_requested | Settled -> []
-   | Preparing _ -> [text " 워크스페이스 접근 준비 중…" " Preparing workspace access…"]
-   | Awaiting_ui _ -> [text " 워크스페이스 접근 준비 결과 반영 대기…" " Workspace access result awaiting application…"])
+   | Preparing _ -> [text " 워크스페이스 접근 준비 중" " Preparing workspace access"]
+   | Awaiting_ui _ -> [text " 워크스페이스 접근 준비 결과 반영 대기" " Workspace access result awaiting application"])
   @ (match state.opening_notice with
    | None -> []
    | Some notice -> [" " ^ clean notice])

@@ -17,7 +17,15 @@ let probe () =
   in
   let default_domain = started Minor_heap.Runtime_default in
   let tuned_domain = started Minor_heap.Tuned in
-  Printf.printf "%d %d %d %d %d\n%!" main_before main_after main_again default_domain tuned_domain
+  (* [Eio.Domain_manager.run_raw] starts a domain without an Eio loop; the
+     manager's heap must reach it too. *)
+  let tuned_raw_domain =
+    Eio_main.run (fun env ->
+      Eio.Domain_manager.run_raw
+        (Minor_heap.domain_mgr Minor_heap.Tuned (Eio.Stdenv.domain_mgr env)) words)
+  in
+  Printf.printf "%d %d %d %d %d %d\n%!"
+    main_before main_after main_again default_domain tuned_domain tuned_raw_domain
 ;;
 
 type sample =
@@ -26,6 +34,7 @@ type sample =
   ; main_again : int
   ; default_domain : int
   ; tuned_domain : int
+  ; tuned_raw_domain : int
   }
 
 let run_probe setting =
@@ -47,9 +56,9 @@ let run_probe setting =
    | Unix.WEXITED 0 -> ()
    | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ ->
      fail "minor heap probe failed");
-  Scanf.sscanf text "%d %d %d %d %d"
-    (fun main_before main_after main_again default_domain tuned_domain ->
-      { main_before; main_after; main_again; default_domain; tuned_domain })
+  Scanf.sscanf text "%d %d %d %d %d %d"
+    (fun main_before main_after main_again default_domain tuned_domain tuned_raw_domain ->
+      { main_before; main_after; main_again; default_domain; tuned_domain; tuned_raw_domain })
 ;;
 
 let test_operator_configuration setting () =
@@ -57,7 +66,8 @@ let test_operator_configuration setting () =
   check int "Tuned leaves the main domain on the runtime heap" s.main_before s.main_after;
   check int "a second apply changes nothing" s.main_after s.main_again;
   check int "a Runtime_default domain keeps the runtime heap" s.main_before s.default_domain;
-  check int "a Tuned domain keeps the runtime heap" s.main_before s.tuned_domain
+  check int "a Tuned domain keeps the runtime heap" s.main_before s.tuned_domain;
+  check int "a Tuned raw domain keeps the runtime heap" s.main_before s.tuned_raw_domain
 ;;
 
 let test_without_operator_configuration () =
@@ -67,7 +77,9 @@ let test_without_operator_configuration () =
   (* The main domain was tuned before this domain started. *)
   check int "a Runtime_default domain starts on the runtime heap, not the caller's"
     s.main_before s.default_domain;
-  check int "a Tuned domain applies 4M words when it starts" (4 * 1024 * 1024) s.tuned_domain
+  check int "a Tuned domain applies 4M words when it starts" (4 * 1024 * 1024) s.tuned_domain;
+  check int "a Tuned raw domain applies 4M words when it starts" (4 * 1024 * 1024)
+    s.tuned_raw_domain
 ;;
 
 let () =

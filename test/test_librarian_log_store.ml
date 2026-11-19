@@ -271,6 +271,25 @@ let test_scan_goes_on_past_one_read () =
   check string "the last" (Printf.sprintf "%d: commit %d" last_at lines) (List.nth seen lines)
 ;;
 
+(* The file goes away after the first locked read: the lines already read
+   are not the file. *)
+let test_scan_of_a_file_that_goes_away () =
+  let path = new_path () in
+  let lines = 70 in
+  let rec append_from seq at_end =
+    if seq <= lines then append_from (seq + 1) (appended path ~at_end (committed seq)).new_end
+  in
+  append_from 1 (appended path ~at_end:0 started).new_end;
+  match
+    Store.fold path ~init:0 ~f:(fun seen (_ : Store.scanned) ->
+      if Int.equal seen 0 then Sys.remove path;
+      seen + 1)
+  with
+  | Error Masc.Private_jsonl_scan.Moved -> ()
+  | Error other -> failf "expected Moved, got %s" (Masc.Private_jsonl_scan.error_to_string other)
+  | Ok seen -> failf "a scan whose file went away was taken as whole at %d lines" seen
+;;
+
 let test_path () =
   check string "beside the snapshot" "/keepers/keeper-a.memory-log.jsonl"
     (Store.path_for_keepers_dir ~keepers_dir:"/keepers" ~keeper_id:"keeper-a")
@@ -292,6 +311,7 @@ let () =
     ; ( "scan"
       , [ test_case "every line from the first" `Quick test_every_line_from_the_first
         ; test_case "goes on past one read" `Quick test_scan_goes_on_past_one_read
+        ; test_case "a file that goes away" `Quick test_scan_of_a_file_that_goes_away
         ] )
     ; "path", [ test_case "beside the snapshot" `Quick test_path ]
     ]

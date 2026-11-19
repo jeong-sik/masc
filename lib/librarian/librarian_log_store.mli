@@ -48,15 +48,6 @@ type read_error =
 (** Reads the tail line and no line before it. *)
 val read_tail : string -> (tail, read_error) result
 
-type scan_error =
-  | Scan_read_failed of
-      { path : string
-      ; detail : string
-      }
-  | Scan_moved
-  (** The offset the scan had reached no longer starts a line: the file was
-      cut or replaced while it was being read. *)
-
 type scanned =
   { at : int (** Byte offset of the line. *)
   ; line : (Librarian_log.line, undecodable) result
@@ -65,11 +56,13 @@ type scanned =
       line for good. *)
   }
 
-(** Every complete line from the first, in order. The file is read a window
-    of lines at a time, each under the store's lock, so lines appended while
-    the scan runs are seen and nothing is held between windows. No file is
-    no line. *)
-val fold : string -> init:'acc -> f:('acc -> scanned -> 'acc) -> ('acc, scan_error) result
+(** Every complete line from the first, in order ({!Private_jsonl_scan}).
+    No file is no line. *)
+val fold
+  :  string
+  -> init:'acc
+  -> f:('acc -> scanned -> 'acc)
+  -> ('acc, Private_jsonl_scan.error) result
 
 type append_error =
   | End_moved of

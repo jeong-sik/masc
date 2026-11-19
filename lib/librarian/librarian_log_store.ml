@@ -37,34 +37,26 @@ let decode row =
   | json -> Result.map_error (fun error -> Malformed error) (Codec.of_json json)
 ;;
 
-(* The error is the reader's own text for why the file was not read. *)
-let window path ~from ~max_rows ~previous_row_wanted =
+let window path ~from ~previous_row_wanted =
   match
-    Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows ~previous_row_wanted
+    Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows:1 ~previous_row_wanted
   with
   | Fs_compat.Private_file_succeeded window
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value = window; _ } -> Ok window
   | Fs_compat.Private_file_failed error
   | Fs_compat.Private_file_failed_with_cleanup_failure { error; _ } ->
-    Error (Fs_compat.Private_jsonl_rows.error_to_string error)
+    Error (Read_failed { path; detail = Fs_compat.Private_jsonl_rows.error_to_string error })
 ;;
-
-let no_row_before (_ : string) = false
 
 (* Two locked reads: where the lines end, then the line before that end. *)
 let read_tail path =
   let ( let* ) = Result.bind in
-  let window ~from ~previous_row_wanted =
-    Result.map_error
-      (fun detail -> Read_failed { path; detail })
-      (window path ~from ~max_rows:1 ~previous_row_wanted)
-  in
-  let* first = window ~from:0 ~previous_row_wanted:no_row_before in
+  let* first = window path ~from:0 ~previous_row_wanted:(fun (_ : string) -> false) in
   match first with
   | Fs_compat.Private_jsonl_window.Window_missing -> Ok Nothing_written
   | Window_present { rows_end = 0; _ } -> Ok Nothing_written
   | Window_present { rows_end; _ } ->
-    let* second = window ~from:rows_end ~previous_row_wanted:(fun (_ : string) -> true) in
+    let* second = window path ~from:rows_end ~previous_row_wanted:(fun (_ : string) -> true) in
     (match second with
      | Window_missing -> Ok Nothing_written
      | Window_present { from_starts_row = false; _ }
@@ -81,13 +73,6 @@ let read_tail path =
          | Error reason -> Error (Tail_undecodable { offset; rows_end; reason })))
 ;;
 
-type scan_error =
-  | Scan_read_failed of
-      { path : string
-      ; detail : string
-      }
-  | Scan_moved
-
 type scanned =
   { at : int
   ; line : (Log.line, undecodable) result
@@ -97,29 +82,9 @@ type scanned =
    megabyte. *)
 let scan_window_rows = 64
 
-let fold_rows ~f acc ~from rows =
-  let rec next acc start =
-    match String.index_from_opt rows start '\n' with
-    | None -> acc
-    | Some stop ->
-      let row = String.sub rows start (stop - start) in
-      next (f acc { at = from + start; line = decode row }) (stop + 1)
-  in
-  next acc 0
-;;
-
 let fold path ~init ~f =
-  let rec from_offset acc from =
-    match window path ~from ~max_rows:scan_window_rows ~previous_row_wanted:no_row_before with
-    | Error detail -> Error (Scan_read_failed { path; detail })
-    | Ok Fs_compat.Private_jsonl_window.Window_missing -> Ok acc
-    | Ok (Window_present { from_starts_row = false; _ }) -> Error Scan_moved
-    | Ok (Window_present { from_starts_row = true; rows; window_end; _ }) ->
-      if String.equal rows ""
-      then Ok acc
-      else from_offset (fold_rows ~f acc ~from rows) window_end
-  in
-  from_offset init 0
+  Private_jsonl_scan.fold path ~rows_per_read:scan_window_rows ~init ~f:(fun acc ~at row ->
+    f acc { at; line = decode row })
 ;;
 
 type append_error =

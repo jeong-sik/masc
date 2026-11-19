@@ -228,8 +228,7 @@ let scan_text path =
       :: seen)
   with
   | Ok seen -> List.rev seen
-  | Error (Scan_read_failed { detail; _ }) -> [ "read failed: " ^ detail ]
-  | Error Scan_moved -> [ "moved while reading" ]
+  | Error error -> [ Masc.Private_jsonl_scan.error_to_string error ]
 ;;
 
 let test_every_line_from_the_first () =

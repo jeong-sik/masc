@@ -163,15 +163,6 @@ let prepare ~memory_keepers_dir ~runtime_keepers_dir ~keeper_name (Offset after)
     save ~runtime_keepers_dir ~keeper_name
       {after;pending=Some {through;atom;official}}
 
-let release_pending ~runtime_keepers_dir ~keeper_name ~expected =
-  let (Observed expected_state)=expected in
-  let* current = load ~runtime_keepers_dir ~keeper_name in
-  if current <> expected_state then
-    Error "external read cursor changed before its pending release"
-  else match expected_state.pending with
-    | None -> Ok ()
-    | Some _ -> save ~runtime_keepers_dir ~keeper_name {after=expected_state.after;pending=None}
-
 let inspect ~keepers_dir ~keeper_id =
   let runtime_keepers_dir = keepers_dir and keeper_name = keeper_id in
   let file = path ~runtime_keepers_dir ~keeper_name in

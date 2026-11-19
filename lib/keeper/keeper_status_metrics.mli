@@ -50,10 +50,12 @@ val latest_tool_audit_snapshot_from_files :
   keeper_name:string ->
   (tool_audit_snapshot option, Dated_jsonl.read_error) result
 (** The newest recorded turn's tool audit. [Ok None] means the metrics store
-    was read and holds no turn row; [Error] means the store could not be read,
-    which says nothing about whether a turn was recorded. *)
-val invalidate_tool_audit_cache :
-  Workspace.config -> keeper_name:string -> unit
-(** Forget the process-local tool-audit snapshot when a Keeper metrics
-    directory is removed. A later Keeper with the same name must not inherit
-    the deleted runtime's audit state. *)
+    holds no turn row; [Error] means the store could not be read, which says
+    nothing about whether a turn was recorded.
+
+    The value is a fact of the Keeper's metrics store
+    ({!Dated_jsonl.newest_selected}). The process that writes the store keeps
+    it in memory and reads no file for it; any other process reads the files
+    each time. Code that removes the store's files without going through
+    [Dated_jsonl] tells it with {!Dated_jsonl.directories_removed}, as the
+    Keeper's purge does. *)

@@ -159,95 +159,73 @@ let summarize_metrics_lines (lines : string list) : metrics_summary =
     empty_metrics_summary
     lines
 
-module Tool_audit_cache = struct
-  type entry = tool_audit_snapshot Dated_jsonl.latest_view
-
-  let entries : (string, entry) Hashtbl.t = Hashtbl.create 64
-  let mutex = Stdlib.Mutex.create ()
-  let max_entries = 256
-
-  let remove path =
-    Stdlib.Mutex.protect mutex (fun () -> Hashtbl.remove entries path)
-
-  let get_or_create path ~create =
-    Stdlib.Mutex.protect mutex (fun () ->
-      match Hashtbl.find_opt entries path with
-      | Some entry -> entry
-      | None ->
-        if Hashtbl.length entries >= max_entries then Hashtbl.clear entries;
-        let entry = create () in
-        Hashtbl.add entries path entry;
-        entry)
-end
-
-let invalidate_tool_audit_cache config ~keeper_name =
-  Keeper_types_support.keeper_metrics_dir config keeper_name
-  |> Tool_audit_cache.remove
-
-let latest_tool_audit_snapshot_from_metrics config keeper_name =
-  let store =
-    Keeper_types_support.keeper_metrics_store config keeper_name
-  in
-  let metrics_path =
-    Keeper_types_support.keeper_metrics_dir config keeper_name
-  in
+(* The tool audit of a metrics row: a turn row with its tools, their count
+   and its time has one. A heartbeat row has none, nor has a row of a kind
+   this build does not read. A row that cannot be read at all is reported
+   against the Keeper's metrics directory and has none either. *)
+let tool_audit_of_metrics_row ~base_dir entry =
   let report_drop ~reason ~detail =
     report_persistence_read_drop
       ~surface:metrics_tool_audit_persistence_surface
       ~reason
-      ~path:metrics_path
+      ~path:base_dir
       ~detail
   in
-  let parse_snapshot = function
-    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
-        let location =
-          match line_number with
-          | Some line_number -> Printf.sprintf "%s:%d" path line_number
-          | None -> path
-        in
-        report_drop
-          ~reason:Read_drop_reason.Entry_load_error
-          ~detail:(Printf.sprintf "%s: %s" location detail);
-        None
-    | Dated_jsonl.Parsed (`Assoc _ as json) ->
-        (match Keeper_metrics_record.kind_of_json json with
-         | Some Keeper_metrics_record.Turn ->
-             (match
-                Json_util.json_string_list_member_strict "tools_used" json,
-                Safe_ops.json_int_opt "tool_call_count" json,
-                Safe_ops.json_string_nonempty_opt "ts" json
-              with
-              | Some tools, Some tool_call_count, Some timestamp ->
-                  Some
-                    { latest_tool_names = tools
-                    ; latest_tool_call_count = Some tool_call_count
-                    ; latest_action_source =
-                        Safe_ops.json_string_nonempty_opt "action_source" json
-                    ; tool_audit_source = Some "keeper_metrics"
-                    ; tool_audit_at = Some timestamp
-                    }
-              | _ -> None)
-         | Some Keeper_metrics_record.Heartbeat | None -> None)
-    | Dated_jsonl.Parsed _ ->
-        report_drop
-          ~reason:Read_drop_reason.Invalid_payload
-          ~detail:"keeper metrics row is not a JSON object";
-        None
-  in
-  let report_read_error error =
-    report_drop
-      ~reason:Read_drop_reason.Entry_load_error
-      ~detail:(Dated_jsonl.read_error_to_string error)
-  in
-  let view =
-    Tool_audit_cache.get_or_create metrics_path
-      ~create:(fun () -> Dated_jsonl.latest_view store ~f:parse_snapshot)
-  in
-  match Dated_jsonl.read_latest_view_result view with
-  | Ok snapshot -> Ok snapshot
-  | Error error ->
-    report_read_error error;
-    Error error
+  match entry with
+  | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+      let location =
+        match line_number with
+        | Some line_number -> Printf.sprintf "%s:%d" path line_number
+        | None -> path
+      in
+      report_drop
+        ~reason:Read_drop_reason.Entry_load_error
+        ~detail:(Printf.sprintf "%s: %s" location detail);
+      None
+  | Dated_jsonl.Parsed (`Assoc _ as json) ->
+      (match Keeper_metrics_record.kind_of_json json with
+       | Some Keeper_metrics_record.Turn ->
+           (match
+              Json_util.json_string_list_member_strict "tools_used" json,
+              Safe_ops.json_int_opt "tool_call_count" json,
+              Safe_ops.json_string_nonempty_opt "ts" json
+            with
+            | Some tools, Some tool_call_count, Some timestamp ->
+                Some
+                  { latest_tool_names = tools
+                  ; latest_tool_call_count = Some tool_call_count
+                  ; latest_action_source =
+                      Safe_ops.json_string_nonempty_opt "action_source" json
+                  ; tool_audit_source = Some "keeper_metrics"
+                  ; tool_audit_at = Some timestamp
+                  }
+            | _ -> None)
+       | Some Keeper_metrics_record.Heartbeat | None -> None)
+  | Dated_jsonl.Parsed _ ->
+      report_drop
+        ~reason:Read_drop_reason.Invalid_payload
+        ~detail:"keeper metrics row is not a JSON object";
+      None
+
+(* The tool audit of the newest turn row of a Keeper's metrics store. The
+   store keeps it in memory in the process that writes the store
+   ([Dated_jsonl.Store.facts]): the turn row a Keeper's turn appends replaces
+   it, and a heartbeat row leaves it as it is. *)
+let newest_turn_tool_audit : tool_audit_snapshot option Dated_jsonl.fact =
+  Dated_jsonl.newest_selected
+    ~name:"keeper_turn_tool_audit"
+    ~select:tool_audit_of_metrics_row
 
 let latest_tool_audit_snapshot_from_files config ~keeper_name =
-  latest_tool_audit_snapshot_from_metrics config keeper_name
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
+  match Dated_jsonl.read_fact store newest_turn_tool_audit with
+  | Fact_cell.Held snapshot
+  | Fact_cell.Read_and_kept snapshot
+  | Fact_cell.Read_not_kept snapshot -> Ok snapshot
+  | Fact_cell.Read_failed error ->
+    report_persistence_read_drop
+      ~surface:metrics_tool_audit_persistence_surface
+      ~reason:Read_drop_reason.Entry_load_error
+      ~path:(Dated_jsonl.base_dir store)
+      ~detail:(Dated_jsonl.read_error_to_string error);
+    Error error

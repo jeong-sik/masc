@@ -629,6 +629,173 @@ let test_what_a_row_makes_of_the_newest_parsed_row () =
     ]
 ;;
 
+(* --- 7b. the newest row a selection selects ----------------------------- *)
+
+(* The rows with an even number are selected, by their number. *)
+let even_number = function
+  | D.Parsed (`Assoc [ ("row", `Int number) ]) when number mod 2 = 0 -> Some number
+  | D.Parsed _ | D.Malformed_json _ -> None
+;;
+
+let newest_even = D.newest_selected ~name:"newest_even" ~select:(fun ~base_dir:_ -> even_number)
+
+(* How the fact was come by, and its value. *)
+let newest_even_of store =
+  match D.read_fact store newest_even with
+  | Fact_cell.Held value -> "held", value
+  | Fact_cell.Read_and_kept value -> "read and kept", value
+  | Fact_cell.Read_not_kept value -> "read, not kept", value
+  | Fact_cell.Read_failed error -> "failed: " ^ D.read_error_to_string error, None
+;;
+
+let selection_answer = pair string (option int)
+
+let check_the_newest_even_is_the_files label store =
+  let kept =
+    match D.read_fact store newest_even with
+    | Fact_cell.Held value | Fact_cell.Read_and_kept value | Fact_cell.Read_not_kept value ->
+      Ok value
+    | Fact_cell.Read_failed error -> Error (D.read_error_to_string error)
+  in
+  check
+    (result (option int) string)
+    label
+    (D.find_latest_entry_result store even_number
+     |> Result.map_error D.read_error_to_string)
+    kept
+;;
+
+(* A row the selection passes over is nothing to the fact: the value stays,
+   and it stays held. This is a Keeper's heartbeat rows between two turn
+   rows. *)
+let test_a_row_passed_over_leaves_the_selection_as_it_is () =
+  let store = D.open_store (temp_location "djkf_selected") in
+  check selection_answer "a store without rows" ("read and kept", None) (newest_even_of store);
+  D.append store (row 1);
+  check selection_answer "a row passed over, with none selected" ("held", None) (newest_even_of store);
+  D.append store (row 2);
+  check selection_answer "a selected row is the value" ("held", Some 2) (newest_even_of store);
+  List.iter
+    (fun number ->
+       D.append store (row number);
+       check
+         selection_answer
+         (Printf.sprintf "row %d is passed over" number)
+         ("held", Some 2)
+         (newest_even_of store))
+    [ 3; 5; 7; 9 ];
+  check_the_newest_even_is_the_files "as the strict search says" store;
+  D.append store (row 10);
+  check selection_answer "the next selected row replaces it" ("held", Some 10) (newest_even_of store);
+  check_the_newest_even_is_the_files "as the strict search says, again" store
+;;
+
+(* The value after rows that were passed over comes from memory: the file
+   those rows are in is gone, and nothing was told. *)
+let test_the_selection_is_held_with_the_files_gone () =
+  let location = temp_location "djkf_selected_gone" in
+  let store = D.open_store location in
+  D.append store (row 2);
+  check selection_answer "the first read reads the files" ("read and kept", Some 2) (newest_even_of store);
+  D.append store (row 3);
+  (* The day file goes, and nobody is told. A reader that opened a file
+     would now find no row. *)
+  D.prepare_for_directory_removal store;
+  Sys.remove (D.Store.dated_path_now location).path;
+  check selection_answer "no file was opened" ("held", Some 2) (newest_even_of store)
+;;
+
+(* The selected row goes out with its file when the file is rotated by size.
+   It is still the newest selected row, and the fact stays held. *)
+let test_a_rotation_keeps_the_selection () =
+  let store = D.open_store (temp_location "djkf_selected_rotated") in
+  D.append store (row 2);
+  ignore (newest_even_of store : string * int option);
+  (match D.append_rotating store ~max_current_file_bytes:1 (row 3) with
+   | D.Appended_after_rotation _ -> ()
+   | D.Appended_to_current | D.Skipped_rotation_exhausted _ | D.Skipped_by_append_guard ->
+     fail "the append did not rotate the file");
+  check selection_answer "held across the rotation" ("held", Some 2) (newest_even_of store);
+  check_the_newest_even_is_the_files "as the strict search says" store
+;;
+
+(* The selection is told the directory of the store whose row it looks at,
+   when the files are read and when a row is appended. *)
+let test_the_selection_is_told_the_stores_directory () =
+  let told = D.newest_selected ~name:"told" ~select:(fun ~base_dir _ -> Some base_dir) in
+  let store = D.open_store (temp_location "djkf_selected_dir") in
+  let directory () =
+    match D.read_fact store told with
+    | Fact_cell.Held value | Fact_cell.Read_and_kept value | Fact_cell.Read_not_kept value ->
+      value
+    | Fact_cell.Read_failed error -> fail (D.read_error_to_string error)
+  in
+  check (option string) "a store without rows" None (directory ());
+  D.append store (row 1);
+  check (option string) "from the appended row" (Some (D.base_dir store)) (directory ());
+  D.directories_removed ();
+  check (option string) "from the files" (Some (D.base_dir store)) (directory ())
+;;
+
+(* What an append makes of the kept value, with no file and no clock. *)
+let test_what_a_row_makes_of_the_selection () =
+  let after ~value ~newest ~row ~written =
+    D.For_testing.after_row newest_even ~value ~newest ~row ~written
+  in
+  let answer = option (pair (option int) (option (pair string string))) in
+  let today = "2026-11", "18.jsonl" in
+  let tomorrow = "2026-11", "19.jsonl" in
+  let yesterday = "2026-11", "17.jsonl" in
+  let cut = D.Malformed_json { path = "18.jsonl"; line_number = None; detail = "cut" } in
+  List.iter
+    (fun (label, value, newest, row, written, expected) ->
+       check answer label expected (after ~value ~newest ~row ~written))
+    [ ( "a selected row in a store without one"
+      , None
+      , None
+      , D.Parsed (row 2)
+      , today
+      , Some (Some 2, Some today) )
+    ; ( "a row passed over in a store without a selected one"
+      , None
+      , None
+      , D.Parsed (row 1)
+      , today
+      , Some (None, Some today) )
+    ; ( "a row passed over, in the file of the kept one"
+      , Some 2
+      , Some today
+      , D.Parsed (row 3)
+      , today
+      , Some (Some 2, Some today) )
+    ; ( "a row passed over, in a later file"
+      , Some 2
+      , Some today
+      , D.Parsed (row 3)
+      , tomorrow
+      , Some (Some 2, Some tomorrow) )
+    ; ( "a selected row in a later file"
+      , Some 2
+      , Some today
+      , D.Parsed (row 4)
+      , tomorrow
+      , Some (Some 4, Some tomorrow) )
+    ; ( "a selected row in a file before the newest one seen"
+      , Some 2
+      , Some today
+      , D.Parsed (row 4)
+      , yesterday
+      , None )
+    ; ( "a row passed over in a file before the newest one seen"
+      , Some 2
+      , Some today
+      , D.Parsed (row 3)
+      , yesterday
+      , None )
+    ; "a row that is not JSON: the files are asked", Some 2, Some today, cut, today, None
+    ]
+;;
+
 (* --- 8. a window of the newest rows ------------------------------------- *)
 
 let test_the_window_is_the_newest_rows () =
@@ -820,6 +987,7 @@ let test_which_stores_keep_their_facts () =
     (list store)
     "the stores whose facts are kept"
     [ D.Store.Root D.Store.Root.Tool_calls
+    ; D.Store.Keeper D.Store.Keeper.Metrics
     ; D.Store.Keeper D.Store.Keeper.Execution_receipts
     ; D.Store.Keeper D.Store.Keeper.Turn_records
     ]
@@ -989,6 +1157,7 @@ let test_the_fact_is_the_files_after_every_operation () =
   in
   let held = ref 0 in
   let parsed_held = ref 0 in
+  let even_held = ref 0 in
   for step = 1 to 400 do
     (match Random.State.int random 16 with
      | 0 | 1 | 2 | 3 | 4 | 5 -> D.append store (next ())
@@ -1020,11 +1189,18 @@ let test_the_fact_is_the_files_after_every_operation () =
     check_the_newest_parsed_row_is_the_files
       (Printf.sprintf "the newest row that is JSON, after step %d" step)
       store;
+    (match newest_even_of store with
+     | "held", _ -> incr even_held
+     | _ -> ());
+    check_the_newest_even_is_the_files
+      (Printf.sprintf "the newest even row, after step %d" step)
+      store;
     check_the_window_is_the_files (Printf.sprintf "the window, after step %d" step) store
   done;
   (* The run is not a run of file reads: most answers came from memory. *)
   check bool "most answers were held" true (!held > 200);
-  check bool "most answers of the newest row that is JSON were held" true (!parsed_held > 200)
+  check bool "most answers of the newest row that is JSON were held" true (!parsed_held > 200);
+  check bool "most answers of the newest even row were held" true (!even_held > 200)
 ;;
 
 (* One append and one reader of a forgotten fact, started together, many
@@ -1165,6 +1341,22 @@ let () =
             "what a row makes of it"
             `Quick
             test_what_a_row_makes_of_the_newest_parsed_row
+        ] )
+    ; ( "the newest row a selection selects"
+      , [ test_case
+            "a row passed over leaves it as it is"
+            `Quick
+            test_a_row_passed_over_leaves_the_selection_as_it_is
+        ; test_case
+            "it is held with the files gone"
+            `Quick
+            test_the_selection_is_held_with_the_files_gone
+        ; test_case "a rotation keeps it" `Quick test_a_rotation_keeps_the_selection
+        ; test_case
+            "the selection is told the store's directory"
+            `Quick
+            test_the_selection_is_told_the_stores_directory
+        ; test_case "what a row makes of it" `Quick test_what_a_row_makes_of_the_selection
         ] )
     ; ( "a window of the newest rows"
       , [ test_case "the window is the newest rows" `Quick test_the_window_is_the_newest_rows

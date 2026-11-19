@@ -213,7 +213,7 @@ snapshot 은 Keeper 행과 따로, 계속 떠 있어야 하는 Keeper 를 고르
 
 옮기지 않은 읽기가 둘 있다.
 
-- supervisor 의 keepalive reconcile(`keepalive_keeper_names`)은 지금처럼 meta 파일을 읽는다. 30초에 한 번 돈다(`env_config_keeper_supervisor.ml`).
+- supervisor 의 keepalive reconcile(`keepalive_keeper_names`)은 지금처럼 meta 파일을 읽는다. supervisor sweep 이 끝날 때마다 돈다(`keeper_supervisor.ml` 의 `sweep_and_recover`). sweep 간격은 설정값이고 기본 30초다(`env_config_keeper_supervisor.ml`).
 - 이 훑기는 Keeper TOML 을 Keeper 마다 두 번 읽는다. 설정된 이름을 찾을 때 한 번, autoboot 를 정할 때 한 번이다. 풀이는 내용이 같으면 다시 하지 않는다(`keeper_types_profile_toml_io.ml` 의 `parsed_toml_cache`). TOML 은 서버 밖에서 고치는 파일이라 '쓰는 곳이 메모리에도 고친다'에 들지 않는다.
 
 ### 3.2 칸과 사실

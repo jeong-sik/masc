@@ -57,6 +57,19 @@ module Ansi = struct
   let box_r = Masc_tui_theme.Box.r
 end
 
+(* A detail's section heading has one shape (RFC tui-one-screen-grammar
+   §5.2): [── title ─────]. It is bold on the reader's own foreground; the info
+   colour is left to work under way and to focus (§7.3), so a heading does
+   not read as something running. Every detail page draws its headings with
+   these two. *)
+module Section = struct
+  let rule_text title =
+    "\xe2\x94\x80\xe2\x94\x80 " ^ title
+    ^ " \xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80"
+
+  let style = Ansi.bold
+end
+
 (** Semantic styles for state and content syntax.
 
     A fact about health, phase, or attention draws through these names, so

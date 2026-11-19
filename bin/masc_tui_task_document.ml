@@ -20,14 +20,14 @@ let status_label ~ko status = status_tag_label ~ko (Masc_domain.task_status_tag 
    from ([Masc_tui_render_work.planning_detail_tone]). A style goes on a row
    after the row is wrapped. The wrapper neutralises every escape sequence in
    what it is given, so a style put on first would be spelled out on screen. *)
-let heading_style () = Theme.info () ^ Ansi.bold
+let heading_style () = Section.style
 let provenance_style = Ansi.dim
 
 let paint style row =
   if String.equal style "" then row else style ^ row ^ Ansi.reset
 
 let section_rows ~width title =
-  Masc_tui_text_block.rows ~max_cells:width ("[ " ^ title ^ " ]")
+  Masc_tui_text_block.rows ~max_cells:width (Section.rule_text title)
   |> List.map (fun line -> "  " ^ paint (heading_style ()) line)
 
 let history_heading_rows ~ko ~width = section_rows ~width (if ko then "상태 기록" else "History")

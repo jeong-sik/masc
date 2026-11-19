@@ -410,7 +410,7 @@ let prepare_prompts_detail_lines (state : state) ~cols =
     | None -> [] | Some (_, text) -> wrap text
   in
   let section ?(first = false) title =
-    let heading = [ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in
+    let heading = [ section_heading_line title ] in
     if first then heading else "" :: heading
   in
   let document = match Masc_tui_fetched.value prompts with

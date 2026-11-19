@@ -3927,19 +3927,20 @@ let test_handle_request_resources_list_paginates () =
 
 (* The catalogue the server lists (config/mcp/resources.toml, surfaced as
    [Mcp_server.resources] / [resource_templates]) and the reader dispatch in
-   mcp_server_eio_resource.ml are two files; a renamed reader arm would leave
-   a listed URI reading as not-found. Pin the join: every listed uri, and
-   every uri_template with concrete values substituted, parses to an id the
-   dispatch handles. *)
+   mcp_server_eio_resource.ml must agree. Pin the join through the same closed
+   target type the reader uses: every listed uri, and every uri_template with
+   concrete values substituted, must parse to a handled target. *)
 let handled_resource_id id =
-  match id with
-  | "tool-help-index" | "status" | "status.json" | "tasks" | "tasks.json"
-  | "who" | "who.json" | "messages" | "messages.json" | "events"
-  | "events.json" | "wiki" | "wiki.json" ->
+  match Masc.Mcp_server_eio_resource.parse_resource_target id with
+  | Tool_help_index | Tool_help _
+  | Status_markdown | Status_json | Tasks_markdown | Tasks_json
+  | Who_markdown | Who_json | Messages_markdown | Messages_json
+  | Events_markdown | Events_json
+  | Wiki_index_markdown | Wiki_index_json | Wiki_page_markdown _ | Wiki_page_json _
+  | World_memory_claims | World_memory_log
+  | Keeper_memory _ | Keeper_memory_health _ ->
       true
-  | _ ->
-      String.starts_with ~prefix:"tool-help/" id
-      || String.starts_with ~prefix:"wiki/" id
+  | Unknown _ -> false
 
 let concrete_uri_of_template uri_template =
   (* RFC 6570: a query expression ({?...}) drops out; a path variable

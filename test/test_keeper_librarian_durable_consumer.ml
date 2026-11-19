@@ -827,63 +827,22 @@ let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
    | Error _ -> ()
    | Ok _ -> fail "damaged snapshot unexpectedly decoded");
   let commits = ref 0 in
-
-    let commit original =
-    let range_id = Original.range_id original in
-    let official_range_id = Original.official_range_id original in
-    let input = Original.input original in
-    incr commits;
-    match
-      Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Durable
-        ~revisions:[]
-        ?durable_range_id:range_id
-        ?official_range_id
-        ~absorbed:[]
-        ~keepers_dir:memory_keepers_dir
-        ~keeper_id:keeper_name
-        ~now:(Float.of_int !commits)
-        ~source:
-          { kind = Current.Librarian
-          ; trace_id = Ids.Turn_ref.trace_id input.Masc.Keeper_librarian.turn_ref
-          }
-        ~new_claims:[]
-        ()
-    with
-    | Ok _ -> Consumer.Memory_committed
-    | Error detail -> fail detail
-  in
-  (match consume config commit with
-   | Consumer.Progress_advanced progress ->
-     check int "unread range advances" 2 progress.position.end_atom
-   | Consumer.Nothing_to_read
-   | Consumer.Baseline_advanced _
-   | Consumer.Official_advanced _
-   | Consumer.Pending _
-   | Consumer.Memory_not_committed _ -> fail "undecodable snapshot blocked the pass");
-  check int "memory commit ran once" 1 !commits;
-  let recovered =
-    match
-      Current.read_for_keepers_dir ~keepers_dir:memory_keepers_dir ~keeper_id:keeper_name
-    with
-    | Ok (Some snapshot) -> snapshot
-    | Ok None -> fail "quarantine left no replacement snapshot"
-    | Error detail -> fail detail
-  in
-  check int "quarantine writes a fresh revision-1 snapshot" 1 recovered.revision;
-  let snapshot_basename = keeper_name ^ ".memory-current.json" in
-  check bool "the rejected bytes moved aside" true
-    (List.exists
-       (fun name ->
-          let prefix =
-            String.sub
-              name
-              0
-              (min (String.length name) (String.length snapshot_basename))
-          in
-          Fs_compat.file_exists (Filename.concat memory_keepers_dir name)
-          && String.equal prefix snapshot_basename
-          && not (String.equal name snapshot_basename))
-       (Array.to_list (Sys.readdir memory_keepers_dir)))
+  (match
+     Consumer.consume_one
+       ~config
+       ~keeper_name
+       ~commit:(fun original ->
+         ignore original;
+         incr commits;
+         Consumer.Memory_committed)
+   with
+   | Error (Consumer.Memory_snapshot_unreadable detail) ->
+     check bool "error identifies undecodable snapshot" true
+       (String_util.contains_substring detail "undecodable")
+   | Error err -> fail ("unexpected error: " ^ Consumer.error_to_string err)
+   | Ok _ -> fail "undecodable current snapshot must fail closed before commit");
+  check int "no memory commit ran on undecodable snapshot" 0 !commits;
+  check string "corrupt snapshot bytes preserved on disk" "{" (Fs_compat.load_file snapshot_path)
 ;;
 
 (* An I/O failure is the other classification: the store the writer would

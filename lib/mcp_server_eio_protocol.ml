@@ -202,6 +202,25 @@ let send_resource_updated_notification ~session_id ~uri =
   Sse.send_to session_id (resource_updated_notification uri)
 ;;
 
+let notify_subscribed_sessions_for_uri ~uri =
+  let session_ids =
+    with_resource_subscription_lock (fun () ->
+      Hashtbl.fold
+        (fun session_id uris acc ->
+           if Hashtbl.mem uris uri then session_id :: acc else acc)
+        resource_subscriptions
+        [])
+  in
+  List.iter
+    (fun session_id -> send_resource_updated_notification ~session_id ~uri)
+    session_ids
+;;
+
+let () =
+  Mcp_server_eio_resource.register_session_resource_notifier
+    notify_subscribed_sessions_for_uri
+;;
+
 let broadcast_tools_list_changed () =
   let notification = jsonrpc_notification "notifications/tools/list_changed" in
   Sse.broadcast notification;

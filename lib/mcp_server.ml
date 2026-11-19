@@ -243,8 +243,46 @@ let resource_of_entry (entry : Mcp_surface_toml.resource_entry) =
   make_resource ~uri:entry.uri ~name:entry.name ~title:entry.title
     ~description:entry.description ~mime_type:entry.mime_type ()
 
+let world_memory_resources : mcp_resource list =
+  [ make_resource
+      ~uri:"masc://world-memory/claims"
+      ~name:"World Memory Claims"
+      ~title:"World Memory Claims"
+      ~description:
+        "Current workspace memory ledger claims, conflicts, corroboration \
+         stages, and synthesized briefing snapshot"
+      ~mime_type:"application/json"
+      ()
+  ; make_resource
+      ~uri:"masc://world-memory/log"
+      ~name:"World Memory Log"
+      ~title:"World Memory Log"
+      ~description:
+        "Committed shared workspace memory two-phase log entries"
+      ~mime_type:"application/json"
+      ()
+  ]
+
+let living_memory_resource_templates : mcp_resource_template list =
+  [ make_resource_template
+      ~uri_template:"masc://keepers/{keeper}/memory"
+      ~name:"Keeper Living Memory"
+      ~title:"Keeper Living Memory"
+      ~description:"Current living memory snapshot for a Keeper"
+      ~mime_type:"application/json"
+      ()
+  ; make_resource_template
+      ~uri_template:"masc://keepers/{keeper}/memory/health"
+      ~name:"Keeper Memory Health"
+      ~title:"Keeper Memory Health"
+      ~description:
+        "Living memory writer and store health diagnostics for a Keeper"
+      ~mime_type:"application/json"
+      ()
+  ]
+
 let resources : mcp_resource list =
-  List.map resource_of_entry Mcp_surface_toml.resources
+  List.map resource_of_entry Mcp_surface_toml.resources @ world_memory_resources
 
 let resource_template_of_entry (entry : Mcp_surface_toml.template_entry) =
   make_resource_template ~uri_template:entry.uri_template ~name:entry.name
@@ -253,6 +291,7 @@ let resource_template_of_entry (entry : Mcp_surface_toml.template_entry) =
 
 let resource_templates : mcp_resource_template list =
   List.map resource_template_of_entry Mcp_surface_toml.resource_templates
+  @ living_memory_resource_templates
 
 (** Parse a masc:// resource URI into (resource_id, Uri.t) *)
 let parse_masc_resource_uri uri_str =

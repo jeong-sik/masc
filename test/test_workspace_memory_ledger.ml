@@ -412,29 +412,38 @@ let test_an_entry_that_loses_a_member_goes_and_its_other_members_are_new () =
               ; ordinary_ref "auditor" "Port is 8936", conflict_member "x1"
               ; ordinary_ref "gone" "Old local note", excluded "local detail" ])
   in
-  let result =
-    Ledger.reconcile ledger
+  let detailed =
+    Ledger.reconcile_detailed ledger
       [ keeper "writer"
           ~ordinary:(Context.Available (ordinary ["Build uses dune"; "Tests run from the worktree root"]))
       ; keeper "reviewer" ~ordinary:(Context.Available (ordinary ["Port is 8935"]))
       ; keeper "tester" ~ordinary:(Context.Available (ordinary ["Tests run from the worktree root"]))
       ; keeper "auditor" ~ordinary:(Context.Available (ordinary [])) ]
   in
+  let result = detailed.reconciliation in
   Alcotest.(check (list fact_ref)) "vanished facts"
     [ ordinary_ref "auditor" "Port is 8936"
     ; ordinary_ref "gone" "Old local note"
     ; ordinary_ref "reviewer" "Build uses dune" ]
     result.vanished;
-  Alcotest.(check (list string)) "only the claim that kept every member stays" ["c2"]
+  Alcotest.(check (list string)) "partial-member claim survives alongside full claims"
+    ["c1"; "c2"]
     (List.map fst (Ledger.claims result.ledger));
+  Alcotest.(check (list string)) "shrank claim records surviving provenance change" ["c1"]
+    (List.map (fun (c : Ledger.provenance_change) -> c.provenance.claim_id) detailed.shrank_claims);
+  Alcotest.(check (list string)) "no claims retracted when at least one member remains" []
+    detailed.retracted_claims;
   Alcotest.(check (list string)) "the conflict that lost a member goes" []
     (List.map fst (Ledger.conflicts result.ledger));
-  Alcotest.(check (list fact_ref)) "the kept claim's members keep their disposition"
+  Alcotest.(check (list string)) "dissolved conflict is reported in detailed reconciliation" ["x1"]
+    detailed.dissolved_conflicts;
+  Alcotest.(check (list fact_ref)) "surviving claim members keep their dispositions"
     [ ordinary_ref "tester" "Tests run from the worktree root"
-    ; ordinary_ref "writer" "Tests run from the worktree root" ]
+    ; ordinary_ref "writer" "Tests run from the worktree root"
+    ; ordinary_ref "writer" "Build uses dune" ]
     (List.map fst (Ledger.dispositions result.ledger));
-  Alcotest.(check (list fact_ref)) "the other members of a gone entry are new again"
-    [ ordinary_ref "reviewer" "Port is 8935"; ordinary_ref "writer" "Build uses dune" ]
+  Alcotest.(check (list fact_ref)) "only the lone conflict survivor re-enters new_facts"
+    [ ordinary_ref "reviewer" "Port is 8935" ]
     (new_refs result)
 
 let test_unavailable_store_keeps_its_facts () =
@@ -535,21 +544,56 @@ let test_selected_decisions_update_one_durable_ledger () =
   Alcotest.(check int) "both original facts retain membership" 2
     (List.length (Ledger.dispositions ledger));
   let claim_id = fst (List.hd (Ledger.claims ledger)) in
+  Alcotest.(check (option int)) "two-member claim starts corroborated"
+    (Some 2)
+    (Option.map (fun (p : Ledger.claim_provenance) -> p.support_count)
+       (Ledger.claim_provenance ledger ~claim_id));
   let newcomer = pending "auditor" "The report is about twelve pages" in
   let ledger = applied ledger ~selected:[newcomer]
       [{ Ledger.fact = newcomer.fact; decision = Ledger.Join_claim claim_id }] in
-  let retained = Ledger.reconcile ledger
+  let retained_two = Ledger.reconcile_detailed ledger
       [keeper "writer" ~ordinary:(Context.Available (ordinary [writer.claim]));
        keeper "reviewer";
        keeper "auditor" ~ordinary:(Context.Available (ordinary [newcomer.claim]))] in
   Alcotest.(check (list fact_ref)) "only the vanished review member leaves"
-    [reviewer.fact] retained.vanished;
-  Alcotest.(check int) "the claim that lost a member goes" 0
-    (List.length (Ledger.claims retained.ledger));
-  Alcotest.(check (list fact_ref)) "its other members are new again"
-    [newcomer.fact; writer.fact] (new_refs retained);
-  Alcotest.check json "applied ledger is valid on disk" (Ledger.to_json retained.ledger)
-    (Ledger.to_json (decode (Ledger.to_json retained.ledger)))
+    [reviewer.fact] retained_two.reconciliation.vanished;
+  Alcotest.(check int) "the claim survives partial member loss with 2 remaining" 1
+    (List.length (Ledger.claims retained_two.reconciliation.ledger));
+  Alcotest.(check (list fact_ref)) "its remaining members are NOT re-queued as new"
+    [] (new_refs retained_two.reconciliation);
+  Alcotest.(check (list string)) "shrank claim provenance recorded" [claim_id]
+    (List.map (fun (c : Ledger.provenance_change) -> c.provenance.claim_id)
+       retained_two.shrank_claims);
+  let retained_one = Ledger.reconcile_detailed retained_two.reconciliation.ledger
+      [keeper "writer" ~ordinary:(Context.Available (ordinary [writer.claim]));
+       keeper "reviewer";
+       keeper "auditor"] in
+  Alcotest.(check int) "the claim still survives with 1 remaining member" 1
+    (List.length (Ledger.claims retained_one.reconciliation.ledger));
+  let retracted = Ledger.reconcile_detailed retained_one.reconciliation.ledger
+      [keeper "writer"; keeper "reviewer"; keeper "auditor"] in
+  Alcotest.(check int) "claim retracts only when 0 supporting members remain" 0
+    (List.length (Ledger.claims retracted.reconciliation.ledger));
+  Alcotest.(check (list string)) "retracted claim id is recorded" [claim_id]
+    retracted.retracted_claims;
+  Alcotest.check json "applied ledger is valid on disk" (Ledger.to_json retained_two.reconciliation.ledger)
+    (Ledger.to_json (decode (Ledger.to_json retained_two.reconciliation.ledger)))
+
+let test_update_locked_round_trip () =
+  let require = function Ok v -> v | Error e -> Alcotest.fail e in
+  let base_path = Filename.temp_dir "workspace-ledger-update" "" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree base_path) (fun () ->
+    let writer = pending "writer" "Locked update persists atomically" in
+    let saved =
+      Ledger.update ~base_path (fun current ->
+        Ledger.apply current ~selected:[writer]
+          [{ Ledger.fact = writer.fact; decision = Ledger.Create_claim writer.claim }]
+        |> Result.map_error Ledger.apply_error_to_string)
+      |> require
+    in
+    let loaded = Ledger.load ~base_path |> require in
+    Alcotest.(check json) "reloaded ledger matches locked update"
+      (Ledger.to_json saved) (Ledger.to_json loaded))
 
 let test_apply_refuses_unselected_or_missing_decisions () =
   let writer = pending "writer" "Build uses OCaml" in
@@ -591,16 +635,32 @@ let test_ordinary_absence_uses_fact_identity_and_all_dispositions () =
     true (observed = Ledger.Complete {facts=6; absent=3; available_stores=2; missing_stores=0})
 
 let test_absence_uses_original_ledger_not_reclassification_queue () =
-  let database = decode (ledger_json ~claims:["c", "shared"]
-    [ordinary_ref "writer" "shared", claim_member "c";
-     ordinary_ref "reviewer" "shared", claim_member "c"]) in
-  let keepers = [keeper "writer" ~ordinary:(Context.Available (ordinary ["shared"]));
-                 keeper "reviewer"] in
-  Alcotest.(check int) "lost member makes the retained member pending for reclassification" 1
-    (List.length (Ledger.reconcile database keepers).new_facts);
-  Alcotest.(check bool) "that member remains present in the observed durable ledger" true
-    (Ledger.ordinary_absence database keepers =
-     Ledger.Complete {facts=1; absent=0; available_stores=1; missing_stores=1})
+  let database =
+    decode
+      (ledger_json ~claims:[ "c", "shared" ] ~conflicts:[ "x", "disputed" ]
+         [ ordinary_ref "writer" "shared", claim_member "c"
+         ; ordinary_ref "reviewer" "shared", claim_member "c"
+         ; ordinary_ref "writer" "mine", conflict_member "x"
+         ; ordinary_ref "reviewer" "theirs", conflict_member "x"
+         ])
+  in
+  let keepers =
+    [ keeper "writer" ~ordinary:(Context.Available (ordinary [ "shared"; "mine" ]))
+    ; keeper "reviewer"
+    ]
+  in
+  let detailed = Ledger.reconcile_detailed database keepers in
+  Alcotest.(check (list string))
+    "partial-member claim survives shrinkage instead of forcing reclassification"
+    [ "c" ]
+    (List.map (fun (p : Ledger.provenance_change) -> p.provenance.claim_id) detailed.shrank_claims);
+  Alcotest.(check int)
+    "lost conflict member makes only the retained conflict member pending for reclassification"
+    1
+    (List.length detailed.reconciliation.new_facts);
+  Alcotest.(check bool) "retained members remain present in the observed durable ledger" true
+    (Ledger.ordinary_absence database keepers
+     = Ledger.Complete { facts = 2; absent = 0; available_stores = 1; missing_stores = 1 })
 
 let test_absence_preserves_unreadable_ordinary_stores () =
   Alcotest.(check bool) "a failed store leaves only a lower bound" true
@@ -649,6 +709,8 @@ let () =
     ; ( "apply"
       , [ Alcotest.test_case "selected decisions make one durable ledger" `Quick
             test_selected_decisions_update_one_durable_ledger
+        ; Alcotest.test_case "locked update persists atomically" `Quick
+            test_update_locked_round_trip
         ; Alcotest.test_case "unselected or incomplete answers fail closed" `Quick
             test_apply_refuses_unselected_or_missing_decisions ] )
     ; ( "ordinary absence"

@@ -595,19 +595,11 @@ let current_memory ~keepers_dir ~keeper_name =
   | Readable snapshot ->
     Ok (Some { Keeper_librarian.facts = snapshot.facts }, Some snapshot.revision)
   | Undecodable { rejection } ->
-    (* A decode rejection is the one failure the write path can recover: the
-       commit below re-reads under the store lock and the quarantine branch in
-       [update_locked_with_error] moves the undecodable bytes aside, then the
-       replacement writes a fresh revision-1 snapshot. Feeding the empty
-       current in with no expected revision is what routes the pass through
-       that branch instead of skipping the write and leaving the keeper
-       wedged (#32461). An I/O failure above stays a hard stop: replacing a
-       store the build could not even read would destroy state blindly. *)
     Log.Keeper.warn
       ~keeper_name
-      "librarian routing undecodable current snapshot into write-path quarantine: %s"
+      "librarian refusing pass on undecodable current snapshot: %s"
       rejection;
-    Ok (None, None)
+    Error (Memory_snapshot_unreadable ("undecodable current snapshot: " ^ rejection))
 ;;
 
 (* [Capture.create] writes every held checkpoint message as JSON, digests the

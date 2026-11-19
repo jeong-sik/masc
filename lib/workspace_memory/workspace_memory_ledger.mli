@@ -74,12 +74,22 @@ val directory : base_path:string -> string
 
 val load : base_path:string -> (t, string) result
 (** [empty] when the ledger file does not exist. A missing [base_path], an
-    unreadable file or a file [of_json] refuses is an error, never [empty]. *)
+    unreadable file or a file [of_json] refuses is an error, never [empty].
+    Reads under {!File_lock_eio.with_lock} when the workspace-memory directory
+    exists. *)
 
 val save : base_path:string -> t -> (unit, string) result
-(** Atomic replacement. A failure before the rename keeps the previous ledger;
-    a failure after it can leave the new one in place, so an error does not
-    say which ledger the next [load] reads. Cancellation propagates. *)
+(** Locked atomic replacement ({!File_lock_eio.with_lock} +
+    {!Fs_compat.save_file_atomic_strict_staged}). A failure before the rename
+    keeps the previous ledger; a failure after it can leave the new one in
+    place, so an error does not say which ledger the next [load] reads.
+    Cancellation propagates. *)
+
+val update : base_path:string -> (t -> (t, string) result) -> (t, string) result
+(** Locked read-modify-write transition over [ledger.json] using
+    {!File_lock_eio.with_lock} and atomic replacement. When [ledger.json]
+    already exists and the returned ledger has the identical {!sha256}, the
+    write and change notification are skipped. *)
 
 val briefing_sources : t -> Workspace_memory_briefing.source list
 (** Complete claim and conflict texts for shared semantic synthesis. Members
@@ -109,6 +119,10 @@ val observe : base_path:string -> observation
     base is unavailable. [Missing] means the ledger is absent in an existing
     workspace, consistently with [load]. *)
 
+val observe_with_briefing_template : briefing_template:string -> base_path:string -> observation
+(** As {!observe}, using a caller-supplied resolved briefing template so
+    blocking systhread callers do not acquire the prompt registry Eio mutex. *)
+
 val check_readable : base_path:string -> (unit, string) result
 (** Fresh regular-file, payload-read and strict decoding checks used by
     {!observe}. An absent ledger in an existing workspace succeeds; an invalid
@@ -123,28 +137,75 @@ type pending_fact =
   ; claim : string
   }
 
+type corroboration_stage =
+  | Observed       (** Backed by a single Keeper. *)
+  | Consolidated   (** Backed by multiple distinct Keepers. *)
+  | Crystallized   (** Multi-Keeper convergence grounded in source-bound evidence. *)
+
+val corroboration_stage_to_string : corroboration_stage -> string
+
+type claim_provenance =
+  { claim_id : string
+  ; claim : string
+  ; stage : corroboration_stage
+  ; supporting_keepers : string list
+  ; support_count : int
+  ; has_source_bound : bool
+  }
+
+type provenance_change =
+  { provenance : claim_provenance
+  ; prior_stage : corroboration_stage
+  ; preserved_stage : corroboration_stage
+  ; prior_support_count : int
+  ; vanished_keepers : string list
+  }
+
+val claim_provenance : t -> claim_id:string -> claim_provenance option
+(** Current corroboration stage and distinct supporting Keepers for [claim_id]. *)
+
+val all_claim_provenance : t -> claim_provenance list
+(** {!claim_provenance} for every claim in [t], in [claim_id] order. *)
+
 type reconciliation =
   { ledger : t
-        (** the input ledger without the [vanished] facts and without every
-            claim or conflict that lost a member *)
+        (** the input ledger without the [vanished] facts; shared claims stay
+            in place as long as at least one corroborating member remains and
+            are retracted only when zero members remain *)
   ; current_facts : pending_fact list
         (** All readable current facts, in discovery and store order. *)
   ; new_facts : pending_fact list
-        (** Current facts [ledger] has no disposition for, including the
-            other members of a claim or conflict that lost a member. Oldest
-            store [first_seen] first; facts first seen at the same instant
-            follow Keeper, store, path and hash order. *)
+        (** Current facts [ledger] has no disposition for, including facts
+            whose prior conflict dissolved below two members. Oldest store
+            [first_seen] first; facts first seen at the same instant follow
+            Keeper, store, path and hash order. *)
   ; vanished : fact_ref list  (** in [dispositions] order *)
+  }
+
+type detailed_reconciliation =
+  { reconciliation : reconciliation
+  ; retracted_claims : string list
+  ; shrank_claims : provenance_change list
+  ; dissolved_conflicts : string list
   }
 
 val reconcile : t -> Workspace_memory_context.keeper list -> reconciliation
 (** Compare the ledger with what the stores hold now. A disposition vanishes
     when its store was read and no longer holds the fact, when the store has
     no file, or when its Keeper is not in the list. An [Unavailable] store
-    adds no new facts and none of its facts vanish. A claim's or conflict's
-    text is written once and never rewritten, so a claim or conflict that
-    loses any member is dropped, and its other members lose their
-    disposition, also in an [Unavailable] store. Makes no model call. *)
+    adds no new facts and none of its facts vanish. A shared claim survives a
+    single Keeper's drop or rewording as long as at least one corroborating
+    member remains, preserving surviving members' dispositions without
+    re-queuing them; a claim is retracted only when zero supporting members
+    remain. A conflict that loses a member and drops below two remaining
+    members dissolves so a lone remaining fact re-enters [new_facts]. Makes no
+    model call. *)
+
+val reconcile_detailed :
+  t -> Workspace_memory_context.keeper list -> detailed_reconciliation
+(** {!reconcile} together with retracted claim ids, surviving claims whose
+    provenance shrank (retaining their prior convergence weight), and
+    dissolved conflict ids. *)
 
 type ordinary_absence_counts = {
   facts : int;

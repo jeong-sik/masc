@@ -5,9 +5,10 @@ type verdict = Faithful | Needs_revision | Insufficient_evidence
 type observation
 val observation_to_yojson : observation -> Yojson.Safe.t
 val permits_publication : observation -> bool
-(** Only an explicit [Needs_revision] withholds the proposed batch. Skips,
-    failures and insufficient evidence retain the existing structural checks;
-    they are never reported as verified preservation. *)
+(** Only {!Skipped} (missing policy, excluded keeper, or empty proposal) and an
+    explicit {!Faithful} or {!Insufficient_evidence} verdict permit publication.
+    {!Needs_revision}, incomplete {!Checking}, {!Failed}, and {!Invalid_answer}
+    fail closed and withhold publication. *)
 
 val run :
   ?observe:(observation -> unit) ->

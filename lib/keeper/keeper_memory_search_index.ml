@@ -49,24 +49,62 @@ let with_database db f =
     (fun () -> f db)
 ;;
 
-(* Every term becomes one FTS5 string (a double quote inside it doubled, as
-   the FTS5 query syntax defines), joined by OR, so no text a Keeper types is
-   read as query syntax. *)
-let match_expression query =
+(* Every term >= 3 UTF-8 code points becomes one FTS5 trigram string (a double
+   quote inside it doubled), joined by OR; shorter terms (< 3 code points)
+   cannot match FTS5 trigrams and fall back to escaped SQL LIKE substring scans
+   on the same SQLite worker domain. *)
+let utf8_char_count s =
+  let count = ref 0 in
+  String.iter
+    (fun c -> if Char.code c land 0xc0 <> 0x80 then incr count)
+    s;
+  !count
+;;
+
+type compiled_query =
+  { trigram_expr : string option
+  ; short_terms : string list
+  }
+
+let escape_like term =
+  let buffer = Buffer.create (String.length term + 4) in
+  Buffer.add_char buffer '%';
+  String.iter
+    (fun c ->
+       match c with
+       | '\\' | '%' | '_' ->
+         Buffer.add_char buffer '\\';
+         Buffer.add_char buffer c
+       | _ -> Buffer.add_char buffer c)
+    term;
+  Buffer.add_char buffer '%';
+  Buffer.contents buffer
+;;
+
+let compile_query query =
   match String_util.query_tokens query with
   | [] -> None
   | terms ->
-    let quote term =
-      let buffer = Buffer.create (String.length term + 2) in
-      Buffer.add_char buffer '"';
-      String.iter
-        (fun c ->
-           if Char.equal c '"' then Buffer.add_string buffer "\"\"" else Buffer.add_char buffer c)
-        term;
-      Buffer.add_char buffer '"';
-      Buffer.contents buffer
+    let trigram_terms, short_terms =
+      List.partition (fun term -> utf8_char_count term >= 3) terms
     in
-    Some (String.concat " OR " (List.map quote terms))
+    let trigram_expr =
+      match trigram_terms with
+      | [] -> None
+      | _ :: _ ->
+        let quote term =
+          let buffer = Buffer.create (String.length term + 2) in
+          Buffer.add_char buffer '"';
+          String.iter
+            (fun c ->
+               if Char.equal c '"' then Buffer.add_string buffer "\"\"" else Buffer.add_char buffer c)
+            term;
+          Buffer.add_char buffer '"';
+          Buffer.contents buffer
+        in
+        Some (String.concat " OR " (List.map quote trigram_terms))
+    in
+    Some { trigram_expr; short_terms }
 ;;
 
 let populate db texts =
@@ -102,27 +140,122 @@ type row_filter =
   | All_rows
   | Excluding of { owner : string; limit : int }
 
-let search db ~count ~filter expression =
-  let sql = match filter with
-    | All_rows ->
-      "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
-       ORDER BY bm25(memory_search), ordinal"
-    | Excluding _ ->
-      "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ? \
-       AND owner != ? ORDER BY bm25(memory_search), ordinal LIMIT ?"
+let search db ~count ~filter compiled =
+  let like_count = List.length compiled.short_terms in
+  let* sql =
+    match compiled.trigram_expr, compiled.short_terms with
+    | None, [] -> Error (Index_unavailable "empty search query")
+    | Some _, [] ->
+      Ok
+        (match filter with
+         | All_rows ->
+           "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ?1 \
+            ORDER BY bm25(memory_search), ordinal"
+         | Excluding _ ->
+           "SELECT ordinal, bm25(memory_search) FROM memory_search WHERE memory_search MATCH ?1 \
+            AND owner != ?2 ORDER BY bm25(memory_search), ordinal LIMIT ?3")
+    | None, _ :: _ ->
+      let like_terms =
+        List.init like_count (fun i -> Printf.sprintf "claim LIKE ?%d ESCAPE '\\'" (i + 1))
+      in
+      let score_expr = "-(" ^ String.concat " + " like_terms ^ ")" in
+      let where_like = "(" ^ String.concat " OR " like_terms ^ ")" in
+      Ok
+        (match filter with
+         | All_rows ->
+           Printf.sprintf
+             "SELECT ordinal, %s FROM memory_search WHERE %s ORDER BY 2, ordinal"
+             score_expr
+             where_like
+         | Excluding _ ->
+           Printf.sprintf
+             "SELECT ordinal, %s FROM memory_search WHERE %s AND owner != ?%d ORDER BY 2, ordinal LIMIT ?%d"
+             score_expr
+             where_like
+             (like_count + 1)
+             (like_count + 2))
+    | Some _, _ :: _ ->
+      let like_terms =
+        List.init like_count (fun i -> Printf.sprintf "(m.claim LIKE ?%d ESCAPE '\\')" (i + 1))
+      in
+      let score_expr = "COALESCE(f.score, 0.0) - (" ^ String.concat " + " like_terms ^ ")" in
+      let where_like = String.concat " OR " like_terms in
+      let match_param = like_count + 1 in
+      Ok
+        (match filter with
+         | All_rows ->
+           Printf.sprintf
+             "SELECT m.ordinal, %s FROM memory_search AS m \
+              LEFT JOIN (SELECT rowid, bm25(memory_search) AS score FROM memory_search WHERE memory_search MATCH ?%d) AS f \
+              ON m.rowid = f.rowid \
+              WHERE (f.rowid IS NOT NULL OR %s) \
+              ORDER BY 2, m.ordinal"
+             score_expr
+             match_param
+             where_like
+         | Excluding _ ->
+           Printf.sprintf
+             "SELECT m.ordinal, %s FROM memory_search AS m \
+              LEFT JOIN (SELECT rowid, bm25(memory_search) AS score FROM memory_search WHERE memory_search MATCH ?%d) AS f \
+              ON m.rowid = f.rowid \
+              WHERE (f.rowid IS NOT NULL OR %s) AND m.owner != ?%d \
+              ORDER BY 2, m.ordinal LIMIT ?%d"
+             score_expr
+             match_param
+             where_like
+             (match_param + 1)
+             (match_param + 2))
   in
   with_statement
     db
     sql
     (fun statement ->
-       let* () = check db "bind memory query" (Sqlite3.bind statement 1 (Sqlite3.Data.TEXT expression)) in
-       let* () = match filter with
+       let* next_param =
+         match compiled.trigram_expr, like_count with
+         | Some expression, 0 ->
+           let* () =
+             check db "bind memory query" (Sqlite3.bind statement 1 (Sqlite3.Data.TEXT expression))
+           in
+           Ok 2
+         | trigram_opt, _ ->
+           let rec bind_short idx = function
+             | [] -> Ok idx
+             | term :: rest ->
+               let* () =
+                 check
+                   db
+                   "bind short memory query"
+                   (Sqlite3.bind statement idx (Sqlite3.Data.TEXT (escape_like term)))
+               in
+               bind_short (idx + 1) rest
+           in
+           let* idx = bind_short 1 compiled.short_terms in
+           (match trigram_opt with
+            | None -> Ok idx
+            | Some expression ->
+              let* () =
+                check
+                  db
+                  "bind memory query"
+                  (Sqlite3.bind statement idx (Sqlite3.Data.TEXT expression))
+              in
+              Ok (idx + 1))
+       in
+       let* () =
+         match filter with
          | Excluding { owner; limit } ->
-           let* () = check db "bind excluded memory owner"
-             (Sqlite3.bind statement 2 (Sqlite3.Data.TEXT owner)) in
-           check db "bind memory result limit"
-             (Sqlite3.bind statement 3 (Sqlite3.Data.INT (Int64.of_int limit)))
-         | All_rows -> Ok () in
+           let* () =
+             check
+               db
+               "bind excluded memory owner"
+               (Sqlite3.bind statement next_param (Sqlite3.Data.TEXT owner))
+           in
+           check
+             db
+             "bind memory result limit"
+             (Sqlite3.bind statement (next_param + 1) (Sqlite3.Data.INT (Int64.of_int limit)))
+         | All_rows -> Ok ()
+       in
        let rec rows hits =
          match Sqlite3.step statement with
          | exception Sqlite3.Error detail -> Error (Index_unavailable ("search memory: " ^ detail))
@@ -138,7 +271,8 @@ let search db ~count ~filter expression =
          | Sqlite3.Rc.NOTFOUND | Sqlite3.Rc.FULL | Sqlite3.Rc.CANTOPEN | Sqlite3.Rc.PROTOCOL
          | Sqlite3.Rc.EMPTY | Sqlite3.Rc.SCHEMA | Sqlite3.Rc.TOOBIG | Sqlite3.Rc.CONSTRAINT
          | Sqlite3.Rc.MISMATCH | Sqlite3.Rc.MISUSE | Sqlite3.Rc.NOFLS | Sqlite3.Rc.AUTH
-         | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _ -> Error (sqlite_error db "search memory")
+         | Sqlite3.Rc.FORMAT | Sqlite3.Rc.RANGE | Sqlite3.Rc.NOTADB | Sqlite3.Rc.UNKNOWN _ ->
+           Error (sqlite_error db "search memory")
        in
        rows [])
 ;;
@@ -160,8 +294,8 @@ let create_table db texts =
 let no_work = { index_builds = 0; indexed_rows = 0; queries_executed = 0 }
 
 let rank_many_with ~queries ~texts =
-  let expressions = List.map (fun (filter, query) -> filter, match_expression query) queries in
-  match texts, List.exists (fun (_, expression) -> Option.is_some expression) expressions with
+  let compiled = List.map (fun (filter, query) -> filter, compile_query query) queries in
+  match texts, List.exists (fun (_, plan) -> Option.is_some plan) compiled with
   | [], _ | _, false -> Ok (List.map (fun _ -> []) queries, no_work)
   | _ :: _, true ->
     (* Building and querying the table is one SQLite call per row, and a
@@ -173,15 +307,17 @@ let rank_many_with ~queries ~texts =
        with_database (Sqlite3.db_open ":memory:") (fun db ->
          let* () = create_table db texts in
          let rec search_all results executed = function
-           | [] -> Ok (List.rev results,
-                       { index_builds = 1; indexed_rows = List.length texts;
-                         queries_executed = executed })
+           | [] ->
+             Ok
+               ( List.rev results
+               , { index_builds = 1; indexed_rows = List.length texts; queries_executed = executed }
+               )
            | (_, None) :: rest -> search_all ([] :: results) executed rest
-           | (filter, Some expression) :: rest ->
-             let* ranked = search db ~count:(List.length texts) ~filter expression in
+           | (filter, Some plan) :: rest ->
+             let* ranked = search db ~count:(List.length texts) ~filter plan in
              search_all (ranked :: results) (executed + 1) rest
          in
-         search_all [] 0 expressions)
+         search_all [] 0 compiled)
      with
      | Sqlite3.Error detail -> Error (Index_unavailable detail))
 ;;
@@ -209,11 +345,20 @@ let close_table db =
   | exception Sqlite3.Error detail -> log_cleanup "close" detail
 ;;
 
+let close_db_in_pool db =
+  let run () =
+    Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () -> close_table db)
+  in
+  match Eio_guard.execution_context () with
+  | Eio_guard.Non_eio -> run ()
+  | Eio_guard.Eio_fiber -> Eio.Cancel.protect run
+;;
+
 (* The table is built on the first [rank] that has work and serves every
-   later one. Each build and each [rank] is its own job on the domain pool
-   when the caller is an Eio fiber, like [rank_many_with]; the jobs run one
-   after another, so the database is never used by two at once. The caller
-   runs [f] itself. *)
+   later one. Each build, each [rank], and closing the database run on the
+   domain pool when the caller is an Eio fiber, like [rank_many_with]; the jobs
+   run one after another, so the database is never used by two at once and
+   [Sqlite3.db_close] never runs on the caller's Eio scheduler domain. *)
 let with_excluding_owners ~texts ~max_results f =
   let opened = ref None in
   let stats = ref no_work in
@@ -237,9 +382,9 @@ let with_excluding_owners ~texts ~max_results f =
       Ok db
   in
   let rank queries =
-    let expressions = List.map (fun (owner, query) -> owner, match_expression query) queries in
+    let compiled = List.map (fun (owner, query) -> owner, compile_query query) queries in
     if max_results < 0 then Error (Index_unavailable "negative result limit")
-    else if max_results = 0 || texts = [] || not (List.exists (fun (_, e) -> Option.is_some e) expressions)
+    else if max_results = 0 || texts = [] || not (List.exists (fun (_, p) -> Option.is_some p) compiled)
     then Ok (List.map (fun _ -> []) queries)
     else
       let* db = table () in
@@ -248,19 +393,24 @@ let with_excluding_owners ~texts ~max_results f =
           let rec search_all results executed = function
             | [] -> Ok (List.rev results, executed)
             | (_, None) :: rest -> search_all ([] :: results) executed rest
-            | (owner, Some expression) :: rest ->
-              let* ranked = search db ~count:(List.length texts)
-                  ~filter:(Excluding { owner; limit = max_results }) expression in
+            | (owner, Some plan) :: rest ->
+              let* ranked =
+                search
+                  db
+                  ~count:(List.length texts)
+                  ~filter:(Excluding { owner; limit = max_results })
+                  plan
+              in
               search_all (ranked :: results) (executed + 1) rest
           in
-          try search_all [] 0 expressions with Sqlite3.Error detail -> Error (Index_unavailable detail))
+          try search_all [] 0 compiled with Sqlite3.Error detail -> Error (Index_unavailable detail))
       in
       stats := { !stats with queries_executed = !stats.queries_executed + executed };
       Ok results
   in
   let value =
     Fun.protect
-      ~finally:(fun () -> Option.iter close_table !opened; opened := None)
+      ~finally:(fun () -> Option.iter close_db_in_pool !opened; opened := None)
       (fun () -> f ~rank)
   in
   value, !stats

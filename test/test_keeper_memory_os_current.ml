@@ -1148,14 +1148,10 @@ let test_duplicate_identity_rejects_without_overwrite () =
   check (list string) "unchanged facts" (fact_ids [ first ]) (fact_ids snapshot.facts)
 ;;
 
-(* A file this build cannot decode is not this build's to destroy, and it is
-   also not this build's reason to stop writing forever. It moves aside with
-   its bytes intact and the write continues from fresh state.
-
-   The earlier contract refused the write and left the file where it was, which
-   is what turned one undecodable snapshot into a permanent wedge: every writer
-   reads before it writes. Byte preservation is what that test was protecting
-   and it still holds — at the moved-aside path. *)
+(* Normal writes never overwrite or implicitly quarantine an undecodable
+   snapshot: they fail closed leaving its bytes intact, and only an explicit
+   operator/boot quarantine moves it aside preserving its bytes so subsequent
+   writes proceed from fresh state. *)
 let test_non_current_snapshot_is_moved_aside_not_overwritten () =
   with_temp_keepers @@ fun keepers_dir ->
   let snapshot_path =
@@ -1163,12 +1159,32 @@ let test_non_current_snapshot_is_moved_aside_not_overwritten () =
   in
   let alien = {|{"schema":"unexpected.memory"}|} in
   Fs_compat.save_file snapshot_path alien;
+  (match replace ~keepers_dir ~facts:[ fact () ] () with
+   | Ok _ -> fail "normal replace must fail closed on undecodable snapshot"
+   | Error detail ->
+     check bool "replace failure reports decode rejection" true
+       (String_util.contains_substring detail "decode failed"));
+  check string "alien bytes stay intact on write rejection" alien (Fs_compat.load_file snapshot_path);
+  check (list string) "no implicit quarantine occurs on normal write" [] (rejected_files ~keepers_dir);
+  (match Current.inspect_for_boot ~keepers_dir ~keeper_id:"keeper" with
+   | Current.Boot_undecodable { rejection; snapshot_sha256 } ->
+     Current.move_aside_for_keepers_dir
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:250.
+       ~rejection
+       ~expected_snapshot_sha256:snapshot_sha256
+       ()
+     |> require_ok
+     |> ignore
+   | Current.Boot_absent | Current.Boot_readable | Current.Boot_unreadable _ ->
+     fail "fixture snapshot must be reported as Boot_undecodable");
   let written = replace ~keepers_dir ~facts:[ fact () ] () |> require_ok in
-  check int "the write proceeds from fresh state" 1 written.revision;
+  check int "the write proceeds from fresh state after explicit quarantine" 1 written.revision;
   match rejected_files ~keepers_dir with
   | [ name ] ->
     let kept = Filename.concat keepers_dir name in
-    check string "alien bytes preserved" alien (Fs_compat.load_file kept);
+    check string "alien bytes preserved at quarantined path" alien (Fs_compat.load_file kept);
     check
       bool
       "and the current snapshot is a different file"
@@ -4047,16 +4063,43 @@ let test_undecodable_snapshot_is_quarantined_and_the_write_proceeds () =
     "a broken snapshot is unreadable before the write"
     true
     (Result.is_error (Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  (match
+     Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:600.0
+       ~source:(source Current.Explicit_write)
+       (fact ~claim:"written after the wedge" ())
+   with
+   | Ok _ -> fail "normal write must fail closed on undecodable snapshot"
+   | Error (Current.Upsert_persistence_failed detail) ->
+     check bool "error reports decode rejection" true
+       (String_util.contains_substring detail "decode failed")
+   | Error other -> fail ("unexpected upsert error: " ^ Current.upsert_error_to_string other));
+  check
+    string
+    "prior snapshot bytes stay intact on decode rejection"
+    rejected_content
+    (Fs_compat.load_file (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"));
+  check (list string) "no implicit quarantine occurs on write" [] (rejected_files ~keepers_dir);
+  check int "no quarantine journal row added by write" 0 (List.length (quarantined_lines ~keepers_dir));
+  (* Operator-approved boot quarantine explicitly moves the rejected bytes aside *)
+  (match Current.inspect_for_boot ~keepers_dir ~keeper_id:"keeper" with
+   | Current.Boot_undecodable { rejection; snapshot_sha256 } ->
+     Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+       ~now:600.0 ~rejection ~expected_snapshot_sha256:snapshot_sha256 () |> require_ok |> ignore
+   | Current.Boot_absent | Current.Boot_readable | Current.Boot_unreadable _ ->
+     fail "expected Boot_undecodable");
   let recovered =
     Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
-      ~now:600.0
+      ~now:601.0
       ~source:(source Current.Explicit_write)
       (fact ~claim:"written after the wedge" ())
     |> require_upsert_ok
   in
-  check int "the write restarts the revision" 1 recovered.revision;
+  check int "the write restarts the revision after explicit quarantine" 1 recovered.revision;
   check
     (list string)
     "only the new row is current"
@@ -4110,13 +4153,17 @@ let test_reading_an_undecodable_snapshot_moves_nothing () =
   check int "and nothing was journaled" 0 (List.length (quarantined_lines ~keepers_dir))
 ;;
 
-(* A caller holding a revision cannot have read it from a file that does not
-   decode, so the concurrency contract still refuses. The quarantine happens
-   first and stands: the next write succeeds. *)
+(* Explicit boot quarantine resets the store, so a stale expected revision still fails
+   closed afterwards while fresh writes succeed. *)
 let test_expected_revision_still_refuses_after_a_quarantine () =
   with_temp_keepers @@ fun keepers_dir ->
   ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
   ignore (break_change_contract ~keepers_dir);
+  (match Current.inspect_for_boot ~keepers_dir ~keeper_id:"keeper" with
+   | Current.Boot_undecodable { rejection; snapshot_sha256 } ->
+     Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+       ~now:500.0 ~rejection ~expected_snapshot_sha256:snapshot_sha256 () |> require_ok |> ignore
+   | _ -> fail "expected Boot_undecodable");
   (match
      replace ~keepers_dir ~expected_revision:(Some 1) ~facts:[ fact ~claim:"next" () ] ()
    with
@@ -4136,30 +4183,43 @@ let test_expected_revision_still_refuses_after_a_quarantine () =
 let test_torn_json_is_quarantined_too () =
   with_temp_keepers @@ fun keepers_dir ->
   ignore (replace ~keepers_dir ~facts:[ fact () ] () |> require_ok);
-  Fs_compat.save_file
-    (Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper")
-    "{\"revision\": 1, \"facts\": [";
+  let torn = "{\"revision\": 1, \"facts\": [" in
+  let path = Current.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper" in
+  Fs_compat.save_file path torn;
+  (match
+     Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
+       ~keepers_dir
+       ~keeper_id:"keeper"
+       ~now:700.0
+       ~source:(source Current.Explicit_write)
+       (fact ~claim:"after a torn file" ())
+   with
+   | Ok _ -> fail "torn json must refuse writes rather than wiping prior snapshot"
+   | Error (Current.Upsert_persistence_failed _) -> ()
+   | Error other -> fail ("unexpected error on torn json: " ^ Current.upsert_error_to_string other));
+  check string "torn json stays untouched before explicit quarantine" torn (Fs_compat.load_file path);
+  (match Current.inspect_for_boot ~keepers_dir ~keeper_id:"keeper" with
+   | Current.Boot_undecodable { rejection; snapshot_sha256 } ->
+     Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+       ~now:700.0 ~rejection ~expected_snapshot_sha256:snapshot_sha256 () |> require_ok |> ignore
+   | _ -> fail "torn json should inspect as Boot_undecodable");
   let recovered =
     Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
       ~keepers_dir
       ~keeper_id:"keeper"
-      ~now:700.0
+      ~now:701.0
       ~source:(source Current.Explicit_write)
       (fact ~claim:"after a torn file" ())
     |> require_upsert_ok
   in
-  check int "a half-written file does not wedge the keeper either" 1 recovered.revision;
-  check int "and it is kept" 1 (List.length (rejected_files ~keepers_dir))
+  check int "write proceeds at revision 1 after explicit quarantine" 1 recovered.revision;
+  check int "rejected torn json kept aside" 1 (List.length (rejected_files ~keepers_dir))
 ;;
 
-(* rename replaces its destination, and [now] repeats: it is the caller's own
-   observation time, so two writes in the same second carry the same value. A
-   fixed name would therefore delete the snapshot an earlier quarantine kept. *)
+(* rename replaces its destination, and [now] repeats: explicit quarantine
+   must keep both rejected snapshots when run at the same [now]. *)
 let test_two_quarantines_at_the_same_time_keep_both_files () =
   with_temp_keepers @@ fun keepers_dir ->
-  (* Both rounds write through upsert, which carries no revision expectation,
-     so the fixture is about the rejected paths and nothing else. Both
-     quarantines are handed the same [now], which is the collision. *)
   let write ~now ~claim =
     ignore
       (Current.upsert_fact ~pass:Masc.Keeper_memory_commit_pass.Keeper_write
@@ -4173,6 +4233,11 @@ let test_two_quarantines_at_the_same_time_keep_both_files () =
   let quarantine_once ~claim =
     write ~now:500.0 ~claim;
     let broken = break_change_contract ~keepers_dir in
+    (match Current.inspect_for_boot ~keepers_dir ~keeper_id:"keeper" with
+     | Current.Boot_undecodable { rejection; snapshot_sha256 } ->
+       Current.move_aside_for_keepers_dir ~keepers_dir ~keeper_id:"keeper"
+         ~now:600.0 ~rejection ~expected_snapshot_sha256:snapshot_sha256 () |> require_ok |> ignore
+     | _ -> fail "expected Boot_undecodable");
     write ~now:600.0 ~claim:(claim ^ " recovered");
     broken
   in

@@ -18,7 +18,17 @@ type retract_sources_error =
       }
   | Retract_source_not_found of string
   | Retract_sources_persistence_failed of string
-type input = { sources : source list; previous : snapshot option; unavailable : string list; execution_basis : string option }
+type input =
+  { sources : source list
+  ; previous : snapshot option
+  ; unavailable : string list
+  ; withheld : string list
+      (** Readership/policy-withheld sources (e.g. pending Board routing or
+          unauthorized Direct access). Unlike [unavailable] store read
+          failures, withheld sources never stall working-context commits or
+          empty-context checks. *)
+  ; execution_basis : string option
+  }
 val version : snapshot -> version
 val current_references : snapshot -> string list
 val empty : input

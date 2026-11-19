@@ -17,12 +17,12 @@ type retract_sources_error =
       }
   | Retract_source_not_found of string
   | Retract_sources_persistence_failed of string
-type input = { sources : source list; previous : snapshot option; unavailable : string list; execution_basis : string option }
+type input = { sources : source list; previous : snapshot option; unavailable : string list; withheld : string list; execution_basis : string option }
 let version (s : snapshot) = s.generation, s.revision
 let current_references (snapshot : snapshot) =
   List.concat_map (fun (p : pocket) -> match p.completeness with
     | Current -> p.sources | Needs_reconsideration -> []) snapshot.pockets
-let empty = { sources = []; previous = None; unavailable = []; execution_basis = None }
+let empty = { sources = []; previous = None; unavailable = []; withheld = []; execution_basis = None }
 open Result.Syntax
 let digest bytes = Agent_core_sha256.(digest_string bytes |> to_hex)
 let strings xs = `List (List.map (fun x -> `String x) xs)

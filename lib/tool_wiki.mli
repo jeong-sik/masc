@@ -120,6 +120,15 @@ type page_name_error = Wiki_page_name.page_name_error =
     writers agree on this one judgment. *)
 val validate_page_name : string -> (string, page_name_error) result
 
+val frontmatter_read_limit : int
+(** Maximum prefix byte count read from a page when scanning frontmatter. *)
+
+val read_frontmatter_cached :
+  string -> (frontmatter, frontmatter_error) result option
+(** Read and parse at most {!frontmatter_read_limit} header bytes from a page
+    path, memoized in memory by [(path, mtime, size)]. Returns [None] when the
+    file is absent or unreadable. *)
+
 val list_pages : base_path:string -> string list
 (** Every [.md] file directly under {!wiki_root}, as full paths in name
     order; [[]] when the directory does not exist. The wiki's own index/log

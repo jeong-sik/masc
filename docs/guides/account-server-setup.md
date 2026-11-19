@@ -231,6 +231,42 @@ signed in: its panels 초대 링크 (invitations), 허용 목록 (the allowlist)
   sign-out in its place: the console is read from the dashboard bundle of
   the binary, and the server logs once at its start when it cannot read it.
 
+## 7. API keys of people
+
+- A person connects a provider of Claude Code with an API key in place of a
+  login. No other client takes a key in this release. The provider is one
+  that runtime.toml declares (step 6).
+- In the console the person opens API key 로 연결, picks the subscription,
+  enters the key and saves it. The account is then in their list. They
+  check a model on it and make Keepers on it as on an account they signed
+  in to.
+- The server keeps the key in a file that is not encrypted:
+  `<base>/.masc/accounts/<namespace>/api-keys/<account id>/<generation>`,
+  mode 0600, in folders of mode 0700. The user the server runs as reads it,
+  and a backup of the base path copies it. The console says so before the
+  person saves.
+- No answer, page or log line shows a key again.
+- key 바꾸기 on the card of the account takes another key for it. The
+  server stops reading the key before and removes its file. 없애기 removes
+  the account with its key file and its home. Neither revokes the key where
+  it was issued: the person does that there.
+- A card that says the key file is not on the server: the person gives a
+  key with key 바꾸기.
+- A card with key 다시 보내기 or 다시 없애기 had a replacement or a
+  removal that did not finish. Pressing it finishes it.
+- A card that says the server could not read the key file: the file is
+  there and the server does not take it as a key file. A check or a turn on
+  the account writes the reason to the log of the server. The file belongs
+  to the user the server runs as, with mode 0600.
+- Restore `<base>/.masc/auth`, the external store and
+  `<base>/.masc/accounts` from the same point in time. With the records
+  taken back and the key folders left as they were, the next start removes
+  the key files the records do not name, and their owners give a key again.
+  The key file of an account that was made after that point stays on disk,
+  and no list shows the account.
+- Once a key was replaced, 0.73.1 and earlier builds do not read the
+  records.
+
 ## Try it on this machine first
 
 `masc auth preview` serves the login routes, the sign-in page at `/` and
@@ -275,3 +311,4 @@ base path.
 - `masc auth invite` writes Admin invitations only, and no command revokes
   one.
 - A workspace whose accounts were turned off is not activated again.
+- The API key of a person is not encrypted on disk.

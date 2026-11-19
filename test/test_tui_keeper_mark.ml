@@ -65,15 +65,21 @@ let test_operator_disposition_words () =
     ; Masc.Keeper_execution_receipt.Disp_unknown
     ]
   in
-  let words = List.map Mark.operator_disposition_word kinds in
-  check_int "each operator disposition kind has its distinct word" 3
-    (List.length (List.sort_uniq String.compare words));
+  let words_ko = List.map (Mark.operator_disposition_word ~ko:true) kinds in
+  check_int "each Korean operator disposition kind has its distinct word" 3
+    (List.length (List.sort_uniq String.compare words_ko));
   Alcotest.(check string) "operator action required is 사람 몫" "사람 몫"
-    (Mark.operator_disposition_word Disp_operator_action_required);
+    (Mark.operator_disposition_word ~ko:true Disp_operator_action_required);
   Alcotest.(check string) "effect review required is 효과 확인" "효과 확인"
-    (Mark.operator_disposition_word Disp_effect_review_required);
+    (Mark.operator_disposition_word ~ko:true Disp_effect_review_required);
   Alcotest.(check string) "unknown is 분류 안 됨" "분류 안 됨"
-    (Mark.operator_disposition_word Disp_unknown)
+    (Mark.operator_disposition_word ~ko:true Disp_unknown);
+  Alcotest.(check string) "EN operator action required is human" "human"
+    (Mark.operator_disposition_word ~ko:false Disp_operator_action_required);
+  Alcotest.(check string) "EN effect review required is review" "review"
+    (Mark.operator_disposition_word ~ko:false Disp_effect_review_required);
+  Alcotest.(check string) "EN unknown is unclassed" "unclassed"
+    (Mark.operator_disposition_word ~ko:false Disp_unknown)
 
 let test_shows_operator_disposition_activity_filter () =
   check_bool "Running does not show disposition badge" false

@@ -390,40 +390,53 @@ let wake_strip index ~now ~ahead ~keeper_name =
       strip
 ;;
 
-let cell ~now = function
+let cell ?(ko = true) ~now = function
   | No_schedule -> None
   | Scheduled_at at ->
       let text =
         if at >= now then
           Printf.sprintf "◷ %s" (Masc_tui_value.Ongoing.until ~now at)
-        else
+        else if ko then
           "◷ 곧"
+        else
+          "◷ soon"
       in
       Some { Masc_tui_keeper_axis_cell.text; tone = Quiet }
   | Late_since at ->
       let text =
         if now > at then
-          Printf.sprintf "◷ 늦음 +%s" (Masc_tui_value.Ongoing.since ~now at)
-        else
+          Printf.sprintf (if ko then "◷ 늦음 +%s" else "◷ late +%s")
+            (Masc_tui_value.Ongoing.since ~now at)
+        else if ko then
           "◷ 늦음"
+        else
+          "◷ late"
       in
       Some { Masc_tui_keeper_axis_cell.text; tone = Attention }
   | Held_current _ ->
-      Some { Masc_tui_keeper_axis_cell.text = "◷ 보류"; tone = Attention }
+      Some
+        { Masc_tui_keeper_axis_cell.text = (if ko then "◷ 보류" else "◷ held")
+        ; tone = Attention
+        }
   | Held_as_of at ->
       let text =
         if now > at then
-          Printf.sprintf "◷ 보류 (%s 전)" (Masc_tui_value.Ongoing.since ~now at)
-        else
+          Printf.sprintf (if ko then "◷ 보류 (%s 전)" else "◷ held (%s ago)")
+            (Masc_tui_value.Ongoing.since ~now at)
+        else if ko then
           "◷ 보류 (확인 전)"
+        else
+          "◷ held (unchecked)"
       in
       Some { Masc_tui_keeper_axis_cell.text; tone = Quiet }
   | Not_before at ->
       let text =
         if at >= now then
           Printf.sprintf "◷ >%s" (Masc_tui_value.Ongoing.until ~now at)
-        else
+        else if ko then
           "◷ 확인 중"
+        else
+          "◷ checking"
       in
       Some { Masc_tui_keeper_axis_cell.text; tone = Quiet }
   | Unknown ->

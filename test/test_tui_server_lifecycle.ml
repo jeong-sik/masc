@@ -344,6 +344,33 @@ let test_manual_command_starts_a_server () =
         "masc start --base-path /ws --host 127.0.0.1 --port 8935"
         manual_command
 
+(* The start waiter runs beside the main loop and does not write the
+   screen: it keeps what it saw and rings the loop, which says it (RFC
+   tui-idle-wait §2.1). Without the ring an exit notice waited for whatever
+   woke the loop next. *)
+let test_the_start_waiter_keeps_its_outcome_and_rings_the_loop () =
+  let rung () = List.mem Masc_tui_wake.Server_start_settled (Masc_tui_wake.take Masc_tui_wake.loop) in
+  let settle ~script ~port ~attempts =
+    let base_path = temp_dir "tui-start-waiter" in
+    let owned = start_fake ~script:(write_script base_path "fake-masc" script) ~base_path ~port in
+    let starts = L.create_settled_starts () in
+    ignore (Masc_tui_wake.take Masc_tui_wake.loop);
+    L.await_start starts owned ~host:"127.0.0.1" ~port ~health_ok:(fun () -> false)
+      ~attempts ~sleep:(fun () -> Unix.sleepf 0.05);
+    Alcotest.(check bool) "the waiter rings Server_start_settled" true (rung ());
+    let settled = L.take_settled starts in
+    Alcotest.(check int) "and keeps its one outcome" 1 (List.length settled);
+    Alcotest.(check int) "which is taken once" 0 (List.length (L.take_settled starts));
+    (owned, settled) in
+  (match settle ~script:"#!/bin/sh\nexit 3\n" ~port:18997 ~attempts:100 with
+   | owned, [ { L.server; port = 18997; outcome = L.Server_exited report; _ } ] ->
+     Alcotest.(check bool) "for its own server" true (server == owned);
+     Alcotest.(check string) "an exit, with its status" "exit 3" report.status
+   | _, _ -> Alcotest.fail "an exited child settles as Server_exited");
+  match settle ~script:"#!/bin/sh\nexec sleep 30\n" ~port:18996 ~attempts:1 with
+  | owned, [ { L.outcome = L.Timed_out 1; _ } ] -> L.stop owned ~grace_sec:0.3
+  | owned, _ -> L.stop owned ~grace_sec:0.3; Alcotest.fail "a silent child settles as Timed_out"
+
 let () =
   Alcotest.run "tui_server_lifecycle"
     [
@@ -373,7 +400,9 @@ let () =
             test_manual_command_starts_a_server;
         ] );
       ( "start_stop",
-        [ Alcotest.test_case "start then stop is reaped" `Quick test_start_stop_reaped ]
+        [ Alcotest.test_case "start then stop is reaped" `Quick test_start_stop_reaped;
+          Alcotest.test_case "the start waiter keeps its outcome and rings the loop" `Quick
+            test_the_start_waiter_keeps_its_outcome_and_rings_the_loop ]
       );
       ( "startup_output",
         [

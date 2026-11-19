@@ -19,6 +19,7 @@ type source =
   | Resize_signal
   | Interrupt_signal
   | Terminate_signal
+  | Server_start_settled
 
 let all_sources =
   [ Mailbox; Workspace_result; Preference_written; Keeper_preference_written;
@@ -26,7 +27,7 @@ let all_sources =
     Ask_answer_receipt; Ask_answer_completion; Runtime_assignment_saved;
     Keeper_settings_saved; Runtime_form_saved; Keeper_creation_observed;
     Task_dispatched; Console_write; Terminal_write_lost; Resize_signal;
-    Interrupt_signal; Terminate_signal ]
+    Interrupt_signal; Terminate_signal; Server_start_settled ]
 
 (* One bit per source. A new constructor stops this match from compiling
    until it has a bit of its own. *)
@@ -51,6 +52,7 @@ let bit = function
   | Resize_signal -> 17
   | Interrupt_signal -> 18
   | Terminate_signal -> 19
+  | Server_start_settled -> 20
 
 let mask source = 1 lsl bit source
 

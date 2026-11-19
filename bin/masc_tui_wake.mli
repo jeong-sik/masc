@@ -29,6 +29,9 @@ type source =
   | Resize_signal  (** SIGWINCH or SIGCONT. *)
   | Interrupt_signal  (** SIGINT. *)
   | Terminate_signal  (** SIGTERM, SIGHUP or SIGQUIT. *)
+  | Server_start_settled
+      (** A server this TUI started answered [/health], exited, or ran out
+          of attempts. *)
 
 val all_sources : source list
 (** Every constructor, in declaration order. *)

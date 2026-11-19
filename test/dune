@@ -4956,7 +4956,7 @@
 (test
  (name test_tui_server_lifecycle)
  (modules test_tui_server_lifecycle)
- (libraries alcotest masc_tui_server_lifecycle masc.masc_process unix))
+ (libraries alcotest masc_tui_server_lifecycle masc_tui_wake masc.masc_process unix))
 
 (test
  (name test_tui_link)

@@ -30,8 +30,9 @@ let source_number : Wake.source -> int = function
   | Resize_signal -> 17
   | Interrupt_signal -> 18
   | Terminate_signal -> 19
+  | Server_start_settled -> 20
 
-let source_count = 20
+let source_count = 21
 
 let reason_number : Wake.deadline_reason -> int = function
   | Frame_slot -> 0

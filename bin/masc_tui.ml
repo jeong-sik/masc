@@ -2873,6 +2873,9 @@ let enqueue_dispatch_start ~enqueue mailbox request was_replay =
 let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
   ref None
 
+(* What a start's waiter saw, held for the loop to say. *)
+let tui_settled_starts = Masc_tui_server_lifecycle.create_settled_starts ()
+
 (* Whether this session may still reach for a server on its own. The TUI is
    the front door and the server is meant to be an implementation detail of
    opening it, so the first time nothing answers the port we start one instead
@@ -2936,8 +2939,10 @@ let note_server_exit ~note ~port (report : Masc_tui_server_lifecycle.exit_report
   note (server_output_location ~port report.output)
 
 (* Start a background server on demand and report readiness without blocking
-   rendering. The handle prevents duplicate starts while the child is alive. *)
-let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
+   rendering. The handle prevents duplicate starts while the child is alive.
+   The waiter leaves how the start ended for the loop
+   ([apply_settled_starts]). *)
+let start_masc_server_here ~base_path ~host ~port ~note =
   (match !tui_owned_server with
    | Some server when not (Masc_tui_server_lifecycle.is_running server) ->
      tui_owned_server := None
@@ -2984,32 +2989,8 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
                         | Some clock -> Eio.Time.sleep clock 0.5
                         | None -> ()
                       in
-                      let outcome =
-                        Masc_tui_server_lifecycle.wait_healthy ~health_ok
-                          ~child_exit:(fun () ->
-                            Masc_tui_server_lifecycle.exit_report owned)
-                          ~attempts:60 ~sleep
-                      in
-                      (* A new start may replace an exited child while this
-                         waiter sleeps. Only its own handle may publish the
-                         result or clear startup ownership. *)
-                      if Option.fold ~none:false
-                           ~some:(fun current -> current == owned)
-                           !tui_owned_server
-                      then match outcome with
-                      | Masc_tui_server_lifecycle.Ready ->
-                          note (Printf.sprintf
-                                  "masc background server is up (PID %d); it stays running when the TUI closes"
-                                  (Masc_tui_server_lifecycle.owned_pgid owned));
-                          on_ready ()
-                      | Masc_tui_server_lifecycle.Server_exited report ->
-                          tui_owned_server := None;
-                          note_server_exit ~note ~port report
-                      | Masc_tui_server_lifecycle.Timed_out _ ->
-                          note
-                            (server_output_location ~port
-                               (Masc_tui_server_lifecycle.startup_output owned));
-                          note "masc server did not answer /health in time")))
+                      Masc_tui_server_lifecycle.await_start tui_settled_starts owned
+                        ~host ~port ~health_ok ~attempts:60 ~sleep)))
       )
 
 (* Send the turn and read it as it arrives.
@@ -24866,18 +24847,46 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
 
-(* Start a server here, and read it once it answers. The failures in a row
-   were of an address where nothing listened, so that answer ends their wait
-   (RFC tui-one-screen-grammar §2). The start the TUI makes by itself and the
-   Keeper list's [s] both come here. *)
-let start_server_here_then_read state ~base_path ~host ~port ~refresh_inflight
-    ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+(* Start a server here; [apply_settled_starts] reads it once it answers. The
+   start the TUI makes by itself and the Keeper list's [s] both come here. *)
+let start_server_here_then_read state ~base_path ~host ~port =
   start_masc_server_here ~base_path ~host ~port
     ~note:(fun msg -> add_event state "system" msg)
-    ~on_ready:(fun () ->
-      state.refresh_pace <- Masc_tui_refresh_pace.answered_again state.refresh_pace;
-      start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
-        ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox)
+
+(* Say how each start ended, on the loop: the waiter only keeps what it saw
+   and rings Server_start_settled (RFC tui-idle-wait §2.1). A new start may
+   replace an exited child while its waiter sleeps, so only the current
+   handle's outcome is said or clears startup ownership. A server that
+   answered is read at once: the failures in a row were of an address where
+   nothing listened, so that answer ends their wait (RFC tui-one-screen-grammar
+   §2). *)
+let apply_settled_starts state ~refresh_inflight ~scoped_refresh_inflight
+    ~scoped_refresh_followup ~mailbox =
+  let note msg = add_event state "system" msg in
+  List.fold_left (fun said (settled : Masc_tui_server_lifecycle.settled_start) ->
+      let host = settled.host and port = settled.port in
+      if not (Option.fold ~none:false ~some:(fun current -> current == settled.server)
+                !tui_owned_server)
+      then said
+      else begin
+        (match settled.outcome with
+         | Masc_tui_server_lifecycle.Ready ->
+             note (Printf.sprintf
+                     "masc background server is up (PID %d); it stays running when the TUI closes"
+                     (Masc_tui_server_lifecycle.owned_pgid settled.server));
+             state.refresh_pace <- Masc_tui_refresh_pace.answered_again state.refresh_pace;
+             start_http_refresh state ~host ~port ~intent:Revalidate
+               ~refresh_inflight ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
+         | Masc_tui_server_lifecycle.Server_exited report ->
+             tui_owned_server := None;
+             note_server_exit ~note ~port report
+         | Masc_tui_server_lifecycle.Timed_out _ ->
+             note (server_output_location ~port
+                     (Masc_tui_server_lifecycle.startup_output settled.server));
+             note "masc server did not answer /health in time");
+        true
+      end)
+    false (Masc_tui_server_lifecycle.take_settled tui_settled_starts)
 
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
@@ -24898,9 +24907,6 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
   then begin
     tui_auto_start_spent := true;
     start_server_here_then_read state ~base_path ~host ~port
-      ~refresh_inflight:http_refresh_inflight
-      ~scoped_refresh_inflight:http_scoped_refresh_inflight
-      ~scoped_refresh_followup ~mailbox
   end;
   (* A server answering here is the workspace appearing. The decision is the
      same guarded one taken at boot -- it still refuses a base path that holds
@@ -31756,6 +31762,9 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
   let progress_changed = Masc_tui_types.drain_http_progress state in
+  let server_start_changed = apply_settled_starts state
+      ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+      ~scoped_refresh_followup ~mailbox in
   (* Asked only with an item in hand, after whatever says one is ready, so
      a spent budget always leaves work behind. That work waits for the next
      pass, which comes at once. Asked with nothing to take, a pass that ran
@@ -31939,7 +31948,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
            frame (RFC tui-one-screen-grammar §8). *)
         loop (match drawn with Drawn_changed -> true | Drawn_unchanged -> changed)
   in
-  let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || settings_reread_changed || credential_changed) in
+  let changed = loop (progress_changed || server_start_changed || chat_changed || keeper_preferences_changed || settings_reread_changed || credential_changed) in
   reset_input_sensitive_sweeps ();
   (* One already-retired notice is bounded work.  Do not starve it behind a
      busy mailbox, but let an operator gesture cancel its marker first. *)
@@ -44899,9 +44908,7 @@ Use relative paths for resources already held in the package. -->
                      (* RFC tui-server-lifecycle: with no server up there is
                         no keeper to shut down, so "s" starts one here. *)
                      start_server_here_then_read state ~base_path ~host:server_peer_host
-                       ~port:state.port ~refresh_inflight:http_refresh_inflight
-                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                       ~scoped_refresh_followup ~mailbox:async_messages
+                       ~port:state.port
                  | Connecting | Booting | Account_server _ | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)

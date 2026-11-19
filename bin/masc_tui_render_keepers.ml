@@ -1670,6 +1670,15 @@ let keeper_group_heading_style = function
       | Keeper_list_model.Age_within_3d | Keeper_list_model.Age_older ) -> Theme.info ()
   | Keeper_list_model.Group_age Keeper_list_model.Age_unknown -> Theme.recede ()
 
+(* A Keeper record without activity, in a value cell (RFC tui-one-screen-grammar
+   6.4): a declared Keeper that never started has none ([—]); a server roster
+   row does not carry it ([?]). A persisted Keeper always carries it. *)
+let keeper_activity_absent_mark (keeper : Tui_decode.keeper) =
+  match keeper.k_origin with
+  | Tui_decode.Declared_keeper _ -> Masc_tui_theme.Glyph.no_value
+  | Tui_decode.Remote_keeper | Tui_decode.Persisted_keeper ->
+      Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+
 let keeper_state_heading_text ~ko ~available_cells rows group count =
   let label =
     match group with
@@ -1678,7 +1687,7 @@ let keeper_state_heading_text ~ko ~available_cells rows group count =
     | Keeper_list_model.Active -> if ko then "활성" else "Active"
     | Keeper_list_model.Waiting -> if ko then "대기" else "Waiting"
     | Keeper_list_model.Inactive -> if ko then "비활성" else "Inactive"
-    | Keeper_list_model.Unobserved -> if ko then "미관측" else "Unknown"
+    | Keeper_list_model.Unobserved -> if ko then "못 읽음" else "Not read"
   in
   let detail =
     match group with
@@ -3897,7 +3906,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       add_section (t "현재 작업" "Current Work");
       add_row (t "작업:" "Task:")
         (match k.k_activity with
-         | None -> t "미관측" "not observed"
+         | None -> keeper_activity_absent_mark k
          | Some activity -> Terminal_text.single_line_or
              ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
       add_empty ();
@@ -4195,7 +4204,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            (List.map Masc.Keeper_declared_roster.requirement_label requirements)));
       add_row (t "최근 자율 턴:" "Last Outcome:")
         (match k.k_activity with
-         | None -> t "미관측" "not observed"
+         | None -> keeper_activity_absent_mark k
          | Some activity ->
            (match activity.k_last_proactive_outcome with
             | Some outcome -> proactive_outcome_word ~ko outcome
@@ -4341,7 +4350,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                  wrap (Keeper_request_failure.summary failure.failure)) failures);
             (match evidence.terminal with
              | Evidence.Terminal_not_observed ->
-               history_row terminal_label (t "미관측" "not observed")
+               history_row terminal_label
+                 (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)
              | Evidence.Candidate_terminal {runtime_id;attempt;failure} ->
                history_row terminal_label (Printf.sprintf "%d · %s" attempt runtime_id);
                wrap (Keeper_request_failure.summary failure)))
@@ -4354,7 +4364,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (* Lifetime totals & Timestamps section *)
       add_numbered_section (t "6. 누적 통계 · 생성 이력" "6. Lifetime Totals & Timestamps");
       (match k.k_activity with
-       | None -> add_row (t "활동:" "Activity:") (t "미관측" "not observed")
+       | None -> add_row (t "활동:" "Activity:") (keeper_activity_absent_mark k)
        | Some activity ->
          add_row (t "누적 턴:" "Total Turns:") (string_of_int activity.k_total_turns);
          (* Read at a glance, the way the Acting pane's block already reads its

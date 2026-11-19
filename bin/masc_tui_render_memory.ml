@@ -1356,24 +1356,28 @@ type memory_reading_measure = { full_rows : int; compact_rows : int; stalled : b
 (* Measuring wraps every loaded Keeper's reading, and the overview is built
    several times a frame (its layout, its body, the position count). The
    measures are kept for the readings they were taken from: the same health
-   snapshot, World reading and input readings, the same Keepers in the same
-   order, at the same width and in the same reading. A value that changes is
-   a new value, so any change measures again. *)
+   snapshot and World reading, the same Keepers in the same order, at the
+   same width and in the same reading. A value that changes is a new value,
+   so any change measures again. The input reading is part of it only under
+   [v]: the axis reading does not draw it, and the input is read again for
+   every Keeper j or k selects, so keeping it there measured every Keeper on
+   every move. *)
 let memory_reading_measures :
     ((memory_health_snapshot option * Masc_tui_memory_world.t
-      * (string, Masc_tui_memory_usage.t, request_failure) Masc_tui_fetched.source
+      * (string, Masc_tui_memory_usage.t, request_failure) Masc_tui_fetched.source option
       * memory_keeper_health list * int * bool * bool * Masc_tui_memory_usage.display_unit)
      * memory_reading_measure list) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
 let measured_readings (state : state) ~cols ~readings keepers =
+  let input = if state.memory_overview_detail then Some state.memory_input else None in
   let key =
-    ( state.memory_health, state.memory_world, state.memory_input, keepers, cols
+    ( state.memory_health, state.memory_world, input, keepers, cols
     , state.ui_language = Lang_ko, state.memory_overview_detail, state.memory_unit )
   in
   let same (health, world, input, seen, seen_cols, seen_ko, seen_detail, seen_unit)
       (health', world', input', keepers', cols', ko', detail', unit') =
-    health == health' && world == world' && input == input'
+    health == health' && world == world' && Option.equal ( == ) input input'
     && List.equal ( == ) seen keepers' && seen_cols = cols' && Bool.equal seen_ko ko'
     && Bool.equal seen_detail detail' && seen_unit = unit'
   in

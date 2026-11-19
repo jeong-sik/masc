@@ -4070,55 +4070,6 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
          tone ^ Masc_tui_types.tool_mode_word mode ^ " \xc2\xb7 "
          ^ Masc_tui_types.tool_mode_effect ~ko:(state.ui_language = Lang_ko) mode
          ^ Ansi.reset);
-      (* "workspace" is where the stance comes from, not what it is. The chat
-         header resolves the same inheritance before drawing it; this row left
-         the reader to go and look it up. *)
-      add_row (t "효과(Gate 모드):" "Effects (Gate mode):")
-        (let inherited =
-           Option.map
-             (fun (modes : Tui_decode.gate_lane_modes) ->
-               gate_mode_reading_word modes.Tui_decode.glm_workspace)
-             state.gate_modes
-         in
-         match List.assoc_opt k.k_name state.keeper_gate_modes with
-         | Some mode ->
-             (Theme.accent ())
-             ^ Terminal_text.single_line (gate_mode_reading_word mode)
-             ^ Ansi.reset
-         | None ->
-             Ansi.dim ^ t "워크스페이스" "workspace"
-             ^ (match inherited with
-                | Some word -> " \xc2\xb7 " ^ Terminal_text.single_line word
-                | None -> "")
-             ^ Ansi.reset);
-      add_row (t "우선 lane:" "Lane first:")
-        (match
-           List.filter
-             (fun (first : Tui_decode.keeper_exact_lane_first) ->
-               String.equal first.Tui_decode.kel_keeper k.k_name)
-             state.keeper_exact_lane_firsts
-         with
-         | [] -> Ansi.dim ^ t "lane 순서" "lane order" ^ Ansi.reset
-         | firsts ->
-             (Theme.accent ())
-             ^ Terminal_text.single_line
-                 (String.concat ", "
-                    (List.map
-                       (fun (first : Tui_decode.keeper_exact_lane_first) ->
-                         (* The marker leads: a narrow pane cuts the row's
-                            tail, and the slot id is the part it can lose. *)
-                         (if first.kel_offered then ""
-                          else t "제안 안 됨, lane 순서 \xc2\xb7 " "not offered, lane order \xc2\xb7 ")
-                         ^ first.Tui_decode.kel_lane_id ^ " \xe2\x86\x92 "
-                         ^ first.kel_slot_id)
-                       firsts))
-             ^ Ansi.reset);
-      (match state.keeper_gate_settings_unread with
-       | None -> ()
-       | Some reason ->
-           add_row (t "Gate 설정:" "Gate settings:")
-             (Theme.bad () ^ t "못 읽음 \xc2\xb7 " "unread \xc2\xb7 "
-              ^ Terminal_text.single_line reason ^ Ansi.reset));
 
       (* Runtime & 24h section *)
       add_numbered_section (t "3. 런타임 배정 · 최근 24시간 활동" "3. Runtime & Last 24h Activity");

@@ -426,7 +426,6 @@ let agent_core_row ~ko ~at ~duration_ms (e : Observer.agent_core) =
 (* The Keeper a change names, or the server for a change of the whole queue,
    the rules, a Gate mode or an installation's questions. *)
 let approval_change_actor = function
-  | Observer.Gate_keeper_settings_changed { keeper }
   | Observer.Tool_approval_waits_changed { keeper }
   | Observer.Tool_approval_mode_changed { keeper }
   | Observer.Keeper_asks_changed { keeper } ->
@@ -587,7 +586,7 @@ let label_of_event ~ko (event : Observer.event) =
   | Observer.Board_changed _ -> say "보드" "board"
   | Observer.Approval_change
       ( Observer.Approval_queue_changed | Observer.Approval_rules_changed
-      | Observer.Gate_mode_changed | Observer.Gate_keeper_settings_changed _ ) -> say "Gate" "gate"
+      | Observer.Gate_mode_changed ) -> say "Gate" "gate"
   | Observer.Approval_change
       (Observer.Tool_approval_waits_changed _ | Observer.Tool_approval_mode_changed _) ->
       say "도구 승인" "tool approval"
@@ -836,7 +835,6 @@ let row_of_event ~ko ~at ~duration_ms (event : Observer.event) =
         | Observer.Approval_queue_changed -> say "승인 대기열이 바뀜" "the approval queue changed"
         | Observer.Approval_rules_changed -> say "항상 허용 규칙이 바뀜" "the standing rules changed"
         | Observer.Gate_mode_changed -> say "Gate 모드가 바뀜" "a Gate mode changed"
-        | Observer.Gate_keeper_settings_changed _ -> say "Keeper 의 Gate 설정이 바뀜" "the Keeper's Gate settings changed"
         | Observer.Tool_approval_waits_changed _ -> say "보류된 도구 호출이 바뀜" "a held tool call changed"
         | Observer.Tool_approval_mode_changed _ -> say "도구 승인 모드가 바뀜" "the tool approval mode changed"
         | Observer.Keeper_asks_changed _ -> say "Keeper 의 질문이 바뀜" "the Keeper's questions changed"

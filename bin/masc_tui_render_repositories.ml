@@ -147,8 +147,8 @@ let render_workspace_activity (state : state) repo_id =
               Printf.sprintf "%s %d" (Terminal_text.single_line name)
                 (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper = name) rows))) names));
           c.push_styled ~style:(Theme.recede ())
-            (if ko then "  모든 Keeper 가 clone 에 쓴 기록 · Enter 로 파일 열기 · 코드 화면에서 H 이력, m 노트"
-             else "  Recorded clone writes from all Keepers · Enter opens file; H history, m notes in Code");
+            (if ko then "  전체 Keeper clone 쓰기 기록  Enter:파일 열기 (코드 화면: H:이력  m:노트)"
+             else "  Recorded clone writes from all Keepers  Enter:open file (in Code: H:history  m:notes)");
           let cells = workspace_activity_cells ~ko ~cols in
           c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();
@@ -900,8 +900,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
     done;
   box_line_styled buf cols ~style:(Theme.recede ())
     (Printf.sprintf
-       (if state.ui_language = Lang_ko then "  열 %d · Esc 로 닫기"
-        else "  col %d · esc closes")
+       (if state.ui_language = Lang_ko then "  열 %d  Esc:닫기"
+        else "  col %d  Esc:close")
        (state.changes_diff_hscroll + 1));
   box_bottom buf cols;
   let framed = Buffer.create (Buffer.length buf + 512) in
@@ -1104,8 +1104,8 @@ let render_changes_list (state : state) =
        box_divider buf cols;
        box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf
-            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  (Enter 로 열어 스크롤)"
-             else "  preview %s  -%d +%d  (Enter opens, scrolls)")
+            (if state.ui_language = Lang_ko then "  미리보기 %s  -%d +%d  Enter:열기·스크롤"
+             else "  preview %s  -%d +%d  Enter:open/scroll")
             (Terminal_text.single_line (change_row_address change))
             removed added);
        let body_height = preview_height - 2 in

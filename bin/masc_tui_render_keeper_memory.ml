@@ -114,8 +114,8 @@ let summary_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   let text ko_text en = if ko then ko_text else en in
   let width = max 1 (cols - 4) in
   let notes = fact_notes ~ko state keeper_name @ activity_notes ~ko state keeper_name in
-  let nav = quiet (text "Enter 목록  1 최근  2 조회  3 변화  4 저장"
-      "Enter browse  1 recent  2 retrievals  3 changes  4 storage") in
+  let nav = quiet (text "Enter:목록  1:최근  2:조회  3:변화  4:저장"
+      "Enter:browse  1:recent  2:retrievals  3:changes  4:storage") in
   let notes = List.take (max 0 (max_lines - 1)) notes in
   let budget = max 0 (max_lines - 1 - List.length notes) in
   let left = recent state keeper_name |> List.take 2 |> List.map (fun fact ->
@@ -171,7 +171,7 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   (* The selected change is the first drawn; its place is the title row's. *)
   if total > 0 then
     hand_position (Masc_tui_value.Position.row ~selected:(Some offset) ~total);
-  let header = quiet (text "1 최근  2 조회  3 변화  4 저장" "1 recent  2 retrievals  3 changes  4 storage") in
+  let header = quiet (text "1:최근  2:조회  3:변화  4:저장" "1:recent  2:retrievals  3:changes  4:storage") in
   let scope = match Fetched.value (activity_view state keeper_name) with
     | None -> []
     | Some activity -> [quiet (text
@@ -189,8 +189,8 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
           let row = Table.row ~close:(if i = 0 then Ansi.reset ^ sel else Ansi.reset)
             (event_cells ~selected:(i = 0) ~ko ~now ~cols:cells event) in
           if i = 0 then sel ^ row ^ Ansi.reset else row) shown
-      @ [quiet ("Enter "
-          ^ text "전문  ·  [.] 변화 카드 · Ctrl-O 연결 트리" "full text  ·  [.] change cards · Ctrl-O connected tree")] in
+      @ [quiet (text "Enter:전문  .:변화 카드  Ctrl-O:연결 트리"
+          "Enter:full text  .:change cards  Ctrl-O:connected tree")] in
   let height = max 0 (min (total + 4) (max_lines - 1 - List.length notes - List.length scope)) in
   let style : Card.style = {border=Theme.border_muted (); focused_border=Theme.border_focus ();
                             title_style=Ansi.bold; reset=Ansi.reset} in

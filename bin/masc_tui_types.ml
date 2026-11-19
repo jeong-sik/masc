@@ -25405,13 +25405,13 @@ let runtime_picker_empty_note ~ko picker =
 let runtime_picker_keys ~ko enter = function
   | None ->
       Printf.sprintf
-        (if ko then "j/k 이동, PgUp/PgDn 쪽 넘김, %s, e 취소"
-         else "j/k move, PgUp/PgDn page, %s, e cancel")
+        (if ko then "j/k:이동  PgUp/PgDn:페이지  %s  e:취소"
+         else "j/k:move  PgUp/PgDn:page  %s  e:cancel")
         enter
   | Some _ ->
       Printf.sprintf
-        (if ko then "\xe2\x86\x91/\xe2\x86\x93 이동, %s, Esc 필터 지우기"
-         else "\xe2\x86\x91/\xe2\x86\x93 move, %s, Esc clear filter")
+        (if ko then "\xe2\x86\x91/\xe2\x86\x93:이동  %s  Esc:필터 해제"
+         else "\xe2\x86\x91/\xe2\x86\x93:move  %s  Esc:clear filter")
         enter
 
 let runtime_picker_choice_height = function

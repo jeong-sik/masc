@@ -1479,7 +1479,7 @@ let usage_lines ~cols ~rows (state : state) =
           | Providers_read _, None -> ["Account absent from the current inventory; selection retained."]
           | Providers_read _, Some _ | (Providers_unread | Providers_failed _), _ -> [] in
         Masc_tui_text_block.rows ~max_cells:(max 1 (framed_inner_width cols))
-          (String.concat "\n" (("Account · " ^ label ^ " · f:choose · a:all accounts") :: missing))
+          (String.concat "\n" (("Account · " ^ label ^ "  f:choose  a:all accounts") :: missing))
         @ [""] in
   match state.usage_section with
   (* Plan cards already have a cell-sized border and wrapped contents. *)

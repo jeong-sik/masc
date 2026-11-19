@@ -223,8 +223,8 @@ let render_fusion_list (state : state) =
       | Page_empty ->
           if Option.is_some replay_warning then
             ui_text state
-              ~ko:"  읽을 수 있는 보존 실행이 없습니다. 위의 시작 시 읽기 경고를 보세요"
-              ~en:"  No readable retained runs; see startup read warning above"
+              ~ko:"  읽을 수 있는 보존 실행 없음 · 상단 시작 읽기 경고 확인"
+              ~en:"  No readable retained runs · see startup read warning above"
           else ui_text state ~ko:"  (보존된 Fusion 실행 없음)" ~en:"  (no retained Fusion runs)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;
@@ -731,7 +731,8 @@ let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
     ~glyph_done ~glyph_active ~glyph_waiting ~glyph_failed ~arrow
     ~status ~stage ~panel_answered ~panel_expected ()
 
-let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
+let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
+  let t korean english = if ko then korean else english in
   let answered, failed, input_tokens, output_tokens =
     List.fold_left
       (fun (answered, failed, input_tokens, output_tokens) result ->
@@ -943,12 +944,14 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
           (Masc_tui_fusion_seat_routes.lines routes)
   in
   [ Ansi.bold, "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
-  @ detail_section_heading ~width "1. 질문 · 최종 판정 (Question & Judge Synthesis)"
+  @ detail_section_heading ~width
+      (t "1. 질문 · 최종 판정" "1. Question & Judge Synthesis")
   @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
   @ [ Ansi.dim, "" ]
   @ judge_lines
   @ judges_lines
-  @ detail_section_heading ~width "2. 패널 응답 · 토큰 분포 (Panel Responses)"
+  @ detail_section_heading ~width
+      (t "2. 패널 응답 · 토큰 분포" "2. Panel Responses & Tokens")
   @ [ ( Ansi.dim
       , let usage =
           if answered = 0 then "panel token usage: not recorded"
@@ -964,9 +967,11 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
   @ (if panel_chart_lines = [] && panel_lines = [] then [] else [ Ansi.dim, "" ])
   @ panel_chart_lines
   @ panel_lines
-  @ detail_section_heading ~width "3. 도구 실행 추적 (Tool Executions)"
+  @ detail_section_heading ~width
+      (t "3. 도구 실행 추적" "3. Tool Executions")
   @ tool_lines
-  @ detail_section_heading ~width "4. 시트 라우팅 · 기록 증거 (Seat Routes & Board Link)"
+  @ detail_section_heading ~width
+      (t "4. 시트 라우팅 · 기록 증거" "4. Seat Routes & Board Link")
   @ seat_route_lines
   @ (if seat_route_lines = [] then [] else [ Ansi.dim, "" ])
   @ [ ( Ansi.dim
@@ -975,7 +980,7 @@ let fusion_evidence_lines ~width ~frame_width (evidence : fusion_evidence) =
             (Terminal_text.single_line evidence.fe_post_id) )
     ]
 
-let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
+let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
   let run = detail.fud_run in
   let status = fusion_run_status_to_string run.fur_status in
   let now = Unix.gettimeofday () in
@@ -1053,7 +1058,7 @@ let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
         [ (Theme.warn ())
         , "  Evidence: absent (no current Board projection for this retained run)"
         ]
-    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~width ~frame_width evidence
+    | Fusion_evidence_recorded, Some evidence -> fusion_evidence_lines ~ko ~width ~frame_width evidence
     | Fusion_evidence_recorded, None
     | Fusion_evidence_pending, Some _
     | Fusion_evidence_absent, Some _ ->
@@ -1065,7 +1070,8 @@ let fusion_detail_lines ~width ~frame_width (detail : fusion_detail) =
   in
   run_lines @ [ Ansi.dim, "" ] @ evidence_lines
 
-let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_detail) =
+let fusion_historical_lines ~ko ~width ~frame_width (detail : fusion_historical_detail) =
+  let t korean english = if ko then korean else english in
   [ Ansi.bold, "  HISTORICAL BOARD EVIDENCE"
   ; Theme.warn (), "  This Board evidence does not provide execution status or finish time"
   ; Ansi.reset, "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
@@ -1083,10 +1089,10 @@ let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_deta
          ; Ansi.reset, (match cost_usd with
              | None -> "  Observed cost: not recorded"
              | Some cost -> Printf.sprintf "  Observed cost: $%.4f" cost) ])
-  @ [ Ansi.dim, "  B: Board original · Y: copy Board link · Esc: back to Fusion list"
+  @ [ Ansi.dim, t "  B:Board 원문  Y:링크 복사  Esc:목록" "  B:Board original  Y:copy link  Esc:back"
   ; Ansi.dim, "" ]
   @ (match detail.fhd_evidence with
-     | Ok evidence -> fusion_evidence_lines ~width ~frame_width evidence
+     | Ok evidence -> fusion_evidence_lines ~ko ~width ~frame_width evidence
      | Error error ->
          clear_fusion_trace_projection ();
          [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
@@ -1094,6 +1100,7 @@ let fusion_historical_lines ~width ~frame_width (detail : fusion_historical_deta
   @ fusion_markdown_block ~width ~indent:"    " detail.fhd_body
 
 let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
+  let ko = state.ui_language = Lang_ko in
   let detail =
     match state.fusion_detail with
     | Some detail when String.equal detail.fud_run.fur_run_id run_id ->
@@ -1123,7 +1130,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
              (if stale || Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
-             @ fusion_historical_lines ~width:(max 1 (framed_inner_width cols - 4))
+             @ fusion_historical_lines ~ko ~width:(max 1 (framed_inner_width cols - 4))
                  ~frame_width:(framed_inner_width cols) original
          | Some _ | None ->
              clear_fusion_trace_projection ();
@@ -1135,9 +1142,9 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
              [ Ansi.dim, "  (loading exact Fusion detail)" ]
          | None, Some _ ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, page_failed_note ~ko:(state.ui_language = Lang_ko) ]
+             [ Ansi.dim, page_failed_note ~ko ]
          | Some detail, (Some _ | None) ->
-             fusion_detail_lines ~width:(max 1 (framed_inner_width cols - 4))
+             fusion_detail_lines ~ko ~width:(max 1 (framed_inner_width cols - 4))
                ~frame_width:(framed_inner_width cols) detail)
   in
   let total = List.length lines in

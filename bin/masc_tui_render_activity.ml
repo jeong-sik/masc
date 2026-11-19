@@ -489,8 +489,8 @@ let render_keeper_calls (state : state) =
             ; freshness ]
   in
   let col_hdr =
-    ui_text state ~ko:"  j/k 줄 단위 · 원문 필드: tool | input | output"
-      ~en:"  j/k rows · exact fields: tool | input | output"
+    ui_text state ~ko:"  j/k:줄 단위  원문 필드: tool | input | output"
+      ~en:"  j/k:rows  exact fields: tool | input | output"
   in
   box_line_styled buf cols ~style:(Theme.recede ()) col_hdr;
   box_divider buf cols;

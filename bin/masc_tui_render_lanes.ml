@@ -537,11 +537,11 @@ let render_exact_lane_provider_editor (state : state) editor =
      let action = match picker.Masc_tui_types.rlp_pick with
        | Masc_tui_types.Pick_exact_lane_replacement _ ->
            ui_text state ~ko:"선택한 후보 교체" ~en:"Replace selected candidate",
-           ui_text state ~ko:"Enter 교체" ~en:"Enter replace"
+           ui_text state ~ko:"Enter:교체" ~en:"Enter:replace"
        | Pick_media_failover | Pick_route_default | Pick_conversation_lane _ | Pick_exact_lane _
        | Pick_new_lane _ ->
            ui_text state ~ko:"후보 추가" ~en:"Add fallback candidate",
-           ui_text state ~ko:"Enter 추가" ~en:"Enter add" in
+           ui_text state ~ko:"Enter:추가" ~en:"Enter:add" in
      box_line_styled buf cols ~style:(Theme.info ())
        ("  " ^ fst action);
      box_line_styled buf cols ~style:(Theme.recede ())
@@ -705,8 +705,8 @@ let render_exact_lane_provider_editor (state : state) editor =
               else box_line buf cols line));
      if entries <> [] && Option.is_none (selected_index) then
        box_line_styled buf cols ~style:(Theme.warn ())
-         (ui_text state ~ko:"  선택한 슬롯 없음 · j/k 로 현재 슬롯 선택"
-            ~en:"  no slot selected; j/k selects a current slot");
+         (ui_text state ~ko:"  선택한 슬롯 없음  j/k:슬롯 선택"
+            ~en:"  no slot selected  j/k:select slot");
      (match Masc_tui_types.slot_editor_cursor_row state with
       | None -> ()
       | Some row ->
@@ -941,7 +941,7 @@ let render_lanes_overview (state : state) =
             (Terminal_text.single_line picker.Masc_tui_types.rlp_lane)
             picker.Masc_tui_types.rlp_summary
             (Masc_tui_types.runtime_picker_keys ~ko:(state.ui_language = Lang_ko)
-               (ui_text state ~ko:"Enter 추가" ~en:"Enter append")
+               (ui_text state ~ko:"Enter:추가" ~en:"Enter:append")
                picker.Masc_tui_types.rlp_filter));
        if picker.Masc_tui_types.rlp_choices = [] then
          box_line_styled buf cols ~style:(Theme.recede ())

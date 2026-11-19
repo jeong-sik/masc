@@ -249,7 +249,7 @@ let task_preview_lines (state : state) ~cells ~rows (task : Tui_decode.task) =
       @ (if rows >= 4 then [""] else [])
     else [] in
   let hint =
-    if rows >= 2 then [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
+    if rows >= 2 then [Theme.recede () ^ text "Enter:상세" "Enter:details" ^ Ansi.reset]
     else [] in
   let room = max 0 (rows - List.length header - List.length hint) in
   let body_budget = if hint <> [] && room >= 3 then room - 1 else room in
@@ -395,7 +395,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
     (footer_line state ~max_cells:cols
        ~status:[]
        ~hints:(ui_text state ~ko:"j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  x:취소  Left / Esc:뒤로  r:새로고침"
-         ~en:"j/k:scroll  PgUp/PgDn:page  Home/End  x:cancel  Left / Esc:back  r:refresh"));
+         ~en:"j/k:scroll  PgUp/PgDn:page  Home/End:top/end  x:cancel  Left / Esc:back  r:refresh"));
 
   let offset =
     if task_documents_pending state && not (task_detail_following_end state)
@@ -454,7 +454,7 @@ let render_work_tasks (state : state) =
             task_preview_lines state ~cells:geometry.preview_width ~rows:geometry.preview_rows task
         | None ->
             text "요청" "Request",
-            [text "작업을 선택하세요" "Select a task"] in
+            [text "선택된 작업 없음" "No task selected"] in
       List.iter c.push (work_panel_lines geometry
         ~list_title:(text "작업" "Tasks")
         ~list_lines ~preview_title ~preview_lines))
@@ -477,20 +477,20 @@ let planning_detail_tone (tone : Planning_detail.tone) =
 let planning_next_step ~ko (goal : planning_goal) =
   let text korean english = if ko then korean else english in
   if not (planning_goal_has_valid_id goal) then
-    (Theme.warn (), (text "목표 ID가 비어 있거나 앞뒤 공백이 있습니다 · 저장된 ID를 확인하세요" "Goal ID is blank or has disallowed surrounding whitespace; inspect the stored ID"))
+    (Theme.warn (), (text "목표 ID 오류 (빈 값·앞뒤 공백) · 저장된 ID 확인 필요" "Goal ID is blank or has disallowed surrounding whitespace; inspect stored ID"))
   else match goal.pg_phase, goal.pg_proof with
   | Goal_phase.Executing, Tui_decode.Proof_unreadable _ when Option.is_none goal.pg_retry_binding ->
-    (Theme.warn (), (text "검증 결속 보고 안 됨 · 근거·서버 저장소·런타임을 확인하고 [r]로 재조회하세요" "verification binding not reported - inspect proof, server storage and runtime, then [r] refresh"))
+    (Theme.warn (), (text "검증 결속 보고 안 됨 · 근거·저장소·런타임 확인 후 r:재조회" "verification binding not reported · inspect proof, storage, runtime  r:refresh"))
   | Goal_phase.Executing, _ when Option.is_none goal.pg_retry_binding ->
-    (Theme.warn (), (text "검증 결속 보고 안 됨 · 목표와 근거를 확인하고 [r]로 재조회하세요" "verification binding not reported - inspect the Goal and proof, then [r] refresh"))
+    (Theme.warn (), (text "검증 결속 보고 안 됨 · 목표·근거 확인 후 r:재조회" "verification binding not reported · inspect Goal and proof  r:refresh"))
   | Goal_phase.Executing, Tui_decode.Proof_refuted _ ->
     ( (Theme.bad ())
-    , (text "검증 거절 · 판정 이유에 따라 수정하고 [c]로 다시 제출하세요" "refused - fix what the verdict names below, then [c] to resubmit") )
+    , (text "검증 거절 · 판정 사유 반영 후 c:재제출" "refused · address verdict below  c:resubmit") )
   | (Goal_phase.Executing, Proof_idle) | (Goal_phase.Executing, Proof_pending)
   | (Goal_phase.Executing, Proof_proven _) | (Goal_phase.Executing, Proof_stale _)
   | (Goal_phase.Executing, Proof_unreadable _) ->
     ( Ansi.dim
-    , (text "목표 조건을 달성한 뒤 [c]로 검증을 요청하세요" "meet the success criterion, then [c] to request verification") )
+    , (text "성공 조건 충족 후 c:검증 요청" "meet success criterion  c:request verification") )
   | (Goal_phase.Verifying, Proof_idle) | (Goal_phase.Verifying, Proof_pending)
   | (Goal_phase.Verifying, Proof_proven _) | (Goal_phase.Verifying, Proof_refuted _)
   | (Goal_phase.Verifying, Proof_stale _) | (Goal_phase.Verifying, Proof_unreadable _) ->
@@ -503,19 +503,19 @@ let planning_next_step ~ko (goal : planning_goal) =
   | (Goal_phase.Awaiting_confirmation, Proof_refuted _)
   | (Goal_phase.Awaiting_confirmation, Proof_stale _)
   | (Goal_phase.Awaiting_confirmation, Proof_unreadable _) ->
-    (Theme.warn (), (text "최종 확인 대기 · [a]로 근거를 조회하고 제시된 증거를 확인하세요" "awaiting confirmation - [a] requests proof or confirms after review"))
+    (Theme.warn (), (text "최종 확인 대기 · a:근거 조회 및 증거 확인" "awaiting confirmation · a:review proof and confirm"))
   | (Goal_phase.Completed, Proof_idle) | (Goal_phase.Completed, Proof_pending)
   | (Goal_phase.Completed, Proof_proven _) | (Goal_phase.Completed, Proof_refuted _)
-  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, (text "완료 · [o]:다시 열기 요청" "completed - [o] requests reopen"))
+  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, (text "완료  o:다시 열기" "completed  o:reopen"))
   | (Goal_phase.Dropped, Proof_idle) | (Goal_phase.Dropped, Proof_pending)
   | (Goal_phase.Dropped, Proof_proven _) | (Goal_phase.Dropped, Proof_refuted _)
-  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, (text "중단 · [o]:다시 열기 요청" "abandoned - [o] requests reopen"))
+  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, (text "중단  o:다시 열기" "abandoned  o:reopen"))
   | (Goal_phase.Paused _, Proof_idle) | (Goal_phase.Paused _, Proof_pending)
   | (Goal_phase.Paused _, Proof_proven _) | (Goal_phase.Paused _, Proof_refuted _)
-  | (Goal_phase.Paused _, Proof_stale _) | (Goal_phase.Paused _, Proof_unreadable _) -> (Theme.warn (), (text "일시정지 · [r]:이전 상태로 재개 · 연결 작업은 별도로 진행됩니다" "paused - [r] restores the prior state; linked Tasks continue independently"))
+  | (Goal_phase.Paused _, Proof_stale _) | (Goal_phase.Paused _, Proof_unreadable _) -> (Theme.warn (), (text "일시정지  r:재개 · 연결 작업은 별도 진행" "paused  r:resume · linked Tasks continue independently"))
   | (Goal_phase.Blocked _, Proof_idle) | (Goal_phase.Blocked _, Proof_pending)
   | (Goal_phase.Blocked _, Proof_proven _) | (Goal_phase.Blocked _, Proof_refuted _)
-  | (Goal_phase.Blocked _, Proof_stale _) | (Goal_phase.Blocked _, Proof_unreadable _) -> (Theme.bad (), (text "막힘 · [u]:이전 상태로 재개 · 연결 작업은 별도로 진행됩니다" "blocked - [u] restores the prior state; linked Tasks continue independently"))
+  | (Goal_phase.Blocked _, Proof_stale _) | (Goal_phase.Blocked _, Proof_unreadable _) -> (Theme.bad (), (text "막힘  u:재개 · 연결 작업은 별도 진행" "blocked  u:resume · linked Tasks continue independently"))
 ;;
 
 (* The line under the list, for the goal the cursor is on. A verdict without its
@@ -773,7 +773,7 @@ let planning_preview_lines (state : state) ~now ~cells ~rows (goal : planning_go
   in
   let hint =
     if rows > List.length header && rows >= 2 then
-      [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
+      [Theme.recede () ^ text "Enter:상세" "Enter:details" ^ Ansi.reset]
     else [] in
   let criterion =
     text "목표: " "Measure: " ^ Planning_detail.measure_text goal.pg_measure ^ "\n"
@@ -913,7 +913,7 @@ let render_planning_list (state : state) =
                (Masc_tui_value.Position.row ~selected:(Some state.planning_cursor)
                   ~total:count);
            let preview_lines = match List.nth_opt goals state.planning_cursor with
-             | None -> [text "목표를 선택하세요" "Select a Goal"]
+             | None -> [text "선택된 목표 없음" "No Goal selected"]
              | Some goal -> planning_preview_lines state ~now ~cells:geometry.preview_width ~rows:geometry.preview_rows goal in
            List.iter push (work_panel_lines geometry
              ~list_title:(text "목표" "Goals")
@@ -1001,7 +1001,7 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
   let text korean english = if ko then korean else english in
   let item action =
     let key = planning_action_key action and label = planning_action_label ~ko action in
-    Printf.sprintf "[%s] %s" key label
+    Printf.sprintf "%s:%s" key label
   in
   let actions = Goal_phase.Public_action.all
     |> List.filter (planning_goal_offers_action goal)
@@ -1009,13 +1009,13 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
   let actions = actions
     @ (if not (planning_goal_has_valid_id goal) then []
        else if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
-       then [(text "[a] 근거 최종 확인" "[a] Confirm proof")] else if goal.pg_phase = Goal_phase.Completed
-       then [(text "[a] 저장된 확인 조회" "[a] Inspect confirmation")] else []) in
+       then [(text "a:근거 최종 확인" "a:confirm proof")] else if goal.pg_phase = Goal_phase.Completed
+       then [(text "a:저장된 확인 조회" "a:inspect confirmation")] else []) in
   (* Keep available actions visible while reading; disabled lifecycle keys
      remain refused by the dispatcher. Layout reserves these same rows. *)
   (if actions = [] then [] else
      Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-       ((text "행동: " "Actions: ") ^ String.concat "   " actions))
+       ((text "행동: " "Actions: ") ^ String.concat "  " actions))
   |> List.map (fun line -> "  " ^ line)
   |> fun rows -> rows @ (if planning_goal_has_valid_id goal then [] else
        Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
@@ -1833,8 +1833,8 @@ let render_schedule_list (state : state) =
     else
       let cue =
         if selected_row_exists then
-          ui_text state ~ko:"… Enter: 거절 진단 전체"
-            ~en:"… Enter: full refusal diagnostic"
+          ui_text state ~ko:"… Enter:거절 진단 전체"
+            ~en:"… Enter:full refusal diagnostic"
         else
           ui_text state ~ko:"… 거절 진단이 잘림"
             ~en:"… refusal diagnostic truncated"

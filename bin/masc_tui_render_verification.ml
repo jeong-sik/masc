@@ -93,32 +93,32 @@ let review_detail ~ko review =
   let text korean english = if ko then korean else english in
   match review with
   | Review_unobserved ->
-    text "자동 검증의 실행 기록이 아직 관측되지 않았습니다." "No automatic review run has been observed yet."
+    text "자동 검증 실행 기록 미관측" "No automatic review run observed yet."
   | Review_running actor ->
-    text "자동 검증자가 증거를 확인하고 있습니다: " "The automatic reviewer is checking the evidence: " ^ actor
+    text "자동 검증 증거 확인 중: " "Automatic reviewer checking evidence: " ^ actor
   | Review_waiting_original {detail;actor} ->
-    text "기존 검증 실행의 기록을 확인하고 있습니다. 모델 재호출은 예약하지 않습니다. "
-      "Checking the record of the earlier review run. No model call is scheduled again. "
+    text "기존 검증 실행 기록 확인 중 · 모델 재호출 미예약 · "
+      "Checking earlier review run · no model retry scheduled · "
     ^ actor ^ " · " ^ detail
   | Review_stopped {cause; detail; actor} ->
     let reason = match cause with
       | Review_environment ->
-        text "검증 환경에 접근하지 못했습니다." "The review environment could not be reached."
-      | Review_no_judgment -> text "검증자가 판정을 내리지 못했습니다." "The reviewer reached no judgment."
+        text "검증 환경 접근 불가" "Review environment unreachable"
+      | Review_no_judgment -> text "검증자 판정 없음" "Reviewer reached no judgment"
       | Review_commit_failure ->
-        text "검증 결과를 Task에 반영하지 못했습니다." "The review result could not be written to the Task."
+        text "검증 결과 Task 반영 실패" "Failed to write review result to Task"
       | Review_original_repair ->
-        text "원 실행의 결과를 확정할 수 없어 운영자 확인이 필요합니다."
-          "The original run's result cannot be settled. An operator check is needed."
-      | Review_failure -> text "검증 실행이 중단되었습니다." "The review run stopped."
-      | Review_cancelled -> text "검증 실행이 취소되었습니다." "The review run was cancelled." in
-    reason ^ " " ^ actor ^ " · " ^ detail
+        text "원 실행 결과 미확정 · 운영자 확인 필요"
+          "Original run unsettled · operator check needed"
+      | Review_failure -> text "검증 실행 중단" "Review run stopped"
+      | Review_cancelled -> text "검증 실행 취소" "Review run cancelled" in
+    reason ^ " · " ^ actor ^ " · " ^ detail
   | Review_approved reason ->
-    text "승인 판정이 기록되었습니다. Task 완료 여부는 Task 상태에서 확인합니다. "
-      "An approval was recorded. Whether the Task is done is read from its status. " ^ reason
-  | Review_rejected reason -> text "반려 판정이 기록되었습니다. " "A rejection was recorded. " ^ reason
+    text "승인 판정 기록됨 · Task 완료 여부는 Task 상태 확인 · "
+      "Approval recorded · check Task status for completion · " ^ reason
+  | Review_rejected reason -> text "반려 판정 기록됨 · " "Rejection recorded · " ^ reason
   | Review_superseded actor ->
-    text "다른 판정이 먼저 적용되었습니다: " "Another verdict was applied first: " ^ actor
+    text "다른 판정 선적용: " "Another verdict applied first: " ^ actor
 
 (* The task and its actual review state lead the list. Submission identity,
    evidence counts and original source remain in the complete reading. *)
@@ -366,7 +366,7 @@ let verification_contract_lines state ~width (request : Masc.Tui_decode.verifica
   @ List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_completion_contract
   @ [Ansi.dim, ""; Ansi.bold, say "  요구 증거" "  Required evidence"]
   @ (if request.vr_required_artifacts = [] then
-       wrap (say "별도 요구 목록이 없습니다." "No separate list of required evidence.")
+       wrap (say "별도 요구 목록 없음" "No separate list of required evidence.")
      else List.concat_map (fun text -> wrap ("• " ^ text)) request.vr_required_artifacts)
   @ [Ansi.dim, ""; Ansi.bold, say "  제출 정보" "  Submission"]
   @ wrap ("Task: " ^ request.vr_task_id ^ say " · 제출자: " " · submitted by: " ^ request.vr_submitted_by)
@@ -428,8 +428,8 @@ let verification_evidence_index state request ~width observation =
     (* The selected item carries its own number below; this row counts the
        items, it does not say which is read. *)
     judgement_detail_rows ~width ([Ansi.dim, ""; Ansi.bold, Printf.sprintf
-        (if ko then "  증거 %s · e/E 다음/이전 · i 목록 · o 열기 · s 저장"
-         else "  Evidence %s · e/E next/previous · i list · o open · s save")
+        (if ko then "  증거 %s  e/E:다음/이전  i:목록  o:열기  s:저장"
+         else "  Evidence %s  e/E:next/prev  i:list  o:open  s:save")
         (Masc_tui_value.Count.grouped count)]
       @ rows @ [Theme.recede (), location]
       @ List.filter_map (fun (key, saved_index, progress) ->
@@ -464,9 +464,9 @@ let verification_detail_pane (state : state) ~rows ~cols
           (Terminal_text.single_line request_id))
     | Some _ | None -> None
   in
-  let approve = say "  a 두 번: 운영자 승인" "  a twice: operator approval" in
-  let reject = say "x: 사유와 함께 반려 · j/k: 스크롤" "x: reject with a reason · j/k: scroll" in
-  let verdict_action = approve ^ " · " ^ reject in
+  let approve = say "  a×2:운영자 승인" "  a×2:operator approval" in
+  let reject = say "x:사유 반려  j/k:스크롤" "x:reject with reason  j/k:scroll" in
+  let verdict_action = approve ^ "  " ^ reject in
   let verdict_action_rows =
     if Message_layout.display_width verdict_action <= width then
       [ verdict_action ]
@@ -977,6 +977,8 @@ let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) 
 
 let harness_detail_pane (state : state) ~rows ~cols verdict buf =
   let width = max 1 (framed_inner_width cols) in
+  let goal_lines = harness_goal_lines state verdict in
+  let ledger_section_num = if goal_lines = [] then 3 else 4 in
   let lines =
     reading_notice_lines state ~width
       ~inflight:state.harness_inflight
@@ -986,15 +988,17 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     (* Appended rather than woven in: the verdict block is what the server
        said, and what the task is aiming at is read from two other surfaces.
        Keeping them in that order keeps the judged fact above the context. *)
-    @ (match harness_goal_lines state verdict with
+    @ (match goal_lines with
        | [] -> []
-       | goal_lines ->
+       | lines ->
            detail_section_heading ~width (ui_text state ~ko:"3. 연결된 목표" ~en:"3. Towards Goals")
-           @ goal_lines)
+           @ lines)
     @ (match harness_ledger_lines ~cols state.harness with
        | [] -> []
        | lines ->
-           detail_section_heading ~width (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts")
+           detail_section_heading ~width
+             (Printf.sprintf "%d. %s" ledger_section_num
+                (ui_text state ~ko:"전체 판정 집계" ~en:"All Verdicts"))
            @ List.map (fun line -> Ansi.reset, line) lines)
     |> judgement_detail_rows ~width
   in

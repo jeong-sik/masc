@@ -11,8 +11,9 @@
     files are where {!Runtime_account_home_layout.key_dir} says.
 
     The files of an account change only inside the call of the account, which
-    whoever asks holds: the registration that makes them, and the purge that
-    removes them. The functions are called from a fiber. Their file calls go
+    whoever asks holds: the registration that makes them, the replacement
+    that puts a new key in place, and the purge that removes them. The
+    functions are called from a fiber. Their file calls go
     through {!Fs_compat.Systhread_host} and {!Fs_compat.remove_tree}, which
     choose the thread; the spelling of a path reads the runtime root
     ([Unix.realpath]) on the fiber. *)
@@ -33,7 +34,9 @@ type make_error =
     once, inside the call of the account it has just recorded. After an
     error there, nothing under the id is a key the account was given, and
     whoever asked removes the account with what is under its id
-    ({!remove}).
+    ({!remove}). A replacement calls it for the next generation of an
+    account that has its files ({!replace}): the home that is there is
+    looked at and left as it is.
 
     {!remove} is not the undo of a call: it takes the key of every
     generation. On an account whose files are there, an error says what
@@ -113,3 +116,66 @@ val key_state
   -> account_id:Authz_types.Provider_account_id.t
   -> generation:Authz_types.Key_generation.t
   -> key_state
+
+(** {1 The replacement of a key}
+
+    RFC a-persons-api-key-is-their-own-provider-account 3.7: the record of
+    the new generation is written first, then the key file of that
+    generation, then every other file of the folder of the keys goes. A
+    reader opens the file of the generation the state names and no other, so
+    a file of another generation is a key nothing reads, kept on disk. *)
+
+(** Removes everything in the folder of the keys of [account_id] but the key
+    file of [generation]: the key of any other generation, and a file a
+    write did not put in place. A link is removed and not followed, and so
+    is a folder with what is in it.
+
+    Each is tried in the order of the names, whatever became of the one
+    before it. [Error] names the first that is still there or was not looked
+    at; the detail can name a path of the server, so it is for the log of
+    the server. Asked again, it finds what went gone and tries what stayed.
+
+    A folder of keys that is not there holds nothing, and neither does a
+    runtime root that is not there. What stands in the place of the folder
+    and is no folder, a link among them, is not read and is left:
+    [Error]. The key file of [generation] is not looked at, so this says
+    nothing of whether the account has its key ({!key_state}).
+
+    The start of the server asks this of each key account, for the
+    generation its record names, inside the call of the account. *)
+val remove_other_keys
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> generation:Authz_types.Key_generation.t
+  -> (unit, string) result
+
+(** What became of the other files of the folder of the keys once the new
+    key was in place. *)
+type other_keys =
+  | Other_keys_removed
+  | Other_keys_left of string
+      (** The new key is in place and is the one read. A file of the folder
+          stayed, or the folder was not looked at ({!remove_other_keys});
+          the detail is for the log of the server. *)
+
+(** Puts [key] in place as the key of [generation] of [account_id]
+    ({!make}), and then removes the other files of the folder of its keys
+    ({!remove_other_keys}).
+
+    [generation] is the one the record of the replacement has just named,
+    so a use of the account reads this file from that record on. After an
+    error nothing was removed, and what the write left is what {!make} says
+    of its error: after [Key_not_written (Not_written _)] the key may be in
+    place, and after the others it is not. An account whose key of
+    [generation] is not in place reads [Key_missing] until a later
+    replacement names the generation after it: the key of the generation
+    before is on disk and is not read. [Key_not_written Generation_taken]
+    says a file of [generation] was there before the call, in place or
+    beside the place, which no replacement of this server wrote: the record
+    of a generation is written once, before its file. *)
+val replace
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> generation:Authz_types.Key_generation.t
+  -> Runtime_api_key_file.key
+  -> (other_keys, make_error) result

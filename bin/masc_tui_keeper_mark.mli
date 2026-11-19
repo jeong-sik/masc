@@ -222,6 +222,29 @@ val grid_facts_by_age_header : string
 val grid_saved_header : string
 val grid_stale_header : string
 val grid_facts_header : string
+
+type grid_column =
+  | Keeper_column
+  | Now_column
+  | Due_column
+  | Lag_column
+  | Turns_column
+  | Librarian_column
+  | Lag_bar_column
+  | Lag_bar_short_column
+  | Digest_column
+  | Gap_column
+  | Facts_by_age_column
+  | Saved_column
+  | Stale_column
+  | Facts_column
+
+val grid_column_word : ko:bool -> grid_column -> string
+(** A view's column header in the screen's language (RFC tui-one-screen-grammar
+    7.1). In English it is the [grid_*_header] word the legend names. *)
+
+val grid_next_column_word : ko:bool -> window:string -> string
+(** {!grid_next_header} in the screen's language: [다음 ▹ 12h]. *)
 (** The column headers of the memory and age views. The lag bar's header is
     [lag ▹], or [lag · unread turns ▹] over a bar wide enough for it. [saved]
     is the snapshot's saved time, not a source-revalidation result. *)

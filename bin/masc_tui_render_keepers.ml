@@ -1310,41 +1310,43 @@ let grid_header state (grid : Grid.t) (columns : Axis_row.columns) =
   let window = Grid.window_label ~slots:grid.side_cells in
   let side = grid.side_cells > 0 in
   let mem = grid.mem_cells > 0 in
+  let word = Keeper_mark.grid_column_word ~ko:(state.ui_language = Lang_ko) in
   let lag_bar =
-    if Grid.strip_cells grid >= grid_lag_bar_header_cells then Keeper_mark.grid_lag_bar_header
-    else Keeper_mark.grid_lag_bar_short_header
+    if Grid.strip_cells grid >= grid_lag_bar_header_cells then word Keeper_mark.Lag_bar_column
+    else word Keeper_mark.Lag_bar_short_column
   in
   let pulse_header word = grid_spread ~cells:grid.side_cells word Grid.slot_label in
   let name, pulse, now_word, strip, due, right =
     match columns with
     | Axis_row.Activity_columns ->
-        ( Keeper_mark.grid_keeper_header
+        ( word Keeper_mark.Keeper_column
         , pulse_header (Keeper_mark.grid_pulse_header ~window)
-        , Keeper_mark.axis_now_header
+        , word Keeper_mark.Now_column
         , (match state.keeper_list_view with
            | Keeper_list_model.By_state ->
                ui_text state ~ko:("예약 확인 · " ^ window) ~en:("known wakes · " ^ window)
            | Plain | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall ->
-               Keeper_mark.grid_next_header ~window)
-        , Keeper_mark.grid_due_header
-        , Message_layout.pad_left Keeper_mark.grid_lag_header (grid.mem_cells - grid_level_cells) )
+               Keeper_mark.grid_next_column_word ~ko:(state.ui_language = Lang_ko) ~window)
+        , word Keeper_mark.Due_column
+        , Message_layout.pad_left (word Keeper_mark.Lag_column) (grid.mem_cells - grid_level_cells) )
     | Axis_row.Memory_columns ->
-        ( Keeper_mark.grid_keeper_header
-        , pulse_header (Keeper_mark.grid_pulse_header ~window:(Keeper_mark.grid_turns_word ^ " " ^ window))
-        , Keeper_mark.grid_librarian_header
+        ( word Keeper_mark.Keeper_column
+        , pulse_header
+            (Keeper_mark.grid_pulse_header ~window:(word Keeper_mark.Turns_column ^ " " ^ window))
+        , word Keeper_mark.Librarian_column
         , lag_bar
-        , Keeper_mark.grid_digest_header
-        , Message_layout.pad_left Keeper_mark.grid_gap_header grid.mem_cells )
+        , word Keeper_mark.Digest_column
+        , Message_layout.pad_left (word Keeper_mark.Gap_column) grid.mem_cells )
     | Axis_row.Age_columns ->
         ( (if grid.name_cells >= grid_facts_by_age_name_cells then
-             fit_width Keeper_mark.grid_keeper_header grid_facts_by_age_offset
-             ^ Keeper_mark.grid_facts_by_age_header
-           else Keeper_mark.grid_keeper_header)
+             fit_width (word Keeper_mark.Keeper_column) grid_facts_by_age_offset
+             ^ word Keeper_mark.Facts_by_age_column
+           else word Keeper_mark.Keeper_column)
         , Age_ladder.tick_line ~column:grid.side_cells
-        , Keeper_mark.grid_saved_header
+        , word Keeper_mark.Saved_column
         , lag_bar
-        , Keeper_mark.grid_stale_header
-        , Message_layout.pad_left Keeper_mark.grid_facts_header grid.mem_cells )
+        , word Keeper_mark.Stale_column
+        , Message_layout.pad_left (word Keeper_mark.Facts_column) grid.mem_cells )
   in
   String.concat ""
     [ String.make Grid.gutter_cells ' '
@@ -1932,10 +1934,12 @@ let rec matrix_letter index =
   let last = String.make 1 (Char.chr (Char.code 'A' + index mod 26)) in
   if index < 26 then last else matrix_letter (index / 26 - 1) ^ last
 
-let matrix_header matrix =
-  String.make Grid.gutter_cells ' ' ^ fit_width "keeper" matrix.matrix_name_cells ^ " "
+let matrix_header ~ko matrix =
+  String.make Grid.gutter_cells ' '
+  ^ fit_width (Keeper_mark.grid_column_word ~ko Keeper_mark.Keeper_column) matrix.matrix_name_cells
+  ^ " "
   ^ String.concat "" (List.mapi (fun index _ -> fit_width (matrix_letter index) matrix.matrix_cell_cells) matrix.matrix_ids)
-  ^ " " ^ fit_width "last" 5
+  ^ " " ^ fit_width (if ko then "최근" else "last") 5
   ^ fit_width ("◂ " ^ Grid.window_label ~slots:matrix.matrix_pulse_slots) matrix.matrix_pulse_slots
 
 let matrix_keeper_row matrix ~now row =
@@ -2961,9 +2965,11 @@ let render_keeper_axes (state : state) =
   box_line buf cols "";
   (match matrix, shape with
    | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
-       box_line_styled buf cols ~style:(Theme.recede ()) (matrix_header matrix)
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (matrix_header ~ko:(state.ui_language = Lang_ko) matrix)
    | None, Axis_row.Wall_columns ->
-       box_line buf cols (Masc_tui_keeper_wall.header ~cols:inner ~now:now_unix);
+       box_line buf cols
+         (Masc_tui_keeper_wall.header ~ko:(state.ui_language = Lang_ko) ~cols:inner ~now:now_unix);
        box_line buf cols (Masc_tui_keeper_wall.fleet ~ko:(state.ui_language = Lang_ko)
          ~cols:inner ~now:now_unix (List.map keeper_row_runtime model_rows))
    | None, Axis_row.List_columns ->

@@ -276,6 +276,49 @@ let grid_saved_header = "saved"
 let grid_stale_header = "stale"
 let grid_facts_header = "facts"
 
+type grid_column =
+  | Keeper_column
+  | Now_column
+  | Due_column
+  | Lag_column
+  | Turns_column
+  | Librarian_column
+  | Lag_bar_column
+  | Lag_bar_short_column
+  | Digest_column
+  | Gap_column
+  | Facts_by_age_column
+  | Saved_column
+  | Stale_column
+  | Facts_column
+
+(* The column headers the views draw, in the screen's language (RFC
+   tui-one-screen-grammar 7.1). The legend is English prose, so it names the
+   English words above. The Korean words are the ones the Keeper story and the
+   memory screen already use for the same readings: 현재 and 다음 in the story
+   window, 사실 and 무효화 on the memory screen, and Librarian, a product name,
+   as it is. *)
+let grid_column_word ~ko column =
+  let say korean english = if ko then korean else english in
+  match column with
+  | Keeper_column -> say "키퍼" grid_keeper_header
+  | Now_column -> say (axis_now_glyph ^ " 현재") axis_now_header
+  | Due_column -> say "예정" grid_due_header
+  | Lag_column -> say "지연" grid_lag_header
+  | Turns_column -> say "턴" grid_turns_word
+  | Librarian_column -> say "Librarian" grid_librarian_header
+  | Lag_bar_column -> say ("지연 \xc2\xb7 안 읽은 턴 " ^ axis_next_glyph) grid_lag_bar_header
+  | Lag_bar_short_column -> say ("지연 " ^ axis_next_glyph) grid_lag_bar_short_header
+  | Digest_column -> say "요약" grid_digest_header
+  | Gap_column -> say "빠짐" grid_gap_header
+  | Facts_by_age_column -> say "나이별 사실 \xe2\x96\xb8" grid_facts_by_age_header
+  | Saved_column -> say "저장" grid_saved_header
+  | Stale_column -> say "무효화" grid_stale_header
+  | Facts_column -> say "사실" grid_facts_header
+
+let grid_next_column_word ~ko ~window =
+  if ko then "다음 " ^ axis_next_glyph ^ " " ^ window else grid_next_header ~window
+
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in

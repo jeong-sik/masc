@@ -211,51 +211,6 @@ let verdict_of_empty_completion ~(stop_reason : Types.stop_reason) ~message =
   | Types.Unknown token -> Empty_unattributed { token }
 ;;
 
-(** [overflow_of_empty_completion ~stop_reason ~message] is the single,
-    compiler-checked source for the #2621 empty-completion overflow rule.
-
-    An empty turn whose typed [stop_reason] is [ContextWindowExceeded] is a
-    context-overflow contract, not provider unavailability: retrying or
-    rotating replays the same oversized prompt, so only the consumer's context
-    recovery (compaction) can make progress. The provider does not report its
-    limit on this path, hence [limit = None].
-
-    Only the typed [ContextOverflow] value is produced here. Each caller keeps
-    its own wrapping of the result — [Provider_failure_attribution]'s
-    [Error.Api], and agent core boundary in [Error] that flattens via
-    [error_message] into [InvalidRequest].
-
-    This is the overflow-only projection of {!verdict_of_empty_completion}: it
-    collapses both a recognized non-overflow stop_reason and an unmodeled one
-    into [None]. Callers that must not retry an unmodeled contract read the
-    verdict directly instead. *)
-let overflow_of_empty_completion ~(stop_reason : Types.stop_reason) ~message =
-  match verdict_of_empty_completion ~stop_reason ~message with
-  | Empty_overflow overflow -> Some overflow
-  | Empty_attributed | Empty_unattributed _ -> None
-;;
-
-let%test "overflow_of_empty_completion: ContextWindowExceeded yields ContextOverflow" =
-  match
-    overflow_of_empty_completion ~stop_reason:Types.ContextWindowExceeded ~message:"X"
-  with
-  | Some
-      (ContextOverflow
-         { message = "empty completion (stop_reason=model_context_window_exceeded): X"
-         ; limit = None
-         }) -> true
-  | Some (RateLimited _) | None | Some (Overloaded _) | Some (ServerError _) | Some (AuthError _)
-  | Some (AuthorizationError _) | Some (PaymentRequired _) | Some (InvalidRequest _)
-  | Some (NotFound _) | Some (ContextOverflow _) | Some (InputCapacity _) | Some (NetworkError _)
-  | Some (Connect_failed _) | Some (Timeout _) -> false
-;;
-
-let%test "overflow_of_empty_completion: non-overflow stop_reason yields None" =
-  match overflow_of_empty_completion ~stop_reason:Types.EndTurn ~message:"X" with
-  | None -> true
-  | Some _ -> false
-;;
-
 let%test "verdict_of_empty_completion: ContextWindowExceeded is Empty_overflow" =
   match
     verdict_of_empty_completion ~stop_reason:Types.ContextWindowExceeded ~message:"X"

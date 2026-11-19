@@ -150,7 +150,17 @@ let api_observation (cause : Exact_output.execution_error_cause) = match cause w
   | Completion_failed {dispatch;error} ->
     Completion_failed {sent=(match dispatch with No_generation_dispatch -> false | Generation_dispatch_started -> true);
       cause=completion error}
-  | Output_limit_reached -> Output_limit | Incomplete_output -> Incomplete | Missing_output -> Missing
+  | Output_limit_reached -> Output_limit
+  (* No new stored constructor: this algebra is removed at the Librarian cut.
+     An answer stopped at the window without text is stored as a sent
+     completion stopped at the window. Over HTTP it used to be stored as a
+     provider refusal with the answer's status (200), which no refusal had
+     sent. Both name the context overflow in [of_api_observation], so the walk
+     reads the same size. With text it stays incomplete. *)
+  | Window_reached {output=No_output} ->
+    Completion_failed {sent=true; cause=Empty_completion Context_window_exceeded}
+  | Window_reached {output=Partial_output} | Incomplete_output _ -> Incomplete
+  | Missing_output -> Missing
   | Ambiguous_output count -> Ambiguous count | Unexpected_output_content -> Unexpected
   | Invalid_json_output -> Invalid_json | Response_body_deadline_exceeded -> Body_deadline
 

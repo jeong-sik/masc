@@ -125,7 +125,8 @@ let test_capacity_only_keeps_all_non_capacity_visits () =
       Alcotest.(check bool) "slot order cannot hide a non-capacity visit" false
         (S.input_capacity_only evidence))
       [S.combine capacity other;S.combine other capacity])
-    [EO.Output_limit_reached;Incomplete_output;Missing_output;Ambiguous_output 2;
+    [EO.Output_limit_reached;Window_reached {output=Partial_output};
+     Incomplete_output {stop=Refusal};Missing_output;Ambiguous_output 2;
      Unexpected_output_content;Response_body_deadline_exceeded;Invalid_json_output;
      Provider_response_refused {http_status=408;refusal=Timeout;retry_after_s=None};
      Provider_response_refused {http_status=503;refusal=Network_error;retry_after_s=None};
@@ -145,6 +146,24 @@ let test_capacity_only_keeps_all_non_capacity_visits () =
     (S.input_capacity_only (S.after_cli_fallback ~prior:capacity
       [Keeper_lane_cli_oneshot.Execution_failed {runtime_id="opaque-cli";cause=Fusion_official_client.Missing_reply}]))
 
+(* An answer stopped at the window keeps one stored observation per output
+   shape. Without text it is stored as a completion sent and stopped at the
+   window, which names the context overflow; with text it is incomplete and
+   names nothing. The JSON is what the receipt and slot-observation rows hold. *)
+let test_window_stop_observations () =
+  let stored cause = Yojson.Safe.to_string (S.api_observation_to_yojson (S.api_observation cause)) in
+  let no_output = EO.Window_reached {output=No_output} in
+  let partial = EO.Window_reached {output=Partial_output} in
+  Alcotest.(check string) "no output is stored as the window stop of a sent completion"
+    {|["Completion_failed",{"sent":true,"cause":["Empty_completion",["Context_window_exceeded"]]}]|}
+    (stored no_output);
+  Alcotest.(check (list string)) "no output names the context overflow" ["context_overflow"]
+    (refusals (S.of_cause no_output));
+  Alcotest.(check string) "partial output is stored as incomplete" {|["Incomplete"]|}
+    (stored partial);
+  Alcotest.(check (list string)) "partial output names no input refusal" []
+    (refusals (S.of_cause partial))
+
 let test_named_causes_survive_the_receipt_codec () =
   List.iter (fun cause ->
       let original = S.of_cause cause in
@@ -158,7 +177,9 @@ let test_named_causes_survive_the_receipt_codec () =
         (original = decoded))
     [ provider_refusal EO.Context_overflow
     ; provider_refusal EO.Input_capacity
-    ; provider_refusal EO.Request_body_refused ]
+    ; provider_refusal EO.Request_body_refused
+    ; EO.Window_reached {output=No_output}
+    ; EO.Window_reached {output=Partial_output} ]
 
 let test_after_cli_fallback_drops_prior_limit () =
   let prior = S.combine (named EO.Input_capacity) (measured "cli-primary" 23 17) in
@@ -192,7 +213,9 @@ let () =
       ; Alcotest.test_case "capacity-only retains every non-capacity visit" `Quick
           test_capacity_only_keeps_all_non_capacity_visits
       ; Alcotest.test_case "named causes survive the receipt codec" `Quick
-          test_named_causes_survive_the_receipt_codec ]
+          test_named_causes_survive_the_receipt_codec
+      ; Alcotest.test_case "a window stop keeps one stored observation per output" `Quick
+          test_window_stop_observations ]
     ; "fallback"
     , [ Alcotest.test_case "after_cli_fallback drops the prior limit" `Quick
           test_after_cli_fallback_drops_prior_limit ] ]

@@ -8,7 +8,7 @@
     parsers that actually produce that stop_reason from a raw provider response.
     That left the wire root untested: [wire_finish_of_string] mapped the
     overflow token to [Other _ -> Types.Unknown], and GLM dropped the
-    stop_reason entirely, so the #2659/#2696 [overflow_of_empty_completion]
+    stop_reason entirely, so the #2659/#2696 [verdict_of_empty_completion]
     classifier was unreachable on the real path while the suite stayed green.
 
     This suite drives the raw wire [finish_reason] string through the real
@@ -92,12 +92,12 @@ let test_glm_parse_overflow () =
 let test_classifier_reachable_from_wire () =
   let body = empty_completion_body ~finish_reason:overflow_token in
   let stop_reason = empty_completion_stop_reason "glm" (Glm.parse_response_result body) in
-  match Retry.overflow_of_empty_completion ~stop_reason ~message:"e2e" with
-  | Some (Retry.ContextOverflow { limit = None; _ }) -> ()
-  | Some other ->
+  match Retry.verdict_of_empty_completion ~stop_reason ~message:"e2e" with
+  | Retry.Empty_overflow (Retry.ContextOverflow { limit = None; _ }) -> ()
+  | Retry.Empty_overflow other ->
     Alcotest.failf "expected ContextOverflow, got %s" (Retry.error_message other)
-  | None ->
-    Alcotest.fail "overflow_of_empty_completion did not fire on wire-decoded overflow"
+  | Retry.Empty_attributed | Retry.Empty_unattributed _ ->
+    Alcotest.fail "verdict_of_empty_completion did not read the wire-decoded overflow"
 ;;
 
 (* --- Full boundary: empty_completion_error -> Api ContextOverflow. Mirrors the

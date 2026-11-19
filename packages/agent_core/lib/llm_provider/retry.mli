@@ -122,21 +122,6 @@ val verdict_of_empty_completion
   -> message:string
   -> empty_completion_verdict
 
-(** [overflow_of_empty_completion ~stop_reason ~message] is the overflow-only
-    projection of {!verdict_of_empty_completion}: [Some (ContextOverflow …)]
-    when [stop_reason] is [ContextWindowExceeded], else [None]. Single
-    compiler-checked source for the #2621 empty-completion overflow rule; the
-    message prefix
-    ["empty completion (stop_reason=model_context_window_exceeded): "] and
-    [limit = None] live there so all call sites stay byte-identical. Callers
-    that must distinguish an unmodeled stop_reason from a recognized
-    non-overflow one use {!verdict_of_empty_completion} instead — this
-    projection collapses both into [None]. *)
-val overflow_of_empty_completion
-  :  stop_reason:Types.stop_reason
-  -> message:string
-  -> api_error option
-
 (** Merge a provider's structured [retry_after] evidence: the JSON body's
     [error.retry_after] field wins when present (provider-specific, more
     precise); the transport's parsed [Retry-After] response header

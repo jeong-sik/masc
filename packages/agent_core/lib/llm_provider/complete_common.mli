@@ -28,6 +28,15 @@ val latency_ms_int : latency_counter -> int option
 
 (** {1 Responses} *)
 
+val has_no_output : Types.api_response -> bool
+(** The response carries no content block and no tool call that could not be
+    read. This is what an empty completion means wherever a completion is
+    consumed: a response whose only tool calls could not be read is not
+    empty, because the model made those calls. What counts as a block is the
+    codec's: a codec that drops an item it will not expose (blank Ollama or
+    OpenAI-compatible text, a partial Responses [function_call] on an
+    incomplete response) leaves nothing here. *)
+
 val ensure_nonempty_completion
   :  (Types.api_response, Http_client.http_error) result
   -> (Types.api_response, Http_client.http_error) result

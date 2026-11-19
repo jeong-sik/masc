@@ -505,7 +505,8 @@ let test_named_provider_input_refusals () =
       (original=decoded))
     [refused E.Context_overflow;refused E.Input_capacity;refused E.Request_body_refused;
      refused E.Rate_limited;E.Invalid_json_output;
-     E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch}]
+     E.Completion_failed {error=context_error;dispatch=E.No_generation_dispatch};
+     E.Window_reached {output=E.No_output};E.Window_reached {output=E.Partial_output}]
 
 let test_native_context_receipt_flags () =
   let module Shared = Keeper_exact_walk_failure in
@@ -666,7 +667,9 @@ let test_size_verdict_table () =
       , false )
     ; "completion failed, wiring rejected", sent (Http.AcceptRejected { reason = "" }), false
     ; "output limit", E.Output_limit_reached, true
-    ; "incomplete output", E.Incomplete_output, true
+    ; "window reached, no output", E.Window_reached { output = E.No_output }, true
+    ; "window reached, partial output", E.Window_reached { output = E.Partial_output }, true
+    ; "incomplete output", E.Incomplete_output { stop = E.End_turn }, true
     ; "missing output", E.Missing_output, true
     ; "ambiguous output", E.Ambiguous_output 2, true
     ; "unexpected output content", E.Unexpected_output_content, true

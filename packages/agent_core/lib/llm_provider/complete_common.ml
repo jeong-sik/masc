@@ -190,6 +190,12 @@ let latency_ms_float = function
 let round_latency_ms ms = int_of_float (Float.round ms)
 let latency_ms_int counter = Option.map round_latency_ms (latency_ms_float counter)
 
+let has_no_output ({ content; unreadable_tool_uses; _ } : Types.api_response) =
+  match content, unreadable_tool_uses with
+  | [], [] -> true
+  | _ :: _, _ | [], _ :: _ -> false
+;;
+
 (** Preserve authoritative policy/truncation outcomes at completion consumption
     boundaries even when they carry no content. Other empty turns fail closed
     with their typed stop reason for the existing retry/overflow classifier.

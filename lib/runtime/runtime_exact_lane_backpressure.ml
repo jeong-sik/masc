@@ -95,7 +95,8 @@ let note_cause ~resolved ~slot_id (cause : Exact.execution_error_cause) =
   | Exact.Completion_failed {dispatch=Exact.No_generation_dispatch; _}
   | Exact.Response_body_deadline_exceeded
   | Exact.Output_limit_reached
-  | Exact.Incomplete_output
+  | Exact.Window_reached _
+  | Exact.Incomplete_output _
   | Exact.Missing_output
   | Exact.Ambiguous_output _
   | Exact.Unexpected_output_content

@@ -1410,11 +1410,20 @@ let test_normalization_error_classes () =
     (function
     | EO.Output_limit_reached -> true
     | _ -> false);
-  List.iter (fun stop_reason ->
+  List.iter (fun (stop_reason, expected) ->
     run stop_reason
       (anthropic_response ~stop_reason {|[{"type":"text","text":"{}"}]|})
-      (function EO.Incomplete_output -> true | _ -> false))
-    ["refusal"; "unrecognized-fixture-stop"];
+      (function EO.Incomplete_output { stop } -> stop = expected | _ -> false))
+    [ "refusal", EO.Refusal
+    ; "unrecognized-fixture-stop", EO.Unknown_stop "unrecognized-fixture-stop" ];
+  run
+    "context window"
+    (anthropic_response
+       ~stop_reason:"model_context_window_exceeded"
+       {|[{"type":"text","text":"{"}]|})
+    (function
+    | EO.Window_reached { output = EO.Partial_output } -> true
+    | _ -> false);
   run "missing" (anthropic_response "[]") (function
     | EO.Missing_output -> true
     | _ -> false);
@@ -1456,11 +1465,9 @@ let test_empty_output_limit_classes () =
         (match expected, cause with
          | Types.MaxTokens, EO.Output_limit_reached -> ()
          (* A refusal stop is terminal whether or not text accompanied it, so
-            it takes the same typed cause as a non-empty refusal; the raw
-            response (checked above) retains the provider's stop evidence.
-            The cause itself does not carry the stop reason, so this pins the
-            current collapse of refusal and incomplete answers; see #43514. *)
-         | Types.Refusal, EO.Incomplete_output -> ()
+            it takes the same typed cause as a non-empty refusal, and the
+            cause names the stop. *)
+         | Types.Refusal, EO.Incomplete_output { stop = EO.Refusal } -> ()
          | Types.Unknown _, EO.Completion_failed
              { error = Http_client.ProviderFailure
                  { kind = Http_client.Empty_completion { stop_reason }; _ }

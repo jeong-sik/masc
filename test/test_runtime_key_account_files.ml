@@ -228,6 +228,138 @@ let test_key_state =
     Alcotest.(check bool) "the reading made no runtime root" false (there no_root))
 ;;
 
+(* ---- the replacement of a key (the same RFC, 3.7) ---- *)
+
+let second = Key_generation.next generation
+let third = Key_generation.next second
+
+let key_file_at ~runtime_root id generation =
+  get_text (Layout.key_file ~runtime_root ~account_id:id ~generation)
+;;
+
+let put path text =
+  Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 path (fun channel ->
+    Out_channel.output_string channel text)
+;;
+
+let names_of folder = List.sort String.compare (Array.to_list (Sys.readdir folder))
+
+let replaced label ~runtime_root id generation text expected =
+  Alcotest.(check string)
+    label
+    expected
+    (match F.replace ~runtime_root ~account_id:id ~generation (key text) with
+     | Ok F.Other_keys_removed -> "replaced"
+     | Ok (F.Other_keys_left (_ : string)) -> "replaced, other keys left"
+     | Error error -> make_name (Error error))
+;;
+
+let other_keys label ~runtime_root id generation expected =
+  Alcotest.(check string)
+    label
+    expected
+    (match F.remove_other_keys ~runtime_root ~account_id:id ~generation with
+     | Ok () -> "removed"
+     | Error (_ : string) -> "left")
+;;
+
+(* The new key is in the file of the generation named, and the folder of the
+   keys then holds that file alone. *)
+let test_replaced =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    made "the account" ~runtime_root account the_key "made";
+    made "another account of the person" ~runtime_root other_account "sk-test-the-other-key" "made";
+    let keys = keys_of ~runtime_root account in
+    let home = home_of ~runtime_root account in
+    put (Filename.concat home "history.jsonl") "{}\n";
+    (* What a write that stopped, a restore and a hand leave in the folder. *)
+    put (Filename.concat keys "7.tmp") "sk-te";
+    Unix.mkdir (Filename.concat keys "older") 0o700;
+    put (Filename.concat (Filename.concat keys "older") "1") "sk-test-an-older-key";
+    Unix.symlink (key_file_of ~runtime_root other_account) (Filename.concat keys "link");
+    replaced "the key of the account" ~runtime_root account second "sk-test-the-second-key" "replaced";
+    let in_place = key_file_at ~runtime_root account second in
+    Alcotest.(check (list string))
+      "the folder of the keys holds the file of the new generation alone"
+      [ Filename.basename in_place ]
+      (names_of keys);
+    Alcotest.(check string) "the new key reads back" "key:sk-test-the-second-key" (read_name in_place);
+    Alcotest.(check string)
+      "what the link in the folder led to is in place"
+      "key:sk-test-the-other-key"
+      (read_name (key_file_of ~runtime_root other_account));
+    Alcotest.(check bool) "the home keeps what was in it" true (there (Filename.concat home "history.jsonl"));
+    (* A generation is written once: the call puts nothing in place and
+       removes nothing. *)
+    put (Filename.concat keys "7.tmp") "sk-te";
+    replaced
+      "the same generation again"
+      ~runtime_root
+      account
+      second
+      "sk-test-a-third-key"
+      "key_not_written:generation_taken";
+    Alcotest.(check string) "the key in place is the one that was there" "key:sk-test-the-second-key" (read_name in_place);
+    Alcotest.(check bool) "nothing was removed after the refusal" true (there (Filename.concat keys "7.tmp")))
+;;
+
+(* An account whose record was written and whose files were not: the
+   replacement makes its home and puts its key in place. *)
+let test_replaced_with_no_files =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    replaced "an account with no files" ~runtime_root account second "sk-test-the-second-key" "replaced";
+    Alcotest.(check int) "its home is there, 0700" 0o700 (mode (home_of ~runtime_root account));
+    Alcotest.(check string)
+      "its key reads back"
+      "key:sk-test-the-second-key"
+      (read_name (key_file_at ~runtime_root account second)))
+;;
+
+(* What the start of the server asks of a key account: the files of the
+   generations its record does not name go. *)
+let test_other_keys =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    other_keys "an account with no files" ~runtime_root account generation "removed";
+    Alcotest.(check bool) "it made no folder" false (there (keys_of ~runtime_root account));
+    made "the account" ~runtime_root account the_key "made";
+    (* A replacement that put its key in place and went no further. *)
+    (match K.write ~runtime_root ~account_id:account ~generation:second (key "sk-test-the-second-key") with
+     | Ok () -> ()
+     | Error (_ : K.write_error) -> Alcotest.fail "the key of the second generation was not written");
+    let keys = keys_of ~runtime_root account in
+    let in_place = key_file_at ~runtime_root account second in
+    other_keys "the files of the other generations" ~runtime_root account second "removed";
+    Alcotest.(check (list string)) "the file of the generation named is left alone" [ Filename.basename in_place ] (names_of keys);
+    Alcotest.(check string) "and its key reads back" "key:sk-test-the-second-key" (read_name in_place);
+    other_keys "the same again" ~runtime_root account second "removed";
+    Alcotest.(check (list string)) "nothing more went" [ Filename.basename in_place ] (names_of keys);
+    (* A record that names a generation whose file was never put in place:
+       no file of the folder is the key of the account. *)
+    other_keys "for a generation with no file" ~runtime_root account third "removed";
+    Alcotest.(check (list string)) "the folder is empty" [] (names_of keys);
+    let no_root = Filename.concat (Filename.dirname runtime_root) "namespace-of-nobody" in
+    other_keys "under a runtime root that is not there" ~runtime_root:no_root account generation "removed";
+    Alcotest.(check bool) "it made no runtime root" false (there no_root))
+;;
+
+(* A link in the place of the folder of the keys is not read: what it leads
+   to is the folder of another account. *)
+let test_other_keys_link =
+  with_root (fun ~base_path:_ ~runtime_root ->
+    made "the other account" ~runtime_root other_account "sk-test-the-other-key" "made";
+    let link = keys_of ~runtime_root account in
+    Unix.symlink (keys_of ~runtime_root other_account) link;
+    other_keys "an account whose key folder is a link" ~runtime_root account second "left";
+    Alcotest.(check string)
+      "what the link led to is in place"
+      "key:sk-test-the-other-key"
+      (read_name (key_file_of ~runtime_root other_account));
+    (match (Unix.lstat link).Unix.st_kind with
+     | Unix.S_LNK -> ()
+     | Unix.S_REG | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+       Alcotest.fail "the link was replaced"))
+;;
+
 (* An account whose record was written and whose files were not, as a process
    that died between the two leaves it: a removal finds nothing and ends. *)
 let test_nothing_made =
@@ -344,6 +476,36 @@ let test_home_stays =
        Alcotest.(check bool) "its home is gone" false (there home)))
 ;;
 
+(* The new key is in place whatever becomes of the others, and each of the
+   others is tried: the one that does not go sorts before the key of the
+   generation before, which goes. *)
+let test_other_keys_stay =
+  with_root
+    (unless_superuser (fun ~base_path:_ ~runtime_root ->
+       made "the account" ~runtime_root account the_key "made";
+       let keys = keys_of ~runtime_root account in
+       let stuck = Filename.concat keys "0-stuck" in
+       Unix.mkdir stuck 0o700;
+       put (Filename.concat stuck "1") "sk-test-an-older-key";
+       Unix.chmod stuck 0o500;
+       replaced
+         "an account one of whose other files does not go"
+         ~runtime_root
+         account
+         second
+         "sk-test-the-second-key"
+         "replaced, other keys left";
+       let in_place = key_file_at ~runtime_root account second in
+       Alcotest.(check string) "the new key is in place" "key:sk-test-the-second-key" (read_name in_place);
+       Alcotest.(check (list string))
+         "the key of the generation before went, after the one that did not"
+         [ Filename.basename stuck; Filename.basename in_place ]
+         (names_of keys);
+       Unix.chmod stuck 0o700;
+       other_keys "asked again, the folder written again" ~runtime_root account second "removed";
+       Alcotest.(check (list string)) "the new key alone is left" [ Filename.basename in_place ] (names_of keys)))
+;;
+
 let () =
   Alcotest.run
     "runtime_key_account_files"
@@ -362,5 +524,12 @@ let () =
         ; Alcotest.test_case "the home that does not go" `Quick test_home_stays
         ] )
     ; "list", [ Alcotest.test_case "what is said of the key" `Quick test_key_state ]
+    ; ( "replace"
+      , [ Alcotest.test_case "the new key, and the folder of the keys with it alone" `Quick test_replaced
+        ; Alcotest.test_case "an account with no files" `Quick test_replaced_with_no_files
+        ; Alcotest.test_case "the files of the other generations" `Quick test_other_keys
+        ; Alcotest.test_case "a link in place of the folder is not read" `Quick test_other_keys_link
+        ; Alcotest.test_case "another file that does not go" `Quick test_other_keys_stay
+        ] )
     ]
 ;;

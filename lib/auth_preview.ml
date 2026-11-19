@@ -560,7 +560,12 @@ let provider_accounts ~base_path ~config state { user_id; namespace } =
           | Some Authz_provider_account.Replacement_start_given_up ->
             [ "replacement", `String start_given_up ]
         in
-        account, integration, Option.is_none blocked, of_kind @ of_blocked)
+        (* Whether a Runtime of the account is listed is what a turn of it
+           is judged by, not what the list has a word for: a reduction on
+           the credential that [blocked] does not name hides the Runtimes
+           all the same. *)
+        let in_use = Result.is_ok (Authz_provider_account.availability state ~user_id account) in
+        account, integration, in_use, of_kind @ of_blocked)
       (Authz_provider_account.shown state user_id)
   in
   (* A Runtime is made only on an account its maker owns (the log refuses

@@ -47,6 +47,9 @@ module Key_generation = struct
   type t = int
 
   let first = 1
+
+  (* A generation goes up by one for each replacement a person asks for, so
+     no account reaches the end of the integers. *)
   let next t = t + 1
   let of_int value = if value >= first then Some value else None
   let to_int t = t

@@ -175,6 +175,10 @@ let density_of_string = function
   | "detailed" -> Some Two_lines
   | _ -> None
 
+let density_title ~ko = function
+  | One_line -> if ko then "1줄" else "1L"
+  | Two_lines -> if ko then "2줄" else "2L"
+
 let next_sort = function
   | Priority -> Recent
   | Recent -> Oldest
@@ -196,6 +200,16 @@ let sort_of_string = function
   | "activity" -> Some Activity
   | "name" -> Some Name
   | _ -> None
+
+let sort_title ~ko sort =
+  if not ko then sort_label sort
+  else
+    match sort with
+    | Priority -> "우선순위"
+    | Recent -> "최근"
+    | Oldest -> "오래된 순"
+    | Activity -> "활동"
+    | Name -> "이름"
 
 (* The first row of each (source, wake producer) pair: enough to ask whether
    a source has rows and which row comes first. *)

@@ -1537,15 +1537,45 @@ let keeper_entry_selected stop = function
   | Keeper_group_heading (group, _) -> stop = Some (Keeper_list_model.Stop_heading group)
   | Keeper_display_row (position, _) -> stop = Some (Keeper_list_model.Stop_row position)
 
-(* The views [v] walks, one press each (RFC-0515 §2.3). *)
-let keeper_view_tabs ~ko ~cols view =
+(* The views [v] walks, one press each (RFC-0515 §2.3), paired with a
+   btop-style right-aligned inline control strip showing active sort and row
+   density without spending an extra vertical row. *)
+let keeper_view_tabs ~ko ~cols ~sort ~density view =
   let lead = "  " in
-  lead
-  ^ tab_strip ~width:(tab_strip_width ~cols ~before:lead ~after:"")
+  let dim text = Theme.recede () ^ text ^ Ansi.reset in
+  let sort_chip =
+    dim "< " ^ Keeper_list_model.sort_title ~ko sort ^ dim " >"
+  in
+  let density_chip = dim (Keeper_list_model.density_title ~ko density) in
+  let full_controls = "  " ^ sort_chip ^ "  " ^ density_chip in
+  let compact_controls = "  " ^ sort_chip in
+  let inner = max 1 (framed_inner_width cols) in
+  let min_tabs_width = 18 in
+  let after =
+    if Message_layout.display_width lead + min_tabs_width
+       + Message_layout.display_width full_controls <= inner
+    then full_controls
+    else if Message_layout.display_width lead + min_tabs_width
+            + Message_layout.display_width compact_controls <= inner
+    then compact_controls
+    else ""
+  in
+  let tabs =
+    tab_strip ~width:(tab_strip_width ~cols ~before:lead ~after)
       ~press:(fun target text -> pressable (Press_keeper_view target) text)
       (List.map
          (fun candidate -> Keeper_list_model.view_title ~ko candidate, candidate = view, candidate)
          Keeper_list_model.views)
+  in
+  if String.equal after "" then lead ^ tabs
+  else
+    let used =
+      Message_layout.display_width lead
+      + Message_layout.display_width tabs
+      + Message_layout.display_width after
+    in
+    let pad = max 0 (inner - used) in
+    lead ^ tabs ^ String.make pad ' ' ^ after
 
 let keeper_state_heading_style = function
   | Keeper_list_model.Attention -> Theme.bad ()
@@ -1579,15 +1609,15 @@ let keeper_group_heading_style = function
       | Keeper_list_model.Age_within_3d | Keeper_list_model.Age_older ) -> Theme.info ()
   | Keeper_list_model.Group_age Keeper_list_model.Age_unknown -> Theme.recede ()
 
-let keeper_state_heading_text ~available_cells rows group count =
+let keeper_state_heading_text ~ko ~available_cells rows group count =
   let label =
     match group with
-    | Keeper_list_model.Attention -> "Attention"
-    | Keeper_list_model.Failing -> "Failing"
-    | Keeper_list_model.Active -> "Active"
-    | Keeper_list_model.Waiting -> "Waiting"
-    | Keeper_list_model.Inactive -> "Inactive"
-    | Keeper_list_model.Unobserved -> "Unknown"
+    | Keeper_list_model.Attention -> if ko then "조치 필요" else "Attention"
+    | Keeper_list_model.Failing -> if ko then "실패" else "Failing"
+    | Keeper_list_model.Active -> if ko then "활성" else "Active"
+    | Keeper_list_model.Waiting -> if ko then "대기" else "Waiting"
+    | Keeper_list_model.Inactive -> if ko then "비활성" else "Inactive"
+    | Keeper_list_model.Unobserved -> if ko then "미관측" else "Unknown"
   in
   let detail =
     match group with
@@ -1599,10 +1629,10 @@ let keeper_state_heading_text ~available_cells rows group count =
   in
   Printf.sprintf "%s %d%s" label count detail
 
-let keeper_group_heading_text ~available_cells rows group count =
+let keeper_group_heading_text ~ko ~available_cells rows group count =
   match group with
   | Keeper_list_model.Group_state attention ->
-      keeper_state_heading_text ~available_cells rows attention count
+      keeper_state_heading_text ~ko ~available_cells rows attention count
   | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named cause) ->
       Printf.sprintf "%s %s %d" failing_glyph
         (String.uppercase_ascii (keeper_cause_group_word cause)) count
@@ -2415,7 +2445,9 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pu
            (keeper_list_reading state).klr_rows) ]
   @ keeper_plain_fleet_lines state ~now ~inner
   @ errors @ roster @ waiting
-  @ [keeper_view_tabs ~ko:(state.ui_language = Lang_ko) ~cols state.keeper_list_view]
+  @ [keeper_view_tabs ~ko:(state.ui_language = Lang_ko) ~cols
+       ~sort:state.keeper_list_sort ~density:state.keeper_list_density
+       state.keeper_list_view]
   @ pulse_headers
   @ Option.to_list (Option.map (warning (text "보기 설정: " "view preferences: ")) state.keeper_list_preference_notice)
   @ Option.to_list (local_source_pending_note state Local_keepers)
@@ -2547,7 +2579,8 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
         let heading =
           (if List.mem group state.keeper_list_folded then Keeper_mark.grid_folded_mark
            else Keeper_mark.grid_open_mark) ^ " "
-          ^ keeper_group_heading_text ~available_cells:(width - 2) (keeper_list_rows state) group count in
+          ^ keeper_group_heading_text ~ko:(state.ui_language = Lang_ko)
+              ~available_cells:(width - 2) (keeper_list_rows state) group count in
         [ if keeper_entry_selected stop entry then
             Theme.sidebar_selection () ^ fit_width (Masc_tui_theme.strip_sgr heading) width ^ Ansi.reset
           else
@@ -2678,7 +2711,9 @@ let render_keeper_axes (state : state) =
   let text korean english = if ko then korean else english in
   (* The fleet rows open with the same words the plain list opens with. *)
   let fleet_lead = text "  운영 관측: " "  fleet: " in
-  box_line buf cols (keeper_view_tabs ~ko ~cols state.keeper_list_view);
+  box_line buf cols
+    (keeper_view_tabs ~ko ~cols ~sort:state.keeper_list_sort
+       ~density:state.keeper_list_density state.keeper_list_view);
   List.iter (box_line buf cols)
     (keeper_pulse_headers state ~now:now_unix ~inner ~grid ~selected_row all_rows);
   Option.iter
@@ -3117,7 +3152,9 @@ let render_keeper_axes (state : state) =
           else box_line buf cols text
       | Keeper_group_heading (group, count) as entry ->
           let text =
-            let title = keeper_group_heading_text ~available_cells:inner model_rows group count in
+            let title =
+              keeper_group_heading_text ~ko ~available_cells:inner model_rows group count
+            in
             match matrix with
             | Some _ -> keeper_group_heading_style group ^ "▌   " ^ title ^ Ansi.reset
             | None ->

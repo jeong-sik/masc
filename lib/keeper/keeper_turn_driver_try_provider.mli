@@ -122,7 +122,10 @@ type turn_starts =
             for a run that wrote it before the turn's input
             ({!this_turn_opening}; the driver decides). Rule 8 resends from
             it, and rule 7 bounds the front rule 8 held by it (RFC
-            librarian-lifecycle §4.10). [None] with no open turn,
+            librarian-lifecycle §4.10). When this run's admission line was
+            not written, the open [Opened] is the unclosed one of an earlier
+            run: its baseline is earlier, so the start comes out earlier,
+            never past this turn's input. [None] with no open turn,
             a [Reset] after its [Opened], a baseline of another trace, or a
             history shorter than the baseline. *)
   }

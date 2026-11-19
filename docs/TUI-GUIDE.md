@@ -194,17 +194,19 @@ join over MCP (`/mcp/play`) or plain HTTP with the token after `#`.
 
 ## Options
 
-`masc-tui --help` lists the options and their defaults: `--base-path`
-(`--base`), `--port`, `--workspace`, `--reasoning` and `--tool-view`.
+`masc-tui --help` lists the options: `--base-path` (`--base`), `--port`,
+`--workspace`, `--reasoning` (default `folded`) and `--tool-view` (default
+`compact`), plus `--version` and `--build-commit`.
 
 ## What the server changes
 
 The TUI runs without a server. Keepers and Work Tasks read `.masc/` and work
-without one; every other surface needs it.
+without one. Every other surface needs it, except the TUI session block, which
+records this session's own events.
 
 An unreachable server is reported, not hidden. The header shows
 `refresh failed`, the surface prints the failing call, and each failed load
-lands in the TUI session block on Metrics.
+lands in the TUI session block, under Usage → Telemetry (`p`, then `1`).
 
 A count of `0` next to `data unreliable` means the read failed. It does not
 mean the board is empty.
@@ -222,7 +224,7 @@ the base path, emptied at each start. When a server refuses to start before its
 own log exists, that file is the only place the reason is written. The TUI
 reads its last line back when the server exits before `/health` answers.
 
-The TUI session block on Metrics cuts each event at the frame width, so open
+The TUI session block cuts each event at the frame width, so open
 the file to read a long line whole. If the server is still not answering
 after 30 seconds, the TUI says `masc server did not answer /health in time` and names the same
 file.
@@ -904,11 +906,12 @@ its exact count and points to Changes for the complete view.
 
 #### Prompt presets
 
-The System `presets` pane (reached with `p`) lists each preset with its counts
-(prompt overrides, Keepers with instructions, runtime assignments, exact-output
-lanes) and save time. The detail below shows its description and Keepers, then
-this session's last restore report. A directory whose manifest does not read
-gets its own `!` row.
+The System `presets` pane (reached with `p`) lists each preset by name with its
+counts (prompt overrides, Keepers with instructions, runtime assignments,
+exact-output lanes). The detail below shows its save time and description, a
+comparison with current settings, this session's last restore report, then the
+saved contents and the Keepers it holds. A directory whose manifest does not
+read is listed with `!` under Read errors.
 
 The chat does the same. `/preset` lists the prompt presets the server holds
 under `.masc/presets`.
@@ -1265,7 +1268,8 @@ to the list; `j`/`k` scroll by a row and `PgUp`/`PgDn` by a page.
 
 ### Fusion
 
-The retained Fusion run registry is the list. Open it with the `go Keepers / Fusion` palette entry or from a Keeper's Runs tab. After following a link, `Esc` returns directly to its origin. Otherwise
+The retained Fusion run registry is the list. Open the list with the `go Keepers / Fusion` palette entry;
+Enter on a run in a Keeper's Runs tab opens that run's detail here. After following a link, `Esc` returns directly to its origin. Otherwise
 it closes detail to the run list, then returns to the Dashboard. While a run is active, `STATE`
 shows the exact process-local stage: `accepted`, `panel(N)`, `judge(A/F)`,
 `computed(A/F)`, or `recording(A/F)`.
@@ -1789,4 +1793,4 @@ only after the header has stopped saying `(not loaded)`.
 
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and
-recorded in the TUI session block on Metrics.
+recorded in the TUI session block.

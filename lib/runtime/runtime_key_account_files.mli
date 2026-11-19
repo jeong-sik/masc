@@ -26,9 +26,24 @@ type make_error =
       (** The home is there. What the write left is what
           {!Runtime_api_key_file.write} says of its error. *)
 
-(** Makes the home of [account_id] and then writes [key] as the key of
-    [generation] ({!Runtime_api_key_file.write}). The home comes first, so an
-    account whose key file is there has its home.
+(** Makes the home of [account_id] under [runtime_root], or looks at the one
+    that is there, and writes no key: the first step of {!make}, alone. The
+    runtime root is read by its real path, as every function of this module
+    reads it, and is a directory of this user that no other user writes
+    ({!Runtime_account_home_folder.make}).
+
+    The replacement of a key asks for it before its record: a root or a
+    home this process does not reach turns the replacement down while
+    nothing is recorded. The detail is for the log of the server: it can
+    name a path of the server. *)
+val make_home
+  :  runtime_root:string
+  -> account_id:Authz_types.Provider_account_id.t
+  -> (unit, string) result
+
+(** Makes the home of [account_id] ({!make_home}) and then writes [key] as
+    the key of [generation] ({!Runtime_api_key_file.write}). The home comes
+    first, so an account whose key file is there has its home.
 
     It makes the files of an account that has none: a registration calls it
     once, inside the call of the account it has just recorded. After an

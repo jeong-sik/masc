@@ -71,7 +71,7 @@ let every_stimulus : (Log.stimulus * string) list =
   ; Fusion { run = "run-1" }, {|{"kind":"fusion","run":"run-1"}|}
   ; ( Schedule { schedule = "schedule-1"; occurrence = "occurrence-1" }
     , {|{"kind":"schedule","schedule":"schedule-1","occurrence":"occurrence-1"}|} )
-  ; Connector { event = "attention-1" }, {|{"kind":"connector","attention":"attention-1"}|}
+  ; Connector { attention = "attention-1" }, {|{"kind":"connector","attention":"attention-1"}|}
   ; Hitl { approval = "approval-1" }, {|{"kind":"hitl","approval":"approval-1"}|}
   ; Ask { ask = "ask-1" }, {|{"kind":"ask","ask":"ask-1"}|}
   ; ( Completion_rejected

@@ -60,6 +60,8 @@ function storedFor(json: unknown): string | null {
 export async function addKey(to: Send, csrfToken: string, integrationId: string, key: string): Promise<Sent> {
   const response = await deliver(to, addPath, {
     method: 'POST',
+    // A redirect would send the body, with the key, again to wherever it leads.
+    redirect: 'error',
     headers: { accept: 'application/json', 'content-type': 'application/json', [csrfHeader]: csrfToken },
     body: JSON.stringify({ integration_id: integrationId, key }),
   })

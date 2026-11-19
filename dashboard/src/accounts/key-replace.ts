@@ -65,10 +65,12 @@ function replacedFor(json: unknown, accountId: string): boolean | null {
 }
 
 /** Sends `key` as the key of the account `accountId`. The key is in the
-    body of this one request and nowhere else. */
+    body of this one request and nowhere else: a redirect is not followed,
+    for it would send the body again to wherever it leads. */
 export async function replaceKey(to: Send, csrfToken: string, accountId: string, key: string): Promise<Asked> {
   const response = await deliver(to, replacePath(accountId), {
     method: 'PUT',
+    redirect: 'error',
     headers: { accept: 'application/json', 'content-type': 'application/json', [csrfHeader]: csrfToken },
     body: JSON.stringify({ key }),
   })
@@ -106,7 +108,8 @@ export type Replacing =
   /** The server has no such account: another page removed it. The
       subscriptions were asked for again. */
   | { readonly kind: 'gone' }
-  /** The request found that the session had ended; the browser is on its way to the sign-in page. */
+  /** A request found that the session had ended; the browser is on its way
+      to the sign-in page. Every field that was open went with it. */
   | { readonly kind: 'leaving' }
 
 export interface ReplacementsDeps {
@@ -127,15 +130,13 @@ export interface ReplacementsModel {
   readonly open: (accountId: string) => void
   /** Takes the field off the card. While a key is on its way it does nothing. */
   readonly close: (accountId: string) => void
-  /** Sends `key` as the key of `accountId`, once: with no open field, or
-      once the session ended, it sends nothing and keeps the key. It ends
-      when the page knows what the field does with the key, and does not
-      wait for the subscriptions it has read again after an answer it has no
-      word of the server on: until then the key would stay in a field with a
-      button that sends it. */
+  /** Sends `key` as the key of `accountId`, once: with no open field it
+      sends nothing and keeps the key. It ends when the answer is read, and
+      does not wait for the subscriptions it asks for again: until they
+      came, a key the server took would stay in the field. */
   readonly replace: (accountId: string, key: string) => Promise<Kept>
-  /** Forgets every replacement, for another person is shown now. An answer
-      that comes later changes nothing. */
+  /** Forgets every replacement: another person is shown now, or the
+      browser leaves the page. An answer that comes later changes nothing. */
   readonly reset: () => void
 }
 
@@ -195,7 +196,7 @@ export function createReplacements({ send, leave, token, refresh }: Replacements
   const replace = async (accountId: string, key: string): Promise<Kept> => {
     const before = replacing.peek().get(accountId)
     const csrfToken = token()
-    if (left || before?.kind !== 'open' || csrfToken === null) return 'kept'
+    if (before?.kind !== 'open' || csrfToken === null) return 'kept'
     const mine = round
     const attempts = (before.failure?.attempts ?? 0) + 1
     set(accountId, { kind: 'sending', failure: before.failure })
@@ -205,19 +206,19 @@ export function createReplacements({ send, leave, token, refresh }: Replacements
     if (mine !== round || left) return 'dropped'
     switch (asked.kind) {
       case 'signed_out': {
-        // Every replacement that runs is left behind with the page.
+        // Every field goes with the page, with what was typed into it,
+        // and every replacement that runs is left behind.
         left = true
         const all = new Map(replacing.peek())
-        for (const [id, one] of all) if (one.kind === 'sending') all.set(id, { kind: 'leaving' })
+        for (const [id, one] of all) if (one.kind === 'open' || one.kind === 'sending') all.set(id, { kind: 'leaving' })
         replacing.value = all
         leave()
         return 'dropped'
       }
+      // No branch below waits for the subscriptions it asks for again.
       case 'replaced':
-        // The list is asked for again first, so the button of the account
-        // stays held until then.
-        await refresh()
-        if (mine === round) set(accountId, { kind: 'replaced', oldKeysRemoved: asked.oldKeysRemoved })
+        set(accountId, { kind: 'replaced', oldKeysRemoved: asked.oldKeysRemoved })
+        void refresh()
         return 'dropped'
       case 'unreachable':
       case 'unreadable':
@@ -227,12 +228,12 @@ export function createReplacements({ send, leave, token, refresh }: Replacements
         return 'dropped'
       case 'refused':
         if (asked.code === 'unknown_account') {
-          await refresh()
-          if (mine === round) set(accountId, { kind: 'gone' })
+          set(accountId, { kind: 'gone' })
+          void refresh()
           return 'dropped'
         }
         set(accountId, { kind: 'open', failure: { kind: 'refused', status: asked.status, code: asked.code, reason: asked.reason, attempts } })
-        if (changedTheAccount(asked.code)) await refresh()
+        if (changedTheAccount(asked.code)) void refresh()
         return 'kept'
     }
   }

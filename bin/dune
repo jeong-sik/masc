@@ -1487,7 +1487,7 @@
  (name masc_tui_memory_mark)
  (wrapped false)
  (modules masc_tui_memory_mark)
- (libraries masc_tui_types masc_tui_memory_world))
+ (libraries masc_tui_types masc_tui_memory_world masc_tui_value))
 
 (library
  (name masc_tui_config_mark)
@@ -1680,7 +1680,7 @@
  (wrapped false)
  (modules masc_tui_memory_world)
  (libraries masc masc_tui_fetched masc_tui_message_layout masc_tui_owed_read
-  masc_tui_words))
+  masc_tui_value masc_tui_words))
 
 (library
  (name masc_tui_lane_read_decision)

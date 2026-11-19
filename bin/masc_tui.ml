@@ -45044,12 +45044,7 @@ Use relative paths for resources already held in the package. -->
     ignore (drain_preference_completions state ~can_take:(fun () -> true))) run_loop
 
 let run_with_eio_context f =
-  (* The server's minor heap, for the same reason: every frame allocates the
-     rows it draws, and at the runtime's default size a held key meets a
-     collection every few frames. Measured on a live chat with PageUp/PageDown
-     held, the median key-to-output time fell about a quarter. A larger
-     OCAMLRUNPARAM setting is left alone. *)
-  Minor_heap.apply Minor_heap.Tuned;
+  Minor_heap.apply Masc_tui_domains.(minor_heap Ui);
   try
     Eio_main.run (fun env ->
         Eio.Switch.run (fun sw ->
@@ -45074,16 +45069,16 @@ let run_with_eio_context f =
                stop-the-world collection while the chat allocates scroll rows;
                the client has no Keeper actors to distribute over that pool. *)
             let cpu_pool=Domain_pool.create ~sw ~domain_count:1
-                (Minor_heap.domain_mgr Minor_heap.Tuned (Eio.Stdenv.domain_mgr env)) in
+                (Minor_heap.domain_mgr Masc_tui_domains.(minor_heap Worker)
+                   (Eio.Stdenv.domain_mgr env)) in
             Domain_pool_ref.set cpu_pool;
             Eio_context.set_env env;
             Eio_context.set_switch sw;
             Eio_context.set_net (Eio.Stdenv.net env);
             Eio_context.set_clock (Eio.Stdenv.clock env);
             Eio_context.set_mono_clock (Eio.Stdenv.mono_clock env);
-            (* A minor collection stops every domain, so the other domains
-               collect on the UI domain's heap size. *)
-            Masc_tui_http.start_io_domain ~sw ~env ~minor_heap:Minor_heap.Tuned;
+            Masc_tui_http.start_io_domain ~sw ~env
+              ~minor_heap:Masc_tui_domains.(minor_heap Io);
             f ()))
   with
   | Break -> ()

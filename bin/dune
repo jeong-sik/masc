@@ -2783,6 +2783,12 @@
  (libraries masc.masc_core masc.http_client eio eio.unix))
 
 (library
+ (name masc_tui_domains)
+ (wrapped false)
+ (modules masc_tui_domains)
+ (libraries masc.masc_core))
+
+(library
  (name masc_tui_response_decode)
  (wrapped false)
  (modules masc_tui_response_decode)
@@ -3080,6 +3086,7 @@
   masc_tui_loader
   masc_tui_memory_world
   masc_tui_io_domain
+  masc_tui_domains
   masc_tui_features
   masc_tui_account_login
   masc_tui_score
@@ -3551,8 +3558,8 @@
  (libraries
   masc.http_client
   masc.masc_eio_context
-  masc.masc_core
   masc_tui_io_domain
+  masc_tui_domains
   cstruct
   eio
   eio_main

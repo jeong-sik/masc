@@ -155,8 +155,54 @@ let test_archive_shapes () =
       check bool "a cut file is an error" true (refused "{\"tasks\":[");
       check bool "an empty tasks list reads" false (refused "{\"tasks\":[]}\n"))
 
+(* The Work read keeps the decoded backlog across refreshes and events, and
+   decodes it again when the file is another version, including a
+   replacement that keeps the size and the modification time. *)
+let test_backlog_decoded_again_only_when_its_version_moves () =
+  let dir = Filename.temp_dir "masc-task-backlog-" "" in
+  let masc = Filename.concat dir ".masc" in
+  let tasks = Filename.concat masc "tasks" in
+  Unix.mkdir masc 0o700;
+  Unix.mkdir tasks 0o700;
+  let backlog = Filename.concat tasks "backlog.json" in
+  let body title =
+    Yojson.Safe.to_string
+      (`Assoc
+        [ ("tasks",
+           `List [ Masc_domain.task_to_yojson
+                     (task ~id:"task-fixture" ~created_at:"2026-01-01T00:00:00Z" Todo
+                      |> fun task -> { task with title }) ]);
+          ("last_updated", `String "2026-01-01T00:00:00Z");
+          ("version", `Int 1) ])
+  in
+  Out_channel.with_open_bin backlog (fun channel ->
+    Out_channel.output_string channel (body "backlog-OLD"));
+  let stamp = Float.floor (Unix.gettimeofday ()) -. 1. in
+  Unix.utimes backlog stamp stamp;
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun path -> try Sys.remove path with Sys_error _ -> ())
+        [ backlog; Filename.concat masc "tasks-archive.json" ];
+      List.iter (fun path -> try Unix.rmdir path with Unix.Unix_error _ -> ())
+        [ tasks; masc; dir ])
+    (fun () ->
+      let domain_rows () =
+        let _, rows, _, _, _, _ = Masc_tui_loader.load_active_tasks dir in
+        rows
+      in
+      let first = domain_rows () in
+      check bool "an unchanged backlog is not decoded again" true (domain_rows () == first);
+      let before, after = replace backlog (body "backlog-NEW") ~keep_stat:true in
+      check bool "the replacement keeps size and modification time" true
+        (before.Unix.st_size = after.Unix.st_size
+         && Float.equal before.Unix.st_mtime after.Unix.st_mtime);
+      check (list string) "a same-stat replacement is decoded again" [ "backlog-NEW" ]
+        (List.map (fun (task : Masc_domain.task) -> task.title) (domain_rows ())))
+
 let () =
-  Eio_main.run (fun _env ->
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
     run "tui_task_archive"
       [ ( "flow",
           [ test_case "the archive's days, window and leftovers" `Quick
@@ -164,4 +210,6 @@ let () =
         ( "reader",
           [ test_case "kept until the file version moves" `Quick
               test_kept_until_the_file_version_moves;
-            test_case "archive shapes" `Quick test_archive_shapes ] ) ])
+            test_case "archive shapes" `Quick test_archive_shapes;
+            test_case "backlog decoded again only when its version moves" `Quick
+              test_backlog_decoded_again_only_when_its_version_moves ] ) ])

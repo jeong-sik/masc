@@ -249,7 +249,7 @@ let read_archive path : (archive_reading, string) result =
     Overview list, plus the full domain rows the detail view reads. Terminal
     tasks remain available in Planning rollups and the detail view but do not
     occupy the Overview list. *)
-let load_active_tasks ~fresh (base_path : string) :
+let load_active_tasks (base_path : string) :
     Masc_tui_overview_tasks.rows_reading
     * Masc_domain.task list
     * string option
@@ -257,7 +257,6 @@ let load_active_tasks ~fresh (base_path : string) :
     * Masc_tui_agenda.stalled Masc_tui_agenda.reading
     * task_goal_links_reading =
   let config = Workspace_core.default_config base_path in
-  if fresh then Workspace_backlog.invalidate_backlog_cache config;
   let path = Workspace_backlog.backlog_path config in
   match Workspace_backlog.read_backlog_observation_with_source_r config with
   | Error err ->
@@ -648,9 +647,9 @@ let with_local_read_mutex mutex read =
   | Ok reading -> reading
   | Error (exn, backtrace) -> Printexc.raise_with_backtrace exn backtrace
 
-let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
+let read_local_work_unlocked (base_path : string) : local_reading =
   let rows, tasks_domain, tasks_error, task_flow, operator_stalled, goal_task_links =
-    load_active_tasks ~fresh base_path
+    load_active_tasks base_path
   in
   let goals_to_confirm = load_goals_to_confirm base_path in
   { lr_rows = rows; lr_task_payloads = Masc_tui_task_payloads.observe tasks_domain
@@ -658,9 +657,11 @@ let read_local_work_unlocked ~fresh (base_path : string) : local_reading =
   ; lr_operator_stalled = operator_stalled; lr_goal_task_links = goal_task_links
   ; lr_goals_to_confirm = goals_to_confirm }
 
-let read_local_workspace ?(fresh = false) base_path =
+(* A refresh and a change event read the same way: each file is decoded
+   only when its version moved since the value kept for it. *)
+let read_local_workspace base_path =
   with_local_read_mutex local_work_read_mutex
-    (fun () -> read_local_work_unlocked ~fresh base_path)
+    (fun () -> read_local_work_unlocked base_path)
 
 (* Whether the named Keeper's metadata file is not the one the last local
    read decoded: written since, created, or removed. The server announces a

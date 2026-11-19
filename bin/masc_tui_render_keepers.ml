@@ -410,26 +410,33 @@ let keeper_detail_cell ~ko ?now ~width ~failure_context row =
         ^ fit_width tail (width - sentence_cells)
         ^ Ansi.reset
 
-let keeper_column_header (columns : Render_schedule.keeper_columns) =
+(* The list view's header words, in the screen language (RFC
+   tui-one-screen-grammar 7.1). Each Korean word fits the cells its English
+   word measures the column by. *)
+let keeper_flags_word ~ko = if ko then "모드 S" else Render_schedule.keeper_flags_header
+let keeper_age_word ~ko = if ko then "경과" else Masc_tui_keeper_mark.age_header
+
+let keeper_column_header ~ko (columns : Render_schedule.keeper_columns) =
+  let say korean english = if ko then korean else english in
   String.concat ""
     [ String.make Render_schedule.keeper_marker_width ' '
-    ; Message_layout.fit_width "KEEPER" columns.kcol_name
+    ; Message_layout.fit_width (say "키퍼" "KEEPER") columns.kcol_name
     ; " "
-    ; Message_layout.fit_width Masc_tui_keeper_mark.now_header
+    ; Message_layout.fit_width (say "현재" Masc_tui_keeper_mark.now_header)
         Render_schedule.keeper_status_width
     ; (if columns.kcol_show_flags then
          " "
-         ^ Message_layout.fit_width Render_schedule.keeper_flags_header
+         ^ Message_layout.fit_width (keeper_flags_word ~ko)
              Render_schedule.keeper_flags_width
        else "")
     ; " "
-      ^ Message_layout.pad_left Masc_tui_keeper_mark.age_header
+      ^ Message_layout.pad_left (keeper_age_word ~ko)
           Render_schedule.keeper_last_turn_width
     ; (if columns.kcol_show_runtime then
-         " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
+         " " ^ fit_width (say "단계 / 런타임" "LIFECYCLE / RUNTIME") columns.kcol_runtime
        else "")
     ; (if columns.kcol_show_detail then
-         " " ^ Message_layout.fit_width "DETAIL" columns.kcol_task
+         " " ^ Message_layout.fit_width (say "내용" "DETAIL") columns.kcol_task
        else "")
     ]
 
@@ -1823,10 +1830,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
     match parts with [] -> None | _ -> Some (join parts)
   in
   let meta_row =
-    dim (Render_schedule.keeper_flags_header ^ " ")
+    dim (keeper_flags_word ~ko ^ " ")
     ^ keeper_flag_cell runtime
     ^ dim
-        (Printf.sprintf "   %s %s   %s" Masc_tui_keeper_mark.age_header age
+        (Printf.sprintf "   %s %s   %s" (keeper_age_word ~ko) age
            (keeper_runtime_label runtime))
   in
   let now_entries =
@@ -2988,7 +2995,8 @@ let render_keeper_axes (state : state) =
        box_line buf cols (Masc_tui_keeper_wall.fleet ~ko:(state.ui_language = Lang_ko)
          ~cols:inner ~now:now_unix (List.map keeper_row_runtime model_rows))
    | None, Axis_row.List_columns ->
-       box_line_styled buf cols ~style:(Theme.recede ()) (keeper_column_header columns)
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (keeper_column_header ~ko:(state.ui_language = Lang_ko) columns)
    | None, Axis_row.Grid grid_columns -> box_line buf cols (grid_header state grid grid_columns));
 
   (match keepers_error with

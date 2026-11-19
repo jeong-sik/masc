@@ -283,6 +283,22 @@ let add_routes ~sw ~clock router =
            request
            reqd
        | None ->
+       match Server_dashboard_http_keeper_memory_act.route (Http.Request.path request) with
+       | Some keeper_name ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_keeper_memory_act.permission
+           (fun state actor req reqd ->
+             Http.Request.read_body_async reqd (fun body_str ->
+               Server_dashboard_http_keeper_memory_act.handle_post
+                 state
+                 ~actor
+                 req
+                 reqd
+                 keeper_name
+                 body_str))
+           request
+           reqd
+       | None ->
        match Keeper_event_queue_operator.route (Http.Request.path request) with
        | Some keeper_name ->
          with_token_permission_auth

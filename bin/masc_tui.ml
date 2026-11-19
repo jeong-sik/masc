@@ -8969,10 +8969,17 @@ let follow_tools_selection (state : state) =
   if state.view = Tools then
     Option.iter (follow_tools_list state) (Masc_tui_list_moves.tools_list state)
 
-(* Where f leaves the page it opens: the top, where the renderer draws the
-   chosen Composition's performance card, above the Skill list. When the
-   renderer reports the card's rows, this is the one place that reads them. *)
-let tools_performance_card_top (_ : state) = 0
+(* Where f leaves the page it opens: the chosen Composition's performance
+   card at the top of the window. The renderer draws it under the Skill list
+   and says where ([card]); the card grows downward as the measurements
+   arrive, so its first row stays put. With no card drawn, the selected
+   Skill's own rows take its place. *)
+let tools_performance_card_top (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let display = Masc_tui_render_tools.tools_display ~cols ~terminal_rows state in
+  match display.card, display.cursor with
+  | Some { first_row; _ }, (Some _ | None) | None, Some { first_row; _ } -> first_row
+  | None, None -> 0
 
 let list_moves (state : state) =
   Masc_tui_list_moves.moves state ~rows:(fun () -> row_list state)

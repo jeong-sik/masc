@@ -182,8 +182,8 @@ let render_runtime_params (state : state) =
      end
      else if Option.is_none state.runtime_params
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터 미확인 · 워크스페이스 접근을 확인하고 새로고침하세요"
-         ~en:"  Parameters unread · confirm workspace access and refresh" ^ Ansi.reset);
+       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터 미조회 · 워크스페이스 접근을 확인하고 새로고침하세요"
+         ~en:"  Parameters not read · confirm workspace access and refresh" ^ Ansi.reset);
        for _ = 2 to list_height do box_empty buf cols done
      end
      else if rows = []
@@ -889,7 +889,7 @@ let preset_save_receipt_rows ~ko (receipt : preset_save_receipt) =
     [P.failure (marked Masc_tui_value.Mark.Failed (text "인증 거절 · 재시도 미전송 · " "Authentication refused · retry not sent · ") ^ name);
      reason detail]
   | Error (Preset_save_unconfirmed detail) ->
-    [P.caution (marked Masc_tui_value.Mark.Caution (text "프리셋 저장 결과 미확인 · " "Preset save unconfirmed · ") ^ name);
+    [P.caution (marked Masc_tui_value.Mark.Caution (text "프리셋 저장 결과 보고 안 됨 · " "Preset save result not reported · ") ^ name);
      P.caution (text "  다시 저장하기 전 내용을 확인하세요 · 같은 이름은 덮어씁니다"
        "  Check contents before saving again · the same name is overwritten");
      P.caution (text "  목록에 이름이 있어도 이번 저장의 성공을 뜻하지 않습니다"
@@ -936,7 +936,7 @@ let preset_confirmation_rows (state : state) ~cols =
            ~en:"  After reviewing, Enter:continue  Esc:cancel")]
     | Some (Save_armed name) ->
       [P.caution (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
-         ^ ui_text state ~ko:"이전 저장 결과 미확인 · " ~en:"Earlier save unconfirmed · "
+         ^ ui_text state ~ko:"이전 저장 결과 보고 안 됨 · " ~en:"Earlier save result not reported · "
          ^ Terminal_text.single_line name);
        P.caution (ui_text state ~ko:"  이전 저장은 성공했을 수 있습니다" ~en:"  The earlier save may have succeeded");
        P.caution (ui_text state ~ko:"  재저장하면 현재 설정으로 같은 이름을 덮어씁니다"
@@ -1802,7 +1802,7 @@ let config_identity_rows ~cols (state : state) =
          the last confirmed identity and the configuration below it. The
          reason is cut in the middle so its start and its end stay readable. *)
       let max_cells = max 1 (width - 2) in
-      let lead = ui_text state ~ko:"(서버 식별 미확인: " ~en:"(server identity unconfirmed: " in
+      let lead = ui_text state ~ko:"(서버 식별 조회 실패: " ~en:"(server identity read failed: " in
       let trail = ui_text state ~ko:" · 마지막 확인은 아래)" ~en:"; last confirmed below)" in
       let reason = Terminal_text.single_line reason in
       let room =
@@ -2318,13 +2318,19 @@ let render_voice (state : state) =
        voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset));
   voice_section
     (ui_text state ~ko:"입력 장치와 설정 출처" ~en:"Input device and config source");
+  let device_missing =
+    match state.voice_setup_error, state.voice_setup with
+    | Some _, (Some _ | None) -> ui_text state ~ko:"조회 실패" ~en:"read failed"
+    | None, None -> ui_text state ~ko:"미조회" ~en:"not read"
+    | None, Some _ -> ui_text state ~ko:"보고 안 됨" ~en:"not reported"
+  in
   field (ui_text state ~ko:"장치" ~en:"device")
-    (Option.value state.voice_input_device ~default:(ui_text state ~ko:"미확인" ~en:"unknown"));
+    (Option.value state.voice_input_device ~default:device_missing);
   voice_body_line buf cols "";
   let source =
     match state.voice_setup_error, state.voice_setup with
     | Some _, (Some _ | None) -> `Read_failed
-    | None, None -> `Unobserved
+    | None, None -> `Unread
     | None, Some json ->
         (match member [ "source" ] json with
          | Some `Null -> `Absent
@@ -2335,9 +2341,9 @@ let render_voice (state : state) =
                   (match List.assoc_opt "path" fields with
                    | Some (`String path) when not (String.equal path "") ->
                        `Standalone_json (Terminal_text.single_line path)
-                   | Some _ | None -> `Unobserved)
-              | Some _ | None -> `Unobserved)
-         | Some _ | None -> `Unobserved)
+                   | Some _ | None -> `Unreported)
+              | Some _ | None -> `Unreported)
+         | Some _ | None -> `Unreported)
   in
   let source_line =
     match source with
@@ -2345,9 +2351,9 @@ let render_voice (state : state) =
     | `Standalone_json path -> path
     | `Absent -> ui_text state ~ko:"서버에 적용된 음성 설정 없음"
         ~en:"No active voice configuration on the server"
-    | `Read_failed -> ui_text state ~ko:"확인하지 못함 · 조회 실패"
-        ~en:"Unconfirmed · read failed"
-    | `Unobserved -> ui_text state ~ko:"미확인" ~en:"Unknown"
+    | `Read_failed -> ui_text state ~ko:"조회 실패" ~en:"Read failed"
+    | `Unread -> ui_text state ~ko:"미조회" ~en:"Not read"
+    | `Unreported -> ui_text state ~ko:"보고 안 됨" ~en:"Not reported"
   in
   voice_body_line buf cols
     (Printf.sprintf "  %s%s: %s%s" Ansi.dim

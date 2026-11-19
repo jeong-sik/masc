@@ -13,7 +13,7 @@ module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 
 let review_label state = function
-  | Review_unobserved -> ui_text state ~ko:"미관측" ~en:"not observed"
+  | Review_unobserved -> ui_text state ~ko:"보고 안 됨" ~en:"not reported"
   | Review_running _ -> ui_text state ~ko:"검증 중" ~en:"reviewing"
   | Review_waiting_original _ -> ui_text state ~ko:"원 실행 확인" ~en:"checking original"
   | Review_stopped {cause=Review_original_repair;_} ->
@@ -72,8 +72,8 @@ let reading_notice_lines state ~width ~inflight ~error =
         let prefix = if refreshing then
             ui_text state ~ko:"재조회 중 · 이전 자료 · 마지막 오류: "
               ~en:"Refreshing · previous reading · last error: "
-          else ui_text state ~ko:"이전 자료 · 현재 상태 미확인: "
-              ~en:"Previous reading · current state unconfirmed: " in
+          else ui_text state ~ko:"이전 관측 · 조회 실패: "
+              ~en:"Previous reading · read failed: " in
         Some (Theme.warn (), prefix ^ detail) in
   match notice with
   | None -> []
@@ -93,7 +93,7 @@ let review_detail ~ko review =
   let text korean english = if ko then korean else english in
   match review with
   | Review_unobserved ->
-    text "자동 검증 실행 기록 미관측" "No automatic review run observed yet."
+    text "자동 검증 실행 보고 안 됨" "No automatic review run reported yet."
   | Review_running actor ->
     text "자동 검증 증거 확인 중: " "Automatic reviewer checking evidence: " ^ actor
   | Review_waiting_original {detail;actor} ->
@@ -439,7 +439,7 @@ let verification_evidence_index state request ~width observation =
             | Masc_tui_evidence_file.Not_started -> None
             | Writing path ->
               Some (Theme.warn (),
-                say "  저장 시도 경로(완료 미확인): " "  Saving to (completion unconfirmed): " ^ path)
+                say "  저장 중(완료 보고 안 됨): " "  Saving to (completion not reported): " ^ path)
             | Saved path -> Some (Ansi.reset, say "  이 기기에 저장한 파일: " "  Saved on this device: " ^ path)
             | Aborted path ->
               Some (Theme.warn (), say "  저장하지 못한 목적지: " "  Could not save to: " ^ path))
@@ -787,9 +787,9 @@ let render_harness_list (state : state) =
     (* The producer also emits zero for an absent/unreadable timestamp. The
        current wire cannot distinguish that from the Unix epoch. *)
     | newest :: _, _ when Float.equal newest.hv_at 0.0 ->
-        ui_text state ~ko:"시각 미관측" ~en:"time not observed"
+        ui_text state ~ko:"시각 보고 안 됨" ~en:"time not reported"
     | newest :: _, _ -> Masc_domain.iso8601_of_unix_seconds newest.hv_at
-    | [], None -> ui_text state ~ko:"미관측" ~en:"not observed"
+    | [], None -> ui_text state ~ko:"미조회" ~en:"not read"
     | [], Some _ -> ui_text state ~ko:"이 페이지에 판정 없음" ~en:"none on this page"
   in
   box_line_styled buf cols ~style:(Theme.recede ())

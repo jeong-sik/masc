@@ -76,6 +76,22 @@ type deadline_reason =
   | Paste_quiet  (** A paste without its end marker has been quiet long enough to recover. *)
   | Drain_budget_spent  (** The drain left work when its pass budget ran out. *)
   | Machine_view_cadence  (** A game is on screen (RFC tui-idle-wait §2.3). *)
+  | Wall_clock_recheck
+      (** A wall-clock instant is noted further away than
+          {!wall_clock_recheck_s}: the wall clock is read again (§6). *)
+
+(** Which clock a reason's instants are read on. A wall-clock instant can
+    move against the loop's own clock: the machine sleeps, or the clock is
+    set. *)
+type clock = Monotonic | Wall
+
+val clock_of : deadline_reason -> clock
+(** The clock column of RFC tui-idle-wait §2.2. *)
+
+val wall_clock_recheck_s : float
+(** How far ahead a wall-clock instant is noted at most, so a machine that
+    slept or a clock that was set is seen this long after at the latest
+    (RFC tui-idle-wait §6). *)
 
 type deadline = { reason : deadline_reason; at_ns : int64 }
 (** [at_ns] is on [Mtime_clock.elapsed_ns]. *)
@@ -89,10 +105,11 @@ val in_seconds : deadline_reason -> now_ns:int64 -> float -> deadline
     its end. *)
 
 val reached : deadline_reason -> now:float -> at:float -> bool
-(** [now >= at] for two instants on one clock, whichever the caller keeps.
-    While it answers [false], [at] is noted for this pass ({!Pass}), so the
-    loop wakes when the answer changes. A non-finite instant is never
-    reached and is not noted. *)
+(** [now >= at] for two instants on the reason's clock ({!clock_of}). While
+    it answers [false], [at] is noted for this pass ({!Pass}), so the loop
+    wakes when the answer changes. A wall-clock [at] more than
+    {!wall_clock_recheck_s} away is noted as [Wall_clock_recheck] that far
+    away instead. A non-finite instant is never reached and is not noted. *)
 
 val reached_ns : deadline_reason -> now_ns:int64 -> at_ns:int64 -> bool
 (** {!reached} on [Mtime_clock.elapsed_ns]. *)

@@ -53,15 +53,22 @@ let reason_number : Wake.deadline_reason -> int = function
   | Paste_quiet -> 15
   | Drain_budget_spent -> 16
   | Machine_view_cadence -> 17
+  | Wall_clock_recheck -> 18
 
 let all_reasons : Wake.deadline_reason list =
   [ Frame_slot; After_frame; Time_text; Owed_read_retry; Refresh_retry;
     Roster_row_scheduled; Engine_sample; Play_room_read; Tool_series_reread;
     Provider_history_day; Harness_stale; Identity_attempt_deadline;
     Identity_login_expiry; Quit_notice_expiry; Emblem_step; Paste_quiet;
-    Drain_budget_spent; Machine_view_cadence ]
+    Drain_budget_spent; Machine_view_cadence; Wall_clock_recheck ]
 
-let reason_count = 18
+let reason_count = 19
+
+(* The clock column of RFC tui-idle-wait §2.2. Moving a reason to the other
+   clock changes this list. *)
+let wall_reasons : Wake.deadline_reason list =
+  [ Time_text; Provider_history_day; Harness_stale; Identity_attempt_deadline;
+    Identity_login_expiry; Quit_notice_expiry ]
 let ns_per_s = 1_000_000_000L
 let seconds n = Int64.mul (Int64.of_int n) ns_per_s
 let taken bell = List.map source_number (Wake.take bell)
@@ -178,6 +185,24 @@ let test_reached_notes_only_while_not_yet () =
   Wake.Pass.begin_pass ();
   check bool "ns: reached" true (Wake.reached_ns Wake.Emblem_step ~now_ns:(seconds 3) ~at_ns:(seconds 3));
   check_nothing_noted "ns: a reached moment"
+
+(* The loop's own clock and the kernel's wait stop while the machine sleeps,
+   so a wall-clock instant far ahead is read again soon instead (§6). *)
+let test_a_far_wall_clock_instant_is_read_again_soon () =
+  List.iter (fun reason ->
+      let wall = List.mem reason wall_reasons in
+      check bool "the reason's clock" wall
+        (match Wake.clock_of reason with Wall -> true | Monotonic -> false);
+      if wall then begin
+        check_noted_in "a wall-clock instant an hour away" Wall_clock_recheck
+          ~remaining_s:Wake.wall_clock_recheck_s (fun () -> Wake.reached reason ~now:0. ~at:3600.);
+        check_noted_in "a wall-clock instant within the recheck" reason ~remaining_s:2.
+          (fun () -> Wake.reached reason ~now:0. ~at:2.)
+      end
+      else
+        check_noted_in "a monotonic instant an hour away" reason ~remaining_s:3600.
+          (fun () -> Wake.reached reason ~now:0. ~at:3600.))
+    all_reasons
 
 let test_pass_keeps_the_earliest_and_begins_empty () =
   Wake.Pass.begin_pass ();
@@ -474,6 +499,8 @@ let () =
        [ test_case "earliest picks each reason" `Quick test_earliest_picks_each_reason;
          test_case "in_seconds bounds" `Quick test_in_seconds_bounds;
          test_case "reached notes only while not yet" `Quick test_reached_notes_only_while_not_yet;
+         test_case "a far wall-clock instant is read again soon" `Quick
+           test_a_far_wall_clock_instant_is_read_again_soon;
          test_case "pass keeps the earliest" `Quick test_pass_keeps_the_earliest_and_begins_empty;
          test_case "next deadline" `Quick test_next_deadline;
          test_case "until" `Quick test_until ]);

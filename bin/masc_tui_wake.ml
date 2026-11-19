@@ -104,6 +104,33 @@ type deadline_reason =
   | Paste_quiet
   | Drain_budget_spent
   | Machine_view_cadence
+  | Wall_clock_recheck
+
+type clock = Monotonic | Wall
+
+(* The clock column of RFC tui-idle-wait §2.2: which clock the decision
+   behind each reason reads its instants on. *)
+let clock_of = function
+  | Time_text | Provider_history_day | Harness_stale | Identity_attempt_deadline
+  | Identity_login_expiry | Quit_notice_expiry ->
+      Wall
+  | Frame_slot | After_frame | Owed_read_retry | Refresh_retry | Roster_row_scheduled
+  | Engine_sample | Play_room_read | Tool_series_reread | Emblem_step | Paste_quiet
+  | Drain_budget_spent | Machine_view_cadence | Wall_clock_recheck ->
+      Monotonic
+
+(* RFC tui-idle-wait §6. The loop's wait runs on Mtime, which on macOS is
+   mach_absolute_time, and on the kernel's poll timeout: neither counts the
+   time a machine sleeps, and a wall-clock step moves neither. A wall-clock
+   instant noted as "so long from now" is therefore late by however long the
+   machine slept, or the clock stepped, unless something else wakes the
+   loop. No notice of a wake or a clock change reaches Eio or the OCaml
+   runtime, so the bound is a re-read: a wall-clock instant further away than
+   this is noted this far away instead, and the next pass reads the wall
+   clock again. Five seconds keeps a wrong clock or age on screen at most
+   that long after a wake, for at most one pass in five seconds, and only
+   while such an instant is noted. *)
+let wall_clock_recheck_s = 5.0
 
 type deadline = { reason : deadline_reason; at_ns : int64 }
 
@@ -151,7 +178,11 @@ let reached reason ~now ~at =
   if not (Float.is_finite now && Float.is_finite at) then false
   else if now >= at then true
   else begin
-    Pass.note (in_seconds reason ~now_ns:(Mtime_clock.elapsed_ns ()) (at -. now));
+    let now_ns = Mtime_clock.elapsed_ns () and remaining = at -. now in
+    Pass.note (match clock_of reason with
+      | Wall when remaining > wall_clock_recheck_s ->
+          in_seconds Wall_clock_recheck ~now_ns wall_clock_recheck_s
+      | Wall | Monotonic -> in_seconds reason ~now_ns remaining);
     false
   end
 

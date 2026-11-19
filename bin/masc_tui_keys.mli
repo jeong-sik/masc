@@ -287,6 +287,7 @@ val footer_hints_approvals :
     [Enter] and [Esc] are its save and cancel and are named. *)
 
 val approval_answer_hint : string
+val approval_answer_hint_for : lang:Masc_tui_types.ui_language -> string
 (** The footer's words for the key that opens the selected question. The
     Questions heading prints this one string, so the two cannot name the key
     differently. *)

@@ -46,12 +46,13 @@ let detail_text = function
       let metadata = Catalog.metadata resource in
       Option.value metadata.description ~default:metadata.uri
 
-let meta_text = function
+let meta_text ~ko = function
   | Catalog.Report report ->
-      Printf.sprintf "%s · %s · %d bytes" report.revision.author
-        report.revision.created_at report.revision.body.bytes
+      Printf.sprintf (if ko then "%s · %s · %d바이트" else "%s · %s · %d bytes")
+        report.revision.author report.revision.created_at report.revision.body.bytes
   | Mcp _ as resource ->
-      Option.value (Catalog.metadata resource).mime_type ~default:"type unknown"
+      Option.value (Catalog.metadata resource).mime_type
+        ~default:(if ko then "유형 미상" else "type unknown")
 
 (* One resource is one row: its type, its name, then, for a published report,
    the revision check and the "today" marker, then what it says about itself
@@ -126,7 +127,7 @@ let list_layout ~ko resources ~today ~inner_width =
   let name_cells = min name_cap_cells
     (widest_cells ~name:(list_head ~ko Col_name) (List.map name_text resources)) in
   let meta_cells = min meta_cap_cells
-    (widest_cells ~name:(list_head ~ko Col_meta) (List.map meta_text resources)) in
+    (widest_cells ~name:(list_head ~ko Col_meta) (List.map (meta_text ~ko) resources)) in
   let check_cells = max check_cells (head_cells Col_check) in
   let day_cells =
     max (Masc_tui_message_layout.display_width (day_marker ~ko)) (head_cells Col_day) in
@@ -365,12 +366,12 @@ let render_resources (state : state) =
             | Col_name -> name_text resource, Ansi.bold
             | Col_check ->
                 (match check with
-                 | Some status -> Masc_tui_artifact_checks.label status, check_style status
+                 | Some status -> Masc_tui_artifact_checks.label ~ko status, check_style status
                  | None -> "", "")
             | Col_day ->
                 (if Catalog.on_day today resource then day_marker ~ko else ""), Theme.recede ()
             | Col_detail -> detail_text resource, Theme.recede ()
-            | Col_meta -> meta_text resource, Theme.recede () in
+            | Col_meta -> meta_text ~ko resource, Theme.recede () in
           let line =
             (if selected then selected_marker else unselected_marker)
             ^ Masc_tui_table.row (list_cells ~ko table (Some read)) in
@@ -393,12 +394,15 @@ let render_resources (state : state) =
       | Some resource ->
           let share_badge =
             match resource, Option.bind reading (fun r -> r.Masc_tui_resource_reading.shared) with
-            | Catalog.Report _, Some true -> " · [마지막 확인: 외부 공유]"
-            | Catalog.Report _, Some false -> " · [마지막 확인: 비공개]"
+            | Catalog.Report _, Some true ->
+                ui_text state ~ko:" · [마지막 확인: 외부 공유]" ~en:" · [last observed: shared]"
+            | Catalog.Report _, Some false ->
+                ui_text state ~ko:" · [마지막 확인: 비공개]" ~en:" · [last observed: private]"
             | Catalog.Report _, None | Catalog.Mcp _, _ -> ""
           in
-          "Resource · " ^ Terminal_text.single_line (Catalog.display_name resource) ^ share_badge
-      | None -> "Resource detail"
+          ui_text state ~ko:"리소스 · " ~en:"Resource · "
+          ^ Terminal_text.single_line (Catalog.display_name resource) ^ share_badge
+      | None -> ui_text state ~ko:"리소스 상세" ~en:"Resource detail"
     in
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols

@@ -491,6 +491,10 @@ let approval_answer =
   b ~role:Acts ~ko:"질문에 답하기" Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
 let approval_answer_hint = key_hint approval_answer
+let approval_answer_hint_for ~lang =
+  match lang with
+  | Masc_tui_types.Lang_ko -> key_hint ~label:approval_answer.label_ko approval_answer
+  | Masc_tui_types.Lang_en -> approval_answer_hint
 let approval_installation_results =
   b ~role:Acts ~ko:"설치 결과" Act "g" "installation Results"
     ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"

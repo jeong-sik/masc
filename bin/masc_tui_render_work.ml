@@ -2561,7 +2561,8 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Schedules"
+      write_list_sidebar left_buf ~rows ~cols:left_cols
+        ~title:(ui_text state ~ko:"예약" ~en:"Schedules")
         ~focused:false
         ~holding:
           (Option.bind state.schedules (fun snapshot ->

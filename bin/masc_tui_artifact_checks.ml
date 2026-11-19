@@ -114,33 +114,40 @@ let next_unchecked ~reports_complete ~entries ~cursor inventory =
    a record that does not answer for this exact body. A kept-back read was
    never sent, so it is not read. The column is headed CHECK, so the cell
    does not say "check" again. *)
-let gap_word = function
-  | Gap.Unread -> "not read"
-  | Gap.Read_failed -> "read failed"
-  | Gap.Unreported -> "not reported"
+let gap_word ~ko = function
+  | Gap.Unread -> if ko then "미조회" else "not read"
+  | Gap.Read_failed -> if ko then "조회 실패" else "read failed"
+  | Gap.Unreported -> if ko then "보고 안 됨" else "not reported"
 
-let gap_label gap = Gap.glyph gap ^ " " ^ gap_word gap
+let gap_label ~ko gap = Gap.glyph gap ^ " " ^ gap_word ~ko gap
 
-let unchecked_label = "○ unchecked"
+let unchecked_label ~ko = if ko then "○ 미확인" else "○ unchecked"
 
 (* The settled status mark (RFC tui-one-screen-grammar 7.2); [✓] is not one.
    Unchecked keeps the waiting mark it already wore. *)
-let checked_label = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled ^ " checked"
+let checked_label ~ko =
+  Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  ^ (if ko then " 확인됨" else " checked")
 
-let label = function
-  | Unknown (gap, _) -> gap_label gap
-  | Kept_back _ -> gap_label Gap.Unread
-  | Known None | Known (Some {state=Check.Unchecked;_}) -> unchecked_label
-  | Known (Some {state=Check.Checked;_}) -> checked_label
+let label ?(ko = false) = function
+  | Unknown (gap, _) -> gap_label ~ko gap
+  | Kept_back _ -> gap_label ~ko Gap.Unread
+  | Known None | Known (Some {state=Check.Unchecked;_}) -> unchecked_label ~ko
+  | Known (Some {state=Check.Checked;_}) -> checked_label ~ko
 
 let widest_label_cells =
   List.fold_left (fun widest text ->
     max widest (Masc_tui_message_layout.display_width text)) 0
-    [ gap_label Gap.Unread; gap_label Gap.Read_failed; gap_label Gap.Unreported
-    ; unchecked_label; checked_label ]
+    (List.concat_map (fun ko ->
+       [ gap_label ~ko Gap.Unread; gap_label ~ko Gap.Read_failed; gap_label ~ko Gap.Unreported
+       ; unchecked_label ~ko; checked_label ~ko ])
+       [ false; true ])
 
-let description status = match status with
-  | Unknown (gap, detail) -> "Confirmation " ^ gap_word gap ^ ": " ^ detail
+let description ?(ko = false) status = match status with
+  | Unknown (gap, detail) ->
+      (if ko then "확인 " else "Confirmation ") ^ gap_word ~ko gap ^ ": " ^ detail
   | Kept_back notice -> notice
-  | Known None -> "No confirmation for this exact report revision."
-  | Known (Some check) -> label status ^ " · " ^ check.changed_by ^ " · " ^ check.changed_at
+  | Known None ->
+      if ko then "이 보고서 리비전에 대한 확인 기록이 없습니다."
+      else "No confirmation for this exact report revision."
+  | Known (Some check) -> label ~ko status ^ " · " ^ check.changed_by ^ " · " ^ check.changed_at

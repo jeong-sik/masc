@@ -833,7 +833,9 @@ let render_lanes_overview (state : state) =
         Theme.recede () ^ ui_text state ~ko:"기능 목록 미조회 · r:조회" ~en:"Inventory not read · r:read" ^ Ansi.reset
     | None -> ""
     | Some (Masc_tui_lane_inventory.Category_header category) ->
-        Theme.info () ^ Masc_tui_lane_inventory.category_label category ^ Ansi.reset
+        Theme.info ()
+        ^ Masc_tui_lane_inventory.category_label ~ko:(state.ui_language = Lang_ko) category
+        ^ Ansi.reset
     | Some (Masc_tui_lane_inventory.Lane_row row) ->
         let observed = standing row in
         let label =

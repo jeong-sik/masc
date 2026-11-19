@@ -54,56 +54,59 @@ let approval_source_notices state ~(reading : Masc_tui_approvals_model.approvals
    no second screen. This is that screen. *)
 let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~cols (row : Masc_tui_approvals_model.approval_row) buf =
   let width = max 0 (framed_inner_width cols - 2) in
+  let say ko en = ui_text state ~ko ~en in
   (* [Approval_detail.of_fields] makes every value terminal-safe. *)
   let fields, gate_fields, identifiers =
     match row with
     | Masc_tui_approvals_model.Keeper_tool_row held ->
-      ([ "question", held.Tui_decode.kta_question
-      ; "because", Option.value ~default:"(not provided)" held.Tui_decode.kta_because
-      ; "keeper", held.Tui_decode.kta_keeper
-      ; "tool", held.Tui_decode.kta_tool
-      ; "args", held.Tui_decode.kta_args
-      ], None, ["call", held.Tui_decode.kta_tool_call_id])
+      ([ say "질문" "question", held.Tui_decode.kta_question
+      ; say "사유" "because",
+        Option.value ~default:(say "(미제공)" "(not provided)") held.Tui_decode.kta_because
+      ; say "키퍼" "keeper", held.Tui_decode.kta_keeper
+      ; say "도구" "tool", held.Tui_decode.kta_tool
+      ; say "인자" "args", held.Tui_decode.kta_args
+      ], None, [say "호출 ID" "call", held.Tui_decode.kta_tool_call_id])
     | Masc_tui_approvals_model.Gate_row pending ->
       let phase = fst (approval_gate_phase state pending.Tui_decode.gp_phase) in
       let blocked_fields =
         match pending.Tui_decode.gp_phase with
         | Gate_blocked ->
-          [ ( "reason"
+          [ ( say "사유" "reason"
             , Option.value
-                ~default:"(the server recorded no detail)"
+                ~default:(say "(서버에 기록된 상세 없음)" "(the server recorded no detail)")
                 pending.Tui_decode.gp_auto_judge_detail )
-          ; ( "next"
+          ; ( say "다음 조치" "next"
             , match pending.Tui_decode.gp_retry_request with
-              | Some _ -> "R:retry Auto Judge  y/n:decide now"
+              | Some _ -> say "R:자동 판정 재시도  y/n:지금 결정" "R:retry Auto Judge  y/n:decide now"
               | None ->
-                  "y/n:decide now (cannot replay this attempt)" )
+                  say "y/n:지금 결정 (이 시도는 재실행 불가)"
+                    "y/n:decide now (cannot replay this attempt)" )
           ]
         | Gate_human_required ->
           (* Auto Judge handed the row over with its reasons; the person
              deciding reads them here instead of guessing why. *)
           (match pending.Tui_decode.gp_judge_advice with
            | Some advice ->
-             ( "judge said", Terminal_text.single_line advice.rationale )
+             ( say "판정 의견" "judge said", Terminal_text.single_line advice.rationale )
              :: List.mapi
                   (fun index question ->
-                     ((if index = 0 then "asks" else ""), Terminal_text.single_line question))
+                     ((if index = 0 then say "확인 질문" "asks" else ""), Terminal_text.single_line question))
                   advice.key_questions
            | None -> [])
         | Gate_queued | Gate_judging -> []
       in
-      let fields = [ "tool", pending.Tui_decode.gp_display_tool
-      ; "keeper", pending.Tui_decode.gp_keeper
-      ; "state", phase
+      let fields = [ say "도구" "tool", pending.Tui_decode.gp_display_tool
+      ; say "키퍼" "keeper", pending.Tui_decode.gp_keeper
+      ; say "상태" "state", phase
       ]
       @ blocked_fields
       @ [
-        ( "operation", pending.Tui_decode.gp_operation )
-      ; ( "sandbox"
-        , Terminal_text.single_line_or ~default:"(not recorded)"
+        ( say "작업" "operation", pending.Tui_decode.gp_operation )
+      ; ( say "샌드박스" "sandbox"
+        , Terminal_text.single_line_or ~default:(say "(미기록)" "(not recorded)")
             pending.Tui_decode.gp_execution_sandbox )
-      ; ( "working directory"
-        , Terminal_text.single_line_or ~default:"(not recorded)"
+      ; ( say "작업 디렉터리" "working directory"
+        , Terminal_text.single_line_or ~default:(say "(미기록)" "(not recorded)")
             pending.Tui_decode.gp_execution_cwd )
       ]
       in
@@ -111,28 +114,28 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
          | Tui_decode.Rows (_ :: _ as input_fields) ->
            fields, Some input_fields
          | Tui_decode.Rows [] ->
-           fields @ [ "input", "(the stored input object is empty)" ], None
+           fields @ [ say "입력" "input", say "(저장된 입력 객체가 비어 있음)" "(the stored input object is empty)" ], None
          | Tui_decode.Flattened preview ->
-           fields @ [ ( "input (flattened preview, may be cut)"
+           fields @ [ ( say "입력 (평탄화 미리보기 · 일부 생략 가능)" "input (flattened preview, may be cut)"
              , Terminal_text.single_line_or
-                 ~default:"(the server recorded no input preview)" preview )
+                 ~default:(say "(서버에 기록된 입력 미리보기 없음)" "(the server recorded no input preview)") preview )
            ], None in
-      fields, input, ["approval", pending.Tui_decode.gp_id]
+      fields, input, [say "승인 ID" "approval", pending.Tui_decode.gp_id]
     | Masc_tui_approvals_model.Operator_row a ->
-      ([ "summary", a.Masc_tui_operator_projection.ap_summary
-      ; "actor", a.Masc_tui_operator_projection.ap_actor
-      ; "action", a.Masc_tui_operator_projection.ap_action_type
-      ; "target", a.Masc_tui_operator_projection.ap_target_type
-      ; "payload",
+      ([ say "요약" "summary", a.Masc_tui_operator_projection.ap_summary
+      ; say "주체" "actor", a.Masc_tui_operator_projection.ap_actor
+      ; say "동작" "action", a.Masc_tui_operator_projection.ap_action_type
+      ; say "대상" "target", a.Masc_tui_operator_projection.ap_target_type
+      ; say "페이로드" "payload",
         Masc_tui_operator_projection.approval_payload_document_for_terminal
           a.Masc_tui_operator_projection.ap_payload
       ], None,
-      [ "target id", Terminal_text.single_line_or ~default:"(not recorded)" a.ap_target_id
-      ; "created", Terminal_text.short_timestamp a.ap_created_at
-      ; "expires", (match Terminal_text.optional_single_line a.ap_expires_at with
+      [ say "대상 ID" "target id", Terminal_text.single_line_or ~default:(say "(미기록)" "(not recorded)") a.ap_target_id
+      ; say "생성 시각" "created", Terminal_text.short_timestamp a.ap_created_at
+      ; say "만료 시각" "expires", (match Terminal_text.optional_single_line a.ap_expires_at with
           | None -> Masc_tui_theme.Glyph.no_value
           | Some at -> Terminal_text.short_timestamp at)
-      ; "trace", a.ap_trace_id
+      ; say "추적 ID" "trace", a.ap_trace_id
       ])
   in
   let lines =
@@ -149,7 +152,7 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
     @ List.map (fun line -> Field_line line)
         (Approval_detail.of_fields ~width
           (approval_source_notices state ~reading:(Masc_tui_approvals_model.approvals_reading state)
-           |> List.map (fun (_, text) -> "read status", text)))
+           |> List.map (fun (_, text) -> say "조회 상태" "read status", text)))
   in
   let input_unreadable =
     List.exists
@@ -193,14 +196,14 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
     (zone_two_title ~cols state
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
        ~title:(fun ~cols:_ -> screen_title
-         (if input_unreadable then "!WIDEN Approval"
+         (if input_unreadable then say "!창 넓히기 필요 · 승인" "!WIDEN Approval"
           else match value_hint, key_has_bytes with
-            | Masc_tui_keys.No_value_reading, false -> " MASC Approval"
-            | No_value_reading, true -> "*N=bN bytes | Approval"
-            | Readable_values, false -> "v:bytes | top-level strings"
-            | Readable_values, true -> "v:bytes *N=bN | Approval"
-            | Byte_values, false -> "v:text | top-level string bytes"
-            | Byte_values, true -> "v:text *N=bN | top-level strings")));
+            | Masc_tui_keys.No_value_reading, false -> say " 승인 상세" " MASC Approval"
+            | No_value_reading, true -> say "*N=bN 바이트 | 승인" "*N=bN bytes | Approval"
+            | Readable_values, false -> say "v:바이트 | 최상위 문자열" "v:bytes | top-level strings"
+            | Readable_values, true -> say "v:바이트 *N=bN | 승인" "v:bytes *N=bN | Approval"
+            | Byte_values, false -> say "v:텍스트 | 최상위 문자열 바이트" "v:text | top-level string bytes"
+            | Byte_values, true -> say "v:텍스트 *N=bN | 최상위 문자열" "v:text *N=bN | top-level strings")));
   box_divider buf cols;
   let drawn =
     lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + content_height)
@@ -279,7 +282,8 @@ let render_approval_detail (state : state) (row : Masc_tui_approvals_model.appro
          an ask, and these rows are the confirmations waiting on an operator. *)
       (* The actor filter hides entries rather than paging past them, and
          the surface's own title already carries "hidden N". *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols ~title:"Approvals"
+      write_list_sidebar left_buf ~rows ~cols:left_cols
+        ~title:(ui_text state ~ko:"승인" ~en:"Approvals")
         ~holding:None
         ~focused:false
         ~labels:(List.map approval_sidebar_label (Masc_tui_approvals_model.approval_items state))
@@ -320,6 +324,8 @@ let ask_summary_line state ~cols ~now ~(row : Masc.Tui_decode_asks.ask_row) =
    Compact rendering and the immutable reader share the same receipt facts. *)
 let ask_answer_feedback_document (state : state) =
   let module Decode = Masc.Tui_decode_asks in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   Option.map (fun feedback ->
     let fields = ref [] in
     let emit heading style body =
@@ -328,106 +334,117 @@ let ask_answer_feedback_document (state : state) =
     let followup = Masc_tui_types.current_ask_followup state in
     let delivered ~already = function
       | Decode.Ask_wake_stored ->
-          (if already then "Existing answer retained · wake recorded"
-           else "Answer saved · wake recorded"), Theme.info (),
-          (match followup with None -> Some "Keeper activity shows whether work has resumed." | Some _ -> None)
+          (if already then say "기존 답변 유지 · 깨우기 기록됨" "Existing answer retained · wake recorded"
+           else say "답변 저장됨 · 깨우기 기록됨" "Answer saved · wake recorded"), Theme.info (),
+          (match followup with
+           | None -> Some (say "키퍼 활동 화면에서 작업 재개 여부를 확인할 수 있습니다."
+                             "Keeper activity shows whether work has resumed.")
+           | Some _ -> None)
       | Decode.Ask_wake_pending detail ->
-          (if already then "Existing answer retained · initial delivery pending"
-           else "Answer saved · initial delivery pending"), Theme.warn (), Some detail in
+          (if already then say "기존 답변 유지 · 초기 전달 대기 중" "Existing answer retained · initial delivery pending"
+           else say "답변 저장됨 · 초기 전달 대기 중" "Answer saved · initial delivery pending"), Theme.warn (), Some detail in
     let status, style, detail = match feedback.Ask_projection.af_receipt with
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_recorded delivery)) -> delivered ~already:false delivery
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_already_recorded { aar_delivery; _ })) ->
           delivered ~already:true aar_delivery
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_written_unconfirmed detail)) ->
-          "Winning answer unconfirmed · log written", Theme.warn (), Some detail
+          say "채택 답변 미확정 · 로그 기록됨" "Winning answer unconfirmed · log written", Theme.warn (), Some detail
       | Ok (Decode.Keeper_answer_receipt (Decode.Ask_answer_refused detail))
       | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_refused detail)) ->
-          "Answer refused", Theme.bad (), Some detail
+          say "답변 거부됨" "Answer refused", Theme.bad (), Some detail
       | Ok (Decode.Installation_answer_receipt Decode.Installation_answer_recorded) ->
-          "Answer saved · installation reads it on its next host request cycle", Theme.info (), None
+          say "답변 저장됨 · 설치가 다음 호스트 요청 주기에 읽습니다"
+            "Answer saved · installation reads it on its next host request cycle", Theme.info (), None
       | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_already_answered _)) ->
-          "An earlier answer stands", Theme.info (), None
+          say "이전 답변이 유지됩니다" "An earlier answer stands", Theme.info (), None
       | Ok (Decode.Installation_answer_receipt (Decode.Installation_answer_withdrawn _)) ->
-          "Installation withdrew the question", Theme.warn (), None
+          say "설치가 질문을 철회했습니다" "Installation withdrew the question", Theme.warn (), None
       | Error (Ask_projection.Answer_unconfirmed detail) ->
-          "Answer recording unconfirmed", Theme.warn (), Some detail
+          say "답변 기록 미확정" "Answer recording unconfirmed", Theme.warn (), Some detail
       (* Not sent: the kept-back notice alone, never an unconfirmed
          recording (RFC §2). *)
       | Error (Ask_projection.Answer_kept_back notice) -> notice, Theme.bad (), None in
-    emit "Recording" style status;
-    emit "Question" Ansi.dim
-      (Decode.ask_asker_label feedback.af_asker ^ "\nAsk ID: " ^ feedback.af_ask_id);
-    Option.iter (emit "Recorded answer label" Ansi.dim) feedback.af_submitted_label;
-    Option.iter (emit "Recording details" (Theme.warn ())) detail;
+    emit (say "기록 결과" "Recording") style status;
+    emit (say "질문" "Question") Ansi.dim
+      (Decode.ask_asker_label feedback.af_asker
+       ^ say "\n질문 ID: " "\nAsk ID: " ^ feedback.af_ask_id);
+    Option.iter (emit (say "기록된 답변 라벨" "Recorded answer label") Ansi.dim) feedback.af_submitted_label;
+    Option.iter (emit (say "기록 상세" "Recording details") (Theme.warn ())) detail;
     (match feedback.af_asker with
      | Decode.Ask_keeper _ ->
          let source = match feedback.af_source_turn_ref with
-           | None -> "Original asking turn: not recorded"
+           | None -> say "원본 질문 턴: 기록 없음" "Original asking turn: not recorded"
            | Some reference ->
-               "Original asking turn:\n" ^ Yojson.Safe.pretty_to_string (Ids.Turn_ref.to_yojson reference) in
-         emit "Original asking turn" Ansi.dim source
+               say "원본 질문 턴:\n" "Original asking turn:\n"
+               ^ Yojson.Safe.pretty_to_string (Ids.Turn_ref.to_yojson reference) in
+         emit (say "원본 질문 턴" "Original asking turn") Ansi.dim source
      | Decode.Ask_installation { ai_title; _ } ->
-         emit "Installation" Ansi.dim
-           ("Esc:return, then g:open " ^ ai_title ^ " Results\n"
+         emit (say "설치" "Installation") Ansi.dim
+           ((if ko then Printf.sprintf "Esc:돌아가기 후 g:%s 결과 열기\n" ai_title
+             else "Esc:return, then g:open " ^ ai_title ^ " Results\n")
             ^ Yojson.Safe.pretty_to_string (Ask_projection.asker_to_json feedback.af_asker)));
     Option.iter (fun reading ->
       let observed = Ask_projection.followup_view reading in
       let source_notice source = match source.Ask_projection.fo_state with
         | Followup_pending ->
-            (match source.fo_value with None -> "" | Some _ -> " · reading latest")
+            (match source.fo_value with None -> "" | Some _ -> say " · 최신 조회 중" " · reading latest")
         | Followup_received -> ""
         | Followup_unconfirmed ->
             (match source.fo_value with None -> ""
-             | Some _ -> " · earlier observation; latest source unconfirmed") in
+             | Some _ -> say " · 이전 관측 · 최신 출처 미확인" " · earlier observation; latest source unconfirmed") in
       let source_style source observed = match source.Ask_projection.fo_state with
         | Followup_unconfirmed -> Theme.warn ()
         | Followup_pending | Followup_received -> observed in
       let absent source label = match source.Ask_projection.fo_state with
-        | Followup_pending -> label ^ ": reading", Theme.recede ()
-        | Followup_received -> label ^ ": observation unavailable", Theme.warn ()
-        | Followup_unconfirmed -> label ^ ": latest source unconfirmed", Theme.warn () in
+        | Followup_pending -> label ^ say ": 조회 중" ": reading", Theme.recede ()
+        | Followup_received -> label ^ say ": 관측 불가" ": observation unavailable", Theme.warn ()
+        | Followup_unconfirmed -> label ^ say ": 최신 출처 미확인" ": latest source unconfirmed", Theme.warn () in
       Option.iter (fun identity ->
-        emit "Original answer identity" Ansi.dim
+        emit (say "원본 답변 식별자" "Original answer identity") Ansi.dim
           (Yojson.Safe.pretty_to_string (`Assoc [
             "answered_at", `Float identity.Decode.afi_answered_at;
             "stimulus_id", `String identity.afi_stimulus_id]))) observed.fv_identity;
       (match observed.fv_reactions.fo_value with
        | None ->
-           let text, style = absent observed.fv_reactions "Keeper wake/turn" in
-           emit "Keeper follow-up" style text
+           let text, style = absent observed.fv_reactions (say "키퍼 깨우기/턴" "Keeper wake/turn") in
+           emit (say "키퍼 후속 반응" "Keeper follow-up") style text
        | Some Decode.Ask_reactions_unavailable ->
-           emit "Keeper follow-up" (Theme.warn ())
-             ("Wake/turn observation unavailable" ^ source_notice observed.fv_reactions)
+           emit (say "키퍼 후속 반응" "Keeper follow-up") (Theme.warn ())
+             (say "깨우기/턴 관측 불가" "Wake/turn observation unavailable" ^ source_notice observed.fv_reactions)
        | Some (Ask_reactions_observed reactions) ->
            let facts = List.filter_map Fun.id
-             [Option.map (fun _ -> "turn entry observed") reactions.ar_turn_started_at;
-              Option.map (fun _ -> "turn boundary observed") reactions.ar_turn_finished_at;
-              Option.map (fun _ -> "wake settled or transferred (consumption unproven)") reactions.ar_queue_settled_at;
-              Option.map (fun _ -> "wake cancelled") reactions.ar_queue_cancelled_at] in
-           let facts = if facts=[] then ["no turn entry observed"] else facts in
-           let facts = if reactions.ar_evidence_complete then facts else facts @ ["evidence incomplete"] in
+             [Option.map (fun _ -> say "턴 시작 관측" "turn entry observed") reactions.ar_turn_started_at;
+              Option.map (fun _ -> say "턴 종료 관측" "turn boundary observed") reactions.ar_turn_finished_at;
+              Option.map (fun _ -> say "깨우기 정산/전달됨 (소비 미증명)" "wake settled or transferred (consumption unproven)") reactions.ar_queue_settled_at;
+              Option.map (fun _ -> say "깨우기 취소됨" "wake cancelled") reactions.ar_queue_cancelled_at] in
+           let facts = if facts=[] then [say "관측된 턴 시작 없음" "no turn entry observed"] else facts in
+           let facts = if reactions.ar_evidence_complete then facts else facts @ [say "근거 불완전" "evidence incomplete"] in
            let facts = if reactions.ar_evidence_current then facts
-             else facts @ ["some earlier observations remain unconfirmed"] in
-           emit "Keeper follow-up"
+             else facts @ [say "일부 이전 관측 미확정" "some earlier observations remain unconfirmed"] in
+           emit (say "키퍼 후속 반응" "Keeper follow-up")
              (source_style observed.fv_reactions
                (if reactions.ar_evidence_complete && reactions.ar_evidence_current
                 then Theme.info () else Theme.warn ()))
              (String.concat " · " facts ^ source_notice observed.fv_reactions));
       let action_text, action_style = match observed.fv_tools.fo_value with
-        | None -> absent observed.fv_tools "Tool results"
-        | Some Decode.Ask_tools_unavailable -> "Observation unavailable", Theme.warn ()
+        | None -> absent observed.fv_tools (say "도구 결과" "Tool results")
+        | Some Decode.Ask_tools_unavailable -> say "관측 불가" "Observation unavailable", Theme.warn ()
         | Some (Decode.Ask_tools_observed {at_count;at_outcomes;at_evidence_current;_}) ->
             let counts = List.filter_map (fun (label,count) ->
                 if count=0 then None else Some (Printf.sprintf "%s %d" label count))
-              ["succeeded",at_outcomes.ato_succeeded;"failed",at_outcomes.ato_failed;
-               "deferred",at_outcomes.ato_deferred;"unsettled",at_outcomes.ato_unsettled;
-               "malformed",at_outcomes.ato_malformed] in
-            let text = if at_count=0 then "None observed"
-              else Printf.sprintf "%d observed · %s" at_count (String.concat " · " counts) in
+              [say "성공" "succeeded",at_outcomes.ato_succeeded;
+               say "실패" "failed",at_outcomes.ato_failed;
+               say "보류" "deferred",at_outcomes.ato_deferred;
+               say "미확정" "unsettled",at_outcomes.ato_unsettled;
+               say "형식오류" "malformed",at_outcomes.ato_malformed] in
+            let text = if at_count=0 then say "관측 없음" "None observed"
+              else Printf.sprintf
+                (if ko then "%d건 관측 · %s" else "%d observed · %s")
+                at_count (String.concat " · " counts) in
             let uncertain = at_outcomes.ato_failed>0 || at_outcomes.ato_unsettled>0 || at_outcomes.ato_malformed>0 in
             if at_evidence_current then text, (if uncertain then Theme.warn () else Theme.info ())
-            else text ^ " · retained earlier evidence", Theme.warn () in
-      emit "Tool results" (source_style observed.fv_tools action_style)
+            else text ^ say " · 이전 근거 유지" " · retained earlier evidence", Theme.warn () in
+      emit (say "도구 결과" "Tool results") (source_style observed.fv_tools action_style)
         (action_text ^ source_notice observed.fv_tools);
       (match observed.fv_tools.fo_value with
        | Some (Decode.Ask_tools_observed {at_latest=Some latest;at_evidence_current;_}) ->
@@ -436,41 +453,43 @@ let ask_answer_feedback_document (state : state) =
              | Recorded_succeeded | Recorded_deferred when at_evidence_current -> Theme.info ()
              | Recorded_failed | Recorded_succeeded | Recorded_deferred
              | Recorded_unsettled | Recorded_malformed -> Theme.warn () in
-           emit "Latest Tool result" style
-             (Printf.sprintf "%s · %s · turn #%d"
-               (Tool_result.recorded_call_outcome_to_string latest.ata_outcome)
-               latest.ata_tool latest.ata_keeper_turn_id)
+           emit (say "최근 도구 결과" "Latest Tool result") style
+             (Printf.sprintf
+                (if ko then "%s · %s · #%d턴" else "%s · %s · turn #%d")
+                (Tool_result.recorded_call_outcome_to_string latest.ata_outcome)
+                latest.ata_tool latest.ata_keeper_turn_id)
        | None | Some Decode.Ask_tools_unavailable | Some (Ask_tools_observed {at_latest=None;_}) -> ());
       let task_text, task_style = match observed.fv_task.fo_value with
-        | None -> absent observed.fv_task "Original Task"
-        | Some Decode.Ask_task_unlinked -> "No linked Task", Theme.recede ()
-        | Some (Ask_task_missing id) -> id ^ ": not observed in lookup", Theme.warn ()
-        | Some (Ask_task_unavailable id) -> id ^ ": observation unavailable", Theme.warn ()
+        | None -> absent observed.fv_task (say "원본 태스크" "Original Task")
+        | Some Decode.Ask_task_unlinked -> say "연결된 태스크 없음" "No linked Task", Theme.recede ()
+        | Some (Ask_task_missing id) -> id ^ say ": 조회 결과에 없음" ": not observed in lookup", Theme.warn ()
+        | Some (Ask_task_unavailable id) -> id ^ say ": 관측 불가" ": observation unavailable", Theme.warn ()
         | Some (Ask_task_observed {akt_task_id;akt_location;akt_status;akt_evidence_current;akt_observed_at=_}) ->
             let phase = match akt_status with
-              | Masc_domain.Todo -> "to do"
-              | Claimed {assignee;_} -> "claimed by " ^ assignee
-              | InProgress {assignee;_} -> "in progress by " ^ assignee
-              | AwaitingVerification {verification_id;_} -> "awaiting verification " ^ verification_id
-              | Done {assignee;_} -> "done by " ^ assignee
-              | Cancelled {cancelled_by;_} -> "cancelled by " ^ cancelled_by in
+              | Masc_domain.Todo -> say "대기" "to do"
+              | Claimed {assignee;_} -> say "할당됨: " "claimed by " ^ assignee
+              | InProgress {assignee;_} -> say "진행 중: " "in progress by " ^ assignee
+              | AwaitingVerification {verification_id;_} -> say "검증 대기: " "awaiting verification " ^ verification_id
+              | Done {assignee;_} -> say "완료: " "done by " ^ assignee
+              | Cancelled {cancelled_by;_} -> say "취소됨: " "cancelled by " ^ cancelled_by in
             let location = match akt_location with
-              | Decode.Ask_task_backlog -> "" | Ask_task_archive -> " · archived" in
+              | Decode.Ask_task_backlog -> "" | Ask_task_archive -> say " · 보관됨" " · archived" in
             let freshness = if akt_evidence_current then ""
-              else " · last observed; not freshly confirmed" in
+              else say " · 마지막 관측 · 최신 미확인" " · last observed; not freshly confirmed" in
             akt_task_id ^ ": " ^ phase ^ location ^ freshness,
             (if akt_evidence_current then Theme.info () else Theme.warn ()) in
-      emit "Original Task" (source_style observed.fv_task task_style)
+      emit (say "원본 태스크" "Original Task") (source_style observed.fv_task task_style)
         (task_text ^ source_notice observed.fv_task);
       (match observed.fv_identity, observed.fv_task.fo_value with
        | Some _, Some (Decode.Ask_task_missing _ | Ask_task_unavailable _ | Ask_task_observed _) ->
-           emit "Original Task reader" (Theme.info ())
-             "Esc:return, then T:inspect original Task, history, and verification evidence"
+           emit (say "원본 태스크 보기" "Original Task reader") (Theme.info ())
+             (say "Esc:돌아가기 후 T:원본 태스크·이력·검증 근거 확인"
+                "Esc:return, then T:inspect original Task, history, and verification evidence")
        | Some _, (Some Decode.Ask_task_unlinked | None)
        | None, (Some _ | None) -> ())) followup;
     Option.iter (fun failure ->
-      emit "Follow-up read incomplete" (Theme.warn ())
-        ("Completed sources retained\n" ^ Ask_projection.followup_failure_text failure)) state.ask_followup_error;
+      emit (say "후속 조회 미완료" "Follow-up read incomplete") (Theme.warn ())
+        (say "완료된 출처 유지\n" "Completed sources retained\n" ^ Ask_projection.followup_failure_text failure)) state.ask_followup_error;
     List.rev !fields) (Masc_tui_types.current_ask_answer_feedback state)
 
 let answer_feedback_reading (state : state) =
@@ -488,16 +507,20 @@ let draw_ask_answer_feedback buf cols state =
 let draw_compact_ask_origin buf cols state =
   Option.iter (fun (origin : Ask_projection.origin) ->
     let turn = match origin.ao_source_turn_ref with
-      | None -> " · original turn not recorded"
-      | Some reference -> Printf.sprintf " · turn #%d" (Ids.Turn_ref.absolute_turn reference) in
-    box_line buf cols (Ansi.dim ^ "  o/O source: "
-      ^ Terminal_text.single_line (origin.ao_keeper_name ^ turn ^ " · " ^ origin.ao_ask_id)
-      ^ Ansi.reset)) (Masc_tui_types.current_ask_origin state)
+      | None -> ui_text state ~ko:" · 원본 턴 기록 없음" ~en:" · original turn not recorded"
+      | Some reference ->
+          Printf.sprintf
+            (if state.ui_language = Lang_ko then " · #%d턴" else " · turn #%d")
+            (Ids.Turn_ref.absolute_turn reference) in
+    box_line buf cols
+      (Ansi.dim ^ ui_text state ~ko:"  o/O 출처: " ~en:"  o/O source: "
+       ^ Terminal_text.single_line (origin.ao_keeper_name ^ turn ^ " · " ^ origin.ao_ask_id)
+       ^ Ansi.reset)) (Masc_tui_types.current_ask_origin state)
 
 (* Copy complete terminal rows from the original safe question rendering.
    Do not cut an ANSI/UTF-8 sequence, reflow the prompt or borrow choice/draft
    state from another question. This preview does not enter answering mode. *)
-let draw_ask_question_preview buf cols ~rows text =
+let draw_ask_question_preview buf cols ~ko ~rows text =
   let length = String.length text in
   let prompt_rows = if rows > 1 then rows - 1 else rows in
   let rec copy offset remaining =
@@ -512,7 +535,11 @@ let draw_ask_question_preview buf cols ~rows text =
   in
   copy 0 prompt_rows;
   if rows > 1 then
-    box_line buf cols (Ansi.dim ^ "    … a opens the full ask and answers" ^ Ansi.reset)
+    box_line buf cols
+      (Ansi.dim
+       ^ (if ko then "    … a: 전체 질문 열기 및 답변"
+          else "    … a opens the full ask and answers")
+       ^ Ansi.reset)
 
 let draw_ask_questions buf cols (state : state) ~budget =
   let now = Unix.gettimeofday () in
@@ -543,7 +570,8 @@ let draw_ask_questions buf cols (state : state) ~budget =
          only while one is selected, in the footer's words. *)
       let selected_index = Ask_projection.selected_index open_rows state.ask_cursor in
       let answer_hint =
-        if Option.is_some selected_index then " · " ^ Masc_tui_keys.approval_answer_hint
+        if Option.is_some selected_index then
+          " · " ^ Masc_tui_keys.approval_answer_hint_for ~lang:state.ui_language
         else ""
       in
       (* The section follows the screen language, as the queue above it does
@@ -636,6 +664,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             let text, _ = question_block index in
             if plan.Ask_layout.question_preview_rows > 0 then
               draw_ask_question_preview buf cols
+                ~ko:(state.ui_language = Lang_ko)
                 ~rows:plan.Ask_layout.question_preview_rows text
             else Buffer.add_string buf text
           done;
@@ -645,7 +674,9 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  the fleet is waiting on and this one names the selected
                  ask's own. Both said "questions", and a reader saw "(1)"
                  three rows above "+2 more questions". *)
-              (Printf.sprintf "    %s+%d more in this ask -- a opens the full ask%s"
+              (Printf.sprintf
+                 (if state.ui_language = Lang_ko then "    %s이 요청에 질문 %d개 더 있음 · a:전체 열기%s"
+                  else "    %s+%d more in this ask -- a opens the full ask%s")
                  Ansi.dim plan.Ask_layout.questions_hidden Ansi.reset);
           if plan.Ask_layout.context_shown then
             Buffer.add_string buf (fst (Stdlib.Lazy.force context_block))
@@ -657,7 +688,9 @@ let draw_ask_questions buf cols (state : state) ~budget =
                reader had nothing to tell them there was a reason to go and
                read. The answering view draws it whole and scrolls. *)
             box_line buf cols
-              (Printf.sprintf "    %sthe reason did not fit -- a opens it%s"
+              (Printf.sprintf
+                 (if state.ui_language = Lang_ko then "    %s배경 설명 생략됨 · a:전체 열기%s"
+                  else "    %sthe reason did not fit -- a opens it%s")
                  Ansi.dim Ansi.reset);
           let printed = ref 0 in
           List.iteri
@@ -670,10 +703,14 @@ let draw_ask_questions buf cols (state : state) ~budget =
             rows;
           if plan.Ask_layout.summaries_hidden > 0 then
             box_line buf cols
-              (Printf.sprintf "  %s+%d more ask%s -- [/] to reach%s" Ansi.dim
-                 plan.Ask_layout.summaries_hidden
-                 (if plan.Ask_layout.summaries_hidden = 1 then "" else "s")
-                 Ansi.reset))
+              (if state.ui_language = Lang_ko then
+                 Printf.sprintf "  %s질문 요청 %d건 더 있음 · [/]:이동%s" Ansi.dim
+                   plan.Ask_layout.summaries_hidden Ansi.reset
+               else
+                 Printf.sprintf "  %s+%d more ask%s -- [/] to reach%s" Ansi.dim
+                   plan.Ask_layout.summaries_hidden
+                   (if plan.Ask_layout.summaries_hidden = 1 then "" else "s")
+                   Ansi.reset))
 
 (* The selected row's detail, and the only one of the three detail rows whose
    height depends on which kind is selected. A held tool call answers two
@@ -687,10 +724,13 @@ let draw_ask_questions buf cols (state : state) ~budget =
    backslash and n, printed as those two characters -- because a real newline
    would have drawn a row nobody counted. *)
 let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
+    let ko = state.ui_language = Lang_ko in
+    let say korean english = if ko then korean else english in
     match List.nth_opt approvals state.approval_cursor with
     | Some (Masc_tui_approvals_model.Operator_row a) -> (
         if action_inflight then
-          Printf.sprintf "  %sApproval request in progress…%s" (Theme.warn ())
+          Printf.sprintf "  %s%s%s" (Theme.warn ())
+            (say "승인 요청 처리 중" "Approval request in progress")
             Ansi.reset
         else
           match state.pending_approval_action with
@@ -701,55 +741,46 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
                 | Confirm -> "y"
                 | Deny -> "n"
               in
-              Printf.sprintf "  %sPress %s again: %s%s" (Theme.warn ()) key
-                (fit_width (Terminal_text.single_line a.ap_summary) (framed_inner_width cols - 18))
+              let prefix =
+                if ko then Printf.sprintf "%s 키를 한 번 더 누르세요: " key
+                else Printf.sprintf "Press %s again: " key
+              in
+              let room =
+                max 8 (framed_inner_width cols - 2 - Message_layout.display_width prefix)
+              in
+              Printf.sprintf "  %s%s%s%s" (Theme.warn ()) prefix
+                (fit_width (Terminal_text.single_line a.ap_summary) room)
                 Ansi.reset
           | _ ->
               let summary =
                 fit_width (Terminal_text.single_line a.ap_summary) (max 8 (framed_inner_width cols - 30))
               in
-              Printf.sprintf "  %s%s%s  %sy:approve  n:reject%s"
+              Printf.sprintf "  %s%s%s  %s%s%s"
                 Ansi.dim summary Ansi.reset
-                (Theme.info ()) Ansi.reset)
+                (Theme.info ()) (say "y:승인  n:거절" "y:approve  n:reject") Ansi.reset)
     | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
-        (* One press answers a held call, matching the chat pane's [y]. The
-           question is the whole ask, so it is the row the eye lands on;
-           the because is why this call was held at all — an operator
-           repeating the same yes needs the reason visible, not the name
-           of a policy table they cannot open. *)
-        (* Two rows. This carried a literal "\n" -- backslash and n, printed as
-           those two characters -- because a real newline would have drawn a
-           row nobody had budgeted for. [detail_extra_rows] above budgets it. *)
-        Printf.sprintf "  %s%s%s  %sy:allow  n:deny%s\n  %swhy: %s%s"
+        Printf.sprintf "  %s%s%s  %s%s%s\n  %s%s%s%s"
           (Theme.warn ())
           (fit_width
              (Terminal_text.single_line held.kta_question)
              (max 8 (framed_inner_width cols - 24)))
           Ansi.reset
-          (Theme.info ()) Ansi.reset
+          (Theme.info ()) (say "y:허용  n:거부" "y:allow  n:deny") Ansi.reset
           Ansi.dim
+          (say "사유: " "why: ")
           (fit_width
-             (Terminal_text.single_line_or ~default:"(not provided)"
+             (Terminal_text.single_line_or ~default:(say "(미제공)" "(not provided)")
                 held.kta_because)
              (max 8 (framed_inner_width cols - 8)))
           Ansi.reset
     | Some (Masc_tui_approvals_model.Gate_row pending) ->
-        (* A durable Gate ask: it keeps until answered, and the answer goes
-           through the dashboard resolve route. What the eye needs is who
-           wants to touch what, and that the decision spends here. *)
-        (* The name is not padded here. This is one line with nothing under
-           it to line up with, so a fixed twenty both cut
-           "rw-e0-r9-20260820-review" and left short names trailing spaces.
-           The list above it now sizes its column to the names it holds and
-           this line disagreed with it three rows apart.
-
-           What follows absorbs the difference, which is the same order the
-           list uses: the identifier is why the line exists. *)
         let keeper =
           Terminal_text.single_line pending.Tui_decode.gp_keeper
         in
         let phase, tone = approval_gate_phase state pending.Tui_decode.gp_phase in
-        let actions = "  " ^ (Theme.info ()) ^ "y:approve  n:reject" ^ Ansi.reset in
+        let actions =
+          "  " ^ (Theme.info ()) ^ say "y:승인  n:거절" "y:approve  n:reject" ^ Ansi.reset
+        in
         let headline =
           Printf.sprintf "  %s%s → %s · %s%s%s"
             tone
@@ -765,23 +796,28 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
         (match pending.gp_phase with
          | Gate_blocked ->
              let detail =
-               Terminal_text.single_line_or ~default:"(the server recorded no detail)"
+               Terminal_text.single_line_or
+                 ~default:(say "(서버에 기록된 상세 없음)" "(the server recorded no detail)")
                  pending.gp_auto_judge_detail
              in
              let next =
                match pending.gp_retry_request with
-               | Some _ -> "R:retry Auto Judge  y/n:decide now"
-               | None -> "y/n:decide now (cannot replay this attempt)"
+               | Some _ -> say "R:자동 판정 재시도  y/n:지금 결정" "R:retry Auto Judge  y/n:decide now"
+               | None ->
+                   say "y/n:지금 결정 (이 시도는 재실행 불가)"
+                     "y/n:decide now (cannot replay this attempt)"
              in
-             Printf.sprintf "%s\n  %sreason: %s%s\n  %s%s%s"
+             Printf.sprintf "%s\n  %s%s%s%s\n  %s%s%s"
                headline Ansi.dim
+               (say "사유: " "reason: ")
                (fit_width detail (max 8 (framed_inner_width cols - 8))) Ansi.reset
                Ansi.dim (fit_width next (max 8 (framed_inner_width cols))) Ansi.reset
          | Gate_human_required ->
              (match pending.gp_judge_advice with
               | Some advice ->
-                  Printf.sprintf "%s\n  %sjudge: %s%s"
+                  Printf.sprintf "%s\n  %s%s%s%s"
                     headline Ansi.dim
+                    (say "판정: " "judge: ")
                     (fit_width (Terminal_text.single_line advice.rationale) (max 8 (framed_inner_width cols - 7)))
                     Ansi.reset
               | None -> headline)
@@ -793,18 +829,12 @@ let approval_detail_line (state : state) ~approvals ~cols ~action_inflight =
    identifiers belong to the full reader; execution site, age and deadlines
    remain here. Pack clauses with the same measured rows the queue budgets. *)
 let approval_metadata_lines (state : state) ~approvals ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let clauses, payload_line =
     match List.nth_opt approvals state.approval_cursor with
     | None -> [], ""
     | Some (Masc_tui_approvals_model.Operator_row approval) ->
-        (* The same clock as [created] beside it. This one kept the server's
-           RFC 3339 string as it arrived -- UTC, and in Seoul nine hours off
-           the local reading next to it -- so a row could show a decision
-           created at 09:03 expiring at 00:03 and read as already gone. It is
-           also the longer of the two spellings, which is what pushed this row
-           past every terminal width once it was spelled in full (#36333); the
-           row now breaks instead of losing it. A decision with no deadline
-           still draws the no-value mark: that is not a time. *)
         let expires =
           match Terminal_text.optional_single_line approval.ap_expires_at with
           | None -> Masc_tui_theme.Glyph.no_value
@@ -814,26 +844,28 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
           Masc_tui_operator_projection.approval_payload_for_terminal
             approval.ap_payload
         in
-        ( [ Printf.sprintf "created=%s"
+        let payload_label = say "페이로드=" "payload=" in
+        ( [ Printf.sprintf (if ko then "생성=%s" else "created=%s")
               (Terminal_text.short_timestamp approval.ap_created_at)
-          ; Printf.sprintf "expires=%s" expires ]
-        , Printf.sprintf "  %spayload=%s%s" Ansi.dim
-            (fit_width payload (max 8 (framed_inner_width cols - 8)))
+          ; Printf.sprintf (if ko then "만료=%s" else "expires=%s") expires ]
+        , Printf.sprintf "  %s%s%s%s" Ansi.dim payload_label
+            (fit_width payload
+               (max 8 (framed_inner_width cols - 2 - Message_layout.display_width payload_label)))
             Ansi.reset )
     | Some (Masc_tui_approvals_model.Keeper_tool_row held) ->
-        ( [ Printf.sprintf "keeper=%s"
+        let args_label = say "인자=" "args=" in
+        ( [ Printf.sprintf (if ko then "키퍼=%s" else "keeper=%s")
               (Terminal_text.single_line held.kta_keeper)
-          ; Printf.sprintf "tool=%s" (Terminal_text.single_line (Masc.Tool_display.label held.kta_tool))
+          ; Printf.sprintf (if ko then "도구=%s" else "tool=%s")
+              (Terminal_text.single_line (Masc.Tool_display.label held.kta_tool))
           ; Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) held.kta_asked_at
             ^ ui_text state ~ko:" 대기" ~en:" waiting" ]
-        , Printf.sprintf "  %sargs=%s%s" Ansi.dim
+        , Printf.sprintf "  %s%s%s%s" Ansi.dim args_label
             (fit_width
                (Terminal_text.preview_line held.kta_args)
-               (max 8 (framed_inner_width cols - 5)))
+               (max 8 (framed_inner_width cols - 2 - Message_layout.display_width args_label)))
             Ansi.reset )
     | Some (Masc_tui_approvals_model.Gate_row pending) ->
-        (* Execution site affects the decision. Keep it in the selected
-           preview; the exact approval ID remains in the full reader. *)
         let site =
           match
             pending.Tui_decode.gp_execution_sandbox,
@@ -841,31 +873,29 @@ let approval_metadata_lines (state : state) ~approvals ~cols =
           with
           | None, None -> []
           | sandbox, cwd ->
-            [ Printf.sprintf "sandbox=%s"
+            [ Printf.sprintf (if ko then "샌드박스=%s" else "sandbox=%s")
                 (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value sandbox)
-            ; Printf.sprintf "at=%s"
+            ; Printf.sprintf (if ko then "경로=%s" else "at=%s")
                 (Terminal_text.single_line_or ~default:Masc_tui_theme.Glyph.no_value cwd) ]
         in
-        (* The operation is already the right-hand side of the line above
-           whenever the two agree, which is every operation but an identity
-           call. Repeating it there costs the width this line needs. *)
         let operation =
           let name = Terminal_text.single_line pending.Tui_decode.gp_operation in
           if String.equal name
                (Terminal_text.single_line pending.Tui_decode.gp_display_tool)
           then []
-          else [ Printf.sprintf "operation=%s" name ]
+          else [ Printf.sprintf (if ko then "작업=%s" else "operation=%s") name ]
         in
+        let input_label = say "입력=" "input=" in
         ( operation @ site
           @ (match pending.gp_waiting_s with
              | None -> []
              | Some seconds -> [Masc_tui_value.Ongoing.text seconds
                  ^ ui_text state ~ko:" 경과" ~en:" old"])
-        , Printf.sprintf "  %sinput=%s%s" Ansi.dim
+        , Printf.sprintf "  %s%s%s%s" Ansi.dim input_label
             (fit_width
-               (Terminal_text.single_line_or ~default:"(no input preview)"
+               (Terminal_text.single_line_or ~default:(say "(입력 미리보기 없음)" "(no input preview)")
                   pending.Tui_decode.gp_input_preview)
-               (max 8 (framed_inner_width cols - 6)))
+               (max 8 (framed_inner_width cols - 2 - Message_layout.display_width input_label)))
             Ansi.reset )
   in
   let metadata_rows =
@@ -1095,7 +1125,7 @@ let render_approvals (state : state) =
      list that was not read says so here instead. *)
   if approvals = [] then begin
     let lines =
-      match Masc_tui_approvals_model.approvals_empty_queue reading with
+      match Masc_tui_approvals_model.approvals_empty_queue ~ko:(state.ui_language = Lang_ko) reading with
       | Masc_tui_approvals_model.Nothing_pending ->
           [ Ansi.dim
             ^ ui_text state ~ko:"  (대기 중인 요청 없음)" ~en:"  (no pending approvals)"
@@ -1247,6 +1277,8 @@ let render_question_reader (state : state) =
     if Option.is_some state.ask_text_entry then limit
     else max 0 (min state.ask_question_scroll limit)
   in
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state
@@ -1254,42 +1286,51 @@ let render_question_reader (state : state) =
          (Masc_tui_value.Position.window ~first:scroll ~shown:room
             ~total:(List.length lines))
        ~title:(fun ~cols:_ -> screen_title
-         (" MASC Approvals / Questions"
-          ^ Masc_tui_approvals_model.approval_list_note ~name:"questions"
+         (say " 승인 › 질문" " MASC Approvals / Questions"
+          ^ Masc_tui_approvals_model.approval_list_note ~ko
+              ~name:(say "질문" "questions")
               (Masc_tui_approvals_model.approvals_questions_reading state))));
   box_line buf cols
     (match selected with
      | None ->
          (match Masc_tui_approvals_model.approvals_questions_reading state with
           | Masc_tui_approvals_model.List_read when asks <> [] ->
-              "  Nothing selected -- [ or ] chooses a question"
-          | Masc_tui_approvals_model.List_read -> "  No questions waiting"
-          | List_not_read (Approval_unread | Approval_kept_back _) -> "  Questions not loaded"
+              say "  선택된 질문 없음 · [ 또는 ] 키로 선택"
+                "  Nothing selected -- [ or ] chooses a question"
+          | Masc_tui_approvals_model.List_read ->
+              say "  대기 중인 질문 없음" "  No questions waiting"
+          | List_not_read (Approval_unread | Approval_kept_back _) ->
+              say "  질문 목록 미조회" "  Questions not loaded"
           | List_not_read (Approval_failed _ | Approval_stale _ | Approval_unavailable _) ->
-              "  Question source unavailable")
+              say "  질문 출처 조회 불가" "  Question source unavailable")
      | Some row ->
          let draft = Ask_projection.draft_for state.ask_draft ~row in
          let drafted = List.filter (fun question ->
              Option.is_some (Ask_projection.response_for draft ~question)) row.ar_questions |> List.length in
-         Printf.sprintf "  %s%s · Ask %d/%d · Question %d/%d · %d drafted%s"
+         Printf.sprintf
+           (if ko then "  %s%s · 요청 %d/%d · 질문 %d/%d · 작성 %d건%s"
+            else "  %s%s · Ask %d/%d · Question %d/%d · %d drafted%s")
            (Theme.warn ()) (Terminal_text.single_line (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))
            (Option.fold ~none:0 ~some:succ selected_index) (List.length asks) (state.ask_question_cursor + 1)
            (List.length row.ar_questions) drafted Ansi.reset);
   box_line buf cols
     (match state.asks_error with
-     | Some error -> "  Question source unavailable · " ^ Terminal_text.single_line error
+     | Some error ->
+         say "  질문 출처 조회 불가 · " "  Question source unavailable · "
+         ^ Terminal_text.single_line error
      | None ->
-       if Option.is_some state.ask_text_entry then "  Enter:save answer  Esc:cancel"
+       if Option.is_some state.ask_text_entry then
+         say "  Enter:답변 저장  Esc:취소" "  Enter:save answer  Esc:cancel"
        else
-         "  Left/Right:prev/next question  [/]:prev/next ask  "
-         ^ "PgUp/PgDn:page  Home/End:top/end  Esc:"
+         say "  ←/→:이전/다음 질문  [/]:이전/다음 요청  PgUp/PgDn:페이지  Home/End:처음/끝  Esc:"
+           "  Left/Right:prev/next question  [/]:prev/next ask  PgUp/PgDn:page  Home/End:top/end  Esc:"
          ^ (match state.followed_from with
-          | Some (Overview, _) -> "Dashboard"
+          | Some (Overview, _) -> say "운영" "Dashboard"
           | Some ((Acting | Metrics | Keepers _ | Memory | Lanes | Clients | Board
               | Approvals | Planning | Schedules | Verification | Harness | Fusion
               | Repositories | Code | Changes | Connectors | Runtime | Config
               | Resources | Tools | System_logs), _)
-            | None -> "approvals"));
+            | None -> say "승인" "approvals"));
   box_divider buf cols;
   let lines_window = Rows.of_list ~first:scroll ~height:room lines in
   for i = 0 to room - 1 do

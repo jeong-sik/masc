@@ -429,7 +429,7 @@ let unbounded_window_scan_cap = 50_000
    allowance span stores instead of applying to each.
 
    The ceiling is measured, not chosen. Phase 1 picked 10_000 provisionally;
-   request_cost_gate (Mode C, 8 keepers x 20k entries) then measured peak RSS
+   a load run (8 keepers x 20k entries) then measured peak RSS
    against it on this same reader:
 
      n =  2_000 ->  80.2 MB, 0.49 s

@@ -2584,9 +2584,7 @@ let test_rejoin_event_log () =
 (** The task surface compares actors by exact identity: a task claimed under the
     canonical "keeper-bob-agent" is not transitionable by the alias
     "keeper-bob". BUG-006 once folded the two spellings, and these cases asserted
-    that fold; the contract since moved the other way, and
-    [test_tool_task_coverage]'s [handle_transition_submit_rejects_registered_keeper_alias]
-    pins the rejection on a CI-wired path. Callers reach the surface through
+    that fold; the contract since moved the other way. Callers reach the surface through
     [Keeper_tool_shared_runtime.keeper_agent_sender], which yields
     [meta.agent_name], so the canonical spelling is what a keeper actually
     passes. These assert the rejection rather than the fold, and name the owning

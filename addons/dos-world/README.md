@@ -15,15 +15,25 @@ results are distinct from later source revisions and production deployment.
 
 ## Install
 
-Build and test in CI using [the package workflow](../../.github/workflows/lane-dos-package.yml).
-It pins the Node base image by digest, uses `npm ci` with exact direct versions and
-integrity-locked dependencies, assembles `guest/lanedemo.asm` with NASM, and runs
-the actual scenario on native amd64 and arm64 runners. It retains each image and
-its evidence separately as workflow artifacts. A successful artifact includes
-`SOURCE_COMMIT`, Docker image identity, `BUILD_SHA256SUMS`, MCP receipts, measured
-counter values, PNG captures, raw `STATE.BIN` files, and server diagnostics.
+Build the image with [the package image workflow](../../.github/workflows/lane-addon-images.yml)
+or from the repository root:
 
-Load the CI-produced image into the Docker engine used by MASC. Place this package
+```sh
+docker build --file addons/dos-world/Dockerfile --tag masc-lane-dos-world:0.1.0 addons
+mkdir -p proof
+docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges --cpus 1 --memory 536870912 --pids-limit 64 \
+  --user "$(id -u):$(id -g)" --mount "type=bind,src=$PWD/proof,dst=/verification" \
+  --workdir /verification masc-lane-dos-world:0.1.0 \
+  node --test /opt/dos-world/test/world.test.mjs
+```
+
+The Dockerfile pins the Node base image by digest, uses `npm ci` with exact direct
+versions and integrity-locked dependencies, and assembles `guest/lanedemo.asm` with
+NASM. The `docker run` command runs the actual scenario inside the image and
+writes its evidence to `proof/`.
+
+Load the built image into the Docker engine used by MASC. Place this package
 directory where MASC can read its manifest and Skill, then copy
 [install.toml](install.toml) into the active config root's `lane-addons/` directory.
 Set `manifest_path` relative to the declaration's new location, or use its actual

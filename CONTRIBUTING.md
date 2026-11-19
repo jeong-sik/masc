@@ -51,7 +51,7 @@ Install the [source prerequisites](README.md#from-source) first.
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-git config core.hooksPath .githooks       # pre-commit and pre-push guards
+git config core.hooksPath .githooks       # pre-commit guard
 
 opam init --bare                         # initialize a fresh opam installation
 opam switch create . ocaml-base-compiler.5.5.2 --no-install
@@ -77,9 +77,8 @@ once: it serializes Dune inside one worktree, defaults concurrency to
 match `dune-project`. `MASC_DUNE_DRY_RUN=1` prints the command instead of
 running it.
 
-The hooks: `pre-commit` refuses a commit on `main`, `master` or `develop`;
-`pre-push` refuses a push that adds Dune trace dumps, because those carry the
-environment. Neither hook runs a build.
+The `pre-commit` hook refuses a commit on `main`, `master` or `develop`. It
+runs no build.
 
 ## Where things are
 

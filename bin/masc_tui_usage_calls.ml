@@ -83,18 +83,8 @@ let column_dots = 4
    fortnight draw the same glyph; two rows leave seven. *)
 let tall_rows = 2
 
-let microseconds_per_ms = 1000.0
-
-(* The p95 as a count of whole microseconds, rounded up so a latency above
-   zero stays above zero on the scale. A latency that is not a number is no
-   reading; one past the integer range stands at the top. *)
 let p95_sample (active : Series.tool_series_calls) =
-  let ms = active.Series.tsc_p95_ms in
-  if not (Float.is_finite ms) then Braille.Absent
-  else
-    let microseconds = Float.ceil (ms *. microseconds_per_ms) in
-    if microseconds >= Float.of_int max_int then Braille.of_count max_int
-    else Braille.of_count (Float.to_int microseconds)
+  Braille.of_milliseconds active.Series.tsc_p95_ms
 
 let calls_sample (active : Series.tool_series_calls) =
   Braille.of_count active.Series.tsc_calls

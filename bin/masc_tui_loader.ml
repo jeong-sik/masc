@@ -1721,16 +1721,37 @@ let load_planning ~(host : string) ~(port : int) :
 
 let memo_server_identity = json_memo ()
 
+(* The newest [/health] answer this TUI received, whoever asked for it: a
+   refresh's probe, a request's guard, or the engine graphs' own read. A
+   sample the graphs take within two seconds of it takes it instead of
+   reading again (RFC tui-one-screen-grammar section 5.6). The reads run on
+   other fibers and domains, so the cell is atomic. Its clock is
+   [Mtime_clock.elapsed_ns] in seconds, the loop's. *)
+let newest_health_answer : Masc_tui_engine_samples.answer option Atomic.t =
+  Atomic.make None
+
+let note_health_answer reading =
+  Atomic.set newest_health_answer
+    (Some
+       { Masc_tui_engine_samples.at = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9
+       ; reading })
+
+let health_answer () = Atomic.get newest_health_answer
+
 (* Which server this is. [/health] is the compact probe, and the caller asks on
    every refresh because another process may bind the same endpoint without a
    failed request reaching this TUI. *)
 let load_server_identity ~(host : string) ~(port : int) :
     (Tui_decode.server_identity, string) result =
-  match fetch_server_identity ~host ~port with
-  | Error err -> Error ("server identity load failed: " ^ err)
-  | Ok json ->
-      decode_offloaded memo_server_identity ~name:"server.identity.decode_wait"
-        Tui_decode.decode_server_identity json
+  let reading =
+    match fetch_server_identity ~host ~port with
+    | Error err -> Error ("server identity load failed: " ^ err)
+    | Ok json ->
+        decode_offloaded memo_server_identity ~name:"server.identity.decode_wait"
+          Tui_decode.decode_server_identity json
+  in
+  note_health_answer (Masc_tui_engine_samples.reading_of_identity reading);
+  reading
 
 let memo_server_reading = json_memo ()
 
@@ -1739,11 +1760,15 @@ let memo_server_reading = json_memo ()
    none of the surfaces it would read next. *)
 let load_server_reading ~(host : string) ~(port : int) :
     (Tui_decode.server_reading, string) result =
-  match fetch_server_identity ~host ~port with
-  | Error err -> Error ("server identity load failed: " ^ err)
-  | Ok json ->
-      decode_offloaded memo_server_reading ~name:"server.identity.decode_wait"
-        Tui_decode.decode_server_reading json
+  let reading =
+    match fetch_server_identity ~host ~port with
+    | Error err -> Error ("server identity load failed: " ^ err)
+    | Ok json ->
+        decode_offloaded memo_server_reading ~name:"server.identity.decode_wait"
+          Tui_decode.decode_server_reading json
+  in
+  note_health_answer (Masc_tui_engine_samples.reading_of_server reading);
+  reading
 
 (* What a refresh goes on with after the probe: the account server, which
    ends it, or the identity of a masc server as [load_server_identity] reads

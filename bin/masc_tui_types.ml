@@ -9795,6 +9795,10 @@ type state = {
   mutable metrics_scroll_card_rows: int option;
   mutable metrics_section: metrics_section;
   mutable usage_telemetry_open: bool;
+  (* The engine view's /health samples, which its time graphs draw (RFC
+     tui-one-screen-grammar section 5.6). The loop opens them while the view
+     is on screen and drops them when it closes. *)
+  mutable engine_samples: Masc_tui_engine_samples.t;
   mutable usage_section: usage_section;
   mutable usage_scope_id: string option;
   mutable usage_show_limit_exhausted: bool;
@@ -20916,6 +20920,7 @@ let create_state
   metrics_scroll_card_rows = None;
   metrics_section = Section_fleet;
   usage_telemetry_open = false;
+  engine_samples = Masc_tui_engine_samples.stopped;
   usage_section = Usage_plan;
   usage_scope_id = None;
   usage_show_limit_exhausted = false;

@@ -10425,6 +10425,66 @@ let launch_owed_repositories state ~mailbox =
       launch_repositories_load state ~mailbox
   end
 
+(* The engine graphs' own [/health] read. It asks which server answers, as
+   the refresh's probe does, outside any workspace scope: [/health] reads no
+   workspace data, and the answer goes to the graphs only. *)
+let launch_engine_sample_read state ~mailbox =
+  let host = server_peer_host and port = state.port in
+  Masc_tui_async_read.launch
+    ~deliver:(fun result ->
+      enqueue_async mailbox
+        (Engine_sample_read (Masc_tui_engine_samples.reading_of_server result)))
+    (fun () ->
+      Masc_tui_workspace_read.without_binding (fun () ->
+        Masc_tui_workspace_precondition.without (fun () ->
+          Masc_tui_loader.load_server_reading ~host ~port)))
+
+(* The engine graphs' samples (RFC tui-one-screen-grammar section 5.6). Runs
+   on every loop iteration, as the owed reads do, and sets no timer of its
+   own. Off the engine view its samples go and nothing is due. On it, a due
+   sample takes the newest [/health] answer of the last two seconds, whoever
+   asked for it, or asks [/health] itself, one read at a time. When the
+   refresh pass is backing off, times without any answer stay blank. A
+   sample changes the graphs and requests a frame (section 8).
+   The view is on screen only while the surface is the frame: the help sheet,
+   a reader, the account server's screen or the too-small notice draws over
+   the whole terminal, and the graphs under it are not sampled. *)
+let step_engine_samples state ~mailbox ~render_schedule =
+  let terminal_rows, cols = get_terminal_size () in
+  let now = monotonic_now_s () in
+  let capacity =
+    match Masc_tui_render_metrics.engine_graph_capacity ~cols state with
+    | None -> None
+    | Some capacity ->
+      (match
+         Masc_tui_render.frame_choice state ~terminal_rows
+           ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ()))
+           ~now:(Unix.gettimeofday ())
+       with
+       | `Surface -> Some capacity
+       | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette
+       | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About | `Context
+       | `Keeper_deletions | `Help | `Agenda | `Answering | `Queue _ | `Link
+       | `Client_detail _ -> None)
+  in
+  match capacity with
+  | None -> state.engine_samples <- Masc_tui_engine_samples.hidden state.engine_samples
+  | Some capacity ->
+    let allow_read =
+      Masc_tui_refresh_pace.screen_read_starts ~now Owed_read_due state.refresh_pace
+    in
+    let samples, step =
+      Masc_tui_engine_samples.tick ~allow_read
+        (Masc_tui_engine_samples.shown state.engine_samples ~now ~capacity)
+        ~now ~newest:(Masc_tui_loader.health_answer ())
+    in
+    state.engine_samples <- samples;
+    (match step with
+     | Masc_tui_engine_samples.Nothing -> ()
+     | Masc_tui_engine_samples.Sampled ->
+       Render_schedule.request render_schedule Render_schedule.Background
+     | Masc_tui_engine_samples.Read -> launch_engine_sample_read state ~mailbox)
+
 let memory_health_on_screen state =
   match state.view with
   | Memory | Metrics | Keepers Keeper_list -> true
@@ -24825,7 +24885,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_msg (Keeper_chat_older_loaded (_, _, _, _)) | Local_msg (Local_workspace_read (_, _) | Local_keepers_read (_, _)) | Live_context_loaded (_, _, _) | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Keeper_msg (Keeper_composite_loaded (_, _, _))
         | Lane_msg (Lane_inventory_loaded (_, _)) | Clients_loaded (_, _) | Lane_msg (Lane_runs_loaded (_, _, _, _)
         | Lane_run_detail_loaded (_, _, _)) | Measurement_artifact_loaded (_, _, _)
-        | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Overview_loaded _ | Fusion_msg (Fusion_runs_loaded (_, _)
+        | Verification_msg (Verification_loaded _) | Harness_msg (Harness_loaded _) | Overview_loaded _ | Engine_sample_read _ | Fusion_msg (Fusion_runs_loaded (_, _)
         | Fusion_detail_loaded (_, _, _) | Fusion_historical_detail_loaded (_, _, _)
         | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
         | Memory_msg (Memory_recall_standing_loaded (_, _)) | Repository_msg (Repositories_loaded _)
@@ -30947,6 +31007,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ | Lanes_overview | Lanes_run_list _ -> ())
   | Measurement_artifact_loaded (sha256, generation, result) ->
       accept_measurement_artifact state ~sha256 ~generation result
+  | Engine_sample_read reading ->
+      (* The drain draws a frame for every answer it applies, so a sample
+         this takes needs nothing more to be drawn. *)
+      let samples, (_ : Masc_tui_engine_samples.step), report =
+        Masc_tui_engine_samples.answered state.engine_samples ~now:(monotonic_now_s ()) reading
+      in
+      state.engine_samples <- samples;
+      (match report with
+       | Masc_tui_engine_samples.Quiet -> ()
+       | Masc_tui_engine_samples.Failure_began detail ->
+         add_event state "error" (Terminal_text.single_line detail))
   | Overview_loaded result ->
       state.overview_inflight <- false;
       state.overview_owed <-
@@ -36287,6 +36358,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_harness state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
       launch_owed_clients state ~mailbox:async_messages;
+      step_engine_samples state ~mailbox:async_messages ~render_schedule;
       reconcile_system_log_stream state ~mailbox:async_messages;
       launch_owed_identity_logins state ~mailbox:async_messages;
       launch_owed_ask_followup state ~mailbox:async_messages;

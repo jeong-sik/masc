@@ -9991,6 +9991,7 @@ type state = {
   (* The roster starts closed. An explicit Ctrl-B choice survives both
      navigation and resizing; Left navigation is transient. *)
   mutable roster_pane_preference: Masc_tui_roster_pane.preference;
+  mutable pane_zoom: Masc_tui_roster_pane.zoom;
   (* Left opens a temporary Keeper navigator without changing Ctrl-B's choice.
      On narrow screens it occupies the body until a selection or dismissal. *)
   mutable keeper_navigation_open: bool;
@@ -16289,7 +16290,8 @@ let retire_identity_login_expectations (state : state) =
 
 let roster_pane_hidden (state : state) =
   not state.keeper_navigation_open
-  && Masc_tui_roster_pane.effective_hidden state.roster_pane_preference
+  && (Masc_tui_roster_pane.hides_roster state.pane_zoom
+      || Masc_tui_roster_pane.effective_hidden state.roster_pane_preference)
 
 (* Called at interaction and presentation boundaries with the surface width,
    after reserving any Activity pane. Visibility preference survives a resize;
@@ -18891,9 +18893,12 @@ let goal_drop_reason_for (state : state) (goal_id : string) =
    ([Masc_tui_acting_pane.drawn_cols]). An explicit reader choice applies on
    every surface and survives surface changes. *)
 let acting_pane_layout (state : state) =
-  match state.acting_pane_preference with
-  | Chosen_acting_pane layout -> layout
-  | Default_acting_pane -> Masc_tui_acting_pane.Narrow
+  if Masc_tui_roster_pane.hides_activity state.pane_zoom then
+    Masc_tui_acting_pane.Hidden
+  else
+    match state.acting_pane_preference with
+    | Chosen_acting_pane layout -> layout
+    | Default_acting_pane -> Masc_tui_acting_pane.Narrow
 
 (* Requests retain receipts and unresolved declarations across withdrawal.
    Successful creation releases its retry body; receipts grant no authority. *)
@@ -21025,6 +21030,7 @@ let create_state
   (* Keep the reading surface full-width until Left opens the navigator
      or Ctrl-B explicitly pins the roster. *)
   roster_pane_preference = Masc_tui_roster_pane.Hidden;
+  pane_zoom = Masc_tui_roster_pane.Normal;
   keeper_navigation_open = false;
   acting_pane_preference = Default_acting_pane;
   acting_pane_presented = Masc_tui_acting_pane.empty_frame;

@@ -98,6 +98,44 @@ let test_a_drawn_pane_keeps_what_the_reader_asked_for () =
     (Masc_tui_roster_pane.arrows_go_left ~hidden:false ~cols:200
        ~preferring_left:false)
 
+let zoom_testable =
+  Alcotest.testable
+    (fun fmt z ->
+       Format.pp_print_string fmt
+         (match z with
+          | Pane.Normal -> "normal"
+          | Pane.Half -> "half"
+          | Pane.Full -> "full"))
+    ( = )
+
+let test_zoom_steps_and_saturates_cleanly () =
+  Alcotest.(check zoom_testable) "normal zooms in to half" Pane.Half
+    (Pane.zoom_in Pane.Normal);
+  Alcotest.(check zoom_testable) "half zooms in to full" Pane.Full
+    (Pane.zoom_in Pane.Half);
+  Alcotest.(check zoom_testable) "full saturates on zoom_in" Pane.Full
+    (Pane.zoom_in Pane.Full);
+  Alcotest.(check zoom_testable) "full zooms out to half" Pane.Half
+    (Pane.zoom_out Pane.Full);
+  Alcotest.(check zoom_testable) "half zooms out to normal" Pane.Normal
+    (Pane.zoom_out Pane.Half);
+  Alcotest.(check zoom_testable) "normal saturates on zoom_out" Pane.Normal
+    (Pane.zoom_out Pane.Normal);
+  check_bool "normal hides neither pane" false
+    (Pane.hides_activity Pane.Normal || Pane.hides_roster Pane.Normal);
+  check_bool "half hides activity only" true
+    (Pane.hides_activity Pane.Half && not (Pane.hides_roster Pane.Half));
+  check_bool "full hides both panes" true
+    (Pane.hides_activity Pane.Full && Pane.hides_roster Pane.Full);
+  List.iter
+    (fun z ->
+       List.iter
+         (fun ko ->
+            check_bool "zoom label is non-empty" true
+              (String.length (Pane.zoom_label ~ko z) > 0))
+         [ true; false ])
+    [ Pane.Normal; Pane.Half; Pane.Full ]
+
 let () =
   Alcotest.run "tui_roster_pane"
     [ ( "which pane holds the arrows"
@@ -127,5 +165,7 @@ let () =
             `Quick test_the_threshold_is_the_first_width_that_shows
         ] )
     ; ( "columns"
-      , [] )
+      , [ Alcotest.test_case "lazygit-style zoom steps and hides panes cleanly"
+            `Quick test_zoom_steps_and_saturates_cleanly
+        ] )
     ]

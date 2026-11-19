@@ -16152,6 +16152,7 @@ let toggle_acting_pane (state : state) =
         (Printf.sprintf "Activity pane needs %d columns; preference unchanged"
            Masc_tui_acting_pane.threshold_cols)
   | Some layout ->
+      state.pane_zoom <- Masc_tui_roster_pane.Normal;
       state.acting_pane_preference <- Chosen_acting_pane layout;
       state.acting_pane_scroll <- 0;
       state.acting_pane_cursor <- None;
@@ -16170,11 +16171,14 @@ let show_acting_pane_tab (state : state) tab =
          Masc_tui_acting_pane.threshold_cols)
   else begin
     let layout =
-      match acting_pane_layout state with
-     | Masc_tui_acting_pane.Hidden ->
-         Masc_tui_acting_pane.Narrow
-      | (Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout -> layout
+      match state.acting_pane_preference with
+      | Chosen_acting_pane
+          ((Masc_tui_acting_pane.Narrow | Masc_tui_acting_pane.Wide) as layout) ->
+          layout
+      | Chosen_acting_pane Masc_tui_acting_pane.Hidden | Default_acting_pane ->
+          Masc_tui_acting_pane.Narrow
     in
+    state.pane_zoom <- Masc_tui_roster_pane.Normal;
     state.acting_pane_preference <- Chosen_acting_pane layout;
     state.acting_pane_tab <- tab;
     state.acting_pane_scroll <- 0;
@@ -36937,6 +36941,20 @@ Use relative paths for resources already held in the package. -->
              state.keeper_message_focus <- Right_pane;
              if terminal_columns >= Masc_tui_roster_pane.threshold_cols then
                state.roster_pane_preference <- Masc_tui_roster_pane.Hidden
+           end else if Masc_tui_roster_pane.hides_roster state.pane_zoom then begin
+             if terminal_columns >= Masc_tui_roster_pane.threshold_cols then begin
+               (* Step Full -> Half rather than Normal so the right Activity
+                  pane stays collapsed and the checked [terminal_columns] width
+                  remains available for the roster on 158..183-col terminals. *)
+               state.pane_zoom <- Masc_tui_roster_pane.Half;
+               state.roster_pane_preference <- Masc_tui_roster_pane.Shown;
+               reconcile_chat_focus ();
+               Render_schedule.request render_schedule Render_schedule.Force
+             end else
+               report_action state "system"
+                 (Printf.sprintf
+                    "Keeper roster needs %d columns; preference unchanged"
+                    Masc_tui_roster_pane.threshold_cols)
            end else (match
               Masc_tui_roster_pane.toggle_preference state.roster_pane_preference
                 ~cols:terminal_columns
@@ -38438,6 +38456,41 @@ Use relative paths for resources already held in the package. -->
               && (state.view <> Keepers Keeper_message
                   || Masc_tui_message_input.length state.msg_input = 0) ->
            focus_acting_pane_or_say_why state;
+           Render_schedule.request render_schedule Render_schedule.Force
+       (* lazygit-style +/- screen zoom: '+' steps Normal -> Half -> Full
+          (hiding the right Activity pane at Half and both side panes at Full),
+          '_' steps back without overwriting stored Ctrl-B/Ctrl-L choices.
+          Excluded from chat ([message_mode]), composer focus, Browser Lane,
+          modals, and all text inputs so '+' and '_' always type normally. *)
+       | Some (("+" | "_") as zoom_key)
+         when not message_mode
+              && not state.composer_focused
+              && Option.is_none (browser_lane_on_screen state)
+              && not state.palette_open && not (modal_owns_keys state)
+              && not state.answering_open
+              && not state.link_modal_open
+              && not state.memory_fact_detail_open
+              && not state.keeper_navigation_open
+              && Option.is_none state.ask_text_entry
+              && (match state.ask_answer_mode with Ask_browsing -> true | Ask_answering _ -> false)
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           let next =
+             if String.equal zoom_key "+" then
+               Masc_tui_roster_pane.zoom_in state.pane_zoom
+             else
+               Masc_tui_roster_pane.zoom_out state.pane_zoom
+           in
+           if next <> state.pane_zoom then begin
+             state.pane_zoom <- next;
+             if Masc_tui_roster_pane.hides_activity next then
+               state.acting_pane_cursor <- None;
+             if Masc_tui_roster_pane.hides_roster next then
+               state.keeper_detail_focus <- Right_pane;
+             reconcile_chat_focus ()
+           end;
+           report_action state "view"
+             (Masc_tui_roster_pane.zoom_label
+                ~ko:(state.ui_language = Lang_ko) state.pane_zoom);
            Render_schedule.request render_schedule Render_schedule.Force
        | Some k
          when String.equal k toggle_browser_lane_key

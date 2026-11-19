@@ -37,3 +37,30 @@ val arrows_go_left : hidden:bool -> cols:int -> preferring_left:bool -> bool
     [preferring_left] is what the reader last asked for with h/l. It only
     counts where the pane is actually drawn: a preference for a pane that is
     not on screen is a keypress that moves something invisible. *)
+
+(** lazygit-style 3-stage screen zoom ([+] to expand main focus, [_] to step
+    back). Temporary view zoom never overwrites the reader's stored Ctrl-B or
+    Ctrl-L pane preferences:
+    - [Normal]: both side panes follow their stored preferences
+    - [Half]: hides the right Activity pane so the main surface and left
+      roster share the terminal
+    - [Full]: hides both side panes so the active surface fills 100% width *)
+type zoom =
+  | Normal
+  | Half
+  | Full
+
+val zoom_in : zoom -> zoom
+(** Step one stage closer to full-screen main focus ([Normal -> Half -> Full]). *)
+
+val zoom_out : zoom -> zoom
+(** Step one stage back toward normal split ([Full -> Half -> Normal]). *)
+
+val hides_activity : zoom -> bool
+(** Whether [zoom] temporarily collapses the right Activity pane. *)
+
+val hides_roster : zoom -> bool
+(** Whether [zoom] temporarily collapses the left Keeper roster pane. *)
+
+val zoom_label : ko:bool -> zoom -> string
+(** Short status notice naming the active zoom stage. *)

@@ -1134,7 +1134,8 @@ let render_tools (state : state) =
       ~path:[ ui_text state ~ko:"도구·스킬" ~en:"tools & skills" ]
       ~readings:[] ~position
   in
-  let display_lines = Render_tools.tools_display_lines ~cols ~terminal_rows state in
+  let display = Render_tools.tools_display ~cols ~terminal_rows state in
+  let display_lines = display.lines in
   let layout = tools_scrolled_for_lines state display_lines in
   let drawable = layout.sc_count in
   let content_height =
@@ -1164,6 +1165,8 @@ let render_tools (state : state) =
                ~request:Kept_request.Tool_inventory_read failure));
        box_divider buf cols);
   let display_lines_window = Rows.of_list ~first:scroll ~height:content_height display_lines in
+  Option.iter Masc_tui_value.Redraw.note_change_at
+    (Render_tools.drawn_change display display_lines_window);
   for i = 0 to content_height - 1 do
     match Rows.at display_lines_window (i + scroll) with
     | None -> box_empty buf cols

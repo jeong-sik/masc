@@ -37,6 +37,13 @@ module Redraw : sig
   (** Run a computation whose text is measured and not drawn, such as the
       widest of every row's sentence, offscreen rows included. What it notes
       is forgotten: only drawn text asks for a redraw. *)
+
+  val deferred : (unit -> 'a) -> 'a * float option
+  (** Build text that is drawn only if it lands in the rows a screen shows,
+      such as one row of a list that scrolls. The earliest instant the build
+      noted is returned instead of noted; the caller notes it
+      ({!note_change_at}) when it draws the text. What the frame noted before
+      stays noted. *)
 end
 
 (** A moment, drawn in the time zone of the machine the TUI runs on. *)

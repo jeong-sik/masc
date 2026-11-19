@@ -2493,6 +2493,7 @@
   masc_tui_tool_tree
   masc_tui_types
   masc_tui_keys
+  masc_tui_rows
   masc_tui_value
   unix
   yojson))

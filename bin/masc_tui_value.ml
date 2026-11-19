@@ -23,6 +23,14 @@ module Redraw = struct
   let measuring measure =
     let noted = Domain.DLS.get earliest in
     Fun.protect ~finally:(fun () -> Domain.DLS.set earliest noted) measure
+
+  (* Built inside a measurement, so the frame's own noting is put back
+     whether [build] returns or raises; what [build] noted is handed back. *)
+  let deferred build =
+    measuring (fun () ->
+        Domain.DLS.set earliest None;
+        let built = build () in
+        (built, Domain.DLS.get earliest))
 end
 
 module Instant = struct

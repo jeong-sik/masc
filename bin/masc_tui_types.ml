@@ -6512,6 +6512,37 @@ type tools_read_inflight =
   ; tri_pending : tools_read_part list
   }
 
+(* What one answer to the inventory read says about the read. The loop
+   judges each answer once and moves the owed read once by it, so a
+   placeholder or a failure in a row counts once toward the next wait. *)
+type tools_inventory_answer =
+  | Inventory_read  (* The built inventory of the Keeper selected now. *)
+  | Inventory_warming
+      (* The placeholder the server answers until it has built the inventory.
+         No push says when it has, so it is read again after a wait that grows
+         like a failure's (Masc_tui_owed_read.placeholder). *)
+  | Inventory_failed
+  | Inventory_for_another
+      (* Answered for a Keeper no longer selected. The Keeper selected now is
+         still owed its read. *)
+
+let tools_inventory_answer ~selected ~answered_for result =
+  if not (Option.equal String.equal answered_for selected) then Inventory_for_another
+  else
+    match result with
+    | Ok { Masc.Tui_decode_tools.ts_freshness = Masc.Tui_decode_tools.Settled; _ } -> Inventory_read
+    | Ok { Masc.Tui_decode_tools.ts_freshness = Masc.Tui_decode_tools.Warming; _ } -> Inventory_warming
+    | Error _ -> Inventory_failed
+
+(* What the inventory owes after the answer to the read that began last.
+   [failed] and [warming] carry the loop's clock and retry waits. *)
+let tools_inventory_owed ~failed ~warming answer owed =
+  match answer with
+  | Inventory_read -> Masc_tui_owed_read.succeeded owed
+  | Inventory_warming -> warming owed
+  | Inventory_failed -> failed owed
+  | Inventory_for_another -> Masc_tui_owed_read.changed (Masc_tui_owed_read.succeeded owed)
+
 type runtime_param_edit_mode = Friendly_value | Advanced_json
 
 type runtime_param_edit =

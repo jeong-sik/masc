@@ -203,8 +203,6 @@ let list_rows state ~rows =
   max 0 (pane_surface_content_height ~rows - save_prompt_height state - 2
     - (if status then 1 else 0))
 
-let list_page_size state ~rows = max 1 (list_rows state ~rows)
-
 let document_viewport state ~rows ~cols =
   let pane_cols = if resource_split state ~cols then cols - keeper_roster_pane_cols else cols in
   let count = match Masc_tui_resource_document.current state with
@@ -355,6 +353,7 @@ let render_resources (state : state) =
              (list_cells ~ko table None)
          ^ Ansi.reset);
     let visible = Rows.of_list ~first ~height:budget rows_list in
+    report_drawn_list Resource_entries ~height:budget;
     for i = 0 to budget - 1 do
       match Rows.at visible (first + i) with
       | Some resource ->

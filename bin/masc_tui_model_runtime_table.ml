@@ -307,6 +307,55 @@ let stacked_item_starts ~pane rows =
   in
   starts [] 0 (stacked_items ~pane rows)
 
+let selected_lines ~table ~starts ~total cursor =
+  if table then (cursor + 1, cursor + 1)
+  else
+    let start = Option.value ~default:0 (List.nth_opt starts cursor) in
+    let stop =
+      match List.nth_opt starts (cursor + 1) with
+      | Some next -> next - 2
+      | None -> total - 1
+    in
+    (start, stop)
+
+(* The lines the window keeps on screen for binding [cursor]: its own, and
+   for the first table row the column names above it as well, so Home shows
+   them -- while both fit. A pane one line tall keeps the binding. *)
+let binding_span ~table ~starts ~total ~height cursor =
+  let start, stop = selected_lines ~table ~starts ~total cursor in
+  if table && cursor = 0 && stop < height then (0, stop) else (start, stop)
+
+let window ~table ~starts ~total ~height ~cursor scroll =
+  let start, stop = binding_span ~table ~starts ~total ~height cursor in
+  let max_scroll = Int.max 0 (total - height) in
+  let scroll = Int.max 0 (Int.min scroll max_scroll) in
+  Int.min max_scroll (Masc_tui_scroll.ensure_span_visible ~start ~stop ~height scroll)
+
+let page_bindings ~table ~starts ~total ~height =
+  let count = if table then Int.max 0 (total - 1) else List.length starts in
+  let spans = Array.init count (binding_span ~table ~starts ~total ~height) in
+  (* How many bindings from [first] on fit the pane together; [None] when
+     the list ends before the pane does, which limits no page. *)
+  let fit_from first =
+    let rec grow taken =
+      if first + taken >= count then None
+      else if snd spans.(first + taken) - fst spans.(first) + 1 > height then Some taken
+      else grow (taken + 1)
+    in
+    grow 0
+  in
+  let fewest =
+    List.fold_left
+      (fun fewest first ->
+        match fit_from first with Some taken -> Int.min fewest taken | None -> fewest)
+      count (List.init count Fun.id)
+  in
+  Int.max 1 fewest
+
+let reads_selected ~table ~starts ~total ~height cursor =
+  let start, stop = selected_lines ~table ~starts ~total cursor in
+  (not table) && stop - start + 1 > height
+
 let render ~width ?pane rows =
   let qualifier = row_qualifier rows in
   let provider_width = provider_width_of ~qualifier rows in

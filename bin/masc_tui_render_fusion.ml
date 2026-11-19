@@ -212,6 +212,7 @@ let render_fusion_list (state : state) =
     else 0
   in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
+  report_drawn_list Fusion_entries ~height:content_height;
   if shown = 0 then begin
     let empty =
       match

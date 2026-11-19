@@ -524,6 +524,7 @@ let render_overview (state : state) home =
     ~body:(fun ~budget:chrome_budget c ->
       let rows_started = Masc_tui_frame_timing.start_stage () in
       let body = Masc_tui_home.home_body home ~scroll:state.home_decision_scroll ~budget:chrome_budget in
+      report_drawn_list Overview_destinations ~height:(List.length body.hb_rows);
       if body.hb_help then
         c.push (" " ^ Theme.recede ()
           ^ Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko)
@@ -756,7 +757,7 @@ let render_memory (state : state) =
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"
     ~title ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
     ~body:(fun ~budget c ->
-      Render_memory.render_memory_body ~cols ~budget state
+      Render_memory.render_memory_body ~cols ~budget state ~report_drawn_list
         ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
@@ -857,7 +858,7 @@ and render_memory_facts_list (state : state) =
   surface_chrome_keys ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
     ~title ~keys:(Masc_tui_keys.footer_row_memory_facts ~lang:state.ui_language ~cols)
     ~body:(fun ~budget c ->
-      Render_memory.render_memory_facts_body ~cols ~budget state
+      Render_memory.render_memory_facts_body ~cols ~budget state ~report_drawn_list
         ~hand_position:c.position ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
         ~push_divider:c.push_divider ~push_empty:c.push_empty)
 
@@ -881,7 +882,6 @@ let render_metrics = Masc_tui_render_runtime.render_metrics
 let render_runtime_pick = Masc_tui_render_runtime.render_runtime_pick
 
 let config_models_scrolled = Masc_tui_render_config.config_models_scrolled
-let config_models_stacked = Masc_tui_render_config.config_models_stacked
 let config_content_height = Masc_tui_render_config.config_content_height
 let prompts_detail_viewport = Masc_tui_render_config.prompts_detail_viewport
 let presets_viewport = Masc_tui_render_config.presets_viewport
@@ -1139,6 +1139,7 @@ let render ~home ~compact_recovery_notice (state : state) =
   frame_panes := Masc_tui_pane_selection.no_panes;
   frame_acting_pane := Masc_tui_acting_pane.empty_frame;
   frame_tools_task := None;
+  frame_lists := [];
   reset_chat_row_actions ();
   Masc_tui_types.keeper_message_rows_begin_frame ();
   (* And the candle, and any placed picture, is on this frame only if this
@@ -1226,4 +1227,4 @@ let render ~home ~compact_recovery_notice (state : state) =
           presses
   in
   ({ frame with Frame_presenter.lines }, clamped, approval, presses, !frame_panes,
-   !frame_acting_pane, chat_row_actions (), !frame_tools_task)
+   !frame_acting_pane, chat_row_actions (), !frame_tools_task, !frame_lists)

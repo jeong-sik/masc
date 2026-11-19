@@ -1159,6 +1159,7 @@ let render_approvals (state : state) =
       |> min (max 0 (framed_inner_width cols - 6 - phase_width)) in
     let subject_width = max 1 (framed_inner_width cols - name_width - 6) in
     let approvals_window = Rows.of_list ~first:scroll_offset ~height:content_height approvals in
+    report_drawn_list Approval_items ~height:content_height;
     for i = 0 to content_height - 1 do
       let idx = i + scroll_offset in
       if idx < approval_total then begin

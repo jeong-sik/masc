@@ -233,6 +233,193 @@ let test_exact_runtime_lookup () =
   check bool "missing binding stays missing" true
     (Option.is_none (T.find_runtime ~runtime_id:"account-three.model.6" rows))
 
+(* QA N10: the first j scrolled the column names off and every j moved the
+   whole table under a still cursor. The window a pane of [height] lines
+   draws moves only when the selected binding leaves it, so the names on
+   line 0 stay while the selection is inside the first window and Home
+   brings them back. *)
+let test_the_window_moves_only_when_the_selection_leaves_it () =
+  let window ?(table = true) ?(starts = []) ~total ~height ~cursor scroll =
+    T.window ~table ~starts ~total ~height ~cursor scroll
+  in
+  (* A table of 30 bindings under its column names: 31 lines, 10 drawn. *)
+  let table ~cursor scroll = window ~total:31 ~height:10 ~cursor scroll in
+  List.iter
+    (fun cursor ->
+      check int (Printf.sprintf "binding %d in the first window keeps the names" cursor) 0
+        (table ~cursor 0))
+    (List.init 9 Fun.id);
+  check int "the tenth binding moves the window one line" 1 (table ~cursor:9 0);
+  check int "a step inside the window moves only the mark" 5 (table ~cursor:7 5);
+  check int "a step below the window brings its line to the bottom" 7 (table ~cursor:15 5);
+  check int "Home brings the names back" 0 (table ~cursor:0 20);
+  check int "End shows the last binding at the bottom" 21 (table ~cursor:29 0);
+  check int "a stale scroll is held inside the document" 21 (table ~cursor:29 99);
+  (* Stacked items of four lines with a blank between: a window that shows
+     any line of the selected item stands, so its body can be read. *)
+  let stacked ~cursor scroll =
+    window ~table:false ~starts:[ 0; 5; 10 ] ~total:14 ~height:3 ~cursor scroll
+  in
+  check int "an item partly shown keeps the window" 2 (stacked ~cursor:0 2);
+  check int "an item below the window shows its first line at the bottom" 3 (stacked ~cursor:1 0);
+  check int "an item above the window comes to its first line" 5 (stacked ~cursor:1 11)
+
+(* QA N10 at 80x24: the stacked items took three lines each, and PgDn walked
+   the document, which the window pulled straight back to the selected
+   item: the selection never moved. A page is the bindings the pane always
+   shows whole together, and only an item taller than the pane is read line
+   by line. *)
+let test_a_page_counts_the_bindings_the_pane_holds_together () =
+  let page ?(table = true) ?(starts = []) ~total ~height () =
+    T.page_bindings ~table ~starts ~total ~height
+  in
+  check int "a table pane holds a row per line less the names" 9
+    (page ~total:31 ~height:10 ());
+  check int "a table shorter than the pane" 3 (page ~total:4 ~height:10 ());
+  check int "a table pane one line tall" 1 (page ~total:31 ~height:1 ());
+  let starts = [ 0; 3; 6; 9; 12 ] in
+  check int "stacked items of two lines and a blank" 3
+    (page ~table:false ~starts ~total:14 ~height:8 ());
+  check int "two items fit a six-line pane" 2 (page ~table:false ~starts ~total:14 ~height:6 ());
+  check int "the run with the tallest items decides" 2
+    (page ~table:false ~starts:[ 0; 3; 6; 11; 16 ] ~total:19 ~height:10 ());
+  check int "an item taller than the pane pages by one" 1
+    (page ~table:false ~starts:[ 0; 20 ] ~total:30 ~height:5 ());
+  let reads ?(table = false) ~starts ~total ~height cursor =
+    T.reads_selected ~table ~starts ~total ~height cursor
+  in
+  check bool "a short stacked item walks bindings" false (reads ~starts ~total:14 ~height:8 1);
+  check bool "a stacked item taller than the pane is read" true
+    (reads ~starts:[ 0; 20 ] ~total:30 ~height:5 0);
+  check bool "a table row never is" false (reads ~table:true ~starts:[] ~total:31 ~height:1 3)
+
+(* The line a binding is drawn on: under the column names in the table, the
+   item's first line when stacked. *)
+let binding_line ~table ~starts binding =
+  if table then binding + 1 else List.nth starts binding
+
+let shown ~table ~starts ~height ~first binding =
+  let line = binding_line ~table ~starts binding in
+  line >= first && line < first + height
+
+(* Every line of a binding is in the window. *)
+let shown_whole ~table ~starts ~total ~height ~first binding =
+  let start, stop = T.selected_lines ~table ~starts ~total binding in
+  start >= first && stop < first + height
+
+(* Item starts and the document length for stacked items of these line
+   counts, a blank between each two. *)
+let stacked_of lengths =
+  let starts, after =
+    List.fold_left (fun (starts, at) lines -> (at :: starts, at + lines + 1)) ([], 0) lengths
+  in
+  (List.rev starts, after - 1)
+
+(* RFC tui-one-screen-grammar §3.1 on the models pane, put together the way
+   the dispatcher does it: the window the pane draws, the page its list
+   reports, and the window that follows the landing. From every selection
+   and every window that shows it, PgDn keeps the binding drawn last on
+   screen and PgUp the binding drawn first, and both land on a binding the
+   pane draws whole. The parts were tested one by one; this is the decision
+   they make. *)
+let test_a_page_keeps_the_binding_drawn_at_its_far_edge () =
+  let check_pane ~label ~table ~starts ~total ~count ~height =
+    let page = T.page_bindings ~table ~starts ~total ~height in
+    let bindings = List.init count Fun.id in
+    for cursor = 0 to count - 1 do
+      if not (T.reads_selected ~table ~starts ~total ~height cursor) then
+        for scroll = 0 to total do
+          let first = T.window ~table ~starts ~total ~height ~cursor scroll in
+          let drawn = List.filter (shown ~table ~starts ~height ~first) bindings in
+          let at = Printf.sprintf "%s %d tall, binding %d, window %d" label height cursor first in
+          check bool (at ^ ": the selection is drawn whole") true
+            (shown_whole ~table ~starts ~total ~height ~first cursor);
+          List.iter
+            (fun (key, landing, kept) ->
+              let next = T.window ~table ~starts ~total ~height ~cursor:landing first in
+              (* A pane that holds one binding at a time pages by one and
+                 keeps nothing. *)
+              check bool (Printf.sprintf "%s: %s keeps binding %d" at key kept) true
+                (page < 2 || shown ~table ~starts ~height ~first:next kept);
+              check bool (Printf.sprintf "%s: %s lands on a binding drawn whole" at key) true
+                (shown_whole ~table ~starts ~total ~height ~first:next landing))
+            (List.concat
+               [ (match List.rev drawn with
+                  | last :: _ ->
+                      [ "PgDn", Int.min (count - 1) (cursor + Masc_tui_scroll.page_step ~height:page), last ]
+                  | [] -> [])
+               ; (match drawn with
+                  | first_drawn :: _ ->
+                      [ "PgUp", Int.max 0 (cursor - Masc_tui_scroll.page_step ~height:page), first_drawn ]
+                  | [] -> []) ])
+        done
+    done
+  in
+  List.iter
+    (fun count ->
+      List.iter
+        (fun height ->
+          check_pane ~label:(Printf.sprintf "table of %d" count) ~table:true ~starts:[]
+            ~total:(count + 1) ~count ~height)
+        [ 2; 3; 4; 9; 14 ])
+    [ 1; 2; 5; 30 ];
+  List.iter
+    (fun (label, lengths) ->
+      let starts, total = stacked_of lengths in
+      let count = List.length lengths in
+      List.iter
+        (fun height ->
+          check_pane ~label ~table:false ~starts ~total ~count ~height)
+        [ 4; 5; 7; 10; 15 ])
+    [ "one item of two lines", [ 2 ]
+    ; "six items of two lines", List.init 6 (fun _ -> 2)
+    ; "forty items of two lines", List.init 40 (fun _ -> 2)
+    ; "twelve items of three lines", List.init 12 (fun _ -> 3)
+    ; "two-line items then four-line items", [ 2; 2; 2; 2; 2; 4; 4; 4; 4; 4; 4; 4 ]
+    ; "four-line items then two-line items", [ 4; 4; 4; 4; 2; 2; 2; 2; 2; 2 ]
+    ; "mixed", [ 2; 4; 2; 3; 2; 4; 4; 2; 2; 3 ] ]
+
+(* QA R8c: two-line items, then four-line items, in a ten-line pane. Home,
+   then PgDn twice: the page was counted from the window rather than from
+   the selection, so the second PgDn landed three items past the binding
+   drawn last and the window that followed it left that binding out. *)
+let test_mixed_heights_page_down_twice_from_home () =
+  let lengths = [ 2; 2; 2; 2; 2; 4; 4; 4; 4; 4; 4; 4 ] in
+  let starts, total = stacked_of lengths in
+  let count = List.length lengths in
+  let height = 10 and table = false in
+  let page = T.page_bindings ~table ~starts ~total ~height in
+  let first = ref (T.window ~table ~starts ~total ~height ~cursor:0 0) and cursor = ref 0 in
+  for press = 1 to 2 do
+    let last =
+      List.fold_left (fun last b -> if shown ~table ~starts ~height ~first:!first b then b else last)
+        (-1) (List.init count Fun.id)
+    in
+    cursor := Int.min (count - 1) (!cursor + Masc_tui_scroll.page_step ~height:page);
+    first := T.window ~table ~starts ~total ~height ~cursor:!cursor !first;
+    check bool (Printf.sprintf "PgDn %d: binding %d drawn last stays (window %d, landing %d)"
+                  press last !first !cursor) true
+      (shown ~table ~starts ~height ~first:!first last)
+  done
+
+(* QA R8c P2: four two-line bindings in a five-line pane. A binding that
+   came in from below showed only its name, and End left the last binding's
+   second line under the pane for good. *)
+let test_end_shows_the_last_binding_whole () =
+  let starts = [ 0; 3; 6; 9 ] and total = 11 and height = 5 in
+  let first = T.window ~table:false ~starts ~total ~height ~cursor:3 0 in
+  check bool (Printf.sprintf "End: the last line %d is drawn (window %d..%d)" (total - 1) first
+                (first + height - 1)) true (total - 1 < first + height);
+  check int "j onto a binding under the window brings its last line to the bottom" 3
+    (T.window ~table:false ~starts ~total ~height ~cursor:2 0)
+
+(* QA R8c P3: a table pane one line tall. Home brought the column names back
+   and left the first binding off the pane. *)
+let test_a_one_line_table_draws_the_selection () =
+  let first = T.window ~table:true ~starts:[] ~total:31 ~height:1 ~cursor:0 5 in
+  check bool (Printf.sprintf "Home in a one-line pane draws binding 0 (window %d)" first) true
+    (shown ~table:true ~starts:[] ~height:1 ~first 0)
+
 let () =
   Alcotest.run
     "masc_tui_model_runtime_table"
@@ -254,5 +441,16 @@ let () =
         ; Alcotest.test_case "commented lines are not values" `Quick test_commented_lines_are_not_values
         ] )
     ; ( "render"
-      , [] )
+      , [ Alcotest.test_case "the window moves only when the selection leaves it" `Quick
+            test_the_window_moves_only_when_the_selection_leaves_it
+        ; Alcotest.test_case "a page counts the bindings the pane holds together" `Quick
+            test_a_page_counts_the_bindings_the_pane_holds_together
+        ; Alcotest.test_case "a page keeps the binding drawn at its far edge" `Quick
+            test_a_page_keeps_the_binding_drawn_at_its_far_edge
+        ; Alcotest.test_case "mixed heights: PgDn twice from Home" `Quick
+            test_mixed_heights_page_down_twice_from_home
+        ; Alcotest.test_case "End shows the last binding whole" `Quick
+            test_end_shows_the_last_binding_whole
+        ; Alcotest.test_case "a one-line table draws the selection" `Quick
+            test_a_one_line_table_draws_the_selection ] )
     ]

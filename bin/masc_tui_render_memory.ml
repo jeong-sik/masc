@@ -1347,20 +1347,83 @@ type memory_overview_projection =
 let refused_rows projection =
   List.length projection.refused + if projection.refused_divider then 1 else 0
 
-let memory_overview_rows ~cols ~budget ?cursor (state : state) =
+(* How tall one Keeper's reading is, full and compact, and whether it keeps a
+   stalled-gap row: all the detail under the list needs from the Keepers that
+   are not selected, to be as tall as the tallest of them (RFC
+   tui-one-screen-grammar §8). *)
+type memory_reading_measure = { full_rows : int; compact_rows : int; stalled : bool }
+
+(* Measuring wraps every loaded Keeper's reading, and the overview is built
+   several times a frame (its layout, its body, the position count). The
+   measures are kept for the readings they were taken from: the same health
+   snapshot and World reading, the same Keepers in the same order, at the
+   same width and in the same reading. A value that changes is a new value,
+   so any change measures again. The input reading is part of it only under
+   [v]: the axis reading does not draw it, and the input is read again for
+   every Keeper j or k selects, so keeping it there measured every Keeper on
+   every move. *)
+let memory_reading_measures :
+    ((memory_health_snapshot option * Masc_tui_memory_world.t
+      * (string, Masc_tui_memory_usage.t, request_failure) Masc_tui_fetched.source option
+      * memory_keeper_health list * int * bool * bool * Masc_tui_memory_usage.display_unit)
+     * memory_reading_measure list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let measured_readings (state : state) ~cols ~readings keepers =
+  let input = if state.memory_overview_detail then Some state.memory_input else None in
+  let key =
+    ( state.memory_health, state.memory_world, input, keepers, cols
+    , state.ui_language = Lang_ko, state.memory_overview_detail, state.memory_unit )
+  in
+  let same (health, world, input, seen, seen_cols, seen_ko, seen_detail, seen_unit)
+      (health', world', input', keepers', cols', ko', detail', unit') =
+    health == health' && world == world' && Option.equal ( == ) input input'
+    && List.equal ( == ) seen keepers' && seen_cols = cols' && Bool.equal seen_ko ko'
+    && Bool.equal seen_detail detail' && seen_unit = unit'
+  in
+  match Domain.DLS.get memory_reading_measures with
+  | Some (seen, measures) when same seen key -> measures
+  | Some _ | None ->
+      let measures =
+        List.map
+          (fun keeper ->
+            let full, compact = readings keeper in
+            { full_rows = List.length full.rows
+            ; compact_rows = List.length compact.rows
+            ; stalled = Option.is_some full.stalled_row })
+          keepers
+      in
+      Domain.DLS.set memory_reading_measures (Some (key, measures));
+      measures
+
+let memory_overview_rows ~cols ~budget (state : state) =
   let keepers = visible_memory_keepers state in
-  let cursor = Option.value cursor ~default:state.memory_health_cursor in
-  let selected = List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) in
-  let context =
-    match selected with
-    | None -> { rows = []; primary_rows = 0; stalled_row = None }
-    | Some keeper when not state.memory_overview_detail ->
-        memory_axis_context state ~cols ~compact:false keeper
-    | Some keeper ->
-      memory_context_lines ~ko:(state.ui_language = Lang_ko) ~cols ~detail:state.memory_overview_detail
-        ~unit:state.memory_unit
-        ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input ~key:keeper.mkh_keeper_id)
-        keeper
+  let ko = state.ui_language = Lang_ko in
+  (* A Keeper's reading and the compact one that stands in for it on a short
+     frame. [v] keeps the full input and coverage, so it has no compact one. *)
+  let readings keeper =
+    if state.memory_overview_detail then
+      let full =
+        memory_context_lines ~ko ~cols ~detail:state.memory_overview_detail
+          ~unit:state.memory_unit
+          ~input:(Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
+                    ~key:keeper.mkh_keeper_id)
+          keeper
+      in
+      full, full
+    else
+      memory_axis_context state ~cols ~compact:false keeper,
+      memory_axis_context state ~cols ~compact:true keeper
+  in
+  (* Every loaded Keeper's is measured, because the detail under the list is
+     as tall as the tallest of them (RFC tui-one-screen-grammar §8). Sized by
+     the selected Keeper alone, it moved the list's last row and the divider
+     under it on every j and k (QA N02). Only the selected one is drawn. *)
+  let measures = measured_readings state ~cols ~readings keepers in
+  let no_reading = { rows = []; primary_rows = 0; stalled_row = None } in
+  let context, compact_context =
+    Option.fold ~none:(no_reading, no_reading) ~some:readings
+      (List.nth_opt keepers (max 0 (min state.memory_health_cursor (List.length keepers - 1))))
   in
   let all_refused = memory_refused_keeper_lines state in
   let base = memory_overview_scrolled ~header_rows:0 ~refused_rows:0 ~context_rows:0 state in
@@ -1373,18 +1436,17 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   (* Reserve a visible count when decoding rejected rows. The rejection
      block spends any additional room after the summary and before detail. *)
   let refused_min = if all_refused = [] then 0 else 1 in
-  (* A compact selected reading keeps its state, an omission marker and an
-     actionable stalled-gap row. [v] retains the full input and coverage. *)
-  let compact_context = match selected with
-    | Some keeper when not state.memory_overview_detail ->
-        memory_axis_context state ~cols ~compact:true keeper
-    | Some _ | None -> context
+  (* A compact reading keeps its state, an omission marker and an actionable
+     stalled-gap row. The rows kept for the detail are the most any loaded
+     Keeper's would keep, so the header and the rejected rows above the list
+     do not change with the selection either. *)
+  let reserve measure =
+    if measure.full_rows = 0 then 0
+    else if state.memory_overview_detail then 3 + (if measure.stalled then 1 else 0)
+    else measure.compact_rows + 1
   in
   let context_reserve =
-    if context.rows = [] then 0
-    else if state.memory_overview_detail then
-      3 + (if Option.is_some context.stalled_row then 1 else 0)
-    else List.length compact_context.rows + 1
+    List.fold_left (fun most measure -> max most (reserve measure)) 0 measures
   in
   let header_budget = max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve) in
   (* On a very short frame the full list and selected detail must yield before
@@ -1395,9 +1457,9 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     if state.memory_overview_detail then memory_fleet_header_rows ~cols state
     else
       [memory_compact_fleet_row ~cols state]
-      @ (match selected with
-         | Some _ -> []
-         | None ->
+      @ (match keepers with
+         | _ :: _ -> []
+         | [] ->
              let heading, clauses = memory_world_axis state ~room:(max 1 (framed_inner_width cols - 2)) in
              clause_rows ~cols (heading :: clauses))
   in
@@ -1424,14 +1486,31 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     in
     if context.rows = [] || available <= 1 then []
     else
-      let context =
-        if List.length context.rows <= available - 1 then context else compact_context in
-      fold_memory_context_rows ~ko:(state.ui_language = Lang_ko) ~max_rows:(available - 1) context
+      let room = available - 1 in
+      let fold (context, compact) =
+        fold_memory_context_rows ~ko ~max_rows:room
+          (if List.length context.rows <= room then context else compact)
+      in
+      (* The rows [fold] leaves a reading: it keeps a reading that fits and
+         folds a longer one, or its compact one, into the room. *)
+      let folded measure =
+        if measure.full_rows <= room then measure.full_rows else min measure.compact_rows room
+      in
+      let tallest = List.fold_left (fun tallest measure -> max tallest (folded measure)) 0 measures in
+      (* Each reading is folded into the room before it is measured, so
+         none is cut here: [fit_tallest] only pads the selected one to the
+         tallest. The room is the cap as well: a reading too tall for it is
+         already drawn in its compact form, so the default cap would only cut
+         a reading that fits. *)
+      Masc_tui_detail_height.fit_tallest ~cap:room ~budget:room ~tallest
+        ~too_tall:(Masc_tui_detail_height.Cut_with
+                     (if ko then "  … v:전체" else "  … v:full reading"))
+        ~blank:"" (fold (context, compact_context))
   in
   { header; refused; refused_divider; context }
 
-let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
-  let projection = memory_overview_rows ~cols ~budget ?cursor state in
+let memory_overview_scrolled ~cols ~budget (state : state) =
+  let projection = memory_overview_rows ~cols ~budget state in
   memory_overview_scrolled
     ~header_rows:(List.length projection.header)
     ~refused_rows:(refused_rows projection)
@@ -1456,6 +1535,7 @@ let memory_selector_line ~cols (state : state) keeper =
   ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
 let render_memory_body ~cols ~budget (state : state)
+    ~(report_drawn_list : paged_list -> height:int -> unit)
     ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -1576,6 +1656,7 @@ let render_memory_body ~cols ~budget (state : state)
     let keepers_window =
       Rows.of_list ~first:scroll ~height:content_height keepers
     in
+    report_drawn_list Memory_keepers ~height:content_height;
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match Rows.at keepers_window idx with
@@ -1603,11 +1684,35 @@ let render_memory_body ~cols ~budget (state : state)
    edge. Under this the browser stops being one. *)
 let memory_fact_list_floor_rows = 5
 
+(* The tallest detail among the loaded facts, in lines. Counting it wraps
+   every fact's claim, so it is kept for the rows it was counted from: the
+   rows are the projection [memory_fact_rows] keeps until the snapshot, the
+   filter or the sort changes, and a frame that draws the same rows reads
+   the count back. *)
+let memory_fact_tallest_detail :
+    (memory_fact_row list * int * bool * int) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let tallest_fact_detail_lines ~ko ~cols rows =
+  match Domain.DLS.get memory_fact_tallest_detail with
+  | Some (seen, seen_cols, seen_ko, tallest)
+    when seen == rows && seen_cols = cols && Bool.equal seen_ko ko -> tallest
+  | Some _ | None ->
+      let tallest =
+        List.fold_left
+          (fun tallest row ->
+            Int.max tallest (fact_detail_line_count (memory_fact_detail_parts ~ko ~cols row)))
+          0 rows
+      in
+      Domain.DLS.set memory_fact_tallest_detail (Some (rows, cols, ko, tallest));
+      tallest
+
 let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
+  let ko = state.ui_language = Lang_ko in
   let detail =
-    Option.map (memory_fact_detail_parts ~state ~ko:(state.ui_language = Lang_ko) ~cols) (List.nth_opt rows cursor)
+    Option.map (memory_fact_detail_parts ~state ~ko ~cols) (List.nth_opt rows cursor)
   in
   let total_detail_lines =
     Option.fold ~none:0 ~some:fact_detail_line_count detail
@@ -1615,9 +1720,8 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let scope_rows = List.length (memory_facts_scope_lines ~cols state) in
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
-     divider. Input asks for the target cursor because wrapped details can
-     change the height on every movement. The search row is counted from
-     [memory_search_query], the same value the renderer draws it from. *)
+     divider. The search row is counted from [memory_search_query], the same
+     value the renderer draws it from. *)
   let chrome_rows =
     4
     + (if Option.is_some (memory_facts_snapshot state) then 1 else 0)
@@ -1625,37 +1729,35 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     + scope_rows
     + (if scope_rows > 0 then 1 else 0)
   in
-  (* The detail is as tall as the fact under the cursor, and a fact can be
-     any length. On the live store at thirty rows one fact filled fifteen of
-     them and the list fell to its floor of one: a browser of 254 facts
-     showing one row, whose height then moved on every [j] as the next fact
-     wrapped to a different depth. The list keeps this many rows before the
-     detail takes any, and what the detail then loses is one keypress away --
-     [Enter] opens the whole fact in an overlay that owns the terminal. *)
+  (* The detail is as tall as the tallest loaded fact's (RFC
+     tui-one-screen-grammar §8), so the list above it keeps one height while
+     [j] walks facts of different lengths; a shorter fact's detail ends in
+     blank rows. A fact can be any length: on the live store at thirty rows
+     one fact filled fifteen of them and the list fell to one row of 254
+     facts. The list keeps this many rows before the detail takes any, and
+     what the detail then loses is one keypress away -- [Enter] opens the
+     whole fact in an overlay that owns the terminal. *)
   let room_below_chrome = max 1 (budget - chrome_rows) in
-  let detail_row_budget =
-    min (if total_detail_lines = 0 then 0 else 1 + total_detail_lines)
-      (max 0 (room_below_chrome - memory_fact_list_floor_rows))
+  let detail_budget =
+    (* Less the detail's divider. *)
+    max 0 (room_below_chrome - memory_fact_list_floor_rows - 1)
   in
+  let tallest = if total = 0 then 0 else tallest_fact_detail_lines ~ko ~cols rows in
   let detail_lines =
     match detail with
     | None -> []
     | Some parts ->
-      let kept = max 0 (detail_row_budget - 1) in
-      (* The detail also needs its divider. With no line left after that,
-         even the folded marker would exceed the rows reserved for it. *)
-      if kept = 0 then []
-      else if kept >= total_detail_lines then
-        fact_detail_prefix parts total_detail_lines
-      else
+        let height = min detail_budget (max tallest total_detail_lines) in
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)
-        fact_detail_prefix parts (kept - 1)
-        @ [ "      "
-            ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko)
-                (total_detail_lines - (kept - 1))
-            ^ (if state.ui_language = Lang_ko then " · Enter:전체 사실"
-               else " · Enter for the whole fact") ]
+        let overflow =
+          "      "
+          ^ Masc_tui_value.Count.more ~ko (total_detail_lines - (height - 1))
+          ^ (if ko then " · Enter:전체 사실" else " · Enter for the whole fact")
+        in
+        Masc_tui_detail_height.fit_tallest ~budget:detail_budget ~tallest
+          ~too_tall:(Masc_tui_detail_height.Cut_with overflow) ~blank:""
+          (fact_detail_prefix parts total_detail_lines)
   in
   (* A budgeted detail that drew nothing also spends no divider. Returning
      that row to the list keeps tiny viewports full. *)
@@ -1681,6 +1783,7 @@ let memory_facts_content_height ~cols ~budget ~cursor state =
   height
 
 let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget (state : state)
+    ~(report_drawn_list : paged_list -> height:int -> unit)
     ~(hand_position : Masc_tui_value.Position.t -> unit)
     ~(push : string -> unit)
     ~(push_styled : style:string -> string -> unit)
@@ -1812,6 +1915,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
      push_styled ~style:(Theme.recede ()) empty)
   else begin
     let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
+    report_drawn_list Memory_fact_rows ~height:content_height;
     for i = 0 to content_height - 1 do
       let idx = i + scroll in
       match Rows.at rows_window idx with
@@ -1830,10 +1934,10 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        List.iter push lines)
 
 let render_memory_facts_body ~cols ~budget (state : state)
-    ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
+    ~report_drawn_list ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty =
   if not state.memory_facts_categories_open || cols < Masc_tui_roster_pane.threshold_cols then
     render_memory_facts_body_single ~cols ~budget state
-      ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
+      ~report_drawn_list ~hand_position ~push ~push_styled ~push_selected ~push_divider ~push_empty
   else begin
     let width = Masc_tui_roster_pane.pane_cols in
     let fact_cols = memory_facts_pane_cols state cols in
@@ -1841,7 +1945,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let facts = ref [] in
     let collect text = facts := text :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
-      ~hand_position
+      ~report_drawn_list ~hand_position
       ~push:collect
       ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
       ~push_selected:(fun text ->

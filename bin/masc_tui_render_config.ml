@@ -1488,23 +1488,30 @@ type models_projection = {
 }
 
 (* Selection and values come from the same published reading. This prefix
-   names only the selected account; ambiguous binding names retain their
-   exact provider on every list row. Full provenance stays in [v]. *)
+   names only the selected binding's account, and says so: it sits where a
+   group heading would, over rows of other accounts. Ambiguous binding names
+   retain their exact provider on every list row. Full provenance stays in
+   [v]. *)
 let config_models_projection state ~terminal_rows ~cols =
   let pane = max 1 (framed_inner_width cols - 2 - 2) in
   let rows = config_models_drawn_rows state in
   let content_height = max 1 (surface_body_rows state ~terminal_rows - 5) in
   let wrap text = Message_layout.wrap_words ~max_cells:pane (Terminal_text.single_line text) in
-  let notes, scope = match List.nth_opt rows state.config_models_cursor with
-    | None -> [], []
-    | Some row ->
-        let email, notes = models_source_account_reading
-            ~provider:row.provider state.runtime_config_view in
-        let identity = row.provider ^ (match email with None -> "" | Some email -> " · " ^ email) in
-        notes, List.map (fun line -> Model_identity line) (wrap identity)
+  let account (row : Masc_tui_model_runtime_table.row) =
+    let email, notes = models_source_account_reading
+        ~provider:row.provider state.runtime_config_view in
+    let identity =
+      ui_text state ~ko:"선택 · " ~en:"Selected · " ^ row.provider
+      ^ (match email with None -> "" | Some email -> " · " ^ email) in
+    notes,
+    List.concat_map (fun note ->
+        List.map (fun line -> Model_observation line) (wrap note)) notes
+    @ List.map (fun line -> Model_identity line) (wrap identity)
   in
-  let prefix = List.concat_map (fun note ->
-      List.map (fun line -> Model_observation line) (wrap note)) notes @ scope in
+  let notes, prefix = match List.nth_opt rows state.config_models_cursor with
+    | None -> [], []
+    | Some row -> account row
+  in
   (* Even a long diagnostic keeps one row for the selected binding. The
      title points to the complete captured reading if any prefix is cut. *)
   let prefix_room = max 0 (content_height - 1) in
@@ -1515,11 +1522,16 @@ let config_models_projection state ~terminal_rows ~cols =
       ui_text state ~ko:"v:계정 전체" ~en:"v:full account"
     else ""
   in
+  (* As tall as the tallest binding's prefix (RFC tui-one-screen-grammar
+     §8): two accounts whose lines wrap differently moved the table a row
+     whenever j crossed between them. *)
   let prefix =
-    if List.length prefix <= prefix_room then prefix
-    else if prefix_room = 0 then []
-    else List.take (prefix_room - 1) prefix
-      @ [Model_observation (ui_text state ~ko:"… v:전체 안내·계정" ~en:"… v:all notices/account")]
+    Masc_tui_detail_height.fit ~budget:prefix_room ~rows
+      ~detail:(fun row -> snd (account row))
+      ~too_tall:(Masc_tui_detail_height.Cut_with
+                   (Model_observation
+                      (ui_text state ~ko:"… v:전체 안내·계정" ~en:"… v:all notices/account")))
+      ~blank:(Model_identity "") prefix
   in
   let table = Masc_tui_model_runtime_table.fits ~width:pane rows in
   { model_document = Masc_tui_model_runtime_table.render ~width:(max 40 pane) ~pane rows;
@@ -1607,34 +1619,20 @@ let render_config_models (state : state) =
           resize, which is the whole point of the transition. *)
        let table_mode = projection.model_table in
        let starts = projection.model_starts in
-       let cursor_line =
-         if table_mode then state.config_models_cursor + 1
-         else
-           List.nth_opt starts state.config_models_cursor
-           |> Option.value ~default:0
+       let cursor_line, _ =
+         Masc_tui_model_runtime_table.selected_lines ~table:table_mode ~starts ~total
+           state.config_models_cursor
        in
-       (* The last line of the selected item: items are separated by one
-          blank line and the trailing separator is dropped. In table mode
-          the binding is the single line itself. *)
-       let cursor_stop =
-         if table_mode then cursor_line
-         else
-           match List.nth_opt starts (state.config_models_cursor + 1) with
-           | Some next -> next - 2
-           | None -> total - 1
-       in
-       let max_scroll = max 0 (total - table_height) in
        (* The window follows the selected item rather than the other way
           round: an item the frame does not draw at all is a selection the
           reader cannot see, and [e] would act on it blind. While some line
           of it is shown the reader's scroll stands, so a stacked item's
           body -- the fields below its first line -- stays reachable on a
-          short pane (#41026 review). *)
-       let scroll = max 0 (min state.config_scroll max_scroll) in
+          short pane (#41026 review). The move keys store the same window
+          ([config_models_list]), so this only corrects a stale scroll. *)
        let scroll =
-         min max_scroll
-           (Masc_tui_scroll.ensure_span_visible ~start:cursor_line
-              ~stop:cursor_stop ~height:table_height scroll)
+         Masc_tui_model_runtime_table.window ~table:table_mode ~starts ~total
+           ~height:table_height ~cursor:state.config_models_cursor state.config_scroll
        in
        (* The mark rides the first line of the item that is on screen. *)
        let marked_line = max cursor_line scroll in
@@ -1643,6 +1641,11 @@ let render_config_models (state : state) =
           key, a list that shrank -- drew its rows outside the window, and
           they came out blank. *)
        let table_window = Rows.of_list ~first:scroll ~height:table_height table in
+       (* A page is the bindings the pane always shows whole together: table
+          rows, or stacked items. *)
+       report_drawn_list Model_bindings
+         ~height:(Masc_tui_model_runtime_table.page_bindings ~table:table_mode ~starts ~total
+                    ~height:table_height);
        (* Row 0 of [table] is the header in table mode, so a cursor over the
           data rows is one lower than the line it marks. Stacked mode has no
           header: line 0 is the first binding's item. *)
@@ -1686,10 +1689,33 @@ let config_models_scrolled (state : state) : scrolled =
       ; sc_preview_keep = None
       }
 
-(* Whether the pane draws stacked items at the current width. *)
-let config_models_stacked (state : state) =
-  let terminal_rows, cols = get_terminal_size () in
-  not (config_models_projection state ~terminal_rows ~cols).model_table
+type models_list = {
+  ml_count : int;
+  ml_reads_selected : bool;
+  ml_window : cursor:int -> int -> int;
+}
+
+(* The bindings the move keys walk. [None] while the pane draws a form, a
+   jump, an error or nothing read yet: there is no binding on screen. *)
+let config_models_list (state : state) ~terminal_rows ~cols =
+  match state.runtime_model_form, state.runtime_model_jump,
+        config_models_read_error state, state.runtime_config_view with
+  | None, None, None, Some _ ->
+      let projection = config_models_projection state ~terminal_rows ~cols in
+      let table = projection.model_table and starts = projection.model_starts in
+      let total = List.length projection.model_document in
+      let height = projection.model_height in
+      let window ~cursor scroll =
+        Masc_tui_model_runtime_table.window ~table ~starts ~total ~height ~cursor scroll
+      in
+      Some
+        { ml_count = List.length state.config_models_rows
+        ; ml_reads_selected =
+            Masc_tui_model_runtime_table.reads_selected ~table ~starts ~total ~height
+              state.config_models_cursor
+        ; ml_window = window
+        }
+  | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
 
 let config_metadata_style = function
   | Masc_tui_runtime_config_view.Neutral -> Theme.recede ()

@@ -227,7 +227,7 @@ let test_memory_diagnostics_escape_control_bytes () =
     state.memory_health_cursor <- cursor;
     let lines = ref [] in
     Render_memory.render_memory_body ~cols:100 ~budget:20 state
-      ~hand_position:ignore
+      ~report_drawn_list:(fun _ ~height:_ -> ()) ~hand_position:ignore
       ~push:(fun line -> lines := line :: !lines)
       ~push_styled:(fun ~style:_ line -> lines := line :: !lines)
       ~push_selected:(fun line -> lines := line :: !lines)
@@ -245,6 +245,269 @@ let test_memory_diagnostics_escape_control_bytes () =
   check bool "the reader's message is escaped" false (contains "\027[31m" unmeasured)
 ;;
 
+(* QA N02: the Keeper list changed height on every j and k, because the
+   selected Keeper's detail under it took the rows that Keeper's reading
+   needed. The detail takes the tallest loaded Keeper's rows (RFC
+   tui-one-screen-grammar section 8), so the layout, and with it the rows
+   the list draws in, is the same whichever Keeper is selected. The Keepers
+   differ in warnings: none, two read errors, a stalled Librarian. *)
+let test_memory_overview_keeps_one_height () =
+  let module H = Masc.Tui_decode_memory_health in
+  let plain = make_keeper_health ~keeper_id:"plain" ~facts:10 ~snapshot_bytes:1024 in
+  let errors =
+    { (make_keeper_health ~keeper_id:"errors" ~facts:3 ~snapshot_bytes:256) with
+      H.mkh_read_error = Some "ordinary snapshot unreadable"
+    ; mkh_source_read_error = Some "source snapshot unreadable" }
+  in
+  let stalled =
+    let keeper = make_keeper_health ~keeper_id:"stalled" ~facts:5 ~snapshot_bytes:512 in
+    { keeper with
+      H.mkh_librarian =
+        { keeper.mkh_librarian with
+          H.mlh_stalled = Some (H.Stalled_gap { mls_gap_start_atom = 2; mls_gap_end_atom = 8 }) } }
+  in
+  let keepers =
+    plain :: errors :: stalled
+    :: List.init 30 (fun index ->
+         make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:index
+           ~snapshot_bytes:1024)
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_health <- Some { (make_fleet_health plain) with H.mhs_keepers = keepers };
+  let count = List.length (Types.visible_memory_keepers state) in
+  check int "every Keeper is listed" (List.length keepers) count;
+  (* The rows the body draws: the layout's chrome, and every row pushed. *)
+  let drawn ~cols ~budget cursor =
+    state.memory_health_cursor <- cursor;
+    let rows = ref 0 in
+    let row _ = incr rows in
+    Render_memory.render_memory_body ~cols ~budget state
+      ~report_drawn_list:(fun _ ~height:_ -> ()) ~hand_position:ignore ~push:row
+      ~push_styled:(fun ~style:_ line -> row line) ~push_selected:row
+      ~push_divider:(fun () -> incr rows) ~push_empty:(fun () -> incr rows);
+    (Render_memory.memory_overview_scrolled ~cols ~budget state).sc_chrome, !rows
+  in
+  (* Each size follows a wider one in the same reading, so a measure the
+     detail kept from the wider frame, where readings wrap into fewer rows,
+     would be too short here and the list would move with the selection. *)
+  List.iter
+    (fun detail ->
+      state.memory_overview_detail <- detail;
+      List.iter
+        (fun (cols, budget) ->
+          let first = drawn ~cols ~budget 0 in
+          List.iter
+            (fun cursor ->
+              check (pair int int)
+                (Printf.sprintf "%dx%d, detail %b, Keeper %d: chrome and rows drawn" cols budget
+                   detail cursor)
+                first (drawn ~cols ~budget cursor))
+            (List.init count Fun.id))
+        [ 200, 53; 120, 33; 80, 17 ])
+    [ false; true ]
+;;
+
+(* Under [v] a Keeper's reading draws its input reading, and the input is
+   read for the selected Keeper after the frame that selected it. The
+   reading that arrives makes that Keeper's detail taller, so the detail
+   under the list is measured again and the list keeps one height for every
+   selection once it has arrived. *)
+let test_memory_overview_measures_an_input_that_arrives () =
+  let keepers =
+    List.init 12 (fun index ->
+      make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:4
+        ~snapshot_bytes:1024)
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_overview_detail <- true;
+  state.memory_health <-
+    Some { (make_fleet_health (List.hd keepers)) with
+           Masc.Tui_decode_memory_health.mhs_keepers = keepers };
+  let count = List.length (Types.visible_memory_keepers state) in
+  (* The list's reported height, and the rows the body draws: the layout's
+     chrome and every row pushed. *)
+  let drawn ~cols ~budget cursor =
+    state.memory_health_cursor <- cursor;
+    let rows = ref 0 and list = ref 0 in
+    let row _ = incr rows in
+    Render_memory.render_memory_body ~cols ~budget state
+      ~report_drawn_list:(fun _ ~height -> list := height) ~hand_position:ignore ~push:row
+      ~push_styled:(fun ~style:_ line -> row line) ~push_selected:row
+      ~push_divider:(fun () -> incr rows) ~push_empty:(fun () -> incr rows);
+    !list, ((Render_memory.memory_overview_scrolled ~cols ~budget state).sc_chrome, !rows)
+  in
+  let usage : Masc_tui_memory_usage.t =
+    { records = 3
+    ; tokens =
+        { distribution = Some { samples = 3; mean = 1200.; minimum = 900; maximum = 1500 }
+        ; last = Some 1100 }
+    ; bytes = { distribution = None; last = None } }
+  in
+  List.iter
+    (fun (cols, budget) ->
+      state.memory_input <- Masc_tui_fetched.initial;
+      let before = List.init count (drawn ~cols ~budget) in
+      let request =
+        match Masc_tui_fetched.start ~equal:String.equal state.memory_input ~key:"keeper-00" with
+        | Already_loading -> fail "a fresh input read was loading"
+        | Started (next, request) -> state.memory_input <- next; request
+      in
+      state.memory_input <-
+        Masc_tui_fetched.complete ~equal:String.equal state.memory_input request (Ok usage);
+      let first = drawn ~cols ~budget 0 in
+      check bool
+        (Printf.sprintf "%dx%d: the reading that arrived takes rows from the list" cols budget)
+        true (fst first < fst (List.hd before));
+      List.iter
+        (fun cursor ->
+          check (pair int (pair int int))
+            (Printf.sprintf "%dx%d, Keeper %d: chrome and rows drawn" cols budget cursor)
+            first (drawn ~cols ~budget cursor))
+        (List.init count Fun.id))
+    [ 120, 33; 200, 53 ]
+;;
+
+(* QA N01: a page key moves the Keeper list by the height the frame reports
+   it drawn in ([Memory_keepers]), less one. That is only a page of what the
+   reader saw when the report is the rows the body pushed for the list, at
+   every size, in both readings and whichever Keeper is selected, and when
+   the body reports that list once and no other. The list is the run of list
+   rows the body pushes right before it hands over its position. *)
+let test_memory_list_draws_the_height_its_page_is_cut_from () =
+  let module H = Masc.Tui_decode_memory_health in
+  let errors =
+    { (make_keeper_health ~keeper_id:"errors" ~facts:3 ~snapshot_bytes:256) with
+      H.mkh_read_error = Some "ordinary snapshot unreadable"
+    ; mkh_source_read_error = Some "source snapshot unreadable" }
+  in
+  let keepers =
+    errors
+    :: List.init 33 (fun index ->
+         make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:index
+           ~snapshot_bytes:1024)
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_health <- Some { (make_fleet_health errors) with H.mhs_keepers = keepers };
+  let count = List.length (Types.visible_memory_keepers state) in
+  (* The list rows the body pushes, and the lists it reports drawn. *)
+  let list_rows ~cols ~budget =
+    let calls = ref [] in
+    let note call = calls := call :: !calls in
+    let reported = ref [] in
+    Render_memory.render_memory_body ~cols ~budget state
+      ~report_drawn_list:(fun list ~height -> reported := (list, height) :: !reported)
+      ~hand_position:(fun _ -> note `Hand)
+      ~push:(fun _ -> note `Row) ~push_selected:(fun _ -> note `Row)
+      ~push_empty:(fun () -> note `Row)
+      ~push_styled:(fun ~style:_ _ -> note `Other) ~push_divider:(fun () -> note `Other);
+    let rec before_hand = function
+      | `Hand :: earlier -> Some earlier
+      | (`Row | `Other) :: earlier -> before_hand earlier
+      | [] -> None
+    in
+    let rec run rows = function
+      | `Row :: earlier -> run (rows + 1) earlier
+      | (`Hand | `Other) :: _ | [] -> rows
+    in
+    (Option.map (run 0) (before_hand !calls), !reported)
+  in
+  List.iter
+    (fun (cols, budget) ->
+      List.iter
+        (fun detail ->
+          state.memory_overview_detail <- detail;
+          List.iter
+            (fun cursor ->
+              state.memory_health_cursor <- cursor;
+              let rows, reported = list_rows ~cols ~budget in
+              check (list (pair bool int))
+                (Printf.sprintf "%dx%d, detail %b, Keeper %d: the Keeper list reported as drawn"
+                   cols budget detail cursor)
+                [ (true, Option.value ~default:(-1) rows) ]
+                (List.map (fun (list, height) -> (list = Types.Memory_keepers, height)) reported))
+            [ 0; 1; count / 2; count - 1 ])
+        [ false; true ])
+    [ 80, 15; 80, 17; 100, 23; 120, 33; 200, 53 ]
+;;
+
+(* QA N02 with rejected rows: the rows kept for the selected Keeper's
+   detail decide how many rejected rows fit above the list, so the rows
+   kept are the most any loaded Keeper's detail would take. Kept for the
+   selected Keeper alone, a Keeper with two read errors took two rejected
+   rows away, and the list and every row under it moved with j and k. *)
+let test_memory_rejected_rows_do_not_follow_the_selection () =
+  let module H = Masc.Tui_decode_memory_health in
+  let errors =
+    { (make_keeper_health ~keeper_id:"errors" ~facts:3 ~snapshot_bytes:256) with
+      H.mkh_read_error = Some "ordinary snapshot unreadable"
+    ; mkh_source_read_error = Some "source snapshot unreadable" }
+  in
+  let keepers =
+    errors
+    :: List.init 20 (fun index ->
+         make_keeper_health ~keeper_id:(Printf.sprintf "keeper-%02d" index) ~facts:index
+           ~snapshot_bytes:1024)
+  in
+  let refused =
+    List.init 12 (fun index ->
+      { H.mkr_keeper_id = Some (Printf.sprintf "rejected-%02d" index)
+      ; mkr_reason = "row not decoded" })
+  in
+  let state = make_state () in
+  state.view <- Types.Memory;
+  state.memory_overview_sort <- Types.Mem_overview_name;
+  state.memory_health <-
+    Some { (make_fleet_health errors) with H.mhs_keepers = keepers; mhs_refused_keepers = refused };
+  let count = List.length (Types.visible_memory_keepers state) in
+  (* Where the list starts, how many rows it takes and how many rows the
+     body draws in all. The totals alone stay put when the rejected rows
+     above the list grow by what the detail under it loses. *)
+  let drawn ~cols ~budget cursor =
+    state.memory_health_cursor <- cursor;
+    let calls = ref [] in
+    let note call = calls := call :: !calls in
+    Render_memory.render_memory_body ~cols ~budget state
+      ~report_drawn_list:(fun _ ~height:_ -> ())
+      ~hand_position:(fun _ -> note `Hand)
+      ~push:(fun _ -> note `Row) ~push_selected:(fun _ -> note `Row)
+      ~push_empty:(fun () -> note `Row)
+      ~push_styled:(fun ~style:_ _ -> note `Other) ~push_divider:(fun () -> note `Other);
+    let calls = List.rev !calls in
+    let rec until_hand index = function
+      | `Hand :: _ | [] -> index
+      | (`Row | `Other) :: later -> until_hand (index + 1) later
+    in
+    let hand = until_hand 0 calls in
+    let rec list_rows rows = function
+      | `Row :: earlier -> list_rows (rows + 1) earlier
+      | (`Hand | `Other) :: _ | [] -> rows
+    in
+    let rows = list_rows 0 (List.rev (List.take hand calls)) in
+    (hand - rows, rows, List.length calls - 1)
+  in
+  List.iter
+    (fun (cols, budget) ->
+      List.iter
+        (fun detail ->
+          state.memory_overview_detail <- detail;
+          let first = drawn ~cols ~budget 0 in
+          List.iter
+            (fun cursor ->
+              check (triple int int int)
+                (Printf.sprintf "%dx%d, detail %b, Keeper %d: list start, list rows, rows drawn"
+                   cols budget detail cursor)
+                first (drawn ~cols ~budget cursor))
+            (List.init count Fun.id))
+        [ false; true ])
+    [ 80, 17; 80, 21; 100, 23; 120, 33 ]
+;;
+
 (* The Keeper list hands its selected row to the title row; the body writes
    no position of its own (RFC tui-one-screen-grammar, section 2). *)
 let test_memory_list_hands_its_selected_row () =
@@ -253,6 +516,7 @@ let test_memory_list_hands_its_selected_row () =
   state.memory_health_cursor <- 1;
   let handed = ref [] in
   Render_memory.render_memory_body ~cols:100 ~budget:20 state
+    ~report_drawn_list:(fun _ ~height:_ -> ())
     ~hand_position:(fun position -> handed := position :: !handed)
     ~push:ignore ~push_styled:(fun ~style:_ _ -> ()) ~push_selected:ignore
     ~push_divider:ignore ~push_empty:ignore;
@@ -732,6 +996,76 @@ let test_memory_refresh_keeps_the_selected_keeper () =
     [""; "a"]
 ;;
 
+(* QA R8c: the fact list shares its body with the selected fact's detail,
+   and the detail was as tall as the selected fact, so the list's height
+   moved with every [j] that crossed a long fact. Thirty short facts and one
+   long one: the list keeps one height for every selection (RFC
+   tui-one-screen-grammar §8). *)
+let test_facts_list_height_does_not_follow_the_selection () =
+  let long = String.concat " " (List.init 60 (fun i -> Printf.sprintf "word%02d" i)) in
+  let extra =
+    List.init 30 (fun i -> make_memory_fact Cat.Fact (Printf.sprintf "short fact %02d" i))
+    @ [ make_memory_fact Cat.Fact long ]
+  in
+  let state = three_kinds_state ~extra_ordinary:extra () in
+  let rows = List.length (Types.memory_fact_rows state) in
+  List.iter
+    (fun (cols, budget) ->
+      let heights =
+        List.init rows (fun cursor ->
+          Render_memory.memory_facts_content_height ~cols ~budget ~cursor state)
+      in
+      let lo = List.fold_left min max_int heights and hi = List.fold_left max 0 heights in
+      check int
+        (Printf.sprintf "%dx%d: facts list height over %d rows, min %d max %d" cols budget rows lo hi)
+        lo hi)
+    [ 120, 33; 80, 17; 80, 21 ]
+
+(* The fact list reports the rows its window was cut to, which a page key
+   moves by less one: the run of rows the body pushes before it hands over
+   its position, whichever fact is selected. *)
+let test_facts_list_reports_the_rows_it_drew () =
+  let long = String.concat " " (List.init 60 (fun i -> Printf.sprintf "word%02d" i)) in
+  let extra =
+    List.init 30 (fun i -> make_memory_fact Cat.Fact (Printf.sprintf "short fact %02d" i))
+    @ [ make_memory_fact Cat.Fact long ]
+  in
+  let state = three_kinds_state ~extra_ordinary:extra () in
+  let rows = List.length (Types.memory_fact_rows state) in
+  let drawn ~cols ~budget cursor =
+    state.memory_facts_cursor <- cursor;
+    let calls = ref [] in
+    let note call = calls := call :: !calls in
+    let reported = ref [] in
+    Render_memory.render_memory_facts_body ~cols ~budget state
+      ~report_drawn_list:(fun list ~height -> reported := (list, height) :: !reported)
+      ~hand_position:(fun _ -> note `Hand)
+      ~push:(fun _ -> note `Row) ~push_selected:(fun _ -> note `Row)
+      ~push_empty:(fun () -> note `Row)
+      ~push_styled:(fun ~style:_ _ -> note `Other) ~push_divider:(fun () -> note `Other);
+    let rec before_hand = function
+      | `Hand :: earlier -> Some earlier
+      | (`Row | `Other) :: earlier -> before_hand earlier
+      | [] -> None
+    in
+    let rec run count = function
+      | `Row :: earlier -> run (count + 1) earlier
+      | (`Hand | `Other) :: _ | [] -> count
+    in
+    (Option.map (run 0) (before_hand !calls), !reported)
+  in
+  List.iter
+    (fun (cols, budget) ->
+      List.iter
+        (fun cursor ->
+          let list_rows, reported = drawn ~cols ~budget cursor in
+          check (list (pair bool int))
+            (Printf.sprintf "%dx%d, fact %d: the fact list reported as drawn" cols budget cursor)
+            [ (true, Option.value ~default:(-1) list_rows) ]
+            (List.map (fun (list, height) -> (list = Types.Memory_fact_rows, height)) reported))
+        [ 0; 1; rows / 2; rows - 1 ])
+    [ 120, 33; 80, 17 ]
+
 let () =
   run "tui_render_memory"
     [ "input statistics",
@@ -757,6 +1091,18 @@ let () =
           test_custom_category_preserves_original_identity
       ; test_case "the Keeper list hands its selected row" `Quick
           test_memory_list_hands_its_selected_row
+      ; test_case "the overview keeps one height for every selection" `Quick
+          test_memory_overview_keeps_one_height
+      ; test_case "the overview measures an input reading that arrives" `Quick
+          test_memory_overview_measures_an_input_that_arrives
+      ; test_case "the list draws the height its page is cut from" `Quick
+          test_memory_list_draws_the_height_its_page_is_cut_from
+      ; test_case "rejected rows do not follow the selection" `Quick
+          test_memory_rejected_rows_do_not_follow_the_selection
+      ; test_case "the fact list keeps one height for every selection" `Quick
+          test_facts_list_height_does_not_follow_the_selection
+      ; test_case "the fact list reports the rows it drew" `Quick
+          test_facts_list_reports_the_rows_it_drew
       ; test_case "failed facts refresh retains facts and unread scope" `Quick
           test_a_failed_facts_refresh_keeps_facts_and_unread_scope ]
     ; "one place per fact",

@@ -179,6 +179,10 @@ let render_context_inspector state =
           match selected with
           | None -> stored_scroll
           | Some cursor ->
+              (* The item rows are one-line rows in a row, and the window
+                 follows the selected one as it follows any row, so the
+                 item list is paged by this window. *)
+              report_drawn_list Context_inspector_items ~height;
               Masc_tui_scroll.ensure_visible ~cursor ~height
                 (Masc_tui_scroll.normalize ~count:(List.length lines) ~height
                    stored_scroll)
@@ -220,6 +224,7 @@ let render_context_inspector state =
               ~left:[ List.hd left ] ~right:[ List.hd right ]
             |> List.iter c.push;
             let body_height = split_height - 1 in
+            report_drawn_list Context_inspector_items ~height:body_height;
             let items = List.length left - 1 in
             let cursor =
               min (max 0 (items - 1)) (max 0 state.context_inspector_cursor)

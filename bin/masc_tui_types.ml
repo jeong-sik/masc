@@ -5847,6 +5847,47 @@ type scrolled = {
           wildcard branch can. *)
 }
 
+(* The lists the six move keys walk (RFC tui-one-screen-grammar §3.1),
+   named so a frame can say which of them it drew and in how many rows. The
+   page key reads that height back ([lists_drawn]) rather than working one
+   out per surface in the key handler: the Memory list shares its body with
+   the selected Keeper's detail, and the handler's guess paged thirteen rows
+   while three were on screen. [Masc_tui_render_work] draws three lists and
+   reports none of them yet: the Task and Goal lists page by the height read
+   from the projection they are drawn with ([Masc_tui_list_moves.Projected]),
+   and [Schedule_rows] has no report, so its page key moves one row. *)
+type paged_list =
+  | Context_inspector_items
+  | Repository_change_rows
+  | Keeper_stops
+  | Lane_runs
+  | Lane_inventory
+  | Client_rows
+  | Verification_rows
+  | Harness_rows
+  | Memory_keepers
+  | Memory_fact_rows
+  | Repository_rows
+  | Connector_rows
+  | Runtime_rows
+  | System_log_rows
+  | Change_rows
+  | Code_file_lines
+  | Code_tree_entries
+  | Board_post_rows
+  | Approval_items
+  | Schedule_rows
+  | Fusion_entries
+  | Resource_entries
+  | Activity_events
+  | Keeper_runs
+  | Identity_services
+  | Overview_destinations
+  | Model_bindings
+
+(* One list a frame drew: which, and the rows of it the frame drew. *)
+type drawn_list = { dl_list : paged_list; dl_height : int }
+
 (* These seven draw the same fixed frame around their content, and spend two
    more rows when a load error is on screen. A surface whose chrome moves has
    to move the typed layout in the same change. Where the window stands is
@@ -11119,6 +11160,10 @@ type state = {
   mutable planning_cursor: int;
   mutable planning_scroll: planning_scroll;
   mutable planning_list_page_rows: int;
+  (* The lists the last built frame drew and the rows it drew each in. A
+     page key moves its list by that height less one row; a list the frame
+     did not draw has no page and moves a row. *)
+  mutable lists_drawn: drawn_list list;
   mutable runtime_mode: runtime_mode;
   mutable planning_mode: planning_mode;
   (* Client-side over the already-loaded goals: [f]/[s] re-render without a
@@ -21808,6 +21853,7 @@ let create_state
   planning_cursor = 0;
   planning_scroll = Planning_scroll_offset 0;
   planning_list_page_rows = 1;
+  lists_drawn = [];
   runtime_mode = Runtime_lanes;
   planning_mode = Planning_list;
   planning_filter = Planning_filter_active;

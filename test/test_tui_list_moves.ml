@@ -13,30 +13,38 @@
 open Masc_tui_types
 module Model = Masc_tui_keeper_list_model
 module Moves = Masc_tui_list_moves
-module Move = Masc_tui_scroll.Cursor_move
+module Key = Masc_tui_scroll
 
-let every_move ~page = Move.[ Line_down; Line_up; Page_down page; Page_up page; To_top; To_end ]
+let every_key = Key.[ Line_down; Line_up; Page_down; Page_up; To_top; To_end ]
+
+(* A list the last frame drew [height] rows tall, as the frame reports it and
+   the dispatcher hands it over. The tag is one list for every surface here:
+   which list a surface names is the dispatcher's arm, not the move. *)
+let drawn state ~height rows () =
+  state.lists_drawn <- [ { dl_list = Board_post_rows; dl_height = height } ];
+  Some { Moves.os_page = Moves.Drawn Board_post_rows; os_rows = rows }
 
 (* The rows the dispatcher hands over on the Keeper list: every Keeper,
    placed by choosing it, which opens its group (what a search does). The
    move keys must not use them; if they did, Home would open the first
    group again. *)
-let keeper_rows state () =
+let keeper_rows state =
   Some
     { Moves.rl_count = List.length state.keepers
     ; rl_cursor = state.keeper_cursor
     ; rl_place = choose_keeper_row state }
 
-(* Overview has no row cursor, so the dispatcher hands over none. *)
-let no_rows () = None
+(* Overview has no row cursor, and a Tools reading or an empty Tools list is
+   not a list the keys walk, so the dispatcher hands over no list. *)
+let nothing_on_screen () = None
 
 (* Only the Tools lists ask the frame to follow their selection; anywhere
    else a call means a surface walked the wrong list. *)
 let no_follow _ = Alcotest.fail "only a Tools list asks to follow its selection"
 
-let press ?(rows = fun () -> None) ?(follow = no_follow) state move =
-  match Moves.moves state ~rows ~follow with
-  | Some moves -> moves move
+let press ?(follow = no_follow) ~on_screen state key =
+  match Moves.moves state ~on_screen ~follow with
+  | Some moves -> moves key
   | None -> Alcotest.fail "no list answered the move key"
 
 let roster_keeper name : Tui_decode.keeper =
@@ -58,7 +66,9 @@ let keeper_list ~view names =
   state.keepers <- List.map roster_keeper names;
   state
 
-let press_keeper state move = press ~rows:(keeper_rows state) state move
+(* A page of the drawn height less one: [height] 3 pages by 2. *)
+let press_keeper ?(height = 3) state key =
+  press ~on_screen:(drawn state ~height (keeper_rows state)) state key
 
 let stop_index state =
   Option.bind (keeper_list_stop state) (fun stop ->
@@ -91,12 +101,12 @@ let test_no_move_key_unfolds_a_group () =
         (match keeper_list_stop state with
          | Some (Model.Stop_world | Model.Stop_heading _) -> true
          | Some (Model.Stop_row _) | None -> false))
-    (every_move ~page:5);
+    every_key;
   place_keeper_list_stop state (Model.Stop_heading group);
-  press_keeper state Move.To_top;
+  press_keeper state Key.To_top;
   Alcotest.(check bool) "Home is the World row" true
     (keeper_list_stop state = Some Model.Stop_world);
-  press_keeper state Move.To_end;
+  press_keeper state Key.To_end;
   Alcotest.(check bool) "End is the folded heading" true
     (keeper_list_stop state = Some (Model.Stop_heading group))
 
@@ -109,19 +119,19 @@ let test_every_move_key_walks_the_stops () =
   state.keeper_list_folded <- [];
   Alcotest.(check int) "World, one heading and three rows" 5
     (List.length (keeper_list_stops state));
-  let from_index index move =
+  let from_index index height key =
     Option.iter (place_keeper_list_stop state) (List.nth_opt (keeper_list_stops state) index);
-    press_keeper state move;
+    press_keeper ~height state key;
     stop_index state
   in
   List.iter
-    (fun (from, move, expected) ->
+    (fun (from, height, key, expected) ->
       Alcotest.(check (option int)) (Printf.sprintf "from stop %d" from) (Some expected)
-        (from_index from move))
-    Move.
-      [ 0, Line_down, 1; 1, Line_down, 2; 0, Line_up, 0; 4, Line_down, 4
-      ; 3, Line_up, 2; 0, Page_down 2, 2; 1, Page_down 9, 4; 4, Page_up 2, 2
-      ; 2, Page_up 9, 0; 3, To_top, 0; 1, To_end, 4 ]
+        (from_index from height key))
+    Key.
+      [ 0, 3, Line_down, 1; 1, 3, Line_down, 2; 0, 3, Line_up, 0; 4, 3, Line_down, 4
+      ; 3, 3, Line_up, 2; 0, 3, Page_down, 2; 1, 10, Page_down, 4; 4, 3, Page_up, 2
+      ; 2, 10, Page_up, 0; 3, 3, To_top, 0; 1, 3, To_end, 4 ]
 
 (* Every view the Keeper list has, every move key, from every stop, with every
    group folded and then with none: the key lands on a stop of that list,
@@ -144,9 +154,9 @@ let test_every_view_moves_over_its_stops () =
           List.iteri
             (fun from stop ->
               List.iter
-                (fun move ->
+                (fun key ->
                   place_keeper_list_stop state stop;
-                  press_keeper state move;
+                  press_keeper state key;
                   let label = Printf.sprintf "view %d folded %d from %d"
                       (Option.value ~default:(-1)
                          (List.find_index (( = ) view) every_view))
@@ -155,13 +165,13 @@ let test_every_view_moves_over_its_stops () =
                     (state.keeper_list_folded = folded);
                   Alcotest.(check bool) (label ^ ": lands on a stop") true
                     (Option.is_some (stop_index state));
-                  match move with
-                  | Move.To_top ->
+                  match key with
+                  | Key.To_top ->
                       Alcotest.(check (option int)) (label ^ ": Home") (Some 0) (stop_index state)
-                  | Move.To_end ->
+                  | Key.To_end ->
                       Alcotest.(check (option int)) (label ^ ": End") (Some last) (stop_index state)
-                  | Move.Line_down | Move.Line_up | Move.Page_down _ | Move.Page_up _ -> ())
-                (every_move ~page:2))
+                  | Key.Line_down | Key.Line_up | Key.Page_down | Key.Page_up -> ())
+                every_key)
             stops)
         [ all_groups; [] ])
     every_view
@@ -170,21 +180,21 @@ let test_every_view_moves_over_its_stops () =
 let test_plain_and_empty_lists () =
   let state = keeper_list ~view:Model.Plain [ "alpha"; "beta" ] in
   Alcotest.(check int) "one stop per row" 2 (List.length (keeper_list_stops state));
-  press_keeper state Move.To_end;
+  press_keeper state Key.To_end;
   Alcotest.(check (option int)) "End is the last row" (Some 1) (stop_index state);
-  press_keeper state Move.To_top;
+  press_keeper state Key.To_top;
   Alcotest.(check (option int)) "Home is the first row" (Some 0) (stop_index state);
   let empty = keeper_list ~view:Model.Plain [] in
-  List.iter (fun move ->
-    press_keeper empty move;
+  List.iter (fun key ->
+    press_keeper empty key;
     Alcotest.(check int) "an empty list keeps its cursor" 0 empty.keeper_cursor)
-    (every_move ~page:2);
+    every_key;
   let world = keeper_list ~view:Model.By_memory [] in
-  List.iter (fun move ->
-    press_keeper world move;
+  List.iter (fun key ->
+    press_keeper world key;
     Alcotest.(check bool) "an empty World view stays on World" true
       (keeper_list_stop world = Some Model.Stop_world))
-    (every_move ~page:2)
+    every_key
 
 (* Overview's destinations, in the order the plain list draws them. *)
 let destinations state =
@@ -216,38 +226,41 @@ let test_overview_answers_every_move_key () =
   let count = List.length (destinations state) in
   Alcotest.(check bool) "the list has more than a page of two" true (count > 4);
   let last = count - 1 in
-  let from_index index move =
+  (* Overview has no row cursor, so the dispatcher hands over only the rows
+     it drew. *)
+  let press_home ~height key = press ~on_screen:(drawn state ~height None) state key in
+  let from_index index height key =
     state.home_selected <- List.nth_opt (destinations state) index;
-    press ~rows:no_rows state move;
+    press_home ~height key;
     home_index state
   in
   List.iter
-    (fun (from, move, expected) ->
+    (fun (from, height, key, expected) ->
       Alcotest.(check (option int)) (Printf.sprintf "from destination %d" from) (Some expected)
-        (from_index from move))
-    Move.
-      [ 0, Line_down, 1; 0, Line_up, 0; 0, Page_down 2, 2; 3, Page_up 2, 1
-      ; 1, Page_up 9, 0; 1, Page_down 99, last; 2, To_top, 0; 0, To_end, last
-      ; last, Line_down, last ];
+        (from_index from height key))
+    Key.
+      [ 0, 3, Line_down, 1; 0, 3, Line_up, 0; 0, 3, Page_down, 2; 3, 3, Page_up, 1
+      ; 1, 10, Page_up, 0; 1, 100, Page_down, last; 2, 3, To_top, 0; 0, 3, To_end, last
+      ; last, 3, Line_down, last ];
   (* A selection the list no longer holds starts again at an edge. *)
   state.home_selected <- Some (Home_request (Home_goal_confirmation "gone"));
-  press ~rows:no_rows state Move.Line_down;
+  press_home ~height:3 Key.Line_down;
   Alcotest.(check (option int)) "a lost selection steps to the first row" (Some 0)
     (home_index state);
   state.home_selected <- Some (Home_request (Home_goal_confirmation "gone"));
-  press ~rows:no_rows state Move.To_end;
+  press_home ~height:3 Key.To_end;
   Alcotest.(check (option int)) "a lost selection's End is the last row" (Some last)
     (home_index state)
 
 (* A list that moves its row cursor: the landing for every move key, over an
    empty list, one row and six, from the first row, a middle row and the
    last. [None] when the key placed nothing. *)
-let landing state ~count ~cursor move =
+let landing ?(height = 4) state ~count ~cursor key =
   let placed = ref None in
-  let rows () =
+  let rows =
     Some { Moves.rl_count = count; rl_cursor = cursor; rl_place = (fun index -> placed := Some index) }
   in
-  press ~rows state move;
+  press ~on_screen:(drawn state ~height rows) state key;
   !placed
 
 let test_row_lists_move_their_cursor () =
@@ -256,21 +269,91 @@ let test_row_lists_move_their_cursor () =
     (fun view ->
       state.view <- view;
       List.iter
-        (fun (count, cursor, move, expected) ->
+        (fun (count, cursor, height, key, expected) ->
           Alcotest.(check (option int))
             (Printf.sprintf "%d rows from %d" count cursor) expected
-            (landing state ~count ~cursor move))
-        Move.
-          [ 0, 0, Line_down, None; 0, 0, To_end, None; 0, 0, Page_down 3, None
-          ; 1, 0, Line_down, Some 0; 1, 0, Line_up, Some 0; 1, 0, Page_down 3, Some 0
-          ; 1, 0, To_top, Some 0; 1, 0, To_end, Some 0
-          ; 6, 0, Line_down, Some 1; 6, 0, Line_up, Some 0; 6, 0, Page_down 3, Some 3
-          ; 6, 0, Page_up 3, Some 0; 6, 0, To_top, Some 0; 6, 0, To_end, Some 5
-          ; 6, 3, Line_down, Some 4; 6, 3, Line_up, Some 2; 6, 3, Page_down 3, Some 5
-          ; 6, 3, Page_up 3, Some 0; 6, 3, To_top, Some 0; 6, 3, To_end, Some 5
-          ; 6, 5, Line_down, Some 5; 6, 5, Page_down 9, Some 5; 6, 5, Page_up 9, Some 0 ])
+            (landing ~height state ~count ~cursor key))
+        Key.
+          [ 0, 0, 4, Line_down, None; 0, 0, 4, To_end, None; 0, 0, 4, Page_down, None
+          ; 1, 0, 4, Line_down, Some 0; 1, 0, 4, Line_up, Some 0; 1, 0, 4, Page_down, Some 0
+          ; 1, 0, 4, To_top, Some 0; 1, 0, 4, To_end, Some 0
+          ; 6, 0, 4, Line_down, Some 1; 6, 0, 4, Line_up, Some 0; 6, 0, 4, Page_down, Some 3
+          ; 6, 0, 4, Page_up, Some 0; 6, 0, 4, To_top, Some 0; 6, 0, 4, To_end, Some 5
+          ; 6, 3, 4, Line_down, Some 4; 6, 3, 4, Line_up, Some 2; 6, 3, 4, Page_down, Some 5
+          ; 6, 3, 4, Page_up, Some 0; 6, 3, 4, To_top, Some 0; 6, 3, 4, To_end, Some 5
+          ; 6, 5, 4, Line_down, Some 5; 6, 5, 10, Page_down, Some 5; 6, 5, 10, Page_up, Some 0 ])
     [ Repositories; Verification; Harness; Clients; Memory; Changes; Connectors; Runtime
-    ; System_logs; Board; Fusion; Schedules; Planning; Lanes; Code; Resources ]
+    ; System_logs; Board; Fusion; Schedules; Planning; Lanes; Code; Resources; Config; Acting ]
+
+(* QA N01: Keeper > Memory drew three rows at 80x24 and PgDn moved thirteen,
+   so nine Keepers never reached the screen. A page is the list's drawn
+   height less one (RFC §3.1): from any cursor in any window, after PgDn the
+   row that was last on screen is still on it, and after PgUp the row that
+   was first. The window follows the landing the way the dispatcher's lists
+   with a scroll follow it. *)
+let test_a_page_keeps_the_row_read_last () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Memory;
+  List.iter
+    (fun (count, height) ->
+      for cursor = 0 to count - 1 do
+        for scroll = max 0 (cursor - height + 1) to min cursor (max 0 (count - height)) do
+          List.iter
+            (fun (key, kept, name) ->
+              let window = ref scroll in
+              let rows =
+                Some
+                  { Moves.rl_count = count
+                  ; rl_cursor = cursor
+                  ; rl_place =
+                      (fun index ->
+                        window := Masc_tui_scroll.ensure_visible ~cursor:index ~height scroll) }
+              in
+              press ~on_screen:(drawn state ~height rows) state key;
+              Alcotest.(check bool)
+                (Printf.sprintf "%d rows drawn %d tall, cursor %d, window %d: %s keeps row %d"
+                   count height cursor scroll name kept)
+                true
+                (kept >= !window && kept < !window + height))
+            [ Key.Page_down, min (count - 1) (scroll + height - 1), "PgDn"
+            ; Key.Page_up, scroll, "PgUp" ]
+        done
+      done)
+    [ 34, 3; 34, 13; 34, 2; 5, 8 ]
+
+(* The height a page moves by is the one the last frame reported for the
+   list the key walks. A frame that drew another list, or none, leaves no
+   page to move by, and the key moves one row: it cannot pass a row nobody
+   saw. A height read from the projection a list is drawn with pages by it
+   too. *)
+let test_a_page_is_the_height_the_frame_reported () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Board;
+  let landing ~reported ~page key =
+    state.lists_drawn <- reported;
+    let placed = ref None in
+    let rows =
+      Some { Moves.rl_count = 40; rl_cursor = 10; rl_place = (fun index -> placed := Some index) }
+    in
+    press ~on_screen:(fun () -> Some { Moves.os_page = page; os_rows = rows }) state key;
+    !placed
+  in
+  List.iter
+    (fun (name, reported, page, key, expected) ->
+      Alcotest.(check (option int)) name (Some expected) (landing ~reported ~page key))
+    [ ( "PgDn moves the reported height less one", [ { dl_list = Board_post_rows; dl_height = 7 } ]
+      , Moves.Drawn Board_post_rows, Key.Page_down, 16 )
+    ; ( "PgUp moves the reported height less one", [ { dl_list = Board_post_rows; dl_height = 7 } ]
+      , Moves.Drawn Board_post_rows, Key.Page_up, 4 )
+    ; ( "the height of the list the key walks, not another one drawn beside it"
+      , [ { dl_list = Approval_items; dl_height = 20 }; { dl_list = Board_post_rows; dl_height = 4 } ]
+      , Moves.Drawn Board_post_rows, Key.Page_down, 13 )
+    ; ( "a list the frame did not draw pages by one row"
+      , [ { dl_list = Approval_items; dl_height = 20 } ], Moves.Drawn Board_post_rows, Key.Page_down, 11 )
+    ; ( "no list drawn at all pages by one row", [], Moves.Drawn Board_post_rows, Key.Page_up, 9 )
+    ; ( "a projected height pages by itself less one", [], Moves.Projected 5, Key.Page_down, 14 )
+    ; ( "a line key is a line whatever was drawn", [], Moves.Drawn Board_post_rows, Key.Line_down, 11 )
+    ; ( "End is the last row whatever was drawn", [], Moves.Drawn Board_post_rows, Key.To_end, 39 ) ]
 
 (* An overlay drawn over a surface moves its own list, even over the two
    surfaces that walk something else: the Git changes list over the Keeper
@@ -280,14 +363,14 @@ let test_an_overlay_moves_its_own_rows () =
   state.repository_changes_open <- true;
   let before = keeper_list_stop state in
   Alcotest.(check (option int)) "the overlay's End is its last row" (Some 3)
-    (landing state ~count:4 ~cursor:1 Move.To_end);
+    (landing state ~count:4 ~cursor:1 Key.To_end);
   Alcotest.(check bool) "the roster under it does not move" true
     (keeper_list_stop state = before);
   state.repository_changes_open <- false;
   state.view <- Overview;
   state.context_inspector_open <- true;
   Alcotest.(check (option int)) "the inspector's Home is its first row" (Some 0)
-    (landing state ~count:4 ~cursor:2 Move.To_top)
+    (landing state ~count:4 ~cursor:2 Key.To_top)
 
 let repository ?(status = Repo_manager_types.Active) ?(keepers = []) name path :
     Tui_decode.repository =
@@ -424,10 +507,15 @@ let tools_surface count =
   state.tools_inventory <- Some inventory;
   state
 
-(* A press that records which list asked to follow. *)
+(* The Tools window the dispatcher hands over, [rows] tall: a page moves one
+   row less, counted in entries. *)
+let tools_window rows () = Some { Moves.os_page = Moves.Projected rows; os_rows = None }
+
+(* A press that records which list asked to follow, in a window of four rows,
+   so a page moves three entries. *)
 let press_tools state move =
   let followed = ref [] in
-  press ~follow:(fun list -> followed := list :: !followed) state move;
+  press ~on_screen:(tools_window 4) ~follow:(fun list -> followed := list :: !followed) state move;
   !followed
 
 let test_tools_skill_list_walks_the_selection () =
@@ -435,7 +523,7 @@ let test_tools_skill_list_walks_the_selection () =
   state.tools_scroll <- 7;
   Alcotest.(check bool) "the Skill list answers the move keys" true
     (Moves.tools_list state = Some Moves.Tools_skills);
-  let followed = press_tools state Move.Line_down in
+  let followed = press_tools state Key.Line_down in
   Alcotest.(check int) "j selects the next Skill" 1 state.tools_skill_cursor;
   Alcotest.(check int) "j does not scroll the page by itself" 7 state.tools_scroll;
   Alcotest.(check bool) "the frame is asked to follow the Skill list" true
@@ -445,13 +533,13 @@ let test_tools_skill_list_walks_the_selection () =
       state.tools_skill_cursor <- from;
       ignore (press_tools state move);
       Alcotest.(check int) (Printf.sprintf "from Skill %d" from) expected state.tools_skill_cursor)
-    Move.
+    Key.
       [ 0, Line_up, 0; 4, Line_down, 4; 1, Line_up, 0; 0, To_end, 4; 3, To_top, 0
-      ; 0, Page_down 3, 3; 3, Page_down 3, 4; 4, Page_up 3, 1; 1, Page_up 3, 0 ];
+      ; 0, Page_down, 3; 3, Page_down, 4; 4, Page_up, 1; 1, Page_up, 0 ];
   (* With no Skill there is nothing to walk, and the page under the empty
      list still has its tool table to scroll. *)
   Alcotest.(check bool) "an empty Skill list leaves the keys to the page" true
-    (Option.is_none (Moves.moves (tools_surface 0) ~rows:no_rows ~follow:no_follow))
+    (Option.is_none (Moves.moves (tools_surface 0) ~on_screen:nothing_on_screen ~follow:no_follow))
 
 (* Enter on Available turns the keys from the Skill list to the page under
    it. The tool table and the evidence are drawn below the Skills, and while
@@ -461,14 +549,14 @@ let test_tools_enter_reads_the_page_and_esc_returns () =
   state.tools_skill_cursor <- 2;
   Moves.read_skill_page state;
   Alcotest.(check bool) "after Enter the move keys scroll the page" true
-    (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow));
+    (Option.is_none (Moves.moves state ~on_screen:nothing_on_screen ~follow:no_follow));
   Alcotest.(check int) "reading the page keeps the selected Skill" 2 state.tools_skill_cursor;
   Moves.read_skill_page state;
   Alcotest.(check bool) "Enter while reading stays on the page" true
     (Option.is_none (Moves.tools_list state));
   Alcotest.(check bool) "Esc is spent giving the keys back to the list" true
     (Moves.choose_skill_again state);
-  ignore (press_tools state Move.Line_down);
+  ignore (press_tools state Key.Line_down);
   Alcotest.(check int) "j walks on from the Skill that was read" 3 state.tools_skill_cursor;
   Alcotest.(check bool) "the next Esc goes further out" false (Moves.choose_skill_again state);
   (* Leaving the pane ends the reading: Available comes back on its list. *)
@@ -523,24 +611,24 @@ let test_tools_async_list_walks_the_selection () =
         (selected_request state);
       Alcotest.(check bool) "the frame is asked to follow the request list" true
         (followed = [ Moves.Tools_async_requests ]))
-    Move.
+    Key.
       [ "a", Line_down, "b"; "c", Line_down, "c"; "a", Line_up, "a"; "a", To_end, "c"
-      ; "c", To_top, "a"; "a", Page_down 9, "c" ];
+      ; "c", To_top, "a"; "a", Page_down, "c" ];
   (* A selection the list no longer holds starts again at an edge. *)
   state.tools_async_selection <- Some (target "gone");
-  ignore (press_tools state Move.Line_down);
+  ignore (press_tools state Key.Line_down);
   Alcotest.(check (option string)) "a lost selection steps to the first request" (Some "a")
     (selected_request state);
   state.tools_async_selection <- Some (target "gone");
-  ignore (press_tools state Move.To_end);
+  ignore (press_tools state Key.To_end);
   Alcotest.(check (option string)) "a lost selection's End is the last request" (Some "c")
     (selected_request state);
   Alcotest.(check bool) "an empty request list leaves the keys to the page" true
-    (Option.is_none (Moves.moves (tools_async []) ~rows:no_rows ~follow:no_follow));
+    (Option.is_none (Moves.moves (tools_async []) ~on_screen:nothing_on_screen ~follow:no_follow));
   (* An open request is a reading: its keys scroll it, as they did. *)
   state.tools_async_detail_open <- true;
   Alcotest.(check bool) "an open request answers no list move" true
-    (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow))
+    (Option.is_none (Moves.moves state ~on_screen:nothing_on_screen ~follow:no_follow))
 
 (* The other panes have no selection on screen and stay readings. *)
 let test_tools_readings_answer_no_list_move () =
@@ -549,7 +637,7 @@ let test_tools_readings_answer_no_list_move () =
     (fun pane ->
       state.tools_pane <- pane;
       Alcotest.(check bool) "a reading pane answers no list move" true
-        (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow)))
+        (Option.is_none (Moves.moves state ~on_screen:nothing_on_screen ~follow:no_follow)))
     [ Tools_activations; Tools_usage; Tools_storage; Tools_catalog Tools_catalog_list
     ; Tools_catalog (Tools_catalog_volumes { catalog_scroll = 0 }) ];
   (* The source picker walks its own list while it is open. *)
@@ -560,7 +648,7 @@ let test_tools_readings_answer_no_list_move () =
       ; ssp_list = Masc_tui_pick_list.closed; ssp_authority = state.workspace_authority
       ; ssp_identity = None; ssp_port = 0 };
   Alcotest.(check bool) "the source picker keeps the move keys" true
-    (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow))
+    (Option.is_none (Moves.moves state ~on_screen:nothing_on_screen ~follow:no_follow))
 
 (* The footer's j/k and Esc words come from [tools_keys], which reads the
    state the keys read. A footer that said "move" on a reading or "features"
@@ -625,17 +713,17 @@ let test_tools_follow_sees_where_the_key_landed () =
   let state = tools_surface 5 in
   let seen = ref [] in
   let note_skill _ = seen := state.tools_skill_cursor :: !seen in
-  press ~follow:note_skill state Move.Line_down;
-  press ~follow:note_skill state Move.To_end;
-  press ~follow:note_skill state (Move.Page_up 2);
+  press ~on_screen:(tools_window 3) ~follow:note_skill state Key.Line_down;
+  press ~on_screen:(tools_window 3) ~follow:note_skill state Key.To_end;
+  press ~on_screen:(tools_window 3) ~follow:note_skill state Key.Page_up;
   Alcotest.(check (list int)) "each follow sees the Skill its key selected" [ 2; 4; 1 ]
     !seen;
   let state = tools_async [ "a"; "b"; "c" ] in
   state.tools_async_selection <- Some (target "a");
   let seen = ref [] in
   let note_request _ = seen := selected_request state :: !seen in
-  press ~follow:note_request state Move.Line_down;
-  press ~follow:note_request state Move.To_end;
+  press ~on_screen:(tools_window 3) ~follow:note_request state Key.Line_down;
+  press ~on_screen:(tools_window 3) ~follow:note_request state Key.To_end;
   Alcotest.(check (list (option string))) "each follow sees the request its key selected"
     [ Some "c"; Some "b" ] !seen
 
@@ -658,6 +746,10 @@ let () =
             test_row_lists_move_their_cursor
         ; Alcotest.test_case "an overlay moves its own rows" `Quick
             test_an_overlay_moves_its_own_rows
+        ; Alcotest.test_case "a page keeps the row read last" `Quick
+            test_a_page_keeps_the_row_read_last
+        ; Alcotest.test_case "a page is the height the frame reported" `Quick
+            test_a_page_is_the_height_the_frame_reported
         ] )
     ; ( "tools"
       , [ Alcotest.test_case "the Skill list walks the selection" `Quick

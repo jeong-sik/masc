@@ -122,8 +122,16 @@ let cursor_apply ~count (move : Cursor_move.t) cursor =
   | To_top -> 0
   | To_end -> cursor_last ~count
 
+(* A run that fits is a row of several lines: it is on screen whole or the
+   reader cannot read it, so a step that leaves its tail under the window
+   brings that tail to the bottom. Only a run taller than the window is
+   read inside, line by line, and a window on any of its lines stands. *)
 let ensure_span_visible ~start ~stop ~height scroll =
-  if stop < scroll then start
+  if stop - start + 1 <= height then
+    if start < scroll then start
+    else if stop >= scroll + height then stop - height + 1
+    else Int.max 0 scroll
+  else if stop < scroll then start
   else if start >= scroll + height then start - height + 1
   else Int.max 0 scroll
 
@@ -166,6 +174,27 @@ let window_of_heights ~heights ~cursor ~rows scroll =
       if stop < count && lines ~first ~stop:(stop + 1) <= rows then fitting (stop + 1) else stop
     in
     first, fitting first - first
+
+(* A page over items of different heights is a count of items, and the
+   count a window holds depends on where it starts: three short items or one
+   tall one. A page of the count the window holds now can pass an item when
+   the next window holds fewer, so the page is the fewest any window holds.
+   A run that reaches the last item holds no fewer than the window it starts:
+   nothing past it is left to pass. *)
+let items_always_shown ~heights ~rows =
+  let heights = Array.of_list heights in
+  let count = Array.length heights in
+  let rec fitting first taken used =
+    if first + taken >= count then None
+    else
+      let used = used + heights.(first + taken) in
+      if used > rows then Some taken else fitting first (taken + 1) used
+  in
+  let fewest = ref count in
+  for first = 0 to count - 1 do
+    Option.iter (fun taken -> fewest := Int.min !fewest taken) (fitting first 0 0)
+  done;
+  Int.max 1 !fewest
 
 let preview_height ~total ~keep = Int.max 0 (Int.min (total - keep) (total / 2))
 let body_height ~total ~keep = Int.max 1 (total - preview_height ~total ~keep)

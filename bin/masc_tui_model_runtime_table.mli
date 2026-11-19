@@ -74,6 +74,38 @@ val stacked_item_starts : pane:int -> row list -> int list
     begins -- one entry per row, in order. The pane's cursor walks bindings,
     not wrapped lines, so this is how it finds the line to mark and follow. *)
 
+val selected_lines : table:bool -> starts:int list -> total:int -> int -> int * int
+(** The first and last document line of binding [cursor]. In the table it
+    is the one row under the column names, line [cursor + 1]. Stacked, it is
+    the item from [List.nth starts cursor] to the line before the blank that
+    ends it, or to the document's last line [total - 1]. *)
+
+val window : table:bool -> starts:int list -> total:int -> height:int -> cursor:int -> int -> int
+(** The first document line a pane [height] lines tall draws once binding
+    [cursor] is selected, coming from a window that began at [scroll]: the
+    smallest move that shows the whole binding when it fits the pane
+    ({!Masc_tui_scroll.ensure_span_visible}), held inside the document. A
+    selection the window already shows leaves the window where it was, so a
+    step inside it moves only the mark, and the table's column names on line
+    0 stay on screen until the selection passes the first window. The first
+    binding brings the names back with it when both fit the pane. *)
+
+val page_bindings : table:bool -> starts:int list -> total:int -> height:int -> int
+(** The most bindings in a row that a pane [height] lines tall always shows
+    whole together: wherever such a run starts, its lines fit. At least one.
+    It is the height the pane's list reports, so a page key moves the cursor
+    by these less one. From any binding the window shows, a page down then
+    lands on a binding that fits on screen with every binding the window
+    showed after it, and a page up with every one before it, so no binding
+    is passed unseen even when the items are of different heights. An item
+    taller than the pane fits no run, so a list that holds one pages by one
+    binding. *)
+
+val reads_selected : table:bool -> starts:int list -> total:int -> height:int -> int -> bool
+(** Whether binding [cursor] is taller than a pane [height] lines tall. Only
+    a stacked item can be; its page keys then read its lines rather than
+    walk the bindings, or the lines past the pane could not be reached. *)
+
 val provider_text : row -> string
 (** What the provider column draws: the id, then the account label when the
     row has one, else [#n] for a shared login. Widths are measured from this

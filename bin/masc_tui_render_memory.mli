@@ -84,15 +84,19 @@ val memory_action_reading :
     A missing exact Keeper observation and read errors remain in the capture;
     [None] means the action is not a Memory destination. *)
 
-val memory_overview_scrolled : cols:int -> budget:int -> ?cursor:int -> state -> scrolled
+val memory_overview_scrolled : cols:int -> budget:int -> state -> scrolled
 (** The overview's scroll layout at [cols], with summary, rejected Keeper
     rows and selected Keeper cards limited to the same body [budget] used by
-    the renderer. Short frames use the same compact cards for both counts. *)
+    the renderer. Short frames use the same compact cards for both counts.
+    The selected Keeper's detail takes the rows the tallest loaded Keeper's
+    would (RFC tui-one-screen-grammar §8), so the layout is the same for
+    every selection and the list's height depends on the frame alone. *)
 
 val render_memory_body :
   cols:int ->
   budget:int ->
   state ->
+  report_drawn_list:(paged_list -> height:int -> unit) ->
   hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->
@@ -100,6 +104,9 @@ val render_memory_body :
   push_divider:(unit -> unit) ->
   push_empty:(unit -> unit) ->
   unit
+(** The Keeper list and the selected Keeper's detail. It reports the Keeper
+    list ([Memory_keepers]) with the rows its window was cut to, which is
+    what a page key moves by. *)
 
 val memory_fact_list_floor_rows : int
 (** How many rows the fact list keeps before the detail below it takes any.
@@ -117,6 +124,7 @@ val render_memory_facts_body :
   cols:int ->
   budget:int ->
   state ->
+  report_drawn_list:(paged_list -> height:int -> unit) ->
   hand_position:(Masc_tui_value.Position.t -> unit) ->
   push:(string -> unit) ->
   push_styled:(style:string -> string -> unit) ->

@@ -184,7 +184,11 @@ let test_the_window_follows_the_row_that_left_it () =
   check int "a run taller than the window ends the window at its first row" 16
     (Masc_tui_scroll.ensure_span_visible ~start:20 ~stop:25 ~height:5 10);
   check int "a run the window already shows leaves the window alone" 10
-    (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10)
+    (Masc_tui_scroll.ensure_span_visible ~start:12 ~stop:13 ~height:5 10);
+  check int "a run that fits and ends under the window ends the window at its last row" 11
+    (Masc_tui_scroll.ensure_span_visible ~start:14 ~stop:15 ~height:5 10);
+  check int "a run that fits and starts above the window starts the window at it" 9
+    (Masc_tui_scroll.ensure_span_visible ~start:9 ~stop:10 ~height:5 10)
 
 (* A row that opens a group brings the group's heading with it. The heading is
    no row the cursor can name, so following the row alone left it above the
@@ -364,6 +368,55 @@ let test_every_move_key_lands_inside_the_list () =
         expected (cursor_apply ~count move from))
     cases
 
+(* A list of items of different heights pages by the fewest items any
+   window holds whole. From every cursor in every window the list can stand
+   in, after PgDn the item that was last whole on screen is still whole on
+   it, and after PgUp the item that was first. The window follows the cursor
+   the way the Keeper list's does ([window_of_heights]). A page of the items
+   this window holds passes one when the next window holds fewer: two short
+   items and then tall ones. *)
+let test_a_page_of_uneven_items_passes_none () =
+  let open Masc_tui_scroll in
+  let shows ~heights ~rows ~cursor scroll item =
+    let first, count = window_of_heights ~heights ~cursor ~rows scroll in
+    item >= first && item < first + count
+  in
+  List.iter
+    (fun (heights, rows) ->
+      let count = List.length heights in
+      let page = page_step ~height:(items_always_shown ~heights ~rows) in
+      for scroll = 0 to count - 1 do
+        for cursor = 0 to count - 1 do
+          let first, held = window_of_heights ~heights ~cursor ~rows scroll in
+          (* Only the windows a reader can stand in: the cursor's item is on
+             screen in it. *)
+          if held > 0 && first = scroll && cursor >= first && cursor < first + held then begin
+            let label key kept =
+              Printf.sprintf "%d items in %d rows, cursor %d, window %d: %s keeps item %d"
+                count rows cursor scroll key kept
+            in
+            let down = cursor_apply ~count (Cursor_move.Page_down page) cursor in
+            let last = first + held - 1 in
+            Alcotest.(check bool) (label "PgDn" last) true
+              (shows ~heights ~rows ~cursor:down first last);
+            let up = cursor_apply ~count (Cursor_move.Page_up page) cursor in
+            Alcotest.(check bool) (label "PgUp" first) true
+              (shows ~heights ~rows ~cursor:up first first)
+          end
+        done
+      done)
+    [ [ 1; 1; 3; 3; 3; 1; 1; 1 ], 6
+    ; [ 1; 2; 1; 2; 1; 2; 1; 2; 1 ], 5
+    ; [ 2; 2; 2; 2; 2; 2 ], 7
+    ; [ 1; 1; 1; 1; 1; 1; 1; 1; 1; 1 ], 4
+    ; [ 0; 1; 1; 2; 1; 1; 2; 2; 1 ], 4 ];
+  Alcotest.(check int) "an item taller than the window pages by one" 1
+    (items_always_shown ~heights:[ 1; 9; 1 ] ~rows:4);
+  Alcotest.(check int) "a list that fits pages by every item" 3
+    (items_always_shown ~heights:[ 1; 1; 1 ] ~rows:10);
+  Alcotest.(check int) "two short items then tall ones" 1
+    (items_always_shown ~heights:[ 1; 1; 3; 3 ] ~rows:4)
+
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -384,6 +437,8 @@ let () =
             test_the_window_follows_the_row_that_left_it
         ; Alcotest.test_case "a row that opens a group keeps its heading in the window"
             `Quick test_a_row_that_opens_a_group_keeps_its_heading_in_the_window
+        ; Alcotest.test_case "a page of uneven items passes none" `Quick
+            test_a_page_of_uneven_items_passes_none
         ; Alcotest.test_case "a window of uneven rows shows the cursor whole" `Quick
             test_a_window_of_uneven_rows_shows_the_cursor_whole
         ] )

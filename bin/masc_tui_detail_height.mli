@@ -39,3 +39,17 @@ val fit :
     enough vertical [budget] does not silently fold away whole-or-nothing
     attribution records. The height depends on [rows], [budget], [cap] and the
     length of [shown] only, so it is the same for every selection of one list. *)
+
+val fit_tallest :
+  ?cap:int ->
+  budget:int ->
+  tallest:int ->
+  too_tall:'line too_tall ->
+  blank:'line ->
+  'line list ->
+  'line list
+(** {!fit} for a list that counts its tallest detail itself, in lines: a
+    list of a few hundred rows whose details wrap keeps that count for as
+    long as the rows it was counted from are loaded, rather than wrapping
+    every row's detail on each frame. A [shown] taller than [tallest] is
+    measured as itself. *)

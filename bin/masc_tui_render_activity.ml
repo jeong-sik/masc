@@ -330,6 +330,7 @@ let render_system_logs (state : state) =
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min (system_logs_page state).lp_scroll max_scroll) in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
+  report_drawn_list System_log_rows ~height:content_height;
   if total_entries = 0 then begin
     let empty =
       match
@@ -871,11 +872,14 @@ let acting_content_height ~rows ~notices =
   (* Top/title/divider, column heading, then bottom/footer. *)
   max 1 (rows - (4 + List.length notices + listing_rows_below_the_body))
 
-let acting_page_rows state ~terminal_rows =
+let acting_list_height state ~terminal_rows =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let trace_reading = Tui_decode.keeper_trace_projection state.keepers in
   let notices = acting_notices state ~trace_unavailable:trace_reading.unavailable in
-  Masc_tui_scroll.page_step ~height:(acting_content_height ~rows ~notices)
+  acting_content_height ~rows ~notices
+
+let acting_page_rows state ~terminal_rows =
+  Masc_tui_scroll.page_step ~height:(acting_list_height state ~terminal_rows)
 
 let render_acting (state : state) =
   match state.acting_detail with
@@ -988,6 +992,7 @@ let render_acting (state : state) =
                 ^ ui_text state ~ko:" 보유" ~en:" held" ]))
   in
   let content_height = acting_content_height ~rows ~notices in
+  report_drawn_list Activity_events ~height:content_height;
   let max_scroll = max 0 (shown - content_height) in
   let cursor = max 0 (min state.acting_cursor (shown - 1)) in
   let scroll =

@@ -404,6 +404,7 @@ let render_repository_list (state : state) =
           (Masc_tui_scroll.ensure_visible ~cursor:state.repositories_cursor
              ~height:content_height state.repositories_scroll)) in
       let repos_window = Rows.of_list ~first:scroll ~height:content_height repos in
+      report_drawn_list Repository_rows ~height:content_height;
       let lines =
         if shown = 0 then
           [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
@@ -654,6 +655,7 @@ let render_repository_changes (state : state) =
               | Some _ -> Masc_tui_scroll.ensure_visible
                   ~cursor:state.repository_changes_cursor ~height:room scroll in
             let changes_window = Rows.of_list ~first:scroll ~height:room changes in
+            report_drawn_list Repository_change_rows ~height:room;
             for i = 0 to room - 1 do
               let idx = scroll + i in
               match Rows.at changes_window idx with
@@ -1031,6 +1033,7 @@ let render_changes_list (state : state) =
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.changes_scroll max_scroll) in
   let changes_window = Rows.of_list ~first:scroll ~height:content_height changes in
+  report_drawn_list Change_rows ~height:content_height;
   (* The marked row, not the window's top row. They were the same field, so
      the mark never left the first drawn row: every row below it was visible
      and unselectable, and Enter always opened whichever change the window

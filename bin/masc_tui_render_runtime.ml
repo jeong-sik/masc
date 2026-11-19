@@ -765,6 +765,7 @@ let render_runtime_reading (state : state) =
     then min max_scroll (state.runtime_cursor - content_height + 1)
     else scroll in
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
+  report_drawn_list Runtime_rows ~height:content_height;
   let candidates_window = Rows.of_list ~first:scroll ~height:content_height candidates in
   let hints =
     Masc_tui_keys.footer_hints_runtime ~lang:state.ui_language

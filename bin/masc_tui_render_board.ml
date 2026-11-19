@@ -557,6 +557,7 @@ let render_board_list (state : state) =
           Rows.of_list ~first:scroll_offset ~height:content_height
             (board_posts state)
         in
+        report_drawn_list Board_post_rows ~height:content_height;
         for i = 0 to content_height - 1 do
           let idx = i + scroll_offset in
           match Rows.at board_posts_window idx with

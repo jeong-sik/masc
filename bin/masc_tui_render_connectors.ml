@@ -446,6 +446,7 @@ let render_connectors (state : state) =
       let max_scroll = max 0 (shown - content_height) in
       let scroll = max 0 (min state.connectors_scroll max_scroll) in
       let connectors_window = Rows.of_list ~first:scroll ~height:content_height connectors in
+      report_drawn_list Connector_rows ~height:content_height;
       if shown = 0 then
         let reading = match Connector_read.view state.connectors_read with
           | Connector_read.Reading _ -> true

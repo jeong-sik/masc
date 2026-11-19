@@ -2762,7 +2762,7 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
-In async requests, `J/K` selects an original request and `Enter` opens its
+In async requests, `j/k` selects an original request and `Enter` opens its
 detail. `r` refreshes that exact request; `Esc` returns to the active list.
 The selection stays on the original submitter, request ID and target Keeper
 when a terminal request disappears from the active list. `o` opens an editor

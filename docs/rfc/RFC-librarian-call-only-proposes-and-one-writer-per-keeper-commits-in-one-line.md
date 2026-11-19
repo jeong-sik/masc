@@ -301,9 +301,13 @@ head 를 줄이거나 없애는 제품 경로는 셋이다. 이력 지우기, �
   |---|---|
   | head 가 있다 | `Reset {Announced Cleared; after = 지우기가 넣을 head 의 끝자리}`. 남기는 메시지는 열린 채로 들어가므로(`keeper_history_clear.ml:199`) 닫힌 메시지 수는 0 이다 |
   | head 가 없고 넣을 것이 있다 | 따로 쓰지 않는다. head 가 마지막 끝자리보다 아래면 위 표의 `Unannounced` 가 쓰인다. 넣은 것은 다음 줄이 싣는다 |
-  | 해석 못 하는 head 를 치우고 새로 넣는다 | `Reset {Unannounced; before = 마지막 끝자리; after = 새 head 의 끝자리}`. 그 head 에서 무엇이 닫혔는지 셀 수 없다. 지금은 줄을 쓰지 않는다 |
-  | 해석 못 하는 head 를 치우기만 한다 | `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}` |
+  | 해석 못 하는 head 를 치우고 새로 넣는다 | `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}`. 넣는 메시지는 열린 채 들어가서 새 head 의 끝자리가 빈 끝자리다. 그 head 에서 무엇이 닫혔는지 셀 수 없다. 지금은 줄을 쓰지 않는다 |
+  | 해석 못 하는 head 를 치우기만 한다 | 위와 같은 줄 |
   | 바꿀 것이 없다 | 쓰지 않는다 |
+
+  - 해석 못 하는 head 를 치우는 두 갈래의 줄은 session 을 지우는 정지의 줄과 같다. 줄 쓰는 쪽의 사건 하나를 셋이 쓴다.
+  - 그 사건은 head 를 읽지 않는다. `before` 는 꼬리의 끝자리다. `after` 는 거기서 닫힌 메시지 수만 0 으로 바꾼 값이다. `closed_before` 는 비어 있다.
+  - 매번 쓴다. 마지막 줄이 이미 같은 줄이어도 쓴다. 까닭은 정지와 같다(아래).
 - 끊긴 곳 뒤를 버리는 purge(recovering purge). 규칙은 `keeper_checkpoint_purge.ml:391-428` 에 있다. dashboard(`server_dashboard_http_keeper_api_checkpoints.ml:612`)와 CLI(`bin/masc_checkpoint_purge.ml:251`) 두 군데서 들어온다. `Announced Recovered` 를 쓴다. 지금은 두 진입이 head 를 다르게 넣는다. dashboard 는 compare-and-swap 이고 CLI 는 watermark 저장이다. 함수 하나를 지나게 하면서 CLI 를 compare-and-swap 으로 옮긴다.
 - session 을 지우는 정지(`remove_session`, `keeper_shutdown_finalize.ml:609`). head 와 그 trace 의 object 를 디렉터리째 지운다. 지금은 줄을 쓰지 않는다. 지우기 전에 `Reset {Unannounced; before = 마지막 끝자리; after = 그 trace 의 빈 끝자리}` 를 쓴다.
   - 정지는 이 줄을 매번 쓴다. 위 표의 줄은 head 가 마지막 끝자리 아래일 때만 쓰인다. 정지는 head 를 없애는 쪽이라 마지막 끝자리가 이미 비어 있어도 쓴다.

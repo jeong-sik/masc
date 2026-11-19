@@ -16446,7 +16446,8 @@ let owe_identity_deadline_reads (state : state) ~now =
   state.identity_deadline_reads <-
     List.filter (fun attempt_id -> List.mem attempt_id waited) state.identity_deadline_reads;
   List.iter (fun expectation ->
-    if expectation.ile_expires_at <= now
+    if Masc_tui_wake.reached Masc_tui_wake.Identity_attempt_deadline ~now
+         ~at:expectation.ile_expires_at
        && not (List.mem expectation.ile_attempt_id state.identity_deadline_reads)
     then begin
       state.identity_deadline_reads <- expectation.ile_attempt_id :: state.identity_deadline_reads;
@@ -16578,7 +16579,8 @@ let retire_identity_login_state (state : state) retirement =
           attempt's own terminal status or its deadline ends them. *)
        | Login_provider_inventory _ -> true
        | Login_keeper_inventory _ -> true
-       | Login_deadline now -> expires_at > now)
+       | Login_deadline now ->
+           not (Masc_tui_wake.reached Masc_tui_wake.Identity_login_expiry ~now ~at:expires_at))
   in
   state.identity_login_expectations <- List.filter
     (fun held -> not (disappeared ~keeper:held.ile_keeper ~provider:held.ile_provider))
@@ -20197,7 +20199,7 @@ let take_tool_series_due (state : state) ~now =
         true
       end else
         match state.tool_series_reread_at with
-        | Some at when at <= now ->
+        | Some at when Masc_tui_wake.reached Masc_tui_wake.Tool_series_reread ~now ~at ->
             state.tool_series_reread_at <- None;
             true
         | Some _ | None -> false

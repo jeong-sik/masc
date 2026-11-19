@@ -371,7 +371,7 @@
  (name masc_tui_engine_samples)
  (wrapped false)
  (modules masc_tui_engine_samples)
- (libraries masc masc_tui_braille masc_tui_message_layout))
+ (libraries masc masc_tui_braille masc_tui_message_layout masc_tui_wake))
 
 ;; Usage's quota scope trend, built once per provider history answer so the
 ;; frame draws rows rather than regrouping every point on every repaint.
@@ -626,7 +626,7 @@
  (name masc_tui_play_room)
  (wrapped false)
  (modules masc_tui_play_room)
- (libraries masc yojson masc.masc_random_id masc_tui_message_layout))
+ (libraries masc yojson masc.masc_random_id masc_tui_message_layout masc_tui_wake))
 
 (library
  (name masc_tui_play_card)
@@ -1757,7 +1757,7 @@
  (name masc_tui_roster_owed)
  (wrapped false)
  (modules masc_tui_roster_owed)
- (libraries masc_tui_owed_read))
+ (libraries masc_tui_owed_read masc_tui_wake))
 
 ;; A Keeper's month of efficiency on its Info tab, beside the fleet's per-turn
 ;; figures. Own library so the request has a test that does not draw a screen.

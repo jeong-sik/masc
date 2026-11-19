@@ -9260,7 +9260,7 @@ let owe_keeper_costs_read state =
 
 let owe_provider_history_day state ~now =
   match state.provider_history_reread_at with
-  | Some at when at <= now ->
+  | Some at when Masc_tui_wake.reached Masc_tui_wake.Provider_history_day ~now ~at ->
       state.provider_history_reread_at <- None;
       owe_pushed_read state Surface_read_source.Provider_history
   | Some _ | None -> ()
@@ -10761,7 +10761,9 @@ let launch_owed_harness state ~mailbox =
   if not (harness_on_screen state) then state.harness_owed <- Masc_tui_owed_read.settled
   else begin
     (match state.harness_stale_at with
-     | Some stale_at when Unix.gettimeofday () >= stale_at ->
+     | Some stale_at
+       when Masc_tui_wake.reached Masc_tui_wake.Harness_stale
+              ~now:(Unix.gettimeofday ()) ~at:stale_at ->
          state.harness_stale_at <- None;
          owe_harness_read state
      | Some _ | None -> ());

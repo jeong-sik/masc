@@ -267,7 +267,8 @@ let tick ?(allow_read = true) t ~now ~newest =
        another answer here instead would draw the graphs once for it and
        once more when that answer is applied. *)
     if session.waiting then (t, Nothing)
-    else if now < slot_time session session.next_slot then (t, Nothing)
+    else if not (Masc_tui_wake.reached Masc_tui_wake.Engine_sample ~now
+                   ~at:(slot_time session session.next_slot)) then (t, Nothing)
     else
       let slot = current_slot session ~now in
       match newest with

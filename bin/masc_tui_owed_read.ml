@@ -45,7 +45,8 @@ let placeholder ~retry_s ~max_retry_s ~now = function
 
 let due ~now = function
   | Owed _ -> true
-  | Waiting { retry_at; _ } -> now >= retry_at
+  | Waiting { retry_at; _ } ->
+      Masc_tui_wake.reached Masc_tui_wake.Owed_read_retry ~now ~at:retry_at
   | Settled | Reading _ -> false
 
 let stale_at_to_schedule ~now = function

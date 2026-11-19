@@ -1068,7 +1068,7 @@ HTTP slot 의 창은 registry 가 게시할 때 target 옆에 고정한 값이�
 lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slot 이 없다, R 을 적지 않았다, 창을 모르는 slot 이 있다(`Window_unknown {slot}`). 모두 선언이 없는 것과 같이 다룬다(W1).
 `slots` 의 id 가 runtime 을 가리키지 않으면 로드가 거절한다. 그 뒤에 창을 모르는 slot 은 둘뿐이다. registry 가 창 없이 고정한 HTTP target 과, 지금 runtime 표에 없는 CLI id 다.
 
-- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿기 전에 버린다. runtime 파일이 다시 게시될 때마다 이 사건이 온다.
+- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿기 전에 버린다. runtime 표나 registry 가 다시 게시될 때마다 이 사건이 온다.
 - 질문 쪽이 바뀌거나 lane 이 켜지고 꺼지면 가던 묻기를 취소한다. 옛 질문으로 만든 것은 반영되지 않는다.
 - slot 목록만 바뀌면 묻기는 끝까지 간다. 답은 반영한다. 선언에서 빠진 slot 의 결과는 읽지 않는다.
 - 어느 쪽이든 새 값을 저장하고 폭 기억을 비운다. 바닥의 크기 사실은 건드리지 않는다. 바뀐 slot 은 key 가 다르고 바뀐 질문은 id 가 다르다(§7.4).
@@ -1232,11 +1232,15 @@ Memory 를 바꾼 쓰기 뒤에는 새 질문을 slot 마다 한 번 묻는다. 
 | `Pulse` | 서버 maintenance tick(60초). 등록된 Keeper 를 돌며 `ensure` 를 부르고 그 쓰는 쪽에 보낸다(§8.6) |
 | `Write` | Keeper 의 Memory 도구와 운영자 route. 답은 promise 로 받는다 |
 | `Ask_ended` | 묻는 fiber. 예외로 끝나도 `Ask_failed` 를 보낸다 |
-| `Declaration_changed` | fiber 하나가 `Runtime.await_catalogue_change` 를 기다렸다가 모든 쓰는 쪽에 lane 값을 보낸다 |
+| `Declaration_changed` | fiber 하나가 신호 둘을 기다린다. runtime 표의 게시(`Runtime.await_catalogue_change`)와 이 lane 의 registry 변경(`Runtime_exact_output_registry.subscribe_lane_changes`)이다. 어느 쪽이 와도 lane 값을 다시 풀어 모든 쓰는 쪽에 보낸다 |
 | `Operator _` | 운영자 route(§12.4) |
 | `Retire` | 등록부에 없는 Keeper 의 쓰는 쪽을 본 pulse. Keeper 를 지우는 경로는 등록부에서 뺀 뒤 파일을 지우기 전에 보내고 `Retired` 를 기다린다. 꺼낼 때 그 Keeper 가 등록부에 있으면 사건이 아니다 |
 | `Boot_finished` | 쓰는 쪽의 boot |
 
+- **선언의 신호는 둘이다.** 한 신호는 다른 쪽이 바꾼 것을 보지 못한다.
+  - runtime 표의 게시는 CLI slot 의 창과 모델 이름을 바꾼다. registry 의 구독은 그것을 보지 못한다.
+  - registry 의 변경은 HTTP slot 의 target 과 창을 바꾼다. `runtime.toml` 을 바꾸는 commit 에서 runtime 표의 신호가 새 registry 보다 먼저 온다. 그사이 registry 는 `Publication_busy` 를 답한다.
+  - `Publication_busy` 면 lane 값을 보내지 않는다. registry 가 다 바뀌면 lane 의 신호가 온다(`runtime_exact_output_registry.mli:125-129`).
 - **`Turn_closed` 는 귀띔이다.** 쓰는 쪽은 사건이 실은 값을 믿지 않고 디스크에서 할 일을 계산한다. 귀띔이 오지 않아도 `Idle` 의 pulse 가 턴 기록의 길이를 보고 찾는다. 그래서 줄을 쓰는 경로가 귀띔을 빠뜨려도 읽기가 서지 않는다. 늦어질 뿐이다.
 - **Keeper 의 턴은 쓰는 쪽을 기다리지 않고 시작한다**(§8.6). Keeper 가 답을 기다리며 보내는 것은 `Write` 하나다. 그 답은 반영 하나(줄 fsync 와 스냅샷 쓰기)를 기다린다. 쓰는 쪽이 `Booting` 이면 boot 가 끝날 때까지 더 기다린다. 모델 호출은 기다리지 않는다. 읽기는 메모리의 view 와 스냅샷 파일을 본다(§11).
 - **사건은 하나씩 다룬다.** 묻는 fiber 는 따로 돌고 결과만 mailbox 로 보낸다. 반영의 덧붙이기와 스냅샷 쓰기는 취소되지 않는 구간이다(§8.2).

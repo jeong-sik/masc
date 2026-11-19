@@ -1,4 +1,4 @@
-(** Switch-owned FIFO lanes with optional bounded per-lane capacity.
+(** Switch-owned FIFO lanes with optional cooperative per-lane backpressure.
     Every accepted event is either executed or reported through [on_failure]
     before the owner is released. *)
 
@@ -24,16 +24,9 @@ type submit_error = Owner_unavailable
 
 type lane_config =
   { max_pending_per_lane : int
-    (** Explicit positive capacity bound per lane queue. *)
+    (** Explicit positive queued-depth threshold per lane at which {!submit}
+        applies cooperative Eio backpressure until an in-flight item drains. *)
   }
-
-type bounded_submit_error =
-  | Closed
-  | Lane_full of
-      { lane : lane
-      ; pending : int
-      ; capacity : int
-      }
 
 type t
 
@@ -41,7 +34,6 @@ val lane_to_string : lane -> string
 val event_id_to_string : event_id -> string
 val failure_reason_to_string : failure_reason -> string
 val submit_error_to_string : submit_error -> string
-val bounded_submit_error_to_string : bounded_submit_error -> string
 
 val create :
   sw:Eio.Switch.t ->
@@ -53,37 +45,28 @@ val create :
     [config.max_pending_per_lane] must be strictly positive (otherwise raises
     [Invalid_argument]). *)
 
-val create_bounded :
-  sw:Eio.Switch.t ->
-  config:lane_config ->
-  on_failure:(failure -> unit) ->
-  unit ->
-  t
-(** Same as {!create} with a required declared {!lane_config}. *)
-
 val submit :
   t ->
   lane:lane ->
   event_id:event_id ->
   (unit -> unit) ->
   (unit, submit_error) result
-(** [submit t ...] accepts work only while [t]'s owner switch is available and
-    capacity permits. [Error Owner_unavailable] is returned on rejection. Callers
-    that distinguish capacity backpressure from owner shutdown should use
-    {!submit_bounded}. *)
+(** [submit t ~lane ~event_id run] enqueues [run] onto [lane]'s FIFO queue
+    while [t]'s owner switch is available.
 
-val submit_bounded :
-  t ->
-  lane:lane ->
-  event_id:event_id ->
-  (unit -> unit) ->
-  (unit, bounded_submit_error) result
-(** Bounded submission returning [Error (Lane_full _)] when the lane's queue
-    has reached [config.max_pending_per_lane], or [Error Closed] when the owner
-    switch is unavailable. *)
+    When [t] was created with [?config] and [lane] currently has at least
+    [config.max_pending_per_lane] queued items (or earlier waiters ahead of
+    this caller), [submit] cooperatively suspends the calling fiber via
+    [Eio.Condition] in FIFO arrival order until a queued slot drains, or
+    returns [Error Owner_unavailable] if the owner switch closes or fails
+    while waiting.
+
+    Propagates [Eio.Cancel.Cancelled] if the calling fiber is cancelled while
+    waiting. *)
 
 val pending_count : t -> lane:lane -> int
 (** Current queued (not yet started) jobs on [lane]. *)
 
 val capacity : t -> int option
-(** Declared per-lane capacity bound, or [None] when created without [?config]. *)
+(** Declared per-lane backpressure depth, or [None] when created without
+    [?config]. *)

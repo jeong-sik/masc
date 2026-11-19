@@ -22,14 +22,6 @@ type lane_config =
   { max_pending_per_lane : int
   }
 
-type bounded_submit_error =
-  | Closed
-  | Lane_full of
-      { lane : lane
-      ; pending : int
-      ; capacity : int
-      }
-
 type job =
   { event_id : event_id
   ; run : unit -> unit
@@ -44,11 +36,17 @@ type lane_state =
   ; mutable phase : lane_phase
   }
 
+type waiter =
+  { cond : Eio.Condition.t
+  ; mutable cancelled : bool
+  }
+
 type t =
   { sw : Eio.Switch.t
   ; mutex : Stdlib.Mutex.t
   ; condition : Eio.Condition.t
   ; lanes : (lane, lane_state) Hashtbl.t
+  ; waiters : (lane, waiter Queue.t) Hashtbl.t
   ; ready : lane Queue.t
   ; capacity_limit : int option
   ; on_failure : failure -> unit
@@ -69,16 +67,6 @@ let failure_reason_to_string = function
 
 let submit_error_to_string = function
   | Owner_unavailable -> "owner_unavailable"
-;;
-
-let bounded_submit_error_to_string = function
-  | Closed -> "closed"
-  | Lane_full { lane; pending; capacity } ->
-    Printf.sprintf
-      "lane_full(%s: pending=%d capacity=%d)"
-      (lane_to_string lane)
-      pending
-      capacity
 ;;
 
 let with_lock t f = Stdlib.Mutex.protect t.mutex f
@@ -120,43 +108,175 @@ let owner_available t =
   | `Closed, _ | `Open, Some _ -> false
 ;;
 
+let pending_count_locked t lane =
+  match Hashtbl.find_opt t.lanes lane with
+  | Some state -> Queue.length state.jobs
+  | None -> 0
+;;
+
+let lane_has_capacity_locked t lane =
+  match t.capacity_limit with
+  | None -> true
+  | Some capacity -> pending_count_locked t lane < capacity
+;;
+
+let rec prune_cancelled_head q =
+  match Queue.peek_opt q with
+  | Some w when w.cancelled ->
+    ignore (Queue.take_opt q);
+    prune_cancelled_head q
+  | Some _ | None -> ()
+;;
+
+let peek_live_waiter_locked t lane =
+  match Hashtbl.find_opt t.waiters lane with
+  | None -> None
+  | Some q ->
+    prune_cancelled_head q;
+    if Queue.is_empty q
+    then (
+      Hashtbl.remove t.waiters lane;
+      None)
+    else Queue.peek_opt q
+;;
+
+let peek_wake_waiter_cond_locked t lane =
+  if not (owner_available t)
+  then None
+  else if lane_has_capacity_locked t lane
+  then Option.map (fun w -> w.cond) (peek_live_waiter_locked t lane)
+  else None
+;;
+
+let drain_all_waiters_locked t =
+  let conds =
+    Hashtbl.fold
+      (fun _lane q acc ->
+         let lane_conds = Queue.fold (fun acc w -> w.cond :: acc) [] q in
+         Queue.clear q;
+         lane_conds @ acc)
+      t.waiters
+      []
+  in
+  Hashtbl.clear t.waiters;
+  conds
+;;
+
+let push_waiter_locked t lane waiter =
+  let q =
+    match Hashtbl.find_opt t.waiters lane with
+    | Some q -> q
+    | None ->
+      let q = Queue.create () in
+      Hashtbl.add t.waiters lane q;
+      q
+  in
+  Queue.add waiter q
+;;
+
+let remove_waiter_locked t lane waiter =
+  waiter.cancelled <- true;
+  match Hashtbl.find_opt t.waiters lane with
+  | None -> ()
+  | Some q ->
+    let filtered = Queue.create () in
+    Queue.iter
+      (fun w -> if not w.cancelled && w != waiter then Queue.add w filtered)
+      q;
+    Queue.clear q;
+    if Queue.is_empty filtered
+    then Hashtbl.remove t.waiters lane
+    else Queue.transfer filtered q
+;;
+
+let enqueue_job_locked t ~lane ~event_id run =
+  let job = { event_id; run } in
+  match Hashtbl.find_opt t.lanes lane with
+  | Some state ->
+    (* Scheduled lanes already have a ready key. Active lanes retain
+       their worker even when its callback has emptied the FIFO. *)
+    Queue.add job state.jobs;
+    false
+  | None ->
+    let state = { jobs = Queue.create (); phase = Scheduled } in
+    Queue.add job state.jobs;
+    Hashtbl.add t.lanes lane state;
+    Queue.add lane t.ready;
+    true
+;;
+
 let take_lane_job t lane state =
-  with_lock t (fun () ->
-    if not (owner_available t)
-    then None
-    else
-      match Queue.take_opt state.jobs with
-      | Some job -> Some job
-      | None ->
-        Hashtbl.remove t.lanes lane;
-        None)
+  let job_opt, waiter_conds =
+    with_lock t (fun () ->
+      if not (owner_available t)
+      then None, drain_all_waiters_locked t
+      else
+        match Queue.take_opt state.jobs with
+        | Some job ->
+          let wake =
+            match peek_wake_waiter_cond_locked t lane with
+            | Some cond -> [ cond ]
+            | None -> []
+          in
+          Some job, wake
+        | None ->
+          Hashtbl.remove t.lanes lane;
+          let wake =
+            match peek_wake_waiter_cond_locked t lane with
+            | Some cond -> [ cond ]
+            | None -> []
+          in
+          None, wake)
+  in
+  List.iter Eio.Condition.broadcast waiter_conds;
+  job_opt
 ;;
 
 let cleanup_lane t lane state =
-  let action =
+  let action, waiter_conds =
     with_lock t (fun () ->
       match Hashtbl.find_opt t.lanes lane with
       | Some current when current == state ->
         if Queue.is_empty state.jobs
         then (
           Hashtbl.remove t.lanes lane;
-          `Done)
+          let wake =
+            match peek_wake_waiter_cond_locked t lane with
+            | Some cond -> [ cond ]
+            | None ->
+              if not (owner_available t)
+              then drain_all_waiters_locked t
+              else []
+          in
+          `Done, wake)
         else if owner_available t
         then (
           (* Requeue leftover jobs if the worker exited abnormally while the
              owner remained open. *)
           state.phase <- Scheduled;
           Queue.add lane t.ready;
-          `Reschedule)
+          let wake =
+            match peek_wake_waiter_cond_locked t lane with
+            | Some cond -> [ cond ]
+            | None -> []
+          in
+          `Reschedule, wake)
         else (
           let jobs =
             Queue.fold (fun acc job -> job :: acc) [] state.jobs |> List.rev
           in
           Queue.clear state.jobs;
           Hashtbl.remove t.lanes lane;
-          `Drain jobs)
-      | Some _ | None -> `Done)
+          `Drain jobs, drain_all_waiters_locked t)
+      | Some _ | None ->
+        let wake =
+          if not (owner_available t)
+          then drain_all_waiters_locked t
+          else []
+        in
+        `Done, wake)
   in
+  List.iter Eio.Condition.broadcast waiter_conds;
   match action with
   | `Done -> ()
   | `Reschedule -> Eio.Condition.broadcast t.condition
@@ -218,10 +338,10 @@ let rec run_dispatcher t : [ `Stop_daemon ] =
 ;;
 
 let close t =
-  let pending =
+  let pending, waiter_conds =
     with_lock t (fun () ->
       match t.lifecycle with
-      | `Closed -> []
+      | `Closed -> [], []
       | `Open ->
         t.lifecycle <- `Closed;
         let pending_by_lane =
@@ -241,8 +361,11 @@ let close t =
         in
         Hashtbl.clear t.lanes;
         Queue.clear t.ready;
-        List.concat pending_by_lane)
+        let waiter_conds = drain_all_waiters_locked t in
+        List.concat pending_by_lane, waiter_conds)
   in
+  Eio.Condition.broadcast t.condition;
+  List.iter Eio.Condition.broadcast waiter_conds;
   List.iter
     (fun (lane, job) ->
        report_failure
@@ -269,6 +392,7 @@ let create ~sw ?config ~on_failure () =
     ; mutex = Stdlib.Mutex.create ()
     ; condition = Eio.Condition.create ()
     ; lanes = Hashtbl.create 16
+    ; waiters = Hashtbl.create 16
     ; ready = Queue.create ()
     ; capacity_limit
     ; on_failure
@@ -280,60 +404,97 @@ let create ~sw ?config ~on_failure () =
   t
 ;;
 
-let create_bounded ~sw ~config ~on_failure () =
-  create ~sw ~config ~on_failure ()
+let cancel_waiter t lane waiter =
+  let wake_cond =
+    with_lock t (fun () ->
+      remove_waiter_locked t lane waiter;
+      peek_wake_waiter_cond_locked t lane)
+  in
+  Option.iter Eio.Condition.broadcast wake_cond
 ;;
 
-let submit_bounded t ~lane ~event_id run =
-  let submission =
+let try_claim_waiter_slot t ~lane ~event_id ~run waiter =
+  Eio.Fiber.check ();
+  let step =
     with_lock t (fun () ->
       if not (owner_available t)
-      then Error Closed
+      then (
+        remove_waiter_locked t lane waiter;
+        `Closed (drain_all_waiters_locked t))
       else
-        let job = { event_id; run } in
-        (match Hashtbl.find_opt t.lanes lane with
-         | Some state ->
-           let pending = Queue.length state.jobs in
-           (match t.capacity_limit with
-            | Some capacity when pending >= capacity ->
-              Error (Lane_full { lane; pending; capacity })
-            | Some _ | None ->
-              (* Scheduled lanes already have a ready key. Active lanes retain
-                 their worker even when its callback has emptied the FIFO. *)
-              Queue.add job state.jobs;
-              Ok false)
-         | None ->
-           let state = { jobs = Queue.create (); phase = Scheduled } in
-           Queue.add job state.jobs;
-           Hashtbl.add t.lanes lane state;
-           Queue.add lane t.ready;
-           Ok true))
+        match peek_live_waiter_locked t lane with
+        | Some head when head == waiter && lane_has_capacity_locked t lane ->
+          (match Hashtbl.find_opt t.waiters lane with
+           | Some q ->
+             ignore (Queue.take_opt q);
+             if Queue.is_empty q then Hashtbl.remove t.waiters lane
+           | None -> ());
+          let notify_dispatcher = enqueue_job_locked t ~lane ~event_id run in
+          let wake_next = peek_wake_waiter_cond_locked t lane in
+          `Claimed (notify_dispatcher, wake_next)
+        | Some _ -> `Retry
+        | None ->
+          if lane_has_capacity_locked t lane
+          then (
+            let notify_dispatcher = enqueue_job_locked t ~lane ~event_id run in
+            `Claimed (notify_dispatcher, None))
+          else (
+            push_waiter_locked t lane waiter;
+            `Retry))
   in
-  match submission with
-  | Error _ as error -> error
-  | Ok notify ->
-    if notify then Eio.Condition.broadcast t.condition;
-    Ok ()
+  match step with
+  | `Closed extra_conds ->
+    List.iter Eio.Condition.broadcast extra_conds;
+    Some (Error Owner_unavailable)
+  | `Claimed (notify_dispatcher, wake_next) ->
+    Some (Ok (notify_dispatcher, wake_next))
+  | `Retry -> None
 ;;
 
 let submit t ~lane ~event_id run =
-  match submit_bounded t ~lane ~event_id run with
-  | Ok () -> Ok ()
-  | Error Closed -> Error Owner_unavailable
-  | Error (Lane_full { lane; pending; capacity }) ->
-    Log.Server.warn
-      "connector ingress lane full lane=%s pending=%d capacity=%d"
-      (lane_to_string lane)
-      pending
-      capacity;
-    Error Owner_unavailable
+  let initial =
+    with_lock t (fun () ->
+      if not (owner_available t)
+      then `Closed
+      else
+        let can_enqueue_now =
+          Option.is_none t.capacity_limit
+          || (Option.is_none (peek_live_waiter_locked t lane)
+              && lane_has_capacity_locked t lane)
+        in
+        if can_enqueue_now
+        then `Accepted (enqueue_job_locked t ~lane ~event_id run)
+        else (
+          let waiter = { cond = Eio.Condition.create (); cancelled = false } in
+          push_waiter_locked t lane waiter;
+          `Wait waiter))
+  in
+  match initial with
+  | `Closed -> Error Owner_unavailable
+  | `Accepted notify_dispatcher ->
+    if notify_dispatcher then Eio.Condition.broadcast t.condition;
+    Ok ()
+  | `Wait waiter ->
+    (try
+       Eio.Fiber.check ();
+       match
+         Eio.Condition.loop_no_mutex waiter.cond (fun () ->
+           try_claim_waiter_slot t ~lane ~event_id ~run waiter)
+       with
+       | Error _ as err -> err
+       | Ok (notify_dispatcher, wake_next) ->
+         if notify_dispatcher then Eio.Condition.broadcast t.condition;
+         Option.iter Eio.Condition.broadcast wake_next;
+         Ok ()
+     with
+     | exn ->
+       let bt = Printexc.get_raw_backtrace () in
+       cancel_waiter t lane waiter;
+       Printexc.raise_with_backtrace exn bt)
 ;;
 
 let pending_count t ~lane =
-  with_lock t (fun () ->
-    match Hashtbl.find_opt t.lanes lane with
-    | Some state -> Queue.length state.jobs
-    | None -> 0)
+  with_lock t (fun () -> pending_count_locked t lane)
 ;;
 
 let capacity t = t.capacity_limit

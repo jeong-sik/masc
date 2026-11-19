@@ -28,7 +28,8 @@ let check_style status =
       (Some {state = Masc.Published_artifact_check.Checked; _}) -> Theme.ok ()
   | Known None
   | Known (Some {state = Masc.Published_artifact_check.Unchecked; _}) -> Theme.warn ()
-  | Unknown _ | Kept_back _ -> Theme.muted ()
+  | Unknown (Masc_tui_value.Unknown.Read_failed, _) -> Theme.bad ()
+  | Unknown (Masc_tui_value.Unknown.(Unread | Unreported), _) | Kept_back _ -> Theme.muted ()
 
 (* A report's display name already spells its format, title and revision, and
    the type column says the format and revision, so the row names it by title. *)
@@ -75,12 +76,10 @@ let meta_cap_cells = 44
    to read across, so a wider pane leaves the rest of its width empty. *)
 let table_cap_cells = 120
 
-(* The widest check reading, the one that says nothing is known. Held as a
-   constant of the column rather than measured over the visible rows, so the
-   columns after it do not move when the window scrolls past a different one. *)
-let check_cells =
-  Masc_tui_message_layout.display_width
-    (Masc_tui_artifact_checks.label (Masc_tui_artifact_checks.Unknown ""))
+(* The widest check reading. Held as a constant of the column rather than
+   measured over the visible rows, so the columns after it do not move when
+   the window scrolls past a different one. *)
+let check_cells = Masc_tui_artifact_checks.widest_label_cells
 
 let day_marker ~ko = if ko then "오늘" else "today"
 

@@ -1,0 +1,7 @@
+### Changed
+
+- The Resources CHECK column says why a report's confirmation has no
+  answer: `◌ not read` while the query runs or before it was sent, `✕ read
+  failed` (in the bad tone) when the read or some records failed, and
+  `? not reported` when the record is for a different report body. It said
+  `? check unknown` for all of them; the detail line follows the same words.

@@ -14935,9 +14935,9 @@ let resource_inventory_status state =
 
 let resource_check_status state report =
   if Option.is_some state.artifact_check_pending then
-    Masc_tui_artifact_checks.Unknown "saving confirmation; a fresh query is required"
+    Masc_tui_artifact_checks.Unknown (Masc_tui_value.Unknown.Unread, "saving confirmation; a fresh query is required")
   else if server_authority_ready state then Masc_tui_artifact_checks.resolve state.artifact_checks report
-  else Masc_tui_artifact_checks.Unknown "workspace identity is unconfirmed"
+  else Masc_tui_artifact_checks.Unknown (Masc_tui_value.Unknown.Unread, "workspace identity is unconfirmed")
 
 let resource_unchecked_today state ~day =
   if not (server_authority_ready state) || Option.is_some state.artifact_check_pending then None

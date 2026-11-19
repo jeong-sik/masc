@@ -213,6 +213,30 @@ let test_reset_inside_the_turn () =
        ~now:(mark 5) admit)
 ;;
 
+(* A clear or a recovering purge is about to change the head. Its line names
+   what was closed since the last unit, so what the path drops is named
+   before it goes, and moves only the history part of the mark. *)
+let test_announced_reset () =
+  let keep kept (mark : Log.mark) = { mark with closed_messages = kept } in
+  let cleared = Writer.Reset { cause = Cleared; after = keep 0 } in
+  check string "the log had not started"
+    "started at a:9/chat 4 | reset cleared a:9/chat 4 -> a:0/chat 4 []"
+    (plan_text ~tail:Nothing_written ~now:(mark ~chat_bytes:4 9) cleared);
+  check string "what was closed since the last unit is named, the other stores stay"
+    "reset cleared a:9/chat 30 -> a:0/chat 30 [b+0:2 c+0:4]"
+    (plan_text ~tail:(written (mark ~chat_bytes:7 3)) ~now:(mark ~chat_bytes:30 9) cleared);
+  check string "an open turn stays open"
+    "reset recovered a:9/chat 0 -> a:6/chat 0 [b+0:2 c+0:4]"
+    (plan_text
+       ~tail:(written ~open_turn:(open_at 40 (mark 5)) (mark 3))
+       ~now:(mark 9)
+       (Writer.Reset { cause = Recovered; after = keep 6 }));
+  check string "a head replaced before it: the unannounced reset goes first"
+    "reset unannounced a:9/chat 0 -> b:0/chat 0 [] | reset cleared b:2/chat 0 -> b:0/chat 0 [d+0:2]"
+    (plan_text ~covered:(covered_from [ turn 'd' 2 ]) ~tail:(written (mark 9))
+       ~now:(mark ~trace:"b" 2) cleared)
+;;
+
 let test_ranges () =
   let behind = covered_from ~first:5 [ turn 'c' 4 ] in
   check string "the unit starts before the head's own turns" "needs the segment before: 3 < 5"
@@ -274,6 +298,14 @@ type step =
   | Recreated (* Another trace, nothing in it. *)
   | Emptied (* The same trace, nothing in it: a head this build cannot decode. *)
   | Cleared_keeping (* The same trace, one kept message put in open. *)
+  | Shrink of
+      { cause : Log.announced
+      ; changed : bool
+      }
+  (* A clear or a recovering purge through the reset function: the closing
+     save and the line landed; [changed] is whether the head change followed.
+     A failed change and a kill leave the same disk. A closing save or an
+     append that fails changes nothing, so the model leaves them out. *)
 
 let step_text = function
   | Admit { close_ok; append_ok } -> Printf.sprintf "admit(close %b, append %b)" close_ok append_ok
@@ -283,6 +315,12 @@ let step_text = function
   | Recreated -> "recreated"
   | Emptied -> "emptied"
   | Cleared_keeping -> "cleared keeping one"
+  | Shrink { cause; changed } ->
+    Printf.sprintf "%s(changed %b)"
+      (match cause with
+       | Cleared -> "clear"
+       | Recovered -> "recover")
+      changed
 ;;
 
 (* A head replaced by one that had already grown past the last mark. The
@@ -297,6 +335,8 @@ type seen =
   ; mutable close_missing : int
   ; mutable process_exited : int
   ; mutable resets : int
+  ; mutable announced : int
+  ; mutable announced_unchanged : int
   ; mutable own_messages : int
   ; mutable unattributed_messages : int
   }
@@ -308,6 +348,8 @@ let seen =
   ; close_missing = 0
   ; process_exited = 0
   ; resets = 0
+  ; announced = 0
+  ; announced_unchanged = 0
   ; own_messages = 0
   ; unattributed_messages = 0
   }
@@ -344,7 +386,8 @@ let covered_of state =
 
 let shown_open state =
   match state.tail with
-  | Written { open_turn = Some { opened; _ }; _ } ->
+  | Written { open_turn = Some { reset_since = true; _ }; _ } -> None
+  | Written { open_turn = Some { opened; reset_since = false; _ }; _ } ->
     if Int.equal (List.assoc opened state.opened_on) state.head.generation
     then Some opened
     else None
@@ -449,9 +492,32 @@ let apply_line ~now state (line : Log.line) =
           }
     ; opened_on = (offset, state.head.generation) :: state.opened_on
     }
-  | Reset { cause; before; after; closed_before; _ }, Written { point; open_turn; _ } ->
+  | Reset { cause = Announced _; before; after; closed_before; _ }, Written { open_turn; _ } ->
+    seen.announced <- seen.announced + 1;
+    expect "an announced reset starts where the stores end now" (before = now);
+    expect "it moves the history count only, on the same trace"
+      (after = { now with closed_messages = after.closed_messages });
+    expect_ids "it names every message closed since the last unit, in order"
+      (ids state.unnamed) (named state closed_before);
+    (* The next unit starts at [after]. Until the change lands that names
+       again what lies above it, as no turn's. *)
+    { state with
+      tail =
+        Written
+          { rows_end
+          ; point = after
+          ; open_turn =
+              Option.map (fun (turn : Store.open_turn) -> { turn with reset_since = true }) open_turn
+          ; last = line
+          }
+    ; unnamed =
+        List.map
+          (fun message -> { message with owner = None })
+          (drop after.closed_messages (closed_ids state.head))
+    ; point_generation = state.head.generation
+    }
+  | Reset { cause = Unannounced; before; after; closed_before; _ }, Written { point; open_turn; _ } ->
     seen.resets <- seen.resets + 1;
-    expect "the turn path writes unannounced resets only" (cause = Log.Unannounced);
     expect "the reset starts at the last mark" (before = point);
     expect "the reset ends at the empty mark of the head, other stores untouched"
       (after = { point with trace = now.trace; closed_messages = 0 });
@@ -507,10 +573,10 @@ let append state ~now lines =
        || now.closed_messages < point.closed_messages
      in
      (match first, replaced with
-      | Log.Reset _, true -> ()
-      | Log.Reset _, false -> fail "a reset for a head that was not replaced"
-      | (Log_started _ | Opened _ | Closed _), false -> ()
-      | (Log_started _ | Opened _ | Closed _), true ->
+      | Log.Reset { cause = Unannounced; _ }, true -> ()
+      | Log.Reset { cause = Unannounced; _ }, false -> fail "a reset for a head that was not replaced"
+      | (Log_started _ | Opened _ | Closed _ | Reset { cause = Announced _; _ }), false -> ()
+      | (Log_started _ | Opened _ | Closed _ | Reset { cause = Announced _; _ }), true ->
         if visible then fail "a replaced head and no reset in front" else raise Invisible));
   let state = List.fold_left (apply_line ~now) state lines in
   (* Where the log says the next unit starts is where the unnamed begin. *)
@@ -575,6 +641,40 @@ let take state step =
     let state = if close_ok then close_open state else state in
     let now, lines = plan state Writer.Process_start in
     if append_ok then append state ~now lines else state
+  | Shrink { cause; changed } ->
+    let state = close_open state in
+    (* What the path keeps closed: nothing for a clear, whose kept message
+       goes in open; the first half of the closed turns for a recovery. *)
+    let kept_turns =
+      match cause with
+      | Cleared -> []
+      | Recovered -> List.filteri (fun index _ -> index < List.length state.head.turns / 2) state.head.turns
+    in
+    let kept = List.length (List.concat_map (fun ((_ : Objects.turn), messages) -> messages) kept_turns) in
+    let now, lines =
+      plan state (Writer.Reset { cause; after = (fun mark -> { mark with closed_messages = kept }) })
+    in
+    (match List.rev lines with
+     | Log.Reset { cause = Announced last; _ } :: _ when last = cause -> ()
+     | (Log_started _ | Opened _ | Closed _ | Reset _) :: _ | [] ->
+       fail "a reset does not end in its announced line");
+    let state = append state ~now lines in
+    if changed
+    then (
+      let generation = state.head.generation + 1 in
+      let open_messages =
+        match cause with
+        | Cleared -> 1
+        | Recovered -> 0
+      in
+      { state with
+        head = { generation; trace = state.head.trace; turns = kept_turns; open_messages }
+      ; unnamed = []
+      ; point_generation = generation
+      })
+    else (
+      seen.announced_unchanged <- seen.announced_unchanged + 1;
+      state)
   | Recreated ->
     replace_head state ~trace:(Printf.sprintf "t%d" (state.head.generation + 1)) ~open_messages:0
   | Emptied -> replace_head state ~trace:state.head.trace ~open_messages:0
@@ -584,8 +684,9 @@ let take state step =
 let both = [ true; false ]
 
 (* A save that has nothing to close cannot fail, so only one of the two is
-   tried. *)
-let steps state =
+   tried. [resets] adds the shrinking paths; they widen every state by four,
+   so they are followed one step less deep. *)
+let steps ~resets state =
   let saves = if state.head.open_messages > 0 then both else [ true ] in
   let pairs make =
     List.concat_map (fun first -> List.map (fun append_ok -> make first append_ok) both) saves
@@ -598,6 +699,13 @@ let steps state =
     pairs (fun close_ok append_ok -> Admit { close_ok; append_ok })
     @ restarts
     @ [ Recreated; Emptied; Cleared_keeping ]
+    @
+    if resets
+    then
+      List.concat_map
+        (fun cause -> List.map (fun changed -> Shrink { cause; changed }) both)
+        [ Log.Cleared; Log.Recovered ]
+    else []
 ;;
 
 let start =
@@ -614,9 +722,7 @@ let start =
   }
 ;;
 
-let depth = 8
-
-let rec explore state path remaining =
+let rec explore ~resets state path remaining =
   if remaining = 0
   then seen.orders <- seen.orders + 1
   else
@@ -624,16 +730,17 @@ let rec explore state path remaining =
       (fun step ->
          let path = step :: path in
          match take state step with
-         | state -> explore state path (remaining - 1)
+         | state -> explore ~resets state path (remaining - 1)
          | exception Invisible -> seen.invisible <- seen.invisible + 1
          | exception exn ->
            Printf.eprintf "order: %s\n%!" (String.concat ", " (List.rev_map step_text path));
            raise exn)
-      (steps state)
+      (steps ~resets state)
 ;;
 
 let test_every_order () =
-  explore start [] depth;
+  explore ~resets:false start [] 8;
+  explore ~resets:true start [] 7;
   (* The model must have reached every kind of line, or it has shown
      nothing. *)
   List.iter
@@ -644,13 +751,16 @@ let test_every_order () =
     ; "Close_missing", seen.close_missing
     ; "Process_exited", seen.process_exited
     ; "resets", seen.resets
+    ; "announced resets", seen.announced
+    ; "announced resets whose change did not follow", seen.announced_unchanged
     ; "messages named as a turn's own", seen.own_messages
     ; "messages named before a baseline", seen.unattributed_messages
     ];
   Printf.printf
-    "orders %d, not visible %d, closed %d (missing %d, exited %d), resets %d, own %d, before %d\n%!"
+    "orders %d, not visible %d, closed %d (missing %d, exited %d), resets %d, announced %d \
+     (unchanged %d), own %d, before %d\n%!"
     seen.orders seen.invisible seen.closed_lines seen.close_missing seen.process_exited seen.resets
-    seen.own_messages seen.unattributed_messages
+    seen.announced seen.announced_unchanged seen.own_messages seen.unattributed_messages
 ;;
 
 let () =
@@ -662,6 +772,7 @@ let () =
         ; test_case "process start" `Quick test_process_start
         ; test_case "a replaced head" `Quick test_replaced_head
         ; test_case "a reset inside the turn" `Quick test_reset_inside_the_turn
+        ; test_case "an announced reset" `Quick test_announced_reset
         ; test_case "ranges" `Quick test_ranges
         ] )
     ; "model", [ test_case "every order to a depth" `Quick test_every_order ]

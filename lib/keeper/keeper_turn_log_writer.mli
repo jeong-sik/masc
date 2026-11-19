@@ -16,8 +16,8 @@
       open on this head when the message was closed.
 
     This module judges the Agent-Core history only: the trace and the count
-    of closed messages. The other stores of a mark are carried as given.
-    Lines for a head that a product path is about to shrink are not here. *)
+    of closed messages. The other stores of a mark are carried as given,
+    apart from the ones a {!Reset} says its path changes. *)
 
 (** How a turn that reached its end ended. A turn nothing closed is closed by
     the next admission or the next process start, with an outcome of its
@@ -49,6 +49,18 @@ type event =
       ; ending : ending
       }
   | Process_start (** After checkpoint tail recovery, before any turn. *)
+  | Reset of
+      { cause : Keeper_turn_log.announced
+      ; after : Keeper_turn_log.mark -> Keeper_turn_log.mark
+      (** The mark once the path has changed its stores, from the mark
+          before. Only the stores the path changes differ. *)
+      }
+  (** A product path is about to shrink or change the head
+      ({!Keeper_turn_log_reset}). The last line of the plan is the
+      [Announced] reset: [before] is [now], [after] is [after now], and
+      [closed_before] names what was closed since the last unit, so the
+      messages the path drops are named before they go. An open turn is left
+      open: its [Closed] then names nothing as its own. *)
 
 (** [now] is where the stores end and [covered] is the closed turns of the
     same head. Open messages are not counted: a message is named by the

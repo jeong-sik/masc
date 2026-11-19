@@ -69,6 +69,7 @@ import {
   liveSendOwnsRequest,
   appendThreadEntry,
   mergeServerHistoryEntries,
+  removeThreadEntries,
   THREAD_ENTRY_CAP,
 } from './keeper-state'
 import {
@@ -990,6 +991,389 @@ describe('sendKeeperThreadMessage operation stream', () => {
     const reply = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
     expect(reply).toMatchObject({ delivery: 'error', streamState: null })
     expect(keeperActionErrors.value.echo).toBe(reply?.error)
+    expect(keeperActionErrors.value.echo).toBeTruthy()
+  })
+
+  // The server ends a turn typed `no_visible_reply` as a success only when the
+  // reply has blocks to show (media without text). Its closing frames are
+  // KEEPER_REPLY_DETAILS, TEXT_MESSAGE_END, RUN_FINISHED.
+  const finishWithoutText = (
+    opts: { operationId: string; onEvent: (event: KeeperChatStreamEvent) => void },
+  ): void => {
+    opts.onEvent({
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: { reply: '', turn_ref: 'turn-media', turn_outcome: 'no_visible_reply' },
+    })
+    opts.onEvent({ type: 'TEXT_MESSAGE_END' })
+    opts.onEvent({ type: 'RUN_FINISHED' })
+  }
+
+  it('leaves a turn the server finished without text as the frames settled it (#52953)', async () => {
+    let operationId = ''
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      operationId = opts.operationId
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      finishWithoutText(opts)
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '그림 그려 줘')
+
+    // The turn succeeded: nothing asks the operator to send again.
+    expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    const reply = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+    if (!reply) throw new Error('missing reply row')
+    expect(reply).toMatchObject({ delivery: 'no_reply', text: '', streamState: null })
+    expect(reply.error ?? null).toBeNull()
+    // A row with no time sorts after every later turn; a finished one has one.
+    expect(reply.timestamp).toBeTruthy()
+    expect(trackedKeeperChatOperationsForKeeper('echo').some(candidate => candidate.operationId === operationId)).toBe(false)
+
+    // History then brings the stored row of the same operation, with the
+    // image, and it takes the placeholder's place.
+    mergeServerHistoryEntries('echo', [{
+      ...reply,
+      id: 'stored-reply',
+      blocks: [{ t: 'image', src: 'https://example.com/drawing.png' }],
+      timestamp: '2026-11-13T00:00:00Z',
+      delivery: 'history',
+    }])
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant')).toMatchObject([{
+      id: 'stored-reply',
+      blocks: [{ t: 'image', src: 'https://example.com/drawing.png' }],
+      delivery: 'history',
+    }])
+  })
+
+  it('leaves that turn as settled when it also ran a tool', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onEvent({
+        type: 'TOOL_CALL_START',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 0,
+        toolCallName: 'Draw',
+        toolCallId: 'draw-1',
+      })
+      opts.onEvent({ type: 'TOOL_CALL_END', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'draw-1' })
+      finishWithoutText(opts)
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '그림 그려 줘')
+
+    expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    // Not restamped as a delivered reply carrying the tool-only filler line.
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant'))
+      .toMatchObject({ delivery: 'no_reply', text: '' })
+    // The tool's output is still read.
+    expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
+  })
+
+  // The other turns the server finishes without reply text. Each is typed, and
+  // its frames settle the row: a surface post that delivered the reply, or a
+  // checkpoint. The server sends a status block with the stored row, not on
+  // the stream.
+  type FrameSink = { operationId: string; onEvent: (event: KeeperChatStreamEvent) => void }
+  describe.each([
+    {
+      outcome: 'external_effect_completed' as const,
+      own: (opts: FrameSink) => opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_EXTERNAL_EFFECT_COMPLETED',
+        value: { target: { kind: 'slack', channel_id: 'C1', thread_ts: '1.2' } },
+      }),
+      settled: {
+        delivery: 'delivered',
+        details: { externalEffectTarget: { kind: 'slack', channelId: 'C1', threadTs: '1.2' } },
+      },
+    },
+    {
+      outcome: 'continuation_checkpoint' as const,
+      own: (opts: FrameSink) => opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CONTINUATION_CHECKPOINT',
+        value: { message: '' },
+      }),
+      settled: {
+        delivery: 'delivered',
+        blocks: [{ t: 'status', kind: 'continuation_checkpoint' }],
+      },
+    },
+  ])('a finished $outcome turn', ({ outcome, own, settled }) => {
+    it.each([
+      { ranTool: false, says: 'without a tool call' },
+      { ranTool: true, says: 'after a tool call' },
+    ])('stays as its frames settled it $says', async ({ ranTool }) => {
+      let operationId = ''
+      streamKeeperMessage.mockImplementation(async (_name: string, _message: string, opts: FrameSink) => {
+        operationId = opts.operationId
+        opts.onEvent({
+          type: 'CUSTOM',
+          name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+          value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+        })
+        if (ranTool) {
+          opts.onEvent({
+            type: 'TOOL_CALL_START',
+            toolStreamScope: 0,
+            toolCallBlockIndex: 0,
+            toolCallName: 'Post',
+            toolCallId: 'post-1',
+          })
+          opts.onEvent({ type: 'TOOL_CALL_END', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'post-1' })
+        }
+        opts.onEvent({
+          type: 'CUSTOM',
+          name: 'KEEPER_REPLY_DETAILS',
+          value: { reply: '', turn_ref: 'turn-typed', turn_outcome: outcome },
+        })
+        own(opts)
+        opts.onEvent({ type: 'TEXT_MESSAGE_END' })
+        opts.onEvent({ type: 'RUN_FINISHED' })
+        return { terminal: true }
+      })
+
+      await sendKeeperThreadMessage('echo', '질문')
+
+      // Nothing asks the operator to send again, and no filler line is
+      // written into a row whose card already says what happened.
+      expect(keeperActionErrors.value.echo ?? null).toBeNull()
+      const reply = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+      if (!reply) throw new Error('missing reply row')
+      expect(reply).toMatchObject({ ...settled, text: '', streamState: null })
+      expect(reply.details?.turnOutcome).toBe(outcome)
+      expect(reply.error ?? null).toBeNull()
+      expect((reply.blocks ?? []).filter(block => block.t !== 'status')).toEqual([])
+      expect(reply.timestamp).toBeTruthy()
+      expect(trackedKeeperChatOperationsForKeeper('echo').some(candidate => candidate.operationId === operationId)).toBe(false)
+    })
+  })
+
+  // A reply typed `visible_reply`. The server ends it with RUN_FINISHED when it
+  // has text, or when it has no text and blocks to show.
+  // A send the server queued first leaves the row queued until the terminal
+  // frame, which is the frame that delivers it. The tail returns early for a
+  // typed turn, so it must not be what moves that row on.
+  it.each([
+    { state: 'Running' as const, says: 'that ran at once' },
+    { state: 'Queued' as const, says: 'that waited in the queue first' },
+  ])('leaves a finished visible reply $says with the text and state its frames gave it', async ({ state }) => {
+    let operationId = ''
+    streamKeeperMessage.mockImplementation(async (_name: string, _message: string, opts: FrameSink) => {
+      operationId = opts.operationId
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state, queued_count: state === 'Queued' ? 1 : 0 },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: '답이에요' })
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_REPLY_DETAILS',
+        value: { reply: '답이에요', turn_ref: 'turn-visible', turn_outcome: 'visible_reply' },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_END' })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '질문')
+
+    expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    const reply = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+    if (!reply) throw new Error('missing reply row')
+    expect(reply).toMatchObject({ delivery: 'delivered', text: '답이에요', streamState: null })
+    expect(reply.error ?? null).toBeNull()
+    expect(reply.timestamp).toBeTruthy()
+    // The terminal frame's own record of the stream stays on the row.
+    expect(reply.streamContract).toMatchObject({ eventName: 'RUN_FINISHED', requestId: operationId })
+    expect(trackedKeeperChatOperationsForKeeper('echo').some(candidate => candidate.operationId === operationId)).toBe(false)
+  })
+
+  it.each([
+    { ranTool: false, says: 'without a tool call' },
+    { ranTool: true, says: 'after a tool call' },
+  ])('does not fail or fill a finished visible reply that has blocks and no text $says', async ({ ranTool }) => {
+    streamKeeperMessage.mockImplementation(async (_name: string, _message: string, opts: FrameSink) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      if (ranTool) {
+        opts.onEvent({
+          type: 'TOOL_CALL_START',
+          toolStreamScope: 0,
+          toolCallBlockIndex: 0,
+          toolCallName: 'Draw',
+          toolCallId: 'draw-1',
+        })
+        opts.onEvent({ type: 'TOOL_CALL_END', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'draw-1' })
+      }
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_REPLY_DETAILS',
+        value: { reply: '', turn_ref: 'turn-visible-media', turn_outcome: 'visible_reply' },
+      })
+      opts.onEvent({ type: 'TEXT_MESSAGE_END' })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '그림 그려 줘')
+
+    // The server counted the turn as done: no error, and no filler line.
+    expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    const reply = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+    if (!reply) throw new Error('missing reply row')
+    expect(reply).toMatchObject({ delivery: 'delivered', text: '', streamState: null })
+    expect(reply.error ?? null).toBeNull()
+    expect(reply.timestamp).toBeTruthy()
+    if (ranTool) expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
+
+    // History then brings the stored row with the image.
+    mergeServerHistoryEntries('echo', [{
+      ...reply,
+      id: 'stored-reply',
+      blocks: [{ t: 'image', src: 'https://example.com/drawing.png' }],
+      timestamp: '2026-11-13T00:00:00Z',
+      delivery: 'history',
+    }])
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant')).toMatchObject([{
+      id: 'stored-reply',
+      blocks: [{ t: 'image', src: 'https://example.com/drawing.png' }],
+      delivery: 'history',
+    }])
+  })
+
+  it('does not fail the stored row history put in place of the placeholder when it has no text', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      const placeholder = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+      if (!placeholder) throw new Error('missing placeholder')
+      // The stored row of a media-only reply: no text, the image as a block.
+      mergeServerHistoryEntries('echo', [{
+        ...placeholder,
+        id: 'stored-reply',
+        text: '',
+        rawText: '',
+        blocks: [{ t: 'image', src: 'https://example.com/drawing.png' }],
+        timestamp: '2026-11-13T00:00:00Z',
+        delivery: 'history',
+        streamState: null,
+      }])
+      expect(keeperThreads.value.echo?.some(entry => entry.id === placeholder.id)).toBe(false)
+      finishWithoutText(opts)
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '그림 그려 줘')
+
+    expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    expect(keeperThreads.value.echo?.filter(entry => entry.role === 'assistant')).toMatchObject([{
+      id: 'stored-reply',
+      text: '',
+      blocks: [{ t: 'image', src: 'https://example.com/drawing.png' }],
+      timestamp: '2026-11-13T00:00:00Z',
+      delivery: 'history',
+    }])
+  })
+
+  it('writes the tool-only line into a finished reply that ran a tool and did not type its turn', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      opts.onEvent({
+        type: 'TOOL_CALL_START',
+        toolStreamScope: 0,
+        toolCallBlockIndex: 0,
+        toolCallName: 'Read',
+        toolCallId: 'read-1',
+      })
+      opts.onEvent({ type: 'TOOL_CALL_END', toolStreamScope: 0, toolCallBlockIndex: 0, toolCallId: 'read-1' })
+      opts.onEvent({ type: 'RUN_FINISHED' })
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '질문')
+
+    expect(keeperActionErrors.value.echo ?? null).toBeNull()
+    expect(keeperThreads.value.echo?.find(entry => entry.role === 'assistant')).toMatchObject({
+      delivery: 'delivered',
+      text: 'Tool-only turn ended without a final reply.',
+      error: null,
+    })
+  })
+
+  it('still fails a finished stream that leaves no reply row at all', async () => {
+    streamKeeperMessage.mockImplementation(async (
+      _name: string,
+      _message: string,
+      opts: {
+        operationId: string
+        onEvent: (event: KeeperChatStreamEvent) => void
+      },
+    ) => {
+      opts.onEvent({
+        type: 'CUSTOM',
+        name: 'KEEPER_CHAT_OPERATION_ACCEPTED',
+        value: { operation_id: opts.operationId, state: 'Running', queued_count: 0 },
+      })
+      const placeholder = keeperThreads.value.echo?.find(entry => entry.role === 'assistant')
+      if (!placeholder) throw new Error('missing placeholder')
+      // Neither the placeholder nor a stored row: the tail has no reply to read.
+      removeThreadEntries('echo', [placeholder.id])
+      return { terminal: true }
+    })
+
+    await sendKeeperThreadMessage('echo', '질문')
+
+    expect(keeperThreads.value.echo?.some(entry => entry.role === 'assistant')).toBe(false)
     expect(keeperActionErrors.value.echo).toBeTruthy()
   })
 

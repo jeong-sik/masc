@@ -8400,14 +8400,6 @@ let list_on_screen (state : state) : on_screen option =
   let windowed list ~count ~cursor place =
     listed list { rl_count = count; rl_cursor = cursor; rl_place = place }
   in
-  (* The Task and Goal lists: [Masc_tui_render_work] draws them and does not
-     report them as drawn lists yet, so their height is the one the
-     projection they are drawn with gives. *)
-  let projected ~height ~count ~cursor place =
-    Some
-      { os_page = Masc_tui_list_moves.Projected height
-      ; os_rows = Some { rl_count = count; rl_cursor = cursor; rl_place = place } }
-  in
   (* A list with a scroll of its own, which follows the cursor. Its count is
      the one the keypress bound already uses, so a jump cannot land on a row
      a step cannot reach. *)
@@ -8581,8 +8573,7 @@ let list_on_screen (state : state) : on_screen option =
                  (Masc_tui_overview_tasks.work_selected_index state.tasks
                     ~selected:(Masc_tui_overview_tasks.selection state.task_focus))
              in
-             projected ~count:(List.length rows) ~cursor
-               ~height:(Masc_tui_render_work.work_tasks_page_rows state ~terminal_rows ~cols)
+             windowed Task_entries ~count:(List.length rows) ~cursor
                (fun index ->
                task_list_user_focus state
                  (Masc_tui_overview_tasks.Task_focus
@@ -8598,10 +8589,7 @@ let list_on_screen (state : state) : on_screen option =
                    (planning_visible_goals ~filter:state.planning_filter
                       ~sort:state.planning_sort snapshot.pl_goals)
            in
-           (* The Goal list's window as the last frame cut it, which
-              [Masc_tui_render_work] reports through its clamped value
-              ([Planning_list_page_rows]). *)
-           projected ~count ~cursor:state.planning_cursor ~height:state.planning_list_page_rows
+           windowed Goal_entries ~count ~cursor:state.planning_cursor
              (fun index -> state.planning_cursor <- index))
   (* Three lists that carry no row search yet (#35306). Home, End and the
      page keys reach them through here, which is what makes these arms live
@@ -32906,7 +32894,7 @@ let main
     let preset_confirmation_changed = match reader with
       | Some (Preset_detail_scroll { confirmation = Some confirmation; _ }) ->
         preset_confirmation_needs_present state confirmation
-      | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
+      | None | Some (Task_detail _ | Board_read _ | Message_scroll _
         | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _
         | Keeper_logs_scroll _ | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
         | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _
@@ -33020,7 +33008,7 @@ let main
          | Some (Harness_detail_scroll _) | Some (Fusion_detail_scroll _)
          | Some (Runtime_detail_scroll _) | Some (Runtime_params_scroll _)
          | Some (System_log_detail_scroll _) | Some (Planning_confirmation_scroll (_, _))
-         | Some (Planning_detail_scroll _) | Some (Planning_list_page_rows _) | Some (Lane_run_detail_scroll _)
+         | Some (Planning_detail_scroll _) | Some (Lane_run_detail_scroll _)
          | Some (Changes_diff_scroll _) | Some (Repository_changes_diff_scroll _)
          | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
          | Some (Link_modal_scroll _)
@@ -36307,7 +36295,7 @@ Use relative paths for resources already held in the package. -->
       in
       let preset_confirmation_wheel = match wheel_reader with
         | Some (Preset_detail_scroll _) -> true
-        | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
+        | None | Some (Task_detail _ | Board_read _ | Message_scroll _
           | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _
           | Keeper_logs_scroll _ | Acting _ | Acting_selection _ | Acting_detail_scroll _ | Memory_fact_detail_scroll _
           | Client_detail_scroll _ | Verification_detail_scroll _ | Harness_detail_scroll _

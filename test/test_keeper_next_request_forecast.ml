@@ -1386,6 +1386,10 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
   Keeper_turn_boundaries.append
     ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name boundary
   |> Result.map_error Keeper_turn_boundaries.append_error_to_string |> unwrap;
+  (* The forecast reads the turn start from the turn log; the Librarian
+     still reads the boundary line above. *)
+  Masc_test_deps.start_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+    ~trace_id ~closed_messages:(List.length messages);
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
   List.iter (fun (atom_count, input_tokens) ->
     let ends = match digest_at 0, digest_at (atom_count - 1) with

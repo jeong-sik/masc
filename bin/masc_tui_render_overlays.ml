@@ -676,12 +676,10 @@ let link_modal_card (state : state) =
   | Some url ->
       let preview = Masc_tui_link_preview.get_preview url in
       let total_links = List.length state.link_modal_links in
-      (* Which link of several, and the divider under it. *)
-      let nav_rows = if total_links > 1 then 2 else 0 in
+      (* Link index/total moved to zone 2 ([c.position]); body uses the full
+         overlay budget without subtracting deleted in-body nav rows. *)
       let content_height =
-        max 1
-          (Masc_tui_types.surface_body_rows state ~terminal_rows
-           - surface_chrome_rows - nav_rows)
+        surface_chrome_budget ~frame:Chrome_overlay state ~terminal_rows
       in
       let content_lines =
         Masc_tui_link_preview.render_modal_card

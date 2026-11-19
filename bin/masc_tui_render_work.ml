@@ -1287,8 +1287,7 @@ let planning_detail_height ~rows ~header_rows ~action_rows ~count =
 
 let planning_detail_fits ~rows ~header_rows ~action_rows ~count =
   let height = planning_detail_height ~rows ~header_rows ~action_rows ~count in
-  framed_chrome_rows + max 0 (header_rows - 1) + action_rows + height
-    + (if count > height then 1 else 0) <= rows
+  framed_chrome_rows + max 0 (header_rows - 1) + action_rows + height <= rows
 
 let planning_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1743,10 +1742,10 @@ let schedule_form_refusal_rows (state : state) ~cols =
   | Some _ | None -> []
 
 (* Rows the Schedules page spends around its list, counted once so the
-   refusal budget and the list height read the same numbers: the request
-   count, next due and its divider; the column names and their rule; the two
-   delivery rows. *)
-let schedule_summary_rows = 3
+   refusal budget and the list height read the same numbers: the summary line
+   (request count and next due combined) and its divider; the column names and
+   their rule; the two delivery rows. *)
+let schedule_summary_rows = 2
 let schedule_column_header_rows = 2
 let schedule_delivery_rows = 2
 
@@ -1795,7 +1794,7 @@ let render_schedule_list (state : state) =
           + (if Option.is_some state.schedule_cancel_error then 1 else 0) in
         let selected = Option.is_some (List.nth_opt snapshot.scs_rows state.schedule_cursor) in
         selected, warning + cancel +
-          (if snapshot.scs_rows = [] then schedule_summary_rows
+          (if snapshot.scs_rows = [] then schedule_summary_rows + 1
            else schedule_rows_around_list + 1)
     | Some _ | None -> false, 1
   in

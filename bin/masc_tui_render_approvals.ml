@@ -170,7 +170,7 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
            | Gate_string | Gate_string_bytes | Gate_json | Gate_unreadable -> false))
       lines
   in
-  let content_height = max 1 (rows - 6) in
+  let content_height = max 1 (rows - framed_chrome_rows) in
   let total = List.length lines in
   viewport := Some
     { adv_count = total; adv_height = content_height;

@@ -1814,13 +1814,13 @@ let config_heading_rows ~cols (state : state) =
         && Option.is_some state.runtime_config_view_error then 1 else 0)
 
 (* The source rows the frame shows, and the height the cursor keeps itself
-   inside. One number for both: the frame is [surface_chrome]'s, so what it
-   spends is [surface_chrome_rows] and the heading above, not a literal. *)
+   inside. One number for both: the frame is [surface_chrome]'s [Chrome_screen],
+   so what it spends matches [surface_chrome_budget] and the heading above. *)
 let config_content_height (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   max 1
-    (Masc_tui_types.surface_body_rows state ~terminal_rows
-     - surface_chrome_rows - config_heading_rows ~cols state)
+    (surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows
+     - config_heading_rows ~cols state)
 
 (* The System landing and its scroll bounds use these same physical rows.
    Identity rows already account for their indentation and clickable menu. *)
@@ -1851,7 +1851,7 @@ let runtime_config_status_rows state ~cols =
   @ runtime_config_status_body state ~cols
 
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
-  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows) in
+  let room = surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows in
   max 0 (List.length (runtime_config_status_rows state ~cols) - room)
 
 let render_runtime_config_status state =
@@ -2389,15 +2389,21 @@ let render_config (state : state) =
          file, and what it saves is that file with one provider added. *)
       match state.runtime_account_form with
       | Some form ->
-          List.iter c.push
-            (Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols)
-               ~height:content_height form);
+          let saved = Masc_tui_runtime_account_form.is_saved form in
+          let form_height =
+            if saved then max 1 (content_height - 1) else content_height
+          in
+          let form_rows =
+            Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols)
+              ~height:form_height form
+          in
+          List.iter c.push (if saved then List.take form_height form_rows else form_rows);
           (* The saved form stays open for its copy key, and the footer can
              lose it: the save notice leads that row and the fitter keeps only
              the way out, so CI run 36397938379 drew "Enter / Esc:close"
              without [y]. The card names its keys itself, as the link card
              does. *)
-          if Masc_tui_runtime_account_form.is_saved form then
+          if saved then
             c.push ("  " ^ Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language)
       | None ->
       match state.memory_recall_form with

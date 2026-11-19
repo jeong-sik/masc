@@ -19021,7 +19021,7 @@ let workspace_activity_context_lines state ~cols =
       @ wrap "Result" (if change.fc_succeeded then "succeeded" else "failed")
       @ wrap "Change" kind
 
-let workspace_activity_context_height state ~surface_rows =
+let workspace_activity_context_height state ~budget =
   let stale = match state.workspace_activity_repo with
     | None -> false
     | Some repo_id -> (match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
@@ -19029,7 +19029,7 @@ let workspace_activity_context_height state ~surface_rows =
                                                          | Masc_tui_fetched.Loading
                                                          | Masc_tui_fetched.Ready _
                                                          | Masc_tui_fetched.Failed _ -> false) in
-  max 1 (surface_rows - Masc_tui_frame.chrome_rows - (if stale then 1 else 0))
+  max 1 (budget - (if stale then 1 else 0))
 
 let apply_workspace_activity_read state request result =
   let _, _, previous = workspace_activity_selection state in

@@ -122,7 +122,7 @@ let render_workspace_activity (state : state) repo_id =
     | Some requested ->
         let count = List.length (workspace_activity_context_lines state ~cols) in
         let height = workspace_activity_context_height state
-          ~surface_rows:(surface_body_rows state ~terminal_rows) in
+          ~budget:(surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows) in
         let scroll = max 0 (min requested (max 0 (count - height))) in
         here_row ~cols state
           ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])

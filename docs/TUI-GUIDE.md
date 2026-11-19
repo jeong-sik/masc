@@ -433,10 +433,10 @@ tool calls and their returns, turn boundaries and turn done rows, chat rows
 landing. This is the surface for watching ten keepers at once without
 opening ten chats.
 
-Marks: `▶` a call
-started, `✓` a call returned, `✗` a failure, `✧` a boundary inside a turn
-(a provider call's start or end, an internal agent run's start), `■` done
-(the keeper's turn, or an internal agent run), `?` something needing
+Marks: `◐` a call
+started, `●` a call returned, `✕` a failure, `✧` a boundary inside a turn
+(a provider call's start or end, an internal agent run's start), `●` done
+(the keeper's turn, or an internal agent run), `▲` something needing
 attention. A returned
 call shows how long it took when its start is among the events held; a
 call that began before the feed opened shows none.

@@ -982,12 +982,16 @@ let speaker_mark : style -> string = function
      came from: the pane answering what was typed at it. *)
   | Local -> "\xe2\x80\xba"
   | Journal -> "\xe2\x97\x88"   (* the parallel Memory journal lane *)
-  | Error -> "\xe2\x9c\x97"
+  (* An error and a skill's state are states, so they wear status marks
+     (RFC tui-one-screen-grammar 7.2): failed, under way, settled, caution.
+     [◇ ◆ △ ✗] are not status marks, and [◆] is the operator's turn. A tool
+     row's [■] names the kind of row, not a state. *)
+  | Error -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
   | Tool -> "\xe2\x96\xa0"
-  | Skill Skill_live -> "\xe2\x97\x87"
-  | Skill Skill_settled -> "\xe2\x97\x86"
-  | Skill Skill_attention -> "\xe2\x96\xb3"
-  | Skill Skill_failure -> "\xe2\x9c\x97"
+  | Skill Skill_live -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Skill Skill_settled -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  | Skill Skill_attention -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
+  | Skill Skill_failure -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
   | Thinking _ -> "\xc2\xb7"
 
 (* Speech or work -- the one question the rail's ordinary pieces answer.

@@ -20,16 +20,21 @@ let tools_list (state : state) =
   if Option.is_some state.tools_skill_source_picker then None
   else
     match state.tools_pane with
-    | Tools_surface -> Some Tools_skills
+    | Tools_surface -> (
+        match tools_skill_profiles state with
+        | _ :: _ -> Some Tools_skills
+        | [] -> None)
     | Tools_async when state.tools_async_detail_open -> None
-    | Tools_async -> Some Tools_async_requests
+    | Tools_async -> (
+        match tools_async_targets state with
+        | _ :: _ -> Some Tools_async_requests
+        | [] -> None)
     | Tools_activations | Tools_usage | Tools_storage
     | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> None
 
 let move_tools_skill state move =
   let count = List.length (tools_skill_profiles state) in
-  if count > 0 then
-    state.tools_skill_cursor <- Masc_tui_scroll.cursor_apply ~count move state.tools_skill_cursor
+  state.tools_skill_cursor <- Masc_tui_scroll.cursor_apply ~count move state.tools_skill_cursor
 
 let move_tools_list state list move =
   match list with

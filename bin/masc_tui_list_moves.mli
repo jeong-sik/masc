@@ -26,7 +26,9 @@ val tools_list : Masc_tui_types.state -> tools_list option
 (** The list the move keys walk on the Tools surface. [None] on the panes
     that are readings -- receipts, usage, all tools, storage, the volume
     report, an open async request -- whose move keys scroll the page, and
-    while the source picker is open, which walks its own list. *)
+    while the source picker is open, which walks its own list. [None] too
+    on a list with nothing in it: a page with no Skill or no request still
+    scrolls. *)
 
 val moves :
   Masc_tui_types.state ->

@@ -431,11 +431,10 @@ let test_tools_skill_list_walks_the_selection () =
     Move.
       [ 0, Line_up, 0; 4, Line_down, 4; 1, Line_up, 0; 0, To_end, 4; 3, To_top, 0
       ; 0, Page_down 3, 3; 3, Page_down 3, 4; 4, Page_up 3, 1; 1, Page_up 3, 0 ];
-  let empty = tools_surface 0 in
-  List.iter (fun move ->
-    ignore (press_tools empty move);
-    Alcotest.(check int) "an empty Skill list keeps its cursor" 0 empty.tools_skill_cursor)
-    (every_move ~page:3)
+  (* With no Skill there is nothing to walk, and the page under the empty
+     list still has its tool table to scroll. *)
+  Alcotest.(check bool) "an empty Skill list leaves the keys to the page" true
+    (Option.is_none (Moves.moves (tools_surface 0) ~rows:no_rows ~follow:no_follow))
 
 let request id : Tui_decode.async_request_row =
   { ar_request_id = id; ar_submitted_by = "operator"; ar_keeper_name = "keeper"
@@ -485,6 +484,8 @@ let test_tools_async_list_walks_the_selection () =
   ignore (press_tools state Move.To_end);
   Alcotest.(check (option string)) "a lost selection's End is the last request" (Some "c")
     (selected_request state);
+  Alcotest.(check bool) "an empty request list leaves the keys to the page" true
+    (Option.is_none (Moves.moves (tools_async []) ~rows:no_rows ~follow:no_follow));
   (* An open request is a reading: its keys scroll it, as they did. *)
   state.tools_async_detail_open <- true;
   Alcotest.(check bool) "an open request answers no list move" true

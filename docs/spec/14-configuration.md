@@ -62,10 +62,12 @@ routes are Optional according to `Standalone_lane.obligation`.
 `librarian_memory` is the lane the Librarian asks through for one Keeper's
 Memory changes. It is a separate table from `librarian_exact`: the two ask
 different questions with different output sizes. First-run setup does not fill
-it; the operator declares its slots. Each slot's window comes from its
-binding's `max-context` (then provider, then model), and a slot whose window
-cannot be resolved leaves the lane without a value. Its asks keep no per-ask
-run record.
+it; the operator declares its slots. Like `verifier_exact`, every `slots` id
+must name a configured runtime, and an enabled table must declare
+`max_output_tokens`, or runtime.toml refuses to load. Each slot's
+window comes from its binding's `max-context` (then provider, then model, then
+the capability catalog), and a slot whose window cannot be resolved leaves the
+lane without a value. Its asks keep no per-ask run record.
 
 Workspace Curator selects models per installed Addon, using
 `[runtime.addon_exact_lanes.<installation-id>.classification]` and

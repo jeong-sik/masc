@@ -62,5 +62,15 @@ val record
   -> Keeper_turn_log_writer.event
   -> (recorded, not_recorded) result
 
+(** Appends {!Keeper_turn_log_writer.drop}'s line, the same way as
+    {!record}. The head is not read, so a head this build cannot decode does
+    not stop the line; the other stores are read for a first line. *)
+val record_drop
+  :  at:float
+  -> new_log_id:Keeper_turn_log.Log_id.t
+  -> place
+  -> after:(Keeper_turn_log.mark -> Keeper_turn_log.mark)
+  -> (recorded, not_recorded) result
+
 (** What an admission's turn carries to its end. *)
 val admitted : (recorded, not_recorded) result -> Keeper_turn_log_writer.admitted

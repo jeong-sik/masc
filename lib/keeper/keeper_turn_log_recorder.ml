@@ -73,36 +73,41 @@ type recorded =
 
 let ( let* ) = Result.bind
 
-let now place =
-  let* head =
-    Result.map_error
-      (fun error -> Head_unread error)
-      (Head.read ~session_dir:place.session_dir ~session_id:place.session_id)
-  in
+let mark_at place ~closed_messages =
   let* ends =
     Result.map_error
       (fun error -> Ends_unread error)
       (Ends.read ~session_dir:place.session_dir ~base_path:place.base_path
          ~keeper_name:place.keeper_name)
   in
-  let mark : Log.mark =
-    { trace = place.session_id
-    ; closed_messages = head.closed_messages
-    ; session = place.session_id
-    ; history_bytes = ends.history_bytes
-    ; internal_bytes = ends.internal_bytes
-    ; chat_bytes = ends.chat_bytes
-    ; external_rows = ends.external_rows
-    }
+  Ok
+    ({ trace = place.session_id
+     ; closed_messages
+     ; session = place.session_id
+     ; history_bytes = ends.history_bytes
+     ; internal_bytes = ends.internal_bytes
+     ; chat_bytes = ends.chat_bytes
+     ; external_rows = ends.external_rows
+     }
+     : Log.mark)
+;;
+
+let now place =
+  let* head =
+    Result.map_error
+      (fun error -> Head_unread error)
+      (Head.read ~session_dir:place.session_dir ~session_id:place.session_id)
   in
+  let* mark = mark_at place ~closed_messages:head.closed_messages in
   Ok (mark, head.covered)
 ;;
 
-let record ~at ~new_log_id place event =
+(* Reads the tail, plans against it, and appends at the end it read.
+   [moved_at] is the end the attempt before read and could not append at. *)
+let append_planned place plan =
   let path =
     Store.path_for_keepers_dir ~keepers_dir:place.keepers_dir ~keeper_id:place.keeper_name
   in
-  (* [moved_at] is the end the attempt before read and could not append at. *)
   let rec attempt ~moved_at =
     let* tail = Result.map_error (fun error -> Tail_unread error) (Store.read_tail path) in
     let at_end =
@@ -110,13 +115,7 @@ let record ~at ~new_log_id place event =
       | Store.Nothing_written -> 0
       | Written { rows_end; _ } -> rows_end
     in
-    let* mark, covered = now place in
-    let* lines =
-      Result.map_error
-        (fun error -> Run_unnamed error)
-        (Head.with_segments_as_needed ~session_dir:place.session_dir covered (fun covered ->
-           Writer.plan ~at ~new_log_id ~tail ~now:mark ~covered event))
-    in
+    let* lines = plan tail in
     match lines with
     | [] -> Ok Nothing_to_append
     | first :: rest ->
@@ -130,6 +129,21 @@ let record ~at ~new_log_id place event =
          Error (Not_appended error))
   in
   attempt ~moved_at:None
+;;
+
+let record ~at ~new_log_id place event =
+  append_planned place (fun tail ->
+    let* mark, covered = now place in
+    Result.map_error
+      (fun error -> Run_unnamed error)
+      (Head.with_segments_as_needed ~session_dir:place.session_dir covered (fun covered ->
+         Writer.plan ~at ~new_log_id ~tail ~now:mark ~covered event)))
+;;
+
+let record_drop ~at ~new_log_id place ~after =
+  append_planned place (fun tail ->
+    let* now = mark_at place ~closed_messages:0 in
+    Ok [ Writer.drop ~at ~new_log_id ~tail ~now ~after ])
 ;;
 
 let admitted = function

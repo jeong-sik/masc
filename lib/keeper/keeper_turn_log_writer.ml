@@ -127,3 +127,10 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
        in
        Ok (reset @ [ announced ~cause ~after closed_before ]))
 ;;
+
+let drop ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~after =
+  match tail with
+  | Nothing_written -> Log.Log_started { id = new_log_id; at; mark = after now }
+  | Written { point; open_turn = (_ : Store.open_turn option); rows_end = (_ : int); last = (_ : Log.line) }
+    -> Log.Reset { at; cause = Unannounced; before = point; after = after point; closed_before = [] }
+;;

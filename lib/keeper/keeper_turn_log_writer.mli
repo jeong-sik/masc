@@ -17,7 +17,7 @@
 
     This module judges the Agent-Core history only: the trace and the count
     of closed messages. The other stores of a mark are carried as given,
-    apart from the ones a {!Reset} says its path changes. *)
+    apart from the ones a reset says its path changes. *)
 
 (** How a turn that reached its end ended. A turn nothing closed is closed by
     the next admission or the next process start, with an outcome of its
@@ -93,3 +93,25 @@ val plan
   -> covered:Keeper_turn_log_marks.covered
   -> event
   -> (Keeper_turn_log.line list, Keeper_turn_log_marks.range_error) result
+
+(** The one line a path writes before it drops the head without reading it:
+    a history clear that removes a head this build cannot decode, or a stop
+    that deletes the session.
+
+    [before] is the last mark and [after] is [after] of it: the trace the
+    path leaves, no closed message, and the other stores the path changes.
+    [closed_before] is empty because what goes cannot be read. [now]'s
+    history is not looked at; with nothing written yet, the line is the
+    log's first, at [after now].
+
+    The line is written every time, even when the last mark already counts
+    no closed message. A turn whose [Opened] was not written can grow the
+    next head back past the last mark, and no count would show the drop
+    then. *)
+val drop
+  :  at:float
+  -> new_log_id:Keeper_turn_log.Log_id.t
+  -> tail:Keeper_turn_log_store.tail
+  -> now:Keeper_turn_log.mark
+  -> after:(Keeper_turn_log.mark -> Keeper_turn_log.mark)
+  -> Keeper_turn_log.line

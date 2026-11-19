@@ -237,6 +237,23 @@ let test_announced_reset () =
        ~now:(mark ~trace:"b" 2) cleared)
 ;;
 
+(* A path about to drop a head the log does not read: the last mark, then
+   no closed message on the trace the path leaves. *)
+let test_drop () =
+  let emptied trace (mark : Log.mark) = { mark with trace; closed_messages = 0 } in
+  let drop ~tail ~now ~after =
+    line_text (Writer.drop ~at:1.0 ~new_log_id:log_id ~tail ~now ~after)
+  in
+  check string "the log had not started: its first line at the emptied mark"
+    "started at a:0/chat 4" (drop ~tail:Nothing_written ~now:(mark ~chat_bytes:4 0) ~after:(emptied "a"));
+  check string "from the last mark, the other stores where it left them"
+    "reset unannounced a:9/chat 7 -> a:0/chat 7 []"
+    (drop ~tail:(written (mark ~chat_bytes:7 9)) ~now:(mark ~chat_bytes:30 0) ~after:(emptied "a"));
+  check string "written even when the last mark counts nothing"
+    "reset unannounced a:0/chat 0 -> b:0/chat 0 []"
+    (drop ~tail:(written ~open_turn:(open_at 40 (mark 0)) (mark 0)) ~now:(mark 0) ~after:(emptied "b"))
+;;
+
 let test_ranges () =
   let behind = covered_from ~first:5 [ turn 'c' 4 ] in
   check string "the unit starts before the head's own turns" "needs the segment before: 3 < 5"
@@ -306,6 +323,8 @@ type step =
      save and the line landed; [changed] is whether the head change followed.
      A failed change and a kill leave the same disk. A closing save or an
      append that fails changes nothing, so the model leaves them out. *)
+  | Dropped of { changed : bool }
+  (* A path drops the head without reading it, after its line landed. *)
 
 let step_text = function
   | Admit { close_ok; append_ok } -> Printf.sprintf "admit(close %b, append %b)" close_ok append_ok
@@ -321,6 +340,7 @@ let step_text = function
        | Cleared -> "clear"
        | Recovered -> "recover")
       changed
+  | Dropped { changed } -> Printf.sprintf "drop(changed %b)" changed
 ;;
 
 (* A head replaced by one that had already grown past the last mark. The
@@ -337,6 +357,7 @@ type seen =
   ; mutable resets : int
   ; mutable announced : int
   ; mutable announced_unchanged : int
+  ; mutable dropped : int
   ; mutable own_messages : int
   ; mutable unattributed_messages : int
   }
@@ -350,6 +371,7 @@ let seen =
   ; resets = 0
   ; announced = 0
   ; announced_unchanged = 0
+  ; dropped = 0
   ; own_messages = 0
   ; unattributed_messages = 0
   }
@@ -460,7 +482,13 @@ let rec drop count list =
     | _ :: rest -> drop (count - 1) rest)
 ;;
 
-let apply_line ~now state (line : Log.line) =
+(* What a drop's line leaves: the next unit names the whole head from its
+   first message, as no turn's. *)
+let named_again state =
+  List.map (fun message -> { message with owner = None }) (closed_ids state.head)
+;;
+
+let apply_line ~dropping ~now state (line : Log.line) =
   let offset = state.next_offset in
   let position =
     match Log.step state.position ~offset line with
@@ -474,9 +502,13 @@ let apply_line ~now state (line : Log.line) =
   let rows_end = offset + 1 in
   match line, state.tail with
   | Log_started { mark; _ }, (Nothing_written | Written _) ->
+    if dropping
+    then
+      expect "a drop starts the log at no closed message of the head's trace"
+        (mark = { now with trace = state.head.trace; closed_messages = 0 });
     { state with
       tail = Written { rows_end; point = mark; open_turn = None; last = line }
-    ; unnamed = []
+    ; unnamed = (if dropping then named_again state else [])
     ; point_generation = state.head.generation
     }
   | (Opened _ | Closed _ | Reset _), Nothing_written -> fail "a line before the log started"
@@ -514,6 +546,25 @@ let apply_line ~now state (line : Log.line) =
         List.map
           (fun message -> { message with owner = None })
           (drop after.closed_messages (closed_ids state.head))
+    ; point_generation = state.head.generation
+    }
+  | Reset { cause = Unannounced; before; after; closed_before; _ }, Written { point; open_turn; _ }
+    when dropping ->
+    seen.dropped <- seen.dropped + 1;
+    expect "a drop starts at the last mark" (before = point);
+    expect "it ends at no closed message of the head's trace, other stores untouched"
+      (after = { point with trace = state.head.trace; closed_messages = 0 });
+    expect "a drop names nothing" (List.is_empty closed_before);
+    { state with
+      tail =
+        Written
+          { rows_end
+          ; point = after
+          ; open_turn =
+              Option.map (fun (turn : Store.open_turn) -> { turn with reset_since = true }) open_turn
+          ; last = line
+          }
+    ; unnamed = named_again state
     ; point_generation = state.head.generation
     }
   | Reset { cause = Unannounced; before; after; closed_before; _ }, Written { point; open_turn; _ } ->
@@ -563,9 +614,10 @@ let apply_line ~now state (line : Log.line) =
 
 (* The lines landed. A head the last line did not see must be announced by a
    reset in front, when a count or a trace can show it. *)
-let append state ~now lines =
+let append ?(dropping = false) state ~now lines =
   (match state.tail, lines with
    | Nothing_written, _ | Written _, [] -> ()
+   | Written _, _ :: _ when dropping -> ()
    | Written { point; _ }, first :: _ ->
      let replaced = state.head.generation <> state.point_generation in
      let visible =
@@ -578,7 +630,7 @@ let append state ~now lines =
       | (Log_started _ | Opened _ | Closed _ | Reset { cause = Announced _; _ }), false -> ()
       | (Log_started _ | Opened _ | Closed _ | Reset { cause = Announced _; _ }), true ->
         if visible then fail "a replaced head and no reset in front" else raise Invisible));
-  let state = List.fold_left (apply_line ~now) state lines in
+  let state = List.fold_left (apply_line ~dropping ~now) state lines in
   (* Where the log says the next unit starts is where the unnamed begin. *)
   (match state.tail with
    | Written { point; _ } when state.head.generation = state.point_generation ->
@@ -675,6 +727,22 @@ let take state step =
     else (
       seen.announced_unchanged <- seen.announced_unchanged + 1;
       state)
+  | Dropped { changed } ->
+    let now = { (mark_of state) with closed_messages = 0 } in
+    let line =
+      Writer.drop ~at:(float_of_int state.clock) ~new_log_id:log_id ~tail:state.tail ~now
+        ~after:(fun mark -> { mark with trace = state.head.trace; closed_messages = 0 })
+    in
+    let state = append ~dropping:true state ~now [ line ] in
+    if changed
+    then (
+      let generation = state.head.generation + 1 in
+      { state with
+        head = { generation; trace = state.head.trace; turns = []; open_messages = 0 }
+      ; unnamed = []
+      ; point_generation = generation
+      })
+    else state
   | Recreated ->
     replace_head state ~trace:(Printf.sprintf "t%d" (state.head.generation + 1)) ~open_messages:0
   | Emptied -> replace_head state ~trace:state.head.trace ~open_messages:0
@@ -705,6 +773,7 @@ let steps ~resets state =
       List.concat_map
         (fun cause -> List.map (fun changed -> Shrink { cause; changed }) both)
         [ Log.Cleared; Log.Recovered ]
+      @ List.map (fun changed -> Dropped { changed }) both
     else []
 ;;
 
@@ -753,14 +822,15 @@ let test_every_order () =
     ; "resets", seen.resets
     ; "announced resets", seen.announced
     ; "announced resets whose change did not follow", seen.announced_unchanged
+    ; "drops", seen.dropped
     ; "messages named as a turn's own", seen.own_messages
     ; "messages named before a baseline", seen.unattributed_messages
     ];
   Printf.printf
     "orders %d, not visible %d, closed %d (missing %d, exited %d), resets %d, announced %d \
-     (unchanged %d), own %d, before %d\n%!"
+     (unchanged %d), drops %d, own %d, before %d\n%!"
     seen.orders seen.invisible seen.closed_lines seen.close_missing seen.process_exited seen.resets
-    seen.announced seen.announced_unchanged seen.own_messages seen.unattributed_messages
+    seen.announced seen.announced_unchanged seen.dropped seen.own_messages seen.unattributed_messages
 ;;
 
 let () =
@@ -773,6 +843,7 @@ let () =
         ; test_case "a replaced head" `Quick test_replaced_head
         ; test_case "a reset inside the turn" `Quick test_reset_inside_the_turn
         ; test_case "an announced reset" `Quick test_announced_reset
+        ; test_case "a drop" `Quick test_drop
         ; test_case "ranges" `Quick test_ranges
         ] )
     ; "model", [ test_case "every order to a depth" `Quick test_every_order ]

@@ -194,6 +194,13 @@ let decode_schedule_row json =
   let* sch_reaction_kind =
     optional_nested_string_field json "keeper_reaction_evidence" "reaction_kind"
   in
+  let sch_reaction_kind =
+    Option.map
+      (fun token ->
+        Masc.Keeper_reaction_ledger_wire.reaction_kind_of_string token
+        |> Result.map_error (fun (Masc.Keeper_reaction_ledger_wire.Unknown_reaction_kind raw) -> raw))
+      sch_reaction_kind
+  in
   let* sch_reaction_keeper_name =
     optional_nested_string_field json "keeper_reaction_evidence" "keeper_name"
   in

@@ -1555,6 +1555,36 @@ let schedule_reaction_word ~ko = function
   | Schedule_contract_values.Reaction_invalid_stimulus_id -> if ko then "잘못된 자극 id" else "bad stimulus id"
   | Schedule_contract_values.Reaction_unrecognized_receipt -> if ko then "모르는 기록" else "unknown receipt"
 
+(* The last reaction the woken Keeper's ledger recorded, in the words the
+   Reaction row above already uses for the same steps. *)
+let schedule_reaction_kind_word ~ko = function
+  | Masc.Keeper_reaction_ledger_wire.Turn_started -> if ko then "턴 시작" else "turn started"
+  | Masc.Keeper_reaction_ledger_wire.Turn_finished -> if ko then "턴 끝남" else "turn finished"
+  | Masc.Keeper_reaction_ledger_wire.Event_queue_ack -> if ko then "받음 확인" else "acknowledged"
+  | Masc.Keeper_reaction_ledger_wire.Event_queue_cancelled -> if ko then "취소됨" else "cancelled"
+
+(* How the woken turn ended: the word and the colour of its status mark (RFC
+   tui-one-screen-grammar §7.2). A turn that ended asking the operator for
+   input is the operator's turn; a rest and a skip are waits; a cancel is a
+   stop. *)
+type schedule_turn_outcome_reading = { outcome_word : string; outcome_tone : string }
+
+let schedule_turn_outcome_reading ~ko disposition =
+  let reading korean english tone =
+    { outcome_word = (if ko then korean else english); outcome_tone = tone } in
+  match disposition with
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Completed -> reading "완료" "completed" (Theme.ok ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Checkpointed ->
+      reading "중간 저장" "checkpointed" (Theme.ok ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Input_required ->
+      reading "입력 필요" "input required" (Theme.warn ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Cancelled ->
+      reading "취소됨" "cancelled" (Theme.recede ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Skipped ->
+      reading "건너뜀" "skipped" (Theme.recede ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Failed -> reading "실패" "failed" (Theme.bad ())
+  | Masc.Keeper_reaction_ledger.Turn_disposition.Rested -> reading "쉼" "rested" (Theme.recede ())
+
 let schedule_queue_color = function
   | Schedule_contract_values.Queue_matched_pending
   | Schedule_contract_values.Queue_terminal_projection_pending
@@ -2138,16 +2168,21 @@ let schedule_turn_rows ~ko
           row.sch_turn_started_recorded_at_iso
       ; step (t "턴 종료" "Turn finished") turn_finished_seen
           row.sch_turn_finished_recorded_at_iso
-      ; field (t "턴 결과" "Turn outcome")
-          (match row.sch_turn_finished with
-           | Some (Schedule_turn_finished disposition) ->
-               Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
-           | Some Schedule_turn_open | None -> Masc_tui_theme.Glyph.no_value)
+      ; (match row.sch_turn_finished with
+         | Some (Schedule_turn_finished disposition) ->
+             let outcome = schedule_turn_outcome_reading ~ko disposition in
+             field ~style:outcome.outcome_tone (t "턴 결과" "Turn outcome") outcome.outcome_word
+         | Some Schedule_turn_open | None ->
+             field (t "턴 결과" "Turn outcome") Masc_tui_theme.Glyph.no_value)
       ; step (t "큐 확인" "Queue ack") row.sch_queue_ack_seen row.sch_queue_ack_recorded_at_iso
       ; step ~bad_when_true:true (t "취소" "Cancelled") row.sch_wake_cancelled
           row.sch_wake_cancelled_recorded_at_iso
       ; field (t "반응 종류" "Reaction kind")
-          (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_kind)
+          (match row.sch_reaction_kind with
+           | Some (Ok kind) -> schedule_reaction_kind_word ~ko kind
+           (* A kind this build cannot read: the ledger's own token. *)
+           | Some (Error raw) -> Terminal_text.single_line raw
+           | None -> Masc_tui_theme.Glyph.no_value)
       ; field
           ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Ansi.dim)
           (t "사유" "Reason") (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_reason)

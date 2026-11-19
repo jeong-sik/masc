@@ -5,6 +5,7 @@
 open Alcotest
 module Log = Masc.Keeper_turn_log
 module Codec = Masc.Keeper_turn_log_codec
+module Stimulus_codec = Masc.Keeper_turn_log_stimulus_codec
 module Types = Masc.Keeper_memory_os_types
 
 let ok_or_fail label = function
@@ -38,8 +39,69 @@ let mark ?(trace = "trace-1") ?(session = "") closed_messages : Log.mark =
 
 let started = Log.Log_started { id = log_id; at = 100.0; mark = mark 4 }
 
-let opened ?(task = Log.No_task) () =
-  Log.Opened { at = 101.0; turn_ref; runtime = "glm-main"; task; baseline = mark 5 }
+let opened ?(task = Log.No_task) ?(stimuli = []) () =
+  Log.Opened { at = 101.0; turn_ref; runtime = "glm-main"; task; stimuli; baseline = mark 5 }
+;;
+
+let board ?(event = Log.Post_created) () : Log.board_item =
+  { post = "post-9"; author = "alice"; event }
+;;
+
+(* Every constructor, every Board event and every judge, each with the text
+   it is written as. A renamed token or field fails here. *)
+let every_stimulus : (Log.stimulus * string) list =
+  [ Board (board ()), {|{"kind":"board","post":"post-9","author":"alice","event":"post_created"}|}
+  ; ( Board (board ~event:Post_updated ())
+    , {|{"kind":"board","post":"post-9","author":"alice","event":"post_updated"}|} )
+  ; ( Board (board ~event:(Comment_added { comment = "comment-3" }) ())
+    , {|{"kind":"board","post":"post-9","author":"alice","event":"comment_added","comment":"comment-3"}|}
+    )
+  ; ( Board (board ~event:(Reaction_changed { by = "bob" }) ())
+    , {|{"kind":"board","post":"post-9","author":"alice","event":"reaction_changed","by":"bob"}|} )
+  ; ( Board (board ~event:(Vote_cast { by = "carol" }) ())
+    , {|{"kind":"board","post":"post-9","author":"alice","event":"vote_cast","by":"carol"}|} )
+  ; ( Board_routing_pending (board ())
+    , {|{"kind":"board_routing_pending","post":"post-9","author":"alice","event":"post_created"}|}
+    )
+  ; ( Board_attention { candidate = "candidate-1"; item = board () }
+    , {|{"kind":"board_attention","candidate":"candidate-1","post":"post-9","author":"alice","event":"post_created"}|}
+    )
+  ; Bootstrap, {|{"kind":"bootstrap"}|}
+  ; Tool_result { receipt = "receipt-1" }, {|{"kind":"tool_result","receipt":"receipt-1"}|}
+  ; Fusion { run = "run-1" }, {|{"kind":"fusion","run":"run-1"}|}
+  ; ( Schedule { schedule = "schedule-1"; occurrence = "occurrence-1" }
+    , {|{"kind":"schedule","schedule":"schedule-1","occurrence":"occurrence-1"}|} )
+  ; Connector { event = "attention-1" }, {|{"kind":"connector","attention":"attention-1"}|}
+  ; Hitl { approval = "approval-1" }, {|{"kind":"hitl","approval":"approval-1"}|}
+  ; Ask { ask = "ask-1" }, {|{"kind":"ask","ask":"ask-1"}|}
+  ; ( Completion_rejected
+        { task = "task-1"
+        ; verification = "verification-1"
+        ; judge = Human_operator { operator = "owner" }
+        }
+    , {|{"kind":"completion_rejected","task":"task-1","verification":"verification-1","judge":"human_operator","operator":"owner"}|}
+    )
+  ; ( Completion_approved
+        { task = "task-1"
+        ; verification = "verification-1"
+        ; judge = System_agent { run = "judge-run-1" }
+        }
+    , {|{"kind":"completion_approved","task":"task-1","verification":"verification-1","judge":"system_agent","run":"judge-run-1"}|}
+    )
+  ; ( Task_cancelled { task = "task-2"; by = "dave" }
+    , {|{"kind":"task_cancelled","task":"task-2","by":"dave"}|} )
+  ; ( Workspace_message { request = "request-1"; from = "erin" }
+    , {|{"kind":"workspace_message","request":"request-1","from":"erin"}|} )
+  ; ( Delegate { operation = "operation-1"; keeper = "frank" }
+    , {|{"kind":"delegate","operation":"operation-1","keeper":"frank"}|} )
+  ; ( Composition { request = "request-2"; tool = "compose" }
+    , {|{"kind":"composition","request":"request-2","tool":"compose"}|} )
+  ; Owned_job { job = "job-1" }, {|{"kind":"owned_job","job":"job-1"}|}
+  ]
+;;
+
+let woken : Log.stimulus list =
+  [ Bootstrap; Workspace_message { request = "request-1"; from = "erin" } ]
 ;;
 
 let own_slices : Log.slice list = [ { bundle = bundle 'c'; skip = 1; take = 3 } ]
@@ -84,6 +146,7 @@ let every_line =
         (Log.Task
            { task; goals = Some [ { goal = "goal-12"; shown = "Review: the probe is green" } ] })
       ()
+  ; opened ~stimuli:(List.map fst every_stimulus) ()
   ; reset ()
   ; reset ~cause:(Log.Announced Cleared) ()
   ; reset ~cause:(Log.Announced Recovered) ()
@@ -126,7 +189,12 @@ let golden =
              { task; goals = Some [ { goal = "goal-12"; shown = "Review: the probe is green" } ] })
         ()
     , Printf.sprintf
-        {|{"line":"opened","at":101.0,"turn_ref":"%s","runtime":"glm-main","task":{"kind":"task","task":"task-3718","goals":[{"goal":"goal-12","shown":"Review: the probe is green"}]},"baseline":%s}|}
+        {|{"line":"opened","at":101.0,"turn_ref":"%s","runtime":"glm-main","task":{"kind":"task","task":"task-3718","goals":[{"goal":"goal-12","shown":"Review: the probe is green"}]},"stimuli":[],"baseline":%s}|}
+        (Ids.Turn_ref.to_string turn_ref)
+        (golden_mark 5 "trace-1") )
+  ; ( opened ~stimuli:woken ()
+    , Printf.sprintf
+        {|{"line":"opened","at":101.0,"turn_ref":"%s","runtime":"glm-main","task":{"kind":"no_task"},"stimuli":[{"kind":"bootstrap"},{"kind":"workspace_message","request":"request-1","from":"erin"}],"baseline":%s}|}
         (Ids.Turn_ref.to_string turn_ref)
         (golden_mark 5 "trace-1") )
   ; ( closed ~outcome:Log.Process_exited 512
@@ -146,6 +214,31 @@ let test_golden () =
        check string "written" expected (text line);
        check string "read" expected (text (decoded "golden" expected)))
     golden
+;;
+
+let test_every_stimulus () =
+  List.iter
+    (fun (stimulus, expected) ->
+       check string "written" expected
+         (Yojson.Safe.to_string (Stimulus_codec.to_json stimulus));
+       match Stimulus_codec.of_json (Yojson.Safe.from_string expected) with
+       | Ok read ->
+         check string "read" expected (Yojson.Safe.to_string (Stimulus_codec.to_json read))
+       | Error error -> failf "%s: %s" expected (Types.wire_error_to_string error))
+    every_stimulus;
+  let kinds =
+    List.sort_uniq String.compare
+      (List.map
+         (fun (stimulus, (_ : string)) ->
+            match Stimulus_codec.to_json stimulus with
+            | `Assoc fields ->
+              (match List.assoc_opt "kind" fields with
+               | Some (`String kind) -> kind
+               | Some _ | None -> fail "a stimulus without a kind")
+            | _ -> fail "a stimulus that is not an object")
+         every_stimulus)
+  in
+  check int "kinds on the wire" 17 (List.length kinds)
 ;;
 
 let replace_once ~old ~by source =
@@ -221,6 +314,23 @@ let test_rejections () =
     (replace_once
        ~old:{|"goals":[{"goal":"goal-12","shown":"Review: the probe is green"}]|}
        ~by:{|"goals":"goal-12"|} task_text);
+  let woken_text = golden_of (opened ~stimuli:woken ()) in
+  expect_rejected "an Opened without its stimuli" ~path:[]
+    ~reason:(Field_set_mismatch { missing = [ "stimuli" ]; unexpected = [] })
+    (replace_once ~old:{|"stimuli":[],|} ~by:"" task_text);
+  expect_rejected "an unknown kind of stimulus"
+    ~path:[ Wire_field "stimuli"; Wire_index 0; Wire_field "kind" ]
+    ~reason:(Unknown_token "woke")
+    (replace_once ~old:{|"kind":"bootstrap"|} ~by:{|"kind":"woke"|} woken_text);
+  expect_rejected "a stimulus with another kind's fields"
+    ~path:[ Wire_field "stimuli"; Wire_index 1 ]
+    ~reason:(Field_set_mismatch { missing = []; unexpected = [ "from"; "request" ] })
+    (replace_once ~old:{|"kind":"workspace_message"|} ~by:{|"kind":"bootstrap"|} woken_text);
+  expect_rejected "a Board comment without its id"
+    ~path:[ Wire_field "stimuli"; Wire_index 0 ]
+    ~reason:(Field_set_mismatch { missing = [ "comment" ]; unexpected = [] })
+    (replace_once ~old:{|{"kind":"bootstrap"}|}
+       ~by:{|{"kind":"board","post":"p","author":"a","event":"comment_added"}|} woken_text);
   expect_rejected "a turn offset below zero" ~path:[ Wire_field "turn" ] ~reason:Negative
     (replace_once ~old:{|"turn":512|} ~by:{|"turn":-1|} closed_text);
   expect_rejected "a field given twice" ~path:[] ~reason:(Duplicate_field "at")
@@ -330,6 +440,7 @@ let () =
     [ ( "codec"
       , [ test_case "round trip of every line" `Quick test_round_trip
         ; test_case "the wire shape as text" `Quick test_golden
+        ; test_case "every stimulus as text" `Quick test_every_stimulus
         ; test_case "rejections" `Quick test_rejections
         ; test_case "log id" `Quick test_log_id
         ] )

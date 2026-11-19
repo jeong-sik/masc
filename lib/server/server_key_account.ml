@@ -162,7 +162,10 @@ let not_recorded =
 ;;
 
 let registration_refused =
-  refused R.Forbidden_403 ~code:"registration_refused" "Your account is not active, so it registers no key."
+  refused
+    R.Forbidden_403
+    ~code:"registration_refused"
+    "Your account is not active, or an action that restricts it has not finished, so it registers no key."
 ;;
 
 let unexpected =
@@ -342,7 +345,10 @@ let replacement_key_of_body body =
 ;;
 
 let replacement_refused =
-  refused R.Forbidden_403 ~code:"replacement_refused" "Your account is not active, so it replaces no key."
+  refused
+    R.Forbidden_403
+    ~code:"replacement_refused"
+    "Your account is not active, or an action that restricts it has not finished, so it replaces no key."
 ;;
 
 let replacement_not_recorded =

@@ -731,6 +731,22 @@ let test_replacement_refused =
       ~code:"invalid_request";
     refused "a body that is the key and no JSON" (replace alice ~base_path account second_key) ~status:400 ~code:"invalid_request";
     refused "an empty key" (replace alice ~base_path account (replacement_body "")) ~status:400 ~code:"not_a_key";
+    (* The body is read before the records of the account, and after the id. *)
+    refused
+      "a body that is refused, for an id no account has"
+      (replace alice ~base_path (get (Provider_account_id.of_string "no-such-account")) (body []))
+      ~status:400
+      ~code:"invalid_request";
+    refused
+      "a body that is refused, for the account of another person"
+      (replace bob ~base_path account (body []))
+      ~status:400
+      ~code:"invalid_request";
+    refused
+      "a body that is refused, for a path that is no id"
+      (Server_key_account.replace ~person:alice ~base_path ~provider_account_id:"../account" ~body:(body []))
+      ~status:404
+      ~code:"unknown_account";
     (* An account that holds a login, as a login of the person records it. *)
     let login = get (Provider_account_id.of_string "login-account") in
     (match Authz_provider_account.link zone ~user_id:alice.Login.user_id ~provider_account_id:login with

@@ -42,7 +42,7 @@ type Uses =
   | { readonly kind: 'stopped'; readonly model: string | null }
   /** The subscriptions are not read, or the Runtime is not among them. The
       server lists no Runtime of an account that was removed or that a
-      removal was left on (lib/auth_preview.ml, `provider_accounts`), so a
+      removal or a key replacement was left on (lib/auth_preview.ml, `provider_accounts`), so a
       Keeper keeps such a Runtime and the list does not have it. */
   | { readonly kind: 'unknown' }
 

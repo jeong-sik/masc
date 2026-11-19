@@ -23,6 +23,10 @@ val version : snapshot -> version
 val current_references : snapshot -> string list
 val empty : input
 val source_of_event : Keeper_event_queue_state.pending_selection -> source
+val stimulus_of_source : source -> (Keeper_event_queue.stimulus, string) result option
+(** The queue event {!source_of_event} stored in this source. [None] for a
+    source that is no queue event (a chat input); [Some (Error _)] for an
+    event source whose content no longer decodes. *)
 val source_of_chat : Keeper_chat_operation.t -> source
 val prompt_json : input -> Yojson.Safe.t
 val shows_no_working_context : input -> bool

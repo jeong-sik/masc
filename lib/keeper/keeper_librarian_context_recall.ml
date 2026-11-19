@@ -1,4 +1,5 @@
 module Context = Keeper_librarian_context
+module Readership = Keeper_librarian_context_readership
 
 let ( let* ) = Result.bind
 
@@ -57,56 +58,53 @@ let with_current ~keepers_dir ~keeper_name (snapshot : Context.snapshot) publish
       Error "working context version changed before publication"
     | Ok (Some _) -> publish ())
 
-let require_readable_board_sources ~base_path ~keeper_name (snapshot : Context.snapshot) =
-  let meta = ref None in
-  let reader_meta () =
-    match !meta with
-    | Some result -> result
-    | None ->
-      let result = Keeper_meta_store.read_effective_meta
-        (Workspace.default_config base_path) keeper_name in
-      meta := Some result;
-      result in
-  let rec check = function
-    | [] -> Ok ()
-    | (source : Context.source) :: rest ->
-      if not (String.starts_with ~prefix:"event:" source.reference) then check rest
-      else match Keeper_event_queue.stimulus_of_yojson source.content with
-        | Error _ -> Error "retained event source unavailable"
-        | Ok stimulus ->
-          (match stimulus.payload with
-           | Keeper_event_queue.Board_routing_pending _ ->
-             Error "retained Board routing is unresolved"
-           | Keeper_event_queue.Board_signal _ | Board_attention _ ->
-             (match reader_meta () with
-              | Ok (Some meta) when Keeper_board_audience.can_project_queued_stimulus ~meta stimulus -> check rest
-              | Ok None | Ok (Some _) | Error _ -> Error "retained Board source readership unavailable")
-           | Keeper_event_queue.Bootstrap | Fusion_completed _ | Schedule_due _
-           | Connector_attention _ | Hitl_resolved _ | Ask_answered _
-           | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
-           | Workspace_message _ | Delegate_completed _ | Composition_completed _
-           | Tool_result_ready _ | Owned_job_completed _ -> check rest)
-  in
-  check snapshot.sources
+(* What a committed snapshot holds for this Keeper now. The artifact and the
+   counts beside it are built from the readable pockets only, so the pockets
+   the capture withholds from the Librarian are the ones withheld here. *)
+type shown =
+  | Nothing_stored
+  | Nothing_readable
+  | Readable of Context.snapshot
+
+let shown ~base_path ~keeper_name (snapshot : Context.snapshot) =
+  match snapshot.pockets with
+  | [] -> Nothing_stored
+  | _ :: _ ->
+    let readable, _ =
+      Readership.shown (Readership.reader ~base_path ~keeper_name) snapshot in
+    (match readable.pockets with
+     | [] -> Nothing_readable
+     | _ :: _ -> Readable readable)
+
+let nothing_readable = "no stored working context pocket is readable by this Keeper now"
+
+(* Unobserved sources cannot authorize next steps. The live Keeper receives
+   admitted original inputs separately; this artifact supplies context only. *)
+let artifact_body (snapshot : Context.snapshot) =
+  let* rendered = Context.render { Context.empty with previous = Some snapshot } in
+  match rendered with
+  | Some body -> Ok body
+  | None ->
+    Prompt_registry.render_prompt_template Prompt_names.keeper_context_librarian_empty_artifact []
+    |> Result.map String.trim
+
+let pocket_source_count (snapshot : Context.snapshot) =
+  List.fold_left (fun count (pocket : Context.pocket) -> count + List.length pocket.sources)
+    0 snapshot.pockets
 
 let publish ~base_path ~keepers_dir ~keeper_name (snapshot : Context.snapshot) =
-  let* () = require_readable_board_sources ~base_path ~keeper_name snapshot in
+  let* readable = match shown ~base_path ~keeper_name snapshot with
+    | Nothing_stored -> Ok snapshot
+    | Readable readable -> Ok readable
+    | Nothing_readable -> Error nothing_readable in
   let file = path ~keepers_dir ~keeper_name in
-  (* Unobserved sources cannot authorize next steps. The live Keeper receives
-     admitted original inputs separately; this artifact supplies context only. *)
-  let input = { Context.empty with previous = Some snapshot } in
-  let* rendered = Context.render input in
-  let* body = match rendered with
-    | Some body -> Ok body
-    | None ->
-      Prompt_registry.render_prompt_template Prompt_names.keeper_context_librarian_empty_artifact []
-      |> Result.map String.trim in
+  let* body = artifact_body readable in
   try
     let artifact = Tool_blob_store.put_durable_reuse
         (Tool_blob_store.create ~base_path) ~bytes:body ~mime:"text/plain" in
     let index = { generation = snapshot.generation; revision = snapshot.revision;
-      pocket_count = List.length snapshot.pockets;
-      source_count = List.length snapshot.sources; artifact } in
+      pocket_count = List.length readable.pockets;
+      source_count = pocket_source_count readable; artifact } in
     (* Validate against the committed generation as well as revision. A late
        publisher from before recovery/deletion must not replace a new index. *)
     with_current ~keepers_dir ~keeper_name snapshot (fun () ->
@@ -160,12 +158,17 @@ let render_with ~before_retain ?(before_retire = fun () -> ())
   | Ok None -> empty ()
   | Error detail -> unavailable detail
   | Ok (Some current) ->
-    match require_readable_board_sources ~base_path ~keeper_name current with
+    match shown ~base_path ~keeper_name current with
+    | Nothing_stored -> empty ()
+    | Nothing_readable -> unavailable nothing_readable
+    | Readable readable_context ->
+    match artifact_body readable_context with
     | Error detail -> unavailable detail
-    | Ok () ->
-    match current.pockets with
-    | [] -> empty ()
-    | _ :: _ ->
+    | Ok body ->
+      (* Which pockets are readable can change while the revision stays, so
+         the revision alone does not say the index is current. It is current
+         while it points at the bytes the readable pockets render to now. *)
+      let readable_sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
       let repair () =
         (* The index is a projection, not authority. Repair it without a new
            model pass, even when pending inputs have not changed. Publication
@@ -177,7 +180,8 @@ let render_with ~before_retain ?(before_retire = fun () -> ())
           | Error detail -> Error detail)
       in
       let current_index = match read (path ~keepers_dir ~keeper_name) with
-        | Ok (Some index) when Context.version current = (index.generation, index.revision) -> Ok index
+        | Ok (Some index) when Context.version current = (index.generation, index.revision)
+                               && String.equal index.artifact.sha256 readable_sha256 -> Ok index
         | Ok None | Ok (Some _) | Error _ -> repair ()
       in
       match current_index with

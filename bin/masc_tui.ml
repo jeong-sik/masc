@@ -8887,33 +8887,16 @@ let place_row_cursor state index =
    geometry. *)
 module Cursor_move = Masc_tui_scroll.Cursor_move
 
-(* Where the selected Skill is drawn on the Available pane, as its first and
-   last line there and the lines above it that belong with it.
-
-   The pane is one document -- the selected Skill's card, the Skill list, its
-   flow and evidence, the tool table -- and only the renderer knows where in
-   it the selected row lands. It does not say, so the row is read back from
-   what it drew.
-
-   WORKAROUND: the row is the one drawn in the selection band
-   ([Theme.selection], RFC tui-one-screen-grammar section 5.1), because
-   bin/masc_tui_render_tools.ml is being rewritten in another layer. Root
-   fix: [tools_display_lines] reports the selected Skill's row, as
-   [Masc_tui_render_identity.drawn.cursor_row] does for the Identity tab,
-   and this reads that.
+(* Where the selected Skill is drawn on the Available pane, as its first line
+   there and the lines above it that belong with it. The renderer says which
+   line the Skill starts on ([cursor_row]); the group heading above it is not
+   part of that line, so the lead brings it in.
 
    The first Skill brings everything above it, so Home shows the top of the
    page. A Skill that opens its group brings the group heading, which the
    renderer draws above the first Skill of each kind. *)
-let tools_skill_landing (state : state) lines =
-  let band =
-    List.mapi (fun index (style, _) ->
-      if String.equal style Theme.selection then Some index else None) lines
-    |> List.filter_map Fun.id
-  in
-  match band with
-  | [] -> None
-  | first :: _ ->
+let tools_skill_landing (state : state) (display : Masc_tui_render_tools.display) =
+  Option.map (fun first ->
       let instruction (profile : Masc.Tui_decode_tools.effective_skill_profile) =
         match profile.esp_io with
         | Model_orchestrated -> true
@@ -8929,7 +8912,8 @@ let tools_skill_landing (state : state) lines =
             when not (Bool.equal (instruction previous) (instruction selected)) -> 1
           | Some _, Some _ | Some _, None | None, Some _ | None, None -> 0
       in
-      Some (first, List.fold_left (fun _ index -> index) first band, lead)
+      first, first, lead)
+    display.cursor_row
 
 (* Where the selected async request is drawn: the rows it adds to the list.
    The page is drawn three times -- with no request, with the requests above
@@ -8968,14 +8952,16 @@ let tools_async_landing (state : state) ~cols ~terminal_rows =
 
 (* The window follows the selection a Tools move key landed on, the way
    [row_list]'s [follow] does for a row cursor: the last line first, then the
-   first with its lead, so a row that wraps is on screen whole when it fits. *)
+   first with its lead, so a request that wraps is on screen whole when it
+   fits. A Skill is known by its first line only ([cursor_row]), so its last
+   line is that one. *)
 let follow_tools_list (state : state) list =
   let terminal_rows, cols = get_terminal_size () in
   let landing =
     match list with
     | Masc_tui_list_moves.Tools_skills ->
         tools_skill_landing state
-          (Masc_tui_render_tools.tools_display_lines ~cols ~terminal_rows state)
+          (Masc_tui_render_tools.tools_display ~cols ~terminal_rows state)
     | Tools_async_requests -> tools_async_landing state ~cols ~terminal_rows
   in
   match landing, scrolled_surface state state.view with

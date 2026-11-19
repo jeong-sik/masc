@@ -108,7 +108,9 @@ let activity_glyph activity =
   | Some mark -> Status.glyph mark
   | None -> unread_glyph
 
-let attempt_glyph = "\xe2\x9c\x97" (* ✗: an attempt failed *)
+(* A failed attempt is a failure, so it wears the failed status mark (RFC
+   tui-one-screen-grammar 7.2: one mark, one meaning). *)
+let attempt_glyph = Status.glyph Status.Failed
 
 (* A badge says in a word what else goes on beside the activity, behind the
    status mark of its kind (§7.2). A list the screen could not read wears the
@@ -211,8 +213,9 @@ let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity)
 let failing_since_word = "failing"
 let unknown_mark = "?"
 let pulse_hours = 12
-let pulse_ok_mark = "\xe2\x9c\x93" (* ✓: the turn finished without failing or resting *)
-let pulse_rested_mark = "\xe2\x8a\x98" (* ⊘ *)
+(* An hour's worst turn in the status marks (7.2): finished, rested, failed. *)
+let pulse_ok_mark = Status.glyph Status.Settled
+let pulse_rested_mark = Status.glyph Status.Waiting
 let pulse_failed_mark = attempt_glyph
 (* A quiet hour in the pulse is a small dot, not a status mark: the pulse
    counts turns, it does not state the Keeper's state. *)

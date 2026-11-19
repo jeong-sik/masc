@@ -88,8 +88,7 @@ let removal_text : Effects.removal -> string = function
 
 let archive_text place ~current =
   match Archive.read (log_path place) ~current with
-  | Error (Scan_read_failed { detail; _ }) -> [ "read failed: " ^ detail ], 0
-  | Error Scan_moved -> [ "moved while reading" ], 0
+  | Error error -> [ Masc.Private_jsonl_scan.error_to_string error ], 0
   | Ok { left; unreadable } ->
     ( List.map
         (fun (left : Archive.left) -> left.fact.claim ^ " -> " ^ removal_text left.removal)

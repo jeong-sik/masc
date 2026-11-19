@@ -29,4 +29,4 @@ type t =
 
 (** [current] is the Memory the snapshot holds now. A snapshot an operator
     adopted can hold a fact the log last saw leaving. *)
-val read : string -> current:fact list -> (t, Librarian_log_store.scan_error) result
+val read : string -> current:fact list -> (t, Private_jsonl_scan.error) result

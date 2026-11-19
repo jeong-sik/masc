@@ -135,6 +135,20 @@ let key_prefix = "made-up-key"
 (* What the log writes in place of what it masked. *)
 let masked = "[REDACTED]"
 
+let store_of root = Filename.concat (Filename.concat root "store") "external.jsonl"
+
+(* The zone of the installation, as a start of the server opens it. *)
+let opened ~root ~base_path =
+  match
+    Z.open_at_start
+      ~now_ms:(fun () -> start_ms)
+      ~log_path:(Authz_log.path_of_base_path ~base_path)
+      ~store_path:(store_of root)
+  with
+  | Ok zone -> zone
+  | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
+;;
+
 let with_zone work () =
   Eio_main.run (fun _env ->
     let root = Unix.realpath (Filename.temp_dir "server-key-account-registration-" "") in
@@ -149,37 +163,33 @@ let with_zone work () =
       (fun () ->
         let base_path = Filename.concat root "base" in
         Unix.mkdir base_path 0o700;
-        let store = Filename.concat (Filename.concat root "store") "external.jsonl" in
-        let now_ms () = start_ms in
         (match
            B.fresh_bootstrap
              { B.base_path
              ; config_dir = Some (Filename.concat root "config")
-             ; external_store = store
+             ; external_store = store_of root
              ; workspace_id = workspace
-             ; now_ms
+             ; now_ms = (fun () -> start_ms)
              }
          with
          | Ok (_ : B.completed) -> ()
          | Error error -> Alcotest.failf "bootstrap refused: %s" (B.error_to_string error));
-        match Z.open_at_start ~now_ms ~log_path:(Authz_log.path_of_base_path ~base_path) ~store_path:store with
-        | Ok zone ->
-          (* No line the server logs while a case runs holds a key or a part
-             of one (RFC a-persons-api-key-is-their-own-provider-account
-             3.3): the lines of every module are read, those of a
-             registration that failed among them. *)
-          let before = latest_ring_seq () in
-          work ~zone ~root ~base_path;
-          List.iter
-            (fun line ->
-              if String_util.contains_substring line key_prefix
-              then Alcotest.failf "a log line of the case holds a key: %d bytes" (String.length line);
-              (* A line the log masked wrote something it took for a secret:
-                 a key under a name the log masks by, among them. *)
-              if String_util.contains_substring line masked
-              then Alcotest.failf "a log line of the case holds what the log masked: %d bytes" (String.length line))
-            (lines_since before)
-        | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)))
+        let zone = opened ~root ~base_path in
+        (* No line the server logs while a case runs holds a key or a part
+           of one (RFC a-persons-api-key-is-their-own-provider-account
+           3.3): the lines of every module are read, those of a
+           registration that failed among them. *)
+        let before = latest_ring_seq () in
+        work ~zone ~root ~base_path;
+        List.iter
+          (fun line ->
+            if String_util.contains_substring line key_prefix
+            then Alcotest.failf "a log line of the case holds a key: %d bytes" (String.length line);
+            (* A line the log masked wrote something it took for a secret:
+               a key under a name the log masks by, among them. *)
+            if String_util.contains_substring line masked
+            then Alcotest.failf "a log line of the case holds what the log masked: %d bytes" (String.length line))
+          (lines_since before)))
 ;;
 
 (* The runtime.toml of the workspace, where the routes of setup read it. *)
@@ -589,6 +599,315 @@ let test_account_stays =
         (List.map (fun (id, status) -> Provider_account_id.to_string id, status) (removals alice))))
 ;;
 
+(* ---- the replacement of a key (the same RFC, 3.7) ---- *)
+
+(* Neither holds [the_key], nor the other: a file is looked for by the key
+   it holds. *)
+let second_key = key_prefix ^ "-the-second-of-alice"
+let third_key = key_prefix ^ "-the-third-of-alice"
+
+let replace (person : Login.person) ~base_path id body =
+  Server_key_account.replace
+    ~person
+    ~base_path
+    ~provider_account_id:(Provider_account_id.to_string id)
+    ~body
+;;
+
+let replacement_body key = body [ "key", `String key ]
+
+(* A key account of the person, as a registration leaves it. *)
+let registered (person : Login.person) ~base_path key =
+  let answer = register person ~base_path (key_body key) in
+  answered "the registration of the case" answer ~status:200 ~code:None;
+  account_in answer
+;;
+
+(* The generation the records give the key of the account. *)
+let generation_of (person : Login.person) id =
+  match Accounts.find (state_of person).Authz_state.provider_accounts id with
+  | Some { Accounts.owner = _; kind = Accounts.Key { integration_id = _; generation } } ->
+    Key_generation.to_int generation
+  | Some { Accounts.owner = _; kind = Accounts.Login } | None -> Alcotest.fail "no key account has this id"
+;;
+
+(* What a refused replacement leaves: the generation and the key that were
+   there, and nothing of the key that was sent. *)
+let unchanged label (person : Login.person) ~root ~runtime_root id ~sent =
+  Alcotest.(check int) (label ^ ": the generation is the one that was there") 1 (generation_of person id);
+  Alcotest.(check string)
+    (label ^ ": the key in place is the one that was there")
+    ("key:" ^ the_key)
+    (read_name (key_file_of person ~runtime_root id));
+  Alcotest.(check (list string)) (label ^ ": no file of the server holds the key sent") [] (holding ~text:sent root)
+;;
+
+let test_replaced =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let answer = replace alice ~base_path account (replacement_body second_key) in
+    answered "the key of an account of the person" answer ~status:200 ~code:None;
+    says_nothing_of "a replacement" ~key:second_key answer;
+    Alcotest.(check (option string))
+      "the answer names the account, which is the same account"
+      (Some (Provider_account_id.to_string account))
+      (text_member "provider_account_id" answer);
+    Alcotest.(check bool)
+      "the answer says the keys before are gone"
+      true
+      (match member "old_keys_removed" answer with
+       | Some (`Bool removed) -> removed
+       | Some (_ : Yojson.Safe.t) | None -> false);
+    Alcotest.(check int) "the records give the account the next generation" 2 (generation_of alice account);
+    let key_file = key_file_of alice ~runtime_root account in
+    Alcotest.(check string) "the new key reads back from the file the records say" ("key:" ^ second_key) (read_name key_file);
+    Alcotest.(check (list string)) "the new key is in that file alone" [ key_file ] (holding ~text:second_key root);
+    Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root);
+    Alcotest.(check bool)
+      "the account is one to spend"
+      true
+      (Result.is_ok (Authz_provider_account.availability (state_of alice) ~user_id:alice.Login.user_id account));
+    Alcotest.(check bool) "its home is there" true (Sys.is_directory (home_of ~runtime_root account));
+    (* The request carries no idempotency key: the same key again is a
+       second replacement. *)
+    let again = replace alice ~base_path account (replacement_body second_key) in
+    answered "the same key again" again ~status:200 ~code:None;
+    Alcotest.(check int) "the generation goes up again" 3 (generation_of alice account);
+    Alcotest.(check (list string))
+      "the key is in the file of that generation alone"
+      [ key_file_of alice ~runtime_root account ]
+      (holding ~text:second_key root))
+;;
+
+(* What the route refuses before any record, and what each refusal leaves. *)
+let test_replacement_refused =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let bob = admit zone ~name:"bob" ~hex:'b' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let refused label answer ~status ~code =
+      answered label answer ~status ~code:(Some code);
+      says_nothing_of label ~key:second_key answer;
+      unchanged label alice ~root ~runtime_root account ~sent:second_key
+    in
+    refused
+      "an id no account has"
+      (replace alice ~base_path (get (Provider_account_id.of_string "no-such-account")) (replacement_body second_key))
+      ~status:404
+      ~code:"unknown_account";
+    refused
+      "a path that is no id"
+      (Server_key_account.replace
+         ~person:alice
+         ~base_path
+         ~provider_account_id:"../account"
+         ~body:(replacement_body second_key))
+      ~status:404
+      ~code:"unknown_account";
+    refused
+      "the account of another person"
+      (replace bob ~base_path account (replacement_body second_key))
+      ~status:404
+      ~code:"unknown_account";
+    refused "a body with no member" (replace alice ~base_path account (body [])) ~status:400 ~code:"invalid_request";
+    refused
+      "a body with a member more"
+      (replace alice ~base_path account (key_body second_key))
+      ~status:400
+      ~code:"invalid_request";
+    refused
+      "a key that is no string"
+      (replace alice ~base_path account (body [ "key", `Int 1 ]))
+      ~status:400
+      ~code:"invalid_request";
+    refused "a body that is the key and no JSON" (replace alice ~base_path account second_key) ~status:400 ~code:"invalid_request";
+    refused "an empty key" (replace alice ~base_path account (replacement_body "")) ~status:400 ~code:"not_a_key";
+    (* An account that holds a login, as a login of the person records it. *)
+    let login = get (Provider_account_id.of_string "login-account") in
+    (match Authz_provider_account.link zone ~user_id:alice.Login.user_id ~provider_account_id:login with
+     | Ok () -> ()
+     | Error error -> Alcotest.failf "the login account was not recorded: %s" (Authz_provider_account.error_to_string error));
+    refused
+      "an account that holds a login"
+      (replace alice ~base_path login (replacement_body second_key))
+      ~status:400
+      ~code:"not_a_key_account";
+    (* The owner is asked about before the kind: what another person's
+       account holds is not told. *)
+    refused
+      "the login account of another person"
+      (replace bob ~base_path login (replacement_body second_key))
+      ~status:404
+      ~code:"unknown_account";
+    (* A call of the account runs: a turn, a verification, or its removal. *)
+    (match
+       Login.one_call_of account ~busy:None (fun (_ : Login.in_call) ->
+         Ok (replace alice ~base_path account (replacement_body second_key)))
+     with
+     | Ok answer -> refused "while a call of the account runs" answer ~status:409 ~code:"account_call_running"
+     | Error (_ : unit option) -> Alcotest.fail "the call of the account was not taken");
+    (* Whether a call of another person's account runs is not told. *)
+    (match
+       Login.one_call_of account ~busy:None (fun (_ : Login.in_call) ->
+         Ok (replace bob ~base_path account (replacement_body second_key)))
+     with
+     | Ok answer ->
+       refused
+         "the account of another person, while a call of it runs"
+         answer
+         ~status:404
+         ~code:"unknown_account"
+     | Error (_ : unit option) -> Alcotest.fail "the call of the account was not taken");
+    commit
+      zone
+      ~author:(Authz_records.Author.Authenticated (Principal.Human bob.Login.user_id))
+      ~kind:Authz_record.Kind.Principal
+      (get (Authz_principal_event.to_body (Authz_principal_event.Disabled { user_id = alice.Login.user_id })));
+    refused
+      "a person who was disabled"
+      (replace alice ~base_path account (replacement_body second_key))
+      ~status:403
+      ~code:"replacement_refused")
+;;
+
+(* A removal that stopped on the account: its key is not replaced, and the
+   account is removed. The modes that keep a folder closed do not keep the
+   superuser out, so this case and the next say nothing when the superuser
+   runs them. *)
+let test_replacement_after_removal =
+  with_zone (fun ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let remove () =
+        Server_key_account.remove ~person:alice ~base_path ~provider_account_id:(Provider_account_id.to_string account)
+      in
+      let keys = Filename.dirname (key_file_of alice ~runtime_root account) in
+      Unix.chmod keys 0o500;
+      answered "a removal whose key does not go" (remove ()) ~status:503 ~code:(Some "key_not_removed");
+      Unix.chmod keys 0o700;
+      let answer = replace alice ~base_path account (replacement_body second_key) in
+      answered "an account a removal stopped on" answer ~status:409 ~code:(Some "removal_left");
+      unchanged "an account a removal stopped on" alice ~root ~runtime_root account ~sent:second_key;
+      answered "its removal, asked again" (remove ()) ~status:200 ~code:None;
+      answered
+        "an account that was removed"
+        (replace alice ~base_path account (replacement_body second_key))
+        ~status:404
+        ~code:(Some "unknown_account");
+      Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root)))
+;;
+
+(* The record goes in and the key file does not: the account has no key, and
+   the key before is not read again. The next replacement puts a key in
+   place and takes the files before it away. *)
+let test_replacement_not_stored =
+  with_zone (fun ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let first_file = key_file_of alice ~runtime_root account in
+      let keys = Filename.dirname first_file in
+      Unix.chmod keys 0o500;
+      let answer = replace alice ~base_path account (replacement_body second_key) in
+      answered "under a folder of keys that is not written" answer ~status:503 ~code:(Some "key_not_stored");
+      says_nothing_of "a key that was not stored" ~key:second_key answer;
+      Unix.chmod keys 0o700;
+      Alcotest.(check int) "the record went in" 2 (generation_of alice account);
+      Alcotest.(check string)
+        "the file the records say holds no key"
+        "key_missing"
+        (read_name (key_file_of alice ~runtime_root account));
+      Alcotest.(check (list string)) "no file of the server holds the key sent" [] (holding ~text:second_key root);
+      Alcotest.(check (list string)) "the key before is on disk, where nothing reads it" [ first_file ] (holding ~text:the_key root);
+      (* A file of the folder that does not go: the new key is in place all
+         the same, and the answer says a file stayed. *)
+      let stuck = Filename.concat keys "0-stuck" in
+      folder stuck 0o700;
+      Out_channel.with_open_bin (Filename.concat stuck "note") (fun out -> output_string out "a note");
+      Unix.chmod stuck 0o500;
+      let next = replace alice ~base_path account (replacement_body third_key) in
+      answered "the next replacement" next ~status:200 ~code:None;
+      Alcotest.(check bool)
+        "the answer says a file of the folder stayed"
+        true
+        (match member "old_keys_removed" next with
+         | Some (`Bool removed) -> not removed
+         | Some (_ : Yojson.Safe.t) | None -> false);
+      Alcotest.(check int) "it took the generation after the one that has no file" 3 (generation_of alice account);
+      Alcotest.(check string)
+        "its key reads back from the file the records say"
+        ("key:" ^ third_key)
+        (read_name (key_file_of alice ~runtime_root account));
+      Alcotest.(check (list string)) "the key of the first generation is gone" [] (holding ~text:the_key root);
+      Unix.chmod stuck 0o700))
+;;
+
+(* What the list of the accounts of the person says is on the account. *)
+let blocked_of (person : Login.person) id =
+  List.find_map
+    (fun ({ provider_account_id; kind = _; blocked } : Authz_provider_account.shown) ->
+      if Provider_account_id.equal provider_account_id id then Some blocked else None)
+    (Authz_provider_account.shown (state_of person) person.Login.user_id)
+;;
+
+let spent (person : Login.person) id =
+  Result.is_ok (Authz_provider_account.availability (state_of person) ~user_id:person.Login.user_id id)
+;;
+
+(* The log takes the intent of a replacement and not its record. At the next
+   start of the server the intent is one that was given up: it blocks the
+   account, and the same request closes it (the same RFC, 3.7). The
+   superuser writes a file whatever its mode is, so the case says nothing
+   when the superuser runs it. *)
+let test_replacement_given_up =
+  with_zone (fun ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let log_path = Authz_log.path_of_base_path ~base_path in
+      Unix.chmod log_path 0o400;
+      let answer = replace alice ~base_path account (replacement_body second_key) in
+      Unix.chmod log_path 0o600;
+      answered "under a log that takes no record" answer ~status:503 ~code:(Some "replacement_not_recorded");
+      says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
+      (* The server starts again. *)
+      let alice = { alice with Login.zone = opened ~root ~base_path } in
+      unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
+      (match blocked_of alice account with
+       | Some (Some Authz_provider_account.Replacement_start_given_up) -> ()
+       | Some (Some (Authz_provider_account.Removal (_ : Authz_provider_account.removal))) | Some None | None ->
+         Alcotest.fail "the list does not say the start of the replacement was given up");
+      Alcotest.(check bool) "no turn is let onto the account" false (spent alice account);
+      let again = replace alice ~base_path account (replacement_body third_key) in
+      answered "the replacement, asked again" again ~status:200 ~code:None;
+      Alcotest.(check int) "it took the next generation" 2 (generation_of alice account);
+      (match blocked_of alice account with
+       | Some None -> ()
+       | Some (Some (Authz_provider_account.Replacement_start_given_up | Authz_provider_account.Removal (_ : Authz_provider_account.removal)))
+       | None -> Alcotest.fail "the request did not close what was given up");
+      Alcotest.(check bool) "the account is one to spend" true (spent alice account);
+      Alcotest.(check string)
+        "its key reads back from the file the records say"
+        ("key:" ^ third_key)
+        (read_name (key_file_of alice ~runtime_root account));
+      Alcotest.(check (list string)) "no file of the server holds the key before" [] (holding ~text:the_key root)))
+;;
+
 let () =
   Alcotest.run
     "server_key_account_registration"
@@ -598,6 +917,13 @@ let () =
         ; Alcotest.test_case "a person the zone turns down" `Quick test_not_active
         ; Alcotest.test_case "files that are not made" `Quick test_files_not_made
         ; Alcotest.test_case "an account whose removal does not go through" `Quick test_account_stays
+        ] )
+    ; ( "replace"
+      , [ Alcotest.test_case "the record, the new key, and the keys before gone" `Quick test_replaced
+        ; Alcotest.test_case "a refused request changes nothing" `Quick test_replacement_refused
+        ; Alcotest.test_case "an account a removal stopped on" `Quick test_replacement_after_removal
+        ; Alcotest.test_case "a key that is not stored, and the next one" `Quick test_replacement_not_stored
+        ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up
         ] )
     ]
 ;;

@@ -1,6 +1,7 @@
 (* HIGH-RISK-UNREVIEWED: the routes of this module put a person's API key on
-   the disk of the server and take it off. Read it against RFC
-   a-persons-api-key-is-their-own-provider-account 3.3 and 3.6. *)
+   the disk of the server, put another in its place and take it off. Read it
+   against RFC a-persons-api-key-is-their-own-provider-account 3.3, 3.6 and
+   3.7. *)
 
 (** The routes of a person's key accounts (RFC
     a-persons-api-key-is-their-own-provider-account). The caller passed
@@ -70,6 +71,52 @@ val remove
 val register
   :  person:Server_setup_account_login.person
   -> base_path:string
+  -> body:string
+  -> Login_routes.answer
+
+(** [PUT /api/v1/setup/accounts/key/<provider_account_id>] with
+    [{"key":...}]: puts the key in place of the one the key account of the
+    person holds ({!Server_key_account_replacement.replace}, RFC
+    a-persons-api-key-is-their-own-provider-account 3.7). The account, its
+    Runtimes and the Keepers assigned to them stay. No client is called, so
+    the answer does not say whether the vendor takes the key: a verification
+    of the account does. The request carries no idempotency key: a second
+    request with the same key writes a second record, and the key in place
+    is the same.
+
+    [body] holds the key. Nothing of it is in an answer or in the log.
+
+    - 200 [{"provider_account_id":...,"old_keys_removed":...}]: the new key
+      is in place and is the one read. [old_keys_removed] is [false] when a
+      file of the folder of the keys stayed, a key of a generation before
+      among them: nothing reads it, and the start of the server, the next
+      replacement and a removal of the account take it away.
+    - 404 [unknown_account]: no account of the person has this id, or its
+      removal began or went through. An account of another person answers
+      the same.
+    - 400 [not_a_key_account]: the account holds a login.
+    - 400 [invalid_request]: the body is not the one member [key], a string.
+    - 400 [not_a_key]: the key is empty, holds a control character, or is a
+      JSON document.
+    - 409 [account_call_running]: a call of the account runs.
+    - 409 [removal_left]: a removal of the account did not go through. Its
+      key is not replaced; the person removes the account ({!remove}).
+    - 403 [replacement_refused]: the person is not active, or a reduction of
+      theirs that was started is not ended.
+    - 500 [internal_error]: the log refused the record for a reason no
+      request of a person leads to.
+    - 503 [replacement_not_recorded]: the record was not written, and the
+      key of the account was not changed. The person sends the key again.
+    - 503 [key_not_stored]: the record was written and the new key was not
+      put in place. The account has no key until the person sends one
+      again: the key before is not read.
+
+    The body is read before the records of the account, so a body that is
+    refused answers 400 whatever account the id names. *)
+val replace
+  :  person:Server_setup_account_login.person
+  -> base_path:string
+  -> provider_account_id:string
   -> body:string
   -> Login_routes.answer
 

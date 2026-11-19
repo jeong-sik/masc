@@ -35,6 +35,16 @@ let make ~runtime_root ~account_id ~generation key =
     |> Result.map_error (fun error -> Key_not_written error)
 ;;
 
+let make_error_detail = function
+  | Home_not_made detail -> "the home was not made: " ^ detail
+  | Key_not_written (Runtime_api_key_file.Root_unavailable detail) ->
+    "no key file is spelled under the runtime root: " ^ detail
+  | Key_not_written (Runtime_api_key_file.Folder_not_private path) ->
+    "a folder of the keys is no private folder of this user: " ^ path
+  | Key_not_written Runtime_api_key_file.Generation_taken -> "a file of the generation was there"
+  | Key_not_written (Runtime_api_key_file.Not_written detail) -> "the key file was not written: " ^ detail
+;;
+
 type remove_error =
   | Key_not_removed of string
   | Home_not_removed of string

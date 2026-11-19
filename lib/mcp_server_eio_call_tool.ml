@@ -973,7 +973,8 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         let fields = match protocol, result.structured_content with
           | Mcp_transport_protocol.Legacy_protocol, Some `Null ->
               List.remove_assoc "structuredContent" fields
-          | _ -> fields in
+          | (Mcp_transport_protocol.Legacy_protocol | Mcp_transport_protocol.Stateless_protocol _), _ ->
+              fields in
         let worker_meta = match result._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
         ("_meta", `Assoc (call_meta @ List.filter (fun (key, _) -> not (List.mem_assoc key call_meta)
           && not (String.equal key "io.modelcontextprotocol/serverInfo")) worker_meta))

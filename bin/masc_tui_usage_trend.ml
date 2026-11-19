@@ -34,6 +34,9 @@ let reported_zero = function
   | Masc.Tui_decode_usage.Utilization_fraction value -> value = 0.0
   | Utilization_percent value -> value = 0
   | Utilization_usd { used; _ } -> used = 0.0
+  | Utilization_credit_balance { total = Some total; remaining; _ } -> total = remaining
+  | Utilization_credit_balance { total = None; _ } -> false
+  | Utilization_credit_unlimited | Utilization_credit_retracted -> false
 
 let mark value share =
   if share < 0.0 then "↓" else if share > 1.0 then "↑" else

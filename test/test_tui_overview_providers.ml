@@ -420,7 +420,10 @@ let test_history_preserves_reported_days_and_units () =
             | Masc.Tui_decode_usage.Utilization_fraction value ->
                 check (float 0.0001) "reported fraction" 0.4 value
             | Masc.Tui_decode_usage.Utilization_percent _
-            | Masc.Tui_decode_usage.Utilization_usd _ -> fail "unit changed")
+            | Masc.Tui_decode_usage.Utilization_usd _
+            | Masc.Tui_decode_usage.Utilization_credit_balance _
+            | Masc.Tui_decode_usage.Utilization_credit_unlimited
+            | Masc.Tui_decode_usage.Utilization_credit_retracted -> fail "unit changed")
        | _ -> fail "expected one reported point")
 
 (* The trend is built once from the answer. A day without a report is the
@@ -613,6 +616,45 @@ let test_usd_rows_do_not_invent_a_percentage () =
     [44; 80; 132];
   check (option (float 0.0001)) "an uncapped amount has no fabricated percentage" None
     (Providers.share_of_full (Masc.Tui_decode_usage.Utilization_usd { used = 12.3456; limit = None }))
+
+let test_credit_balance_rows_put_remaining_first () =
+  let json = Yojson.Safe.from_string
+    {|{"provider_usage_windows_since":1,"provider_usage_windows":[
+      {"scope":"credit","scope_id":"credit","providers":[{"id":"provider","display_name":"Provider"}],
+       "state":"reported","windows":[
+        {"limit_id":null,"window":{"kind":"provider_label","label":"account credit balance"},"role":"counts_other_use",
+         "utilization":{"unit":"credit_balance","currency":"USD","total":100.5,"remaining":74.75},"resets_at":null,"observed_at":2},
+        {"limit_id":null,"window":{"kind":"provider_label","label":"purchased credit balance"},"role":"counts_other_use",
+         "utilization":{"unit":"credit_balance","currency":"CNY","total":null,"remaining":25},"resets_at":null,"observed_at":2},
+        {"limit_id":null,"window":{"kind":"provider_label","label":"booster credit balance"},"role":"counts_other_use",
+         "utilization":{"unit":"credit_balance","currency":"CNY","total":175,"remaining":0},"resets_at":null,"observed_at":2},
+        {"limit_id":"codex","window":{"kind":"provider_label","label":"credit balance"},"role":"counts_other_use",
+         "utilization":{"unit":"credit_unlimited"},"resets_at":null,"observed_at":2}]}]}|}
+  in
+  let reading = match Masc.Tui_decode_usage.decode_provider_usage_windows json with
+    | Ok reading -> reading | Error detail -> fail detail in
+  List.iter (fun width ->
+    let section = match Providers.section ~rows:24 ~providers:(Types.Providers_read reading)
+        ~runtimes:Types.Quota_unread ~account_emails:Types.Account_emails_unread ~now ~width ~show_limit_exhausted:true with
+      | Some section -> section | None -> fail "Credit accounts disappeared" in
+    let lines = List.map plain section.lines in
+    let text = String.concat " " lines in
+    List.iter (fun value -> check bool ("retains " ^ value) true (contains ~affix:value text))
+      [ "Credit USD 74.75 left"; "used USD 25.75/USD 100.50"
+      ; "Credit CNY 25.00 left"; "Credit CNY 0.00 left"; "Credit unlimited" ];
+    check int "only Credit with a positive stated total has a meter" 2
+      (List.length (List.filter (contains ~affix:meter_open) lines));
+    List.iter (fun line -> check bool "Credit rows fit the terminal" true
+      (Masc_tui_message_layout.display_width line <= width)) lines)
+    [44; 80; 132];
+  check (option (float 0.0001)) "an uncapped Credit balance has no fabricated percentage" None
+    (Providers.share_of_full
+       (Masc.Tui_decode_usage.Utilization_credit_balance
+          { currency = "CNY"; total = None; remaining = 25.0 }));
+  check (option (float 0.0001)) "a zero Credit total has no percentage either" None
+    (Providers.share_of_full
+       (Masc.Tui_decode_usage.Utilization_credit_balance
+          { currency = "USD"; total = Some 0.0; remaining = 0.0 }))
 
 (* ---- plan: sections and order, asserted on typed data ------------------ *)
 
@@ -1036,6 +1078,7 @@ let () =
             test_trend_is_built_from_the_answer
         ; test_case "scope id is the server's" `Quick test_scope_id_is_the_servers
         ; test_case "USD rows preserve amounts without a fabricated meter" `Quick test_usd_rows_do_not_invent_a_percentage
+        ; test_case "Credit rows put remaining first" `Quick test_credit_balance_rows_put_remaining_first
         ; test_case "a silent account draws only its exhaustion" `Quick
             test_silent_account_draws_only_its_exhaustion
         ; test_case "a window that gates nothing is not an alarm" `Quick

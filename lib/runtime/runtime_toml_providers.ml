@@ -267,7 +267,9 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
 
 let usage_read_key = "usage-read"
 let usage_read_refresh_key = "refresh-s"
-let usage_read_keys = [ "shape"; "url"; usage_read_refresh_key ]
+let usage_read_credit_key = "credit"
+let usage_read_credit_keys = [ "url" ]
+let usage_read_keys = [ "shape"; "url"; usage_read_refresh_key; usage_read_credit_key ]
 let usage_read_url_scheme = "https"
 
 let usage_read_shape_of_string = function
@@ -346,6 +348,43 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
             (Printf.sprintf "url must be an absolute https:// URL, got %S" url)))
 ;;
 
+let parse_credit_url ~path ~transport ~shape tbl =
+  let path = path ^ "." ^ usage_read_credit_key in
+  match Otoml.find_opt tbl Fun.id [ usage_read_credit_key ] with
+  | None -> Ok None
+  | Some ((Otoml.TomlTable entries | Otoml.TomlInlineTable entries) as credit_tbl) ->
+    let shape_errors =
+      match shape with
+      | Runtime_schema.Openrouter_key -> []
+      | Runtime_schema.Zai_quota_limit | Runtime_schema.Kimi_coding_usages
+      | Runtime_schema.Ollama_balance ->
+        error path "credit is valid only for shape \"openrouter-key\""
+    in
+    let unknown_key_errors =
+      List.concat_map
+        (fun (key, _) ->
+          if List.mem key usage_read_credit_keys
+          then []
+          else
+            error
+              (path ^ "." ^ key)
+              (Printf.sprintf
+                 "unknown credit key %S; expected %s"
+                 key
+                 (String.concat ", " usage_read_credit_keys)))
+        entries
+    in
+    (match shape_errors @ unknown_key_errors, usage_read_url_field ~path ~transport credit_tbl with
+     | [], Ok url -> Ok (Some url)
+     | errors, Ok _ -> Error errors
+     | errors, Error url_errors -> Error (errors @ url_errors))
+  | Some
+      ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
+      | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+      | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _ ) ->
+    Error (error path "credit must be a TOML table")
+;;
+
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
    official-client runtime (Codex, Claude Code, Antigravity, Muse Code, Vibe) logs
@@ -413,23 +452,33 @@ let parse_usage_read
       strict_float_find path usage_tbl usage_read_refresh_key
       |> positive_finite_float_opt_field ~path ~key:usage_read_refresh_key
     in
+    let shape_result = usage_read_shape_field ~path usage_tbl in
+    let credit_result =
+      match shape_result with
+      | Ok shape -> parse_credit_url ~path ~transport ~shape usage_tbl
+      | Error _ -> Ok None
+    in
     (match
        ( unknown_key_errors @ execution_errors @ credential_errors
-       , usage_read_shape_field ~path usage_tbl
+       , shape_result
        , usage_read_url_field ~path ~transport usage_tbl
-       , refresh_result )
+       , refresh_result
+       , credit_result )
      with
-     | [], Ok shape, Ok url, Ok refresh_s ->
-       Ok (Some { Runtime_schema.shape; url; refresh_s })
+     | [], Ok shape, Ok url, Ok refresh_s, Ok credit_url ->
+       Ok (Some { Runtime_schema.shape; url; refresh_s; credit_url })
      | ( ([] | _ :: _) as errors
        , ((Ok _ | Error _) as shape)
        , ((Ok _ | Error _) as url)
-       , ((Ok _ | Error _) as refresh) ) ->
+       , ((Ok _ | Error _) as refresh)
+       , ((Ok _ | Error _) as credit) ) ->
        let field_errors = function
          | Ok _ -> []
          | Error errors -> errors
        in
-       Error (errors @ field_errors shape @ field_errors url @ field_errors refresh))
+       Error
+         (errors @ field_errors shape @ field_errors url @ field_errors refresh
+          @ field_errors credit))
   | Some
       ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _
       | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _

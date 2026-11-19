@@ -118,6 +118,9 @@ type usage_read =
   ; refresh_s : float option
     (** [refresh-s] — seconds from the end of one read to the next, after the
         read at server start. [None] reads at server start only. *)
+  ; credit_url : string option
+    (** [usage-read.credit.url] — OpenRouter's optional auxiliary account
+        Credit endpoint. It uses the same credential and refresh period. *)
   }
 [@@deriving show, eq]
 

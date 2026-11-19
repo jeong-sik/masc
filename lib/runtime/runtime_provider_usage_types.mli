@@ -10,12 +10,16 @@ type utilization =
   | Fraction of float
   | Percent of int
   | Usd of { used : float; limit : float option }
+  | Credit_balance of { currency : string; total : float option; remaining : float }
+  | Credit_unlimited
+  | Credit_retracted
 
 type source =
   | Claude_code_rate_limit_event
   | Codex_account_rate_limits_updated
   | Codex_account_rate_limits_read
   | Openrouter_key_read
+  | Openrouter_credits_read
   | Zai_quota_limit_read
   | Kimi_coding_usages_read
   | Ollama_balance_read

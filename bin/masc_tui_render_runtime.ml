@@ -1236,7 +1236,11 @@ let provider_history_lines ~cols ~rows (state : state) =
             | Utilization_usd { used; limit = Some limit } ->
                 Printf.sprintf "$%s / $%s" (float_text used) (float_text limit)
             | Utilization_usd { used; limit = None } ->
-                Printf.sprintf "$%s (uncapped)" (float_text used) in
+                Printf.sprintf "$%s (uncapped)" (float_text used)
+            | Utilization_credit_balance { currency; remaining; _ } ->
+                Printf.sprintf "Credit %s %.2f left" currency remaining
+            | Utilization_credit_unlimited -> "Credit unlimited"
+            | Utilization_credit_retracted -> "Credit retracted" in
       let chart (row : Masc_tui_usage_trend.row) =
         let account = List.find_opt (fun account ->
           String.equal (Overview_providers.scope_id account) row.scope_id) scopes in

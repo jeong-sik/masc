@@ -191,6 +191,37 @@ let cases =
       (with_credentials
          "[providers.p.usage-read]\nshape = \"ollama-balance\"\nurl = \"https://example.invalid/usage\"\nmethod = \"GET\"")
       "providers.p.usage-read.method: unknown usage-read key \"method\""
+  ; provider_case
+      "providers.p.usage-read.credit on another shape"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"zai-quota-limit\"\nurl = \"https://example.invalid/usage\"\n\
+          [providers.p.usage-read.credit]\nurl = \"https://example.invalid/credits\"")
+      "providers.p.usage-read.credit: credit is valid only for shape \"openrouter-key\""
+  ; provider_case
+      "providers.p.usage-read.credit wrong type"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"openrouter-key\"\nurl = \"https://example.invalid/key\"\n\
+          credit = true")
+      "providers.p.usage-read.credit: credit must be a TOML table"
+  ; provider_case
+      "providers.p.usage-read.credit unknown key"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"openrouter-key\"\nurl = \"https://example.invalid/key\"\n\
+          [providers.p.usage-read.credit]\nshape = \"openrouter-credits\"\n\
+          url = \"https://example.invalid/credits\"")
+      "providers.p.usage-read.credit.shape: unknown credit key \"shape\"; expected url"
+  ; provider_case
+      "providers.p.usage-read.credit.url http"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"openrouter-key\"\nurl = \"https://example.invalid/key\"\n\
+          [providers.p.usage-read.credit]\nurl = \"http://example.invalid/credits\"")
+      "providers.p.usage-read.credit.url: url must be an absolute https:// URL"
+  ; provider_case
+      "providers.p.usage-read.credit.url on another host"
+      (with_credentials
+         "[providers.p.usage-read]\nshape = \"openrouter-key\"\nurl = \"https://example.invalid/key\"\n\
+          [providers.p.usage-read.credit]\nurl = \"https://credits.example.test/credits\"")
+      "providers.p.usage-read.credit.url: url host \"credits.example.test\" must be the provider endpoint host \"example.invalid\""
   ; model_case
       "models.m.api-name = 1"
       "api-name = 1"
@@ -293,6 +324,7 @@ let test_usage_read_parses_to_the_shape () =
             { Runtime_schema.shape = Zai_quota_limit
             ; url = "https://example.invalid/api/monitor/usage/quota/limit"
             ; refresh_s = None
+            ; credit_url = None
             }))
 ;;
 
@@ -318,6 +350,32 @@ let test_usage_read_carries_its_refresh_period () =
       (Option.bind provider.usage_read (fun (read : Runtime_schema.usage_read) -> read.refresh_s))
 ;;
 
+let test_usage_read_carries_credit_url () =
+  let toml =
+    config
+      ~provider_lines:
+        (well_typed_provider ^ "\n"
+         ^ with_credentials
+             "[providers.p.usage-read]\nshape = \"openrouter-key\"\n\
+              url = \"https://example.invalid/api/v1/key\"\nrefresh-s = 600.0\n\
+              [providers.p.usage-read.credit]\nurl = \"https://example.invalid/api/v1/credits\"")
+      ~model_lines:""
+  in
+  match Runtime_toml.parse_string toml with
+  | Error errors ->
+    failf
+      "expected the config to load: %s"
+      (String.concat "; " (List.map (fun (e : Runtime_toml.parse_error) -> e.message) errors))
+  | Ok config ->
+    let provider = List.find (fun (p : Runtime_schema.provider) -> p.id = "p") config.providers in
+    match provider.usage_read with
+    | None -> fail "usage-read was not parsed"
+    | Some read ->
+      check (option string) "the auxiliary Credit URL" (Some "https://example.invalid/api/v1/credits")
+        read.credit_url;
+      check (option (float 0.0)) "the shared refresh period" (Some 600.0) read.refresh_s
+;;
+
 let () =
   run
     "runtime_toml_wrong_typed_keys"
@@ -327,6 +385,8 @@ let () =
             test_usage_read_parses_to_the_shape
         ; test_case "a declared usage-read carries its refresh period" `Quick
             test_usage_read_carries_its_refresh_period
+        ; test_case "a declared OpenRouter credit URL is carried" `Quick
+            test_usage_read_carries_credit_url
         ] )
     ]
 ;;

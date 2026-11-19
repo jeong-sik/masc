@@ -137,6 +137,7 @@ type usage_read =
   { shape : usage_read_shape
   ; url : string
   ; refresh_s : float option
+  ; credit_url : string option
   }
 [@@deriving show, eq]
 

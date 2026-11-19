@@ -160,6 +160,12 @@ let share_of_full = function
       Some (float_of_int value /. float_of_int percent_of_full)
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } -> Some (used /. limit)
   | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> None
+  | Masc.Tui_decode_usage.Utilization_credit_balance { total = Some total; remaining; _ }
+    when Float.compare total 0.0 > 0 ->
+      Some ((total -. remaining) /. total)
+  | Masc.Tui_decode_usage.Utilization_credit_balance _
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited -> None
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> None
 
 (* The full value of the unit the provider reported in, not a threshold. *)
 let at_or_past_full = function
@@ -167,6 +173,8 @@ let at_or_past_full = function
   | Masc.Tui_decode_usage.Utilization_percent value -> value >= percent_of_full
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } -> used >= limit
   | Masc.Tui_decode_usage.Utilization_usd { limit = None; _ } -> false
+  | Masc.Tui_decode_usage.Utilization_credit_balance { remaining; _ } -> remaining <= 0.0
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited | Utilization_credit_retracted -> false
 
 (* Twelve significant digits cut binary noise such as 0.29 *. 100. =
    28.999999999999996 before the floor, and still keep 0.9999 below 100. *)
@@ -224,6 +232,14 @@ let coloured_meter ~cells ~fill:bar ~around share =
   in
   drawn_fill ^ String.concat "" track
 
+let credit_decimals = 2
+
+let credit_text currency value = Printf.sprintf "%s %.*f" currency credit_decimals value
+
+let credit_remaining_text currency remaining =
+  "Credit " ^ credit_text currency remaining ^ " left"
+;;
+
 let utilization_text = function
   | Masc.Tui_decode_usage.Utilization_fraction value when Float.is_finite value ->
       Printf.sprintf "%d%%" (percent_of_fraction value)
@@ -234,6 +250,10 @@ let utilization_text = function
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = Some limit } ->
       Printf.sprintf "$%.4f / $%.4f" used limit
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = None } -> Printf.sprintf "$%.4f" used
+  | Masc.Tui_decode_usage.Utilization_credit_balance { currency; remaining; _ } ->
+      credit_remaining_text currency remaining
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited -> "Credit unlimited"
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> "Credit retracted"
 
 let minutes_per_hour = 60
 let minutes_per_day = 24 * minutes_per_hour
@@ -634,6 +654,17 @@ let money_text = function
       Some (usd_text used ^ "/" ^ usd_text limit)
   | Masc.Tui_decode_usage.Utilization_usd { used; limit = None } ->
       Some ("spent " ^ usd_text used)
+  | Masc.Tui_decode_usage.Utilization_credit_balance { currency; total; remaining } ->
+      let context =
+        match total with
+        | None -> ""
+        | Some total ->
+            " \xc2\xb7 used " ^ credit_text currency (total -. remaining)
+            ^ "/" ^ credit_text currency total
+      in
+      Some (credit_remaining_text currency remaining ^ context)
+  | Masc.Tui_decode_usage.Utilization_credit_unlimited -> Some "Credit unlimited"
+  | Masc.Tui_decode_usage.Utilization_credit_retracted -> Some "Credit retracted"
   | Masc.Tui_decode_usage.Utilization_fraction _
   | Masc.Tui_decode_usage.Utilization_percent _ -> None
 

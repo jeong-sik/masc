@@ -2497,7 +2497,9 @@ let test_rate_limits_read_without_turn () =
               , (match w.kind with
                  | Five_hour -> "5h" | Seven_day -> "7d"
                  | Duration_minutes m -> string_of_int m | Provider_label l -> l)
-              , (match w.utilization with Percent p -> p | Fraction _ | Usd _ -> -1) ))
+              , (match w.utilization with
+                 | Percent p -> p
+                 | Fraction _ | Usd _ | Credit_balance _ | Credit_unlimited | Credit_retracted -> -1) ))
             report.windows
         in
         check (list (triple string string int)) "every bucket, keyed"

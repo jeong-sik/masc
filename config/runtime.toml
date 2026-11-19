@@ -286,9 +286,8 @@ key = "OLLAMA_CLOUD_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
 # call, then again refresh-s seconds after each read. GET /api/balance
-# (ollama/ollama docs/api/balance.mdx) states a legacy plan's session and
-# weekly windows with their reset times; a credit plan's answer is reported
-# as an error.
+# (docs.ollama.com/api/balance) states legacy session/weekly windows or a
+# credit plan's included allowance, plus the purchased Credit balance.
 [providers.ollama_cloud.usage-read]
 shape = "ollama-balance"
 url = "https://ollama.com/api/balance"
@@ -2768,11 +2767,13 @@ key = "OPENROUTER_API_KEY"
 
 # Usage windows for the operator view, read at server start with no model
 # call, then again refresh-s seconds after each read. Documented at
-# openrouter.ai/docs/api-reference/limits.
+# openrouter.ai/docs/api-reference/limits and /docs/api-reference/get-credits.
 [providers.openrouter.usage-read]
 shape = "openrouter-key"
 url = "https://openrouter.ai/api/v1/key"
 refresh-s = 600.0
+[providers.openrouter.usage-read.credit]
+url = "https://openrouter.ai/api/v1/credits"
 
 # OpenRouter identifies the calling app by these two headers and attributes
 # usage to it. Both were accepted (HTTP 200) on all twelve probed models.

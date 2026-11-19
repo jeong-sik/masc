@@ -5325,7 +5325,9 @@
   masc_tui_roster_owed
   masc_tui_engine_samples
   masc_tui_braille
-  masc_tui_play_room))
+  masc_tui_play_room
+  masc_tui_terminal_probe
+  masc_tui_input_decoder))
 
 (test
  (name test_tui_wake_writers)

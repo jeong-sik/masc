@@ -1074,7 +1074,8 @@
  (name masc_tui_terminal_probe)
  (wrapped false)
  (modules masc_tui_terminal_probe)
- (libraries masc_tui_terminal_palette masc_tui_graphics))
+ ; masc_tui_input_decoder for the hold it reports in the decoder's terms.
+ (libraries masc_tui_terminal_palette masc_tui_graphics masc_tui_input_decoder))
 
 (library
  (name masc_tui_startup_observation)

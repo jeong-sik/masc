@@ -368,6 +368,100 @@ let test_ring_does_not_split_an_escape_sequence () =
       check bool "the ring during ESC's wait does not end it as Escape" true
         (Eio.Promise.await result = arrow))
 
+let sleep_s seconds =
+  match Eio_context.get_clock_opt () with
+  | Some clock -> Eio.Time.sleep clock seconds
+  | None -> fail "no clock"
+
+(* A terminal that never answers the graphics query (the harness VTE, iTerm2)
+   keeps the startup probe in front of every byte for the whole session. *)
+let behind_an_unanswered_probe ~palette_requested =
+  let reader = Reader.create_input_reader () in
+  Reader.install_terminal_probe reader (Masc_tui_terminal_probe.create ~palette_requested);
+  reader
+
+(* An idle read: no deadline and a bell nobody rings. If it has not ended by
+   itself half a second on, [fallback] is written so that it ends; [true]
+   says the fallback was needed. *)
+let read_idle reader ~writer ~fallback =
+  let bell = Wake.create () in
+  let result, resolve = Eio.Promise.create () in
+  let fell_back = ref false in
+  Eio.Fiber.both
+    (fun () -> Eio.Promise.resolve resolve (Reader.read_input ~wait:(Wake.until ~now_ns:0L bell None) reader ()))
+    (fun () ->
+      Eio.Fiber.first
+        (fun () -> ignore (Eio.Promise.await result))
+        (fun () -> sleep_s 0.5; fell_back := true; write writer fallback));
+  (Eio.Promise.await result, !fell_back)
+
+let rec read_rest reader =
+  match Reader.read_input ~wait:(Wake.within 0.2) reader () with
+  | None -> []
+  | Some event -> event :: read_rest reader
+
+let event_name = function
+  | Reader.Key name -> name
+  | Reader.Pasted _ | Reader.Graphics_reply _ | Reader.Mouse_left_press _
+  | Reader.Mouse_left_drag _ | Reader.Mouse_left_release _ | Reader.Mouse_wheel _ -> "<not a key>"
+
+let test_lone_escape_behind_an_unanswered_probe () =
+  List.iter (fun palette_requested ->
+      with_stdin_pipe (fun ~writer ->
+          let reader = behind_an_unanswered_probe ~palette_requested in
+          write writer "\x1b";
+          let event, fell_back = read_idle reader ~writer ~fallback:"x" in
+          check bool "the read ended by itself" false fell_back;
+          check (option string) "a lone Esc is Escape" (Some "esc") (Option.map event_name event)))
+    [ false; true ]
+
+(* An Esc held until the next byte joins it: Backspace became Alt+Backspace,
+   and [ O ] began a sequence that took the keys after them. *)
+let test_lone_escape_behind_a_probe_keeps_the_next_key () =
+  List.iter (fun (palette_requested, follower, expected) ->
+      with_stdin_pipe (fun ~writer ->
+          let reader = behind_an_unanswered_probe ~palette_requested in
+          write writer "\x1b";
+          let first, fell_back = read_idle reader ~writer ~fallback:follower in
+          if not fell_back then write writer follower;
+          check (list string) (Printf.sprintf "Esc, then %S" follower) expected
+            (List.map event_name (Option.to_list first @ read_rest reader))))
+    [ (false, "\x7f", [ "esc"; "\x7f" ]);
+      (false, "[j", [ "esc"; "["; "j" ]);
+      (false, "Oj", [ "esc"; "O"; "j" ]);
+      (false, "]j", [ "esc"; "]"; "j" ]);
+      (true, "]j", [ "esc"; "]"; "j" ]) ]
+
+let test_next_byte_wait () =
+  let bell = Wake.create () in
+  let idle = Wake.until ~now_ns:0L bell None in
+  let due_now = Wake.until ~now_ns:0L bell (Some { Wake.reason = Frame_slot; at_ns = 0L }) in
+  let quiet_at_ns = seconds 10 in
+  let ahead = Int64.sub quiet_at_ns 30_000_000L and past = Int64.add quiet_at_ns 1L in
+  let wait held ~now_ns caller = Reader.next_byte_wait held ~quiet_at_ns ~now_ns caller in
+  let within = option (float 1e-9) in
+  List.iter (fun caller ->
+      let prefix = wait (Some Masc_tui_input_decoder.Prefix) ~now_ns:ahead caller in
+      check within "a prefix waits until it has been quiet, whatever the caller allows"
+        (Some 0.03) prefix.within_s;
+      check bool "and no bell ends it" true (Option.is_none prefix.bell))
+    [ idle; due_now ];
+  check within "a prefix already quiet waits no more" (Some 0.)
+    (wait (Some Masc_tui_input_decoder.Prefix) ~now_ns:past idle).within_s;
+  List.iter (fun held ->
+      let first = wait (Some held) ~now_ns:ahead idle in
+      check within "a sequence's first quiet read returns" (Some 0.03) first.within_s;
+      check bool "and keeps the bell" true (Option.is_some first.bell);
+      check within "a frame due sooner comes first" (Some 0.)
+        (wait (Some held) ~now_ns:ahead due_now).within_s;
+      check within "after that the caller's wait" None (wait (Some held) ~now_ns:past idle).within_s)
+    [ Masc_tui_input_decoder.Sequence; Masc_tui_input_decoder.Character ];
+  List.iter (fun held ->
+      let caller = wait held ~now_ns:ahead idle in
+      check within "a paste or nothing held waits by the caller" None caller.within_s;
+      check bool "with its bell" true (Option.is_some caller.bell))
+    [ Some Masc_tui_input_decoder.Pasting; Some Masc_tui_input_decoder.Draining; None ]
+
 let () =
   run "tui_wake"
     [ ("bell",
@@ -391,5 +485,9 @@ let () =
       ("terminal read",
        [ test_case "a ring ends a read without a deadline" `Quick test_ring_ends_a_read_without_a_deadline;
          test_case "a waiting byte is read before a ring" `Quick test_waiting_byte_is_read_before_a_ring;
+         test_case "a lone Esc behind an unanswered probe" `Quick test_lone_escape_behind_an_unanswered_probe;
+         test_case "a lone Esc behind a probe keeps the next key" `Quick
+           test_lone_escape_behind_a_probe_keeps_the_next_key;
+         test_case "next byte wait" `Quick test_next_byte_wait;
          test_case "a ring does not split an escape sequence" `Quick
            test_ring_does_not_split_an_escape_sequence ]) ]

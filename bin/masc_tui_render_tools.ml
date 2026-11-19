@@ -1061,9 +1061,8 @@ let skill_run_history_lines state (evidence : Masc.Tui_decode_skill_evidence.ski
 
 let request_selection_prefix = Say.both ~ko:"요청: " ~en:"Request: "
 
-let skill_selection_prefix state =
-  Say.code (Printf.sprintf "Skill %d/%d: " (state.tools_skill_cursor + 1)
-    (List.length (tools_skill_profiles state)))
+let skill_selection_prefix ~index ~count =
+  Say.code (Printf.sprintf "Skill %d/%d: " (index + 1) count)
 
 (* The selection row of the frame, drawn by the frame in the screen's
    language. *)
@@ -1088,7 +1087,10 @@ let tools_selection_line ~cols state =
       (match selected_tools_skill_profile state with
        | None -> Say.both ~ko:"Skill: 없음" ~en:"Skill: none"
        | Some profile ->
-         let prefix = skill_selection_prefix state in
+         let prefix =
+           skill_selection_prefix ~index:state.tools_skill_cursor
+             ~count:(List.length (tools_skill_profiles state))
+         in
          prefix ++ Say.as_received (Masc_tui_message_layout.fit_middle
            (max 1 (Masc_tui_frame.inner_width ~cols
                    - Masc_tui_message_layout.display_width (Say.render language prefix)))
@@ -1101,45 +1103,116 @@ let tools_selection_line ~cols state =
    name that fits is on screen once and a cut name can still be read whole.
    Whether it fits depends on the words, so it is decided when the language
    is chosen. *)
+let named_again ~cols ~selection_row ~title =
+  Laid_out (fun language ->
+    if Masc_tui_message_layout.display_width (Say.render language selection_row)
+       > Masc_tui_frame.inner_width ~cols
+    then draw language [ title ] else [])
+
+let request_selection_document ~cols (target : Masc.Tui_decode_async_request.target) =
+  let request_id = Say.as_received (Terminal_text.single_line target.request_id) in
+  [ named_again ~cols ~selection_row:(request_selection_prefix ++ request_id)
+      ~title:(Row (Ansi.bold, Say.code " " ++ request_selection_prefix ++ request_id))
+  ; Row (Ansi.dim,
+         Say.both ~ko:" 원래 요청자: " ~en:" Requested by: "
+         ++ Say.as_received (Terminal_text.single_line target.submitted_by)
+         ++ Say.both ~ko:" · 대상 Keeper: " ~en:" · Keeper: "
+         ++ Say.as_received (Terminal_text.single_line target.keeper_name)) ]
+
+(* The Skill at [index] of [count]: its selection row counts its place, so
+   whether the row fits depends on the place as well as on the name. *)
+let skill_selection_document ~cols ~count index
+    (profile : Masc.Tui_decode_tools.effective_skill_profile) =
+  let reference = profile.esp_reference in
+  let name = Say.as_received (Terminal_text.single_line profile.esp_name) in
+  (* Where the Skill comes from is one fact in three parts, so it takes
+     one row: the list below gets the two rows the parts used to take
+     each. A row too long for the frame wraps rather than cutting an
+     identity. *)
+  let field label value = label ++ Say.code " " ++ Say.as_received value in
+  [ named_again ~cols ~selection_row:(skill_selection_prefix ~index ~count ++ name)
+      ~title:(Row (Ansi.bold, Say.both ~ko:"동작 대상 Skill: " ~en:"Action Skill: " ++ name))
+  ; Row (Ansi.dim,
+         Say.concat ~sep:say_dot
+           [ field (Say.both ~ko:"출처" ~en:"Source") (Terminal_text.single_line
+               (Skill_reference.identity_source_id_to_string reference.identity));
+             field (Say.both ~ko:"패키지" ~en:"Package") (Terminal_text.single_line
+               (Skill_reference.identity_package_id_to_string reference.identity));
+             field (Say.both ~ko:"리비전" ~en:"Revision") (Masc_tui_value.Hash.short (Terminal_text.single_line
+               (Skill_reference.content_revision_to_string reference.content_revision))) ]) ]
+
 let tools_selection_document ~cols state =
-  let named_again ~selection_row ~title =
-    Laid_out (fun language ->
-      if Masc_tui_message_layout.display_width (Say.render language selection_row)
-         > Masc_tui_frame.inner_width ~cols
-      then draw language [ title ] else []) in
-  if state.tools_pane=Tools_async then
-    (match state.tools_async_selection with
-     | None -> []
-     | Some target ->
-         let request_id = Say.as_received (Terminal_text.single_line target.request_id) in
-         [ named_again ~selection_row:(request_selection_prefix ++ request_id)
-             ~title:(Row (Ansi.bold, Say.code " " ++ request_selection_prefix ++ request_id))
-         ; Row (Ansi.dim,
-                Say.both ~ko:" 원래 요청자: " ~en:" Requested by: "
-                ++ Say.as_received (Terminal_text.single_line target.submitted_by)
-                ++ Say.both ~ko:" · 대상 Keeper: " ~en:" · Keeper: "
-                ++ Say.as_received (Terminal_text.single_line target.keeper_name)) ])
+  if state.tools_pane = Tools_async then
+    Option.fold ~none:[] ~some:(request_selection_document ~cols) state.tools_async_selection
   else
-  match selected_tools_skill_profile state with
-  | None -> []
-  | Some profile ->
-      let reference = profile.esp_reference in
-      let name = Say.as_received (Terminal_text.single_line profile.esp_name) in
-      (* Where the Skill comes from is one fact in three parts, so it takes
-         one row: the list below gets the two rows the parts used to take
-         each. A row too long for the frame wraps rather than cutting an
-         identity. *)
-      let field label value = label ++ Say.code " " ++ Say.as_received value in
-      [ named_again ~selection_row:(skill_selection_prefix state ++ name)
-          ~title:(Row (Ansi.bold, Say.both ~ko:"동작 대상 Skill: " ~en:"Action Skill: " ++ name))
-      ; Row (Ansi.dim,
-             Say.concat ~sep:say_dot
-               [ field (Say.both ~ko:"출처" ~en:"Source") (Terminal_text.single_line
-                   (Skill_reference.identity_source_id_to_string reference.identity));
-                 field (Say.both ~ko:"패키지" ~en:"Package") (Terminal_text.single_line
-                   (Skill_reference.identity_package_id_to_string reference.identity));
-                 field (Say.both ~ko:"리비전" ~en:"Revision") (Masc_tui_value.Hash.short (Terminal_text.single_line
-                   (Skill_reference.content_revision_to_string reference.content_revision))) ]) ]
+    let profiles = tools_skill_profiles state in
+    match List.nth_opt profiles state.tools_skill_cursor with
+    | None -> []
+    | Some profile ->
+        skill_selection_document ~cols ~count:(List.length profiles) state.tools_skill_cursor
+          profile
+
+(* The loaded list the move keys walk on this pane, as it was read: the
+   Skills of the Effective Keeper Surface, or the async requests while no
+   request is open. A new read is a new list. *)
+type selections =
+  | Skill_selections of Masc.Tui_decode_tools.effective_skill_profile list
+  | Request_selections of Tui_decode.async_request_row list
+
+let selections (state : state) =
+  match state.tools_pane with
+  | Tools_surface -> (
+      match state.tools_inventory with
+      | Some
+          { Masc.Tui_decode_tools.ts_effective =
+              Some (Masc.Tui_decode_tools.Effective_surface_available { ets_skill_profiles; _ })
+          ; _ } ->
+          Some (Skill_selections ets_skill_profiles)
+      | Some
+          { Masc.Tui_decode_tools.ts_effective =
+              None | Some (Masc.Tui_decode_tools.Effective_surface_unavailable _)
+          ; _ }
+      | None -> None)
+  | Tools_async when not state.tools_async_detail_open -> (
+      match state.tools_async_observation with
+      | Some (Tui_decode.Async_ready { requests; _ }) -> Some (Request_selections requests)
+      | Some (Tui_decode.Async_unavailable _) | None -> None)
+  | Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _ -> None
+
+let same_selections seen loaded =
+  match seen, loaded with
+  | Skill_selections seen, Skill_selections loaded -> seen == loaded
+  | Request_selections seen, Request_selections loaded -> seen == loaded
+  | Skill_selections _, Request_selections _ | Request_selections _, Skill_selections _ -> false
+
+(* The document of every selection the list can land on, in the order the
+   list draws them, from the state the list was read from. *)
+let selection_documents ~cols state = function
+  | Skill_selections _ ->
+      let profiles = tools_skill_profiles state in
+      List.mapi (skill_selection_document ~cols ~count:(List.length profiles)) profiles
+  | Request_selections _ -> List.map (request_selection_document ~cols) (tools_async_targets state)
+
+(* The rows the tallest of those documents takes, counted once for as long
+   as the same list is loaded at the same width in the same language, as the
+   Memory screen counts its tallest fact: wrapping every entry's document on
+   each frame made a Skill key on 54 Skills about two fifths slower, and the
+   cost grows with the list. *)
+let tallest_selection_memo : (selections * int * Say.language * int) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let tallest_selection_rows ~cols ~language ~rows_of state loaded =
+  match Domain.DLS.get tallest_selection_memo with
+  | Some (seen, seen_cols, seen_language, tallest)
+    when same_selections seen loaded && seen_cols = cols && seen_language = language -> tallest
+  | Some _ | None ->
+      let tallest =
+        List.fold_left
+          (fun tallest document -> max tallest (rows_of document))
+          0 (selection_documents ~cols state loaded)
+      in
+      Domain.DLS.set tallest_selection_memo (Some (loaded, cols, language, tallest));
+      tallest
 
 (* The Effective Keeper Surface's diagnostics: what the runtime says about
    itself, the two digests and the byte budgets. [hash] draws a digest: its
@@ -2811,7 +2884,29 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       ++ say_dot ++ Say.code (if draft.scd_composition then "C" else "c")
       ++ Say.both ~ko:": 편집기에서 이어 쓰기" ~en:":resume in editor")
     (skill_create_drafts_for_current_workspace state) in
-  let prefix = tools_selection_document ~cols state @ rows (drafts @ reading_lines @ error_lines) in
+  let notices = rows (drafts @ reading_lines @ error_lines) in
+  (* The selection's document stands above the list, so on a pane whose list
+     the move keys walk it takes as many rows for every selection: as many as
+     the tallest document among the loaded entries, a shorter one ending in
+     blank rows (RFC tui-one-screen-grammar §8). Sized by the selected
+     entry alone, the list moved a row with j and k wherever the next
+     entry's source or requester wrapped differently, and a page counted in
+     one frame was a row off in the frame the key landed in, so PgDn and
+     PgUp pushed the entry read last off the window (§3.1). The document is
+     an identity and is never cut, so no cap applies: it is as tall as it
+     wraps. *)
+  let selection_rows =
+    let shown = wrap (tools_selection_document ~cols state) in
+    match selections state with
+    | None -> shown
+    | Some loaded ->
+        let tallest =
+          max (List.length shown)
+            (tallest_selection_rows ~cols ~language
+               ~rows_of:(fun document -> List.length (wrap document)) state loaded)
+        in
+        shown @ List.init (tallest - List.length shown) (fun _ -> ("", ""), Unmarked)
+  in
   (* Where each entry of the pane's list is in the page, in order, from the
      page wrapped one piece at a time, so no row is wrapped twice. *)
   let entry_spans ~above wrapped =
@@ -2831,12 +2926,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
       (* No Skill is selected here, so the Skill heading stays out. *)
       wrap (rows (reading_lines @ error_lines) @ pane_lines), []
     else if state.tools_pane=Tools_async && state.tools_async_detail_open && Option.is_some state.tools_async_task_source then
-      wrap prefix @ draw_marked language pane_lines, []
+      selection_rows @ wrap notices @ draw_marked language pane_lines, []
     else
       (* A row wraps by its own width alone, so a piece takes as many rows
          wrapped by itself as among the rows around it. *)
-      let wrapped = List.map (fun piece -> piece, wrap [ piece ]) (prefix @ pane_lines) in
-      List.concat_map snd wrapped, entry_spans ~above:0 wrapped
+      let wrapped = List.map (fun piece -> piece, wrap [ piece ]) (notices @ pane_lines) in
+      ( selection_rows @ List.concat_map snd wrapped
+      , entry_spans ~above:(List.length selection_rows) wrapped )
   in
   let entries =
     let listed list = match entry_rows with [] -> None | spans -> Some (list, spans) in

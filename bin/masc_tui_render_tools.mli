@@ -60,8 +60,11 @@ type display =
             request list on Async while no request is open -- with the rows
             of [lines] each of its entries takes, in order: a Skill with its
             group heading and the rows that say why it was loaded, a request
-            as it wraps. [None] on a pane with no entry in such a list. The
-            frame pages that list by {!drawn_page}. *)
+            as it wraps. The selection's document above the list is as tall
+            for every selection of the loaded list, so each entry takes the
+            same rows whichever entry is selected. [None] on a pane with no
+            entry in such a list. The frame pages that list by
+            {!drawn_page}. *)
   }
 
 val tools_display : ?cols:int -> ?terminal_rows:int -> state -> display

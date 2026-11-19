@@ -508,7 +508,12 @@ let test_schedules_with_notices_report_the_rows_they_drew () =
    entry's rows are found in the page by its text, not taken from the
    renderer's count: from its first row, a group heading when it opens one,
    to its last. The window brings the whole top of the page in with the
-   first entry. *)
+   first entry.
+
+   Above the list stands the selection's document: the Skill's source,
+   package and revision, or the request's requester and Keeper. These wrap
+   differently for different entries, so the fixtures give the entries
+   values that wrap differently. *)
 module Tools = Masc.Tui_decode_tools
 
 (* Where an entry's rows are in the page. *)
@@ -563,7 +568,8 @@ let entry_rows lines ~names ~above ~below =
 
 (* One walk down the list with j and one back up with k, the window
    following the cursor. In every page the renderer's count of each entry's
-   rows is the rows the page gives it, and from every window PgDn keeps the
+   rows is the rows the page gives it, every entry stands on the rows it
+   stood on for the first selection, and from every window PgDn keeps the
    last entry it held whole and PgUp the first. [rows display] are each
    entry's rows in that page; [prepare] lays the list out for the terminal's
    width, [landing] is the dispatcher's, and [cursor] / [place] are the
@@ -592,6 +598,11 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~landing ~cursor ~place 
         let whole_in ~shown ~height index entry =
           (if index = 0 then 0 else entry.er_first) >= shown && entry.er_last < shown + height
         in
+        let first_selection =
+          place state 0;
+          let _, entries, _, _ = page () in
+          spans entries
+        in
         let scroll = ref 0 in
         let visit at =
           place state at;
@@ -610,6 +621,9 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~landing ~cursor ~place 
                        entry.first_row, entry.last_row)
                      reported ))
                display.entries);
+          Alcotest.(check (list (pair int int)))
+            (label ^ ": the entries stand where they stood for the first selection")
+            first_selection (spans entries);
           let heights = List.map (fun entry -> entry.er_last - entry.er_first + 1) entries in
           Alcotest.(check bool) (label ^ ": the entries take different rows") true
             (List.length (List.sort_uniq compare (List.tl heights)) > 1);
@@ -650,13 +664,22 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~landing ~cursor ~place 
         for at = count - 1 downto 0 do visit at done))
     sizes
 
-let skill_reference name =
+(* Where a Skill comes from: every third from a source whose id is long, and
+   every third after it a package whose id is longer, so the row that names
+   them above the list takes one, two or three rows. *)
+let skill_reference index name =
+  let source_id, package_id =
+    match index mod 3 with
+    | 0 -> "workspace", name
+    | 1 -> "workspace-" ^ String.make 80 's', name
+    | _ -> "workspace", name ^ "-" ^ String.make 150 'p'
+  in
   match
     Skill_reference.of_yojson
       (`Assoc
          [ ( "identity"
            , `Assoc
-               [ "source_id", `String "workspace"; "package_id", `String name
+               [ "source_id", `String source_id; "package_id", `String package_id
                ; "name", `String name ] )
          ; "content_revision", `String (String.make 64 'a') ])
   with
@@ -680,7 +703,7 @@ let skill index : Tools.effective_skill_profile =
     | _ -> [ Skill_keeper_profile ]
   in
   let name = Printf.sprintf "sk-%02d" index in
-  { esp_reference = skill_reference name; esp_name = name
+  { esp_reference = skill_reference index name; esp_name = name
   ; esp_surface =
       (if composition then
          Masc.Keeper_skill_observability.Composition_skill
@@ -734,15 +757,16 @@ let test_skills_page_by_the_entries_a_window_holds () =
 
 let request_count = 30
 
-(* Every request names the same Keeper, so the selected request's
-   requester row above the list keeps one height. Every third request's
-   ownership is unknown, which says so in more words: with a Keeper name of
-   this length that row wraps at the terminal's width and the others do
-   not. *)
+(* Every fifth request names a Keeper long enough that the requester row
+   above the list wraps at the terminal's width, and its own row with it;
+   the others fit. Every third request's ownership is unknown, which says so
+   in more words: with the shorter Keeper name that row wraps too. *)
 let request ~cols index : Tui_decode.async_request_row =
   { ar_request_id = Printf.sprintf "rq-%02d" index
   ; ar_submitted_by = "operator"
-  ; ar_keeper_name = "keeper-" ^ String.make (cols - 62) 'k'
+  ; ar_keeper_name =
+      (if index mod 5 = 2 then "keeper-" ^ String.make (cols - 30) 'v'
+       else "keeper-" ^ String.make (cols - 62) 'k')
   ; ar_phase = Async_running; ar_submitted_at = 0.
   ; ar_ownership = (if index mod 3 = 0 then Async_ownership_unknown else Async_runtime_owned) }
 

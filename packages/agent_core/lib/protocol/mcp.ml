@@ -85,9 +85,20 @@ module Channel = struct
     | Ok tools -> Ok tools
 
   let call_tool_full t ~name ~arguments =
-    match Sdk_client.call_tool t ~name ~arguments () with
+    let params = `Assoc [ "name", `String name; "arguments", arguments ] in
+    match Sdk_client.send_request t ~method_:Mcp_protocol.Notifications.tools_call ~params () with
     | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = name; detail }))
-    | Ok result -> Ok result
+    | Ok json ->
+      (match Mcp_protocol.Mcp_types.tool_result_of_yojson json with
+       | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = name; detail }))
+       | Ok result ->
+         let result = match json with
+           | `Assoc fields ->
+             (match List.assoc_opt "structuredContent" fields with
+              | Some `Null -> { result with structured_content = Some `Null }
+              | Some _ | None -> result)
+           | _ -> result in
+         Ok result)
 
   let close = Sdk_client.close
 end

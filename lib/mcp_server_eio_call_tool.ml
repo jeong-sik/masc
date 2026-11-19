@@ -31,10 +31,14 @@ let status_of_result : Tool_result.result -> string = function
   | Tool_result.Failed _ -> "error"
 ;;
 
-let structured_content_of_result (result : Tool_result.result) : Yojson.Safe.t option =
-  match Tool_result.data result with
-  | `Assoc _ as data -> Some data
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+let structured_content_of_result ~protocol (result : Tool_result.result) : Yojson.Safe.t option =
+  let data = Tool_result.data result in
+  match protocol with
+  | Mcp_transport_protocol.Stateless_protocol _ -> Some data
+  | Mcp_transport_protocol.Legacy_protocol ->
+    (match data with
+     | `Assoc _ -> Some data
+     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None)
 ;;
 
 let activity_preview_string value =
@@ -551,8 +555,9 @@ let resolve_managed_agent_call ?mcp_session_id request =
 
 (** Handle tools/call JSON-RPC method *)
 let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
-    ~broadcast_tools_list_changed ?(wire_result = fun () -> None) ~sw ~clock ?(profile = Full) ?mcp_session_id
-    ~bearer state id request =
+    ~broadcast_tools_list_changed ?(wire_result = fun () -> None)
+    ?(protocol = Mcp_transport_protocol.Legacy_protocol)
+    ~sw ~clock ?(profile = Full) ?mcp_session_id ~bearer state id request =
   (* The active workspace is an admission fact for this call.  In particular,
      [masc_start] may publish a new current scope while executing, but the
      initiating call and every post-execution observation remain attributed to
@@ -913,7 +918,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     Runtime_official_client_tool.mcp_tool_result_content ~success ~content:message
       ~content_blocks:(content_blocks_of_result result)
   in
-  let structured_content = structured_content_of_result result in
+  let structured_content = structured_content_of_result ~protocol result in
   let meta_fields =
     [
       ("trace_id", `String trace_id);
@@ -965,6 +970,11 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Some result ->
         let fields = match Mcp_protocol.Mcp_types.tool_result_to_yojson result with
           | `Assoc fields -> fields | _ -> [] in
+        let fields = match protocol, result.structured_content with
+          | Mcp_transport_protocol.Legacy_protocol, Some `Null ->
+              List.remove_assoc "structuredContent" fields
+          | (Mcp_transport_protocol.Legacy_protocol | Mcp_transport_protocol.Stateless_protocol _), _ ->
+              fields in
         let worker_meta = match result._meta with Some (`Assoc fields) -> fields | None | Some _ -> [] in
         ("_meta", `Assoc (call_meta @ List.filter (fun (key, _) -> not (List.mem_assoc key call_meta)
           && not (String.equal key "io.modelcontextprotocol/serverInfo")) worker_meta))

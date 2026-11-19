@@ -130,6 +130,7 @@ let handle_request
         ~sw
         ~clock
         ~profile
+        ~protocol
         ?mcp_session_id
         ~bearer
         state
@@ -143,6 +144,7 @@ let handle_request
         ~sw
         ~clock
         ~profile
+        ~protocol
         ?mcp_session_id
         ~bearer
         state

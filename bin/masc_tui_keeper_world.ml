@@ -9,21 +9,32 @@ module Terminal_text = Masc_tui_ansi.Terminal_text
 type pulse = Ledger_and_briefing | Fact_ages of Masc.Keeper_memory_age_bins.t option
 type row_cells = { pulse : pulse; now_cell : string; strip : string; due : string; right : string }
 
+(* The status marks of RFC tui-one-screen-grammar 7.2 and the missing-value
+   marks of 6.4. A briefing not yet published waits, a current one is
+   settled, a stale one is the 오래됨 caution, and one the server could not
+   give read failed. A world not read yet or being read is [◌] (6.4 names
+   both), and one that failed to read [✕], rather than one [?] for all. *)
+let marked mark word = mark ^ " " ^ word
+
 let briefing_word = function
-  | Wire.Pending -> "◷ pending"
-  | Wire.Current -> "✓ current"
-  | Wire.Stale -> "! stale"
-  | Wire.Unavailable -> "? unavailable"
+  | Wire.Pending -> marked (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting) "pending"
+  | Wire.Current -> marked (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled) "current"
+  | Wire.Stale -> marked (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution) "stale"
+  | Wire.Unavailable -> marked (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed) "unavailable"
 
 let now_word = function
-  | World.Not_read -> "? not read"
-  | World.Reading -> "? reading"
-  | World.Read_failed _ -> "? read failed"
+  | World.Not_read -> marked (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread) "not read"
+  | World.Reading -> marked (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread) "reading"
+  | World.Read_failed _ -> marked (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed) "read failed"
   | World.Loaded { world; refresh_failure } ->
       let word = match world with
         | Wire.Missing _ -> "— no ledger"
         | Wire.Available world -> briefing_word world.Wire.briefing.status in
-      word ^ (match refresh_failure with None -> "" | Some _ -> " !")
+      (* The reading shown is the last one; a refresh after it failed, so it
+         may be old. *)
+      word ^ (match refresh_failure with
+        | None -> ""
+        | Some _ -> " " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution)
 
 let inventory_absence = function
   | Wire.Missing { ordinary_absence; _ } -> ordinary_absence
@@ -97,9 +108,9 @@ let world_failed = function
 let inventory_summary world =
   let qualifier = if world_failed world then ["read failed; earlier inventory"] else [] in
   qualifier @ (match world with
-    | World.Not_read -> ["? not read"]
-    | World.Reading -> ["? reading"]
-    | World.Read_failed _ -> ["?"]
+    | World.Not_read | World.Reading -> [now_word world]
+    | World.Read_failed _ ->
+        [Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed]
     | World.Loaded { world = Wire.Missing _; _ } -> ["no ledger"]
     | World.Loaded { world = Wire.Available world; _ } ->
         [Printf.sprintf "%s claims / %s conflicts"

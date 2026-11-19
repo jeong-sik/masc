@@ -855,24 +855,28 @@ let preset_save_receipt_rows ~ko (receipt : preset_save_receipt) =
   let name = Terminal_text.single_line receipt.psr_request.psp_name in
   let reason detail =
     P.detail (text "  원인 · " "  Reason · " ^ Terminal_text.single_line detail) in
+  (* Each outcome opens on its status mark (RFC tui-one-screen-grammar 7.2):
+     confirmed is settled, not sent and refused failed, an answer that never
+     came a caution. [✓] and [!] are not status marks. *)
+  let marked mark words = Masc_tui_value.Mark.glyph mark ^ " " ^ words in
   let outcome = match receipt.psr_result with
   | Ok _ ->
     [{ P.tone = P.Confirmed
-     ; text = text "✓ 프리셋 저장 확인 · " "✓ Preset save confirmed · " ^ name }]
+     ; text = marked Masc_tui_value.Mark.Settled (text "프리셋 저장 확인 · " "Preset save confirmed · ") ^ name }]
   | Error (Preset_save_not_sent detail) ->
-    [P.failure (text "! 프리셋 저장 미전송 · " "! Preset save not sent · " ^ name);
+    [P.failure (marked Masc_tui_value.Mark.Failed (text "프리셋 저장 미전송 · " "Preset save not sent · ") ^ name);
      reason detail]
   (* Kept back by the workspace guard: the notice alone, then the name. *)
   | Error (Preset_save_kept_back refusal) ->
     [P.failure (workspace_refusal_text ~ko ~request:Kept_request.Preset_save refusal ^ " · " ^ name)]
   | Error (Preset_save_refused detail) ->
-    [P.failure (text "! 프리셋 저장 거절 · " "! Preset save refused · " ^ name);
+    [P.failure (marked Masc_tui_value.Mark.Failed (text "프리셋 저장 거절 · " "Preset save refused · ") ^ name);
      reason detail]
   | Error (Preset_save_auth_retry_not_sent detail) ->
-    [P.failure (text "! 인증 거절 · 재시도 미전송 · " "! Authentication refused · retry not sent · " ^ name);
+    [P.failure (marked Masc_tui_value.Mark.Failed (text "인증 거절 · 재시도 미전송 · " "Authentication refused · retry not sent · ") ^ name);
      reason detail]
   | Error (Preset_save_unconfirmed detail) ->
-    [P.caution (text "! 프리셋 저장 결과 미확인 · " "! Preset save unconfirmed · " ^ name);
+    [P.caution (marked Masc_tui_value.Mark.Caution (text "프리셋 저장 결과 미확인 · " "Preset save unconfirmed · ") ^ name);
      P.caution (text "  다시 저장하기 전 내용을 확인하세요 · 같은 이름은 덮어씁니다"
        "  Check contents before saving again · the same name is overwritten");
      P.caution (text "  목록에 이름이 있어도 이번 저장의 성공을 뜻하지 않습니다"
@@ -918,7 +922,8 @@ let preset_confirmation_rows (state : state) ~cols =
       @ [P.detail (ui_text state ~ko:"  전체 확인 후 Enter: 진행 · Esc: 취소"
            ~en:"  After reviewing all rows, Enter: continue · Esc: cancel")]
     | Some (Save_armed name) ->
-      [P.caution (ui_text state ~ko:"! 이전 저장 결과 미확인 · " ~en:"! Earlier save unconfirmed · "
+      [P.caution (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
+         ^ ui_text state ~ko:"이전 저장 결과 미확인 · " ~en:"Earlier save unconfirmed · "
          ^ Terminal_text.single_line name);
        P.caution (ui_text state ~ko:"  이전 저장은 성공했을 수 있습니다" ~en:"  The earlier save may have succeeded");
        P.caution (ui_text state ~ko:"  재저장하면 현재 설정으로 같은 이름을 덮어씁니다"
@@ -1033,8 +1038,9 @@ let preset_detail_lines (state : state) ~cols ~selected =
     | [] -> []
     | rows ->
       [P.caution (Printf.sprintf
-         (if state.ui_language = Lang_ko then "! 읽을 수 없는 프리셋 %d개 · 상세는 아래에"
-          else "! Unreadable presets: %d · details below") (List.length rows))]
+         (if state.ui_language = Lang_ko then "%s 읽을 수 없는 프리셋 %d개 · 상세는 아래에"
+          else "%s Unreadable presets: %d · details below")
+         (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution) (List.length rows))]
   in
   let failures = match unreadable, state.presets_error with
     | [], None -> []
@@ -1047,7 +1053,9 @@ let preset_detail_lines (state : state) ~cols ~selected =
          | Some (Request_withdrawn refusal) ->
            [P.failure (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
               ~request:Kept_request.Preset_list_read refusal)])
-      @ List.map (fun (name, reason) -> P.failure ("! " ^ name ^ " — " ^ reason)) rows
+      @ List.map (fun (name, reason) ->
+          P.failure (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+                     ^ " " ^ name ^ " — " ^ reason)) rows
   in
   let remaining =
     preset_folded_rows ~cols

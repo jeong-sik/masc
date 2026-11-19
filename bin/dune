@@ -655,7 +655,7 @@
  (name masc_tui_artifact_checks)
  (wrapped false)
  (modules masc_tui_artifact_checks)
- (libraries masc_tui_resource_catalog masc_tui_fetched masc yojson))
+ (libraries masc_tui_resource_catalog masc_tui_fetched masc masc_tui_value yojson))
 
 (library
  (name masc_tui_artifact_check_action)
@@ -3779,7 +3779,7 @@
  (name masc_tui_github_ui)
  (wrapped false)
  (modules masc_tui_github_ui)
- (libraries masc_tui_types masc_tui_ansi masc_tui_github_identity masc_tui_message_layout masc yojson))
+ (libraries masc_tui_types masc_tui_ansi masc_tui_github_identity masc_tui_message_layout masc masc_tui_value yojson))
 
 (library
  (name masc_tui_render_github)

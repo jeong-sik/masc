@@ -305,7 +305,8 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
     List.map
       (fun (name, finished_at) ->
         { text =
-            Printf.sprintf "\xe2\x9c\x93 %s  %s"
+            Printf.sprintf "%s %s  %s"
+              (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled)
               (fitted_name name)
               (answered (Masc_tui_value.Ongoing.since ~now finished_at))
         ; tone = Done

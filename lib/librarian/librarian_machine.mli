@@ -23,15 +23,17 @@ type place =
 type state =
   | Idle of Librarian_store.t (** The store is open. Nothing is being asked. *)
   | Stopped of Librarian_store.stop
-  | Retired (** The Keeper is no longer registered. The writer takes nothing. *)
 
 (** Opens the store: [Idle], or [Stopped] with the reason. *)
 val boot : place -> at:float -> state
 
-(** Why the writer takes neither a write nor an act. *)
+(** Why a Keeper's Memory takes neither a write nor an act. *)
 type unavailable =
   | Store_stopped of Librarian_store.stop
   | Keeper_retired
+  (** The Keeper is not registered, so it has no writer. No state here
+      answers this: a writer that retires ends, and whoever looks for the
+      Keeper's writer finds none. *)
 
 type write_answer =
   | Written of Librarian_log.commit (** The line that was committed. *)
@@ -52,8 +54,7 @@ type write_answer =
     - A commit whose line is on disk and whose snapshot is not is answered
       [Written]: it is committed. The store stops as [Store_unwritable] and
       the next boot writes the snapshot from the line.
-    - [Stopped s]: [Unavailable (Store_stopped s)].
-    - [Retired]: [Unavailable Keeper_retired]. *)
+    - [Stopped s]: [Unavailable (Store_stopped s)]. *)
 val write
   :  state
   -> at:float

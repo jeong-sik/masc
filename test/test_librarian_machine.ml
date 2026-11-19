@@ -87,7 +87,6 @@ let state_text : Machine.state -> string = function
     ^ String.concat "; "
         (List.map (fun (fact : Types.fact) -> fact.claim) (Store.memory store).facts)
   | Stopped stop -> "stopped: " ^ stop_text stop
-  | Retired -> "retired"
 ;;
 
 let unavailable_text : Machine.unavailable -> string = function
@@ -251,22 +250,6 @@ let test_adopt_is_not_the_way_out_of_every_stop () =
   check string "and stays stopped" (state_text stopped) (state_text same)
 ;;
 
-let test_retired () =
-  let place = started_place () in
-  let retired = Machine.Retired in
-  let state, answer = write retired ~at:201.0 (remember port) in
-  check string "a write" "the keeper is retired" (write_text answer);
-  check string "leaves it retired" "retired" (state_text state);
-  check string "a resume" "the keeper is retired"
-    (act_text (snd (resume place retired ~at:300.0)));
-  check string "an adoption" "the keeper is retired"
-    (act_text
-       (snd
-          (Machine.adopt place retired ~at:400.0 ~by:"operator-1"
-             ~observed:(Digest.digest_of_bytes "anything"))));
-  check bool "nothing was written for it" false (Sys.file_exists (log_path place))
-;;
-
 let () =
   run "librarian_machine"
     [ "boot", [ test_case "opens or stops" `Quick test_boot ]
@@ -280,6 +263,5 @@ let () =
         ; test_case "adopt is not the way out of every stop" `Quick
             test_adopt_is_not_the_way_out_of_every_stop
         ] )
-    ; "retired", [ test_case "takes nothing" `Quick test_retired ]
     ]
 ;;

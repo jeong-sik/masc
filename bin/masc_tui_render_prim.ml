@@ -6816,6 +6816,9 @@ let keeper_deletions_hints (state : state) ~scrollable =
    poll. *)
 let answering_lines (state : state) =
   let _, cols = get_terminal_size () in
+  (* The overlay may draw the age of the observation time, which every
+     successful turns answer moves (RFC tui-one-screen-grammar §8). *)
+  if Option.is_some state.keeper_turns_observed_at then note_turn_observation_age_drawn ();
   Masc_tui_answering.overlay
     ~ko:(state.ui_language = Lang_ko)
     ~width:(max 0 (framed_inner_width cols - 2))

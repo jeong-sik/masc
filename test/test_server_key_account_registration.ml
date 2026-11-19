@@ -1088,6 +1088,28 @@ let test_replacement_under_a_root_that_leads_nowhere =
     Alcotest.(check int) "it took the next generation" 2 (generation_of alice account))
 ;;
 
+(* The home of the account is a folder others read. The store of the key
+   is refused under such a home, so the replacement is turned down before
+   its record, and the account keeps the key it has. With the home closed
+   again the replacement goes through. *)
+let test_replacement_over_an_open_home =
+  with_zone (fun ~zone ~root ~base_path ->
+    declare ~base_path;
+    let alice = admit zone ~name:"alice" ~hex:'a' in
+    let runtime_root = runtime_root_of ~base_path alice in
+    let account = registered alice ~base_path the_key in
+    let home = home_of ~runtime_root account in
+    Unix.chmod home 0o755;
+    let answer = replace alice ~base_path account (replacement_body second_key) in
+    answered "over a home others read" answer ~status:503 ~code:(Some "replacement_not_recorded");
+    says_nothing_of "a replacement that was not recorded" ~key:second_key answer;
+    unchanged "a replacement that was not recorded" alice ~root ~runtime_root account ~sent:second_key;
+    Unix.chmod home 0o700;
+    let again = replace alice ~base_path account (replacement_body third_key) in
+    answered "the replacement, asked again" again ~status:200 ~code:None;
+    Alcotest.(check int) "it took the next generation" 2 (generation_of alice account))
+;;
+
 (* The runtime root of the person was taken away whole, with the home and
    the key of the account in it. The replacement makes the root and the
    home again, and puts its key in place. *)
@@ -1403,6 +1425,7 @@ let () =
         ; Alcotest.test_case "a key that is not stored, and its folder gone" `Quick test_replacement_not_stored_and_the_folder_gone
         ; Alcotest.test_case "a runtime root that is not reached" `Quick test_replacement_without_the_runtime_root
         ; Alcotest.test_case "a runtime root that leads nowhere" `Quick test_replacement_under_a_root_that_leads_nowhere
+        ; Alcotest.test_case "a home others read" `Quick test_replacement_over_an_open_home
         ; Alcotest.test_case "a runtime root that went" `Quick test_replacement_after_the_runtime_root_went
         ; Alcotest.test_case "a file in the place of the new key" `Quick test_replacement_over_a_file_in_its_place
         ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up

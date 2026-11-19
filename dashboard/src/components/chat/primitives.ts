@@ -406,6 +406,7 @@ function timeLabel(timestamp?: string | null): string | null {
 
 function deliveryLabel(entry: KeeperConversationEntry): string {
   if (entry.streamState === 'cancelling') return '서버 취소 확인 중'
+  if (entry.streamState === 'stop_pending') return '중지 대기 중'
   switch (entry.delivery) {
     case 'queued':
       return 'queued'
@@ -437,6 +438,7 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
 function liveMessageLabel(entry: KeeperConversationEntry): string | null {
   if (entry.text.trim()) return null
   if (entry.streamState === 'cancelling') return '응답 연결 중단 · 서버 취소 확인 중'
+  if (entry.streamState === 'stop_pending') return '서버 접수 대기 중 · 접수되면 중지합니다'
   if (entry.delivery === 'cancelled') return '요청이 취소되었습니다.'
   if (entry.delivery === 'streaming') {
     if (entry.streamState === 'retrying') return '모델 제공자 요청 재시도 중...'
@@ -3405,7 +3407,14 @@ function toolTraceOutputStatus(
 // A turn's lifecycle and bulk coverage do not establish whether its exact
 // output exists. Only an exact 404 on a finished turn permits missing.
 function isTurnStreaming(state: KeeperConversationEntry['streamState']): boolean {
-  return state === 'opening' || state === 'thinking' || state === 'streaming' || state === 'finalizing' || state === 'retrying'
+  switch (state) {
+    case 'opening': case 'thinking': case 'streaming': case 'finalizing': case 'retrying':
+    // The stream is open and the turn has not started.
+    case 'stop_pending':
+      return true
+    case 'cancelling': case null: case undefined:
+      return false
+  }
 }
 
 function toolOutputCoverageState(

@@ -1020,8 +1020,10 @@ let initialize_owner_state_blocking
   (match runtime_initialization, runtime_config_path with
    | Ok _, Some path ->
      (try configure_exact_output_registry ~config_root:(Filename.dirname path) () with
-      | Env_config_core.Config_error _ ->
-        Log.Server.warn "Exact-output authority unavailable; conversational runtime remains available. Configure internal lanes to enable affected features.")
+      | Env_config_core.Config_error reason ->
+        Log.Server.warn
+          "Exact-output authority unavailable: %s. Conversational runtime remains available. Configure internal lanes to enable affected features."
+          reason)
    | Error _, _ | Ok _, None -> ());
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);

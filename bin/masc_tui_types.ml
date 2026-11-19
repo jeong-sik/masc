@@ -6274,6 +6274,16 @@ let tools_volume_gc_parent_scroll = function
   | Tools_surface | Tools_async | Tools_activations | Tools_usage | Tools_storage
   | Tools_catalog Tools_catalog_list -> None
 
+(* What the six move keys act on in the Available pane. The pane draws the
+   Skill list and, below it, the selected Skill's page: its flow, its
+   evidence, the tool table. Choosing walks the list. Enter loads the
+   Skill's evidence and turns the keys to the page; Esc gives them back to
+   the list (RFC tui-one-screen-grammar section 3.1). Another pane, another
+   screen or a Skill that is no longer there starts again at Choosing. *)
+type tools_skill_focus =
+  | Choosing_skill
+  | Reading_page
+
 type tools_read_part =
   | Tools_inventory_read
   | Tools_catalog_read
@@ -11102,6 +11112,7 @@ type state = {
   mutable tools_task_follow_end: tools_task_owner option;
   mutable tools_task_presented: tools_task_frame option;
   mutable tools_skill_cursor: int;
+  mutable tools_skill_focus: tools_skill_focus;
   (* Whether the Effective Keeper Surface's diagnostics -- the runtime, the
      two digests and the byte budgets -- are folded under their heading.
      Folded is the default: these rows sat above the Skill list, and a reader
@@ -21553,6 +21564,7 @@ let create_state
   tools_task_follow_end = None;
   tools_task_presented = None;
   tools_skill_cursor = 0;
+  tools_skill_focus = Choosing_skill;
   tools_diagnostics_folded = true;
   tools_skill_source_picker = None;
   tools_skill_create_drafts = [];

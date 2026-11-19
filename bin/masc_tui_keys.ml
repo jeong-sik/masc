@@ -1351,8 +1351,9 @@ let for_surface = function
       @ row_list_jumps @ listing_meta
   | Tools ->
       [ b ~ko:"이동 / 스크롤" Navigate "j/k" "move / scroll"
-          ~help:"in Available, select a Skill; in async runs, select an original \
-                 request; the other sections and an open request scroll"
+          ~help:"in Available, select a Skill, and after Enter scroll its page; \
+                 in async runs, select an original request; the other sections \
+                 and an open request scroll"
       ; b ~ko:"페이지" Navigate "PgUp/PgDn" "page"
       ; b ~ko:"처음/끝" Navigate "Home/End" "top/bottom"
       ; b ~ko:"다음 탭" Navigate "p" "section"
@@ -1393,8 +1394,9 @@ let for_surface = function
           ~help:"remove the selected published package; press d again on the \
                  same row to confirm"
       ; b ~ko:"기능" Act "Esc" "features"
-          ~help:"return from original Task to request, then request to list; \
-                 otherwise back to Features & plugins"
+          ~help:"return from original Task to request, then request to list, \
+                 and from a Skill's page to the Skill list; otherwise back to \
+                 Features & plugins"
       ]
       @ [ tools_refresh; listing_next; listing_quit ]
   | System_logs ->
@@ -2885,7 +2887,8 @@ let tools_detail_bindings =
   [ tools_volume_gc_binding
   ; b ~ko:"요청 / Skill 근거 읽기" Act "Enter" "read request / Skill evidence"
       ~help:"in async runs, read the selected original request; \
-             otherwise load retained evidence for the selected Skill"
+             otherwise load retained evidence for the selected Skill, and in \
+             Available turn j/k and paging to its page until Esc"
   ; b ~ko:"원본 작업" Navigate "t / T" "source Task"
       ~help:"from async request detail, read its original source Task and history"
   ; b ~ko:"이전 기록" Navigate "H" "earlier history"

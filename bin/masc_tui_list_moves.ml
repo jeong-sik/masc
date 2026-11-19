@@ -21,9 +21,9 @@ let tools_list (state : state) =
   else
     match state.tools_pane with
     | Tools_surface -> (
-        match tools_skill_profiles state with
-        | _ :: _ -> Some Tools_skills
-        | [] -> None)
+        match state.tools_skill_focus, tools_skill_profiles state with
+        | Choosing_skill, _ :: _ -> Some Tools_skills
+        | Choosing_skill, [] | Reading_page, _ -> None)
     | Tools_async when state.tools_async_detail_open -> None
     | Tools_async -> (
         match tools_async_targets state with
@@ -31,6 +31,24 @@ let tools_list (state : state) =
         | [] -> None)
     | Tools_activations | Tools_usage | Tools_storage
     | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> None
+
+let read_skill_page (state : state) =
+  match state.tools_pane, selected_tools_skill_profile state with
+  | Tools_surface, Some _ -> state.tools_skill_focus <- Reading_page
+  | Tools_surface, None
+  | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ -> ()
+
+let choose_skill_again (state : state) =
+  match state.tools_pane, state.tools_skill_focus with
+  | Tools_surface, Reading_page ->
+      state.tools_skill_focus <- Choosing_skill;
+      true
+  | Tools_surface, Choosing_skill
+  | (Tools_async | Tools_activations | Tools_usage | Tools_storage | Tools_catalog _), _ -> false
+
+let show_tools_pane (state : state) pane =
+  state.tools_pane <- pane;
+  state.tools_skill_focus <- Choosing_skill
 
 let move_tools_skill state move =
   let count = List.length (tools_skill_profiles state) in

@@ -27,8 +27,24 @@ val tools_list : Masc_tui_types.state -> tools_list option
     that are readings -- receipts, usage, all tools, storage, the volume
     report, an open async request -- whose move keys scroll the page, and
     while the source picker is open, which walks its own list. [None] too
-    on a list with nothing in it: a page with no Skill or no request still
-    scrolls. *)
+    on Available while its page is read ({!read_skill_page}), and on a list
+    with nothing in it: a page with no Skill or no request still scrolls. *)
+
+val read_skill_page : Masc_tui_types.state -> unit
+(** Enter on Available, after the selected Skill's evidence is asked for:
+    the move keys read the whole page -- the Skill's flow, its evidence, the
+    tool table -- instead of walking the list. With no Skill selected there
+    is nothing to read, and the keys stay where they were. Other panes keep
+    their own Enter. *)
+
+val choose_skill_again : Masc_tui_types.state -> bool
+(** Esc on Available while its page is read: the move keys walk the Skill
+    list again. [true] when Esc was spent this way, so the caller brings the
+    selected Skill back on screen and Esc goes no further out. *)
+
+val show_tools_pane : Masc_tui_types.state -> Masc_tui_types.tools_pane -> unit
+(** Change the Tools pane. A page read on Available belongs to that visit,
+    so every arrival starts with the move keys on the list. *)
 
 val moves :
   Masc_tui_types.state ->

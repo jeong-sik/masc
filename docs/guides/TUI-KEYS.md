@@ -796,7 +796,7 @@ count is drawn beyond the available space.
 
 | Keys | What it does |
 |---|---|
-| `j/k` | in Available, select a Skill; in async runs, select an original request; the other sections and an open request scroll |
+| `j/k` | in Available, select a Skill, and after Enter scroll its page; in async runs, select an original request; the other sections and an open request scroll |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
 | `p` | available / async runs / receipts / usage / all tools. Available shows the selected Keeper's exposed tools and Skills; ORIGIN names the tool source. Async runs shows workspace requests and recovery: active counts active ledger requests, runtime-owned means a current runtime owner, ownership-unknown is unconfirmed. Receipts keeps current-session Skill evidence: triggered=invoked, delivered/handed off=delivered, actions=later tool actions. These are separate events; no record does not prove no use. Usage aggregates recorded calls by exact Skill revision across current Keeper sessions; last use is the ledger's recorded time, and unread ledgers stay qualified. All tools lists process-wide registrations, separately from a Keeper's callable surface and observed calls. DIRECT=direct calls allowed; SURFACES=exposure paths; none=no exposure path. Use Skill receipts for usage evidence and Activity for tool input/output. |
@@ -806,12 +806,12 @@ count is drawn beyond the available space.
 | `c / C` | open $EDITOR on a template for a new Skill; c starts an instruction Skill, C starts a composition Skill |
 | `e` | open the selected SKILL.md in $EDITOR, validate, CAS-save, and publish |
 | `d` | remove the selected published package; press d again on the same row to confirm |
-| `Esc` | return from original Task to request, then request to list; otherwise back to Features & plugins |
+| `Esc` | return from original Task to request, then request to list, and from a Skill's page to the Skill list; otherwise back to Features & plugins |
 | `r` | refresh the open original Task body/history, original request detail, or Tools list |
 | `Ctrl-S` | in Available, unfold or fold the runtime, digest and byte-budget rows |
 | `Y` | in Available, copy the diagnostics with whole digests and the selected Skill's whole revision |
 | `V` | in All tools, open retired Keeper volumes and request a report; in that reading, an armed V reclaims only the reported names, other input disarms, and Esc returns to the catalog position |
-| `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill |
+| `Enter` | in async runs, read the selected original request; otherwise load retained evidence for the selected Skill, and in Available turn j/k and paging to its page until Esc |
 | `t / T` | from async request detail, read its original source Task and history |
 | `H` | from original Task detail, read earlier stored history; retains the observed prefix on failure |
 | `o / O` | in async runs, edit the original submitter, request ID and target Keeper for an exact lookup |

@@ -4668,6 +4668,7 @@ let cycle_tools_keeper state ~mailbox ~delta =
     state.tools_activations_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled;
     tools_task_user_scroll state 0;
     state.tools_skill_cursor <- 0;
+    state.tools_skill_focus <- Choosing_skill;
     launch_tools_load state ~mailbox
   end
 ;;
@@ -9611,6 +9612,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
   state.code_hover <- None;
   state.runtime_config_jump_section <- None;
   if destination <> Tools && state.tools_async_detail_open then close_tools_async_detail state;
+  if destination <> Tools then state.tools_skill_focus <- Choosing_skill;
   state.keeper_navigation_open <- false;
   state.keeper_message_focus <- Right_pane;
   state.runtime_model_jump <- None;
@@ -18934,6 +18936,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.tools_evidence_run_id <- None;
   state.browser_lane_read_resume <- None;
   state.tools_skill_cursor <- 0;
+  state.tools_skill_focus <- Choosing_skill;
   tools_task_user_scroll state 0;
   state.msg_loaded_pages <- [];
   state.item_account <- None;
@@ -20466,7 +20469,7 @@ let enter_metrics_section state section =
    shorter section opens it part-way down for no reason the reader gave. *)
 let enter_tools_pane state pane =
   if pane <> Tools_async then close_tools_async_detail state;
-  state.tools_pane <- pane;
+  Masc_tui_list_moves.show_tools_pane state pane;
   tools_task_user_scroll state 0;
   (* Opening the Usage pane reads the catalog and every Keeper's usage once,
      and the Activations pane the selected Keeper's ledger (RFC-0483 §4.3).
@@ -30231,13 +30234,23 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match snapshot.Masc.Tui_decode_tools.ts_freshness with
              | Masc.Tui_decode_tools.Settled -> Masc_tui_owed_read.succeeded state.tools_inventory_owed
              | Masc.Tui_decode_tools.Warming -> failed_read state.tools_inventory_owed);
-          (match selected with
-           | None -> ()
-           | Some reference ->
-               List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference reference)
-                 (tools_skill_profiles state)
-               |> Option.iter (fun index -> state.tools_skill_cursor <- index));
-          normalize_tools_skill_cursor state
+          let kept =
+            match selected with
+            | None -> false
+            | Some reference -> (
+                match
+                  List.find_index (fun profile -> Skill_reference.equal profile.Masc.Tui_decode_tools.esp_reference reference)
+                    (tools_skill_profiles state)
+                with
+                | Some index ->
+                    state.tools_skill_cursor <- index;
+                    true
+                | None -> false)
+          in
+          normalize_tools_skill_cursor state;
+          (* A page read about a Skill the new inventory no longer holds is
+             not the page of the Skill now selected. *)
+          if not kept then state.tools_skill_focus <- Choosing_skill
       | Error detail ->
           (* The failure and its wait are this Keeper's, like a reading. *)
           state.tools_inventory_keeper <- keeper_name;
@@ -40696,7 +40709,7 @@ Use relative paths for resources already held in the package. -->
             | None -> report_action state "system" "No Composition Skill is available on this Keeper surface"
             | Some (index, _) ->
                 state.tools_skill_cursor <- index;
-                state.tools_pane <- Tools_surface;
+                Masc_tui_list_moves.show_tools_pane state Tools_surface;
                 tools_task_user_scroll state 0;
                 handle_skill_evidence ())
        | Some k
@@ -40717,7 +40730,12 @@ Use relative paths for resources already held in the package. -->
              tools_task_user_scroll state 0;
              launch_tools_async_detail state ~mailbox:async_messages
            end
-       | Some "\r" when state.view = Tools -> handle_skill_evidence ()
+       | Some "\r" when state.view = Tools ->
+           (* Enter loads the selected revision's evidence as before, and
+              again (the latest) while the page is read. On Available it
+              also turns the move keys from the list to that page. *)
+           handle_skill_evidence ();
+           Masc_tui_list_moves.read_skill_page state
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_params ->
            handle_runtime_param_edit_open ~advanced:false ()
@@ -42924,6 +42942,10 @@ Use relative paths for resources already held in the package. -->
                   (* Back on the request list, which reads on its own pushes
                      ([launch_owed_async_requests]). *)
                   close_tools_async_detail state
+                else if Masc_tui_list_moves.choose_skill_again state then
+                  (* From the page back to the Skill list, with the selected
+                     Skill on screen again. *)
+                  follow_tools_list state Masc_tui_list_moves.Tools_skills
                 else goto_surface state ~mailbox:async_messages
                   (Masc_tui_surface_navigation.surface_ring_family state.view)
             | Config ->

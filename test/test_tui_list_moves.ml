@@ -436,6 +436,40 @@ let test_tools_skill_list_walks_the_selection () =
   Alcotest.(check bool) "an empty Skill list leaves the keys to the page" true
     (Option.is_none (Moves.moves (tools_surface 0) ~rows:no_rows ~follow:no_follow))
 
+(* Enter on Available turns the keys from the Skill list to the page under
+   it. The tool table and the evidence are drawn below the Skills, and while
+   the keys only walked the list, nothing past the last Skill was reachable. *)
+let test_tools_enter_reads_the_page_and_esc_returns () =
+  let state = tools_surface 5 in
+  state.tools_skill_cursor <- 2;
+  Moves.read_skill_page state;
+  Alcotest.(check bool) "after Enter the move keys scroll the page" true
+    (Option.is_none (Moves.moves state ~rows:no_rows ~follow:no_follow));
+  Alcotest.(check int) "reading the page keeps the selected Skill" 2 state.tools_skill_cursor;
+  Moves.read_skill_page state;
+  Alcotest.(check bool) "Enter while reading stays on the page" true
+    (Option.is_none (Moves.tools_list state));
+  Alcotest.(check bool) "Esc is spent giving the keys back to the list" true
+    (Moves.choose_skill_again state);
+  ignore (press_tools state Move.Line_down);
+  Alcotest.(check int) "j walks on from the Skill that was read" 3 state.tools_skill_cursor;
+  Alcotest.(check bool) "the next Esc goes further out" false (Moves.choose_skill_again state);
+  (* Leaving the pane ends the reading: Available comes back on its list. *)
+  Moves.read_skill_page state;
+  Moves.show_tools_pane state Tools_async;
+  Moves.show_tools_pane state Tools_surface;
+  Alcotest.(check bool) "switching pane gives the keys back to the list" true
+    (Moves.tools_list state = Some Moves.Tools_skills);
+  (* No Skill, nothing to read; other panes keep their own Enter and Esc. *)
+  let empty = tools_surface 0 in
+  Moves.read_skill_page empty;
+  Alcotest.(check bool) "Enter with no Skill reads no page" false (Moves.choose_skill_again empty);
+  state.tools_pane <- Tools_usage;
+  Moves.read_skill_page state;
+  state.tools_pane <- Tools_surface;
+  Alcotest.(check bool) "Enter on another pane reads no Skill page" true
+    (Moves.tools_list state = Some Moves.Tools_skills)
+
 let request id : Tui_decode.async_request_row =
   { ar_request_id = id; ar_submitted_by = "operator"; ar_keeper_name = "keeper"
   ; ar_phase = Async_running; ar_submitted_at = 0.; ar_ownership = Async_runtime_owned }
@@ -534,6 +568,8 @@ let () =
     ; ( "tools"
       , [ Alcotest.test_case "the Skill list walks the selection" `Quick
             test_tools_skill_list_walks_the_selection
+        ; Alcotest.test_case "Enter reads the page and Esc returns" `Quick
+            test_tools_enter_reads_the_page_and_esc_returns
         ; Alcotest.test_case "the async request list walks the selection" `Quick
             test_tools_async_list_walks_the_selection
         ; Alcotest.test_case "the readings answer no list move" `Quick

@@ -2762,6 +2762,12 @@ Keeper's effective Tool surface, async requests, Skill activations, cross-Keeper
 Skill usage, and the registered Tool catalog. This keeps the Skill views from
 being buried below a long Tool list.
 
+On the effective Tool surface, `j/k`, paging and `Home/End` select a Skill.
+`Enter` loads its retained evidence and turns those keys to the page below the
+list, where the evidence and the tool table are; `Esc` returns them to the
+Skill list with the selected Skill in view. Another pane or screen starts on
+the list again.
+
 In async requests, `j/k` selects an original request and `Enter` opens its
 detail. `r` refreshes that exact request; `Esc` returns to the active list.
 The selection stays on the original submitter, request ID and target Keeper

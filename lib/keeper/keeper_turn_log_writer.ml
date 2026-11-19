@@ -25,6 +25,10 @@ type event =
       ; ending : ending
       }
   | Process_start
+  | Reset of
+      { cause : Log.announced
+      ; after : Log.mark -> Log.mark
+      }
 
 let outcome_of_ending : ending -> Log.outcome = function
   | Completed -> Completed
@@ -66,6 +70,9 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
   let opened ~turn_ref ~runtime ~task ~stimuli =
     Log.Opened { at; turn_ref; runtime; task; stimuli; baseline = now }
   in
+  let announced ~cause ~after closed_before =
+    Log.Reset { at; cause = Announced cause; before = now; after = after now; closed_before }
+  in
   match tail with
   | Nothing_written ->
     let started = Log.Log_started { id = new_log_id; at; mark = now } in
@@ -73,6 +80,7 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
      | Admit { turn_ref; runtime; task; stimuli } ->
        Ok [ started; opened ~turn_ref ~runtime ~task ~stimuli ]
      | Process_start -> Ok [ started ]
+     | Reset { cause; after } -> Ok [ started; announced ~cause ~after [] ]
      | Finish { admitted = Recorded { opened = (_ : int) } | Not_recorded; ending = (_ : ending) }
        -> Ok [])
   | Written { point; open_turn; rows_end = (_ : int); last = (_ : Log.line) } ->
@@ -112,5 +120,17 @@ let plan ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~covered event =
      | Finish { admitted = Not_recorded; ending = (_ : ending) }, Some (_ : Store.open_turn)
      | Finish { admitted = Recorded _ | Not_recorded; ending = (_ : ending) }, None -> Ok []
      | Process_start, Some open_turn -> close open_turn Process_exited
-     | Process_start, None -> Ok [])
+     | Process_start, None -> Ok []
+     | Reset { cause; after }, (Some (_ : Store.open_turn) | None) ->
+       let* closed_before =
+         Marks.slices covered ~from:point.closed_messages ~through:now.closed_messages
+       in
+       Ok (reset @ [ announced ~cause ~after closed_before ]))
+;;
+
+let drop ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~after =
+  match tail with
+  | Nothing_written -> Log.Log_started { id = new_log_id; at; mark = after now }
+  | Written { point; open_turn = (_ : Store.open_turn option); rows_end = (_ : int); last = (_ : Log.line) }
+    -> Log.Reset { at; cause = Unannounced; before = point; after = after point; closed_before = [] }
 ;;

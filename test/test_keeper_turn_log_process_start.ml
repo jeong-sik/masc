@@ -199,11 +199,11 @@ let open_messages (place : Recorder.place) =
 
 let closing_text : Start.closing -> string = function
   | No_open_turn -> "no open turn"
-  | Nothing_open -> "nothing open"
-  | Closed_open { messages } -> Printf.sprintf "closed %d" messages
-  | Not_closed (Head_unread _) -> "not closed: head unread"
-  | Not_closed (History_unread _) -> "not closed: history unread"
-  | Not_closed (Save_not_installed _) -> "not closed: save not installed"
+  | Closing Nothing_open -> "nothing open"
+  | Closing (Closed_open { messages }) -> Printf.sprintf "closed %d" messages
+  | Closing (Not_closed (Head_unread _)) -> "not closed: head unread"
+  | Closing (Not_closed (History_unread _)) -> "not closed: history unread"
+  | Closing (Not_closed (Save_not_installed _)) -> "not closed: save not installed"
 ;;
 
 let line_result_text = function

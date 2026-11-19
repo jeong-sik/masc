@@ -1087,3 +1087,17 @@ val age_text : now:float -> since:float -> string option
     one frame can share a single read. A clock that moved backwards, or a
     stamp that is not a number or is absurdly far off, says nothing rather
     than an age. *)
+
+val thought_preview : max_cells:int -> string -> string
+(** First readable line of a folded reasoning block, skipping fenced code
+    markers and horizontal rules, stripping Markdown block/inline markers and
+    control characters, collapsed to one line and truncated cleanly to
+    [max_cells]. Returns [""] when no readable text exists or
+    [max_cells <= 0]. *)
+
+val folded_thought_summary :
+  mark:string -> width:int -> line_count:int -> body:string -> string
+(** Antigravity-style 1-line summary for a folded reasoning block:
+    ["○ Thought · N lines — <preview> · Ctrl-R"] when the preview fits within
+    [width] (with at least 12 preview cells, capped at 64), stepping down to
+    ["○ Thought · N lines · Ctrl-R"] on narrow panes or empty previews. *)

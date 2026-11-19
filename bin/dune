@@ -1723,19 +1723,31 @@
  (modules masc_tui_lane_read_decision)
  (libraries masc))
 
+;; What wakes the TUI main loop and when it must wake by itself (RFC
+;; tui-idle-wait): the bell writers ring, and the deadlines decisions note.
+(library
+ (name masc_tui_wake)
+ (wrapped false)
+ (modules masc_tui_wake)
+ (libraries eio mtime.clock.os))
+
 ;; What a surface owes its server reading after an announced change
-;; (RFC-0480 section 3.1). Pure; the main loop decides when to read.
+;; (RFC-0480 section 3.1). Pure apart from noting when a retry's wait ends
+;; for the main loop (masc_tui_wake); the main loop decides when to read.
 (library
  (name masc_tui_owed_read)
  (wrapped false)
- (modules masc_tui_owed_read))
+ (modules masc_tui_owed_read)
+ (libraries masc_tui_wake))
 
 ;; When the next refresh pass may read /health after the probe failed
-;; (RFC tui-one-screen-grammar section 2). Pure; the main loop starts it.
+;; (RFC tui-one-screen-grammar section 2). Pure apart from noting when the
+;; wait ends for the main loop (masc_tui_wake); the main loop starts it.
 (library
  (name masc_tui_refresh_pace)
  (wrapped false)
- (modules masc_tui_refresh_pace))
+ (modules masc_tui_refresh_pace)
+ (libraries masc_tui_wake))
 
 ;; Which Keeper rows, or the whole roster, the TUI owes a read after the
 ;; server says they changed (RFC-0481 section 3.3). Pure; the main loop

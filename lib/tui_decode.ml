@@ -3741,6 +3741,17 @@ let standalone_lane_answer ~ko (lane : standalone_lane) =
           "the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
     ; sla_evidence = structured_output_without_ledger
     }
+  | Standalone_lane.Librarian_memory ->
+    { sla_output_meaning =
+        t "Keeper 하나의 Memory 를 어떻게 바꿀지 제안. 반영은 그 Keeper 의 쓰는 쪽이 한다."
+          "a proposal for how one Keeper's Memory changes; that Keeper's writer commits it."
+    ; sla_evidence =
+        (* [Lane_run_identity.keeps_run_records] is false for this lane. *)
+        t "구조화 출력 생성이며 MASC 도구 루프가 아닙니다. 이 lane 은 실행 기록을 \
+           남기지 않아서 입력·출력 원문을 열 곳이 없습니다."
+          "structured-output generation, not a MASC tool loop; this lane keeps \
+           no run records, so no exact Input/Output is retained to open."
+    }
   | Standalone_lane.Verifier ->
     { sla_output_meaning =
         t "태스크 완료 또는 목표 증명 판정, 사유, 평가 런타임."
@@ -3828,7 +3839,8 @@ let required_standalone_lane_field json field =
 let required_run_lane_field json field =
   let* id = required_string_field json field in
   match Lane_run_identity.of_id id with
-  | Some lane -> Ok lane
+  | Some lane when Lane_run_identity.keeps_run_records lane -> Ok lane
+  | Some _ -> Error (Printf.sprintf "%s: lane %s keeps no run records" field id)
   | None -> Error (Printf.sprintf "%s: unknown retained lane %s" field id)
 ;;
 
@@ -3856,7 +3868,8 @@ let decode_standalone_lane json =
     | Standalone_lane.Librarian
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Candle_appraiser
-    | Standalone_lane.Verifier -> Ok None
+    | Standalone_lane.Verifier
+    | Standalone_lane.Librarian_memory -> Ok None
   in
   let* admitted_slots = required_list_field json "admitted_slots" in
   let* sl_admitted_slots =
@@ -6398,7 +6411,8 @@ let decode_librarian_run_page json =
          | Lane_run_identity.Board_attention
          | Lane_run_identity.Workspace_curator
          | Lane_run_identity.Candle_appraiser
-         | Lane_run_identity.Verifier -> None)
+         | Lane_run_identity.Verifier
+         | Lane_run_identity.Librarian_memory -> None)
       rows
   in
   let* lrp_next =
@@ -6643,7 +6657,8 @@ let decode_lane_run_gate_judgment ~(lane : Lane_run_identity.t) ~status ~output 
   | Lane_run_identity.Board_attention
   | Lane_run_identity.Workspace_curator
   | Lane_run_identity.Candle_appraiser
-  | Lane_run_identity.Verifier -> Ok Lane_run_not_gate_judgment
+  | Lane_run_identity.Verifier
+  | Lane_run_identity.Librarian_memory -> Ok Lane_run_not_gate_judgment
   | Lane_run_identity.Hitl_auto_judge ->
     let decode_advisory output =
       let* judgment = required_string_field output "judgment" in
@@ -7173,7 +7188,8 @@ let decode_lane_run_detail json =
       | Lane_run_identity.Hitl_auto_judge
       | Lane_run_identity.Workspace_curator
       | Lane_run_identity.Candle_appraiser
-      | Lane_run_identity.Verifier ->
+      | Lane_run_identity.Verifier
+      | Lane_run_identity.Librarian_memory ->
         false
     in
     match is_board_attention, answer_succeeded, lrd_output with
@@ -7212,7 +7228,8 @@ let decode_lane_run_detail json =
     | (Lane_run_identity.Librarian, _) | (Lane_run_identity.Hitl_auto_judge, _)
     | (Lane_run_identity.Board_attention, _) | (Lane_run_identity.Workspace_curator, _)
     | (Lane_run_identity.Verifier, _)
-    | (Lane_run_identity.Candle_appraiser, _) -> Ok None
+    | (Lane_run_identity.Candle_appraiser, _)
+    | (Lane_run_identity.Librarian_memory, _) -> Ok None
   in
   let* () = match lrd_librarian_preflight, answer_succeeded with
     | Some {lp_generation_path = Generation_not_entered; _}, true ->
@@ -7321,7 +7338,8 @@ let decode_lane_run_detail json =
     | Lane_run_identity.Board_attention
     | Lane_run_identity.Workspace_curator
     | Lane_run_identity.Candle_appraiser
-    | Lane_run_identity.Verifier -> decode_judgment ()
+    | Lane_run_identity.Verifier
+    | Lane_run_identity.Librarian_memory -> decode_judgment ()
   in
   Ok
     { lrd_run_id = summary.lrs_run_id

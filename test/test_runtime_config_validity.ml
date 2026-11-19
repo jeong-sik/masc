@@ -3009,6 +3009,7 @@ let test_judgment_lanes_join_the_priority_queue () =
     ; "board_attention_exact", "priority"
     ; "verifier_exact", "priority"
     ; "candle_appraiser", "standard"
+    ; "librarian_memory", "background"
     ]
     (List.map
        (fun lane ->

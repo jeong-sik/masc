@@ -164,6 +164,11 @@ val run
     [runtime_id] and parse the answer as a single JSON value. *)
 
 val order_slots : string list -> string Runtime_candidate_standing.exact_order
+
+val order_slots_at :
+  now:float -> string list -> string Runtime_candidate_standing.exact_order
+(** {!order_slots} read at [now] instead of the wall clock, so a caller can
+    read the HTTP and CLI orders of one lane at one moment. *)
 (** {!Runtime_candidate_standing.order_exact} over declared CLI candidates.
     Both observations come from one resolved runtime per declared entry; an
     unknown entry is never held and is preserved for [run] to report. Reapply

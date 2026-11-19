@@ -218,7 +218,7 @@ let palette_entries (state : state) =
       config_panes
   @ List.map (fun lane ->
       ("go Features & plugins / " ^ Lane_run_identity.label lane ^ " history", Palette_lane_history lane))
-      Lane_run_identity.all
+      (List.filter Lane_run_identity.keeps_run_records Lane_run_identity.all)
   @ [ "go Play / Links", Palette_collab
     ; "go Play / MSX", Palette_msx
     ; "go Play / DOS", Palette_dos

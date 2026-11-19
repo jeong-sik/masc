@@ -20755,8 +20755,11 @@ let open_lane_inventory_selection state ~mailbox =
       match row.Inventory.selection with
       | Inventory.Exact _ ->
           (match selected_standalone_lane state with
-           | Some lane -> open_lane_run_list state ~mailbox
-               (Standalone_lane.run_identity lane.sl_lane)
+           | Some lane ->
+               let identity = Standalone_lane.run_identity lane.sl_lane in
+               if Lane_run_identity.keeps_run_records identity
+               then open_lane_run_list state ~mailbox identity
+               else show_lanes_action_error state "This Lane keeps no run records"
            | None -> show_lanes_action_error state "The exact Lane detail is absent from this inventory; r reads again")
       | Browser lane ->
           show_browser_lane state;

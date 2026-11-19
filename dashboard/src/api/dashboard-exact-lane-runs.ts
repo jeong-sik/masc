@@ -12,7 +12,9 @@ export const EXACT_LANE_IDS = [
 export type ExactLane = typeof EXACT_LANE_IDS[number]
 
 // Retained logical work is independent of the current builtin model routes.
-// Verifier uses Task/Goal registries.
+// Verifier uses Task/Goal registries. This list is OCaml
+// `Lane_run_identity.all` filtered by `keeps_run_records`: `librarian_memory`
+// keeps no run records, so it is absent and no run link opens for it.
 export const LANE_RUN_IDENTITIES = [...EXACT_LANE_IDS, 'verifier_exact'] as const
 export type LaneRunIdentity = typeof LANE_RUN_IDENTITIES[number]
 export function isLaneRunIdentity(value: unknown): value is LaneRunIdentity {

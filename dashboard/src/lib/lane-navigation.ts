@@ -73,7 +73,8 @@ export function sameLaneTarget(left: LaneNavigationTarget, right: LaneNavigation
   }
 }
 export function laneTargetParams(target: LaneNavigationTarget, diagnostics = false): Record<string, string> {
-  const destination: LaneNavigationTarget = diagnostics && target.kind === 'exact'
+  // librarian_memory keeps no run records, so it has no run history to open.
+  const destination: LaneNavigationTarget = diagnostics && target.kind === 'exact' && isLaneRunIdentity(target.lane)
     ? { kind: 'run_history', workspace: target.workspace, lane: target.lane } : target
   return { section: diagnostics || destination.kind === 'run_history' ? 'internal-agents'
       : destination.kind === 'declaration' || destination.kind === 'instance' ? 'lane-addons' : 'runtime',

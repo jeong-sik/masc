@@ -942,8 +942,9 @@ let registration_row lane =
     (Standalone_lane.to_id lane)
 ;;
 
-(* Verifier reviews have their own registries. Rows naming that lane are
-   refused on replay. *)
+(* Verifier reviews have their own registries, and the Librarian's Memory
+   lane keeps no run records. Rows naming the Verifier lane are refused on
+   replay. *)
 let test_the_registry_refuses_unrecorded_lanes () =
   check bool "the Verifier lane has no registry lane" true
     (Option.is_none (R.lane_of_standalone Standalone_lane.Verifier));
@@ -952,7 +953,7 @@ let test_the_registry_refuses_unrecorded_lanes () =
        check bool (Standalone_lane.to_id lane ^ " converts back to itself") true
          (match R.lane_of_standalone lane with
           | Some recorded -> Lane_run_identity.equal (R.run_lane recorded) (Standalone_lane.run_identity lane)
-          | None -> lane = Standalone_lane.Verifier))
+          | None -> List.mem lane Standalone_lane.[ Verifier; Librarian_memory ]))
     Standalone_lane.all;
   let read_and_refused lane =
     let path = fresh_log_path "exact-lane-verifier-row-" in

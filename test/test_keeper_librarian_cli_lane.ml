@@ -755,7 +755,8 @@ let with_held_api_slot ~sw ~net ~clock ~cli_slot_ids f =
       [ held_api_slot,
         { Runtime_exact_output_registry.candidate =
             runtime.Runtime_instance.candidate_backpressure
-        ; quota_scope = scope } ]
+        ; quota_scope = scope
+        ; window = None } ]
     ~cli_slot_ids ~lane_id:"librarian_exact" ~slot_ids:[held_api_slot]
     (Fixture.resolver_snapshot ~source:"librarian held API slot"
        [{ Fixture.id = held_api_slot; base_url = server.base_url }])

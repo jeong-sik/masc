@@ -44,6 +44,16 @@ let order_at ~now (resolved : Registry.resolved_lane) =
   }
 ;;
 
+let held_until ({ lane; held_http } : ordered)
+      ~(cli : string Standing.exact_order) =
+  match lane.Registry.selected_slots, cli.walk with
+  | _ :: _, _ | [], _ :: _ -> None
+  | [], [] ->
+    (match List.map (fun held -> held.until) held_http @ List.map snd cli.held with
+     | [] -> None
+     | first :: rest -> Some (List.fold_left Float.min first rest))
+;;
+
 let order resolved =
   (* NDT-OK: the wall clock decides only whether a rest or a provider-stated
      time has passed. A slot it sets aside comes back in [held_http] with its

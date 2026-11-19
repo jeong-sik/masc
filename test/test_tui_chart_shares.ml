@@ -442,6 +442,53 @@ let meter_bar_opens_a_code_per_colour () =
   Alcotest.(check string) "no colour opens nothing" (glyphs 10)
     (bar (Chart.Series { paint = series_paint Theme.No_color; series = Theme.Calls }))
 
+(* A meter's readout takes the colour at the value's own position along the
+   scale (btop readout colouring): empty/non-positive and No_color stay plain,
+   a declared limit matches its band at the value's share, a series walks its
+   hue, and an anomaly takes its alarm colour. *)
+let meter_tip_style_matches_scale () =
+  let limit_16 = Chart.Declared_limit (series_paint Theme.Colors_16) in
+  let limit_off = Chart.Declared_limit (series_paint Theme.No_color) in
+  let series_16 = Chart.Series { paint = series_paint Theme.Colors_16; series = Theme.Calls } in
+  let anomaly_16 = Chart.Anomaly { paint = series_paint Theme.Colors_16; alarm = Chart.Alarm_bad } in
+  Alcotest.(check string) "zero value stays plain" ""
+    (Chart.meter_tip_style limit_16 ~value:0 ~max_value:100);
+  Alcotest.(check string) "non-positive max stays plain" ""
+    (Chart.meter_tip_style limit_16 ~value:10 ~max_value:0);
+  Alcotest.(check string) "no colour stays plain" ""
+    (Chart.meter_tip_style limit_off ~value:90 ~max_value:100);
+  Alcotest.(check string) "declared limit near zero matches Ok"
+    (Theme.status_readable ~surface:Theme.Page None Theme.Ok)
+    (Chart.meter_tip_style limit_16 ~value:25 ~max_value:100);
+  Alcotest.(check string) "declared limit midway matches Warn"
+    (Theme.status_readable ~surface:Theme.Page None Theme.Warn)
+    (Chart.meter_tip_style limit_16 ~value:60 ~max_value:100);
+  Alcotest.(check string) "declared limit near limit matches Bad"
+    (Theme.status_readable ~surface:Theme.Page None Theme.Bad)
+    (Chart.meter_tip_style limit_16 ~value:85 ~max_value:100);
+  Alcotest.(check string) "value above max clamps to near limit"
+    (Theme.status_readable ~surface:Theme.Page None Theme.Bad)
+    (Chart.meter_tip_style limit_16 ~value:150 ~max_value:100);
+  Alcotest.(check string) "series tip matches its 16-colour hue"
+    Theme.Sgr.bright_cyan
+    (Chart.meter_tip_style series_16 ~value:50 ~max_value:100);
+  Alcotest.(check string) "anomaly tip takes alarm colour"
+    (Theme.status_readable ~surface:Theme.Page None Theme.Bad)
+    (Chart.meter_tip_style anomaly_16 ~value:10 ~max_value:100);
+  let reset = "<0>" in
+  let plain_suffix =
+    Chart.meter ~width:20 ~value:85 ~max_value:100 ~scale:limit_16
+      ~suffix_style:"" ~reset ()
+  in
+  let explicit_suffix =
+    Chart.meter ~width:20 ~value:85 ~max_value:100 ~scale:limit_16
+      ~suffix_style:"<W>" ~reset ()
+  in
+  Alcotest.(check bool) "explicit empty suffix_style omits readout code" true
+    (String.ends_with ~suffix:" 85%" plain_suffix);
+  Alcotest.(check bool) "explicit suffix_style overrides tip style" true
+    (String.ends_with ~suffix:" <W> 85%<0>" explicit_suffix)
+
 (* A column two cells tall: the base cell fills before the one above it
    starts, a zero is the baseline of the base cell alone, and the top of the
    scale fills both. One cell is the one-row mark. *)
@@ -651,6 +698,8 @@ let () =
       ; Alcotest.test_case "blend and plain fallbacks" `Quick meter_cell_fallbacks
       ; Alcotest.test_case "a bar opens a code per colour" `Quick
           meter_bar_opens_a_code_per_colour
+      ; Alcotest.test_case "a meter tip matches its scale" `Quick
+          meter_tip_style_matches_scale
       ]
     ; "braille graph",
       [ Alcotest.test_case "levels for zero, small, absent and unread" `Quick braille_levels

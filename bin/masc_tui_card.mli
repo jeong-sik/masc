@@ -20,8 +20,9 @@
     The caller passes the style codes, so the same card reads in whatever
     palette the screen probed. That includes a focused card's border, the
     theme's border.focused token, which the caller takes from the probed
-    palette like every other colour. The corners stay rounded either way: RFC
-    section 12 leaves the focused card's border glyphs open. *)
+    palette like every other colour. A focused card also switches from light
+    rounded glyphs ([╭─╮│╰─╯]) to heavy glyphs ([┏━┓┃┗━┛]), so focus stays
+    distinguishable without colour (RFC tui-one-screen-grammar section 2). *)
 
 type count =
   | Whole of int  (** Every row of the reading is loaded: [12]. *)
@@ -153,12 +154,42 @@ val min_height : int
 val content_cells : width:int -> int
 (** The width of a card's content for a card [width] cells wide. *)
 
+(** Scroll state for a card that shows a window over a longer body
+    (RFC tui-one-screen-grammar section 2, btop right-edge scrollbar). *)
+type scrollbar =
+  { offset : int
+  ; visible : int
+  ; total : int
+  }
+
+(** One cell of the right-edge scrollbar track. *)
+type scrollbar_cell =
+  | Track
+  | Thumb
+  | Arrow_up
+  | Arrow_down
+
+val scrollbar_cells : rows:int -> scrollbar -> scrollbar_cell list option
+(** The [rows] cells drawn along the right edge of a scrollable card, top row
+    first, or [None] when the body fits ([total <= visible]) or [rows <= 0] or
+    [visible <= 0]. For [rows >= 3] the first and last cells are {!Arrow_up}
+    and {!Arrow_down} with a proportional {!Thumb} moving across the inner
+    [rows - 2] track cells; for 1–2 rows the thumb moves without arrows. *)
+
 val render :
-  ko:bool -> style:style -> width:int -> height:int -> t -> string list
-(** [render ~ko ~style ~width ~height card] is [height] rows of [width] cells
-    each, the body stretched to the height with blank rows. Below {!min_width}
-    or {!min_height} it returns that many blank rows rather than a box with no
-    room in it, so a caller that counts rows still counts them. [ko] is the
+  ?scrollbar:scrollbar ->
+  ko:bool ->
+  style:style ->
+  width:int ->
+  height:int ->
+  t ->
+  string list
+(** [render ?scrollbar ~ko ~style ~width ~height card] is [height] rows of
+    [width] cells each, the body stretched to the height with blank rows. Below
+    {!min_width} or {!min_height} it returns that many blank rows rather than a
+    box with no room in it, so a caller that counts rows still counts them.
+    When [scrollbar] overflows, the right edge draws its btop-style scrollbar
+    in place of the vertical border without taking content cells. [ko] is the
     language of the count and of the cut-off rows. *)
 
 val columns_that_fit :

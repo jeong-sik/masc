@@ -259,8 +259,9 @@ let other_keys label ~runtime_root id generation expected =
     label
     expected
     (match F.remove_other_keys ~runtime_root ~account_id:id ~generation with
-     | Ok gone -> Printf.sprintf "removed %d" gone
-     | Error (_ : string) -> "left")
+     | Ok { F.gone; stayed = None } -> Printf.sprintf "removed %d" gone
+     | Ok { F.gone; stayed = Some (_ : string) } -> Printf.sprintf "removed %d, one stays" gone
+     | Error (_ : string) -> "not looked at")
 ;;
 
 (* The new key is in the file of the generation named, and the folder of the
@@ -349,7 +350,7 @@ let test_other_keys_link =
     made "the other account" ~runtime_root other_account "sk-test-the-other-key" "made";
     let link = keys_of ~runtime_root account in
     Unix.symlink (keys_of ~runtime_root other_account) link;
-    other_keys "an account whose key folder is a link" ~runtime_root account second "left";
+    other_keys "an account whose key folder is a link" ~runtime_root account second "not looked at";
     Alcotest.(check string)
       "what the link led to is in place"
       "key:sk-test-the-other-key"
@@ -511,6 +512,13 @@ let test_other_keys_stay =
        Alcotest.(check string) "the new key is in place" "key:sk-test-the-second-key" (read_name in_place);
        Alcotest.(check (list string))
          "the key of the generation before went, after the one that did not"
+         [ Filename.basename stuck; Filename.basename in_place ]
+         (names_of keys);
+       (* What went and what stays are said of the same look. *)
+       put (Filename.concat keys "9-left") "sk-test-a-key-a-write-left";
+       other_keys "asked while one of them does not go" ~runtime_root account second "removed 1, one stays";
+       Alcotest.(check (list string))
+         "the one that goes went"
          [ Filename.basename stuck; Filename.basename in_place ]
          (names_of keys);
        Unix.chmod stuck 0o700;

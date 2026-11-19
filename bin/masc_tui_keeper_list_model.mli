@@ -149,6 +149,9 @@ val density_label : density -> string
 val density_of_string : string -> density option
 (** The labels are the values [tui-keepers.toml] stores under [density]. *)
 
+val density_title : ko:bool -> density -> string
+(** Compact screen-language label for the inline density indicator ([1줄]/[2줄], [1L]/[2L]). *)
+
 val shows_portrait : view -> density -> bool
 (** Whether the list draws the selected Keeper's portrait above its rows:
     only the [Plain] view in [Two_lines]. The axis views spend those rows on
@@ -157,6 +160,9 @@ val shows_portrait : view -> density -> bool
 val next_sort : sort -> sort
 val sort_label : sort -> string
 val sort_of_string : string -> sort option
+
+val sort_title : ko:bool -> sort -> string
+(** Screen-language label for the inline sort indicator (btop-style [< sort >]). *)
 type verification_holders
 (** The assignees of tasks that await their verdict, read once from a task
     list so a roster of keepers can ask about each of them. *)

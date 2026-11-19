@@ -214,7 +214,13 @@ let keeper_facts = function
      the prune pass and by the Keeper's purge, both in that process. Boot
      reconcile does not move this store. *)
   | Keeper.Execution_receipts -> Kept_by_the_lease_holder
-  | Keeper.Metrics
+  (* One writer, [Keeper_types_support.append_keeper_metrics], with two
+     callers: the row a Keeper's turn ends with and the row of its heartbeat
+     loop. Both run only in a process that holds the lease. The append
+     rotates the day file by size and prunes to the store's byte budget
+     itself. Day files also go by the prune pass and by the Keeper's purge,
+     both in that process. No command line tool appends to this store. *)
+  | Keeper.Metrics -> Kept_by_the_lease_holder
   | Keeper.Provider_inputs
   | Keeper.Memory_recall_artifacts
   | Keeper.Crash_events

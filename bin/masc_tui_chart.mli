@@ -79,6 +79,16 @@ val meter_cell_style :
     {!Masc_tui_theme.ramp_style} at the cell's reach, the smaller of its far
     edge and [value / max_value]; an anomaly draws its status colour. *)
 
+val meter_tip_style :
+  meter_scale -> value:int -> max_value:int -> string
+(** The text-readable SGR for a meter's numeric readout (btop readout
+    colouring). For {!Declared_limit} and {!Anomaly} it matches the rightmost
+    filled cell at [value / max_value] (already lifted to 4.5:1 text contrast).
+    For {!Series} it reads the bright end of the series ramp so the readout
+    carries the series hue while staying above the 4.5:1 text contrast floor
+    even at low values. Returns [""] when [value <= 0], [max_value <= 0], or
+    colours are disabled. *)
+
 val meter_fill_run :
   scale:meter_scale ->
   width:int ->
@@ -118,7 +128,9 @@ val meter :
   string
 (** Bracketless segmented telemetry meter bounded within [width] display cells:
     optional [label], {!meter_bar}, and right readout ([suffix], defaulting to
-    aligned ["%3d%%"]). *)
+    aligned ["%3d%%"]). When [suffix_style] is omitted, the readout takes
+    {!meter_tip_style} so the figure matches the bar's tip colour; pass
+    [~suffix_style:""] for plain foreground or an explicit SGR to override. *)
 
 (** {1 Distribution Bars} *)
 

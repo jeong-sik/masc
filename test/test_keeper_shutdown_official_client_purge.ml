@@ -177,6 +177,30 @@ let test_purge_forgets_the_kept_turn_record () =
   check string "and the kept row with it" "read, no row" (newest ())
 ;;
 
+(* The purge removes the Keeper's store directories with plain [rmdir]. A
+   same-name successor in the same process writes into them again: nothing
+   remembers that a directory was once made (#53279). *)
+let test_a_same_name_successor_writes_after_the_purge () =
+  with_base_path @@ fun config base_path ->
+  let oauth_source = Filename.concat base_path "operator-oauth.json" in
+  let account_home = Filename.concat base_path "muse-account" in
+  write_runtime_toml
+    base_path
+    (runtime_toml ~oauth_source ~account_home
+       ~assignment:(Printf.sprintf "\n%s = %S" keeper_name "muse.muse-spark"));
+  let store = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
+  Dated_jsonl.append store (`Assoc [ "row", `Int 1 ]);
+  purge config;
+  check bool "the purge removes the TurnRecord store" false
+    (Sys.file_exists (Dated_jsonl.base_dir store));
+  let successor = Masc.Keeper_types_support.keeper_turn_record_store config keeper_name in
+  let row = `Assoc [ "row", `Int 2 ] in
+  Dated_jsonl.append successor row;
+  check (list string) "the successor's row is in its store"
+    [ Yojson.Safe.to_string row ]
+    (List.map Yojson.Safe.to_string (Dated_jsonl.read_recent successor 5))
+;;
+
 (* The purged Keeper's newest decision row is held in memory too
    ([Keeper_row_facts.newest_decision]). The purge removes the record itself,
    so it tells the kept rows, and a same-name successor reads its own record:
@@ -338,6 +362,8 @@ let () =
             test_purge_removes_muse_identity_directory
         ; test_case "purge forgets the kept TurnRecord" `Quick
             test_purge_forgets_the_kept_turn_record
+        ; test_case "a same-name successor writes after the purge" `Quick
+            test_a_same_name_successor_writes_after_the_purge
         ; test_case "purge forgets the kept decision row" `Quick
             test_purge_forgets_the_kept_decision_row
         ; test_case "purge omits a home it can no longer derive" `Quick

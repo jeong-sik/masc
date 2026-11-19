@@ -6,6 +6,16 @@
 open Keeper_approval_queue_rules_types
 open Keeper_approval_queue_result
 
+(* Whether the decision's [Resolved] row is known to be on the audit ledger
+   (#38541). The delivery is journaled as [Ledger_append_pending] in the same
+   write that removes the pending entry, so it is durable before the append
+   is tried; it becomes [Ledger_recorded] only after an append or a retry's
+   read confirms the row. Until then the delivery is the decision's only
+   durable copy and is never removed. *)
+type resolution_ledger =
+  | Ledger_append_pending
+  | Ledger_recorded
+
 type persisted_delivery =
   { entry : pending_approval
   ; resolution_sequence : int
@@ -16,6 +26,10 @@ type persisted_delivery =
   ; created_by : string option
   ; grant_consumed : bool
   ; replay_outcome : resolution_replay_outcome option
+  ; resolved_at : float
+      (* The [Resolved] row's own timestamp; it also names the day file that
+         row is filed under, so a retry reads that one file. *)
+  ; ledger : resolution_ledger
   }
 
 type log_row =

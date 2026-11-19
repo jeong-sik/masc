@@ -193,6 +193,23 @@ val footer_line :
     its keys use the ordinary item fitter. Quit and input-recovery notices
     keep their existing priority. It does not authorize an action. *)
 
+val footer_line_keys :
+  ?help_door:bool ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?position:string ->
+  ?recovery_in_slot:recovery_row option ->
+  ?choices:string ->
+  Masc_tui_types.state -> max_cells:int -> keys:Masc_tui_footer.key_row -> string
+(** {!footer_line} for a row of typed keys: a key that does not answer on the
+    screen as drawn keeps its place in the row's dim when every key fits, and
+    is the first to go when the row is cut. With colours off the dim marks
+    nothing, so such a key is left out at every width. The navigation trace
+    hears only the keys that answer.
+
+    {!footer_line} stays for rows still written by hand. Each goes when its
+    screen builds zone 5 from its action list (RFC tui-one-screen-grammar
+    3.5); then this is the only entry. *)
+
 val keeper_split_threshold_cols : int
 
 val keeper_roster_pane_cols : int
@@ -349,6 +366,22 @@ val surface_chrome :
 (** [sidebar] reserves its width from [cols] and draws beside the body,
     above the full-width footer. The body must wrap for the remaining width.
     A complete recovery notice may use the existing bottom row. *)
+
+val surface_chrome_keys :
+  overflow:overflow ->
+  ?help_door:bool ->
+  ?frame:chrome_frame ->
+  ?status:Masc_tui_footer.status_item list ->
+  ?sidebar:(int * (rows:int -> Buffer.t -> unit)) ->
+  Masc_tui_types.state ->
+  terminal_rows:int ->
+  cols:int ->
+  surface_key:string ->
+  title:string ->
+  keys:Masc_tui_footer.key_row ->
+  body:(budget:int -> chrome_body -> unit) ->
+  Frame_presenter.frame * Masc_tui_types.clamped_scroll option
+(** {!surface_chrome} whose footer is drawn by {!footer_line_keys}. *)
 
 val connection_badge : Masc_tui_types.state -> string
 (** What a title row adds to the top row's connection word: that the event
@@ -696,10 +729,15 @@ val harness_detail_heading :
 
 val planning_proof_mark : Masc_tui_types.Tui_decode.goal_proof -> string
 
+(** Which Keeper row the keys are for. The roster names the keys that act
+    (RFC tui-one-screen-grammar section 2); the detail keeps [j/k], its way
+    back, [r] and [q] until it is drawn from the action list. *)
+type keeper_keys = Roster_keys | Detail_keys
+
 val keeper_control_hints :
   ?offers_chat:bool ->
-  ?offers_back:bool ->
   ?taken:string list ->
+  keys:keeper_keys ->
   Masc_tui_types.state -> Keeper_control.reading option -> string
 (** The Keeper keys alone, less any whose single keys are in [taken] -- the
     keys a detail tab answers itself ({!Masc_tui_keys.keeper_detail_tab_taken_keys}).

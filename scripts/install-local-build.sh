@@ -26,9 +26,17 @@
 # which holds only the shim the latest rebuild replaced. All of this happens
 # before any binary is replaced. A failed build (build-shim.sh needs Docker), an architecture
 # this cannot build or a built shim of another source stops the install with
-# exit status 1. Nothing is changed then, and the error gives the command
-# that builds the shim by hand. A shim that already declares this build's
+# exit status 1. The shim and the binaries are then as they were, and the
+# error gives the command that builds the shim by hand; only a rename that
+# fails after masc-exec-shim.previous was written leaves that file holding a
+# copy of the shim still in place. A shim that already declares this build's
 # identity is kept. A workspace with no shim is given none.
+#
+# The server still running refuses the new shim from this install until
+# masc restart, as the restarted server refused the old one before (#53164):
+# its readiness check reads the shim again for every guest it has not
+# verified. So restart right after installing. To go back before a restart,
+# rename masc-exec-shim.previous to masc-exec-shim.
 #
 # A release shim (masc-exec-shim with its sha256 sidecar) is left alone, and
 # no release is asked for, unless --refresh-guest-shim is given. That option
@@ -562,24 +570,31 @@ checkout_guest_shim() (
   if [ "$guest_arch_status" -eq 0 ]; then
     arch_arg=$guest_arch
   else
-    arch_arg="<arm64|amd64>"
+    arch_arg=ARCH
   fi
-  by_hand=$(printf 'cd %q && scripts/remote-ssh/build-shim.sh --arch %s && cp dist/remote-ssh/masc-exec-shim-linux-%s %q && chmod 755 %q' \
-    "$repo" "$arch_arg" "$arch_arg" "$shim" "$shim")
+  # The command puts the shim in place with one rename, as this step does,
+  # so a guest that boots meanwhile never reads a partial file.
+  by_hand=$(printf 'cd %q && scripts/remote-ssh/build-shim.sh --arch %s && install -m 755 dist/remote-ssh/masc-exec-shim-linux-%s %q && mv %q %q' \
+    "$repo" "$arch_arg" "$arch_arg" "$shim.partial" "$shim.partial" "$shim")
   refuse() {
     echo "install-local-build: guest exec shim $shim declares source identity $installed_source, but this build is $required_source and its server refuses that shim. $1; nothing installed. Build the shim by hand, then install again: $by_hand" >&2
     exit 1
   }
   [ "$guest_arch_status" -eq 0 ] ||
-    refuse "Its ELF header names no guest architecture this install can build ($guest_arch)"
+    refuse "Its ELF header names no guest architecture this install can build ($guest_arch); in the command below ARCH is arm64 or amd64"
   previous="$shim.previous"
   out=""
   staged=""
   staged_previous=""
+  # Cleanup that fails says so and does not change how the step ended: under
+  # errexit a failing last command here would turn a finished swap into a
+  # failed install after the shim was already replaced.
   remove_staged() {
-    [ -z "$out" ] || rm -rf "$out"
-    [ -z "$staged" ] || rm -f "$staged"
-    [ -z "$staged_previous" ] || rm -f "$staged_previous"
+    if [ -n "$out" ]; then rm -rf "$out" || echo "install-local-build: could not remove $out" >&2; fi
+    if [ -n "$staged" ]; then rm -f "$staged" || echo "install-local-build: could not remove $staged" >&2; fi
+    if [ -n "$staged_previous" ]; then
+      rm -f "$staged_previous" || echo "install-local-build: could not remove $staged_previous" >&2
+    fi
   }
   trap remove_staged EXIT
   # build-shim.sh takes --out relative to the top of the checkout it runs in.
@@ -596,12 +611,15 @@ checkout_guest_shim() (
   fi
   built="$out/masc-exec-shim-linux-$guest_arch"
   [ -f "$built" ] || refuse "scripts/remote-ssh/build-shim.sh left no $built"
-  if ! built_source=$(source_identity_of "$built") || [ "$built_source" != "$required_source" ]; then
-    refuse "The shim built from $repo declares $built_source instead: the checkout changed after $build_dir/main_eio.exe was built, or that build comes from another checkout. Build again without --skip-build"
-  fi
   if ! staged=$(mktemp "$shim_dir/masc-exec-shim.partial.XXXXXX") ||
      ! cp "$built" "$staged" || ! chmod 755 "$staged"; then
     refuse "The built shim could not be staged in $shim_dir"
+  fi
+  # The identity is read from the staged copy, the bytes that are renamed
+  # into place, not from the build directory, which build-shim.sh leaves
+  # writable by everyone.
+  if ! built_source=$(source_identity_of "$staged") || [ "$built_source" != "$required_source" ]; then
+    refuse "The shim built from $repo declares $built_source instead: the checkout changed after $build_dir/main_eio.exe was built, or that build comes from another checkout. Build again without --skip-build"
   fi
   # One copy of the shim being replaced, so installs do not pile up copies.
   # Files that other hands left here are not this step's to remove.
@@ -615,7 +633,7 @@ checkout_guest_shim() (
     refuse "The built shim could not be renamed to $shim"
   fi
   staged=""
-  echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous)"
+  echo "installed the $guest_arch guest exec shim built from $repo into $shim_dir (source identity $required_source; the previous one is kept as $previous). The running server refuses it until masc restart."
 )
 checkout_guest_shim
 refresh_guest_shim

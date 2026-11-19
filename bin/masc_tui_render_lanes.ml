@@ -1232,13 +1232,9 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
           else box_line buf cols line
     done;
   box_bottom buf cols;
-  Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints_lanes_run_list ~lang:state.ui_language
-            ~has_runs:(shown > 0)
-            ~has_older:
-              (Option.is_some state.lane_runs_next && not state.lane_runs_loading)));
+  (* Every key of the run list moves, so zone 5 names none of them: the [?]
+     sheet does ([Masc_tui_keys.lane_run_list_bindings]). *)
+  Buffer.add_string buf (footer_line state ~max_cells:cols ~hints:"");
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
 
 (* The total preview includes labels, fences and notices. Complete payloads
@@ -2414,9 +2410,9 @@ let render_clients (state : state) =
      declares for Clients went unshown, and so did an armed search's query,
      which rides the same row. *)
   Buffer.add_string buf
-    (footer_line state ~max_cells:cols
-       ~hints:
-         (Masc_tui_keys.footer_hints ~lang:state.ui_language ~has_rows:(shown > 0)
+    (footer_line_keys state ~max_cells:cols
+       ~keys:
+         (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~has_rows:(shown > 0)
             Masc_tui_types.Clients));
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;

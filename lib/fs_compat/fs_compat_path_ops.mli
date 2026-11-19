@@ -1,6 +1,6 @@
 (** Path operations of [Fs_compat]: the optional loads, [file_size], the
     publish, exchange, rename and clone entry points, unlink and tree removal,
-    subdirectory names, [realpath], and [mkdir_p] with its memo. [Fs_compat]
+    subdirectory names, [realpath], and [mkdir_p]. [Fs_compat]
     includes this module. *)
 
 val load_file_opt : string -> string option
@@ -42,9 +42,3 @@ val realpath : string -> string
 val realpath_lenient : string -> string
 
 val mkdir_p : string -> unit
-
-val mkdir_p_memoized : string -> unit
-
-val invalidate_mkdir_memo : string -> unit
-
-val reset_mkdir_memo_for_testing : unit -> unit

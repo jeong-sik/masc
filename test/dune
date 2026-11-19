@@ -3043,6 +3043,7 @@
 (include stanzas/test_file_system_named.inc)
 (include stanzas/test_keeper_decision_row_kept.inc)
 (include stanzas/test_masc_test_workspace_names.inc)
+(include stanzas/test_keeper_turn_tool_audit_kept.inc)
 
 (include stanzas/test_dated_jsonl_count_cache.inc)
 (include stanzas/test_dated_jsonl_off_fiber.inc)
@@ -3195,7 +3196,7 @@
 (include stanzas/test_fs_compat_save_file_mode.inc)
 (include stanzas/test_fs_compat_save_file_errors.inc)
 
-(include stanzas/test_fs_compat_mkdir_memo.inc)
+(include stanzas/test_fs_compat_writers_make_their_directory.inc)
 
 (include stanzas/test_fs_compat_fd_cache.inc)
 
@@ -3915,7 +3916,13 @@
 (test
  (name test_tui_footer_row_need)
  (modules test_tui_footer_row_need)
- (libraries alcotest masc_tui_keys masc_tui_types))
+ (libraries alcotest masc_tui_keys masc_tui_types masc_tui_footer masc_tui_theme))
+
+(test
+ (name test_tui_footer_moves)
+ (modules test_tui_footer_moves)
+ (libraries alcotest masc.runtime masc_tui_keys masc_tui_types masc_tui_footer
+  masc_tui_theme masc_tui_keeper_story masc_tui_render_prim))
 
 (test
  (name test_tui_runtime_config_receipt)
@@ -5217,6 +5224,11 @@
  (name test_tui_card)
  (modules test_tui_card)
  (libraries alcotest masc_tui_card masc_tui_message_layout masc_tui_theme masc_tui_value))
+
+(test
+ (name test_tui_table)
+ (modules test_tui_table)
+ (libraries alcotest masc_tui_table masc_tui_message_layout))
 
 (test
  (name test_tui_keeper_mark)

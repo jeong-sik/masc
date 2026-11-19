@@ -1250,16 +1250,16 @@ let render_agenda (state : state) =
        to the column and a leading mark would push the right half off. *)
     if selected then Ansi.reverse ^ body ^ Ansi.reset else body
   in
-  (* A panel with nothing to open says so on its own footer rather than
-     naming a key that would do nothing. *)
-  let hints =
-    Masc_tui_keys.footer_hints_agenda ~lang:state.ui_language
-      ~openable:(Agenda.target_indexes lines <> [])
-  in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"agenda"
+  (* Every key of the panel moves -- j/k, the page keys, g/G, Enter and Esc --
+     so zone 5 names none of them (RFC tui-one-screen-grammar section 2) and
+     holds the help door alone. The panel owns the keys, so the door is not
+     the default ([help_key_answers] says no under a modal); [?] here opens
+     the sheet on the agenda's own section. *)
+  surface_chrome ~overflow:Paged_by_cursor ~help_door:true state ~terminal_rows ~cols
+    ~surface_key:"agenda"
     ~frame:Chrome_overlay
     ~title:(screen_title (ui_text state ~ko:" 일정·요청" ~en:" Agenda"))
-    ~hints
+    ~hints:""
     (* [agenda_viewport] rather than the budget it is derived from: the
        keypress bounds the cursor against that pair. *)
     ~body:(fun ~budget:_ c ->

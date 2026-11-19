@@ -609,6 +609,8 @@ let test_account_stays =
    it holds. *)
 let second_key = key_prefix ^ "-the-second-of-alice"
 let third_key = key_prefix ^ "-the-third-of-alice"
+let key_of_bob = key_prefix ^ "-of-bob"
+let second_key_of_bob = key_prefix ^ "-the-second-of-bob"
 
 let replace (person : Login.person) ~base_path id body =
   Server_key_account.replace
@@ -968,7 +970,132 @@ let test_left_keys_at_start =
       "the key the records say reads back"
       ("key:" ^ second_key)
       (read_name key_file);
-    Alcotest.(check (list string)) "and is in that file alone" [ key_file ] (holding ~text:second_key root))
+    Alcotest.(check (list string)) "and is in that file alone" [ key_file ] (holding ~text:second_key root);
+    (* A runtime root that is gone is spelled and not made again. *)
+    remove_tree runtime_root;
+    at_start ();
+    Alcotest.(check bool) "a start makes no runtime root" false (Sys.file_exists runtime_root))
+;;
+
+(* Nothing goes on records that cannot be trusted: records that went back
+   name a generation before the one on disk. The log of the case stopped,
+   as a record it did not take leaves it. *)
+let test_left_keys_under_a_stopped_log =
+  with_env_zone (fun ~env ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let runtime_root = runtime_root_of ~base_path alice in
+      let account = registered alice ~base_path the_key in
+      let first_file = key_file_of alice ~runtime_root account in
+      answered
+        "the replacement of the case"
+        (replace alice ~base_path account (replacement_body second_key))
+        ~status:200
+        ~code:None;
+      Out_channel.with_open_gen
+        [ Open_wronly; Open_creat; Open_excl; Open_binary ]
+        0o600
+        first_file
+        (fun out -> output_string out the_key);
+      let log_path = Authz_log.path_of_base_path ~base_path in
+      Unix.chmod log_path 0o400;
+      let answer = replace alice ~base_path account (replacement_body third_key) in
+      Unix.chmod log_path 0o600;
+      answered "under a log that takes no record" answer ~status:503 ~code:(Some "replacement_not_recorded");
+      Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path);
+      Alcotest.(check (list string))
+        "a start over the zone whose log stopped leaves the file"
+        [ first_file ]
+        (holding ~text:the_key root);
+      (* The server starts again, and reads the files again. *)
+      Eio.Switch.run (fun sw ->
+        Server_stopped_work.start ~sw ~env ~zone:(opened ~root ~base_path) ~base_path);
+      Alcotest.(check (list string)) "a start over a zone it can trust removes it" [] (holding ~text:the_key root);
+      Alcotest.(check string)
+        "the key the records say reads back"
+        ("key:" ^ second_key)
+        (read_name (key_file_of alice ~runtime_root account))))
+;;
+
+(* The key before of a key account, where a stopped server leaves it. *)
+type left_key =
+  { account : Provider_account_id.t
+  ; file : string
+  ; key : string
+  }
+
+let put_back { account = (_ : Provider_account_id.t); file; key } =
+  Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl; Open_binary ] 0o600 file (fun out ->
+    output_string out key)
+;;
+
+(* One account keeps no other waiting. The start looks at them in the order
+   the records give: while the call of the first runs, and while a folder
+   of the first does not go, the key the one after it left goes all the
+   same. *)
+let test_left_keys_of_two_accounts =
+  with_env_zone (fun ~env ~zone ~root ~base_path ->
+    if Unix.geteuid () <> 0
+    then (
+      declare ~base_path;
+      let alice = admit zone ~name:"alice" ~hex:'a' in
+      let bob = admit zone ~name:"bob" ~hex:'b' in
+      let replaced_with_a_left_key (person : Login.person) ~before ~after =
+        let runtime_root = runtime_root_of ~base_path person in
+        let account = registered person ~base_path before in
+        let left = { account; file = key_file_of person ~runtime_root account; key = before } in
+        answered
+          "the replacement of the case"
+          (replace person ~base_path account (replacement_body after))
+          ~status:200
+          ~code:None;
+        put_back left;
+        left
+      in
+      let of_alice = replaced_with_a_left_key alice ~before:the_key ~after:second_key in
+      let of_bob = replaced_with_a_left_key bob ~before:key_of_bob ~after:second_key_of_bob in
+      let first, second =
+        match Accounts.key_accounts (state_of alice).Authz_state.provider_accounts with
+        | first :: (_ : Provider_account_id.t list) ->
+          if Provider_account_id.equal first of_alice.account then of_alice, of_bob else of_bob, of_alice
+        | [] -> Alcotest.fail "the records hold no key account"
+      in
+      let at_start () = Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path) in
+      (match
+         Login.one_call_of first.account ~busy:None (fun (_ : Login.in_call) ->
+           at_start ();
+           Ok ())
+       with
+       | Ok () -> ()
+       | Error (_ : unit option) -> Alcotest.fail "the call of the account was not taken");
+      Alcotest.(check (list string))
+        "the key the account after a running call left is gone"
+        []
+        (holding ~text:second.key root);
+      Alcotest.(check (list string))
+        "the key of the account whose call ran is there"
+        [ first.file ]
+        (holding ~text:first.key root);
+      put_back second;
+      let stuck = Filename.concat (Filename.dirname first.file) "0-stuck" in
+      Unix.mkdir stuck 0o700;
+      Out_channel.with_open_bin (Filename.concat stuck "1") (fun out -> output_string out "left");
+      Unix.chmod stuck 0o500;
+      at_start ();
+      Alcotest.(check bool) "the folder that does not go is there" true (Sys.file_exists stuck);
+      Alcotest.(check (list string))
+        "the key the account after it left is gone"
+        []
+        (holding ~text:second.key root);
+      Alcotest.(check (list string))
+        "and so is the key before of the account the folder is in"
+        []
+        (holding ~text:first.key root);
+      Unix.chmod stuck 0o700;
+      at_start ();
+      Alcotest.(check bool) "the next start removes what stayed" false (Sys.file_exists stuck)))
 ;;
 
 let () =
@@ -988,6 +1115,8 @@ let () =
         ; Alcotest.test_case "a key that is not stored, and the next one" `Quick test_replacement_not_stored
         ; Alcotest.test_case "a record the log did not take, and the same request again" `Quick test_replacement_given_up
         ; Alcotest.test_case "what a stopped server left in the folder of the keys" `Quick test_left_keys_at_start
+        ; Alcotest.test_case "records that cannot be trusted remove no key" `Quick test_left_keys_under_a_stopped_log
+        ; Alcotest.test_case "one account keeps no other waiting" `Quick test_left_keys_of_two_accounts
         ] )
     ]
 ;;

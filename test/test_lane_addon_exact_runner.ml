@@ -669,7 +669,8 @@ let test_a_held_slot_keeps_the_request_open_without_a_call () =
       ~runtime_observations:
         [ ( "held"
           , { Runtime_exact_output_registry.candidate
-            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime } ) ]
+            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime
+            ; window = None } ) ]
       [ { F.id = "held"; base_url = held.base_url }; { F.id = "refusing"; base_url = refusing.base_url } ];
     Fun.protect ~finally:(fun () -> Runtime_candidate_backpressure.note_candidate_success ~candidate) (fun () ->
       Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 3600.0);
@@ -693,7 +694,8 @@ let with_a_held_slot ~base_path ~held body =
       ~runtime_observations:
         [ ( "held"
           , { Runtime_exact_output_registry.candidate
-            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime } ) ]
+            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime
+            ; window = None } ) ]
       ({ F.id = "held"; base_url = held } :: walked)
   in
   let release () = Runtime_candidate_backpressure.note_candidate_success ~candidate in
@@ -862,7 +864,8 @@ let test_an_http_lane_whose_every_slot_waits_starts_nothing () =
       ~runtime_observations:
         [ ( "held"
           , { Runtime_exact_output_registry.candidate
-            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime } ) ]
+            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime
+            ; window = None } ) ]
       [ { F.id = "held"; base_url = held.base_url } ];
     Fun.protect ~finally:(fun () -> Runtime_candidate_backpressure.note_candidate_success ~candidate) (fun () ->
       Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 3600.0);

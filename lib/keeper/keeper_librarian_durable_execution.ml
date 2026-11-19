@@ -726,6 +726,33 @@ let rec consume_one ~config ~keeper_name ~wake =
            | Error detail -> error detail
            | Ok original -> resume_original (Owner.Read original))
     | [],[] ->
+      let settled_records=match observed with
+        | Some (_,_,_,settled) -> settled
+        | None -> [] in
+      let replaced_evidence (evidence:Yojson.Safe.t) =
+        match evidence with
+        | `Assoc fields ->
+          List.exists (fun (k,v) -> k="cause" && v=`String "declaration_replaced") fields
+          && List.exists (fun (k,v) -> k="status" && v=`String "not_allowed") fields
+        | _ -> false in
+      let drained_replaced=settled_records<>[] && List.for_all (fun ((record:Retained.retained),_) ->
+        match Progress.phase record.progress with
+        | Rejected {stage=Execution;evidence} -> replaced_evidence evidence
+        | Rejected {stage=Before_dispatch;_} -> false
+        | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+        | Commit_unknown _ | Finished _ | Conflicted _
+        | Subdividing _ | Subdivided _ -> false) settled_records in
+      let* ()=
+        if drained_replaced then
+          let runtime_keepers_dir=Workspace.keepers_runtime_dir config in
+          (match Keeper_external_read_cursor.observe ~runtime_keepers_dir ~keeper_name with
+           | Error detail -> error detail
+           | Ok observed ->
+             (match Keeper_external_read_cursor.release_pending ~runtime_keepers_dir
+                      ~keeper_name ~expected:observed with
+              | Error detail -> error detail
+              | Ok () -> Ok ()))
+        else Ok () in
       match Refusal.blocked ~config ~reserved stops with
       | Some refusal -> Error refusal
       | None ->

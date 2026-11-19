@@ -26364,6 +26364,19 @@ let runtime_quota_end_label ?(ko = false) = function
         (if ko then "초기화 시각 없음, %s 다시 호출" else "no reset stated, called again %s")
         (runtime_moment_text at)
 
+(* Whether the runtime's quota rest already says its account is spent: a
+   provider quota refusal or a usage read that found the gating window spent
+   rests it for that, so an account-usage badge on the same row would say it
+   twice. A payment refusal is the balance, a different limit. *)
+let runtime_quota_rest_says_spent (runtime : Tui_decode.runtime_option) =
+  match runtime.ro_quota_rest with
+  | Some { Runtime_quota_window.cause =
+             ( Runtime_quota_window.Refused Runtime_quota_window.Provider_quota_refused
+             | Runtime_quota_window.Usage_read ); _ } -> true
+  | Some { Runtime_quota_window.cause =
+             Runtime_quota_window.Refused Runtime_quota_window.Payment_refused; _ }
+  | None -> false
+
 let runtime_quota_label ?(ko = false) (runtime : Tui_decode.runtime_option) =
   Option.map
     (fun (spent : Runtime_quota_window.spent) ->
@@ -26417,6 +26430,7 @@ let runtime_usage_label state runtime =
       match runtime_spent_usage snapshot.rss_resolved runtime with
       | Error _ -> Some (if ko then "사용량 미확인" else "usage unknown")
       | Ok [] -> None
+      | Ok (_ :: _) when runtime_quota_rest_says_spent runtime -> None
       | Ok (_ :: _) -> Some (if ko then "계정 한도 소진" else "account limit spent")
 
 let runtime_route_probe_text state runtime probe =

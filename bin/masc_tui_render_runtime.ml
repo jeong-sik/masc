@@ -86,6 +86,7 @@ let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
   let warn label = Option.map (fun text -> Theme.warn () ^ text ^ Ansi.reset) label in
   let usage = runtime_usage_reading state runtime in
   let spent = match usage with
+    | Ok (_ :: _) when runtime_quota_rest_says_spent runtime -> None
     | Ok (_ :: _) -> Some (Theme.warn () ^ (if ko then "계정 한도 소진" else "account limit spent") ^ Ansi.reset)
     | Ok [] | Error _ -> None in
   match

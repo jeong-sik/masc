@@ -115,46 +115,52 @@ let covered_messages ~end_atom messages =
     labelled
 ;;
 
-let completed_history_end ~trace_id ~lines ~messages =
-  Librarian_continuity_snapshot.checkpoint_prefix_range ~trace_id ~lines ~messages
-  |> Result.map (fun range -> range.Keeper_librarian_range.end_atom)
-;;
-
 (* RFC keeper-context-window-in-tokens §13.4: where a request with no
-   absorbed point starts. The end of the last completed turn on this
-   history, verified against it; 0 when the history has no completed turn.
-   A boundary store this process cannot read, or a boundary the history in
-   hand does not match, is [Turn_boundary_unknown]: the range then opens on
-   the newest atom alone and the origin says so, rather than on the whole
-   history under a boundary that was never read (§13.4 does not fold an
-   unknown start into 0). The same boundary names the turns whose tool
-   results go as markers ([finished_turn_results]); an unknown boundary names
-   none. Reading it logs nothing: a request
-   whose range it opens says so ([Keeper_carried_front.warn_range_opens_on_newest_atom]),
-   and the dispatches that read it but start from a seed or a Librarian
-   point, or the forecast that only looks, have nothing to report. *)
+   absorbed point starts. The end of the last unit of the Keeper's turn log
+   (RFC librarian-call-only-proposes §11.2): the mark its last [Closed] or
+   [Reset] ends at, or [Log_started]'s when no unit has ended, turned from a
+   count of closed messages into the atom vocabulary of the history in hand.
+   An open turn's [Opened] does not move it. A log with no line has recorded
+   no turn of this Keeper, so the history is the first turn's and starts at 0.
+
+   No digest is compared: a purge that rewrites a closed message keeps its
+   number (§5.6). The history in hand is checked for holding at least the
+   closed messages the mark names. A log this process cannot read, a mark of
+   another trace, or a history shorter than the mark is
+   [Turn_boundary_unknown]: the range then opens on the newest atom alone and
+   the origin says so, rather than on the whole history under a boundary that
+   was never read (§13.4 does not fold an unknown start into 0). The same
+   boundary names the turns whose tool results go as markers
+   ([finished_turn_results]); an unknown boundary names none. Reading it logs
+   nothing: a request whose range it opens says so
+   ([Keeper_carried_front.warn_range_opens_on_newest_atom]), and the
+   dispatches that read it but start from a seed or a Librarian point, or the
+   forecast that only looks, have nothing to report. *)
 let turn_start ~config ~keeper_name ~trace_id ~messages =
   let unknown reason = Keeper_carried_front.Turn_boundary_unknown { reason } in
-  match
-    Keeper_turn_boundaries.read
+  let path =
+    Keeper_turn_log_store.path_for_keepers_dir
       ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name
-  with
-  | Error detail -> unknown ("boundary read failed: " ^ detail)
-  | Ok lines ->
-    (match completed_history_end ~trace_id ~lines ~messages with
-     | Ok end_atom -> Keeper_carried_front.Turn_boundary { end_atom }
-     | Error Librarian_continuity_snapshot.Uncovered_history ->
-       Keeper_carried_front.Turn_boundary { end_atom = 0 }
-     | Error
-         ((Librarian_continuity_snapshot.Unmatched_history
-          | Librarian_continuity_snapshot.Range_stopped _
-          | Librarian_continuity_snapshot.Trace_mismatch
-          | Librarian_continuity_snapshot.History_changed
-          | Librarian_continuity_snapshot.Prefix_changed
-          | Librarian_continuity_snapshot.Invalid_snapshot _
-          | Librarian_continuity_snapshot.Read_failed _
-          | Librarian_continuity_snapshot.Write_failed _) as error) ->
-       unknown (Librarian_continuity_snapshot.error_to_string error))
+  in
+  match Keeper_turn_log_store.read_tail path with
+  | Error error ->
+    unknown (Keeper_turn_log_recorder.not_recorded_to_string (Keeper_turn_log_recorder.Tail_unread error))
+  | Ok Keeper_turn_log_store.Nothing_written -> Keeper_carried_front.Turn_boundary { end_atom = 0 }
+  | Ok (Keeper_turn_log_store.Written { point; _ }) ->
+    let in_hand = List.length messages in
+    if not (String.equal point.Keeper_turn_log.trace trace_id)
+    then unknown (Printf.sprintf "the turn log's last unit ends on trace %s" point.trace)
+    else if in_hand < point.closed_messages
+    then
+      unknown
+        (Printf.sprintf "the turn log's last unit ends after %d closed messages; the history holds %d"
+           point.closed_messages in_hand)
+    else
+      Keeper_carried_front.Turn_boundary
+        { end_atom =
+            Runtime_model_input_tail_window.first_atom_at_or_after messages
+              ~message_index:point.closed_messages
+        }
 ;;
 
 let prepare_continuity ~trace_id ~lines ~messages snapshot =

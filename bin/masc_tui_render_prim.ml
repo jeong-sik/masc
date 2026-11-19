@@ -4202,7 +4202,7 @@ let repository_change_status (row : Masc.Tui_decode.repository_change) =
     | true, true -> "staged+worktree"
     | true, false -> "staged"
     | false, true -> "worktree"
-    | false, false -> "unknown"
+    | false, false -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 
 let box_line_span buf cols span =

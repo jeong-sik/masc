@@ -1932,7 +1932,9 @@ let temporal_input_lines ~width ~sha256 (report : Temporal.t) =
 
 let temporal_output_lines ~width (report : Temporal.t) =
   let module T = Temporal in
-  let natural = function None -> "unknown" | Some value -> string_of_int value in
+  let natural = function
+    | None -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
+    | Some value -> string_of_int value in
   let detail (value : T.omission_detail) =
     ("TARGET EXCLUSIVE END  " ^ string_of_int value.target_end_atom)
     :: List.concat_map (fun (request : T.request_range) ->

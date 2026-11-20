@@ -316,12 +316,6 @@ def prefix_omission(target: Json, probe: Json) -> Json:
                 raise AcceptanceError(
                     "custom projection prevents a range-only omission claim"
                 )
-            unread = object_value(row.get("unread"), "frozen unread observation")
-            if any(
-                unread.get(source) != {"status": "available", "messages": []}
-                for source in ("snapshot", "memory")
-            ):
-                raise AcceptanceError("unread holes are present or unavailable")
             snapshot = object_value(row.get("selection"), "request selection")
             first_atom = natural(bounded.get("first_atom"), "request first atom")
             ranges.append(

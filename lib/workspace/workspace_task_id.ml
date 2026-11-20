@@ -421,7 +421,9 @@ let event_history_max_task_id config =
 
 let next_task_number config (backlog : backlog) =
   let backlog_ids = List.filter_map (fun (task : task) -> task_id_to_int task.id) backlog.tasks in
-  let receipt_ids = List.filter_map (fun receipt -> task_id_to_int receipt.deleted_task_id) backlog.task_deletion_receipts in
+  let receipt_ids = List.filter_map (fun receipt ->
+    task_id_to_int (Masc_domain.task_deletion_task_id_to_string receipt.deleted_task_id))
+    backlog.task_deletion_receipts in
   let creation_ids = List.filter_map (fun receipt -> task_id_to_int receipt.created_task_id) backlog.task_creation_receipts in
   let archive_ids = read_archive_task_ids config in
   (* Event history outlives both the live backlog and its archive after a

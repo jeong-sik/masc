@@ -51,7 +51,7 @@ let retire_rejections (backlog : Masc_domain.backlog) ~task_id =
    including failures after the acknowledgement's primary commit. *)
 let settle_task_deletion_locked config backlog (receipt : task_deletion_receipt) task =
   let open Result.Syntax in
-  let task_id = receipt.deleted_task_id in
+  let task_id = Masc_domain.task_deletion_task_id_to_string receipt.deleted_task_id in
   let backlog = retire_rejections backlog ~task_id in
   let pending_completion_approvals = List.filter
     (fun (pending : pending_completion_approval) -> not (String.equal pending.task_id task_id))
@@ -89,20 +89,26 @@ let settle_task_deletion_locked config backlog (receipt : task_deletion_receipt)
 ;;
 
 let delete_task_r config ~task_id =
-  with_file_lock_r config (backlog_lock_path config) (fun () ->
-    match read_backlog_r config with
-    | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message))
-    | Ok backlog ->
-      let task = List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks in
-      let existing = match task with
-        | Some _ -> None
-        | None -> List.find_opt (fun receipt -> String.equal receipt.deleted_task_id task_id) backlog.task_deletion_receipts in
-      let receipt = match existing with
-        | Some receipt -> receipt
-        | None -> {deletion_id=Random_id.prefixed ~prefix:"delete-" ~bytes:16;
-          deleted_task_id=task_id; requested_at=now_iso (); phase=Cleanup_required []} in
-      settle_task_deletion_locked config backlog receipt task)
-  |> Workspace_task_verification.flatten_lock_result
+  match Masc_domain.task_deletion_task_id_of_string task_id with
+  | Error msg -> Error (Masc_domain.Task (Masc_domain.Task_error.InvalidId msg))
+  | Ok validated_task_id ->
+    let task_id = Masc_domain.task_deletion_task_id_to_string validated_task_id in
+    with_file_lock_r config (backlog_lock_path config) (fun () ->
+      match read_backlog_r config with
+      | Error message -> Error (Masc_domain.System (Masc_domain.System_error.IoError message))
+      | Ok backlog ->
+        let task = List.find_opt (fun (task : task) -> String.equal task.id task_id) backlog.tasks in
+        let existing = match task with
+          | Some _ -> None
+          | None -> List.find_opt (fun receipt ->
+              Masc_domain.equal_task_deletion_task_id receipt.deleted_task_id validated_task_id)
+              backlog.task_deletion_receipts in
+        let receipt = match existing with
+          | Some receipt -> receipt
+          | None -> {deletion_id=Random_id.prefixed ~prefix:"delete-" ~bytes:16;
+            deleted_task_id=validated_task_id; requested_at=now_iso (); phase=Cleanup_required []} in
+        settle_task_deletion_locked config backlog receipt task)
+    |> Workspace_task_verification.flatten_lock_result
 ;;
 
 let retry_task_deletion_r config ~deletion_id =
@@ -113,8 +119,9 @@ let retry_task_deletion_r config ~deletion_id =
       match List.find_opt (fun receipt -> String.equal receipt.deletion_id deletion_id) backlog.task_deletion_receipts with
       | None -> Error (Unknown_deletion deletion_id)
       | Some receipt ->
-        if List.exists (fun (task : task) -> String.equal task.id receipt.deleted_task_id) backlog.tasks
-        then Error (Task_identity_reused receipt.deleted_task_id)
+        let deleted_task_id = Masc_domain.task_deletion_task_id_to_string receipt.deleted_task_id in
+        if List.exists (fun (task : task) -> String.equal task.id deleted_task_id) backlog.tasks
+        then Error (Task_identity_reused deleted_task_id)
         else settle_task_deletion_locked config backlog receipt None |> Result.map_error (fun error -> Deletion_storage_error error)) with
   | Ok result -> result
   | Error error -> Error (Deletion_storage_error error)

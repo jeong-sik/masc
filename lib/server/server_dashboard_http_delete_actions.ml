@@ -1374,7 +1374,13 @@ let add_delete_action_routes router =
              match Safe_ops.json_string_opt "task_id" json with
              | None ->
                  respond_error ~request:req reqd (invalid_request "task_id")
-             | Some task_id ->
+             | Some raw_task_id ->
+             match Masc_domain.task_deletion_task_id_of_string raw_task_id with
+             | Error msg ->
+                 respond_error ~status:`Bad_request ~request:req reqd
+                   (Printf.sprintf "invalid task_id: %s" msg)
+             | Ok validated_task_id ->
+             let task_id = Masc_domain.task_deletion_task_id_to_string validated_task_id in
              let config = (Mcp_server.workspace_config state) in
              match Workspace.delete_task_r config ~task_id with
              | Ok outcome ->

@@ -385,9 +385,20 @@ type pending_completion_approval =
 type task_deletion_phase = Cleanup_required of string list | Cleanup_verified
 [@@deriving show]
 
+type task_deletion_task_id = private string
+[@@deriving show, eq]
+
+val task_deletion_task_id_of_string :
+  string -> (task_deletion_task_id, string) result
+(** Validated task identity for durable deletion receipts. Delegates to
+    {!Validation.Task_id.validate} so both write paths and backlog
+    decoding enforce one exact identity contract. *)
+
+val task_deletion_task_id_to_string : task_deletion_task_id -> string
+
 type task_deletion_receipt =
   { deletion_id : string
-  ; deleted_task_id : string
+  ; deleted_task_id : task_deletion_task_id
   ; requested_at : string
   ; phase : task_deletion_phase
   }

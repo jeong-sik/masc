@@ -239,7 +239,8 @@ let lookup_results config ~goal_id task_ids =
       let copies rows = List.filter (fun (task : Masc_domain.task) -> String.equal task.id task_id) rows in
       let raw_copies = List.filter (fun row -> List.mem task_id (possible_row_ids ~wanted:task_ids row)) raw_rows in
       let deleted = List.exists (fun (receipt : Masc_domain.task_deletion_receipt) ->
-        String.equal receipt.deleted_task_id task_id) backlog.task_deletion_receipts in
+        String.equal (Masc_domain.task_deletion_task_id_to_string receipt.deleted_task_id) task_id)
+        backlog.task_deletion_receipts in
       let deletion_detail = Printf.sprintf "task %s has a deletion receipt; remaining copies do not prove its original status" task_id in
       let duplicate_detail = Printf.sprintf "task %s has duplicate rows in a source" task_id in
       let raw_uncertain = unidentified || List.exists duplicate_payout_field raw_copies in

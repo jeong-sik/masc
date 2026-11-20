@@ -612,6 +612,32 @@ let with_board_store ?(recipient_lookup = Masc.Recipient_lookup.none_declared) ~
   f ()
 ;;
 
+let test_dashboard_task_delete_rejects_invalid_task_id () =
+  with_authenticated_activity_router
+    ~prefix:"task-delete-invalid-id-" ~agent_name:"task-delete-admin"
+  @@ fun ~base_path:_ ~config ~state:_ ~sw:_ ~clock:_ ~router ~token ->
+  let router = Server_dashboard_http_delete_actions.add_delete_action_routes router in
+  let open Yojson.Safe.Util in
+  List.iter
+    (fun bad_id ->
+       let status, body =
+         dispatch_json ~router ~token ~path:"/api/v1/dashboard/tasks/delete"
+           ~extra_headers:[]
+           ~body:(Yojson.Safe.to_string (`Assoc [ "task_id", `String bad_id ])) ()
+       in
+       check int ("invalid task_id HTTP status for " ^ bad_id) 400 status;
+       check bool ("invalid task_id ok=false for " ^ bad_id) false
+         (body |> member "ok" |> to_bool))
+    [ ""; "   "; "../bad" ];
+  (match Masc.Workspace.deletion_receipts_r config with
+   | Ok { receipts = []; _ } -> ()
+   | Ok _ -> fail "rejected task deletes must not record receipts"
+   | Error message -> fail ("deletion_receipts_r failed: " ^ message));
+  (match Masc.Workspace.read_backlog_r config with
+   | Ok _ -> ()
+   | Error message -> fail ("read_backlog_r failed after invalid delete: " ^ message))
+;;
+
 let test_dashboard_delete_preserves_applied_pending_and_refused () =
   with_authenticated_activity_router
     ~prefix:"board-delete-persistence-" ~agent_name:"board-delete-operator"
@@ -2044,6 +2070,10 @@ let () =
             "reaction batch rejects an empty or oversized list"
             `Quick
             test_board_reaction_batch_rejects_an_empty_or_oversized_list
+        ; test_case
+            "dashboard task delete rejects invalid task_id without writing receipt"
+            `Quick
+            test_dashboard_task_delete_rejects_invalid_task_id
         ; test_case
             "reaction batch rejects an unknown target type"
             `Quick

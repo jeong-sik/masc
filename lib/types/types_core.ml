@@ -866,9 +866,19 @@ type pending_completion_approval =
 type task_deletion_phase = Cleanup_required of string list | Cleanup_verified
 [@@deriving show]
 
+type task_deletion_task_id = string
+[@@deriving show, eq]
+
+let task_deletion_task_id_of_string value =
+  Validation.Task_id.validate value
+  |> Result.map Validation.Task_id.to_string
+;;
+
+let task_deletion_task_id_to_string value = value
+
 type task_deletion_receipt =
   { deletion_id : string
-  ; deleted_task_id : string
+  ; deleted_task_id : task_deletion_task_id
   ; requested_at : string
   ; phase : task_deletion_phase
   }
@@ -1040,7 +1050,7 @@ let pending_completion_approvals_of_yojson = function
 
 let task_deletion_receipt_to_yojson (receipt : task_deletion_receipt) =
   `Assoc ["deletion_id", `String receipt.deletion_id;
-    "task_id", `String receipt.deleted_task_id;
+    "task_id", `String (task_deletion_task_id_to_string receipt.deleted_task_id);
     "requested_at", `String receipt.requested_at;
     "phase", `String (match receipt.phase with Cleanup_required _ -> "cleanup_required" | Cleanup_verified -> "cleanup_verified");
     "cleanup_errors", `List (List.map (fun message -> `String message) (match receipt.phase with Cleanup_required errors -> errors | Cleanup_verified -> []))]
@@ -1053,8 +1063,11 @@ let task_deletion_receipts_of_yojson = function
         (match List.sort (fun (a,_) (b,_) -> String.compare a b) fields with
          | ["cleanup_errors", `List errors; "deletion_id", `String deletion_id;
             "phase", `String phase; "requested_at", `String requested_at;
-            "task_id", `String deleted_task_id]
-           when List.for_all (fun value -> String.trim value <> "") [deletion_id; requested_at; deleted_task_id] ->
+            "task_id", `String raw_deleted_task_id]
+           when List.for_all (fun value -> String.trim value <> "") [deletion_id; requested_at] ->
+           (match task_deletion_task_id_of_string raw_deleted_task_id with
+            | Error _ -> Error "deletion receipt requires exact identity, phase and error fields"
+            | Ok deleted_task_id ->
            let rec strings acc = function
              | [] -> Ok (List.rev acc)
              | `String value :: rest -> strings (value :: acc) rest
@@ -1070,7 +1083,7 @@ let task_deletion_receipts_of_yojson = function
               if List.exists (fun old -> String.equal old.deletion_id deletion_id) acc
               then Error "duplicate deletion receipt identity"
               else read ({deletion_id; deleted_task_id; requested_at; phase} :: acc) rest
-            | Error message -> Error message)
+            | Error message -> Error message))
          | _ -> Error "deletion receipt requires exact identity, phase and error fields")
       | _ -> Error "deletion receipt must be an object" in
     read [] values

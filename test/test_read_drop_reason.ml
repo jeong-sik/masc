@@ -10,8 +10,7 @@ let canonical : (string * R.t) list =
   ; "Decompression_error", R.Decompression_error
   ; "Path_normalization_error", R.Path_normalization_error
   ; "Stat_error", R.Stat_error
-  ; (* RFC-0134 PR-1. *)
-    "Concurrent_removal", R.Concurrent_removal
+  ; "Concurrent_removal", R.Concurrent_removal
   ; "Transient_fd_pressure", R.Transient_fd_pressure
   ; (* Same not-a-loss family: the final line of an append-only
        file caught mid-write by a tail reader. *)
@@ -57,11 +56,10 @@ let test_unknown_wire_becomes_other () =
 ;;
 
 let test_rfc_0134_wire_strings () =
-  (* RFC-0134 PR-1 §3.1 wire mapping is part of the public contract;
-     PR-3 will switch caller behavior keyed on these exact byte
-     strings (e.g. "concurrent_removal" must not get re-routed to the
-     data-integrity counter). Pin them here so a typo in the
-     serialiser cannot drift them silently. *)
+  (* The wire mapping is part of the public contract: these exact byte
+     strings are the [reason] label of the persistence read-drop counter.
+     Pin them here so a typo in the serialiser cannot drift them
+     silently. *)
   Alcotest.(check string)
     "Concurrent_removal wire = \"concurrent_removal\""
     "concurrent_removal"

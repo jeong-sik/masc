@@ -85,6 +85,8 @@ type state =
 
 let state = Atomic.make Unpublished
 
+type published = t
+
 let publish access =
   let observed = Atomic.get state in
   match observed with
@@ -92,8 +94,15 @@ let publish access =
   | Unpublished ->
     (* A failed exchange means another call published in between. *)
     if Atomic.compare_and_set state observed (Published access)
-    then Ok ()
+    then Ok access
     else Error Already_published
+;;
+
+let published_access (published : published) : t = published
+
+let published_base_path = function
+  | Single_user single_user -> Authz_boot_mode_read.single_user_base_path single_user
+  | Multi_account { zone = _; base_path; now = _ } -> base_path
 ;;
 
 let publish_host_tool ~base_path ~config_dir =
@@ -101,6 +110,7 @@ let publish_host_tool ~base_path ~config_dir =
   | Error _ as refused -> refused
   | Ok single_user ->
     publish (Single_user single_user)
+    |> Result.map (fun (_ : published) -> ())
     |> Result.map_error (fun error -> publish_error_to_string error, [])
 ;;
 

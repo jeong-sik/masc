@@ -151,9 +151,20 @@ type publish_error = Already_published  (** The process published its access bef
 
 val publish_error_to_string : publish_error -> string
 
-(** Publishes the access of this process. The first call wins. A later call
-    is refused and changes nothing. *)
-val publish : t -> (unit, publish_error) result
+(** The access this process published. Only {!publish} makes one, so what
+    takes one runs after the publication, under that access. *)
+type published
+
+(** Publishes the access of this process. The first call wins and gets the
+    access it published. A later call is refused and changes nothing. *)
+val publish : t -> (published, publish_error) result
+
+(** The access that was published. *)
+val published_access : published -> t
+
+(** The base path of the published access: the one the boot judged a single
+    user, or the [base_path] of a multi-account access. *)
+val published_base_path : published -> string
 
 (** Publishes the access of a host tool: {!Single_user} when
     {!Authz_boot_mode_read.tool} judges [base_path] a single user, with

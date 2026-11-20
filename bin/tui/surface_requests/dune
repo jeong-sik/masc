@@ -5,6 +5,7 @@
   masc
   masc.runtime
   masc.auth
+  masc.browser_lane
   masc.masc_random_id
   masc_core
   masc_log
@@ -33,6 +34,12 @@
   masc_tui_board_quarantine
   masc_tui_connector_unbind
   masc_tui_volume_gc
+  masc_tui_lane_addons
+  masc_tui_lane_application
+  masc_tui_lane_broadcast_pending
+  masc_tui_lane_declaration
+  masc_tui_lane_installer
+  masc_tui_lane_subscriptions
   masc_tui_mcp
   masc_tui_workspace_job
   masc_tui_async_read

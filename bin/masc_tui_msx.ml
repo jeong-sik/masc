@@ -204,12 +204,18 @@ let empty_title ~(connection : Masc_tui_types.connection_status) source
         " %s — no frame: the server is %s, so nothing could be asked for." label
         (Masc_tui_types.connection_status_label status))
 
+(* A title names the machine, then its facts of one rank -- mode, media,
+   frame, who controls it, that this screen only watches -- joined by the
+   dot of RFC tui-one-screen-grammar 6.5. An empty title above stays
+   "name -- reason": the reason is not a fact beside the name. *)
+let spectating = "spectating the server"
+
 let title_of ~(connection : Masc_tui_types.connection_status)
     ~(live : Live.view) (frame : Masc_tui_types.msx_frame option) =
   match frame with
   | None -> empty_title ~connection Machine_lane.Msx live
   | Some { msx_meta = None; msx_number; _ } ->
-      Printf.sprintf " MSX — frame %d   (spectating the server)" msx_number
+      Printf.sprintf " MSX · frame %d · %s" msx_number spectating
   | Some ({ msx_meta = Some m; _ } as f) ->
       let media =
         match (m.msx_cartridge, m.msx_disk) with
@@ -219,19 +225,19 @@ let title_of ~(connection : Masc_tui_types.connection_status)
       let playing =
         match m.msx_players with
         | [] -> ""
-        | who -> "   조작: " ^ String.concat ", " who
+        | who -> " · controlled by " ^ String.concat ", " who
       in
-      Printf.sprintf " MSX — %s%s   frame %d%s   (spectating the server)" m.msx_mode
-        media f.msx_number playing
+      Printf.sprintf " MSX · %s%s · frame %d%s · %s" m.msx_mode
+        media f.msx_number playing spectating
 
 let live_title ~connection source (live : Live.view) =
   match live with
   | Live.Showing { time = Live.Untimed; mark; _ } ->
-      Printf.sprintf " %s — change %d   (spectating the server)"
-        (Live.source_label source) mark.count
+      Printf.sprintf " %s · change %d · %s"
+        (Live.source_label source) mark.count spectating
   | Live.Showing { time = Live.Frame frame; _ } ->
-      Printf.sprintf " %s — frame %d   (spectating the server)"
-        (Live.source_label source) frame
+      Printf.sprintf " %s · frame %d · %s"
+        (Live.source_label source) frame spectating
   | Live.Unread | Live.Not_loaded | Live.Failed _ | Live.Kept_back _ ->
       empty_title ~connection source live
 

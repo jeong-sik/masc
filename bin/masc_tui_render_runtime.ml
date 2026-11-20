@@ -441,7 +441,10 @@ let runtime_detail_lines state target ~width =
       in
       let probe_lines =
         match probe with
-        | None -> fact ~tone:Page_line.Quiet (say "프로브" "Probe") (say "미관측" "unobserved")
+        | None ->
+            fact ~tone:Page_line.Quiet (say "프로브" "Probe")
+              (runtime_unknown_words ~ko ~subject_ko:"결과" ~subject_en:"result"
+                 (runtime_probe_missing state))
         | Some row ->
             let transport =
               match row.rpp_transport with
@@ -1268,8 +1271,8 @@ let provider_history_lines ~cols ~rows (state : state) =
   match usage_history_reading state with
   | Provider_history_unread ->
       [ Printf.sprintf
-          (if ko then " 쿼터 범위 추이 (%d일 UTC) · 미관측"
-           else " Quota scope trend (%d UTC days) · not observed")
+          (if ko then " 쿼터 범위 추이 (%d일 UTC) · 미조회"
+           else " Quota scope trend (%d UTC days) · not read")
           state.provider_history_days ]
   | Provider_history_error reason ->
       [ Printf.sprintf
@@ -1442,9 +1445,9 @@ let usage_lines ~cols ~rows (state : state) =
   let keepers () =
     match state.keeper_usage with
     | Keeper_usage_unread ->
-        [ say " 키퍼 사용량 (24시간) · 미관측" " Keeper usage (24h) · not observed" ]
+        [ say " 키퍼 사용량 (1일) · 미조회" " Keeper usage (1d) · not read" ]
     | Keeper_usage_error reason ->
-        [ say " 키퍼 사용량 (24시간) · 조회 불가: " " Keeper usage (24h) · unavailable: "
+        [ say " 키퍼 사용량 (1일) · 조회 불가: " " Keeper usage (1d) · unavailable: "
           ^ Terminal_text.single_line reason ]
     | Keeper_usage_read { kuw_rows; kuw_window_minutes; kuw_generated_at } ->
         let readable row = match row.kur_coverage with
@@ -1455,6 +1458,7 @@ let usage_lines ~cols ~rows (state : state) =
         let cost_value row = row.kur_cost_usd in
         let valid value = Float.is_finite value && value >= 0. in
         let count = Masc_tui_value.Count.grouped in
+        let not_reported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
         let largest value = List.fold_left
             (fun highest row ->
               if readable row then
@@ -1469,13 +1473,13 @@ let usage_lines ~cols ~rows (state : state) =
           | None when List.exists (fun row ->
               Option.fold ~none:false ~some:valid (value row)) kuw_rows ->
               say "산출 불가 (완전한 기간 없음)" "unavailable (no complete window)"
-          | None -> say "미보고" "unreported"
+          | None -> not_reported
         in
         let width = max 1 (framed_inner_width cols - 3) in
         let tokens_text row =
-          Option.fold ~none:(say "미보고" "unreported") ~some:count row.kur_tokens in
+          Option.fold ~none:not_reported ~some:count row.kur_tokens in
         let cost_text row =
-          Option.fold ~none:(say "미보고" "unreported") ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
+          Option.fold ~none:not_reported ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
         let metric_text label value reported missing =
           Printf.sprintf
             (if ko then "%s %s · 보고 %s, 누락 %s" else "%s %s · %s reported, %s missing")
@@ -1625,7 +1629,7 @@ let usage_lines ~cols ~rows (state : state) =
        | Tool_series_unread ->
            wrap_evidence
              (Masc_tui_usage_calls.note_lines ~ko ~days:state.provider_history_days
-                (say "미관측" "not observed"))
+                (say "미조회" "not read"))
        | Tool_series_error reason ->
            wrap_evidence
              (Masc_tui_usage_calls.note_lines ~ko ~days:state.provider_history_days

@@ -263,8 +263,17 @@ let emit_board_sse_event ~visibility event =
   let event = match visibility with
     | Some Board.Public -> event
     | Some (Board.Unlisted | Board.Internal | Board.Direct) | None -> Board_changed in
+  (* Every caller emits after the store took the write. A raising hook cannot
+     undo that write, so it must not turn the write into an exception or stop
+     the Keeper signal that follows the edit; the operator reads it here. *)
   match Atomic.get board_sse_hook with
-  | Some hook -> hook event
+  | Some hook ->
+      (try hook event
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.BoardLog.error "Board SSE hook failed after the write: %s"
+             (Printexc.to_string exn))
   | None -> ()
 
 (* The store keys a post by its parsed id, so the event names the post by the

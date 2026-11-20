@@ -639,36 +639,29 @@ let test_board_sse_post_created_includes_post_kind () =
 
 exception Board_sse_hook_bug
 
-(* The post is stored before the SSE hook runs. A hook that raises makes the
-   publish an after-commit failure that still names the stored post; it does
-   not read as a clean publish while every dashboard update is lost. *)
-let test_board_sse_hook_failure_is_an_after_commit_failure () =
+(* The SSE hook runs after the store took the edit, before the Keeper signal.
+   A hook that raises must leave the edit's result and its signal as they are. *)
+let test_board_sse_hook_failure_keeps_the_edit_and_its_signal () =
+  let post = get_created (Board_dispatch.create_post ~author:"sse-hook-editor"
+      ~content:"before the hook fails" ~title:"hook" ~body:"before the hook fails"
+      ~post_kind:Board.Human_post ()) in
+  let post_id = Board.Post_id.to_string post.id in
+  let signals = ref [] in
+  Board_dispatch.set_board_signal_hook (fun signal -> signals := signal :: !signals);
   Board_dispatch.set_board_sse_hook (fun _ -> raise Board_sse_hook_bug);
-  let failure =
-    match
-      Board_dispatch.create_post ~author:"sse-hook-bug"
-        ~content:"stored before the SSE hook raises"
-        ~visibility:Board.Public ~post_kind:Board.Human_post ()
-    with
-    | Ok _ -> Alcotest.fail "a raising SSE hook must reach the writer"
-    | Error failure -> failure
-  in
-  (match Board.Post_publication_failure.cause failure with
-   | Board.Post_publication_failure.Raised Board_sse_hook_bug -> ()
-   | Board.Post_publication_failure.Raised _
-   | Board.Post_publication_failure.Board_error _ ->
-     Alcotest.fail ("expected the SSE hook exception, got "
-       ^ Board.Post_publication_failure.to_string failure));
-  let creation =
-    match Board.Post_publication_failure.committed failure with
-    | Some creation -> creation
-    | None -> Alcotest.fail "the after-commit failure lost the stored post"
-  in
-  let post_id = Board.Post_id.to_string creation.post.id in
+  let edited = "@reader edited while the hook fails" in
+  (match Board_dispatch.update_post ~post_id ~editor:"sse-hook-editor"
+      ~content:edited ~title:"hook" ~body:edited () with
+   | Ok _ -> ()
+   | Error error -> Alcotest.fail (Board.show_board_error error)
+   | exception Board_sse_hook_bug ->
+     Alcotest.fail "the SSE hook exception must not replace the stored edit");
+  (match !signals with
+   | [ { Board_dispatch.signal = { kind = Board_dispatch.Board_post_updated _; _ }; _ } ] -> ()
+   | _ -> Alcotest.fail "expected the edit's Keeper signal");
   match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
-  | Ok post ->
-    Alcotest.(check string) "the stored post is the one the failure names"
-      "stored before the SSE hook raises" post.body
+  | Ok fetched ->
+    Alcotest.(check string) "the edit is stored" edited fetched.body
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
 let test_list_posts () =
@@ -3676,8 +3669,8 @@ let () =
         (with_eio test_direct_comments_cannot_expand_readership);
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);
-      Alcotest.test_case "a raising SSE hook is an after-commit failure" `Quick
-        (with_eio test_board_sse_hook_failure_is_an_after_commit_failure);
+      Alcotest.test_case "a raising SSE hook keeps the edit and its signal" `Quick
+        (with_eio test_board_sse_hook_failure_keeps_the_edit_and_its_signal);
       Alcotest.test_case "list" `Quick (with_eio test_list_posts);
       Alcotest.test_case "negative list limit" `Quick
         (with_eio test_list_posts_negative_limit_returns_empty);

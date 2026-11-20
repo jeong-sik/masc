@@ -114,7 +114,14 @@ let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt fail
 
 let notify_failure config failure =
   match config.on_failure with
-  | Some f -> f failure
+  | Some f ->
+    (* The callback runs inside the refresh fiber. Raising out of it would
+       fail [sw] and the switches above it instead of retrying the read. *)
+    Cancel_safe.observe
+      ~on_exn:(fun exn ->
+        Log.Dashboard.error "%s on_failure callback raised: %s" config.label
+          (Printexc.to_string exn))
+      (fun () -> f failure)
   | None -> ()
 
 let coalesce_changes ~clock ~config stream =

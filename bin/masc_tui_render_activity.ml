@@ -13,10 +13,6 @@ module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 module Page_line = Masc_tui_page_line
 
-let wrap_style style text =
-  if String.equal style "" || String.equal text "" then text
-  else style ^ text ^ Ansi.reset
-
 let box_line_selection buf cols styled_line =
   box_line_selected_styled buf cols styled_line
 
@@ -1197,12 +1193,12 @@ let render_acting (state : state) =
           let selected = state.acting_filter <> Acting.Turns && idx = cursor in
           let lead = if selected then "\xe2\x80\xba " else "  " in
           let styled_line =
-            let glyph_styled = wrap_style style (Acting.glyph_text row.Acting.glyph) in
+            let glyph_styled = Ansi.wrap_style style (Acting.glyph_text row.Acting.glyph) in
             let content_styled =
               let fitted = fit_width content_text table_columns.Acting.content_cells in
               match row.Acting.glyph with
-              | Acting.Turn_done -> wrap_style (Ansi.bold ^ style) fitted
-              | Acting.Failure | Acting.Attention | Acting.Quiet -> wrap_style style fitted
+              | Acting.Turn_done -> Ansi.wrap_style (Ansi.bold ^ style) fitted
+              | Acting.Failure | Acting.Attention | Acting.Quiet -> Ansi.wrap_style style fitted
               | Acting.Call_started | Acting.Call_returned | Acting.Turn_boundary -> fitted
             in
             let actor_styled =
@@ -1211,11 +1207,11 @@ let render_acting (state : state) =
                   (Message_layout.fit_middle table_columns.Acting.keeper_cells actor_text)
                   table_columns.Acting.keeper_cells
               in
-              wrap_style (Theme.recede ()) fitted
+              Ansi.wrap_style (Theme.recede ()) fitted
             in
             let clock_styled =
               if table_columns.Acting.show_clock then
-                " " ^ wrap_style (Theme.recede ()) clock_text
+                " " ^ Ansi.wrap_style (Theme.recede ()) clock_text
               else ""
             in
             lead ^ glyph_styled ^ " " ^ content_styled ^ " " ^ actor_styled ^ clock_styled

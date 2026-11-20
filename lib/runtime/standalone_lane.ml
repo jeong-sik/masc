@@ -51,6 +51,15 @@ let admission_class : t -> Llm_provider.Admission_class.t = function
   | Verifier | Hitl_auto_judge | Board_attention | Candle_appraiser -> Standard
 ;;
 
+type caller_lane =
+  | Interactive_chat
+  | Standalone of t
+
+let admission_class_of_caller : caller_lane -> Llm_provider.Admission_class.t = function
+  | Interactive_chat -> Priority
+  | Standalone lane -> admission_class lane
+;;
+
 let required_ids =
   List.filter_map
     (fun lane ->

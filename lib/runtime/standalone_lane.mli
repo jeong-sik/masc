@@ -54,6 +54,17 @@ val admission_class : t -> Llm_provider.Admission_class.t
     background request still receives bounded service while higher classes
     wait; running requests are not preempted. *)
 
+type caller_lane =
+  | Interactive_chat
+  | Standalone of t
+
+val admission_class_of_caller : caller_lane -> Llm_provider.Admission_class.t
+(** Closed admission classification across interactive chat and standalone
+    lanes:
+    - [Interactive_chat] -> [Priority]
+    - [Standalone (Verifier | Hitl_auto_judge | Board_attention | Candle_appraiser)] -> [Standard]
+    - [Standalone (Librarian | Librarian_memory | Workspace_memory_curator)] -> [Background] *)
+
 val required_ids : string list
 (** The {!to_id} of every [Required] lane, in {!all} order: the
     [required_lane_ids] the exact-output registry is published with. *)

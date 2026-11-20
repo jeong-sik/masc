@@ -94,7 +94,7 @@ let test_nothing_read_names_no_place () =
 ;;
 
 let test_a_view_of_another_trace_is_unresolved () =
-  check string "a cleared history is not placed by the trace it replaced"
+  check string "a view that ends on another trace names no place in this one"
     "unresolved: the view ends on trace another-trace"
     (placed ~unread_lines:not_asked history (view ~trace:"another-trace" (List.length read_turn)))
 ;;

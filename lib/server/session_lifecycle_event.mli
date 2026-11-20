@@ -1,13 +1,13 @@
-(** Session lifecycle typed events (RFC-0099).
+(** Session lifecycle typed events.
 
-    Published on the existing [Event_bus.Custom ("session_lifecycle",
-    json)] channel. Dashboard surfaces consume from there. Closed sum;
-    adding a new variant requires RFC-level discussion (same discipline
-    as {!Mcp_error_code}).
+    Encoded for the [Event_bus.Custom ("session_lifecycle", json)]
+    channel. Closed sum; adding a new variant requires RFC-level
+    discussion (same discipline as {!Mcp_error_code}).
 
-    This module is {b wire-inert} at PR-2 — only the variant + JSON
-    encoding land. PR-3+ wire the publish calls from the SSE eviction
-    and lifecycle sites in {!Server_mcp_transport_http_conn}. *)
+    {!Server_mcp_transport_http_conn.stop_sse_session_evict} publishes the
+    [Evict] and [Close] pair of an SSE eviction; no other site publishes.
+    Only tests install a publisher, so in the server {!publish} drops
+    every event. *)
 
 type transport = SSE | WS | GRPC
 
@@ -17,11 +17,10 @@ type evict_reason =
   | Idle_timeout
       (** [cleanup_stale] crossed its idle age. The bound is
           [Sse.cleanup_stale]'s own [?max_age_s] default of 1800 s, applied
-          because the caller passes no argument; RFC-0099 PR-5 is where the
-          transport keep-alive knobs become configuration. *)
+          because the caller passes no argument. *)
   | Backpressure
       (** mailbox-full beyond drain grace, or {!Fd_accountant} pressure
-          escalation (RFC-0101 §3.6, 5 s sustained). *)
+          escalation. *)
   | Policy_revoked
       (** auth / quota / admin action terminated the session. *)
 
@@ -86,13 +85,13 @@ val bus_topic : string
 val pp : Format.formatter -> t -> unit
 (** Pretty-printer for tests and operator diagnostics. *)
 
-(** {1 Publisher injection (PR-3)}
+(** {1 Publisher injection}
 
     The transport layer ({!Server_mcp_transport_http}, AGUI, etc.)
     cannot reach into the running {!Agent_core.Event_bus} directly —
-    the bus handle lives behind {!Server_bootstrap_loops}. PR-3
-    introduces a publisher hook so transport-side eviction sites can
-    emit events without taking a hard dependency on bus plumbing. *)
+    the bus handle lives behind {!Server_bootstrap_loops}. The
+    publisher hook lets transport-side eviction sites emit events
+    without taking a hard dependency on bus plumbing. *)
 
 val publish : t -> unit
 (** [publish evt] forwards [evt] to the currently-installed

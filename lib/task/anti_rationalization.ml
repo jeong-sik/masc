@@ -327,8 +327,7 @@ let lookup_with_evidence_observation { schemas; dispatch } =
    type) assembled here under the template's header prose. An empty list
    renders an empty section, so a review without image artifacts reads
    exactly as before this existed. The lines survive on text-only evaluators
-   — media degrade strips the attached blocks, not the prompt text — which is
-   the RFC-0436 §4.4 reference-plus-hash degradation. *)
+   — media degrade strips the attached blocks, not the prompt text. *)
 let image_evidence_section (req : review_request) =
   match req.evidence_images with
   | [] -> Ok ""
@@ -392,8 +391,7 @@ let build_prompt
 (* ================================================================ *)
 
 (** JSON schema for the report_review_verdict tool, read from
-    [config/tools/report_review_verdict.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2). Forces the LLM to call
+    [config/tools/report_review_verdict.toml]. Forces the LLM to call
     a tool with typed parameters; verdict is constrained to APPROVE/REJECT by
     the TOML enum literal, which the mirror test in
     [test_anti_rationalization_empty_reject] pins to [valid_verdict_strings]
@@ -402,9 +400,7 @@ let build_prompt
 let schema_of_name = Tool_definition_embedded.schema
 
 (* What to say on each verdict lives in config/prompts/verification.md, not
-   in the schema — model-facing prose belongs in the prompt files (RFC
-   prompts-and-tool-definitions-outside-ocaml), and the ratchet on this file
-   enforces that. *)
+   in the schema — model-facing prose belongs in the prompt files. *)
 let report_tool_name = "report_review_verdict"
 
 let report_review_verdict_schema : Masc_domain.tool_schema =
@@ -435,8 +431,8 @@ let classify_review_verdict_json (args : Yojson.Safe.t)
     | "APPROVE" -> Ok (Approve reason)
     | "REJECT" ->
       (* A tool result the reviewer LLM reads back, so the sentence is a
-         managed prompt; the pure parse errors below stay inline (RFC §6
-         mechanically-derived validation). *)
+         managed prompt; the pure parse errors below stay inline
+         (mechanically-derived validation). *)
       if String.equal (String.trim reason) ""
       then
         Error
@@ -1038,10 +1034,10 @@ let run_review
       (req : review_request)
   : review_result
   =
-  (* RFC-0436 §4.3: each recorded image becomes an attached block. The base64
+  (* Each recorded image becomes an attached block. The base64
      body was read at assembly time, so a missing or unreadable body never
      reaches this list — the artifact stays in the prompt as its reference and
-     hash line only, which is the §4.4 posture for it. *)
+     hash line only. *)
   let media_store = Tool_blob_media_store.of_base_path ~base_path in
   let image_blocks =
     req.evidence_images

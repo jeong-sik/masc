@@ -57,6 +57,8 @@ let request_fingerprint
                      ; system_prompt_cache_prefix
                      ; cache_extended_ttl
                      ; cache_session_key
+                     ; provider_only
+                     ; provider_ignore
                      ; model_capabilities_override
                      ; model_anthropic_thinking_control_override
                      ; request_policy_snapshot
@@ -171,6 +173,8 @@ let request_fingerprint
               | Provider_config.Glm), _, _ -> `Null
            | Provider_config.Anthropic, (None | Some _), (None | Some _) -> `Null) )
       ; "cache_extended_ttl", `Bool cache_extended_ttl
+      ; "provider_only", `List (List.map (fun s -> `String s) provider_only)
+      ; "provider_ignore", `List (List.map (fun s -> `String s) provider_ignore)
       ; "keep_alive", opt_json (fun s -> `String s) keep_alive
       ; "num_ctx", opt_json (fun n -> `Int n) num_ctx
       ; "seed", opt_json (fun n -> `Int n) seed

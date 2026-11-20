@@ -421,6 +421,11 @@ val request_policy_cache_session_wire : request_policy -> cache_session_wire
 (** The prompt-cache session routing wire field declared by the selected
     provider entry, or {!No_cache_session_wire} when undeclared or anonymous. *)
 
+val request_policy_supports_provider_routing_filter : request_policy -> bool
+(** Whether the selected provider entry declares upstream provider routing
+    filter support ([provider: { only; ignore }]), or [false] when undeclared
+    or anonymous. *)
+
 
 (** Exact bare-model lookup from the one loaded model catalog. Returns [None]
     for malformed or undeclared identities. Explicit hosts compose JSON input

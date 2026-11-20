@@ -122,7 +122,7 @@ module Theme = struct
     ; hue_blue : string
     ; hue_cyan : string
     ; hue_yellow : string
-    (* Six slots for an axis whose members are kinds, not degrees. A file
+    (* Two slots for an axis whose members are kinds, not degrees. A file
        type, a goal phase, a sandbox: nothing in such a set outranks its
        siblings and the reader's only job is to tell them apart, which is
        neither what [ok]/[warn]/[bad] say nor what a weight says. Without
@@ -133,15 +133,12 @@ module Theme = struct
        Numbered, not named. Two axes never on the same screen can hold the
        same slot, and a global kind-to-colour map runs out of colours.
 
-       Five, not six, and none of them is free of status. The theme names
+       Blue and magenta, the only hues status leaves alone. The theme names
        seven ANSI colours and [status_ansi_color] already claims five --
-       green, yellow, red, cyan and the receding black -- so a slot is the
-       same bytes as some status token by construction. Red is the one
-       nobody can use: it is [bad], and it turned a media file's mark into
-       the failure text sharing its terminal row. Blue and magenta are the
-       only hues status leaves alone; a surface reaching for any of the
-       other three owes a check that it does not draw that status token.
-       RFC-0431. *)
+       green, yellow, red, cyan and the receding black -- so a slot on any of
+       those is the same bytes as some status token. On red, which is [bad],
+       a media file's mark turned into the failure text sharing its terminal
+       row. *)
     ; slot_1 : string
     ; slot_2 : string
     (* A row drawn behind the ones around it. Not a synonym for [Ansi.dim]:

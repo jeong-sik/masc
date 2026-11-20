@@ -1,5 +1,4 @@
-(** [masc_checkpoint_purge] — offline deterministic checkpoint purge
-    (RFC-0351 S1).
+(** [masc_checkpoint_purge] — offline deterministic checkpoint purge.
 
     Loads the canonical AGENT_CORE checkpoint for one trace, applies
     {!Masc.Keeper_checkpoint_purge.purge} (unsigned reasoning strip and
@@ -233,8 +232,7 @@ let install ~session_dir ~trace ~runtime_root ~runtime_keepers_dir ~keeper_name 
          Printf.printf "warning: %s\n" (Store.checkpoint_installation_auxiliary_to_string auxiliary))
       installed.auxiliary;
     (* The archive entries are heads of the checkpoint before the purge;
-       while one is there, the object sweep keeps what the purge removed
-       (RFC-0476 §3.3). *)
+       while one is there, the object sweep keeps what the purge removed. *)
     (match Store.delete_all_agent_core_history_files ~session_dir with
      | Error detail -> Printf.printf "warning: the history archive was not removed: %s\n" detail
      | Ok { removed; left } ->

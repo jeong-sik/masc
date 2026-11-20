@@ -1981,7 +1981,7 @@ let keeper_context_lines ~cols input =
        found nothing waiting on, since the heads hold the first row of every
        source (RFC-an-idle-tui-receives-only-changes-it-draws). A list not
        read yet is [◌] and a read that failed is [✕] (6.4); the words are
-       RFC-0519's, as a detail sentence may carry them. *)
+       the ones the other screens use, as a detail sentence may carry them. *)
     let unknown_lines unknown korean english =
       let mark = Masc_tui_value.Unknown.glyph unknown in
       let tone = match unknown with

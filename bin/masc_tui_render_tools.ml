@@ -325,7 +325,7 @@ let async_request_inventory_lines (state : state) =
       let tone, ownership = match request.ar_ownership with
         | Async_runtime_owned -> Theme.ok (), Say.both ~ko:"runtime 소유" ~en:"runtime owned"
         | Async_ownership_unknown ->
-          Theme.warn (), Say.both ~ko:"디스크에만 있음 · 소유 확인 안 됨" ~en:"on disk only · ownership not confirmed"
+          Theme.warn (), Say.both ~ko:"디스크에만 있음 · 소유 확인 안 됨" ~en:"on disk only · ownership unconfirmed"
       in
       let status = match request.ar_phase with
         | Async_queued -> Say.both ~ko:"대기열" ~en:"queued"
@@ -358,8 +358,8 @@ let async_request_inventory_lines (state : state) =
     in
     let recovery_lines = match recovery with
       | None ->
-        [ Ansi.dim, Say.both ~ko:"   시작 복구: 이 process 가 관측하지 않음"
-                      ~en:"   startup recovery: not observed by this process" ]
+        [ Ansi.dim, Say.both ~ko:"   시작 복구: 이 process 에 보고 없음"
+                      ~en:"   startup recovery: not reported to this process" ]
       | Some report ->
         [ Ansi.dim,
           Say.both ~ko:"   시작 복구: " ~en:"   startup recovery: "
@@ -429,8 +429,8 @@ let async_request_detail_lines ~cols state target =
   let snapshot = match Masc_tui_fetched.value view with
     | None -> []
     | Some Detail.Absent ->
-      [Theme.warn (), Say.both ~ko:" 원본 요청이 관측되지 않습니다 · 재실행 허가가 아닙니다"
-                        ~en:" The original request was not observed · this is not permission to run again"]
+      [Theme.warn (), Say.both ~ko:" 원본 요청 기록이 없습니다 · 재실행 허가가 아닙니다"
+                        ~en:" No record of the original request · this is not permission to run again"]
     | Some (Observed snapshot) ->
       let phase = match snapshot.phase with
         | Detail.Queued -> Say.both ~ko:"대기열" ~en:"queued"
@@ -1258,7 +1258,7 @@ let effective_surface_diagnostics ~hash = function
               (byte_count ets_skill_tool_surface_bytes) (byte_count ets_tool_surface_bytes))
       ; Say.code "digest="
         ++ (match ets_tool_surface_sha256 with
-            | None -> Say.both ~ko:"없음 (턴은 Agent Core 가 가짐)" ~en:"n/a (Agent Core owns the turn)"
+            | None -> Say.both ~ko:"없음 (턴은 Agent Core 가 가짐)" ~en:"none (Agent Core owns the turn)"
             | Some value -> Say.as_received (hash (Terminal_text.single_line value))) ]
 
 (* What Y copies, in the screen's language. *)

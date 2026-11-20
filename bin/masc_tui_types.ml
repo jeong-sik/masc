@@ -10832,7 +10832,7 @@ type state = {
   (* The series is owed again [Masc_tui_usage_calls.reread_s] after a read of it
      answered while Calls is drawn, because no push says that the store took a
      call. Seconds on the loop's monotonic clock. *)
-  mutable tool_series_reread_at: float option;
+  mutable tool_series_reread_at: Masc_tui_wake.Mono.t option;
   mutable overview_account_emails: overview_account_emails_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -20179,7 +20179,7 @@ let tool_series_drawn (state : state) = Option.is_some (tool_series_days state)
 (* A read of the series answered at [now]: it is owed again after
    [Masc_tui_usage_calls.reread_s]. *)
 let note_tool_series_read (state : state) ~now =
-  state.tool_series_reread_at <- Some (now +. Masc_tui_usage_calls.reread_s)
+  state.tool_series_reread_at <- Some (Masc_tui_wake.Mono.after now Masc_tui_usage_calls.reread_s)
 
 (* Whether the series is owed, once per moment. It is owed when its time has
    come, and when the reading holds the other screen's window: Calls and the
@@ -20207,7 +20207,7 @@ let take_tool_series_due (state : state) ~now =
         true
       end else
         match state.tool_series_reread_at with
-        | Some at when Masc_tui_wake.reached Masc_tui_wake.Tool_series_reread ~now ~at ->
+        | Some at when Masc_tui_wake.reached_mono Masc_tui_wake.Tool_series_reread ~now ~at ->
             state.tool_series_reread_at <- None;
             true
         | Some _ | None -> false

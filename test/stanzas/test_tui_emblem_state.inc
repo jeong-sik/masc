@@ -8,4 +8,5 @@
   masc_tui_play_card
   masc_tui_play_room
   masc_tui_terminal_palette
-  masc_tui_types))
+  masc_tui_types
+  masc_tui_wake))

@@ -133,7 +133,7 @@
 (test
  (name test_tui_play_room)
  (modules test_tui_play_room)
- (libraries alcotest yojson masc masc_tui_play_room))
+ (libraries alcotest yojson masc masc_tui_play_room masc_tui_wake))
 
 (test
  (name test_auth_credential_optional_fields)
@@ -622,6 +622,7 @@
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask
+  test_librarian_l6g_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks
@@ -975,6 +976,7 @@
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask
+  test_librarian_l6g_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks
@@ -7049,7 +7051,7 @@
  (name test_tui_queue_inspection)
  (modules test_tui_queue_inspection)
  (libraries alcotest masc masc.keeper_runtime masc.http_client masc_tui_queue_inspection
-  masc_tui_workspace_read masc_tui_kept_reads eio_main uri yojson))
+  masc_tui_value masc_tui_workspace_read masc_tui_kept_reads eio_main uri yojson))
 
 (test
  (name test_tui_fork_guard)
@@ -7376,7 +7378,8 @@
 (test
  (name test_tui_usage_scope)
  (modules test_tui_usage_scope)
- (libraries alcotest masc masc_tui_types masc_tui_usage_trend masc_tui_usage_calls masc_tui_palette))
+ (libraries alcotest masc masc_tui_types masc_tui_usage_trend masc_tui_usage_calls masc_tui_palette
+  masc_tui_wake))
 
 (test
  (name test_runtime_native_tasks)

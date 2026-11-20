@@ -34,7 +34,7 @@
       own instructions. Codex keeps no rollout or history of the thread.
 
     The client may be silent for 120 seconds. One call of an account runs at
-    a time ({!Server_setup_account_login.one_call_of}). The log is asked
+    a time ({!Runtime_account_call.one_call_of}). The log is asked
     first which Runtime and which account the Keeper is on, and whether it
     gives the turn ({!Runtime_account_access.admit}): a turn the log refuses
     takes no call. The runtime is made and the turn is authorized inside the

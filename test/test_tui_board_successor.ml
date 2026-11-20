@@ -53,11 +53,11 @@ let test_detail_scope_owns_target () =
 let test_close_time_boundary () =
   List.iter (fun at ->
     check bool "calendar rejects invalid source value" true
-      (Result.is_error (Masc_tui_board_read_layout.close_time at)))
+      (Result.is_error (Masc_tui_board_read_layout.close_time ~now:0. at)))
     [nan; infinity; neg_infinity; 1e30; -1e30];
   List.iter (fun at ->
     check bool "supported calendar value remains readable" true
-      (Result.is_ok (Masc_tui_board_read_layout.close_time at)))
+      (Result.is_ok (Masc_tui_board_read_layout.close_time ~now:0. at)))
     [0.; -1.; 1792332000.]
 
 let () = run "board successor ownership"

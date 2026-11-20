@@ -53,7 +53,11 @@ let test_quota_spent_rows_are_scheduled_for_the_reset () =
   Alcotest.(check bool) "a quota wait is not an operation target" true
     (List.for_all (fun (item : Inbox.item) -> item.id = None) items);
   Alcotest.(check bool) "the stated reset is when it is scheduled for" true
-    (List.exists (fun item -> has "quota-lane spent" item && has "scheduled for 1970-01-01T00:33:20Z" item) items);
+    (List.exists (fun item ->
+       has "quota-lane spent" item
+       && has ("scheduled for "
+               ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+                   ~now:1000. 2000.) item) items);
   Alcotest.(check bool) "a wait with no stated reset is still listed" true
     (List.exists (has "other-lane spent") items)
 

@@ -97,7 +97,7 @@ val status : owner:owner -> base_path:string ->
     [{"runtime_id":...,"record":"made"}], or ["existing"] on a later pass.
     When it fails, [runtime] is [null]. Nothing is written to runtime.toml.
 
-    One call of an account runs at a time ({!one_call_of}): a request while a
+    One call of an account runs at a time ({!Runtime_account_call.one_call_of}): a request while a
     verification or a Keeper turn of the account runs is answered 409. A key
     account whose key file is not there or is not read as a key is a 409 too,
     with the [code] [key_missing] or [key_unreadable] beside the [error].
@@ -131,17 +131,12 @@ type runtime_error =
     {!Runtime_api_key_file.read_error_code}. *)
 val key_unusable_message : Runtime_api_key_file.read_error -> string
 
-(** The call of an account that is running ({!Runtime_account_call.t}).
-    {!one_call_of} makes one and hands it to the work it runs. No caller
-    hands the value on past its call. *)
-type in_call = Runtime_account_call.t
-
 (** The runtime of [binding] on the home of the account of the call, an
     account of the person: a provider of the workspace with the home of the
     account ({!Runtime_account_runtime}). {!verify} chooses a model, and a
     turn of a Keeper the Runtime its owner gave it (plan D2-8).
 
-    It takes the call of the account ({!one_call_of}), so the records of the
+    It takes the call of the account ({!Runtime_account_call.one_call_of}), so the records of the
     account and its key file are read inside that call. The files of an
     account change only inside its call, so no runtime is made on a key that
     a removal or a replacement was taking away.
@@ -156,20 +151,11 @@ type in_call = Runtime_account_call.t
     An account the person does not own, or a login account with no login
     receipt of theirs, is a 404 with the same sentence. *)
 val person_runtime
-  :  in_call
+  :  Runtime_account_call.t
   -> person
   -> base_path:string
   -> binding:Runtime_account_runtime.binding
   -> (prepared, runtime_error) result
-
-(** Runs [f] when no other call of the account runs, and gives [busy]
-    otherwise ({!Runtime_account_call.one_call_of}). [f] gets the call it
-    runs in, which {!person_runtime} takes. *)
-val one_call_of
-  :  Authz_types.Provider_account_id.t
-  -> busy:'e
-  -> (in_call -> ('a, 'e) result)
-  -> ('a, 'e) result
 
 (** The runtime root of [person] under [base_path], made when it is not
     there: the folder the homes and the key files of their accounts are

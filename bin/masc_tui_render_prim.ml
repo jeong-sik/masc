@@ -5299,7 +5299,8 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
   in
   let turn =
     Printf.sprintf "  %sturn #%d  ·  %s%s" Ansi.dim record.absolute_turn
-      (Masc_domain.iso8601_of_unix_seconds record.ts)
+      (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+         ~now:(Unix.gettimeofday ()) record.ts)
       Ansi.reset
   in
   let trace =
@@ -5372,12 +5373,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     | Runtime_usage_scope.Conversation_cumulative ->
         non_request_token_lines "tokens counted across the conversation"
     | Runtime_usage_scope.Usage_scope_unavailable ->
-        non_request_token_lines "tokens reported with unknown scope"
+        non_request_token_lines "tokens reported without their scope"
     | Runtime_usage_scope.Per_request -> (
         match record.usage.input_provenance with
         | Some Turn_input_provenance.Context_estimate ->
             non_request_token_lines "estimated context tokens, not dispatched input"
-        | None -> non_request_token_lines "tokens with unknown input provenance"
+        | None -> non_request_token_lines "tokens reported without their input provenance"
         | Some Turn_input_provenance.Measured_request -> (
         match record.usage.input_tokens, record.context_window with
         (* A figure above MASC's effective shaping ceiling cannot become a
@@ -5454,7 +5455,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
       match record.usage.scope with
       | Runtime_usage_scope.Turn_total -> "client turn total  "
       | Runtime_usage_scope.Conversation_cumulative -> "cumulative  "
-      | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown  "
+      | Runtime_usage_scope.Usage_scope_unavailable -> "scope not reported  "
       | Runtime_usage_scope.Per_request -> ""
     in
     match parts with
@@ -5726,7 +5727,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
      that looks like this turn's. *)
   let recent_turns_lines =
     let row index (recent : Inspector.recent_turn) =
-      let ts = Masc_domain.iso8601_of_unix_seconds recent.ts in
+      (* A column of turn moments in the operator's zone, padded to the
+         widest form so the sentences after it stay aligned (RFC
+         tui-one-screen-grammar 6.1). *)
+      let ts =
+        Printf.sprintf "%-*s" Terminal_text.clock_timestamp_cells
+          (Terminal_text.clock_timestamp_of_unix recent.ts) in
       (* The sentence each row can honestly carry depends on why a figure is
          absent: a conversation-cumulative provider has a number that is not
          about this turn, while a per-request provider that reported nothing
@@ -5740,7 +5746,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             ^ Ansi.reset ]
       | Runtime_usage_scope.Usage_scope_unavailable, _ ->
           [ marker ^ Ansi.dim
-            ^ Printf.sprintf " #%-4d %s  usage scope unknown" recent.turn ts
+            ^ Printf.sprintf " #%-4d %s  usage scope not reported" recent.turn ts
             ^ Ansi.reset ]
       | Runtime_usage_scope.Conversation_cumulative, _ ->
           [ marker
@@ -5762,7 +5768,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
               ]
           | None ->
               [ marker ^ Ansi.dim
-                ^ Printf.sprintf " #%-4d %s  count %s; input provenance unknown"
+                ^ Printf.sprintf " #%-4d %s  count %s; input provenance not reported"
                     recent.turn ts (Inspector.format_tokens input)
                 ^ Ansi.reset ]
           | Some Turn_input_provenance.Measured_request -> (
@@ -6271,7 +6277,8 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         Printf.sprintf "  Exact provider input  %s  %s"
           (Keeper_chat.terminal_safe_text
              (Ids.Turn_ref.to_string input.turn_ref))
-          (Masc_domain.iso8601_of_unix_seconds input.captured_at)
+          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
+             ~now:(Unix.gettimeofday ()) input.captured_at)
       in
       let wire =
         Printf.sprintf "  Prepared request  %s · %s · %s tok (%s) · %s"

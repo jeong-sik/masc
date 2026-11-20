@@ -33,6 +33,10 @@ let of_runtime ~now = function
       | Decode.Health_offline ->
           if failed_recently ~now runtime.kr_recent_turns then Recovered
           else
+            (* [kr_paused] is handled before this branch, so [unexpected] matches
+               [Masc_tui_keeper_mark.starts_on_its_own] ([not kr_paused &&
+               activation = Activation_autonomous]). Keep the [kr_paused] guard
+               first so grid/strip verdicts stay aligned with roster NOW cells. *)
             let unexpected =
               match runtime.kr_activation_mode with
               | Decode.Activation_autonomous -> true

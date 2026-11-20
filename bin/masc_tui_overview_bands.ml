@@ -190,7 +190,7 @@ let render_keeper_row ~cells entry =
     if entry.needs_attention then Ansi.bold ^ fitted ^ Ansi.reset else fitted
   in
   let state_cell =
-    let tone = if entry.needs_attention then Theme.warn () else Theme.recede () in
+    let tone = if entry.needs_attention then entry.mark_tone else Theme.recede () in
     tone ^ pad_cell ~width:state_w entry.state_label ^ Ansi.reset
   in
   let activity_cell =

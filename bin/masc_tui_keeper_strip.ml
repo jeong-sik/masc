@@ -20,6 +20,7 @@ let clean = Terminal_text.single_line
 
 type bucket =
   | Failures
+  | Config_error
   | Unexpected_offline
   | Recoveries
   | Sound
@@ -31,7 +32,7 @@ type bucket =
   | Dormant
   | Unknown
 
-let bucket ~now ~age view row =
+let bucket ~now ~age view (row : Model.row) =
   match view with
   | Model.By_age ->
       (match age row with
@@ -39,23 +40,33 @@ let bucket ~now ~age view row =
        | Model.Age_within_3d -> Cooling | Model.Age_older -> Dormant
        | Model.Age_unknown -> Unknown)
   | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-      (match Grid.verdict ~now (runtime row) with
-       | Grid.Failing _ -> Failures
-       | Grid.Offline { unexpected = true } -> Unexpected_offline
-       | Grid.Recovered -> Recoveries
-       | Grid.Sound -> Sound
-       | Grid.Paused -> Paused
-       | Grid.Offline { unexpected = false } -> Offline
-       | Grid.Other -> Unknown)
+      (match row.reading.Masc_tui_keeper_control.liveness with
+       | Masc_tui_keeper_control.Present r ->
+           if row.reading.Masc_tui_keeper_control.paused then Paused
+           else
+             (match Grid.verdict ~now (Some r) with
+              | Grid.Failing _ -> Failures
+              | Grid.Offline { unexpected = true } -> Unexpected_offline
+              | Grid.Recovered -> Recoveries
+              | Grid.Sound -> Sound
+              | Grid.Paused -> Paused
+              | Grid.Offline { unexpected = false } -> Offline
+              | Grid.Other -> Unknown)
+       | Masc_tui_keeper_control.Invalid _ -> Config_error
+       | Masc_tui_keeper_control.Absent ->
+           if row.reading.Masc_tui_keeper_control.paused then Paused else Offline
+       | Masc_tui_keeper_control.Unobserved ->
+           if row.reading.Masc_tui_keeper_control.paused then Paused else Unknown)
 
 let header ~ko ~now ~cells ~view ~selected:_ ~age rows =
   let say korean english = if ko then korean else english in
   (* A group of Keepers wears the status mark of its verdict, in that mark's
-     colour (RFC tui-one-screen-grammar §7.2); the groups the verdict cannot
-     place keep the unreported mark and say what they hold. *)
+     colour (RFC tui-one-screen-grammar §7.2); config errors keep the read-failed
+     mark and unread rows keep the unread mark. *)
   let status mark = Masc_tui_value.Mark.glyph mark, Theme.status_tone mark in
   let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
   let unread = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread in
+  let read_failed = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed in
   (* The age words name the bound each bucket is cut at, as [bucket] reads
      it off [Model.age]. *)
   let groups = match view with
@@ -71,6 +82,7 @@ let header ~ko ~now ~cells ~view ~selected:_ ~age rows =
         let settled, settled_tone = status Masc_tui_value.Mark.Settled in
         let paused, paused_tone = status Masc_tui_value.Mark.Paused in
         [Failures, failed, say "실패" "failing", "", failed_tone;
+         Config_error, read_failed, say "설정 오류" "config error", say "오류" "err", failed_tone;
          Unexpected_offline, caution, say "자율 꺼짐" "auto off", say "꺼짐" "off", caution_tone;
          Recoveries, caution, say "복구" "recovered", say "복구" "rec", caution_tone;
          Sound, settled, say "정상" "ok", "", settled_tone;
@@ -225,8 +237,10 @@ let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows
         else if peak > 2 && n * 3 <= peak then low_tint
         else warn
       in
+      (* Keep 1-row fleet failure sparklines light (1..2 top dot rows: ⠉ ⠋ ⠙ ⠛),
+         matching Day_wall pure-fail cells and staying shape-disjoint from ok ⣀. *)
       let count_arr = Array.of_list counts in
-      let scale_dots n = max 1 (min 4 (((n * 4) + peak - 1) / max 1 peak)) in
+      let scale_dots n = if peak > 1 && n * 2 > peak then 2 else 1 in
       let level_arr =
         Array.map (fun (n, _) -> if n > 0 then scale_dots n else 0) count_arr
       in
@@ -235,8 +249,8 @@ let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows
           if n > 0 then
             let h = level_arr.(i) in
             let left =
-              if i > 0 && level_arr.(i - 1) > 0 then max 1 ((level_arr.(i - 1) + h) / 2)
-              else max 1 (h / 2)
+              if i > 0 && level_arr.(i - 1) > 0 then level_arr.(i - 1)
+              else 1
             in
             emit (fail_tone n) (Masc_tui_braille.braille_pair_down ~left ~right:h)
           else emit recede (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")) count_arr) in

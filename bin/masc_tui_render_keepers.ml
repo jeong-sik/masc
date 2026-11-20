@@ -1250,7 +1250,9 @@ let group_pulse ~now members =
           else count, true)
           (0, false) reading_arrays)
     in
-    let scale_dots count = max 1 (min 4 (((count * 4) + peak - 1) / peak)) in
+    (* Keep 1-row group failure sparklines light (1..2 top dot rows: ⠉ ⠋ ⠙ ⠛),
+       matching fleet_cells and Day_wall pure-fail cells. *)
+    let scale_dots count = if peak > 1 && count * 2 > peak then 2 else 1 in
     let levels =
       Array.map (fun (count, _) -> if count > 0 then scale_dots count else 0) counts
     in
@@ -1265,8 +1267,8 @@ let group_pulse ~now members =
           in
           let h = levels.(i) in
           let left =
-            if i > 0 && levels.(i - 1) > 0 then max 1 ((levels.(i - 1) + h) / 2)
-            else max 1 (h / 2)
+            if i > 0 && levels.(i - 1) > 0 then levels.(i - 1)
+            else 1
           in
           (tone, Masc_tui_braille.braille_pair_down ~left ~right:h)
         else

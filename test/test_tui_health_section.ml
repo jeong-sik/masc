@@ -62,6 +62,22 @@ let test_an_unknown_name_is_kept_as_received () =
      | Error kept -> String.equal kept received
      | Ok _ -> false)
 
+let test_korean_labels_translate_sections () =
+  List.iter
+    (fun section ->
+      Alcotest.(check bool)
+        (Printf.sprintf "%s has distinct Korean label" (Section.wire_name section))
+        true
+        (not (String.equal (Section.label ~ko:true section) (Section.label ~ko:false section))))
+    Section.
+      [ Fd_observation; Fd_accountant; Provider_connection_cache; Disk_observation
+      ; Keeper_fleet_safety; Keeper_identity_drift; Keeper_memory_attention
+      ; Publication_recovery_activation; Keeper_reaction_ledger; Keeper_owner
+      ; Keeper_board_event_collection; Keeper_hitl_gate
+      ; Keeper_terminal_effect_policy; Keeper_observability_artifacts
+      ; Tla_source_observation; Auxiliary_startup; Paused_keepers
+      ; Runtime_startup_degradation ]
+
 let () =
   Alcotest.run "tui_health_section"
     [ ( "decode"
@@ -71,5 +87,7 @@ let () =
             test_no_known_section_is_labelled_with_its_wire_name
         ; Alcotest.test_case "an unknown name is kept as received" `Quick
             test_an_unknown_name_is_kept_as_received
+        ; Alcotest.test_case "Korean labels translate overview health sections" `Quick
+            test_korean_labels_translate_sections
         ] )
     ]

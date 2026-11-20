@@ -219,7 +219,16 @@ let test_cells_formatting () =
   Alcotest.(check int) "produces 4 cells (gap, lag, clock, stale)" 4 (List.length cells);
   Alcotest.(check string) "first cell is gap 5" "gap 5" (List.nth cells 0).text;
   Alcotest.(check string) "second cell is lag 3" "lag 3" (List.nth cells 1).text;
-  Alcotest.(check string) "fourth cell is stale ×2" "stale ×2" (List.nth cells 3).text
+  Alcotest.(check string) "fourth cell is stale ×2" "stale ×2" (List.nth cells 3).text;
+  let ko_cells = Masc_tui_keeper_memory_reading.cells ~ko:true ~now reading in
+  Alcotest.(check int) "Korean produces 4 cells" 4 (List.length ko_cells);
+  Alcotest.(check string) "Korean gap cell" "누락 5" (List.nth ko_cells 0).text;
+  Alcotest.(check string) "Korean lag cell" "지연 3" (List.nth ko_cells 1).text;
+  Alcotest.(check string) "Korean stale cell" "무효화 ×2" (List.nth ko_cells 3).text;
+  Alcotest.(check string) "Korean unknown cell" "기억 ?"
+    (List.hd (Masc_tui_keeper_memory_reading.cells ~ko:true ~now Masc_tui_keeper_memory_reading.Unknown)).text;
+  Alcotest.(check string) "Korean refused cell" "기억 !"
+    (List.hd (Masc_tui_keeper_memory_reading.cells ~ko:true ~now (Masc_tui_keeper_memory_reading.Refused "err"))).text
 ;;
 
 module Reading = Masc_tui_keeper_memory_reading

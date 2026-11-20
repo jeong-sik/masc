@@ -693,7 +693,14 @@ let test_every_palette_action_has_bilingual_description () =
        check_bool
          (Printf.sprintf "ko and en descriptions differ for %s" label)
          true (not (String.equal ko_desc en_desc)))
-    entries
+    entries;
+  Alcotest.(check string) "Korean gate lane label" "워크스페이스"
+    (gate_lane_label ~ko:true Workspace_gate);
+  Alcotest.(check string) "Korean gate mode label" "Auto Judge가 판단"
+    (gate_mode_label ~ko:true Masc.Keeper_gate_mode.Auto_judge);
+  Alcotest.(check string) "Korean LSP description localizes question"
+    "코드 화면에서 심볼 render의 정의를 조회합니다"
+    (action_description ~ko:true (Palette_lsp ("definition", "render")))
 ;;
 
 let () =

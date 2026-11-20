@@ -1025,12 +1025,12 @@ let grid_age_ladder_reading (grid : Grid.t) = function
 
 (* The age view's pulse column: the Keeper's ladder, or the word its age cell
    uses when there is none. *)
-let grid_fact_ages (grid : Grid.t) memory =
+let grid_fact_ages ~ko (grid : Grid.t) memory =
   match Memory_reading.age_bins memory with
   | Memory_reading.Measured bins -> grid_age_ladder grid bins
   | Memory_reading.Unmeasured | Memory_reading.No_snapshot | Memory_reading.Snapshot_unknown
   | Memory_reading.Row_absent | Memory_reading.Row_refused ->
-      let cell = Memory_reading.fact_ages_cell memory in
+      let cell = Memory_reading.fact_ages_cell ~ko memory in
       style_axis_cell { cell with text = Message_layout.pad_left cell.text grid.side_cells }
 
 (* The age view's ● cell: how long ago the memory snapshot was saved. *)
@@ -1045,7 +1045,7 @@ let grid_saved ~ko ~now memory =
         (grid_quiet
            (Masc_tui_theme.Glyph.no_value ^ " " ^ Keeper_mark.grid_word ~ko Keeper_mark.No_snapshot_word))
   | Memory_reading.Unmeasured | Memory_reading.Snapshot_unknown | Memory_reading.Row_refused ->
-      grid_fitted Grid.now_cells (Memory_reading.updated_cell ~now memory)
+      grid_fitted Grid.now_cells (Memory_reading.updated_cell ~ko ~now memory)
 
 (* The age view's due column: the invalidated sources. *)
 let grid_stale memory =
@@ -1108,7 +1108,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
      | Axis_row.Age_columns ->
          { gutter
          ; name
-         ; pulse = grid_fact_ages grid memory
+         ; pulse = grid_fact_ages ~ko:(state.ui_language = Lang_ko) grid memory
          ; now_cell = grid_saved ~ko:(state.ui_language = Lang_ko) ~now memory
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_stale memory

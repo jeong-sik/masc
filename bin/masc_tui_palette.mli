@@ -44,8 +44,8 @@ type palette_action =
   | Palette_code_worktree of Masc.Tui_decode.git_worktree
   | Palette_code_search_match of Masc.Tui_decode.workspace_search_match
 
-val gate_lane_label : gate_lane -> string
-val gate_mode_label : Masc.Keeper_gate_mode.t -> string
+val gate_lane_label : ?ko:bool -> gate_lane -> string
+val gate_mode_label : ?ko:bool -> Masc.Keeper_gate_mode.t -> string
 val code_cursor_line_symbols : Masc_tui_types.state -> string list
 val lsp_question_prefixes : (string * string) list
 val palette_entries : Masc_tui_types.state -> (string * palette_action) list

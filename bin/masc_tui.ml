@@ -16897,14 +16897,19 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Auto_judge_retry refusal);
       Drawn_changed
   | Gate_msg (Gate_mode_set (lane, mode, result)) ->
+      let ko = state.ui_language = Lang_ko in
       (match result with
        | Ok () ->
            report_action state "system"
-             (Printf.sprintf "%s Gate set to %s" (Masc_tui_palette.gate_lane_label lane) mode);
+             (Printf.sprintf
+                (if ko then "%s 게이트 정책 설정됨: %s" else "%s Gate set to %s")
+                (Masc_tui_palette.gate_lane_label ~ko lane) mode);
            Masc_tui_work_requests.Approval_gate_requests.launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox
        | Error (Request_failed detail) ->
            report_action state "error"
-             (Printf.sprintf "%s Gate change failed: %s" (Masc_tui_palette.gate_lane_label lane) detail)
+             (Printf.sprintf
+                (if ko then "%s 게이트 변경 실패: %s" else "%s Gate change failed: %s")
+                (Masc_tui_palette.gate_lane_label ~ko lane) detail)
        | Error (Request_withdrawn refusal) ->
            Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Gate_mode_change refusal);
       Drawn_changed
@@ -19500,8 +19505,10 @@ let main
              ~rows ~cols:terminal_cols in
            let cols = resource_content_cols state ~cols:terminal_cols in
            let visible = Masc_tui_scroll.Position.offset ~count ~height position = 0
-             && Option.exists (Masc_tui_resource_document.recovery_preview_fits ~cols ~height
-                  ~requested:prompt.recovery_entry.request.requested)
+             && Option.exists
+                  (Masc_tui_resource_document.recovery_preview_fits
+                     ~ko:(state.ui_language = Lang_ko) ~cols ~height
+                     ~requested:prompt.recovery_entry.request.requested)
                   (Masc_tui_resource_document.current state) in
            Masc_tui_artifact_share_confirmation.observe_frame prompt.recovery_confirmation
              ~visible

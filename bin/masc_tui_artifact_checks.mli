@@ -31,7 +31,7 @@ val unchecked_on_day : reports_complete:bool ->
     the gap it leaves: a read pending or not sent is [Unread]; a listing that
     did not carry every report, a failed read, or records left unread is
     [Read_failed]; a record for a different body is [Unreported]. *)
-val next_unchecked : reports_complete:bool ->
+val next_unchecked : ?ko:bool -> reports_complete:bool ->
   entries:Masc_tui_resource_catalog.t list -> cursor:int ->
   (unit, inventory, read_failure) Masc_tui_fetched.source -> (int option, string) result
 (** Find the next unchecked published revision after [cursor], wrapping in the

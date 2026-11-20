@@ -1052,23 +1052,10 @@ let render_approvals (state : state) =
      same two things in Korean; on an English one it shows the palette's own
      words. *)
   let lane_mode_label = function
-    | Tui_decode.Gate_mode mode ->
-        (match mode, state.ui_language with
-         | Masc.Keeper_gate_mode.Manual, Lang_ko -> "매번 나에게 묻기"
-         | Masc.Keeper_gate_mode.Auto_judge, Lang_ko -> "Auto Judge 가 판단"
-         | Masc.Keeper_gate_mode.Always_allow, Lang_ko -> "검토 없이 모두 허용"
-         | ( Masc.Keeper_gate_mode.Manual | Masc.Keeper_gate_mode.Auto_judge
-           | Masc.Keeper_gate_mode.Always_allow ), Lang_en ->
-             Masc_tui_palette.gate_mode_label mode)
+    | Tui_decode.Gate_mode mode -> Masc_tui_palette.gate_mode_label ~ko mode
     | Tui_decode.Unrecognised_gate_mode raw -> Terminal_text.single_line raw
   in
-  let lane_word gate =
-    match gate, state.ui_language with
-    | Masc_tui_palette.Workspace_gate, Lang_ko -> "워크스페이스"
-    | Masc_tui_palette.External_gate, Lang_ko -> "외부 서비스"
-    | (Masc_tui_palette.Workspace_gate | Masc_tui_palette.External_gate), Lang_en ->
-        Masc_tui_palette.gate_lane_label gate
-  in
+  let lane_word gate = Masc_tui_palette.gate_lane_label ~ko gate in
   (* The two lanes share a row while both fit. A narrower terminal gives each
      lane its own row, so a mode is not cut off in the middle of its words. *)
   let lane_rows modes =

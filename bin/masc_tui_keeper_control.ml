@@ -253,7 +253,7 @@ let action_key = function
   | Delete -> "x"
 
 let action_label ~ko = function
-  | Pause -> if ko then "일시 정지" else "pause"
+  | Pause -> if ko then "일시정지" else "pause"
   | Resume -> if ko then "재개" else "resume"
   | Boot -> if ko then "올리기" else "boot"
   | Shutdown -> if ko then "내리기" else "shutdown"
@@ -261,7 +261,7 @@ let action_label ~ko = function
   | Delete -> if ko then "삭제" else "delete"
 
 let action_gerund ~ko = function
-  | Pause -> if ko then "일시 정지하는 중" else "pausing"
+  | Pause -> if ko then "일시정지하는 중" else "pausing"
   | Resume -> if ko then "재개하는 중" else "resuming"
   | Boot -> if ko then "올리는 중" else "booting"
   | Shutdown -> if ko then "내리는 중" else "shutting down"

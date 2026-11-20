@@ -9,9 +9,15 @@ type t = Reading.t
 
 let entry (reading : t) = reading.entry
 
-let recovery_preview_lead ~requested = Printf.sprintf
-  "**%s all revisions**\n\n**! retries the original request; it may apply.**"
-  (if requested then "ENABLE" else "REVOKE")
+let recovery_preview_lead ~ko ~requested =
+  if ko then
+    Printf.sprintf
+      "**모든 리비전 %s**\n\n**! 키로 원래 요청을 다시 시도합니다. 실제 적용될 수 있습니다.**"
+      (if requested then "외부 공유 켜기" else "외부 공유 해제")
+  else
+    Printf.sprintf
+      "**%s all revisions**\n\n**! retries the original request; it may apply.**"
+      (if requested then "ENABLE" else "REVOKE")
 
 let diagrams_allowed (state : state) =
   Option.is_none state.resource_share_recovery_prompt
@@ -36,7 +42,9 @@ let save_notice state entry =
           | Resource_save_settled (Resource_save_kept_back _) -> None
           | Resource_save_settled (Resource_save_interrupted cancellation) ->
               Some (match cancellation with
-                | None -> "No authoritative target effect was observed."
+                | None ->
+                    ui_text state ~ko:"확정된 대상 변경이 관측되지 않았습니다."
+                      ~en:"No authoritative target effect was observed."
                 | Some evidence -> Masc_tui_resource_export.cancellation_to_string evidence) in
         Option.fold ~none:"" ~some:(Masc_tui_markdown_theme.fenced ~language:"text") detail in
     "**" ^ resource_save_summary state receipt.save_phase ^ "**\n\n"
@@ -111,10 +119,12 @@ let current (state : state) =
         ~recovery_preview:(match state.resource_share_recovery_prompt with
           | Some prompt when prompt.recovery_workspace = state.workspace_authority
               && Catalog.equal_key prompt.recovery_key key ->
+            let ko = state.ui_language = Lang_ko in
             let request = prompt.recovery_entry.request in
             Some (Printf.sprintf
-              "%s\n\nShare version %d · publication v%d\n\nOperation `%s` · SHA-256 `%s`"
-              (recovery_preview_lead ~requested:request.requested) request.expected_version
+              (if ko then "%s\n\n공유 버전 %d · 게시 v%d\n\n작업 `%s` · SHA-256 `%s`"
+               else "%s\n\nShare version %d · publication v%d\n\nOperation `%s` · SHA-256 `%s`")
+              (recovery_preview_lead ~ko ~requested:request.requested) request.expected_version
               request.expected_artifact_revision request.operation_id request.expected_artifact_sha256)
           | Some _ | None -> None)
         ~public_url)
@@ -142,55 +152,82 @@ let selected_text_part parts cursor =
   if cursor < 0 then None else List.nth_opt parts cursor
 
 let copy_source state =
+  let say ko en = ui_text state ~ko ~en in
   if not (server_authority_ready state) then
-    Error "Confirm the workspace before copying resource source"
+    Error (say "리소스 원문을 복사하기 전에 워크스페이스를 확인하세요"
+             "Confirm the workspace before copying resource source")
   else if state.view <> Resources || state.resource_focus <> Right_pane then
-    Error "Focus resource detail to copy its source"
+    Error (say "원문을 복사하려면 리소스 상세 패널에 포커스하세요"
+             "Focus resource detail to copy its source")
   else match admitted_text_parts state with
-    | None -> Error "Resource source is not currently readable"
+    | None ->
+        Error (say "현재 읽을 수 있는 리소스 원문이 없습니다"
+                 "Resource source is not currently readable")
     | Some (entry, parts) ->
       match selected_text_part parts state.resource_text_cursor with
       | Some (part, source) ->
-          Ok (Printf.sprintf "%s · part %d" (Catalog.display_name entry) part, source)
-      | None -> Error "No selected text part in the current resource reading"
+          Ok (Printf.sprintf
+                (if state.ui_language = Lang_ko then "%s · 파트 %d" else "%s · part %d")
+                (Catalog.display_name entry) part, source)
+      | None ->
+          Error (say "현재 리소스 읽기에 선택된 텍스트 파트가 없습니다"
+                   "No selected text part in the current resource reading")
 
 let export_source state =
   let open Result.Syntax in
+  let say ko en = ui_text state ~ko ~en in
   let* _label, _source = copy_source state in
   match admitted_text_parts state with
   | Some (Catalog.Report report, [(_, source)]) ->
       Masc_tui_resource_export.create ~report ~source
-  | Some (Catalog.Mcp _, _) -> Error "Select a published report revision"
-  | Some (Catalog.Report _, _) | None -> Error "The report has no single admitted original body"
+  | Some (Catalog.Mcp _, _) ->
+      Error (say "게시 보고서 리비전을 선택하세요" "Select a published report revision")
+  | Some (Catalog.Report _, _) | None ->
+      Error (say "보고서에 단일 원문 본문이 없습니다" "The report has no single admitted original body")
 
 let copy_public_url state =
   let open Result.Syntax in
+  let say ko en = ui_text state ~ko ~en in
   let* () = match current state with
     | Some { share_uncertain = true; _ } ->
-      Error "External sharing is unconfirmed; U reconciles the recorded operation and may apply it"
+      Error (say "외부 공유가 미확인 상태입니다. U로 기록된 작업을 확인·재시도할 수 있습니다"
+               "External sharing is unconfirmed; U reconciles the recorded operation and may apply it")
     | Some _ | None -> Ok () in
   let* _ = export_source state in
   match state.resource_shared, current state with
   | Some true, Some { public_url = Some result; _ } -> result
-  | Some true, (Some _ | None) -> Error "Press R to reread the report before copying its public link"
-  | Some false, (Some _ | None) -> Error "External sharing is off; press P to enable it"
-  | None, (Some _ | None) -> Error "External sharing is unknown; press R to reread the report"
+  | Some true, (Some _ | None) ->
+      Error (say "공개 링크를 복사하기 전에 R로 보고서를 다시 읽으세요"
+               "Press R to reread the report before copying its public link")
+  | Some false, (Some _ | None) ->
+      Error (say "외부 공유가 꺼져 있습니다. P를 눌러 켜세요"
+               "External sharing is off; press P to enable it")
+  | None, (Some _ | None) ->
+      Error (say "외부 공유 상태를 알 수 없습니다. R로 보고서를 다시 읽으세요"
+               "External sharing is unknown; press R to reread the report")
 
 let external_share_change state =
   let open Result.Syntax in
-  if not (server_authority_ready state) then Error "Confirm the workspace before changing external sharing"
+  let say ko en = ui_text state ~ko ~en in
+  if not (server_authority_ready state) then
+    Error (say "외부 공유를 바꾸기 전에 워크스페이스를 확인하세요"
+             "Confirm the workspace before changing external sharing")
   else if state.view <> Resources || state.resource_focus <> Right_pane then
-    Error "Focus a published report to change external sharing"
+    Error (say "외부 공유를 바꾸려면 게시 보고서 상세에 포커스하세요"
+             "Focus a published report to change external sharing")
   else match current state, state.resource_shared with
     | Some { entry = Catalog.Report _; share_uncertain = true; _ }, (Some _ | None) ->
-      Error "External sharing is unconfirmed; U reconciles the recorded operation and may apply it"
+      Error (say "외부 공유가 미확인 상태입니다. U로 기록된 작업을 확인·재시도할 수 있습니다"
+               "External sharing is unconfirmed; U reconciles the recorded operation and may apply it")
     | Some { entry = Catalog.Report report; _ }, Some true -> Ok (report, false)
     | Some { entry = Catalog.Report report; _ }, Some false ->
       let* _ = export_source state in Ok (report, true)
     | Some { entry = Catalog.Report _; _ }, None ->
-      Error "External sharing is unknown; press R to reread the report"
+      Error (say "외부 공유 상태를 알 수 없습니다. R로 보고서를 다시 읽으세요"
+               "External sharing is unknown; press R to reread the report")
     | (Some { entry = Catalog.Mcp _; _ } | None), (Some _ | None) ->
-      Error "Open a published report to change external sharing"
+      Error (say "외부 공유를 바꾸려면 게시 보고서를 여세요"
+               "Open a published report to change external sharing")
 
 let fenced_pretty_json text =
   let pretty =
@@ -242,7 +279,7 @@ type origin = Metadata | Selection | Part_heading of int | Part_body of int
 let resource_document ?(ko = false) entry
     (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~save_notice ~public_url =
   let say ko_text en_text = if ko then ko_text else en_text in
-  let resource = Catalog.metadata entry in
+  let resource = Catalog.metadata ~ko entry in
   let present = function
     | Some text when String.trim text <> "" -> text
     | Some _ | None -> say "제공되지 않음" "not supplied"
@@ -259,7 +296,7 @@ let resource_document ?(ko = false) entry
       let available direction = Option.is_some (Catalog.adjacent_revision direction
         ~current:report revisions) in
       [if ko then
-         Printf.sprintf "**리비전:** %d · 확인 %d건 · { 이전%s · } 다음%s"
+         Printf.sprintf "**리비전:** %d · 총 %d개 · { 이전%s · } 다음%s"
            report.revision.revision (List.length revisions)
            (if available Catalog.Older then "" else " 없음")
            (if available Catalog.Newer then "" else " 없음")
@@ -270,7 +307,7 @@ let resource_document ?(ko = false) entry
            (if available Catalog.Newer then "" else " unavailable")] in
   let details =
     String.concat "\n\n"
-      ([ Catalog.origin entry
+      ([ Catalog.origin ~ko entry
       ; say "**설명:** " "**About:** " ^ present resource.description
       ; "**URI:** `" ^ resource.uri ^ "`"
       ; say "**이름:** " "**Name:** " ^ resource.name
@@ -436,7 +473,7 @@ let prepare_anchored_layout ~ko ~cols (reading : t) =
          rendered.layout_rows) @ [""]
     | Html_text source ->
       Masc_tui_artifact_html.project source
-      |> Masc_tui_artifact_html_rows.render ~width in
+      |> Masc_tui_artifact_html_rows.render ~ko ~width in
     (* HTML has no Mermaid replacement, but remains a stable part when earlier
        Markdown preparations alter the prefix. Its own rows keep their offset. *)
     (match piece with
@@ -473,12 +510,12 @@ let layout ?(ko = false) ~cols reading =
 
 let rows ?(ko = false) ~cols reading = fst (layout ~ko ~cols reading)
 
-let recovery_preview_fits ~cols ~height ~requested (reading : t) =
+let recovery_preview_fits ?(ko = false) ~cols ~height ~requested (reading : t) =
   match reading.recovery_preview, reading.diagrams with
   | Some _, None ->
     let width = max 1 (framed_inner_width cols - 4) in
     let preview_rows = Message_layout.wrap_body ~markdown:Masc_tui_markdown_theme.document
-      ~max_cells:width ~sanitize:Terminal_text.single_line (recovery_preview_lead ~requested) in
+      ~max_cells:width ~sanitize:Terminal_text.single_line (recovery_preview_lead ~ko ~requested) in
     preview_rows <> [] && List.length preview_rows <= height
   | (Some _ | None), (Some _ | None) -> false
 

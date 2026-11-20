@@ -115,7 +115,7 @@ let detail_lines ?(ko = false) ?account_email ?keepers row =
        | [] -> []
        | others ->
          [ Printf.sprintf
-             (if ko then "같은 로그인 공유: %s (공유 account-home)"
+             (if ko then "같은 로그인 공유: %s (공유 계정 홈)"
               else "Same login as %s (shared account-home)")
              (String.concat ", " others) ])
     @ (match keepers with
@@ -148,10 +148,19 @@ let detail_lines ?(ko = false) ?account_email ?keepers row =
            if ko then "컨텍스트: 미선언 · 런타임 화면에서 카탈로그 해석값 표시"
            else "Context: undeclared; Runtime shows the resolved catalog value"
        | Some (source, n) ->
+           let source_label =
+             if not ko then source
+             else
+               match source with
+               | "binding" -> "바인딩"
+               | "provider" -> "제공자"
+               | "model" -> "모델"
+               | other -> other
+           in
            Printf.sprintf
              (if ko then "컨텍스트: %d 토큰 (%s) · 모델 사양: %s"
               else "Context: %d tokens (%s); model specification: %s")
-             n source (tokens_text row.model_context))
+             n source_label (tokens_text row.model_context))
     ; (if ko then "- 는 해당 키가 설정되지 않았음을 뜻합니다. 위 섹션에서 추가하거나 수정할 수 있습니다."
        else "- means that key is absent; add or edit it in the section shown above.")
     ]
@@ -388,13 +397,41 @@ let reads_selected ~table ~starts ~total ~height cursor =
   let start, stop = selected_lines ~table ~starts ~total cursor in
   (not table) && stop - start + 1 > height
 
+let wrap_style code text =
+  if String.equal code "" || String.equal text "" then text
+  else code ^ text ^ Masc_tui_theme.Sgr.reset
+
 let render ?(ko = false) ~width ?pane rows =
   let qualifier = row_qualifier rows in
   let provider_width = provider_width_of ~ko ~qualifier rows in
   let model_width = model_column ~width ~provider_width in
+  let recede =
+    Masc_tui_theme.recede ~surface:Masc_tui_theme.Page
+      (Masc_tui_terminal_palette.snapshot_palette
+         (Masc_tui_terminal_palette.snapshot ()))
+  in
+  let dim_if_absent text padded =
+    if String.equal text absent then wrap_style recede padded else padded
+  in
   let owner text = if provider_width = 0 then ""
     else String.make gutter ' ' ^ pad text provider_width in
+  let styled_owner text =
+    if provider_width = 0 then ""
+    else if String.equal text "" then String.make (gutter + provider_width) ' '
+    else String.make gutter ' ' ^ wrap_style recede (pad text provider_width)
+  in
   let tokens text = if provider_width = 0 then text else pad text tokens_width in
+  let styled_model r =
+    let plain = model_text r in
+    let plain_cells = Masc_tui_message_layout.display_width plain in
+    if plain_cells > model_width then pad (clip plain model_width) model_width
+    else
+      let trailing = String.make (model_width - plain_cells) ' ' in
+      match r.context with
+      | None -> r.model ^ trailing
+      | Some (_, n) ->
+          r.model ^ wrap_style recede (Printf.sprintf " [%d ctx]" n) ^ trailing
+  in
   let header =
     pad (model_header ~ko) model_width
     ^ String.make gutter ' '
@@ -405,13 +442,17 @@ let render ?(ko = false) ~width ?pane rows =
     ^ tokens (max_tokens_header ~ko) ^ owner (provider_header ~ko)
   in
   let line r =
-    pad (clip (model_text r) model_width) model_width
+    let eff = effort_text r.reasoning_effort in
+    let temp = value_or_absent r.temperature in
+    let tok = tokens_text r.max_tokens in
+    styled_model r
     ^ String.make gutter ' '
-    ^ pad (effort_text r.reasoning_effort) effort_width
+    ^ dim_if_absent eff (pad eff effort_width)
     ^ String.make gutter ' '
-    ^ pad (value_or_absent r.temperature) temperature_width
+    ^ dim_if_absent temp (pad temp temperature_width)
     ^ String.make gutter ' '
-    ^ tokens (tokens_text r.max_tokens) ^ owner (Option.value ~default:"" (qualifier r))
+    ^ dim_if_absent tok (tokens tok)
+    ^ styled_owner (Option.value ~default:"" (qualifier r))
   in
   match rows with
   | [] ->

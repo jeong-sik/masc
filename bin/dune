@@ -1586,7 +1586,7 @@
 (library
  (name masc_tui_model_runtime_table)
  (wrapped false)
- (libraries masc_tui_message_layout masc_tui_scroll masc.runtime masc.runtime_toml_namespace masc.agent_core.llm_provider)
+ (libraries masc_tui_message_layout masc_tui_scroll masc_tui_theme masc_tui_terminal_palette masc.runtime masc.runtime_toml_namespace masc.agent_core.llm_provider)
  (modules masc_tui_model_runtime_table))
 
 (library

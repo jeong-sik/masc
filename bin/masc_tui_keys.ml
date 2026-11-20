@@ -448,7 +448,7 @@ let keeper_actions =
   ; b ~role:Acts ~ko:"호출" Act keeper_calls_key "calls" ~help:"tool calls"
   ; b ~role:Acts ~ko:"런타임" Act "u" "runtime" ~help:"pick a runtime candidate order"
   ; b ~role:Acts ~ko:"yolo / auto" Act "g" "yolo / auto" ~help:"toggle yolo / auto tool approval"
-  ; b ~role:Acts ~ko:"일시 정지 / 깨우기" Act "p / w" "pause / wake"
+  ; b ~role:Acts ~ko:"일시정지 / 깨우기" Act "p / w" "pause / wake"
   ; b ~role:Acts ~ko:"내리기" Act "s" "shutdown"
   ; b ~role:Acts ~ko:"설정 TOML/JSON" Act "e/E" "settings TOML/JSON"
   ; b ~role:Acts ~ko:"파일" Act "f" "files" ~help:"file changes this keeper wrote"

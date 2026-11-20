@@ -79,12 +79,13 @@ let mcp_reading parts = { parts; revisions = []; shared = None; share_version = 
 let report_path report =
   Printf.sprintf "/api/v1/published-artifacts/%s?revision=%d" report.id report.revision.revision
 
-let metadata = function
+let metadata ?(ko = false) = function
   | Mcp resource -> resource
   | Report { id; revision } ->
     { Masc_tui_mcp.uri = Published.url ~revision:revision.revision id
     ; name = id; title = Some revision.title
-    ; description = Some (Printf.sprintf "%s\n\n%s · %s · revision %d"
+    ; description = Some (Printf.sprintf
+        (if ko then "%s\n\n%s · %s · 리비전 %d" else "%s\n\n%s · %s · revision %d")
         revision.summary revision.author revision.created_at revision.revision)
     ; mime_type = Some revision.body.mime; size = Some revision.body.bytes }
 
@@ -94,9 +95,13 @@ let display_name = function
       (match report.revision.format with Published.Markdown -> "Markdown" | Html -> "HTML")
       report.revision.title report.revision.revision
 
-let origin = function
-  | Mcp _ -> "MCP resource · read-only data exposed by this server."
-  | Report _ -> "Published report · exact revision from this workspace. v: document/source."
+let origin ?(ko = false) = function
+  | Mcp _ ->
+      if ko then "MCP 리소스 · 이 서버가 제공하는 읽기 전용 데이터입니다."
+      else "MCP resource · read-only data exposed by this server."
+  | Report _ ->
+      if ko then "게시 보고서 · 이 워크스페이스의 고정 리비전입니다. v: 문서/원문 전환."
+      else "Published report · exact revision from this workspace. v: document/source."
 
 let object_fields = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields)) -> Ok fields

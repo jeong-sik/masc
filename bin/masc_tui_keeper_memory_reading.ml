@@ -119,47 +119,60 @@ let find (idx : index) ~keeper_name : t =
 
 (* A value the row came without draws the age ladder's mark, so one mark
    says "not measured" on every memory cell. *)
-let unknown_cell =
-  { Masc_tui_keeper_axis_cell.text = "mem " ^ Masc_tui_keeper_age_ladder.unmeasured_mark
+let unknown_cell ~ko =
+  { Masc_tui_keeper_axis_cell.text =
+      (if ko then "기억 " else "mem ") ^ Masc_tui_keeper_age_ladder.unmeasured_mark
   ; tone = Quiet
   }
 ;;
 
-let refused_cell = { Masc_tui_keeper_axis_cell.text = "mem !"; tone = Failure }
+let refused_cell ~ko =
+  { Masc_tui_keeper_axis_cell.text = (if ko then "기억 !" else "mem !"); tone = Failure }
+;;
 
 let lag_tone turns =
   if turns > 0 then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet
 ;;
 
-let cell_of_lag = function
-  | Lag n -> { Masc_tui_keeper_axis_cell.text = Printf.sprintf "lag %d" n; tone = lag_tone n }
+let cell_of_lag ~ko = function
+  | Lag n ->
+      { Masc_tui_keeper_axis_cell.text =
+          Printf.sprintf (if ko then "지연 %d" else "lag %d") n
+      ; tone = lag_tone n
+      }
   | Lag_unmeasured ->
-      { Masc_tui_keeper_axis_cell.text = "lag " ^ Masc_tui_keeper_age_ladder.unmeasured_mark
+      { Masc_tui_keeper_axis_cell.text =
+          (if ko then "지연 " else "lag ") ^ Masc_tui_keeper_age_ladder.unmeasured_mark
       ; tone = Quiet
       }
 ;;
 
-let lag_cell = function
-  | Unknown -> Some unknown_cell
+let lag_cell ?(ko = false) = function
+  | Unknown -> Some (unknown_cell ~ko)
   | No_row -> None
-  | Refused _ -> Some refused_cell
-  | Row { lag; _ } -> Some (cell_of_lag lag)
+  | Refused _ -> Some (refused_cell ~ko)
+  | Row { lag; _ } -> Some (cell_of_lag ~ko lag)
 ;;
 
-let gap_cells = function
+let gap_cells ~ko = function
   | Gap { first_atom; past_last_atom } ->
       let count = past_last_atom - first_atom in
-      [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "gap %d" count; tone = Attention } ]
+      [ { Masc_tui_keeper_axis_cell.text =
+            Printf.sprintf (if ko then "누락 %d" else "gap %d") count
+        ; tone = Attention
+        } ]
   | Gap_unmeasured ->
-      [ { Masc_tui_keeper_axis_cell.text = "gap " ^ Masc_tui_keeper_age_ladder.unmeasured_mark
+      [ { Masc_tui_keeper_axis_cell.text =
+            (if ko then "누락 " else "gap ") ^ Masc_tui_keeper_age_ladder.unmeasured_mark
         ; tone = Attention
         } ]
   | No_gap -> []
 ;;
 
-let stale_cells source_invalidations =
+let stale_cells ~ko source_invalidations =
   if source_invalidations > 0 then
-    [ { Masc_tui_keeper_axis_cell.text = "stale " ^ Masc_tui_value.Count.times source_invalidations
+    [ { Masc_tui_keeper_axis_cell.text =
+          (if ko then "무효화 " else "stale ") ^ Masc_tui_value.Count.times source_invalidations
       ; tone = Attention
       } ]
   else []
@@ -167,10 +180,10 @@ let stale_cells source_invalidations =
 
 let span_since ~now at = Masc_tui_value.Ongoing.since ~now at
 
-let cells ~now = function
-  | Unknown -> [ unknown_cell ]
+let cells ?(ko = false) ~now = function
+  | Unknown -> [ unknown_cell ~ko ]
   | No_row -> []
-  | Refused _ -> [ refused_cell ]
+  | Refused _ -> [ refused_cell ~ko ]
   | Row { lag; gap; updated_at; added; removed; source_invalidations; _ } ->
       let clock_cells =
         match updated_at with
@@ -183,7 +196,8 @@ let cells ~now = function
               } ]
         | None -> []
       in
-      gap_cells gap @ [ cell_of_lag lag ] @ clock_cells @ stale_cells source_invalidations
+      gap_cells ~ko gap @ [ cell_of_lag ~ko lag ] @ clock_cells
+      @ stale_cells ~ko source_invalidations
 ;;
 
 type 'a field =
@@ -236,12 +250,12 @@ let peak_lag readings =
 
 let no_memory_cell = { Masc_tui_keeper_axis_cell.text = Masc_tui_theme.Glyph.no_value; tone = Quiet }
 
-let field_cell ~unmeasured ~measured = function
+let field_cell ~ko ~unmeasured ~measured = function
   | Measured value -> measured value
   | Unmeasured -> { Masc_tui_keeper_axis_cell.text = unmeasured; tone = Quiet }
   | No_snapshot | Row_absent -> no_memory_cell
-  | Snapshot_unknown -> unknown_cell
-  | Row_refused -> refused_cell
+  | Snapshot_unknown -> unknown_cell ~ko
+  | Row_refused -> refused_cell ~ko
 ;;
 
 (* What the operator reads for how the last Librarian pass ended, on the
@@ -296,7 +310,7 @@ let admission_wait_word ~ko pending =
 ;;
 
 let pass_cell ?(ko = false) reading =
-  let durable = field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
+  let durable = field_cell ~ko ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
     ~measured:(fun ending -> { Masc_tui_keeper_axis_cell.text = pass_word ~ko ending; tone = pass_tone ending })
     (pass_end reading) in
   match reading with
@@ -315,14 +329,14 @@ let pass_cell ?(ko = false) reading =
   | Row { admission_wait = None; _ } | Unknown | No_row | Refused _ -> durable
 ;;
 
-let updated_cell ~now reading =
-  field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
+let updated_cell ?(ko = false) ~now reading =
+  field_cell ~ko ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
     ~measured:(fun at -> { Masc_tui_keeper_axis_cell.text = span_since ~now at; tone = Quiet })
     (updated_at reading)
 ;;
 
-let fact_ages_cell reading =
-  field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
+let fact_ages_cell ?(ko = false) reading =
+  field_cell ~ko ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
     ~measured:(fun bins ->
       { Masc_tui_keeper_axis_cell.text = Masc_tui_keeper_age_ladder.strip bins; tone = Quiet })
     (age_bins reading)

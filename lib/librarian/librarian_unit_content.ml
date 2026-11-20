@@ -311,77 +311,99 @@ let add_entry_external_key keys = function
 let external_keys_of_entries entries = List.fold_left add_entry_external_key empty_external_keys entries
 
 type transcript_witnesses =
-  { has_user : bool
-  ; has_assistant : bool
-  ; has_tool : bool
+  { user_texts : String_set.t
+  ; assistant_texts : String_set.t
+  ; tool_call_ids : String_set.t
+  ; tool_observation_names : String_set.t
   }
 
-let empty_witnesses = { has_user = false; has_assistant = false; has_tool = false }
+let empty_witnesses =
+  { user_texts = String_set.empty
+  ; assistant_texts = String_set.empty
+  ; tool_call_ids = String_set.empty
+  ; tool_observation_names = String_set.empty
+  }
+;;
+
+let add_non_empty value set = if String.equal value "" then set else String_set.add value set
+let mem_non_empty value set = (not (String.equal value "")) && String_set.mem value set
 
 let is_conversation_user (message : Agent_core.Types.message) =
-  match message.origin, message.role with
-  | Agent_core.Types.Conversation, Agent_core.Types.User -> true
-  | ( ( Agent_core.Types.System_context
-      | Historical_system_context
-      | Recovery_instruction
-      | Tool_result_followup
-      | Agent_instruction )
-    , _ )
-  | Agent_core.Types.Conversation, (Agent_core.Types.System | Assistant | Tool) -> false
+  match message.origin with
+  | Agent_core.Types.Conversation ->
+    (match message.role with
+     | Agent_core.Types.User -> true
+     | Agent_core.Types.System | Assistant | Tool -> false)
+  | System_context
+  | Historical_system_context
+  | Recovery_instruction
+  | Tool_result_followup
+  | Agent_instruction -> false
 ;;
 
 let is_conversation_assistant (message : Agent_core.Types.message) =
-  match message.origin, message.role with
-  | Agent_core.Types.Conversation, Agent_core.Types.Assistant -> true
-  | ( ( Agent_core.Types.System_context
-      | Historical_system_context
-      | Recovery_instruction
-      | Tool_result_followup
-      | Agent_instruction )
-    , _ )
-  | Agent_core.Types.Conversation, (Agent_core.Types.System | User | Tool) -> false
+  match message.origin with
+  | Agent_core.Types.Conversation ->
+    (match message.role with
+     | Agent_core.Types.Assistant -> true
+     | Agent_core.Types.System | User | Tool -> false)
+  | System_context
+  | Historical_system_context
+  | Recovery_instruction
+  | Tool_result_followup
+  | Agent_instruction -> false
 ;;
 
-let message_has_tool_block (message : Agent_core.Types.message) =
-  List.exists
-    (function
-      | Agent_core.Types.ToolUse _ | Agent_core.Types.ToolResult _ -> true
+let add_message_tool_call_ids acc (message : Agent_core.Types.message) =
+  List.fold_left
+    (fun ids -> function
+      | Agent_core.Types.ToolUse { id; _ } -> add_non_empty id ids
+      | Agent_core.Types.ToolResult { tool_use_id; _ } -> add_non_empty tool_use_id ids
       | Agent_core.Types.Text _
       | Agent_core.Types.Thinking _
       | Agent_core.Types.ReasoningDetails _
       | Agent_core.Types.RedactedThinking _
       | Agent_core.Types.Image _
       | Agent_core.Types.Document _
-      | Agent_core.Types.Audio _ -> false)
+      | Agent_core.Types.Audio _ -> ids)
+    acc
     message.Agent_core.Types.content
 ;;
 
+let add_message_witnesses ~include_user acc (message : Agent_core.Types.message) =
+  let text = Agent_core.Types.text_of_content message.content in
+  let user_texts =
+    if include_user && is_conversation_user message
+    then add_non_empty text acc.user_texts
+    else acc.user_texts
+  in
+  let assistant_texts =
+    if is_conversation_assistant message
+    then add_non_empty text acc.assistant_texts
+    else acc.assistant_texts
+  in
+  let tool_call_ids = add_message_tool_call_ids acc.tool_call_ids message in
+  { acc with user_texts; assistant_texts; tool_call_ids }
+;;
+
 let add_witnesses acc = function
-  | Read_unit.Message message ->
-    { has_user = acc.has_user || is_conversation_user message
-    ; has_assistant = acc.has_assistant || is_conversation_assistant message
-    ; has_tool = acc.has_tool || message_has_tool_block message
-    }
+  | Read_unit.Message message -> add_message_witnesses ~include_user:true acc message
   | Read_unit.Fragment
       { file = Keeper_turn_fragments.Main
       ; line = Keeper_turn_fragments.Fragment (Keeper_turn_fragments.Message { message; _ })
-      } ->
-    { has_user = acc.has_user || is_conversation_user message
-    ; has_assistant = acc.has_assistant || is_conversation_assistant message
-    ; has_tool = acc.has_tool || message_has_tool_block message
-    }
+      } -> add_message_witnesses ~include_user:true acc message
   | Read_unit.Fragment
       { file = Keeper_turn_fragments.Internal
       ; line = Keeper_turn_fragments.Fragment (Keeper_turn_fragments.Message { message; _ })
-      } ->
-    { acc with
-      has_assistant = acc.has_assistant || is_conversation_assistant message
-    ; has_tool = acc.has_tool || message_has_tool_block message
-    }
+      } -> add_message_witnesses ~include_user:false acc message
   | Read_unit.Fragment
       { file = Keeper_turn_fragments.Main | Keeper_turn_fragments.Internal
-      ; line = Keeper_turn_fragments.Fragment (Keeper_turn_fragments.Tool_observation _)
-      } -> { acc with has_tool = true }
+      ; line =
+          Keeper_turn_fragments.Fragment (Keeper_turn_fragments.Tool_observation { observation; _ })
+      } ->
+    { acc with
+      tool_observation_names = add_non_empty observation.tool_name acc.tool_observation_names
+    }
   | Read_unit.Fragment
       { file = Keeper_turn_fragments.Main | Keeper_turn_fragments.Internal
       ; line = Keeper_turn_fragments.Untagged
@@ -418,32 +440,84 @@ let matches_external_row external_keys (msg : Chat_types.chat_message) =
   let matches_delivery_pair =
     match msg.conversation_id, msg.external_message_id with
     | Some cid, Some mid -> Pair_set.mem (cid, mid) external_keys.delivery_pairs
-    | None, _ | _, None -> false
+    | Some (_ : string), None | None, (Some (_ : string) | None) -> false
   in
   matches_connector_event || matches_delivery_pair
 ;;
 
+(* Delivery keys whose rows originate on the chat lane (e.g. Fusion
+   deliberation conclusions via [Fusion_sink.emit], Gate approval lifecycle
+   receipts, workspace broadcasts, autonomous turn tool rows) are never
+   dropped as transcript mirrors. *)
+let is_chat_only_provenance (msg : Chat_types.chat_message) =
+  match msg.delivery_provenance with
+  | Some
+      { delivery_key =
+          ( Delivery_identity.Fusion_run _
+          | Approval_lifecycle _
+          | Autonomous_turn _
+          | Workspace_message _ )
+      ; _
+      } -> true
+  | None
+  | Some
+      { delivery_key =
+          ( Operation _
+          | Operation_checkpoint _
+          | Operation_native _
+          | Connector_message _ )
+      ; _
+      } -> false
+;;
+
+(* When the unit transcript carries exact [ToolUse]/[ToolResult] call ids,
+   only a chat tool row with a matching [tool_call_id] is dropped so a
+   concurrent or different [call_id] stays visible. Official-client
+   [Tool_observation] rows carry no [call_id], so match [tool_call_name]
+   against [tool_observation_names] only when [tool_call_ids] is empty. *)
+let matches_tool_witness witnesses (msg : Chat_types.chat_message) =
+  match msg.tool_call_id with
+  | Some cid when mem_non_empty cid witnesses.tool_call_ids -> true
+  | Some (_ : string) | None ->
+    if String_set.is_empty witnesses.tool_call_ids
+    then (
+      match msg.tool_call_name with
+      | Some name -> mem_non_empty name witnesses.tool_observation_names
+      | None -> false)
+    else false
+;;
+
 (* Layer-2 exact-witness chat deduplication on top of Layer-1 records (#53607):
-   - Corrupt rows, [Role.System], and [Role.Request_failure] always stay.
-   - [Role.Assistant] and [Role.Tool] mirror rows drop only when the unit's
-     conversation witness actually contains an assistant message or tool block
-     (so missing/incomplete transcript records never lose their chat fallback).
+   - Corrupt rows, [Role.System], [Role.Request_failure], and chat-only
+     provenance ([Fusion_run], [Approval_lifecycle], [Autonomous_turn],
+     [Workspace_message]) always stay.
+   - [Role.Assistant] mirror rows drop only when their non-empty text matches a
+     [Conversation] [Assistant] message in the unit's transcript.
+   - [Role.Tool] mirror rows drop only when [tool_call_id] matches a transcript
+     [ToolUse]/[ToolResult] id (or [tool_call_name] matches an official-client
+     [Tool_observation] when no [tool_call_id] witnesses exist).
    - [Role.User] drops only when matched by exact [External_row] keys or when
-     both [turn_ref] is stamped and the conversation holds a user message;
-     unlinked [Operation*] accepted-user rows (whose [operation_id] is absent
-     from [Keeper_turn_log.Opened]) stay conservatively. *)
+     both [turn_ref] is stamped and its non-empty text matches a [Conversation]
+     [User] message in the unit's transcript; unlinked [Operation*]
+     accepted-user rows stay conservatively. *)
 let keep_chat_row ~witnesses ~external_keys (parsed : Keeper_chat_store_line_decode.parsed_line) =
   match parsed.message with
   | None -> true
   | Some msg ->
     (match msg.role with
      | Chat_types.Role.System | Chat_types.Role.Request_failure -> true
-     | Chat_types.Role.Assistant -> not witnesses.has_assistant
-     | Chat_types.Role.Tool -> not witnesses.has_tool
+     | Chat_types.Role.Assistant ->
+       if is_chat_only_provenance msg
+       then true
+       else not (mem_non_empty msg.content witnesses.assistant_texts)
+     | Chat_types.Role.Tool ->
+       if is_chat_only_provenance msg then true else not (matches_tool_witness witnesses msg)
      | Chat_types.Role.User ->
        if matches_external_row external_keys msg
        then false
-       else if Option.is_some msg.turn_ref && witnesses.has_user
+       else if is_chat_only_provenance msg
+       then true
+       else if Option.is_some msg.turn_ref && mem_non_empty msg.content witnesses.user_texts
        then false
        else true)
 ;;
@@ -460,6 +534,13 @@ let take_entries budget entries =
   loop [] budget entries
 ;;
 
+(* Preloading [non_chat_starts] runs only while [resume] is still inside [Chat];
+   once [resume] moves past [Chat], [has_unread_chat] is [false] and zero
+   preloading runs. Within a single [read] call the preloaded entries are reused
+   directly by [segment] (so [Rest_of_unit] reads each store strictly once).
+   [read] is stateless across [First_items] narrowing calls (#53736), so any
+   per-step witness scan is bounded to one unit's non-chat stores while still
+   consuming unread chat items. *)
 let has_unread_chat (seg : Unread.segment) starts =
   if is_empty seg.chat then false
   else

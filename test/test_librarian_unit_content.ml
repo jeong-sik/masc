@@ -210,7 +210,10 @@ let fragment_text : Fragments.fragment -> string = function
 ;;
 
 let body_text : Read_unit.body -> string = function
-  | Chat_row { message = Some { role = Tool; tool_call_name = Some name; _ }; _ } -> "chat tool " ^ name
+  | Chat_row { message = Some { role = Tool; tool_call_name = Some name; tool_call_id = Some id; _ }; _ } ->
+    Printf.sprintf "chat tool %s(%s)" name id
+  | Chat_row { message = Some { role = Tool; tool_call_name = Some name; tool_call_id = None; _ }; _ } ->
+    "chat tool " ^ name
   | Chat_row { message = Some { role = Request_failure; content; _ }; _ } -> "chat failure " ^ content
   | Chat_row { message = Some chat; _ } -> "chat " ^ chat.content
   | Chat_row { message = None; _ } -> "chat row the reader dropped"
@@ -415,35 +418,93 @@ let test_layer2_witness_dedup_chat_mirrors () =
   let speaker : Masc.Keeper_chat_store.speaker =
     { speaker_id = Some "owner"; speaker_name = Some "Owner"; speaker_authority = Owner }
   in
+  let require = function Ok _ -> () | Error detail -> fail detail in
   let tool_calls : Masc.Keeper_chat_store.tool_call list =
-    [ { call_id = "tc-1"; execution_id = None; call_name = "read_file"; args = "{}" } ]
+    [ { call_id = "tc-1"; execution_id = None; call_name = "read_file"; args = "{}" }
+    ; { call_id = "tc-other"; execution_id = None; call_name = "read_file"; args = "{}" }
+    ]
   in
+  let other_turn_ref = Ids.Turn_ref.make ~trace_id:session_id ~absolute_turn:2 in
   Masc.Keeper_chat_store.append_turn ~base_dir ~keeper_name ~user_content:"u-mirror" ~user_attachments:[]
     ~tool_calls ~speaker ~turn_ref ~assistant_content:"a-mirror" ();
+  Masc.Keeper_chat_store.append_turn ~base_dir ~keeper_name ~user_content:"other-turn user"
+    ~user_attachments:[] ~speaker ~turn_ref:other_turn_ref ~assistant_content:"other-turn reply" ();
   Masc.Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name ~content:"extra assistant" ~turn_ref ();
+  Masc.Keeper_chat_store.append_assistant_message_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Fusion_run (req_id "fusion-1"))
+    ~content:"a-mirror" () |> require;
   let chat_end = size chat_path in
-  (* No transcript witness: fail-safe retention keeps all 4 chat rows. *)
-  check (list string) "without transcript witness, mirror chat rows stay"
-    [ "reset 0 chat u-mirror"; "reset 1 chat tool read_file"; "reset 2 chat a-mirror"; "reset 3 chat extra assistant" ]
+  (* No transcript witness: fail-safe retention keeps every chat row. *)
+  check (list string) "without transcript witness, all chat rows stay"
+    [ "reset 0 chat u-mirror"
+    ; "reset 1 chat tool read_file(tc-1)"
+    ; "reset 2 chat tool read_file(tc-other)"
+    ; "reset 3 chat a-mirror"
+    ; "reset 4 chat other-turn user"
+    ; "reset 5 chat other-turn reply"
+    ; "reset 6 chat extra assistant"
+    ; "reset 7 chat a-mirror"
+    ]
     (read_text stores (span (Announced_reset { cause = Cleared; segment = segment ~chat:(range 0 chat_end) () })));
-  (* Internal assistant witness only: drops Assistant mirrors while keeping User + Tool. *)
+  (* Internal assistant witness with text "a-mirror" only: drops the matching
+     "a-mirror" assistant mirror while keeping non-matching assistant rows
+     ("other-turn reply", "extra assistant"), Fusion_run conclusion even with
+     the same text, and all user/tool rows. *)
   History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Internal_assistant session
-    (message ~role:Assistant "internal reply");
+    (message ~role:Assistant "a-mirror");
   let internal_end = size (Fragments.path ~session_dir Internal) in
-  check (list string) "internal assistant witness drops assistant chat mirrors only"
-    [ "reset 0 chat u-mirror"; "reset 1 chat tool read_file"; "reset 2 internal internal reply" ]
+  check (list string) "internal assistant witness drops only exact text match and preserves Fusion/unmatched"
+    [ "reset 0 chat u-mirror"
+    ; "reset 1 chat tool read_file(tc-1)"
+    ; "reset 2 chat tool read_file(tc-other)"
+    ; "reset 3 chat other-turn user"
+    ; "reset 4 chat other-turn reply"
+    ; "reset 5 chat extra assistant"
+    ; "reset 6 chat a-mirror"
+    ; "reset 7 internal a-mirror"
+    ]
     (read_text stores
        (span
           (Announced_reset
              { cause = Cleared
              ; segment = segment ~record:(files ~internal:(range 0 internal_end) ()) ~chat:(range 0 chat_end) ()
              })));
-  (* Checkpoint witness with User + ToolUse + Assistant: drops all 3 mirror classes. *)
+  (* Official-client Tool_observation witness (no call_ids in unit): drops
+     matching tool_name rows while keeping non-matching tool_name rows. *)
+  History.persist_tool_observation ~keeper_name ~turn_ref session ~tool_name:"read_file"
+    ~outcome:Tool_result.Ok;
+  let internal_with_obs_end = size (Fragments.path ~session_dir Internal) in
+  Masc.Keeper_chat_store.append_tool_calls_result ~base_dir ~keeper_name
+    ~tool_calls:[ { call_id = "tc-write"; execution_id = None; call_name = "write_file"; args = "{}" } ]
+    () |> require;
+  let chat_with_write_end = size chat_path in
+  check (list string) "official-client Tool_observation drops matching tool_name only"
+    [ "reset 0 chat u-mirror"
+    ; "reset 1 chat other-turn user"
+    ; "reset 2 chat other-turn reply"
+    ; "reset 3 chat extra assistant"
+    ; "reset 4 chat a-mirror"
+    ; "reset 5 chat tool write_file(tc-write)"
+    ; "reset 6 internal a-mirror"
+    ; "reset 7 internal tool read_file"
+    ]
+    (read_text stores
+       (span
+          (Announced_reset
+             { cause = Cleared
+             ; segment =
+                 segment ~record:(files ~internal:(range 0 internal_with_obs_end) ())
+                   ~chat:(range 0 chat_with_write_end) ()
+             })));
+  (* Checkpoint witness with User "u-mirror", ToolUse id="tc-1", Assistant
+     "a-mirror": drops only exact matches ("u-mirror", "tc-1", non-Fusion
+     "a-mirror"), while preserving different call_id ("tc-other"), other-turn
+     user ("other-turn user"), unmatched assistant rows, and Fusion_run. *)
   let tool_msg : Types.message =
     { origin = Llm_provider.Types.Conversation
     ; role = Types.Assistant
     ; content =
-        [ Types.Text "reply text"
+        [ Types.Text "a-mirror"
         ; Types.ToolUse { id = "tc-1"; name = "read_file"; input = `Null }
         ]
     ; name = None
@@ -451,10 +512,17 @@ let test_layer2_witness_dedup_chat_mirrors () =
     ; metadata = []
     }
   in
-  let bundle = stored_bundle ~session_dir [ message ~role:User "ckpt prompt"; tool_msg ] in
+  let bundle = stored_bundle ~session_dir [ message ~role:User "u-mirror"; tool_msg ] in
   let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
-  check (list string) "full transcript witnesses deduplicate user, tool, and assistant chat mirrors"
-    [ "own 0 message ckpt prompt"; "own 1 message reply text" ]
+  check (list string) "checkpoint witnesses deduplicate exact user/call_id/assistant matches only"
+    [ "unattributed 0 chat tool read_file(tc-other)"
+    ; "unattributed 1 chat other-turn user"
+    ; "unattributed 2 chat other-turn reply"
+    ; "unattributed 3 chat extra assistant"
+    ; "unattributed 4 chat a-mirror"
+    ; "own 5 message u-mirror"
+    ; "own 6 message a-mirror"
+    ]
     (read_text stores
        (span
           (Turn
@@ -537,8 +605,8 @@ let test_layer2_dedup_invariant_under_first_items_and_resume () =
   let tool_calls : Masc.Keeper_chat_store.tool_call list =
     [ { call_id = "tc-step"; execution_id = None; call_name = "read_file"; args = "{}" } ]
   in
-  Masc.Keeper_chat_store.append_turn ~base_dir ~keeper_name ~user_content:"turn_ref user mirror" ~user_attachments:[]
-    ~tool_calls ~speaker:owner ~turn_ref ~assistant_content:"assistant mirror" ();
+  Masc.Keeper_chat_store.append_turn ~base_dir ~keeper_name ~user_content:"ckpt user" ~user_attachments:[]
+    ~tool_calls ~speaker:owner ~turn_ref ~assistant_content:"ckpt reply" ();
   Masc.Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
     ~delivery_key:(Keeper_chat_delivery_identity.Operation (req_id "op-step-keep"))
     ~content:"unlinked concurrent op" ~speaker:owner () |> require;

@@ -11,19 +11,27 @@
 
     To avoid repeating identical user/assistant/tool lines across overlapping
     stores in one unit, exact-witness chat deduplication omits:
-    - [Role.Assistant] and [Role.Tool] chat mirror rows only when the unit's
-      conversation witness holds a matching assistant message or tool block
-      (keeping the chat row if the transcript witness is absent);
+    - [Role.Assistant] chat mirror rows only when they do not carry chat-only
+      delivery provenance ([Fusion_run], [Approval_lifecycle],
+      [Autonomous_turn], [Workspace_message]) and their non-empty text matches
+      a conversation assistant message in the unit's transcript;
+    - [Role.Tool] chat mirror rows only when they do not carry chat-only
+      delivery provenance and their [tool_call_id] matches a transcript
+      [ToolUse]/[ToolResult] id (or, when no tool call ids are recorded in the
+      unit, their [tool_call_name] matches an official-client
+      [Tool_observation] name);
     - [Role.User] chat rows matching an [External_row] in the same unit (by
       connector event id or [(conversation_id, external_message_id)]);
-    - [turn_ref]-stamped [Role.User] chat rows only when the unit's
-      conversation carries a conversation user message.
-    Corrupt rows, [Role.System], [Role.Request_failure], and unlinked
-    [Operation*] accepted-user rows (whose operation id is absent from
-    [Opened]) always stay, so deduplication never leaves a previously readable
-    unit empty. Witnesses are derived from the unit's full non-chat ranges so
-    item selection and coordinates are invariant across {!First_items} slices
-    and [span.resume]. Each kept item is the value its store holds, in the order
+    - [turn_ref]-stamped [Role.User] chat rows (without chat-only provenance)
+      only when their non-empty text matches a conversation user message in the
+      unit's transcript.
+    Corrupt rows, [Role.System], [Role.Request_failure], chat-only provenance
+    rows (such as Fusion deliberation conclusions), and unlinked [Operation*]
+    accepted-user rows (whose operation id is absent from [Opened]) always
+    stay, so deduplication never leaves a previously readable unit empty.
+    Witnesses are derived from the unit's full non-chat ranges so item
+    selection and coordinates are invariant across {!First_items} slices and
+    [span.resume]. Each kept item is the value its store holds, in the order
     {!Librarian_unit} gives. Nothing is reduced here: the question reduces
     the items as §5.5 says when it writes them out.
 

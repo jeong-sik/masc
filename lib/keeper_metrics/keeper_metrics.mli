@@ -168,8 +168,6 @@ type t =
   | MemoryRecallRequestSeconds  (* histogram: seconds a recall judgment request took, from sending to its result *)
   | MemoryRecallTotal           (* counter: recall judgments, by outcome *)
   | MemoryRecallSelected        (* counter: candidates a recall judgment carried *)
-  | MemoryRecallTurnContradicted (* counter: recall judgments where question (b) answered no-knowledge while question (a) selected at least one candidate *)
-  | MemoryRecallRenderedBodyBytes (* histogram: UTF-8 byte length of rendered recall memory body per judged preparation *)
   | MemoryRecallJudgmentSeconds (* histogram: seconds a recall judgment took, from its first request to its saved outcome *)
   | MemoryRecallPreparationFailures (* counter: recall preparation failures, by bounded reason; no judgment is implied *)
   | MemoryChanges               (* counter: memory IDs a store commit added, absorbed, superseded or dropped, by keeper, pass and change *)

@@ -260,61 +260,6 @@ let turn_json = function
   | J.Turn_answered need -> `String (J.turn_need_label need)
   | J.Turn_question_failed -> `String "failed"
 
-let selected_id_set_sha256 ids =
-  let canonical =
-    ids
-    |> List.sort_uniq String.compare
-    |> List.map (fun id -> `String id)
-    |> fun items -> Yojson.Safe.to_string (`List items)
-  in
-  Agent_core_sha256.(digest_string canonical |> to_hex)
-
-type outcome_observation =
-  { status : string
-  ; selected_ids : string list
-  ; selected_id_set_sha256 : string option
-  ; turn_question_contradicted : bool
-  }
-
-let outcome_observation_of_yojson = function
-  | `Assoc fields ->
-    (match List.assoc_opt "status" fields with
-     | Some (`String status) ->
-       let selected_ids_result =
-         match List.assoc_opt "selected" fields with
-         | None | Some `Null -> Ok []
-         | Some (`List items) ->
-           List.fold_left
-             (fun acc item ->
-                match acc, item with
-                | Error _ as err, _ -> err
-                | Ok ids, `String id -> Ok (id :: ids)
-                | Ok _, _ -> Error "outcome.selected must be a list of strings")
-             (Ok [])
-             items
-           |> Result.map List.rev
-         | Some _ -> Error "outcome.selected must be a list of strings"
-       in
-       let sha_result =
-         match List.assoc_opt "selected_id_set_sha256" fields with
-         | None | Some `Null -> Ok None
-         | Some (`String digest) -> Ok (Some digest)
-         | Some _ -> Error "outcome.selected_id_set_sha256 must be a string"
-       in
-       let contradicted_result =
-         match List.assoc_opt "turn_question_contradicted" fields with
-         | None | Some `Null -> Ok false
-         | Some (`Bool flag) -> Ok flag
-         | Some _ -> Error "outcome.turn_question_contradicted must be a bool"
-       in
-       (match selected_ids_result, sha_result, contradicted_result with
-        | Ok selected_ids, Ok selected_id_set_sha256, Ok turn_question_contradicted ->
-          Ok { status; selected_ids; selected_id_set_sha256; turn_question_contradicted }
-        | (Error _ as err), _, _ | _, (Error _ as err), _ | _, _, (Error _ as err) -> err)
-     | Some _ | None -> Error "outcome.status must be a string")
-  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
-    Error "outcome must be a JSON object"
-
 let status_json status =
   let coverage = J.status_coverage status in
   let common =
@@ -325,10 +270,8 @@ let status_json status =
   in
   match status with
   | J.Selected { selection; coverage = _; turn_question_contradicted } ->
-    let ids = J.selection_ids selection in
     common
-    @ [ "selected", `List (List.map (fun id -> `String id) ids)
-      ; "selected_id_set_sha256", `String (selected_id_set_sha256 ids)
+    @ [ "selected", `List (List.map (fun id -> `String id) (J.selection_ids selection))
       ; "turn_question_contradicted", `Bool turn_question_contradicted
       ]
   | J.None_found _ | J.None_needed _ -> common

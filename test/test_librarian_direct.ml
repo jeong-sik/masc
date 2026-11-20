@@ -176,6 +176,30 @@ let test_supersede_into_a_held_claim () =
     (removed effects)
 ;;
 
+(* The claim that replaces a fact is first seen when that fact was. A claim
+   Memory already holds keeps its own first seen. *)
+let older : Types.fact =
+  { (observed "the port was 8000") with first_seen = 50.0; last_seen = 60.0 }
+;;
+
+let seen_of claim facts =
+  match List.find_opt (fun (fact : Types.fact) -> String.equal fact.claim claim) facts with
+  | Some (fact : Types.fact) -> fact.first_seen, fact.last_seen
+  | None -> fail ("not held: " ^ claim)
+;;
+
+let test_supersede_keeps_the_age () =
+  let facts = older :: memory in
+  let after, (_ : Effects.t) = written ~facts (supersede older "the port is 9000") in
+  check (pair (float 0.0) (float 0.0)) "first seen when the old fact was, last seen now"
+    (50.0, at)
+    (seen_of "the port is 9000" after);
+  let after, (_ : Effects.t) = written ~facts (supersede older owner.claim) in
+  check (pair (float 0.0) (float 0.0)) "a held claim keeps its own first seen"
+    (100.0, at)
+    (seen_of owner.claim after)
+;;
+
 let test_supersede_without_the_old_fact () =
   let gone = observed "the port is 8000" in
   check string "the new claim is held" "already done" (outcome (supersede gone owner.claim));
@@ -297,6 +321,8 @@ let () =
     ; ( "supersede"
       , [ test_case "the old fact is held" `Quick test_supersede
         ; test_case "into a held claim" `Quick test_supersede_into_a_held_claim
+        ; test_case "the new claim is as old as the fact it replaces" `Quick
+            test_supersede_keeps_the_age
         ; test_case "the old fact is not held" `Quick test_supersede_without_the_old_fact
         ; test_case "itself" `Quick test_supersede_itself
         ] )

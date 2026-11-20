@@ -1,6 +1,5 @@
 (** The four run tool declarations that moved to
-    [config/tools/masc_run_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/masc_run_*.toml].
 
     Decoded once at module initialization; a missing or undecodable file
     refuses the boot rather than advertising a partial run surface.

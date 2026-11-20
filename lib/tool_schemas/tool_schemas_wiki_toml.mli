@@ -1,6 +1,5 @@
 (** The six wiki tool declarations that moved to
-    [config/tools/masc_wiki_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/masc_wiki_*.toml].
 
     Decoded once at module initialization; a missing or undecodable file
     refuses the boot. Each value is the whole decoded file, so its

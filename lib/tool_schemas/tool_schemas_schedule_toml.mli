@@ -1,6 +1,5 @@
 (** The four schedule tool declarations that moved to
-    [config/tools/masc_schedule_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/masc_schedule_*.toml].
 
     Decoded once at module initialization; a missing or undecodable file
     refuses the boot. [Tool_schemas_schedule] is the only consumer. *)

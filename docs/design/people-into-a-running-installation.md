@@ -789,7 +789,7 @@ config root 와 `runtime.toml` 두 줄은 직접 읽었다. 나머지는 조사�
 
 - 초기 설정은 config root 가 없으면 만든다. 자기가 만들었을 때만 채운다(`server_bootstrap_maintenance.ml:412-425`). state 를 만드는 단계가 같은 함수를 한 번 더 부른다. 그때는 이미 있는 root 다(`server_runtime_bootstrap.ml:427`, `lib/server/server_runtime_config_root_bootstrap.ml:642-643`).
 - 채우는 방식은 넷이다. `MASC_CONFIG_DIR` 가 있으면 쓰지 않는다. 자기가 방금 만든 root 가 아니면 빠진 것만 채운다. 새 root 는 mode 에 따라 빈 틀이거나 seed 다(`lib/server/server_runtime_config_root_bootstrap.ml:508-535`).
-- 기본 Keeper 정의를 복사하는 것은 seed 뿐이다(`:139-168, 617-639`). 빠진 것만 채우는 쪽은 prompt 와 시작에 필요한 설정 파일을 채운다(`:574-605`). 그래서 root 는 있고 `runtime.toml` 이 없는 설치에는 boot 가 `runtime.toml` 을 쓴다(`:542-559`).
+- 기본 Keeper 정의를 복사하는 것은 seed 뿐이다(`:139-168, 617-639`). 빠진 것만 채우는 쪽은 prompt 와 시작에 필요한 설정 파일을 채운다(`:574-605`). 그래서 root 는 있고 `runtime.toml` 이 없는 설치에는 boot 가 내장된 `runtime.toml` 을 쓴다(`:236-237, 547-551, 584-585`).
 - 조사만 함: `masc auth bootstrap` 이 `runtime.toml` 을 놓으면서 config root 를 만든다. 내장된 기본 정의는 `imp.toml` 하나이고 `activation_mode = "manual"` 이라 autoboot 대상이 아니다.
 - autoboot 는 Runtime 이 준비될 때까지 기다린다. `MASC_KEEPER_AUTONOMOUS_ENABLED` 가 꺼져 있으면 아무것도 하지 않는다(`lib/server/server_bootstrap_loops.ml:1974-1977`). 띄울 이름은 `Keeper_runtime.bootable_keeper_names` 에서 온다(`:2004`).
 - 조사만 함: 그 함수는 config root 의 `keepers/*.toml` 을 읽는다. 폴더가 없거나 비면 빈 목록이고, 0개를 띄운 뒤 supervisor sweep 만 시작한다.

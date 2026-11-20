@@ -1681,7 +1681,7 @@ let narrowing_projection ~media_store ~asked ~first narrower history =
     })
 ;;
 
-let run_narrowing ~stream narrower =
+let run_narrowing ?(count_of = measured_by_marker) ~stream narrower =
   let asked = ref [] in
   let counted = ref 0 in
   let observations = ref [] in
@@ -1690,7 +1690,7 @@ let run_narrowing ~stream narrower =
       ~stream
       ~count_of:(fun body ->
         incr counted;
-        measured_by_marker body)
+        count_of body)
     @@ fun ~sw ~net ~base_url ->
     let provider_config = config ~max_context:512 base_url in
     let media_store = Agent_core.History.Memory_store.create () in
@@ -1794,6 +1794,32 @@ let test_a_failed_step_ends_the_turn_with_its_own_error () =
   check (list int) "no step after the failed one is asked" [ 0 ] (List.map fst asked);
   check int "only the first request is measured" 1 counted;
   check bool "nothing is sent" true (Option.is_none completion_body)
+;;
+
+(* A narrower request that cannot be measured is no request: the turn ends
+   with the refusal before it, as it would without narrower requests. The
+   count endpoint answers a negative count for it, which the count parser
+   refuses. *)
+let test_an_unmeasurable_narrower_request_leaves_the_refusal_before_it () =
+  let unmeasurable body =
+    if contains ~sub:"unmeasurable" body then -1 else measured_by_marker body
+  in
+  let result, completion_body, asked, counted, observations =
+    run_narrowing
+      ~count_of:unmeasurable
+      ~stream:false
+      [ (fun _ -> Ok (Some "second-request-unmeasurable"))
+      ; (fun _ -> fail "a step after the unmeasurable request was asked")
+      ]
+  in
+  (match result with
+   | Error error when is_size_refusal_before_sending error -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "an unmeasurable narrower request must not be sent");
+  check (list int) "only the step before it is asked" [ 0 ] (List.map fst asked);
+  check int "both requests are counted" 2 counted;
+  check bool "nothing is sent" true (Option.is_none completion_body);
+  check int "nothing is dispatched" 0 (List.length observations)
 ;;
 
 (* A provider refusal of a sent request is not a refusal before sending: the
@@ -2335,6 +2361,10 @@ let () =
             "a provider refusal asks no narrower request"
             `Quick
             test_a_provider_refusal_asks_no_narrower_request
+        ; test_case
+            "an unmeasurable narrower request leaves the refusal before it"
+            `Quick
+            test_an_unmeasurable_narrower_request_leaves_the_refusal_before_it
         ; test_case
             "the one provider attempt records the narrower request sent"
             `Quick

@@ -74,7 +74,10 @@ type narrower_model_input =
     to back, each at most once. A step may change the caller's state, so this
     order is what keeps each narrower request built on the one before. A
     provider's refusal of a sent request calls no step: the provider attempt
-    is the turn's only one. The list is finite, so its length bounds how many
+    is the turn's only one. A narrower request that fails before it is sent
+    -- it cannot be checked or measured, or the windows are spent -- ends the
+    turn with the refusal before it, as the turn would end without it, and no
+    later step is called. The list is finite, so its length bounds how many
     requests one turn compares. *)
 type model_input_candidates =
   { request : Llm_provider.Types.message list

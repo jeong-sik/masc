@@ -1,5 +1,7 @@
 open Agent_types
 
+let _log = Log.create ~module_name:"pipeline_stage_route" ()
+
 (* The admitted body's serialisation walks every message in the request. An
    agent may carry an executor that runs it elsewhere: the closure reads
    immutable request values and returns a result, and nothing in it needs
@@ -259,11 +261,16 @@ let before_completion agent serialized result =
 ;;
 
 (* Where a request stands among the turn's requests. The first opens the
-   provider attempt and the caller's windows; a narrower one is compared in
-   that attempt and spends from the windows the first one opened. *)
+   provider attempt and the caller's windows. A narrower one is compared in
+   that attempt, spends from the windows the first one opened, and carries
+   the refusal before it with that refusal's body. *)
 type 'window position =
   | First
-  | Narrower of 'window
+  | Narrower of
+      { window : 'window
+      ; refusal : Provider_failure_attribution.detailed_error
+      ; refused : Llm_provider.Complete.serialized_request
+      }
 
 (* What one request's way to the provider ended with. [Does_not_fit] is a
    request [admit_request] refused as larger than the input limit before it
@@ -293,9 +300,10 @@ let rec next_narrower refusal = function
 (* The turn's requests, compared front to back in the one provider attempt
    the first opened; the route sends at most one of them. The answer pairs a
    response with the request that was sent. When the narrower requests run
-   out the last refusal is the answer, and a narrower request that fails
-   answers with its own error, which no provider made; both keep the refused
-   body as the outcome's provenance. *)
+   out the last refusal is the answer, and a step that fails answers with its
+   own error, which no provider made; both keep the refused body as the
+   outcome's provenance. A narrower request that fails before it is sent
+   answers with the refusal before it ([send]). *)
 let rec route_requests agent ?on_provider_failure ~send position
           (request : Agent_turn.turn_request) narrower =
   match send position request with
@@ -311,7 +319,10 @@ let rec route_requests agent ?on_provider_failure ~send position
     in
     (match next_narrower refusal.Provider_failure_attribution.error narrower with
      | Ok (Some (request, narrower)) ->
-       route_requests agent ?on_provider_failure ~send (Narrower window) request narrower
+       route_requests agent ?on_provider_failure ~send
+         (Narrower { window; refusal; refused = serialized })
+         request
+         narrower
      | Ok None -> finish refusal
      | Error error ->
        finish { Provider_failure_attribution.error; provider_failure = None })
@@ -346,12 +357,30 @@ let dispatch_sync
     Llm_provider.Completion_outcome.map_result (finish_call ?on_provider_failure) outcome
   in
   let send position (request : Agent_turn.turn_request) =
+    (* A narrower request that fails before it is sent is no request. The
+       turn ends with the refusal before it, as the turn would end without
+       narrower requests; the failure itself goes to the log. *)
+    let not_sent ~own error =
+      match position with
+      | First -> Answered (own ())
+      | Narrower { refusal; refused; _ } ->
+        Log.warn
+          _log
+          "narrower request failed before it was sent; the refusal before it answers"
+          [ Log.S ("error", Error.to_string error) ];
+        Answered (finish (before_completion agent refused (Error refusal)))
+    in
     let ( let* ) result next = match result with
       | Ok value -> next value
       | Error error ->
-        Answered (Llm_provider.Completion_outcome.before_serialization (Error error))
+        not_sent error ~own:(fun () ->
+          Llm_provider.Completion_outcome.before_serialization (Error error))
     in
-    let* () = validate_replay_continuity ?on_provider_failure ~on_reasoning_replay_exclusion
+    let* () = validate_replay_continuity
+      ?on_provider_failure:(match position with
+        | First -> on_provider_failure
+        | Narrower _ -> None)
+      ~on_reasoning_replay_exclusion
       ~binding ~provider_config
       ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
       ~source_change_policy:agent.options.reasoning_source_change
@@ -385,9 +414,13 @@ let dispatch_sync
       |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
     | Error error ->
-      Answered (finish (Llm_provider.Completion_outcome.before_serialization (Error error)))
+      not_sent error.Provider_failure_attribution.error ~own:(fun () ->
+        finish (Llm_provider.Completion_outcome.before_serialization (Error error)))
     | Ok serialized ->
-      let failed error = Answered (finish (before_completion agent serialized (Error error))) in
+      let failed error =
+        not_sent error.Provider_failure_attribution.error ~own:(fun () ->
+          finish (before_completion agent serialized (Error error)))
+      in
       let sent outcome =
         Answered
           (finish
@@ -422,7 +455,7 @@ let dispatch_sync
                window the first one opened. *)
             let call_window =
               match position with
-              | Narrower call_window -> Ok call_window
+              | Narrower { window = call_window; _ } -> Ok call_window
               | First ->
                 Llm_provider.Http_client.resolve_explicit_deadline
                   ~operation:"Pipeline_stage_route.dispatch_sync"
@@ -548,12 +581,30 @@ let dispatch_stream
       ~next_stage:"stream"
   in
   let send position (request : Agent_turn.turn_request) =
+    (* A narrower request that fails before it is sent is no request. The
+       turn ends with the refusal before it, as the turn would end without
+       narrower requests; the failure itself goes to the log. *)
+    let not_sent ~own error =
+      match position with
+      | First -> Answered (own ())
+      | Narrower { refusal; refused; _ } ->
+        Log.warn
+          _log
+          "narrower request failed before it was sent; the refusal before it answers"
+          [ Log.S ("error", Error.to_string error) ];
+        Answered (finish (before_completion agent refused (Error refusal)))
+    in
     let ( let* ) result next = match result with
       | Ok value -> next value
       | Error error ->
-        Answered (Llm_provider.Completion_outcome.before_serialization (Error error))
+        not_sent error ~own:(fun () ->
+          Llm_provider.Completion_outcome.before_serialization (Error error))
     in
-    let* () = validate_replay_continuity ?on_provider_failure ~on_reasoning_replay_exclusion
+    let* () = validate_replay_continuity
+      ?on_provider_failure:(match position with
+        | First -> on_provider_failure
+        | Narrower _ -> None)
+      ~on_reasoning_replay_exclusion
       ~binding ~provider_config
       ~tools_present:(Llm_provider.Complete_common.request_tools_present ~config:provider_config ~tools)
       ~source_change_policy:agent.options.reasoning_source_change
@@ -587,9 +638,13 @@ let dispatch_stream
       |> Result.map_error (Provider_failure_attribution.of_http_error ~binding ~provider)
     with
     | Error error ->
-      Answered (finish (Llm_provider.Completion_outcome.before_serialization (Error error)))
+      not_sent error.Provider_failure_attribution.error ~own:(fun () ->
+        finish (Llm_provider.Completion_outcome.before_serialization (Error error)))
     | Ok serialized ->
-      let failed error = Answered (finish (before_completion agent serialized (Error error))) in
+      let failed error =
+        not_sent error.Provider_failure_attribution.error ~own:(fun () ->
+          finish (before_completion agent serialized (Error error)))
+      in
       let sent outcome =
         Answered
           (finish
@@ -640,7 +695,7 @@ let dispatch_stream
                   { admission_window = Llm_provider.Deadline_window.open_ admission_deadline
                   ; counted_s = 0.0
                   })
-              | Narrower spent ->
+              | Narrower { window = spent; _ } ->
                 (match agent.options.first_event_timeout_s with
                  | Some budget_s when Float.compare (budget_s -. spent.counted_s) 0.0 <= 0 ->
                    Error (first_event_spent_by_counting ~budget_s)

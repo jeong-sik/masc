@@ -11,8 +11,10 @@
    [Librarian_plan], and [Librarian_scoring].
 
    Note on [seen] (#53543): [seen] is merged on [main] but not yet stacked
-   into [feat/librarian-l6c-question] (#53578), so [seen] op scoring cases
-   wait until the L6 stack rebases atop #53543. *)
+   into this base ([Librarian_answer] accepts [add]/[drop]/[merge]/[revise]
+   only). [config/prompts/librarian.ask.md] therefore omits [seen] until the
+   L6 stack rebases atop #53543, and [test_prompt_contract] verifies the
+   prompt does not advertise unsupported [seen] ops. *)
 
 open Alcotest
 module Question = Masc.Librarian_question
@@ -540,11 +542,8 @@ let test_prompt_contract () =
     ; {|"drop"|}
     ; {|"merge"|}
     ; {|"revise"|}
-    ; {|"seen"|}
-    ; {|{"op": "seen", "ref": "m5", "from": ["u1"]}|}
     ; {|"from": []|}
-    ; "하나 이상"
-    ; "자기 발언에서 그대로 인용·되풀이한 것은 다시 본 것이 아닙니다"
+    ; "자기 발언에서 그대로 인용·되풀이한 것은 새 사실이 아니므로"
     ; "모른다·없다고 한 말은 그 기억을 바꾸거나 지울 근거가 아닙니다"
     ; "단위의 언어로"
     ; "중복 행은 새 재확인이 아니라 하나의 관측으로"
@@ -569,13 +568,15 @@ let test_prompt_contract () =
     ; "Memory fact 로도 함께 두고"
     ];
   List.iter
-    (fun legacy_output_key ->
-       check bool ("librarian.ask.md omits legacy output key " ^ legacy_output_key) false
-         (contains_substring ~needle:legacy_output_key ask_text))
+    (fun disallowed_token ->
+       check bool ("librarian.ask.md omits unsupported/legacy key " ^ disallowed_token) false
+         (contains_substring ~needle:disallowed_token ask_text))
     [ {|"new_claims"|}
     ; {|"working_contexts"|}
     ; {|"supersedes"|}
     ; {|"absorbs"|}
+    ; {|"seen"|}
+    ; {|"op": "seen"|}
     ];
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");

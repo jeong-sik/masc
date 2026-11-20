@@ -7,6 +7,7 @@ type board_read_allocation = {
 }
 
 val board_read_box_rows : int
+val board_read_footer_rows : int
 
 val allocate_board_read :
   terminal_rows:int ->

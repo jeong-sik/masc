@@ -2881,9 +2881,12 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
   let hide_reading = state.tools_pane = Tools_async && state.tools_async_detail_open in
   let pane_tag =
     match state.tools_pane with
-    | Tools_effective -> "effective"
-    | Tools_catalog _ -> "catalog"
+    | Tools_surface -> "surface"
     | Tools_async -> "async"
+    | Tools_activations -> "activations"
+    | Tools_usage -> "usage"
+    | Tools_catalog (Tools_catalog_list | Tools_catalog_volumes _) -> "catalog"
+    | Tools_storage -> "storage"
   in
   let reading_started =
     Masc_tui_types.progress_clock_option state ~slot:"tools-reading" ~now

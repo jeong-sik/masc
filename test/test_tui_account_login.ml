@@ -632,7 +632,7 @@ let a_login_address_wraps_whole () =
   t.output <- "Open this address in your browser:\n\027[94m" ^ address ^ "\027[0m";
   let width = 32 in
   let rows = fst (Login.visible_lines ~height:40 ~width t) in
-  let terminal = List.filter_map (function Login.Terminal line -> Some line | Login.Text _ -> None) rows in
+  let terminal = List.filter_map (function Login.Terminal line -> Some line | Login.Text _ | Login.Progress _ -> None) rows in
   List.iter (fun line ->
     check bool "no row is wider than the pane" true
       (Masc_tui_message_layout.display_width (Sgr_text.text line) <= width)) terminal;

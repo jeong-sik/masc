@@ -1419,7 +1419,7 @@ let test_left_keys_of_two_accounts =
    and remove work without creating or checking any CLI account home, while
    vertex-gemini and uncredentialed local HTTP providers stay refused. *)
 let test_http_provider_key_lifecycle =
-  with_env_zone (fun ~env ~zone ~base_path ->
+  with_env_zone (fun ~env ~zone ~root:(_ : string) ~base_path ->
     let config_path = Server_runtime_setup_actions.config_path ~base_path in
     private_dirs (Filename.dirname config_path);
     Out_channel.with_open_bin config_path (fun out ->
@@ -1498,9 +1498,14 @@ streaming = true
        let kf = get_text (Layout.key_file ~runtime_root ~account_id:account ~generation) in
        Alcotest.(check string) "rotated key persists after start sweep" ("key:" ^ rotated) (read_name kf)
      | _ -> Alcotest.fail "missing rotated HTTP key account");
+    (match Files.present_for ~home:Files.No_home ~runtime_root ~account_id:account with
+     | Ok there -> Alcotest.(check bool) "HTTP key files present before purge" true there
+     | Error detail -> Alcotest.failf "present_for before purge: %s" detail);
     let remove_reply = Server_key_account.remove ~person:alice ~base_path ~provider_account_id:account_str in
     answered "HTTP provider key purge succeeds" remove_reply ~status:200 ~code:None;
-    files_there "HTTP key files removed after purge" ~runtime_root account false)
+    match Files.present_for ~home:Files.No_home ~runtime_root ~account_id:account with
+    | Ok there -> Alcotest.(check bool) "HTTP key files removed after purge" false there
+    | Error detail -> Alcotest.failf "present_for after purge: %s" detail)
 ;;
 
 let () =

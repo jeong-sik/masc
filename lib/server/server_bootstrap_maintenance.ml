@@ -876,9 +876,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         (fun writers ->
            Librarian_writers.pulse
              writers
-             (List.map
-                (fun (entry : Keeper_registry.registry_entry) -> entry.name)
-                (Keeper_registry.all ~base_path:config.base_path ())))
+             (Keeper_memory_writers.registered ~base_path:config.base_path))
         (Keeper_memory_writers.find ~base_path:config.base_path)
     in
     (* Each step of a pass has its own boundary. The steps do not depend on

@@ -88,6 +88,21 @@ let test_a_process_without_writers () =
      | other -> failf "the section is not an object: %s" (Yojson.Safe.to_string other))
 ;;
 
+(* A registered Keeper's writer is made by its first turn or the first
+   pulse. Before that the section shows the Keeper as booting, and reading
+   the section makes no writer. *)
+let test_a_keeper_before_its_writer () =
+  in_workspace (fun ~sw config ->
+    Deps.ensure_memory_writer ~sw ~config keeper;
+    let row = row_of config in
+    check string "its state" "booting" (text "state" row);
+    check (list string) "W1" [ "W1" ] (alarms row);
+    check string "a warning" "warn" (text "level" row);
+    check bool "the section counts it" true (member "warn" (Health.section_json ~config) = `Int 1);
+    check int "and the table still holds no writer" 0 (List.length (Writers.held (writers config))))
+    ()
+;;
+
 (* A writer with no lane value and nothing unread is open and has no alarm. *)
 let test_an_open_writer () =
   in_workspace (fun ~sw config ->
@@ -140,6 +155,7 @@ let () =
   run "keeper_memory_writer_health"
     [ ( "row"
       , [ test_case "a process without writers" `Quick test_a_process_without_writers
+        ; test_case "a registered Keeper before its writer" `Quick test_a_keeper_before_its_writer
         ; test_case "an open writer" `Quick test_an_open_writer
         ; test_case "a stopped writer" `Quick test_a_stopped_writer
         ] )

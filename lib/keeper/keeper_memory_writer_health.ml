@@ -215,10 +215,25 @@ let section_json ~config =
   match Keeper_memory_writers.find ~base_path:config.Workspace.base_path with
   | None -> `Assoc [ "writers", `String "none_in_process" ]
   | Some writers ->
+    let made = Librarian_writers.held writers in
+    (* §8.6: a registered Keeper's writer is made by its first turn or by
+       the first pulse. Until then no store of its was opened here, which is
+       what [Held_booting] says, and reading the row makes no writer. *)
+    let not_made =
+      List.filter_map
+        (fun keeper ->
+           if List.mem_assoc keeper made
+           then None
+           else Some (keeper, Librarian_writer.Held_booting))
+        (Keeper_memory_writers.registered ~base_path:config.Workspace.base_path)
+    in
     let rows =
       List.map
         (fun (keeper, held) -> keeper, row_with_level ~config ~keeper held)
-        (Librarian_writers.held writers)
+        (List.sort
+           (fun ((a : string), (_ : Librarian_writer.held)) (b, (_ : Librarian_writer.held)) ->
+              String.compare a b)
+           (made @ not_made))
     in
     let at wanted =
       List.length

@@ -42,6 +42,12 @@ let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
 
 let find ~base_path = By_workspace.find_opt (workspace_key ~base_path) (Atomic.get tables)
 
+let registered ~base_path =
+  List.map
+    (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+    (Keeper_registry.all ~base_path ())
+;;
+
 (* The lane value under the registry published now. A registry that is
    being replaced is not read: the end of the replacement signals the lane
    (§9.5). *)

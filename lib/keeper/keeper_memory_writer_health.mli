@@ -10,9 +10,16 @@
     no provider text, claim or answer goes in. The level is
     {!Librarian_level.level}. *)
 
-(** Every writer's row, with how many are at [error] and at [warn]. A row
-    carries the writer's state, the alarms on and their level, what is
-    unread, how far reading stands, the last asks, and Memory.
+(** A row for every writer the table holds and for every Keeper the
+    registry holds, by Keeper name, with how many are at [error] and at
+    [warn]. A row carries the writer's state, the alarms on and their level,
+    what is unread, how far reading stands, the last asks, and Memory.
+
+    A registered Keeper whose writer is not made yet has the [booting] row:
+    its first turn or the first pulse makes the writer (§8.6), and until
+    then what is unread cannot be told (W1). Reading the section makes no
+    writer.
+
     ["writers": "none_in_process"] when this process runs no writer table:
     a CLI or the TUI. *)
 val section_json : config:Workspace.config -> Yojson.Safe.t

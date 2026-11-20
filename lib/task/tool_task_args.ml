@@ -126,10 +126,10 @@ let parse_handoff_context ~(agent_name : string)
             else summary
           in
           if
-            (* RFC-0337 decision 4 applies to every transition action. Check
-               caller-provided evidence before the entry-action empty-summary
-               path can intentionally collapse an otherwise empty context to
-               [None]. *)
+            (* Blank evidence refs are refused for every transition action.
+               Check caller-provided evidence before the entry-action
+               empty-summary path can intentionally collapse an otherwise
+               empty context to [None]. *)
             List.exists Tool_task_completion_review.blank_evidence_ref
               handoff_context.evidence_refs
           then

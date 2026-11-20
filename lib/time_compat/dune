@@ -4,7 +4,8 @@
  (name time_compat)
  (public_name masc.time_compat)
  (modules time_compat)
- ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 enabled. Leaf util sublib. + unused-value ratchet (warning 32)
+ ; Leaf util sublib.
+ ; Warning 4 (fragile pattern match), 33 (unused open) and 37 (unused constructor) on.
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries mcp_protocol.eio))

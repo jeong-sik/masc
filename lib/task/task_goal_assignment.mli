@@ -43,7 +43,8 @@ val set_task_goal :
     - [Error (Backlog_read_failed _)] — the authoritative backlog cannot be
       read; a recovery snapshot is never used to authorize this mutation.
     - [Error (Goal_source_unavailable _)] — the primary Goal store cannot be
-      read; the value is the store's own (RFC-0444) for the envelope.
+      read; the value is the store's own [Goal_store.unavailable], which the
+      tool reply turns into its error envelope.
     - [Error (Goal_lock_failed _)] — the Goal file lock was not taken; nothing
       was read.
     - [Error (Unknown_goal _)] — no goal with [goal_id] in the primary Goal store.
@@ -56,8 +57,8 @@ val set_task_goal :
       link is read, so a finished task that already has a link is refused as
       finished, not as [Already_assigned].
     - [Error (Already_assigned _)] — the task already carries a link to a
-      different goal or multiple goal links; reassignment/unlink is out of scope
-      (RFC-0267 §4, which keeps Phase 2 strictly additive for goalless tasks).
+      different goal or multiple goal links; this call only adds a link to a
+      goalless task and never reassigns or unlinks.
     - [Error (Link_write_failed _)] — the task and goal are valid, but the
       registry update could not be durably written and verified.
     - [Ok ()] — Goal identity and open phase, task existence, and the unfinished

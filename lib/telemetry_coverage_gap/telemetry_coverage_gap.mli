@@ -59,9 +59,8 @@ val record :
     the typed tag. When both are absent, [error_class] is [`Null].
 
     The wire row carries an [error_class] field alongside the existing
-    [error] field — readers should prefer the typed tag and fall back
-    to substring matching on [error] (RFC-0154 §4 backward compat
-    window). *)
+    [error] field — readers key on the typed tag, not on substrings of
+    [error]. *)
 
 val read_recent :
   masc_root:string ->

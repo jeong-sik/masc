@@ -2309,12 +2309,19 @@ let run_pass
                ~observe:(fun observation -> observed_context_review := Some observation)
                ~clock ~keeper_id ~input:inp.working_context
                ~proposed () in
-             if not (Keeper_librarian_context_review.permits_publication context_review) then (
+             match Keeper_librarian_context_review.withholding_kind context_review with
+             | Needs_revision ->
                context_write := Withheld;
                Log.Keeper.info ~keeper_name:keeper_id
                  "working context withheld by review: pockets=%d"
-                 (List.length proposed))
-             else (
+                 (List.length proposed)
+             | Review_failed reason ->
+               context_write := Withheld;
+               Log.Keeper.warn ~keeper_name:keeper_id
+                 "working context withheld fail-closed (%s): pockets=%d"
+                 reason
+                 (List.length proposed)
+             | Not_withheld -> (
              context_write := Outcome_unconfirmed;
              (try match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
                 Keeper_librarian_context.commit ~keepers_dir ~keeper_id

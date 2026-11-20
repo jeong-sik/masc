@@ -482,16 +482,18 @@ let log_entries_of_reconciliation (detailed : Ledger.detailed_reconciliation) =
       (fun (c : Ledger.provenance_change) ->
          ( "claim:" ^ c.provenance.claim_id
          , Printf.sprintf
-             "Claim %s support shrank (%d -> %d; stage %s)"
+             "Claim %s support shrank (%d -> %d; stage %s -> %s)"
              c.provenance.claim_id
              c.prior_support_count
              c.provenance.support_count
+             (Ledger.corroboration_stage_to_string c.prior_stage)
              (Ledger.corroboration_stage_to_string c.provenance.stage)
          , `Assoc
              [ "kind", `String "claim_shrank"
              ; "claim_id", `String c.provenance.claim_id
              ; "prior_support_count", `Int c.prior_support_count
              ; "support_count", `Int c.provenance.support_count
+             ; "prior_stage", `String (Ledger.corroboration_stage_to_string c.prior_stage)
              ; "stage", `String (Ledger.corroboration_stage_to_string c.provenance.stage)
              ; "vanished_keepers", `List (List.map (fun k -> `String k) c.vanished_keepers)
              ] ))
@@ -620,29 +622,43 @@ type domain_step_outcome =
   | Failed of string
 
 let run_reconciliation ~base_path =
-  let* context, ledger =
+  let* context, initial_ledger =
     io (fun () ->
       let* context = Context.collect ~base_path in
       let* ledger = Ledger.load ~base_path in
       Ok (context, ledger))
   in
-  let detailed = Ledger.reconcile_detailed ledger (Context.keepers context) in
-  let entries = log_entries_of_reconciliation detailed in
-  let* ledger_changed =
-    if detailed.reconciliation.vanished = [] then Ok false
-    else
-      let* () =
-        io (fun () ->
-          commit_two_phase_log
-            ~base_path
-            ~author:"workspace-memory-curator"
-            ~entries
-            ~apply_state:(fun () -> Ledger.save ~base_path detailed.reconciliation.ledger))
-      in
-      Ok true
-  in
-  if ledger_changed then Mcp_server_eio_resource.notify_world_memory_updated ();
-  Ok (context, detailed.reconciliation, ledger_changed)
+  let keepers = Context.keepers context in
+  let initial_detailed = Ledger.reconcile_detailed initial_ledger keepers in
+  if initial_detailed.reconciliation.vanished = [] then
+    Ok (context, initial_detailed.reconciliation, false)
+  else
+    let latest_detailed = ref initial_detailed in
+    let* updated_ledger =
+      io (fun () ->
+        let* updated =
+          Ledger.update ~base_path (fun latest ->
+            let d = Ledger.reconcile_detailed latest keepers in
+            latest_detailed := d;
+            Ok d.reconciliation.ledger)
+        in
+        let detailed = !latest_detailed in
+        let entries = log_entries_of_reconciliation detailed in
+        let* () =
+          if entries = [] then Ok ()
+          else
+            commit_two_phase_log
+              ~base_path
+              ~author:"workspace-memory-curator"
+              ~entries
+              ~apply_state:(fun () -> Ok ())
+        in
+        Ok updated)
+    in
+    let detailed = !latest_detailed in
+    let ledger_changed = detailed.reconciliation.vanished <> [] in
+    if ledger_changed then Mcp_server_eio_resource.notify_world_memory_updated ();
+    Ok (context, { detailed.reconciliation with ledger = updated_ledger }, ledger_changed)
 ;;
 
 let run_classification ~base_path ~(owner : owner) =
@@ -783,23 +799,27 @@ let run_briefing ~base_path =
       match Briefing.prepare ~sources ~contract ~render state with
       | Error detail -> Failed detail
       | Ok Briefing.Unchanged -> Idle
-      | Ok (Briefing.Cleanup cleaned) ->
-        (match io (fun () -> Briefing.save ~directory cleaned) with
-         | Ok () ->
-           Mcp_server_eio_resource.notify_world_memory_updated ();
-           Progressed
-         | Error detail -> Failed detail)
-      | Ok (Briefing.Prepared initial_batch) ->
-        let prepared_state = Briefing.prepared_state initial_batch in
-        let save_prepared =
-          if Yojson.Safe.equal (Briefing.to_json state) (Briefing.to_json prepared_state) then
-            Ok ()
-          else io (fun () -> Briefing.save ~directory prepared_state)
-        in
-        (match save_prepared with
+      | Ok (Briefing.Cleanup _ | Briefing.Prepared _) ->
+        let step = ref None in
+        (match
+           io (fun () ->
+             Briefing.update ~directory (fun current ->
+               let* prep = Briefing.prepare ~sources ~contract ~render current in
+               step := Some prep;
+               match prep with
+               | Briefing.Unchanged -> Ok current
+               | Briefing.Cleanup cleaned -> Ok cleaned
+               | Briefing.Prepared batch -> Ok (Briefing.prepared_state batch)))
+         with
          | Error detail -> Failed detail
-         | Ok () ->
-           (match resolve_lane_execution () with
+         | Ok _ ->
+           (match !step with
+            | None | Some Briefing.Unchanged -> Idle
+            | Some (Briefing.Cleanup _) ->
+              Mcp_server_eio_resource.notify_world_memory_updated ();
+              Progressed
+            | Some (Briefing.Prepared initial_batch) ->
+              (match resolve_lane_execution () with
             | Lane_busy detail ->
               Log.Server.debug "workspace curator briefing deferred: %s" detail;
               Transient_retry
@@ -863,7 +883,7 @@ let run_briefing ~base_path =
                     Transient_retry)
                   else Failed failure.detail
               in
-              attempt_batch initial_batch)))
+              attempt_batch initial_batch))))
 ;;
 
 let run_pass ~base_path ~(owner : owner) ~on_observation_failure =

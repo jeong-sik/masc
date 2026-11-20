@@ -321,6 +321,11 @@ let reader_path ~base_path ~keeper =
 
 let io f =
   try f () with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | File_lock_eio.Flock_timeout { caller; path; attempts } ->
+    Error
+      (Io_error
+         (Printf.sprintf "%s: flock timeout on %s after %d attempts" caller path attempts))
   | Unix.Unix_error (error, fn, arg) ->
     Error
       (Io_error

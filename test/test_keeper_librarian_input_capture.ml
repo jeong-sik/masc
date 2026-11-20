@@ -140,11 +140,17 @@ let test_absence_and_failure () =
 let test_refused_envelope () =
   let json=Capture.to_json (input ()) in
   let fields=match json with `Assoc fields -> fields | _ -> fail "input must be an object" in
+  let working_context_without_withheld=match List.assoc_opt "working_context" fields with
+    | Some (`Assoc wc_fields) ->
+      `Assoc (("working_context",`Assoc (List.remove_assoc "withheld" wc_fields))::
+        List.remove_assoc "working_context" fields)
+    | Some _ | None -> fail "input working_context must be an object" in
   List.iter (fun malformed -> check bool "malformed typed envelopes never default" true
     (Result.is_error (Capture.of_json malformed)))
     [`Assoc (("keeper_id",`String "different")::fields);
      `Assoc (List.remove_assoc "messages" fields);
      `Assoc (("unexpected",`Bool true)::fields);
+     working_context_without_withheld;
      `Assoc (("tool_observations",`List [`Assoc ["tool_name",`String "browser_read";
        "outcome",`String "invented"]])::List.remove_assoc "tool_observations" fields)]
 

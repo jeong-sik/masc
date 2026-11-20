@@ -676,6 +676,62 @@ let test_absence_preserves_unreadable_ordinary_stores () =
        keeper "empty" ~ordinary:(Context.Available (ordinary []))] =
      Ledger.Complete {facts=0; absent=0; available_stores=1; missing_stores=1})
 
+let test_corroboration_stage_recomputes_on_shrink () =
+  let sb_claim = "Release port is 8935" in
+  let writer_sb : Ledger.pending_fact =
+    { fact = source_ref "writer" "docs/ports.md" sb_claim; claim = sb_claim }
+  in
+  let reviewer = pending "reviewer" sb_claim in
+  let auditor = pending "auditor" sb_claim in
+  let ledger =
+    applied Ledger.empty ~selected:[ writer_sb; reviewer; auditor ]
+      [ { Ledger.fact = writer_sb.fact; decision = Ledger.Create_claim sb_claim }
+      ; { Ledger.fact = reviewer.fact; decision = Ledger.Create_claim sb_claim }
+      ; { Ledger.fact = auditor.fact; decision = Ledger.Create_claim sb_claim }
+      ]
+  in
+  let claim_id = fst (List.hd (Ledger.claims ledger)) in
+  Alcotest.(check (option string)) "multi-Keeper with source-bound is Crystallized"
+    (Some "crystallized")
+    (Option.map
+       (fun (p : Ledger.claim_provenance) -> Ledger.corroboration_stage_to_string p.stage)
+       (Ledger.claim_provenance ledger ~claim_id));
+  let step1 =
+    Ledger.reconcile_detailed ledger
+      [ keeper "writer"
+      ; keeper "reviewer" ~ordinary:(Context.Available (ordinary [ sb_claim ]))
+      ; keeper "auditor" ~ordinary:(Context.Available (ordinary [ sb_claim ]))
+      ]
+  in
+  (match step1.shrank_claims with
+   | [ change ] ->
+     Alcotest.(check string) "losing source-bound keeps claim_id" claim_id change.provenance.claim_id;
+     Alcotest.(check string) "prior_stage records Crystallized" "crystallized"
+       (Ledger.corroboration_stage_to_string change.prior_stage);
+     Alcotest.(check string) "recomputed stage drops to Consolidated" "consolidated"
+       (Ledger.corroboration_stage_to_string change.provenance.stage)
+   | _ -> Alcotest.fail "expected one shrank claim after losing source-bound member");
+  let step2 =
+    Ledger.reconcile_detailed step1.reconciliation.ledger
+      [ keeper "writer"
+      ; keeper "reviewer"
+      ; keeper "auditor" ~ordinary:(Context.Available (ordinary [ sb_claim ]))
+      ]
+  in
+  (match step2.shrank_claims with
+   | [ change ] ->
+     Alcotest.(check string) "prior_stage records Consolidated" "consolidated"
+       (Ledger.corroboration_stage_to_string change.prior_stage);
+     Alcotest.(check string) "single surviving keeper drops stage to Observed" "observed"
+       (Ledger.corroboration_stage_to_string change.provenance.stage)
+   | _ -> Alcotest.fail "expected one shrank claim after dropping to single keeper");
+  let step3 =
+    Ledger.reconcile_detailed step2.reconciliation.ledger
+      [ keeper "writer"; keeper "reviewer"; keeper "auditor" ]
+  in
+  Alcotest.(check (list string)) "zero remaining members retracts claim" [ claim_id ]
+    step3.retracted_claims
+
 let () =
   Alcotest.run "workspace memory ledger"
     [ ( "identity"
@@ -705,7 +761,9 @@ let () =
         ; Alcotest.test_case "an entry that loses a member goes and its other members are new" `Quick
             test_an_entry_that_loses_a_member_goes_and_its_other_members_are_new
         ; Alcotest.test_case "unavailable store keeps its facts" `Quick
-            test_unavailable_store_keeps_its_facts ] )
+            test_unavailable_store_keeps_its_facts
+        ; Alcotest.test_case "corroboration stage recomputes honestly on shrink" `Quick
+            test_corroboration_stage_recomputes_on_shrink ] )
     ; ( "apply"
       , [ Alcotest.test_case "selected decisions make one durable ledger" `Quick
             test_selected_decisions_update_one_durable_ledger

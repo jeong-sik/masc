@@ -155,8 +155,8 @@ type claim_provenance =
 
 type provenance_change =
   { provenance : claim_provenance
+        (** Recomputed live provenance from remaining supporting members. *)
   ; prior_stage : corroboration_stage
-  ; preserved_stage : corroboration_stage
   ; prior_support_count : int
   ; vanished_keepers : string list
   }
@@ -193,19 +193,21 @@ val reconcile : t -> Workspace_memory_context.keeper list -> reconciliation
 (** Compare the ledger with what the stores hold now. A disposition vanishes
     when its store was read and no longer holds the fact, when the store has
     no file, or when its Keeper is not in the list. An [Unavailable] store
-    adds no new facts and none of its facts vanish. A shared claim survives a
-    single Keeper's drop or rewording as long as at least one corroborating
-    member remains, preserving surviving members' dispositions without
-    re-queuing them; a claim is retracted only when zero supporting members
-    remain. A conflict that loses a member and drops below two remaining
-    members dissolves so a lone remaining fact re-enters [new_facts]. Makes no
-    model call. *)
+    adds no new facts and none of its facts vanish. Under the Curator contract
+    every fact assigned to a claim independently entails that claim's text, so
+    a shared claim survives partial member loss as long as at least one
+    supporting member remains without re-queuing survivors; a claim is retracted
+    only when zero supporting members remain. Corroboration stage is always
+    recomputed from surviving members (never ratcheted), so losing the last
+    source-bound or multi-Keeper supporter steps [stage] down accordingly. A
+    conflict that loses a member and drops below two remaining members dissolves
+    so a lone remaining fact re-enters [new_facts]. Makes no model call. *)
 
 val reconcile_detailed :
   t -> Workspace_memory_context.keeper list -> detailed_reconciliation
 (** {!reconcile} together with retracted claim ids, surviving claims whose
-    provenance shrank (retaining their prior convergence weight), and
-    dissolved conflict ids. *)
+    provenance shrank (recording [prior_stage] alongside live recomputed
+    [provenance.stage]), and dissolved conflict ids. *)
 
 type ordinary_absence_counts = {
   facts : int;

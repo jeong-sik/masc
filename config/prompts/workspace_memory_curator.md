@@ -17,9 +17,12 @@ Neighbors are context: do not classify or alter a neighbor unless it also
 appears in new_facts.
 
 For each new_facts id, choose one kind and value:
-- join_claim: the id of an existing claim from claims.
+- join_claim: the id of an existing claim from claims. Only join a claim if the
+  fact on its own independently entails the entire existing claim text.
 - create_claim: the shared claim text. Selected facts with identical text join
-  the same new claim.
+  the same new claim. Every assigned fact must independently entail every
+  assertion in the claim text so surviving members still entail it if another
+  member later disappears.
 - join_conflict: the id of an existing conflict from conflicts.
 - create_conflict: a precise conflict description. Selected facts with
   identical descriptions join the same new conflict.

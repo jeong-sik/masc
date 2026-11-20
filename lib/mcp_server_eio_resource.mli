@@ -39,7 +39,9 @@ val world_memory_claims_uri : string
 (** Canonical URI for {!World_memory_claims} ([masc://world-memory/claims]). *)
 
 val world_memory_log_uri : string
-(** Canonical URI for {!World_memory_log} ([masc://world-memory/log]). *)
+(** Canonical URI for {!World_memory_log} ([masc://world-memory/log]).
+    Supports optional [?since_seq=<int>&limit=<int>] cursor pagination
+    (default limit 100, capped at 500). *)
 
 val register_session_resource_notifier : (uri:string -> unit) -> unit
 (** Install the legacy session-scoped [notifications/resources/updated]
@@ -83,7 +85,9 @@ val handle_read_resource_eio :
     Synchronous workspace, event, worktree, and library filesystem reads run
     in a system thread so they cannot block the cooperative Eio domain.
     Session registry reads remain on the calling fiber because they may yield
-    through the registry actor.
+    through the registry actor. System-thread filesystem exceptions ([Sys_error],
+    [Unix.Unix_error]) on World Memory resource reads are converted into
+    typed [-32603] Internal_error envelopes while Eio cancellation propagates.
 
     Returns a JSON-RPC response envelope (jsonrpc / id / result or
     error fields).  Never raises — all error paths produce error

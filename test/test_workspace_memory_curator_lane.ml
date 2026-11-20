@@ -249,7 +249,25 @@ let test_in_process_pipeline_and_mcp_resources () =
           (member "claims" claims_json |> Yojson.Safe.Util.to_list |> List.length);
         let log_json = read_resource Mcp_server_eio_resource.world_memory_log_uri in
         check bool "log resource shows committed_changes" true
-          (member "committed_changes" log_json |> Yojson.Safe.Util.to_list <> []))))
+          (member "committed_changes" log_json |> Yojson.Safe.Util.to_list <> []);
+        let page1 =
+          read_resource (Mcp_server_eio_resource.world_memory_log_uri ^ "?since_seq=0&limit=1")
+        in
+        let p1_changes = member "committed_changes" page1 |> Yojson.Safe.Util.to_list in
+        check int "world-memory/log limit=1 returns 1 change" 1 (List.length p1_changes);
+        check bool "world-memory/log page1 reports has_more" true
+          (member "has_more" page1 |> Yojson.Safe.Util.to_bool);
+        let cursor1 = member "next_since_seq" page1 |> Yojson.Safe.Util.to_int in
+        check bool "next_since_seq advances" true (cursor1 > 0);
+        let page2 =
+          read_resource
+            (Printf.sprintf "%s?since_seq=%d&limit=1"
+               Mcp_server_eio_resource.world_memory_log_uri cursor1)
+        in
+        let p2_changes = member "committed_changes" page2 |> Yojson.Safe.Util.to_list in
+        check int "world-memory/log page2 returns next change" 1 (List.length p2_changes);
+        let p2_seq = List.hd p2_changes |> member "seq" |> Yojson.Safe.Util.to_int in
+        check bool "page2 advances strictly past cursor1" true (p2_seq > cursor1))))
 ;;
 
 let test_capacity_refusal_bisects_batch () =

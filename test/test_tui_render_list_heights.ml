@@ -309,6 +309,62 @@ let test_goals_report_the_entries_they_drew () =
     ; wl_cursor = (fun state -> state.planning_cursor) }
     state
 
+let test_docked_preview_mode_and_vertical_split () =
+  let open Alcotest in
+  check bool "compact -> half" true
+    (cycle_docked_preview_mode Preview_compact = Preview_half);
+  check bool "half -> full" true
+    (cycle_docked_preview_mode Preview_half = Preview_full);
+  check bool "full -> compact" true
+    (cycle_docked_preview_mode Preview_full = Preview_compact);
+  List.iter
+    (fun total_rows ->
+       List.iter
+         (fun mode ->
+            let split =
+              docked_vertical_split ~total_rows ~mode ~has_selection:true
+            in
+            check int
+              (Printf.sprintf "split conserves total_rows=%d" total_rows)
+              total_rows (split.list_rows + split.preview_rows);
+            check bool "nonnegative list_rows" true (split.list_rows >= 0);
+            check bool "nonnegative preview_rows" true (split.preview_rows >= 0);
+            if total_rows < 6 then
+              check int "short screen drops preview cleanly" 0 split.preview_rows)
+         [ Preview_compact; Preview_half; Preview_full ];
+       let compact = docked_vertical_split ~total_rows ~mode:Preview_compact ~has_selection:true in
+       let half = docked_vertical_split ~total_rows ~mode:Preview_half ~has_selection:true in
+       let full = docked_vertical_split ~total_rows ~mode:Preview_full ~has_selection:true in
+       check bool "preview grows monotonically compact <= half <= full" true
+         (compact.preview_rows <= half.preview_rows && half.preview_rows <= full.preview_rows);
+       let empty_sel = docked_vertical_split ~total_rows ~mode:Preview_full ~has_selection:false in
+       check int "unselected keeps 0 preview rows" 0 empty_sel.preview_rows)
+    [ 0; 3; 5; 6; 12; 20; 36 ];
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Planning;
+  let goals = List.init 40 goal in
+  state.planning <-
+    Some
+      { pl_goals = goals
+      ; pl_rollup =
+          { pr_active = 40; pr_verifying = 0; pr_awaiting_confirmation = 0; pr_done = 0
+          ; pr_dropped = 0; pr_paused = 0; pr_blocked = 0 }
+      ; pl_backlog =
+          { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_awaiting_verification = 0
+          ; pb_done = 0; pb_cancelled = 0 }
+      ; pl_goal_history = []
+      ; pl_generated_at = "2026-11-19T00:00:00Z" };
+  List.iter
+    (fun mode ->
+       state.planning_preview_mode <- mode;
+       check_work_list
+         { wl_name = "Goal stage"; wl_list = Goal_entries; wl_marker = "gq-"; wl_count = 40
+         ; wl_render = Masc_tui_render_work.render_planning_list
+         ; wl_place = (fun state index -> state.planning_cursor <- index)
+         ; wl_cursor = (fun state -> state.planning_cursor) }
+         state)
+    [ Preview_half; Preview_full ]
+
 let schedule index : schedule_row =
   { sch_schedule_id = Printf.sprintf "schedule-%02d" index
   ; sch_schedule_instance_id = "instance"
@@ -860,6 +916,8 @@ let () =
             test_tasks_report_the_entries_they_drew
         ; Alcotest.test_case "the Goal list reports the entries it drew" `Quick
             test_goals_report_the_entries_they_drew
+        ; Alcotest.test_case "docked preview modes split height and preserve Goal page counts" `Quick
+            test_docked_preview_mode_and_vertical_split
         ; Alcotest.test_case "the schedule list reports the rows it drew" `Quick
             test_schedules_report_the_rows_they_drew
         ; Alcotest.test_case "a schedule's Keeper link names the Keeper" `Quick

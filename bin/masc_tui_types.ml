@@ -3941,6 +3941,41 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
+(** Three-stage bottom docked preview density (compact -> half -> full) cycled
+    with [Space] and collapsed with [Esc] on table-preview surfaces. *)
+type docked_preview_mode =
+  | Preview_compact
+  | Preview_half
+  | Preview_full
+
+let cycle_docked_preview_mode = function
+  | Preview_compact -> Preview_half
+  | Preview_half -> Preview_full
+  | Preview_full -> Preview_compact
+
+type docked_vertical_split =
+  { list_rows : int
+  ; preview_rows : int
+  }
+
+let docked_vertical_split ~total_rows ~mode ~has_selection =
+  let total_rows = max 0 total_rows in
+  if (not has_selection) || total_rows < 6 then
+    { list_rows = total_rows; preview_rows = 0 }
+  else
+    let preview_rows =
+      match mode with
+      | Preview_compact ->
+          let target = min 8 (max 5 (total_rows * 35 / 100)) in
+          min target (max 0 (total_rows - 4))
+      | Preview_half ->
+          let target = max 6 (total_rows / 2) in
+          min target (max 0 (total_rows - 3))
+      | Preview_full -> max 0 (total_rows - 3)
+    in
+    let preview_rows = if preview_rows < 4 then 0 else preview_rows in
+    { list_rows = total_rows - preview_rows; preview_rows }
+
 (** The Candle destination follows its section as asynchronous rows change;
     its integer is the last visible offset for a subsequent manual move. *)
 type planning_scroll =
@@ -11289,6 +11324,7 @@ type state = {
   mutable lists_drawn: drawn_list list;
   mutable runtime_mode: runtime_mode;
   mutable planning_mode: planning_mode;
+  mutable planning_preview_mode: docked_preview_mode;
   (* Client-side over the already-loaded goals: [f]/[s] re-render without a
      refetch. *)
   mutable planning_filter: planning_filter;
@@ -11809,6 +11845,7 @@ type state = {
      with it. *)
   mutable harness_detail: (string * float) option;
   mutable harness_detail_scroll: int;
+  mutable harness_preview_mode: docked_preview_mode;
   (* The retained-run list. A failed refresh keeps the rows it had and says
      why beside them ([Masc_tui_fetched.Stale]), rather than a registry that
      could not be read drawing as an empty one. *)
@@ -22025,6 +22062,7 @@ let create_state
   lists_drawn = [];
   runtime_mode = Runtime_lanes;
   planning_mode = Planning_list;
+  planning_preview_mode = Preview_compact;
   planning_filter = Planning_filter_active;
   planning_sort = Planning_sort_phase_priority;
   goal_action_pending = None;
@@ -22308,6 +22346,7 @@ let create_state
   harness_cursor = 0;
   harness_detail = None;
   harness_detail_scroll = 0;
+  harness_preview_mode = Preview_compact;
   fusion_runs = Masc_tui_fetched.initial;
   fusion_runs_reread_pending = false;
   fusion_runs_awaiting_observer = false;

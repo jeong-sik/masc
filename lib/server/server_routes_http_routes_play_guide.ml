@@ -1,5 +1,4 @@
-(** How an agent handed an invite link joins the shared DOS machine (RFC
-    play-link-for-the-shared-machine §2.7).
+(** How an agent handed an invite link joins the shared DOS machine.
 
     The wording lives in the prompt [play.agent_guide]; this module fills in
     the addresses and schemas the server itself routes and checks, so the

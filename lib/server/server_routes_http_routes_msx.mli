@@ -1,6 +1,6 @@
 (** Server_routes_http_routes_msx — the workspace MSX machine HTTP routes.
 
-    Registers MSX control and manipulation routes (RFC-0439 §3.7, RFC #38695).
+    Registers MSX control and manipulation routes.
     Every mutation validates an optional [expected_workspace] binding before
     effects; the TUI supplies its captured identity on every write.
     Machine spectating is handled via

@@ -1,5 +1,4 @@
-(** Server_routes_http_routes_play — invites to the shared machine (RFC
-    play-link-for-the-shared-machine §2.4).
+(** Server_routes_http_routes_play — invites to the shared machine.
 
     [POST], [GET] and [DELETE <name>] under {!invites_path}, each needing
     [CanAdmin] from a bearer. A workspace with auth off or without

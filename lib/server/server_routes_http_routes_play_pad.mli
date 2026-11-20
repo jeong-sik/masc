@@ -1,5 +1,4 @@
-(** Server_routes_http_routes_play_pad — the masc pad over HTTP (RFC
-    play-link-for-the-shared-machine §2.9).
+(** Server_routes_http_routes_play_pad — the masc pad over HTTP.
 
     [GET /api/v1/play/pad] ([CanPlayMachine] bearer) answers the layout of the
     DOS program loaded now, [{saves_name, source, buttons}], where [source]

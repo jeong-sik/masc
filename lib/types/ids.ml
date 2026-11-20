@@ -56,7 +56,7 @@ module Task_id = Sequenced_id (struct
   let prefix = "task"
 end)
 
-(** Tool execution identifier — RFC-0233 canonical join key. One mint
+(** Tool execution identifier — canonical join key. One mint
     per tool execution at the dispatch boundary; every store that
     records the execution carries the same value. *)
 module Execution_id = Sequenced_id (struct

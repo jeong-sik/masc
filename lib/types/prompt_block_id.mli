@@ -145,12 +145,12 @@ val injected_on_post_tool_round : t -> bool
     correlation keys and rides every round of its turn, without rebroadcasting
     Task, Gate, Lane or other inbox state. [Goals_awaiting_proof] rides every
     round as well: a later round that lost it would read a Goal under proof as
-    ordinary open work (RFC-0387 review P0-1). [Constitution_amendments]
+    ordinary open work. [Constitution_amendments]
     rides every round of the turn, as the System it amends does: without it a
     later round reads only the older norms that System holds. Agent Core
     carries the complete current norms in the issued System instead of this
     block, where they ride every round as well. Operator
-    speech remains [Operator_note] (RFC-0366). A new constructor must declare
+    speech remains [Operator_note]. A new constructor must declare
     its class here before it can ride a post-tool round.
 
     [Recalled_memory] and [Recalled_memory_status] are first-round blocks as

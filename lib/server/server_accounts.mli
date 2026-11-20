@@ -126,10 +126,11 @@ type refusal =
           ([Keeper_config_journal.journal_path_for_base_path]) records it.
           The boot does not read it. The first step of the engine, after the
           folder was looked in, would roll the change back by writing or
-          removing a Keeper definition if the journal decodes and names this
-          configuration root, and would not start if it does not. Removing
-          the journal leaves the definition and runtime.toml as the change
-          left them. *)
+          removing a Keeper definition when the journal decodes and passes
+          its target check ([Keeper_config_journal.recover_interrupted]). It
+          would not start on any other journal, nor when the rollback fails,
+          possibly after part of it. Removing the journal leaves the
+          definition and runtime.toml as they are. *)
   | Keeper_configuration_journal_not_read of
       { journal : string
       ; detail : string

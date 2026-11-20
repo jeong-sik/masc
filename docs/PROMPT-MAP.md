@@ -48,7 +48,7 @@ keeper.md ### world.frame.frame
   active_goals · current_task · approval_authority · connected_surfaces
   namespace_state · autonomous_trigger
   scheduled_automation · completion_authority · task_cancellations
-  pending_mentions · scope_messages · own_board_posts · board_activity
+  pending_mentions · own_board_posts · board_activity
   own_recent_actions · fleet_messages
 ```
 

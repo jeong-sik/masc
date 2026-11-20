@@ -76,10 +76,8 @@ type stimulus_payload =
          approval, and payload validation; this queue payload only carries the
          typed wake and operator-authored message. *)
   | Connector_attention of connector_attention
-      (* RFC-connector-ambient-attention-wake: an ambient connector message
-         recorded as external attention. Carries the [event_id] pointer (not
-         content). Dormant — no producer emits it yet (handle_ambient enqueuer
-         lands in P3). *)
+      (* An ambient connector message recorded as external attention. Carries
+         the [event_id] pointer (not content). *)
   | Hitl_resolved of hitl_resolution
   | Ask_answered of ask_answered
       (* A nonblocking HITL approval this keeper enqueued was resolved. Wakes

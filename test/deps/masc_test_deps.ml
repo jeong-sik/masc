@@ -897,6 +897,69 @@ let write_checkpoint_head
     Out_channel.with_open_bin path (fun channel -> output_string channel plan.head_bytes);
     plan.head_bytes
 
+let turn_log_mark ~trace_id ~closed_messages : Masc.Keeper_turn_log.mark =
+  { trace = trace_id
+  ; closed_messages
+  ; session = trace_id
+  ; history_bytes = 0
+  ; internal_bytes = 0
+  ; chat_bytes = 0
+  ; external_rows = 0
+  }
+
+let append_turn_log_lines ~who ~keepers_dir ~keeper_name ~at_end lines =
+  match
+    Masc.Keeper_turn_log_store.append
+      ~path:(Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name)
+      ~at_end lines
+  with
+  | Ok (_ : Masc.Keeper_turn_log_store.appended) -> ()
+  | Error error ->
+    invalid_arg
+      (who ^ ": "
+       ^ Masc.Keeper_turn_log_recorder.not_recorded_to_string
+           (Masc.Keeper_turn_log_recorder.Not_appended error))
+
+let turn_log_started_line mark =
+  Masc.Keeper_turn_log.Log_started { id = Masc.Keeper_turn_log.Log_id.fresh (); at = 1.0; mark }
+
+(** A Keeper turn log whose one line starts it after [closed_messages] closed
+    messages of [trace_id]: where a request with no seed starts
+    ({!Masc.Keeper_turn_driver_try_provider.turn_starts}). For a fixture whose
+    history holds completed turns that no turn of this process recorded. *)
+let start_turn_log ~keepers_dir ~keeper_name ~trace_id ~closed_messages =
+  append_turn_log_lines ~who:"start_turn_log" ~keepers_dir ~keeper_name ~at_end:0
+    (turn_log_started_line (turn_log_mark ~trace_id ~closed_messages), [])
+
+(** This turn's [Opened] after [closed_messages] closed messages of
+    [trace_id], at the end of the Keeper's turn log: where this turn began
+    ({!Masc.Keeper_turn_driver_try_provider.turn_starts}). A log with no line
+    is started at the same mark first. *)
+let open_turn_log ~keepers_dir ~keeper_name ~trace_id ~closed_messages =
+  let mark = turn_log_mark ~trace_id ~closed_messages in
+  let opened =
+    Masc.Keeper_turn_log.Opened
+      { at = 2.0
+      ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
+      ; runtime = "fixture"
+      ; task = Masc.Keeper_turn_log.No_task
+      ; stimuli = []
+      ; baseline = mark
+      }
+  in
+  let path = Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name in
+  match Masc.Keeper_turn_log_store.read_tail path with
+  | Ok Masc.Keeper_turn_log_store.Nothing_written ->
+    append_turn_log_lines ~who:"open_turn_log" ~keepers_dir ~keeper_name ~at_end:0
+      (turn_log_started_line mark, [ opened ])
+  | Ok (Masc.Keeper_turn_log_store.Written { rows_end; _ }) ->
+    append_turn_log_lines ~who:"open_turn_log" ~keepers_dir ~keeper_name ~at_end:rows_end (opened, [])
+  | Error error ->
+    invalid_arg
+      ("open_turn_log: "
+       ^ Masc.Keeper_turn_log_recorder.not_recorded_to_string
+           (Masc.Keeper_turn_log_recorder.Tail_unread error))
+
 (** [bytes], a checkpoint head, with the checkpoint field's [name] set to
     [value]: the same head for other content (RFC-0476 §3.2). *)
 let checkpoint_head_bytes_with_field bytes name value =

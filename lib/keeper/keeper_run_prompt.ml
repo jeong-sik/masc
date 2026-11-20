@@ -30,10 +30,9 @@ type user_turn_record =
       (** The resumed AGENT_CORE checkpoint already owns this exact user turn. Do not
           append or persist a second copy before replay. *)
 
-let range_turn_start user_turn_record ~history_at_start =
-  match user_turn_record with
-  | Record_user_turn -> history_at_start
-  | Skip_already_checkpointed_user_turn -> Keeper_turn_boundaries.Continued_history
+let this_turn_opening = function
+  | Record_user_turn -> Keeper_turn_driver_try_provider.Opened_before_its_input
+  | Skip_already_checkpointed_user_turn -> Keeper_turn_driver_try_provider.Opened_after_its_input
 ;;
 
 type extra_system_context_assembly = Keeper_context_assembly.t

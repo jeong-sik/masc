@@ -38,7 +38,8 @@ let next_try = function
   | Answering | Recovered _ -> None
 
 let due ~now = function
-  | Failing { retry_at; _ } -> now >= retry_at
+  | Failing { retry_at; _ } ->
+      Masc_tui_wake.reached Masc_tui_wake.Refresh_retry ~now ~at:retry_at
   | Recovered _ -> true
   | Answering -> false
 

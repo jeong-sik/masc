@@ -37,7 +37,7 @@ let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 
     ~continuity:(Some Keeper_turn_driver_try_provider.without_snapshot)
     ~accepted:None ~front
     ~turn_start
-    ~history_at_start:Keeper_turn_boundaries.Continued_history
+    ~this_turn_start:None
     ~counted_tokens
     messages
 
@@ -170,9 +170,11 @@ let test_a_known_start_leaves_a_recorded_start_bounded_by_the_boundary () =
       ~measure:(Keeper_context_core.message_measurer ())
       ~continuity:(Some continuity) ~front:None ~accepted:(Some accepted)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 8 })
-      ~history_at_start:
-        (Keeper_turn_boundaries.history_at_start_of_messages
-           (List.filteri (fun index _ -> index < 14) messages))
+      ~this_turn_start:
+        (Some
+           (snd
+              (Runtime_model_input_tail_window.annotate
+                 (List.filteri (fun index _ -> index < 14) messages))))
       ~counted_tokens:None messages
   in
   Alcotest.(check int) "from the turn boundary" 8 c.first_atom;
@@ -1386,6 +1388,10 @@ let test_observed_boundary_forecast ~samples ~expected_front () =
   Keeper_turn_boundaries.append
     ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name boundary
   |> Result.map_error Keeper_turn_boundaries.append_error_to_string |> unwrap;
+  (* The forecast reads the turn start from the turn log; the Librarian
+     still reads the boundary line above. *)
+  Masc_test_deps.start_turn_log ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_name
+    ~trace_id ~closed_messages:(List.length messages);
   let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
   List.iter (fun (atom_count, input_tokens) ->
     let ends = match digest_at 0, digest_at (atom_count - 1) with

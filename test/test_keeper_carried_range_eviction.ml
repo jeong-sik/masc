@@ -8,7 +8,6 @@ module Ledger = Masc.Keeper_model_input_ledger
 module Front = Masc.Keeper_carried_front
 module Window = Runtime_model_input_tail_window
 module Types = Agent_core.Types
-module Boundary = Masc.Keeper_turn_boundaries
 
 open Alcotest
 
@@ -400,49 +399,6 @@ let test_a_refused_boundary_resend_ends_the_turn () =
   check bool "no accepted start is recorded" true (Option.is_none recorded)
 ;;
 
-(* Where a turn began when it started from the first [start] atoms of
-   [history], as the turn computes it before its input. *)
-let began_at ~start history =
-  Boundary.history_at_start_of_messages (List.filteri (fun index _ -> index < start) history)
-;;
-
-(* Rules 7 and 8 read where this turn began from its start state, and only
-   while the history in hand opens the atom before it with the message the
-   turn started on. *)
-let test_this_turn_start_reads_the_start_state () =
-  let history = exchanges ~from:0 10 in
-  let start ?(on = history) state =
-    Try_provider.For_testing.this_turn_start ~history_digest_at:(Window.atom_opening_digest on) state
-  in
-  check (option int) "a fresh history began at atom 0" (Some 0) (start Boundary.Fresh_history);
-  check (option int) "a start state with no position names none" None
-    (start Boundary.Continued_history);
-  check (option int) "the start state names the atom the turn began at" (Some 14)
-    (start (began_at ~start:14 history));
-  let rewritten = exchanges ~from:100 7 @ List.filteri (fun index _ -> index >= 14) history in
-  check (option int) "a history that opens the atom before it with another message names none"
-    None (start ~on:rewritten (began_at ~start:14 history));
-  check (option int) "a history shorter than the start names none" None
-    (start ~on:(exchanges ~from:0 5) (began_at ~start:14 history))
-;;
-
-(* The turn hands rules 7 and 8 where it began only when it records its own
-   input: a resumed checkpoint already holds that input and maybe its
-   progress, so its length names no start. *)
-let test_a_resumed_turn_names_no_start () =
-  let history = exchanges ~from:0 10 in
-  let began_at_14 = began_at ~start:14 history in
-  let start record =
-    Try_provider.For_testing.this_turn_start
-      ~history_digest_at:(Window.atom_opening_digest history)
-      (Masc.Keeper_run_prompt.range_turn_start record ~history_at_start:began_at_14)
-  in
-  check (option int) "a turn that records its input began where its start state says" (Some 14)
-    (start Masc.Keeper_run_prompt.Record_user_turn);
-  check (option int) "a resumed turn names no start" None
-    (start Masc.Keeper_run_prompt.Skip_already_checkpointed_user_turn)
-;;
-
 let accepted_at ?(source = Front.Turn_record { turn = 1 }) history first_atom : Front.seed =
   { first_atom
   ; front = Model_input_front.At_atom (Option.get (Window.atom_opening_digest history first_atom))
@@ -463,44 +419,67 @@ let past_point_start = function
    names is bounded by the boundary even when it lies before this turn's
    start; only a front rule 8 moved to where this turn began keeps its place
    past the boundary, and is bounded by where this turn began. *)
+(* B10 of RFC librarian-lifecycle §4.10: where this turn began is read only
+   when this run wrote its [Opened] before the turn's input. A resumed
+   checkpoint already holds the input and maybe the turn's progress, so its
+   run's [Opened] names no start. *)
+let test_a_resumed_turn_names_no_start () =
+  let opening =
+    testable
+      (fun fmt (opening : Try_provider.this_turn_opening) ->
+         Format.pp_print_string fmt
+           (match opening with
+            | Try_provider.Opened_before_its_input -> "opened before its input"
+            | Try_provider.Opened_after_its_input -> "opened after its input"))
+      ( = )
+  in
+  check opening "a turn that records its input opened before it"
+    Try_provider.Opened_before_its_input
+    (Masc.Keeper_run_prompt.this_turn_opening Masc.Keeper_run_prompt.Record_user_turn);
+  check opening "a resumed checkpoint's turn opened after it"
+    Try_provider.Opened_after_its_input
+    (Masc.Keeper_run_prompt.this_turn_opening
+       Masc.Keeper_run_prompt.Skip_already_checkpointed_user_turn)
+;;
+
 let test_an_accepted_start_is_bounded_by_the_turn_boundary () =
   let history = exchanges ~from:0 10 in
   let continuity = absorbed_at ~point:2 history in
-  let start ?source ~history_at_start accepted =
+  let start ?source ~this_turn_start accepted =
     (Try_provider.choose_range_start ~past_max_context:None ~held_window:None
        ~continuity:(Some continuity) ~front:None
        ~accepted:(Some (accepted_at ?source history accepted))
        ~history_digest_at:(Window.atom_opening_digest history)
-       ~turn_boundary:(Front.Turn_boundary { end_atom = 8 }) ~history_at_start)
+       ~turn_boundary:(Front.Turn_boundary { end_atom = 8 }) ~this_turn_start)
       .Try_provider.start
     |> past_point_start
   in
-  let began_at_14 = began_at ~start:14 history in
+  let began_at_14 = Some 14 in
   check (option int) "a recorded start past the boundary moves back to it" (Some 8)
-    (start ~history_at_start:began_at_14 12);
+    (start ~this_turn_start:began_at_14 12);
   check (option int) "a recorded start where this turn began moves back to the boundary" (Some 8)
-    (start ~history_at_start:began_at_14 14);
+    (start ~this_turn_start:began_at_14 14);
   check (option int) "a recorded start before the boundary stays" (Some 6)
-    (start ~history_at_start:began_at_14 6);
+    (start ~this_turn_start:began_at_14 6);
   check (option int) "a ledger start past the boundary moves back to it" (Some 8)
-    (start ~source:Front.Ledger ~history_at_start:began_at_14 12);
+    (start ~source:Front.Ledger ~this_turn_start:began_at_14 12);
   check (option int) "a rule-1 front past the boundary moves back to it" (Some 8)
-    (start ~source:Front.Turn_start_after_librarian_refusal ~history_at_start:began_at_14 12);
+    (start ~source:Front.Turn_start_after_librarian_refusal ~this_turn_start:began_at_14 12);
   check (option int) "a rule-1 front without a Librarian point moves back too" (Some 8)
-    (start ~source:Front.Turn_start_after_seed_refusal ~history_at_start:began_at_14 12);
+    (start ~source:Front.Turn_start_after_seed_refusal ~this_turn_start:began_at_14 12);
   let this_turn = Front.This_turn_start_after_librarian_refusal in
   check (option int) "a rule-8 front past the boundary and before this turn stays" (Some 12)
-    (start ~source:this_turn ~history_at_start:began_at_14 12);
+    (start ~source:this_turn ~this_turn_start:began_at_14 12);
   check (option int) "a rule-8 front where this turn began stays" (Some 14)
-    (start ~source:this_turn ~history_at_start:began_at_14 14);
+    (start ~source:this_turn ~this_turn_start:began_at_14 14);
   check (option int) "a rule-8 front inside this turn moves back to where it began" (Some 14)
-    (start ~source:this_turn ~history_at_start:began_at_14 16);
+    (start ~source:this_turn ~this_turn_start:began_at_14 16);
   check (option int) "a rule-8 front without a seed is bounded the same way" (Some 12)
-    (start ~source:Front.This_turn_start_after_seed_refusal ~history_at_start:began_at_14 12);
+    (start ~source:Front.This_turn_start_after_seed_refusal ~this_turn_start:began_at_14 12);
   check (option int) "with no known start the boundary bounds a rule-8 front" (Some 8)
-    (start ~source:this_turn ~history_at_start:Boundary.Continued_history 12);
+    (start ~source:this_turn ~this_turn_start:None 12);
   check (option int) "a start state behind the boundary does not lower the bound" (Some 8)
-    (start ~source:this_turn ~history_at_start:(began_at ~start:6 history) 12)
+    (start ~source:this_turn ~this_turn_start:(Some 6) 12)
 ;;
 
 (* Rule 8 over injected rungs: [first] stands for rules 1 and 6, and the
@@ -735,7 +714,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
       Try_provider.choose_range_start ~past_max_context ~held_window:None
         ~continuity:(Option.map (fun point -> absorbed_at ~point history) continuity)
         ~front ~accepted ~history_digest_at:digest_at ~turn_boundary:boundary_8
-        ~history_at_start:Boundary.Continued_history
+        ~this_turn_start:None
     in
     opens start, Front.origin_to_string (Try_provider.range_start_origin start)
   in
@@ -768,7 +747,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
     Masc.Keeper_next_request_forecast.carry ?past_max_context:signal
       ~measure:(Masc.Keeper_context_core.message_measurer ())
       ~continuity:(Some Try_provider.without_snapshot) ~front:(Some ledger_4) ~accepted:None
-      ~turn_start:boundary_8 ~history_at_start:Boundary.Continued_history
+      ~turn_start:boundary_8 ~this_turn_start:None
       ~counted_tokens:(Some 2_400) history
   in
   check int "the forecast opens where the request will" 8 forecast.first_atom;
@@ -791,7 +770,7 @@ let test_a_window_that_stays_holds_behind_the_librarian_point () =
         ~continuity:(Some (absorbed_at ~point history)) ~front:None
         ~accepted:(Some (accepted_at history accepted))
         ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
-        ~history_at_start:Boundary.Continued_history
+        ~this_turn_start:None
     in
     opens start, Front.origin_to_string (Try_provider.range_start_origin start)
   in
@@ -834,7 +813,7 @@ let test_the_size_signal_moves_to_the_librarian_point () =
              { Try_provider.window_opened_at = held_at; markers_before = 0; working_state = None })
         ~continuity:(Some (absorbed_at ~point history)) ~front:None ~accepted:(Some accepted)
         ~history_digest_at:(Window.atom_opening_digest history) ~turn_boundary:boundary_8
-        ~history_at_start:Boundary.Continued_history
+        ~this_turn_start:None
     in
     ( opens choice.Try_provider.start
     , Option.map (fun (seed : Front.seed) -> seed.first_atom) choice.moved_at_max_context )
@@ -902,9 +881,7 @@ let () =
             test_a_size_refused_boundary_keeps_the_front
         ] )
     ; ( "this turn's start"
-      , [ test_case "this turn's start is read from its start state" `Quick
-            test_this_turn_start_reads_the_start_state
-        ; test_case "a resumed turn names no start" `Quick test_a_resumed_turn_names_no_start
+      , [ test_case "a resumed turn names no start" `Quick test_a_resumed_turn_names_no_start
         ; test_case "an accepted start is bounded by the turn boundary" `Quick
             test_an_accepted_start_is_bounded_by_the_turn_boundary
         ; test_case "a refused ladder resends from where this turn began" `Quick

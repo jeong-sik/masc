@@ -321,7 +321,8 @@
  (name masc_tui_server_lifecycle)
  (wrapped false)
  (modules masc_tui_server_lifecycle)
- (libraries masc.masc_core masc.fs_compat masc.masc_process unix))
+ ; masc_tui_wake so the start waiter rings the loop when its outcome is known.
+ (libraries masc.masc_core masc.fs_compat masc.masc_process masc_tui_wake unix))
 
 ;; What bare `masc` does: the TUI on a terminal, the server everywhere else.
 ;; Own library, no dependencies, so the rule runs under a test without a TTY,
@@ -361,7 +362,7 @@
  (name masc_tui_engine_samples)
  (wrapped false)
  (modules masc_tui_engine_samples)
- (libraries masc masc_tui_braille masc_tui_message_layout))
+ (libraries masc masc_tui_braille masc_tui_message_layout masc_tui_wake))
 
 ;; Usage's quota scope trend, built once per provider history answer so the
 ;; frame draws rows rather than regrouping every point on every repaint.
@@ -616,7 +617,7 @@
  (name masc_tui_play_room)
  (wrapped false)
  (modules masc_tui_play_room)
- (libraries masc yojson masc.masc_random_id masc_tui_message_layout))
+ (libraries masc yojson masc.masc_random_id masc_tui_message_layout masc_tui_wake))
 
 (library
  (name masc_tui_play_card)
@@ -948,6 +949,7 @@
  (modules masc_tui_config)
  ; masc carries Tui_preference, the [tui] settings the server answers.
  (libraries
+  masc_tui_wake
   masc
   masc.masc_core
   masc.masc_log
@@ -1073,7 +1075,8 @@
  (name masc_tui_terminal_probe)
  (wrapped false)
  (modules masc_tui_terminal_probe)
- (libraries masc_tui_terminal_palette masc_tui_graphics))
+ ; masc_tui_input_decoder for the hold it reports in the decoder's terms.
+ (libraries masc_tui_terminal_palette masc_tui_graphics masc_tui_input_decoder))
 
 (library
  (name masc_tui_startup_observation)
@@ -1203,7 +1206,7 @@
  (name masc_tui_terminal_out)
  (wrapped false)
  (modules masc_tui_terminal_out)
- (libraries threads.posix unix))
+ (libraries masc_tui_wake threads.posix unix))
 
 (library
  (name masc_tui_frame_presenter)
@@ -1714,19 +1717,31 @@
  (modules masc_tui_lane_read_decision)
  (libraries masc))
 
+;; What wakes the TUI main loop and when it must wake by itself (RFC
+;; tui-idle-wait): the bell writers ring, and the deadlines decisions note.
+(library
+ (name masc_tui_wake)
+ (wrapped false)
+ (modules masc_tui_wake)
+ (libraries eio mtime.clock.os))
+
 ;; What a surface owes its server reading after an announced change
-;; (RFC-0480 section 3.1). Pure; the main loop decides when to read.
+;; (RFC-0480 section 3.1). Pure apart from noting when a retry's wait ends
+;; for the main loop (masc_tui_wake); the main loop decides when to read.
 (library
  (name masc_tui_owed_read)
  (wrapped false)
- (modules masc_tui_owed_read))
+ (modules masc_tui_owed_read)
+ (libraries masc_tui_wake))
 
 ;; When the next refresh pass may read /health after the probe failed
-;; (RFC tui-one-screen-grammar section 2). Pure; the main loop starts it.
+;; (RFC tui-one-screen-grammar section 2). Pure apart from noting when the
+;; wait ends for the main loop (masc_tui_wake); the main loop starts it.
 (library
  (name masc_tui_refresh_pace)
  (wrapped false)
- (modules masc_tui_refresh_pace))
+ (modules masc_tui_refresh_pace)
+ (libraries masc_tui_wake))
 
 ;; Which Keeper rows, or the whole roster, the TUI owes a read after the
 ;; server says they changed. Pure; the main loop
@@ -1735,7 +1750,7 @@
  (name masc_tui_roster_owed)
  (wrapped false)
  (modules masc_tui_roster_owed)
- (libraries masc_tui_owed_read))
+ (libraries masc_tui_owed_read masc_tui_wake))
 
 ;; A Keeper's month of efficiency on its Info tab, beside the fleet's per-turn
 ;; figures. Own library so the request has a test that does not draw a screen.
@@ -1857,7 +1872,7 @@
  (name masc_tui_terminal_write_repair)
  (wrapped false)
  (modules masc_tui_terminal_write_repair)
- (libraries masc_tui_render_schedule unix))
+ (libraries masc_tui_render_schedule masc_tui_wake unix))
 
 (library
  (name masc_tui_editor)
@@ -1983,19 +1998,19 @@
  (name masc_tui_preference_writer)
  (wrapped false)
  (modules masc_tui_preference_writer)
- (libraries masc masc.runtime eio))
+ (libraries masc masc.runtime masc_tui_wake eio))
 
 (library
  (name masc_tui_credential_preparation)
  (wrapped false)
  (modules masc_tui_credential_preparation)
- (libraries masc_tui_credential masc.masc_core masc.masc_log eio mtime.clock.os))
+ (libraries masc_tui_credential masc.masc_core masc.masc_log masc_tui_wake eio mtime.clock.os))
 
 (library
  (name masc_tui_types)
  (wrapped false)
  (modules masc_tui_types)
- (libraries masc_tui_value masc_tui_engine_samples masc_tui_read_failure masc_tui_refresh_pace masc.fs_compat masc_tui_chat_facts masc_tui_keeper_efficiency masc_tui_help masc_tui_owed_read masc_tui_approval_value_reading masc_tui_roster_owed masc_tui_candle masc_tui_chat_row_actions masc_tui_board_publication masc_tui_execute_terminal masc_tui_execute_stream masc_tui_action_notice masc_tui_fleet_stream masc_tui_evidence_file masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc_tui_system_log_stream masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_preference_writer masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft masc_tui_editor masc_tui_words
+ (libraries masc_tui_value masc_tui_wake masc_tui_engine_samples masc_tui_read_failure masc_tui_refresh_pace masc.fs_compat masc_tui_chat_facts masc_tui_keeper_efficiency masc_tui_help masc_tui_owed_read masc_tui_approval_value_reading masc_tui_roster_owed masc_tui_candle masc_tui_chat_row_actions masc_tui_board_publication masc_tui_execute_terminal masc_tui_execute_stream masc_tui_action_notice masc_tui_fleet_stream masc_tui_evidence_file masc_tui_pele masc_tui_image_viewport masc_tui_resource_diagrams masc_tui_resource_export masc_tui_resource_images masc_tui_resource_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog masc_tui_observation_store masc_tui_system_logs masc_tui_system_log_stream masc.build_version masc_tui_observation_origin masc_tui_original_task_read masc_tui_task_dispatch masc.keeper_cost_coverage masc_tui_preference_writer masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft masc_tui_editor masc_tui_words
    masc_tui_markdown
   masc_tui_chat_call_reader
   masc_tui_board_reader
@@ -2970,7 +2985,7 @@
  (name masc_tui_async_protocol)
  (wrapped false)
  (modules masc_tui_async_protocol)
- (libraries masc_tui_refresh_pace masc_tui_engine_samples masc.masc_candle masc_tui_usage_calls masc_tui_pele masc_tui_resource_diagrams masc_tui_attachment_action masc_tui_image_cache masc_tui_board_reader masc_tui_detail_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read
+ (libraries masc_tui_wake mtime.clock.os masc_tui_refresh_pace masc_tui_engine_samples masc.masc_candle masc_tui_usage_calls masc_tui_pele masc_tui_resource_diagrams masc_tui_attachment_action masc_tui_image_cache masc_tui_board_reader masc_tui_detail_reading masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_artifact_share_pending masc_tui_resource_catalog masc_tui_observation_store masc_tui_observation_origin masc_tui_ask_projection masc_tui_original_task_read
   masc_tui_code_results
   masc_tui_context_results
   masc_tui_fleet_results
@@ -3130,6 +3145,7 @@
  (public_name masc-tui)
  (package masc)
  (libraries
+  masc_tui_wake
   masc_tui_memory_lineage
   masc_tui_read_failure
   masc_tui_refresh_pace
@@ -3748,6 +3764,7 @@
   masc_tui_terminal_palette
   masc_tui_render_schedule
   masc_tui_paste
+  masc_tui_wake
   eio
   eio.unix
   unix
@@ -3835,13 +3852,13 @@
  (name masc_tui_workspace_result)
  (wrapped false)
  (modules masc_tui_workspace_result)
- (libraries masc_tui_types masc_tui_workspace_job masc_eio_context eio mtime.clock.os))
+ (libraries masc_tui_types masc_tui_wake masc_tui_workspace_job masc_eio_context eio mtime.clock.os))
 
 (library
  (name masc_tui_task_dispatch)
  (wrapped false)
  (modules masc_tui_task_dispatch)
- (libraries masc masc_tui_mcp masc_eio_context eio yojson mtime.clock.os))
+ (libraries masc masc_tui_mcp masc_tui_wake masc_eio_context eio yojson mtime.clock.os))
 
 (library
  (name masc_tui_original_task_read)

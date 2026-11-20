@@ -5323,11 +5323,20 @@ for line in sys.stdin:
       |> fun ctx -> List.fold_left Keeper_context_runtime.append ctx history
       |> Keeper_context_runtime.checkpoint_of_context in
     let checkpoint = { checkpoint with session_id = trace_id; turn_count = 1 } in
-    (match Keeper_checkpoint_store.save_agent_core_if_absent ~boundary:Agent_core.Checkpoint_objects.Turn_continues
-      ~session_dir:(Filename.concat (Filename.concat base_path "keeper-sessions") trace_id)
-      checkpoint with
+    let session_dir = Filename.concat (Filename.concat base_path "keeper-sessions") trace_id in
+    (* A completed turn closed the first four atoms; the retained turn holds
+       the last four open. The turn log starts at the closed ones when the
+       first run is admitted, and the request opens there. *)
+    (match Keeper_checkpoint_store.save_agent_core_if_absent ~boundary:Agent_core.Checkpoint_objects.Turn_closes
+      ~session_dir
+      { checkpoint with messages = List.filteri (fun index _ -> index < 4) checkpoint.messages } with
      | Installed { auxiliary = []; _ } -> ()
-     | Installed _ | Not_installed _ -> fail "could not seed retained history");
+     | Installed _ | Not_installed _ -> fail "could not seed the completed turn");
+    (match Keeper_checkpoint_store.save_agent_core_classified ~session_dir ~history_retained:0
+      ~boundary:Agent_core.Checkpoint_objects.Turn_continues checkpoint with
+     | Ok (Keeper_checkpoint_store.Saved _) -> ()
+     | Ok (Keeper_checkpoint_store.Stale_noop _) -> fail "the retained turn was read as stale"
+     | Error detail -> fail ("could not seed retained history: " ^ detail));
     let config = Workspace.default_config base_path in
     let digest_at = Runtime_model_input_tail_window.atom_opening_digest history in
     let boundary : Keeper_turn_boundaries.record =

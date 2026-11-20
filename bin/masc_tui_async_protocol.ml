@@ -994,6 +994,12 @@ type 'a mailed = {
   message : 'a;
 }
 
+(* The loop may be asleep in its wait; the bell tells it to look
+   (RFC tui-idle-wait §2.1). *)
+let mail notifications message =
+  Eio.Stream.add notifications { ready_at_ns = Mtime_clock.elapsed_ns (); message };
+  Masc_tui_wake.(ring loop Mailbox)
+
 let capture_workspace_message state =
   let authority = state.workspace_authority in
   let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
@@ -1062,7 +1068,12 @@ module Delivery_round : sig
   (** Capture the actual queued prefix, apply it in FIFO order, then collect
       and deliver one finite set of owned results. A completed round returns
       [None] even if new shared traffic is queued. [can_take] uses the caller's
-      existing deadline; a paused round retains its exact prefix/remainder. *)
+      existing deadline and is asked only with an item in hand: before a
+      queued item is taken and before a collected result is handed on. So a
+      [false] always leaves work, and a round with nothing to do never asks.
+      Capturing the prefix and collecting the owned results are not items;
+      they run when the round reaches them. A paused round retains its exact
+      prefix/remainder. *)
   val take : 'a t -> can_take:(unit -> bool) -> queued:(unit -> int) ->
     take_shared:(unit -> 'a option) -> collect_owned:(unit -> 'a list) ->
     'a option * 'a t
@@ -1070,12 +1081,12 @@ end = struct
   type 'a t = Await_prefix | Shared_prefix of int | Owned_results of 'a list
   let empty = Await_prefix
   let rec take round ~can_take ~queued ~take_shared ~collect_owned =
-    if not (can_take ()) then None, round
-    else match round with
+    match round with
     | Await_prefix ->
         take (Shared_prefix (queued ())) ~can_take ~queued ~take_shared ~collect_owned
     | Shared_prefix remaining when remaining > 0 ->
-        (match take_shared () with
+        if not (can_take ()) then None, round
+        else (match take_shared () with
          | Some ready -> Some ready, Shared_prefix (remaining-1)
          | None ->
              take (Owned_results (collect_owned ()))
@@ -1083,7 +1094,8 @@ end = struct
     | Shared_prefix _ ->
         take (Owned_results (collect_owned ()))
           ~can_take ~queued ~take_shared ~collect_owned
-    | Owned_results (ready :: rest) -> Some ready, Owned_results rest
+    | Owned_results (ready :: rest) ->
+        if not (can_take ()) then None, round else Some ready, Owned_results rest
     | Owned_results [] -> None, Await_prefix
 end
 

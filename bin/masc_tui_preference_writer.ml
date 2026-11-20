@@ -29,7 +29,9 @@ let create ~send =
   { send; pending = Queue.create (); completed = Queue.create (); phase = Open; idle = None }
 
 let same_request a b = a.token == b.token
-let publish t request outcome = Queue.add { request; outcome } t.completed
+let publish t request outcome =
+  Queue.add { request; outcome } t.completed;
+  Masc_tui_wake.(ring loop Preference_written)
 
 let refuse_pending t detail =
   Queue.iter (fun request -> publish t request (Error (Not_started detail))) t.pending;

@@ -90,8 +90,10 @@ let start t machine operation =
 let poll t ~now ~machine =
   if Option.is_some t.pending then t, None
   else if not t.active then
-    if t.joined && now >= t.next_read then start t machine Leave else t, None
-  else if now >= t.next_read then start t machine (Read t.before)
+    if t.joined && Masc_tui_wake.reached Masc_tui_wake.Play_room_read ~now ~at:t.next_read
+    then start t machine Leave else t, None
+  else if Masc_tui_wake.reached Masc_tui_wake.Play_room_read ~now ~at:t.next_read
+  then start t machine (Read t.before)
   else t, None
 let send t ~machine =
   if not t.active || Option.is_some t.pending then

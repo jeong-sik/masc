@@ -297,8 +297,6 @@ let frame_interval_ns = 16_000_000L
    notch here is worth what a notch is worth in a pager. *)
 let wheel_notch_rows = 3
 
-let maximum_input_wait_seconds = 0.016
-
 (* Point fd 2 at a file under the base path, so writing to stderr cannot land
    in the frame. Best effort by construction: a surface that cannot open its
    log is still a working surface, and refusing to start over it would trade a
@@ -1923,9 +1921,7 @@ type async_mailbox = {
   workspace_results : async_msg Masc_tui_workspace_result.t;
 }
 
-let enqueue_async mailbox msg =
-  Eio.Stream.add mailbox.notifications
-    { ready_at_ns = Mtime_clock.elapsed_ns (); message = msg }
+let enqueue_async mailbox msg = Masc_tui_async_protocol.mail mailbox.notifications msg
 
 let same_server_workspace (expected : Tui_decode.server_identity)
     (actual : Tui_decode.server_identity) =
@@ -2877,6 +2873,9 @@ let enqueue_dispatch_start ~enqueue mailbox request was_replay =
 let tui_owned_server : Masc_tui_server_lifecycle.owned_server option ref =
   ref None
 
+(* What a start's waiter saw, held for the loop to say. *)
+let tui_settled_starts = Masc_tui_server_lifecycle.create_settled_starts ()
+
 (* Whether this session may still reach for a server on its own. The TUI is
    the front door and the server is meant to be an implementation detail of
    opening it, so the first time nothing answers the port we start one instead
@@ -2940,8 +2939,10 @@ let note_server_exit ~note ~port (report : Masc_tui_server_lifecycle.exit_report
   note (server_output_location ~port report.output)
 
 (* Start a background server on demand and report readiness without blocking
-   rendering. The handle prevents duplicate starts while the child is alive. *)
-let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
+   rendering. The handle prevents duplicate starts while the child is alive.
+   The waiter leaves how the start ended for the loop
+   ([apply_settled_starts]). *)
+let start_masc_server_here ~base_path ~host ~port ~note =
   (match !tui_owned_server with
    | Some server when not (Masc_tui_server_lifecycle.is_running server) ->
      tui_owned_server := None
@@ -2988,32 +2989,8 @@ let start_masc_server_here ~base_path ~host ~port ~note ~on_ready =
                         | Some clock -> Eio.Time.sleep clock 0.5
                         | None -> ()
                       in
-                      let outcome =
-                        Masc_tui_server_lifecycle.wait_healthy ~health_ok
-                          ~child_exit:(fun () ->
-                            Masc_tui_server_lifecycle.exit_report owned)
-                          ~attempts:60 ~sleep
-                      in
-                      (* A new start may replace an exited child while this
-                         waiter sleeps. Only its own handle may publish the
-                         result or clear startup ownership. *)
-                      if Option.fold ~none:false
-                           ~some:(fun current -> current == owned)
-                           !tui_owned_server
-                      then match outcome with
-                      | Masc_tui_server_lifecycle.Ready ->
-                          note (Printf.sprintf
-                                  "masc background server is up (PID %d); it stays running when the TUI closes"
-                                  (Masc_tui_server_lifecycle.owned_pgid owned));
-                          on_ready ()
-                      | Masc_tui_server_lifecycle.Server_exited report ->
-                          tui_owned_server := None;
-                          note_server_exit ~note ~port report
-                      | Masc_tui_server_lifecycle.Timed_out _ ->
-                          note
-                            (server_output_location ~port
-                               (Masc_tui_server_lifecycle.startup_output owned));
-                          note "masc server did not answer /health in time")))
+                      Masc_tui_server_lifecycle.await_start tui_settled_starts owned
+                        ~host ~port ~health_ok ~attempts:60 ~sleep)))
       )
 
 (* Send the turn and read it as it arrives.
@@ -9230,7 +9207,7 @@ let owe_keeper_costs_read state =
 
 let owe_provider_history_day state ~now =
   match state.provider_history_reread_at with
-  | Some at when at <= now ->
+  | Some at when Masc_tui_wake.reached Masc_tui_wake.Provider_history_day ~now ~at ->
       state.provider_history_reread_at <- None;
       owe_pushed_read state Surface_read_source.Provider_history
   | Some _ | None -> ()
@@ -10730,7 +10707,9 @@ let launch_owed_harness state ~mailbox =
   if not (harness_on_screen state) then state.harness_owed <- Masc_tui_owed_read.settled
   else begin
     (match state.harness_stale_at with
-     | Some stale_at when Unix.gettimeofday () >= stale_at ->
+     | Some stale_at
+       when Masc_tui_wake.reached Masc_tui_wake.Harness_stale
+              ~now:(Unix.gettimeofday ()) ~at:stale_at ->
          state.harness_stale_at <- None;
          owe_harness_read state
      | Some _ | None -> ());
@@ -21620,7 +21599,8 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
     let progress_events = state.http_refresh_progress_events in
     let on_progress = Some (fun hp_event ->
       Masc_tui_types.publish_http_progress progress_events
-        { hp_ticket = refresh_ticket; hp_authority = (!requests).hrr_authority; hp_event }) in
+        { hp_ticket = refresh_ticket; hp_authority = (!requests).hrr_authority; hp_event };
+      Masc_tui_wake.(ring loop Refresh_progress)) in
     let on_dataset = if early_sources then
       Some (fun ed_identity ed_dataset ->
         enqueue_async mailbox (Http_msg (Http_dataset_loaded
@@ -24851,18 +24831,46 @@ let apply_stored_picks state (settings : Masc.Tui_preference.settings) =
      confirming, so absence is not consent. *)
   state.voice_send_on_stop <- Option.value settings.send_on_stop ~default:false
 
-(* Start a server here, and read it once it answers. The failures in a row
-   were of an address where nothing listened, so that answer ends their wait
-   (RFC tui-one-screen-grammar §2). The start the TUI makes by itself and the
-   Keeper list's [s] both come here. *)
-let start_server_here_then_read state ~base_path ~host ~port ~refresh_inflight
-    ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox =
+(* Start a server here; [apply_settled_starts] reads it once it answers. The
+   start the TUI makes by itself and the Keeper list's [s] both come here. *)
+let start_server_here_then_read state ~base_path ~host ~port =
   start_masc_server_here ~base_path ~host ~port
     ~note:(fun msg -> add_event state "system" msg)
-    ~on_ready:(fun () ->
-      state.refresh_pace <- Masc_tui_refresh_pace.answered_again state.refresh_pace;
-      start_http_refresh state ~host ~port ~intent:Revalidate ~refresh_inflight
-        ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox)
+
+(* Say how each start ended, on the loop: the waiter only keeps what it saw
+   and rings Server_start_settled (RFC tui-idle-wait §2.1). A new start may
+   replace an exited child while its waiter sleeps, so only the current
+   handle's outcome is said or clears startup ownership. A server that
+   answered is read at once: the failures in a row were of an address where
+   nothing listened, so that answer ends their wait (RFC tui-one-screen-grammar
+   §2). *)
+let apply_settled_starts state ~refresh_inflight ~scoped_refresh_inflight
+    ~scoped_refresh_followup ~mailbox =
+  let note msg = add_event state "system" msg in
+  List.fold_left (fun said (settled : Masc_tui_server_lifecycle.settled_start) ->
+      let host = settled.host and port = settled.port in
+      if not (Option.fold ~none:false ~some:(fun current -> current == settled.server)
+                !tui_owned_server)
+      then said
+      else begin
+        (match settled.outcome with
+         | Masc_tui_server_lifecycle.Ready ->
+             note (Printf.sprintf
+                     "masc background server is up (PID %d); it stays running when the TUI closes"
+                     (Masc_tui_server_lifecycle.owned_pgid settled.server));
+             state.refresh_pace <- Masc_tui_refresh_pace.answered_again state.refresh_pace;
+             start_http_refresh state ~host ~port ~intent:Revalidate
+               ~refresh_inflight ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox
+         | Masc_tui_server_lifecycle.Server_exited report ->
+             tui_owned_server := None;
+             note_server_exit ~note ~port report
+         | Masc_tui_server_lifecycle.Timed_out _ ->
+             note (server_output_location ~port
+                     (Masc_tui_server_lifecycle.startup_output settled.server));
+             note "masc server did not answer /health in time");
+        true
+      end)
+    false (Masc_tui_server_lifecycle.take_settled tui_settled_starts)
 
 (* What a refresh completing owes the operator, decided from the status it
    concluded rather than from which message carried it.
@@ -24883,9 +24891,6 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
   then begin
     tui_auto_start_spent := true;
     start_server_here_then_read state ~base_path ~host ~port
-      ~refresh_inflight:http_refresh_inflight
-      ~scoped_refresh_inflight:http_scoped_refresh_inflight
-      ~scoped_refresh_followup ~mailbox
   end;
   (* A server answering here is the workspace appearing. The decision is the
      same guarded one taken at boot -- it still refuses a base path that holds
@@ -24912,7 +24917,11 @@ let react_to_server_contact state ~base_path ~host ~port ~http_refresh_inflight
          && not !tui_credential_retry_pending ->
       (match Eio_context.get_switch_opt () with
        | Some sw ->
-           state.settings_reread <- Reread_running (Eio.Fiber.fork_promise ~sw state.preference_read)
+           (* The loop peeks this promise in its drain, so the bell says when
+              there is something to see. *)
+           state.settings_reread <- Reread_running (Eio.Fiber.fork_promise ~sw (fun () ->
+             Fun.protect ~finally:(fun () -> Masc_tui_wake.(ring loop Settings_reread))
+               state.preference_read))
        | None ->
            state.settings_reread <- Reread_settled;
            report_action state "error"
@@ -31734,29 +31743,42 @@ let async_drain_budget_ns = 4_000_000L
 (* The pass computes one deadline from [async_drain_budget_ns] and both drains
    in the pass share it, so the two calls together apply at most one frame of
    queued work. No item starts past the deadline — not even the first — so a
-   spent pass retains its delivery round for the next pass. An item or owned
-   collection that starts in budget still runs whole; recheck the deadline
-   after collection before applying any of its results. *)
+   spent pass retains its delivery round for the next pass. An item that
+   starts in budget still runs whole. Collecting the owned results is not an
+   item: it moves what is already settled into the round, and the deadline
+   is checked again before each collected result is applied. *)
 let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share_input_pending = fun () -> false) state ~delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~base_path ~http_refresh_inflight
     ~http_scoped_refresh_inflight ~scoped_refresh_followup
     ~frame_presenter ~render_schedule mailbox =
   let progress_changed = Masc_tui_types.drain_http_progress state in
+  let server_start_changed = apply_settled_starts state
+      ~refresh_inflight:http_refresh_inflight ~scoped_refresh_inflight:http_scoped_refresh_inflight
+      ~scoped_refresh_followup ~mailbox in
+  (* Asked only with an item in hand, after whatever says one is ready, so
+     a spent budget always leaves work behind. That work waits for the next
+     pass, which comes at once. Asked with nothing to take, a pass that ran
+     past the budget bought one more pass with nothing in it. *)
   let over_budget () =
     match deadline_ns with
     | None -> false
-    | Some deadline -> Int64.compare (Mtime_clock.elapsed_ns ()) deadline >= 0
+    | Some deadline ->
+      let now_ns = Mtime_clock.elapsed_ns () in
+      let spent = Int64.compare now_ns deadline >= 0 in
+      if spent then
+        Masc_tui_wake.Pass.note { Masc_tui_wake.reason = Masc_tui_wake.Drain_budget_spent; at_ns = now_ns };
+      spent
   in
   let chat_changed = drain_preference_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let keeper_preferences_changed = drain_keeper_preference_completions state
       ~can_take:(fun () -> not (over_budget ()) && not (input_pending ())) in
   let settings_reread_changed =
-    if over_budget () then false else
     match state.settings_reread with
     | Reread_due | Reread_settled -> false
     | Reread_running promise ->
         (match Eio.Promise.peek promise with
          | None -> false
+         | Some _ when over_budget () -> false
          | Some outcome ->
              state.settings_reread <- Reread_settled;
              (match outcome with
@@ -31785,8 +31807,11 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
              true)
   in
   let credential_changed =
-    if over_budget () then false else
     let module Preparation = Masc_tui_credential_preparation in
+    match Preparation.status state.credential_preparation with
+    | Preparation.Not_requested | Preparation.Preparing _ | Preparation.Settled -> false
+    | Preparation.Awaiting_ui _ when over_budget () -> false
+    | Preparation.Awaiting_ui _ ->
     match Preparation.take_completed state.credential_preparation with
     | None -> false
     | Some completion ->
@@ -31847,29 +31872,30 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
           (Masc_tui_workspace_result.take_ready mailbox.workspace_results)) in
     delivery_round := next;
     match ready with
-    | None when not (over_budget ()) && deferred_is_ready ()
+    | None when deferred_is_ready ()
         && (match !deferred_share_messages, !deferred_share_sweep with
             | item :: _, Some held -> item != held
-            | _ :: _, None -> true | [], _ -> false) ->
+            | _ :: _, None -> true | [], _ -> false)
+        && not (over_budget ()) ->
         (* Capture a new finite round before consuming a delayed result so
            already-queued workspace authority is applied first. *)
         deferred_share_sweep := (match !deferred_share_messages with item :: _ -> Some item | [] -> None);
         loop changed
-    | None when not (over_budget ()) && deferred_is_ready () ->
+    | None when deferred_is_ready () && not (over_budget ()) ->
         deferred_share_sweep := None;
         (match !deferred_share_messages with
          | item :: rest -> deferred_share_messages := rest; apply_item changed item
          | [] -> loop changed)
-    | None when not (over_budget ()) && not (share_input_pending ())
-        && (match state.resource_copy_ready, !resource_copy_sweep with
+    | None when (match state.resource_copy_ready, !resource_copy_sweep with
             | Some copy, Some held -> copy != held
-            | Some _, None -> true | None, _ -> false) ->
+            | Some _, None -> true | None, _ -> false)
+        && not (share_input_pending ()) && not (over_budget ()) ->
         (* A fresh finite round also precedes the clipboard side effect. *)
         resource_copy_sweep := state.resource_copy_ready; loop changed
     | None ->
-        if not (over_budget ()) && not (share_input_pending ())
-           && (match state.resource_copy_ready, !resource_copy_sweep with
-               | Some copy, Some held -> copy == held | None, _ | Some _, None -> false)
+        if (match state.resource_copy_ready, !resource_copy_sweep with
+            | Some copy, Some held -> copy == held | None, _ | Some _, None -> false)
+           && not (share_input_pending ()) && not (over_budget ())
         then copy_sweep_complete := true;
         state.keeper_creation_waits <- List.filter
           (fun wait -> not (keeper_available_for_new_message state wait.kcw_keeper))
@@ -31911,7 +31937,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
            frame (RFC tui-one-screen-grammar §8). *)
         loop (match drawn with Drawn_changed -> true | Drawn_unchanged -> changed)
   in
-  let changed = loop (progress_changed || chat_changed || keeper_preferences_changed || settings_reread_changed || credential_changed) in
+  let changed = loop (progress_changed || server_start_changed || chat_changed || keeper_preferences_changed || settings_reread_changed || credential_changed) in
   reset_input_sensitive_sweeps ();
   (* One already-retired notice is bounded work.  Do not starve it behind a
      busy mailbox, but let an operator gesture cancel its marker first. *)
@@ -31921,7 +31947,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
     else false in
   let changed = changed || retired_image_changed in
   match state.resource_copy_ready with
-  | Some copy when !copy_sweep_complete && not (over_budget ()) && not (share_input_pending ()) ->
+  | Some copy when !copy_sweep_complete && not (share_input_pending ()) && not (over_budget ()) ->
     if not (resource_public_copy_is_current state copy) then begin
       state.resource_copy_ready <- None;
       resource_copy_sweep := None;
@@ -32485,7 +32511,8 @@ let main
 
   let request_full_repaint _ =
     ignore (Atomic.fetch_and_add resize_generation 1);
-    Atomic.set resize_requested true in
+    Atomic.set resize_requested true;
+    Masc_tui_wake.(ring loop Resize_signal) in
   (* SIGTERM, SIGHUP and SIGQUIT used to call [exit] from the handler, and a
      second Ctrl-C did the same from the loop. [exit] runs the [at_exit]
      terminal restore and nothing else: the switch release in
@@ -32499,7 +32526,8 @@ let main
   let exit_signals = Masc_tui_exit_signals.create () in
   let terminate signal =
     Masc_tui_exit_signals.request_terminate exit_signals
-      ~signal:(signal_name signal)
+      ~signal:(signal_name signal);
+    Masc_tui_wake.(ring loop Terminate_signal)
   in
   (* Ctrl-C used to reach [terminate] and the session ended mid-sentence, with
      whatever was in the composer gone. It is one key away from Ctrl-V and
@@ -32511,7 +32539,8 @@ let main
      the signal stays a signal and the loop decides what it means — the first
      one says what a second one will do, and any other key withdraws it. *)
   let request_interrupt _ =
-    Masc_tui_exit_signals.request_interrupt exit_signals
+    Masc_tui_exit_signals.request_interrupt exit_signals;
+    Masc_tui_wake.(ring loop Interrupt_signal)
   in
   (* The terminal goes to another program for a while and comes back: the
      shell while Ctrl-Z has this process stopped, an [$EDITOR], a player. Every
@@ -32632,7 +32661,17 @@ let main
     | None -> true
     | Some refusal -> report_withdrawn state ~request refusal; false
   in
-  let last_loop_at_ns = ref (Mtime_clock.elapsed_ns ()) in
+  (* When the last wait for input ended: the pass's own work runs from here
+     to the next wait. *)
+  let pass_started_ns = ref (Mtime_clock.elapsed_ns ()) in
+  (* A frame went out this pass. Launchers that read what it drew run after
+     the next wait, so that wait ends at once (RFC tui-idle-wait §3.4). *)
+  let frame_drawn = ref false in
+  (* One drain deadline for the work between two waits: the post-input drain
+     after one wait and the pre-input drain before the next share it, so the
+     two apply at most one budget of queued work and the wait itself is never
+     counted against it. A key is handled before either drain runs. *)
+  let drain_deadline_ns = ref (Int64.add !pass_started_ns async_drain_budget_ns) in
   let presented_surface_reference () =
     match state.view with
     | Approvals -> Option.bind (!presented).approval approval_row_reference
@@ -33020,7 +33059,6 @@ let main
   add_event state "system" "TUI started";
 
   (* Main loop *)
-  let machine_input_timeout_s = 0.3 in
   (* The wall-clock second at which the time text of the last built frame
      next reads differently, [None] when that frame drew none. *)
   let time_redraw_due = ref None in
@@ -34952,12 +34990,6 @@ Use relative paths for resources already held in the package. -->
                 end)
        | Masc_tui_exit_signals.Continue -> None
       in
-      (* One drain deadline for the whole pass: the pre-input drain below and
-         the post-input drain share it, so a key never waits through two
-         separately budgeted drains. *)
-      let drain_deadline_ns =
-        Int64.add (Mtime_clock.elapsed_ns ()) async_drain_budget_ns
-      in
       (* Input may cancel a pending MIDI handoff even when it will later be
          rejected; this lets the existing editor owner yield without replay. *)
       if not (input_unsettled ()) && Option.is_none interrupted_paste then
@@ -34993,7 +35025,7 @@ Use relative paths for resources already held in the package. -->
       in
       retire_music_editor_for_input ();
       if
-        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
+        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:!drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader
               || Masc_tui_exit_signals.pending_signal exit_signals
               || Option.is_some state.quit_armed
@@ -35062,19 +35094,6 @@ Use relative paths for resources already held in the package. -->
         Masc_tui_code_requests.launch_file_load ~intent:Refresh_code_file state
           ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~path)
         (Code_results.saved_refresh_path state ~input_pending:code_navigation_input_pending);
-      (* Check for input *)
-      let input_timeout =
-        Render_schedule.input_timeout_seconds render_schedule
-          ~now_ns:(Mtime_clock.elapsed_ns ())
-          ~maximum:maximum_input_wait_seconds
-      in
-      let input_timeout =
-        (* Machine observation does not wake the loop to read. This timeout only
-           lets terminal animation and input continue while a game is open. *)
-        if state.msx_open && not state.msx_menu_open then
-          Float.min input_timeout machine_input_timeout_s
-        else input_timeout
-      in
       (* The load menu owns the terminal while it is up. *)
       (* Console writes damage whichever surface owns the terminal, including
          the spectator whose output bypasses the ordinary frame presenter. *)
@@ -35090,6 +35109,21 @@ Use relative paths for resources already held in the package. -->
             render_spectator state
       end;
       poll_play_room state ~mailbox:async_messages;
+      (* Check for input. The read sleeps until a byte arrives, a writer
+         rings the loop's bell, or the earliest moment this pass's decisions
+         noted (RFC tui-idle-wait §3). *)
+      let input_wait =
+        let now_ns = Mtime_clock.elapsed_ns () in
+        let work_ns = Int64.sub now_ns !pass_started_ns in
+        if Int64.compare work_ns Masc_tui_http.slow_report_ns >= 0 then
+          Log.Transport.info "main loop: %.0f ms of work in one pass"
+            (Masc_tui_http.ms_of_ns work_ns);
+        Masc_tui_wake.until ~now_ns Masc_tui_wake.loop
+          (Masc_tui_wake.next_deadline ~now_ns
+             { frame_due_ns = Render_schedule.frame_due_ns render_schedule ~now_ns;
+               frame_drawn = !frame_drawn;
+               machine_view = state.msx_open && not state.msx_menu_open })
+      in
       let guarding_before_read =
         match paste_phase input_reader with
         | Draining_tail _ -> true
@@ -35108,10 +35142,17 @@ Use relative paths for resources already held in the package. -->
           match Queue.take_opt hangul_latin_queue with
           | Some latin_key -> Some (Key latin_key)
           | None ->
-            let input = read_input ~timeout:input_timeout input_reader () in
+            let input = read_input ~wait:input_wait input_reader () in
             Option.iter (observe_input_received input_reader) input;
             input)
       in
+      (* The wait is over: what rang before now is seen by this pass, and
+         every decision notes its moment again. *)
+      ignore (Masc_tui_wake.take Masc_tui_wake.loop);
+      Masc_tui_wake.Pass.begin_pass ();
+      frame_drawn := false;
+      pass_started_ns := Mtime_clock.elapsed_ns ();
+      drain_deadline_ns := Int64.add !pass_started_ns async_drain_budget_ns;
       Masc_tui_nav_trace_log.note_input nav_trace
         (match input with
          | Some (Key name) -> Masc_tui_nav_trace_log.Key name
@@ -36805,12 +36846,6 @@ Use relative paths for resources already held in the package. -->
        | Some (Mouse_left_release _) | Some (Mouse_wheel _) | None -> ());
       if Option.is_some input then
         Render_schedule.request render_schedule Render_schedule.Input;
-      (let now_ns = Mtime_clock.elapsed_ns () in
-       let gap_ns = Int64.sub now_ns !last_loop_at_ns in
-       if Int64.compare gap_ns Masc_tui_http.slow_report_ns >= 0 then
-         Log.Transport.info "main loop: %.0f ms between two iterations"
-           (Masc_tui_http.ms_of_ns gap_ns);
-       last_loop_at_ns := now_ns);
       let reads_before = reads_in_flight state in
       reconcile_chat_listen state;
       ensure_acting_pane_changes state ~mailbox:async_messages;
@@ -44862,9 +44897,7 @@ Use relative paths for resources already held in the package. -->
                      (* RFC tui-server-lifecycle: with no server up there is
                         no keeper to shut down, so "s" starts one here. *)
                      start_server_here_then_read state ~base_path ~host:server_peer_host
-                       ~port:state.port ~refresh_inflight:http_refresh_inflight
-                       ~scoped_refresh_inflight:http_scoped_refresh_inflight
-                       ~scoped_refresh_followup ~mailbox:async_messages
+                       ~port:state.port
                  | Connecting | Booting | Account_server _ | Degraded | Connected ->
                      handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
@@ -45250,12 +45283,12 @@ Use relative paths for resources already held in the package. -->
       end;
 
       Eio.Fiber.yield ();
-      (* Shares the pass deadline computed before the pre-input drain: when the
+      (* Shares the deadline set when the wait ended: when the
          pass budget is spent this applies nothing and the mailbox waits for
          the next pass. *)
       retire_music_editor_for_input ();
       if
-        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:drain_deadline_ns
+        drain_async_messages ~delivery_round:async_delivery_round ~deferred_share_messages ~deferred_share_sweep ~resource_copy_sweep ~deadline_ns:!drain_deadline_ns
           ~input_pending:(fun () -> input_reader_has_ready_input input_reader
               || Masc_tui_exit_signals.pending_signal exit_signals
               || Option.is_some state.quit_armed
@@ -45302,7 +45335,9 @@ Use relative paths for resources already held in the package. -->
          is drawn on the following whole second, and a frame with no such
          text schedules none. About keeps its independent clock below. *)
       (match !time_redraw_due with
-       | Some due when Unix.gettimeofday () >= due ->
+       | Some due
+         when Masc_tui_wake.reached Masc_tui_wake.Time_text
+                ~now:(Unix.gettimeofday ()) ~at:due ->
            time_redraw_due := None;
            Render_schedule.request render_schedule Render_schedule.Background
        | Some _ | None -> ());
@@ -45312,10 +45347,8 @@ Use relative paths for resources already held in the package. -->
       (match Masc_tui_emblem_screen.drawn () with
        | Masc_tui_emblem_screen.Moving when state.about_open ->
            if
-             Int64.compare
-               (Int64.sub now_ns !emblem_last_step_ns)
-               Masc_tui_types.motion_step_ns
-             >= 0
+             Masc_tui_wake.reached_ns Masc_tui_wake.Emblem_step ~now_ns
+               ~at_ns:(Int64.add !emblem_last_step_ns Masc_tui_types.motion_step_ns)
            then begin
              emblem_last_step_ns := now_ns;
              state.emblem_frame <-
@@ -45338,6 +45371,12 @@ Use relative paths for resources already held in the package. -->
                   ~presented_rows:(Frame_presenter.presented_rows frame_presenter) ())
                 ~input_pending:(input_unsettled ()
                   || Masc_tui_exit_signals.interrupt_pending exit_signals) }) state.quit_armed;
+      (* An armed quit is withdrawn when its notice leaves the screen. *)
+      Option.iter (fun arm ->
+          let _, shown_at = Masc_tui_action_notice.quit_ordinary arm.qa_confirmation in
+          ignore (Masc_tui_wake.reached Masc_tui_wake.Quit_notice_expiry
+                    ~now:(Unix.gettimeofday ()) ~at:(shown_at +. last_action_window_s)))
+        state.quit_armed;
       (match state.quit_armed with
        | Some arm when Option.is_none (current_quit_confirmation state ~now:(Unix.gettimeofday ())) ->
            let kind = Masc_tui_action_notice.quit_kind arm.qa_confirmation in
@@ -45424,7 +45463,8 @@ Use relative paths for resources already held in the package. -->
            (* The picture draws no time text. Closing it repaints in full,
               and that frame says when time next changes its text. *)
            time_redraw_due := None;
-           Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal
+           Masc_tui_portrait_view.flush Frame_presenter.Unchanged ~write:write_to_terminal;
+           frame_drawn := true
        | Render_schedule.Render when defer_owned_frame ->
            Render_schedule.request render_schedule Render_schedule.Background
        | Render_schedule.Render ->
@@ -45545,7 +45585,8 @@ Use relative paths for resources already held in the package. -->
               Measuring the interval from Build start made every queued key
               start another overdue frame before the reader could catch up.
               Drained input still bypasses the interval in [take]. *)
-           Render_schedule.completed render_schedule ~now_ns:(Mtime_clock.elapsed_ns ())
+           Render_schedule.completed render_schedule ~now_ns:(Mtime_clock.elapsed_ns ());
+           frame_drawn := true
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

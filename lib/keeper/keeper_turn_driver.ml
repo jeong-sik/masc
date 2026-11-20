@@ -2285,7 +2285,7 @@ let run_named
     ?required_native_posture
     ?(initial_messages = [])
     ?argument_demotion_seed
-    ?(history_at_start = Keeper_turn_boundaries.Continued_history)
+    ?(this_turn_opening = Keeper_turn_driver_try_provider.Opened_after_its_input)
     ?model_input_projection
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
@@ -2391,16 +2391,23 @@ let run_named
          The checkpoint remains the source of every atom index. *)
       (* The end of the last completed turn on this history: where a request
          with no absorbed point starts (RFC keeper-context-window-in-tokens
-         §13.4) and the boundary before which completed arguments bind. Read
+         §13.4) and the boundary before which completed arguments bind. With
+         it, where this turn began, which rules 7 and 8 read (RFC
+         librarian-lifecycle §4.10). Both come from one read of the turn log,
          once per turn for every lane. *)
-      let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+      let turn_starts = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id with
         | Some trace_id ->
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-            Keeper_turn_driver_try_provider.turn_start
+            Keeper_turn_driver_try_provider.turn_starts
               ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
               ~messages:initial_messages)
-        | None -> Keeper_carried_front.Turn_boundary { end_atom = 0 }) in
+        | None ->
+          { Keeper_turn_driver_try_provider.boundary = Keeper_carried_front.Turn_boundary { end_atom = 0 }
+          ; this_turn = None
+          }) in
+      let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+        (Eio.Lazy.force turn_starts).Keeper_turn_driver_try_provider.boundary) in
       let official_client_turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         official_client_turn_start ~session_id
           ~read_boundary:(fun () -> Eio.Lazy.force turn_boundary)) in
@@ -3913,7 +3920,11 @@ let run_named
             ; input_runtime = Some runtime
             ; error_runtime_id
             ; turn_boundary = Eio.Lazy.force turn_boundary
-            ; history_at_start
+            ; this_turn_start =
+                (match this_turn_opening with
+                 | Keeper_turn_driver_try_provider.Opened_before_its_input ->
+                   (Eio.Lazy.force turn_starts).Keeper_turn_driver_try_provider.this_turn
+                 | Keeper_turn_driver_try_provider.Opened_after_its_input -> None)
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection
             ; prepare_request_media =

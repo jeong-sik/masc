@@ -585,7 +585,7 @@ let test_empty_response_replaces_old_seed_and_validates_the_omitted_end () =
     ~continuity:(Some Masc.Keeper_turn_driver_try_provider.without_snapshot)
     ~accepted:None ~front:(Some selected)
     ~turn_start:(Front.Turn_boundary { end_atom = 0 })
-    ~history_at_start:Masc.Keeper_turn_boundaries.Continued_history
+    ~this_turn_start:None
     ~counted_tokens:None grown in
   check int "a new request starts after the omitted history" 10 next.first_atom;
   check int "only the appended question is carried" 1 next.kept_atoms;
@@ -651,7 +651,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
       ~continuity:(Some Masc.Keeper_turn_driver_try_provider.without_snapshot)
       ~accepted:None ~front:read.Front.seed
       ~turn_start:(Front.Turn_boundary { end_atom = 0 })
-      ~history_at_start:Masc.Keeper_turn_boundaries.Continued_history
+      ~this_turn_start:None
       ~counted_tokens:None
       next_tick
   in
@@ -708,7 +708,7 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
         ~measure:(Masc.Keeper_context_core.message_measurer ())
         ~continuity:(Some continuity) ~front:None ~accepted
         ~turn_start:(Front.Turn_boundary { end_atom = boundary })
-        ~history_at_start:Masc.Keeper_turn_boundaries.Continued_history
+        ~this_turn_start:None
         ~counted_tokens:None next_tick
     in
     carried.first_atom, Front.origin_to_json carried.origin

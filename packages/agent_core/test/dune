@@ -60,15 +60,12 @@
 ; No file is named below: nothing is withheld for a compile failure today.
 ; Keep this header as the place to record one if it returns, and say so.
 ;
-; ---- (2) pre-existing runtime failures — wired, and running ----
-; The suites named below are NOT excluded.  They sit in the tests stanza that
-; follows and do run under `dune runtest`.  Two of them fail on today's main
-; for reasons older than any single change:
-;   - backend_openai_codec: serialize 3 and serialize 7
-;   - snapshot_provider_serialization: gemini 0, tool_choice Any
-; A failure in either one says nothing about the change under test, and a full
-; regression run cannot be green until they are fixed or moved out of the list.
-; See task-3737.
+; ---- (2) pre-existing runtime failures — none listed here ----
+; No suite is listed below: both former `task-3737` entries were fixed in
+; #54110 (`backend_openai_codec: serialize 3 and serialize 7`) and the
+; Gemini `functionResponse.response.is_error` snapshot alignment
+; (`snapshot_provider_serialization: gemini 0, tool_choice Any`).
+; Keep this header as the place to record a pre-existing failure if one returns.
 ;
 
 (tests

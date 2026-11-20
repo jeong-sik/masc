@@ -426,6 +426,47 @@ let fact_match_to_json (m : fact_match) : Yojson.Safe.t =
      | Source_sha256 sha256 -> [ "source_sha256", `String sha256 ])
 ;;
 
+(* --- The Memory writer beside a search (RFC librarian-call-only-proposes §11.5) --- *)
+
+(* The snapshot is read whatever the writer's state, and the answer says
+   what that state was. An open store says nothing. A stopped one says why.
+   A writer that has not opened its store, or none at all, means the snapshot
+   was read before it was checked against the commit log, so it can be one
+   write behind (§8.6). The table is only read: a search makes no writer. *)
+let memory_writer_fields ~(config : Workspace.config) ~keeper_name =
+  let not_checked state =
+    [ ( "memory_writer"
+      , `Assoc
+          [ "state", `String state
+          ; ( "guidance"
+            , `String
+                "Memory was read before its writer checked it against the commit log; it can be one write behind." )
+          ] )
+    ]
+  in
+  match Keeper_memory_writers.find ~base_path:config.base_path with
+  | None -> not_checked "none_in_process"
+  | Some writers ->
+    (match List.assoc_opt keeper_name (Librarian_writers.statuses writers) with
+     | None -> not_checked "not_started"
+     | Some Booting -> not_checked "booting"
+     | Some Retired -> not_checked "retired"
+     | Some (Open (_ : Librarian_log.line)) -> []
+     | Some (Stopped stop) ->
+       [ ( "memory_writer"
+         , `Assoc
+             [ "state", `String "stopped"
+             ; ( "stop"
+               , `String
+                   (Keeper_tool_memory_validation.memory_unwritable_to_string
+                      (Keeper_tool_memory_validation.Store_stopped stop)) )
+             ; ( "guidance"
+               , `String
+                   "Memory writes are refused until an operator resumes or adopts the store. This is the snapshot the store last held." )
+             ] )
+       ])
+;;
+
 (* --- Facts that left Memory (RFC librarian-call-only-proposes §11.5) --- *)
 
 let read_left ~keepers_dir ~keeper_id ~current =
@@ -754,7 +795,8 @@ let keeper_memory_search_with_outcome
          ; "matches", `List (fact_jsons @ extra_matches)
          ]
          @ (if total_matches = 0 && not read_errors then [ "no_match", `Bool true ] else [])
-         @ read_error_fields)
+         @ read_error_fields
+         @ memory_writer_fields ~config ~keeper_name:meta.name)
     in
     (* A commit log line that does not decode is left out of the results, and
        both the model and the operator are told: what it removed is not known,

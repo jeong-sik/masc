@@ -2884,6 +2884,13 @@ let test_an_unreadable_memory_log_leaves_all_its_current_facts () =
     (match default_search with
      | `Assoc fields -> Option.is_none (List.assoc_opt "unavailable_stores" fields)
      | _ -> false);
+  (match json_field "memory_writer" default_search with
+   | `Assoc _ as writer ->
+     Alcotest.(check string)
+       "a process with no writer says the snapshot was not checked against the log"
+       "none_in_process"
+       (string_field "state" writer)
+   | _ -> Alcotest.fail "expected the writer's state");
   let all = answered "all" in
   (match json_field "matches" all with
    | `List [ matched ] ->

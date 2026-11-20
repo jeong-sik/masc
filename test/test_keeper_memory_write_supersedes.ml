@@ -599,7 +599,44 @@ let test_search_finds_what_a_supersede_took_out () =
   Alcotest.(check (list string))
     "a query only the old claim answers keeps it"
     [ "harbor window: monday" ]
-    (List.map (string_field "text") (matches (search "all" "monday")))
+    (List.map (string_field "text") (matches (search "all" "monday")));
+  Alcotest.(check bool)
+    "an open store adds nothing about its writer"
+    false
+    (has_field "memory_writer" (search "current" "harbor window"));
+  (* A change made outside the writer stops the store at the next write.
+     The snapshot is still read, and the answer says why writes are refused. *)
+  let held =
+    match snapshot ~keepers_dir:env.keepers_dir ~keeper_id:meta.name with
+    | Some held -> held
+    | None -> Alcotest.fail "expected a current snapshot"
+  in
+  (match
+     Current.replace
+       ~keepers_dir:env.keepers_dir
+       ~keeper_id:meta.name
+       ~expected_revision:(Some held.revision)
+       ~now:(Unix.gettimeofday ())
+       ~source:{ Current.kind = Current.Librarian; trace_id = "outside" }
+       ~facts:held.facts
+       ()
+   with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check bool)
+    "the next write is refused"
+    true
+    (json_field "ok" (write env meta "harbor window: thursday") = `Bool false);
+  let stopped = search "current" "harbor window" in
+  Alcotest.(check (list string))
+    "the snapshot is still read"
+    [ "harbor window: tuesday" ]
+    (List.map (string_field "text") (matches stopped));
+  match json_field "memory_writer" stopped with
+  | `Assoc _ as writer ->
+    Alcotest.(check string) "the writer is stopped" "stopped" (string_field "state" writer);
+    Alcotest.(check string) "and says why" "store_stopped_log_diverged" (string_field "stop" writer)
+  | _ -> Alcotest.fail "expected the writer's state"
 ;;
 
 let () =

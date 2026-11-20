@@ -7860,6 +7860,7 @@
 (include stanzas/test_tui_backlog_read.inc)
 (include stanzas/test_tui_tools_inventory_owed.inc)
 (include stanzas/test_tui_drawn_effect.inc)
+(include stanzas/test_scripts_pipefail_head.inc)
 
 (test
  (name test_librarian_l6g_question_corpus)

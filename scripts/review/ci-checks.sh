@@ -76,7 +76,7 @@ check_current_ci() {
   # 39404586810 died exactly here, without naming the failed call).
   local rows selected status conclusion sha branch path jobs required
   rows=$(ci_gh_json "repos/$repo/actions/runs?head_sha=$head&per_page=100" '.workflow_runs[] | select(.path == ".github/workflows/release-candidate.yml") | [.id, .status, (.conclusion // "none"), .head_sha, .head_branch, .path] | @tsv') || { echo "RC run read failed: repos/$repo/actions/runs?head_sha=$head" >&2; return 1; }
-  selected=$(printf '%s\n' "$rows" | awk -F '\t' -v sha="$head" -v branch="$pr_branch" '$4==sha && $5==branch' | sort -t "$(printf '\t')" -k1,1nr | head -n 1)
+  selected=$(printf '%s\n' "$rows" | awk -F '\t' -v sha="$head" -v branch="$pr_branch" '$4==sha && $5==branch' | sort -t "$(printf '\t')" -k1,1nr | sed -n '1p')
   IFS=$'\t' read -r release_run status conclusion sha branch path <<<"$selected"
   if [ -z "$release_run" ] || [ "$status" != completed ] || [ "$conclusion" != success ] ||
      { [ -n "${run:-}" ] && [ "$run" != "$release_run" ]; }; then

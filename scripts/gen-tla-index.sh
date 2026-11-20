@@ -57,7 +57,7 @@ detect_kind() {
 module_name() {
   local f="$1"
   local m
-  m="$(grep -m1 -oE "MODULE[[:space:]]+[A-Za-z0-9_]+" "$f" 2>/dev/null | head -1 | awk '{print $2}')"
+  m="$(grep -m1 -oE "MODULE[[:space:]]+[A-Za-z0-9_]+" "$f" 2>/dev/null | sed -n '1p' | awk '{print $2}')"
   if [[ -z "$m" ]]; then
     basename "$f" .tla
   else

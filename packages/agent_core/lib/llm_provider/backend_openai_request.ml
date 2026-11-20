@@ -514,6 +514,23 @@ let build_request_assoc_artifact
       in
       ("cache_control", cache_control) :: body
   in
+  let body =
+    if Provider_config.supports_provider_routing_filter config
+    then (
+      let provider_fields =
+        (match config.provider_only with
+         | [] -> []
+         | slugs -> [ "only", `List (List.map (fun s -> `String s) slugs) ])
+        @
+        match config.provider_ignore with
+        | [] -> []
+        | slugs -> [ "ignore", `List (List.map (fun s -> `String s) slugs) ]
+      in
+      match provider_fields with
+      | [] -> body
+      | _ :: _ -> ("provider", `Assoc provider_fields) :: body)
+    else body
+  in
   Request_artifact_internal.create ~payload:(`Assoc body) ~output_token_receipt
 ;;
 

@@ -348,13 +348,17 @@ let uncheckpointed_official_turns
     List.filter_map bridged_turn_ref_of_message existing_messages
     |> List.map Ids.Turn_ref.to_string
   in
-  let remaining =
-    List.filter
-      (fun turn_ref ->
+  let _, remaining =
+    List.fold_left
+      (fun (seen, acc) turn_ref ->
          let key = Ids.Turn_ref.to_string turn_ref in
-         not (List.exists (String.equal key) already_bridged))
+         if List.exists (String.equal key) seen
+         then seen, acc
+         else key :: seen, turn_ref :: acc)
+      (already_bridged, [])
       pending
   in
+  let remaining = List.rev remaining in
   match remaining with
   | [] -> Ok []
   | _ :: _ ->

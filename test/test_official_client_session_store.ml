@@ -3034,7 +3034,55 @@ let test_turn_bridge_uncheckpointed_turns_and_resume_handoff () =
         ~existing_messages:[]
       |> Result.get_ok
     in
-    check int "History_restarted resets uncheckpointed official turns" 0 (List.length after_restart))
+    check int "History_restarted resets uncheckpointed official turns" 0 (List.length after_restart));
+  (* Repeated Turn_ended lines for the same turn_ref must not double-bridge. *)
+  with_workspace "masc-turn-bridge-dedup-" (fun base_path ->
+    let keeper_name = "bridge-dedup-keeper" in
+    let trace_id = "trace-bridge-dedup" in
+    let keepers_dir = Common.keepers_runtime_dir_of_base ~base_path in
+    let session_base_dir = Keeper_fs.session_store_path_for_base_path base_path in
+    let session_dir = Filename.concat session_base_dir trace_id in
+    let session = Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir:session_base_dir in
+    let t1 = Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
+    Keeper_context_runtime.persist_message
+      ~keeper_name
+      ~turn_ref:t1
+      ~source:Keeper_types_support.Direct_user
+      session
+      (Agent_core.Types.user_msg "ask once");
+    Keeper_context_runtime.persist_message
+      ~keeper_name
+      ~turn_ref:t1
+      ~source:Keeper_types_support.Direct_assistant
+      session
+      (Agent_core.Types.assistant_msg "reply once");
+    let append recorded_at =
+      Keeper_turn_boundaries.append
+        ~keepers_dir
+        ~keeper_id:keeper_name
+        { recorded_at
+        ; event =
+            Keeper_turn_boundaries.Turn_ended
+              { turn_ref = t1
+              ; task_context = Keeper_turn_task_context.Admission_not_recorded
+              ; history_at_start = Keeper_turn_boundaries.Continued_history
+              ; position = Keeper_turn_boundaries.No_atom_history
+              }
+        }
+      |> Result.get_ok
+    in
+    append 10.;
+    append 11.;
+    let bridged =
+      Keeper_turn_bridge.uncheckpointed_official_turns
+        ~keepers_dir
+        ~keeper_name
+        ~trace_id
+        ~session_dir
+        ~existing_messages:[]
+      |> Result.get_ok
+    in
+    check int "duplicate pending turn_ref is bridged only once" 2 (List.length bridged))
 ;;
 
 let () =

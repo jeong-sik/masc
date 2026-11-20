@@ -309,8 +309,10 @@ let task_detail_lines (state : state) ~cols (task : Masc_domain.task) =
              ~max_cells:(max 1 (framed_inner_width cols))))
   @ task_document_lines state ~cols Masc_tui_task_document.History
 
+let task_detail_chrome_rows = max 0 (framed_chrome_rows - 2)
+
 let task_detail_height ~rows ~count =
-  Masc_tui_scroll.content_height ~rows ~chrome:framed_chrome_rows ~count
+  Masc_tui_scroll.content_height ~rows ~chrome:task_detail_chrome_rows ~count
     ~preview_keep:None
 
 let task_detail_viewport (state : state) =
@@ -330,7 +332,6 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
   let count = List.length lines in
   let height = task_detail_height ~rows ~count in
   let scroll = Masc_tui_scroll.normalize ~count ~height (task_detail_render_scroll state) in
-  box_top buf cols;
   box_line buf cols
     (titled_row ~cols state ~title:header
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
@@ -341,7 +342,6 @@ let task_detail_pane (state : state) ~rows ~cols (task : Masc_domain.task) buf =
     | None -> box_empty buf cols
     | Some line -> box_line buf cols line
   done;
-  box_bottom buf cols;
   scroll, count, height
 ;;
 
@@ -365,7 +365,7 @@ let render_task_detail (state : state) (task : Masc_domain.task) =
          task. *)
       (* The id follows each title because the shared sidebar fold keeps the
          tail, so titles with the same opening and ending still differ. *)
-      write_list_sidebar_selection left_buf ~rows ~cols:left_cols
+      write_list_sidebar_selection ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"작업" ~en:"Tasks") ~focused:false
         (* [Overview_tasks.work_rows] drops what is done or cancelled.
            A filter is not a page: what it left out is a different kind of
@@ -2496,8 +2496,11 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
         | lines -> List.map (fun text -> style, text) lines))
     (if warnings = [] then fields else warnings @ ((Ansi.dim, "") :: fields))
 
+let schedule_detail_chrome_rows = max 0 (framed_chrome_rows - 2)
+
 let schedule_detail_height ~rows ~warning_rows ~count =
-  Masc_tui_scroll.content_height ~rows ~chrome:(framed_chrome_rows + warning_rows) ~count
+  Masc_tui_scroll.content_height ~rows
+    ~chrome:(schedule_detail_chrome_rows + warning_rows) ~count
     ~preview_keep:None
 
 let schedule_detail_viewport (state : state) =
@@ -2523,7 +2526,6 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
   let count = List.length lines in
   let height = schedule_detail_height ~rows ~warning_rows ~count in
   let scroll = Masc_tui_scroll.normalize ~count ~height state.schedule_scroll in
-  box_top buf cols;
   box_line buf cols
     (here_row ~cols state
        ~path:
@@ -2542,7 +2544,6 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
-  box_bottom buf cols;
   scroll, Masc_tui_scroll.maximum ~count ~height
 ;;
 
@@ -2572,7 +2573,7 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
       in
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
-      write_list_sidebar left_buf ~rows ~cols:left_cols
+      write_list_sidebar ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"예약" ~en:"Schedules")
         ~focused:false
         ~holding:

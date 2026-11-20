@@ -504,7 +504,7 @@ let verification_detail_pane (state : state) ~rows ~cols
       + (if Option.is_some armed_note then 1 else 0)
       + (if Option.is_some state.verification_verdict_error then 1 else 0)
   in
-  let content_height = max 1 (rows - framed_chrome_rows - fixed_rows) in
+  let content_height = max 1 (rows - max 0 (framed_chrome_rows - 2) - fixed_rows) in
   (* The three parts are wrapped apart so the evidence section's row index is
      known: wrapping is per row, so this is the same rows as wrapping once. *)
   let before = judgement_detail_rows ~width
@@ -536,7 +536,6 @@ let verification_detail_pane (state : state) ~rows ~cols
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let pane_start = Buffer.length buf in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state
        ~position:
@@ -589,7 +588,6 @@ let verification_detail_pane (state : state) ~rows ~cols
   List.iter
     (box_line_styled buf cols ~style:(Theme.warn ()))
     verdict_action_rows;
-  box_bottom buf cols;
   scroll
 ;;
 
@@ -629,7 +627,7 @@ let render_verification_detail (state : state) request =
       let right_buf = Buffer.create 4096 in
       (* One server page: the list screen next door draws "history 1-50 of
          664" off the same snapshot, and this index drew "(50)". *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols
+      write_list_sidebar ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"태스크 검증" ~en:"Task Review")
         ~focused:false
         ~holding:
@@ -1043,10 +1041,9 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
            @ List.map (fun line -> Ansi.reset, line) lines)
     |> judgement_detail_rows ~width
   in
-  let content_height = max 1 (rows - framed_chrome_rows) in
+  let content_height = max 1 (rows - max 0 (framed_chrome_rows - 2)) in
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
-  box_top buf cols;
   box_line buf cols
     (zone_two_title ~cols state
        ~title:
@@ -1068,7 +1065,6 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     | Some (style, line) -> box_line_styled buf cols ~style line
     | None -> box_empty buf cols
   done;
-  box_bottom buf cols;
   scroll
 ;;
 
@@ -1107,7 +1103,7 @@ let render_harness_detail (state : state) verdict =
       let right_buf = Buffer.create 4096 in
       (* The harness snapshot carries its verdicts whole; there is no page
          behind them. *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols
+      write_list_sidebar ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"판정" ~en:"Verdicts")
         ~focused:false ~holding:None ~labels ~selected:state.harness_cursor;
       let answer =

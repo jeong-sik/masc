@@ -329,8 +329,11 @@ let test_chat_file_observation_retains_its_read_epoch () =
     List.iter (fun (terminal_rows, error) ->
       size (terminal_rows, 80);
       state.repository_changes_error <- error;
-      let body_rows = surface_body_rows state ~terminal_rows:(terminal_rows - 1) in
-      let budget = max 1 (body_rows - Masc_tui_frame.chrome_rows) in
+      let budget =
+        Masc_tui_render_prim.surface_chrome_budget
+          ~frame:Masc_tui_render_prim.Chrome_screen state
+          ~terminal_rows:(terminal_rows - 1)
+      in
       state.repository_changes_cursor <- 11;
       state.repository_changes_scroll <- 0;
       Alcotest.(check bool) "resize keeps the selected file visible without another key" true

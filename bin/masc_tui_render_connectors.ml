@@ -534,8 +534,13 @@ let render_connectors (state : state) =
         + (if Option.is_some state.connectors_error then 2 else 0) in
       let room = max 1 (budget - fixed) in
       let content_height = room in
+      let cursor = max 0 (min state.connectors_cursor (max 0 (shown - 1))) in
       let max_scroll = max 0 (shown - content_height) in
       let scroll = max 0 (min state.connectors_scroll max_scroll) in
+      let scroll =
+        if shown = 0 then scroll
+        else Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll
+      in
       let connectors_window = Rows.of_list ~first:scroll ~height:content_height connectors in
       report_drawn_list Connector_rows ~height:content_height;
       if shown = 0 then
@@ -571,7 +576,7 @@ let render_connectors (state : state) =
                 if flag then ui_text state ~ko:"예" ~en:"yes"
                 else ui_text state ~ko:"아니오" ~en:"no"
               in
-              let is_selected = idx = state.connectors_cursor in
+              let is_selected = idx = cursor in
               let line =
                 (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row (cells
                   ~name:(Terminal_text.single_line connector.cn_display_name)
@@ -594,6 +599,6 @@ let render_connectors (state : state) =
               else c.push_styled ~style line
         done;
         c.position
-          (Masc_tui_value.Position.row ~selected:(Some state.connectors_cursor)
+          (Masc_tui_value.Position.row ~selected:(Some cursor)
              ~total:shown)
       end)

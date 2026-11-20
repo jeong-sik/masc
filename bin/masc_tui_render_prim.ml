@@ -3093,9 +3093,9 @@ let write_list_sidebar_selection ?(framed = true) buf ~rows ~cols ~title ~focuse
   if framed then draw ""
 
 (* The same index for a list whose open row is always in it. *)
-let write_list_sidebar buf ~rows ~cols ~title ~focused ~holding ~labels
+let write_list_sidebar ?(framed = true) buf ~rows ~cols ~title ~focused ~holding ~labels
     ~selected =
-  write_list_sidebar_selection buf ~rows ~cols ~title ~focused ~holding ~labels
+  write_list_sidebar_selection ~framed buf ~rows ~cols ~title ~focused ~holding ~labels
     ~selection:(Some selected)
 
 
@@ -4443,8 +4443,9 @@ type diff_surface =
   ; ds_clamped : int -> clamped_scroll
   }
 
-(* Top, title, divider, caption, divider, status, bottom and footer. *)
-let diff_surface_fixed_chrome_rows = 8
+(* Title, divider, caption, divider, status and footer (borderless Chrome_screen
+   layout: omitting top and bottom spacers reclaims 2 body rows). *)
+let diff_surface_fixed_chrome_rows = 6
 
 let diff_surface_rows_per_context_line = 2
 
@@ -4504,7 +4505,6 @@ let render_diff_surface (state : state) (ds : diff_surface) =
       ~readings:[ ui_text state ~ko:"HEAD 대비" ~en:"vs HEAD" ]
       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   List.iter
@@ -4555,7 +4555,6 @@ let render_diff_surface (state : state) (ds : diff_surface) =
   (* The status line carries the esc hint at every count, so it is one of
      the fixed chrome rows above. *)
   box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ ds.ds_esc_hint);
-  box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints:ds.ds_footer_hints);
   finish_surface state ~clamped:(ds.ds_clamped scroll)
@@ -5605,7 +5604,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
           List.fold_left
             (fun widest (source, _) ->
               max widest
-                (String.length (Inspector.input_source_label source)))
+                (Message_layout.display_width (Inspector.input_source_label source)))
             0 by_source
         in
         (* Wide enough for the longest component name on screen and no wider:
@@ -6389,6 +6388,9 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
         | Inspector.Message _ ->
             if Some index = last_message_index then "N" else "H"
       in
+      let idx_width =
+        max 2 (String.length (string_of_int (max 1 (List.length items))))
+      in
       let rows width =
         List.mapi
           (fun index (item : Inspector.exact_input_item) ->
@@ -6396,7 +6398,7 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
              let marker, style =
                if selected then "\xe2\x80\xba", Theme.selection_style () else " ", Ansi.reset
              in
-             let label_width = max 8 (width - 22) in
+             let label_width = max 8 (width - (20 + idx_width)) in
              (* The list carries the producer's colour the summary above it
                 groups by, except under the selection band, whose own styling
                 owns the whole row. *)
@@ -6409,8 +6411,8 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
                  context_source_style (Inspector.exact_input_source item.kind)
                  ^ label ^ Ansi.reset
              in
-             Printf.sprintf "%s %s %2d %s  %s  \xe2\x89\x88%6s tok%s" style
-               marker (index + 1) (kind_letter index item) label
+             Printf.sprintf "%s %s %*d %s  %s  \xe2\x89\x88%6s tok%s" style
+               marker idx_width (index + 1) (kind_letter index item) label
                (Inspector.format_tokens
                   (Masc_tui_token_scale.estimate scale item.bytes))
                Ansi.reset)

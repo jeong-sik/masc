@@ -1606,7 +1606,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                   in
                   ( Ansi.dim
                   , Say.code (Printf.sprintf "     %s " stem)
-                    ++ Say.as_received (Printf.sprintf "%-12s %-18s " label (Terminal_text.single_line node_id))
+                    ++ Say.as_received
+                         (pad_cells 12 label ^ " "
+                          ^ pad_cells 18 (Terminal_text.single_line node_id)
+                          ^ " ")
                     ++ tool ++ Say.as_received dependencies ))
                 |> fun lines ->
                 if node_count = 0 then
@@ -2223,8 +2226,8 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                                    it was read from: this screen has no turn
                                    record to take a scale from, and the timeline
                                    header says it reads at the fleet figure. *)
-                                " %-20s \xe2\x89\x88%6s tok %9s turn#%d %s"
-                                skill
+                                " %s \xe2\x89\x88%6s tok %9s turn#%d %s"
+                                (pad_cells 20 skill)
                                 (Masc_tui_context_inspector.format_tokens
                                    (Masc_tui_token_scale.estimate
                                       Masc_tui_token_scale.fleet
@@ -2241,9 +2244,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                           Say.code (Printf.sprintf "%-*s " Terminal_text.clock_timestamp_cells (time_of act.observed_at))
                           ++ event_kind (Say.both ~ko:"동작" ~en:"action")
                           ++ Say.code
-                               (Printf.sprintf " %-20s turn#%d %s"
-                                  (Terminal_text.single_line
-                                     (Masc.Tool_display.list_label act.tool_name))
+                               (Printf.sprintf " %s turn#%d %s"
+                                  (pad_cells 20
+                                     (Terminal_text.single_line
+                                        (Masc.Tool_display.list_label act.tool_name)))
                                   act.agent_core_turn
                                   (Terminal_text.single_line act.runtime_id)) ))
                      activation.actions)

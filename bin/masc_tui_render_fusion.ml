@@ -1164,7 +1164,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | Fusion_list | Fusion_detail _ -> state.fusion_detail_stale && Option.is_some detail
   in
   let chrome_rows =
-    5 + (if stale then 1 else 0)
+    max 0 (framed_chrome_rows - 2) + (if stale then 1 else 0)
       + (if Option.is_some state.fusion_detail_error then 1 else 0)
       + (if stale || Option.is_some state.fusion_detail_error then 1 else 0)
   in
@@ -1200,7 +1200,6 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     here_row ~cols state ~path:[ fusion_step; run_id ] ~readings:[]
       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
   in
-  box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   if stale then
@@ -1217,7 +1216,6 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | None -> box_empty buf cols
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
-  box_bottom buf cols;
   scroll
 ;;
 
@@ -1261,7 +1259,7 @@ let render_fusion_detail (state : state) run_id =
          no matching row; the domain selection stays optional. *)
       let selected = Option.value (Masc_tui_fusion_model.fusion_detail_entry_index state) ~default:(-1) in
       (* The retained inventory is the whole list; nothing is held back. *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols
+      write_list_sidebar ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"퓨전" ~en:"Fusion")
         ~focused:false ~holding:None ~labels ~selected;
       let answer =

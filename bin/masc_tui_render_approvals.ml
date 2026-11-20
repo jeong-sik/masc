@@ -173,7 +173,7 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
            | Gate_string | Gate_string_bytes | Gate_json | Gate_unreadable -> false))
       lines
   in
-  let content_height = max 1 (rows - framed_chrome_rows) in
+  let content_height = max 1 (rows - max 0 (framed_chrome_rows - 2)) in
   let total = List.length lines in
   viewport := Some
     { adv_count = total; adv_height = content_height;
@@ -187,7 +187,6 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
   (* The pane is where the field count and the drawn height meet, so the row
      it could actually use is reported back rather than recomputed outside. *)
   clamped := scroll;
-  box_top buf cols;
   (* Keep the numbered-key legend visible while scrolling; unreadable input
      takes precedence over it. The footer owns the way out. The pane
      scrolls, and an operator who reads the first screen as the whole ask
@@ -236,8 +235,7 @@ let approval_detail_pane (state : state) ~value_hint ~clamped ~viewport ~rows ~c
     drawn;
   for _ = 1 to content_height - List.length drawn do
     box_empty buf cols
-  done;
-  box_bottom buf cols
+  done
 ;;
 
 (* The queue stays beside the ask. Reading one used to hide the rest, and the
@@ -282,7 +280,7 @@ let render_approval_detail (state : state) (row : Masc_tui_approvals_model.appro
          an ask, and these rows are the confirmations waiting on an operator. *)
       (* The actor filter hides entries rather than paging past them, and
          the surface's own title already carries "hidden N". *)
-      write_list_sidebar left_buf ~rows ~cols:left_cols
+      write_list_sidebar ~framed:false left_buf ~rows ~cols:left_cols
         ~title:(ui_text state ~ko:"승인" ~en:"Approvals")
         ~holding:None
         ~focused:false

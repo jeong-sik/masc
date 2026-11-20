@@ -326,8 +326,13 @@ let render_system_logs (state : state) =
           ~preview_keep:s.sc_preview_keep
     | None -> max 1 (rows - listing_chrome ~error:(system_logs_page state).lp_error)
   in
+  let cursor = max 0 (min (system_logs_page state).lp_cursor (max 0 (total_entries - 1))) in
   let max_scroll = max 0 (total_entries - content_height) in
   let scroll = max 0 (min (system_logs_page state).lp_scroll max_scroll) in
+  let scroll =
+    if total_entries = 0 then scroll
+    else Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll
+  in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
   report_drawn_list System_log_rows ~height:content_height;
   if total_entries = 0 then begin
@@ -369,7 +374,7 @@ let render_system_logs (state : state) =
           let level_style = system_log_level_style e.sl_level in
           (* Every cell is fitted to the width its header is drawn at; a long
              module name used to push every column right of it out of line. *)
-          let is_selected = idx = (system_logs_page state).lp_cursor in
+          let is_selected = idx = cursor in
           let line =
             (if is_selected then "\xe2\x80\xba " else "  ")
             ^ Render_schedule.system_log_row ~layout:log_layout ~level_style

@@ -1176,7 +1176,7 @@ let declare_keeper ~base_path profile_lines =
 ;;
 
 type observed_run =
-  { outcome : Keeper_muse_runtime.attempt_outcome
+  { outcome : Keeper_official_client_attempt.outcome
   ; adapter_result : (Runtime_agent.run_result, Agent_core.Error.t) result
   ; events : Agent_core.Types.sse_event list
   ; reports : Keeper_client_usage_report.t list
@@ -2013,7 +2013,7 @@ let check_failure label expected actual =
     (Store.recovery_failure_to_string actual)
 ;;
 
-let check_effect label expected (outcome : Keeper_muse_runtime.attempt_outcome) =
+let check_effect label expected (outcome : Keeper_official_client_attempt.outcome) =
   check string label
     (Keeper_provider_attempt_effect.to_string expected)
     (Keeper_provider_attempt_effect.to_string outcome.effect_disposition)

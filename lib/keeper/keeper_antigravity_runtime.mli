@@ -1,20 +1,5 @@
 (** Keeper projection for the official Antigravity subscription runtime. *)
 
-type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-      (** [Some] names exact receipt snapshots of a durably settled candidate,
-          not acceptance. [None] carries no authority on failed/prevalidation
-          results. The caller accepts first, then settles with its final stop reason. *)
-  ; effect_disposition : Keeper_provider_attempt_effect.t
-  }
-(** One Antigravity candidate result plus its typed effect observation.
-    Validation, setup and spawn rejection are effect-free. Entering a dynamic
-    tool closes the same-turn retry boundary before user/tool code can run.
-    A non-completed result keeps any observed effect or marks observation
-    unavailable: built-in tools may have run outside the MCP observer. *)
-
 val run :
   ?on_guidance_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->
@@ -79,8 +64,14 @@ val run :
   on_event:(Agent_core.Types.sse_event -> unit) option ->
   config:Runtime_execution.antigravity_cli ->
   unit ->
-  attempt_outcome
-(** [on_transmitted_model_input] fires once per turn, after the carried
+  Keeper_official_client_attempt.outcome
+(** One Antigravity candidate result plus its typed effect observation.
+    Validation, setup and spawn rejection are effect-free. Entering a dynamic
+    tool closes the same-turn retry boundary before user/tool code can run.
+    A non-completed result keeps any observed effect or marks observation
+    unavailable: built-in tools may have run outside the MCP observer.
+
+    [on_transmitted_model_input] fires once per turn, after the carried
     range is composed and before the prompt is rendered. Required
     rather than optional: a lane that reports nothing is what wrote every
     Antigravity turn's input attribution as zero (masc#32995).

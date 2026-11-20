@@ -5,13 +5,7 @@ let internal_error = Keeper_official_client_host.internal_error
 
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
-
-type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-  ; effect_disposition : Keeper_provider_attempt_effect.t
-  }
+module Effect_cell = Keeper_official_client_attempt.Effect_cell
 
 let runtime_label = "Claude Code"
 
@@ -784,24 +778,16 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
    leaves the disposition alone, as the Codex and Muse lanes do. Record it
    before the call: the handler may commit and then raise or be cancelled, and
    observing only its return would reopen a duplicate-effect window. *)
-let recording_effect_attempt ~effect_disposition (tool : Host.dynamic_tool) =
+let recording_effect_attempt ~effect_cell (tool : Host.dynamic_tool) =
   { tool with
     Host.call =
       (fun ~call_id input ->
         (match tool.call_effect input with
          | Agent_core.Tool.Read_only -> ()
          | Agent_core.Tool.Effect_possible ->
-           Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted);
+           Effect_cell.attempted effect_cell);
         tool.call ~call_id input)
   }
-;;
-
-let note_transport_uncertainty effect_disposition =
-  Atomic.compare_and_set
-    effect_disposition
-    Keeper_provider_attempt_effect.No_effect_observed
-    Keeper_provider_attempt_effect.Observation_unavailable
-  |> ignore
 ;;
 
 (* RFC-0390 under [none] and [read]: the CLI may run only the built-ins its
@@ -811,30 +797,30 @@ let note_transport_uncertainty effect_disposition =
    exits or goes silent afterwards therefore leaves no effect MASC could have
    missed. Under [full] the client's own built-ins act out of MASC's sight
    from the moment the prompt is sent. *)
-let note_uncertainty_beyond_masc_tools ~built_ins effect_disposition =
+let note_uncertainty_beyond_masc_tools ~built_ins effect_cell =
   match built_ins with
   | Runtime_native_tools.Granted _ -> ()
-  | Runtime_native_tools.Client_default -> note_transport_uncertainty effect_disposition
+  | Runtime_native_tools.Client_default -> Effect_cell.unobserved effect_cell
 ;;
 
 (* What the stream itself shows. Response text has already reached the
    operator, so another candidate would answer a second time. A built-in the
    grant does not name means the client did not run under the posture MASC
    asked for. A tool call wrapping a MASC tool is judged by its handler. *)
-let observe_stream_effect ~built_ins ~effect_disposition
+let observe_stream_effect ~built_ins ~effect_cell
     (event : Runtime_claude_code.stream_event) =
   match event with
-  | Runtime_claude_code.Text_delta _ -> note_transport_uncertainty effect_disposition
+  | Runtime_claude_code.Text_delta _ -> Effect_cell.unobserved effect_cell
   | Runtime_claude_code.Native_tool_started
       { Runtime_native_tools.origin = Runtime_native_tools.Mcp_wrapper; _ } -> ()
   | Runtime_claude_code.Native_tool_started
       { Runtime_native_tools.origin = Runtime_native_tools.Built_in; tool_name; _ } ->
     (match built_ins, tool_name with
      | Runtime_native_tools.Granted names, Some name ->
-       if not (List.mem name names) then note_transport_uncertainty effect_disposition
+       if not (List.mem name names) then Effect_cell.unobserved effect_cell
      | Runtime_native_tools.Granted _, None
      | Runtime_native_tools.Client_default, (Some _ | None) ->
-       note_transport_uncertainty effect_disposition)
+       Effect_cell.unobserved effect_cell)
   | Runtime_claude_code.Turn_started _
   | Runtime_claude_code.Thinking_delta _
   | Runtime_claude_code.Child_content_observed _
@@ -855,7 +841,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks ~system_prompt
     ~tools ~loading_plan ~initial_messages ~model_input_projection_for
     ~on_transmitted_model_input ~hooks ~context_injector
-    ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
+    ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_cell
     ~context_overflow_retry_safe
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
     ~on_provider_retry ~on_usage_report ~on_tool_execution
@@ -1120,7 +1106,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
         ()
     in
     let dynamic_tools =
-      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+      List.map (recording_effect_attempt ~effect_cell) host_dynamic_tools
     in
     let* () =
       match
@@ -1216,7 +1202,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
     in
     let natural_completion = ref false in
     let dynamic_tools =
-      List.map (recording_effect_attempt ~effect_disposition) host_dynamic_tools
+      List.map (recording_effect_attempt ~effect_cell) host_dynamic_tools
     in
     let* claimed_session =
       match
@@ -1470,7 +1456,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
            even when no native task/child observer is installed. *)
         (match observation.phase with
          | Runtime_claude_input_attribution.Write_unknown ->
-           note_uncertainty_beyond_masc_tools ~built_ins effect_disposition
+           note_uncertainty_beyond_masc_tools ~built_ins effect_cell
          | Runtime_claude_input_attribution.Prepared
          | Runtime_claude_input_attribution.Written
          | Runtime_claude_input_attribution.Consumed
@@ -1507,7 +1493,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
       let on_stream_event =
         Some
           (fun event ->
-            observe_stream_effect ~built_ins ~effect_disposition event;
+            observe_stream_effect ~built_ins ~effect_cell event;
             Option.iter (fun forward -> forward event) on_stream_event)
       in
       try
@@ -1529,7 +1515,7 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                    ~session_id
                    ~updated_at:(Time_compat.now ())))
              ~on_prompt_sent:(fun () ->
-               note_uncertainty_beyond_masc_tools ~built_ins effect_disposition;
+               note_uncertainty_beyond_masc_tools ~built_ins effect_cell;
                report_transmitted_input ())
              ~on_context_submission:(fun submission ->
                Host.record_context_submission ~keeper_name ~raw_trace_run
@@ -1624,12 +1610,10 @@ let run_without_lifecycle ~on_guidance_prepared ~input_source ~result_scope ~med
                 { tool_effect_attempted = false; response_emitted = false; _ }
             | Runtime_claude_code.Context_window_exceeded
                 { tool_effect_attempted = false; response_emitted = false; _ } ->
-              Atomic.set
-                effect_disposition
-                Keeper_provider_attempt_effect.No_effect_observed
+              Effect_cell.quiet effect_cell
             | Runtime_claude_code.Turn_transport_interrupted _
             | Runtime_claude_code.Process_exited { turn_admitted = true; _ } ->
-              note_uncertainty_beyond_masc_tools ~built_ins effect_disposition
+              note_uncertainty_beyond_masc_tools ~built_ins effect_cell
             | Runtime_claude_code.Turn_failed_with_observation _
             | Runtime_claude_code.Quota_blocked _
             | Runtime_claude_code.Context_window_exceeded _
@@ -1803,13 +1787,6 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     Runtime_quota_window.scope_of_claude_code_home
       (Some (Runtime_official_account.home (Runtime_account_access.account account)))
   in
-  let settled_session = Atomic.make None in
-  let pending_result_receipts = Atomic.make None in
-  let on_results_ready value = Atomic.set pending_result_receipts value in
-  let on_session_settled value = Atomic.set settled_session (Some value) in
-  let effect_disposition =
-    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
-  in
   let observed_next_shrink_capacity_bytes = ref None in
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
@@ -1830,9 +1807,9 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         (Option.value on_memory_capacity_refusal
            ~default:(fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged))
   in
-  let result =
-    Eio.Switch.run (fun result_scope ->
-    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+  Keeper_official_client_attempt.run ~event_bus ~keeper_name
+    (fun ~result_scope
+         { Keeper_official_client_attempt.on_session_settled; on_results_ready; effect_cell } ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
         ~on_memory_capacity_refusal
         ~on_memory_retry:(fun () ->
@@ -1929,7 +1906,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
           ~event_bus
             ~raw_trace
             ~on_event
-            ~effect_disposition
+            ~effect_cell
             ~context_overflow_retry_safe
         ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
             ~on_usage_report
@@ -1937,13 +1914,5 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
             ~on_tool_execution
             ~account
             ~config)
-        ()))
-  in
-  { result
-  ; settled_session = Atomic.get settled_session
-  ; pending_result_receipts = (match result with
-      | Ok _ -> Atomic.get pending_result_receipts
-      | Error _ -> None)
-  ; effect_disposition = Atomic.get effect_disposition
-  }
+        ())
 ;;

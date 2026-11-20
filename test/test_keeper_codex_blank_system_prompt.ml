@@ -203,7 +203,7 @@ let test_blank_system_prompt_is_refused_not_defaulted () =
            ~cli_path
            ~on_transmitted_model_input:(fun _ -> incr reports)
        in
-       (match attempt.Keeper_codex_runtime.result with
+       (match attempt.Keeper_codex_runtime.outcome.result with
         | Error
             (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; _ }))
           -> check string "refused field" "system_prompt" field
@@ -265,7 +265,7 @@ let test_non_blank_system_prompt_reaches_thread_start_unchanged () =
            ~cli_path
            ~on_transmitted_model_input:(fun _ -> ())
        in
-       (match attempt.Keeper_codex_runtime.result with
+       (match attempt.Keeper_codex_runtime.outcome.result with
         | Error
             (Agent_core.Error.Config
                (Agent_core.Error.InvalidConfig { field = "system_prompt"; detail }))
@@ -339,7 +339,7 @@ let test_missing_native_guidance_refuses_before_spawn () =
       let transmissions = ref 0 in
       let attempt = run_direct_attempt ~system_prompt:"current keeper instructions" ~base_path ~cli_path
           ~on_transmitted_model_input:(fun _ -> incr transmissions) in
-      (match attempt.Keeper_codex_runtime.result with
+      (match attempt.Keeper_codex_runtime.outcome.result with
        | Error error -> check bool "actual Codex adapter returns positive preparation failure" true
            (Option.is_some (Keeper_internal_error.guidance_preparation_failure error))
        | Ok _ -> fail "missing guidance dispatched Codex");
@@ -408,7 +408,7 @@ let test_core_checkpoint_survives_codex_guidance_failure () =
                   Owner.resume_direct_checkpoint owner ~operation_id:id ~observed:checkpoint
                   |> Result.map_error (fun error -> Agent_core.Error.Internal (Owner.error_to_string error)))
                 ~on_transmitted_model_input:(fun _ -> incr transmissions) () in
-            (match !attempts,run.Keeper_codex_runtime.result with
+            (match !attempts,run.Keeper_codex_runtime.outcome.result with
              | 2, Error error ->
                check bool "Codex native-read failure has positive preparation authority" true
                  (Option.is_some (Keeper_internal_error.guidance_preparation_failure error));

@@ -243,9 +243,9 @@ default = "codex.%s"
 let read_requests path = In_channel.with_open_bin path In_channel.input_lines
   |> List.map Yojson.Safe.from_string
 
-let successful attempt = match attempt.Keeper_codex_runtime.result with
+let successful attempt = match attempt.Keeper_codex_runtime.outcome.result with
   | Ok result ->
-    (match attempt.pending_result_receipts with
+    (match attempt.outcome.pending_result_receipts with
      | None -> ()
      | Some pending -> Keeper_client_tool_outbox.settle_consumption pending
          ~stop_reason:result.Runtime_agent.stop_reason |> require)
@@ -691,7 +691,7 @@ let test_rejected_system_snapshot_is_not_settled () =
     ~system_observations:Keeper_context_assembly.[Direct_input_source "UNACKED_SOURCE"]
     ~world:"Next world" () in
   check bool "injection rejection fails the attempt" true
-    (Result.is_error attempt.Keeper_codex_runtime.result);
+    (Result.is_error attempt.Keeper_codex_runtime.outcome.result);
   let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
   check bool "no model turn after rejected System snapshot" false
     (List.exists (fun row -> member "method" row = `String "turn/start") rows);
@@ -876,7 +876,7 @@ let test_recall_lifecycle_across_native_ticks () =
 let test_rejected_context_never_submits_turn () =
   with_fixture ~reject_context:true @@ fun ~run ~capture ~reports ->
   let attempt = run ~instructions:"Keeper current instructions" ~world:"World State: task-003 todo" () in
-  check bool "context rejection is a failed turn" true (Result.is_error attempt.Keeper_codex_runtime.result);
+  check bool "context rejection is a failed turn" true (Result.is_error attempt.Keeper_codex_runtime.outcome.result);
   check bool "no model turn after rejected context" false
     (List.exists (fun row -> member "method" row = `String "turn/start") (read_requests capture));
   check int "rejected context never reports transmitted turn input" 0 (List.length !reports)
@@ -893,7 +893,7 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let original_task = "Create the requested artifact and report its path." in
   let initial = run ~goal:original_task ~instructions:"Keeper instructions" ~world:"Original work" () in
   successful initial;
-  let settled = Option.get initial.Keeper_codex_runtime.settled_session in
+  let settled = Option.get initial.Keeper_codex_runtime.outcome.settled_session in
   let session_id, turn_id = match settled.Keeper_official_client_session_store.phase with
     | Settled settlement -> settlement.session_id, settlement.turn_id
     | _ -> fail "fixture did not settle a native thread" in
@@ -908,7 +908,7 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
   let steering = run ~instructions:"Keeper instructions" ~world:"Newer steering" () in
   successful steering;
   let checkpoint = Keeper_direct_checkpoint_continuation.For_testing.prepare_official_resume
-    ~observed ~expected:steering.Keeper_codex_runtime.settled_session |> require in
+    ~observed ~expected:steering.Keeper_codex_runtime.outcome.settled_session |> require in
   check bool "steering advances admission turn" true (not (String.equal observed.turn_id checkpoint.turn_id));
   let official_task_reference = Keeper_official_task_reference.create
     ~operation_id ~message:original_task ~original_turn:observed in
@@ -920,7 +920,7 @@ let test_cooperative_resume_sends_only_remaining_work_instruction () =
     ~model_input_projection:(fun messages -> Ok (List.filter
       (fun (message : Agent_core.Types.message) -> message.role <> System) messages))
     ~instructions:"Keeper instructions" ~world:"Newer steering" () in
-  (match rejected.Keeper_codex_runtime.result with
+  (match rejected.Keeper_codex_runtime.outcome.result with
    | Error (Agent_core.Error.Internal detail) ->
      check string "required task mapping cannot be projected away"
        "required historical task reference was removed by model-input projection" detail
@@ -979,7 +979,7 @@ let test_continuation_resume_overflow_ends_on_a_full_thread () =
   with_fixture ~overflow_resume:true @@ fun ~run ~capture ~reports:_ ->
   let first = run ~instructions:"Keeper instructions" ~world:"world" () in
   successful first;
-  let settled = Option.get first.Keeper_codex_runtime.settled_session in
+  let settled = Option.get first.Keeper_codex_runtime.outcome.settled_session in
   let session_id, turn_id = match settled.Keeper_official_client_session_store.phase with
     | Settled turn -> turn.session_id, turn.turn_id | _ -> fail "initial turn not settled" in
   let operation_id = Keeper_chat_operation.Operation_id.of_string "context-shrink-original" |> require in
@@ -993,7 +993,7 @@ let test_continuation_resume_overflow_ends_on_a_full_thread () =
   let attempt = run ~official_client_continuation:checkpoint
     ~instructions:"Keeper instructions" ~world:"world" () in
   check bool "the overflow ends the turn" true
-    (Result.is_error attempt.Keeper_codex_runtime.result);
+    (Result.is_error attempt.Keeper_codex_runtime.outcome.result);
   let resumes = read_requests capture |> List.filter (fun row -> member "method" row = `String "thread/resume") in
   (match resumes with
    | [resume] ->
@@ -1020,7 +1020,7 @@ let large_history = List.init 64 (fun index -> Agent_core.Types.user_msg
 let resume_large_history ~capture ~start ~resume =
   let first = start () in
   successful first;
-  let settled = Option.get first.Keeper_codex_runtime.settled_session in
+  let settled = Option.get first.Keeper_codex_runtime.outcome.settled_session in
   let session_id, turn_id = match settled.Keeper_official_client_session_store.phase with
     | Settled turn -> turn.session_id, turn.turn_id | _ -> fail "initial turn not settled" in
   let operation_id = Keeper_chat_operation.Operation_id.of_string "prompt-limit-original" |> require in
@@ -1458,7 +1458,7 @@ let test_completion_projection_failure_prevents_native_request () =
   let attempt = run ~input_source:Keeper_request_source.Completion_review
       ~model_input_projection:(fun _ -> Error refusal)
       ~instructions:"Review the supplied evidence." ~world:"" () in
-  (match attempt.Keeper_codex_runtime.result with
+  (match attempt.Keeper_codex_runtime.outcome.result with
    | Error error -> check bool "the exact typed projection failure propagates" true (error=refusal)
    | Ok _ -> fail "a refused completion projection reached execution");
   check int "no provider request follows a refused projection" 0
@@ -1648,7 +1648,7 @@ let test_checkpoint_preserves_receipt_across_session_replacement () =
       let attempt = run ~tools:[tool]
         ~on_official_client_tool_boundary:(fun ~tool_name:_ -> Ok (Some stop))
         ~instructions:"Read the original result without replaying its effect." ~world:"before checkpoint" () in
-      let result = match attempt.Keeper_codex_runtime.result with
+      let result = match attempt.Keeper_codex_runtime.outcome.result with
         | Ok result -> result | Error error -> fail (Agent_core.Error.to_string error) in
       (match result.stop_reason with
        | Yielded_to_durable_stimulus _ -> ()

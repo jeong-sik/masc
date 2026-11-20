@@ -3238,10 +3238,7 @@ let run_named
             authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
           with
           | Error error ->
-            { Keeper_codex_runtime.result = Error error
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed
+            { Keeper_codex_runtime.outcome = Keeper_official_client_attempt.refused_before_dispatch error
             ; successful_tool_completion = Keeper_codex_runtime.No_successful_tool_completion
             }
           | Ok account ->
@@ -3315,8 +3312,8 @@ let run_named
         let codex_attempt =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            { Keeper_codex_runtime.result =
-                Error
+            { Keeper_codex_runtime.outcome =
+                Keeper_official_client_attempt.refused_before_dispatch
                   (Agent_core.Error.Config
                      (Agent_core.Error.InvalidConfig
                         { field = "provider_config_transform"
@@ -3324,10 +3321,6 @@ let run_named
                             "provider config transforms cannot target a \
                              codex-app-server runtime"
                         }))
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition =
-                Keeper_provider_attempt_effect.No_effect_observed
             ; successful_tool_completion =
                 Keeper_codex_runtime.No_successful_tool_completion
             }
@@ -3359,7 +3352,7 @@ let run_named
         in
         Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
         let codex_result =
-          Result.bind codex_attempt.result (fun run_result ->
+          Result.bind codex_attempt.outcome.result (fun run_result ->
             match codex_attempt.successful_tool_completion with
             | Keeper_codex_runtime.Successful_tool_completion ->
               (match
@@ -3396,13 +3389,13 @@ let run_named
                 run_result)
         in
         let codex_result = settle_accepted_official_client_results
-          ~pending_result_receipts:codex_attempt.pending_result_receipts codex_result in
+          ~pending_result_receipts:codex_attempt.outcome.pending_result_receipts codex_result in
         let codex_result = observe_official_result
-          ~execution_result:codex_attempt.result codex_result in
+          ~execution_result:codex_attempt.outcome.result codex_result in
         let codex_result = guidance_result codex_result in
-        ( selected_runtime_result ?official_client_settlement:codex_attempt.settled_session runtime ~lane_attempt_index:idx codex_result
+        ( selected_runtime_result ?official_client_settlement:codex_attempt.outcome.settled_session runtime ~lane_attempt_index:idx codex_result
         , None
-        , codex_attempt.effect_disposition
+        , codex_attempt.outcome.effect_disposition
         , official_client_dispatch ~provider_config_transform codex_result )
       | Runtime_execution.Antigravity_cli config ->
         let ( reset_model_input_observation
@@ -3415,10 +3408,7 @@ let run_named
         let run_antigravity ~initial_messages () =
           match authorize_host_account Runtime_account_access.Antigravity with
           | Error error ->
-            { Keeper_antigravity_runtime.result = Error error
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
+            Keeper_official_client_attempt.refused_before_dispatch error
           | Ok host ->
           reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
@@ -3490,19 +3480,13 @@ let run_named
         let antigravity_attempt =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            { Keeper_antigravity_runtime.result =
-                Error
-                  (Agent_core.Error.Config
-                     (Agent_core.Error.InvalidConfig
-                        { field = "provider_config_transform"
-                        ; detail =
-                            "provider config transforms cannot target an antigravity-cli runtime"
-                        }))
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition =
-                Keeper_provider_attempt_effect.No_effect_observed
-            }
+            Keeper_official_client_attempt.refused_before_dispatch
+              (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target an antigravity-cli runtime"
+                    }))
           | None, Some _ ->
             Log.Keeper.info
               "%s: official-client runtime %s resolves start-or-resume from \
@@ -3555,10 +3539,7 @@ let run_named
               execution.account_home
           with
           | Error error ->
-            { Keeper_muse_runtime.result = Error error
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
+            Keeper_official_client_attempt.refused_before_dispatch error
           | Ok account ->
           reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
@@ -3573,10 +3554,7 @@ let run_named
               ~account_home:(Runtime_account_access.declared_muse_home account) in
           match workspace with
           | Error error ->
-            { Keeper_muse_runtime.result = Error error
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed }
+            Keeper_official_client_attempt.refused_before_dispatch error
           | Ok (workspace_root, workspace_origin, native_context) ->
           Keeper_muse_runtime.run ~on_guidance_prepared ~input_source ~media_store
             ~on_model_input_refused:record_refused_model_input
@@ -3643,19 +3621,13 @@ let run_named
         let muse_attempt =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            { Keeper_muse_runtime.result =
-                Error
-                  (Agent_core.Error.Config
-                     (Agent_core.Error.InvalidConfig
-                        { field = "provider_config_transform"
-                        ; detail =
-                            "provider config transforms cannot target a muse-serve runtime"
-                        }))
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition =
-                Keeper_provider_attempt_effect.No_effect_observed
-            }
+            Keeper_official_client_attempt.refused_before_dispatch
+              (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target a muse-serve runtime"
+                    }))
           | None, Some _ ->
             Log.Keeper.info
               "%s: official-client runtime %s resolves start-or-resume from \
@@ -3706,9 +3678,7 @@ let run_named
           match
             authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
           with
-          | Error error -> {Keeper_claude_code_runtime.result=Error error;
-              pending_result_receipts=None;settled_session=None;
-              effect_disposition=Keeper_provider_attempt_effect.No_effect_observed}
+          | Error error -> Keeper_official_client_attempt.refused_before_dispatch error
           | Ok account ->
           reset_model_input_observation ();
           let tools = if runtime.model.tools_support then tools else [] in
@@ -3793,19 +3763,13 @@ let run_named
         let claude_attempt =
           match provider_config_transform, agent_core_checkpoint with
           | Some _, _ ->
-            { Keeper_claude_code_runtime.result =
-                Error
-                  (Agent_core.Error.Config
-                     (Agent_core.Error.InvalidConfig
-                        { field = "provider_config_transform"
-                        ; detail =
-                            "provider config transforms cannot target a claude-code runtime"
-                        }))
-            ; pending_result_receipts = None
-            ; settled_session = None
-            ; effect_disposition =
-                Keeper_provider_attempt_effect.No_effect_observed
-            }
+            Keeper_official_client_attempt.refused_before_dispatch
+              (Agent_core.Error.Config
+                 (Agent_core.Error.InvalidConfig
+                    { field = "provider_config_transform"
+                    ; detail =
+                        "provider config transforms cannot target a claude-code runtime"
+                    }))
           | None, Some _ ->
             (* The durable official-client session store owns start-or-resume
                (Keeper_claude_code_runtime reads [previous_settlement]), so a

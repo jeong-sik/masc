@@ -1,5 +1,5 @@
 (* Fusion — 패널 fan-out (구현).
-   계약/문서: fusion_panel.mli, docs/rfc/RFC-0252 §7.1, docs/rfc/RFC-fusion-seat-routes.md
+   계약: fusion_panel.mli
 
    panel 한 명이 한 자리다. 자리들은 동시에 돌고, 한 자리 안에서는 경로의 후보를
    차례로 시도한다(Fusion_seat). 후보 하나를 시도하는 방법은 두 가지다:
@@ -7,7 +7,7 @@
    클라이언트 런타임은 Fusion_official_client.run_panelist. fusion 개념은
    AGENT_CORE에 노출하지 않는다. *)
 
-(* [panelist] = 패널 정체성 (RFC-0278, Fusion_policy.panelist_id) — 라벨 + 적힌 경로.
+(* [panelist] = 패널 정체성 (Fusion_policy.panelist_id) — 라벨 + 적힌 경로.
    panel_answer.model / panel_error.failed_model에 이 정체성을 담는다(심판·sink가
    같은 식별자로 패널을 지칭).
    [model] = 이번 시도의 후보 런타임 id. provider 에러 attribution(`Provider '...'`

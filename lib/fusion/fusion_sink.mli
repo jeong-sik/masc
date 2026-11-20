@@ -1,4 +1,4 @@
-(** Fusion — 심의 결과 가시화 (RFC-0252 §8, "결과를 키퍼 흐름에 녹이기" 개정).
+(** Fusion — 심의 결과 가시화.
 
     judge 결론(decision + resolved_answer)을 요청 키퍼의 *메인* chat lane에 authored
     메시지로 한 줄 남기고 SSE 브로드캐스트한다 → 키퍼가 다음 턴 observation
@@ -9,9 +9,7 @@
     run_id로 묶인 쿼리 가능한 구조화 *증거*로 남긴다 — 사용자는 대시보드 board에서 상세를
     본다. chat lane에 패널 트랜스크립트를 쌓지 않는 이유: [Keeper_chat_store.load]는
     conversation을 필터하지 않아, 긴 패널 답변이 키퍼 [recent_direct_conversation]
-    observation을 도배한다(§8.1 개정).
-
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §8 *)
+    observation을 도배한다. *)
 
 (** [panel_meta o] — 패널 결과 한 건을 board meta_json의 [panel] 배열 원소로 직렬화.
     [Answered] → {model; status="answered"; answer; input_tokens; output_tokens},

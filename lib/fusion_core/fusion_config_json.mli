@@ -1,6 +1,6 @@
-(* Fusion config <-> JSON for the dashboard settings endpoints (RFC-0306 §3.1,
-   RFC fusion-seat-routes §2.5). The write path decodes a preset from the same
-   shape [to_yojson] emits; TOML is written by Fusion_config_writer. *)
+(* Fusion config <-> JSON for the dashboard settings endpoints. The write path
+   decodes a preset from the same shape [to_yojson] emits; TOML is written by
+   Fusion_config_writer. *)
 
 (** [to_yojson c] is the structured JSON projection of the product-relevant
     active fusion config: [enabled], [default_preset], staged reducer group size,

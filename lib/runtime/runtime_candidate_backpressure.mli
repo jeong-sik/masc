@@ -73,7 +73,7 @@ val note_failed_attempt :
 (** Record that this attempted runtime failed without answering, seen by the
     walk of [recorded_by]. It carries no time: it holds until the candidate
     answers. The recorder's next cycle attempts the candidate again, which
-    renews or clears it; other walks keep it behind (RFC-0458 §3.4). *)
+    renews or clears it; other walks keep it behind. *)
 
 val note_candidate_success : candidate:candidate -> unit
 (** Clear this candidate's rate limit and failed attempt after it answered. *)

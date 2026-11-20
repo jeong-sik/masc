@@ -102,8 +102,8 @@ val prepare
     effective-user-owned regular 0600 managed credential only when its principal
     still matches the generation record. A managed credential that is missing
     is written again from the source: agy 1.5.9 moves the file into the HOME
-    keychain on every run, and the file is what binds the account (RFC-0490
-    §6.3). A readable managed login-keychain item
+    keychain on every run, and the file is what binds the account.
+    A readable managed login-keychain item
     naming another principal refuses the same way, since keyring-first CLI reads
     would resume that account, and so does a readable item that does not
     decode to a known login. A missing or unreadable item leaves the file
@@ -167,7 +167,7 @@ val prepare_native_tools
     Keeper that root is the masc state directory, which holds every Keeper's
     credentials. A refusal leaves the published settings unchanged.
     Every posture names the masc tool schema folder and denies the config
-    folder and the token file by exact path (RFC-0490 2.2). [Native_none]
+    folder and the token file by exact path. [Native_none]
     opens the schema folder without an all-files [read_file] deny while
     explicitly denying its workspace roots, writes, commands and network; a
     root that holds the HOME is refused. Callers pair [Native_none] with

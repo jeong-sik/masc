@@ -253,8 +253,8 @@ let has_permission_pattern_syntax path =
   String.exists (function '*' | '?' | '[' | ']' | '(' | ')' -> true | _ -> false) path
 ;;
 
-(* The three managed paths a policy names besides the workspaces (RFC-0490
-   2.2). agy lists a lazily loaded tool by name and keeps its arguments in
+(* The three managed paths a policy names besides the workspaces.
+   agy lists a lazily loaded tool by name and keeps its arguments in
    [<appDataDir>/mcp/<server>/<tool>.json]; the config folder holds
    [mcp_config.json] with the bridge bearer; the token file is the account
    credential. *)
@@ -294,7 +294,7 @@ let path_is_within ~root path =
 ;;
 
 (* HIGH-RISK-UNREVIEWED: this table is the antigravity lane's permission
-   boundary (RFC-0490 2.2). Plan mode merely adds an instruction.
+   boundary. Plan mode merely adds an instruction.
    Directory arguments (without glob suffixes) are recursive CLI grants:
    https://antigravity.google/docs/permissions?tab=cli .
    - Deny beats allow. Every posture names the schema folder and the two
@@ -307,7 +307,7 @@ let path_is_within ~root path =
      matches, so [Native_none] denies each workspace root explicitly.
    - agy's own appDataDir boundary already refuses the token file. That rule
      is undocumented and agy updates itself, so the token keeps its own deny;
-     login still works with it (RFC-0490 measurement 8b).
+     login still works with it.
    - Do not emit a wildcard command grant: agy 1.2.11 uses it for both
      sandboxed and unsandboxed execution, and rejects the former [unsandboxed]
      action. With --sandbox, the vendor's implicit grant covers sandboxed
@@ -1141,7 +1141,7 @@ let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
   Ok cwd
 ;;
 
-(* HIGH-RISK-UNREVIEWED: read-guard hook publication (RFC-0490 2.3).
+(* HIGH-RISK-UNREVIEWED: read-guard hook publication.
    [Native_none] opens only the masc schema folder; workspace roots stay
    denied by both this hook and settings.json. *)
 let prepare_read_hook t ~posture ~cwd ~additional_workspaces =

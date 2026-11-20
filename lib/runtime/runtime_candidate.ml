@@ -1,4 +1,4 @@
-(** Runtime_candidate — the provider config a turn dispatches to (RFC-0206).
+(** Runtime_candidate — the provider config a turn dispatches to.
 
     Dispatch selects one Runtime, so [type t] is that [Provider_config.t] and
     nothing more. Members delegate to {!Runtime_agent}. *)

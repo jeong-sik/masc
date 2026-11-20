@@ -98,6 +98,7 @@ let lane_specs =
     ; Standalone_lane.Verifier
     ; Standalone_lane.Candle_appraiser
     ; Standalone_lane.Librarian_memory
+    ; Standalone_lane.Workspace_memory_curator
     ]
 ;;
 
@@ -761,7 +762,8 @@ let lane_json
     | Standalone_lane.Hitl_auto_judge
     | Standalone_lane.Candle_appraiser
     | Standalone_lane.Verifier
-    | Standalone_lane.Librarian_memory -> []
+    | Standalone_lane.Librarian_memory
+    | Standalone_lane.Workspace_memory_curator -> []
   in
   `Assoc
     ([ "lane_id", `String lane_id
@@ -897,7 +899,8 @@ let live_lane_configuration registry lane_id =
           | Runtime.Hitl_auto_judge
           | Runtime.Board_attention
           | Runtime.Candle_appraiser
-          | Runtime.Librarian_memory )
+          | Runtime.Librarian_memory
+          | Runtime.Workspace_memory_curator )
         , _
       | None, _ -> registry_admitted_catalog_slots, cli_slots, []
     in

@@ -20,8 +20,11 @@ let lane_of_run_lane = function
   | Lane_run_identity.Workspace_curator -> Some Workspace_curator
   | Lane_run_identity.Candle_appraiser -> Some Candle_appraiser
   (* The Librarian's Memory asks keep no per-ask record (RFC
-     librarian-call-only-proposes: nothing grows per pass). *)
-  | Lane_run_identity.Verifier | Lane_run_identity.Librarian_memory -> None
+     librarian-call-only-proposes: nothing grows per pass), and the in-process
+     World Memory curator registers no run. *)
+  | Lane_run_identity.Verifier
+  | Lane_run_identity.Librarian_memory
+  | Lane_run_identity.Workspace_memory_curator -> None
 ;;
 
 let lane_of_standalone lane = lane_of_run_lane (Standalone_lane.run_identity lane)

@@ -234,11 +234,9 @@ let make_resource_template ?title ?annotations ~uri_template ~name ~description
   }
 
 (* The catalogue prose lives in config/mcp/resources.toml, decoded once at
-   module init by [Mcp_surface_toml] (RFC
-   prompts-and-tool-definitions-outside-ocaml §3 item 8). The list values
-   below keep their previous type and evaluation timing, so
-   [handle_list_resources_eio] reads them unchanged. Every entry declares its
-   title explicitly in the file. *)
+   module init by [Mcp_surface_toml]. The list values below keep their
+   previous type and evaluation timing, so [handle_list_resources_eio] reads
+   them unchanged. Every entry declares its title explicitly in the file. *)
 let resource_of_entry (entry : Mcp_surface_toml.resource_entry) =
   make_resource ~uri:entry.uri ~name:entry.name ~title:entry.title
     ~description:entry.description ~mime_type:entry.mime_type ()

@@ -1,15 +1,7 @@
 (** Closed sum type for the [reason] label of
     [Otel_metric_store.metric_persistence_read_drops].
 
-    This module is introduced in PR-1 of the RFC-0044 migration.
-    PR-2 changes [Core.Safe_ops.report_persistence_read_drop] to
-    accept [t] instead of [string]; existing constants in
-    [safe_ops.ml] become wire-compatible aliases. PR-3 (optional)
-    introduces a [read_outcome] Result-style helper for opt-in
-    caller migration.
-
-    Adding a new variant here is, by construction, a compile
-    obligation for every callsite once PR-2 lands.
+    [Core.Safe_ops.report_persistence_read_drop] takes [t].
 
     @stability Evolving
     @since 0.193.2 *)
@@ -29,26 +21,19 @@ type t =
   (** Path containment / canonicalisation rejected the entry. *)
   | Stat_error (** [stat] / [lstat] failed before file open. *)
   | Concurrent_removal
-  (** RFC-0134 PR-1. Entry was present at directory enumeration
-          but absent at load time (TOCTOU race between [list_dir] and
-          a concurrent writer that uses delete-then-replace). Not a
-          data loss; the entry was concurrently retired by another
-          writer. PR-3 of RFC-0134 routes this away from the
-          data-integrity WARN/counter path. *)
+  (** Entry was present at directory enumeration but absent at load
+          time (TOCTOU race between [list_dir] and a concurrent writer
+          that uses delete-then-replace). Not a data loss; the entry was
+          concurrently retired by another writer. *)
   | Transient_fd_pressure
-  (** RFC-0134 PR-1. Underlying [open()] failed with
-          [ENFILE]/[EMFILE]. Not data loss; retry-eligible under
-          RFC-0097 backpressure. PR-3 of RFC-0134 routes this to a
-          DEBUG line (or a separate metric in PR-4), not the
-          data-integrity counter. *)
+  (** Underlying [open()] failed with [ENFILE]/[EMFILE]. Not data
+          loss; retry-eligible. *)
   | Tail_partial_write
-  (** RFC-0134 classification. The last line of an append-only file was
-          still being written when a tail reader reached it, so it parses
-          as truncated JSON. Not data loss: the reader skips to the
-          previous complete line and the next read sees the row whole.
-          Belongs with [Concurrent_removal] and [Transient_fd_pressure]
-          on the not-a-loss side rather than on the data-integrity
-          counter. *)
+  (** The last line of an append-only file was still being written when
+          a tail reader reached it, so it parses as truncated JSON. Not
+          data loss: the reader skips to the previous complete line and the
+          next read sees the row whole. Belongs with [Concurrent_removal]
+          and [Transient_fd_pressure] on the not-a-loss side. *)
   | Other of string
   (** Escape hatch for one-off surfaces. A PR introducing a new
           [Other] payload must justify why the value cannot be
@@ -56,12 +41,12 @@ type t =
           value that appears at a second site belongs in a
           constructor. *)
 
-(** Stable wire format. Before PR-2 (#29664), the strings produced here
+(** Stable wire format. Before #29664, the strings produced here
     were byte-for-byte compatible with the string constants that
     [Core.Safe_ops] used ([persistence_read_drop_reason_list_dir_error],
     [persistence_read_drop_reason_entry_load_error],
     [persistence_read_drop_reason_invalid_payload]), so swapping callers
-    in PR-2 does not change the Otel_metric_store label cardinality.
+    to [t] does not change the Otel_metric_store label cardinality.
 
     Wire mapping:
     - [List_dir_error] → ["list_dir_error"]
@@ -73,16 +58,15 @@ type t =
     - [Decompression_error] → ["decompression_error"]
     - [Path_normalization_error] → ["path_normalization_error"]
     - [Stat_error] → ["stat_error"]
-    - [Concurrent_removal] → ["concurrent_removal"] (RFC-0134 PR-1)
-    - [Transient_fd_pressure] → ["transient_fd_pressure"] (RFC-0134 PR-1)
-    - [Tail_partial_write] → ["tail_partial_write"] (RFC-0134)
+    - [Concurrent_removal] → ["concurrent_removal"]
+    - [Transient_fd_pressure] → ["transient_fd_pressure"]
+    - [Tail_partial_write] → ["tail_partial_write"]
     - [Other s] → [s] (verbatim) *)
 val to_wire : t -> string
 
-(** Best-effort reverse of [to_wire]. Returns [Some] for canonical
-    constructors, [Some (Other s)] for any other input (so callers can
-    round-trip). PR-2 may narrow this once the lint blocks free
-    strings. *)
+(** Best-effort reverse of [to_wire]. Returns the canonical constructor
+    for its wire string and [Other s] for any other input (so callers can
+    round-trip). *)
 val of_wire : string -> t
 
 (** Equality (structural). *)

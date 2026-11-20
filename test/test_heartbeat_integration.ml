@@ -149,7 +149,7 @@ let transition_owner_shutdown_exn
 
 (* The autonomous keeper_cycle_decision path resolves a runtime id
    (Keeper_meta_contract.runtime_id_of_meta -> Runtime.get_default_runtime_id),
-   which fails with no silent fallback (RFC-0206 §2.1) unless a default runtime
+   which fails with no silent fallback unless a default runtime
    is initialized. Reactive turns return before that point, so only the
    autonomous R2b test needs this. Tolerant of an already-initialized runtime
    (Alcotest runs the whole binary in one process). *)
@@ -338,7 +338,7 @@ let base_observation : WO.world_observation =
 
 (** Simulate the Keeper_fiber_crash catch branch in
     launch_supervised_fiber.  Failure reason is pre-stored in registry,
-    exception carries no payload (RFC-0002).
+    exception carries no payload.
     Verifies: state = Crashed, failure_reason stored, done_p resolved. *)
 let test_crash_heartbeat_failure () =
   R.For_testing.clear ();
@@ -2275,12 +2275,11 @@ let test_operator_update_supersedes_exact_blocked_shutdown () =
       (* #25491: a [Reconciliation_required] fence previously had no release
          path at all. The worker no-ops on it by design and supersession
          accepted only [Blocked], so the keeper was unreachable in every
-         direction (RFC-0000 §1.2 LAW 1 "no dead-end"). Since #25522 boot
-         recovery settles the phase automatically instead of minting it, so
-         this operator route is now the manual fallback. These pin that the
-         operator route releases it and that the accepted turn survives in the
-         durable record, since [Superseded] overwrites the phase that carried
-         it. *)
+         direction. Since #25522 boot recovery settles the phase automatically
+         instead of minting it, so this operator route is now the manual
+         fallback. These pin that the operator route releases it and that the
+         accepted turn survives in the durable record, since [Superseded]
+         overwrites the phase that carried it. *)
       let unreconciled_turn =
         { Shutdown_types.lane = Some Shutdown_types.Autonomous
         ; admitted_at = Some 1784545390.0
@@ -5749,7 +5748,7 @@ let test_resolve_done_reports_prior_outcome () =
     fail "previous outcome should remain crashed"
 
 (* ══════════════════════════════════════════════════════════
-   9. RFC-0002: pipeline_stage_of_phase deterministic mapping
+   9. pipeline_stage_of_phase deterministic mapping
 
    Failure streaks are observational and do not terminate the Keeper lane.
    ══════════════════════════════════════════════════════════ *)

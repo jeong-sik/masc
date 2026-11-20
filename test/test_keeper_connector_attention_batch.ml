@@ -1,4 +1,4 @@
-(* test_keeper_connector_attention_batch.ml — RFC-0377: conversation-batched
+(* test_keeper_connector_attention_batch.ml — conversation-batched
    stimulus intake.
 
    Live data (2026-08-08..08-13) showed every delivered continuation
@@ -1325,7 +1325,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
     ]
 ;;
 
-(* RFC-0377 S5.1: channel A has 3 pending Connector_attention + channel B
+(* Channel A has 3 pending Connector_attention + channel B
    has 2, interleaved on the queue (A1, B1, A2, B2, A3) so the batch filter
    must select past channel B's entries, not just take a prefix. One intake
    admits A's 3 in arrival order; B's 2 stay queued untouched. *)

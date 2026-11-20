@@ -1,6 +1,5 @@
-(* High_water_marks keeps the highest number recorded per name (RFC-0474 L4d
-   follow-up). A goals tree generation filled late must not replace a newer
-   one that finished first. *)
+(* High_water_marks keeps the highest number recorded per name. A goals tree
+   generation filled late must not replace a newer one that finished first. *)
 open Alcotest
 
 let test_a_lower_number_recorded_later_changes_nothing () =

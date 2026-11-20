@@ -1,4 +1,4 @@
-(* RFC-0374 probe_surface.
+(* Keeper_capability_probe.probe_surface.
 
    The cases below are the ones the 2026-08-12 audit actually hit. Each spent a
    real keeper turn to learn something the descriptor table already knew, so

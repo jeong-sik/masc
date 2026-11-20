@@ -1,6 +1,6 @@
 open Alcotest
 
-(* CLI lane-slot fallback for librarian_exact (RFC cli-runtimes-as-lane-slots):
+(* CLI lane-slot fallback for librarian_exact:
    the classified exact-output pass walks the declared cli slots only after
    the catalog reports provider exhaustion, applies the same selection
    contract to each cli answer, and advances after a domain-invalid

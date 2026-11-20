@@ -3798,7 +3798,7 @@ let test_stale_replace_rejects_concurrent_explicit_write () =
 (* Byte-identical re-observation is not duplication and not a score: the row
    count stays flat, insertion time stays authoritative, the observation time
    refreshes, and an injected copy re-observing an authored row must not
-   repaint its origin (task-1032 loop damper, RFC-0418). *)
+   repaint its origin (task-1032 loop damper). *)
 let test_reobservation_refreshes_instead_of_duplicating () =
   with_temp_keepers @@ fun keepers_dir ->
   let initial = fact ~claim:"reinforced claim" () in
@@ -4627,7 +4627,7 @@ let seed_three ~keepers_dir =
   a, b, c
 ;;
 
-(* RFC-0456 §4.2: a fact a new claim absorbs leaves the snapshot and its row is
+(* A fact a new claim absorbs leaves the snapshot and its row is
    kept beside it, naming the claim that now says it and the pass that did. *)
 let test_absorbed_facts_leave_the_snapshot_with_their_rows_kept () =
   with_temp_keepers @@ fun keepers_dir ->

@@ -357,7 +357,7 @@ let test_redacted_http_url_opt_reports_drop_reason () =
     [ B.Missing_scheme ]
     !drops
 
-(* RFC-0371 B2 regression: the try/with wrappers around the Uri helpers were
+(* Regression: the try/with wrappers around the Uri helpers were
    removed because Uri.of_string is total. These pin that garbage input still
    flows through the option-based checks as ordinary values — no exception
    escapes, nothing is silently classified as valid. *)

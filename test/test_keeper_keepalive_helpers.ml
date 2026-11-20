@@ -545,8 +545,8 @@ let test_closed_board_audience_routes_only_its_authority () =
      classification — the valid Keeper target keeps live routing, and both
      audience consumers (routing and structural [mention_ids_of_signal])
      project the exact same Keeper id set.
-     [Keeper_id.of_string] mints a raw-fallback id for non-Keeper names
-     (RFC-0232 §3.4), so this also pins that behavior against regressions. *)
+     [Keeper_id.of_string] mints a raw-fallback id for non-Keeper names,
+     so this also pins that behavior against regressions. *)
   let mixed_audience =
     audience_signal ~author:"external-author" "@alpha @human-b inspect"
   in

@@ -548,8 +548,7 @@ let test_script_classification_unit () =
   observation "stderr discarded" "ls repos/_build 2>/dev/null | head -5";
   observation "stdin from a file" "wc -l < f";
   observation "tilde is a path the read resolves" "cat ~/notes";
-  (* The tab cases RFC-0404 refused by character: the parser splits the
-     flag out, so the guards see it. *)
+  (* The tab cases: the parser splits the flag out, so the guards see it. *)
   script_requires_observation "tab splits the sed in-place flag out" "sed -e\t-i s/a/b/ f";
   script_requires_observation "tab splits the rg preprocessor flag out" "rg --pre\trm x";
   script_requires_observation "tab splits the sort output flag out" "sort -o\tout f";

@@ -105,8 +105,7 @@ let tool_pair () =
 
 (* A seed range reaches behind this turn, and an earlier turn's tool body in
    it goes out exactly as the range first sent it: rewriting it when the turn
-   boundary moves would change the prefix the provider cached (RFC-0363
-   §3.4.1). *)
+   boundary moves would change the prefix the provider cached. *)
 let test_without_a_read_end_a_seed_range_sends_earlier_tool_bodies_as_sent () =
   let earlier_body = String.make 4_000 'o' in
   let earlier =
@@ -487,7 +486,7 @@ let body_for id messages =
 (* With [Finished_turns_verbatim], the [request_view] default, a completed
    exchange still in the range goes out raw on every ordinary request; only
    the resend that answers a size refusal sends the refused request's bodies
-   as markers, the unfinished exchange's included (#28845, RFC-0363 §3.4.1).
+   as markers, the unfinished exchange's included (#28845).
    The driver asks for [Finished_turns_as_markers] when the reader is
    offered; [test_keeper_model_input_demotion] covers that request. *)
 let test_completed_bodies_go_raw_until_a_size_refusal () =

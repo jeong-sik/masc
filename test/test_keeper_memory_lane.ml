@@ -1,5 +1,5 @@
 module Original = Masc.Keeper_librarian_durable_capture
-(** Tests for Keeper_memory_lane (RFC-0257).
+(** Tests for Keeper_memory_lane.
 
     The lane detaches post-turn memory work from the keeper turn lane:
     serialized within a keeper, independent across keepers, bounded, and
@@ -241,7 +241,7 @@ let test_serializes_within_keeper () =
     (List.rev !order)
 ;;
 
-(* RFC-0467: [has_waiting] is true exactly while a unit waits behind the
+(* [has_waiting] is true exactly while a unit waits behind the
    running one. Reading it registers no lane entry, and the waiting unit,
    once it runs, sees nothing behind itself. *)
 let test_has_waiting_reads_the_latest_slot () =

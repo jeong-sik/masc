@@ -1,4 +1,4 @@
-(** Tests for RFC-0233 PR-2: the in-flight [invocation ↔ execution_id]
+(** Tests for the in-flight [invocation ↔ execution_id]
     join table ([Keeper_execution_join]) and the event bridge stamping
     that consumes it ([Keeper_event_bridge.native_event_to_json]). *)
 

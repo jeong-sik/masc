@@ -1,12 +1,10 @@
 (** Classification contract for the [Api (InvalidRequest _)] class.
 
-    RFC turn-failure-visible-stop (#32105) removed the crash-accounting
-    exemption this file used to pin: every turn failure now advances the
-    durable crash-accounting streak regardless of class, so there is no
-    per-keeper budget to test here. What remains pinned is the
-    classification itself — [InvalidRequest] must stay a distinct typed
-    class, because telemetry and failure routing depend on which boundary
-    produced the rejection. *)
+    Every turn failure advances the durable crash-accounting streak
+    regardless of class, so there is no per-keeper budget to test here.
+    What remains pinned is the classification itself — [InvalidRequest]
+    must stay a distinct typed class, because telemetry and failure routing
+    depend on which boundary produced the rejection. *)
 
 open Alcotest
 

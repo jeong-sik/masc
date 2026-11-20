@@ -446,9 +446,6 @@ let test_forecast_refuses_a_checkpoint_it_cannot_read () =
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "an unreadable checkpoint was forecast as an empty history"
 
-(* RFC-0458 §3.4 rule 5: the forecast shows the order this Keeper's next turn
-   takes. A head that failed in this Keeper's own walk is walked first again;
-   the same mark recorded by another Keeper sends it behind. *)
 (* A checkpoint the build before the last [checkpoint_version] bump wrote is
    the fresh state the next turn starts from, so the forecast is of a request
    with no saved history rather than an error. *)
@@ -559,6 +556,9 @@ max-concurrent = 1
       (List.length forecast.candidates)
 ;;
 
+(* The forecast shows the order this Keeper's next turn takes. A head that
+   failed in this Keeper's own walk is walked first again; the same mark
+   recorded by another Keeper sends it behind. *)
 let test_the_recorders_forecast_walks_its_marked_head_first () =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->

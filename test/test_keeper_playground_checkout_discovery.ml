@@ -1,8 +1,8 @@
 (** Tests for [Keeper_playground_checkouts.discover].
 
-    Each case pins one decision from RFC-keeper-workspace-root-only. The
-    fixtures are shaped after the live playground measured on 2026-08-13, not
-    after the layout the system used to prescribe. *)
+    Each case pins one rule of [discover]. The fixtures are shaped after the
+    live playground measured on 2026-08-13, not after the layout the system
+    used to prescribe. *)
 
 open Alcotest
 module C = Masc.Keeper_playground_checkouts

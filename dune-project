@@ -22,7 +22,7 @@
  (allow_empty))
 
 ; Format OCaml, and only OCaml. Nothing enforces formatting today:
-; ocamlformat is disabled repo-wide (.ocamlformat, RFC-0010) and the
+; ocamlformat is disabled repo-wide (.ocamlformat) and the
 ; ocamlformat workflow this comment used to cite no longer exists. But
 ; `dune fmt` formats every language it knows, so it rewrote 18 dune files
 ; nobody checks, and the one blank line it added to lib/dune pushed the
@@ -75,7 +75,7 @@
   ; Path-pinned: `opam pin add ocaml-msx --kind=path <core repo>`, per bin/dune.
   ocaml-msx
   ; lib/dos_lane links ocaml-dos.dosmachine, the same way lib/msx_lane links
-  ; the MSX core: a second machine keepers play on (RFC-0439).
+  ; the MSX core: a second machine keepers play on.
   ocaml-dos
   ; Native stdout colour capability detection links the system terminfo API.
   (conf-ncurses :build)
@@ -100,7 +100,7 @@
   (cmdliner (>= 1.1))
   (cohttp (>= 5.0))
   (cohttp-eio (>= 6.0))
-  ; RFC-0107 Phase D — pooled keep-alive HTTP transport. piaf provides
+  ; Pooled keep-alive HTTP transport. piaf provides
   ; per-endpoint persistent client (Client.t) + h1/h2 + Eio integration;
   ; multi-host pool layer (Host_key map, idle eviction, TLS cache) is
   ; built on top in lib/masc_http_client/pool.ml.  macOS install needs
@@ -173,13 +173,13 @@
   ; Terminal emulator (matrix.vte) that reads a PTY login's output into
   ; the screen the TUI and dashboard draw. 0.x may change its API.
   (matrix (and (>= 0.2.0) (< 0.3.0)))
-  ; RFC-0004 Phase A0.1 typed SSE event library (lib/sse_event/).
+  ; Typed SSE event library (lib/sse_event/).
   ; atdgen runs at build-time (codegen for sse_event.atd →
   ; sse_event_{t,j}.{ml,mli}); atdgen-runtime is linked into the
   ; generated _j module.  The typed SSE library is production-required.
   (atdgen (and :build (>= 4.2.0)))
   (atdgen-runtime (>= 4.2.0))
-  ; RFC-0004 Phase A0.2 PR-2: atdts generates TypeScript decoders
+  ; atdts generates TypeScript decoders
   ; from sse_event.atd for the dashboard (committed at
   ; dashboard/src/schemas/sse_event_generated.ts).  Build-time only;
   ; no runtime linkage.  CI invokes it via dashboard/scripts/gen-sse-types.sh.

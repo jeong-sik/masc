@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Analyze module dependencies in lib/ monolith for sub-library extraction.
 
-Phase 0 of #3593: dependency graph analysis. Feeds RFC-0056 §3.4 (the
-fan-in/fan-out audit that prioritizes future sub-library extractions).
+Phase 0 of #3593: dependency graph analysis. Feeds the fan-in/fan-out
+audit that prioritizes future sub-library extractions.
 
 Usage:
     python3 scripts/analyze_lib_deps.py [--json] [--cycles] [--clusters]

@@ -1027,11 +1027,11 @@ let test_content_parts_reference_carriers () =
 ;;
 
 let test_non_base64_media_source_fails_closed () =
-  (* The openai-chat image URL carrier no longer fails closed — it
-     passes through as the image_url (see the reference-carriers test). The
-     fail-closed contract that remains is for backends with no native form
-     for the carrier: ollama rejects a URL image, and the responses surface
-     rejects a file_id document. *)
+  (* OpenAI chat images and Responses documents support native reference
+     carriers ([image_url]/[file_id] and [input_file] with [file_id]/[file_url]
+     since #53575). The fail-closed contract remains for backends and media
+     kinds with no native reference carrier: ollama rejects a URL image, and
+     the Responses surface rejects non-base64 audio ([File_id]/[Url]). *)
   expect_invalid_arg "ollama image url" (fun () ->
     ollama_messages
       ~supports_image_input:true
@@ -1044,22 +1044,74 @@ let test_non_base64_media_source_fails_closed () =
           ]
       ]
     |> ignore);
-  let config =
+  let media_capable_config =
     Provider_config.make
       ~kind:Provider_config.OpenAI_compat
       ~model_id:"gpt-test"
       ~base_url:""
+      ~model_capabilities_override:
+        { Capabilities.openai_compat_chat_capabilities with
+          supports_document_input = true
+        ; supports_audio_input = true
+        }
       ()
   in
-  expect_invalid_arg "responses document file_id" (fun () ->
+  let doc_body =
     Responses.build_request
-      ~config
+      ~config:media_capable_config
       ~messages:
         [ msg
             User
             [ Document
                 { media_type = "application/pdf"
                 ; source = Types.File_id "file_abc123"
+                }
+            ; Document
+                { media_type = "application/pdf"
+                ; source = Types.Url "https://example.invalid/doc.pdf"
+                }
+            ]
+        ]
+      ()
+    |> Yojson.Safe.from_string
+  in
+  let doc_parts =
+    member "input" doc_body |> to_list |> List.hd |> member "content" |> to_list
+  in
+  check_int "responses document reference parts" 2 (List.length doc_parts);
+  let file_id_part = List.nth doc_parts 0 in
+  check_string "responses file_id type" "input_file"
+    (member "type" file_id_part |> to_string);
+  check_string "responses file_id value" "file_abc123"
+    (member "file_id" file_id_part |> to_string);
+  let file_url_part = List.nth doc_parts 1 in
+  check_string "responses file_url type" "input_file"
+    (member "type" file_url_part |> to_string);
+  check_string "responses file_url value" "https://example.invalid/doc.pdf"
+    (member "file_url" file_url_part |> to_string);
+  expect_invalid_arg "responses audio file_id" (fun () ->
+    Responses.build_request
+      ~config:media_capable_config
+      ~messages:
+        [ msg
+            User
+            [ Audio
+                { media_type = "audio/wav"
+                ; source = Types.File_id "file_abc123"
+                }
+            ]
+        ]
+      ()
+    |> ignore);
+  expect_invalid_arg "responses audio url" (fun () ->
+    Responses.build_request
+      ~config:media_capable_config
+      ~messages:
+        [ msg
+            User
+            [ Audio
+                { media_type = "audio/wav"
+                ; source = Types.Url "https://example.invalid/clip.wav"
                 }
             ]
         ]

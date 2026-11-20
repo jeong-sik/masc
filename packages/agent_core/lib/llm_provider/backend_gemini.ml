@@ -755,14 +755,23 @@ let project_function_response_media messages =
     {message with content}) messages
 ;;
 
-(* Document admission is shared by preflight projection and request building.
-   The diagnostic [observe] stays at the dispatch site. *)
+(* Document and audio admission are shared by preflight projection and request
+   building. Running audio capability degradation before
+   [project_function_response_media] ensures a model without
+   [supports_audio_input] reports the audio-input omission instead of the
+   secondary function-response-parts omission. The diagnostic [observe] stays
+   at the dispatch site. *)
 let project_history ?(tools_present = false) config messages =
   let caps = capabilities_of_config config in
   let messages, _documents_degraded =
     Api_common.degrade_document_messages
       ~wire_form:Api_common.Document_inline_data
       ~supports_document_input:caps.supports_document_input
+      messages
+  in
+  let messages, _audio_degraded =
+    Api_common.degrade_audio_messages
+      ~supports_audio_input:caps.supports_audio_input
       messages
   in
   let messages =
@@ -827,13 +836,8 @@ let build_request_artifact
         ~supports_image_input:caps.supports_image_input
         projected_messages
     in
-    (* Documents already passed the same boundary in [project_history].
-       Audio, like images, still needs its capability projection here. *)
-    let projected_messages, _audio_degraded =
-      Api_common.degrade_audio_messages
-        ~supports_audio_input:caps.supports_audio_input
-        projected_messages
-    in
+    (* Documents and audio already passed their capability boundaries in
+       [project_history] before [project_function_response_media]. *)
     projected_messages
   in
   let contents, system_instruction =

@@ -43,8 +43,14 @@ def row(number, base='main', *, approvals=2, **changes):
     return dict(value, **changes)
 
 
-def check_run(conclusion):
-    return {'__typename': 'CheckRun', 'conclusion': conclusion}
+def check_run(conclusion, name=None, started=None):
+    """A check run; the listing names it and dates its start, a bare one does not."""
+    run = {'__typename': 'CheckRun', 'conclusion': conclusion}
+    if name is not None:
+        run['name'] = name
+    if started is not None:
+        run['startedAt'] = started
+    return run
 
 
 def commit_status(state):
@@ -95,6 +101,43 @@ class Selection(unittest.TestCase):
         cancelled = row(13, statusCheckRollup=rollup(check_run('SUCCESS'),
                                                      check_run('CANCELLED')))
         self.assertEqual(SWEEP.select([cancelled], never), [13])
+
+    def test_a_failed_run_that_a_newer_run_of_the_same_name_replaced_says_nothing(self):
+        # #53686: `type-check` failed twice on a stale merge ref (01:54Z, 02:04Z),
+        # then passed on the same head (02:13Z). The rollup keeps all three; the
+        # pull request was approved and CLEAN, and no sweep picked it. The
+        # listing's order is not the runs' order, so both orders are read.
+        failed_once = check_run('FAILURE', 'type-check', '2026-11-20T01:54:55Z')
+        failed_twice = check_run('FAILURE', 'type-check', '2026-11-20T02:04:39Z')
+        passed = check_run('SUCCESS', 'type-check', '2026-11-20T02:13:11Z')
+        changes = check_run('SUCCESS', 'changes', '2026-11-20T02:13:00Z')
+        for checks in ([failed_once, failed_twice, passed, changes],
+                       [passed, changes, failed_twice, failed_once]):
+            with self.subTest(first=checks[0]['startedAt']):
+                replaced = row(30, statusCheckRollup=rollup(*checks))
+                self.assertEqual(SWEEP.select([replaced], never), [30])
+
+    def test_the_newest_run_of_a_name_decides_even_when_an_older_run_passed(self):
+        passed = check_run('SUCCESS', 'type-check', '2026-11-20T02:00:00Z')
+        failed = check_run('FAILURE', 'type-check', '2026-11-20T02:10:00Z')
+        for checks in ([passed, failed], [failed, passed]):
+            with self.subTest(first=checks[0]['conclusion']):
+                refused = row(31, statusCheckRollup=rollup(*checks))
+                self.assertEqual(SWEEP.select([refused], never), [])
+
+    def test_a_failure_under_another_name_is_not_replaced_by_a_pass(self):
+        refused = row(32, statusCheckRollup=rollup(
+            check_run('FAILURE', 'changes', '2026-11-20T02:00:00Z'),
+            check_run('SUCCESS', 'type-check', '2026-11-20T02:10:00Z')))
+        self.assertEqual(SWEEP.select([refused], never), [])
+
+    def test_a_rerun_that_has_not_started_replaces_the_failed_run(self):
+        # A queued re-run has no start yet; it is the newest, and a run that has
+        # not decided leaves the pull request selectable.
+        queued = row(33, statusCheckRollup=rollup(
+            check_run('FAILURE', 'type-check', '2026-11-20T02:00:00Z'),
+            check_run(None, 'type-check')))
+        self.assertEqual(SWEEP.select([queued], never), [33])
 
     def test_a_check_that_has_not_decided_stays_selectable(self):
         # A running check has no conclusion yet; a pending or expected status

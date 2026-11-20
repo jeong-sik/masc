@@ -64,7 +64,7 @@ type keeper_persistence_prepare_error =
   | Store_quarantine_refused of Keeper_store_boot_reconcile.refusal list
       (** Boot examined the keeper stores, found some this build cannot
           decode, and the operator did not pass [--accept-store-quarantine].
-          The files stay where they are (RFC-0420). *)
+          The files stay where they are. *)
 
 type prepared_keeper_persistence
 type claimed_keeper_persistence

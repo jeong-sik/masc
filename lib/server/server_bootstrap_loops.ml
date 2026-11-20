@@ -177,10 +177,10 @@ let resolve_broadcast_mention_target ~config target =
       ~mention_target:target
 
 (* Who wrote a workspace message, as the recipient's transcript records it.
-   A sender the Keeper registry holds under exactly this name is that Keeper
-   (RFC-0468 §3.2); anyone else is an external author. The registry match is
-   the proof, not the shape of [from_agent]: people and external bots mint
-   the same id shape. *)
+   A sender the Keeper registry holds under exactly this name is that Keeper;
+   anyone else is an external author. The registry match is the proof, not
+   the shape of [from_agent]: people and external bots mint the same id
+   shape. *)
 let workspace_message_speaker ~is_registered_keeper ~from_agent
   : Keeper_chat_store.speaker
   =
@@ -786,7 +786,7 @@ let prepare_keeper_persistence_owned
      instead of surfacing per keeper, hours later, on whichever read or write
      happens to come first. Moving a store aside changes what its keeper
      remembers, so boot refuses unless the operator asked for it with
-     --accept-store-quarantine (RFC-0420). This workspace's keeper loops have
+     --accept-store-quarantine. This workspace's keeper loops have
      not started; that does not fence independent external writers. *)
   let store_reconcile_started = preparation_stage_started () in
   let recovery_refusals = Keeper_store_boot_reconcile.recover_memory_publications config in
@@ -819,7 +819,7 @@ let prepare_keeper_persistence_owned
          (List.map (fun failure -> Keeper_store_boot_reconcile.Quarantine_failed failure)
             failures))
   | [] ->
-  (* RFC-0240 §2.4. Close tool cycles left open by process death before
+  (* Close tool cycles left open by process death before
      anything reads a checkpoint. Persistence stores the open cycle on purpose
      so recovery knows which calls were dispatched, but nothing closed it, so
      provider admission rejected the history on every reload and the lane

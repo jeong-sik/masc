@@ -67,8 +67,7 @@ let dashboard_fleet_composite_json ~(config : Workspace.config) () : Yojson.Safe
      time; the dashboard already treats it as a possibly-stale value for
      runtime-attention arithmetic (fleet-fsm-matrix.ts). This is a fleet-level
      envelope cache, not a second per-keeper cache layered on the projection
-     rebuild cycle (RFC-0029 §3 non-goal), so it does not re-introduce
-     projection-staleness drift. *)
+     rebuild cycle, so it does not re-introduce projection-staleness drift. *)
   let cache_key =
     Server_dashboard_http_keeper_api_types.fleet_composite_cache_key
       ~base_path:config.base_path

@@ -9,8 +9,8 @@
     JSON readers:
     - [json_member key json] — `Assoc field-by-key with [`Null] on
       miss / non-Assoc.
-    - [json_number] — RFC-0142 PR-5 typed-failure variant via
-      Json_field.float_opt (accepts both `Float and `Int). *)
+    - [json_number] — number field via Json_field.float_opt (accepts
+      both `Float and `Int; [None] on miss / wrong shape). *)
 
 (* [max_chars] is a byte budget for the kept text. The cut moves back to a
    UTF-8 character boundary: a receipt error message is often Korean model

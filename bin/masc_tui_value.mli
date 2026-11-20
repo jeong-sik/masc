@@ -204,6 +204,11 @@ module Interval : sig
       two units can say it: [45s], [1m30s], [5m], [6h], [1h30m], [1d],
       [2d03h]. A setting that needs three units reads as {!Ongoing.text}. A
       setting at or below zero reads [0s]. *)
+
+  val of_seconds : float -> string
+  (** {!text} of a setting held in float seconds, rounded up to the whole
+      second so a sub-second setting never reads [0s]. A value no int can
+      hold (an infinity, a NaN, past 10^15 seconds) reads as {!Ongoing.text}. *)
 end
 
 module Ongoing : sig

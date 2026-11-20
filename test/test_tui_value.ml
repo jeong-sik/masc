@@ -474,6 +474,18 @@ let test_a_set_interval_reads_its_exact_seconds () =
     [ 45, "45s"; 90, "1m30s"; 300, "5m"; 3600, "1h"; 5400, "1h30m"; 21600, "6h"
     ; 86400, "1d"; 93600, "1d02h"; 0, "0s" ]
 
+(* A setting held in float seconds (a timeout, a cleanup interval) reads as
+   the same ladder, rounded up so a sub-second setting is not [0s]; a value
+   no int can hold falls to the ongoing ladder instead of an undefined
+   conversion. *)
+let test_a_float_setting_reads_its_whole_seconds () =
+  List.iter
+    (fun (seconds, expected) ->
+      Alcotest.(check string) (Printf.sprintf "%g seconds" seconds) expected
+        (Masc_tui_value.Interval.of_seconds seconds))
+    [ 30., "30s"; 90., "1m30s"; 300., "5m"; 0.4, "1s"; 29.2, "30s"; 0., "0s"
+    ; Float.nan, "0s"; Float.infinity, Masc_tui_value.Ongoing.text Float.infinity ]
+
 (* Text built for a row that may be scrolled out of the window hands back
    when it reads differently instead of noting it, so only the caller that
    draws the row asks for a redraw. *)
@@ -541,7 +553,9 @@ let () =
         [ Alcotest.test_case "a hash keeps its head" `Quick test_a_hash_keeps_its_head ] )
     ; ( "interval",
         [ Alcotest.test_case "a set interval reads its exact seconds" `Quick
-            test_a_set_interval_reads_its_exact_seconds ] )
+            test_a_set_interval_reads_its_exact_seconds
+        ; Alcotest.test_case "a float setting reads its whole seconds" `Quick
+            test_a_float_setting_reads_its_whole_seconds ] )
     ; ( "ongoing length",
         [ Alcotest.test_case "past a minute, at most once a minute" `Quick
             test_a_length_past_a_minute_changes_at_most_once_a_minute

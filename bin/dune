@@ -1499,7 +1499,7 @@
  (name masc_tui_storage)
  (wrapped false)
  (modules masc_tui_storage)
- (libraries masc masc_tui_say))
+ (libraries masc masc_tui_say masc_tui_value))
 
 (library
  (name masc_tui_keeper_mark)
@@ -2875,7 +2875,7 @@
  (name masc_tui_transport_failure)
  (wrapped false)
  (modules masc_tui_transport_failure)
- (libraries masc masc.http_client masc.masc_log))
+ (libraries masc masc.http_client masc.masc_log masc_tui_value))
 
 (library
  (name masc_tui_workspace_precondition)

@@ -145,12 +145,15 @@ let pass_lines ~timestamp = function
                ++ names_text names ]
     in
     let started = timestamp pass.started_at in
+    (* How often the pass runs is a setting (RFC tui-one-screen-grammar 6.2):
+       [5m], [1m30s], not [300초] or [300s]. *)
+    let interval = Masc_tui_value.Interval.of_seconds pass.interval_sec in
     [ ( Plain
       , Say.per_language (function
-          | Say.Ko -> Printf.sprintf "정리 주기 %s · 간격 %.0f초 · 훑은 Keeper %d"
-              started pass.interval_sec pass.owners
-          | Say.En -> Printf.sprintf "Cleanup pass %s · every %.0fs · %d Keepers looked at"
-              started pass.interval_sec pass.owners) )
+          | Say.Ko -> Printf.sprintf "정리 주기 %s · 간격 %s · 훑은 Keeper %d"
+              started interval pass.owners
+          | Say.En -> Printf.sprintf "Cleanup pass %s · every %s · %d Keepers looked at"
+              started interval pass.owners) )
     ; ( Dim
       , Say.per_language (function
           | Say.Ko -> Printf.sprintf

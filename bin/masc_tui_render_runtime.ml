@@ -1445,9 +1445,12 @@ let usage_lines ~cols ~rows (state : state) =
   let keepers () =
     match state.keeper_usage with
     | Keeper_usage_unread ->
-        [ say " 키퍼 사용량 (1일) · 미조회" " Keeper usage (1d) · not read" ]
+        (* The window is the server's to state: only a read carries
+           kuw_window_minutes, and the request names none. Before a read, or
+           when it fails, the heading names no window. *)
+        [ say " 키퍼 사용량 · 미조회" " Keeper usage · not read" ]
     | Keeper_usage_error reason ->
-        [ say " 키퍼 사용량 (1일) · 조회 불가: " " Keeper usage (1d) · unavailable: "
+        [ say " 키퍼 사용량 · 조회 불가: " " Keeper usage · unavailable: "
           ^ Terminal_text.single_line reason ]
     | Keeper_usage_read { kuw_rows; kuw_window_minutes; kuw_generated_at } ->
         let readable row = match row.kur_coverage with

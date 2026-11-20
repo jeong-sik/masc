@@ -1,11 +1,11 @@
-// MASC v2 — Keeper lifecycle FSM tables (ported 1:1 from prototype data.jsx)
+// MASC v2 — Keeper lifecycle FSM tables
 //
-// The prototype's 12-state FSM drives every keeper's status dot tone, the
+// The 8-state keeper FSM drives every keeper's status dot tone, the
 // breathing pulse, the hover gloss, and the operator action set. The live
-// dashboard's `KeeperPhase` (types/core.ts) uses the same 12 states, so
+// dashboard's `KeeperPhase` (types/core.ts) has the same 8 states, so
 // these tables map directly onto live keeper data. Unknown /
-// null phases fall back to the idle/off bucket (a total display default —
-// the prototype used the same `?? 'idle'` pattern), never throwing.
+// null phases fall back to the idle/off bucket (a total display default),
+// never throwing.
 //
 // All four lookup tables (PHASE_TONE / PHASE_PULSE / PHASE_INFO / FSM_ACTIONS)
 // key on `KeeperPhase` (PascalCase). The
@@ -60,7 +60,6 @@ const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
 }
 
 // phase → whether the dot breathes (active/transient phases only).
-// Verbatim from prototype data.jsx:43-45.
 const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Running: true,
   Restarting: true,
@@ -121,7 +120,7 @@ const RUN_PHASES: ReadonlySet<KeeperPhase> = new Set<KeeperPhase>([
 ])
 const PAUSE_PHASES: ReadonlySet<KeeperPhase> = new Set<KeeperPhase>(['Paused', 'Draining'])
 
-/** phase → coarse status bucket (mirrors prototype phaseStatus). */
+/** phase → coarse status bucket. */
 export function phaseStatus(phase: string | null | undefined): KeeperCoarseStatus {
   if (phase && isKeeperPhase(phase) && RUN_PHASES.has(phase)) return 'run'
   if (phase && isKeeperPhase(phase) && PAUSE_PHASES.has(phase)) return 'pause'

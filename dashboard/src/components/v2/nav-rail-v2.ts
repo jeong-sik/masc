@@ -1,5 +1,5 @@
-// MASC v2 — left surface nav rail (ported from prototype shell.jsx NavRail).
-// Emits the prototype `.v2-nav` DOM (brand · nav-item · nav-div · spacer ·
+// MASC v2 — left surface nav rail.
+// Emits the `.v2-nav` DOM (brand · nav-item · nav-div · spacer ·
 // settings) so the vendored v2.css styles it 1:1. Surface ids are mapped to
 // the live dashboard TabIds; clicking drives the real router (navigate()).
 
@@ -16,13 +16,10 @@ interface SurfaceEntry {
 }
 type NavEntry = SurfaceEntry | 'sep'
 
-// Prototype SURFACES order/labels/icons, mapped to live TabIds.
-//   prototype work→workspace, monitor→monitoring, ide→code; rest 1:1.
-// Groups mirror the keeper-v2 prototype rail (shell.jsx, #29046): 개요 |
-// Keepers · Registry · Monitor | 작업 · Gate · 예약 | 보드 · Fusion · 로그 |
-// IDE · 커넥터 | 명령 · Lab (설정 stays in the footer slot below the spacer).
-// The 2026-07 standalone export predates the prototype's 명령/Lab group; the
-// in-repo prototype is the design SSOT the parity probes measure.
+// Rail surfaces in order with labels and icons, keyed by live TabIds.
+// Groups: 개요 | Keepers · Registry · Monitor | 작업 · Gate · 예약 |
+// 보드 · Fusion · 로그 | IDE · 커넥터 | 명령 · Lab (설정 stays in the footer
+// slot below the spacer).
 const SURFACES = [
   { tab: 'overview', label: '개요', icon: 'grid' },
   'sep',
@@ -75,8 +72,7 @@ export function surfaceLabel(tab: TabId): string {
 
 // On phones the rail collapses to a bottom tab bar: the operator's daily loop
 // (home / agents / work / approvals) gets first-class tabs; the rest live behind
-// a 더보기 sheet so no tab drops below the 44px hit target (prototype shell.jsx
-// MOBILE_PRIMARY order: overview · keepers · work · approvals).
+// a 더보기 sheet so no tab drops below the 44px hit target.
 const MOBILE_PRIMARY: readonly TabId[] = ['overview', 'keepers', 'workspace', 'approvals']
 const SURFACE_ENTRIES: readonly SurfaceEntry[] = SURFACES.filter((entry): entry is RailEntry => entry !== 'sep')
 

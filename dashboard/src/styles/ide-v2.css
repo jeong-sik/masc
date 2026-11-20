@@ -1,13 +1,13 @@
 /* MASC Dashboard — keeper-v2 IDE surface layout.
  *
- * Ports the three-pane IDE surface from keeper-v2/ide.jsx into the dashboard
- * using the existing semantic token ladder and the keeper-v2 token bridge
- * aliases defined in variables.css.
+ * Ports the three-pane IDE surface into the dashboard using the existing
+ * semantic token ladder and the keeper-v2 token bridge aliases defined in
+ * variables.css.
  *
- * Naming rule: a component the design draws carries the design's own name, so
- * keeper-v2/surfaces.css reaches it — .ide-body, .ide-top, .ide-tree, .ide-ed,
+ * Naming rule: a component keeper-v2/surfaces.css styles keeps that sheet's
+ * class name, so its rules reach it — .ide-body, .ide-top, .ide-tree, .ide-ed,
  * .ide-rail, .ide-rail-scroll, .ide-crumb, .ide-view(s), .ide-presence. The
- * .ide-v2-* prefix is reserved for chrome the design has no counterpart for: the
+ * .ide-v2-* prefix is reserved for chrome that sheet has no rules for: the
  * compact toolbar, the terminal drawer, operational status, the connection dot,
  * the tree and rail toggles.
  *
@@ -64,10 +64,10 @@
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
 }
 
-/* A live-only guard: the design's mock repo path is short, real ones are URLs
-   that would push the view tabs off the bar. Scoped to the app's own surface
-   value — the prototype's is `ide`, the dashboard's is `code` — so it constrains
-   the cell it was written for and leaves the design's sizing alone. */
+/* A live-only guard: real repo paths are URLs that would push the view tabs
+   off the bar. Scoped to the dashboard's own surface value (`code`), so it
+   constrains the cell it was written for and leaves the surfaces.css sizing
+   alone. */
 .v2-app[data-surface="code"] .ide-top > .ide-repo {
   flex: 0 1 auto;
   min-width: 12rem;
@@ -796,7 +796,7 @@
 .ide-v2-drawer {
   flex: none;
   border-top: 1px solid var(--border-main);
-  /* prototype — well (deepest), not bg-page/bg-deep */
+  /* well (deepest), not bg-page/bg-deep */
   background: var(--bg-well);
   display: flex;
   flex-direction: column;

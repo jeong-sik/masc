@@ -379,7 +379,7 @@ export const goals = signal<Goal[]>([])
 export const goalIdentityObservation = signal<{ readonly goals: Goal[]; readonly observation: GoalIdentityObservation } | null>(null)
 export const goalsLoading = signal(false)
 
-// --- Fusion run registry state (RFC-0266 §7 Phase 4) ---
+// --- Fusion run registry state ---
 
 import type { FusionRunRecord, DashboardFusionRunsResponse } from './api/dashboard-fusion'
 
@@ -731,8 +731,8 @@ function bootstrapSliceError(slice: unknown): slice is DashboardBootstrapSliceEr
   return isRecord(slice) && typeof slice.error === 'string'
 }
 
-// RFC-0444 §2.3 row 4: a Goal slice may be the typed store failure envelope
-// (HTTP 200, no `error` line), which the slice-error guard above cannot see.
+// A Goal slice may be the typed store failure envelope (HTTP 200, no `error`
+// line), which the slice-error guard above cannot see.
 function firstGoalSourceUnavailable(slices: readonly unknown[]): GoalSourceUnavailable | null {
   for (const slice of slices) {
     const unavailable = goalSourceUnavailable(slice)
@@ -1962,7 +1962,7 @@ export async function refreshGoals(): Promise<void> {
   }
 }
 
-// --- Fusion board-sink + run registry fetchers (RFC-0266 §7 Phase 4) ---
+// --- Fusion board-sink + run registry fetchers ---
 
 // Fusion board posts are automation/sink evidence and must not inherit the
 // operator's current Board filters. A Board route set to "hide system" would

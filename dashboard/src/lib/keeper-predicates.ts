@@ -1,4 +1,4 @@
-// RFC-0135 PR-3 — primitive keeper predicates SSOT.
+// Primitive keeper predicates SSOT.
 //
 // Before this module, four call sites each implemented their own
 // OR-chain for "is this keeper paused?" (and similar):
@@ -8,9 +8,8 @@
 //   - tool-monitor/tool-monitor-reactivity.ts (paused | phase | pipeline_stage)
 //
 // Each chain looked at a *different subset of axes*, so two surfaces
-// could disagree on whether the same keeper was paused. RFC-0135
-// §1.5.1 Cluster C3 catalogued this drift; the typed
-// `KeeperOperationalState` SSOT (PR-1) handles full operational state
+// could disagree on whether the same keeper was paused. The typed
+// `KeeperOperationalState` SSOT handles full operational state
 // derivation, while this module provides the *primitive* booleans the
 // derivation function reuses and that non-typed call sites need.
 //

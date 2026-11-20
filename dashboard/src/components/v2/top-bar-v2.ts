@@ -1,5 +1,5 @@
-// MASC v2 — top bar (ported from prototype shell.jsx TopBar + AttentionIndicator).
-// Emits the prototype `.v2-top` DOM (crumb · live statchip · attention ·
+// MASC v2 — top bar and its attention indicator.
+// Emits the `.v2-top` DOM (crumb · live statchip · attention ·
 // schedule · Copilot). Wired to live signals: running count + attention
 // aggregate (Gate approvals, needs-attention keepers, crashed,
 // stale connectors). The Copilot button reuses the existing dock controller.
@@ -20,7 +20,7 @@ import {
   projectDashboardCompositeHealth,
   type DashboardCompositeHealthVerdict,
 } from '../../lib/dashboard-composite-health'
-// Operational/safety chrome the v2 prototype omits but operators rely on
+// Operational/safety chrome operators rely on
 // (connection state, transport telemetry, error console, auth,
 // build identity). Re-mounted into the v2 top bar so the reskin does not drop
 // live operational visibility (PR #22081 review P1). These are zero-prop

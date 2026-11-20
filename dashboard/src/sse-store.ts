@@ -253,7 +253,7 @@ const SIMPLE_ROUTES: Record<string, SimpleRoute> = {
   // Observatory activity telemetry
   activity:             { target: 'activity', debounceMs: SSE_ACTIVITY_DEBOUNCE_MS },
   // Fusion run registry — emitted by lib/fusion/fusion_sink.ml broadcast_run_status.
-  // This entry is how the run-status panel learns about a run change (RFC-0266 Phase 4).
+  // This entry is how the run-status panel learns about a run change.
   fusion_run_status:    { target: 'fusion' },
   internal_agent_runs_changed: { target: 'internalAgents', debounceMs: 0 },
 }

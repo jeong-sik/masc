@@ -175,9 +175,8 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
 // keepers mid-transition) or `attention` (which is reserved for failure/stall
 // signals).
 //
-// `Draining` is intentionally NOT in this set. The prototype `data.jsx:37`
-// treats `Draining` as `warn` (paired with `Paused` under the `pause` glyph),
-// and `fleet-tone.ts:85` lifts that to the workspace tone SSOT. Including
+// `Draining` is intentionally NOT in this set. The workspace tone SSOT
+// (`fleet-tone.ts:85`) treats `Draining` as `warn`, like `Paused`. Including
 // Draining here would force the runtime band to `transient` → `busy` rail,
 // disagreeing with the workspace tone (`warn` dot/pill) on the same keeper.
 // The correct non-offline display band for `Draining` is `paused`, reached
@@ -213,20 +212,12 @@ export function keeperPhaseForDisplay(
 }
 
 function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
-  // RFC-0135 §13 Goal-1 (audit B1, 2026-05-20): paused / offline / stuck
-  // routing collapsed into the typed sum SSOT. The two prior local
-  // checks
-  //   - `isKeeperPaused(keeper)` (PR-3 canonical predicate)
-  //   - `lifecycleKey === 'offline' | 'unbooted' | 'stopped'
-  //      || OFFLINE_PHASES.has(phaseKey)` (string-set lifecycle/phase
-  //      bypass)
-  // were strict subsets of `projection.opState.kind === 'paused'` and
-  // `projection.opState.kind === 'offline'`; routing through the runtime
-  // projection keeps monitoring aligned with detail live-truth.
+  // Paused / offline / stuck routing reads the typed sum SSOT through the
+  // runtime projection, which keeps monitoring aligned with detail live-truth.
   //
   // Pixel-perfect Fleet tone rail: autonomous transient FSM
   // Restarting gets its own band so the
-  // prototype's busy rail becomes live instead of collapsing into `active`.
+  // busy rail becomes live instead of collapsing into `active`.
   // Routed *before* attention so a restart blocker check doesn't
   // repaint the row as red — the operator's first scan question is "what is
   // currently moving", not "what is currently failing".
@@ -238,17 +229,16 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // "operator stop via Draining" (kind=running, terminal intent). Folding
   // Draining into the paused variant would silently flip action-panel
   // semantics (canPause/canResume), roster state-note labels (agent-roster
-  // line 179), and presence display (line 252) — none of which the
-  // prototype calls for. The band is a *presentation* layer derived from
-  // phase; the operational kind is an *action* layer derived from
-  // pause/resume/operator-intent. The two are deliberately orthogonal here.
+  // line 179), and presence display (line 252). The band is a *presentation*
+  // layer derived from phase; the operational kind is an *action* layer
+  // derived from pause/resume/operator-intent. The two are deliberately
+  // orthogonal here.
   //
-  // The prototype `data.jsx:37,49` pairs `Draining` with `Paused` under the
-  // `pause` glyph / `warn` rail — that pairing is a display choice, not an
-  // action-equivalence claim. `fleet-tone.ts:85` already lifts
-  // `PHASE_TONE.draining = 'warn'`; this branch makes the runtime band
-  // agree with the workspace tone without letting Draining override typed
-  // offline truth.
+  // Pairing `Draining` with `Paused` under the `pause` glyph / `warn` rail is
+  // a display choice, not an action-equivalence claim. `fleet-tone.ts:85`
+  // already lifts `PHASE_TONE.draining = 'warn'`; this branch makes the
+  // runtime band agree with the workspace tone without letting Draining
+  // override typed offline truth.
   if (projection.opState.kind === 'paused') return 'paused'
   if (projection.opState.kind === 'offline') return 'offline'
   if (projection.opState.phase === 'Draining') return 'paused'

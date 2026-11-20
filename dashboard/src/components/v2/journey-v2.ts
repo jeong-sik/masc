@@ -1,5 +1,5 @@
-// MASC v2 — 턴 워터폴 (ported from prototype journey.jsx JourneyPanel).
-// Emits the prototype `.jw-*` / `.ev-*` / `.lq-*` DOM so the vendored
+// MASC v2 — 턴 워터폴.
+// Emits the `.jw-*` / `.ev-*` / `.lq-*` DOM so the vendored
 // keeper-v2 skin (styles/keeper-v2/lanes.css) applies unchanged.
 //
 // Live wiring (mark, don't fake):
@@ -12,10 +12,9 @@
 //   · ev-* live strip — global `journal` SSE ring buffer (same source as
 //     agent-monitor/live-timeline.ts), filter chips + events/min.
 //
-// Not ported: the design's per-turn stimuli strip. No backend signal records
-// which payloads a past turn processed — run_state.stimulus_kinds is a
-// current-snapshot field only, so the sub-component is omitted rather than
-// faked.
+// No per-turn stimuli strip: no backend signal records which payloads a past
+// turn processed — run_state.stimulus_kinds is a current-snapshot field only,
+// so the sub-component is omitted rather than faked.
 
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
@@ -47,7 +46,7 @@ import {
   type JourneyWaterfallTurn,
 } from '../journey-waterfall-state'
 
-// --- prototype lookup tables (journey.jsx) ---
+// --- lookup tables ---
 
 const ENTRY_STATUS: Readonly<Record<string, { lbl: string; tone: string }>> = {
   success: { lbl: '성공', tone: 'ok' },
@@ -81,7 +80,7 @@ const EV_CHIPS: ReadonlyArray<readonly [EvFilter, string]> = [
 
 type EvFilter = 'all' | 'heartbeat' | 'message' | 'agent_core_turn' | 'tool' | 'error' | 'lifecycle'
 
-/** badge code → [raw badge, tone, filter group] (journey.jsx EV_BADGE). */
+/** badge code → [raw badge, tone, filter group]. */
 const EV_BADGE: Readonly<Record<string, readonly [string, string, string]>> = {
   keeper_heartbeat: ['HB', 'ok', 'heartbeat'],
   agent_core_turn: ['TURN', 'info', 'agent_core_turn'],
@@ -180,7 +179,7 @@ async function fetchWaterfallSources(
   }
 }
 
-// --- evidence strip (journey.jsx EvidenceStrip) ---
+// --- evidence strip ---
 
 function EvidenceStrip({
   ev,
@@ -243,13 +242,13 @@ function EvidenceStrip({
   `
 }
 
-// --- turn card (journey.jsx TurnCard) ---
+// --- turn card ---
 
 interface TimedEntry {
   entry: JourneyWaterfallEntry
-  /** ms since the turn's first entry (design `at`). */
+  /** ms since the turn's first entry. */
   at: number
-  /** entry.durationMs, null-able (design `dur`). */
+  /** entry.durationMs, null-able. */
   dur: number | null
 }
 
@@ -265,8 +264,7 @@ function turnSpan(timed: TimedEntry[]): number {
   return Math.max(1, ...timed.map(t => t.at + (t.dur || 0)))
 }
 
-/** Greedy lane packing so concurrent batches stack on separate rows
- * (journey.jsx TurnCard lanes). */
+/** Greedy lane packing so concurrent batches stack on separate rows. */
 function packLanes(tools: TimedEntry[]): TimedEntry[][] {
   const lanes: TimedEntry[][] = []
   for (const tool of tools) {
@@ -400,7 +398,7 @@ function TurnCard({
   `
 }
 
-// --- live event strip (journey.jsx LiveStrip) ---
+// --- live event strip ---
 
 const EV_BADGE_UNKNOWN: readonly [string, string, string] = ['SYS', 'dim', 'other']
 
@@ -421,7 +419,7 @@ function compactEventText(value: string, max = 120): string {
 
 function LiveStrip({ dev }: { dev: boolean }) {
   const [filter, setFilter] = useState<EvFilter>('all')
-  // journal ring buffer, newest first — the design's "최근 50건" window.
+  // journal ring buffer, newest first — the "최근 50건" window.
   const entries = journal.value.slice(0, 50)
   const rows = entries.filter(entry => entryMatchesFilter(entry, filter))
   // events/min reads Date.now() on each render so the 60s window keeps
@@ -467,7 +465,7 @@ function LiveStrip({ dev }: { dev: boolean }) {
   `
 }
 
-// --- panel (journey.jsx JourneyPanel) ---
+// --- panel ---
 
 function keeperHasTurnRecords(keeper: Keeper): boolean {
   const turns = keeper.turn_count ?? keeper.total_turns ?? null
@@ -508,9 +506,8 @@ export function JourneyV2Panel() {
   const state = resource.state.value
   const model = state.data?.model ?? null
   const summary = model?.summary ?? null
-  // openKey null = "not chosen yet" → default to the first card, like the
-  // design's initial `open='t0'`. Toggling that card shut stores NONE so the
-  // default does not re-open it.
+  // openKey null = "not chosen yet" → default to the first card. Toggling
+  // that card shut stores NONE so the default does not re-open it.
   const NONE_OPEN = '__none__'
   const open = openKey === NONE_OPEN ? null : openKey ?? model?.turns[0]?.key ?? null
 

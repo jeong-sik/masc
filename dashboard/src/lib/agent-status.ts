@@ -5,9 +5,6 @@
 // predicates.ts) and the agent-status SSOT as parallel typed
 // vocabularies; conversion between them happens at component boundaries
 // only.
-//
-// No callsite migration in this PR — module + tests only. Migration to
-// the predicates lands in RFC-0139 PR-1b/PR-1c.
 
 import type { Agent } from '../types/core'
 

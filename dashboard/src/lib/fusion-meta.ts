@@ -140,7 +140,7 @@ export function normalizeFusionJudge(value: unknown): FusionJudgeView | null {
 }
 
 // ---------------------------------------------------------------------------
-// RFC-0284 judge-node observation array (`judges`)
+// Judge-node observation array (`judges`)
 // ---------------------------------------------------------------------------
 
 // One judge execution node from `fusion_sink.ml judge_node_meta`. `role` is the
@@ -203,8 +203,8 @@ export function normalizeFusionJudgeNodes(value: unknown): FusionJudgeNode[] {
 }
 
 /**
- * Classify a judges array by its shape, never by a topology field (RFC-0284
- * §line 27: the frontend must not hardcode topology-name vocabulary). The
+ * Classify a judges array by its shape, never by a topology field (the
+ * frontend must not hardcode topology-name vocabulary). The
  * classification reads the per-node `role` — an observed fact carried in each
  * array element, not a topology label — which is exactly the array shape and is
  * more robust than a raw node count:

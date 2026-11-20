@@ -1,8 +1,7 @@
-// MASC v2 — schedule domain display constants (ported from prototype
-// schedule-data.jsx; mirrors lib/schedule Schedule_domain). Status/payload
-// → label + tone class + glyph for the `.sch-pill` / `.sch-kind`
-// prototype markup. Pure data; the live schedule surface maps its API records
-// onto these keys.
+// MASC v2 — schedule domain display constants (mirrors lib/schedule
+// Schedule_domain). Status/payload → label + tone class + glyph for the
+// `.sch-pill` / `.sch-kind` markup. Pure data; the live schedule surface maps
+// its API records onto these keys.
 
 import { UNKNOWN_STATUS_LABEL } from '../../lib/format-string'
 

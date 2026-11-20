@@ -52,7 +52,7 @@ type SurfaceSectionId =
   | 'journey' // Hidden execution-flow drill-down.
   | 'lane-addons'
   | 'lane-inventory'
-  | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐 (keeper-v2 lanes.jsx).
+  | 'lanes' // Lane · Queue — 실행 타임라인 + 대기 큐.
   | 'skills' // SKILL.md catalog keepers load at turn start, with usage.
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + Gate + inspector (Phase 7: connectors split out)
@@ -106,12 +106,10 @@ export interface DashboardSectionNavItem {
   hidden?: boolean
 }
 
-// Order mirrors the keeper-v2 prototype rail (shell.jsx, #29046): 개요 ·
-// Keepers · 레지스트리 · Monitor · 작업 · Gate · 예약 · 보드 · Fusion · 로그 ·
-// IDE · 커넥터 · 명령 · Lab · 설정. The prototype's rail is the design SSOT the
-// parity probes measure; the older 2026-07 standalone export predates its
-// 명령/Lab group. Settings stays pinned in the rail footer, so it renders
-// outside the main list even though it closes this set.
+// Order mirrors the v2 nav rail: 개요 · Keepers · 레지스트리 · Monitor · 작업 ·
+// Gate · 예약 · 보드 · Fusion · 로그 · IDE · 커넥터 · 명령 · Lab · 설정. Settings
+// stays pinned in the rail footer, so it renders outside the main list even
+// though it closes this set.
 export const V2_PRIMARY_SURFACE_IDS: ReadonlyArray<SurfaceId> = [
   'overview',
   'keepers',

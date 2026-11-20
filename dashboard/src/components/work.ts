@@ -151,8 +151,7 @@ function blockerNoteForTask(task: Task): string | null {
   return task.handoff_context?.failure_mode ?? null
 }
 
-// Keyed by Goal_phase values — the only lifecycle representation after
-// RFC-0352 slice 1 (the legacy status duplicate is gone).
+// Keyed by Goal_phase values — the only lifecycle representation.
 // Labels come from the goalPhaseLabel SSOT (goals/goal-helpers.ts).
 function goalPhaseText(phase: string): string {
   return goalPhaseLabel(phase)
@@ -804,8 +803,6 @@ function GoalCard({
 //   • "recent": tasks with status === 'done'.
 
 // Phase semantic class for the .wka-flag border tint.
-// Mirrors prototype goalMeta() / STATUS_COLS cls (data.jsx:340-350).
-// Using the existing GOAL_STATUS_CLASS mapping which covers these phases.
 type WkaFlagCls = 'ok' | 'warn' | 'bad' | 'volt'
 
 const GOAL_PHASE_FLAG_CLS: Record<string, WkaFlagCls> = {

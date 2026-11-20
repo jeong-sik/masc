@@ -704,16 +704,8 @@ let reading_log : Librarian_log.line -> Keeper_turn_log.Log_id.t = function
   | Started { turn_log; _ } | Committed { turn_log; _ } -> turn_log
 ;;
 
-(* What a restart passes, read from the disk when it is taken: the file's
-   first line names [observed], and the reader, run again from the tail,
-   finds that file is another turn log or that the stored offset is not one
-   of its lines. The reader reads the first line again, so each fault is
-   taken only when the file it saw is the one [observed] names: a file
-   replaced in between is refused, not recorded as what it is not. Any other
-   answer of the reader is no reason to start over. *)
-let restart_from place store ~observed =
-  let turns_path = turns_path place in
-  let is_observed id = Keeper_turn_log.Log_id.equal id observed in
+(* The file's first line, when it names [observed]. *)
+let observed_start turns_path ~observed =
   match Keeper_turn_log_store.read_start turns_path with
   | Error (Read_failed { path = (_ : string); detail = (_ : string) } | Moved_while_reading) ->
     Error Turn_log_unread
@@ -725,18 +717,36 @@ let restart_from place store ~observed =
     (* No [Log_started] line names [observed]. *)
     Error Not_replaced
   | Ok (Some (start : Keeper_turn_log_store.start)) ->
-    if not (is_observed start.id)
-    then Error Not_replaced
-    else (
-      let tail = Store.tail store in
-      match Librarian_unread.read ~turns_path ~until:(First_with_items 1) tail with
-      | Error (Fault (Turn_log_replaced { expected; observed = Some now })) when is_observed now ->
-        Ok (Librarian_log.Turn_log_replaced { from = expected; to_ = now }, start)
-      | Error (Fault (Position_lost { offset; length })) when is_observed (reading_log tail) ->
-        Ok (Librarian_log.Position_lost { offset; length }, start)
-      | Error (Fault (Turn_log_replaced _ | Position_lost _ | Line_unreadable _ | Content_unreadable _))
-      | Ok (_ : Librarian_unread.reading) -> Error Not_replaced
-      | Error (Unread { detail = (_ : string) }) -> Error Turn_log_unread)
+    if Keeper_turn_log.Log_id.equal start.id observed then Ok start else Error Not_replaced
+;;
+
+(* What a restart passes, read from the disk when it is taken: the file's
+   first line names [observed], and the reader, run again from the tail,
+   finds that file is another turn log or that the stored offset is not one
+   of its lines. Each fault is taken only when the file it is about is the
+   one [observed] names, so a file replaced in between is refused, not
+   recorded as what it is not. [Turn_log_replaced] carries the first line
+   the reader read. [Position_lost] comes from the reader's own open of the
+   file after that line, so the first line is read once more after it. Any
+   other answer of the reader is no reason to start over. *)
+let restart_from place store ~observed =
+  let turns_path = turns_path place in
+  let is_observed id = Keeper_turn_log.Log_id.equal id observed in
+  match observed_start turns_path ~observed with
+  | Error refusal -> Error refusal
+  | Ok start ->
+    let tail = Store.tail store in
+    (match Librarian_unread.read ~turns_path ~until:(First_with_items 1) tail with
+     | Error (Fault (Turn_log_replaced { expected; observed = Some now })) when is_observed now ->
+       Ok (Librarian_log.Turn_log_replaced { from = expected; to_ = now }, start)
+     | Error (Fault (Position_lost { offset; length })) when is_observed (reading_log tail) ->
+       Result.map
+         (fun (again : Keeper_turn_log_store.start) ->
+            Librarian_log.Position_lost { offset; length }, again)
+         (observed_start turns_path ~observed)
+     | Error (Fault (Turn_log_replaced _ | Position_lost _ | Line_unreadable _ | Content_unreadable _))
+     | Ok (_ : Librarian_unread.reading) -> Error Not_replaced
+     | Error (Unread { detail = (_ : string) }) -> Error Turn_log_unread)
 ;;
 
 (* §12.4: a refusal leaves the value as it is, so an ask that is out goes

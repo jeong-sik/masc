@@ -682,8 +682,8 @@ let base_for_provider_config (config : Provider_config.t) =
 ;;
 
 (* [preserve_thinking] decides reasoning across completed user turns on the
-   [Thinking_object_clear_thinking] wire (RFC-0488 §3.2). Only a declared
-   [Some false] removes it. On the two toggle wires whose request carries the
+   [Thinking_object_clear_thinking] wire. Only a declared [Some false]
+   removes it. On the two toggle wires whose request carries the
    member (none of the row's own, and [Thinking_object_only]) the request then
    also carries [clear_thinking = true], so the provider and the request
    agree. An undeclared row replays every assistant message as it was sent,

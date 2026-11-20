@@ -1,7 +1,7 @@
 (* Bytes hashed per digestif call. 64 KiB of SHA-256 took about 0.24 ms on
-   2026-10-27 (M3 Max, digestif 1.3.0, about 280 MB/s); 1 MiB took 3.7 ms
-   (RFC-0474 L2). OCaml code runs between slices, so a stop-the-world request
-   waits for one slice at most. *)
+   2026-10-27 (M3 Max, digestif 1.3.0, about 280 MB/s); 1 MiB took 3.7 ms.
+   OCaml code runs between slices, so a stop-the-world request waits for one
+   slice at most. *)
 let slice_bytes = 65_536
 
 (* Resolves [?off ?len] the way digestif does and refuses a range outside the

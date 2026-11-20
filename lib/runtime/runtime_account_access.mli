@@ -255,6 +255,14 @@ type refusal =
           the request is for. For an account asked for as one's own it
           comes after the check of the owner, so it says nothing of an
           account of another person. *)
+  | Home_asks_for_environment of Authz_types.Provider_account_id.t
+      (** The configuration of the home of this account of the person names
+          variables of the environment of the process
+          ({!Runtime_official_account.names_asked_by_the_home}). The
+          environment is the operator's and the client the person drives
+          writes the home, so no client starts on it. It comes after the
+          check of the home, so it says nothing of an account captured from
+          another home. *)
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable

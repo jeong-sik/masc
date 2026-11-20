@@ -148,6 +148,7 @@ type refusal =
   | Not_a_declared_home
   | Not_the_account_home of Authz_types.Provider_account_id.t
   | Not_the_account_key of Authz_types.Provider_account_id.t
+  | Home_asks_for_environment of Authz_types.Provider_account_id.t
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable
@@ -189,6 +190,11 @@ let refusal_to_string = function
   | Not_the_account_key provider_account_id ->
     Printf.sprintf
       "the account was not captured on the key the log gives %s"
+      (Authz_types.Provider_account_id.to_string provider_account_id)
+  | Home_asks_for_environment provider_account_id ->
+    Printf.sprintf
+      "the configuration of the home of %s names variables of the environment of the server, \
+       and no client starts on the home of a person that does"
       (Authz_types.Provider_account_id.to_string provider_account_id)
   | Account_unavailable { provider_account_id; reason } ->
     Printf.sprintf
@@ -247,6 +253,7 @@ type claim =
   { client : Layout.client
   ; declared_home : string option
   ; key_file : string option
+  ; asked_names : string list
   }
 
 (* The runtime root of the namespace the admission of [user_id] fixed. *)
@@ -274,6 +281,17 @@ let own_home ~runtime_root provider_account_id claim =
        if String.equal expected home
        then Ok ()
        else Error (Not_the_account_home provider_account_id))
+;;
+
+(* HIGH-RISK-UNREVIEWED: the environment of the process is the operator's.
+   The configuration of a Codex home names variables its client takes from
+   it ([Runtime_official_account.names_asked_by_the_home]), and the home of a
+   person is written by the client that person drives. So a client starts on
+   the home of a person only when the home asks for none. *)
+let asks_for_nothing provider_account_id claim =
+  match claim.asked_names with
+  | [] -> Ok ()
+  | (_ : string) :: (_ : string list) -> Error (Home_asks_for_environment provider_account_id)
 ;;
 
 (* HIGH-RISK-UNREVIEWED: the key a child is handed is the one the log gives
@@ -344,6 +362,7 @@ let multi_account ~zone ~base_path ~now request claim =
         let ( let* ) = Result.bind in
         let* runtime_root = person_root ~base_path state user_id in
         let* () = own_home ~runtime_root provider_account_id claim in
+        let* () = asks_for_nothing provider_account_id claim in
         (* What the log says of the account, as a turn reads it. The home
            is checked first, so the answer says nothing of an account
            captured from another home. *)
@@ -364,6 +383,7 @@ let multi_account ~zone ~base_path ~now request claim =
       let provider_account_id = turn.Authz_keeper_turn.provider_account_id in
       let* runtime_root = person_root ~base_path state owner in
       let* () = own_home ~runtime_root provider_account_id claim in
+      let* () = asks_for_nothing provider_account_id claim in
       own_key ~runtime_root state provider_account_id claim)
 ;;
 
@@ -447,6 +467,7 @@ let official_claim sealed =
        | Runtime_official_account.Inherited_directory
        | Runtime_official_account.Inherited_user_home -> None)
   ; key_file = Runtime_official_account.key_file sealed
+  ; asked_names = Runtime_official_account.names_asked_by_the_home sealed
   }
 ;;
 
@@ -457,7 +478,11 @@ let authorize request sealed =
 let authorize_muse request account =
   judge
     request
-    { client = Layout.Muse_home; declared_home = muse_account_home account; key_file = None }
+    { client = Layout.Muse_home
+    ; declared_home = muse_account_home account
+    ; key_file = None
+    ; asked_names = []
+    }
   |> Result.map (fun () -> account)
 ;;
 

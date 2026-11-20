@@ -86,7 +86,8 @@ let refusal_error (refusal : Runtime_account_access.refusal) =
   | Runtime_account_access.Turn_refused (Authz_keeper_turn.Denied _)
   | Runtime_account_access.Not_active _
   | Runtime_account_access.Not_the_account_home _
-  | Runtime_account_access.Not_the_account_key _ -> E.Turn_refused text
+  | Runtime_account_access.Not_the_account_key _
+  | Runtime_account_access.Home_asks_for_environment _ -> E.Turn_refused text
   | Runtime_account_access.Not_the_assigned_runtime _
   | Runtime_account_access.Turn_refused (Authz_keeper_turn.No_authorized_runtime _) ->
     (* The owner gave the Keeper another Runtime after the route read it. *)

@@ -16,6 +16,7 @@ type 'client t =
   ; source : source
   ; key_file : string option
   ; environment : string array
+  ; asked_names : string list
   }
 
 type 'client selection =
@@ -134,19 +135,20 @@ let capture (type owner) ~(client : owner client) ~declaration : (owner t, strin
   let inherited = Unix.environment () in
   let ( let* ) = Result.bind in
   let* source, home = selected_directory ~client ~declaration ~environment:inherited in
-  let* environment = match client with
+  let* environment, asked_names = match client with
     | Claude_code ->
       let names = Runtime_claude_environment_projection.inherited_names
         ~explicit_account:(Option.is_some declaration) in
       Ok (Runtime_claude_environment_projection.of_inherited
         ~account_home:(Option.map (fun _ -> home) declaration)
-        (claude_inherited ~names ~source ~home inherited))
+        (claude_inherited ~names ~source ~home inherited), [])
     | Codex ->
       let* configured = codex_configured_keys home in
       Ok (Runtime_codex_environment_projection.project
-        ~explicit_account:(Option.is_some declaration) ~home:(Some home) ~configured inherited) in
+        ~explicit_account:(Option.is_some declaration) ~home:(Some home) ~configured inherited,
+        configured) in
   let* () = validate_environment environment in
-  Ok {client; home; source; key_file = None; environment = Array.copy environment}
+  Ok {client; home; source; key_file = None; environment = Array.copy environment; asked_names}
 
 type key_capture_error =
   | Key_not_read of Runtime_api_key_file.read_error
@@ -175,7 +177,8 @@ let capture_on_key ~declaration ~key_file =
         [| Runtime_claude_environment_projection.api_key_variable
            ^ "=" ^ Runtime_api_key_file.value key |] in
     let* () = validate_environment environment in
-    Ok {client = Claude_code; home; source; key_file = Some key_file; environment} in
+    Ok {client = Claude_code; home; source; key_file = Some key_file; environment;
+        asked_names = []} in
   match Runtime_api_key_file.read key_file with
   | Error error -> Error (Key_not_read error)
   | Ok key -> Result.map_error (fun detail -> Key_not_captured detail) (captured key)
@@ -193,12 +196,14 @@ let home selected = selected.home
 let client selected = selected.client
 let source selected = selected.source
 let key_file selected = selected.key_file
+let names_asked_by_the_home selected = selected.asked_names
 let environment selected = Array.copy selected.environment
 let environment_value selected name = value name selected.environment
 let same left right =
   String.equal left.home right.home
   && left.source = right.source
   && Option.equal String.equal left.key_file right.key_file
+  && List.equal String.equal left.asked_names right.asked_names
   && List.equal String.equal
        (List.sort String.compare (Array.to_list left.environment))
        (List.sort String.compare (Array.to_list right.environment))

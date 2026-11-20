@@ -94,6 +94,17 @@ let claude_home ~runtime_root account =
   home
 ;;
 
+(* The Codex home of [account] under [runtime_root], as the layout spells it,
+   made. *)
+let codex_home ~runtime_root account =
+  let home =
+    get_text
+      (Layout.home ~runtime_root Layout.Codex_home ~account_id:(Provider_account_id.to_string account))
+  in
+  Fs_compat.mkdir_p home;
+  home
+;;
+
 (* One person joins through an invitation, links one account, makes a Runtime
    on it, and makes a Keeper on that Runtime, each through its writer. *)
 let person zone ~base_path ~name ~hex =
@@ -164,6 +175,18 @@ let refused label request captured expected =
     if not (expected refusal)
     then
       Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
+;;
+
+(* What the judgment says of a client on the Codex home [home], captured as
+   the home is now. *)
+let codex_judged request home =
+  match
+    Access.authorize
+      request
+      (Access.seal (get_text (Account.capture ~client:Account.Codex ~declaration:(Some home))))
+  with
+  | Ok (_ : Account.codex Access.authorized) -> Ok ()
+  | Error refusal -> Error refusal
 ;;
 
 (* The judgment of a turn before its account is read ({!Access.admit}). *)
@@ -423,6 +446,43 @@ let test_multi_account () =
             | _ -> false);
         (* A Keeper turn runs on the account of the Runtime its owner gave it. *)
         allowed "a turn of the person's Keeper" (turn alice ()) alice_account;
+        (* The Codex home of a person asks the environment of the server for
+           nothing: a client starts on it until its config.toml names a
+           variable. *)
+        let alice_codex = codex_home ~runtime_root:alice.runtime_root alice.account in
+        let on_the_codex_home =
+          [ "the person's own account", own alice (); "a turn of the person's Keeper", turn alice () ]
+        in
+        List.iter
+          (fun (label, request) ->
+             match codex_judged request alice_codex with
+             | Ok () -> ()
+             | Error refusal ->
+               Alcotest.failf
+                 "%s on a Codex home that names no variable: refused: %s"
+                 label
+                 (Access.refusal_to_string refusal))
+          on_the_codex_home;
+        Out_channel.with_open_bin (Filename.concat alice_codex "config.toml") (fun channel ->
+          Out_channel.output_string
+            channel
+            "[model_providers.made_up]\nname = \"made up\"\nenv_key = \"MADE_UP_NAME\"\n");
+        List.iter
+          (fun (label, request) ->
+             match codex_judged request alice_codex with
+             | Error (Access.Home_asks_for_environment account) ->
+               Alcotest.(check bool)
+                 (label ^ ": the refusal names the account of the home")
+                 true
+                 (Provider_account_id.equal account alice.account)
+             | Ok () ->
+               Alcotest.failf "%s on a Codex home that names a variable: authorized" label
+             | Error refusal ->
+               Alcotest.failf
+                 "%s on a Codex home that names a variable: refused for another reason: %s"
+                 label
+                 (Access.refusal_to_string refusal))
+          on_the_codex_home;
         allowed "a direct turn" (turn alice ~channel:Channel.Direct ()) alice_account;
         (* A turn that a personal access token asked for runs inside the scope
            of that token. *)

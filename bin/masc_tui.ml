@@ -21,13 +21,6 @@ let withdraw_resource_diagram_pending state =
    than this is reported rather than held. *)
 let gh_open_timeout_sec = 15.0
 
-(* [run_with_eio_context] owns the UI switch. An unavailable async context
-   must not turn an operator action into blocking HTTP on the key path. *)
-let with_async_switch state ~action start =
-  match Eio_context.get_switch_opt () with
-  | Some sw -> start sw
-  | None -> report_action state "error" (action ^ ": asynchronous runtime unavailable")
-
 module Code_results = Masc_tui_code_results
 module Context_results = Masc_tui_context_results
 module Fleet_results = Masc_tui_fleet_results
@@ -861,65 +854,6 @@ let finish_resource_share state request result =
       state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
     None
 
-(* A creation keeps its operation receipt even after its workspace withdraws.
-   Only the result handler may use current authority to refresh or open chat. *)
-let launch_keeper_creation state ~mailbox ~request ~declaration =
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  let check = Masc_tui_transport.Workspace_admission.admission_sequence state ~mailbox
-      ~authority:request.kcr_authority ~identity:(Some request.kcr_workspace)
-      ~host ~port in
-  let deliver status =
-    if publish_keeper_creation_status request ~observed_ns:(Mtime_clock.elapsed_ns ()) status then
-      Masc_tui_transport.Workspace_admission.enqueue mailbox (Keeper_msg (Keeper_creation_changed (request, status))) in
-  let interrupted sent detail =
-    if sent then Creation_unconfirmed detail else Creation_not_sent detail in
-  let sent = ref false in
-  let run () =
-    let outcome =
-      try match check () with
-      | Error refusal -> Creation_kept_back refusal
-      | Ok () ->
-        deliver Creation_posting;
-        sent := true;
-        (match Masc_tui_http.post_keeper_up ~host ~port
-            ~keeper_name:request.kcr_keeper
-            ~expected_workspace:(Some request.kcr_workspace)
-            ~declaration_json:declaration with
-         | Masc_tui_http.Post_refused detail -> Creation_refused detail
-         | Post_unanswered detail -> Creation_unconfirmed detail
-         | Post_answered receipt ->
-           (match Masc_cli_keeper_create.creation_receipt
-               ~keeper_name:request.kcr_keeper receipt with
-            | Masc_cli_keeper_create.Created _ -> Creation_created
-            | Reconfigured { name } -> Creation_unconfirmed
-                (name ^ ": server reported reconfiguration instead of creation; inspect its configuration")
-            | Refused detail | Unauthorized detail | Unreachable detail ->
-                Creation_unconfirmed detail
-            | Revision_conflict -> Creation_unconfirmed "Creation revision conflict"))
-      with
-      | Eio.Cancel.Cancelled _ as exn ->
-          deliver (Creation_finished (interrupted !sent "Creation request was interrupted"));
-          raise exn
-      | exn -> interrupted !sent (Printexc.to_string exn)
-    in
-    deliver (Creation_finished outcome)
-  in
-  Log.Transport.info "tui_keeper_creation keeper=%s started_ns=%Ld phase=checking"
-    request.kcr_keeper request.kcr_started_ns;
-  match Eio_context.get_switch_opt () with
-  | None ->
-      ignore (publish_keeper_creation_status request ~observed_ns:(Mtime_clock.elapsed_ns ())
-        (Creation_finished (Creation_not_sent "Eio switch is unavailable")))
-  | Some sw ->
-      (match Masc_tui_transport.Workspace_admission.fork_job state ~mailbox ~sw run with
-       | () -> ()
-       | exception (Eio.Cancel.Cancelled _ as exn) ->
-           deliver (Creation_finished (interrupted !sent "Creation worker was interrupted"));
-           raise exn
-       | exception exn ->
-           deliver (Creation_finished (interrupted !sent (Printexc.to_string exn))))
-
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
    this hook; the fetched <title>/og:* then replace that entry in the shared
@@ -1662,21 +1596,6 @@ let resume_fusion_after_observer_failure state ~mailbox =
    asked when the [m] form opens and drawn in it. Each open takes a new
    generation, so the answer for a form the operator already left is dropped
    ([Masc_tui_types.finish_memory_recall_standing_read]). *)
-let launch_memory_recall_standing_load state ~mailbox =
-  let generation = Masc_tui_types.begin_memory_recall_standing_read state in
-  if server_authority_ready state then begin
-    let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Memory_msg (Memory_recall_standing_loaded (generation, result))))
-      (fun () -> Masc_tui_loader.load_memory_recall_standing ~host ~port)
-  end
-  else
-    Masc_tui_types.stop_waiting_for_memory_recall_standing state
-      (ui_text state ~ko:"서버 신원을 아직 확인하지 못했어요" ~en:"Server identity not verified yet")
-
 (* The two requests behind the launch form. Neither is inflight-guarded by
    a field of its own: the form's state says which request it waits on, and
    the generation in the answer says whether it is still that one. *)
@@ -20344,13 +20263,6 @@ let main
     fun () -> admitted && not (Masc_tui_exit_signals.pending_signal exit_signals)
       && signal_generation = Masc_tui_exit_signals.generation exit_signals
       && terminal_generation = Masc_tui_shell.Terminal_session.resize_generation terminal_session in
-  (* A write the guard refuses here is not sent, and is said as kept back
-     under its own name (RFC §2). *)
-  let workspace_write_ready request =
-    match write_authority_refusal state state.workspace_authority with
-    | None -> true
-    | Some refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request refusal; false
-  in
   (* When the last wait for input ended: the pass's own work runs from here
      to the next wait. *)
   let pass_started_ns = ref (Mtime_clock.elapsed_ns ()) in
@@ -20869,499 +20781,6 @@ let main
      then the server's preview validation; only a preview that passes is
      written. A failed preview keeps the operator's text out of the file
      and puts the validator's words in the session log. *)
-  (* Connector bind/unbind: the highlighted transport owns the route. The
-     form edits only the route body, so its visible selection and mutation
-     target cannot disagree. *)
-  let handle_connector_form ?fixed_channel_id ~change ~connector
-      ~required_fields ~stem ~post () =
-    let form = Masc_tui_shell.Editor_notice.Connector_form change in
-    (* The form's other notices are still English; they move with the
-       connector screen's own sentences. *)
-    let action = Masc_tui_shell.Editor_notice.form_name ~ko:false form in
-    let authority = state.workspace_authority in
-    let identity = state.server_identity in
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-    match Masc_tui_editor.editor_command () with
-    | None -> Masc_tui_shell.Editor_notice.report_unset state ~form
-    | Some _ -> (
-      match
-        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
-      with
-      | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form abort
-      | Ok body -> (
-        match Yojson.Safe.from_string body with
-        | exception Yojson.Json_error e ->
-          report_action state "error" (action ^ ": body is not JSON: " ^ e)
-        | json -> (
-          let field key =
-            match json with
-            | `Assoc fields -> (
-                match List.assoc_opt key fields with
-                | Some (`String value) when String.trim value <> "" ->
-                    Some (String.trim value)
-                | _ -> None)
-            | _ -> None
-          in
-          match List.find_opt (fun key -> Option.is_none (field key)) required_fields with
-          | Some key ->
-              report_action state "error"
-                (Printf.sprintf "%s: %S is required" action key)
-          | None -> (
-              match fixed_channel_id with
-              | Some expected when field "channel_id" <> Some expected ->
-                  report_action state "error"
-                    (action ^ ": channel_id must remain the selected binding")
-              | Some _ | None -> (
-                  match Masc_tui_transport.Workspace_admission.admit_request state ~mailbox:async_messages
-                      ~authority ~identity ~host ~port () with
-                  | Error refusal ->
-                      (* Not sent: the kept-back notice, never the route's
-                         own answer (RFC §2). *)
-                      let request = match change with
-                        | Masc_tui_shell.Editor_notice.Channel_bind -> Kept_request.Connector_bind
-                        | Masc_tui_shell.Editor_notice.Channel_unbind -> Kept_request.Connector_unbind
-                        | Masc_tui_shell.Editor_notice.Channel_binding_edit -> Kept_request.Connector_binding_edit in
-                      Masc_tui_transport.Request_notice.report_withdrawn state ~request refusal
-                  | Ok () ->
-                  match post ~connector ~json with
-                  | Ok _ ->
-                      state.connector_unbind_armed <- None;
-                      report_action state "system"
-                        (action ^ ": ok (" ^ connector ^ ")");
-                      Masc_tui_surface_requests.Connector_volume_requests.reload_connectors_after_write state
-                        ~mailbox:async_messages
-                  | Error detail ->
-                      report_action state "error" (action ^ ": " ^ detail))))))
-  in
-  let selected_connector () =
-    Option.bind state.connectors (fun snapshot ->
-        List.nth_opt snapshot.cs_connectors state.connectors_cursor)
-  in
-  let selected_connector_binding (connector : Masc.Tui_decode_connectors.connector) =
-    List.nth_opt connector.cn_bindings state.connectors_binding_cursor
-  in
-  let handle_connector_bind () =
-    state.connector_unbind_armed <- None;
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    let keeper_name =
-      match state.view, selected_keeper state with
-      | Keepers Keeper_detail, Some keeper -> keeper.k_name
-      | (Overview, _) | (Acting, _) | (Metrics, _)
-      | (Keepers (Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls
-                  | Keeper_message | Keeper_runtime_pick), _)
-      | (Memory, _) | (Lanes, _)
-      | (Clients, _) | (Board, _) | (Approvals, _) | (Planning, _) | (Schedules, _)
-      | (Verification, _) | (Harness, _) | (Fusion, _) | (Repositories, _) | (Code, _)
-      | (Changes, _) | (Connectors, _) | (Runtime, _) | (Config, _) | (Resources, _) | (Tools, _)
-      | (System_logs, _) -> ""
-    in
-    match selected_connector () with
-    | None -> report_action state "error" "bind: select a transport first"
-    | Some selected ->
-        handle_connector_form ~change:Masc_tui_shell.Editor_notice.Channel_bind ~connector:selected.cn_id
-          ~required_fields:[ "channel_id"; "keeper_name" ]
-          ~stem:
-            (Yojson.Safe.pretty_to_string
-               (`Assoc
-                 [ "channel_id", `String ""
-                 ; "keeper_name", `String keeper_name
-                 ])
-             ^ "\n")
-          ~post:(fun ~connector ~json ->
-            Masc_tui_http.post_connector_bind ~host ~port ~connector
-              ~body_json:(Yojson.Safe.to_string json))
-          ()
-  in
-  let handle_connector_unbind () =
-    let authority = state.workspace_authority in
-    let identity = state.server_identity in
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    match selected_connector () with
-    | None -> report_action state "error" "unbind: select a transport first"
-    | Some selected ->
-        let submit ?fixed_channel_id channel_id =
-          handle_connector_form ?fixed_channel_id ~change:Masc_tui_shell.Editor_notice.Channel_unbind
-            ~connector:selected.cn_id ~required_fields:[ "channel_id" ]
-            ~stem:
-              (Yojson.Safe.pretty_to_string
-                 (`Assoc [ "channel_id", `String channel_id ])
-               ^ "\n")
-            ~post:(fun ~connector ~json ->
-              Masc_tui_http.post_connector_unbind ~host ~port ~connector
-                ~body_json:(Yojson.Safe.to_string json))
-            ()
-        in
-        (match state.view with
-         | Keepers Keeper_detail ->
-             (match selected_connector_binding selected with
-              | None ->
-                  report_action state "error"
-                    "unbind: select a binding with J/K"
-              | Some binding ->
-                  let exact =
-                    selected.cn_id, binding.cb_channel_id, binding.cb_keeper_name
-                  in
-                  (* The footer sentences this label goes into are English. *)
-                  let label =
-                    Masc_tui_connector_unbind.channel_label ~ko:false
-                      ~channel_id:binding.cb_channel_id
-                      ~channel_name:binding.cb_channel_name
-                  in
-                  if state.connector_unbind_armed = Some exact then begin
-                    state.connector_unbind_armed <- None;
-                    match Masc_tui_transport.Workspace_admission.admit_request state ~mailbox:async_messages
-                        ~authority ~identity ~host ~port () with
-                    | Error refusal ->
-                      Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Connector_unbind refusal
-                    | Ok () ->
-                    match
-                      Masc_tui_http.post_connector_unbind ~host ~port
-                        ~connector:selected.cn_id
-                        ~body_json:
-                          (Yojson.Safe.to_string
-                             (`Assoc
-                               [ "channel_id", `String binding.cb_channel_id
-                               ; "keeper_name", `String binding.cb_keeper_name
-                               ]))
-                    with
-                    | Ok _ ->
-                      report_action state "system"
-                        ("unbind: removed " ^ label);
-                      Masc_tui_surface_requests.Connector_volume_requests.reload_connectors_after_write state
-                        ~mailbox:async_messages
-                    | Error detail ->
-                      report_action state "error" ("unbind: " ^ detail)
-                  end else begin
-                    state.connector_unbind_armed <- Some exact;
-                    report_action state "system"
-                      (Printf.sprintf
-                         "unbind armed: press u again to remove %s → %s"
-                         label binding.cb_keeper_name)
-                  end)
-         | Keepers (Keeper_list | (Keeper_logs | (Keeper_calls | (Keeper_message | Keeper_runtime_pick))))
-         | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals | Planning
-         | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
-         | Runtime | Config | Resources | Tools | System_logs -> submit "")
-  in
-  (* [U] twice: every binding the selected Keeper holds, on every transport.
-     The first press arms, and the Channels tab names each channel while the
-     arm stands; the second sends exactly those, each
-     conditional on the Keeper still owning it. A snapshot that changed in
-     between re-arms with the new list instead of sending a list the operator
-     never read. *)
-  let handle_connector_unbind_all () =
-    state.connector_unbind_armed <- None;
-    (* The selected Keeper decides, and a second press confirms only an arm
-       for that same Keeper. *)
-    let keeper_name =
-      Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
-    in
-    match keeper_name, state.connectors with
-    | None, _ ->
-        state.connector_unbind_all_armed <- None;
-        report_action state "error" "unbind all: select a Keeper first"
-    | Some _, None ->
-        state.connector_unbind_all_armed <- None;
-        report_action state "error"
-          "unbind all: channel transports have not been read yet"
-    | Some keeper_name, Some snapshot -> (
-        let targets =
-          Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
-        in
-        let unreadable =
-          Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
-        in
-        match
-          Masc_tui_connector_unbind.next_press
-            ~named:state.connector_unbind_all_armed ~keeper_name targets
-        with
-        | Masc_tui_connector_unbind.Nothing_bound ->
-            state.connector_unbind_all_armed <- None;
-            report_action state "system"
-              (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
-                 ~unreadable)
-        | Masc_tui_connector_unbind.Sends targets ->
-            state.connector_unbind_all_armed <- None;
-            Masc_tui_surface_requests.Connector_volume_requests.launch_connector_unbind_all state ~mailbox:async_messages
-              ~keeper_name targets
-        | Masc_tui_connector_unbind.Asks targets ->
-            state.connector_unbind_all_armed <- Some (keeper_name, targets);
-            report_action state "system"
-              (Masc_tui_connector_unbind.arm_prompt ~keeper_name
-                 ~confirm_key:Masc_tui_connector_unbind.unbind_all_key
-                 ~unreadable targets))
-  in
-  (* The pause offer's one key. It sends only what the offer named, for the
-     Keeper it named: a roster refresh can move the selection, and a
-     snapshot read since can hold other bindings. A changed list is offered
-     again rather than sent unread. *)
-  let handle_connector_unbind_offer_accept
-      (offer : Masc_tui_connector_unbind.offer) =
-    state.connector_unbind_offer <- None;
-    state.connector_unbind_armed <- None;
-    state.connector_unbind_all_armed <- None;
-    let keeper_name = offer.offer_keeper in
-    let still_selected =
-      match selected_keeper state with
-      | Some (keeper : keeper) -> String.equal keeper.k_name keeper_name
-      | None -> false
-    in
-    match still_selected, state.connectors with
-    | false, (Some _ | None) ->
-        report_action state "error"
-          (Printf.sprintf
-             "unbind all: %s is no longer the selected Keeper; nothing removed"
-             (Terminal_text.single_line keeper_name))
-    | true, None ->
-        report_action state "error"
-          "unbind all: channel transports have not been read yet"
-    | true, Some snapshot -> (
-        let targets =
-          Masc_tui_connector_unbind.targets ~keeper_name snapshot.cs_connectors
-        in
-        let unreadable =
-          Masc_tui_connector_unbind.unreadable_transports snapshot.cs_connectors
-        in
-        match
-          Masc_tui_connector_unbind.next_press
-            ~named:(Some (offer.offer_keeper, offer.offer_targets))
-            ~keeper_name targets
-        with
-        | Masc_tui_connector_unbind.Nothing_bound ->
-            report_action state "system"
-              (Masc_tui_connector_unbind.nothing_to_unbind ~keeper_name
-                 ~unreadable)
-        | Masc_tui_connector_unbind.Sends targets ->
-            Masc_tui_surface_requests.Connector_volume_requests.launch_connector_unbind_all state ~mailbox:async_messages
-              ~keeper_name targets
-        | Masc_tui_connector_unbind.Asks targets ->
-            state.connector_unbind_offer <-
-              Some { offer with offer_targets = targets
-                              ; offered_at = state.frames_presented };
-            report_action state "system"
-              (Masc_tui_connector_unbind.offer_prompt ~keeper_name ~unreadable
-                 targets))
-  in
-  let handle_connector_edit () =
-    state.connector_unbind_armed <- None;
-    match selected_connector (), selected_keeper state with
-    | None, _ -> report_action state "error" "edit: select a transport first"
-    | _, None -> report_action state "error" "edit: select a Keeper first"
-    | Some connector, Some keeper ->
-        (match selected_connector_binding connector with
-         | None -> report_action state "error" "edit: select a binding with J/K"
-         | Some binding ->
-             handle_connector_form ~fixed_channel_id:binding.cb_channel_id
-               ~change:Masc_tui_shell.Editor_notice.Channel_binding_edit ~connector:connector.cn_id
-               ~required_fields:[ "channel_id"; "keeper_name" ]
-               ~stem:
-                 (Yojson.Safe.pretty_to_string
-                    (`Assoc
-                      [ "channel_id", `String binding.cb_channel_id
-                      ; "keeper_name", `String keeper.k_name
-                      ])
-                  ^ "\n")
-               ~post:(fun ~connector ~json ->
-                 Masc_tui_http.post_connector_bind ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-                   ~port:state.port ~connector
-                   ~body_json:(Yojson.Safe.to_string json))
-               ())
-  in
-  (* The verdict row under the Harness cursor, when the list has one. *)
-  let harness_cursor_verdict () =
-    Option.bind state.harness (fun snapshot ->
-        List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts state.harness_cursor)
-  in
-  (* Operator label on a harness verdict. [y] records the machine's side as
-     the human's; [n] records the opposite side and takes its reason through
-     $EDITOR, because the reason is the text the divergence teaches the judge
-     as a few-shot example. The machine's side is read off the closed
-     verdict serialization ("approve" | "approve:<reason>" | "reject:<reason>"). *)
-  let harness_machine_approved (row : Masc.Tui_decode.harness_verdict) =
-    (* [Task] and [Eval_calibration] live in the masc library, which the
-       executable reaches through [Masc] -- the mli spells them the library's
-       way because it sits inside it (#33116 built red on the bare names). *)
-    match Masc.Eval_calibration.verdict_of_string
-            row.Masc.Tui_decode.hv_verdict
-    with
-    | Some (Masc.Task.Anti_rationalization.Approve _) -> Some true
-    | Some (Masc.Task.Anti_rationalization.Reject _) -> Some false
-    | None -> None
-  in
-  let start_harness_label ~notes_hash ~(verdict : [ `Approve | `Reject ])
-      ~reason ~described =
-    if workspace_write_ready Kept_request.Harness_label then
-    let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox:async_messages in
-    let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    let run () =
-      let result =
-        match check () with
-        | Error refusal -> Error (Request_withdrawn refusal)
-        | Ok () ->
-          (match
-             Masc_tui_http.post_harness_label ~host ~port ~notes_hash ~verdict
-               ~reason
-           with
-           | Error err -> Error (Request_failed err)
-           | Ok _json -> Ok described)
-      in
-      enqueue_async async_messages (Harness_msg (Harness_label_done result))
-    in
-    with_async_switch state ~action:"Harness label" (fun sw ->
-      Masc_tui_transport.Workspace_admission.fork_job state ~mailbox:async_messages ~sw run)
-  in
-  let handle_harness_agree () =
-    match harness_cursor_verdict () with
-    | None -> ()
-    | Some row -> (
-        match harness_machine_approved row with
-        | None ->
-            report_action state "error"
-              "cannot label: unrecognized verdict format"
-        | Some approved ->
-            start_harness_label ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
-              ~verdict:(if approved then `Approve else `Reject)
-              ~reason:""
-              ~described:
-                (Printf.sprintf "labelled %s: the %s stands"
-                   row.Masc.Tui_decode.hv_task_id
-                   (if approved then "approve" else "reject")))
-  in
-  let handle_harness_overrule () =
-    if workspace_write_ready Kept_request.Harness_label then
-    match harness_cursor_verdict () with
-    | None -> ()
-    | Some row -> (
-        match Masc_tui_editor.editor_command () with
-        | None ->
-            Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Harness_overrule
-        | Some _ -> (
-            let stem = "{\n  \"reason\": \"\"\n}\n" in
-            match
-              Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-                ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
-            with
-            | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Harness_overrule abort
-            | Ok body -> (
-                match Yojson.Safe.from_string body with
-                | exception Yojson.Json_error e ->
-                    report_action state "error" ("overrule: body is not JSON: " ^ e)
-                | json ->
-                    let reason =
-                      match json with
-                      | `Assoc fields -> (
-                          match List.assoc_opt "reason" fields with
-                          | Some (`String s) -> String.trim s
-                          | Some _ | None -> "")
-                      | _ -> ""
-                    in
-                    if String.equal reason "" then
-                      report_action state "system"
-                        "overrule cancelled (empty reason)"
-                    else
-                      match harness_machine_approved row with
-                      | None ->
-                          report_action state "error"
-                            "cannot overrule: unrecognized verdict format"
-                      | Some approved ->
-                          start_harness_label
-                            ~notes_hash:row.Masc.Tui_decode.hv_notes_hash
-                            ~verdict:(if approved then `Reject else `Approve)
-                            ~reason
-                            ~described:
-                              (Printf.sprintf "overruled %s: %s was wrong"
-                                 row.Masc.Tui_decode.hv_task_id
-                                 (if approved then "the approve" else "the reject")))))
-  in
-  (* Verification reject: the reason is required, and $EDITOR is the form we
-     already have. The editor is the confirmation step -- a non-zero exit or
-     an empty reason leaves the task unjudged, so no arming gate sits in
-     front of it the way one sits in front of the single-key approve. *)
-  let handle_verification_reject () =
-    match Masc_tui_work_actions.Verification_actions.verification_cursor_row state with
-    | None -> ()
-    | Some row -> (
-        let task_id = row.Masc.Tui_decode.vr_task_id in
-        match Masc_tui_editor.editor_command () with
-        | None ->
-            Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Verification_rejection
-        | Some _ -> (
-            let stem = "{\n  \"reason\": \"\"\n}\n" in
-            match
-              Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-                ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
-            with
-            | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Verification_rejection abort
-            | Ok body -> (
-                match Yojson.Safe.from_string body with
-                | exception Yojson.Json_error e ->
-                    report_action state "error" ("reject: body is not JSON: " ^ e)
-                | json ->
-                    let reason =
-                      match json with
-                      | `Assoc fields -> (
-                          match List.assoc_opt "reason" fields with
-                          | Some (`String s) -> String.trim s
-                          | Some _ | None -> "")
-                      | _ -> ""
-                    in
-                    if String.equal reason "" then
-                      report_action state "system" "reject cancelled (empty reason)"
-                    else
-                      Masc_tui_work_actions.Verification_actions.start_verification_verdict state
-                        ~mailbox:async_messages ~task_id
-                        ~verification_id:row.Masc.Tui_decode.vr_request_id
-                        ~verdict:(`Reject reason))))
-  in
-  (* Task cancel: same form discipline as the verification reject — the
-     reason is required, $EDITOR is the form, and a non-zero exit or an
-     empty reason leaves the task untouched. The server's FSM decides
-     whether the task is still cancellable. *)
-  let handle_task_cancel () =
-    let authority = state.workspace_authority in
-    let identity = state.server_identity in
-    match task_detail_on_screen state with
-    | None -> ()
-    | Some (task : Masc_domain.task) -> (
-        let task_id = task.id in
-        match Masc_tui_editor.editor_command () with
-        | None ->
-            Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Task_cancellation
-        | Some _ -> (
-            let stem =
-              Yojson.Safe.pretty_to_string
-                (`Assoc [ ("reason", `String "") ])
-              ^ "\n"
-            in
-            match
-              Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-                ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
-            with
-            | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Task_cancellation abort
-            | Ok body -> (
-                match Yojson.Safe.from_string body with
-                | exception Yojson.Json_error e ->
-                    report_action state "error" ("cancel: body is not JSON: " ^ e)
-                | json ->
-                    let reason =
-                      match json with
-                      | `Assoc fields -> (
-                          match List.assoc_opt "reason" fields with
-                          | Some (`String s) -> String.trim s
-                          | Some _ | None -> "")
-                      | _ -> ""
-                    in
-                    if String.equal reason "" then
-                      report_action state "system" "cancel cancelled (empty reason)"
-                    else
-                      Masc_tui_work_requests.Tools_task_requests.launch_task_cancel state ~mailbox:async_messages
-                        ~authority ~identity ~task_id ~reason)))
-  in
   (* From a table row to the line that declares it. The header the source
      pane needs is [models.NAME], quoted when the name carries a dot -- the
      same two spellings the table parser accepts, kept together here so a
@@ -21401,512 +20820,6 @@ let main
         add_event state "info"
           (Printf.sprintf "runtime.toml at [models.%s] - e to edit"
              row.Masc_tui_model_runtime_table.model))
-  in
-  let handle_lane_document_editor () =
-    let module Addons = Masc_tui_lane_addons in
-    match state.lane_addons with
-    | None -> ()
-    | Some view ->
-        state.lane_addons <- Some {view with editor_ready=false};
-        (match Addons.selected_document view with
-         | None -> ()
-         | Some session ->
-             match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-               ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) ~suffix:".toml" session.text with
-             (* The lane add-ons pane is still English, so the reason in it is
-                too; the pane's own layer moves both. *)
-             | Error abort -> Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
-                 {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure (Masc_tui_editor.abort_detail ~ko:false abort ^ "; TOML draft retained")})
-             | Ok text -> Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
-                 Addons.put_document {view with error=None;scroll=0}
-                   {session with text;message=Some "Draft edited; s saves through the shared TOML owner"}))
-  in
-  let select_lane_document view =
-    let module Addons = Masc_tui_lane_addons in
-    let path = Addons.selected_source_path view in
-    match path with
-    | None -> state.lane_addons <- Some {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Choose a current declaration .toml file; directory issues have no file to edit"}
-    | Some path ->
-        (match Masc_tui_lane_declaration.find_for_path ~path view.documents with
-         | Ok (Some session) -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
-         | Ok None -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path)
-         | Error detail -> state.lane_addons <- Some {view with document_key=None;
-             editor_ready=false;scroll=0;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
-  in
-  (* Raw edits join the same owned operation as structured forms. Retain the
-     exact session before dispatch; neither a duplicate nor a refusal loses it. *)
-  let save_runtime_config_edit_session ~workspace session =
-    let module Edit = Masc_tui_runtime_config_edit in
-    Masc_tui_types.put_runtime_config_edit state ~workspace session;
-    let request =
-      if Masc_tui_types.runtime_config_workspace state <> Some workspace then
-        Error "Draft belongs to another workspace; save not sent"
-      else begin_runtime_form_save state ~draft:(Config_document_draft session)
-        ~started_ns:(Mtime_clock.elapsed_ns ()) in
-    match request with
-    | Ok request -> Masc_tui_surface_requests.Runtime_config_requests.launch_runtime_form_save state ~mailbox:async_messages request
-    | Error detail ->
-        Masc_tui_types.put_runtime_config_edit ~preserve_view:true state ~workspace
-          (Edit.failed detail session);
-        report_action state "error" (detail ^ "; draft retained")
-  in
-  (* The document an edit of runtime.toml starts from: the retained draft when
-     there is one, else the file as the pane last read it. *)
-  let runtime_config_working_session reading =
-    let module Edit = Masc_tui_runtime_config_edit in
-    match Masc_tui_types.runtime_config_edit_session state with
-    | Some edit -> edit.rce_session
-    | None -> Edit.open_document ?read_generation:state.runtime_config_observed_generation
-        { path = reading.rcv_path;
-        source_text = reading.rcv_source_text; source_revision = reading.rcv_metadata.source_revision }
-  in
-  let handle_runtime_config_edit () =
-    let module Edit = Masc_tui_runtime_config_edit in
-    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None ->
-        report_action state "error"
-          (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
-             ~en:"config identity not loaded yet; r to reload")
-    | Some workspace, Some reading ->
-      let session = runtime_config_working_session reading in
-      (match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) ~suffix:".toml" session.text with
-       | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Runtime_config_text abort
-       | Ok edited ->
-         if String.equal edited session.base.source_text then begin
-           release_runtime_document_recovery state ~workspace ~path:session.base.path;
-           Masc_tui_types.discard_runtime_config_edit state ~workspace ~path:session.base.path;
-           report_action state "system" "No changes from the draft base; no file was written."
-         end else save_runtime_config_edit_session ~workspace (Edit.edit edited session))
-  in
-  let handle_runtime_config_draft key =
-    let module Edit = Masc_tui_runtime_config_edit in
-    match Masc_tui_types.runtime_config_edit_session state with
-    | None -> report_action state "system" "No retained runtime.toml draft; e to edit."
-    | Some edit ->
-      let session = edit.rce_session in
-      (match key with
-       | "S" -> save_runtime_config_edit_session ~workspace:edit.rce_workspace session
-       | "X" ->
-         release_runtime_document_recovery state ~workspace:edit.rce_workspace ~path:session.base.path;
-         Masc_tui_types.discard_runtime_config_edit state ~workspace:edit.rce_workspace ~path:session.base.path;
-         Masc_tui_surface_requests.Runtime_config_requests.launch_runtime_config_load state ~mailbox:async_messages;
-         report_action state "system" "Local draft discarded; reading current runtime.toml."
-       | "C" ->
-         let view = match edit.rce_view with
-           | Config_edit_current _ -> Ok Config_edit_draft
-           | Config_edit_draft ->
-             (match session.current with
-              | None -> Error "Read the current file with r before comparing."
-              | Some current -> Ok (Config_edit_current
-                  (Masc_tui_types.runtime_config_source_rows ~path:current.path current.source_text))) in
-         (match view with
-          | Error message -> report_action state "error" message
-          | Ok view ->
-            state.runtime_config_edits <- List.map (fun candidate ->
-              if candidate.rce_workspace = edit.rce_workspace
-                 && String.equal candidate.rce_session.base.path session.base.path
-              then {candidate with rce_view = view} else candidate) state.runtime_config_edits;
-            state.config_scroll <- 0; state.runtime_config_cursor <- 0)
-       | "u" | "U" ->
-         let result = if key = "u" then Edit.adopt_current session else Edit.replace_with_current session in
-         (match result with
-          | Error message -> report_action state "error" message
-          | Ok session ->
-            release_runtime_document_recovery state ~workspace:edit.rce_workspace ~path:session.base.path;
-            Masc_tui_types.put_runtime_config_edit state ~workspace:edit.rce_workspace session;
-            state.config_scroll <- 0; state.runtime_config_cursor <- 0;
-            report_action state "system"
-              (if key = "u" then "Current revision adopted; draft text retained. S to save."
-               else "Draft replaced with the displayed current file. No file was written."))
-       | _ -> ())
-  in
-  (* [a] on the runtime.toml pane opens the account form on the file as the
-     pane shows it. *)
-  let handle_model_form_open mode () =
-    if recover_runtime_form_save state ~account:false then ()
-    else if Option.is_some state.runtime_model_jump then
-      report_action state "info" "Loading the selected binding; Esc cancels"
-    else match state.runtime_config_view, selected_config_model state with
-    | Some { rcv_metadata = metadata; _ }, Ok row ->
-      state.runtime_form_save_focus <- None;
-      state.runtime_model_form <- Some
-        (Masc_tui_model_form.create ~source_revision:metadata.source_revision mode row)
-    | None, _ -> report_action state "error" "config not loaded yet; r to reload"
-    | Some _, Error detail -> report_action state "error" detail
-  in
-  let handle_runtime_account_open () =
-    if recover_runtime_form_save state ~account:true then () else
-    match state.runtime_config_view with
-    | None -> report_action state "error" "config not loaded yet; r to reload"
-    | Some reading -> (
-      match
-        Masc_tui_runtime_account_form.open_on ~source_revision:reading.rcv_metadata.source_revision
-          ?home_dir:(Sys.getenv_opt "HOME") reading.rcv_source_text
-      with
-      | Ok form -> state.runtime_form_save_focus <- None; state.runtime_account_form <- Some form
-      | Error reason -> report_action state "error" reason)
-  in
-  (* [m] on the runtime.toml pane opens the recall form on the document an
-     edit would start from, so a hand edit that is not saved yet is neither
-     dropped nor written over. A save that is still out is not checked here:
-     [begin_runtime_form_save] refuses a second one with its own reason when
-     Enter reaches it, and the choice stays as a retained draft. *)
-  let handle_memory_recall_form_open () =
-    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None ->
-        report_action state "error"
-          (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
-             ~en:"config identity not loaded yet; r to reload")
-    | Some _, Some reading ->
-      let session = runtime_config_working_session reading in
-      let module Form = Masc_tui_memory_recall_form in
-      (* A paused Keeper, or one no fiber runs, is marked in the list. The
-         reading is the Keepers surface's own, so the two say the same. A
-         roster that could not be read says nothing: [Unknown] is not drawn. *)
-      let roster_entry (keeper : keeper) =
-        let reading = Masc_tui_types.keeper_reading state keeper in
-        { Form.name = keeper.k_name
-        ; presence =
-            (if reading.Masc_tui_keeper_control.paused then Form.Stopped
-             else
-               match Masc_tui_keeper_control.runs reading with
-               | Some true -> Form.Running
-               | Some false -> Form.Stopped
-               | None -> Form.Unknown) }
-      in
-      (match
-         Form.open_on ~ko:(state.ui_language = Lang_ko)
-           ~source_revision:session.base.source_revision
-           ~keepers:(List.map roster_entry state.keepers)
-           session.text
-       with
-       | Ok form ->
-         state.memory_recall_form <- Some form;
-         launch_memory_recall_standing_load state ~mailbox:async_messages
-       | Error reason -> report_action state "error" reason)
-  in
-  (* Enter on the recall form. Its text is the document it was opened on, so
-     it goes to the save only while the pane's document is still that one;
-     laid over another revision it would carry a choice made against a file
-     it is not. The save is the raw edit's: the same preview, revision check
-     and conflict handling as [e]. *)
-  let submit_memory_recall_form form =
-    let module Edit = Masc_tui_runtime_config_edit in
-    let ko = state.ui_language = Lang_ko in
-    let refuse reason =
-      state.memory_recall_form <- Some (Masc_tui_memory_recall_form.refused form reason) in
-    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None ->
-        refuse (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
-                  ~en:"config identity not loaded yet; r to reload")
-    | Some workspace, Some reading ->
-      let session = runtime_config_working_session reading in
-      if not (Option.equal String.equal (Masc_tui_memory_recall_form.source_revision form)
-                (Some session.base.source_revision))
-      then refuse
-        (ui_text state
-           ~ko:"runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 m 으로 다시 열어 주세요"
-           ~en:"runtime.toml changed after this form opened. Press Esc to close and m to reopen.")
-      else (
-        match Masc_tui_memory_recall_form.text_on ~ko form with
-        | Error form -> state.memory_recall_form <- Some form
-        | Ok text ->
-          state.memory_recall_form <- None;
-          if String.equal text session.text
-          then report_action state "system"
-            (ui_text state ~ko:"바뀐 게 없어요. 파일에 쓰지 않았어요" ~en:"No changes made; file was not written.")
-          else save_runtime_config_edit_session ~workspace (Edit.edit text session))
-  in
-  (* [x] on the runtime.toml pane: the exclusion form, opened on the file the
-     pane shows, with a stopped Keeper marked the way the recall form marks it. *)
-  let handle_typesafeai_exclusion_form_open () =
-    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None ->
-        report_action state "error"
-          (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
-             ~en:"config identity not loaded yet; r to reload")
-    | Some _, Some reading ->
-      let session = runtime_config_working_session reading in
-      let module Form = Masc_tui_typesafeai_exclusion_form in
-      let roster_entry (keeper : keeper) =
-        let reading = Masc_tui_types.keeper_reading state keeper in
-        { Form.name = keeper.k_name
-        ; presence =
-            (if reading.Masc_tui_keeper_control.paused then Form.Stopped
-             else
-               match Masc_tui_keeper_control.runs reading with
-               | Some true -> Form.Running
-               | Some false -> Form.Stopped
-               | None -> Form.Unknown) }
-      in
-      (match
-         Form.open_on ~ko:(state.ui_language = Lang_ko)
-           ~source_revision:session.base.source_revision
-           ~keepers:(List.map roster_entry state.keepers)
-           session.text
-       with
-       | Ok form -> state.typesafeai_exclusion_form <- Some form
-       | Error reason -> report_action state "error" reason)
-  in
-  (* Enter on the exclusion form, saved the way the recall form's choice is:
-     only while the pane still holds the document the form was opened on, and
-     through the raw edit's preview, revision check and conflict handling. *)
-  let submit_typesafeai_exclusion_form form =
-    let module Edit = Masc_tui_runtime_config_edit in
-    let module Form = Masc_tui_typesafeai_exclusion_form in
-    let ko = state.ui_language = Lang_ko in
-    let refuse reason = state.typesafeai_exclusion_form <- Some (Form.refused form reason) in
-    match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None ->
-        refuse (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
-                  ~en:"config identity not loaded yet; r to reload")
-    | Some workspace, Some reading ->
-      let session = runtime_config_working_session reading in
-      if not (Option.equal String.equal (Form.source_revision form)
-                (Some session.base.source_revision))
-      then refuse
-        (ui_text state
-           ~ko:"runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 x 로 다시 열어 주세요"
-           ~en:"runtime.toml changed after this form opened. Press Esc to close and x to reopen.")
-      else (
-        match Form.text_on ~ko form with
-        | Error form -> state.typesafeai_exclusion_form <- Some form
-        | Ok text ->
-          state.typesafeai_exclusion_form <- None;
-          if String.equal text session.text
-          then report_action state "system"
-            (ui_text state ~ko:"바뀐 게 없어요. 파일에 쓰지 않았어요" ~en:"No changes made; file was not written.")
-          else save_runtime_config_edit_session ~workspace (Edit.edit text session))
-  in
-  let open_runtime_model_settings runtime_id =
-    state.runtime_model_form <- None;
-    state.runtime_model_jump <- Some runtime_id;
-    state.runtime_config_jump_section <- None;
-    state.view <- Config;
-    state.config_pane <- Config_models;
-    state.config_scroll <- 0;
-    (* Read the authoritative source before choosing the exact account/binding;
-       a pending catalogue or stale cursor cannot select a neighbour's model. *)
-    Masc_tui_surface_requests.Runtime_config_requests.launch_runtime_config_load ~force:true state ~mailbox:async_messages
-  in
-  let open_selected_slot_config () =
-    match Masc_tui_types.slot_editor_cursor_row state with
-    | None -> show_lanes_action_error state "No slot is selected"
-    | Some { sr_kind = Masc_tui_types.Media_route_slot; _ } ->
-      show_lanes_action_error state "Select an exact lane provider slot"
-    | Some { sr_slot; sr_kind = (Masc_tui_types.Catalog_slot
-                             | Masc_tui_types.Official_client_slot); _ } ->
-      state.lanes_action_error <- None;
-      open_runtime_model_settings sr_slot
-  in
-  let selected_runtime_param () =
-    Option.bind state.runtime_params (fun rows ->
-      List.nth_opt rows state.runtime_params_cursor)
-  in
-  let write_runtime_param ~edit ~failure ~notice write =
-    if not state.runtime_params_loading then begin
-      state.runtime_params_loading <- true;
-      Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox:async_messages
-        ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Runtime_msg (Runtime_param_written (edit, result)))
-        (fun () -> write ()
-          |> Result.map (fun _ -> notice)
-          |> Result.map_error (fun detail -> Request_failed (failure ^ detail)))
-    end
-  in
-  let handle_runtime_param_edit_open ~advanced () =
-    match selected_runtime_param () with
-    | None ->
-      state.runtime_params_notice <- Some (Params_said (false, "No runtime parameter is selected"))
-    | Some row ->
-      state.runtime_param_edit <-
-        Some (Masc_tui_types.runtime_param_edit_of_row ~advanced row);
-      state.runtime_params_notice <- None
-  in
-  let handle_runtime_param_edit_apply () =
-    match state.runtime_param_edit with
-    | None -> ()
-    | Some edit -> (
-      match Masc_tui_types.runtime_param_edit_value edit with
-      | Error detail -> state.runtime_params_notice <- Some (Params_said (false, detail))
-      | Ok value ->
-        write_runtime_param ~edit:(Some edit) ~failure:"Set failed: "
-          ~notice:(Printf.sprintf "Set %s = %s" edit.rpe_key (Yojson.Safe.to_string value))
-          (fun () -> Masc_tui_http.post_runtime_param_set ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-            ~port:state.port ~key:edit.rpe_key ~value))
-  in
-  let handle_runtime_param_clear () =
-    match selected_runtime_param () with
-    | None ->
-      state.runtime_params_notice <- Some (Params_said (false, "No runtime parameter is selected"))
-    | Some row ->
-      let key = row.Tui_decode.rpr_key in
-      if not row.rpr_has_override then
-        state.runtime_params_notice <- Some (Params_said (true, key ^ " already uses its default"))
-      else
-        write_runtime_param ~edit:None ~failure:"Reset failed: "
-          ~notice:("Reset " ^ key ^ " to its default")
-          (fun () -> Masc_tui_http.post_runtime_param_clear ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-            ~port:state.port ~key)
-  in
-  let skill_template ~composition =
-    if composition then {|---
-name: ""
-description: ""
----
-
-```toml composition
-[[compositions]]
-name = ""
-execution = "inline"
-plan_json = "{\"nodes\":[],\"exports\":[],\"branch_failure_policy\":\"fail_fast\"}"
-```
-
-<!-- Set the same package name in frontmatter and composition. Author the
-nodes, JSON inputs, after dependencies and named outputs in plan_json.
-The server validates tool contracts; this empty plan cannot be published.
-Add instructions below the closed executable declaration. -->
-|}
-    else {|---
-name: ""
-description: ""
----
-
-<!-- Describe the procedure, expected result and verification here.
-Agents discover the name and description first; the body loads on demand.
-Use relative paths for resources already held in the package. -->
-|}
-  in
-  let edit_new_skill ~origin ~composition ~source_id ~check ~port () =
-    let same_draft draft = draft.scd_composition = composition
-      && String.equal draft.scd_source_id source_id && draft.scd_origin = origin in
-    let source_text = match List.find_opt same_draft state.tools_skill_create_drafts with
-      | Some draft -> draft.scd_source_text
-      | None -> skill_template ~composition in
-    match Masc_tui_editor.editor_command () with
-    | None -> Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Skill_creation
-    | Some _ ->
-      (match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session)
-          ~suffix:".md" source_text with
-       | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Skill_creation abort
-       | Ok source_text ->
-         state.tools_skill_create_drafts <-
-           { scd_source_id = source_id; scd_composition = composition; scd_source_text = source_text; scd_origin = origin }
-           :: List.filter (fun draft -> not (same_draft draft)) state.tools_skill_create_drafts;
-         (match Agent_core.Skill_document.decode_authored source_text with
-          | Agent_core.Skill_document.Unloadable diagnostics ->
-            report_action state "error" (Terminal_text.single_line
-              ("Draft retained: " ^ String.concat "; "
-                (List.map Agent_core.Skill_document.diagnostic_to_string diagnostics)))
-          | Agent_core.Skill_document.Loaded document ->
-            let package_id = document.name in
-            let report kind text = report_action state kind (Terminal_text.single_line text) in
-            (match check () with
-             | Error refusal ->
-               (* Not sent: the kept-back notice with the draft it kept
-                  (RFC §2). *)
-               Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Skill_creation
-                 (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept
-             | Ok () ->
-               match Masc_tui_http.post_skill_editor_create ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port
-                   ~composition ~source_id ~package_id ~source_text with
-               | Error (Masc_tui_http.Skill_write_refused detail) ->
-                 report "error" ("Create refused; draft retained: " ^ detail)
-               | Error (Skill_write_unconfirmed detail) ->
-                 report "error" ("Create effect not confirmed; draft retained. Read the package before retrying: " ^ detail)
-               | Ok receipt ->
-                 state.tools_skill_create_drafts <- List.filter (fun draft -> not (same_draft draft))
-                   state.tools_skill_create_drafts;
-                 (match receipt.sec_status with
-                  | Masc_tui_http.Skill_created_and_published ->
-                    report "system" (Printf.sprintf "created and published · %s/%s" source_id package_id)
-                  | Skill_created_but_shadowed winner ->
-                    report "error" (Printf.sprintf "shadowed by %s/%s: %s/%s was created; Keepers see the earlier source by name"
-                      (Skill_reference.identity_source_id_to_string winner)
-                      (Skill_reference.identity_package_id_to_string winner) source_id package_id)
-                  | Skill_created_but_unpublished reason ->
-                    report "error" (Printf.sprintf "%s/%s created but NOT published: %s" source_id package_id reason));
-                 Masc_tui_work_requests.Tools_task_requests.launch_tools_load state ~mailbox:async_messages)))
-  in
-  let handle_skill_create ~composition () =
-    let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox:async_messages in
-    let port = state.port in
-    let origin = workspace_input_identity_of_server state.server_identity in
-    match check () with
-    | Error refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_sources_read refusal
-    | Ok () ->
-    match Masc_tui_http.fetch_skill_editor_sources ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port with
-    | Error detail -> report_action state "error" ("Skill sources failed: " ^ detail)
-    | Ok [] -> report_action state "error" "No ready read-write Skill source"
-    | Ok [source_id] ->
-      (match origin with
-       | None ->
-         Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Skill_creation
-           workspace_identity_unconfirmed Nothing_kept
-       | Some origin -> edit_new_skill ~origin ~composition ~source_id ~check ~port ())
-    | Ok sources ->
-      state.search <- None;
-      tools_task_user_scroll state 0;
-      state.tools_skill_source_picker <- Some
-        { ssp_sources = sources; ssp_composition = composition; ssp_list = Masc_tui_pick_list.closed
-        ; ssp_authority = state.workspace_authority; ssp_identity = state.server_identity; ssp_port = port }
-  in
-  let handle_skill_source_key key =
-    tools_task_user_scroll state 0;
-    match state.tools_skill_source_picker with
-    | None -> ()
-    | Some picker ->
-      (match Masc_tui_pick_list.action_of_key ~close_keys:[] picker.ssp_list key with
-       | None -> ()
-       | Some action ->
-         let terminal_rows, _ = get_terminal_size () in
-         match Masc_tui_pick_list.apply ~page:(Masc_tui_render_tools.skill_source_picker_page state ~terminal_rows)
-             ~label:Fun.id picker.ssp_sources picker.ssp_list action with
-         | Masc_tui_pick_list.Stay list ->
-           state.tools_skill_source_picker <- Some { picker with ssp_list = list }
-         | Dismissed -> state.tools_skill_source_picker <- None
-         | Chosen source_id ->
-           state.tools_skill_source_picker <- None;
-           let check = Masc_tui_transport.Workspace_admission.admission_sequence state ~mailbox:async_messages
-             ~authority:picker.ssp_authority ~identity:picker.ssp_identity
-             ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port:picker.ssp_port in
-           match check () with
-           | Error refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_creation refusal
-           | Ok () ->
-             match workspace_input_identity_of_server picker.ssp_identity with
-             | None ->
-               Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Skill_creation
-                 workspace_identity_unconfirmed Nothing_kept
-             | Some origin -> edit_new_skill ~origin ~composition:picker.ssp_composition
-                 ~source_id ~check ~port:picker.ssp_port ())
-  in
-  let handle_async_request_lookup () =
-    let authority = state.workspace_authority and reading = state.workspace_read_authority in
-    let target = match state.tools_async_selection with
-      | Some (target : Masc.Tui_decode_async_request.target) ->
-        `Assoc ["submitted_by",`String target.submitted_by;"request_id",`String target.request_id;
-          "keeper_name",`String target.keeper_name]
-      | None -> `Assoc ["submitted_by",`String "";"request_id",`String "";"keeper_name",`String ""] in
-    match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session)
-        ~suffix:".json" (Yojson.Safe.pretty_to_string target ^ "\n") with
-    | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Original_request_lookup abort
-    | Ok text ->
-      let decoded = match Yojson.Safe.from_string text with
-        | json -> Masc.Tui_decode_async_request.target_of_json json
-        | exception Yojson.Json_error detail -> Error detail in
-      (match decoded with
-       | Error detail -> report_action state "error" detail
-       | Ok _ when authority <> state.workspace_authority || reading != state.workspace_read_authority ->
-         report_action state "error" "Original lookup workspace was withdrawn"
-       | Ok target ->
-         Masc_tui_work_requests.Tools_task_requests.close_tools_async_detail state;
-         if not (Option.equal Masc.Tui_decode_async_request.equal_target state.tools_async_selection (Some target)) then
-           state.tools_async_last_logical <- None;
-         state.tools_async_selection <- Some target;
-         state.tools_async_detail_open <- true;
-         Masc_tui_work_requests.Tools_task_requests.launch_tools_async_detail state ~mailbox:async_messages)
   in
   let handle_skill_diagram () =
     if not (tools_keeper_observation_confirmed state) then
@@ -21981,530 +20894,6 @@ Use relative paths for resources already held in the package. -->
           | Some composition_run_id -> launch_skill_evidence_read ~composition_run_id
               state ~mailbox:async_messages profile.esp_reference))
     | _ -> report_action state "system" "Load this Skill revision's retained evidence first"
-  in
-  (* Each of the read, the preview and the save asks the workspace guard
-     first; one it stops was not sent and is said as kept back (RFC §2). *)
-  let handle_skill_edit () =
-    let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox:async_messages in
-    match selected_tools_skill_profile state with
-    | None -> report_action state "error" "no published Skill selected"
-    | Some profile ->
-      let name = profile.Masc.Tui_decode_tools.esp_name in
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-      let port = state.port in
-      (match check () with
-       | Error refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_read refusal
-       | Ok () ->
-       match Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference with
-       | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
-       | Ok { Masc_tui_http.sel_access = Skill_source_config.Read_only; _ } ->
-         report_action state "error" (name ^ " belongs to a read-only Skill source")
-       | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
-         (match Masc_tui_editor.editor_command () with
-          | None ->
-            Masc_tui_shell.Editor_notice.report_unset state ~form:(Masc_tui_shell.Editor_notice.Skill_source name)
-          | Some _ ->
-            (match
-               Masc_tui_editor.roundtrip
-                 ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-                 ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session)
-                 ~suffix:".md"
-                 loaded.sel_source_text
-             with
-             | Error abort ->
-               Masc_tui_shell.Editor_notice.report_abort state ~form:(Masc_tui_shell.Editor_notice.Skill_source name) abort
-             | Ok edited when String.equal edited loaded.sel_source_text ->
-               report_action state "system" (name ^ " unchanged")
-             | Ok edited ->
-               (match check () with
-                | Error refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_preview refusal
-                | Ok () ->
-                match
-                  Masc_tui_http.post_skill_editor_preview ~host ~port
-                    ~reference:loaded.sel_reference ~source_text:edited
-                with
-                | Error detail ->
-                  report_action state "error" ("Skill preview rejected: " ^ detail)
-                | Ok _ ->
-                  (match check () with
-                   | Error refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_save refusal
-                   | Ok () ->
-                   match
-                     Masc_tui_http.post_skill_editor_save ~host ~port
-                       ~reference:loaded.sel_reference ~source_text:edited
-                   with
-                   | Error (Masc_tui_http.Skill_write_refused detail) ->
-                     report_action state "error" (Terminal_text.single_line ("Skill save refused: " ^ detail))
-                   | Error (Skill_write_unconfirmed detail) ->
-                     report_action state "error" (Terminal_text.single_line
-                       ("Skill save effect not confirmed; read the current package before retrying: " ^ detail))
-                   | Ok receipt ->
-                     (match receipt.ses_status with
-                      | Masc_tui_http.Skill_unchanged ->
-                        report_action state "system" (name ^ " unchanged")
-                      | Skill_saved_and_published ->
-                        let revision =
-                          Skill_reference.content_revision_to_string
-                            receipt.ses_reference.content_revision
-                        in
-                        let revision_short =
-                          String.sub revision 0 (min 12 (String.length revision))
-                        in
-                        report_action state "system"
-                          (Printf.sprintf
-                             "%s saved + published · %s%s"
-                             name
-                             revision_short
-                             (match receipt.ses_snapshot_revision with
-                              | None -> ""
-                              | Some snapshot ->
-                                " · snapshot "
-                                ^ String.sub snapshot 0 (min 12 (String.length snapshot))));
-                        Masc_tui_work_requests.Tools_task_requests.launch_tools_load state ~mailbox:async_messages
-                      | Skill_saved_but_unpublished reason ->
-                        report_action state "error"
-                          (name ^ " was saved but NOT published: " ^ reason)))))))
-  in
-  (* Deleting a Skill is the editor DELETE route, which no $EDITOR roundtrip
-     covers: the first [d] arms the selected identity, and only a second [d]
-     on the same row sends the delete. The read that precedes the write is
-     what the edit flow does too -- it yields the fresh exact reference the
-     server's revision CAS demands and refuses read-only sources up front. *)
-  let handle_skill_delete () =
-    let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox:async_messages in
-    match selected_tools_skill_profile state with
-    | None -> report_action state "error" "no published Skill selected"
-    | Some profile ->
-      let name = profile.Masc.Tui_decode_tools.esp_name in
-      let identity = profile.Masc.Tui_decode_tools.esp_reference.Skill_reference.identity in
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-      let port = state.port in
-      if state.tools_skill_delete_armed <> Some identity then begin
-        state.tools_skill_delete_armed <- Some identity;
-        report_action state "system"
-          (Printf.sprintf "press d again to delete %s" name)
-      end
-      else begin
-        state.tools_skill_delete_armed <- None;
-        (* The read and the delete each ask the workspace guard first; one it
-           stops was not sent and is said as kept back (RFC §2). *)
-        match check () with
-        | Error refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_read refusal
-        | Ok () ->
-        match Masc_tui_http.post_skill_editor_read ~host ~port profile.esp_reference with
-        | Error detail -> report_action state "error" ("Skill read failed: " ^ detail)
-        | Ok { Masc_tui_http.sel_access = Skill_source_config.Read_only; _ } ->
-          report_action state "error" (name ^ " belongs to a read-only Skill source")
-        | Ok ({ Masc_tui_http.sel_access = Skill_source_config.Read_write; _ } as loaded) ->
-          (match check () with
-           | Error refusal -> Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Skill_delete refusal
-           | Ok () ->
-           match Masc_tui_http.delete_skill_editor ~host ~port ~reference:loaded.sel_reference with
-           | Error (Masc_tui_http.Skill_write_refused detail) ->
-             report_action state "error" (Terminal_text.single_line ("Skill delete refused: " ^ detail))
-           | Error (Skill_write_unconfirmed detail) ->
-             report_action state "error" (Terminal_text.single_line
-               ("Skill delete effect not confirmed; read the current package before retrying: " ^ detail))
-           | Ok receipt ->
-             (match receipt.Masc_tui_http.sed_status with
-              | Masc_tui_http.Skill_deleted_and_published ->
-                report_action state "system"
-                  (Printf.sprintf "%s deleted + published · recovery %s"
-                     name receipt.Masc_tui_http.sed_recovery_id);
-                Masc_tui_work_requests.Tools_task_requests.launch_tools_load state ~mailbox:async_messages
-              | Masc_tui_http.Skill_deleted_but_unpublished reason ->
-                report_action state "error"
-                  (name ^ " was deleted but NOT published: " ^ reason)))
-      end
-  in
-  (* A prompt is edited the way runtime.toml is: $EDITOR over the text a turn
-     actually gets, and the server persists what comes back. The effective
-     text is the stem rather than the file's, because an overridden prompt is
-     what the keeper reads and editing the file underneath it would change
-     nothing the operator can see. *)
-  let selected_prompt () =
-    Masc_tui_surface_requests.Prompt_preset_requests.selected_prompt_for_state state
-  in
-  let handle_librarian_input_read () =
-    match selected_prompt () with
-    | None -> report_action state "error" "prompts not loaded yet; r to reload"
-    | Some row when not (String.equal row.Tui_decode.pr_category "librarian") ->
-        report_action state "error" "actual input is available on the Librarian prompt"
-    | Some row ->
-        Masc_tui_surface_requests.Prompt_preset_requests.launch_librarian_input_load state ~mailbox:async_messages
-          ~prompt_key:row.Tui_decode.pr_key
-  in
-  let handle_prompt_edit () =
-    if workspace_write_ready Kept_request.Prompt_save then
-    let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox:async_messages in
-    match selected_prompt () with
-    | None -> report_action state "error" "prompts not loaded yet; r to reload"
-    | Some row -> (
-      match Masc_tui_editor.editor_command () with
-      | None ->
-        Masc_tui_shell.Editor_notice.report_unset state ~form:(Masc_tui_shell.Editor_notice.Prompt_text row.Tui_decode.pr_key)
-      | Some _ -> (
-        match
-          Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-            ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) row.Tui_decode.pr_effective
-        with
-        | Error abort ->
-          Masc_tui_shell.Editor_notice.report_abort state ~form:(Masc_tui_shell.Editor_notice.Prompt_text row.Tui_decode.pr_key) abort
-        | Ok edited ->
-          (match check () with
-           | Error refusal ->
-             (* Not sent: the kept-back notice, with the prompt after it,
-                never a failed save (RFC §2). *)
-             report_action state "error"
-               (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-                  ~request:Kept_request.Prompt_save refusal
-                ^ " · " ^ row.Tui_decode.pr_key)
-           | Ok () ->
-           match
-             Masc_tui_http.post_prompt_override ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-               ~port:state.port ~key:row.Tui_decode.pr_key ~value:edited
-           with
-           | Ok _ ->
-             report_action state "system" (row.Tui_decode.pr_key ^ ": prompt saved");
-             Masc_tui_surface_requests.Prompt_preset_requests.launch_prompts_load state ~mailbox:async_messages
-           | Error detail ->
-             report_action state "error"
-               (row.Tui_decode.pr_key ^ ": save failed: " ^ detail))))
-  in
-  (* Clearing is not editing to empty: it returns the prompt to the file's
-     words, which is a different outcome from an override holding "". *)
-  let handle_prompt_clear () =
-    if workspace_write_ready Kept_request.Prompt_clear then
-    let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox:async_messages in
-    match selected_prompt () with
-    | None -> report_action state "error" "prompts not loaded yet; r to reload"
-    | Some row -> (
-      match row.Tui_decode.pr_source with
-      | Tui_decode.Prompt_file | Tui_decode.Prompt_missing ->
-        report_action state "system"
-          (row.Tui_decode.pr_key ^ ": no override to clear")
-      | Tui_decode.Prompt_override -> (
-        match check () with
-        | Error refusal ->
-          (* Not sent: the kept-back notice, with the prompt after it, never
-             a failed clear (RFC §2). *)
-          report_action state "error"
-            (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-               ~request:Kept_request.Prompt_clear refusal
-             ^ " · " ^ row.Tui_decode.pr_key)
-        | Ok () ->
-        match
-          Masc_tui_http.post_prompt_clear ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-            ~port:state.port ~key:row.Tui_decode.pr_key
-        with
-        | Ok _ ->
-          report_action state "system"
-            (row.Tui_decode.pr_key ^ ": override cleared");
-          Masc_tui_surface_requests.Prompt_preset_requests.launch_prompts_load state ~mailbox:async_messages
-        | Error detail ->
-          report_action state "error"
-            (row.Tui_decode.pr_key ^ ": clear failed: " ^ detail)))
-  in
-  let open_prepared_keeper_settings_editor request snapshot =
-    let key = Masc_tui_fetched.request_key request.ksr_request in
-    let keeper_name = key.ksk_keeper in
-    let observed = snapshot.kss_observed in
-    let format = request.ksr_format in
-    (* The same frozen snapshot supplies the editor text and guarded patch. *)
-    let rec edit_round ?prior_reason stem =
-      match
-        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) ~suffix:(Masc_tui_keeper_config.editor_suffix format) stem
-      with
-      | Error abort ->
-          Masc_tui_shell.Editor_notice.report_abort state ~form:(Masc_tui_shell.Editor_notice.Keeper_settings keeper_name) abort
-      | Ok edited ->
-        let reopen reason =
-          if String.equal edited stem then
-            report_action state "error"
-              (keeper_name ^ ": " ^ reason ^ " (settings unchanged)")
-          else
-            edit_round ~prior_reason:reason
-              (Masc_tui_keeper_config.reopened_stem ~format ?prior_reason ~reason edited)
-        in
-        (match Masc_tui_keeper_config.parse_editor ~format edited with
-         | Error detail -> reopen detail
-         | Ok edited_json -> apply_edit ~reopen ~edited edited_json)
-    and apply_edit ~reopen ~edited edited_json =
-        match
-          Masc_tui_keeper_config.patch_of_edit ~before:observed
-            ~after:edited_json
-        with
-        | Error (Masc_tui_keeper_config.Fix_in_editor reason) -> reopen reason
-        | Error (Masc_tui_keeper_config.Cannot_send detail) ->
-            report_action state "error" detail
-        | Ok (`Assoc []) ->
-            report_action state "system"
-              (keeper_name ^ ": no settings changed")
-        | Ok patch ->
-            let draft = {ksd_snapshot=snapshot;ksd_text=edited;ksd_patch=patch} in
-            (match begin_keeper_settings_save state ~origin:request ~draft
-               ~started_ns:(Mtime_clock.elapsed_ns ()) with
-             | Error detail -> report_action state "error" detail
-             | Ok request -> Masc_tui_surface_requests.Runtime_config_requests.launch_keeper_settings_save state ~mailbox:async_messages request)
-    in
-    let stem = match keeper_settings_recovery state key with
-      | None -> Ok snapshot.kss_stem
-      | Some retained -> Masc_tui_keeper_config.reopen_edit_on_current
-          ~format ~patch:retained.ksd_patch ~current:observed in
-    match stem with
-    | Ok stem -> edit_round stem
-    | Error refusal -> report_action state "error" (Masc_tui_keeper_config.edit_refusal_to_string refusal)
-  in
-  let handle_keeper_settings_edit ~format () =
-    match selected_keeper state with
-    | None -> report_action state "system" (Masc_tui_operator_actions.Keeper_actions.no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
-    | Some keeper ->
-      (match Masc_tui_editor.editor_command () with
-       | None -> Masc_tui_shell.Editor_notice.report_unset state ~form:(Masc_tui_shell.Editor_notice.Keeper_settings keeper.k_name)
-       | Some _ ->
-         match Masc_tui_types.begin_keeper_settings_editor state
-             ~format
-             ~available:(Masc_tui_surface_requests.Keeper_surface_requests.keeper_settings_editor_available state)
-             ~started_ns:(Mtime_clock.elapsed_ns ()) with
-         | Some request -> Masc_tui_surface_requests.Keeper_surface_requests.launch_keeper_settings_editor_read state ~mailbox:async_messages request
-         | None ->
-             (match (match Masc_tui_types.keeper_settings_editor_notice state with
-                | Some _ as notice -> notice | None -> keeper_settings_save_notice state) with
-              | Some notice -> report_action state "info" notice
-              | None -> report_action state "error" "Settings editor preparation requires current workspace and focus"))
-  in
-  let continue_keeper_settings_editor ~input_pending =
-    match Masc_tui_types.take_ready_keeper_settings_editor state
-        ~available:(Masc_tui_surface_requests.Keeper_surface_requests.keeper_settings_editor_available state) ~input_pending with
-    | None -> ()
-    | Some (request, snapshot) ->
-        Masc_tui_surface_requests.Keeper_surface_requests.log_keeper_settings_read ~phase:"editor_opened" request ~outcome:"snapshot_handed_off";
-        open_prepared_keeper_settings_editor request snapshot
-  in
-  (* An absolute shortcut owns its profile immediately. The worker reads a
-     fresh composite revision before preparing the single-field CAS patch. *)
-  let set_sandbox_backend ~profile =
-    match begin_keeper_sandbox_save state ~profile ~started_ns:(Mtime_clock.elapsed_ns ()) with
-    | Ok request -> Masc_tui_surface_requests.Runtime_config_requests.launch_keeper_settings_save state ~mailbox:async_messages request
-    | Error detail -> report_action state "error" detail
-  in
-  let handle_keeper_create ?(return_to = Keeper_chat_return_list) () =
-    if state.workspace_identity <> Workspace_identity_match then
-      Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Keeper_creation workspace_identity_unconfirmed Draft_kept
-    else
-    let return_to = Option.value state.keeper_creation_return ~default:return_to in
-    match Masc_tui_editor.editor_command () with
-    | None ->
-      Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Keeper_creation
-    | Some _ -> (
-      (* Which fields a creation cannot omit is [parse]'s business, so the
-         stem comes from there rather than being restated here. Restating it
-         is what went wrong: this form carried two fields across the whole
-         time [sandbox_profile] was required, and every keeper made through
-         it came back 400. *)
-      let stem =
-        match state.keeper_creation_draft with
-        | Some declaration -> declaration
-        | None -> Option.value (keeper_creation_recovery_draft state)
-            ~default:Masc.Keeper_turn_up_args.creation_stem
-      in
-      match
-        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
-      with
-      | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Keeper_creation abort
-      | Ok declaration -> (
-        state.keeper_creation_draft <- Some declaration;
-        state.keeper_creation_draft_owner <- ref ();
-        state.keeper_creation_return <- Some return_to;
-        let refuse detail =
-          goto_surface state ~mailbox:async_messages (Keepers Keeper_list);
-          report_action state "error"
-            (detail ^ " · press a to edit the retained declaration")
-        in
-        let declared_name =
-          match Yojson.Safe.from_string declaration with
-          | exception Yojson.Json_error detail ->
-              Error ("Keeper declaration is not JSON: " ^ detail)
-          | `Assoc fields -> (
-            match List.assoc_opt "name" fields with
-            | Some (`String value) ->
-                Keeper_id.Keeper_name.of_string (String.trim value)
-                |> Result.map Keeper_id.Keeper_name.to_string
-            | Some _ | None -> Error "declaration needs a non-empty name string")
-          | _ -> Error "Keeper declaration must be a JSON object"
-        in
-        match declared_name with
-        | Error detail -> refuse detail
-        | Ok declared_name ->
-          (* The editor suspends observations. Revalidate the captured server
-             in the worker; the mutation itself also carries that workspace. *)
-          if List.exists (fun (keeper : Tui_decode.keeper) ->
-               String.equal keeper.k_name declared_name) state.keepers then
-            refuse (declared_name ^ ": Keeper already exists; choose a new name.")
-          else
-          let create_declaration =
-            match Yojson.Safe.from_string declaration with
-            | `Assoc fields -> Yojson.Safe.to_string
-                (`Assoc (("create_only", `Bool true) :: List.remove_assoc "create_only" fields))
-            | json -> Yojson.Safe.to_string json
-          in
-          state.http_refresh_order <- Http_refresh_order.dispatch state.http_refresh_order;
-          match begin_keeper_creation state ~keeper_name:declared_name ~declaration ~return_to
-              ~started_ns:(Mtime_clock.elapsed_ns ()) with
-          | Error detail -> refuse detail
-          | Ok request ->
-              launch_keeper_creation state ~mailbox:async_messages ~request
-                ~declaration:create_declaration;
-              report_action state "system"
-                (declared_name ^ ": checking workspace before creation; declaration retained")))
-  in
-  (* Same shape as [handle_keeper_create]: several fields at once go through
-     $EDITOR rather than a modal the TUI does not otherwise have. The stem
-     names every field the route reads, with the two that have no sensible
-     default left empty. *)
-  let handle_repository_add () =
-    if workspace_write_ready Kept_request.Repository_add then
-    let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox:async_messages in
-    match Masc_tui_editor.editor_command () with
-    | None ->
-      Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Repository_addition
-    | Some _ -> (
-      let stem =
-        String.concat "\n"
-          [ "{";
-            "  \"name\": \"\",";
-            "  \"url\": \"\",";
-            "  \"default_branch\": \"main\",";
-            "  \"auto_sync\": false,";
-            "  \"sync_interval\": 300";
-            "}";
-            "" ]
-      in
-      match
-        Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-          ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
-      with
-      | Error abort -> Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Repository_addition abort
-      | Ok declaration -> (
-        let declared field =
-          match Yojson.Safe.from_string declaration with
-          | `Assoc fields -> (
-            match List.assoc_opt field fields with
-            | Some (`String value) -> String.trim value
-            | _ -> "")
-          | _ -> ""
-        in
-        let name = declared "name" in
-        let url = declared "url" in
-        if String.length name = 0 || String.length url = 0 then
-          report_action state "error"
-            "declaration needs non-empty \"name\" and \"url\" strings; nothing was added"
-        else
-          match check () with
-          | Error refusal ->
-            Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Repository_add refusal
-          | Ok () ->
-          match
-            Masc_tui_http.post_repository_add ~host ~port
-              ~declaration_json:declaration
-          with
-          | Ok _ ->
-            report_action state "system" (name ^ ": repository added");
-            (* The server announces the repositories dataset for this write
-               too; owing the read lets that announcement fold into the one
-               read the loop launches instead of starting a second. *)
-            owe_repositories_read state
-          | Error detail -> report_action state "error" detail))
-  in
-  let handle_schedule_form ~change ~stem ~post =
-    let form = Masc_tui_shell.Editor_notice.Schedule_form change in
-    let ko = state.ui_language = Lang_ko in
-    (* A refusal stays on the Schedules surface for the last-action window:
-       the action line alone is lost under a workspace warning. A new
-       attempt clears the previous one. *)
-    state.schedule_form_refusal <- None;
-    let authority = state.workspace_authority in
-    let identity = state.server_identity in
-    let report_form_refusal reason =
-      let refusal =
-        { sfr_change = change; sfr_reason = reason; sfr_at = Unix.gettimeofday ()
-        ; sfr_workspace = workspace_input_identity_of_server identity } in
-      state.schedule_form_refusal <- Some refusal;
-      report_action state "error" (schedule_form_refusal_text ~ko refusal)
-    in
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-    match Masc_tui_editor.editor_command () with
-    | None ->
-      report_form_refusal
-        (Schedule_form_editor (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset))
-    | Some _ ->
-      (match
-         Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
-           ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) stem
-       with
-       | Error Masc_tui_editor.Cancelled ->
-           Masc_tui_shell.Editor_notice.report_abort state ~form Masc_tui_editor.Cancelled
-       | Error (Masc_tui_editor.Editor_unavailable _ | Masc_tui_editor.Form_unreadable _ as abort) ->
-           report_form_refusal (Schedule_form_editor abort)
-       | Ok declaration ->
-         (match Yojson.Safe.from_string declaration with
-          | exception Yojson.Json_error message ->
-            report_form_refusal (Schedule_form_not_json message)
-          | `Assoc _ ->
-            (match
-               Masc_tui_transport.Workspace_admission.admit_request ~schedule_form_change:change state
-                 ~mailbox:async_messages ~authority ~identity ~host ~port ()
-             with
-             | Error refusal -> report_form_refusal (Schedule_form_request (Request_withdrawn refusal))
-             | Ok () ->
-             match post declaration with
-             | Error detail -> report_form_refusal (Schedule_form_request (Request_failed detail))
-             | Ok response ->
-               (match Masc.Tui_decode.tool_envelope_outcome response with
-                | Error detail -> report_form_refusal (Schedule_form_request (Request_failed detail))
-                | Ok message ->
-                  report_action state "system" (schedule_change_name ~ko change ^ ": " ^ message);
-                  state.schedule_cancel_armed <- None;
-                  state.schedule_cancel_error <- None;
-                  (* Owed, as after a cancel: the [schedule_store_invalidated] this
-                     write announces folds into the same read. *)
-                  owe_schedules_read state))
-          | _ -> report_form_refusal Schedule_form_not_an_object))
-  in
-  let handle_schedule_create () =
-    handle_schedule_form ~change:Schedule_create
-      ~stem:(Masc_tui_types.schedule_create_form_json ())
-      ~post:(fun body_json ->
-        Masc_tui_http.post_schedule_create_json ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-          ~port:state.port ~body_json)
-  in
-  let handle_schedule_modify () =
-    (* Every modify attempt retires the earlier refusal, including the ones
-       refused before an editor opens; their reason goes to the footer. *)
-    state.schedule_form_refusal <- None;
-    match Masc_tui_work_actions.Board_schedule_actions.selected_schedule_row state with
-    | None ->
-      let ko = state.ui_language = Lang_ko in
-      report_action state "error"
-        (schedule_change_name ~ko Schedule_modify ^ ": "
-         ^ (if ko then "커서 아래 일정 없음" else "no schedule under the cursor"))
-    (* The refusal was always real; it just arrived after the operator had
-       edited fifteen fields and saved. The status is on the screen before the
-       key is pressed, so the answer is available here. *)
-    | Some row ->
-      (match Masc_tui_types.schedule_update_form_json row with
-       | Error reason ->
-         let ko = state.ui_language = Lang_ko in
-         report_action state "error"
-           (schedule_change_name ~ko Schedule_modify ^ ": "
-            ^ schedule_modify_refusal_text ~ko reason)
-       | Ok stem ->
-         handle_schedule_form ~change:Schedule_modify ~stem
-           ~post:(fun body_json ->
-             Masc_tui_http.post_schedule_update ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-               ~port:state.port ~body_json))
   in
   let reconcile_chat_focus () =
     if state.view <> Overview && state.view <> Keepers Keeper_message then
@@ -22778,9 +21167,9 @@ Use relative paths for resources already held in the package. -->
              ~now:(Unix.gettimeofday ()) in
       (match state.lane_addons with
        | Some view when view.editor_ready && not editor_waits_for_frame
-                        && not (input_not_yet_admissible ()) -> handle_lane_document_editor ()
+                        && not (input_not_yet_admissible ()) -> Masc_tui_editor_forms.Runtime_config_forms.handle_lane_document_editor state ~terminal_session
        | Some _ | None -> ());
-      continue_keeper_settings_editor ~input_pending:(
+      Masc_tui_editor_forms.Skill_prompt_forms.continue_keeper_settings_editor state ~mailbox:async_messages ~terminal_session ~input_pending:(
         editor_waits_for_frame || input_not_yet_admissible () || Option.is_some interrupted_paste
         || input_reader_has_ready_input input_reader
         || input_holds_incomplete_sequence input_reader
@@ -24500,7 +22889,7 @@ Use relative paths for resources already held in the package. -->
        | Some (Mouse_left_release _ | Mouse_wheel _) when help_owns_input -> ()
        | Some (Mouse_wheel (direction, _, _))
          when state.view = Tools && Option.is_some state.tools_skill_source_picker ->
-           if not compact_viewport then handle_skill_source_key
+           if not compact_viewport then Masc_tui_editor_forms.Skill_prompt_forms.handle_skill_source_key state ~mailbox:async_messages ~terminal_session ~page:(Masc_tui_render_tools.skill_source_picker_page state ~terminal_rows:(fst (get_terminal_size ())))
              (match direction with
               | Masc.Tui_mouse_protocol.Wheel_up -> "wheel-up"
               | Wheel_down -> "wheel-down")
@@ -25658,7 +24047,7 @@ Use relative paths for resources already held in the package. -->
                | _ -> ()))
        | Some _ when composer_claimed -> ()
        | Some _ when Option.is_some accepted_unbind_offer ->
-           Option.iter handle_connector_unbind_offer_accept accepted_unbind_offer
+           Option.iter (Masc_tui_editor_forms.Connector_forms.handle_connector_unbind_offer_accept state ~mailbox:async_messages) accepted_unbind_offer
        (* The keeper-voice screen owns every key while it is open: it is drawn
           instead of the pane, so a key that fell through would act on a
           surface nobody is looking at. *)
@@ -25882,7 +24271,7 @@ Use relative paths for resources already held in the package. -->
                      | "E" ->
                          (match Addons.selected_document view with
                           | Some _ -> update {view with editor_ready=true}
-                          | None -> select_lane_document view)
+                          | None -> Masc_tui_editor_forms.Runtime_config_forms.select_lane_document state ~mailbox:async_messages view)
                      | " " when Option.is_some (Addons.selected_document view) ->
                          if view.loading then update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure
                            "Wait for the current document request; the draft is retained"}
@@ -26290,7 +24679,7 @@ Use relative paths for resources already held in the package. -->
             | Some form -> match Masc_tui_memory_recall_form.key form k with
               | Masc_tui_memory_recall_form.Editing form -> state.memory_recall_form <- Some form
               | Masc_tui_memory_recall_form.Cancelled -> state.memory_recall_form <- None
-              | Masc_tui_memory_recall_form.Submitted form -> submit_memory_recall_form form)
+              | Masc_tui_memory_recall_form.Submitted form -> Masc_tui_editor_forms.Runtime_config_forms.submit_memory_recall_form state ~mailbox:async_messages form)
        | Some k
          when text_input_target state ~compact_viewport = Some Text_typesafeai_exclusion_form ->
            (match state.typesafeai_exclusion_form with
@@ -26300,7 +24689,7 @@ Use relative paths for resources already held in the package. -->
                 state.typesafeai_exclusion_form <- Some form
               | Masc_tui_typesafeai_exclusion_form.Cancelled -> state.typesafeai_exclusion_form <- None
               | Masc_tui_typesafeai_exclusion_form.Submitted form ->
-                submit_typesafeai_exclusion_form form)
+                Masc_tui_editor_forms.Runtime_config_forms.submit_typesafeai_exclusion_form state ~mailbox:async_messages form)
        | Some k
          when text_input_target state ~compact_viewport = Some Text_runtime_account_form ->
            (match state.runtime_account_form with
@@ -26349,7 +24738,7 @@ Use relative paths for resources already held in the package. -->
                    Masc_tui_scroll.step_uncounted
                      ~delta:(if String.equal k "pagedown" then page else -page)
                      state.config_scroll
-               | "\r" | "\n" | "enter" -> handle_runtime_param_edit_apply ()
+               | "\r" | "\n" | "enter" -> Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_param_edit_apply state ~mailbox:async_messages
                | "\127" | "\b" | "backspace" ->
                  set (Masc_tui_types.runtime_param_edit_backspace edit);
                  state.runtime_params_notice <- None
@@ -27716,7 +26105,7 @@ Use relative paths for resources already held in the package. -->
                  | Masc_tui_pick_list.Dismissed ->
                      state.runtime_lane_pick <- None))
        | Some k when state.view = Tools && Option.is_some state.tools_skill_source_picker ->
-           if not compact_viewport then handle_skill_source_key k
+           if not compact_viewport then Masc_tui_editor_forms.Skill_prompt_forms.handle_skill_source_key state ~mailbox:async_messages ~terminal_session ~page:(Masc_tui_render_tools.skill_source_picker_page state ~terminal_rows:(fst (get_terminal_size ()))) k
            else if String.equal k "esc" then state.tools_skill_source_picker <- None
        | Some k
          when state.view = Tools
@@ -27832,7 +26221,7 @@ Use relative paths for resources already held in the package. -->
                | None -> ()
                | Some runtime ->
                  Masc_tui_types.dismiss_runtime_lane_notice state;
-                 open_runtime_model_settings runtime.Masc.Tui_decode.ro_id))
+                 Masc_tui_editor_forms.Runtime_config_forms.open_runtime_model_settings state ~mailbox:async_messages runtime.Masc.Tui_decode.ro_id))
        (* The route editor holds the Runtime reading's own keys while it is
           open: [a] adds to the route rather than naming a new lane, and
           x/J/K act on the route's entry under its cursor. *)
@@ -28452,7 +26841,7 @@ Use relative paths for resources already held in the package. -->
        | Some (("S" | "C" | "u" | "U" | "X") as key)
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open && Option.is_none state.runtime_account_form ->
-           handle_runtime_config_draft key
+           Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_config_draft state ~mailbox:async_messages key
        | Some ("v" | "V")
          when state.view = Config && state.config_pane = Config_runtime ->
            state.runtime_config_status_open <- not state.runtime_config_status_open;
@@ -28840,7 +27229,7 @@ Use relative paths for resources already held in the package. -->
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
            let count =
-             match selected_connector () with
+             match Masc_tui_editor_forms.Connector_forms.selected_connector state with
              | None -> 0
              | Some connector -> List.length connector.cn_bindings
            in
@@ -28973,7 +27362,7 @@ Use relative paths for resources already held in the package. -->
            && state.tools_async_detail_open && Option.is_some state.tools_async_task_source ->
            Masc_tui_work_requests.Tools_task_requests.launch_tools_async_task_history ~terminal_size:Masc_tui_render_prim.get_terminal_size ~older:true state ~mailbox:async_messages
        | Some ("o" | "O") when state.view = Tools && state.tools_pane = Tools_async ->
-           handle_async_request_lookup ()
+           Masc_tui_editor_forms.Skill_prompt_forms.handle_async_request_lookup state ~mailbox:async_messages ~terminal_session
        | Some ("t" | "T") when state.view = Tools && state.tools_pane = Tools_async && state.tools_async_detail_open ->
            Masc_tui_work_requests.Tools_task_requests.open_tools_async_source_task ~terminal_size:Masc_tui_render_prim.get_terminal_size state ~mailbox:async_messages
        | Some "\x0f" when state.view = Tools && state.tools_pane <> Tools_async -> handle_skill_diagram ()
@@ -29024,7 +27413,7 @@ Use relative paths for resources already held in the package. -->
              (Tools_catalog (Tools_catalog_volumes {catalog_scroll}));
            Masc_tui_surface_requests.Connector_volume_requests.press_tools_volume_gc state ~mailbox:async_messages
        | Some "d" when state.view = Tools && state.tools_pane <> Tools_async ->
-           handle_skill_delete ()
+           Masc_tui_editor_forms.Skill_prompt_forms.handle_skill_delete state ~mailbox:async_messages
        | Some "\r" when state.view = Tools && state.tools_pane = Tools_async ->
            if Option.is_some state.tools_async_selection then begin
              state.tools_async_detail_open <- true;
@@ -29039,7 +27428,7 @@ Use relative paths for resources already held in the package. -->
            Masc_tui_list_moves.read_skill_page state
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_params ->
-           handle_runtime_param_edit_open ~advanced:false ()
+           Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_param_edit_open state ~advanced:false
        | Some ("\r" | "\n" | "enter")
          when state.view = Config && state.config_pane = Config_themes ->
            (* Applying draws it: the palette's generation bumps and every
@@ -29069,8 +27458,8 @@ Use relative paths for resources already held in the package. -->
                 sync_theme_page state;
                 store_theme_choice (Some entry.Masc_tui_theme_choice.name)
               end)
-       | Some "c" when state.view = Tools -> handle_skill_create ~composition:false ()
-       | Some "C" when state.view = Tools -> handle_skill_create ~composition:true ()
+       | Some "c" when state.view = Tools -> Masc_tui_editor_forms.Skill_prompt_forms.handle_skill_create state ~mailbox:async_messages ~terminal_session ~composition:false
+       | Some "C" when state.view = Tools -> Masc_tui_editor_forms.Skill_prompt_forms.handle_skill_create state ~mailbox:async_messages ~terminal_session ~composition:true
        | Some "c"
          when state.view = Memory && state.memory_page = Memory_facts
               && Option.is_some state.memory_facts_keeper ->
@@ -29343,7 +27732,7 @@ Use relative paths for resources already held in the package. -->
                    | Shutdown_fenced_backlog {keepers=Some [(keeper,_)]; complete=true;_} ->
                        Masc_tui_collab_queue.Keeper_queue.open_keeper_queue_panel state ~mailbox:async_messages ~keeper_name:keeper
                    | Shutdown_fenced_backlog _ | Other_reported -> original ())
-            | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
+            | Home_create_keeper -> Masc_tui_editor_forms.Workspace_review_forms.handle_keeper_create ~return_to:Keeper_chat_return_home state ~mailbox:async_messages ~terminal_session ~show_keeper_list:(fun () -> goto_surface state ~mailbox:async_messages (Keepers Keeper_list))))
         | Some "s" when state.view = Overview ->
             (match open_music () with
              | Ok () -> ()
@@ -30133,11 +28522,11 @@ Use relative paths for resources already held in the package. -->
                launch_keeper_history_load state ~mailbox:async_messages ~keeper_name)
        (* Absolute Sandbox intent; the owned save supplies a fresh revision. *)
        | Some "d" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
-           set_sandbox_backend ~profile:Keeper_sandbox_config.Docker
+           Masc_tui_editor_forms.Skill_prompt_forms.set_sandbox_backend state ~mailbox:async_messages ~profile:Keeper_sandbox_config.Docker
        | Some "m" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
-           set_sandbox_backend ~profile:Keeper_sandbox_config.Micro_vm
+           Masc_tui_editor_forms.Skill_prompt_forms.set_sandbox_backend state ~mailbox:async_messages ~profile:Keeper_sandbox_config.Micro_vm
        | Some "s" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_sandbox ->
-           set_sandbox_backend ~profile:Keeper_sandbox_config.Remote_ssh
+           Masc_tui_editor_forms.Skill_prompt_forms.set_sandbox_backend state ~mailbox:async_messages ~profile:Keeper_sandbox_config.Remote_ssh
        | Some ("h" | "l")
          (* The width belongs to the screen that needs two panes, not to the
             key. Keeper detail below the threshold draws the detail alone and
@@ -30275,7 +28664,7 @@ Use relative paths for resources already held in the package. -->
        | Some "y" ->
            (match state.view with
             | Approvals -> answer_presented_approval Confirm
-            | Harness -> handle_harness_agree ()
+            | Harness -> Masc_tui_editor_forms.Workspace_review_forms.handle_harness_agree state ~mailbox:async_messages
             | Resources ->
                 (match Masc_tui_resource_document.copy_source state with
                  | Error detail -> report_action state "error" detail
@@ -30321,7 +28710,7 @@ Use relative paths for resources already held in the package. -->
        | Some (("n" | "N") as direction) ->
            (match state.view with
             | Approvals -> answer_presented_approval Deny
-            | Schedules -> handle_schedule_create ()
+            | Schedules -> Masc_tui_editor_forms.Workspace_review_forms.handle_schedule_create state ~mailbox:async_messages ~terminal_session
             (* The presets pane says [n] is its own key: a new preset from
                the live state, named in the line the pane opens. *)
             | Config when state.config_pane = Config_presets ->
@@ -31867,7 +30256,7 @@ Use relative paths for resources already held in the package. -->
                 (* The slot editor answers Enter over whichever screen it
                    covers, the overview or one Lane's inventory detail. *)
                 (match state.slot_editor, state.runtime_lane_pick, state.lanes_mode with
-                 | Some _, None, _ -> open_selected_slot_config ()
+                 | Some _, None, _ -> Masc_tui_editor_forms.Runtime_config_forms.open_selected_slot_config state ~mailbox:async_messages
                  | Some _, Some _, _ -> ()
                  | None, (None | Some _), Lanes_run_list lane ->
                      open_selected_lane_run state ~mailbox:async_messages ~lane
@@ -32411,11 +30800,11 @@ Use relative paths for resources already held in the package. -->
               && Option.is_some (task_detail_on_screen state) ->
            (* Cancel wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
-           handle_task_cancel ()
+           Masc_tui_editor_forms.Workspace_review_forms.handle_task_cancel state ~mailbox:async_messages ~terminal_session
        | Some "x" | Some "X" when state.view = Verification ->
            (* Reject wants a reason, and $EDITOR is the form we already
               have; the editor itself is the confirmation step. *)
-           handle_verification_reject ()
+           Masc_tui_editor_forms.Workspace_review_forms.handle_verification_reject state ~mailbox:async_messages ~terminal_session
        | Some (("<" | ">") as key)
          when state.view = Schedules && Option.is_none state.schedule_detail_id
               ->
@@ -32502,7 +30891,7 @@ Use relative paths for resources already held in the package. -->
               own. It was [n], which this surface cannot keep: Harness
               answers the row search, and [n] steps that search on every
               surface that does not bind the key itself. *)
-           handle_harness_overrule ()
+           Masc_tui_editor_forms.Workspace_review_forms.handle_harness_overrule state ~mailbox:async_messages ~terminal_session
        | Some (("l" | "L" | "o") as log_key)
          when (match log_key, state.view with
                | ("l" | "L"), Keepers (Keeper_list | Keeper_detail)
@@ -32533,7 +30922,7 @@ Use relative paths for resources already held in the package. -->
                unguarded on every surface that names a Keeper. *)
             goto_surface state ~mailbox:async_messages Clients
        | Some "c" when state.view = Config && state.config_pane = Config_models ->
-           handle_model_form_open Masc_tui_model_form.Copy ()
+           Masc_tui_editor_forms.Runtime_config_forms.handle_model_form_open state Masc_tui_model_form.Copy
        | Some "m" when state.view = Config && state.config_pane = Config_models ->
            handle_config_models_open_source ()
        (* [m] on the runtime.toml pane: memory recall. Above the chat arm below,
@@ -32542,14 +30931,14 @@ Use relative paths for resources already held in the package. -->
        | Some ("m" | "M")
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open ->
-           handle_memory_recall_form_open ()
+           Masc_tui_editor_forms.Runtime_config_forms.handle_memory_recall_form_open state ~mailbox:async_messages
        (* [x] on the runtime.toml pane: the [typesafeai] exclusion list, under
           the same condition as [m]. Lower case only: [X] on this pane is the
           draft's discard, read by the draft keys above. *)
        | Some "x"
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open ->
-           handle_typesafeai_exclusion_form_open ()
+           Masc_tui_editor_forms.Runtime_config_forms.handle_typesafeai_exclusion_form_open state
 | Some "m" | Some "M" | Some "c" | Some "C" ->
            (* Chat from every row that names a Keeper. Standalone Lanes carry
               no Keeper identity; Keeper chat is owned by the Keepers surface.
@@ -32609,7 +30998,7 @@ Use relative paths for resources already held in the package. -->
             | System_logs -> ())
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_params ->
-           handle_runtime_param_clear ()
+           Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_param_clear state ~mailbox:async_messages
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_themes ->
            (* Back to whatever the terminal reports. Persist the explicit
@@ -32629,7 +31018,7 @@ Use relative paths for resources already held in the package. -->
                (ui_text state
                   ~ko:"런타임 프롬프트 자산에는 기록된 모델 입력이 없습니다"
                   ~en:"Runtime prompt assets have no recorded model input")
-           else handle_librarian_input_read ()
+           else Masc_tui_editor_forms.Skill_prompt_forms.handle_librarian_input_read state ~mailbox:async_messages
        | Some "p" | Some "P"
          when state.view = Runtime
               && Option.is_none state.runtime_detail_target ->
@@ -32789,16 +31178,16 @@ Use relative paths for resources already held in the package. -->
             -> ())
        | Some "E"
          when state.view = Config && state.config_pane = Config_params ->
-           handle_runtime_param_edit_open ~advanced:true ()
+           Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_param_edit_open state ~advanced:true
        | Some "e" | Some "E"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
-           handle_connector_edit ()
+           Masc_tui_editor_forms.Connector_forms.handle_connector_edit state ~mailbox:async_messages ~terminal_session
        | Some "e"
          when state.view = Runtime && Option.is_some state.runtime_detail_target ->
            (match state.runtime_detail_target with
             | Some (Runtime_lane_candidate { runtime_id; _ }
-                  | Runtime_catalog_entry { runtime_id }) -> open_runtime_model_settings runtime_id
+                  | Runtime_catalog_entry { runtime_id }) -> Masc_tui_editor_forms.Runtime_config_forms.open_runtime_model_settings state ~mailbox:async_messages runtime_id
             | Some Runtime_routes -> report_action state "info" "Select a runtime to edit its model settings"
             | None -> ())
        | Some "d"
@@ -32806,7 +31195,7 @@ Use relative paths for resources already held in the package. -->
            (* The editor answers over the overview or the inventory detail it
               covers. The picker owns focus while it is open. *)
            if Option.is_none state.runtime_lane_pick then
-             open_selected_slot_config ()
+             Masc_tui_editor_forms.Runtime_config_forms.open_selected_slot_config state ~mailbox:async_messages
        | Some (("e" | "E") as edit_key) ->
            (* The terminal roundtrip stays here; preparation and the guarded
               save run as owned asynchronous operations around it. *)
@@ -32816,7 +31205,7 @@ Use relative paths for resources already held in the package. -->
             | Keepers (Keeper_list | Keeper_detail) ->
                 let format = if String.equal edit_key "e"
                   then Masc_tui_keeper_config.Toml else Masc_tui_keeper_config.Json in
-                handle_keeper_settings_edit ~format ()
+                Masc_tui_editor_forms.Skill_prompt_forms.handle_keeper_settings_edit state ~mailbox:async_messages ~format
             | Lanes ->
                 (* [missing] is the note for a table runtime.toml does not
                    have yet. *)
@@ -32900,12 +31289,12 @@ Use relative paths for resources already held in the package. -->
                    then
                      report_action state "system"
                        (ui_text state ~ko:"런타임 프롬프트 자산은 읽기 전용입니다" ~en:"Runtime prompt assets are read-only")
-                   else handle_prompt_edit ()
-                 | Config_runtime -> handle_runtime_config_edit ()
+                   else Masc_tui_editor_forms.Skill_prompt_forms.handle_prompt_edit state ~mailbox:async_messages ~terminal_session
+                 | Config_runtime -> Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_config_edit state ~mailbox:async_messages ~terminal_session
                  | Config_params ->
-                   handle_runtime_param_edit_open ~advanced:false ()
+                   Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_param_edit_open state ~advanced:false
                  (* Structured fields still use the same preview/commit writer. *)
-                 | Config_models -> handle_model_form_open Masc_tui_model_form.Edit ()
+                 | Config_models -> Masc_tui_editor_forms.Runtime_config_forms.handle_model_form_open state Masc_tui_model_form.Edit
                  (* The preset pane writes through n and u, never $EDITOR. *)
                  | Config_presets | Config_themes -> ()
                  (* The voice pane was a reading. It now opens the wizard,
@@ -32950,8 +31339,8 @@ Use relative paths for resources already held in the package. -->
                                    ~provider:Voice_wizard.Elevenlabs ~revision)
                        | (Some _ | None), _ -> ())
                     | Some _ | None -> ()))
-            | Tools -> handle_skill_edit ()
-            | Schedules -> handle_schedule_modify ()
+            | Tools -> Masc_tui_editor_forms.Skill_prompt_forms.handle_skill_edit state ~mailbox:async_messages ~terminal_session
+            | Schedules -> Masc_tui_editor_forms.Workspace_review_forms.handle_schedule_modify state ~mailbox:async_messages ~terminal_session
             | Approvals ->
                 state.palette_open <- true;
                 state.palette_mode <- Palette_jump;
@@ -32967,14 +31356,14 @@ Use relative paths for resources already held in the package. -->
            then
              report_action state "system"
                (ui_text state ~ko:"런타임 프롬프트 자산은 읽기 전용입니다" ~en:"Runtime prompt assets are read-only")
-           else handle_prompt_clear ()
+           else Masc_tui_editor_forms.Skill_prompt_forms.handle_prompt_clear state ~mailbox:async_messages
        (* [a] on the runtime.toml pane: one more account of a Claude Code,
           Codex, Antigravity or Muse provider the file already declares. The status
           reading hides the source, so it does not open there. *)
        | Some ("a" | "A")
          when state.view = Config && state.config_pane = Config_runtime
               && not state.runtime_config_status_open ->
-           handle_runtime_account_open ()
+           Masc_tui_editor_forms.Runtime_config_forms.handle_runtime_account_open state
        (* [a] on the voice pane: the keepers this workspace has on one axis and
           the voices the section's first endpoint answers to on the other. The
           revision the pane read is what the save carries, so a screen opened
@@ -33046,25 +31435,25 @@ Use relative paths for resources already held in the package. -->
          when state.view = Connectors
                || (state.view = Keepers Keeper_detail
                    && state.detail_tab = Detail_channels) ->
-            handle_connector_bind ()
+            Masc_tui_editor_forms.Connector_forms.handle_connector_bind state ~mailbox:async_messages ~terminal_session
        | Some "u"
          when state.view = Connectors
               || (state.view = Keepers Keeper_detail
                   && state.detail_tab = Detail_channels) ->
-           handle_connector_unbind ()
+           Masc_tui_editor_forms.Connector_forms.handle_connector_unbind state ~mailbox:async_messages ~terminal_session
        | Some "U"
          when state.view = Keepers Keeper_detail
               && state.detail_tab = Detail_channels ->
-           handle_connector_unbind_all ()
+           Masc_tui_editor_forms.Connector_forms.handle_connector_unbind_all state ~mailbox:async_messages
        | Some "a" | Some "A" ->
            (match state.view with
             | Code -> ()
             | Keepers Keeper_runtime_pick -> ()
-            | Keepers (Keeper_list | Keeper_detail) -> handle_keeper_create ()
+            | Keepers (Keeper_list | Keeper_detail) -> Masc_tui_editor_forms.Workspace_review_forms.handle_keeper_create state ~mailbox:async_messages ~terminal_session ~show_keeper_list:(fun () -> goto_surface state ~mailbox:async_messages (Keepers Keeper_list))
             (* The route and its permission already existed; only the TUI had
                no way to reach them, so Workspace could list what was registered
                and never register anything. *)
-            | Repositories -> handle_repository_add ()
+            | Repositories -> Masc_tui_editor_forms.Workspace_review_forms.handle_repository_add state ~mailbox:async_messages ~terminal_session
             | Verification ->
                 (* Two presses, like every irreversible action here: the
                    first names the task, the second sends the approval. *)

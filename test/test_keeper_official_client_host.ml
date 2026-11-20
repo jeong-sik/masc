@@ -2339,11 +2339,11 @@ let test_a_start_seed_begins_at_the_librarian_position () =
     absorbed_end carried.Host.first_atom;
   check bool "the front says so" true
     (match carried.Host.front with
-     | Host.Librarian_working_state { end_atom } -> end_atom = absorbed_end
+     | Host.Covered_with_working_state { end_atom } -> end_atom = absorbed_end
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
-     | Host.Librarian_progress _ -> false);
+     | Host.Covered _ -> false);
   check string "and the log names it after the Agent Core lane's word"
-    "librarian_progress_with_working_state"
+    "covered_with_working_state"
     (Host.carried_start_front_to_string carried.Host.front);
   let carried_texts = texts carried.Host.messages in
   let ends_with ~suffix text =
@@ -2420,8 +2420,8 @@ let test_a_seed_without_a_librarian_position_is_unchanged () =
   check bool "the turn start, which is 0 with no completed turn" true
     (match carried.Host.front with
      | Host.Turn_start -> true
-     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Librarian_working_state _
-     | Host.Librarian_progress _ -> false)
+     | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Covered_with_working_state _
+     | Host.Covered _ -> false)
 ;;
 
 (* RFC-librarian-lifecycle §4.10: a new session whose seed this runtime
@@ -2459,7 +2459,7 @@ let is_past_refused_start (carried : Host.carried_start) =
   match carried.Host.front with
   | Host.Past_refused_start _ -> true
   | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _
-  | Host.Librarian_working_state _ | Host.Librarian_progress _ -> false
+  | Host.Covered_with_working_state _ | Host.Covered _ -> false
 ;;
 
 let test_a_refused_seed_reopens_at_the_turn_boundary () =
@@ -2527,7 +2527,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
     (match opened.Host.front with
      | Host.Turn_start_unknown _ -> true
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Past_refused_start _
-     | Host.Librarian_working_state _ | Host.Librarian_progress _ -> false);
+     | Host.Covered_with_working_state _ | Host.Covered _ -> false);
   check int "composing the range says nothing" 0
     (warnings_for ~keeper_name:"alpha" ~since_seq:before_opening);
   let before_sending = latest_log_seq () in
@@ -2541,9 +2541,9 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
   in
   check bool "the read end chose the start" true
     (match decided.Host.front with
-     | Host.Librarian_working_state _ -> true
+     | Host.Covered_with_working_state _ -> true
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
-     | Host.Librarian_progress _ -> false);
+     | Host.Covered _ -> false);
   let before_librarian = latest_log_seq () in
   Host.warn_if_sent_on_unknown_start ~keeper_name:"alpha" decided.Host.front;
   check int "a range the unknown start did not open is not reported" 0
@@ -2561,7 +2561,7 @@ let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
     (absorbed_end - 1) carried.Host.first_atom;
   check bool "and still says the read end named the front" true
     (match carried.Host.front with
-     | Host.Librarian_working_state { end_atom } -> end_atom = absorbed_end
+     | Host.Covered_with_working_state { end_atom } -> end_atom = absorbed_end
      | _ -> false);
   check bool "the newest atom is on the wire" true
     (List.exists (String.equal "The build passed.") (texts carried.Host.messages));
@@ -2600,9 +2600,9 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
     carried.Host.first_atom;
   check bool "and the front is the read end's" true
     (match carried.Host.front with
-     | Host.Librarian_working_state { end_atom } -> end_atom = absorbed_end
+     | Host.Covered_with_working_state { end_atom } -> end_atom = absorbed_end
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
-     | Host.Librarian_progress _ -> false)
+     | Host.Covered _ -> false)
 ;;
 
 (* The writer's read end comes with no working state (it has committed
@@ -2620,10 +2620,10 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
   check int "the range starts at the read position" end_atom carried.Host.first_atom;
   check bool "the front says so" true
     (match carried.Host.front with
-     | Host.Librarian_progress { end_atom = at } -> at = end_atom
+     | Host.Covered { end_atom = at } -> at = end_atom
      | Host.Carried_seed _ | Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
-     | Host.Librarian_working_state _ -> false);
-  check string "and logs the Agent Core lane's word for it" "librarian_progress"
+     | Host.Covered_with_working_state _ -> false);
+  check string "and logs the Agent Core lane's word for it" "covered"
     (Host.carried_start_front_to_string carried.Host.front);
   let carried_texts = texts carried.Host.messages in
   check bool "the read atoms are not sent" false
@@ -2650,7 +2650,7 @@ let test_a_read_position_behind_the_lane_cut_loses () =
     (match carried.Host.front with
      | Host.Lane_cut -> true
      | Host.Carried_seed _ | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _
-     | Host.Librarian_working_state _ | Host.Librarian_progress _ -> false)
+     | Host.Covered_with_working_state _ | Host.Covered _ -> false)
 ;;
 
 (* What the Memory screen records for a request this lane composed, in the
@@ -2663,13 +2663,13 @@ let test_the_observation_records_the_front_or_why_the_choice_was_not_applied () 
   let input ?continuity front =
     Host.continuity_observation_input ~trace_id:start_seed_trace ~continuity front
   in
-  (match input (Host.Librarian_working_state { end_atom = absorbed_end }) with
+  (match input (Host.Covered_with_working_state { end_atom = absorbed_end }) with
    | Observation.Absorbed { trace_id; end_atom } ->
      check string "the turn's trace" start_seed_trace trace_id;
      check int "the read end" absorbed_end end_atom
    | Observation.Summarized _ | Observation.Without_snapshot | Observation.Not_applied ->
      fail "a working-state front was not recorded as absorbed");
-  (match input (Host.Librarian_progress { end_atom = 2 }) with
+  (match input (Host.Covered { end_atom = 2 }) with
    | Observation.Absorbed { end_atom = 2; _ } -> ()
    | _ -> fail "a read-end front was not recorded as absorbed");
   (match input Host.Turn_start with

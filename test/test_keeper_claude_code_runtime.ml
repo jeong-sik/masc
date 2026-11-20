@@ -6419,7 +6419,7 @@ let test_the_librarian_front_reaches_the_list () =
        (encoded (List.filteri (fun i _ -> i >= 100) messages))
        (encoded carried));
   (match !seen_front with
-   | Some (Keeper_official_client_host.Librarian_progress { end_atom = 100 }, bytes) ->
+   | Some (Keeper_official_client_host.Covered { end_atom = 100 }, bytes) ->
      check bool "the front is reported with the range's bytes" true (bytes > 0)
    | Some _ -> fail "the reported front is not the read end"
    | None -> fail "the composition reported no front");

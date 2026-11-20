@@ -1967,7 +1967,7 @@ let test_the_librarian_front_reaches_the_list () =
     (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
     (encoded_history projected);
   match !seen_front with
-  | Some (Keeper_official_client_host.Librarian_progress { end_atom = 53 }, bytes) ->
+  | Some (Keeper_official_client_host.Covered { end_atom = 53 }, bytes) ->
     check bool "the front is reported with the range's bytes" true (bytes > 0)
   | Some _ -> fail "the reported front is not the read end"
   | None -> fail "the composition reported no front"
@@ -2003,7 +2003,7 @@ let test_a_read_end_leads_with_its_working_state () =
        (encoded_history rest)
    | _ -> fail "the working state did not lead the list");
   (match !seen_front with
-   | Some (Keeper_official_client_host.Librarian_working_state { end_atom = 53 }) -> ()
+   | Some (Keeper_official_client_host.Covered_with_working_state { end_atom = 53 }) -> ()
    | Some _ -> fail "the reported front is not the working state"
    | None -> fail "the composition reported no front");
   check (float 0.) "and nothing is counted as left out" before

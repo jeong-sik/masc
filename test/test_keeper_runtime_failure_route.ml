@@ -643,6 +643,38 @@ let test_response_observed_fences_follow_the_disposition () =
              ~runtime_id:"codex_app_server.gpt-5.5"
              ~diagnostic:"Turn_input_write_failed")))
 
+(* The Keeper turn reads a fence the lane walk built at the AGENT_CORE
+   boundary. There it must keep the route the lane gave it, so a fence after a
+   tool handler ran still says the provider answered (#53345). *)
+let test_fences_route_the_same_at_both_boundaries () =
+  let cause =
+    Keeper_internal_error.Fenced_core
+      (Keeper_request_failure_core.of_core_error
+         (Agent_core.Error.Internal "stream closed"))
+  in
+  List.iter
+    (fun effect_disposition ->
+       List.iter
+         (fun (label, err) ->
+            Alcotest.check route label (route_of_masc_error err)
+              (route_of_agent_core_error err))
+         [ ( "provider attempt fence"
+           , internal_err
+               (Keeper_internal_error.Provider_attempt_effect_fenced
+                  { runtime_id = "claude_code.opus"; effect_disposition; cause }) )
+         ; ( "lost correction"
+           , internal_err
+               (Keeper_internal_error.Tool_correction_lost
+                  { runtime_id = "claude_code.opus"
+                  ; effect_disposition
+                  ; reject_count = 2
+                  ; cause
+                  }) )
+         ])
+    [ Keeper_provider_attempt_effect_core.Effect_attempted
+    ; Keeper_provider_attempt_effect_core.Observation_unavailable
+    ]
+;;
 
 (* Which failures pass with time on
    the path that answered them. A quota resumes only with a reset it named. *)
@@ -1125,6 +1157,10 @@ let () =
             "fences follow the lane's observation"
             `Quick
             test_response_observed_fences_follow_the_disposition
+        ; Alcotest.test_case
+            "fences route the same at both boundaries"
+            `Quick
+            test_fences_route_the_same_at_both_boundaries
         ] )
     ; ( "route_resumes_on_same_path"
       , [ Alcotest.test_case

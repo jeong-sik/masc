@@ -84,6 +84,11 @@ function createScheduleReader(
       if (subscriberCount === 0) {
         stopRefresh?.()
         stopRefresh = null
+        // Nothing keeps the page current from here on, so it is not held. A
+        // surface that mounts later draws once before its subscription
+        // starts, and would draw a page kept here as the current one.
+        cancelRead()
+        resource.reset()
       }
     }
   }

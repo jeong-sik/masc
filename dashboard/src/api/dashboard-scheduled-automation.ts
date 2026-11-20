@@ -352,13 +352,26 @@ export async function fetchDashboardScheduledAutomation(
   opts?: ScheduledAutomationReadOptions,
 ): Promise<DashboardScheduledAutomationProjection> {
   await ensureDevToken()
-  const path = opts?.activeOnly === true
+  const activeOnly = opts?.activeOnly === true
+  const path = activeOnly
     ? '/api/v1/dashboard/scheduled-automation?active_only=true'
     : '/api/v1/dashboard/scheduled-automation'
   const raw = await get<unknown>(path, {
     signal: opts?.signal,
   })
-  return normalizeScheduledAutomation(raw)
+  const projection = normalizeScheduledAutomation(raw)
+  // The page says what it is narrowed to. A server from before the
+  // active-only page ignores the parameter and answers with the fleet page,
+  // the 20 soonest schedules with ended ones counted in; drawn as the
+  // active-only page it would be every schedule still going to run.
+  const answeredActiveOnly = asRecord(raw)?.active_only_selector === true
+  if (projection.state === 'available' && answeredActiveOnly !== activeOnly) {
+    return {
+      state: 'unavailable',
+      reason: 'the server answered with another schedule page than the one asked for',
+    }
+  }
+  return projection
 }
 
 export async function fetchDashboardScheduledAutomationLookup(

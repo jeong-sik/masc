@@ -5010,6 +5010,55 @@ let test_dashboard_schedule_pages_bind_the_selector () =
     (Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
        ~active_only:true ~cursor config
      |> member "status" |> to_string);
+  (* Every schedule here is still going to run, so alpha's active-only list is
+     alpha's list: the same 201 rows under another selector pair. *)
+  let both_first =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha" ~active_only:true config
+  in
+  let both_cursor = both_first |> member "next_cursor" |> to_string in
+  let both_second =
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+      ~payload_target:"keeper:alpha" ~active_only:true ~cursor:both_cursor config
+  in
+  check (list string) "a cursor of both selectors continues the list of both"
+    alpha_expected (List.sort String.compare (rows both_first @ rows both_second));
+  check string "and not the Keeper list without the active-only selector" "invalid_cursor"
+    (Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+       ~payload_target:"keeper:alpha" ~cursor:both_cursor config
+     |> member "status" |> to_string);
+  check string "nor the active-only list without the Keeper" "invalid_cursor"
+    (Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+       ~active_only:true ~cursor:both_cursor config
+     |> member "status" |> to_string);
+  check string "a Keeper cursor does not continue that Keeper's active-only list"
+    "invalid_cursor"
+    (Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
+       ~payload_target:"keeper:alpha" ~active_only:true ~cursor:alpha_cursor config
+     |> member "status" |> to_string);
+  (* The cursor is URL-safe base64 of a JSON object. Version 1 carried no
+     selector for the active-only list; a cursor written by hand at this
+     version is read, so the two refusals below are for the version. *)
+  let fleet_status_for fields =
+    let cursor =
+      Base64.encode_string ~pad:false ~alphabet:Base64.uri_safe_alphabet
+        (Yojson.Safe.to_string (`Assoc fields))
+    in
+    Server_dashboard_schedule_projection.scheduled_automation_dashboard_json ~cursor config
+    |> member "status" |> to_string
+  in
+  let page_key =
+    [ "active", `Bool true; "due_at", `Float 200.0; "schedule_id", `String "page-schedule-00" ]
+  in
+  check string "a fleet cursor at this version is read" "ok"
+    (fleet_status_for
+       ([ "version", `Int 2; "target", `Null; "active_only", `Bool false ] @ page_key));
+  check string "the same cursor at version 1 is refused" "invalid_cursor"
+    (fleet_status_for
+       ([ "version", `Int 1; "target", `Null; "active_only", `Bool false ] @ page_key));
+  check string "and so is a version 1 cursor as it was issued, with no active-only field"
+    "invalid_cursor"
+    (fleet_status_for ([ "version", `Int 1; "target", `Null ] @ page_key));
   let tail_id = match rows alpha_second with
     | [id] -> id
     | _ -> fail "expected one row after the Keeper's first page" in
@@ -5082,11 +5131,17 @@ let test_dashboard_schedule_page_can_hold_only_active_schedules () =
     (active_page |> member "fsm" |> member "terminal_count" |> to_int);
   check bool "nothing is left out" false (active_page |> member "truncated" |> to_bool);
   check bool "so there is no next page" true (active_page |> member "next_cursor" = `Null);
-  let both =
+  (* Every schedule here is alpha's, the ended one included. *)
+  let count ?active_only target =
     Server_dashboard_schedule_projection.scheduled_automation_dashboard_json
-      ~payload_target:"keeper:beta" ~active_only:true config
+      ~payload_target:target ?active_only config
+    |> member "request_count" |> to_int
   in
-  check int "the two selectors combine" 0 (both |> member "request_count" |> to_int)
+  check int "a Keeper page counts that Keeper's ended schedule" 26 (count "keeper:alpha");
+  check int "the two selectors combine: its active-only page leaves the ended one out" 25
+    (count ~active_only:true "keeper:alpha");
+  check int "and the Keeper still narrows an active-only page" 0
+    (count ~active_only:true "keeper:beta")
 ;;
 
 let () =

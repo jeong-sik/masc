@@ -63,11 +63,10 @@ val dashboard_gate_tool_events_http_json :
 
 val dashboard_scheduled_automation_http_json :
   config:Workspace.config -> Yojson.Safe.t
-(** Schedule projection for [GET /api/v1/dashboard/scheduled-automation],
-    cached and offloaded. Both the HTTP/1 router and the H2 gateway call this
-    rather than the projection directly, so the two transports cannot serve
-    different data or drift on cache policy. This is the fleet list, the
-    answer to a request with no selector. *)
+(** The fleet list of the schedule projection, cached and offloaded: the
+    answer to [GET /api/v1/dashboard/scheduled-automation] with no selector.
+    The route calls {!dashboard_scheduled_automation_query_http_json}, which
+    delegates here. *)
 
 val dashboard_scheduled_automation_query_http_json :
   config:Workspace.config -> Httpun.Request.t -> Yojson.Safe.t

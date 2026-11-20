@@ -45,16 +45,22 @@ let same_line a b =
 
 let not_open = Failed (Flow_stopped, "the writer is no longer open")
 
-(* The file is read as the store reads it at boot. A file the store does not
-   open ends the ask with the fault, and the writer stops for it as the store
-   does; a snapshot whose bytes are not the ones the tail names diverged. *)
-let memory_of_snapshot tail = function
+(* The file is read as the store reads it before a commit: a file the store
+   does not open ends the ask with its fault, and the writer stops for it as
+   the store does. The digest is of the bytes the file holds and is compared
+   before they are decoded, so bytes other than the ones the tail names
+   diverged, as they do for a commit. *)
+let memory_of_bytes tail = function
   | Error fault -> Error (Ended (Snapshot_fault fault))
-  | Ok (memory, observed) ->
+  | Ok bytes ->
     let expected = named tail in
-    if same_digest expected observed
-    then Ok (tail, memory)
-    else Error (Ended (Memory_diverged { expected; observed }))
+    let observed = Digest.digest_of_bytes bytes in
+    if not (same_digest expected observed)
+    then Error (Ended (Memory_diverged { expected; observed }))
+    else (
+      match Librarian_store.decode_snapshot bytes with
+      | Some memory -> Ok (tail, memory)
+      | None -> Error (Ended (Snapshot_fault Not_a_snapshot_file)))
 ;;
 
 (* The tail is read on both sides of the bytes. A direct write that commits
@@ -64,11 +70,11 @@ let rec read_memory input ~snapshot_path =
   match input.tail () with
   | None -> Error not_open
   | Some tail ->
-    let read = Librarian_store.read_snapshot snapshot_path in
+    let read = Librarian_store.read_snapshot_bytes snapshot_path in
     (match input.tail () with
      | None -> Error not_open
      | Some again when not (same_line tail again) -> read_memory input ~snapshot_path
-     | Some (_ : Librarian_log.line) -> memory_of_snapshot tail read)
+     | Some (_ : Librarian_log.line) -> memory_of_bytes tail read)
 ;;
 
 (* --- The units and the question (§7.1 step 3) --- *)

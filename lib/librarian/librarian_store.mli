@@ -24,9 +24,13 @@ type stop =
   (** A read or a write failed, or there is no turn log to name. Booting
       again is the way out. *)
 
-(** The snapshot at [path] and the digest of its bytes, read the way
-    {!boot} reads it. The digest is of the bytes the file holds. *)
-val read_snapshot : string -> (Current.t * Digest.digest, Librarian_snapshot_fault.t) result
+(** The bytes at a snapshot path, as every reader of the file reads them
+    first. No file is [Absent], something other than a regular file is
+    [Not_a_snapshot_file], and a read that failed is [Not_read]. *)
+val read_snapshot_bytes : string -> (string, Librarian_snapshot_fault.t) result
+
+(** The snapshot the bytes are, or [None] when they do not decode as one. *)
+val decode_snapshot : string -> Current.t option
 
 (** The stop a snapshot fault is wherever the store meets it: absent and not
     a snapshot are [Memory_unreadable], a read that failed is

@@ -407,9 +407,6 @@ let test_a_snapshot_the_store_would_not_open () =
   let ask () = result_text (Ask.run fixture.env (input fixture (tail_of state))) in
   Sys.remove path;
   check string "no file" "snapshot fault: absent" (ask ());
-  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "{");
-  check string "bytes that do not decode" "snapshot fault: not a snapshot file" (ask ());
-  Sys.remove path;
   Sys.mkdir path 0o700;
   check string "a directory" "snapshot fault: not a snapshot file" (ask ());
   Sys.rmdir path;

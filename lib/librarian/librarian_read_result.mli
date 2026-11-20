@@ -83,8 +83,9 @@ type t =
       ; observed : Digest.digest (** The snapshot the file holds. *)
       }
   | Snapshot_fault of Librarian_snapshot_fault.t
-  (** The snapshot the tail names is not one the store opens. The file is
-      read as {!Librarian_store.boot} reads it, and the writer stops for it
-      as the store does. *)
+  (** The file at the snapshot path is not one the store opens: no file,
+      not a regular file, a failed read, or bytes the tail names that do not
+      decode. The file is read as the store reads it before a commit, and
+      the writer stops for it as the store does. *)
   | Input_fault of Librarian_unit.input_fault
   | Ask_failed of failed

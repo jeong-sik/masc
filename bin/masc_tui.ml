@@ -39,7 +39,6 @@ module Keeper_chat_live = Masc_tui_keeper_chat_live
 module Keeper_chat_log = Masc_tui_keeper_chat_log
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Composer = Masc_tui_composer
-module Composer_projection = Masc_tui_composer_projection
 module Keeper_control = Masc_tui_keeper_control
 module Ask = Masc_tui_ask_projection
 module Metrics_tail = Masc_tui_metrics_tail
@@ -11559,335 +11558,6 @@ let toggle_selected_ask_origin state =
                  ["opened_ns",`String (Int64.to_string (Mtime_clock.elapsed_ns ()));
                   "origin",Ask.origin_to_json origin]))) (current_ask_origin state))
 
-
-(* Apply one keystroke the composer claimed. Sending routes through the same
-   chat surface the [c] key opens, so a message typed on the roster and one
-   typed in the chat view take the identical dispatch path. *)
-let handle_composer_key state ~base_path ~mailbox key =
-  if state.view = Overview || state.workspace_identity <> Masc_tui_types.Workspace_identity_match
-     || Option.is_some (browser_lane_on_screen state)
-  then false
-  else
-  match Composer_projection.classify_key state key with
-  | Composer.Pass_to_surface -> false
-  | Composer.Take_focus keeper_name ->
-      (* Taking focus names the recipient for the draft, independently of
-         later roster cursor movement. Focus before the retarget's drain. *)
-      state.msg_return <- Keeper_chat_return_detail;
-      state.composer_focused <- true;
-      (if state.msg_target_keeper_name <> Some keeper_name then begin
-         Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper state keeper_name ~drain_queue:(fun () ->
-           Masc_tui_chat_dispatch.Queue_steer.drain_queued_message state ~base_path ~mailbox);
-         (* Chat visits use the stored roster order; this surface may draw
-            a sorted/grouped roster and keeps its selection by name. *)
-         select_keeper_name state keeper_name
-       end);
-      true
-  | Composer.Start_listening keeper_name ->
-      (* Pressing it while continuous mode is on turns the mode off. That is
-         the only way out: a mode that re-arms itself needs a key that stops
-         it, and the key that started it is the one the operator will reach
-         for. *)
-      (match state.voice_continuous with
-       | Some _ ->
-           state.voice_continuous <- None;
-           state.voice_floor <- None;
-           set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
-       | None ->
-      (* One capture at a time: a second microphone would contend for the same
-         input device and the two transcripts would race into one draft.
-
-         The second press stops the running one, which is what the row has
-         been telling the operator it does. It used to start another instead,
-         leaving two recorders on one device with no way to end either. *)
-      (match state.voice_capture with
-       | Some _ ->
-           request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
-           set_last_action state (Some ("voice: stopping", Unix.gettimeofday ()))
-       | None -> Masc_tui_operator_actions.Voice_actions.launch_voice_capture state ~mailbox ~keeper:keeper_name));
-      true
-  | Composer.Toggle_continuous keeper_name ->
-      (match state.voice_continuous with
-       | Some _ ->
-           state.voice_continuous <- None;
-           state.voice_floor <- None;
-           set_last_action state (Some ("voice: continuous off", Unix.gettimeofday ()))
-       | None when Option.is_some state.voice_capture ->
-           (* A manual or withdrawn capture still owns the microphone. The
-              noise-floor probe must wait for its completion too. *)
-           let notice =
-             if state.voice_capture_withdrawn
-             then "voice: discarding previous capture"
-             else "voice: recording in progress" in
-           set_last_action state (Some (notice, Unix.gettimeofday ()))
-       | None ->
-           (* Request one room probe in the asynchronous session, then reuse
-              its floor between utterances. Turning the mode off drops it. *)
-           state.voice_continuous <- Some keeper_name;
-           state.voice_floor <- None;
-           set_last_action state (Some ("voice: continuous on", Unix.gettimeofday ()));
-           if state.voice_capture = None
-           then Masc_tui_operator_actions.Voice_actions.launch_voice_capture ~calibrate:true state ~mailbox ~keeper:keeper_name);
-      true
-  | Composer.Release_focus ->
-      (* A running capture is the innermost thing Esc can leave, so it goes
-         first and the row keeps its focus. ^Y stops one and keeps what was
-         said; this abandons it. *)
-      (match state.voice_capture with
-       | Some _ ->
-           request_voice_stop state Masc.Voice_bridge.Discard;
-           set_last_action state (Some ("voice: discarding", Unix.gettimeofday ()))
-       | None ->
-           save_message_draft state;
-           state.composer_focused <- false;
-           (* The row put away releases a line held for its compose
-              ([composing_for_keeper]); it goes now, not at a settle an idle
-              keeper never has. *)
-           Masc_tui_chat_dispatch.Queue_steer.drain_queued_message state ~base_path ~mailbox);
-      true
-  | Composer.Send keeper_name ->
-      withdraw_resource_diagram_pending state;
-      if Masc_tui_chat_input.Paste_spill.recovered_paste_send_locked state then begin
-        report_action state "system"
-          "Recovered draft protected; press Ctrl-G to enable Enter";
-        true
-      end else begin
-      state.composer_focused <- false;
-      let snapshot = Masc_tui_message_input.snapshot state.msg_input in
-      let text = Masc_tui_message_input.snapshot_text snapshot in
-      (match Masc_tui_command.parse text with
-       | Masc_tui_command.Say _ ->
-           set_msg_scroll state 0;
-           if state.view <> Keepers Keeper_message then begin
-             match state.msg_target_keeper_name with
-             | Some keeper_name ->
-                 Masc_tui_chat_input.Message_draft_recall.reset_message_file_changes state (Some keeper_name);
-                 launch_keeper_history_load state ~mailbox ~keeper_name
-             | None -> ()
-           end;
-           state.view <- Keepers Keeper_message
-       | Masc_tui_command.Switch_keeper _ ->
-           (* The switch handler owns the view change. *)
-           set_msg_scroll state 0
-       (* These answers are chat notices, including Memory status. Typed from
-          the roster they would land in a pane the operator is not looking
-          at, so the chat pane comes forward the way it does for a message. *)
-       | Masc_tui_command.Queue _
-       | Masc_tui_command.Memory_status
-       | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
-       | Masc_tui_command.Play_invite _
-       | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
-       | Masc_tui_command.Listen | Masc_tui_command.Open_music_midi
-       | Masc_tui_command.Open_images _ | Masc_tui_command.List_images | Masc_tui_command.Images_invalid_index
-       | Masc_tui_command.Open_score _ | Masc_tui_command.Score_invalid_index
-       | Masc_tui_command.Preset_list | Masc_tui_command.Preset_save _
-       | Masc_tui_command.Preset_save_missing_name
-       | Masc_tui_command.Preset_restore _
-       | Masc_tui_command.Preset_restore_missing_name
-       | Masc_tui_command.Preset_show _
-       | Masc_tui_command.Preset_show_missing_name
-       | Masc_tui_command.Preset_delete _
-       | Masc_tui_command.Preset_delete_missing_name ->
-           set_msg_scroll state 0;
-           if state.view <> Keepers Keeper_message then begin
-             match state.msg_target_keeper_name with
-             | Some keeper_name ->
-                 Masc_tui_chat_input.Message_draft_recall.reset_message_file_changes state (Some keeper_name);
-                 launch_keeper_history_load state ~mailbox ~keeper_name
-             | None -> ()
-           end;
-           state.view <- Keepers Keeper_message
-       | Masc_tui_command.Task_for_keeper _ | Masc_tui_command.Task_recover | Masc_tui_command.Task_inspect | Masc_tui_command.Task_missing_title
-       | Masc_tui_command.Help | Masc_tui_command.Features
-       | Masc_tui_command.Show_load_errors
-       | Masc_tui_command.About | Masc_tui_command.Switch_keeper_missing_name
-       | Masc_tui_command.Open_artifacts | Masc_tui_command.Open_music | Masc_tui_command.Music_invalid_arguments
-        | Masc_tui_command.Open_diff
-        | Masc_tui_command.Open_usage | Masc_tui_command.Open_changes
-        | Masc_tui_command.Toggle_acting_pane
-         | Masc_tui_command.Show_acting_pane_tab _
-         | Masc_tui_command.Acting_pane_tab_unknown _
-         | Masc_tui_command.Set_acting_pane_call_order _
-         | Masc_tui_command.Acting_pane_call_order_unknown _
-         | Masc_tui_command.Scroll_acting_pane _
-         | Masc_tui_command.Acting_pane_scroll_unknown _
-         | Masc_tui_command.Lane_addons _
-         | Masc_tui_command.Account_login _
-         | Masc_tui_command.Open_settings | Masc_tui_command.Open_metrics
-         | Masc_tui_command.Open_link_preview _
-         | Masc_tui_command.Open_links_list
-         | Masc_tui_command.Set_embeds _
-        | Masc_tui_command.Answer_tool_approval _
-        | Masc_tui_command.Interrupt_turn
-        | Masc_tui_command.Interrupt_keeper_turn _
-         | Masc_tui_command.Run_next
-         | Masc_tui_command.Reconcile_held
-         | Masc_tui_command.Priority _
-         | Masc_tui_command.Steer_turn _
-       | Masc_tui_command.Steer_missing_message
-       | Masc_tui_command.Set_thinking _
-       | Masc_tui_command.Open_calls | Masc_tui_command.Set_tools _ | Masc_tui_command.Cycle_memory
-       | Masc_tui_command.Open_fleet_memory
-       (* [/find] moves the pane on purpose, so unlike every other command it
-          must not be followed by the reset to the newest row above. *)
-       | Masc_tui_command.Find_in_chat _ | Masc_tui_command.Find_next
-       | Masc_tui_command.Copy_latest_reply
-       | Masc_tui_command.Open_measurement _ | Masc_tui_command.Measurement_missing_sha
-       | Masc_tui_command.Inspect_context
-       | Masc_tui_command.View_image _ | Masc_tui_command.View_image_missing_path
-       | Masc_tui_command.Attach_image _ | Masc_tui_command.Attach_image_missing_path
-       | Masc_tui_command.Attach_image_ref _ | Masc_tui_command.Attach_image_ref_missing_value
-       | Masc_tui_command.Unknown _ ->
-           (* A command keeps the surface: the operator asked the TUI, not
-              the keeper, and the answer lands in the session log. *)
-           ());
-      send_operator_text ~keeper_name state ~base_path ~mailbox snapshot;
-      true
-      end
-  | Composer.Edit ->
-      (* Annotated: [handle_message_key] takes labelled callbacks, and a
-         missing one leaves a partial application that binds to [_handled]
-         without a word. Saying the type here turns that into a build
-         failure. *)
-      let (_handled : bool) =
-        Masc_tui_chat_input.Message_keymap.handle_message_key ~terminal_size:Masc_tui_render_prim.get_terminal_size ~wheel_notch_rows state
-          ~submit_message:(fun _ -> ())
-          ~load_older:(fun ~cursor:_ -> ())
-          ~paste_image:(fun () -> paste_clipboard_image state)
-                   ~open_named_image:(fun () -> open_named_image state ~mailbox)
-                   ~inspect_context:(fun () ->
-                     match state.msg_target_keeper_name with
-                     | Some keeper_name ->
-                         Masc_tui_chat_dispatch.Chat_journals.open_context_inspector state ~mailbox ~keeper_name
-                     | None -> ())
-                   ~inspect_queue:(fun () ->
-                     match state.msg_target_keeper_name with
-                     | Some keeper_name ->
-                         Masc_tui_collab_queue.Keeper_queue.open_keeper_queue_panel state ~mailbox ~keeper_name
-                     | None -> ())
-          ~load_preparation:(fun () -> Masc_tui_chat_dispatch.Chat_journals.launch_selected_preparation_operation_read state ~mailbox)
-          ~load_tool_changes:(fun () ->
-            match state.msg_target_keeper_name with
-            | Some keeper_name ->
-                launch_keeper_chat_tool_details_load ~force:true state ~mailbox
-                  ~keeper_name
-            | None -> ())
-          ~drain_queue:(fun () -> ())
-          (* This call site replays one key to reach the paste handlers; a
-             capture is not something a replay should start. *)
-          ~start_voice:(fun () -> ())
-          ~toggle_voice_continuous:(fun () -> ())
-          key
-      in
-      true
-
-(* Where a paste lands.
-
-   The composer row and the chat pane hold one draft between them
-   ([msg_input]), so a paste has one destination whatever surface is on
-   screen. When the row is idle the paste takes focus for it, through the same
-   path the focus key takes: focus is what names the recipient, and text
-   dropped into a draft whose keeper was never resolved is a message with
-   nowhere to go.
-
-   The text is sanitized the way every other text this process draws is.
-   Typed keys reach the draft only through [is_printable_utf8_scalar], so a
-   control byte cannot get in one keystroke at a time; a paste is the one way
-   a terminal escape could arrive, and it arrives as spaces instead. *)
-(* A paste filename pairs the wall-clock minute with a random suffix. The
-   publication step refuses to replace an existing name if that suffix collides. *)
-let spill_stamp () = Masc_tui_value.Instant.file_stamp (Unix.gettimeofday ())
-
-let spill_nonce () =
-  (* Keep the existing short filename; [write_file] refuses any collision. *)
-  Random_id.hex ~bytes:4
-
-(* A file dropped on the composer arrives as a paste. An image is meant to be
-   looked at, so it is staged rather than spelled out; every other file keeps
-   its path in the draft, which is how an operator names a file they want read.
-
-   Shares handle_paste's guard: a staged image with no keeper to send it to is
-   the same silence as a paste with nowhere to go. *)
-let attach_dropped_image ?(protect_recovered = false) state ~base_path ~mailbox
-    attachment =
-  let in_chat = state.view = Keepers Keeper_message in
-  if not (in_chat || state.composer_focused) then
-    ignore
-      (handle_composer_key state ~base_path ~mailbox Composer.focus_key : bool);
-  if not (in_chat || state.composer_focused) then
-    report_action state "error"
-      (Printf.sprintf "Dropped %s with no Keeper to send it to"
-         attachment.Masc_tui_keeper_chat_projection.name)
-  else begin
-    if protect_recovered then Masc_tui_chat_input.Paste_spill.protect_recovered_paste_for_current_keeper state;
-    (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- state.msg_attachments @ [ attachment ]);
-    Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
-    report_action state "system"
-      (Printf.sprintf "Attached %s (%s, %d bytes) · %d staged for the next message"
-         attachment.Masc_tui_keeper_chat_projection.name
-         attachment.Masc_tui_keeper_chat_projection.mime_type
-         attachment.Masc_tui_keeper_chat_projection.size
-         (List.length state.msg_attachments))
-  end
-
-let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
-    ~(paste : Masc_tui_paste.t) =
-  if state.workspace_identity <> Masc_tui_types.Workspace_identity_match
-  then ()
-  else
-  let in_chat = state.view = Keepers Keeper_message in
-  if not (in_chat || state.composer_focused) then
-    ignore
-      (handle_composer_key state ~base_path ~mailbox Composer.focus_key : bool);
-  if not (in_chat || state.composer_focused) then
-    (* No keeper is selected, or the one that is cannot be written to. A paste
-       that says nothing and goes nowhere is the silence this surface keeps
-       being caught by. *)
-    report_action state "error"
-      (let count = String.length paste.Masc_tui_paste.text in
-       if state.ui_language = Lang_ko then
-         Printf.sprintf "보낼 키퍼가 선택되지 않은 상태에서 %d바이트가 붙여넣기되었습니다" count
-       else
-         Printf.sprintf "Pasted %s with no Keeper to send %s to"
-           (Masc_tui_message_layout.count_noun count "character")
-           (if count = 1 then "it" else "them"))
-  else begin
-    Masc_tui_chat_input.Message_draft_recall.forget_recall state;
-    let text =
-      Keeper_chat.terminal_safe_text ~preserve_newlines:true
-        paste.Masc_tui_paste.text
-    in
-    if protect_recovered
-       && (String.trim (Masc_tui_message_input.contents state.msg_input ^ text) <> ""
-           || state.msg_attachments <> [] || state.msg_references <> [])
-    then
-      Masc_tui_chat_input.Paste_spill.protect_recovered_paste_for_current_keeper state;
-    (match state.msg_spill with
-     | Some _ ->
-         (* The draft still owns its first spill. Keep later paste bytes in
-            the editable input rather than replacing that original source. *)
-         Masc_tui_message_input.insert state.msg_input text
-     | None ->
-       match
-         Masc_tui_paste_spill.of_paste ~now_iso:(spill_stamp ())
-           ~nonce:(spill_nonce ()) text
-       with
-       | None -> Masc_tui_message_input.insert state.msg_input text
-       | Some spill ->
-         (* One line in the draft, the text kept beside it. The composer is
-            five rows: a four-hundred-line paste in it is a draft the operator
-            cannot read, and a draft they cannot read is a message they cannot
-            check before sending. The text goes back in on the way out, so
-            what the keeper receives is what was pasted. *)
-          let owner = Masc_tui_message_input.insert_owned state.msg_input
-              (Masc_tui_paste_spill.draft_line spill) in
-          state.msg_spill <- Some { msp_paste = spill; msp_owner = owner });
-    if paste.Masc_tui_paste.dropped > 0 then
-      report_action state "error"
-        (Printf.sprintf "Paste kept the first %d bytes; %d more were dropped"
-           Masc_tui_paste.max_bytes paste.Masc_tui_paste.dropped)
-  end
-
 (* A server action belongs to the Keeper that submitted it even when its
    completion arrives after navigation. Keep offscreen outcomes in the action
    record; they cannot replace the selected Keeper's notice. *)
@@ -12637,7 +12307,16 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               ~drain_queue:(fun () -> Masc_tui_chat_dispatch.Queue_steer.drain_queued_message state ~base_path ~mailbox)
           else (
             let (_ : bool) =
-              handle_composer_key state ~base_path ~mailbox Composer.send_key
+              Masc_tui_composer_input.Composer_key.handle_composer_key
+                ~terminal_size:Masc_tui_render_prim.get_terminal_size
+                ~wheel_notch_rows
+                ~withdraw_resource_diagram_pending:(fun () -> withdraw_resource_diagram_pending state)
+                ~launch_keeper_history_load:(fun ~keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name)
+                ~send_operator_text:(fun ~keeper_name snapshot -> send_operator_text ~keeper_name state ~base_path ~mailbox snapshot)
+                ~paste_clipboard_image:(fun () -> paste_clipboard_image state)
+                ~open_named_image:(fun () -> open_named_image state ~mailbox)
+                ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name)
+                state ~base_path ~mailbox Composer.send_key
             in
             ())));
       Drawn_changed
@@ -21786,18 +21465,18 @@ let main
             | Some path when Sys.file_exists path -> (
                 match Masc_tui_attachment.classify_drop ~path with
                 | Masc_tui_attachment.Attach attachment ->
-                    attach_dropped_image ~protect_recovered:recovered_paste
+                    Masc_tui_composer_input.Paste_drop.attach_dropped_image ~protect_recovered:recovered_paste
                       state ~base_path
                       ~mailbox:async_messages attachment
                 | Masc_tui_attachment.Keep_path ->
-                    handle_paste ~protect_recovered:recovered_paste state
+                    Masc_tui_composer_input.Paste_drop.handle_paste ~protect_recovered:recovered_paste state
                       ~base_path ~mailbox:async_messages
                       ~paste:{ paste with Masc_tui_paste.text = path }
                 | Masc_tui_attachment.Refuse error ->
                     report_action state "error"
                       (Masc_tui_attachment.error_to_string error))
             | Some _ | None ->
-                handle_paste ~protect_recovered:recovered_paste state
+                Masc_tui_composer_input.Paste_drop.handle_paste ~protect_recovered:recovered_paste state
                   ~base_path ~mailbox:async_messages ~paste)
        | Some (Mouse_left_release _ | Mouse_wheel _) when help_owns_input -> ()
        | Some (Mouse_wheel (direction, _, _))
@@ -22207,7 +21886,16 @@ let main
         && key <> Some Masc_tui_shell.Terminal_session.toggle_browser_lane_key
         &&
         match key with
-        | Some k -> handle_composer_key state ~base_path ~mailbox:async_messages k
+        | Some k -> Masc_tui_composer_input.Composer_key.handle_composer_key
+              ~terminal_size:Masc_tui_render_prim.get_terminal_size
+              ~wheel_notch_rows
+              ~withdraw_resource_diagram_pending:(fun () -> withdraw_resource_diagram_pending state)
+              ~launch_keeper_history_load:(fun ~keeper_name -> launch_keeper_history_load state ~mailbox:async_messages ~keeper_name)
+              ~send_operator_text:(fun ~keeper_name snapshot -> send_operator_text ~keeper_name state ~base_path ~mailbox:async_messages snapshot)
+              ~paste_clipboard_image:(fun () -> paste_clipboard_image state)
+              ~open_named_image:(fun () -> open_named_image state ~mailbox:async_messages)
+              ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> launch_keeper_chat_tool_details_load ~force:true state ~mailbox:async_messages ~keeper_name)
+              state ~base_path ~mailbox:async_messages k
         | None -> false
       in
       (* What [r] refreshes on every surface, the Git-changes overlay

@@ -134,9 +134,8 @@ let test_decode_rejects_unknown_source () =
   | _ -> Alcotest.fail "expected Entry_decode_error for unknown source"
 
 let test_decode_rejects_legacy_raw_level_row () =
-  (* Pre-RFC-0079 JSONL row shape — written before the typed encoder.
-     The file-fold boundary in load_from_file catches this and skips with
-     a WARN; everywhere else the decoder is strict. *)
+  (* JSONL row shape written before the typed encoder. The decoder is
+     strict at every boundary, the file fold in load_from_file included. *)
   let legacy_row =
     `Assoc [
       ("seq", `Int 1);

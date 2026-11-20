@@ -112,10 +112,9 @@ let strict_success_names =
 
 let strict_message_cases =
   [
-    (* The runner plumbs sw/clock (RFC-0182 Phase 5 PR-A.2), so the dispatch
-       no longer stops at the "requires Eio context" gate: the deliberately
-       invalid target name ("bad keeper!") must be rejected by argument
-       validation. *)
+    (* The runner plumbs sw/clock, so the dispatch no longer stops at the
+       "requires Eio context" gate: the deliberately invalid target name
+       ("bad keeper!") must be rejected by argument validation. *)
     ("masc_keeper_delegate", "keeper_name must match");
   ]
 

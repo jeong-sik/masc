@@ -1,4 +1,4 @@
-(* RFC tools-as-shell-commands — the shell-side of the conversion.
+(* The shell side of running a declared tool as a shell command.
 
    A stage whose program is the bare reserved word [masc] and whose leading
    arguments walk a tool's declared [shell_command] path is not a process:
@@ -8,7 +8,7 @@
 
    The reservation is closed at one point.  [masc] is matched by bare
    equality only, the reachable tools are exactly those that declared a
-   [shell_command] in their own TOML, and the PR-1 surface is read-only
+   [shell_command] in their own TOML, and the surface is read-only
    tools — a tool that defers or needs approval answers "call the tool
    directly" rather than holding a shell line hostage.
 

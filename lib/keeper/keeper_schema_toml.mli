@@ -1,15 +1,13 @@
-(** The twelve keeper tools whose declarations moved to
-    [config/tools/masc_keeper_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The keeper tools whose declarations moved to
+    [config/tools/masc_keeper_*.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
     partial keeper surface, so a reader of these values never has to ask
     whether a schema loaded.
 
-    [Keeper_schema.schemas] is the only consumer; it keeps the three tools that
-    derive values from an owner module. [test_keeper_schema_toml_parity] pins
-    all fifteen against what the list published before any of this moved. *)
+    [Keeper_schema.schemas] is the only consumer.
+    [test_keeper_schema_toml_parity] pins the order it publishes them in. *)
 
 val sandbox_start : Masc_domain.tool_schema
 val sandbox_stop : Masc_domain.tool_schema

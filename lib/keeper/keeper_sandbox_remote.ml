@@ -155,7 +155,7 @@ type shared_state =
        The major frames every request to this endpoint, so a shim one release
        behind or ahead of this server keeps running instead of refusing every
        frame, and the first dispatch asks. [release] is the MASC release the
-       shim was built from (RFC-0427 B-3): [None] from a shim built before
+       shim was built from: [None] from a shim built before
        the field existed. A shim replaced in place, as the microVM guest's is
        through its host mount, reaches this endpoint's next request but not
        this cache: the answer is asked again only when the preflight cache is

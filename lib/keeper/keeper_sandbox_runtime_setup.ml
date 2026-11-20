@@ -91,10 +91,6 @@ let docker_image_inspect_next_action =
 
 let docker_command_cwd () = Config_dir_resolver.current_working_dir ()
 
-(* RFC-0107 Phase E step 2 — branch on MASC_DOCKER_TRANSPORT env flag here.
-   When set to "api", route through [Sandbox.Docker_api] (UDS HTTP) instead
-   of forking a [docker] subprocess; the subprocess path stays as the
-   transitional fallback. Default "subprocess" until step 2 lands. *)
 let run_docker_argv_with_status ?timeout_sec argv =
   Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
     Process_eio.run_argv_with_status
@@ -279,12 +275,11 @@ let docker_network_args = function
     Ok ([ "--network"; "host" ], "inherit")
   | Keeper_types_profile_sandbox.Network_policy ->
     (* Docker can create an [--internal] network, so the shape is plausible
-       here. It has not been measured, and RFC-0415 turns on exactly that
-       measurement: whether the guest can still reach a public address by raw
-       TCP. Emitting args that might not close would make this mode advice on
-       Docker while it is policy on the microVM backend, and an allowlist that
-       holds on one backend and not another is worse than one that refuses.
-       Measure it, then replace this arm. *)
+       here. It has not been measured whether the guest can still reach a
+       public address by raw TCP. Emitting args that might not close would
+       make this mode advice on Docker while it is policy on the microVM
+       backend, and an allowlist that holds on one backend and not another is
+       worse than one that refuses. Measure it, then replace this arm. *)
     Error
       "network_mode \"policy\" is not available on sandbox_profile \"docker\": \
        the Docker egress boundary is unmeasured (RFC-0415). Use \"microvm\" \

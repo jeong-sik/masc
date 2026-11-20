@@ -683,13 +683,28 @@ let test_stream_redacts_an_escaped_secret_crossing_bounded_flush () =
     (emitted ^ trailing) quoted_secret_in_json;
   contains "it leaves a marker" (emitted ^ trailing) "[REDACTED]"
 
+(* Control characters a JSON string writes in six bytes each, in an order
+   that does not repeat. The order matters to the matcher: while the text
+   repeats the first bytes of a value, every start offset in that run is still
+   a candidate, and [Re] keeps a thread for each of them in each DFA state it
+   builds. Memory then grows with the square of the run: one byte repeated
+   4,000 times took about 1.2 GB, and 20,000 times does not fit a CI runner. *)
+let six_byte_control_characters ~length =
+  let alphabet =
+    "\001\002\003\004\005\006\007\011\014\015\016\017\018\019\020\021\022\023\024\025\026\027\028\029\030\031"
+  in
+  let state = ref 53_524 in
+  String.init length (fun _ ->
+    state := ((!state * 1_103_515_245) + 12_345) land 0x3fff_ffff;
+    alphabet.[(!state lsr 12) mod String.length alphabet])
+
 (* A JSON string writes a control character in six bytes, so the spelling of
    a value made of them is six times the value. The longest exact value is
    what an unterminated line keeps back. Held as an exact value, this
    spelling would keep back 120,000 bytes for a secret file of 20,000, and a
    file at the 64 KiB limit would keep back six times that limit. *)
 let test_stream_keeps_back_the_value_and_not_a_longer_spelling () =
-  let value = String.make 20_000 '\001' in
+  let value = six_byte_control_characters ~length:20_000 in
   Alcotest.(check int) "the JSON spelling is six bytes for each byte" 120_000
     (String.length (Yojson.Safe.to_string (`String value)) - 2);
   with_exact_secret ~keeper_name:"bounded-spelling-size" value @@ fun redaction ->

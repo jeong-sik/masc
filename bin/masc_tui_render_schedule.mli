@@ -701,25 +701,47 @@ type board_column =
   | Board_score
   | Board_replies
 
-val board_layout : inner_width:int -> board_column Masc_tui_table.layout
-(** The columns the list draws inside its frame, with the title immediately
-    after the kind mark. A narrow row drops the hearth, replies, score and
-    author in that order. Exact post references remain available through the
-    existing copy action; they do not take a list column. *)
+(** Which column header carries the active descending sort arrow ([↓]). *)
+type board_sort_column =
+  | Sort_none
+  | Sort_age
+  | Sort_score
+  | Sort_replies
+
+val board_layout :
+  hide_hearth:bool ->
+  sort_column:board_sort_column ->
+  inner_width:int ->
+  board_column Masc_tui_table.layout
+(** The columns the list draws inside its frame: fixed metadata
+    ([mark], [age], [author], [hearth]) on the left, flexible [title] beside
+    them, and right-aligned numeric [score] and [replies] on the right. When
+    [hide_hearth] is [true] (the listing is already narrowed to one hearth),
+    [Board_hearth] is omitted without counting as dropped so its width goes to
+    [Board_title]. A narrow row drops hearth, the inactive numeric counter,
+    author, and only last the active [sort_column] so the column governing the
+    order stays visible whenever room allows. Exact post references remain
+    available through the existing copy action; they do not take a list column. *)
 
 val board_header_row :
-  ko:bool -> age_header:string -> layout:board_column Masc_tui_table.layout -> string
+  sort_column:board_sort_column ->
+  ko:bool ->
+  age_header:string ->
+  layout:board_column Masc_tui_table.layout ->
+  string
 (** [age_header] is the word over the age column, which names the time the
-    column holds. *)
+    column holds. [sort_column] appends [↓] to the active sort column header. *)
 
 val board_header_row_with_dropped :
+  sort_column:board_sort_column ->
   ko:bool ->
   inner_width:int ->
   age_header:string ->
   layout:board_column Masc_tui_table.layout ->
   string
-(** Like {!board_header_row}, with a right-aligned dropped-columns badge when
-    [layout.dropped > 0]. *)
+(** Like {!board_header_row}, placing any dropped-columns badge inside the
+    flexible title column's trailing slack so right-aligned numeric headers
+    and active sort arrows are never overwritten. *)
 
 val board_row :
   ?close:string ->

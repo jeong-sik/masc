@@ -198,6 +198,7 @@ let clamped_scroll_now (state : state) = function
           max_scroll = state.config_document_max_scroll;
           confirmation }
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
+  | Board_list_scroll _ -> Board_list_scroll state.board_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
   | Context_inspector_response_scroll _ ->
@@ -298,7 +299,7 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Logs use their own bounded Metrics_tail movement through the key path. *)
   | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
-  | Acting _ | Acting_selection _ | Keeper_list_scroll _ -> None
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ | Board_list_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
 

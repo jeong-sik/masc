@@ -517,6 +517,138 @@ let test_time_alone_renders_at_most_once_a_second () =
         [ -5.; -0.001; 0.; 0.001; 0.4; 0.999; 1.; 59.5 ])
     frame_instants
 
+let test_board_layout_column_order_and_hide_hearth () =
+  let contains_sub hay needle =
+    let len = String.length needle in
+    let rec find i =
+      i + len <= String.length hay
+      && (String.sub hay i len = needle || find (i + 1))
+    in
+    find 0
+  in
+  let wide =
+    Masc_tui_render_schedule.board_layout ~hide_hearth:false
+      ~sort_column:Sort_score ~inner_width:140
+  in
+  check bool "wide layout places metadata ahead of title and counters after" true
+    (wide.shown
+     = [ Masc_tui_render_schedule.Board_mark
+       ; Board_age
+       ; Board_author
+       ; Board_hearth
+       ; Board_title
+       ; Board_score
+       ; Board_replies
+       ]);
+  check int "wide layout drops nothing" 0 wide.dropped;
+  let narrowed =
+    Masc_tui_render_schedule.board_layout ~hide_hearth:true
+      ~sort_column:Sort_score ~inner_width:140
+  in
+  check bool "hide_hearth omits Board_hearth" false
+    (List.mem Masc_tui_render_schedule.Board_hearth narrowed.shown);
+  check int "hide_hearth does not count omitted hearth as dropped" 0 narrowed.dropped;
+  check bool "hide_hearth gives freed cells to title" true
+    (narrowed.flex_width > wide.flex_width);
+  let tight =
+    Masc_tui_render_schedule.board_layout ~hide_hearth:false
+      ~sort_column:Sort_age ~inner_width:50
+  in
+  check bool "narrow layout preserves 30-cell title floor" true
+    (tight.flex_width >= 30);
+  check bool "narrow layout keeps mark, age, and title" true
+    (List.mem Masc_tui_render_schedule.Board_mark tight.shown
+     && List.mem Masc_tui_render_schedule.Board_age tight.shown
+     && List.mem Masc_tui_render_schedule.Board_title tight.shown);
+  (* At 80 cols (inner_width = 76), active sort column stays visible and
+     board_header_row_with_dropped places the dropped badge inside TITLE's slack
+     without overwriting the rightmost right-aligned header or its sort arrow. *)
+  let at_80_score =
+    Masc_tui_render_schedule.board_layout ~hide_hearth:false
+      ~sort_column:Sort_score ~inner_width:76
+  in
+  check bool "80 cols under Sort_score keeps Board_score visible" true
+    (List.mem Masc_tui_render_schedule.Board_score at_80_score.shown);
+  let hdr_80_en =
+    Masc_tui_render_schedule.board_header_row_with_dropped ~sort_column:Sort_score
+      ~ko:false ~inner_width:76 ~age_header:"AGE" ~layout:at_80_score
+  in
+  check int "80-col EN dropped header fits exact inner_width" 76
+    (Masc_tui_message_layout.display_width hdr_80_en);
+  check bool "80-col EN dropped header keeps SCORE ↓ intact" true
+    (contains_sub hdr_80_en "SCORE \xe2\x86\x93");
+  check bool "80-col EN dropped header shows dropped badge" true
+    (contains_sub hdr_80_en "2 more cols");
+  let hdr_80_ko =
+    Masc_tui_render_schedule.board_header_row_with_dropped ~sort_column:Sort_score
+      ~ko:true ~inner_width:76 ~age_header:"게시 후" ~layout:at_80_score
+  in
+  check int "80-col KO dropped header fits exact inner_width" 76
+    (Masc_tui_message_layout.display_width hdr_80_ko);
+  check bool "80-col KO dropped header keeps 점수 ↓ intact" true
+    (contains_sub hdr_80_ko "점수 \xe2\x86\x93");
+  let at_80_replies =
+    Masc_tui_render_schedule.board_layout ~hide_hearth:false
+      ~sort_column:Sort_replies ~inner_width:76
+  in
+  check bool "80 cols under Sort_replies keeps Board_replies visible" true
+    (List.mem Masc_tui_render_schedule.Board_replies at_80_replies.shown);
+  let hdr_80_replies =
+    Masc_tui_render_schedule.board_header_row_with_dropped ~sort_column:Sort_replies
+      ~ko:false ~inner_width:76 ~age_header:"AGE" ~layout:at_80_replies
+  in
+  check bool "80-col Sort_replies header keeps REPLIES↓ intact" true
+    (contains_sub hdr_80_replies "REPLIES\xe2\x86\x93");
+  let at_90 =
+    Masc_tui_render_schedule.board_layout ~hide_hearth:false
+      ~sort_column:Sort_replies ~inner_width:86
+  in
+  let hdr_90 =
+    Masc_tui_render_schedule.board_header_row_with_dropped ~sort_column:Sort_replies
+      ~ko:false ~inner_width:86 ~age_header:"AGE" ~layout:at_90
+  in
+  check int "90-col dropped header fits exact inner_width" 86
+    (Masc_tui_message_layout.display_width hdr_90);
+  check bool "90-col dropped header keeps REPLIES↓ intact" true
+    (contains_sub hdr_90 "REPLIES\xe2\x86\x93");
+  let narrow_36 =
+    Masc_tui_render_schedule.board_layout ~hide_hearth:false
+      ~sort_column:Masc_tui_render_schedule.Sort_score ~inner_width:36
+  in
+  let hdr_36_en =
+    Masc_tui_render_schedule.board_header_row_with_dropped
+      ~sort_column:Masc_tui_render_schedule.Sort_score ~ko:false
+      ~inner_width:36 ~age_header:"AGE" ~layout:narrow_36
+  in
+  check bool "36-col EN dropped header fits inner_width" true
+    (Masc_tui_message_layout.display_width hdr_36_en <= 36);
+  check bool "36-col EN dropped header preserves badge" true
+    (contains_sub hdr_36_en "4 more cols");
+  let hdr_36_ko =
+    Masc_tui_render_schedule.board_header_row_with_dropped
+      ~sort_column:Masc_tui_render_schedule.Sort_score ~ko:true
+      ~inner_width:36 ~age_header:"게시 후" ~layout:narrow_36
+  in
+  check bool "36-col KO dropped header fits inner_width" true
+    (Masc_tui_message_layout.display_width hdr_36_ko <= 36);
+  check bool "36-col KO dropped header preserves badge" true
+    (contains_sub hdr_36_ko "외 4열");
+  List.iter
+    (fun (ko, age_header) ->
+      List.iter
+        (fun sort_column ->
+          let row =
+            Masc_tui_render_schedule.board_header_row ~sort_column ~ko
+              ~age_header ~layout:wide
+          in
+          check int "header width matches inner width" 140
+            (Masc_tui_message_layout.display_width row);
+          check bool "active sort column carries arrow"
+            (sort_column <> Masc_tui_render_schedule.Sort_none)
+            (contains_sub row "\xe2\x86\x93"))
+        [ Masc_tui_render_schedule.Sort_none; Sort_age; Sort_score; Sort_replies ])
+    [ false, "AGE"; false, "MOVED"; true, "게시 후"; true, "변경 후" ]
+
 let () =
   test_terminal_size_retains_raw_resize_signal ();
   test_terminal_size_retains_raw_resize_signal ();
@@ -578,5 +710,7 @@ let () =
             test_capped_page_cannot_report_an_empty_store
         ; test_case "wake readings stay four separate answers" `Quick
             test_wake_readings_stay_four_separate_answers
+        ; test_case "board layout column order, hide_hearth, and sort arrow" `Quick
+            test_board_layout_column_order_and_hide_hearth
         ;] )
     ]

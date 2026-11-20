@@ -1344,367 +1344,6 @@ let launch_git_diff_load state ~mailbox ~keeper ~path =
         ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
   end
 
-let launch_harness_load state ~mailbox =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  if state.harness_inflight then ()
-  else begin
-    state.harness_inflight <- true;
-    state.harness_owed <- Masc_tui_owed_read.started state.harness_owed;
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-      ~on_not_run:(fun () ->
-        state.harness_inflight <- false;
-        state.harness_owed <- Masc_tui_owed_read.abandoned state.harness_owed)
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Harness_msg (Harness_loaded result)))
-      (fun () -> Masc_tui_loader.load_harness ~host ~port)
-  end
-  end
-
-(* The Home Health line, drawn on every surface. *)
-let launch_overview_load state ~mailbox =
-  if server_authority_ready state && not state.overview_inflight then begin
-    let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-    state.overview_inflight <- true;
-    state.overview_owed <- Masc_tui_owed_read.started state.overview_owed;
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-      ~on_not_run:(fun () ->
-        state.overview_inflight <- false;
-        state.overview_owed <- Masc_tui_owed_read.abandoned state.overview_owed)
-      ~deliver:(fun result -> enqueue_async mailbox (Overview_loaded result))
-      (fun () -> Masc_tui_loader.load_overview ~host ~port)
-  end
-
-let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox =
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  if server_authority_ready state then
-  match Masc_tui_fusion_updates.begin_runs state ~demand with
-  | None -> ()
-  | Some request ->
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-      let port = state.port in
-      let read = Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-        Masc_tui_loader.load_fusion_runs ~host ~port) in
-      let run () =
-        let result =
-          try (match read () with
-            | Error refusal -> Error (Request_withdrawn refusal)
-            | Ok result -> Result.map_error (fun detail -> Request_failed detail) result) with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Request_failed (Printexc.to_string exn))
-        in
-        enqueue_async mailbox (Fusion_msg (Fusion_runs_loaded (request, result)))
-      in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-               run ();
-               `Stop_daemon)
-       | None ->
-           enqueue_async mailbox
-             (Fusion_msg (Fusion_runs_loaded
-                (request, Error (Request_failed "Eio switch is unavailable")))))
-
-let revalidate_visible_fusion state ~mailbox =
-  let demand = Masc_tui_fusion_updates.After_change in
-  Masc_tui_fusion_updates.revalidate_visible state
-    ~runs:(fun () -> launch_fusion_runs_load ~demand state ~mailbox)
-    ~detail:(fun run_id -> Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load ~demand state ~mailbox ~run_id)
-    ~historical:(fun reference ->
-      Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
-
-let resume_fusion_after_observer_failure state ~mailbox =
-  Masc_tui_fusion_updates.observer_failed state
-    ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
-    ~detail:(fun run_id -> Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load state ~mailbox ~run_id)
-    ~historical:(fun reference ->
-      Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load state ~mailbox ~reference)
-
-(* The server's reading of which Keepers the memory recall judgment reaches,
-   asked when the [m] form opens and drawn in it. Each open takes a new
-   generation, so the answer for a form the operator already left is dropped
-   ([Masc_tui_types.finish_memory_recall_standing_read]). *)
-(* The two requests behind the launch form. Neither is inflight-guarded by
-   a field of its own: the form's state says which request it waits on, and
-   the generation in the answer says whether it is still that one. *)
-
-let launch_fusion_launch_options_load state ~mailbox =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
-  let generation = state.fusion_launch_generation in
-  state.fusion_launch <- Some (Fusion_launch_reading_presets generation);
-  state.fusion_scroll <- 0;
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Fusion_msg (Fusion_launch_options_loaded (generation, result))))
-    (fun () -> Masc_tui_loader.load_fusion_launch_options ~host ~port)
-
-  end
-
-(* Named apart from [Masc_tui_loader.launch_fusion_run], which it calls: one
-   name for both is a shadow that turns a missing qualifier into unbounded
-   recursion rather than a compile error. *)
-
-let start_fusion_run state ~mailbox ~(request : Masc_tui_fusion_launch.request) =
-  state.fusion_launch_generation <- state.fusion_launch_generation + 1;
-  let generation = state.fusion_launch_generation in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-    ~deliver:(fun result -> Fusion_msg (Fusion_launched (generation, result)))
-    (fun () -> Masc_tui_loader.launch_fusion_run ~host ~port ~request
-      |> Result.map_error (fun detail -> Request_failed detail))
-
-let launch_lanes_load state ~mailbox =
-  if server_authority_ready state then begin
-  if state.standalone_lanes_inflight then ()
-  else begin
-    state.standalone_lanes_inflight <- true;
-    state.lanes_owed <- Masc_tui_owed_read.started state.lanes_owed;
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    state.standalone_lanes_generation <- state.standalone_lanes_generation + 1;
-    let standalone_generation = state.standalone_lanes_generation in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~deliver:(fun result -> Lane_msg (Lane_inventory_loaded (standalone_generation, result)))
-      (fun () -> Masc_tui_loader.load_lane_inventory ~host ~port
-        |> Masc_tui_async_read.attribute Masc_tui_async_read.Standalone_lanes
-        |> Result.map_error (fun detail -> Request_failed detail))
-  end
-
-  end
-
-(* A re-read that has to happen: a write's read-back, or the operator's [r].
-   A load already out may have left before the change it has to show, so
-   one more is queued behind it instead of the request being dropped. *)
-
-let launch_lanes_reread state ~mailbox =
-  if state.standalone_lanes_inflight
-  then state.standalone_lanes_reread_pending <- true
-  else launch_lanes_load state ~mailbox
-
-let launch_machine_activity_read state ~mailbox owner =
-  if server_authority_ready state then begin
-  match Masc_tui_types.machine_activity_session state owner with
-  | None -> ()
-  | Some session ->
-    state.machine_activity_generation <- state.machine_activity_generation + 1;
-    (match Masc_tui_machine_activity.start_read ~generation:state.machine_activity_generation session with
-     | None -> ()
-     | Some (session, request) ->
-       Masc_tui_types.put_machine_activity state session;
-       let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-       let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox in
-       Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-         ~deliver:(fun result -> Machine_msg (Machine_activity_read (request,result))) (fun () ->
-           let document = Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
-             {Masc_tui_runtime_config_edit.path=reading.path;
-              source_text=reading.source_text;source_revision=reading.metadata.source_revision})
-             (Masc_tui_loader.load_runtime_config_view ~host ~port) in
-           let check () = Result.map_error (fun refusal -> Request_withdrawn refusal) (check ()) in
-           Result.bind (check ()
-             |> Result.map_error (Masc_tui_transport.Request_notice.request_failure_after_read state ~request:Kept_request.Runtime_config_read)) (fun () ->
-           let activity = Result.bind (Masc_tui_loader.load_lane_inventory ~host ~port)
-             (fun snapshot ->
-               match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) ->
-                 row.selection = Machine owner.Masc_tui_machine_activity.machine) snapshot.rows with
-               | Some {state=Machine_state (activity,_);_} ->
-                   Ok (match activity with
-                     | Machine_enabled -> Machine_configuration.Enabled
-                     | Machine_disabled -> Machine_configuration.Disabled
-                     | Machine_unobserved -> Machine_configuration.Unobserved)
-               | None
-               | Some {state=(Exact_state _ | Browser_clients _ | Package_state _);_} ->
-                   Error "The selected machine is absent from the server reading.") in
-           Result.map (fun () -> Masc_tui_machine_activity.{document;activity})
-             (check ()
-              |> Result.map_error (Masc_tui_transport.Request_notice.request_failure_after_read state ~request:Kept_request.Lanes_read)))))
-  end
-
-let launch_machine_activity_save state ~mailbox session =
-  let module Activity = Masc_tui_machine_activity in
-  state.machine_activity_generation <- state.machine_activity_generation + 1;
-  match Activity.start_save ~generation:state.machine_activity_generation session with
-  | Error notice ->
-    report_action state "error"
-      (Masc_tui_activity_notice.text ~ko:(state.ui_language = Lang_ko) notice)
-  | Ok (session,request,write) ->
-    Masc_tui_types.put_machine_activity state session;
-    let authority=state.workspace_authority and identity=state.server_identity in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox
-      ~boundary_error:(fun detail -> `Save (Masc_tui_http.Runtime_config_save_refused detail))
-      ~withdrawn:(fun refusal -> `Kept_back refusal)
-      ~deliver:(fun result ->
-        let result = match result with
-          | Ok receipt -> Ok (Activity.Saved receipt)
-          | Error (`Save (Masc_tui_http.Runtime_config_conflict current)) -> Ok (Activity.Conflict current)
-          | Error (`Save (Masc_tui_http.Runtime_config_save_refused detail)) -> Ok (Activity.Refused detail)
-          | Error (`Save (Masc_tui_http.Runtime_config_save_unconfirmed detail)) ->
-              Ok (Activity.Unconfirmed detail)
-          | Error (`Kept_back refusal) -> Error refusal in
-        Machine_msg (Machine_activity_saved (request,result)))
-      (fun () -> Masc_tui_surface_requests.Runtime_config_requests.save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
-        ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
-
-let open_machine_activity state ~mailbox machine =
-  match Masc_tui_types.runtime_config_workspace state with
-  | None -> report_action state "error" "Verify the workspace before editing Lane activity."
-  | Some workspace ->
-    let owner = {Masc_tui_machine_activity.workspace;machine} in
-    if Masc_tui_types.machine_activity_session state owner=None then
-      Masc_tui_types.put_machine_activity state (Masc_tui_machine_activity.create owner);
-    state.exact_activity_open <- None;
-    state.machine_activity_open <- Some owner;
-    state.lane_run_detail_scroll <- 0;
-    launch_machine_activity_read state ~mailbox owner
-
-let launch_exact_activity_read state ~mailbox owner =
-  if server_authority_ready state then begin
-  match Masc_tui_types.exact_activity_session state owner with
-  | None -> ()
-  | Some session ->
-    state.exact_activity_generation <- state.exact_activity_generation + 1;
-    (match Masc_tui_exact_activity.start_read ~generation:state.exact_activity_generation session with
-     | None -> ()
-     | Some (session, request) ->
-       Masc_tui_types.put_exact_activity state session;
-       let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-       Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-         ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-         ~deliver:(fun result -> Exact_msg (Exact_activity_read (request,result))) (fun () ->
-           Masc_tui_loader.load_runtime_config_view ~host ~port
-           |> Result.map (fun (reading : Masc_tui_runtime_config_view.reading) ->
-             {Masc_tui_runtime_config_edit.path=reading.path;source_text=reading.source_text;
-              source_revision=reading.metadata.source_revision})
-           |> Result.map_error (fun detail -> Request_failed detail)))
-  end
-
-let launch_exact_activity_save state ~mailbox session =
-  let module Activity = Masc_tui_exact_activity in
-  state.exact_activity_generation <- state.exact_activity_generation + 1;
-  match Activity.start_save ~generation:state.exact_activity_generation session with
-  | Error notice ->
-    report_action state "error"
-      (Masc_tui_activity_notice.text ~ko:(state.ui_language = Lang_ko) notice)
-  | Ok (session,request,write) ->
-    Masc_tui_types.put_exact_activity state session;
-    let authority=state.workspace_authority and identity=state.server_identity in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox
-      ~boundary_error:(fun detail -> `Save (Masc_tui_http.Runtime_config_save_refused detail))
-      ~withdrawn:(fun refusal -> `Kept_back refusal)
-      ~deliver:(fun result ->
-        let result = match result with
-          | Ok receipt -> Ok (Activity.Saved receipt)
-          | Error (`Save (Masc_tui_http.Runtime_config_conflict current)) -> Ok (Activity.Conflict current)
-          | Error (`Save (Masc_tui_http.Runtime_config_save_refused detail)) -> Ok (Activity.Refused detail)
-          | Error (`Save (Masc_tui_http.Runtime_config_save_unconfirmed detail)) ->
-              Ok (Activity.Unconfirmed detail)
-          | Error (`Kept_back refusal) -> Error refusal in
-        Exact_msg (Exact_activity_saved (request,result)))
-      (fun () -> Masc_tui_surface_requests.Runtime_config_requests.save_runtime_config_text ~prior_contact:Masc_tui_server_lifecycle.Server_reached state ~mailbox ~authority ~identity
-        ~expected_source_path:write.expected_source_path ~expected_source_revision:write.expected_source_revision write.source_text)
-
-let open_exact_activity state ~mailbox lane =
-  match Masc_tui_types.runtime_config_workspace state with
-  | None -> report_action state "error" "Verify the workspace before editing Lane activity."
-  | Some workspace ->
-    let owner = {Masc_tui_exact_activity.workspace;lane} in
-    if Masc_tui_types.exact_activity_session state owner=None then
-      Masc_tui_types.put_exact_activity state (Masc_tui_exact_activity.create owner);
-    state.machine_activity_open <- None;
-    state.exact_activity_open <- Some owner;
-    state.lane_run_detail_scroll <- 0;
-    launch_exact_activity_read state ~mailbox owner
-
-let launch_clients_load state ~mailbox =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  if state.clients_surface_inflight then ()
-  else begin
-    state.clients_surface_inflight <- true;
-    (* Marks the read in flight on the owed read, so the answer settles
-       it rather than leaving it due for the next loop. *)
-    begin_clients_read state;
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    state.clients_surface_generation <- state.clients_surface_generation + 1;
-    let generation = state.clients_surface_generation in
-    Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-      ~on_not_run:(fun () ->
-        state.clients_surface_inflight <- false;
-        abandon_clients_read state)
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Clients_loaded (generation, result)))
-      (fun () -> Masc_tui_loader.load_clients ~host ~port)
-  end
-  end
-
-let launch_lane_runs_load ?before state ~mailbox ~(lane : Lane_run_identity.t) =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  state.lane_runs_generation <- state.lane_runs_generation + 1;
-  let generation = state.lane_runs_generation in
-  state.lane_runs_loading <- true;
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Lane_msg (Lane_runs_loaded (lane, generation, before, result))))
-    (fun () -> Masc_tui_http.fetch_lane_runs ?before ~host ~port ~lane ())
-  end
-
-let launch_lane_run_detail_load state ~mailbox ~run_id =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
-  let generation = state.lane_run_detail_generation in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Lane_msg (Lane_run_detail_loaded (run_id, generation, result))))
-    (fun () -> Masc_tui_http.fetch_lane_run_detail ~host ~port ~run_id)
-
-  end
-
-(* History targets are logical observation identities. Opening one drops the
-   previous list; it never requires a current configuration/installation row. *)
-
-let open_lane_run_list state ~mailbox (lane : Lane_run_identity.t) =
-  begin_lane_run_list state lane;
-  launch_lane_runs_load state ~mailbox ~lane
-
-let open_lane_run_detail state ~mailbox ~(lane : Lane_run_identity.t) ~run_id =
-  state.lanes_mode <- Lanes_run_detail (lane, run_id);
-  state.lane_run_detail <- None;
-  state.lane_run_detail_error <- None;
-  state.lane_run_detail_scroll <- 0;
-  state.lane_run_preflight_details <- false;
-  state.lane_run_detail_content_height <- 0;
-  launch_lane_run_detail_load state ~mailbox ~run_id
-
-(* The run under the list cursor. Enter opens it from the list, and [ and ]
-   reopen through it after moving the cursor under an open detail, so a step
-   reads everything an open reads. *)
-let open_selected_lane_run state ~mailbox ~(lane : Lane_run_identity.t) =
-  match
-    Option.bind state.lane_runs (fun runs ->
-      List.nth_opt runs state.lane_runs_cursor)
-  with
-  | Some (run : Tui_decode.lane_run_summary) ->
-      open_lane_run_detail state ~mailbox ~lane ~run_id:run.lrs_run_id
-  | None -> ()
-
 (* Back from a run's detail to the list it was opened from. [ and ] move the
    list cursor while the detail covers the list, so the window is brought to
    the cursor here; without it the list came back showing the rows around the
@@ -1721,65 +1360,6 @@ let close_lane_run_detail state ~(lane : Lane_run_identity.t) =
       state.lane_runs_scroll <-
         Masc_tui_scroll.ensure_visible ~cursor:state.lane_runs_cursor ~height
           state.lane_runs_scroll
-
-let launch_measurement_artifact_load state ~mailbox ~sha256 =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  state.lane_run_detail_generation <- state.lane_run_detail_generation + 1;
-  let generation = state.lane_run_detail_generation in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Measurement_artifact_loaded (sha256, generation, result)))
-    (fun () -> Masc_tui_http.fetch_measurement_artifact ~host ~port ~sha256)
-  end
-
-let open_measurement_artifact state ~mailbox ~sha256 =
-  state.lanes_mode <- Lanes_measurement_detail sha256;
-  state.measurement_report <- None;
-  state.lane_run_detail_error <- None;
-  state.lane_run_detail_scroll <- 0;
-  state.lane_run_detail_content_height <- 0;
-  launch_measurement_artifact_load state ~mailbox ~sha256
-
-(* Everything that names a row stops meaning anything when the surface moves
-   to another page or another list: the cursor, the scroll, the open detail
-   and a half-armed approve all point at rows this surface is about to stop
-   holding. The arm in particular must go -- a second press landing on a row
-   that arrived from a different page would approve a task the operator never
-   looked at. *)
-let reset_verification_rows state =
-  state.verification_cursor <- 0;
-  state.verification_scroll <- 0;
-  Masc_tui_work_actions.Verification_actions.cancel_verification_evidence_load state
-    ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
-  state.verification_detail_request_id <- None;
-  state.verification_detail_scroll <- 0;
-  state.verification_verdict_armed <- None;
-  state.verification_verdict_error <- None;
-  state.verification_verdict_inflight <- None
-
-let launch_verification_load state ~mailbox =
-  if server_authority_ready state then begin
-  if state.verification_inflight then ()
-  else begin
-    state.verification_inflight <- true;
-    state.verification_owed <- Masc_tui_owed_read.started state.verification_owed;
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    (* Read once, here, rather than inside the fiber: the operator can press
-       another view key while this load is in flight, and the answer that
-       arrives must be the one that was asked for. *)
-    let view = state.verification_view in
-    let offset = state.verification_offset in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~deliver:(fun result -> Verification_msg (Verification_loaded result))
-      (fun () -> Masc_tui_loader.load_verification ~host ~port ~limit:200 ~view ~offset
-        |> Result.map_error (fun detail -> Request_failed detail))
-  end
-  end
 
 (* One surface's row list: how many rows it has, which one the cursor is on,
    and how to put the cursor somewhere else.
@@ -2728,7 +2308,7 @@ let launch_owed_lanes state ~mailbox =
     if not state.standalone_lanes_inflight then
       state.lanes_owed <- Masc_tui_owed_read.abandoned state.lanes_owed;
     if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) state.lanes_owed then
-      launch_lanes_load state ~mailbox
+      Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_load state ~mailbox
   end
 
 let launch_owed_lane_addons state ~mailbox =
@@ -2906,7 +2486,7 @@ let owe_async_requests_read state =
 let launch_surface_reads state ~mailbox (surface : surface) =
   if server_authority_ready state then
   match surface with
-  | Lanes -> launch_lanes_load state ~mailbox
+  | Lanes -> Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_load state ~mailbox
   | Clients -> owe_clients_read state
   (* The list draws nothing from the Keeper composite; Info and Secrets read
      it on entry and when it changes. Keeper_list reads memory health for its
@@ -2932,11 +2512,11 @@ let launch_surface_reads state ~mailbox (surface : surface) =
      off screen, and the owed read follows it. *)
   | Verification ->
       owe_verification_read state;
-      launch_verification_load state ~mailbox
-  | Planning -> launch_verification_load state ~mailbox
+      Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox
+  | Planning -> Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox
   | Fusion ->
       let demand = Masc_tui_fusion_updates.After_change in
-      launch_fusion_runs_load ~demand state ~mailbox;
+      Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load ~demand state ~mailbox;
       (match state.fusion_mode with
        | Fusion_list -> ()
        | Fusion_detail run_id ->
@@ -2955,7 +2535,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       Masc_tui_surface_requests.Memory_repository_requests.launch_repositories_load state ~mailbox
   | Harness ->
       owe_harness_read state;
-      launch_harness_load state ~mailbox
+      Masc_tui_ops_requests.Overview_harness_requests.launch_harness_load state ~mailbox
   | Changes -> (
       match state.changes_keeper with
       | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
@@ -3442,7 +3022,7 @@ let launch_owed_history state ~mailbox =
    failed read is due. *)
 let launch_owed_fusion state ~mailbox =
   Masc_tui_fusion_updates.retry_due_visible state ~now:(Masc_tui_wake.Mono.now ())
-    ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
+    ~runs:(fun () -> Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load state ~mailbox)
     ~detail:(fun run_id -> Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load state ~mailbox ~run_id)
     ~historical:(fun reference ->
       Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load state ~mailbox ~reference)
@@ -3845,7 +3425,7 @@ let launch_owed_overview state ~mailbox =
   in
   state.overview_owed <- read;
   if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not state.overview_inflight then
-    launch_overview_load state ~mailbox
+    Masc_tui_ops_requests.Overview_harness_requests.launch_overview_load state ~mailbox
 
 let launch_owed_runtime_surface state ~mailbox =
   if state.view <> Runtime then state.runtime_surface_owed <- Masc_tui_owed_read.settled
@@ -4082,7 +3662,7 @@ let launch_owed_clients state ~mailbox =
     in
     state.clients_owed <- read;
     if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
-      launch_clients_load state ~mailbox
+      Masc_tui_ops_requests.Overview_harness_requests.launch_clients_load state ~mailbox
   end
 
 let launch_owed_harness state ~mailbox =
@@ -4102,7 +3682,7 @@ let launch_owed_harness state ~mailbox =
     in
     state.harness_owed <- read;
     if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
-      launch_harness_load state ~mailbox
+      Masc_tui_ops_requests.Overview_harness_requests.launch_harness_load state ~mailbox
   end
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving on the
@@ -4118,7 +3698,7 @@ let launch_owed_verification state ~mailbox =
     in
     state.verification_owed <- read;
     if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
-      launch_verification_load state ~mailbox
+      Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox
   end
 
 (* Runs on every loop iteration. A turns read already in flight, whoever
@@ -7366,7 +6946,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
        | Ok () ->
            Masc_tui_message_input.clear state.msg_input;
            goto_surface state ~mailbox Lanes;
-           open_measurement_artifact state ~mailbox ~sha256)
+           Masc_tui_ops_requests.Lanes_activity_requests.open_measurement_artifact state ~mailbox ~sha256)
   | Masc_tui_command.View_image path ->
       Masc_tui_message_input.clear state.msg_input;
       open_image state ~mailbox ~notice (String.trim path)
@@ -8403,7 +7983,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.sent_image_read <- None;
   state.msg_copy_pending <- None;
   state.chat_command_reads <- [];
-  reset_verification_rows state;
+  Masc_tui_ops_requests.Verification_requests.reset_verification_rows state;
   state.verification <- None;
   state.verification_error <- None;
   state.verification_evidence <- Masc_tui_fetched.clear state.verification_evidence;
@@ -9570,7 +9150,7 @@ let launch_detail_tab_reading state ~mailbox (keeper : keeper) =
       state.keeper_schedules_error <- None;
       Masc_tui_work_requests.Schedule_call_requests.launch_keeper_schedules_load state ~mailbox ~keeper_name:keeper.k_name
   | Detail_runs ->
-      launch_fusion_runs_load ~demand:Masc_tui_fusion_updates.After_change state ~mailbox
+      Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load ~demand:Masc_tui_fusion_updates.After_change state ~mailbox
   | Detail_terminal ->
       (* The tab follows the Keeper's output over a stream that
          [reconcile_keeper_logs] opens on the next pass of the loop. *)
@@ -9908,7 +9488,7 @@ let open_lane_inventory_selection state ~mailbox =
            | Some lane ->
                let identity = Standalone_lane.run_identity lane.sl_lane in
                if Lane_run_identity.keeps_run_records identity
-               then open_lane_run_list state ~mailbox identity
+               then Masc_tui_ops_requests.Lanes_activity_requests.open_lane_run_list state ~mailbox identity
                else show_lanes_action_error state "This Lane keeps no run records"
            | None -> show_lanes_action_error state "The exact Lane detail is absent from this inventory; r reads again")
       | Browser lane ->
@@ -10674,7 +10254,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
      | Fusion ->
          (match state.fusion_launch with
           | Some (Fusion_launch_reading_presets _) ->
-              launch_fusion_launch_options_load state ~mailbox
+              Masc_tui_ops_requests.Fusion_requests.launch_fusion_launch_options_load state ~mailbox
           | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> ())
      | Board ->
          Option.iter (fun post_id -> owe_board_post_read state ~mailbox ~post_id)
@@ -10752,9 +10332,9 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
          Masc_tui_work_requests.Schedule_call_requests.launch_schedule_wake_history_load state ~mailbox ~schedule_id) state.schedule_detail_id
      | Lanes ->
          (match state.lanes_mode with
-          | Lanes_run_list lane -> launch_lane_runs_load state ~mailbox ~lane
-          | Lanes_run_detail (_, run_id) -> launch_lane_run_detail_load state ~mailbox ~run_id
-          | Lanes_measurement_detail sha256 -> launch_measurement_artifact_load state ~mailbox ~sha256
+          | Lanes_run_list lane -> Masc_tui_ops_requests.Lanes_activity_requests.launch_lane_runs_load state ~mailbox ~lane
+          | Lanes_run_detail (_, run_id) -> Masc_tui_ops_requests.Lanes_activity_requests.launch_lane_run_detail_load state ~mailbox ~run_id
+          | Lanes_measurement_detail sha256 -> Masc_tui_ops_requests.Lanes_activity_requests.launch_measurement_artifact_load state ~mailbox ~sha256
           | Lanes_overview | Lanes_inventory_detail _ -> ())
      | Memory ->
          (match state.memory_facts_keeper with
@@ -10777,8 +10357,8 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
     Option.iter (Masc_tui_work_requests.Tools_task_requests.launch_task_history_load ~terminal_size:Masc_tui_render_prim.get_terminal_size state ~mailbox) state.task_detail_id;
     Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox ~repo_id)
       state.workspace_activity_repo;
-    Option.iter (launch_exact_activity_read state ~mailbox) state.exact_activity_open;
-    Option.iter (launch_machine_activity_read state ~mailbox) state.machine_activity_open;
+    Option.iter (Masc_tui_ops_requests.Lanes_activity_requests.launch_exact_activity_read state ~mailbox) state.exact_activity_open;
+    Option.iter (Masc_tui_ops_requests.Lanes_activity_requests.launch_machine_activity_read state ~mailbox) state.machine_activity_open;
     Option.iter (fun session -> Option.iter (fun (kind,api_key_env) ->
       Masc_tui_work_requests.Voice_requests.launch_voice_agent_voices state ~mailbox ~kind ~api_key_env) session.vas_lookup)
       state.voice_agent_voices;
@@ -12602,7 +12182,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
           owe_keeper_waiting_read ~change:Waiting_all state;
           owe_agenda_revalidation state;
           Masc_tui_transport.Local_sources.launch_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-          revalidate_visible_fusion state ~mailbox;
+          Masc_tui_ops_requests.Fusion_requests.revalidate_visible_fusion state ~mailbox;
           state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room;
           if state.view = Memory then owe_memory_health_read state;
           start_http_refresh ~server_contact state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port:state.port
@@ -12945,7 +12525,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       if !observer_source_loss_seen then owe_agenda_revalidation state;
       if !observer_source_loss_seen then begin
         state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room;
-        revalidate_visible_fusion state ~mailbox;
+        Masc_tui_ops_requests.Fusion_requests.revalidate_visible_fusion state ~mailbox;
         (match acting_pane_changes_keeper state with
          | Some keeper_name when server_authority_ready state ->
              state.acting_pane_changes <-
@@ -13150,7 +12730,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
          let demand = Masc_tui_fusion_updates.After_change in
          match state.view with
          | Fusion ->
-             launch_fusion_runs_load ~demand state ~mailbox;
+             Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load ~demand state ~mailbox;
              if (!fusion_status_seen).open_run then
                (match state.fusion_mode with
                 | Fusion_detail run_id ->
@@ -13159,7 +12739,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                     Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load ~demand state ~mailbox ~reference
                 | Fusion_list -> ())
          | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
-             launch_fusion_runs_load ~demand state ~mailbox
+             Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load ~demand state ~mailbox
          | Keepers (Keeper_detail | Keeper_list | Keeper_logs | Keeper_calls
                    | Keeper_message | Keeper_runtime_pick)
          | Overview | Acting | Metrics | Memory | Lanes | Clients | Board
@@ -13255,7 +12835,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       let owner = ref () in
       state.observer_retry_owner <- Some owner;
       Masc_tui_transport.Event_streams.schedule_observer_retry state ~mailbox owner;
-      if was_opening then resume_fusion_after_observer_failure state ~mailbox
+      if was_opening then Masc_tui_ops_requests.Fusion_requests.resume_fusion_after_observer_failure state ~mailbox
       end;
       Drawn_changed
   | Observer_msg (Observer_opened _) ->
@@ -13546,7 +13126,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                | Form_saved _ | Form_unconfirmed _ ->
                    Masc_tui_chat_dispatch.Chat_journals.launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox;
                    Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:true;
-                   launch_lanes_reread state ~mailbox
+                   Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_reread state ~mailbox
                | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> ())
             end;
             if attached && current then begin
@@ -14779,8 +14359,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
          Masc_tui_types.put_machine_activity state (Activity.finish_save request result session);
          (match result with
           | Activity.Saved _ | Activity.Unconfirmed _ ->
-            launch_machine_activity_read state ~mailbox owner;
-            launch_lanes_reread state ~mailbox
+            Masc_tui_ops_requests.Lanes_activity_requests.launch_machine_activity_read state ~mailbox owner;
+            Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_reread state ~mailbox
           | Activity.Conflict _ | Activity.Refused _ | Activity.Kept_back _ -> ())
        | None | Some _ -> ());
       Drawn_changed
@@ -14809,8 +14389,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
          Masc_tui_types.put_exact_activity state (Activity.finish_save request result session);
          (match result with
           | Activity.Saved _ ->
-            launch_exact_activity_read state ~mailbox owner;
-            launch_lanes_reread state ~mailbox
+            Masc_tui_ops_requests.Lanes_activity_requests.launch_exact_activity_read state ~mailbox owner;
+            Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_reread state ~mailbox
           | Activity.Conflict _ | Activity.Refused _ | Activity.Unconfirmed _
           | Activity.Kept_back _ -> ())
        | None | Some _ -> ());
@@ -15463,7 +15043,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
           state.verification_error <- None;
           if state.verification_inflight then
             state.verification_refresh_after_inflight <- true
-          else launch_verification_load state ~mailbox
+          else Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox
       | Error err ->
           state.verification_verdict_armed <- None;
           state.verification_verdict_error <- Some err);
@@ -17267,7 +16847,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            (match written with
             | Masc_tui_types.Runtime_surface_list ->
                 Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:true
-            | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
+            | Masc_tui_types.Standalone_lanes_list -> Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_reread state ~mailbox)
        | Error _ -> ());
       Drawn_changed
   | Runtime_msg (Runtime_catalog_loaded (request,result)) ->
@@ -17936,7 +17516,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               ~list:Masc_tui_types.Standalone_lanes_list ~generation (Error failure));
       if state.standalone_lanes_reread_pending then begin
         state.standalone_lanes_reread_pending <- false;
-        launch_lanes_load state ~mailbox
+        Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_load state ~mailbox
       end;
       Drawn_changed
   | Clients_loaded (generation, result) ->
@@ -18058,7 +17638,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       (match Masc_tui_fusion_updates.runs_loaded state request result with
        | Reread when state.view = Fusion
                      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_runs) ->
-           launch_fusion_runs_load state ~mailbox
+           Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load state ~mailbox
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Runs result
        | Reread | Await_observer | Obsolete -> ());
       Drawn_changed
@@ -18085,7 +17665,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
   | Fusion_msg (Fusion_launched (generation, result)) ->
       Masc_tui_fusion_updates.launched state ~generation
         ~report:(report_action state "system")
-        ~refresh:(fun () -> launch_fusion_runs_load
+        ~refresh:(fun () -> Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load
           ~demand:Masc_tui_fusion_updates.After_change state ~mailbox) result;
       Drawn_changed
   | Memory_msg (Memory_recall_standing_loaded (generation, result)) ->
@@ -18098,7 +17678,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       state.verification_inflight <- false;
       if state.verification_refresh_after_inflight then begin
         state.verification_refresh_after_inflight <- false;
-        launch_verification_load state ~mailbox
+        Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox
       end else (match result with
       | Ok snapshot ->
           state.verification_owed <- Masc_tui_owed_read.succeeded state.verification_owed;
@@ -22567,8 +22147,8 @@ let main
                | "esc" | "q" | "Q" -> state.machine_activity_open <- None; state.quit_armed <- None
                | "?" -> state.help_open <- true; state.help_scroll <- 0
                | " " | "space" -> if not compact_viewport then set (Masc_tui_machine_activity.toggle session)
-               | "s" | "S" -> if not compact_viewport then launch_machine_activity_save state ~mailbox:async_messages session
-               | "r" -> launch_machine_activity_read state ~mailbox:async_messages (Masc_tui_machine_activity.owner session)
+               | "s" | "S" -> if not compact_viewport then Masc_tui_ops_requests.Lanes_activity_requests.launch_machine_activity_save state ~mailbox:async_messages session
+               | "r" -> Masc_tui_ops_requests.Lanes_activity_requests.launch_machine_activity_read state ~mailbox:async_messages (Masc_tui_machine_activity.owner session)
                | "u" -> if not compact_viewport then set (Masc_tui_machine_activity.reapply session)
                | "x" -> if not compact_viewport then set (Masc_tui_machine_activity.discard session)
                | "j" | "down" | "wheel-down" -> state.lane_run_detail_scroll <- Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:1
@@ -22587,8 +22167,8 @@ let main
                | "esc" | "q" | "Q" -> state.exact_activity_open <- None; state.quit_armed <- None
                | "?" -> state.help_open <- true; state.help_scroll <- 0
                | " " | "space" -> if not compact_viewport then set (Masc_tui_exact_activity.toggle session)
-               | "s" | "S" -> if not compact_viewport then launch_exact_activity_save state ~mailbox:async_messages session
-               | "r" -> launch_exact_activity_read state ~mailbox:async_messages (Masc_tui_exact_activity.owner session)
+               | "s" | "S" -> if not compact_viewport then Masc_tui_ops_requests.Lanes_activity_requests.launch_exact_activity_save state ~mailbox:async_messages session
+               | "r" -> Masc_tui_ops_requests.Lanes_activity_requests.launch_exact_activity_read state ~mailbox:async_messages (Masc_tui_exact_activity.owner session)
                | "u" -> if not compact_viewport then set (Masc_tui_exact_activity.reapply session)
                | "x" -> if not compact_viewport then set (Masc_tui_exact_activity.discard session)
                | "j" | "down" | "wheel-down" -> state.lane_run_detail_scroll <- Masc_tui_types.scroll_down_from state.lane_run_detail_scroll ~by:1
@@ -23485,7 +23065,7 @@ let main
                       | Masc_tui_fusion_launch.Submitted (next, request) ->
                           state.fusion_launch <- Some (Fusion_launch_open next);
                           state.fusion_scroll <- 0;
-                          start_fusion_run state ~mailbox:async_messages ~request))
+                          Masc_tui_ops_requests.Fusion_requests.start_fusion_run state ~mailbox:async_messages ~request))
             | Some (Fusion_launch_started _) | None -> ())
        (* A visible arrival consumes its first key. Esc leaves the overlay; every
           other key reaches the final frame without also activating a shortcut
@@ -24521,7 +24101,7 @@ let main
                      open_installation_results state ~mailbox:async_messages declaration_id
                  | Some (_, Masc_tui_palette.Palette_lane_history lane) ->
                      goto_surface state ~mailbox:async_messages Lanes;
-                     open_lane_run_list state ~mailbox:async_messages lane
+                     Masc_tui_ops_requests.Lanes_activity_requests.open_lane_run_list state ~mailbox:async_messages lane
                  | Some (_, Masc_tui_palette.Palette_browser_lane) ->
                      Masc_tui_surface_requests.Lane_browser_requests.open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_connectors) ->
@@ -24931,9 +24511,9 @@ let main
            && Option.is_none state.runtime_lane_pick && Option.is_none state.slot_editor ->
            (match selected_inventory_lane state with
             | Some {Masc.Tui_decode_lane_inventory.selection=Exact lane;_} ->
-                open_exact_activity state ~mailbox:async_messages lane
+                Masc_tui_ops_requests.Lanes_activity_requests.open_exact_activity state ~mailbox:async_messages lane
             | Some {selection=Machine machine;_} ->
-                open_machine_activity state ~mailbox:async_messages machine
+                Masc_tui_ops_requests.Lanes_activity_requests.open_machine_activity state ~mailbox:async_messages machine
             | Some {selection=Browser _;_} ->
                 show_lanes_action_error state
                   (Masc_tui_lane_inventory.browser_switch_line ~ko:(state.ui_language = Lang_ko))
@@ -25337,7 +24917,7 @@ let main
                 Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
                   state ~mailbox:async_messages ~run_id:run.fur_run_id)
        | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
-           launch_fusion_launch_options_load state ~mailbox:async_messages
+           Masc_tui_ops_requests.Fusion_requests.launch_fusion_launch_options_load state ~mailbox:async_messages
        | Some "K" when state.view = Fusion
            && (match state.fusion_mode, Masc_tui_fusion_model.selected_fusion_entry state with
                | Fusion_historical_detail _, _
@@ -25848,7 +25428,7 @@ let main
                 ~delta:(if bracket = "]" then 1 else -1)
                 ~set_cursor:(fun n -> state.lane_runs_cursor <- n)
                 ~reopen:(fun () ->
-                  open_selected_lane_run state ~mailbox:async_messages ~lane)
+                  Masc_tui_ops_requests.Lanes_activity_requests.open_selected_lane_run state ~mailbox:async_messages ~lane)
             | Lanes_overview | Lanes_run_list _ | Lanes_measurement_detail _
             | Lanes_inventory_detail _ -> ())
        (* The next page the server holds, as > is on Schedules and
@@ -25857,7 +25437,7 @@ let main
        | Some ">" when state.view = Lanes ->
            (match state.lanes_mode, state.lane_runs_next, state.lane_runs_loading with
             | Lanes_run_list lane, Some before, false ->
-              launch_lane_runs_load ~before state ~mailbox:async_messages ~lane
+              Masc_tui_ops_requests.Lanes_activity_requests.launch_lane_runs_load ~before state ~mailbox:async_messages ~lane
             | ( ( Lanes_overview | Lanes_run_list _ | Lanes_run_detail _
                 | Lanes_measurement_detail _ | Lanes_inventory_detail _ ),
                 _,
@@ -27910,9 +27490,9 @@ let main
                        ~mailbox:async_messages ~keeper_name
                  | None -> ())
             | Verification ->
-                launch_verification_load state ~mailbox:async_messages
+                Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox:async_messages
             | Planning ->
-                launch_verification_load state ~mailbox:async_messages;
+                Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox:async_messages;
                 (* The open Task's history asks for its first page again, and
                    the open Goal's timeline is read again. The drawn
                    observation stays until the answer replaces it; nothing
@@ -27925,23 +27505,23 @@ let main
                      Masc_tui_work_requests.Tools_task_requests.launch_goal_timeline_load state ~mailbox:async_messages goal_id)
              | Clients -> owe_clients_read state
              | Lanes ->
-                launch_lanes_reread state ~mailbox:async_messages;
+                Masc_tui_ops_requests.Lanes_activity_requests.launch_lanes_reread state ~mailbox:async_messages;
                 if Option.is_some state.runtime_lane_pick || Option.is_some state.slot_editor then
                   Masc_tui_chat_dispatch.Chat_journals.launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages;
                 (match state.lanes_mode with
                  | Lanes_run_list lane ->
-                     launch_lane_runs_load state ~mailbox:async_messages
+                     Masc_tui_ops_requests.Lanes_activity_requests.launch_lane_runs_load state ~mailbox:async_messages
                        ~lane
                  | Lanes_run_detail (_, run_id) ->
-                     launch_lane_run_detail_load state ~mailbox:async_messages
+                     Masc_tui_ops_requests.Lanes_activity_requests.launch_lane_run_detail_load state ~mailbox:async_messages
                        ~run_id
                  | Lanes_measurement_detail sha256 ->
-                     launch_measurement_artifact_load state ~mailbox:async_messages
+                     Masc_tui_ops_requests.Lanes_activity_requests.launch_measurement_artifact_load state ~mailbox:async_messages
                        ~sha256
                  | Lanes_overview | Lanes_inventory_detail _ -> ())
-            | Harness -> launch_harness_load state ~mailbox:async_messages
+            | Harness -> Masc_tui_ops_requests.Overview_harness_requests.launch_harness_load state ~mailbox:async_messages
             | Fusion ->
-                launch_fusion_runs_load state ~mailbox:async_messages;
+                Masc_tui_ops_requests.Fusion_requests.launch_fusion_runs_load state ~mailbox:async_messages;
                 (match state.fusion_mode with
                  | Fusion_list -> ()
                  | Fusion_detail run_id ->
@@ -28947,7 +28527,7 @@ let main
                  | Some _, None, _ -> Masc_tui_editor_forms.Runtime_config_forms.open_selected_slot_config state ~mailbox:async_messages
                  | Some _, Some _, _ -> ()
                  | None, (None | Some _), Lanes_run_list lane ->
-                     open_selected_lane_run state ~mailbox:async_messages ~lane
+                     Masc_tui_ops_requests.Lanes_activity_requests.open_selected_lane_run state ~mailbox:async_messages ~lane
                  | None, (None | Some _),
                    (Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _) -> ()
                  | None, (None | Some _), Lanes_overview ->
@@ -29564,8 +29144,8 @@ let main
               | Masc.Tui_decode.Awaiting_queue -> Masc.Tui_decode.Full_history
               | Masc.Tui_decode.Full_history -> Masc.Tui_decode.Awaiting_queue);
            state.verification_offset <- 0;
-           reset_verification_rows state;
-           launch_verification_load state ~mailbox:async_messages
+           Masc_tui_ops_requests.Verification_requests.reset_verification_rows state;
+           Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox:async_messages
        | Some ">"
          when state.view = Verification && not state.verification_inflight ->
            (* Forward only while the server says a further page exists, so the
@@ -29575,8 +29155,8 @@ let main
                 state.verification_offset <-
                   snapshot.Masc.Tui_decode.vs_offset
                   + List.length snapshot.Masc.Tui_decode.vs_requests;
-                reset_verification_rows state;
-                launch_verification_load state ~mailbox:async_messages
+                Masc_tui_ops_requests.Verification_requests.reset_verification_rows state;
+                Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox:async_messages
             | Some _ | None -> ())
        | Some "<"
          when state.view = Verification && not state.verification_inflight ->
@@ -29590,8 +29170,8 @@ let main
                 in
                 state.verification_offset <-
                   max 0 (snapshot.Masc.Tui_decode.vs_offset - page);
-                reset_verification_rows state;
-                launch_verification_load state ~mailbox:async_messages
+                Masc_tui_ops_requests.Verification_requests.reset_verification_rows state;
+                Masc_tui_ops_requests.Verification_requests.launch_verification_load state ~mailbox:async_messages
             | Some _ | None -> ())
        | Some "x" | Some "X" when state.view = Harness ->
            (* The negative verdict, spelled the way Verification spells its

@@ -49,10 +49,11 @@ type stores =
   }
 
 type read_error =
-  | Fault of Librarian_unit.input_fault
-  (** [Content_unreadable]: a bundle the unit names is there and does not
-      read: it cannot be read now, it does not match its digest or does not
-      decode, or it holds fewer messages than a slice takes. *)
+  | Unreadable of { line : int }
+  (** A bundle the unit at [line] names is there and does not read: it
+      cannot be read now, it does not match its digest or does not decode, or
+      it holds fewer messages than a slice takes. A question reads it as
+      {!Librarian_unit.Content_unreadable}. *)
   | Unread of { detail : string }
   (** A byte file or the external store could not be read, or it changed
       while it was read. *)

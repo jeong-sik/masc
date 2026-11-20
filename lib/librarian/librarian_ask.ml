@@ -120,105 +120,26 @@ let nothing_before : Librarian_unread.stop -> Read_result.t = function
     Input_fault (Line_unreadable { offset })
 ;;
 
-(* The units read, split at the first that holds items: the head (§7.6). *)
-type range =
-  { before : Librarian_unread.span list (** Units with no items, before the head. *)
-  ; head : Librarian_unread.span
-  ; after : Librarian_unread.span list
-  }
-
-let rec head_of before = function
-  | [] -> None
-  | span :: rest ->
-    if Librarian_unread.has_items span
-    then Some { before = List.rev before; head = span; after = rest }
-    else head_of (span :: before) rest
-;;
-
-(* The units from the tail, when one holds an item. A width of units stops
-   after that many units with items, and a width of items after the first.
-   Reading that stopped at a line it cannot pass asks about the units before
-   that line. *)
+(* The units from the tail, when one holds an item (§7.6). *)
 let read_units (input : input) ~(width : Librarian_width.width) tail =
   let turns_path =
     Keeper_turn_log_store.path_for_keepers_dir
       ~keepers_dir:input.place.turns_dir
       ~keeper_id:input.place.keeper_id
   in
-  let until : Librarian_unread.until =
-    match width with
-    | All -> To_end
-    | Units count -> First_with_items (count :> int)
-    | Items (_ : Librarian_width.count) -> First_with_items 1
-  in
-  match Librarian_unread.read ~turns_path ~until tail with
-  | Error (Fault fault) -> Error (Ended (Read_result.Input_fault fault))
-  | Error (Unread { detail }) -> Error (Failed (Read_failed, "turn log: " ^ detail))
-  | Ok { spans; stop; bytes = (_ : int) } ->
-    (match head_of [] spans with
-     | Some range -> Ok range
-     | None -> Error (Ended (nothing_before stop)))
+  match Librarian_question_units.units ~turns_path ~width tail with
+  | Ok range -> Ok range
+  | Error (No_head stop) -> Error (Ended (nothing_before stop))
+  | Error (Turn_log_fault fault) -> Error (Ended (Read_result.Input_fault fault))
+  | Error (Turn_log_unread { detail }) -> Error (Failed (Read_failed, "turn log: " ^ detail))
 ;;
 
-let read_content (input : input) span ~take =
-  match Librarian_unit_content.read input.stores span ~take with
-  | Ok content -> Ok (span, content)
-  | Error (Fault fault) -> Error (Ended (Read_result.Input_fault fault))
-  | Error (Unread { detail }) -> Error (Failed (Read_failed, "unit content: " ^ detail))
-;;
-
-let rec read_whole (input : input) reads = function
-  | [] -> Ok (List.rev reads)
-  | span :: rest ->
-    let* read = read_content input span ~take:Rest_of_unit in
-    read_whole input (read :: reads) rest
-;;
-
-let item_count ({ kind; _ } : Librarian_read_unit.t) =
-  match kind with
-  | Turn { unattributed; own; _ } -> List.length unattributed + List.length own
-  | Reset { items; _ } -> List.length items
-;;
-
-(* What one question is made of. *)
-type contents =
-  { units : Librarian_read_unit.t list
-  ; reach : Read_result.reach
-  ; trace : string (** The last unit's trace. *)
-  ; offered : Librarian_width.offered
-  }
-
-(* Only the head is cut by a width of items; every other unit is read to its
-   end. The reach is where the last unit's read ended. *)
-let read_range (input : input) ~(width : Librarian_width.width) { before; head; after } =
-  let head_take : Librarian_unit_content.take =
-    match width with
-    | Items count -> First_items count
-    | All | Units (_ : Librarian_width.count) -> Rest_of_unit
-  in
-  let* before = read_whole input [] before in
-  let* head_read = read_content input head ~take:head_take in
-  let* after = read_whole input [] after in
-  let (last : Librarian_unread.span), (ended : Librarian_unit_content.read) =
-    match List.rev after with
-    | last :: (_ : (Librarian_unread.span * Librarian_unit_content.read) list) -> last
-    | [] -> head_read
-  in
-  let with_items =
-    List.filter
-      (fun ((span : Librarian_unread.span), (_ : Librarian_unit_content.read)) -> Librarian_unread.has_items span)
-      after
-  in
-  let offered : Librarian_width.offered =
-    { units = 1 + List.length with_items; head_items = item_count (snd head_read).unit }
-  in
-  let reads = before @ (head_read :: after) in
-  Ok
-    { units = List.map (fun ((_ : Librarian_unread.span), (read : Librarian_unit_content.read)) -> read.unit) reads
-    ; reach = Librarian_unread.reach last ended.ends
-    ; trace = last.through.trace
-    ; offered
-    }
+let read_range (input : input) ~width range =
+  match Librarian_question_units.contents input.stores ~width range with
+  | Ok contents -> Ok contents
+  | Error (Content_unreadable { span }) ->
+    Error (Ended (Read_result.Input_fault (Content_unreadable { line = span.line })))
+  | Error (Content_unread { detail }) -> Error (Failed (Read_failed, "unit content: " ^ detail))
 ;;
 
 (* --- The walk (§7.1 steps 4 to 6) --- *)
@@ -476,7 +397,9 @@ let ask env (input : input) =
     | Read_item_alone -> Librarian_width.head_item, Librarian_question.Item_alone, Librarian_bottom.Alone
   in
   let* range = read_units input ~width tail in
-  let* { units; reach; trace; offered } = read_range input ~width range in
+  let* ({ units; reach; trace; offered } : Librarian_question_units.contents) =
+    read_range input ~width range
+  in
   match
     Librarian_question.make ~lane:input.lane.question ~from:tail ~shows ~reach ~trace ~offered units
   with

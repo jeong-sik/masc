@@ -56,3 +56,12 @@ type t =
   ; kind : kind
   ; missing : Librarian_unit.missing_part list
   }
+
+(** The parts each unit lacks, in unit order. A unit that lacks none is
+    left out. *)
+val missing_at : t list -> Librarian_unit.missing_at list
+
+(** The unit's first item as a question shows it: the first [unattributed]
+    item of a turn, else its first [own] one, or a reset's first item.
+    [None] when the read holds no item. *)
+val first_item : t -> Librarian_unit.item_name option

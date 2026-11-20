@@ -336,15 +336,6 @@ let has_item ({ kind; _ } : Read_unit.t) =
   | Reset { items; _ } -> not (List.is_empty items)
 ;;
 
-let missing_of units =
-  List.filter_map
-    (fun ({ line; missing; _ } : Read_unit.t) ->
-       match missing with
-       | [] -> None
-       | _ :: _ -> Some ({ line; parts = missing } : Librarian_unit.missing_at))
-    units
-;;
-
 (* {1 The id} *)
 
 let declaration
@@ -399,7 +390,7 @@ type shows =
   | Item_alone
 
 let make ~(lane : Librarian_memory_lane.question_side) ~from ~shows ~reach ~trace ~offered units =
-  let missing = missing_of units in
+  let missing = Read_unit.missing_at units in
   if not (List.exists has_item units)
   then Nothing_readable { reach; missing }
   else (

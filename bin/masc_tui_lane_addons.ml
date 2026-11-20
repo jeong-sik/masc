@@ -2017,9 +2017,15 @@ let overview_lines ?(ko = false) ?(height = 24) ~width view =
         let entries = selectable_overview_entries view snapshot in
         (* Keep the selected entry first: wrapped history/count context already
            spends rows before the list in a narrow terminal. *)
+        let sheet = overview_bottom_sheet ~ko ~width ~height view snapshot entries in
+        (* Dock the sheet: it is drawn after the list, so its rows must come out
+           of the list budget. Otherwise a long plugin list pushes the selected
+           worker's sheet below the visible rows. *)
+        let sheet_rows = if sheet = [] then 0 else List.length sheet + 1 in
+        let list_rows = max 3 (9 - sheet_rows) in
         let window = max 0 view.instance_cursor in
         let items = List.mapi (fun index item -> index,item) entries
-          |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
+          |> List.filter (fun (index,_) -> index >= window && index < window + list_rows) in
         let empty = match view.overview_mode, snapshot.configuration with
           | Retained_runs, _ when entries=[] ->
               key_rows ~width
@@ -2044,7 +2050,6 @@ let overview_lines ?(ko = false) ?(height = 24) ~width view =
             (if ko then "보존 이력 · %d개 인스턴스" else "Retained history · %d instances")
             retained_count
         in
-        let sheet = overview_bottom_sheet ~ko ~width ~height view snapshot entries in
         texts [heading]
         @ [plain_drawn (key_rows ~width (match view.overview_mode with
              | Current_installations -> [history; if ko then "h:이력 열기" else "h:open"]

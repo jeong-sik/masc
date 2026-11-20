@@ -2320,9 +2320,63 @@ let ko_localization_and_overview_bottom_sheet () =
         (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) plain))
     failed_lines
 
+let overview_bottom_sheet_stays_docked () =
+  let module Category = Masc.Lane_addon_category in
+  let worker index : UI.instance =
+    { id = Printf.sprintf "w-%02d" index
+    ; run_id = Printf.sprintf "run-%02d" index
+    ; addon_id = "browser-addon"
+    ; title = Printf.sprintf "Worker %02d" index
+    ; revision = "rev-1"
+    ; phase = UI.Row.Attached
+    ; runtime_presence = UI.Live_entry
+    ; observation_seq = 2
+    ; rows_count = 4
+    ; installation_id = Some "browser-main"
+    ; source_path = Some "/config/browser.toml"
+    ; configuration_revision = Some "rev-1"
+    ; binding = `Assoc []
+    ; outputs = [ ("rows", UI.Row.All_lanes) ]
+    ; skills_directory = None
+    ; ui_category = Some Category.Browser
+    ; incarnation = "inc-1"
+    ; action_schema = None
+    ; binding_schema = None
+    ; display =
+        { Masc.Lane_addon_presentation.readings = []
+        ; actions = []
+        ; description = None
+        }
+    ; host_requests = None
+    ; row_actions = None
+    ; action_tool = None
+    }
+  in
+  let snapshot : UI.snapshot =
+    { instances = List.init 30 (fun index -> worker index)
+    ; configuration = None
+    ; output = { UI.Row.rows = []; coverage = [] }
+    ; complete = Some true }
+  in
+  let view = { UI.initial with snapshot = Some snapshot; instance_cursor = 0 } in
+  let height = 24 in
+  let plain =
+    UI.lines ~height ~width:100 view
+    |> List.map Masc_tui_theme.strip_sgr in
+  let sheet_top =
+    List.find_index (fun line -> String.starts_with ~prefix:"\xe2\x95\xad\xe2\x94\x80" line) plain in
+  check bool "a long plugin list still draws the selected worker's sheet" true
+    (Option.is_some sheet_top);
+  check bool "the sheet is docked inside the visible height" true
+    (match sheet_top with Some index -> index < height | None -> false);
+  check bool "docking the sheet keeps roster rows above it" true
+    (List.length plain > 4)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "Korean localization and overview Bottom Sheet render cleanly" `Quick
     ko_localization_and_overview_bottom_sheet;
+  test_case "overview Bottom Sheet stays docked above a long plugin list" `Quick
+    overview_bottom_sheet_stays_docked;
   test_case "records overlay keeps draft identity and scroll" `Quick records_overlay_keeps_draft_identity_and_scroll;
   test_case "current category requires exact id and path" `Quick
     current_category_requires_exact_id_and_path;

@@ -3277,6 +3277,7 @@
   masc_tui_termios
   masc_tui_shell
   masc_tui_transport
+  masc_tui_surface_requests
   masc_tui_keys
   masc_tui_key_ime
   masc_tui_file_icon

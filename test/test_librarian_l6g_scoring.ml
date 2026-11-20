@@ -29,10 +29,10 @@
         code-reviewer 0/925 recall).
       - Paired unknowing-reply non-erasure vs explicit operator retraction
         with original claim language preserved (Ollama 18936 regression).
-   2. Legacy prompt guard and PR coexistence boundary: leaves
-      [config/prompts/librarian.md] untouched (and confirms neither removed
-      [librarian-l6.md] nor L6-stacked [librarian.ask.md] owned by PR #53583
-      are duplicated here). *)
+   2. Legacy prompt guard: leaves [config/prompts/librarian.md] untouched and
+      confirms removed [librarian-l6.md] stays absent without asserting on
+      [librarian.ask.md] (owned by PR #53583, so both PRs can land in any
+      order). *)
 
 open Alcotest
 module Answer = Masc.Librarian_answer
@@ -815,12 +815,8 @@ let test_corpus_tally_pinned () =
 ;;
 
 let test_legacy_prompt_untouched () =
-  let ask_path = Masc_test_deps.source_path "config/prompts/librarian.ask.md" in
   let old_l6_path = Masc_test_deps.source_path "config/prompts/librarian-l6.md" in
   let legacy_path = Masc_test_deps.source_path "config/prompts/librarian.md" in
-  (* Prompt file ownership lives exclusively in PR #53583 so this PR can coexist cleanly. *)
-  check bool "config/prompts/librarian.ask.md is omitted here (owned by #53583)"
-    false (Sys.file_exists ask_path);
   check bool "old config/prompts/librarian-l6.md removed" false (Sys.file_exists old_l6_path);
   check bool "config/prompts/librarian.md exists" true (Sys.file_exists legacy_path);
   let legacy_text = Masc_test_deps.read_file legacy_path in
@@ -830,17 +826,13 @@ let test_legacy_prompt_untouched () =
        check bool ("legacy librarian.md retains " ^ legacy_token) true
          (contains_substring ~needle:legacy_token legacy_text))
     [ "new_claims"; "supersedes"; "absorbs"; "working_contexts"; "admission_policy" ];
-  (* Verify Prompt_registry loads legacy prompt cleanly without duplicating librarian.ask. *)
+  (* Verify Prompt_registry loads the legacy prompt cleanly and keeps librarian-l6 absent. *)
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   Masc.Prompt_defaults.init ();
   Fun.protect
     ~finally:Prompt_registry.clear
     (fun () ->
-       check bool "librarian.ask key is Missing on amendment-only branch" true
-         (match Prompt_registry.prompt_source "librarian.ask" with
-          | Prompt_registry.Missing -> true
-          | Prompt_registry.File | Prompt_registry.Override -> false);
        check bool "old librarian-l6 key is Missing" true
          (match Prompt_registry.prompt_source "librarian-l6" with
           | Prompt_registry.Missing -> true
@@ -882,7 +874,7 @@ let () =
             test_corpus_tally_pinned
         ] )
     ; ( "legacy_prompt_guard"
-      , [ test_case "legacy librarian.md untouched and librarian.ask deferred to #53583"
+      , [ test_case "legacy librarian.md untouched and librarian-l6 removed"
             `Quick test_legacy_prompt_untouched
         ] )
     ]

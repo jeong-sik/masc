@@ -506,8 +506,7 @@ let ensure_keeper_meta_and_defaults config name =
 let ensure_keeper_meta_with_cause config name =
   Result.map snd (ensure_keeper_meta_and_defaults config name)
 
-(* Operator decision 2026-09-25, RFC keeper-sandbox-images-have-versions
-   §2.4: a keeper whose container would start from a name this host cannot
+(* A keeper whose container would start from a name this host cannot
    resolve does not boot, the same place a missing name is refused (#37523).
    Booting it anyway made every wake fail on the same refusal.
 

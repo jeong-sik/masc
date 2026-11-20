@@ -551,8 +551,7 @@ let test_a_post_cannot_share_a_batch_with_a_wait () =
 ;;
 
 (* Every run is offered the wait, whether or not it serves a chat execution:
-   the tool array is part of the request prefix a provider caches (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A run picks
+   the tool array is part of the request prefix a provider caches. A run picks
    its descriptors without the scope ([offered_descriptors]), and the bundle
    hands the scope to the tool handlers only. So a run that serves a chat
    execution and one that does not send the same tool array. A call from a

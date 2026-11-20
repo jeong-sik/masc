@@ -160,8 +160,7 @@ let handle
       ~execution_scope
       ~args
   =
-  (* Every run is offered the wait (RFC
-     a-sent-request-prefix-changes-only-when-the-window-moves §3.2). One that
+  (* Every run is offered the wait. One that
      serves no conversation has no turn to end on a receipt, whatever the call
      names, so it is refused before anything is read. *)
   match execution_scope with

@@ -64,8 +64,7 @@ val assemble_request_context :
     right behind them, including one that takes the turn over after an Agent
     Core round. Agent Core leaves the source in the end context of the
     turn's first request, so a turn that serves an admitted request and one
-    that does not send the same System
-    (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A
+    that does not send the same System. A
     later request adds no tail for it; an Anthropic lane that keeps the first
     context in its history sends it again in place
     ({!Prompt_block_id.injected_on_post_tool_round}).

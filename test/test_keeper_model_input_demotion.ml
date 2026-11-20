@@ -2740,8 +2740,7 @@ let a_finished_turn_result_changes_once_and_its_marker_stays () =
     (take (List.length sent_in_b) sent_later_in_b = sent_in_b)
 ;;
 
-(* A window that stays keeps its markers where it last sent them (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.1): turn B's
+(* A window that stays keeps its markers where it last sent them: turn B's
    first request opens with every message turn A's request sent. A window
    that opened anywhere else demotes turn A's results, and the resend that
    answers a size refusal still demotes the whole refused request. *)

@@ -196,8 +196,7 @@ type start_choice =
             holds for the rest of the turn; [None] when it moved nothing. *)
   }
 
-(** The size signal (RFC
-    a-sent-request-prefix-changes-only-when-the-window-moves §4, D1): at a
+(** The size signal: at a
     turn's first request, the window the pair's ledger last carried passes
     the binding's input-token budget ({!Llm_provider.Input_budget.t}) once
     the next turn grows as much as the largest turn grew since the ledger
@@ -242,8 +241,7 @@ val past_max_context :
     and never moves it back or by a guess. [continuity] names the Librarian
     point the move may go to. Pure. *)
 
-(** What a window that stays keeps where it last sent it (RFC
-    a-sent-request-prefix-changes-only-when-the-window-moves §3.1, §3.3). *)
+(** What a window that stays keeps where it last sent it. *)
 type held_window =
   { window_opened_at : int
         (** Where the ledger's last request opened its range. *)
@@ -289,8 +287,7 @@ val choose_range_start :
     signal (RFC librarian-lifecycle §4.10, rules 1, 2 and 5). It yields to
     an [accepted] at or behind the point too when [held_window] opened
     there: a window that stays holds where it opened, and the point moves it
-    only when it moves (RFC
-    a-sent-request-prefix-changes-only-when-the-window-moves §3.3). With a known
+    only when it moves. With a known
     [turn_boundary], an [accepted] past it is moved back to it (rule 7). A
     front rule 8 moved to where this turn began
     ({!Keeper_carried_front.This_turn_start_after_refusal}) is
@@ -319,8 +316,7 @@ val carried_working_state : held_window:held_window option -> range_start -> str
 (** The working state a range opened at [start] carries ahead of its atoms.
     A window that stays, opened where [held_window] says, carries the one it
     carried when it opened, or none when it opened with none: the front of
-    the request changes only when the window moves (RFC
-    a-sent-request-prefix-changes-only-when-the-window-moves §3.3). Any
+    the request changes only when the window moves. Any
     other start carries the working state of the read end it stands on
     ({!working_state_text}), and none without one. *)
 
@@ -735,8 +731,7 @@ type finished_turn_results =
           never the newest atom, goes as its externalized marker when its
           body is at least {!aged_result_min_bytes} bytes. The boundary is
           the one the window last sent while the window stays
-          ({!held_window}), and the turn boundary once it moves (RFC
-          a-sent-request-prefix-changes-only-when-the-window-moves §3.1).
+          ({!held_window}), and the turn boundary once it moves.
           The same result is the same marker on every later request, so it
           changes once, on the first request whose window moved after its
           turn ended (RFC-tool-results-age-out-of-context). With an unknown
@@ -822,8 +817,7 @@ val run_try_provider_with_truncation_recovery :
     but memory as its next candidates, which Agent Core measures in the same
     run after the size check refuses the request before it is sent: the
     carrier, the turn boundary, the demotion and where this turn began, in
-    that order. What a candidate narrowed stays for the run's later requests
-    (RFC a-request-fits-by-the-one-input-limit-agent-core-decides §4.2).
+    that order. What a candidate narrowed stays for the run's later requests.
 
     A materialized Agent Core HTTP lane whose connection closes before any
     stream event or checkpoint/effect progress reconnects with an uncached

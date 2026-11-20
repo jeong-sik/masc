@@ -832,8 +832,7 @@ let declared_request_reserve_bytes ~system_prompt ~tools =
    [aged_result_min_bytes] or more that belongs to a turn that ended leaves
    as its marker ([finished_turn_results], RFC-tool-results-age-out-of-context).
    Each such result changes once, on the first request whose window moved
-   after its turn ended, and goes as the same marker on every later request
-   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.1).
+   after its turn ended, and goes as the same marker on every later request.
    Verified arguments of closed calls in ended turns also go as stored
    references below the same boundary, unless signed reasoning requires
    their original prefix. A window that stays keeps both where it last sent
@@ -1081,8 +1080,7 @@ let within_turn_boundary ~history_digest_at ~turn_boundary ~this_turn_start
 
 (* RFC librarian-lifecycle §4.10, rules 1 and 2: a Librarian point yields to
    a start the provider accepted past it. A window that stays holds its
-   accepted start behind the point too (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.3): the point
+   accepted start behind the point too: the point
    moves the window only when the window moves, so the prefix the provider
    cached stays. [window_held_at] is where the held window opened. *)
 let from_librarian_point ~window_held_at ~accepted ~history_digest_at ~turn_boundary
@@ -1101,8 +1099,8 @@ let from_librarian_point ~window_held_at ~accepted ~history_digest_at ~turn_boun
   | Some (_ : Keeper_carried_front.seed) | None -> From_covered point
 ;;
 
-(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4 (D1). The
-   window the pair's ledger last carried passes the binding's max-context
+(* The size signal. The window the pair's ledger last carried passes the
+   request's input limit, the window less the output the request reserves,
    once the next turn grows as much as the largest turn grew since the ledger
    started, so it moves before a provider refuses it: to the end of what the
    Librarian read when that lies past the window, else to the turn boundary.
@@ -1185,8 +1183,7 @@ let past_max_context
   else None
 ;;
 
-(* What a window that stays keeps where it last sent it (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.1, §3.3). *)
+(* What a window that stays keeps where it last sent it. *)
 type held_window =
   { window_opened_at : int
   ; markers_before : int
@@ -1297,8 +1294,7 @@ let current_working_state = function
 
 (* A window that stays carries the working state it carried when it opened,
    or none when it opened with none, so the front of the request changes
-   only when the window moves (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.3). A window
+   only when the window moves. A window
    that moved carries the one its start reads. *)
 let carried_working_state ~held_window start =
   match held_window with
@@ -1345,8 +1341,7 @@ let project_range_start ~working_state ~measure_message_bytes ~atom_count start 
       ~allow_empty_history ~measure_message_bytes ~first_atom messages
 ;;
 
-(* Where the results and arguments of turns that ended go as markers (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.1). A window
+(* Where the results and arguments of turns that ended go as markers. A window
    that stays keeps them below the boundary it last sent, and the arguments
    the attempt bound at the turn boundary narrow to it. A window that moved
    demotes every turn that ended. *)
@@ -2469,8 +2464,7 @@ let boundary_resend_on = function
 
 (* A memory answer that changes nothing: the answer when the caller has no
    memory to defer, and the in-run candidates' answer, since a request after
-   the checkpoint stage runs no hook that draws memory again (RFC
-   a-request-fits-by-the-one-input-limit-agent-core-decides §4.2). *)
+   the checkpoint stage runs no hook that draws memory again. *)
 let memory_unchanged : Keeper_memory_delivery_reprojection.t =
   fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged
 ;;
@@ -2482,8 +2476,7 @@ let memory_unchanged : Keeper_memory_delivery_reprojection.t =
    [this_turn_start_resend_sequence]). A request after the run's checkpoint
    stage composes again in the same run instead ([in_run_narrower]). Both
    call these steps over the same [history_rungs], so a rung answers a
-   refusal the same way on either path (RFC
-   a-request-fits-by-the-one-input-limit-agent-core-decides §5, layer 5).
+   refusal the same way on either path.
    [authorized] is the ladder's same-run authority, asked where the ladder
    always asked it. *)
 
@@ -2686,8 +2679,7 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
   }
 ;;
 
-(* RFC a-request-fits-by-the-one-input-limit-agent-core-decides §4.2: the next
-   candidates of a request after the run's checkpoint stage, the ladder's
+(* The next candidates of a request after the run's checkpoint stage, the ladder's
    rungs in its order without memory: the carrier, the turn boundary, the
    demotion and where this turn began. Agent Core asks each only after the
    one before it was refused for size before it was sent, so each composes
@@ -3156,8 +3148,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
       | Keeper_history { continuity; _ } -> Some (history_rungs ctx ~state ~continuity)
       | Completion_review -> None
     in
-    (* RFC a-request-fits-by-the-one-input-limit-agent-core-decides §4.2. A
-       request before the run's checkpoint stage has no next candidate: the
+    (* A request before the run's checkpoint stage has no next candidate: the
        ladder answers its refusal by sending the attempt again. A request
        after it cannot be sent again from the start, so the rungs answer in
        the run. An in-run candidate sends nothing again, so the ladder's

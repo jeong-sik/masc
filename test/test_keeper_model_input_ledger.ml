@@ -591,8 +591,7 @@ let test_a_provider_observed_front_is_checked_at_its_own_position () =
 
 (* The pair table sits behind an Eio mutex, so the table tests need a
    running scheduler. *)
-(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4. [steps]
-   are (turn context, first atom, atom count, input tokens) per request; a
+(* [steps] are (turn context, first atom, atom count, input tokens) per request; a
    [None] count is a request the provider did not count. *)
 let observe_all steps =
   List.fold_left

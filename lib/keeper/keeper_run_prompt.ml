@@ -47,8 +47,7 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
    for an official client only. Agent Core leaves it in the end context, which
    rides the turn's first request alone, so a turn that serves an admitted
    request sends the System a turn that does not would: a System that changed
-   with the turn kind made the provider read the whole history again
-   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2, D3). A later
+   with the turn kind made the provider read the whole history again. A later
    round carries this turn's authority block again because the post-tool
    assembly drops the [Dynamic_context] it came from (#45853). Proof state
    remains visible too, but Agent Core keeps this recurring state out of the

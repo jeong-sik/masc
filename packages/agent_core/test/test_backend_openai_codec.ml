@@ -3233,6 +3233,216 @@ let test_responses_developer_carrier_and_explicit_cache_opt_out () =
     (member "input" legacy |> to_list |> List.length)
 ;;
 
+let test_responses_pre_system_context_explicit_breakpoint () =
+  let expected_bp = `Assoc [ "mode", `String "explicit" ] in
+  let sys_ctx text : message =
+    { origin = Types.System_context
+    ; role = User
+    ; content = [ Text text ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let responses_json config messages =
+    Responses.build_request ~config ~messages () |> Yojson.Safe.from_string
+  in
+  let gpt62_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai-responses"
+      ~model_id:"gpt-6.2-sol"
+      ~base_url:"https://api.openai.com"
+      ~request_path:"/v1/responses"
+      ~system_prompt:"Stable system instructions."
+      ~cache_system_prompt:true
+      ()
+  in
+  let rec count_breakpoints = function
+    | `Assoc fields ->
+      let self = if List.mem_assoc "prompt_cache_breakpoint" fields then 1 else 0 in
+      List.fold_left (fun acc (_, v) -> acc + count_breakpoints v) self fields
+    | `List items ->
+      List.fold_left (fun acc v -> acc + count_breakpoints v) 0 items
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ -> 0
+  in
+  let check_explicit_mode label json =
+    let pco = member "prompt_cache_options" json |> Yojson.Safe.Util.to_assoc in
+    check_bool (label ^ " sets prompt_cache_options.mode=explicit") true
+      (List.assoc_opt "mode" pco = Some (`String "explicit"));
+    check_bool (label ^ " omits ttl on prompt_cache_options") false
+      (List.mem_assoc "ttl" pco)
+  in
+  let check_no_explicit_mode label json =
+    let fields = Yojson.Safe.Util.to_assoc json in
+    check_bool (label ^ " omits prompt_cache_options") false
+      (List.mem_assoc "prompt_cache_options" fields);
+    check_int (label ^ " has 0 breakpoints") 0 (count_breakpoints json)
+  in
+  (* 1. Trailing System_context after User message marks the User input_text part. *)
+  let after_user =
+    responses_json gpt62_cfg [ msg User [ Text "turn input" ]; sys_ctx "ephemeral world state" ]
+  in
+  check_explicit_mode "after user" after_user;
+  check_int "after user has exactly 1 breakpoint" 1 (count_breakpoints after_user);
+  (match member "input" after_user |> to_list with
+   | [ dev; usr; ext ] ->
+     check_int "developer unmarked" 0 (count_breakpoints dev);
+     check_int "trailing ext unmarked" 0 (count_breakpoints ext);
+     (match member "content" usr |> to_list with
+      | [ part ] ->
+        check_bool "user input_text marked with explicit breakpoint" true
+          (List.assoc_opt "prompt_cache_breakpoint" (Yojson.Safe.Util.to_assoc part)
+           = Some expected_bp)
+      | _ -> Alcotest.fail "expected single user content part")
+   | _ -> Alcotest.fail "expected [developer; user; ext]");
+  (* 2. Trailing System_context after string function_call_output converts output to [input_text]. *)
+  let after_tool_str =
+    responses_json
+      gpt62_cfg
+      [ msg User [ Text "run tool" ]
+      ; msg Assistant [ ToolUse { id = "call_1"; name = "read"; input = `Assoc [] } ]
+      ; msg
+          Tool
+          [ ToolResult
+              { tool_use_id = "call_1"
+              ; content = "tool text"
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = None
+              }
+          ]
+      ; sys_ctx "ephemeral ext"
+      ]
+  in
+  check_explicit_mode "after string tool result" after_tool_str;
+  check_int "after string tool result has 1 breakpoint" 1 (count_breakpoints after_tool_str);
+  (match member "input" after_tool_str |> to_list with
+   | [ _dev; _usr; _call; tool_out; ext ] ->
+     check_int "tool_out marked" 1 (count_breakpoints tool_out);
+     check_int "ext unmarked" 0 (count_breakpoints ext);
+     (match member "output" tool_out |> to_list with
+      | [ part ] ->
+        let pf = Yojson.Safe.Util.to_assoc part in
+        check_bool "output converted to input_text" true
+          (List.assoc_opt "type" pf = Some (`String "input_text"));
+        check_bool "output text preserved" true
+          (List.assoc_opt "text" pf = Some (`String "tool text"));
+        check_bool "output carries explicit breakpoint" true
+          (List.assoc_opt "prompt_cache_breakpoint" pf = Some expected_bp)
+      | _ -> Alcotest.fail "expected single input_text part in function_call_output.output")
+   | _ -> Alcotest.fail "expected 5 items for string tool result");
+  (* 3. Trailing System_context after array function_call_output (with image) marks last eligible part. *)
+  let img_block =
+    Image
+      { media_type = "image/png"
+      ; source = Url "https://example.invalid/chart.png"
+      }
+  in
+  let after_tool_arr =
+    responses_json
+      gpt62_cfg
+      [ msg User [ Text "inspect" ]
+      ; msg Assistant [ ToolUse { id = "call_2"; name = "view"; input = `Assoc [] } ]
+      ; msg
+          Tool
+          [ ToolResult
+              { tool_use_id = "call_2"
+              ; content = ""
+              ; outcome = Tool_succeeded
+              ; json = None
+              ; content_blocks = Some [ Text "caption"; img_block ]
+              }
+          ]
+      ; sys_ctx "ephemeral ext"
+      ]
+  in
+  check_explicit_mode "after array tool result" after_tool_arr;
+  check_int "after array tool result has 1 breakpoint" 1 (count_breakpoints after_tool_arr);
+  (match member "input" after_tool_arr |> to_list with
+   | [ _dev; _usr; _call; tool_out; _ext ] ->
+     (match member "output" tool_out |> to_list with
+      | [ p1; p2 ] ->
+        check_int "first tool output part unmarked" 0 (count_breakpoints p1);
+        check_bool "last tool output image part marked" true
+          (List.assoc_opt "prompt_cache_breakpoint" (Yojson.Safe.Util.to_assoc p2)
+           = Some expected_bp)
+      | _ -> Alcotest.fail "expected 2 parts in image tool output")
+   | _ -> Alcotest.fail "expected 5 items for array tool result");
+  (* 4. P0 output_text exclusion: Assistant before System_context walks backward to User (NEVER marks assistant output_text!). *)
+  let after_assistant =
+    responses_json
+      gpt62_cfg
+      [ msg User [ Text "earlier user" ]
+      ; msg Assistant [ Text "assistant reply" ]
+      ; sys_ctx "ephemeral ext"
+      ]
+  in
+  check_explicit_mode "after assistant" after_assistant;
+  check_int "after assistant has 1 breakpoint" 1 (count_breakpoints after_assistant);
+  (match member "input" after_assistant |> to_list with
+   | [ _dev; usr; asst; ext ] ->
+     check_int "assistant output_text NEVER marked" 0 (count_breakpoints asst);
+     check_int "preceding user marked" 1 (count_breakpoints usr);
+     check_int "ext unmarked" 0 (count_breakpoints ext)
+   | _ -> Alcotest.fail "expected [developer; user; assistant; ext]");
+  (* 5. Developer-only prefix (System_context with no prior conversation) marks developer item. *)
+  let dev_only = responses_json gpt62_cfg [ sys_ctx "ephemeral ext" ] in
+  check_explicit_mode "developer-only prefix" dev_only;
+  check_int "developer-only prefix has 1 breakpoint" 1 (count_breakpoints dev_only);
+  (match member "input" dev_only |> to_list with
+   | [ dev; ext ] ->
+     check_int "developer marked" 1 (count_breakpoints dev);
+     check_int "ext unmarked" 0 (count_breakpoints ext)
+   | _ -> Alcotest.fail "expected [developer; ext]");
+  (* 6. No eligible prefix item (no system_prompt, assistant only before ext) -> stays implicit (NEVER 0-bp explicit!). *)
+  let no_eligible =
+    responses_json
+      { gpt62_cfg with system_prompt = None }
+      [ msg Assistant [ Text "assistant only" ]; sys_ctx "ephemeral ext" ]
+  in
+  check_no_explicit_mode "no eligible prefix item stays implicit" no_eligible;
+  (* 7. Mid-history System_context (not strictly trailing) -> stays implicit. *)
+  let mid_history =
+    responses_json
+      gpt62_cfg
+      [ sys_ctx "earlier ext"; msg User [ Text "user" ]; sys_ctx "trailing ext" ]
+  in
+  check_no_explicit_mode "mid-history System_context stays implicit" mid_history;
+  (* 8. previous_response_id = Some _ -> stays implicit and keeps instructions. *)
+  let with_prev =
+    responses_json
+      { gpt62_cfg with previous_response_id = Some "resp_prev_99" }
+      [ msg User [ Text "follow up" ]; sys_ctx "ephemeral ext" ]
+  in
+  check_no_explicit_mode "previous_response_id stays implicit" with_prev;
+  check_string "previous_response_id keeps instructions" "Stable system instructions."
+    (member "instructions" with_prev |> to_string);
+  (* 9. Pre-5.6 model (supports_explicit_cache_opt_out = false) -> untouched implicit mode. *)
+  let legacy_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openai"
+      ~model_id:"gpt-5.5"
+      ~base_url:"https://api.openai.com"
+      ~request_path:"/v1/responses"
+      ~system_prompt:"Legacy system."
+      ~cache_system_prompt:true
+      ()
+  in
+  check_no_explicit_mode
+    "pre-5.6 model stays implicit"
+    (responses_json legacy_cfg [ msg User [ Text "hi" ]; sys_ctx "ext" ]);
+  (* 10. cache_system_prompt = false (1-shot opt-out) still emits explicit mode with 0 breakpoints. *)
+  let opt_out =
+    responses_json
+      { gpt62_cfg with cache_system_prompt = false }
+      [ msg User [ Text "one-shot" ]; sys_ctx "ext" ]
+  in
+  check_explicit_mode "1-shot opt-out keeps explicit mode" opt_out;
+  check_int "1-shot opt-out keeps 0 breakpoints" 0 (count_breakpoints opt_out)
+;;
+
 let test_openrouter_top_level_cache_control_and_1h_pricing () =
   let messages = [ msg User [ Text "hello" ] ] in
   let chat_json config =
@@ -4455,6 +4665,10 @@ let () =
             "responses developer carrier, previous_response_id guard, and explicit cache opt-out"
             `Quick
             test_responses_developer_carrier_and_explicit_cache_opt_out
+        ; Alcotest.test_case
+            "responses pre-System_context explicit prompt_cache_breakpoint"
+            `Quick
+            test_responses_pre_system_context_explicit_breakpoint
         ; Alcotest.test_case
             "openrouter top-level cache_control and 1h write pricing"
             `Quick

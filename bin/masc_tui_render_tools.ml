@@ -601,8 +601,8 @@ let skill_config_line (config : Masc.Tui_decode_tools.skill_catalog_config optio
       | None -> Say.both ~ko:"resource 읽기 한도 없음" ~en:"no resource read cap"
       | Some bytes ->
         Say.per_language (function
-          | Say.Ko -> Printf.sprintf "resource 읽기 \xe2\x89\xa4 %d바이트" bytes
-          | Say.En -> Printf.sprintf "resource read \xe2\x89\xa4 %d bytes" bytes)
+          | Say.Ko -> Printf.sprintf "resource 읽기 \xe2\x89\xa4 %s바이트" (Masc_tui_value.Count.grouped bytes)
+          | Say.En -> Printf.sprintf "resource read \xe2\x89\xa4 %s bytes" (Masc_tui_value.Count.grouped bytes))
     in
     [ ( Ansi.dim
       , Say.both ~ko:"   설정 " ~en:"   config "
@@ -1263,8 +1263,8 @@ let effective_surface_diagnostics ~hash = function
       ; (match ets_skill_resource_read_max_bytes with
          | Some max_bytes ->
            Say.per_language (function
-             | Say.Ko -> Printf.sprintf "미룬 resource 한도 %d바이트" max_bytes
-             | Say.En -> Printf.sprintf "deferred resource bound=%d bytes" max_bytes)
+             | Say.Ko -> Printf.sprintf "미룬 resource 한도 %s바이트" (Masc_tui_value.Count.grouped max_bytes)
+             | Say.En -> Printf.sprintf "deferred resource bound=%s bytes" (Masc_tui_value.Count.grouped max_bytes))
          | None -> Say.both ~ko:"미룬 resource 한도 없음" ~en:"deferred resource bound=not configured")
       ; Say.per_language (function
           | Say.Ko -> Printf.sprintf

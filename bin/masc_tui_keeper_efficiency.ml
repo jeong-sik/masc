@@ -42,17 +42,17 @@ let row_lines ~ko ~month (view : month_view) (row : Decode.keeper_month) =
   let heading =
     wrap_style Ansi.bold
       (Printf.sprintf
-         (if ko then "%s 효율 (%d일, 전체 %d턴)" else "Efficiency %s (%d days, fleet %d turns)")
-         month view.days_covered fleet.turns_total)
+         (if ko then "%s 효율 (%d일, 전체 %s턴)" else "Efficiency %s (%d days, fleet %s turns)")
+         month view.days_covered (Masc_tui_value.Count.grouped fleet.turns_total))
   in
   if row.turns = 0
   then
     [ Plain, heading
     ; ( Dim
       , Printf.sprintf
-          (if ko then "센 턴 없음 \xc2\xb7 도구 호출 %d회, 실패 %d회"
-           else "no turn counted; %d tool calls, %d failed")
-          row.calls row.failed )
+          (if ko then "센 턴 없음 \xc2\xb7 도구 호출 %s회, 실패 %s회"
+           else "no turn counted; %s tool calls, %s failed")
+          (Masc_tui_value.Count.grouped row.calls) (Masc_tui_value.Count.grouped row.failed) )
     ]
   else
     let turns = row.turns in
@@ -69,21 +69,21 @@ let row_lines ~ko ~month (view : month_view) (row : Decode.keeper_month) =
     in
     let fail_text =
       wrap_style fail_style
-        (if ko then Printf.sprintf "실패 %d / 호출 %d" row.failed row.calls
-         else Printf.sprintf "%d of %d calls failed" row.failed row.calls)
+        (if ko then Printf.sprintf "실패 %s / 호출 %s" (Masc_tui_value.Count.grouped row.failed) (Masc_tui_value.Count.grouped row.calls)
+         else Printf.sprintf "%s of %s calls failed" (Masc_tui_value.Count.grouped row.failed) (Masc_tui_value.Count.grouped row.calls))
     in
     let sep = recede " · " in
     [ Plain, heading
     ; ( Plain
       , if ko then
-          Printf.sprintf "%d턴%s턴당 호출 %.1f %s %s%s턴당 도구 %.1f초 %s %s"
-            turns sep calls_pt calls_bar
+          Printf.sprintf "%s턴%s턴당 호출 %.1f %s %s%s턴당 도구 %.1f초 %s %s"
+            (Masc_tui_value.Count.grouped turns) sep calls_pt calls_bar
             (recede (Printf.sprintf "(전체 %.1f)" fleet.calls_per_turn))
             sep tool_s_pt tool_bar
             (recede (Printf.sprintf "(전체 %.1f)" fleet.tool_s_per_turn))
         else
-          Printf.sprintf "%d turns%s%.1f calls/turn %s %s%s%.1f tool s/turn %s %s"
-            turns sep calls_pt calls_bar
+          Printf.sprintf "%s turns%s%.1f calls/turn %s %s%s%.1f tool s/turn %s %s"
+            (Masc_tui_value.Count.grouped turns) sep calls_pt calls_bar
             (recede (Printf.sprintf "(fleet %.1f)" fleet.calls_per_turn))
             sep tool_s_pt tool_bar
             (recede (Printf.sprintf "(fleet %.1f)" fleet.tool_s_per_turn)) )

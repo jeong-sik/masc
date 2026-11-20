@@ -1781,7 +1781,7 @@
  (name masc_tui_keeper_efficiency)
  (wrapped false)
  (modules masc_tui_keeper_efficiency)
- (libraries masc masc.keeper_efficiency masc_tui_ansi masc_tui_chart masc_tui_fetched masc_tui_theme yojson))
+ (libraries masc masc.keeper_efficiency masc_tui_ansi masc_tui_chart masc_tui_fetched masc_tui_theme masc_tui_value yojson))
 
 ;; A Keeper's Board-attention quarantine rows on its Info tab. Own library so
 ;; the lines and the requeue target have a test that does not draw a screen.

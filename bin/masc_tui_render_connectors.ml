@@ -26,13 +26,13 @@ let browser_lane_source_hint view =
 (* Project a backend that could not start, then the selected connection's
    current metadata and activity, together, so drawing and available-room
    calculations consume the same ephemeral rows. *)
-let browser_lane_connection_rows ?(ko = false) (view : Browser_lane_view.t) =
+let browser_lane_connection_rows ?(ko = false) ~now (view : Browser_lane_view.t) =
   let say korean english = if ko then korean else english in
   let selected = match view.selected_client with
     | None -> []
     | Some (client : Browser_lane_view.client) ->
         let metadata = Option.to_list (Option.map (fun row -> Theme.recede (), "  " ^ row)
-          (Browser_lane_view.space_observation_row client)) in
+          (Browser_lane_view.space_observation_row ~now client)) in
         let pending = List.map (fun (work : Browser_lane.interaction_activity) ->
           let phase = match work.phase with
             | Browser_lane.Interaction_queued -> say "대기 중" "queued"
@@ -90,7 +90,7 @@ let browser_picker_frame_rows connection_rows = 4 + List.length connection_rows
 
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let budget = surface_chrome_budget ~frame:Chrome_screen state ~terminal_rows in
-  let connection_rows = browser_lane_connection_rows view in
+  let connection_rows = browser_lane_connection_rows ~now:(Unix.gettimeofday ()) view in
   max 0 (budget - browser_lane_fixed_rows ~connection_rows view)
 
 let browser_lane_scroll_limit state ~terminal_rows ~cols view =
@@ -114,7 +114,8 @@ let browser_step state = ui_text state ~ko:"브라우저" ~en:"browser"
 let render_browser_lane (state : state) (view : Browser_lane_view.t) =
   let open Browser_lane_view in
   let terminal_rows, cols = get_terminal_size () in
-  let connection_rows = browser_lane_connection_rows ~ko:(state.ui_language = Lang_ko) view in
+  let now = Unix.gettimeofday () in
+  let connection_rows = browser_lane_connection_rows ~ko:(state.ui_language = Lang_ko) ~now view in
   let fixed_rows = browser_lane_fixed_rows ~connection_rows view in
   let picker_frame_rows = browser_picker_frame_rows connection_rows in
   let read_status = Browser_lane_view.read_status view in
@@ -274,7 +275,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
              the cursor. *)
           let choice = List.nth_opt choices cursor in
           let details = List.filter_map Fun.id
-            [Option.bind choice browser_choice_observation;
+            [Option.bind choice (browser_choice_observation ~now);
              (if view.advanced_choices then Option.bind choice browser_choice_detail else None)] in
           c.push_styled ~style:(Theme.recede ()) ("  " ^ String.concat " · " details);
           Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line

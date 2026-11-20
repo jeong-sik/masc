@@ -7482,19 +7482,22 @@ module Browser_lane_view = struct
     ^ (match client.space with None -> "" | Some space ->
         Printf.sprintf " · Space #%d · %s" space.id
           (Masc.Tui_terminal_text.sanitize_terminal_text space.name))
-  let space_observation_row (client : client) =
+  (* The observation moment reads in the local zone (RFC
+     tui-one-screen-grammar 6.1); the decoder admits only a finite time, and
+     one the calendar cannot break down draws the read-failure mark. *)
+  let space_observation_row ~now (client : client) =
     match client.transport, client.space_observation with
     | Browser_lane.Ego_task_space, Some observed ->
         let timestamp =
-          try Time_codec.rfc3339_of_unix_ms observed.observed_at
-          with Unix.Unix_error _ | Invalid_argument _ ->
-            Printf.sprintf "epoch %.17g" observed.observed_at in
+          try Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second ~now
+                observed.observed_at
+          with Unix.Unix_error _ -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed in
         Some (Printf.sprintf "Last SDK Space #%d · %s · %s · observed %s"
           observed.space.id
           (Masc.Tui_terminal_text.sanitize_terminal_text observed.space.name)
           (Masc.Tui_terminal_text.sanitize_terminal_text observed.ownership)
           timestamp)
-    | Browser_lane.Ego_task_space, None -> Some "SDK Space control: not observed"
+    | Browser_lane.Ego_task_space, None -> Some "SDK Space control: not reported"
   let connection_name (client : client) =
     browser_name client.browser ^ " · " ^ transport_label client.transport
   (* The title names the connection; the connection row adds what it leaves
@@ -7526,8 +7529,8 @@ module Browser_lane_view = struct
                    ^ (match served_elsewhere lacking with
                       | Some clause -> " · " ^ clause
                       | None -> "")))
-  let browser_choice_observation = function
-    | Connected_browser client -> space_observation_row client
+  let browser_choice_observation ~now = function
+    | Connected_browser client -> space_observation_row ~now client
     | Automatic_browser -> None
   let screenshot_client t (shot : screenshot) =
     List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id)

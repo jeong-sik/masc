@@ -76,13 +76,23 @@ type ('rejection, 'record_error) failure =
       }
       (** An official client whose account published no seats, so no
           client was run. *)
+  | Http_unfit of
+      { slot_id : string
+      ; reason : string
+      }
+      (** The slot's own declaration could not become a flow candidate (a
+          blank slot id, or an id the snapshot names twice), so no request
+          was sent. This is the slot's fault and not the lane's: the walk
+          moves on, as RFC exact-lane-walks-one-slot-list section 3.3 Q1
+          requires, because another slot can still serve the request. *)
 
 type ('rejection, 'record_error) stop =
   | Http_unstartable of
       { slot_id : string
       ; reason : string
       }
-      (** masc could not start the flow of one candidate. *)
+      (** masc could not give the slot's flow an identity, so no request was
+          sent. Masc's own failure ends the walk (section 3.3 Q1). *)
   | Http_stopped of
       { slot_id : string
       ; error : ('record_error, 'rejection) Agent_core.Exact_output.validated_flow_error
@@ -114,7 +124,8 @@ type ('accepted, 'rejection, 'record_error) walk_result =
     recorded on the slot's frozen runtime observation
     ({!Runtime_exact_lane_backpressure.observe}). A flow that ended on a
     failure another candidate could have served moves on; one that ended
-    on masc's own failure stops the walk.
+    on masc's own failure stops the walk. A slot that could not become a
+    flow candidate at all is [Http_unfit] and the walk moves on.
 
     {b CLI visit.} Without [cli_request] the slot is [Cli_unfit]. Otherwise
     [before_cli_visit] records the visit, then the client runs once and

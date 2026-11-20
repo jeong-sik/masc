@@ -105,6 +105,10 @@ type ('rejection, 'record_error) failure =
       { runtime_id : string
       ; provider_id : string
       }
+  | Http_unfit of
+      { slot_id : string
+      ; reason : string
+      }
 
 type ('rejection, 'record_error) stop =
   | Http_unstartable of
@@ -126,6 +130,7 @@ let rests = function
   | Http_failed { slot_id = _; error = Exact.Flow_semantic_candidates_exhausted _ } -> false
   | Cli_failed { runtime_id = _; failure } -> Oneshot.refused_for_binding_rest failure
   | Cli_rejected _ | Cli_unfit _ | Cli_seats_unpublished _ -> false
+  | Http_unfit _ -> false
 ;;
 
 type ('accepted, 'rejection, 'record_error) walk_result =
@@ -135,20 +140,28 @@ type ('accepted, 'rejection, 'record_error) walk_result =
     , ('rejection, 'record_error) stop )
     Exact_lane_walk.walk_result
 
+(* Why one candidate could not become a flow: the slot's own declaration, or
+   masc failing to give the flow an identity. The first settles only this slot
+   (RFC section 3.3 Q1); the second is masc's own failure and ends the walk. *)
+type start_refusal =
+  | Slot_unfit of string
+  | Identity_unavailable of string
+;;
+
 let start_one_candidate_flow ~admission_class ~messages ~requirement (slot : Registry.selected_slot)
   =
   match Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target with
-  | Error Exact.Blank_flow_candidate_id -> Error "the slot has a blank id"
+  | Error Exact.Blank_flow_candidate_id -> Error (Slot_unfit "the slot has a blank id")
   | Ok first ->
     (match Exact.snapshot_flow ~first ~rest:[] ~messages requirement with
      | Error
          (Exact.Duplicate_flow_candidate_id
            { candidate_id; first_position = _; duplicate_position = _ }) ->
-       Error ("the slot is named twice: " ^ candidate_id)
+       Error (Slot_unfit ("the slot is named twice: " ^ candidate_id))
      | Ok snapshot ->
        (match Exact.start_flow ~admission_class snapshot with
         | Ok attempt -> Ok attempt
-        | Error (Exact.Flow_id_generation_failed detail) -> Error detail))
+        | Error (Exact.Flow_id_generation_failed detail) -> Error (Identity_unavailable detail)))
 ;;
 
 let visit_http
@@ -165,7 +178,9 @@ let visit_http
       seat
   =
   match start_one_candidate_flow ~admission_class ~messages ~requirement slot with
-  | Error reason -> Exact_lane_walk.Stop (Http_unstartable { slot_id = slot.slot_id; reason })
+  | Error (Slot_unfit reason) -> Exact_lane_walk.Advance (Http_unfit { slot_id = slot.slot_id; reason })
+  | Error (Identity_unavailable reason) ->
+    Exact_lane_walk.Stop (Http_unstartable { slot_id = slot.slot_id; reason })
   | Ok attempt ->
     let result =
       Exact.execute_flow_once

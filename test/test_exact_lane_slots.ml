@@ -26,7 +26,9 @@ let test_a_cli_refusal_rests_only_on_its_account_standing () =
     (rests_on
        (Keeper_lane_cli_oneshot.Invalid_json_output { runtime_id = "cli.a"; detail = "not json" }));
   check bool "a request that cannot be one prompt does not rest" false
-    (Slots.rests (Slots.Cli_unfit { runtime_id = "cli.a" }))
+    (Slots.rests (Slots.Cli_unfit { runtime_id = "cli.a" }));
+  check bool "a slot that cannot be a flow candidate does not rest" false
+    (Slots.rests (Slots.Http_unfit { slot_id = ""; reason = "the slot has a blank id" }))
 ;;
 
 let test_the_registry_lists_http_slots_then_cli_slots () =

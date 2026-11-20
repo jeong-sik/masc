@@ -56,8 +56,8 @@ operator choice. Configurability is not added speculatively.
 
 The configurable builtin exact-output routes are `librarian_exact`,
 `hitl_auto_judge`, `board_attention_exact`, `verifier_exact`,
-`candle_appraiser` and `librarian_memory`. Board Attention and HITL are Required; the other builtin
-routes are Optional according to `Standalone_lane.obligation`.
+`candle_appraiser`, `librarian_memory` and `workspace_memory_curator`. Board Attention and HITL are
+Required; the other builtin routes are Optional according to `Standalone_lane.obligation`.
 
 `librarian_memory` is the lane the Librarian asks through for one Keeper's
 Memory changes. It is a separate table from `librarian_exact`: the two ask
@@ -68,6 +68,13 @@ must name a configured runtime, and an enabled table must declare
 window comes from its binding's `max-context` (then provider, then model, then
 the capability catalog), and a slot whose window cannot be resolved leaves the
 lane without a value. Its asks keep no per-ask run record.
+
+`workspace_memory_curator` is the lane the in-process World Memory curator
+asks through, for classification and for the briefing. First-run setup does
+not fill it; the operator declares its slots. Without this table the curator
+asks no model, and declaring `librarian_memory` does not start it. Its asks
+keep no run record: what the curator committed is in the World Memory log and
+ledger. The curator does not read the Addon tables below.
 
 Workspace Curator selects models per installed Addon, using
 `[runtime.addon_exact_lanes.<installation-id>.classification]` and

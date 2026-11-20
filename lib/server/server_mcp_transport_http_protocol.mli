@@ -95,8 +95,8 @@ val validate_session_known :
   is_known:bool ->
   string ->
   (unit, string) result
-(** RFC-0100 PR-3 — Q3 default. Reject [POST /mcp] when the client
-    echoes an [Mcp-Session-Id] the server has no state for. Returns
+(** Reject [POST /mcp] when the client echoes an
+    [Mcp-Session-Id] the server has no state for. Returns
     [Ok ()] when [session_was_provided = false] (a missing header is
     handled by {!validate_session_requirement}), when [is_known = true],
     when the body declares a stateless 2026-07-28 protocol version, or

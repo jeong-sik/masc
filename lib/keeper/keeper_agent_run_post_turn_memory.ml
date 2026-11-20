@@ -1,6 +1,6 @@
 (** Keeper_agent_run_post_turn_memory.ml — Post-turn memory write series.
 
-    Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-4). *)
+    Extracted from [Keeper_agent_run.run_turn]. *)
 
 let counterpart_observations_before ~base_dir ~keeper_name ~before =
   let user_rows =

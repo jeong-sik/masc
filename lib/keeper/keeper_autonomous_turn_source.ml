@@ -227,9 +227,9 @@ let run_step_of_trajectory ~records ~raw_occurrences = function
 
 let trace_step_of_run_step ~executions = function
   | Run_think ts ->
-    (* RFC-0358 §2 admits the step and its timestamp, not the reasoning. The
-       flag carries that fact; the label a reader shows for it belongs to the
-       reader, not to this projection. *)
+    (* The public autonomous projection admits the step and its timestamp,
+       not the reasoning. The flag carries that fact; the label a reader shows
+       for it belongs to the reader, not to this projection. *)
     Keeper_chat_blocks.Trace_think
       { text = ""
       ; content_withheld = true

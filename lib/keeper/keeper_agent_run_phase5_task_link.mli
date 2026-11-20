@@ -1,5 +1,5 @@
 (** Phase 5: wire goal/task/board with keeper tool results.
-    Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-9). *)
+    Extracted from [Keeper_agent_run.run_turn]. *)
 
 val run :
   config:Workspace.config ->

@@ -469,17 +469,16 @@ let judgment_of_success candidate (flow_success : Exact_output.flow_success) =
     }
 ;;
 
-(* RFC cli-runtimes-as-lane-slots: after every catalog slot is exhausted the
-   lane walks its declared official clients as one-shots. This lane is
-   boot-mandatory and its catalog slots share two quota pools, so without a
-   tail an exhausted pool stops Board attention outright.
+(* After every catalog slot is exhausted the lane walks its declared official
+   clients as one-shots. This lane is boot-mandatory and its catalog slots
+   share two quota pools, so without a tail an exhausted pool stops Board
+   attention outright.
 
    The walk runs inside [execute_current], which also closes the lane's run
    record, after semantic exhaustion or a typed advanceable final failure.
-   The record therefore names the slot that answered (RFC §3:
-   [selected_slot] is the runtime id). The judgment says [Cli_lane_slot], so
-   the durable record never claims an AGENT_CORE attempt that was not
-   allocated. *)
+   The record therefore names the slot that answered ([selected_slot] is the
+   runtime id). The judgment says [Cli_lane_slot], so the durable record
+   never claims an AGENT_CORE attempt that was not allocated. *)
 type cli_tail_error =
   | Tail_no_slots
   | Tail_failures of Keeper_lane_cli_oneshot.failure list

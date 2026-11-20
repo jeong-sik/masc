@@ -2799,6 +2799,60 @@ let body_rows_of_chosen rows chosen =
 (* Positions belong to the actual immutable rows selected by this producer.
    Generated gaps and rows synthesized by repeat collapse have no original
    row owner and cannot acquire a body position by matching their text. *)
+(* Whether [rows] fits in [room] rows, asking no more of the list than
+   [room + 1] of its rows. *)
+let rec fits_in rows room =
+  match rows with
+  | [] -> true
+  | _ :: rest -> room > 0 && fits_in rest (room - 1)
+
+(* The windows recent frames cut out of entries too tall for the room they
+   had, per domain. A window and the body rows it shows follow from the
+   entry's rows, the room, the width and whether the entry is the newest
+   alone, and the rows of an unchanged entry are the same list from one frame
+   to the next. Cut again on every frame, a 1MB reply at the live edge walked
+   its 50k rows four times to keep a screenful. *)
+type kept_window = {
+  window_rows : row list;
+  window_room : int;
+  window_inner_width : int;
+  window_newest : bool;
+  window_chosen : row list;
+  window_body_rows : int option list;
+}
+
+let kept_windows_capacity = 4
+
+let kept_windows_key : kept_window list ref Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> ref [])
+
+let windows_cut = Atomic.make 0
+
+let window_of_entry ~inner_width ~room ~newest rows =
+  if fits_in rows room then rows, body_rows_of_chosen rows rows
+  else
+    let held = Domain.DLS.get kept_windows_key in
+    let matches kept =
+      kept.window_rows == rows
+      && kept.window_room = room
+      && kept.window_inner_width = inner_width
+      && Bool.equal kept.window_newest newest
+    in
+    match List.find_opt matches !held with
+    | Some kept -> kept.window_chosen, kept.window_body_rows
+    | None ->
+        Atomic.incr windows_cut;
+        let chosen =
+          if newest then newest_entry_window ~inner_width ~height:room rows
+          else take_last room rows
+        in
+        let body_rows = body_rows_of_chosen rows chosen in
+        held :=
+          { window_rows = rows; window_room = room; window_inner_width = inner_width;
+            window_newest = newest; window_chosen = chosen; window_body_rows = body_rows }
+          :: List.filteri (fun index _ -> index < kept_windows_capacity - 1) !held;
+        chosen, body_rows
+
 let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
   let inner_width = Int.max 1 inner_width in
   let height = Int.max 0 height in
@@ -2808,15 +2862,13 @@ let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
     | entry :: older ->
         let rows = rows_of_entry ?markdown ?origin ~inner_width
           ~previous:(List.nth_opt older 0) entry in
-        let chosen =
-          if List.length rows <= remaining then rows
-          else if selected = [] then newest_entry_window ~inner_width ~height:remaining rows
-          else take_last remaining rows in
+        let newest = match selected with [] -> true | _ :: _ -> false in
+        let chosen, body_rows = window_of_entry ~inner_width ~room:remaining ~newest rows in
         let below = List.length selected in
         let count = List.length chosen in
         let owned = List.mapi (fun index body_row ->
           Option.map (fun body_row -> {entry_index;body_row;
-            rows_below=below+count-index-1}) body_row) (body_rows_of_chosen rows chosen)
+            rows_below=below+count-index-1}) body_row) body_rows
           |> List.filter_map Fun.id in
         collect (entry_index-1) (remaining-count) (chosen @ selected) (owned @ positions) older
   in
@@ -3337,6 +3389,7 @@ let folded_thought_summary ~mark ~width ~line_count ~body =
 module For_testing = struct
   let rows_built () = Atomic.get rows_built
   let body_rows_built () = Atomic.get body_rows_built
+  let windows_cut () = Atomic.get windows_cut
 
   let with_no_kept_rows run =
     let held = Domain.DLS.get kept_rows_key in

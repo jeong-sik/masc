@@ -882,6 +882,67 @@ let test_a_growing_body_draws_only_its_new_rows () =
 (* A window's body positions name the rows it shows: each is the body row
    the entry's own rows give that physical row, for a newest entry cut by a
    gap, collapsed repeats and diagnostics after the body. *)
+(* A frame drawn again with nothing changed cuts no window again: the entries
+   too tall for their room return the windows kept for their rows. Any other
+   room, width or newest entry cuts again, as a fresh frame would. *)
+let test_a_frame_drawn_again_cuts_no_window () =
+  let lines label count =
+    String.concat "\n" (List.init count (Printf.sprintf "%s line %03d" label)) in
+  let older = entry Layout.Keeper "alpha" "" (lines "older" 40) in
+  let newest = entry Layout.Keeper "alpha" "" (lines "newest" 60) in
+  let both = [ older; newest ] in
+  let window ~entries ~inner_width ~height () =
+    Layout.clamped_scrolled_rows ~origin:Layout.Origin_inline ~inner_width ~height
+      ~requested:0 entries in
+  let fresh ~entries ~inner_width ~height () =
+    Layout.For_testing.with_no_kept_rows (window ~entries ~inner_width ~height) in
+  let same label (expected : Layout.scroll_window) (actual : Layout.scroll_window) =
+    same_rows (label ^ " shows what a fresh frame shows") expected.rows actual.rows;
+    check bool (label ^ " places what a fresh frame places") true
+      (expected.body_positions = actual.body_positions) in
+  (* A short newer entry leaves the older one the same room of 20 it had when
+     it was the newest: the window is cut from the bottom instead. *)
+  let tiny = entry Layout.Keeper "alpha" "" "tiny" in
+  let below = [ older; tiny ] in
+  let below_height =
+    20 + List.length (Layout.rows_of_entry ~origin:Layout.Origin_inline ~inner_width:50
+                        ~previous:(Some older) tiny) in
+  (* The newest entry alone overflows a room of 20; a room of 70 takes it
+     whole and cuts the older entry from the bottom. *)
+  List.iter (fun height ->
+    let first = window ~entries:both ~inner_width:50 ~height () in
+    let cut = Layout.For_testing.windows_cut () in
+    let again = window ~entries:both ~inner_width:50 ~height () in
+    check int (Printf.sprintf "height %d cuts nothing again" height)
+      cut (Layout.For_testing.windows_cut ());
+    same (Printf.sprintf "height %d drawn again" height) first again)
+    [ 20; 70 ];
+  (* Every room keeps the window within it, the room one row short of the
+     newest entry included. *)
+  for height = 1 to 75 do
+    let shown = window ~entries:both ~inner_width:50 ~height () in
+    check bool (Printf.sprintf "height %d shows at most %d rows" height height) true
+      (List.length shown.rows <= height);
+    same (Printf.sprintf "height %d" height)
+      (fresh ~entries:both ~inner_width:50 ~height ()) shown
+  done;
+  List.iter (fun (label, draw, redraw) ->
+    ignore (window ~entries:both ~inner_width:50 ~height:20 ());
+    let before = Layout.For_testing.windows_cut () in
+    let kept = draw () in
+    check bool (label ^ " cuts again") true (Layout.For_testing.windows_cut () > before);
+    same label (redraw ()) kept)
+    [ "another height", window ~entries:both ~inner_width:50 ~height:21,
+      fresh ~entries:both ~inner_width:50 ~height:21
+    ; "another width", window ~entries:both ~inner_width:40 ~height:20,
+      fresh ~entries:both ~inner_width:40 ~height:20
+    ; "the older entry alone",
+      window ~entries:[ older ] ~inner_width:50 ~height:20,
+      fresh ~entries:[ older ] ~inner_width:50 ~height:20
+    ; "the older entry below a newer one in the same room",
+      window ~entries:below ~inner_width:50 ~height:below_height,
+      fresh ~entries:below ~inner_width:50 ~height:below_height ]
+
 let test_window_positions_name_the_rows_shown () =
   let long = String.concat "\n" (List.init 300 (Printf.sprintf "long line %03d")) in
   let repeated = String.concat "\n" ("start" :: List.init 12 (fun _ -> "same") @ [ "end" ]) in
@@ -936,6 +997,8 @@ let () =
             test_a_growing_body_draws_only_its_new_rows
         ; test_case "window positions name the rows shown" `Quick
             test_window_positions_name_the_rows_shown
+        ; test_case "a frame drawn again cuts no window" `Quick
+            test_a_frame_drawn_again_cuts_no_window
         ; test_case "a text is split again after a frame without it" `Quick
             test_a_text_is_split_again_after_a_frame_without_it
         ; test_case "an ASCII text is not kept" `Quick test_an_ascii_text_is_not_kept

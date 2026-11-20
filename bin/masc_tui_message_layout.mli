@@ -1132,6 +1132,10 @@ module For_testing : sig
   (** How many body rows {!rows_of_entry} drew rather than took from a kept
       body of the same shape. *)
 
+  val windows_cut : unit -> int
+  (** How many times {!visible_rows} cut a window out of an entry too tall for
+      its room rather than returning the window kept for the same rows. *)
+
   val with_no_kept_rows : (unit -> 'a) -> 'a
   (** Run with this domain's kept rows and kept bodies emptied, restoring them
       afterwards. *)

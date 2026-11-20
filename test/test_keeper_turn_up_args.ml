@@ -1935,7 +1935,7 @@ let test_initial_configuration_rechecks_journal_after_early_recovery () =
      | Ok () -> Fs_compat.save_file manifest_path "interrupted-manifest"; Ok ()) with
    | Ok () -> () | Error detail -> fail detail);
   let constructed = ref false in
-  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root:Server_bootstrap_maintenance.Seeded
      (fun ~runtime_config_path ->
        constructed := true;
        Runtime.load_config_observation ~runtime_config_path ()) with
@@ -1955,7 +1955,7 @@ let test_initial_configuration_excludes_concurrent_writers () =
   let attempted, publish_attempt = Eio.Promise.create () in
   let finished, publish_finished = Eio.Promise.create () in
   let writer_entered = ref false in
-  let initialized = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+  let initialized = Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root:Server_bootstrap_maintenance.Seeded
     (fun ~runtime_config_path ->
       Fs_compat.save_file runtime_config_path "before";
       Eio.Fiber.fork ~sw:ctx.sw (fun () ->
@@ -1982,7 +1982,7 @@ let test_initial_configuration_preserves_setup_observations () =
   with_env "MASC_CONFIG_BOOTSTRAP" "skip" @@ fun () ->
   with_persisting_context @@ fun ctx ->
   let base_path = ctx.config.Workspace.base_path in
-  let observe () = Server_bootstrap_maintenance.with_initial_configuration ~base_path
+  let observe () = Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root:Server_bootstrap_maintenance.Seeded
     (fun ~runtime_config_path -> Runtime.load_config_observation ~runtime_config_path ()) in
   (match observe () with
    | Ok (Error _) -> ()
@@ -1990,7 +1990,7 @@ let test_initial_configuration_preserves_setup_observations () =
    | Ok (Ok _) -> fail "missing runtime configuration was invented");
   let runtime_path = Config_dir_resolver.runtime_toml_path_for_base_path ~base_path in
   Fs_compat.save_file runtime_path "[invalid TOML";
-  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+  (match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root:Server_bootstrap_maintenance.Seeded
      (fun ~runtime_config_path ->
        match Runtime.load_config_observation ~runtime_config_path () with
        | Error _ -> fail "invalid model bytes should remain observable"

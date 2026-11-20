@@ -855,7 +855,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       mkdir_p base_path;
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd repo @@ fun () ->
-      (match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+      (match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root:Server_bootstrap_maintenance.Seeded
          (fun ~runtime_config_path:_ ->
            Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path) with
        | Ok () -> () | Error detail -> Alcotest.fail detail);
@@ -900,6 +900,37 @@ let test_created_root_populated_before_lock_is_not_fresh_seeded () =
     Alcotest.(check string) "competing writer bytes survive" "# operator configuration" (read_file runtime_path);
     Alcotest.(check bool) "populated root does not receive a fresh default roster" false
       (Sys.file_exists (Filename.concat config_root "keepers/default-imp.toml")))
+
+(* The boot of a multi-account installation asks for [Refilled]: a root it
+   made gets what a root that was there gets, and no Keeper definition. The
+   same seed gives a single-user boot its default roster, so the absence
+   below is of the request and not of the seed. *)
+let test_fresh_config_root_is_filled_as_asked () =
+  with_temp_dir "startup-fresh-root-as-asked" (fun dir ->
+    let repo = Filename.concat dir "repo" in
+    mkdir_p repo;
+    let seed = make_config_root repo in
+    mkdir_p (Filename.concat seed "keepers-default");
+    write_file (Filename.concat seed "keepers-default/default-imp.toml") "[keeper]";
+    with_env "MASC_CONFIG_DIR" None @@ fun () ->
+    with_cwd repo @@ fun () ->
+    let default_roster_after fresh_root name =
+      let base_path = Filename.concat dir name in
+      mkdir_p base_path;
+      (match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root
+         (fun ~runtime_config_path:_ -> ()) with
+       | Ok () -> () | Error detail -> Alcotest.fail detail);
+      let config_root = Filename.concat base_path ".masc/config" in
+      Alcotest.(check bool) (name ^ ": the Keeper definitions directory is made") true
+        (Sys.file_exists (Filename.concat config_root "keepers"));
+      Alcotest.(check bool) (name ^ ": the prompt of the seed is there") true
+        (Sys.file_exists (Filename.concat config_root "prompts/keeper.md"));
+      Sys.file_exists (Filename.concat config_root "keepers/default-imp.toml")
+    in
+    Alcotest.(check bool) "a seeded root receives the default roster" true
+      (default_roster_after Server_bootstrap_maintenance.Seeded "seeded");
+    Alcotest.(check bool) "a refilled root receives no Keeper definition" false
+      (default_roster_after Server_bootstrap_maintenance.Refilled "refilled"))
 
 let test_bootstrap_base_path_config_root_backfills_missing_prompts () =
   with_temp_dir "startup-config-preserve" (fun dir ->
@@ -963,7 +994,7 @@ let test_initial_configuration_relative_override_matches_writer_path () =
     with_cwd process_cwd @@ fun () ->
     Config_dir_resolver.reset ();
     Fun.protect ~finally:Config_dir_resolver.reset (fun () ->
-    match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root:Server_bootstrap_maintenance.Seeded
        (fun ~runtime_config_path ->
          Alcotest.(check string) "initial lock uses explicit workspace override" runtime_path runtime_config_path;
          Alcotest.(check (option string)) "runtime initialization and resume use writer path"
@@ -7940,6 +7971,8 @@ let () =
             test_startup_state_json_includes_runtime_resolution;
           Alcotest.test_case "created root populated before lock is not fresh seeded" `Quick
             test_created_root_populated_before_lock_is_not_fresh_seeded;
+          Alcotest.test_case "fresh config root is filled as asked" `Quick
+            test_fresh_config_root_is_filled_as_asked;
           Alcotest.test_case "initial configuration relative override matches writer path" `Quick
             test_initial_configuration_relative_override_matches_writer_path;
           Alcotest.test_case

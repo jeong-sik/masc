@@ -946,8 +946,18 @@ let initialize_owner_state_blocking
   Runtime_log_sink.install ();
   Log.Server.info
     "Runtime_log_sink installed (agent core -> MASC structured log)";
+  (* A multi-account installation runs the Keepers its authorization log
+     names, so its boot makes no Keeper definition (RFC
+     a-persons-keeper-runs-on-the-engine, S1). *)
+  let fresh_root =
+    match Runtime_account_access.published_access access with
+    | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) ->
+      Server_bootstrap_maintenance.Seeded
+    | Runtime_account_access.Multi_account { zone = _; base_path = _; now = _ } ->
+      Server_bootstrap_maintenance.Refilled
+  in
   let state, t1, prepared_keeper_persistence =
-    match Server_bootstrap_maintenance.with_initial_configuration ~base_path
+    match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root
       (fun ~runtime_config_path:locked_runtime_config_path ->
   (* Keep constructor configuration reads, runtime publication and owner
      inventory preparation in one journal-free observation interval. No

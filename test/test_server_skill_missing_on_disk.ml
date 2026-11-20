@@ -226,8 +226,7 @@ let test_detects_and_records_ghost_skill () =
        ghost.Detection.expected_source_path
    | _ -> fail "expected exactly one ghost");
   (* The record actually landed: one skill_missing_on_disk audit row for the
-     ghost. The printed row is the measured evidence for the RFC-0506
-     completion criterion. *)
+     ghost. *)
   let rows =
     Audit_log.read_entries workspace_config
     |> List.filter (fun (entry : Audit_log.audit_entry) ->

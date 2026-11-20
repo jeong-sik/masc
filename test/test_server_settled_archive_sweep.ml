@@ -107,7 +107,8 @@ let gate_names_its_execution ~gate_scope ~kind ~execution_scope () = with_store 
   settle_stray store ~scope:execution_scope;
   check_named_stays root ~scope:execution_scope ~named:"execution" (run store))
 
-(* Settles before RFC-0498 layer two left bodies in the archive. *)
+(* A settle archives only the record, so the pass deletes any body in the
+   archive. *)
 let test_archived_body_is_deleted () = with_store (fun root store ->
   settle_stray store ~scope:curator;
   let bodies = Filename.concat (archive_day root ~scope:curator) "bodies" in

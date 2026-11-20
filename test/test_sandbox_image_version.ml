@@ -1,7 +1,6 @@
-(* A sandbox image tag names one build of one recipe (RFC
-   keeper-sandbox-images-have-versions §2.2). These cases pin what makes two
-   tags differ, and that the recipes in this repository list every file their
-   COPY lines need. *)
+(* A sandbox image tag names one build of one recipe. These cases pin what
+   makes two tags differ, and that the recipes in this repository list every
+   file their COPY lines need. *)
 
 open Alcotest
 module V = Keeper_sandbox_image_version

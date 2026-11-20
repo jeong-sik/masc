@@ -554,9 +554,9 @@ let test_write_and_unknown_methods_rejected () =
 ;;
 
 (* One method, one table. definition, references, documentSymbol,
-   documentHighlight and inlayHint were written in both after RFC-0378 rung E
-   turned them into plain relays, so two lists decided the same thing about the
-   same method (#28686). *)
+   documentHighlight and inlayHint were written in both once they became plain
+   relays, so two lists decided the same thing about the same method
+   (#28686). *)
 let test_relayed_and_handled_tables_are_disjoint () =
   let handled = Lsp.handled_lsp_methods () |> List.map fst in
   let relayed = Lsp.relayed_lsp_methods () |> List.map fst in

@@ -10916,66 +10916,17 @@ let current_surface_needs state =
    while the bundle is still on the wire, so a bundle that moves the read
    authority withdraws them; [resume_reads_after_authority_change] sends
    them again from this same list. *)
-let launch_ask_followup_load state ~mailbox =
-  if state.view = Approvals && server_authority_ready state then begin
-    let admission_started_ns=Mtime_clock.elapsed_ns () in
-    match state.server_identity, Masc_tui_types.begin_ask_followup_read state with
-    | Some expected_workspace, Some (request, submission, keeper_name) ->
-        let origin=Masc_tui_observation_origin.capture state.observation_instance ~expected_workspace in
-        let admission_capture=Option.map (fun store ->
-          Masc_tui_observation_store.record_admission store ~origin
-            ~request:(Snapshot_read.request_id request) ~admission_started_ns) state.observation_store in
-        let read=capture_ask_followup_read ~origin ~request ~submission
-          ~admission_started_ns ~admission_capture in
-        let host=Masc_tui_transport.Workspace_admission.server_peer_host and port=state.port in
-        let clock=Eio_context.get_clock_opt () in
-        let envelope=capture_workspace_message state in
-        let superseded,resolve=Eio.Promise.create () in
-        Masc_tui_types.supersede_ask_followup_worker state
-          (Some (request,fun detail -> ignore (Eio.Promise.try_resolve resolve detail)))
-          ~detail:"answer follow-up observation superseded";
-        let finish ()=Masc_tui_types.finish_ask_followup_worker state request in
-        Ask_followup_observation.emit read ~sources:(Masc_tui_types.current_ask_followup state)
-          Ask_followup_observation.Followup_read_started;
-        Masc_tui_transport.Workspace_admission.launch_observation state ~mailbox
-          ~on_not_run:finish ~boundary_error:(fun detail -> Ask.Followup_read_failed detail)
-          ~observe_job:(fun event -> Ask_followup_observation.emit read ~sources:None (Ask_followup_observation.Followup_job_event event))
-          ~not_started:(fun detail -> Ask.Followup_not_started detail)
-          ~cancelled:(envelope (Ask_msg (Ask_followup_finished (read,Error Ask.Followup_cancelled))))
-          ~progress:(fun (event,received_ns) -> envelope (Ask_msg (Ask_followup_observed (read,event,received_ns))))
-          ~deliver:(fun result -> envelope (Ask_msg (Ask_followup_finished (read,result))))
-          (fun publish -> Fun.protect ~finally:finish (fun () ->
-            Ask_followup_observation.emit read ~sources:None Ask_followup_observation.Followup_worker_entered;
-            let result=try match clock with
-              | None -> Error (Ask.Followup_read_failed "Eio clock is unavailable for answer follow-up observation")
-              | Some clock -> Eio.Fiber.first
-                (fun () -> Masc_tui_http.observe_keeper_ask_followup ~clock ~expected_workspace
-                  ~keeper_name ~ask_id:submission.as_ask_id ~host ~port
-                  ~on_event:(fun event -> publish (event,Mtime_clock.elapsed_ns ()))
-                  |> Result.map_error (fun detail -> Ask.Followup_read_failed detail))
-                (fun () -> let _detail=Eio.Promise.await superseded in Error Ask.Followup_withdrawn)
-              with
-              | Eio.Cancel.Cancelled _ as exn ->
-                let backtrace=Printexc.get_raw_backtrace () in
-                Ask_followup_observation.emit read ~sources:None Ask_followup_observation.Followup_producer_cancelled;
-                Printexc.raise_with_backtrace exn backtrace
-              | exn -> Error (Ask.Followup_read_failed (Printexc.to_string exn)) in
-            Ask_followup_observation.emit read ~sources:None (Ask_followup_observation.Followup_producer_returned result);
-            result))
-    | None, _ | Some _, None -> ()
-  end
-
 let launch_owed_ask_followup state ~mailbox =
   match Masc_tui_types.ask_followup_target state with
   | None -> state.ask_followup_owed <- Masc_tui_owed_read.settled
   | Some _ ->
       if state.view = Approvals && server_authority_ready state
          && Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) state.ask_followup_owed
-      then launch_ask_followup_load state ~mailbox
+      then Masc_tui_operator_actions.Ask_actions.launch_ask_followup_load state ~mailbox
 
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
   if server_authority_ready state then begin
-  launch_ask_followup_load state ~mailbox;
+  Masc_tui_operator_actions.Ask_actions.launch_ask_followup_load state ~mailbox;
   end
 ;;
 
@@ -12776,1093 +12727,6 @@ let toggle_selected_ask_origin state =
                  ["opened_ns",`String (Int64.to_string (Mtime_clock.elapsed_ns ()));
                   "origin",Ask.origin_to_json origin]))) (current_ask_origin state))
 
-let inspect_selected_ask_origin state ~mailbox =
-  if not (server_authority_ready state) then
-    report_action state "system"
-      (let ko = state.ui_language = Lang_ko in
-       kept_back ~ko ~request:Kept_request.Ask_source (workspace_identity_unconfirmed ~ko) Nothing_kept)
-  else match selected_ask_origin state with
-  | None -> report_action state "system" "No question source is available"
-  | Some origin ->
-      (match origin.Ask.ao_source_turn_ref with
-       | None -> report_action state "system" "The question did not record a calling turn"
-       | Some turn_ref ->
-           state.ask_origin <- Some (state.workspace_authority, origin);
-           Masc_tui_chat_dispatch.Chat_journals.open_context_inspector ~target:(Masc_tui_context_inspector.Pinned turn_ref)
-             state ~mailbox ~keeper_name:origin.ao_keeper_name;
-           Log.Transport.info "tui_ask_source_inspect=%s"
-             (Yojson.Safe.to_string (`Assoc
-               [ "requested_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))
-               ; "origin", Ask.origin_to_json origin ])))
-
-(* Leaving the mode drops the draft. An answer half-written against a question
-   the operator walked away from is not a thing to restore later; the Keeper
-   is still waiting either way, and the row says so. *)
-let leave_ask_answering state = Masc_tui_home.clear_ask_answering state
-
-let enter_ask_answering state =
-  match selected_ask_row state with
-  | None -> (
-      (* Nothing is selected while asks are open: the cursor was released,
-         or it points past the list. Either way [ or ] selects one. *)
-      match open_ask_rows state with
-      | _ :: _ -> report_action state "system" "Choose a question with [ or ] first"
-      | [] -> report_action state "system" "No question is waiting on you")
-  | Some (row : Masc.Tui_decode_asks.ask_row) ->
-      (* The answer flow is drawn by the approvals list. With an approval's
-         detail open that surface is not on screen, so [a] used to set the mode
-         and change nothing an operator could see -- the keypress landed and
-         the questions stayed hidden. Close the detail, which is where the
-         operator asked to go. *)
-      state.approval_detail_open <- false;
-      state.approval_value_reading <- None;
-      state.ask_answer_mode <- Ask_answering { aam_ask = Masc.Tui_decode_asks.ask_key row };
-      state.ask_question_cursor <- 0;
-      state.ask_question_scroll <- 0;
-      state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row);
-      Masc_tui_types.disarm_ask_submit state
-
-(* Walking to another ask starts a new draft rather than carrying the old one
-   across: [draft_for] keys on the ask, so the answer cannot land under a
-   question the operator never read. *)
-let move_ask_cursor state delta =
-  let rows = open_ask_rows state in
-  let next = Ask.move_cursor rows state.ask_cursor ~delta in
-  if next <> state.ask_cursor then begin
-    state.ask_cursor <- next;
-    state.ask_origin <- None;
-    state.ask_question_cursor <- 0;
-    state.ask_question_scroll <- 0;
-    Masc_tui_types.disarm_ask_submit state;
-    match (state.ask_answer_mode, Ask.selected_row rows next) with
-    (* Walking the list while browsing is not answering. Opening a draft
-       here would make [ and ] commit to a question the operator was only
-       looking at, and [a] is the key that says they mean it. *)
-    | Ask_browsing, _ -> ()
-    | Ask_answering _, None -> ()
-    | Ask_answering _, Some (row : Masc.Tui_decode_asks.ask_row) ->
-        state.ask_answer_mode <- Ask_answering { aam_ask = Masc.Tui_decode_asks.ask_key row };
-        state.ask_draft <- Some (Ask.draft_for state.ask_draft ~row)
-  end
-
-let move_ask_question_cursor state delta =
-  match selected_ask_row state with
-  | None -> ()
-  | Some (row : Masc.Tui_decode_asks.ask_row) ->
-      let count = List.length row.Masc.Tui_decode_asks.ar_questions in
-      if count > 0 then begin
-        state.ask_question_cursor <-
-          max 0 (min (count - 1) (state.ask_question_cursor + delta));
-        state.ask_question_scroll <- 0
-      end
-
-let with_ask_draft state f =
-  match (selected_ask_row state, selected_ask_question state) with
-  | Some row, Some question ->
-      let draft = Ask.draft_for state.ask_draft ~row in
-      state.ask_draft <- Some (f draft question);
-      (* Editing after arming means the armed answer is not the one on screen
-         any more, so the next press arms again rather than sending. *)
-      Masc_tui_types.disarm_ask_submit state
-  | (Some _ | None), _ -> ()
-
-let toggle_ask_choice state index =
-  match selected_ask_question state with
-  | None -> ()
-  | Some (question : Masc.Tui_decode_asks.ask_question) -> (
-      match List.nth_opt question.Masc.Tui_decode_asks.aq_choices index with
-      | None -> ()
-      | Some choice ->
-          with_ask_draft state (fun draft question ->
-              Ask.toggle_choice draft ~question ~choice))
-
-(* Open the editor on the question under the cursor.
-
-   A question can arrive with no choices at all -- the domain accepts one as
-   long as it welcomes free text -- and on those the digits answer nothing.
-   Until this key existed the panel drew "free text welcome" beside a keyboard
-   that had no way to write any, so the only answer the terminal could give
-   such a question was [s]: skipped. The dashboard has had a textarea for it
-   since the surface shipped.
-
-   Reopening on an answer already written starts from that text rather than
-   from blank: a typo in a long answer should cost a backspace, not the whole
-   sentence. *)
-let begin_ask_text_entry state =
-  match (selected_ask_row state, selected_ask_question state) with
-  | Some row, Some question ->
-      let slot = Ask.free_text_slot ~ask:(Masc.Tui_decode_asks.ask_key row) question in
-      let existing =
-        match Ask.response_for (Ask.draft_for state.ask_draft ~row) ~question with
-        | Some (Ask.Draft_wrote text) -> text
-        | Some (Ask.Draft_chose _) | Some Ask.Draft_skipped | None -> ""
-      in
-      state.ask_text_entry <- Some { ate_slot = slot; ate_text = existing }
-  | (Some _ | None), _ -> ()
-
-(* Typing edits the buffer alone. The draft is written once, on the key that
-   closes the editor, so a half-typed answer is never a response the submit
-   gate would count as answered. *)
-let edit_ask_text state f =
-  match state.ask_text_entry with
-  | None -> ()
-  | Some entry -> state.ask_text_entry <- Some { entry with ate_text = f entry.ate_text }
-
-let commit_ask_text_entry state =
-  match state.ask_text_entry with
-  | None -> ()
-  | Some entry ->
-      (* Through the slot, which names its own ask and question: a snapshot
-         arriving while the operator typed may have moved the cursor, even to
-         another ask whose question carries the same id (masc_ask numbers
-         every ask from q1), and the answer belongs to the question the editor
-         was opened on. So the ask is looked up by the slot's key, not taken
-         from the cursor. Blank text clears the response rather than recording
-         one -- an editor emptied by backspaces means unanswered, and the
-         domain refuses a blank write. *)
-      let ask = Ask.free_text_ask entry.ate_slot in
-      (match
-         List.find_opt
-           (fun row -> Masc.Tui_decode_asks.(equal_ask_key ask (ask_key row)))
-           (open_ask_rows state)
-       with
-       | Some row ->
-           let draft = Ask.draft_for state.ask_draft ~row in
-           state.ask_draft <- Some (Ask.set_text draft ~slot:entry.ate_slot ~text:entry.ate_text);
-           Masc_tui_types.disarm_ask_submit state
-       | None ->
-           report_action state "system"
-             "The question you were writing to is no longer open; the text was not recorded");
-      state.ask_text_entry <- None
-
-let cancel_ask_text_entry state = state.ask_text_entry <- None
-
-let skip_ask_question state =
-  with_ask_draft state (fun draft question -> Ask.skip draft ~question)
-
-let clear_ask_question state =
-  with_ask_draft state (fun draft question -> Ask.clear draft ~question)
-
-let log_ask_answer_observation observation =
-  Log.Transport.info "tui_ask_answer_lifecycle=%s"
-    (Yojson.Safe.to_string (Ask_answer_observation.to_json observation))
-
-let observe_ask_answer_call submission call operation =
-  let started_ns = Mtime_clock.elapsed_ns () in
-  log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:started_ns (Ask_answer_observation.Call_started call));
-  match operation () with
-  | result ->
-    log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:(Mtime_clock.elapsed_ns ())
-      (Ask_answer_observation.Call_finished {call; started_ns; outcome=Ask_answer_observation.outcome_of_result result}));
-    result
-  | exception error ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    let outcome = match error with Eio.Cancel.Cancelled _ -> Ask_answer_observation.Cancelled
-      | _ -> Ask_answer_observation.Raised in
-    let emit () =
-      log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:(Mtime_clock.elapsed_ns ())
-        (Ask_answer_observation.Call_finished {call; started_ns; outcome})) in
-    (match Fs_compat.execution_context () with
-     | Fs_compat.Non_eio -> emit ()
-     | Fs_compat.Eio_fiber -> Eio.Cancel.protect emit);
-    Printexc.raise_with_backtrace error backtrace
-
-let observe_ask_answer_receipt state submission result =
-  Option.iter (fun feedback ->
-    Log.Transport.info "tui_ask_answer_receipt=%s"
-      (Yojson.Safe.to_string (`Assoc
-        [ "phase", `String "receipt_admitted"
-        ; "submission_started_ns", `String (Int64.to_string submission.as_started_ns)
-        ; "result_observed_ns", (match Ask_answer_receipt.read submission.as_receipt with
-            | Ask_answer_receipt.Returned observation -> `String (Int64.to_string observation.observed_ns)
-            | Ask_answer_receipt.Waiting | Ask_answer_receipt.Closed_without_result -> `Null)
-        ; "admitted_ns", `String (Int64.to_string (Mtime_clock.elapsed_ns ()))
-        ; "receipt", Ask.answer_feedback_to_json feedback ])))
-    (Masc_tui_types.retain_ask_answer_feedback state submission result)
-
-let apply_ask_answer_receipt state submission ~mailbox =
-  match Masc_tui_types.take_ask_answer_receipt state submission with
-  | None -> ()
-  | Some (owner, observation) ->
-    observe_ask_answer_receipt state owner observation.result;
-    if Masc_tui_types.owns_ask_submission state owner then
-      launch_ask_followup_load state ~mailbox
-
-let apply_ask_answer_completion state submission result asks =
-  let answered_label = submission.as_answered_label in
-  observe_ask_answer_receipt state submission result;
-  Option.iter log_ask_answer_observation
-    (Masc_tui_types.observe_ask_reread_completion state submission
-      ~at_ns:(Mtime_clock.elapsed_ns ()) asks);
-  state.ask_submit_inflight <- false;
-  Masc_tui_types.disarm_ask_submit state;
-  let close_draft () =
-    state.ask_draft <- None;
-    state.ask_answer_mode <- Ask_browsing
-  in
-  let report_delivery ~already = function
-    | Masc.Tui_decode_asks.Ask_wake_stored ->
-        report_action state "system"
-          (if already then "Question already answered; keeper wake stored"
-           else Printf.sprintf "Answer recorded; keeper wake stored: %s" answered_label)
-    | Masc.Tui_decode_asks.Ask_wake_pending detail ->
-        report_action state "error"
-          (if already then
-             Printf.sprintf "Question already answered; delivery pending, automatic recovery will retry: %s" detail
-           else
-             Printf.sprintf "Answer recorded; delivery pending: %s; automatic recovery will retry: %s"
-               answered_label detail)
-  in
-  (match result with
-   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_recorded delivery)) ->
-       close_draft ();
-       report_delivery ~already:false delivery
-   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_already_recorded { aar_delivery; _ })) ->
-       close_draft ();
-       report_delivery ~already:true aar_delivery
-   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_written_unconfirmed detail)) ->
-       report_action state "error"
-         (Printf.sprintf "Answer log write confirmed; winning answer unconfirmed: %s" detail)
-   | Ok (Masc.Tui_decode_asks.Keeper_answer_receipt (Ask_answer_refused detail))
-   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt (Installation_answer_refused detail)) ->
-       report_action state "error" (Printf.sprintf "Answer refused: %s" detail)
-   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt Installation_answer_recorded) ->
-       close_draft ();
-       report_action state "system" (Printf.sprintf "Answer recorded: %s" answered_label)
-   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt (Installation_answer_already_answered _)) ->
-       close_draft ();
-       report_action state "system" "Question already answered; the earlier answer stands"
-   | Ok (Masc.Tui_decode_asks.Installation_answer_receipt (Installation_answer_withdrawn _)) ->
-       close_draft ();
-       report_action state "system" "The installation withdrew this question"
-   | Error (Request_failed err) ->
-       (* A lost or invalid response cannot establish that the write did not
-          land. Keep the draft and read the canonical questions again. *)
-       report_action state "error" (Printf.sprintf "Answer recording unconfirmed: %s" err)
-   | Error (Request_withdrawn refusal) ->
-       (* The guard stopped the answer before it left: kept back, with the
-          draft it kept, never an unconfirmed recording (RFC §2). *)
-       Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Ask_answer
-         (fun ~ko -> workspace_refusal_reason ~ko refusal) Draft_kept);
-  settle_asks state asks
-
-(* TEL-OK: the TUI-local submit gate emits user-visible events here; the
-   ask-answer endpoint owns the durable answer telemetry. *)
-let start_ask_answer state ~asker ~ask_id ~source_turn_ref ~answered_label ~answers ~mailbox =
-  let authority = state.workspace_authority in
-  let reading = if server_authority_ready state then Some state.workspace_read_authority else None in
-  let identity = state.server_identity in
-  let submission = { as_request = ref (); as_started_ns = Mtime_clock.elapsed_ns ();
-    as_receipt = Ask_answer_receipt.create ();
-    as_completion = Ask_answer_completion.create ();
-    as_authority = authority; as_reading = reading; as_asker = asker;
-    as_ask_id = ask_id; as_source_turn_ref = source_turn_ref; as_answered_label = answered_label } in
-  if state.workspace_identity <> Workspace_identity_match then
-    Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Ask_answer workspace_identity_unconfirmed Draft_kept
-  else begin
-  Masc_tui_work_requests.Approval_gate_requests.supersede_home_decision_receipt state;
-
-  (match state.task_inspection_reader with
-   | Some {tci_original=Answered_ask_owner _;_} -> Masc_tui_chat_dispatch.Task_dispatch.cancel_task_inspection_read state
-   | Some {tci_original=Created_task_owner _;_} | None -> ());
-  Masc_tui_types.begin_ask_submission_state ~submission state;
-  log_ask_answer_observation (Ask_answer_observation.make submission ~at_ns:submission.as_started_ns Ask_answer_observation.Submitted);
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  let check = Masc_tui_transport.Workspace_admission.admission_sequence state ~mailbox ~authority ~identity ~host ~port in
-  let run_action () =
-    Fun.protect ~finally:(fun () -> close_ask_submission submission) (fun () ->
-    let result =
-      try
-        let open Result.Syntax in
-        (* A refusal of the workspace guard stays typed: the answer was not
-           sent (RFC §2). *)
-        let* () = observe_ask_answer_call submission Ask_answer_observation.Workspace_check (fun () ->
-          check () |> Result.map_error (fun refusal -> Request_withdrawn refusal)) in
-        observe_ask_answer_call submission Ask_answer_observation.Answer_post (fun () ->
-          (* The asker decides the route; each route's receipt keeps its kind. *)
-          let result = match asker with
-            | Masc.Tui_decode_asks.Ask_keeper keeper_name ->
-                Masc_tui_http.post_keeper_ask_answer ~host ~port ~keeper_name ~ask_id ~answers ~session_id:None
-                |> Result.map (fun receipt -> Masc.Tui_decode_asks.Keeper_answer_receipt receipt)
-            | Masc.Tui_decode_asks.Ask_installation { ai_declaration_id; _ } ->
-                Masc_tui_http.post_installation_ask_answer ~host ~port ~declaration_id:ai_declaration_id
-                  ~ask_id ~answers ~session_id:None
-                |> Result.map (fun receipt -> Masc.Tui_decode_asks.Installation_answer_receipt receipt) in
-          let result = Result.map_error (fun detail -> Request_failed detail) result in
-          (* Keep the actual POST result before even the observation logger can
-             yield. The outer publication also covers pre-POST failures. *)
-          ignore (Ask_answer_receipt.publish submission.as_receipt
-            ~observed_ns:(Mtime_clock.elapsed_ns ()) result);
-          result)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Request_failed (Printexc.to_string exn))
-    in
-    (* Publish before any queue wait. UI drain owns admission; the original
-       operation proceeds straight to canonical reread, even with a full mailbox. *)
-    ignore (Ask_answer_receipt.publish submission.as_receipt
-      ~observed_ns:(Mtime_clock.elapsed_ns ()) result);
-    let publish_completion asks =
-      ignore (Ask_answer_completion.publish submission.as_completion
-        ~observed_ns:(Mtime_clock.elapsed_ns ()) ~receipt:result ~asks);
-      asks in
-    let asks =
-      try
-        let open Result.Syntax in
-        let* expected_workspace = match identity with
-          | Some identity -> Ok identity
-          | None -> Error "Server workspace identity is unavailable" in
-        observe_ask_answer_call submission Ask_answer_observation.Asks_reread (fun () ->
-          let asks = Masc_tui_http.fetch_asks ~expected_workspace ~host ~port () in
-          publish_completion asks)
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error ("asks reload failed: " ^ Printexc.to_string exn)
-    in
-    ignore (publish_completion asks))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Masc_tui_transport.Workspace_admission.fork_job state ~mailbox ~sw
-      ~on_withdrawn:(fun () -> close_ask_submission submission) run_action
-  | None -> run_action ()
-  end
-
-let handle_ask_submit state ~mailbox =
-  if state.workspace_identity <> Workspace_identity_match then
-    Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Ask_answer workspace_identity_unconfirmed Draft_kept
-  else
-  match state.asks_error with
-  | Some _ -> report_action state "error" "Question source unavailable; refresh before answering"
-  | None ->
-  match selected_ask_row state with
-  | None -> ()
-  | Some (row : Masc.Tui_decode_asks.ask_row) -> (
-      let draft = Ask.draft_for state.ask_draft ~row in
-      match Ask.readiness draft ~row with
-      | Ask.Not_open ->
-          report_action state "system" "That question already has an answer"
-      | Ask.Missing questions ->
-          (* Every gap at once: the domain reports them together, so an
-             operator does not learn about the second one after fixing the
-             first. *)
-          report_action state "system"
-            (Printf.sprintf "Still unanswered: %s"
-               (String.concat ", "
-                  (List.map
-                     (fun (q : Masc.Tui_decode_asks.ask_question) -> q.Masc.Tui_decode_asks.aq_header)
-                     questions)))
-      | Ask.Ready answers -> (
-          (* Name the Keeper and what was chosen, not the ask's opaque id. The
-             arming press says it too: the second press sends whatever is on
-             this line, so it is the last place to see which question and
-             which choice it is before the answer settles. *)
-          let asker_label = Masc.Tui_decode_asks.ask_asker_label row.Masc.Tui_decode_asks.ar_asker in
-          let answered_label =
-            match Ask.summarize_answer draft ~row with
-            | "" -> asker_label
-            | chosen -> Printf.sprintf "%s: %s" asker_label chosen
-          in
-          match
-            Ask.gate_transition ~inflight:state.ask_submit_inflight
-              ~pending:state.pending_ask_submit ~ask:(Masc.Tui_decode_asks.ask_key row)
-          with
-          | Ask.Ask_gate_blocked_inflight ->
-              Masc_tui_types.disarm_ask_submit state;
-              report_action state "system" "An answer is already on its way"
-          | Ask.Ask_gate_arm ask ->
-              state.pending_ask_submit <- Some ask;
-              report_action state "system" (Masc_tui_types.armed_ask_submit_notice answered_label)
-          | Ask.Ask_gate_submit ->
-              start_ask_answer state ~asker:row.Masc.Tui_decode_asks.ar_asker
-                ~ask_id:row.Masc.Tui_decode_asks.ar_id
-                ~source_turn_ref:row.Masc.Tui_decode_asks.ar_source_turn_ref
-                ~answered_label ~answers ~mailbox))
-
-(* Run one lifecycle action's steps against the server.
-
-   The steps come from [Keeper_control.plan]; this only performs them and
-   reports the first answer that ends the sequence. The 409 branch is the one
-   piece of routing here: /boot refuses a keeper whose owner is durably
-   paused, and the pause only clears through the directive endpoint, so a
-   conflict on an action that names a recovery continues into it instead of
-   surfacing as a failure. Recovery runs once — a conflict raised by the
-   recovery itself is the operator's to read. *)
-let run_keeper_action_steps ~check_request ~kept_back ~later_step_kept_back ~host ~port ~keeper_name
-    ~operator_operation_id ~expected_workspace action =
-  (* The transport answers in text, not HTTP; what it says is carried as it
-     came. *)
-  let unanswered result = Result.map_error (fun text -> Keeper_control.No_answer text) result in
-  (* Before the first step leaves, a guard refusal is kept back: nothing was
-     sent. A refusal of a later step stops an action whose earlier step did
-     leave, so it is kept back as that later step, never as a step with no
-     answer. *)
-  let sent = ref false in
-  let admit () =
-    match check_request () with
-    | Ok () -> Ok ()
-    | Error refusal when not !sent -> Error (kept_back refusal)
-    | Error refusal -> Error (later_step_kept_back refusal)
-  in
-  let perform = function
-    | Keeper_control.Lifecycle lifecycle_action ->
-        unanswered
-          (Masc_tui_http.post_keeper_lifecycle ~host ~port ~keeper_name
-             ~action:lifecycle_action ~expected_workspace)
-    | Keeper_control.Directive directive_action ->
-        unanswered
-          (Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-             ~action:directive_action ~operator_operation_id ~expected_workspace)
-    | Keeper_control.Purge ->
-        unanswered
-          (Masc_tui_http.post_keeper_purge ~host ~port ~keeper_name ~expected_workspace)
-  in
-  let rec walk ~recovery_available last_outcome steps =
-    match steps with
-    | [] -> (
-        match last_outcome with
-        | Some outcome -> Ok outcome
-        | None ->
-            (* [plan] never returns an empty step list; if it ever did, an
-               empty walk must not read as success. *)
-            Error Keeper_control.Empty_plan)
-    | step :: rest -> (
-        match Result.bind (admit ()) (fun () -> sent := true; perform step) with
-        | Error failure -> Error failure
-        | Ok (status, body) -> (
-            let outcome = match step with
-              | Keeper_control.Purge -> Keeper_control.classify_purge_response ~keeper_name ~status ~body
-              | Keeper_control.Lifecycle _ | Keeper_control.Directive _ -> Keeper_control.classify_response ~status ~body in
-            match outcome with
-            | (Keeper_control.Accepted _ | Keeper_control.Purge_accepted _) as outcome ->
-                walk ~recovery_available (Some outcome) rest
-            | Keeper_control.Committed_followup_failed detail as outcome -> (
-                match rest with
-                | _ :: _ -> walk ~recovery_available (Some outcome) rest
-                | [] -> Error (Keeper_control.Followup_failed detail))
-            | Keeper_control.Paused_owner_conflict detail -> (
-                match
-                  ( recovery_available
-                  , Keeper_control.recovers_from_conflict action )
-                with
-                | true, Some recovery_steps ->
-                    walk ~recovery_available:false last_outcome recovery_steps
-                | true, None | false, _ ->
-                    Error (Keeper_control.Refused { status; detail }))
-            | Keeper_control.Rejected { status; detail } ->
-                Error (Keeper_control.Refused { status; detail })
-            | Keeper_control.Unbound_purge_receipt { status } ->
-                Error (Keeper_control.Unbound_receipt status)))
-  in
-  walk ~recovery_available:true None (Keeper_control.plan action)
-
-let apply_keeper_action_result state ~base_path ~mailbox keeper_name action result =
-  state.keeper_action_inflight <- None;
-  let ko = state.ui_language = Lang_ko in
-  let label = Keeper_control.action_label ~ko action in
-  (match result with
-   | Ok (Keeper_control.Purge_accepted { operation_id }) ->
-       report_action state "system"
-         (Printf.sprintf
-            (if ko then "%s 삭제 접수됨 (요청 %s) · 종료와 정리는 아직 확인 전"
-             else "%s deletion requested (operation %s); shutdown and cleanup are not yet confirmed")
-            keeper_name operation_id)
-   | Ok (Keeper_control.Accepted { already_live = true }) ->
-       report_action state "system"
-         (Printf.sprintf
-            (if ko then "%s 이미 실행 중 · 새로 띄우지 않고 깨움"
-             else "%s was already running; woke it instead of starting a second fiber")
-            keeper_name)
-   | Ok (Keeper_control.Accepted { already_live = false }) ->
-       report_action state "system"
-         (Printf.sprintf (if ko then "%s %s 접수됨" else "%s %s accepted") keeper_name label)
-   | Ok (Keeper_control.Paused_owner_conflict detail)
-   | Ok (Keeper_control.Committed_followup_failed detail)
-   | Ok (Keeper_control.Rejected { detail; _ }) ->
-       (* [run_keeper_action_steps] returns these as [Error]; keeping the
-          branch exhaustive rather than wildcarded means a future outcome
-          member has to be answered here too. *)
-       report_action state "error"
-         (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
-            keeper_name label detail)
-   | Ok (Keeper_control.Unbound_purge_receipt { status }) ->
-       report_action state "error"
-         (Printf.sprintf (if ko then "%s %s 거절: %s" else "%s %s refused: %s")
-            keeper_name label
-            (Keeper_control.failure_text ~ko (Keeper_control.Unbound_receipt status)))
-   | Error (Keeper_control.Kept_back notice) ->
-       (* Not sent: the kept-back notice alone, with the Keeper after it
-          (RFC §2). *)
-       report_action state "error" (notice ^ " · " ^ keeper_name)
-   | Error (Keeper_control.Later_step_kept_back notice) ->
-       (* The later step's kept-back notice, the Keeper, and that an earlier
-          step was sent (RFC §2). *)
-       report_action state "error"
-         (notice ^ " · " ^ keeper_name ^ " · " ^ Keeper_control.earlier_step_sent ~ko)
-   | Error
-       (( Keeper_control.Empty_plan | Keeper_control.Followup_failed _
-        | Keeper_control.Refused _ | Keeper_control.Unbound_receipt _
-        | Keeper_control.No_answer _ ) as failure) ->
-       report_action state "error"
-         (Printf.sprintf (if ko then "%s %s 실패: %s" else "%s %s failed: %s")
-            keeper_name label (Keeper_control.failure_text ~ko failure)));
-  (* The accepted action may change Keeper metadata and release Task work.
-     Each local source starts a fresh owned read; the HTTP roster refresh is
-     independent and no directory scan runs in this result handler. *)
-  Masc_tui_transport.Local_sources.launch_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh base_path
-
-let start_keeper_action state ~base_path:_ ~mailbox keeper_name action =
-  let refuse () =
-    state.keeper_action_pending <- None;
-    Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unconfirmed Nothing_kept in
-  (* The requests carry the identity this admission confirmed. *)
-  match state.server_identity with
-  | None -> refuse ()
-  | Some _ when not (server_authority_ready state) -> refuse ()
-  | Some expected_workspace ->
-  let origin = state.server_identity in
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  state.keeper_action_inflight <- Some (keeper_name, action);
-  state.keeper_action_pending <- None;
-  report_action ~show_in_footer:false state "system"
-    (let ko = state.ui_language = Lang_ko in
-     let gerund = Keeper_control.action_gerund ~ko action in
-     if ko then Printf.sprintf "%s %s" keeper_name gerund
-     else Printf.sprintf "%s %s" gerund keeper_name);
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  let operator_operation_id =
-    Keeper_control.mint_operation_id ()
-  in
-  let check_request =
-    Masc_tui_transport.Workspace_admission.admission_sequence state ~mailbox ~authority ~identity ~host ~port
-  in
-  let kept_back refusal =
-    Keeper_control.Kept_back
-      (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-         ~request:Kept_request.Keeper_action refusal)
-  in
-  let later_step_kept_back refusal =
-    Keeper_control.Later_step_kept_back
-      (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-         ~request:Kept_request.Keeper_action_step refusal)
-  in
-  let run_action () =
-    let result =
-      try
-        run_keeper_action_steps ~check_request ~kept_back ~later_step_kept_back ~host ~port ~keeper_name
-          ~operator_operation_id ~expected_workspace action
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))
-    in
-    enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Masc_tui_transport.Workspace_admission.fork_job state ~mailbox ~sw run_action
-  | None ->
-      let result =
-        try
-          run_keeper_action_steps ~check_request ~kept_back ~later_step_kept_back ~host ~port ~keeper_name
-            ~operator_operation_id ~expected_workspace action
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Keeper_control.No_answer (Printexc.to_string exn))
-      in
-      enqueue_async mailbox (Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)))
-
-(* The Board draft splits at the first newline: commit-message shape, one
-   buffer covering title and body. Trimming the title keeps a draft whose
-   first line has stray spaces publishable without surprising the operator. *)
-let split_board_draft (text : string) : string * string =
-  Board_composer.split_draft text
-
-
-
-let open_board_composer_editor state ~restore ~reenter =
-  match Masc_tui_editor.editor_command () with
-  | None ->
-      state.board_post_error <-
-        Some
-          (Masc_tui_editor.abort_detail ~ko:(state.ui_language = Lang_ko)
-             (Masc_tui_editor.Editor_unavailable Masc_tui_editor.Unset));
-      state.board_compose_armed <- false;
-      Masc_tui_shell.Editor_notice.report_unset state ~form:Masc_tui_shell.Editor_notice.Board_draft
-  | Some _ -> (
-      let current_draft = Buffer.contents state.board_draft in
-      let stem =
-        if String.length (String.trim current_draft) > 0 then current_draft
-        else if Option.is_none state.board_compose_reply_to then
-          Board_composer.template_for_new_post ()
-        else
-          ""
-      in
-      match
-        Masc_tui_editor.roundtrip ~restore ~reenter ~suffix:".md" stem
-      with
-      | Error abort ->
-          Masc_tui_shell.Editor_notice.report_abort state ~form:Masc_tui_shell.Editor_notice.Board_draft abort;
-          state.board_compose_armed <- false
-      | Ok edited ->
-          let trimmed = String.trim edited in
-          if Board_composer.is_untouched_template ~draft:trimmed
-             && String.length (String.trim current_draft) = 0 then begin
-            state.board_compose_armed <- false;
-            report_action state "system"
-              (ui_text state ~ko:"글쓰기 취소 · 빈 초안"
-                 ~en:"Board compose cancelled · empty draft")
-          end else begin
-            Buffer.clear state.board_draft;
-            Buffer.add_string state.board_draft trimmed;
-            state.board_compose_armed <- false;
-            state.board_post_error <- None;
-            report_action state "system"
-              (ui_text state ~ko:"편집기로 초안을 고침" ~en:"Board draft updated from editor")
-          end )
-;;
-
-(* The attach path input closed with nothing staged: Esc, or Enter on an
-   empty path. *)
-let attach_cancelled state = ui_text state ~ko:"첨부 취소" ~en:"attach cancelled"
-
-(* Stage one local file for the post. Its kind comes from the file's name:
-   the store keeps nothing that says what a file is, so the extension is the
-   only signal. A path that does not name a plain file keeps the input open
-   with the error showing, so the typing can be fixed rather than
-   re-entered. *)
-let stage_board_compose_path state raw =
-  (* A shell would have expanded a leading [~]; nothing does here, and a
-     path typed by hand usually starts with one. *)
-  let path =
-    let typed = String.trim raw in
-    match Sys.getenv_opt "HOME" with
-    | Some home when String.equal typed "~" -> home
-    | Some home when String.starts_with ~prefix:"~/" typed ->
-        Filename.concat home (String.sub typed 2 (String.length typed - 2))
-    | Some _ | None -> typed
-  in
-  let ko = state.ui_language = Lang_ko in
-  if String.equal path "" then begin
-    state.board_compose_attach_input <- None;
-    state.board_post_error <- None;
-    report_action state "system" (attach_cancelled state)
-  end
-  else if
-    List.exists
-      (fun (staged : board_staged_attachment) -> String.equal staged.sa_path path)
-      state.board_compose_attachments
-  then
-    state.board_post_error <-
-      Some (if ko then "이미 첨부한 파일" else "that file is already attached")
-  else
-    match
-      Masc_tui_board_upload.attachable
-        ~max_bytes:Masc_tui_board_upload.max_attachment_bytes path
-    with
-    | Error refusal ->
-        state.board_post_error <- Some (Masc_tui_board_upload.refusal_text ~ko refusal)
-    | Ok () ->
-        let sa_kind = upload_kind_of_path path in
-        state.board_compose_attachments <-
-          state.board_compose_attachments
-          @ [ { sa_path = path; sa_name = Filename.basename path; sa_kind } ];
-        state.board_compose_attach_input <- None;
-        state.board_post_error <- None;
-        report_action state "system"
-          (Printf.sprintf
-             (if ko then "%s (%s) 첨부 준비 · 글에 붙일 파일 %s개"
-              else "attached %s (%s) · %s staged for the post")
-             (Filename.basename path)
-             (board_upload_kind_to_wire sa_kind)
-             (Masc_tui_value.Count.grouped (List.length state.board_compose_attachments)))
-;;
-
-(* While the attach path is being typed it owns the compose keys: Enter
-   stages, Esc cancels, printable keys are path text. Tab keeps its global
-   meaning, the rule the draft itself keeps. *)
-let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool =
-  match key with
-  | "\r" | "\n" | "enter" ->
-      stage_board_compose_path state (Buffer.contents input);
-      true
-  | "esc" ->
-      state.board_compose_attach_input <- None;
-      state.board_post_error <- None;
-      report_action state "system" (attach_cancelled state);
-      true
-  | "\127" | "\b" | "backspace" ->
-      let next =
-        Buffer.contents input
-        |> Masc_tui_message_layout.drop_last_utf8_scalar
-      in
-      Buffer.clear input;
-      Buffer.add_string input next;
-      true
-  | "\t" | "shift-tab" -> false
-  | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
-      Buffer.add_string input s;
-      true
-  | _ -> true
-;;
-
-(* A second send while one is out is refused; the draft stays. *)
-let send_in_flight state =
-  ui_text state ~ko:"이미 보내는 중" ~en:"a send is already in flight"
-
-(* Without the terminal hand-off pair the editor cannot take the screen. *)
-let editor_not_here state =
-  ui_text state ~ko:"여기서는 편집기를 열 수 없음" ~en:"external editor not available here"
-
-(* Compose-mode keys. Sending is armed rather than pressed: esc offers
-   send-or-discard, so a stray key during writing cannot publish. Returns
-   false for keys this pane does not own, so Tab and quit keep their global
-   meaning. *)
-let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : bool =
-  match state.board_compose_attach_input with
-  | Some input -> handle_board_attach_input_key state input key
-  | None ->
-  let armed_allowed =
-    if Option.is_none state.board_compose_reply_to then
-      [ "s"; "S"; "d"; "D"; "e"; "E"; "h"; "H"; "esc" ]
-    else
-      [ "s"; "S"; "d"; "D"; "e"; "E"; "esc" ]
-  in
-  if state.board_compose_armed && not (List.mem key armed_allowed) then
-    state.board_compose_armed <- false;
-  match key with
-  | "\001" -> (
-      (* Ctrl-A stages a local file: the path input takes the keys until
-         Enter or Esc. The comment wire has no attachments, so a reply keeps
-         its staged files parked for a new post and says so. *)
-      match state.board_compose_reply_to with
-      | Some _ ->
-          report_action state "system"
-            (ui_text state ~ko:"첨부는 새 글에만 · 댓글은 글자만"
-               ~en:"attachments go with new posts · a comment carries text only");
-          true
-      | None ->
-          state.board_compose_attach_input <- Some (Buffer.create 128);
-          state.board_post_error <- None;
-          true )
-  | "\005" -> (
-      match restore, reenter with
-      | Some r, Some re ->
-          open_board_composer_editor state ~restore:r ~reenter:re;
-          true
-      | _ ->
-          state.board_post_error <- Some (editor_not_here state);
-          true )
-  | "e" | "E" when state.board_compose_armed -> (
-      match restore, reenter with
-      | Some r, Some re ->
-          open_board_composer_editor state ~restore:r ~reenter:re;
-          true
-      | _ ->
-          state.board_post_error <- Some (editor_not_here state);
-          true )
-  | "h" | "H" when state.board_compose_armed && Option.is_none state.board_compose_reply_to ->
-      state.board_compose_hearth <-
-        Board_hearth.next ~current:state.board_compose_hearth
-          ~census:(board_census_values state);
-      (* Keep armed so the operator can continue cycling hearths or press 's' to send *)
-      (* The pane's own label for the hearth, with the value it now holds. *)
-      report_action state "system"
-        (ui_text state ~ko:"게시판: " ~en:"hearth: "
-         ^ (match state.board_compose_hearth with
-            | Some h -> "#" ^ h
-            | None -> ui_text state ~ko:"기본" ~en:"default"));
-      true
-  | "esc" ->
-      state.board_compose_armed <- not state.board_compose_armed;
-      true
-  | "s" | "S" when state.board_compose_armed -> (
-      (* A reply sends the whole draft as one comment; a new post still
-         splits title from body at the first line. *)
-      match state.board_compose_reply_to with
-      | Some post_id ->
-          let content = Buffer.contents state.board_draft in
-          if String.equal (String.trim content) "" then begin
-            state.board_compose_armed <- false;
-            state.board_post_error <-
-              Some (ui_text state ~ko:"댓글이 비어 있음" ~en:"the comment is empty");
-            true
-          end else if board_write_inflight state.board_write then begin
-            state.board_compose_armed <- false;
-            state.board_post_error <- Some (send_in_flight state);
-            true
-          end else begin
-            state.board_compose_armed <- false;
-            let sent_draft = Buffer.contents state.board_draft in
-            let request_id = ref () in
-            let cancelled =
-              Board_msg (Board_comment_done
-                { request_id
-                ; post_id
-                ; sent_draft
-                ; result =
-                    Error
-                      (Request_failed
-                         (Masc_tui_board_updates.comment_outcome_unknown
-                            ~ko:(state.ui_language = Lang_ko)))
-                })
-            in
-            let on_not_run () =
-              Masc_tui_board_updates.comment_launch_failed state ~request_id
-            in
-            Masc_tui_board_requests.start_board_comment state ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-              ~request_id
-              ~report:(report_action state)
-              ~launch:(fun ~deliver read ->
-                let authority = state.workspace_authority in
-                let identity = state.server_identity in
-                let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-                Masc_tui_transport.Workspace_admission.launch_result ~operation:true ~cancelled ~on_not_run state ~mailbox
-                  ~boundary_error:(fun detail -> Request_failed detail)
-                  ~withdrawn:(fun refusal -> Request_withdrawn refusal) ~deliver (fun () ->
-                    match Masc_tui_transport.Workspace_admission.admit_request state ~mailbox ~authority ~identity ~host ~port () with
-                    | Error refusal -> Error (Request_withdrawn refusal)
-                    | Ok () -> read ()))
-              ~post_id ~content;
-            true
-          end
-      | None ->
-          let title, body =
-            split_board_draft (Buffer.contents state.board_draft)
-          in
-          match String.split_on_char '\n' (String.trim title) with
-          | [] | [ "" ] ->
-              state.board_compose_armed <- false;
-              state.board_post_error <-
-                Some
-                  (ui_text state ~ko:"첫 줄(제목)이 비어 있음"
-                     ~en:"the first line (title) is empty");
-              true
-          | _ when board_write_inflight state.board_write ->
-              state.board_compose_armed <- false;
-              state.board_post_error <- Some (send_in_flight state);
-              true
-          | _ ->
-              state.board_compose_armed <- false;
-              Masc_tui_board_requests.start_board_post state ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-                ~results:mailbox.Masc_tui_transport.Workspace_admission.workspace_results
-                ~admit:(fun request ->
-                  Masc_tui_transport.Workspace_admission.admit_request state ~mailbox
-                    ~authority:request.Masc_tui_board_publication.authority
-                    ~identity:request.expected_workspace
-                    ~host:request.host ~port:request.port ())
-                ~report:(report_action state) ~title ~body
-                ?hearth:state.board_compose_hearth ();
-              true )
-  | "d" | "D" when state.board_compose_armed ->
-      Buffer.clear state.board_draft;
-      state.board_compose_armed <- false;
-      state.board_compose_hearth <- None;
-      state.board_post_error <- None;
-      (* The staged files belong to the new post being discarded. A reply
-         never showed or carried them, so discarding one leaves them waiting
-         for the post they were staged for. *)
-      (match state.board_compose_reply_to with
-       | Some post_id -> state.board_mode <- Board_read post_id
-       | None ->
-           state.board_compose_attachments <- [];
-           state.board_mode <- Board_list);
-      report_action state "system" "Board draft discarded";
-      true
-  | "\r" | "\n" | "enter" ->
-      Buffer.add_char state.board_draft '\n';
-      true
-  | "\127" | "\b" | "backspace" ->
-      let new_content =
-        Buffer.contents state.board_draft
-        |> Masc_tui_message_layout.drop_last_utf8_scalar
-      in
-      Buffer.clear state.board_draft;
-      Buffer.add_string state.board_draft new_content;
-      true
-  | "\t" | "shift-tab" -> false
-  | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
-      (* The same printable test the chat draft uses: a Korean scalar is
-         three bytes and one keystroke, and a control byte is neither. *)
-      Buffer.add_string state.board_draft s;
-      true
-  | _ -> true
-
-(* Said by every keypress gate that finds nothing under the cursor. One name
-   rather than the sentence written twice: the two gates have to answer the
-   same way, and a test can ask whether each of them reaches this. *)
-let no_keeper_under_cursor ~ko =
-  if ko then "커서 아래 키퍼 없음 · r 로 목록 다시 읽기"
-  else "no keeper under the cursor; r to reload the roster"
-
-(* The keypress path. The reading decides which actions exist at all, so a key
-   that names an action the reading does not offer says why instead of sending
-   a request the server would refuse. *)
-let handle_keeper_action state ~base_path ~mailbox action =
-  match state.workspace_identity with
-  | Workspace_identity_unread ->
-      Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unread Nothing_kept
-  | Workspace_identity_match_unconfirmed _ ->
-      Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Keeper_action workspace_identity_unconfirmed Nothing_kept
-  | Workspace_identity_match | Workspace_identity_mismatch _ ->
-  match selected_keeper state with
-  | None ->
-    (* A keypress with nothing under the cursor said nothing at all, which
-       reads as a key that does not exist. The comment above already holds
-       this rule for the next gate -- an action the reading does not offer
-       says why -- and this gate is the one the operator reaches first. *)
-    report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
-  | Some keeper ->
-      let reading = keeper_reading state keeper in
-      let ko = state.ui_language = Lang_ko in
-      let label = Keeper_control.action_label ~ko action in
-      if not (List.mem action (Keeper_control.available reading)) then
-        report_action state "system"
-          (Printf.sprintf
-             (if ko then "%s 지금 %s 불가 (%s)" else "%s cannot %s right now (%s)")
-             keeper.k_name label
-             (Keeper_control.status_label ~ko reading
-              ^ (match reading.Keeper_control.liveness with
-                 | Keeper_control.Invalid detail -> ": " ^ detail
-                 | Keeper_control.Unobserved | Keeper_control.Absent
-                 | Keeper_control.Present _ -> "")))
-      else
-        match
-          Keeper_control.gate_transition
-            ~inflight:(Option.is_some state.keeper_action_inflight)
-            ~pending:state.keeper_action_pending ~keeper:keeper.k_name action
-        with
-        | Keeper_control.Gate_blocked_inflight ->
-            report_action state "system"
-              (if ko then "키퍼 동작 이미 진행 중" else "A keeper action is already in progress")
-        | Keeper_control.Gate_arm pending ->
-            state.keeper_action_pending <- Some pending;
-            let key = Keeper_control.action_key action in
-            report_action ~show_in_footer:false state "system"
-              (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key keeper.k_name label
-               else Printf.sprintf "Press %s again to %s %s" key label keeper.k_name);
-
-            (* Shutdown is undone by a boot. Delete is not undone at all, so
-               the arm names what goes -- the same list the dashboard shows
-               before its own purge. *)
-            if action = Keeper_control.Delete then
-              report_action state "system"
-                ((if ko then "삭제하면 키퍼를 멈추고 레인 종료를 기다린 뒤 지움: "
-                  else "Delete stops the Keeper and waits for lane shutdown before removing: ")
-                 ^ String.concat ", " (Keeper_control.purge_artifacts ~ko))
-        | Keeper_control.Gate_submit ->
-            start_keeper_action state ~base_path ~mailbox keeper.k_name action
-
-let report_voice_failure state ~keeper error =
-  Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
-    ("voice failed: " ^ error);
-  set_last_action state (Some ("voice failed: " ^ error, Unix.gettimeofday ()))
-
-(* One microphone capture, off the input loop.
-
-   [Voice_bridge.record_and_transcribe] blocks for as long as the operator
-   speaks — up to its timeout — so running it inline would freeze the TUI mid
-   sentence. It is forked, and what comes back arrives as an [async_msg] like
-   every other background result.
-
-   The meter is read from the recording as it grows rather than from the
-   microphone: opening a second capture device costs about 2.5 s here, which is
-   longer than most utterances. Sox writes the file continuously, so the level
-   of the newest bytes is the level being heard now. Nothing else can tell the
-   operator their input device is dead — a dead microphone and a quiet room
-   both end as an empty draft. *)
-let launch_voice_capture ?(calibrate = false) state ~mailbox ~keeper =
-  let inherited_floor = state.voice_floor in
-  let capture noise_floor =
-    match Masc.Voice_bridge.record_and_transcribe
-        ~agent_id:keeper ?noise_floor
-        (* The operator's stored pick travels to the recorder, so a capture
-           from the panel opens the device the config names, not whatever the
-           OS currently calls the default input. *)
-        ?audio_device:(Masc_tui_work_requests.Voice_requests.resolved_audio_input_device ~pick:state.boot_audio_input_device ~for_display:false)
-        ~on_level:(fun level -> Masc_tui_transport.Workspace_admission.enqueue mailbox (Voice_msg (Voice_level { keeper; level })))
-        ~should_stop:(fun () -> state.voice_stop_requested) () with
-    | Error error -> Voice_msg (Voice_failed { keeper; error })
-    | Ok json ->
-        (* Read the bridge's typed outcome rather than guessing from text. *)
-        match Masc.Voice_bridge.capture_outcome_of_json json with
-        | Masc.Voice_bridge.Transcript { text; _ } -> Voice_msg (Voice_transcribed { keeper; text })
-        | Masc.Voice_bridge.Transcriber_returned_nothing { endpoint_id } ->
-          Voice_msg (Voice_silent
-            { keeper
-            ; reason =
-                (match endpoint_id with
-                 | Some endpoint -> "the transcriber (" ^ endpoint ^ ") returned no text"
-                 | None -> "the transcriber returned no text")
-            })
-        | Masc.Voice_bridge.Nothing_heard { message } -> Voice_msg (Voice_silent { keeper; reason = message })
-        | Masc.Voice_bridge.Discarded_recording { message } ->
-          Voice_msg (Voice_discarded { keeper; reason = message })
-        | Masc.Voice_bridge.Unrecognized_status status ->
-          Voice_msg (Voice_failed { keeper; error = "voice result carried an unknown status: " ^ status })
-        | Masc.Voice_bridge.Status_absent ->
-          Voice_msg (Voice_failed { keeper; error = "voice result carried no status" })
-  in
-  let run () =
-    let msg =
-      try
-        if calibrate then begin
-          (* This probe owns the same microphone session as the capture. The
-             key handler returns while it waits, but another capture must wait
-             for this session's original terminal response. *)
-          let floor = Masc.Voice_bridge.measure_noise_floor ~agent_id:keeper () in
-          Masc_tui_transport.Workspace_admission.enqueue mailbox (Voice_msg (Voice_calibrated { keeper; floor }));
-          match state.voice_stop_requested with
-          | Some Masc.Voice_bridge.Discard ->
-              Voice_msg (Voice_discarded { keeper; reason = "microphone preparation discarded" })
-          | Some Masc.Voice_bridge.Keep_what_was_heard ->
-              Voice_msg (Voice_silent { keeper; reason = "stopped during microphone preparation; no speech recorded" })
-          | None ->
-              (* The probe and its mailbox publication both yield. Turning
-                 continuous mode off during either wait must not start a new
-                 recorder. Once recording has started its existing Keep/
-                 Discard policy still owns speech already captured. *)
-              (match state.voice_continuous with
-               | Some active when String.equal active keeper -> capture floor
-               | Some _ | None -> Voice_msg (Voice_silent
-                   {keeper; reason = "continuous mode stopped during microphone preparation"}))
-        end else capture inherited_floor
-      with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Voice_msg (Voice_failed { keeper; error = Printexc.to_string exn })
-    in
-    Masc_tui_transport.Workspace_admission.enqueue mailbox msg
-  in
-  match Eio_context.get_switch_opt () with
-  | None ->
-      (* No capture exists to settle. Report this synchronous refusal at its
-         original call site instead of sending a terminal event with no owner. *)
-      ignore (refuse_voice_start state ~keeper);
-      report_voice_failure state ~keeper "background recorder unavailable"
-  | Some sw ->
-      (* Eio fork can skip its body on an already cancelled switch. Check before
-         claiming a microphone session; cancellation is not a recorder error. *)
-      Eio.Switch.check sw;
-      state.voice_capture <- Some keeper;
-      state.voice_capture_phase <- (if calibrate then Voice_calibrating else Voice_starting);
-      state.voice_capture_withdrawn <- false;
-      state.voice_level_db <- None;
-      state.voice_stop_requested <- None;
-      Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-;;
-
-(* Continuous mode's only moving part: after each capture settles, start the
-   next one. Left as a separate step rather than looping inside the fiber so
-   the mode can be turned off between utterances — a fiber that re-armed itself
-   would have to be cancelled mid-recording, and that throws away speech
-   already said. *)
-let rearm_continuous_capture state ~mailbox ~keeper =
-  match state.voice_continuous with
-  | Some active when String.equal active keeper && state.voice_capture = None ->
-      launch_voice_capture state ~mailbox ~keeper
-  | Some _ | None -> ()
-;;
 
 (* Apply one keystroke the composer claimed. Sending routes through the same
    chat surface the [c] key opens, so a message typed on the roster and one
@@ -13908,7 +12772,7 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Some _ ->
            request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
            set_last_action state (Some ("voice: stopping", Unix.gettimeofday ()))
-       | None -> launch_voice_capture state ~mailbox ~keeper:keeper_name));
+       | None -> Masc_tui_operator_actions.Voice_actions.launch_voice_capture state ~mailbox ~keeper:keeper_name));
       true
   | Composer.Toggle_continuous keeper_name ->
       (match state.voice_continuous with
@@ -13931,7 +12795,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            state.voice_floor <- None;
            set_last_action state (Some ("voice: continuous on", Unix.gettimeofday ()));
            if state.voice_capture = None
-           then launch_voice_capture ~calibrate:true state ~mailbox ~keeper:keeper_name);
+           then Masc_tui_operator_actions.Voice_actions.launch_voice_capture ~calibrate:true state ~mailbox ~keeper:keeper_name);
       true
   | Composer.Release_focus ->
       (* A running capture is the innermost thing Esc can leave, so it goes
@@ -14902,7 +13766,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       (match settle_voice_capture state ~keeper with
        | None | Some Voice_withdrawn -> ()
        | Some (Voice_current disposition) ->
-        rearm_continuous_capture state ~mailbox ~keeper;
+        Masc_tui_operator_actions.Voice_actions.rearm_continuous_capture state ~mailbox ~keeper;
         match disposition with
         | Masc.Voice_bridge.Discard -> ()
         | Masc.Voice_bridge.Keep_what_was_heard ->
@@ -14951,7 +13815,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
        | Some (Voice_current _) ->
         (* Silence re-arms too: an operator who paused longer than the
            trailing-silence window has not left the mode. *)
-        rearm_continuous_capture state ~mailbox ~keeper;
+        Masc_tui_operator_actions.Voice_actions.rearm_continuous_capture state ~mailbox ~keeper;
         (* In the transcript, not only the footer. A capture that heard
            nothing leaves the draft exactly as a capture that was never
            transcribed does, and the footer line saying which is gone by the
@@ -14970,7 +13834,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         (* Esc abandons the recording, not the mode: the capture is the
            innermost thing it cancels, and the toggle is the way out of
            continuous mode. So this re-arms like a silence does. *)
-        rearm_continuous_capture state ~mailbox ~keeper;
+        Masc_tui_operator_actions.Voice_actions.rearm_continuous_capture state ~mailbox ~keeper;
         (* In the transcript, like a silence, and worded as what it was. An
            operator who pressed Esc mid-sentence and then read "nothing was
            heard" went looking for a microphone fault that was not there. *)
@@ -14987,7 +13851,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            it again, and a loop that re-arms on failure spins. *)
         state.voice_continuous <- None;
         state.voice_floor <- None;
-        report_voice_failure state ~keeper error);
+        Masc_tui_operator_actions.Voice_actions.report_voice_failure state ~keeper error);
       Drawn_changed
   | Http_surface_read_completed (context, completed) ->
       let request=Surface_read_context.current context in
@@ -16436,7 +15300,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
           origin
       in
       if origin_matches then begin
-      apply_keeper_action_result state ~base_path ~mailbox keeper_name action result;
+      Masc_tui_operator_actions.Keeper_actions.apply_keeper_action_result state ~base_path ~mailbox keeper_name action result;
       (* A paused or shut-down Keeper still routes its channels to itself, and
          answers on them the moment it runs again. Read the bindings fresh
          and, if it holds any, offer to remove them; doing nothing is the
@@ -18260,15 +17124,15 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         (Masc_tui_types.finish_ask_followup_read state request submission result);
       Drawn_changed
   | Ask_msg (Ask_answer_receipt_ready submission) ->
-      apply_ask_answer_receipt state submission ~mailbox;
+      Masc_tui_operator_actions.Ask_actions.apply_ask_answer_receipt state submission ~mailbox;
       Drawn_changed
   | Ask_msg (Ask_answer_done (submission, result, asks)) ->
       if ask_submission_inflight state submission then begin
-        apply_ask_answer_receipt state submission ~mailbox;
-        apply_ask_answer_completion state submission result asks;
+        Masc_tui_operator_actions.Ask_actions.apply_ask_answer_receipt state submission ~mailbox;
+        Masc_tui_operator_actions.Ask_actions.apply_ask_answer_completion ~settle_asks state submission result asks;
         if Option.is_none (Masc_tui_types.current_ask_followup state)
            && Option.is_none state.ask_followup_error then
-          launch_ask_followup_load state ~mailbox
+          Masc_tui_operator_actions.Ask_actions.launch_ask_followup_load state ~mailbox
       end;
       Drawn_changed
   | Keeper_msg (Keeper_chat_dispatch_started (request, was_replay, acknowledge)) ->
@@ -23394,7 +22258,7 @@ Use relative paths for resources already held in the package. -->
   in
   let handle_keeper_settings_edit ~format () =
     match selected_keeper state with
-    | None -> report_action state "system" (no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
+    | None -> report_action state "system" (Masc_tui_operator_actions.Keeper_actions.no_keeper_under_cursor ~ko:(state.ui_language = Lang_ko))
     | Some keeper ->
       (match Masc_tui_editor.editor_command () with
        | None -> Masc_tui_shell.Editor_notice.report_unset state ~form:(Masc_tui_shell.Editor_notice.Keeper_settings keeper.k_name)
@@ -25455,7 +24319,7 @@ Use relative paths for resources already held in the package. -->
             | None -> ()
             | Some Text_collab_form | Some Text_account_login -> ()
             | Some Text_ask_answer ->
-                edit_ask_text state (fun draft ->
+                Masc_tui_operator_actions.Ask_actions.edit_ask_text state (fun draft ->
                   draft ^ Keeper_chat.terminal_safe_text ~preserve_newlines:true
                     paste.Masc_tui_paste.text)
             | Some Text_resource_save ->
@@ -26582,10 +25446,10 @@ Use relative paths for resources already held in the package. -->
                           (match state.ask_answer_mode with
                            | Ask_answering { aam_ask }
                              when not (Masc.Tui_decode_asks.equal_ask_key aam_ask ask) ->
-                               leave_ask_answering state
+                               Masc_tui_operator_actions.Ask_actions.leave_ask_answering state
                            | Ask_answering _ | Ask_browsing -> ());
                           state.ask_cursor <- Ask.On cursor;
-                          enter_ask_answering state)
+                          Masc_tui_operator_actions.Ask_actions.enter_ask_answering state)
                  | Some
                      { Masc_tui_agenda.goes_to =
                          Masc_tui_agenda.Goal_to_confirm goal_id
@@ -27746,14 +26610,14 @@ Use relative paths for resources already held in the package. -->
               && Option.is_some state.ask_text_entry
               && not (modal_owns_keys state) ->
            (match k with
-            | "esc" -> cancel_ask_text_entry state
-            | "\r" | "\n" | "enter" -> commit_ask_text_entry state
+            | "esc" -> Masc_tui_operator_actions.Ask_actions.cancel_ask_text_entry state
+            | "\r" | "\n" | "enter" -> Masc_tui_operator_actions.Ask_actions.commit_ask_text_entry state
             | "\127" | "\b" | "backspace" ->
-                edit_ask_text state Masc_tui_message_layout.drop_last_utf8_scalar
+                Masc_tui_operator_actions.Ask_actions.edit_ask_text state Masc_tui_message_layout.drop_last_utf8_scalar
             | s
               when (String.length s = 1 && Char.code s.[0] >= 32)
                    || (String.length s > 1 && Char.code s.[0] >= 0x80) ->
-                edit_ask_text state (fun text -> text ^ s)
+                Masc_tui_operator_actions.Ask_actions.edit_ask_text state (fun text -> text ^ s)
             | _ -> ());
            Render_schedule.request render_schedule Render_schedule.Force
        (* Answering is modal. A question needs a key per choice, and this
@@ -27769,14 +26633,14 @@ Use relative paths for resources already held in the package. -->
               && not (modal_owns_keys state) ->
            (match k with
             | "esc" ->
-                leave_ask_answering state;
+                Masc_tui_operator_actions.Ask_actions.leave_ask_answering state;
                 (match state.home_opened_request with
                  | Some (Home_question _) ->
                      goto_surface state ~mailbox:async_messages Overview
                  | Some (Home_held_call _) | None | Some (Home_gate_request _)
                  | Some (Home_operator_request _) | Some (Home_goal_confirmation _) -> ())
-            | "left" | "up" | "k" -> move_ask_question_cursor state (-1)
-            | "right" | "down" | "j" -> move_ask_question_cursor state 1
+            | "left" | "up" | "k" -> Masc_tui_operator_actions.Ask_actions.move_ask_question_cursor state (-1)
+            | "right" | "down" | "j" -> Masc_tui_operator_actions.Ask_actions.move_ask_question_cursor state 1
             | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
                 let delta = match k with
                   | "pageup" -> -(Masc_tui_render_approvals.ask_question_page_size state)
@@ -27794,22 +26658,22 @@ Use relative paths for resources already held in the package. -->
             | "end" ->
                 state.ask_question_scroll <-
                   Masc_tui_render_approvals.ask_question_scroll_limit state
-            | "[" -> state.home_opened_request <- None; move_ask_cursor state (-1)
-            | "]" -> state.home_opened_request <- None; move_ask_cursor state 1
+            | "[" -> state.home_opened_request <- None; Masc_tui_operator_actions.Ask_actions.move_ask_cursor state (-1)
+            | "]" -> state.home_opened_request <- None; Masc_tui_operator_actions.Ask_actions.move_ask_cursor state 1
             | "o" -> toggle_selected_ask_origin state
-            | "O" -> inspect_selected_ask_origin state ~mailbox:async_messages
-            | "s" | "S" -> skip_ask_question state
-            | "c" | "C" -> clear_ask_question state
+            | "O" -> Masc_tui_operator_actions.Ask_actions.inspect_selected_ask_origin state ~mailbox:async_messages
+            | "s" | "S" -> Masc_tui_operator_actions.Ask_actions.skip_ask_question state
+            | "c" | "C" -> Masc_tui_operator_actions.Ask_actions.clear_ask_question state
             (* Ahead of the digit arm below, which takes every one-character
                key and drops the ones that are not positions -- [t] landed
                there and did nothing. *)
-            | "t" | "T" -> begin_ask_text_entry state
+            | "t" | "T" -> Masc_tui_operator_actions.Ask_actions.begin_ask_text_entry state
             (* Terminals send Enter as CR. "enter" is the name the Kitty
                protocol gives codepoint 13, and this was the only site in the
                file waiting for it -- the other twelve read "\r" -- so the
                answer could be composed and never sent. *)
             | "\r" | "\n" | "enter" ->
-                handle_ask_submit state ~mailbox:async_messages
+                Masc_tui_operator_actions.Ask_actions.handle_ask_submit state ~mailbox:async_messages
             | digit when String.length digit = 1 -> (
                 (* Parsed, not matched: a choice is picked by its position in
                    the list the server sent, and anything that is not a
@@ -27818,8 +26682,8 @@ Use relative paths for resources already held in the package. -->
                 | Some position when position >= 1 && position <= 9 ->
                     (match selected_ask_question state with
                      | Some question when Ask.alternative_position question = Some position ->
-                         begin_ask_text_entry state
-                     | Some _ | None -> toggle_ask_choice state (position - 1))
+                         Masc_tui_operator_actions.Ask_actions.begin_ask_text_entry state
+                     | Some _ | None -> Masc_tui_operator_actions.Ask_actions.toggle_ask_choice state (position - 1))
                 | Some _ | None -> ())
             | _ -> ());
            Render_schedule.request render_schedule Render_schedule.Force
@@ -27830,7 +26694,7 @@ Use relative paths for resources already held in the package. -->
               && (not state.approval_detail_open)
               && not (modal_owns_keys state) ->
            (if String.equal key "o" then toggle_selected_ask_origin state
-            else inspect_selected_ask_origin state ~mailbox:async_messages);
+            else Masc_tui_operator_actions.Ask_actions.inspect_selected_ask_origin state ~mailbox:async_messages);
            Render_schedule.request render_schedule Render_schedule.Force
        (* The same two keys the answering mode uses, so the walk does not
           change shape when the operator commits. j/k cannot serve here: the
@@ -27851,7 +26715,7 @@ Use relative paths for resources already held in the package. -->
                   | Ask_answering _ -> false)
               && (not state.approval_detail_open)
               && not (modal_owns_keys state) ->
-           move_ask_cursor state (if String.equal k "[" then -1 else 1);
+           Masc_tui_operator_actions.Ask_actions.move_ask_cursor state (if String.equal k "[" then -1 else 1);
            Render_schedule.request render_schedule Render_schedule.Force
        (* [/context] is modal: the summary and exact input text must not leak
           keys into the composer underneath. The quit confirmation and chrome
@@ -30424,7 +29288,7 @@ Use relative paths for resources already held in the package. -->
                       | Some cursor ->
                           navigate Approvals;
                           state.ask_cursor <- Ask.On cursor;
-                          enter_ask_answering state)
+                          Masc_tui_operator_actions.Ask_actions.enter_ask_answering state)
                  | Home_goal_confirmation goal_id ->
                      (match state.planning_filter with
                       | Planning_filter_all | Planning_filter_active -> ()
@@ -30634,7 +29498,7 @@ Use relative paths for resources already held in the package. -->
                    ~start_voice:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper when state.voice_capture = None ->
-                         launch_voice_capture state ~mailbox:async_messages ~keeper
+                         Masc_tui_operator_actions.Voice_actions.launch_voice_capture state ~mailbox:async_messages ~keeper
                      (* The same toggle the composer row carries. *)
                      | Some _ ->
                          request_voice_stop state Masc.Voice_bridge.Keep_what_was_heard;
@@ -30658,7 +29522,7 @@ Use relative paths for resources already held in the package. -->
                          set_last_action state (Some ("voice: continuous on", Unix.gettimeofday ()));
                          if state.voice_capture = None
                          then
-                           launch_voice_capture ~calibrate:true state ~mailbox:async_messages ~keeper
+                           Masc_tui_operator_actions.Voice_actions.launch_voice_capture ~calibrate:true state ~mailbox:async_messages ~keeper
                      | None, None -> ())
                    k
                in
@@ -30682,7 +29546,7 @@ Use relative paths for resources already held in the package. -->
               (Tab) keeps its global meaning, so the cycle works mid-compose
               as this comment always claimed. *)
            let handled =
-             handle_board_compose_key state ~mailbox:async_messages
+             Masc_tui_operator_actions.Board_compose_actions.handle_board_compose_key state ~mailbox:async_messages
                ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session) ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) k
            in
            if not handled then
@@ -33278,7 +32142,7 @@ Use relative paths for resources already held in the package. -->
                | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
                | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
                | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> false) ->
-           handle_keeper_action state ~base_path ~mailbox:async_messages
+           Masc_tui_operator_actions.Keeper_actions.handle_keeper_action state ~base_path ~mailbox:async_messages
              Keeper_control.Delete
        | Some "d"
          when (match state.view with
@@ -33844,7 +32708,7 @@ Use relative paths for resources already held in the package. -->
                   |> Option.map Keeper_control.primary
                 with
                 | Some (Some action) ->
-                    handle_keeper_action state ~base_path
+                    Masc_tui_operator_actions.Keeper_actions.handle_keeper_action state ~base_path
                       ~mailbox:async_messages action
                 | Some None ->
                     report_action state "system"
@@ -33868,7 +32732,7 @@ Use relative paths for resources already held in the package. -->
                      Masc_tui_transport.Server_contact.start_here_then_read server_contact state ~base_path ~host:Masc_tui_transport.Workspace_admission.server_peer_host
                        ~port:state.port
                  | Connecting | Booting | Account_server _ | Degraded | Connected ->
-                     handle_keeper_action state ~base_path
+                     Masc_tui_operator_actions.Keeper_actions.handle_keeper_action state ~base_path
                        ~mailbox:async_messages Keeper_control.Shutdown)
             | Board ->
                 (match state.board_mode with
@@ -33916,7 +32780,7 @@ Use relative paths for resources already held in the package. -->
                      state.board_post_error <- None
                  | Board_read _ | Board_compose -> ())
             | Keepers (Keeper_list | Keeper_detail) ->
-                handle_keeper_action state ~base_path ~mailbox:async_messages
+                Masc_tui_operator_actions.Keeper_actions.handle_keeper_action state ~base_path ~mailbox:async_messages
                   Keeper_control.Wakeup
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
@@ -34208,7 +33072,7 @@ Use relative paths for resources already held in the package. -->
             | Approvals ->
                 (* The approval queue owns this surface's arrows and its y/n,
                    so answering a Keeper's question opens as its own mode. *)
-                enter_ask_answering state
+                Masc_tui_operator_actions.Ask_actions.enter_ask_answering state
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Memory | Lanes
             | Board | Planning | Schedules | Harness

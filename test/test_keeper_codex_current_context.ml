@@ -1358,8 +1358,8 @@ let test_completion_evidence_reaches_native_writer ~custom_projection () =
     projected_texts actual_texts;
   check int "explicit source projection runs once" (if custom_projection then 1 else 0)
     !projection_calls;
-  let start = match params_of "thread/start" rows with
-    | [params] -> params | _ -> fail "expected one fresh completion thread" in
+  check int "completion evidence opens one fresh thread" 1
+    (List.length (params_of "thread/start" rows));
   check int "completion evidence is submitted once" 1
     (List.length (params_of "turn/start" rows));
   check bool "the source evidence remains unchanged" true

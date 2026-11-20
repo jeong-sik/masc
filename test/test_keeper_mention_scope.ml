@@ -578,6 +578,11 @@ let test_fleet_before_ack_and_changed_targets () =
   let messages = [ broadcast; ack ] in
   check (list string) "fleet context survives acknowledgement of later rows"
     [ broadcast.content ] (fleet_contents (MS.fleet_messages_of_messages ~limit:1 ~targets messages));
+  check (list string) "the fleet row carries its source message id"
+    [ broadcast.id ]
+    (List.map
+       (fun (f : MS.fleet_message) -> f.fleet_message_id)
+       (MS.fleet_messages_of_messages ~limit:1 ~targets messages));
   check (list string) "new targets reclassify that same broadcast before the limit"
     [] (fleet_contents (MS.fleet_messages_of_messages ~limit:1 ~targets:[ "bob" ] messages));
   check (list string) "ack still controls the reactive lane independently"

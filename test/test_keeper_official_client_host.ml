@@ -3706,6 +3706,42 @@ let test_pending_mentions_and_fleet_messages_resume_by_row () =
     (section_names delivery.unchanged_sections)
 ;;
 
+(* An answered mention's row stays in what the session holds. A later mention
+   with the same speaker and text is a new message whose row names its own
+   message id, so the resume sends it instead of reporting the section
+   unchanged. The rows come from the shipped template. *)
+let test_a_repeated_mention_is_sent_on_resume () =
+  use_markdown_prompts ();
+  let mention_row message_id =
+    match
+      Prompt_registry.render_prompt_template
+        Prompt_names.keeper_world_pending_messages_mention_row
+        [ "message_id", message_id; "speaker", "operator"; "content", "status?" ]
+    with
+    | Ok row -> row ^ "\n"
+    | Error detail -> fail detail
+  in
+  let turn_with message_id =
+    let world =
+      Layers.assemble_prepared ~content_of:(function
+        | Layers.Pending_mentions ->
+          Some
+            (Layers.prepare_rows
+               ~head:"### Pending Messages (1)\n"
+               ~rows:[ mention_row message_id ]
+               ~tail:"\n")
+        | _ -> None)
+      |> Layers.prepend_unattributed World_frame "## Current World State\nWORLD-FRAME\n\n"
+    in
+    world_state_turn world
+  in
+  let held = start_holding (turn_with "msg-1") in
+  let delivery = resume ~held (turn_with "msg-2") in
+  check bool "the new mention is sent" true (contains delivery.prompt "[message msg-2]");
+  check bool "the mention section is not reported unchanged" false
+    (List.mem "pending_mentions" (section_names delivery.unchanged_sections))
+;;
+
 (* A session that holds nothing -- a new session, a reset, a compaction --
    gets every section. A whole World State sent without its partition, and a
    section that left and came back, also make the session's earlier section
@@ -4104,6 +4140,10 @@ let () =
             "pending mentions and fleet messages resume by row"
             `Quick
             test_pending_mentions_and_fleet_messages_resume_by_row
+        ; test_case
+            "a repeated mention is sent on resume"
+            `Quick
+            test_a_repeated_mention_is_sent_on_resume
         ; test_case
             "every section goes out when the session may not hold it"
             `Quick

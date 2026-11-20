@@ -29,15 +29,20 @@ type pending_message = {
   kind : pending_kind;
 }
 (** One unacknowledged lane row. Stable [message_id] is the exact durable
-    acknowledgement cursor; list order is persisted source order. *)
+    acknowledgement cursor; list order is persisted source order. The rendered
+    row names [message_id], so a resumed session that compares rows by their
+    bytes tells two mentions with the same text apart. *)
 
 type fleet_message = {
+  fleet_message_id : string;
   fleet_speaker : string;
   fleet_content : string;
 }
-(** One keeper broadcast projected into this keeper's transcript. No message
-    id: the layer carries no acknowledgement cursor, so nothing keys off row
-    identity. List order is persisted source order. *)
+(** One keeper broadcast projected into this keeper's transcript.
+    [fleet_message_id] is the source {!Keeper_chat_store.chat_message} id. The
+    layer carries no acknowledgement cursor, but the rendered row names the id:
+    a resumed session compares rows by their bytes, and two broadcasts with the
+    same speaker and text are two rows. List order is persisted source order. *)
 
 val pairs_of_kind : pending_kind -> pending_message list -> (string * string) list
 val has_kind : pending_kind -> pending_message list -> bool

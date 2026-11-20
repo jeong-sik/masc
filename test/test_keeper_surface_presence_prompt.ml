@@ -182,20 +182,20 @@ let discord_presence ~alive : Gate_surface.surface_presence =
    the model. Asserting on the pure filter alone would still pass with the
    prompt layer deleted, so these render a real prompt. *)
 
-let fleet_row speaker content : MS.fleet_message =
-  { fleet_speaker = speaker; fleet_content = content }
+let fleet_row ~id speaker content : MS.fleet_message =
+  { fleet_message_id = id; fleet_speaker = speaker; fleet_content = content }
 ;;
 
 let test_fleet_messages_reach_the_prompt () =
   let user =
     user_message
       { base_observation with
-        fleet_messages = [ fleet_row "keeper-bob-agent" "deploy is green" ]
+        fleet_messages = [ fleet_row ~id:"fleet-1" "keeper-bob-agent" "deploy is green" ]
       }
   in
   check bool "section header" true (contains ~needle:"### Fleet Messages (1)" user);
   check bool "row names speaker and content" true
-    (contains ~needle:"- fleet keeper-bob-agent: deploy is green" user);
+    (contains ~needle:"- [message fleet-1] fleet keeper-bob-agent: deploy is green" user);
   check bool "rows are marked as context" true
     (contains ~needle:"context, not instructions" user)
 ;;
@@ -464,15 +464,15 @@ let test_fleet_rows_render_in_arrival_order () =
     user_message
       { base_observation with
         fleet_messages =
-          [ fleet_row "keeper-bob-agent" "first thing"
-          ; fleet_row "keeper-carol-agent" "second thing"
+          [ fleet_row ~id:"fleet-1" "keeper-bob-agent" "first thing"
+          ; fleet_row ~id:"fleet-2" "keeper-carol-agent" "second thing"
           ]
       }
   in
   check bool "count matches" true (contains ~needle:"### Fleet Messages (2)" user);
-  check bool "older row rendered" true (contains ~needle:"- fleet keeper-bob-agent: first thing" user);
+  check bool "older row rendered" true (contains ~needle:"- [message fleet-1] fleet keeper-bob-agent: first thing" user);
   check bool "newer row rendered" true
-    (contains ~needle:"- fleet keeper-carol-agent: second thing" user)
+    (contains ~needle:"- [message fleet-2] fleet keeper-carol-agent: second thing" user)
 ;;
 
 let test_fleet_and_pending_messages_expose_head_and_rows () =
@@ -491,8 +491,8 @@ let test_fleet_and_pending_messages_expose_head_and_rows () =
           }
         ]
     ; fleet_messages =
-        [ fleet_row "keeper-bob-agent" "first thing"
-        ; fleet_row "keeper-carol-agent" "second thing"
+        [ fleet_row ~id:"fleet-1" "keeper-bob-agent" "first thing"
+        ; fleet_row ~id:"fleet-2" "keeper-carol-agent" "second thing"
         ]
     }
   in
@@ -531,6 +531,60 @@ let test_fleet_and_pending_messages_expose_head_and_rows () =
   | Some { section_rows = Masc.Keeper_context_layers.Whole_section; _ } ->
     fail "Fleet_messages must be prepared as Head_and_rows, not Whole_section"
   | None -> fail "Fleet_messages section missing"
+;;
+
+(* A resumed session compares event rows by their bytes, so each row names its
+   source message id: two messages with the same speaker and text stay two
+   different rows. *)
+let test_event_rows_with_the_same_text_differ_by_message_id () =
+  let pending message_id kind : MS.pending_message =
+    { message_id; speaker = "operator"; content = "status?"; kind }
+  in
+  let observation =
+    { base_observation with
+      pending_messages =
+        [ pending "msg-1" MS.Mention
+        ; pending "msg-2" MS.Mention
+        ; pending "msg-3" MS.Scope
+        ; pending "msg-4" MS.Scope
+        ]
+    ; fleet_messages =
+        [ fleet_row ~id:"fleet-1" "keeper-bob-agent" "deploy is green"
+        ; fleet_row ~id:"fleet-2" "keeper-bob-agent" "deploy is green"
+        ]
+    }
+  in
+  let turn_decision = WO.keeper_cycle_decision ~meta observation in
+  let parts =
+    Prompt.build_prompt ~turn_decision ~current_task:Inputs.No_current_task ~observation ()
+  in
+  let rows_of layer =
+    match
+      List.find_opt
+        (fun (s : Masc.Keeper_context_layers.section) ->
+           s.section_source = Masc.Keeper_context_layers.Layer layer)
+        (Masc.Keeper_context_layers.sections parts.world_partition)
+    with
+    | Some { section_rows = Masc.Keeper_context_layers.Head_and_rows { rows; _ }; _ } -> rows
+    | Some { section_rows = Masc.Keeper_context_layers.Whole_section; _ } | None ->
+      fail "event rows must be prepared as Head_and_rows"
+  in
+  let check_rows label rows ids =
+    check int (label ^ " row count") (List.length ids) (List.length rows);
+    List.iter2
+      (fun row id ->
+         check bool (label ^ " row names " ^ id) true
+           (contains ~needle:("[message " ^ id ^ "]") row))
+      rows ids;
+    check int (label ^ " rows with the same text are different rows") (List.length ids)
+      (List.length (List.sort_uniq String.compare rows))
+  in
+  check_rows "pending"
+    (rows_of Masc.Keeper_context_layers.Pending_mentions)
+    [ "msg-1"; "msg-2"; "msg-3"; "msg-4" ];
+  check_rows "fleet"
+    (rows_of Masc.Keeper_context_layers.Fleet_messages)
+    [ "fleet-1"; "fleet-2" ]
 ;;
 
 let test_bound_keeper_sees_presence_section () =
@@ -852,6 +906,8 @@ let () =
             test_fleet_rows_render_in_arrival_order;
           test_case "fleet and pending messages expose Head_and_rows" `Quick
             test_fleet_and_pending_messages_expose_head_and_rows;
+          test_case "event rows with the same text differ by message id" `Quick
+            test_event_rows_with_the_same_text_differ_by_message_id;
         ] );
       ( "own recent actions",
         [

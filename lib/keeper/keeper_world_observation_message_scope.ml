@@ -41,10 +41,12 @@ type pending_message =
   ; kind : pending_kind
   }
 
-(* A keeper broadcast projected into this keeper's transcript. Carries no
-   message id: the layer has no watermark, so nothing keys off row identity. *)
+(* A keeper broadcast projected into this keeper's transcript. The layer has no
+   watermark, but the row names [fleet_message_id]: a resumed session compares
+   rows by their bytes, and two broadcasts with the same text are two rows. *)
 type fleet_message =
-  { fleet_speaker : string
+  { fleet_message_id : string
+  ; fleet_speaker : string
   ; fleet_content : string
   }
 
@@ -276,7 +278,11 @@ let fleet_messages_of_index ~limit ~targets index =
        | Some (Mention | Scope) -> take remaining acc rest
        | None ->
          take (remaining - 1)
-           ({ fleet_speaker = speaker_display message; fleet_content = message.content } :: acc)
+           ({ fleet_message_id = message.id
+            ; fleet_speaker = speaker_display message
+            ; fleet_content = message.content
+            }
+            :: acc)
            rest)
   in
   (* Candidates are newest first; prepending selected rows restores append order.

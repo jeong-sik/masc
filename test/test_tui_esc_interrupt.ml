@@ -1,20 +1,19 @@
-(* Esc while the chat view shows a keeper whose turn is live.
+(* Ctrl-C while the chat view shows a keeper whose turn is live (RFC §3.4;
+   Esc only leaves the chat).
 
-   [Masc_tui_esc_interrupt.action] is the pure decision the dispatch arm in
-   masc_tui.ml reads; these tests pin the table so the arm has no logic left
-   to drift:
+   [Masc_tui_esc_interrupt.action] is the pure decision
+   [Queue_steer.interrupt_active_chat_turn] reads; these tests pin the table
+   and test_tui_chat_escape_and_interrupt_keys pins the keys:
 
-   - no interrupt requested yet: Esc is the first press — it launches the
-     interrupt and is spent on it;
-   - a signal just sent: Esc is the accidental second press the swallow was
-     written for — spent, the view stays;
+   - no interrupt requested yet: the press launches the interrupt and is
+     spent on it;
+   - a signal just sent: the press is the accidental second one the swallow
+     was written for, spent on the turn;
    - a signal older than the grace window: the turn heard the request and
      kept streaming (masc #29229: a parked turn may stream indefinitely), so
-     Esc leaves the view. Leaving cancels nothing — the interrupt proceeds
-     server-side and the pane can be reopened;
-   - a declined or errored request: nothing is pending, so Esc leaves at
-     once. Before the grace window existed, this arm trapped Esc for the
-     rest of the session.
+     the press goes on to arm quit. The interrupt proceeds server-side;
+   - a declined or errored request: nothing is pending, so the press goes on
+     at once.
 
    All instants are monotonic nanoseconds ([Mtime_clock.elapsed_ns]), never
    wall-clock: a backward clock step must not re-arm the guard. *)

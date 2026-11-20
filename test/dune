@@ -3511,6 +3511,7 @@
 (include stanzas/test_workspace_agent_record.inc)
 
 (include stanzas/test_tui_list_moves.inc)
+(include stanzas/test_tui_chat_escape_and_interrupt_keys.inc)
 (include stanzas/test_tui_local_keeper_meta_moved.inc)
 
 (include stanzas/test_workspace_heartbeat_outcome.inc)

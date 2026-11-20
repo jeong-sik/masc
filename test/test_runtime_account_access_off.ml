@@ -160,6 +160,7 @@ let person_turn who ~runtime =
     { owner = who.user_id
     ; keeper_id = get (Keeper_id.of_string who.keeper)
     ; channel = Channel.Autonomous
+    ; stored_scope = Authz_types.Authorization_scope.all
     ; pat = Authz_types.Pat_binding.Not_pat
     ; runtime_id = runtime
     }

@@ -392,6 +392,7 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
         { owner = person.user_id
         ; keeper_id
         ; channel = Authz_types.Channel.Direct
+        ; stored_scope = Authz_types.Authorization_scope.all
         ; pat
         ; runtime_id = Authz_types.Runtime_id.to_string runtime_id
         }

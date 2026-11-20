@@ -463,6 +463,8 @@ let run_keeper_invocation_turn_admitted_inner
         let* operation = match operation with
           | Some operation -> Ok operation
           | None -> Error "direct native admission has no owning operation" in
+        let* source = Keeper_chat_operation_payload.source_of_json operation.source in
+        let person_caller = source.person_caller in
         let binding : Keeper_direct_native_continuation.binding =
           { base_path = ctx.config.base_path
           ; keeper_name = meta.name
@@ -474,7 +476,7 @@ let run_keeper_invocation_turn_admitted_inner
         let* admission = Keeper_direct_native_continuation.load ~binding in
         match admission with
         | Keeper_direct_native_continuation.Resume resumed ->
-          Ok (binding, Some resumed, None)
+          Ok (binding, Some resumed, None, person_caller)
         | Keeper_direct_native_continuation.Terminal_pending _ ->
           Error "native execution is terminal and awaiting Owner settlement; it cannot be dispatched again"
         | Keeper_direct_native_continuation.No_pending ->
@@ -491,7 +493,7 @@ let run_keeper_invocation_turn_admitted_inner
                ~base_path:ctx.config.base_path ~keeper_name:meta.name ~operation_id
                ~session_dir ~session_id
                |> Result.map (Option.map (fun admission -> Keeper_agent_run.Runtime_continuation admission)))) in
-          Ok (binding, None, direct_resume)
+          Ok (binding, None, direct_resume, person_caller)
       in
       (match native_admission with
        | Error detail ->
@@ -499,7 +501,7 @@ let run_keeper_invocation_turn_admitted_inner
            ~class_:Tool_result.Runtime_failure
            (Keeper_request_failure.Turn_continuation_unpersisted
               { stage = Keeper_request_failure.Continuation_load; detail })
-       | Ok (native_binding, native_resume, direct_resume) ->
+       | Ok (native_binding, native_resume, direct_resume, person_caller) ->
       let deferred_lane = ref None in
       let produced_checkpoint = ref None in
       let gate_ids = ref [] in
@@ -858,6 +860,7 @@ let run_keeper_invocation_turn_admitted_inner
                                           Keeper_input_speaker.Official_client_resume
                                       | None -> input_speaker)
 		                                ~woken_by:[]
+		                                ?person_caller
 		                                ~turn_kind:Turn_record.Direct
                                 ~repetition_execution
 		                                ~skill_snapshot

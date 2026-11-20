@@ -193,6 +193,8 @@ val run_turn
   -> user_message:string
   -> input_speaker:Keeper_input_speaker.t
   -> woken_by:Keeper_event_queue.stimulus list
+  -> ?wake_reason:Keeper_registry.wake_reason
+  -> ?person_caller:Keeper_chat_operation_payload.person_caller
   -> turn_kind:Turn_record.turn_kind
   -> approval_admission:Keeper_approval_origin.admission
      (** Host-owned direct operation or exact admitted-source context. It is
@@ -274,3 +276,13 @@ val run_turn
 val capture_skill_snapshot : base_path:string -> Skill_catalog_snapshot.t
 (** Capture one immutable Skill revision outside provider retry/failover loops.
     Every attempt of the same logical turn must receive the same value. *)
+
+val resolve_turn_walk_owner
+  :  keeper_name:string
+  -> turn_kind:Turn_record.turn_kind
+  -> wake_reason:Keeper_registry.wake_reason option
+  -> person_caller:Keeper_chat_operation_payload.person_caller option
+  -> (Keeper_turn_driver.walk_owner, Agent_core.Error.t) result
+(** Resolves the typed turn walk owner and channel in single-user or
+    multi-account mode. Disallowed channels and missing/mismatched person
+    callers fail closed without constructing a fleet walk owner. *)

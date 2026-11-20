@@ -1,3 +1,26 @@
+type person_caller =
+  { user_id : Authz_types.User_id.t
+  ; stored_scope : Authz_types.Authorization_scope.t
+  }
+
+let equal_person_caller left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right ->
+    Authz_types.User_id.equal left.user_id right.user_id
+    && Authz_types.Authorization_scope.equal left.stored_scope right.stored_scope
+  | Some _, None | None, Some _ -> false
+;;
+
+let admit_person_caller ~engine_name ~user_id ~channel ~pat =
+  Runtime_account_access.admit_by_engine_name
+    ~engine_name
+    ~owner:user_id
+    ~channel
+    ~pat
+  |> Result.map (fun stored_scope -> { user_id; stored_scope })
+;;
+
 type decoded_source =
   { submitted_by : string
   ; thread_id : string
@@ -13,6 +36,7 @@ type decoded_source =
   ; extra_mentions : Keeper_identity.Keeper_id.t list
   ; sender_keeper : Keeper_identity.Keeper_id.t option
   ; user_row_origin : Keeper_chat_store.user_row_origin
+  ; person_caller : person_caller option
   }
 
 type decoded_input =
@@ -23,7 +47,7 @@ type decoded_input =
   ; attachments : Keeper_chat_store.attachment list
   }
 
-let source_schema = "masc.keeper_chat_operation.source.v2"
+let source_schema = "masc.keeper_chat_operation.source.v3"
 let input_schema = "masc.keeper_chat_operation.input.v1"
 
 let strict_fields ~context ~expected = function
@@ -223,7 +247,84 @@ let validate_sender_keeper ~sender_keeper ~surface ~channel_user_id =
        Error "Keeper chat operation source names a sender Keeper outside the Agent surface")
 ;;
 
-let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
+let validate_person_caller ~person_caller ~sender_keeper ~continuation_channel ~channel_user_id =
+  match person_caller with
+  | None -> Ok ()
+  | Some _ ->
+    if Option.is_some sender_keeper
+    then Error "Keeper chat operation source cannot carry both person_caller and sender_keeper"
+    else if String.trim channel_user_id <> ""
+    then Error "Keeper chat operation source cannot carry both person_caller and an external speaker"
+    else (
+      match continuation_channel with
+      | Keeper_continuation_channel.Dashboard _ -> Ok ()
+      | Keeper_continuation_channel.Discord _
+      | Keeper_continuation_channel.Slack _
+      | Keeper_continuation_channel.Telegram _
+      | Keeper_continuation_channel.Imessage _
+      | Keeper_continuation_channel.Gate _
+      | Keeper_continuation_channel.Keeper _
+      | Keeper_continuation_channel.Unrouted _ ->
+        Error "Keeper chat operation person_caller requires a Dashboard continuation channel")
+;;
+
+let person_caller_to_json = function
+  | None -> Ok `Null
+  | Some { user_id; stored_scope } ->
+    let open Result.Syntax in
+    let* scope_body =
+      Authz_scope_body.to_body stored_scope
+      |> Result.map_error Authz_body.error_to_string
+    in
+    Ok
+      (`Assoc
+         [ "user_id", `String (Authz_types.User_id.to_string user_id)
+         ; "stored_scope", Authz_body.to_yojson scope_body
+         ])
+;;
+
+let person_caller_of_json = function
+  | `Null -> Ok None
+  | json ->
+    let open Result.Syntax in
+    let context = "Keeper chat operation person_caller" in
+    let* fields =
+      strict_fields ~context ~expected:[ "user_id"; "stored_scope" ] json
+    in
+    let* raw_user_id = string_field ~context fields "user_id" in
+    let* user_id =
+      Authz_types.User_id.of_string raw_user_id
+      |> Result.map_error Authz_id.error_to_string
+    in
+    (* Keeper_chat_operation.canonical_json sorts every object's keys alphabetically
+       before persisting to SQLite, whereas Authz_scope_body.of_body requires exact
+       member order [runtimes; channels; allowed_effects]. Validate strictly and
+       normalize key order before decoding the scope. *)
+    let* scope_fields =
+      strict_fields
+        ~context:(context ^ " stored_scope")
+        ~expected:[ "runtimes"; "channels"; "allowed_effects" ]
+        (List.assoc "stored_scope" fields)
+    in
+    let normalized_scope_json =
+      `Assoc
+        [ "runtimes", List.assoc "runtimes" scope_fields
+        ; "channels", List.assoc "channels" scope_fields
+        ; "allowed_effects", List.assoc "allowed_effects" scope_fields
+        ]
+    in
+    let* scope_body =
+      Authz_body.of_yojson normalized_scope_json
+      |> Result.map_error Authz_body.error_to_string
+    in
+    let* stored_scope =
+      Authz_scope_body.of_body scope_body
+      |> Result.map_error Authz_scope_body.error_to_string
+    in
+    Ok (Some { user_id; stored_scope })
+;;
+
+let encode_source_to_json ~person_caller ~submitted_by ~thread_id ~continuation_channel ~surface
       ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
       ~conversation_id ~external_message_id ~workspace_id
       ~extra_mentions
@@ -245,6 +346,14 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
         ~workspace_id
   in
   let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
+  let* () =
+    validate_person_caller
+      ~person_caller
+      ~sender_keeper
+      ~continuation_channel
+      ~channel_user_id
+  in
+  let* person_caller_json = person_caller_to_json person_caller in
   let user_row_origin =
     match user_row_origin with
     | Keeper_chat_store.Needs_append -> "needs_append"
@@ -278,7 +387,34 @@ let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
            | None -> `Null
            | Some keeper_id -> `String (Keeper_identity.Keeper_id.to_string keeper_id) )
        ; "user_row_origin", `String user_row_origin
+       ; "person_caller", person_caller_json
        ])
+;;
+
+let source_to_json_with_person_caller ~person_caller =
+  encode_source_to_json ~person_caller
+;;
+
+let source_to_json ~submitted_by ~thread_id ~continuation_channel ~surface
+      ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
+      ~conversation_id ~external_message_id ~workspace_id ~extra_mentions
+      ~sender_keeper ~user_row_origin =
+  encode_source_to_json
+    ~person_caller:None
+    ~submitted_by
+    ~thread_id
+    ~continuation_channel
+    ~surface
+    ~channel
+    ~channel_user_id
+    ~channel_user_name
+    ~channel_workspace_id
+    ~conversation_id
+    ~external_message_id
+    ~workspace_id
+    ~extra_mentions
+    ~sender_keeper
+    ~user_row_origin
 ;;
 
 let source_of_json json =
@@ -302,6 +438,7 @@ let source_of_json json =
         ; "extra_mentions"
         ; "sender_keeper"
         ; "user_row_origin"
+        ; "person_caller"
         ]
       json
   in
@@ -372,6 +509,7 @@ let source_of_json json =
     | `String _ -> Error "Keeper chat operation source user_row_origin is unsupported"
     | _ -> Error "Keeper chat operation source user_row_origin must be a string"
   in
+  let* person_caller = person_caller_of_json (List.assoc "person_caller" fields) in
   let* () =
     validate_source_route
       ~thread_id
@@ -384,6 +522,13 @@ let source_of_json json =
       ~workspace_id
   in
   let* () = validate_sender_keeper ~sender_keeper ~surface ~channel_user_id in
+  let* () =
+    validate_person_caller
+      ~person_caller
+      ~sender_keeper
+      ~continuation_channel
+      ~channel_user_id
+  in
   Ok
     { submitted_by
     ; thread_id
@@ -399,6 +544,7 @@ let source_of_json json =
     ; extra_mentions
     ; sender_keeper
     ; user_row_origin
+    ; person_caller
     }
 ;;
 

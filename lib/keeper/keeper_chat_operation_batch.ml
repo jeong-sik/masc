@@ -11,7 +11,9 @@ let decode (operation : Operation.t) =
 
 let same_context (left : Payload.decoded_source) (right : Payload.decoded_source) =
   Keeper_continuation_channel.same_route left.continuation_channel right.continuation_channel
-  && { left with external_message_id = None } = { right with external_message_id = None }
+  && Payload.equal_person_caller left.person_caller right.person_caller
+  && { left with external_message_id = None; person_caller = None }
+     = { right with external_message_id = None; person_caller = None }
 
 let merge_attachments existing incoming =
   List.fold_left (fun result (attachment : Keeper_chat_store.attachment) ->

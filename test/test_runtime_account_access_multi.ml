@@ -263,6 +263,7 @@ let muse_refused (type where) label request (account : where Access.muse_account
 let turn
       (who : person)
       ?(channel = Channel.Autonomous)
+      ?(stored_scope = Authorization_scope.all)
       ?(pat = Pat_binding.Not_pat)
       ?(runtime = who.runtime)
       ?(keeper = who.keeper)
@@ -272,6 +273,7 @@ let turn
     { owner = who.user_id
     ; keeper_id = get (Keeper_id.of_string keeper)
     ; channel
+    ; stored_scope
     ; pat
     ; runtime_id = Runtime_id.to_string runtime
     }

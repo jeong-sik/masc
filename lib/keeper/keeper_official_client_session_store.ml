@@ -170,7 +170,6 @@ type carried_context =
   | Context_section_row of { section : Keeper_context_layers.source; row_sha256 : string }
   | Context_carrier
   | Librarian_working_state
-  | Librarian_unread
   | Tool_result_receipts
   | Historical_task_reference
   | Codex_system_prompt
@@ -502,10 +501,9 @@ let carried_context_rank = function
   | Context_section_row _ -> 2
   | Context_carrier -> 3
   | Librarian_working_state -> 4
-  | Librarian_unread -> 5
-  | Tool_result_receipts -> 6
-  | Historical_task_reference -> 7
-  | Codex_system_prompt -> 8
+  | Tool_result_receipts -> 5
+  | Historical_task_reference -> 6
+  | Codex_system_prompt -> 7
 ;;
 
 let compare_carried_context a b =
@@ -523,7 +521,6 @@ let compare_carried_context a b =
     if c <> 0 then c else String.compare a.row_sha256 b.row_sha256
   | Context_carrier, Context_carrier
   | Librarian_working_state, Librarian_working_state
-  | Librarian_unread, Librarian_unread
   | Tool_result_receipts, Tool_result_receipts
   | Historical_task_reference, Historical_task_reference
   | Codex_system_prompt, Codex_system_prompt -> 0
@@ -532,7 +529,6 @@ let compare_carried_context a b =
     | Context_section_row _
     | Context_carrier
     | Librarian_working_state
-    | Librarian_unread
     | Tool_result_receipts
     | Historical_task_reference
     | Codex_system_prompt ),
@@ -541,7 +537,6 @@ let compare_carried_context a b =
     | Context_section_row _
     | Context_carrier
     | Librarian_working_state
-    | Librarian_unread
     | Tool_result_receipts
     | Historical_task_reference
     | Codex_system_prompt ) ->
@@ -579,7 +574,7 @@ let validate binding =
                    | Context_section_row { row_sha256; _ } ->
                      not (String.equal row_sha256 held.sha256)
                    | Context_block _ | Context_section _ | Context_carrier
-                   | Librarian_working_state | Librarian_unread
+                   | Librarian_working_state
                    | Historical_task_reference | Tool_result_receipts | Codex_system_prompt -> false)
                 frontier.held_context
       then Error "held section row is not named by its own digest"
@@ -880,7 +875,6 @@ let held_context_to_yojson { context; sha256 } =
       ; "row_sha256", `String row_sha256 ]
     | Context_carrier -> [ "context", `String "carrier" ]
     | Librarian_working_state -> [ "context", `String "working_state" ]
-    | Librarian_unread -> [ "context", `String "librarian_unread" ]
     | Tool_result_receipts -> [ "context", `String "tool_result_receipts" ]
     | Historical_task_reference -> [ "context", `String "task_reference" ]
     | Codex_system_prompt -> [ "context", `String "codex_system_prompt" ]
@@ -906,7 +900,6 @@ let held_context_of_yojson = function
          | None -> Error ("unknown held context section " ^ section))
       | [ "context", `String "carrier"; "sha256", _ ] -> Ok Context_carrier
       | [ "context", `String "working_state"; "sha256", _ ] -> Ok Librarian_working_state
-      | [ "context", `String "librarian_unread"; "sha256", _ ] -> Ok Librarian_unread
       | [ "context", `String "tool_result_receipts"; "sha256", _ ] -> Ok Tool_result_receipts
       | [ "context", `String "task_reference"; "sha256", _ ] -> Ok Historical_task_reference
       | [ "context", `String "codex_system_prompt"; "sha256", _ ] -> Ok Codex_system_prompt

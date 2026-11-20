@@ -15,7 +15,6 @@ let valid_v3_row json =
   is_non_empty_string (Option.value ~default:`Null (member "runtime_id" json))
   && member "evidence" json = Some (`String "pre_dispatch_projection_and_selection")
   && is_object (Option.value ~default:`Null (member "wire" json))
-  && is_object (Option.value ~default:`Null (member "unread" json))
   && is_object (Option.value ~default:`Null (member "selection" json))
   &&
   match member "association" json, member "binding" json, member "bounded_range" json with

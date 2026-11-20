@@ -177,8 +177,8 @@ type context_delivery =
     World State section of its [Dynamic_context] block when the renderer's
     partition of that block is known, one row of such a section, the whole
     carrier when its blocks are not known, the Librarian working state, the
-    independent unread observation, the historical task reference, or the
-    standing Keeper System prompt sent to Codex as Developer context. *)
+    historical task reference, or the standing Keeper System prompt sent to
+    Codex as Developer context. *)
 type carried_context =
   | Context_block of Prompt_block_id.t
       (** Codex also uses [Keeper_instructions], absent from carriers, for
@@ -194,7 +194,6 @@ type carried_context =
           order they were sent, and a resume reads that order. *)
   | Context_carrier
   | Librarian_working_state
-  | Librarian_unread
   | Tool_result_receipts
   | Historical_task_reference
   | Codex_system_prompt

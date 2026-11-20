@@ -41,12 +41,6 @@ let is_working_state (message : Agent_core.Types.message) =
   && List.mem_assoc working_state_marker_key message.metadata
 ;;
 
-let unread_context_marker_key = "masc.librarian_unread_context.v1"
-let unread_context_metadata = [unread_context_marker_key,`Bool true]
-let is_unread_context (message : Agent_core.Types.message) =
-  message.origin = Agent_core.Types.Agent_instruction
-  && List.mem_assoc unread_context_marker_key message.metadata
-
 type budget_error =
   | Reservation_exceeds_capacity of
       { capacity_bytes : int
@@ -121,7 +115,7 @@ let budget_error_to_core_error error =
        { message = budget_error_to_string error; limit = None })
 ;;
 
-(* Current runtime context and Librarian working/unread state survive cuts.
+(* Current runtime context and the Librarian working state survive cuts.
    Historical system context is ordinary replay history and may be trimmed. *)
 let is_extra_context (msg : Agent_core.Types.message) =
   match msg.origin with
@@ -130,7 +124,7 @@ let is_extra_context (msg : Agent_core.Types.message) =
   | Tool_result_followup | Agent_instruction -> false
 ;;
 
-let is_pinned msg = is_extra_context msg || is_working_state msg || is_unread_context msg
+let is_pinned msg = is_extra_context msg || is_working_state msg
 
 type label =
   | Pinned

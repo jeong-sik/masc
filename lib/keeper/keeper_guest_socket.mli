@@ -1,6 +1,5 @@
-(** The host end of a microVM guest agent connection (RFC
-    microvm-guest-agent-over-socket, section 3.5): one connection carries one
-    request.
+(** The host end of a microVM guest agent connection: one connection carries
+    one request.
 
     {!run} connects to the socket a VM published with
     [container run --publish-socket], waits for the agent's hello, asks

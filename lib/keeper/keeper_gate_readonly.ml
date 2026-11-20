@@ -399,9 +399,7 @@ module Ir = Masc_exec.Shell_ir
    a glob, a variable, a substitution, a subshell, a heredoc. Each of those
    is a place where the argv a command receives depends on the guest at run
    time, so each keeps the judge. Everything the IR does show is judged by
-   the same closed tables as a real argv. RFC-0404 refused the whole line
-   whenever one of those characters appeared; 2026-09-04..05 that sent 94
-   scripts whose every stage was an observation command to the judge. *)
+   the same closed tables as a real argv. *)
 
 (* Only a literal the shell will hand over unchanged counts. A glob may
    expand into flags a guard below inspects; a variable's value is not on

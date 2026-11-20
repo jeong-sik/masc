@@ -106,9 +106,5 @@ val lag_fill : cells:int -> peak:int -> int -> int
     none for a lag of 0 or less or a bar of no cells. A [peak] below [lag] is
     read as [lag], so the bar never runs past its cells. *)
 
-val short_span : float -> string
-(** A span of seconds in at most five cells, the mock's [dur]: [42s], [17m],
-    [3h05m], [27h], [9d]. A negative span reads as [0s]. *)
-
 val chain_attempts : int
 (** How many attempts the failure line draws before it cuts the chain: 4. *)

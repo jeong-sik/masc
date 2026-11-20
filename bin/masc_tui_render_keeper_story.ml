@@ -23,6 +23,7 @@ let rows ~budget =
 ;;
 
 let dim text = Theme.recede () ^ text ^ Ansi.reset
+let info text = Theme.info () ^ text ^ Ansi.reset
 let warn text = Theme.warn () ^ text ^ Ansi.reset
 
 let tab ~ko ~current page =
@@ -261,21 +262,25 @@ let schedules (state : Masc_tui_types.state) ~keeper_name =
    reading and not the Keeper's present one. *)
 let refresh_suffix ~ko = function
   | Current -> ""
-  | Refreshing -> if ko then " (다시 읽는 중)" else " (reading again)"
+  | Refreshing ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      if ko then " (" ^ under_way ^ " 다시 읽는 중)" else " (" ^ under_way ^ " reading again)"
   | Refresh_failed _ -> if ko then " (일정 조회 실패)" else " (schedule read failed)"
   | Refresh_kept_back notice -> " · " ^ notice
 ;;
 
 (* What a source says about itself where its events may be missing from the
    feed. A [Caution] is a source whose read failed or whose answer cannot be
-   placed in time. A [Notice] is a source not read yet, being read, cut, or
-   drawn from an earlier reading. *)
+   placed in time. A [Notice] is a source not read yet, cut, or drawn from an
+   earlier reading. [Active] is a read currently in flight. *)
 type note =
   | Caution of string
+  | Active of string
   | Notice of string
 
 let note_line = function
   | Caution text -> warn text
+  | Active text -> info text
   | Notice text -> dim text
 ;;
 
@@ -355,7 +360,9 @@ let turns_source (state : Masc_tui_types.state) ~keeper_name =
     Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name
   with
   | Masc_tui_fetched.Absent -> [], [ Notice (say "턴 기록 미조회" "turns not read yet") ]
-  | Masc_tui_fetched.Loading -> [], [ Notice (say "턴 기록 읽는 중" "turns reading") ]
+  | Masc_tui_fetched.Loading ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      [], [ Active (under_way ^ " " ^ say "턴 기록 읽는 중" "turns reading") ]
   | Masc_tui_fetched.Ready turns -> turns, []
   | Masc_tui_fetched.Stale ([], Masc_tui_types.Request_failed detail)
   | Masc_tui_fetched.Failed (Masc_tui_types.Request_failed detail) ->
@@ -372,7 +379,8 @@ let turns_source (state : Masc_tui_types.state) ~keeper_name =
 (* The note of a schedule page that is not the Keeper's present reading. *)
 let refresh_note ~ko refresh text =
   match refresh with
-  | Current | Refreshing -> Notice (text ^ refresh_suffix ~ko refresh)
+  | Current -> Notice (text ^ refresh_suffix ~ko refresh)
+  | Refreshing -> Active (text ^ refresh_suffix ~ko refresh)
   | Refresh_failed detail -> Caution (with_detail (text ^ refresh_suffix ~ko refresh) detail)
   | Refresh_kept_back _ -> Caution (text ^ refresh_suffix ~ko refresh)
 ;;
@@ -385,7 +393,9 @@ let wakes_source (state : Masc_tui_types.state) ~keeper_name =
   let say korean english = if ko then korean else english in
   match schedules state ~keeper_name with
   | Not_read -> [], [ Notice (say "호출 기록 미조회" "wakes not read yet") ]
-  | Reading -> [], [ Notice (say "호출 기록 읽는 중" "wakes reading") ]
+  | Reading ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      [], [ Active (under_way ^ " " ^ say "호출 기록 읽는 중" "wakes reading") ]
   | Read_failed detail ->
       [], [ Caution (with_detail (say "호출 알 수 없음, 일정 조회 실패" "wakes unknown, the schedule read failed") detail) ]
   | Read_kept_back notice -> [], [ Caution notice ]
@@ -444,10 +454,10 @@ let digest_source (state : Masc_tui_types.state) ~keeper_name =
         | Some _ -> say "요약 (이전 관측 · 재조회 실패)" "digest (earlier read, refresh failed)"
         | None -> say "요약 알 수 없음, 기억 조회 실패" "digest unknown, memory read failed"
       in
-      let refusals = List.filter (function Caution _ -> true | Notice _ -> false) notes in
+      let refusals = List.filter (function Caution _ -> true | Active _ | Notice _ -> false) notes in
       digest_at, Caution (with_detail text detail) :: refusals
   | Some (Masc_tui_types.Request_withdrawn refusal) ->
-      let refusals = List.filter (function Caution _ -> true | Notice _ -> false) notes in
+      let refusals = List.filter (function Caution _ -> true | Active _ | Notice _ -> false) notes in
       digest_at,
       Caution (Masc_tui_types.workspace_refusal_text
                  ~ko:(state.ui_language = Masc_tui_types.Lang_ko)
@@ -469,7 +479,7 @@ let feed_lines (state : Masc_tui_types.state) ~now ~max_lines ~keeper_name =
   let digest_at, digest_notes = digest_source state ~keeper_name in
   let cautions, notices =
     List.partition
-      (function Caution _ -> true | Notice _ -> false)
+      (function Caution _ -> true | Active _ | Notice _ -> false)
       (turn_notes @ wake_notes @ digest_notes)
   in
   let item_lines =
@@ -494,7 +504,9 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
   in
   match schedules state ~keeper_name with
   | Not_read -> [ dim (say "  ◷ 이 키퍼의 일정 미조회" "  ◷ this Keeper's schedules are not read yet") ]
-  | Reading -> [ dim (say "  ◷ 이 키퍼의 일정 읽는 중" "  ◷ reading this Keeper's schedules") ]
+  | Reading ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      [ info ("  " ^ under_way ^ " " ^ say "이 키퍼의 일정 읽는 중" "reading this Keeper's schedules") ]
   | Read_failed detail ->
       [ warn (say "  ◷ 일정 조회 실패: " "  ◷ schedule read failed: " ^ Terminal_text.single_line detail) ]
   | Read_kept_back notice -> [ warn ("  ◷ " ^ Terminal_text.single_line notice) ]
@@ -539,11 +551,12 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
         @ (match refresh with
            | Current -> []
            | Refreshing ->
-               [ dim
+               let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+               [ info
                    (Printf.sprintf
-                      (if ko then "  %s 관측 표시 중 · 다시 읽는 중"
-                       else "  showing the reading of %s, reading again")
-                      observed)
+                      (if ko then "  %s %s 관측 표시 중 · 다시 읽는 중"
+                       else "  %s showing the reading of %s, reading again")
+                      under_way observed)
                ]
            | Refresh_failed detail ->
                [ warn

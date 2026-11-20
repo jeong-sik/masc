@@ -8325,7 +8325,8 @@ let reset_verification_rows state =
   state.verification_detail_request_id <- None;
   state.verification_detail_scroll <- 0;
   state.verification_verdict_armed <- None;
-  state.verification_verdict_error <- None
+  state.verification_verdict_error <- None;
+  state.verification_verdict_inflight <- None
 
 let launch_verification_load state ~mailbox =
   if server_authority_ready state then begin
@@ -19164,6 +19165,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification_evidence_request <- None;
   state.verification_verdict_armed <- None;
   state.verification_verdict_error <- None;
+  state.verification_verdict_inflight <- None;
   state.runtime_params <- None;
   state.runtime_params_error <- None;
   state.runtime_params_loading <- false;
@@ -23639,32 +23641,41 @@ let handle_schedule_cancel_key state ~mailbox =
    pre-guess from the row it rendered a moment ago. *)
 let start_verification_verdict state ~mailbox ~(task_id : string)
     ~(verification_id : string) ~(verdict : [ `Approve | `Reject of string ]) =
-  let enqueue_async = workspace_enqueue state in
+  if Option.is_some state.verification_verdict_inflight then ()
+  else begin
   let authority = state.workspace_authority in
   let identity = state.server_identity in
   state.verification_verdict_error <- None;
+  state.verification_verdict_inflight <- Some (task_id, verification_id);
   let verb = match verdict with `Approve -> "approving" | `Reject _ -> "rejecting" in
   report_action state "system" (Printf.sprintf "%s %s" verb task_id);
   let host = server_peer_host in
   let port = state.port in
-  let run_verdict () =
-    let result =
+  let deliver result = Verification_msg (Verification_verdict_done result) in
+  let cancelled =
+    deliver (Error (Request_failed "Verification verdict cancelled"))
+  in
+  let on_not_run () =
+    state.verification_verdict_inflight <- None;
+    state.verification_verdict_error <-
+      Some (Request_failed "Verification verdict could not start")
+  in
+  launch_workspace_result ~operation:true ~cancelled ~on_not_run state ~mailbox
+    ~boundary_error:(fun detail -> Request_failed detail)
+    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
+    ~deliver
+    (fun () ->
       match admit_workspace_request state ~mailbox ~authority ~identity ~host ~port () with
       | Error refusal -> Error (Request_withdrawn refusal)
       | Ok () ->
-        (match
-           Masc_tui_http.post_verification_verdict ~host ~port ~task_id
-             ~verification_id ~verdict
-         with
-         | Error err -> Error err
-         | Ok json -> Masc.Tui_decode.verification_verdict_outcome json)
-        |> Result.map_error (fun detail -> Request_failed detail)
-    in
-    enqueue_async mailbox (Verification_msg (Verification_verdict_done result))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> fork_workspace_job state ~mailbox ~sw run_verdict
-  | None -> enqueue_async mailbox (Verification_msg (Verification_verdict_done (Error (Request_failed "Eio switch is unavailable"))))
+          (match
+             Masc_tui_http.post_verification_verdict ~host ~port ~task_id
+               ~verification_id ~verdict
+           with
+           | Error err -> Error err
+           | Ok json -> Masc.Tui_decode.verification_verdict_outcome json)
+          |> Result.map_error (fun detail -> Request_failed detail))
+  end
 
 (* The row under the Verification cursor, if the list has one. *)
 let verification_cursor_row state =
@@ -23991,7 +24002,7 @@ let stage_board_compose_path state raw =
    meaning, the rule the draft itself keeps. *)
 let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool =
   match key with
-  | "\r" | "\n" ->
+  | "\r" | "\n" | "enter" ->
       stage_board_compose_path state (Buffer.contents input);
       true
   | "esc" ->
@@ -23999,7 +24010,7 @@ let handle_board_attach_input_key state (input : Buffer.t) (key : string) : bool
       state.board_post_error <- None;
       report_action state "system" (attach_cancelled state);
       true
-  | "\127" | "\b" ->
+  | "\127" | "\b" | "backspace" ->
       let next =
         Buffer.contents input
         |> Masc_tui_message_layout.drop_last_utf8_scalar
@@ -24177,10 +24188,10 @@ let handle_board_compose_key state ~mailbox ?restore ?reenter (key : string) : b
            state.board_mode <- Board_list);
       report_action state "system" "Board draft discarded";
       true
-  | "\r" | "\n" ->
+  | "\r" | "\n" | "enter" ->
       Buffer.add_char state.board_draft '\n';
       true
-  | "\127" | "\b" ->
+  | "\127" | "\b" | "backspace" ->
       let new_content =
         Buffer.contents state.board_draft
         |> Masc_tui_message_layout.drop_last_utf8_scalar
@@ -28892,6 +28903,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           if state.schedule_detail_id = Some schedule_id then state.schedule_scroll <- 0);
       Drawn_changed
   | Verification_msg (Verification_verdict_done result) -> (
+      state.verification_verdict_inflight <- None;
       match result with
       | Ok (message, noop) ->
           state.verification_verdict_armed <- None;
@@ -38870,7 +38882,7 @@ Use relative paths for resources already held in the package. -->
            (match k with
             | "esc" -> cancel_ask_text_entry state
             | "\r" | "\n" | "enter" -> commit_ask_text_entry state
-            | "\127" | "\b" ->
+            | "\127" | "\b" | "backspace" ->
                 edit_ask_text state Masc_tui_message_layout.drop_last_utf8_scalar
             | s
               when (String.length s = 1 && Char.code s.[0] >= 32)

@@ -914,12 +914,13 @@ let partial_view_lines ~sanitize ~ko ~width partial =
             "턴 실행과 호스트 조회 환경 비교 불가"
             "Turn and host CLI environment comparison unavailable" in
       wrapped_rows ~width ~label:(tr "조회 환경" "CLI context") ~tone:`Warn detail in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let name_lines =
     match partial.name with
     | None ->
       [ " " ^ styled Masc_tui_theme.Sgr.bold (tr "1. Kata 이름 관측" "1. Kata name observation") ]
       @ wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Info
-          (tr "조회 중" "Loading")
+          (under_way ^ " " ^ tr "조회 중" "Loading")
     | Some (Error (Lookup_failed detail)) ->
       [ " " ^ styled Masc_tui_theme.Sgr.bold (tr "1. Kata 이름 관측" "1. Kata name observation") ]
       @ request_failure_rows ~label:(tr "조회 실패" "Lookup failed")
@@ -954,7 +955,7 @@ let partial_view_lines ~sanitize ~ko ~width partial =
       (tr "인스턴스 목록 관측" "Instance inventory observation") ] in
   let inventory_lines = match partial.inventory with
     | None -> inventory_header @ wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Info
-        (tr "조회 중" "Loading")
+        (under_way ^ " " ^ tr "조회 중" "Loading")
     | Some (Error (Lookup_failed detail)) -> inventory_header
       @ request_failure_rows ~label:(tr "조회 실패" "Lookup failed")
           ~summary:"인스턴스 목록 조회를 완료하지 못했습니다." detail

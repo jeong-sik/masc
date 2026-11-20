@@ -125,16 +125,101 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
     | Reading | Operating -> Theme.info ()
     | Unread | Browser_missing -> Theme.recede ()
   in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let loading_spec =
+    match view.load with
+    | Loading (req_id, op) ->
+        let title, blocking, hint =
+          match op with
+          | Discover _ ->
+              ui_text state ~ko:"브라우저 연결 확인 중" ~en:"Reading browser connections", false, None
+          | Read ->
+              (match browser_label view with
+               | Some browser ->
+                   if ko then browser ^ " 읽는 중" else "Reading " ^ browser
+               | None -> ui_text state ~ko:"브라우저 읽는 중" ~en:"Reading browser"), false, None
+          | Read_refresh ->
+              ui_text state ~ko:"브라우저 텍스트 새로고침 중" ~en:"Refreshing browser text", false, None
+          | Scene_regions _ ->
+              ui_text state ~ko:"페이지 영역 읽는 중" ~en:"Reading page regions", false, None
+          | Scene_scroll _ ->
+              ui_text state ~ko:"페이지 스크롤 및 화면 새로고침 중" ~en:"Scrolling page and refreshing scene", true, None
+          | Scene_focus _ ->
+              ui_text state ~ko:"선택한 페이지 영역 읽는 중" ~en:"Reading selected page region", false, None
+          | Scene_read _ ->
+              ui_text state ~ko:"브라우저 텍스트와 컨트롤 읽는 중" ~en:"Reading browser text and controls", false, None
+          | Scene_refresh _ ->
+              ui_text state ~ko:"현재 브라우저 화면 새로고침 중" ~en:"Refreshing current browser view", false, None
+          | Scene_follow _ ->
+              ui_text state ~ko:"관측된 브라우저 링크로 이동 중" ~en:"Following observed browser link", true, None
+          | Scene_follow_refresh _ ->
+              ui_text state ~ko:"이동한 브라우저 목적지 재확인 중" ~en:"Rechecking followed browser destination", false, None
+          | Scene_click _ ->
+              ui_text state ~ko:"관측된 브라우저 컨트롤 클릭 중" ~en:"Clicking observed browser control", true, None
+          | Viewport_refresh _ | Viewport_observed _ ->
+              ui_text state ~ko:"선택한 브라우저 뷰포트 새로고침 중" ~en:"Refreshing selected browser viewport", false, None
+          | Viewport_pointer { action = Browser_lane.Scroll_at _; _ } ->
+              ui_text state ~ko:"선택한 브라우저 뷰포트 스크롤 중" ~en:"Scrolling selected browser viewport", true, None
+          | Viewport_pointer
+              { action =
+                  ( Browser_lane.Set_viewport _ | Browser_lane.Double_click _
+                  | Browser_lane.Double_click_at _ | Browser_lane.Type_text _
+                  | Browser_lane.Press_key _ | Browser_lane.Activate_tab
+                  | Browser_lane.Click _ | Browser_lane.Fill _
+                  | Browser_lane.Select_option _ | Browser_lane.Scroll _
+                  | Browser_lane.Hover _ | Browser_lane.Drag_to _
+                  | Browser_lane.Hover_at _ | Browser_lane.Click_at _
+                  | Browser_lane.Tap_at _ | Browser_lane.Swipe _
+                  | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+                  | Browser_lane.Fill_node _ | Browser_lane.Click_target _
+                  | Browser_lane.Fill_target _ | Browser_lane.Hover_target _
+                  | Browser_lane.Double_click_target _ )
+              ; _
+              } ->
+              ui_text state ~ko:"선택한 브라우저 뷰포트 조작 중" ~en:"Interacting with selected browser viewport", true, None
+          | Screenshot _ ->
+              (match browser_label view with
+               | Some browser ->
+                   if ko then Printf.sprintf "선택한 %s 탭 캡처 중" browser
+                   else "Capturing selected " ^ browser ^ " tab"
+               | None -> ui_text state ~ko:"선택한 탭 캡처 중" ~en:"Capturing selected tab"),
+              true,
+              Some (ui_text state ~ko:"아무 키:미리보기 취소" ~en:"Any key:cancel preview")
+        in
+        Some (string_of_int req_id, title, blocking, hint)
+    | Idle | Failed _ | No_browser -> None
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"browser-lane" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) loading_spec)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, ps_title, ps_blocking, ps_action_hint) ->
+        { ps_title
+        ; ps_detail = connection_label view
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint
+        ; ps_blocking
+        })
+      loading_spec
+  in
   let title =
     here_row ~cols state ~path:[ browser_step state ]
       ~readings:
         [ selection_label view ^ " · "
           ^ Option.value (connection_label view)
               ~default:(ui_text state ~ko:"브라우저 없음" ~en:"no browser")
-        ; read_style ^ Browser_lane_view.read_status_label read_status ^ Ansi.reset ]
+        ; (match progress_sheet with
+           | Some sheet ->
+               progress_inline ~ko ~now ?started_at:sheet.ps_started_at
+                 (Browser_lane_view.read_status_label read_status)
+           | None -> read_style ^ Browser_lane_view.read_status_label read_status ^ Ansi.reset) ]
       ~position:None
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(match view.client_picker with
       | Some _ -> Masc_tui_keys.footer_hints_browser_picker ~lang:state.ui_language
       | None when Option.is_some view.scene ->
@@ -145,37 +230,49 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
           Masc_tui_keys.footer_hints_browser_scene_guard ~lang:state.ui_language
       | None -> Masc_tui_keys.footer_hints_browser_lane_reading ~lang:state.ui_language)
     ~body:(fun ~budget c ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      let loading_text s =
+        let elapsed =
+          match started_at with
+          | None -> ""
+          | Some at ->
+              let d = Masc_tui_value.Ongoing.since ~now at in
+              if ko then " · " ^ d ^ " 경과" else " · " ^ d
+        in
+        under_way ^ " " ^ s ^ elapsed
+      in
       let status, style = match view.load with
         | Loading (_, Discover _) ->
-            ui_text state ~ko:"브라우저 연결 확인 중" ~en:"Reading browser connections", Theme.info ()
+            loading_text (ui_text state ~ko:"브라우저 연결 확인 중" ~en:"Reading browser connections"), Theme.info ()
         | Loading (_, Read) ->
-            (match browser_label view with
-             | Some browser ->
-                 if state.ui_language = Lang_ko then browser ^ " 읽는 중"
-                 else "Reading " ^ browser
-             | None -> ui_text state ~ko:"읽는 중" ~en:"Reading"), Theme.info ()
+            loading_text
+              (match browser_label view with
+               | Some browser ->
+                   if ko then browser ^ " 읽는 중"
+                   else "Reading " ^ browser
+               | None -> ui_text state ~ko:"읽는 중" ~en:"Reading"), Theme.info ()
         | Loading (_, Read_refresh) ->
-            ui_text state ~ko:"브라우저 텍스트 새로고침 중" ~en:"Refreshing browser text", Theme.info ()
+            loading_text (ui_text state ~ko:"브라우저 텍스트 새로고침 중" ~en:"Refreshing browser text"), Theme.info ()
         | Loading (_, Scene_regions _) ->
-            ui_text state ~ko:"페이지 영역 읽는 중" ~en:"Reading page regions", Theme.info ()
+            loading_text (ui_text state ~ko:"페이지 영역 읽는 중" ~en:"Reading page regions"), Theme.info ()
         | Loading (_, Scene_scroll _) ->
-            ui_text state ~ko:"페이지 스크롤 및 화면 새로고침 중" ~en:"Scrolling page and refreshing scene", Theme.info ()
+            loading_text (ui_text state ~ko:"페이지 스크롤 및 화면 새로고침 중" ~en:"Scrolling page and refreshing scene"), Theme.info ()
         | Loading (_, Scene_focus _) ->
-            ui_text state ~ko:"선택한 페이지 영역 읽는 중" ~en:"Reading selected page region", Theme.info ()
+            loading_text (ui_text state ~ko:"선택한 페이지 영역 읽는 중" ~en:"Reading selected page region"), Theme.info ()
         | Loading (_, Scene_read _) ->
-            ui_text state ~ko:"브라우저 텍스트와 컨트롤 읽는 중" ~en:"Reading browser text and controls", Theme.info ()
+            loading_text (ui_text state ~ko:"브라우저 텍스트와 컨트롤 읽는 중" ~en:"Reading browser text and controls"), Theme.info ()
         | Loading (_, Scene_refresh _) ->
-            ui_text state ~ko:"현재 브라우저 화면 새로고침 중" ~en:"Refreshing current browser view", Theme.info ()
+            loading_text (ui_text state ~ko:"현재 브라우저 화면 새로고침 중" ~en:"Refreshing current browser view"), Theme.info ()
         | Loading (_, Scene_follow _) ->
-            ui_text state ~ko:"관측된 브라우저 링크로 이동 중" ~en:"Following observed browser link", Theme.info ()
+            loading_text (ui_text state ~ko:"관측된 브라우저 링크로 이동 중" ~en:"Following observed browser link"), Theme.info ()
         | Loading (_, Scene_follow_refresh _) ->
-            ui_text state ~ko:"이동한 브라우저 목적지 재확인 중" ~en:"Rechecking followed browser destination", Theme.info ()
+            loading_text (ui_text state ~ko:"이동한 브라우저 목적지 재확인 중" ~en:"Rechecking followed browser destination"), Theme.info ()
         | Loading (_, Scene_click _) ->
-            ui_text state ~ko:"관측된 브라우저 컨트롤 클릭 중" ~en:"Clicking observed browser control", Theme.info ()
+            loading_text (ui_text state ~ko:"관측된 브라우저 컨트롤 클릭 중" ~en:"Clicking observed browser control"), Theme.info ()
         | Loading (_, (Viewport_refresh _ | Viewport_observed _)) ->
-            ui_text state ~ko:"선택한 브라우저 뷰포트 새로고침 중" ~en:"Refreshing selected browser viewport", Theme.info ()
+            loading_text (ui_text state ~ko:"선택한 브라우저 뷰포트 새로고침 중" ~en:"Refreshing selected browser viewport"), Theme.info ()
         | Loading (_, Viewport_pointer {action=Browser_lane.Scroll_at _;_}) ->
-            ui_text state ~ko:"선택한 브라우저 뷰포트 스크롤 중" ~en:"Scrolling selected browser viewport", Theme.info ()
+            loading_text (ui_text state ~ko:"선택한 브라우저 뷰포트 스크롤 중" ~en:"Scrolling selected browser viewport"), Theme.info ()
         | Loading
             ( _
             , Viewport_pointer
@@ -192,17 +289,18 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
                     | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ )
                 ; _
                 } ) ->
-            ui_text state ~ko:"선택한 브라우저 뷰포트 조작 중" ~en:"Interacting with selected browser viewport", Theme.info ()
+            loading_text (ui_text state ~ko:"선택한 브라우저 뷰포트 조작 중" ~en:"Interacting with selected browser viewport"), Theme.info ()
         | Loading (_, Screenshot _) ->
-            (match browser_label view with
-             | Some browser ->
-                 if state.ui_language = Lang_ko then
-                   Printf.sprintf "선택한 %s 탭 캡처 중 (아무 키나 누르면 미리보기 취소)" browser
-                 else
-                   "Capturing selected " ^ browser ^ " tab (any key cancels preview)"
-             | None ->
-                 ui_text state ~ko:"선택한 탭 캡처 중 (아무 키나 누르면 미리보기 취소)"
-                   ~en:"Capturing selected tab (any key cancels preview)"), Theme.info ()
+            loading_text
+              (match browser_label view with
+               | Some browser ->
+                   if ko then
+                     Printf.sprintf "선택한 %s 탭 캡처 중 (아무 키나 누르면 미리보기 취소)" browser
+                   else
+                     "Capturing selected " ^ browser ^ " tab (any key cancels preview)"
+               | None ->
+                   ui_text state ~ko:"선택한 탭 캡처 중 (아무 키나 누르면 미리보기 취소)"
+                     ~en:"Capturing selected tab (any key cancels preview)"), Theme.info ()
         | Failed detail ->
             let retry = match view.scene_guard with
               | Some _ ->
@@ -397,12 +495,45 @@ let render_browser_history (state : state) (history : Browser_history.t) =
             ; ui_text state ~ko:"관측" ~en:"observations" ]
       ~readings:[] ~position:None
   in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let history_loading_spec =
+    match history.content with
+    | Listing ->
+        Some
+          ( "listing"
+          , ui_text state ~ko:"관측 기록 목록 읽는 중" ~en:"Loading browser observations"
+          , Some (ui_text state ~ko:"키퍼의 최근 도구 실행 기록을 불러오고 있습니다" ~en:"Reading the Keeper's recent tool receipts") )
+    | Entries { selection = Loading; _ } ->
+        Some
+          ( "selection"
+          , ui_text state ~ko:"저장된 페이지 본문 읽는 중" ~en:"Loading saved page"
+          , Some (Terminal_text.single_line history.keeper_name) )
+    | List_failed _ | List_kept_back _ | Entries { selection = (Failed _ | Observed _); _ } -> None
+  in
+  let history_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"browser-history" ~now
+      (Option.map (fun (sig_key, _, _) -> sig_key) history_loading_spec)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = history_started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (ui_text state ~ko:"Esc:돌아가기" ~en:"Esc:back")
+        ; ps_blocking = false
+        })
+      history_loading_spec
+  in
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     ~hints:(Masc_tui_keys.footer_hints_browser_observations ~lang:state.ui_language)
     ~body:(fun ~budget c ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
       let status = match history.content with
         | Listing ->
-            ui_text state ~ko:"키퍼의 최근 도구 실행 기록을 불러오는 중"
+            under_way ^ " " ^ ui_text state ~ko:"키퍼의 최근 도구 실행 기록을 불러오는 중"
               ~en:"Reading the Keeper's recent tool receipts"
         | List_failed detail ->
             ui_text state ~ko:"관측 기록 조회 실패: " ~en:"Could not read observations: "
@@ -416,7 +547,7 @@ let render_browser_history (state : state) (history : Browser_history.t) =
                  ~total:(List.length entries));
           ui_text state ~ko:"최근 도구 호출 100건의 관측 기록" ~en:"Observations from 100 recent tool calls"
           ^ (match selection with
-             | Loading -> ui_text state ~ko:" · 저장된 페이지 불러오는 중" ~en:" · loading saved page"
+             | Loading -> " · " ^ under_way ^ " " ^ ui_text state ~ko:"저장된 페이지 불러오는 중" ~en:"loading saved page"
              | Failed detail -> " · " ^ Terminal_text.single_line detail
              | Observed _ -> "") in
       c.push_styled ~style:(Theme.info ()) ("  " ^ status);
@@ -434,9 +565,14 @@ let render_browser_history (state : state) (history : Browser_history.t) =
             ^ " · " ^ entry.execution_id));
       (match Browser_history.observation history with
        | None ->
-           c.push_styled ~style:(Theme.recede ())
-             (ui_text state ~ko:"  페이지 본문이 아직 로드되지 않음"
-                ~en:"  Page content has not been loaded")
+           if Option.is_some history_loading_spec then
+             c.push
+               ("  " ^ progress_inline ~ko ~now ?started_at:history_started_at
+                  (ui_text state ~ko:"페이지 본문 불러오는 중" ~en:"Loading page content"))
+           else
+             c.push_styled ~style:(Theme.recede ())
+               (ui_text state ~ko:"  페이지 본문이 아직 로드되지 않음"
+                  ~en:"  Page content has not been loaded")
        | Some observation -> c.push_styled ~style:(Theme.info ())
            ("  " ^ Terminal_text.single_line observation.scene.title ^ " · "
             ^ Terminal_text.single_line observation.scene.url
@@ -460,10 +596,20 @@ type connector_table_column =
 
 let render_connectors (state : state) =
   match browser_lane_on_screen state, state.browser_history with
-  | Some _, Some history -> render_browser_history state history
-  | Some view, None -> render_browser_lane state view
+  | Some _, Some history ->
+      Masc_tui_types.clear_progress_clock state ~slot:"browser-lane";
+      Masc_tui_types.clear_progress_clock state ~slot:"connectors-op";
+      render_browser_history state history
+  | Some view, None ->
+      Masc_tui_types.clear_progress_clock state ~slot:"browser-history";
+      Masc_tui_types.clear_progress_clock state ~slot:"connectors-op";
+      render_browser_lane state view
   | None, _ ->
+  Masc_tui_types.clear_progress_clock state ~slot:"browser-lane";
+  Masc_tui_types.clear_progress_clock state ~slot:"browser-history";
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let connectors =
     match state.connectors with
     | None -> []
@@ -502,13 +648,63 @@ let render_connectors (state : state) =
       let width = if column = Connector_name_column then layout.flex_width else column_width column in
       Masc_tui_table.cell ~header ~width value) layout.shown
   in
+  let read_notice = connectors_read_notice state in
+  let read_view = Connector_read.view state.connectors_read in
+  let read_in_flight =
+    match read_view with
+    | Connector_read.Reading _ -> true
+    | Quiet | Waiting_after_write | Failed_to_start -> false
+  in
+  let unbind_active = state.connector_unbind_all_inflight in
+  let connectors_progress_spec =
+    if unbind_active then
+      Some
+        ( "unbind-all"
+        , ui_text state ~ko:"커넥터 전체 연결 해제 중" ~en:"Unbinding all connectors"
+        , Some (ui_text state ~ko:"서버에서 모든 채널 연결을 해제하고 있습니다" ~en:"Removing all connector bindings on server")
+        , true )
+    else if read_in_flight then
+      match read_notice with
+      | Some notice ->
+          Some
+            ( "read:" ^ notice
+            , ui_text state ~ko:"채널 상태 조회 중" ~en:"Reading channels"
+            , Some (Terminal_text.single_line notice)
+            , false )
+      | None -> None
+    else None
+  in
+  let connectors_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"connectors-op" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) connectors_progress_spec)
+  in
+  let read_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"connectors-read" ~now
+      (if read_in_flight then read_notice else None)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail, ps_blocking) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = connectors_started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking
+        })
+      connectors_progress_spec
+  in
   let title =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"채널" ~en:"channels" ]
-      ~readings:[] ~position:None
+      ~readings:
+        (match progress_sheet with
+         | None -> []
+         | Some sheet ->
+             [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ])
+      ~position:None
   in
-  let read_notice = connectors_read_notice state in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"connectors" ~title
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"connectors" ~title
     (* Keep the transport keys here: the shared Connectors sheet also names
        keys owned only by Browser Lane. Esc returns to Features & plugins. *)
     ~hints:(ui_text state
@@ -518,13 +714,21 @@ let render_connectors (state : state) =
       c.push_styled ~style:(Theme.recede ())
         ("  "
          ^ Masc_tui_table.header_row_with_dropped
-             ~ko:(state.ui_language = Lang_ko)
+             ~ko
              ~inner_width:table_inner_width
              ~dropped:layout.dropped
              (cells ~name:"" ~configured:"" ~reachable:"" ~status:"" ~channel:""));
       c.push_divider ();
       Option.iter (fun notice ->
-        c.push_styled ~style:(Theme.info ()) ("  " ^ notice)) read_notice;
+        if read_in_flight then
+          c.push ("  " ^ progress_inline ~ko ~now ?started_at:read_started_at notice)
+        else
+          let style =
+            match read_view with
+            | Connector_read.Failed_to_start -> Theme.warn ()
+            | Quiet | Waiting_after_write | Reading _ -> Theme.recede ()
+          in
+          c.push_styled ~style ("  " ^ Terminal_text.single_line notice)) read_notice;
       (match state.connectors_error with
        | None -> ()
        | Some detail ->

@@ -13,6 +13,7 @@ type tone =
   | Proven
   | Refused
   | Waiting
+  | Active
   | Unreadable
   | Note
   | Quiet

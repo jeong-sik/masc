@@ -11851,6 +11851,7 @@ type state = {
      no arm -- its $EDITOR reason form is the confirmation step. *)
   mutable verification_verdict_armed: (string * string) option;
   mutable verification_verdict_error: request_failure option;
+  mutable verification_verdict_inflight: (string * string) option;
   mutable system_logs: System_logs_view.t;
   msg_input: Masc_tui_message_input.t;
   mutable msg_command_menu: Masc_tui_command.menu_state;
@@ -16251,6 +16252,7 @@ let suspend_workspace_readings state =
   state.overview_owed <- Masc_tui_owed_read.settled;
   state.harness_stale_at <- None;
   state.verification_inflight <- false;
+  state.verification_verdict_inflight <- None;
   state.verification_refresh_after_inflight <- false;
   state.verification_owed <- Masc_tui_owed_read.settled;
   state.fusion_detail_inflight <- None;
@@ -22298,6 +22300,7 @@ let create_state
   verification_detail_scroll = 0;
   verification_verdict_armed = None;
   verification_verdict_error = None;
+  verification_verdict_inflight = None;
   msg_input = Masc_tui_message_input.create ();
   msg_command_menu = Masc_tui_command.Menu_idle;
   msg_recovered_paste_keepers = [];
@@ -22420,7 +22423,8 @@ let page_unread_note ~ko =
    to it. Each surface keeps its own record of a read on the wire, so the
    caller passes that fact. *)
 let page_reading_note ~ko =
-  if ko then "  (조회 중)" else "  (reading)"
+  let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  if ko then "  (" ^ mark ^ " 조회 중)" else "  (" ^ mark ^ " reading)"
 
 let page_unread_note_while ~ko ~reading =
   if reading then page_reading_note ~ko else page_unread_note ~ko
@@ -28353,6 +28357,14 @@ let keeper_message_inflight_rows (state : state) ~now =
         | Masc_tui_keeper_chat_transcript.Stream_failed _ ->
             ui_text state ~ko:"요청 실패" ~en:"failed"
   in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let group_failed group =
+    group.reconciling_count = 0
+    && not (Masc_tui_keeper_chat_transcript.awaiting_continuation group.representative.log.tl_transcript)
+    && (match Masc_tui_keeper_chat_transcript.phase group.representative.log.tl_transcript with
+        | Masc_tui_keeper_chat_transcript.Stream_failed _ -> true
+        | Waiting | Working | Stream_ended -> false)
+  in
   let summary group =
     let age =
       if not (keeper_message_timing_visible state) then "" else
@@ -28360,15 +28372,42 @@ let keeper_message_inflight_rows (state : state) ~now =
       | None -> ""
       | Some text -> " · " ^ text
     in
-    Printf.sprintf "  (%s%s %s%s)" (batch_label group) (activity group)
+    let failed = group_failed group in
+    let lead = if failed then "  " else "  " ^ under_way ^ " " in
+    failed,
+    Printf.sprintf "%s(%s%s %s%s)" lead (batch_label group) (activity group)
       (Masc_tui_keeper_chat_projection.compact_request_id
          (turn_log_execution_id group.representative.log)) age
   in
-  List.map (fun group -> true, summary group)
-    (keeper_message_inflight_drawn state)
+  let control_rows =
+    match state.msg_target_keeper_name with
+    | None -> []
+    | Some keeper_name ->
+        (match List.assoc_opt keeper_name state.keeper_chat_control_pending with
+         | None -> []
+         | Some requested_ns ->
+             let elapsed =
+               Masc_tui_value.Ongoing.age ~now
+                 (max 0.0 (Int64.to_float (Int64.sub (Mtime_clock.elapsed_ns ()) requested_ns) /. 1e9))
+             in
+             [ false
+             , ui_text state
+                 ~ko:("  " ^ under_way ^ " 턴 제어 요청 전달 중 · " ^ elapsed)
+                 ~en:("  " ^ under_way ^ " Sending turn control · " ^ elapsed) ])
+        @ (if List.mem keeper_name state.keeper_queue_inflight then
+             [ false
+             , ui_text state
+                 ~ko:("  " ^ under_way ^ " 대기열 요청 처리 중")
+                 ~en:("  " ^ under_way ^ " Processing queue request") ]
+           else [])
+  in
+  List.map summary (keeper_message_inflight_drawn state)
+  @ control_rows
   @ if keeper_message_history_loading state then
       [ false
-      , ui_text state ~ko:"  대화 기록 조회 중" ~en:"  Loading conversation history" ]
+      , ui_text state
+          ~ko:("  " ^ under_way ^ " 대화 기록 조회 중")
+          ~en:("  " ^ under_way ^ " Loading conversation history") ]
     else []
 
 (* One drawn row of the chat's schedule block: what leads it and the facts it
@@ -28464,7 +28503,8 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
       | None ->
           unread
             (if failed then say "조회 실패" "read failed"
-             else if reading then say "조회 중" "reading"
+             else if reading then
+               Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " ^ say "조회 중" "reading"
              else say "미조회" "unread")
       | Some snapshot when Option.is_some snapshot.scs_read_error
                            || Option.is_none snapshot.scs_request_count ->
@@ -28485,7 +28525,8 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
             then [fact ~label:(say "이전 관측 " "retained ") Facts.Plain
                     (observed
                      ^ if failed then say "/갱신 실패" "/refresh failed"
-                       else say "/갱신 중" "/refreshing")]
+                       else "/" ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+                            ^ say "갱신 중" "refreshing")]
             else [] in
           let partial =
             if snapshot.scs_truncated then [fact Facts.Plain (say "일부 목록" "partial list")]

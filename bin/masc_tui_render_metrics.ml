@@ -882,7 +882,9 @@ let render_section_fleet ?session_rows ~cols (state : state) =
     ^
     match state.observer with
     | Observer_off -> say "꺼짐" "off"
-    | Observer_opening -> say "연결 중" "opening"
+    | Observer_opening ->
+        Theme.info () ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+        ^ say "연결 중" "opening" ^ Ansi.reset
     | Observer_live { events; _ } ->
         Printf.sprintf (if ko then "수신 중 %s" else "live %s") (Count.grouped events)
     | Observer_closed_after_live { events; reason; _ } ->

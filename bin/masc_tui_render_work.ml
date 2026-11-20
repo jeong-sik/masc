@@ -460,9 +460,60 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Proven -> (Theme.ok ())
   | Planning_detail.Refused -> (Theme.bad ())
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
+  | Planning_detail.Active -> (Theme.info ())
   | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
   | Planning_detail.Plain -> Ansi.default_fg
   | Planning_detail.Heading -> Masc_tui_ansi.Section.style
+
+let planning_progress_sheet ~now ?goal_id (state : state) =
+  let matching_inflight =
+    match goal_id with
+    | Some id ->
+        if List.mem_assoc id state.goal_action_inflight then Some id else None
+    | None -> (
+        match state.goal_action_inflight with
+        | (id, _) :: _ -> Some id
+        | [] -> None)
+  in
+  let submitting_goal =
+    match state.goal_confirmation with
+    | Masc_tui_planning_detail.Submitting (id, _) -> (
+        match goal_id with
+        | Some target when not (String.equal target id) -> None
+        | Some _ | None -> Some id)
+    | Inspecting _ -> None
+  in
+  let spec =
+    match submitting_goal, matching_inflight with
+    | Some id, _ ->
+        Some
+          ( "confirm:" ^ id
+          , ui_text state ~ko:"목표 근거 최종 확인 전송 중" ~en:"Submitting goal proof confirmation"
+          , Some (Terminal_text.single_line id)
+          , true )
+    | None, Some id ->
+        Some
+          ( "transition:" ^ id
+          , ui_text state ~ko:"목표 상태 변경 처리 중" ~en:"Updating goal state"
+          , Some (Terminal_text.single_line id)
+          , true )
+    | None, None -> None
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"planning-op" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) spec)
+  in
+  Option.map
+    (fun (_, ps_title, ps_detail, ps_blocking) ->
+      { ps_title
+      ; ps_detail
+      ; ps_started_at = started_at
+      ; ps_meter = None
+      ; ps_action_hint = None
+      ; ps_blocking
+      })
+    spec
+;;
 
 (* What moves this goal next, in one sentence, from the pair the operator can
    see separately but had to combine themselves: the phase and the judge's
@@ -814,9 +865,21 @@ let render_planning_list (state : state) =
   let show_modes = state.planning_sort <> Planning_sort_phase_priority
     || state.planning_filter <> Planning_filter_active in
   let badge = quiet_connection_tail state in
-  let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" ~after:badge ^ badge in
+  let now_unix = Unix.gettimeofday () in
+  let progress_sheet = planning_progress_sheet ~now:now_unix state in
+  let title =
+    let suffix =
+      badge
+      ^ (match progress_sheet with
+         | None -> ""
+         | Some sheet ->
+             "  " ^ progress_inline ~ko ~now:now_unix ?started_at:sheet.ps_started_at sheet.ps_title)
+    in
+    planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" ~after:suffix ^ suffix
+  in
   surface_chrome_keys
     ~overflow:Paged_by_cursor
+    ?progress_sheet ~now:now_unix
     state ~terminal_rows ~cols ~surface_key:"planning-list" ~title
     ~keys:(Masc_tui_keys.footer_row_planning_goal_list ~lang:state.ui_language ~has_rows:(count > 0))
     ~body:(fun ~budget c ->
@@ -1156,13 +1219,14 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
           (task_status_word state task.status ^ " · " ^ task.title)) linked_tasks
   in
   let proof_width = planning_proof_width ~width in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let confirmation_rows =
     (match confirmation with
-       | `Submitting -> [{Planning_detail.tone = Waiting; text = (text "근거 최종 확인 요청 중" "Sending proof confirmation")}]
+       | `Submitting -> [{Planning_detail.tone = Active; text = under_way ^ " " ^ (text "근거 최종 확인 요청 중" "Sending proof confirmation")}]
        | `Inspect (Masc_tui_fetched.Ready value) ->
            Planning_detail.confirmation_lines ~width:proof_width
              ~ko:(state.ui_language = Lang_ko) value
-       | `Inspect Loading -> [{Planning_detail.tone = Waiting; text = (text "확인할 근거 조회 중" "Reading the proof to confirm")}]
+       | `Inspect Loading -> [{Planning_detail.tone = Active; text = under_way ^ " " ^ (text "확인할 근거 조회 중" "Reading the proof to confirm")}]
        | `Inspect (Stale (_, reason) | Failed reason) -> Planning_detail.wrapped ~width:proof_width Unreadable reason
        | `Inspect Masc_tui_fetched.Absent ->
            (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~ko ~width:proof_width blocked | None -> [])
@@ -1246,38 +1310,39 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
          | Missing | Unavailable _ | Observed (No_recorded_obligation | Inconsistent) -> [])
       @ field ~tone:Planning_detail.Quiet (text "모델 실행" "Model execution") (text "지급 원장에서 관측하지 않음" "not observed from the payout ledger") in
     let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
+    let reading_label s = under_way ^ " " ^ s in
     let rows =
       if not (server_authority_ready state) then
         field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (workspace_identity_unconfirmed ~ko)
       else match reading with
       | Masc_tui_fetched.Absent -> field ~tone:Planning_detail.Quiet (text "Candle" "Candle") (text "미조회" "not read")
-      | Loading -> field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
+      | Loading -> field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
       | Failed (Goal_candle_unread error) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error)
+          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error))
         else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") error
       | Failed (Goal_candle_kept_back notice) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
+          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
         else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") notice
       | Ready (owner, _, _) | Stale ((owner, _, _), _) when not (Masc_tui_http.credential_owner_is_current owner) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "조회 중 · 이전 인증 정보의 관측은 표시하지 않음" "reading; previous credential observation hidden")
+          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "조회 중 · 이전 인증 정보의 관측은 표시하지 않음" "reading; previous credential observation hidden"))
         else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (text "인증 정보 변경 · 다시 조회하세요" "credential changed; read again")
       | Ready (_, instance, _) | Stale ((_, instance, _), _)
         when not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
         field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (text "서버 인스턴스 변경 · 다시 조회하세요" "server instance changed; read again")
       | Ready (_, _, observation) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
+          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
         else describe observation
       | Stale (_, Goal_candle_unread error) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error)
+          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error))
         else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") error
       | Stale (_, Goal_candle_kept_back notice) ->
         if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Waiting (text "Candle" "Candle") (text "지급 원장 조회 중" "reading payout ledger")
+          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
         else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") notice in
     gap @ section (Printf.sprintf "%s [%s:%s]"
       (ui_text state ~ko:"Candle 지급 기록" ~en:"Candle payout record")
@@ -1323,6 +1388,31 @@ let planning_detail_fits ~rows ~header_rows ~action_rows ~count =
   let height = planning_detail_height ~rows ~header_rows ~action_rows ~count in
   planning_detail_chrome_rows + max 0 (header_rows - 1) + action_rows + height <= rows
 
+let planning_detail_sheet_available ~rows ~header_rows ~base_action_rows =
+  max 0 (rows - planning_detail_chrome_rows - max 0 (header_rows - 1) - base_action_rows - 1)
+;;
+
+let planning_detail_sheet_rows ~rows ~cols ~header_rows ~base_action_rows ~goal_id (state : state) =
+  let has_op =
+    List.mem_assoc goal_id state.goal_action_inflight
+    || (match state.goal_confirmation with
+        | Masc_tui_planning_detail.Submitting (id, _) -> String.equal id goal_id
+        | Inspecting _ -> false)
+  in
+  if not has_op then 0
+  else
+    progress_sheet_height
+      ~available:(planning_detail_sheet_available ~rows ~header_rows ~base_action_rows)
+      ~cols:(framed_inner_width cols)
+      { ps_title = ""
+      ; ps_detail = None
+      ; ps_started_at = None
+      ; ps_meter = None
+      ; ps_action_hint = None
+      ; ps_blocking = true
+      }
+;;
+
 let planning_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
@@ -1332,24 +1422,45 @@ let planning_detail_viewport (state : state) =
       (match List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id) snapshot.pl_goals with
        | None -> 0, max 1 (rows - planning_detail_chrome_rows)
        | Some goal ->
-           let action_rows = List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols ~armed:(goal_action_armed_for state goal_id)
-             ~drop_reason:(goal_drop_reason_for state goal_id) goal) in
+           let header_rows = List.length (planning_detail_header_rows state ~cols goal) in
+           let base_action_rows =
+             List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols ~armed:(goal_action_armed_for state goal_id)
+               ~drop_reason:(goal_drop_reason_for state goal_id) goal)
+           in
+           let action_rows =
+             base_action_rows
+             + planning_detail_sheet_rows ~rows ~cols ~header_rows ~base_action_rows ~goal_id state
+           in
            let count = List.length (planning_detail_lines state ~cols goal
              ~confirmation:(planning_confirmation_view state ~goal_id)) in
-           let header_rows = List.length (planning_detail_header_rows state ~cols goal) in
            if planning_detail_fits ~rows ~header_rows ~action_rows ~count
            then count, planning_detail_height ~rows ~header_rows ~action_rows ~count
            else 0, 1)
   | Planning_list, _ | Planning_detail _, None -> 0, max 1 (rows - planning_detail_chrome_rows)
 
 let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal : planning_goal) buf =
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let headers = planning_detail_header_rows state ~cols goal in
-  let actions = planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols ~armed
+  let actions = planning_detail_action_rows ~ko ~cols ~armed
       ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal in
+  let progress_sheet = planning_progress_sheet ~now ~goal_id:goal.pg_id state in
+  let sheet_avail =
+    planning_detail_sheet_available ~rows ~header_rows:(List.length headers)
+      ~base_action_rows:(List.length actions)
+  in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now
+          ~available:sheet_avail
+          ~width:(framed_inner_width cols) sheet
+  in
   let lines, candle_scroll = planning_detail_content state ~confirmation ~cols goal in
   let count = List.length lines in
   let height = planning_detail_height ~rows ~header_rows:(List.length headers)
-    ~action_rows:(List.length actions) ~count in
+    ~action_rows:(List.length actions + List.length sheet_lines) ~count in
   let requested_scroll = match state.planning_scroll with
     | Planning_scroll_offset value -> value
     | Planning_scroll_candle _ -> candle_scroll in
@@ -1357,6 +1468,12 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
   (match headers with
    | [] -> ()
    | title :: rest ->
+       let title =
+         match progress_sheet with
+         | None -> title
+         | Some sheet ->
+             title ^ "  " ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+       in
        box_line buf cols
          (titled_row ~cols state ~title
             ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
@@ -1369,12 +1486,13 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
     | None -> box_empty buf cols
     | Some line -> box_line_styled buf cols ~style:(planning_detail_tone line.Planning_detail.tone) line.text
   done;
+  List.iter (box_line buf cols) sheet_lines;
   let seen = match confirmation with
     | `Inspect (Masc_tui_fetched.Ready proof) ->
         let width = max 1 (framed_inner_width cols - 2) in
         let last = List.length (planning_proof_rows
           (Planning_detail.confirmation_lines ~width:(planning_proof_width ~width)
-             ~ko:(state.ui_language = Lang_ko) proof)) - 1 in
+             ~ko proof)) - 1 in
         if last >= scroll && last < scroll + height then Some proof else None
     | `Submitting | `Inspect (Masc_tui_fetched.Absent | Loading | Stale _ | Failed _) -> None in
   scroll, seen
@@ -1391,10 +1509,16 @@ let render_planning_detail (state : state)
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let detail_cols = if cols < keeper_split_threshold_cols then cols else cols - keeper_roster_pane_cols in
-  let action_rows = List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols:detail_cols ~armed
-      ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal) in
-  let count = List.length (planning_detail_lines state ~confirmation ~cols:detail_cols goal) in
   let header_rows = List.length (planning_detail_header_rows state ~cols:detail_cols goal) in
+  let base_action_rows =
+    List.length (planning_detail_action_rows ~ko:(state.ui_language = Lang_ko) ~cols:detail_cols ~armed
+      ~drop_reason:(goal_drop_reason_for state goal.pg_id) goal)
+  in
+  let action_rows =
+    base_action_rows
+    + planning_detail_sheet_rows ~rows ~cols:detail_cols ~header_rows ~base_action_rows ~goal_id:goal.pg_id state
+  in
+  let count = List.length (planning_detail_lines state ~confirmation ~cols:detail_cols goal) in
   if not (planning_detail_fits ~rows ~header_rows ~action_rows ~count) then begin
     let buf = Buffer.create 96 in
     Buffer.add_string buf (fit_width (ui_text state ~ko:"목표 상세를 읽으려면 창을 늘려 주세요" ~en:"Goal detail needs more room; resize to read and act") cols);
@@ -1860,7 +1984,7 @@ let render_schedule_list (state : state) =
             c.push (data_unreliable_row ~cols err)
         | None ->
             let reading = Snapshot_read.in_flight state.schedules_read in
-            c.push (Ansi.dim ^ page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading ^ Ansi.reset))
+            c.push ((if reading then Theme.info () else Ansi.dim) ^ page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading ^ Ansi.reset))
    | Some snapshot ->
        let warning_rows =
          match schedule_source_warning state with
@@ -1925,10 +2049,18 @@ let render_schedule_list (state : state) =
          in
          let page_read_text = match state.schedules_navigation with
            | Some (ticket, page, _) when Snapshot_read.is_current state.schedules_read ticket ->
-               Printf.sprintf
-                 (if ko then "  · %d쪽 조회 중" else "  · loading page %d")
-                 (List.length page.sp_previous + 1)
-           | Some _ | None -> "" in
+               let now = Unix.gettimeofday () in
+               let page_num = List.length page.sp_previous + 1 in
+               let started_at =
+                 Masc_tui_types.progress_clock_for state ~slot:"schedules-page" ~now
+                   ~signature:(string_of_int page_num)
+               in
+               "  · "
+               ^ progress_inline ~ko ~now ~started_at
+                   (Printf.sprintf (if ko then "%d쪽 조회 중" else "loading page %d") page_num)
+           | Some _ | None ->
+               Masc_tui_types.clear_progress_clock state ~slot:"schedules-page";
+               "" in
          c.push (Ansi.bold ^ count_text ^ Ansi.reset ^ next_due_text ^ page_read_text);
          c.push_divider ();
 
@@ -2271,9 +2403,10 @@ let schedule_wake_lines ~ko
       :: last_wake_fields
       @ [ (Theme.bad (), t "  실행 이력: " "  Wake history: " ^ Terminal_text.single_line err) ]
   | Render_schedule.Wake_last_only ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
       last_wake
       :: last_wake_fields
-      @ [ (Ansi.dim, t "  (이 일정의 나머지 실행을 읽는 중)" "  (loading the rest of this schedule's wakes)") ]
+      @ [ (Theme.info (), t ("  " ^ under_way ^ " 이 일정의 나머지 실행을 읽는 중") ("  " ^ under_way ^ " loading the rest of this schedule's wakes")) ]
   | Render_schedule.Wake_never ->
       [ Ansi.bold, t "  실행" "  WAKES"
       ; (Ansi.dim, t "  (이 일정은 아직 실행된 적 없음)" "  (this schedule has not woken)") ]
@@ -2639,20 +2772,56 @@ let render_planning (state : state) =
       let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
       match List.find_opt (fun g -> g.pg_id = goal_id) goals with
       | Some goal ->
+          ignore (Masc_tui_types.progress_clock_option state ~slot:"planning-missing" ~now:(Unix.gettimeofday ()) None);
           let confirmation = planning_confirmation_view state ~goal_id in
           render_planning_detail state
             ~armed:(goal_action_armed_for state goal_id) ~confirmation goal
       | None when planning_missing_goal_notice state ~goal_id ->
                let terminal_rows, cols = get_terminal_size () in
-               surface_chrome ~overflow:Fits state ~terminal_rows ~cols
+               let now = Unix.gettimeofday () in
+               let ko = state.ui_language = Lang_ko in
+               let started_at =
+                 Masc_tui_types.progress_clock_option state
+                   ~slot:"planning-missing" ~now
+                   (if Option.is_none state.planning_error then Some goal_id else None)
+               in
+               let progress_sheet =
+                 match state.planning_error with
+                 | Some _ -> None
+                 | None ->
+                     Some
+                       { ps_title = ui_text state ~ko:"목표 상세 불러오는 중" ~en:"Loading goal detail"
+                       ; ps_detail = Some (ui_text state
+                           ~ko:"목표 목록에서 상세 정보를 기다리고 있습니다"
+                           ~en:"Waiting for goal detail from the planning source")
+                       ; ps_started_at = started_at
+                       ; ps_meter = None
+                       ; ps_action_hint = Some (ui_text state ~ko:"r:새로고침  Esc:대시보드" ~en:"r:refresh  Esc:Dashboard")
+                       ; ps_blocking = false
+                       }
+               in
+               surface_chrome ~overflow:Fits ?progress_sheet ~now state ~terminal_rows ~cols
                  ~surface_key:"planning_detail"
                  ~title:
                    (here_row ~cols state
                       ~path:[ ui_text state ~ko:"목표" ~en:"goal" ]
-                      ~readings:[] ~position:None)
+                      ~readings:
+                        (match state.planning_error with
+                         | Some _ -> []
+                         | None ->
+                             [ progress_inline ~ko ~now ?started_at
+                                 (ui_text state ~ko:"목표 상세 읽는 중" ~en:"reading goal detail") ])
+                      ~position:None)
                  ~status:[] ~hints:(ui_text state ~ko:"Esc:대시보드  r:새로고침" ~en:"Esc:Dashboard  r:refresh")
                  ~body:(fun ~budget:_ c ->
-                   c.push (match state.planning_error with
-                     | Some error -> (ui_text state ~ko:" 목표 상세 조회 실패 · " ~en:" Goal detail unavailable · ") ^ Terminal_text.single_line error
-                     | None -> (ui_text state ~ko:" 목표 상세 미조회 · 조회 대기" ~en:" Goal detail not read · waiting for its source")))
+                   match state.planning_error with
+                   | Some error ->
+                       c.push_styled ~style:(Theme.bad ())
+                         ((ui_text state ~ko:" 목표 상세 조회 실패 · " ~en:" Goal detail unavailable · ")
+                          ^ Terminal_text.single_line error)
+                   | None ->
+                       c.push
+                         (" " ^ progress_inline ~ko ~now ?started_at
+                            (ui_text state ~ko:"목표 상세 읽는 중 · 조회 대기"
+                               ~en:"Reading goal detail · waiting for its source")))
       | None -> render_planning_list state

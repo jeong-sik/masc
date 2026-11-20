@@ -300,10 +300,11 @@ let resource_document ?(ko = false) entry
       , Markdown_text (Printf.sprintf (if ko then "### 파트 %d · %s" else "### Part %d · %s") index part_mime)
       ; Part_body index, body ]
     | Some (_ :: []) | Some [] | None -> [Part_body index, body] in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let read_status, body = match error, contents with
     | Some detail, _ -> [Read_status, Markdown_text detail], []
     | None, None when requested ->
-        [Read_status, Markdown_text (say "(리소스 읽는 중)" "(reading resource)")], []
+        [Read_status, Markdown_text (under_way ^ " " ^ say "리소스 읽는 중" "reading resource")], []
     | None, None ->
         [Read_status, Markdown_text (say "(Enter로 선택한 리소스를 읽습니다.)" "(Enter reads the selected resource.)")], []
     | None, Some [] ->
@@ -393,10 +394,11 @@ let prepare_anchored_layout ~ko ~cols (reading : t) =
     | None -> pieces
     | Some diagrams ->
       let completed,total = Masc_tui_resource_diagrams.progress diagrams in
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
       let progress = if completed < total then
         [Progress, Markdown_text (Printf.sprintf
-          (if ko then "다이어그램 준비 중 · %d/%d" else "Preparing diagrams · %d/%d")
-          completed total)] else [] in
+          (if ko then "%s 다이어그램 준비 중 · %d/%d" else "%s Preparing diagrams · %d/%d")
+          under_way completed total)] else [] in
       let failures = Masc_tui_resource_diagrams.sources (Masc_tui_resource_diagrams.request diagrams)
         |> List.mapi (fun index source ->
           Option.map (fun detail -> Failure index, Markdown_text (

@@ -406,11 +406,12 @@ let async_request_detail_lines ~cols state target =
   let view = Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target in
   let pending = Masc_tui_fetched.in_flight state.tools_async_detail in
   let safe value = Say.as_received (Terminal_text.single_line value) in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " in
   let reading = match pending,view with
     | true,(Masc_tui_fetched.Ready _ | Stale _) ->
-      [Ansi.dim, Say.both ~ko:" 재조회 중 · 이전 관측 유지" ~en:" Reading again · previous observation kept"]
+      [Theme.info (), Say.code (" " ^ under_way) ++ Say.both ~ko:"재조회 중 · 이전 관측 유지" ~en:"Reading again · previous observation kept"]
     | true,(Absent | Loading | Failed _) ->
-      [Ansi.dim, Say.both ~ko:" 원본 요청 조회 중" ~en:" Reading the original request"]
+      [Theme.info (), Say.code (" " ^ under_way) ++ Say.both ~ko:"원본 요청 조회 중" ~en:"Reading the original request"]
     | false,_ -> [] in
   let failures = match view with
     | Masc_tui_fetched.Absent -> [Ansi.dim, Say.both ~ko:" 미조회" ~en:" Not read"]
@@ -480,9 +481,10 @@ let async_source_task_lines ~cols state source =
   let ko = state.ui_language = Lang_ko in
   let body=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_body ~key:source in
   let history=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_history ~key:source in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let pending = if Masc_tui_fetched.in_flight state.tools_async_task_body then
-      [Ansi.dim, Say.both ~ko:" Task 본문 조회 중 · 기존 관측·실패 유지"
-                   ~en:" Reading the Task body · earlier observation and failure kept"] else [] in
+      [Theme.info (), Say.both ~ko:(" " ^ under_way ^ " Task 본문 조회 중 · 기존 관측·실패 유지")
+                   ~en:(" " ^ under_way ^ " Reading the Task body · earlier observation and failure kept")] else [] in
   let errors=match body with
     | Masc_tui_fetched.Absent -> [Ansi.dim, Say.both ~ko:" Task 본문 미조회" ~en:" Task body not read"]
     | Loading | Ready _ -> []
@@ -745,9 +747,20 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
 let volume_tone = function
   | Masc_tui_volume_gc.Plain -> ""
   | Masc_tui_volume_gc.Dim -> Ansi.dim
+  | Masc_tui_volume_gc.Info -> Theme.info ()
   | Masc_tui_volume_gc.Bad -> Theme.bad ()
 
 let volume_gc_lines (state : state) =
+  let now = Unix.gettimeofday () in
+  let gc_sig =
+    match state.volume_gc.phase with
+    | Masc_tui_volume_gc.Reporting -> Some "reporting"
+    | Masc_tui_volume_gc.Reclaiming -> Some "reclaiming"
+    | Masc_tui_volume_gc.Idle | Masc_tui_volume_gc.Armed _ -> None
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"tools-volume-gc" ~now gc_sig
+  in
   let server_report =
     Option.map
       (fun (snapshot : Masc.Tui_decode_tools.tool_snapshot) ->
@@ -757,7 +770,15 @@ let volume_gc_lines (state : state) =
       state.tools_inventory
   in
   List.map
-    (fun (tone, text) -> Row (volume_tone tone, Say.code " " ++ text))
+    (fun (tone, text) ->
+      let text =
+        match tone, started_at with
+        | Masc_tui_volume_gc.Info, Some at ->
+            let duration = Masc_tui_value.Ongoing.since ~now at in
+            text ++ Say.both ~ko:(" · " ^ duration ^ " 경과") ~en:(" · " ^ duration)
+        | (Masc_tui_volume_gc.Plain | Dim | Info | Bad), (Some _ | None) -> text
+      in
+      Row (volume_tone tone, Say.code " " ++ text))
     (Masc_tui_volume_gc.lines ~server_report state.volume_gc)
 ;;
 
@@ -1881,8 +1902,9 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
               | Composition_io _ -> selected_skill_statistics_lines in
             let pending = match state.tools_evidence_reference, state.tools_evidence_request with
               | Some reference, Some _ when Skill_reference.equal reference profile.esp_reference ->
-                  [ Theme.info (), Say.both ~ko:"실측 조회 중 · 이전 관측 유지"
-                                     ~en:"Reading measurements · earlier observation retained" ]
+                  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+                  [ Theme.info (), Say.both ~ko:(under_way ^ " 실측 조회 중 · 이전 관측 유지")
+                                     ~en:(under_way ^ " Reading measurements · earlier observation retained") ]
               | Some _, Some _ | Some _, None | None, Some _ | None, None -> [] in
             let card_pieces =
               rows
@@ -1919,8 +1941,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           @ selected_skill_flow_lines
           @ (match state.tools_evidence_reference, state.tools_evidence_request, selected_tools_skill_profile state with
              | Some reference, Some _, Some profile when Skill_reference.equal reference profile.esp_reference ->
-                 [Ansi.dim,
-                  Say.both ~ko:"     요청한 실행 불러오는 중: " ~en:"     Loading requested run "
+                 let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+                 [Theme.info (),
+                  Say.both ~ko:("     " ^ under_way ^ " 요청한 실행 불러오는 중: ")
+                    ~en:("     " ^ under_way ^ " Loading requested run ")
                   ++ Option.fold ~none:(Say.both ~ko:"최신" ~en:"latest")
                        ~some:(fun run_id -> Say.as_received (Masc.Keeper_tool_plan.Composition_run_id.to_string run_id))
                        state.tools_evidence_run_id
@@ -2852,15 +2876,43 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
               List.exists reads_this_pane request.tri_pending
           | Some _ | None -> false)
   in
-  let reading_lines = if state.tools_pane=Tools_async && state.tools_async_detail_open then [] else match pending, observed, error with
+  let now = Unix.gettimeofday () in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " in
+  let hide_reading = state.tools_pane = Tools_async && state.tools_async_detail_open in
+  let pane_tag =
+    match state.tools_pane with
+    | Tools_effective -> "effective"
+    | Tools_catalog _ -> "catalog"
+    | Tools_async -> "async"
+  in
+  let reading_started =
+    Masc_tui_types.progress_clock_option state ~slot:"tools-reading" ~now
+      (if pending && not hide_reading then
+         Some (pane_tag ^ ":" ^ string_of_int state.tools_request_generation)
+       else None)
+  in
+  let elapsed_suffix =
+    if hide_reading then Say.empty
+    else
+      match reading_started with
+      | None -> Say.empty
+      | Some at ->
+          let d = Masc_tui_value.Ongoing.since ~now at in
+          Say.both ~ko:(" · " ^ d ^ " 경과") ~en:(" · " ^ d)
+  in
+  let reading_lines = if hide_reading then [] else match pending, observed, error with
     | true, _, Some _ ->
-        [ Theme.warn (), Say.code " " ++ source
-                         ++ Say.both ~ko:" 다시 읽는 중 · 앞선 실패 유지" ~en:" · retrying, previous failure retained" ]
+        [ Theme.info (), Say.code (" " ^ under_way) ++ source
+                         ++ Say.both ~ko:" 다시 읽는 중 · 앞선 실패 유지" ~en:" · retrying, previous failure retained"
+                         ++ elapsed_suffix ]
     | true, true, None ->
-        [ Ansi.dim, Say.code " " ++ source
-                    ++ Say.both ~ko:" 새로 읽는 중 · 마지막 조회 유지" ~en:" · refreshing, last reading retained" ]
+        [ Theme.info (), Say.code (" " ^ under_way) ++ source
+                         ++ Say.both ~ko:" 새로 읽는 중 · 마지막 조회 유지" ~en:" · refreshing, last reading retained"
+                         ++ elapsed_suffix ]
     | true, false, None ->
-        [ Ansi.dim, Say.code " " ++ source ++ Say.both ~ko:" 읽는 중" ~en:" · reading" ]
+        [ Theme.info (), Say.code (" " ^ under_way) ++ source
+                         ++ Say.both ~ko:" 읽는 중" ~en:" · reading"
+                         ++ elapsed_suffix ]
     | false, true, Some _ ->
         [ Theme.warn (), Say.code " " ++ source
                          ++ Say.both ~ko:" 마지막 조회 유지 · r:새로 읽기" ~en:" · last reading retained · r:refresh" ]

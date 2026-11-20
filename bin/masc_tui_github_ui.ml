@@ -64,17 +64,21 @@ let token_key (state : state) ~save key =
   let draft = Option.value state.github_token_input ~default:"" in
   match key with
   | "esc" -> state.github_token_input <- None
-  | "\127" | "\b" ->
+  | "\127" | "\b" | "backspace" ->
     state.github_token_input <- Some (Masc_tui_message_layout.drop_last_utf8_scalar draft)
-  | "\r" | "\n" ->
+  | "\r" | "\n" | "enter" ->
     (match selected_keeper state with
      | Some keeper ->
        let token = String.trim draft in
        state.github_token_input <- None;
        if not (String.equal token "")
        then (
+         let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
          state.github_token_save_status
-         <- Some (Ansi.dim ^ "Saving GitHub token" ^ Ansi.reset);
+         <- Some
+              (Theme.info () ^ mark ^ " "
+               ^ ui_text state ~ko:"GitHub 토큰 저장 중" ~en:"Saving GitHub token"
+               ^ Ansi.reset);
          save keeper.k_name token)
      | None -> state.github_token_input <- None)
   | s
@@ -101,11 +105,16 @@ let start_login (state : state) ~login =
             ", +"
             (List.map Masc.Keeper_github_identity.login_scope_to_string scopes)
     in
+    let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
     state.github_identity_view
     <- Some
          ( keeper.k_name
          , [ "# github login"
-           ; "(starting gh device flow with " ^ asked ^ ")"
+           ; Theme.info () ^ mark ^ " "
+             ^ ui_text state
+                 ~ko:("gh 디바이스 로그인 시작 중 (" ^ asked ^ ")")
+                 ~en:("starting gh device flow with " ^ asked)
+             ^ Ansi.reset
            ] );
     login keeper.k_name
   | None -> ()

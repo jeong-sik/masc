@@ -238,8 +238,92 @@ let render_resources (state : state) =
                reading ))
          (Masc_tui_resource_document.current state))
   in
+  let ko_surface = state.ui_language = Lang_ko in
+  let now_surface = Unix.gettimeofday () in
+  let save_pending =
+    List.exists
+      (fun receipt ->
+        match receipt.save_phase with
+        | Resource_save_pending -> true
+        | Resource_save_settled _ -> false)
+      state.resource_save_receipts
+  in
+  let diagram_progress =
+    Option.bind (Masc_tui_resource_document.current state) (fun (r : Masc_tui_resource_document.t) ->
+      Option.bind r.diagrams (fun diagrams ->
+        let completed, total = Masc_tui_resource_diagrams.progress diagrams in
+        if completed < total && total > 0 then Some (completed, total) else None))
+  in
+  let resource_progress_spec =
+    if save_pending then
+      Some
+        ( "save"
+        , ui_text state ~ko:"원본 파일 저장 중" ~en:"Saving original file"
+        , Some (ui_text state ~ko:"선택한 리소스를 파일로 저장하고 있습니다" ~en:"Writing selected resource to disk")
+        , None
+        , true )
+    else if Option.is_some state.artifact_check_pending then
+      Some
+        ( "check"
+        , ui_text state ~ko:"확인 상태 저장 중" ~en:"Saving confirmation"
+        , Some (ui_text state ~ko:"보고서 확인 기록을 서버에 반영하고 있습니다" ~en:"Recording confirmation check on server")
+        , None
+        , true )
+    else if state.resource_share_pending <> [] then
+      Some
+        ( "share"
+        , ui_text state ~ko:"외부 공유 설정 변경 중" ~en:"Updating external sharing"
+        , Some (ui_text state ~ko:"서버에서 공유 권한을 변경하고 있습니다" ~en:"Updating share permissions on server")
+        , None
+        , true )
+    else if Option.is_some state.resource_share_recovery_lookup then
+      Some
+        ( "share-recovery"
+        , ui_text state ~ko:"공유 변경 이력 확인 중" ~en:"Checking share recovery"
+        , Some (ui_text state ~ko:"미확정 공유 변경의 기록을 조회하고 있습니다" ~en:"Looking up unconfirmed share record")
+        , None
+        , true )
+    else if Option.is_some state.resource_copy_pending then
+      Some
+        ( "copy"
+        , ui_text state ~ko:"클립보드 복사 준비 중" ~en:"Preparing copy"
+        , None
+        , None
+        , false )
+    else
+      match diagram_progress with
+      | Some (completed, total) ->
+          Some
+            ( "diagrams:" ^ string_of_int total
+            , ui_text state ~ko:"다이어그램 렌더링 중" ~en:"Preparing diagrams"
+            , Some
+                (Printf.sprintf (if ko_surface then "%d/%d 다이어그램 변환 중" else "Rendering %d/%d diagrams")
+                   completed total)
+            , Some { pm_done = completed; pm_total = total; pm_failed = 0 }
+            , false )
+      | None -> None
+  in
+  let resource_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"resources-op" ~now:now_surface
+      (Option.map (fun (sig_key, _, _, _, _) -> sig_key) resource_progress_spec)
+  in
+  let document_sheet_lines =
+    match resource_progress_spec with
+    | None -> []
+    | Some (_, ps_title, ps_detail, ps_meter, ps_blocking) ->
+        render_progress_sheet ~ko:ko_surface ~now:now_surface ~available:pane_rows
+          ~width:(framed_inner_width document_cols)
+          { ps_title
+          ; ps_detail
+          ; ps_started_at = resource_started_at
+          ; ps_meter
+          ; ps_action_hint = None
+          ; ps_blocking
+          }
+  in
+  let document_height = max 0 (pane_rows - List.length document_sheet_lines) in
   let document_scroll total_lines =
-    Masc_tui_scroll.Position.clamp ~count:total_lines ~height:pane_rows
+    Masc_tui_scroll.Position.clamp ~count:total_lines ~height:document_height
       state.resource_scroll
   in
   let position =
@@ -254,9 +338,9 @@ let render_resources (state : state) =
             let total_lines = List.length rendered in
             Masc_tui_value.Position.window
               ~first:
-                (Masc_tui_scroll.Position.offset ~count:total_lines ~height:pane_rows
+                (Masc_tui_scroll.Position.offset ~count:total_lines ~height:document_height
                    (document_scroll total_lines))
-              ~shown:pane_rows ~total:total_lines)
+              ~shown:document_height ~total:total_lines)
   in
   box_line buf cols
     (here_row ~cols state
@@ -274,14 +358,17 @@ let render_resources (state : state) =
     box_line buf cols
       (ui_text state ~ko:"경로: " ~en:"Path: "
        ^ left ^ Ansi.reverse ^ " " ^ Ansi.reset ^ right);
+    let ko = state.ui_language = Lang_ko in
+    let now = Unix.gettimeofday () in
     let notice = match prompt.rsp_error with
       | Some detail -> Theme.warn () ^ Terminal_text.single_line detail ^ Ansi.reset
       | None ->
         (match resource_save_prompt_receipt state prompt with
          | Some receipt -> resource_save_summary state receipt.save_phase
          | None when resource_save_pending_for_prompt state prompt ->
-             ui_text state ~ko:"기존 저장 요청 진행 중 · 결과는 본문에서 확인"
-               ~en:"An earlier save is pending · read its result below"
+             progress_inline ~ko ~now
+               (ui_text state ~ko:"기존 저장 요청 진행 중 · 결과는 본문에서 확인"
+                  ~en:"Earlier save pending · read result below")
          | None -> ui_text state ~ko:"경로 입력 중 · 이 입력은 아직 제출하지 않았습니다"
              ~en:"Editing the path · this input has not been submitted") in
     box_line buf cols notice)
@@ -316,7 +403,10 @@ let render_resources (state : state) =
          framed_line pane_buf pane_cols
            ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
      | List_unread -> status_note (String.trim (page_unread_note ~ko))
-     | List_loading -> status_note (if ko then "(읽는 중)" else "(loading)")
+     | List_loading ->
+         framed_line pane_buf pane_cols
+           (Theme.info () ^ " " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+            ^ (if ko then "목록 읽는 중" else "loading") ^ Ansi.reset)
      | List_empty None -> status_note (no_resources ~ko)
      | Rows_ready None -> ());
 
@@ -334,13 +424,18 @@ let render_resources (state : state) =
           Theme.muted () ^ Masc_tui_value.Unknown.glyph gap
       | Ok 0 -> Theme.ok () ^ "0"
       | Ok count -> Theme.warn () ^ string_of_int count in
-    let query = match Masc_tui_fetched.current state.artifact_checks with
-      | Some (_, (Ready inventory | Stale (inventory, _))) ->
-        Printf.sprintf
-          (if ko then " · 마지막 확인 조회 %s" else " · last check query %s")
-          (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) inventory.received_at)
-      | Some (_, (Absent | Loading | Failed _)) | None ->
-          if ko then " · 확인 미조회" else " · checks not read" in
+    let query =
+      if Masc_tui_fetched.in_flight state.artifact_checks then
+        " · " ^ Theme.info () ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+        ^ (if ko then "확인 조회 중" else "reading checks") ^ Ansi.reset
+      else
+        match Masc_tui_fetched.current state.artifact_checks with
+        | Some (_, (Ready inventory | Stale (inventory, _))) ->
+          Printf.sprintf
+            (if ko then " · 마지막 확인 조회 %s" else " · last check query %s")
+            (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) inventory.received_at)
+        | Some (_, (Absent | Loading | Failed _)) | None ->
+            if ko then " · 확인 미조회" else " · checks not read" in
     framed_line pane_buf pane_cols (Theme.recede () ^ " " ^ period
       ^ (if ko then " · 오늘 확인 안 함: " else " · today unchecked: ")
       ^ unchecked ^ Ansi.reset
@@ -395,8 +490,10 @@ let render_resources (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane ~split pane_buf pane_cols =
+    let ko = ko_surface in
     let reading = Option.map fst (Lazy.force document) in
     let shown_resource = Option.map Masc_tui_resource_document.entry reading in
+    let sheet_lines = document_sheet_lines in
     let title =
       match shown_resource with
       | Some resource ->
@@ -421,10 +518,9 @@ let render_resources (state : state) =
     box_divider pane_buf pane_cols;
     let content_origin = strip_rows + lines_ended_since pane_buf ~start:0
       + (if pane_buf == buf then 0 else lines_ended_since buf ~start:0) in
-    let content_height = pane_rows in
+    let content_height = max 0 (pane_rows - List.length sheet_lines) in
     (match reading with
      | None ->
-         let ko = state.ui_language = Lang_ko in
          draw_list_idle pane_buf pane_cols ~ko ~empty:(no_resources ~ko)
            ~height:content_height (inventory_idle state)
      | Some _ ->
@@ -471,6 +567,7 @@ let render_resources (state : state) =
                png_key=picture.image.key;png_data=picture.image.png;
              }
            end) pictures);
+    List.iter (box_line pane_buf pane_cols) sheet_lines;
     box_bottom pane_buf pane_cols
   in
   (if split then begin

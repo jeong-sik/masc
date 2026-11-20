@@ -127,15 +127,19 @@ let history_status_lines ~ko ~width
     | Masc_tui_fetched.Failed (History_kept_back notice) -> Masc_tui_text_block.rows ~max_cells:width
         ("    " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ (text "    기록 미조회" "    history not requested") ]
-    | Masc_tui_fetched.Loading -> [ (text "    조회 중" "    loading") ]
+    | Masc_tui_fetched.Loading ->
+        let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        [ "    " ^ mark ^ " " ^ (text "조회 중" "loading") ]
   in
   let pending =
     if not in_flight then []
-    else match view with
+    else
+      let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      match view with
       | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
-          [ if continuing then (text "    이전 기록 조회 중 · 조회한 범위 표시" "    reading earlier history; showing observed prefix")
-            else (text "    기록 조회 중 · 이전 관측" "    reading history; previous observation") ]
-      | Masc_tui_fetched.Failed _ -> [ (text "    재조회 중 · 이전 실패 유지" "    retrying; previous failure remains") ]
+          [ "    " ^ mark ^ " " ^ (if continuing then (text "이전 기록 조회 중 · 조회한 범위 표시" "reading earlier history; showing observed prefix")
+            else (text "기록 조회 중 · 이전 관측" "reading history; previous observation")) ]
+      | Masc_tui_fetched.Failed _ -> [ "    " ^ mark ^ " " ^ (text "재조회 중 · 이전 실패 유지" "retrying; previous failure remains") ]
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   let boundary=match Masc_tui_fetched.value view with
     | None -> []

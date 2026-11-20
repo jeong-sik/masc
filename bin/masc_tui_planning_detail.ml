@@ -10,6 +10,7 @@ type tone =
   | Proven
   | Refused
   | Waiting
+  | Active
   | Unreadable
   | Note
   | Quiet
@@ -857,13 +858,17 @@ let timeline ~ko ~now ~width ~goal_id
     | Masc_tui_fetched.Failed (Timeline_kept_back notice) -> wrapped ~width Unreadable
         ("  " ^ Terminal_text.single_line notice)
     | Masc_tui_fetched.Absent -> [ { tone = Quiet; text = (text "  기록 미조회" "  timeline not requested") } ]
-    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = (text "  조회 중" "  loading") } ]
+    | Masc_tui_fetched.Loading ->
+        let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        [ { tone = Active; text = "  " ^ mark ^ " " ^ (text "조회 중" "loading") } ]
   in
   let pending =
     if not (Masc_tui_fetched.in_flight loaded) then []
-    else match view with
+    else
+      let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      match view with
       | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
-          [ { tone = Quiet; text = (text "  갱신 중 · 이전 관측" "  refreshing; previous observation") } ]
-      | Masc_tui_fetched.Failed _ -> [ { tone = Quiet; text = (text "  재조회 중 · 이전 실패 유지" "  retrying; previous failure remains") } ]
+          [ { tone = Active; text = "  " ^ mark ^ " " ^ (text "갱신 중 · 이전 관측" "refreshing; previous observation") } ]
+      | Masc_tui_fetched.Failed _ -> [ { tone = Active; text = "  " ^ mark ^ " " ^ (text "재조회 중 · 이전 실패 유지" "retrying; previous failure remains") } ]
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   ({ tone = Quiet; text = "" } :: header :: (pending @ rows))

@@ -41,6 +41,7 @@ let decode json =
 type tone =
   | Plain
   | Dim
+  | Info
   | Warn
   | Bad
 
@@ -207,7 +208,8 @@ let lines ~ko ~now fetched ~keeper_name =
   let say korean english = if ko then korean else english in
   match Masc_tui_fetched.view_for ~equal:String.equal fetched ~key:keeper_name with
   | Masc_tui_fetched.Absent -> [ Dim, say "읽기 전" "not read yet" ]
-  | Masc_tui_fetched.Loading -> [ Dim, say "읽는 중" "reading" ]
+  | Masc_tui_fetched.Loading ->
+      [ Info, Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " ^ say "읽는 중" "reading" ]
   | Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail ->
     (* The detail pane's one shape for a read that failed: what was read,
        "read failed", then the reason (RFC tui-one-screen-grammar §2). *)

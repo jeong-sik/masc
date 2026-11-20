@@ -105,12 +105,18 @@ let prepare_code_draft_rows ~ko ~cols draft =
   let say korean english = if ko then korean else english in
   let wrap text = Message_layout.wrap_body
     ~max_cells:(max 1 (framed_inner_width cols - 2)) ~sanitize:Terminal_text.single_line text in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let is_saving =
+    match Draft.phase draft with
+    | Draft.Saving _ -> true
+    | Draft.Editable | Draft.Rejected _ | Draft.Kept_back _ | Draft.Needs_review _ -> false
+  in
   let status, before, comparing = match Draft.phase draft with
     | Draft.Editable ->
       say "저장하지 않은 초안 · 이 세션에만 있음" "Unsaved draft · this session",
       (Draft.base draft).text, say "원본 → 초안" "original source → draft"
     | Draft.Saving _ ->
-      say "보낸 초안 저장 중 · 서버 확인 대기" "Saving submitted draft; waiting for acknowledgement",
+      under_way ^ " " ^ say "보낸 초안 저장 중 · 서버 확인 대기" "Saving submitted draft; waiting for acknowledgement",
       (Draft.base draft).text, say "원본 → 보낸 초안" "original source → submitted draft"
     | Draft.Rejected detail ->
       say "저장 거절: " "Save refused: " ^ detail, (Draft.base draft).text,
@@ -146,11 +152,18 @@ let prepare_code_draft_rows ~ko ~cols draft =
     |> Message_layout.split_cells
       ~max_cells:(max 1 (framed_inner_width cols - 4))
     |> List.map (fun text -> style ^ marker ^ text ^ Ansi.reset)) in
-  List.concat_map wrap
-    [ status; comparing; bytes;
+  let status_lines =
+    let wrapped = wrap status in
+    if is_saving then List.map (fun line -> Theme.info () ^ line ^ Ansi.reset) wrapped
+    else wrapped
+  in
+  let hint_line =
+    if is_saving then say "Esc:닫기 (저장 요청은 계속됨)" "Esc:close (save continues)"
+    else
       say "e:편집  S:저장  r:다시 읽기  A:서버 판 적용  X:버리기  Esc:닫기"
-        "e:edit  S:save  r:reread  A:adopt compared revision  X:discard  Esc:close" ]
-  @ rows
+        "e:edit  S:save  r:reread  A:adopt compared revision  X:discard  Esc:close"
+  in
+  status_lines @ List.concat_map wrap [ comparing; bytes; hint_line ] @ rows
 
 (* [same_draft] follows the editing session, including later edits. Only the
    exact immutable value also fixes text, compared source and save phase. *)
@@ -285,7 +298,10 @@ let prepare_code_history_rows (state : state) ~cols =
   match Masc_tui_fetched.current state.code_history with
   | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
       wrap None (field (say "이력을 읽지 못함" "History unavailable") detail)
-  | Some (_, Masc_tui_fetched.Loading) -> wrap None (say "(이력 읽는 중)" "(loading history)")
+  | Some (_, Masc_tui_fetched.Loading) ->
+      let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      List.map (fun (o, t) -> o, Theme.info () ^ t ^ Ansi.reset)
+        (wrap None (mark ^ " " ^ say "이력 읽는 중" "Loading history"))
   | Some (_, Masc_tui_fetched.Absent) | None -> []
   | Some ((scope, path), Masc_tui_fetched.Ready listing) ->
       let git_failure = match listing.chl_git_error with
@@ -426,7 +442,16 @@ let empty_directory_text (state : state) =
    it is. "(loading…)" stood for all three empty ones: a request in flight, a
    listing never asked for, and a directory that answered with no entries. *)
 let code_tree_status (state : state) =
-  match code_listing_view state with
+  let now = Unix.gettimeofday () in
+  let listing = code_listing_view state in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"code-tree" ~now
+      (match listing with
+       | Masc_tui_fetched.Loading -> Some "loading"
+       | Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+       | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> None)
+  in
+  match listing with
   | Masc_tui_fetched.Stale (_, detail) ->
       Some
         ((Theme.bad ())
@@ -437,8 +462,9 @@ let code_tree_status (state : state) =
       Some ((Theme.bad ()) ^ " " ^ Terminal_text.single_line detail ^ Ansi.reset)
   | Masc_tui_fetched.Loading ->
       Some
-        (Ansi.dim ^ ui_text state ~ko:" (읽는 중)" ~en:" (loading)"
-         ^ Ansi.reset)
+        (" "
+         ^ progress_inline ~ko:(state.ui_language = Lang_ko) ~now ?started_at
+             (ui_text state ~ko:"목록 읽는 중" ~en:"loading directory"))
   | Masc_tui_fetched.Absent ->
       Some (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
   | Masc_tui_fetched.Ready [] ->
@@ -593,12 +619,134 @@ let render_code (state : state) =
     framed_bottom pane_buf pane_cols
   in
   let content_pane ~split pane_buf pane_cols =
+    let ko = state.ui_language = Lang_ko in
+    let now = Unix.gettimeofday () in
     let hover = current_code_hover state in
     let hover_showing = Option.is_some hover in
     let draft_showing = state.code_draft_open && Option.is_some (current_code_draft state) in
     let history_showing = state.code_history_open in
     let diff_showing = state.code_diff_open in
     let notes_showing = state.code_notes_open in
+    let nav_lsp_token =
+      match code_pending_navigation state with
+      | Some (owner, path) ->
+          Some ("nav:" ^ path ^ ":" ^ string_of_int owner.cno_destination.cj_cursor)
+      | None ->
+          (match code_lsp_pending_query state with
+           | Some query -> Some ("lsp:" ^ query.clq_question ^ ":" ^ query.clq_symbol)
+           | None -> None)
+    in
+    let nav_lsp_started =
+      Masc_tui_types.progress_clock_option state ~slot:"code-nav-lsp" ~now nav_lsp_token
+    in
+    let blame_started =
+      Masc_tui_types.progress_clock_option state ~slot:"code-blame" ~now
+        (match Masc_tui_fetched.current state.code_blame with
+         | Some (path, Masc_tui_fetched.Loading) -> Some path
+         | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+                     | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
+         | None -> None)
+    in
+    let draft_saving =
+      if draft_showing then
+        match current_code_draft state with
+        | Some draft ->
+            (match Masc_tui_code_draft.phase draft with
+             | Masc_tui_code_draft.Saving _ -> true
+             | Masc_tui_code_draft.Editable | Masc_tui_code_draft.Rejected _
+             | Masc_tui_code_draft.Kept_back _ | Masc_tui_code_draft.Needs_review _ -> false)
+        | None -> false
+      else false
+    in
+    let pane_op =
+      if draft_saving then
+        Some
+          ( "draft-save"
+          , ui_text state ~ko:"초안 저장 중" ~en:"Saving draft"
+          , Some (ui_text state ~ko:"서버 저장 확인을 기다리고 있습니다" ~en:"Waiting for server save acknowledgement")
+          , Some (ui_text state ~ko:"Esc:닫기 (저장 계속됨)" ~en:"Esc:close (save continues)")
+          , true )
+      else
+        match code_pending_navigation state with
+        | Some (owner, path) ->
+            let safe_path = Terminal_text.single_line path in
+            let detail =
+              match owner.cno_action with
+              | Return_to_history -> ui_text state ~ko:("돌아가는 중: " ^ safe_path) ~en:("Returning to " ^ safe_path)
+              | Follow_location ->
+                  Printf.sprintf (if ko then "여는 중: %s:%d" else "Opening %s:%d")
+                    safe_path (owner.cno_destination.cj_cursor + 1)
+            in
+            Some
+              ( "nav:" ^ safe_path ^ ":" ^ string_of_int owner.cno_destination.cj_cursor
+              , ui_text state ~ko:"위치로 이동 중" ~en:"Navigating to location"
+              , Some detail
+              , None
+              , false )
+        | None ->
+            (match code_lsp_pending_query state with
+             | Some query ->
+                 Some
+                   ( "lsp:" ^ query.clq_question ^ ":" ^ query.clq_symbol
+                   , ui_text state ~ko:"언어 서버 조회 중" ~en:"Querying language server"
+                   , Some (Printf.sprintf "%s · %S" query.clq_question query.clq_symbol)
+                   , None
+                   , false )
+             | None ->
+                 if diff_showing then
+                   (match Masc_tui_fetched.current state.code_diff with
+                    | Some (_, Masc_tui_fetched.Loading) ->
+                        Some
+                          ( "diff"
+                          , ui_text state ~ko:"변경 내역 읽는 중" ~en:"Reading diff"
+                          , Some (ui_text state ~ko:"Git 작업 트리·커밋 변경을 불러오고 있습니다" ~en:"Loading diff from Git")
+                          , Some (ui_text state ~ko:"Esc:코드로" ~en:"Esc:back")
+                          , false )
+                    | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+                                | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
+                    | None -> None)
+                 else if history_showing then
+                   (match Masc_tui_fetched.current state.code_history with
+                    | Some (_, Masc_tui_fetched.Loading) ->
+                        Some
+                          ( "history"
+                          , ui_text state ~ko:"파일 이력 읽는 중" ~en:"Reading file history"
+                          , Some (ui_text state ~ko:"커밋과 키퍼 변경 이력을 불러오고 있습니다" ~en:"Loading commits and keeper changes")
+                          , Some (ui_text state ~ko:"Esc:코드로" ~en:"Esc:back")
+                          , false )
+                    | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+                                | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
+                    | None -> None)
+                 else if not hover_showing && not draft_showing && not notes_showing then
+                   (match Masc_tui_fetched.current state.code_file with
+                    | Some (path, Masc_tui_fetched.Loading) ->
+                        Some
+                          ( "file:" ^ path
+                          , ui_text state ~ko:"파일 읽는 중" ~en:"Reading file"
+                          , Some (Terminal_text.single_line path)
+                          , None
+                          , false )
+                    | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+                                | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
+                    | None -> None)
+                 else None)
+    in
+    let pane_op_started =
+      Masc_tui_types.progress_clock_option state ~slot:"code-pane-op" ~now
+        (Option.map (fun (tok, _, _, _, _) -> tok) pane_op)
+    in
+    let code_sheet =
+      Option.map
+        (fun (_, title, detail, action_hint, blocking) ->
+          { ps_title = title
+          ; ps_detail = detail
+          ; ps_started_at = pane_op_started
+          ; ps_meter = None
+          ; ps_action_hint = action_hint
+          ; ps_blocking = blocking
+          })
+        pane_op
+    in
     let title =
       match Masc_tui_fetched.current_key state.code_file with
       | Some path ->
@@ -651,7 +799,8 @@ let render_code (state : state) =
           (* The note (a language-server answer, a PR link) rides the title
              in every view: the history's Enter writes one too. *)
           let with_note =
-            let note = match code_pending_navigation state with
+            let active_note =
+              match code_pending_navigation state with
               | Some (owner, path) ->
                   let path = Terminal_text.single_line path in
                   Some (match owner.cno_action with
@@ -668,14 +817,19 @@ let render_code (state : state) =
                          (if state.ui_language = Lang_ko then "언어 서버에 묻는 중: %s %S"
                           else "asking %s about %S")
                          query.clq_question query.clq_symbol)
-                   | None ->
-                       Option.map (code_note_text ~ko:(state.ui_language = Lang_ko))
-                         state.code_lsp_note) in
-            match (if hover_showing then None else note) with
-            | Some note ->
-                base ^ "  " ^ (Theme.accent ())
-                ^ Terminal_text.single_line note ^ Ansi.reset
-            | None -> base
+                   | None -> None)
+            in
+            if hover_showing then base
+            else
+              match active_note with
+              | Some text ->
+                  base ^ "  " ^ progress_inline ~ko ~now ?started_at:nav_lsp_started text
+              | None ->
+                  (match Option.map (code_note_text ~ko) state.code_lsp_note with
+                   | Some note ->
+                       base ^ "  " ^ (Theme.accent ())
+                       ^ Terminal_text.single_line note ^ Ansi.reset
+                   | None -> base)
           in
           (* What the memo on the cursor's line says. The gutter already
              marks which rows carry one (RFC-0429 §3.1); a mark alone makes
@@ -727,8 +881,9 @@ let render_code (state : state) =
                with_note ^ "  " ^ Theme.bad () ^ "blame: "
                ^ Terminal_text.single_line detail ^ Ansi.reset
            | Some (_, Masc_tui_fetched.Loading) ->
-               with_note ^ "  " ^ Theme.recede ()
-               ^ ui_text state ~ko:"blame 읽는 중" ~en:"reading blame" ^ Ansi.reset
+               with_note ^ "  "
+               ^ progress_inline ~ko ~now ?started_at:blame_started
+                   (ui_text state ~ko:"blame 읽는 중" ~en:"reading blame")
            | Some (_, (Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent))
            | None -> with_note)
       | None ->
@@ -744,7 +899,16 @@ let render_code (state : state) =
        ^ title
        ^ Ansi.reset);
     box_divider pane_buf pane_cols;
-    let content_height = code_pane_content_height state in
+    let full_content_height = code_pane_content_height state in
+    let code_sheet_lines =
+      match code_sheet with
+      | None -> []
+      | Some sheet ->
+          render_progress_sheet ~ko ~now
+            ~available:(max 0 (full_content_height - 1))
+            ~width:(framed_inner_width pane_cols) sheet
+    in
+    let content_height = max 0 (full_content_height - List.length code_sheet_lines) in
     let file_scroll total_lines =
       max 0 (min state.code_file_scroll (max 0 (total_lines - content_height)))
     in
@@ -805,11 +969,14 @@ let render_code (state : state) =
              box_empty pane_buf pane_cols
            done
        | Some (_, Masc_tui_fetched.Loading) ->
-           box_line pane_buf pane_cols
-             (Ansi.dim ^ ui_text state ~ko:"  (트리 읽는 중)" ~en:"  (reading the tree)" ^ Ansi.reset);
-           for _ = 2 to content_height do
-             box_empty pane_buf pane_cols
-           done
+           if content_height > 0 then begin
+             box_line pane_buf pane_cols
+               ("  " ^ progress_inline ~ko ~now ?started_at:pane_op_started
+                  (ui_text state ~ko:"변경 내역 읽는 중" ~en:"reading diff"));
+             for _ = 2 to content_height do
+               box_empty pane_buf pane_cols
+             done
+           end
        | Some (_, Masc_tui_fetched.Absent) | None ->
            for _ = 1 to content_height do
              box_empty pane_buf pane_cols
@@ -900,17 +1067,27 @@ let render_code (state : state) =
           read, and a file that failed to read. Each now says so; with no file
           open the pane says what the listing beside it holds. *)
        let say style text =
-         box_line pane_buf pane_cols
-           (style ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset);
-         for _ = 2 to content_height do
-           box_empty pane_buf pane_cols
-         done
+         if content_height > 0 then begin
+           box_line pane_buf pane_cols
+             (style ^ "  " ^ Terminal_text.single_line text ^ Ansi.reset);
+           for _ = 2 to content_height do
+             box_empty pane_buf pane_cols
+           done
+         end
        in
        match Masc_tui_fetched.current state.code_file with
        | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) -> say (Theme.bad ()) detail
        | Some (path, Masc_tui_fetched.Loading) ->
-           say (Theme.recede ())
-             (ui_text state ~ko:(path ^ " 읽는 중") ~en:("reading " ^ path))
+           if content_height > 0 then begin
+             box_line pane_buf pane_cols
+               ("  " ^ progress_inline ~ko ~now ?started_at:pane_op_started
+                  (ui_text state
+                     ~ko:(Terminal_text.single_line path ^ " 읽는 중")
+                     ~en:("reading " ^ Terminal_text.single_line path)));
+             for _ = 2 to content_height do
+               box_empty pane_buf pane_cols
+             done
+           end
        | Some (_, Masc_tui_fetched.Absent) | None ->
            draw_list_idle pane_buf pane_cols ~ko:(state.ui_language = Lang_ko)
              ~empty:empty_directory ~height:content_height listing_idle
@@ -1043,6 +1220,7 @@ let render_code (state : state) =
                       mark gutter_style (row_index + 1) Ansi.reset body)
              | None -> box_empty pane_buf pane_cols
            done);
+    List.iter (box_line pane_buf pane_cols) code_sheet_lines;
     box_bottom pane_buf pane_cols
   in
   let panes = Buffer.create 4096 in

@@ -161,7 +161,7 @@ val identity_loopback_callback_rows : identity_provider list -> string list
     loopback-only service sends the browser to is on screen. *)
 
 val identity_started_rows :
-  cols:int -> keeper_name:string -> identity_login_started list -> string list
+  ?ko:bool -> ?now:float -> cols:int -> keeper_name:string -> identity_login_started list -> string list
 (** The consent prompt and wrapped URL for each login this Keeper started and
     has not finished. *)
 

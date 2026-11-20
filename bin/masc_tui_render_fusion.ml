@@ -219,21 +219,30 @@ let render_fusion_list (state : state) =
   in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
   report_drawn_list Fusion_entries ~height:content_height;
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let fusion_list_started =
+    Masc_tui_types.progress_clock_option state ~slot:"fusion-list" ~now
+      (if view_is_loading reading then Some "loading" else None)
+  in
   if shown = 0 then begin
-    let empty =
-      match
-        empty_page_of ~snapshot ~error:failure
-      with
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:(view_is_loading reading)
-      | Page_empty ->
-          if Option.is_some replay_warning then
-            ui_text state
-              ~ko:"  읽을 수 있는 보존 실행 없음 · 상단 시작 읽기 경고 확인"
-              ~en:"  No readable retained runs · see startup read warning above"
-          else ui_text state ~ko:"  (보존된 Fusion 실행 없음)" ~en:"  (no retained Fusion runs)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    (match empty_page_of ~snapshot ~error:failure with
+     | Page_failed ->
+         box_line_styled buf cols ~style:(Theme.recede ()) (page_failed_note ~ko)
+     | Page_unread when view_is_loading reading ->
+         box_line buf cols
+           ("  " ^ progress_inline ~ko ~now ?started_at:fusion_list_started
+              (ui_text state ~ko:"Fusion 실행 목록 읽는 중" ~en:"reading Fusion runs"))
+     | Page_unread ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (page_unread_note_while ~ko ~reading:false)
+     | Page_empty ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (if Option.is_some replay_warning then
+              ui_text state
+                ~ko:"  읽을 수 있는 보존 실행 없음 · 상단 시작 읽기 경고 확인"
+                ~en:"  No readable retained runs · see startup read warning above"
+            else ui_text state ~ko:"  (보존된 Fusion 실행 없음)" ~en:"  (no retained Fusion runs)"));
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done
@@ -736,7 +745,7 @@ let fusion_tool_trace_lines ~ko ~width ~frame_width trace =
 
 let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
   let glyph_done = (Theme.ok ()) ^ "\xe2\x97\x8f" ^ Ansi.reset in
-  let glyph_active = (Theme.warn ()) ^ "\xe2\x97\x90" ^ Ansi.reset in
+  let glyph_active = (Theme.info ()) ^ "\xe2\x97\x90" ^ Ansi.reset in
   let glyph_waiting = Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset in
   let glyph_failed = (Theme.bad ()) ^ "\xc3\x97" ^ Ansi.reset in
   let arrow = " " ^ (Theme.recede ()) ^ "\xe2\x96\xb8" ^ Ansi.reset ^ " " in
@@ -1168,26 +1177,77 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
       + (if Option.is_some state.fusion_detail_error then 1 else 0)
       + (if stale || Option.is_some state.fusion_detail_error then 1 else 0)
   in
-  let content_height = max 1 (rows - chrome_rows) in
+  let now = Unix.gettimeofday () in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let loading_detail =
+    match state.fusion_mode with
+    | Fusion_historical_detail reference ->
+        (match state.fusion_historical_detail, state.fusion_detail_error with
+         | Some original, _ when original.fhd_reference.fhe_post_id = reference.fhe_post_id
+                              && original.fhd_reference.fhe_run_id = reference.fhe_run_id -> None
+         | (Some _ | None), Some _ -> None
+         | (Some _ | None), None ->
+             Some
+               ( "historical:" ^ reference.fhe_post_id
+               , ui_text state ~ko:"보드 원문 근거 읽는 중" ~en:"Loading Board original evidence"
+               , Some (ui_text state ~ko:"선택한 보드 게시물 원문을 불러오고 있습니다 (r:재시도)" ~en:"Waiting for the selected Board original (r:retry)") ))
+    | Fusion_list | Fusion_detail _ ->
+        (match detail, state.fusion_detail_error with
+         | None, None ->
+             Some
+               ( "detail:" ^ run_id
+               , ui_text state ~ko:"Fusion 실행 상세 읽는 중" ~en:"Loading Fusion detail"
+               , Some (ui_text state ~ko:"패널 응답·판정·도구 추적을 불러오고 있습니다" ~en:"Loading panel responses, judgment, and tool trace") )
+         | None, Some _ | Some _, (Some _ | None) -> None)
+  in
+  let detail_started =
+    Masc_tui_types.progress_clock_option state ~slot:"fusion-detail-op" ~now
+      (Option.map (fun (tok, _, _) -> tok) loading_detail)
+  in
+  let full_content_height = max 1 (rows - chrome_rows) in
+  let sheet_lines =
+    match loading_detail with
+    | None -> []
+    | Some (_, title, detail_text) ->
+        render_progress_sheet ~ko ~now
+          ~available:(max 0 (full_content_height - 1))
+          ~width:(framed_inner_width cols)
+          { ps_title = title
+          ; ps_detail = detail_text
+          ; ps_started_at = detail_started
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"r:재시도  Esc:뒤로" ~en:"r:retry  Esc:back")
+          ; ps_blocking = false
+          }
+  in
+  let content_height = max 1 (full_content_height - List.length sheet_lines) in
   let lines =
     match state.fusion_mode with
     | Fusion_historical_detail reference ->
-        (match state.fusion_historical_detail with
-         | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
+        (match state.fusion_historical_detail, state.fusion_detail_error with
+         | Some original, _ when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
              (if stale || Option.is_some state.fusion_detail_error then
                 [ Theme.warn (), ui_text state ~ko:"  이전 게시판 조회를 유지 중" ~en:"  Previous Board reading retained" ]
               else [])
              @ fusion_historical_lines ~ko ~width:(max 1 (framed_inner_width cols - 4))
                  ~frame_width:(framed_inner_width cols) original
-         | Some _ | None ->
+         | (Some _ | None), Some _ ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, ui_text state ~ko:"  (선택한 게시판 원본 대기 중 · r:재시도)" ~en:"  (waiting for the selected Board original; r retries)" ])
+             [ Ansi.dim, page_failed_note ~ko ]
+         | (Some _ | None), None ->
+             clear_fusion_trace_projection ();
+             [ Theme.info (),
+               "  " ^ under_way ^ " "
+               ^ ui_text state ~ko:"선택한 게시판 원본 대기 중 · r:재시도"
+                   ~en:"Waiting for the selected Board original · r retries" ])
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
          | None, None ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, ui_text state ~ko:"  (Fusion 상세 불러오는 중)" ~en:"  (loading exact Fusion detail)" ]
+             [ Theme.info (),
+               "  " ^ under_way ^ " "
+               ^ ui_text state ~ko:"Fusion 상세 불러오는 중" ~en:"Loading exact Fusion detail" ]
          | None, Some _ ->
              clear_fusion_trace_projection ();
              [ Ansi.dim, page_failed_note ~ko ]
@@ -1199,7 +1259,12 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   let max_scroll = max 0 (total - content_height) in
   let scroll = max 0 (min state.fusion_scroll max_scroll) in
   let header =
-    here_row ~cols state ~path:[ fusion_step; run_id ] ~readings:[]
+    here_row ~cols state ~path:[ fusion_step; run_id ]
+      ~readings:
+        (match loading_detail with
+         | None -> []
+         | Some (_, title, _) ->
+             [ progress_inline ~ko ~now ?started_at:detail_started title ])
       ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:content_height ~total)
   in
   box_line buf cols header;
@@ -1219,6 +1284,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
     | None -> box_empty buf cols
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
+  List.iter (box_line buf cols) sheet_lines;
   scroll
 ;;
 

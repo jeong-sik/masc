@@ -228,7 +228,10 @@ let continue_rows_of_state (state : state) =
     match state.home_last_chat, state.opening_mode with
     | Recorded_chat name, _ -> Some (Keeper_id.Keeper_name.to_string name, "")
     | Saving_chat name, _ ->
-        Some (Keeper_id.Keeper_name.to_string name, text " · 저장 중" " · save pending")
+        let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+        Some
+          ( Keeper_id.Keeper_name.to_string name
+          , " · " ^ mark ^ " " ^ text "저장 중" "save pending" )
     | Unobserved_chat { keeper; _ }, _ ->
         Some (Keeper_id.Keeper_name.to_string keeper, text " · 저장 결과 보고 안 됨" " · save outcome not reported")
     | Session_chat { keeper; _ }, _ ->
@@ -356,10 +359,12 @@ let initial_reading_ready state selected =
 let notice_lines_of_state state =
   let text ko en = ui_text state ~ko ~en in
   let clean = Masc_tui_ansi.Terminal_text.single_line in
+  let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let info_line s = " " ^ mark ^ " " ^ s in
   (match Masc_tui_credential_preparation.status state.credential_preparation with
    | Not_requested | Settled -> []
-   | Preparing _ -> [text " 워크스페이스 접근 준비 중" " Preparing workspace access"]
-   | Awaiting_ui _ -> [text " 워크스페이스 접근 준비 결과 반영 대기" " Workspace access result awaiting application"])
+   | Preparing _ -> [info_line (text "워크스페이스 접근 준비 중" "Preparing workspace access")]
+   | Awaiting_ui _ -> [info_line (text "워크스페이스 접근 준비 결과 반영 대기" "Workspace access result awaiting application")])
   @ (match state.opening_notice with
    | None -> []
    | Some notice -> [" " ^ clean notice])

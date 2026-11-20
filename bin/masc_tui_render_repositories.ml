@@ -204,10 +204,24 @@ let render_workspace_activity (state : state) repo_id =
               match Rows.at window (scroll + index) with
               | None -> c.push_empty () | Some line -> c.push line
             done in
-      match Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id with
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading ->
+      let ko = state.ui_language = Lang_ko in
+      let now = Unix.gettimeofday () in
+      let view = Masc_tui_fetched.view_for ~equal:String.equal state.workspace_activity ~key:repo_id in
+      let started_at =
+        Masc_tui_types.progress_clock_option state ~slot:"workspace-activity" ~now
+          (match view with
+           | Masc_tui_fetched.Loading -> Some repo_id
+           | Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+           | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> None)
+      in
+      match view with
+      | Masc_tui_fetched.Absent ->
+          c.push_styled ~style:(Theme.recede ())
+            (ui_text state ~ko:"  기록된 파일 변경 미조회 · r:조회" ~en:"  Recorded file changes not read · r:read")
+      | Masc_tui_fetched.Loading ->
           c.push
-            (ui_text state ~ko:"  기록된 파일 변경 조회 중" ~en:"  Reading recorded file changes")
+            ("  " ^ progress_inline ~ko ~now ?started_at
+               (ui_text state ~ko:"기록된 파일 변경 조회 중" ~en:"Reading recorded file changes"))
       | Masc_tui_fetched.Failed message -> c.push_styled ~style:(Theme.bad ()) ("  " ^ Terminal_text.single_line message)
       | Masc_tui_fetched.Ready reading -> show ~budget reading
       (* The changes already read stay, with the failed refresh above them so
@@ -287,6 +301,7 @@ let repository_preview_lines state ~width (repo : Tui_decode.repository) =
   @ [checkout]
 
 let repository_inventory_intro (state : state) ~width =
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let observation = match state.repositories, state.repositories_error,
       state.repositories_inflight with
     | Some _, Some _, _ -> [Theme.warn (), ui_text state
@@ -294,11 +309,13 @@ let repository_inventory_intro (state : state) ~width =
         ~en:"Previous repository list · refresh failed"]
     | None, Some _, _ -> [Theme.bad (), ui_text state ~ko:"저장소 목록 조회 실패"
         ~en:"Repository list unavailable"]
-    | Some _, None, true -> [Theme.recede (), ui_text state ~ko:"저장소 목록 갱신 중 · 이전 관측"
-        ~en:"Refreshing repositories · previous observation"]
+    | Some _, None, true -> [Theme.info (), ui_text state
+        ~ko:(under_way ^ " 저장소 목록 갱신 중 · 이전 관측")
+        ~en:(under_way ^ " Refreshing repositories · previous observation")]
     | Some _, None, false -> []
-    | None, None, true -> [Theme.recede (), ui_text state ~ko:"저장소 목록 조회 중"
-        ~en:"Reading repositories"]
+    | None, None, true -> [Theme.info (), ui_text state
+        ~ko:(under_way ^ " 저장소 목록 조회 중")
+        ~en:(under_way ^ " Reading repositories")]
     | None, None, false -> [Theme.recede (), ui_text state ~ko:"저장소 목록 미조회"
         ~en:"Repositories not read"] in
   let actions = match state.repositories with
@@ -422,11 +439,20 @@ let render_repository_list (state : state) =
              ~height:content_height state.repositories_scroll)) in
       let repos_window = Rows.of_list ~first:scroll ~height:content_height repos in
       report_drawn_list Repository_rows ~height:content_height;
+      let ko = state.ui_language = Lang_ko in
+      let now = Unix.gettimeofday () in
+      let repos_started =
+        Masc_tui_types.progress_clock_option state ~slot:"repositories-list" ~now
+          (if state.repositories_inflight then Some "reading" else None)
+      in
       let lines =
         if shown = 0 then
           [match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
-           | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-           | Page_unread -> page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading:state.repositories_inflight
+           | Page_failed -> page_failed_note ~ko
+           | Page_unread when state.repositories_inflight ->
+               progress_inline ~ko ~now ?started_at:repos_started
+                 (ui_text state ~ko:"저장소 목록 읽는 중" ~en:"reading repositories")
+           | Page_unread -> page_unread_note_while ~ko ~reading:false
            | Page_empty ->
                ui_text state ~ko:"(등록된 저장소 없음)" ~en:"(no repositories registered)"]
         else List.init content_height (fun i ->
@@ -454,26 +480,28 @@ let render_repository_list (state : state) =
             match geometry.rsg_detail_spec with
             | Some spec -> spec
             | None ->
-                let style, note =
+                let styled_note =
                   if shown > 0 then
-                    Theme.recede (), ui_text state ~ko:"저장소를 선택하세요." ~en:"Select a repository."
+                    Theme.recede () ^ ui_text state ~ko:"저장소를 선택하세요." ~en:"Select a repository." ^ Ansi.reset
                   else
                     match empty_page_of ~snapshot:state.repositories ~error:state.repositories_error with
                     | Page_failed ->
-                        Theme.bad (),
-                        String.trim (page_failed_note ~ko:(state.ui_language = Lang_ko))
+                        Theme.bad () ^ String.trim (page_failed_note ~ko) ^ Ansi.reset
+                    | Page_unread when state.repositories_inflight ->
+                        progress_inline ~ko ~now ?started_at:repos_started
+                          (ui_text state ~ko:"저장소 목록 읽는 중" ~en:"reading repositories")
                     | Page_unread ->
-                        Theme.recede (),
-                        String.trim
-                          (page_unread_note_while ~ko:(state.ui_language = Lang_ko)
-                             ~reading:state.repositories_inflight)
+                        Theme.recede ()
+                        ^ String.trim (page_unread_note_while ~ko ~reading:false)
+                        ^ Ansi.reset
                     | Page_empty ->
-                        Theme.recede (),
-                        ui_text state ~ko:"등록된 저장소가 없습니다."
-                          ~en:"No registered repositories yet."
+                        Theme.recede ()
+                        ^ ui_text state ~ko:"등록된 저장소가 없습니다."
+                            ~en:"No registered repositories yet."
+                        ^ Ansi.reset
                 in
                 ( ui_text state ~ko:"저장소 상세" ~en:"Repository detail"
-                , [ style ^ note ^ Ansi.reset ] )
+                , [ styled_note ] )
           in
           let panel_max = max 1 (budget - List.length geometry.rsg_intro - 2) in
           let inner_h =
@@ -649,13 +677,36 @@ let render_repository_changes (state : state) =
         | Some (Tui_decode.Repository_change_repository id), None -> id
         | None, _ -> ui_text state ~ko:"Git 워크스페이스" ~en:"Git workspace"
       in
+      let ko = state.ui_language = Lang_ko in
+      let now = Unix.gettimeofday () in
+      let git_loading = Option.is_none state.repository_changes && Option.is_none state.repository_changes_error in
+      let git_started =
+        Masc_tui_types.progress_clock_option state ~slot:"repo-git-changes" ~now
+          (if git_loading then Some scope_name else None)
+      in
+      let progress_sheet =
+        if git_loading then
+          Some
+            { ps_title = ui_text state ~ko:"Git 변경 조회 중" ~en:"Loading Git changes"
+            ; ps_detail = Some (ui_text state ~ko:"작업 트리 상태와 변경 파일 목록을 읽고 있습니다" ~en:"Reading working tree status and changed files")
+            ; ps_started_at = git_started
+            ; ps_meter = None
+            ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로" ~en:"Esc:back")
+            ; ps_blocking = false
+            }
+        else None
+      in
       let title =
         here_row ~cols state ~path:[ git_changes_step state; scope_name ]
           ~readings:
             [ (match state.repository_changes with
                | Some snapshot ->
                    repository_branch_label snapshot.Masc.Tui_decode.rcs_branch
-               | None -> "")
+               | None ->
+                   if git_loading then
+                     progress_inline ~ko ~now ?started_at:git_started
+                       (ui_text state ~ko:"Git 변경 읽는 중" ~en:"reading Git changes")
+                   else "")
             ; (if Option.is_some state.repository_changes_error then
                  ui_text state ~ko:"조회 실패" ~en:"read failed"
                else "") ]
@@ -669,7 +720,7 @@ let render_repository_changes (state : state) =
                       ~total:(List.length changes)))
       in
       let recorded_changes = current_keeper_chat_file_changes state in
-      surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repository-changes"
+      surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols ~surface_key:"repository-changes"
         ~title ~hints:(Masc_tui_keys.footer_hints_git_changes ~lang:state.ui_language)
         ~body:(fun ~budget c ->
           let geometry = repository_changes_geometry state ~cols ~budget
@@ -699,12 +750,17 @@ let render_repository_changes (state : state) =
            | Some _, _ -> ());
           let room = geometry.rcg_list_height in
           if changes = [] then
-            c.push_styled ~style:(Theme.recede ())
-              (match state.repository_changes, state.repository_changes_error with
-               | None, None -> ui_text state ~ko:"  (Git 변경 조회 중)" ~en:"  (loading Git changes)"
-               | Some _, None -> ui_text state ~ko:"  (바뀐 파일 없음)" ~en:"  (working tree clean)"
-               | _, Some _ ->
-                   ui_text state ~ko:"  (Git 변경 조회 실패)" ~en:"  (Git changes unavailable)")
+            (match state.repository_changes, state.repository_changes_error with
+             | None, None ->
+                 c.push
+                   ("  " ^ progress_inline ~ko ~now ?started_at:git_started
+                      (ui_text state ~ko:"Git 변경 조회 중" ~en:"Loading Git changes"))
+             | Some _, None ->
+                 c.push_styled ~style:(Theme.recede ())
+                   (ui_text state ~ko:"  (바뀐 파일 없음)" ~en:"  (working tree clean)")
+             | _, Some _ ->
+                 c.push_styled ~style:(Theme.recede ())
+                   (ui_text state ~ko:"  (Git 변경 조회 실패)" ~en:"  (Git changes unavailable)"))
           else
             let max_scroll = max 0 (List.length changes - room) in
             let scroll = max 0 (min state.repository_changes_scroll max_scroll) in
@@ -1003,10 +1059,16 @@ let render_changes_list (state : state) =
     | None -> ui_text state ~ko:"(고른 Keeper 없음)" ~en:"(no keeper selected)"
     | Some name -> name
   in
-  let heading ~reading =
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let changes_started =
+    Masc_tui_types.progress_clock_option state ~slot:"keeper-changes" ~now
+      (if state.changes_inflight then Some "reading" else None)
+  in
+  let heading ~readings =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"변경" ~en:"changes"; whose ]
-      ~readings:[ reading ]
+      ~readings
       ~position:
         (if shown = 0 then None
          else
@@ -1018,22 +1080,33 @@ let render_changes_list (state : state) =
     match state.changes with
     | None ->
         heading
-          ~reading:(here_missing_reading state ~error:state.changes_error)
+          ~readings:
+            [ (if state.changes_inflight then
+                 progress_inline ~ko ~now ?started_at:changes_started
+                   (ui_text state ~ko:"변경 기록 읽는 중" ~en:"reading changes")
+               else here_missing_reading state ~error:state.changes_error) ]
     | Some s ->
         (* The window and the call count are stated because the list alone
            does not say what was looked at: no changes in a window and no
            calls in a window are different facts. *)
+        let summary =
+          if ko then
+            Printf.sprintf "변경 %d건 · 최근 %s 호출 %d건" shown
+              (Masc_tui_value.Interval.of_hours s.Masc.Tui_decode.fcs_window_hours)
+              s.Masc.Tui_decode.fcs_calls_in_window
+          else
+            Printf.sprintf "%d in %s of %s" shown
+              (Masc_tui_value.Interval.of_hours s.Masc.Tui_decode.fcs_window_hours)
+              (Masc_tui_message_layout.count_noun
+                 s.Masc.Tui_decode.fcs_calls_in_window "call")
+        in
         heading
-          ~reading:
-            (if state.ui_language = Lang_ko then
-               Printf.sprintf "변경 %d건 · 최근 %s 호출 %d건" shown
-                 (Masc_tui_value.Interval.of_hours s.Masc.Tui_decode.fcs_window_hours)
-                 s.Masc.Tui_decode.fcs_calls_in_window
-             else
-               Printf.sprintf "%d in %s of %s" shown
-                 (Masc_tui_value.Interval.of_hours s.Masc.Tui_decode.fcs_window_hours)
-                 (Masc_tui_message_layout.count_noun
-                    s.Masc.Tui_decode.fcs_calls_in_window "call"))
+          ~readings:
+            (if state.changes_inflight then
+               [ summary
+               ; progress_inline ~ko ~now ?started_at:changes_started
+                   (ui_text state ~ko:"새로고침 중" ~en:"refreshing") ]
+             else [ summary ])
   in
   box_line buf cols header;
   box_divider buf cols;
@@ -1123,19 +1196,21 @@ let render_changes_list (state : state) =
   report_drawn_list Change_rows ~height:content_height;
   let cursor_change = List.nth_opt changes cursor in
   if shown = 0 then begin
-    let empty =
-      match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
-      | Page_failed -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | Page_unread ->
-          if state.changes_inflight then page_reading_note ~ko:(state.ui_language = Lang_ko)
-          else
-            ui_text state ~ko:"  (키퍼 화면에서 Keeper 를 고른 뒤 r 누르기)"
-              ~en:"  (pick a keeper on the Keepers surface, then press r)"
-      | Page_empty ->
-          ui_text state ~ko:"  (이 Keeper 가 이 기간에 쓴 파일 없음)"
-            ~en:"  (this keeper wrote no files in the window)"
-    in
-    box_line_styled buf cols ~style:(Theme.recede ()) empty;
+    (match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
+     | Page_failed ->
+         box_line_styled buf cols ~style:(Theme.recede ()) (page_failed_note ~ko)
+     | Page_unread when state.changes_inflight ->
+         box_line buf cols
+           ("  " ^ progress_inline ~ko ~now ?started_at:changes_started
+              (ui_text state ~ko:"변경 기록 읽는 중" ~en:"reading file changes"))
+     | Page_unread ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (ui_text state ~ko:"  (키퍼 화면에서 Keeper 를 고른 뒤 r 누르기)"
+              ~en:"  (pick a keeper on the Keepers surface, then press r)")
+     | Page_empty ->
+         box_line_styled buf cols ~style:(Theme.recede ())
+           (ui_text state ~ko:"  (이 Keeper 가 이 기간에 쓴 파일 없음)"
+              ~en:"  (this keeper wrote no files in the window)"));
     for _ = 1 to content_height - 1 do
       box_empty buf cols
     done

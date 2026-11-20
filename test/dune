@@ -607,6 +607,7 @@
   test_librarian_plan
   test_librarian_direct
   test_librarian_log
+  test_librarian_log_store
   test_librarian_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store
@@ -946,6 +947,7 @@
   test_librarian_plan
   test_librarian_direct
   test_librarian_log
+  test_librarian_log_store
   test_librarian_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store

@@ -56,10 +56,30 @@ let autonomous_wake_marker = Env_config_keeper.KeeperAutonomous.default_wake_pro
    validation), so the rendered text is used raw and the call site owns the
    joining newlines — byte-identical to the [Printf.sprintf]/[String.concat]
    assembly it replaces. *)
-let render_fragment key vars =
-  match Prompt_registry.render_prompt_template key vars with
+let fragment_text key = function
   | Ok text -> text
   | Error detail -> key ^ ": " ^ detail
+;;
+
+let render_fragment key vars =
+  fragment_text key (Prompt_registry.render_prompt_template key vars)
+;;
+
+(* An event row -- a pending mention or scope message, a fleet broadcast --
+   names its source message id. A resumed session leaves out rows whose bytes
+   it already holds, so without the id a new message with the same speaker and
+   text would read as a row the session holds and never reach the keeper. The
+   id is a required variable: an override template that drops it fails to
+   render, and the failure is placed in the row as for any fragment. *)
+let event_row_id_variable = "message_id"
+
+let render_event_row key ~message_id vars =
+  Prompt_registry.resolve_and_render_prompt_template
+    ~required_variables:[ event_row_id_variable ]
+    key
+    ((event_row_id_variable, message_id) :: vars)
+  |> Result.map snd
+  |> fragment_text key
 ;;
 
 (* The diagnostic attached to an [unavailable] Skill catalog row lives in
@@ -107,12 +127,14 @@ let format_pending_messages_section
            let row =
              match message.Keeper_world_observation_message_scope.kind with
              | Keeper_world_observation_message_scope.Mention ->
-               render_fragment
+               render_event_row
                  Prompt_names.keeper_world_pending_messages_mention_row
+                 ~message_id:message.message_id
                  [ "speaker", message.speaker; "content", message.content ]
              | Keeper_world_observation_message_scope.Scope ->
-               render_fragment
+               render_event_row
                  Prompt_names.keeper_world_pending_messages_scope_row
+                 ~message_id:message.message_id
                  [ "speaker", message.speaker; "content", message.content ]
            in
            row ^ "\n")
@@ -138,8 +160,9 @@ let format_fleet_messages_section
     let rows =
       List.map
         (fun (message : Keeper_world_observation_message_scope.fleet_message) ->
-           render_fragment
+           render_event_row
              Prompt_names.keeper_world_fleet_messages_row
+             ~message_id:message.fleet_message_id
              [ "speaker", message.fleet_speaker; "content", message.fleet_content ]
            ^ "\n")
         messages

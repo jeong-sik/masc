@@ -9525,6 +9525,27 @@ type goal_action_pending =
       phase : Goal_phase.t; retry_binding : Tui_decode.goal_retry_binding option }
   | Goal_drop_reason of { goal_id : string; reason : string }
 
+(* What a new reading of the goals leaves pending. A first press stays armed
+   while its goal still takes that action from the phase it was armed in. A
+   drop reason stays open while its goal still takes a drop: Enter does not
+   close it, so a drop the guard kept back, or one that failed, still holds
+   the sentence the operator typed (#52967). The reading that shows the goal
+   dropped is the one that closes it. *)
+let goal_action_pending_after_reading (planning : planning_snapshot) pending =
+  let goal_of goal_id =
+    List.find_opt (fun goal -> String.equal goal.pg_id goal_id) planning.pl_goals
+  in
+  let kept goal_id still = if Option.exists still (goal_of goal_id) then pending else None in
+  match pending with
+  | None -> None
+  | Some (Goal_action_armed armed) ->
+      kept armed.goal_id (fun goal ->
+        planning_goal_retains_arm goal ~action:armed.action ~phase:armed.phase
+          ~retry_binding:armed.retry_binding)
+  | Some (Goal_drop_reason entry) ->
+      kept entry.goal_id (fun goal ->
+        planning_goal_offers_action goal Goal_phase.Public_action.Drop)
+
 (* The Config presets pane's writes that wait for a second press of their
    key: [u] restores the selected preset, [D] deletes it. One value, so
    arming one disarms the other. *)

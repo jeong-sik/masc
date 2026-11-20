@@ -17736,13 +17736,8 @@ let apply_planning_load state result =
       in
       if Option.is_none state.planning_baseline then
         state.planning_baseline <- Some planning;
-      (match state.goal_action_pending with
-       | Some (Goal_action_armed armed) ->
-         let goal = List.find_opt (fun goal -> String.equal goal.pg_id armed.goal_id) planning.pl_goals in
-         if not (Option.exists (fun goal -> planning_goal_retains_arm goal ~action:armed.action
-             ~phase:armed.phase ~retry_binding:armed.retry_binding) goal) then
-           state.goal_action_pending <- None
-       | Some (Goal_drop_reason _) | None -> ());
+      state.goal_action_pending <-
+        goal_action_pending_after_reading planning state.goal_action_pending;
       state.planning <- Some planning;
       state.planning_error <- None;
       (match navigation with
@@ -37393,7 +37388,10 @@ Use relative paths for resources already held in the package. -->
                | _ -> ()))
        (* Typing why a goal is dropped. Enter sends the drop with that
           reason; a blank reason stays open with the refusal on it, because
-          the Server refuses a drop that does not say why. *)
+          the Server refuses a drop that does not say why. A sent reason stays
+          open too, until a reading shows the goal no longer takes a drop
+          ({!goal_action_pending_after_reading}): a drop kept back or failed
+          keeps the sentence. *)
        | Some k
          when text_input_target state ~compact_viewport
               = Some Text_goal_drop_reason ->
@@ -37415,7 +37413,6 @@ Use relative paths for resources already held in the package. -->
                  else if List.mem_assoc entry.goal_id state.goal_action_inflight then
                    set_goal_action_error state ~goal_id:entry.goal_id "A request is still in progress; the drop reason is retained"
                  else begin
-                   state.goal_action_pending <- None;
                    clear_goal_action_error state ~goal_id:entry.goal_id;
                    start_goal_transition state ~mailbox:async_messages ~note:reason
                      ~goal_id:entry.goal_id ~action:Goal_phase.Public_action.Drop

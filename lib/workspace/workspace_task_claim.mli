@@ -55,3 +55,23 @@ val emit_auto_start_side_effects :
 (** Emit post-commit side effects (broadcast, activity, transition observer,
     hook push, and transition log event) for an atomic [Claimed -> InProgress]
     auto-start transition. *)
+
+val claim_broadcast_content : task_id:string -> string
+(** Canonical [System_record] broadcast message emitted when a task is claimed. *)
+
+val emit_claim_side_effects :
+  config ->
+  action:string ->
+  agent_name:string ->
+  task_id:string ->
+  from_status:Masc_domain.task_status ->
+  claimed_status:Masc_domain.task_status ->
+  final_status:Masc_domain.task_status ->
+  auto_start:bool ->
+  activity_payload:Yojson.Safe.t ->
+  log_label:string ->
+  log_payload:Yojson.Safe.t ->
+  unit
+(** Emit the full post-commit side-effect sequence for a newly claimed task:
+    local agent state update, [System_record] claim broadcast, activity event,
+    audit log event, transition observer, and optional [auto_start] side effects. *)

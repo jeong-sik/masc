@@ -70,7 +70,7 @@ let transition_broadcast_content ~new_status ~task_id ~(stated_reason : string o
      agent action path calls it. The idempotent repeats ([Cancel] on [Cancelled],
      [Release] on [Todo]) are filtered as no-ops before this is reached. *)
   match (new_status : Masc_domain.task_status) with
-  | Masc_domain.Claimed _ -> Some (Printf.sprintf "Claimed %s" task_id)
+  | Masc_domain.Claimed _ -> Some (claim_broadcast_content ~task_id)
   | Masc_domain.InProgress _ -> Some (Printf.sprintf "Started %s" task_id)
   | Masc_domain.Cancelled _ -> with_reason "Cancelled"
   | Masc_domain.Todo -> with_reason "Released"

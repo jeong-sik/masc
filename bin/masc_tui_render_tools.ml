@@ -312,11 +312,11 @@ let async_request_inventory_lines (state : state) =
       [ Ansi.bold,
         Say.per_language (function
           | Say.Ko -> Printf.sprintf
-              " Async broker · 진행 %d · runtime 소유 %d · 소유 미확인 %d · 기록 오류 %d"
+              " Async broker · 진행 %d · runtime 소유 %d · 소유 확인 안 됨 %d · 기록 오류 %d"
               summary.ars_active summary.ars_runtime_owned
               summary.ars_ownership_unknown summary.ars_record_errors
           | Say.En -> Printf.sprintf
-              " Async broker · active=%d · runtime-owned=%d · ownership-unknown=%d · record-errors=%d"
+              " Async broker · active=%d · runtime-owned=%d · ownership-unconfirmed=%d · record-errors=%d"
               summary.ars_active summary.ars_runtime_owned
               summary.ars_ownership_unknown summary.ars_record_errors) ]
     in
@@ -325,7 +325,7 @@ let async_request_inventory_lines (state : state) =
       let tone, ownership = match request.ar_ownership with
         | Async_runtime_owned -> Theme.ok (), Say.both ~ko:"runtime 소유" ~en:"runtime owned"
         | Async_ownership_unknown ->
-          Theme.warn (), Say.both ~ko:"디스크에만 있음 · 소유 미확인" ~en:"on disk only · ownership unknown"
+          Theme.warn (), Say.both ~ko:"디스크에만 있음 · 소유 확인 안 됨" ~en:"on disk only · ownership not confirmed"
       in
       let status = match request.ar_phase with
         | Async_queued -> Say.both ~ko:"대기열" ~en:"queued"
@@ -929,8 +929,8 @@ let deferred_word = Say.both ~ko:"미룸" ~en:"deferred"
 
 let skill_statistics_lines ~cols = function
   | None ->
-    [Row (Ansi.dim, Say.both ~ko:"실행 시간 집계 없음 · 미관측은 0ms가 아닙니다"
-                      ~en:"No run-time totals · not observed is not 0ms")]
+    [Row (Ansi.dim, Say.both ~ko:"실행 시간 집계 없음 · 보고되지 않은 값은 0ms가 아닙니다"
+                      ~en:"No run-time totals · an unreported total is not 0ms")]
   | Some stats ->
       let measured =
         [ completed_word, Theme.ok (), stats.Masc.Tui_decode_skill_evidence.scst_completed
@@ -961,7 +961,11 @@ let skill_statistics_lines ~cols = function
         | Some first, Some last ->
           Say.both ~ko:"결과 기록 시각(UTC): " ~en:"Results recorded (UTC): "
           ++ recorded_at first ++ Say.code " → " ++ recorded_at last
-        | _ -> Say.both ~ko:"결과 기록 시각: 미관측" ~en:"Results recorded: not observed" in
+        | _ ->
+          (* The statistics came back without the window's ends: a value read
+             but not reported, the 6.4 mark of RFC tui-one-screen-grammar. *)
+          Say.both ~ko:"결과 기록 시각: " ~en:"Results recorded: "
+          ++ Say.code (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported) in
       let width = max 1 (Masc_tui_frame.inner_width ~cols - 4) in
       rows
         ([ Theme.info (),
@@ -1233,7 +1237,9 @@ let effective_surface_diagnostics ~hash = function
       [ Say.code (Printf.sprintf "runtime=%s  client=%s  native=%s"
           (Terminal_text.single_line ets_runtime_id)
           (Terminal_text.single_line ets_official_client_kind)
-          (Option.value ~default:"n/a" ets_native_posture))
+          (Option.value
+             ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)
+             ets_native_posture))
       ; Say.code "skill snapshot=" ++ Say.as_received (hash (Terminal_text.single_line ets_skill_snapshot_revision))
       ; (match ets_skill_resource_read_max_bytes with
          | Some max_bytes ->

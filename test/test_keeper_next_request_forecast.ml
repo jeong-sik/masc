@@ -34,7 +34,7 @@ let seed ~messages first_atom : Keeper_carried_front.seed =
 let carry ?front ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 }) ?counted_tokens messages =
   Keeper_next_request_forecast.carry
     ~measure:(Keeper_context_core.message_measurer ())
-    ~continuity:(Some Keeper_turn_driver_try_provider.without_snapshot)
+    ~continuity:(Some Keeper_turn_driver_try_provider.No_read_end)
     ~accepted:None ~front
     ~turn_start
     ~this_turn_start:None
@@ -145,24 +145,14 @@ let test_an_unknown_turn_start_opens_on_the_newest_atom () =
     (c.origin = Keeper_carried_front.Turn_start_unknown { reason })
 
 (* The forecast bounds an accepted start the way the turn does (RFC
-   librarian-lifecycle §4.10, rule 7). The Librarian stands at atom 2, the
+   librarian-lifecycle §4.10, rule 7). The read end is atom 2, the
    last completed turn ended at atom 8, the next turn begins at atom 14, and
    the newest turn record accepted atom 12. A known start widens the bound
    only for a front rule 8 held inside a turn, which the forecast never
    reads, so the range opens at the boundary, not at the recorded start. *)
 let test_a_known_start_leaves_a_recorded_start_bounded_by_the_boundary () =
   let messages = history ~exchanges:10 ~text_bytes:100 in
-  let trace_id = "forecast-known-start" in
-  let digest_at = Runtime_model_input_tail_window.atom_opening_digest messages in
-  let progress : Keeper_librarian_progress.t =
-    { position = { trace_id; end_atom = 2; last_atom_digest = Option.get (digest_at 1) }
-    ; boundary_lines_seen = 1 }
-  in
-  let continuity =
-    match Keeper_turn_driver_try_provider.absorbed_history ~trace_id ~messages progress with
-    | Some (_, continuity) -> continuity
-    | None -> Alcotest.fail "the read position names an atom of this history"
-  in
+  let continuity = Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 2; working_state = None } in
   let accepted =
     { (seed ~messages 12) with source = Keeper_carried_front.Turn_record { turn = 1 } } in
   let c =

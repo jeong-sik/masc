@@ -582,7 +582,7 @@ let test_empty_response_replaces_old_seed_and_validates_the_omitted_end () =
   let grown = history @ [ Types.user_msg "New question" ] in
   let next = Masc.Keeper_next_request_forecast.carry
     ~measure:(Masc.Keeper_context_core.message_measurer ())
-    ~continuity:(Some Masc.Keeper_turn_driver_try_provider.without_snapshot)
+    ~continuity:(Some Masc.Keeper_turn_driver_try_provider.No_read_end)
     ~accepted:None ~front:(Some selected)
     ~turn_start:(Front.Turn_boundary { end_atom = 0 })
     ~this_turn_start:None
@@ -648,7 +648,7 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
   let carried =
     Masc.Keeper_next_request_forecast.carry
       ~measure:(Masc.Keeper_context_core.message_measurer ())
-      ~continuity:(Some Masc.Keeper_turn_driver_try_provider.without_snapshot)
+      ~continuity:(Some Masc.Keeper_turn_driver_try_provider.No_read_end)
       ~accepted:None ~front:read.Front.seed
       ~turn_start:(Front.Turn_boundary { end_atom = 0 })
       ~this_turn_start:None
@@ -661,10 +661,10 @@ let test_read_seed_keeps_a_response_beyond_unobserved_rows () =
 
 (* RFC librarian-lifecycle §4.10, rules 2, 5 and 7, from the files alone:
    a server that just started holds no ledger and no measurement, only the
-   turn record of the last accepted request and the Librarian's position.
-   The next request starts at the accepted start while the Librarian stands
-   behind it, returns to the Librarian's position once that reaches or
-   passes it, and never starts past this turn's boundary. *)
+   turn record of the last accepted request and the writer's read end.
+   The next request starts at the accepted start while the read end stands
+   behind it, returns to the read end once that reaches or passes it, and
+   never starts past this turn's boundary. *)
 let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
   with_turn_record_store @@ fun config store ->
   let persisted = exchanges 8 in
@@ -684,24 +684,9 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
        });
   let accepted = (Front.read_seed ~config ~keeper_name:"alpha" ~trace_id:"trace-1").Front.seed in
   let next_tick = persisted @ [ text_message Types.User "next tick" ] in
-  let digest_at = Window.atom_opening_digest next_tick in
   let start ~point ~boundary =
-    let progress : Masc.Keeper_librarian_progress.t =
-      { position =
-          { trace_id = "trace-1"
-          ; end_atom = point
-          ; last_atom_digest = Option.get (digest_at (point - 1))
-          }
-      ; boundary_lines_seen = 1
-      }
-    in
     let continuity =
-      match
-        Masc.Keeper_turn_driver_try_provider.absorbed_history ~trace_id:"trace-1"
-          ~messages:next_tick progress
-      with
-      | Some (_, continuity) -> continuity
-      | None -> fail "the read position does not name an atom of this history"
+      Masc.Keeper_turn_driver_try_provider.Covered { Masc.Keeper_turn_driver_try_provider.end_atom = point; working_state = None }
     in
     let carried =
       Masc.Keeper_next_request_forecast.carry

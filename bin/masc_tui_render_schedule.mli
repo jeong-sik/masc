@@ -712,6 +712,15 @@ val board_header_row :
 (** [age_header] is the word over the age column, which names the time the
     column holds. *)
 
+val board_header_row_with_dropped :
+  ko:bool ->
+  inner_width:int ->
+  age_header:string ->
+  layout:board_column Masc_tui_table.layout ->
+  string
+(** Like {!board_header_row}, with a right-aligned dropped-columns badge when
+    [layout.dropped > 0]. *)
+
 val board_row :
   ?close:string ->
   ko:bool ->

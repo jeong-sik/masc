@@ -342,6 +342,7 @@ let test_expiry_stops_waiting_and_retires_consent () =
 
 let test_admitted_callback_outlives_consent_deadline () =
   let state = identity_state () in
+  state.ui_language <- Masc_tui_types.Lang_en;
   state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
   state.keepers <- [{ Decode.k_origin=Decode.Persisted_keeper; k_name="A"; k_paused=false;
     k_identity=Ok {k_trace_id="trace-A";k_created_at="2026-09-01T00:00:00Z";k_updated_at="2026-09-05T12:00:00Z"};k_activity=None }];
@@ -510,6 +511,7 @@ let test_an_offscreen_login_failure_is_reported () =
 let test_a_lost_attempt_is_read_against_the_catalog () =
   let setup () =
     let state = identity_state () in
+    state.ui_language <- Masc_tui_types.Lang_en;
     state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
     state.keepers <- [{ Decode.k_origin=Decode.Persisted_keeper; k_name="A"; k_paused=false;
       k_identity=Ok {k_trace_id="trace-A";k_created_at="2026-09-01T00:00:00Z";k_updated_at="2026-09-05T12:00:00Z"};k_activity=None }];
@@ -614,6 +616,7 @@ let test_previous_expiry_preserves_a_replacement_request () =
 
 let test_login_that_expires_while_queued_cannot_start () =
   let state = identity_state () in
+  state.ui_language <- Masc_tui_types.Lang_en;
   state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
   let request = Masc_tui_types.start_identity_login_request state
     ~keeper_name:"A" ~provider_id:"slack" in
@@ -1277,6 +1280,7 @@ let test_detaching_takes_two_presses_on_the_same_row () =
      so the first press only arms the row and says so where the pane already
      reads its notice; the second press on that row is what sends it. *)
   let state = detach_state [ declared ~tools:[ "sendMessage" ] "slack" "Slack" ] in
+  state.ui_language <- Masc_tui_types.Lang_en;
   let sent = ref [] in
   let unbind ~keeper_name ~provider_id = sent := (keeper_name, provider_id) :: !sent in
   let disconnect () =
@@ -1448,9 +1452,67 @@ let test_a_view_that_hides_the_cursor_clamps_it () =
   check Alcotest.bool "inside the shorter list" true
     (landed >= 0 && landed < List.length (listed ~order:attached.order ~show:attached.show))
 
+let test_korean_localization_covers_identity_model_and_updates () =
+  let providers =
+    [ Masc_tui_identity_model.Identity_declared
+        { idp_id = "slack"
+        ; idp_label = "Slack"
+        ; idp_tools = Some [ "sendMessage" ]
+        ; idp_also_on = []
+        ; idp_enabled = Some true
+        ; idp_switch_problem = None
+        ; idp_app = None
+        ; idp_callback =
+            Some
+              (Masc_tui_identity_model.Loopback_row
+                 (Masc_tui_identity_model.Callback_url "http://127.0.0.1:8080/cb"))
+        }
+    ]
+  in
+  let summary =
+    Masc_tui_identity_model.identity_summary_for ~ko:true ~providers
+      ~listing:Masc_tui_identity_model.identity_listing_default
+  in
+  check Alcotest.bool "Korean summary names services and attached count" true
+    (contains "서비스 1개" summary && contains "연결됨 1" summary);
+  let notice_rows =
+    Masc_tui_identity_model.identity_notice ~ko:true ~cols:80
+      (Some (Masc_tui_identity_model.Notice_bad, "refused"))
+  in
+  check Alcotest.bool "Korean bad notice includes A key hint" true
+    (List.exists (contains "A로 현재 행의 앱을 등록") notice_rows);
+  let cb_rows =
+    Masc_tui_identity_model.identity_server_callback_rows ~ko:true
+      (Some (Masc_tui_identity_model.Callback_url "https://example.test/cb"))
+  in
+  check Alcotest.bool "Korean server callback label" true
+    (List.exists (contains "콜백") cb_rows);
+  let lb_rows =
+    Masc_tui_identity_model.identity_loopback_callback_rows ~ko:true providers
+  in
+  check Alcotest.bool "Korean loopback callback label" true
+    (List.exists (contains "로컬 콜백") lb_rows);
+  let saved = ref "" in
+  Masc_tui_identity_updates.app_saved ~ko:true ~keeper_name:(Some "A") ~provider_id:"slack"
+    ~notice:(fun ~keeper_name:_ (_, detail) -> saved := detail) (Ok 2);
+  check Alcotest.bool "Korean app_saved message" true
+    (contains "앱이 등록되었습니다" !saved && contains "2개" !saved);
+  let state = detach_state [ declared ~tools:[ "sendMessage" ] "slack" "Slack" ] in
+  state.ui_language <- Masc_tui_types.Lang_ko;
+  Masc_tui_identity_input.disconnect state ~unbind:(fun ~keeper_name:_ ~provider_id:_ -> ())
+    ~report:(fun _ _ -> ());
+  check Alcotest.bool "Korean disconnect arm notice" true
+    (match state.identity_attempt_error with
+     | Some (_, detail) -> contains "D를 한 번 더 누르세요" detail
+     | None -> false)
+
 let () =
   Alcotest.run "tui_identity_tab"
-    [ ( "callback and apps",
+    [ ( "korean localization",
+        [ Alcotest.test_case "model preamble, app_saved, and disconnect arm localize in KO"
+            `Quick test_korean_localization_covers_identity_model_and_updates
+        ] );
+      ( "callback and apps",
         [ Alcotest.test_case "the callback and app state are read strictly" `Quick
             test_the_callback_and_app_state_are_read_strictly;
           Alcotest.test_case "a read keeps the server's callback" `Quick

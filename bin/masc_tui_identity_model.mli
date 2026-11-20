@@ -141,22 +141,25 @@ val identity_connectable
   -> identity_provider list
   -> (string * string) list
 
+val identity_summary_for :
+  ko:bool -> providers:identity_provider list -> listing:identity_listing -> string
 val identity_summary :
   providers:identity_provider list -> listing:identity_listing -> string
 val identity_field_paste : string -> string
-val identity_notice : cols:int -> (identity_notice_kind * string) option -> string list
+val identity_notice : ?ko:bool -> cols:int -> (identity_notice_kind * string) option -> string list
 
 val identity_filter_rows
-  :  providers:identity_provider list
+  :  ?ko:bool
+  -> providers:identity_provider list
   -> listing:identity_listing
   -> string option
   -> string list
 
-val identity_server_callback_rows : identity_callback option -> string list
+val identity_server_callback_rows : ?ko:bool -> identity_callback option -> string list
 (** The server's callback line under the summary, or nothing when the server
     did not say. *)
 
-val identity_loopback_callback_rows : identity_provider list -> string list
+val identity_loopback_callback_rows : ?ko:bool -> identity_provider list -> string list
 (** The loopback callback line, when any service names one, so the URL a
     loopback-only service sends the browser to is on screen. *)
 

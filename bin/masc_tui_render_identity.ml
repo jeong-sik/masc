@@ -99,7 +99,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
          let mark, row_state =
            match state with
            | Masc_tui_identity_model.Identity_not_attached ->
-             Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset, ""
+             Theme.recede () ^ "\xe2\x97\x8b" ^ Ansi.reset, ""
            | Identity_attached_without_tools ->
              ( Theme.warn () ^ "\xe2\x97\x8f" ^ Ansi.reset
              , Theme.warn () ^ say "연결됨, 도구 없음" "attached, no tools" ^ Ansi.reset )
@@ -130,18 +130,18 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
          in
          let shown =
            if held || here then padded
-           else Ansi.dim ^ padded ^ Ansi.reset
+           else Theme.recede () ^ padded ^ Ansi.reset
          in
          let elsewhere =
            match also_on id with
            | [] -> ""
            | names ->
-               Ansi.dim ^ say "  · 공용: " "  · also " ^ String.concat ", " names ^ Ansi.reset
+               Theme.recede () ^ say "  · 공용: " "  · also " ^ String.concat ", " names ^ Ansi.reset
          in
          let app =
            match app_of id with
            | Some Masc_tui_identity_model.App_on_file ->
-             Ansi.dim ^ say "  · 사용자 앱" "  · your app" ^ Ansi.reset
+             Theme.info () ^ say "  · 사용자 앱" "  · your app" ^ Ansi.reset
            | Some (Masc_tui_identity_model.App_problem _) ->
              Theme.bad () ^ say "  · 앱 읽기 불가" "  · app unreadable" ^ Ansi.reset
            | Some Masc_tui_identity_model.App_none | None -> ""
@@ -153,7 +153,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
            | Some
                (Masc_tui_identity_model.Loopback_row
                   (Masc_tui_identity_model.Callback_url _)) ->
-             Ansi.dim ^ say "  · 로컬 콜백" "  · loopback callback" ^ Ansi.reset
+             Theme.recede () ^ say "  · 로컬 콜백" "  · loopback callback" ^ Ansi.reset
            | Some
                (Masc_tui_identity_model.Loopback_row
                   (Masc_tui_identity_model.Callback_unknown _)) ->
@@ -205,7 +205,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
       | None | Some [] -> []
       | Some names ->
         ""
-        :: (Ansi.dim ^ "  " ^ Terminal_text.single_line id ^ Ansi.reset)
+        :: (Theme.recede () ^ "  " ^ Terminal_text.single_line id ^ Ansi.reset)
         :: List.map (fun name -> "    " ^ Terminal_text.single_line name) names)
   in
   let rejected =
@@ -215,7 +215,9 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
         | Masc_tui_identity_model.Identity_unreadable { idp_id; idp_problem } ->
           Some
             (Printf.sprintf
-               "  -  %s  %s%s%s"
+               "  %s\xc3\x97%s  %s  %s%s%s"
+               (Theme.bad ())
+               Ansi.reset
                (Terminal_text.single_line idp_id)
                (Theme.bad ())
                (Terminal_text.single_line idp_problem)
@@ -233,7 +235,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
           ^ say ("OAuth 로그인 시작 중 · " ^ clean_names)
                 ("Starting OAuth login · " ^ clean_names)
           ^ Ansi.reset
-        ; Ansi.dim
+        ; Theme.recede ()
           ^ say "  서버에서 로그인 URL을 준비하고 있습니다."
                 "  Waiting for the server to prepare the consent URL."
           ^ Ansi.reset
@@ -246,19 +248,19 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
   (* The callback the server will name, coloured as a fact when it is known
      and as a problem when it is not: a login cannot start without it. *)
   let callback =
-    let server = Masc_tui_identity_model.identity_server_callback_rows view.callback in
+    let server = Masc_tui_identity_model.identity_server_callback_rows ~ko view.callback in
     let server =
       match view.callback with
       | Some (Masc_tui_identity_model.Callback_url _) ->
-        List.map (fun line -> Ansi.dim ^ line ^ Ansi.reset) server
+        List.map (fun line -> Theme.recede () ^ line ^ Ansi.reset) server
       | Some (Masc_tui_identity_model.Callback_unknown _) ->
         List.map (fun line -> Theme.bad () ^ line ^ Ansi.reset) server
       | None -> server
     in
     server
     @ List.map
-        (fun line -> Ansi.dim ^ line ^ Ansi.reset)
-        (Masc_tui_identity_model.identity_loopback_callback_rows providers)
+        (fun line -> Theme.recede () ^ line ^ Ansi.reset)
+        (Masc_tui_identity_model.identity_loopback_callback_rows ~ko providers)
   in
   (* What one attempt answered. Wrapped, because the message that matters
      most here is the long one: a provider that registers no client says what
@@ -270,6 +272,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
   let attempt_kind = Option.map fst view.attempt_error in
   let attempt =
     Masc_tui_identity_model.identity_notice
+      ~ko
       ~cols
       (Option.map
          (fun (kind, text) -> kind, Terminal_text.single_line text)
@@ -288,8 +291,9 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
       (fun index line ->
          if line = ""
          then line
-         else if index = List.length attempt - 1
-         then Ansi.dim ^ line ^ Ansi.reset
+         else if attempt_kind = Some Masc_tui_identity_model.Notice_bad
+                 && index = List.length attempt - 2
+         then Theme.recede () ^ line ^ Ansi.reset
          else body ^ line ^ Ansi.reset)
       attempt
   in
@@ -299,11 +303,11 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
   let filter_rows =
     List.map
       (fun line -> if line = "" then line else Theme.ok () ^ line ^ Ansi.reset)
-      (Masc_tui_identity_model.identity_filter_rows ~providers ~listing view.filter)
+      (Masc_tui_identity_model.identity_filter_rows ~ko ~providers ~listing view.filter)
   in
   let preamble () =
     Masc_tui_identity_model.identity_preamble
-      ~summary:(Masc_tui_identity_model.identity_summary ~providers ~listing)
+      ~summary:(Masc_tui_identity_model.identity_summary_for ~ko ~providers ~listing)
       ~callback
       ~notice:
         (attempt
@@ -321,7 +325,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
   then
     { rows =
         preamble ()
-        @ [ Ansi.dim
+        @ [ Theme.recede ()
             ^ say "  일치하는 항목이 없습니다. Esc로 전체 보기."
                   "  Nothing here matches. esc to see them all."
             ^ Ansi.reset ]
@@ -332,7 +336,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
   then
     { rows =
         preamble ()
-        @ [ Ansi.dim
+        @ [ Theme.recede ()
             ^ say "  이 보기에 항목이 없습니다. v로 다른 보기 전환."
                   "  Nothing in this view. v to see the others."
             ^ Ansi.reset ]
@@ -342,7 +346,7 @@ let draw ?(ko = false) ?now ?(pending_logins = []) ~cols (view : view) =
   else if numbered = [] && rejected = []
   then
     { rows =
-        [ Ansi.dim
+        [ Theme.recede ()
           ^ say "  config/identity/ 아래에 선언된 항목이 없습니다."
                 "  Nothing is declared under config/identity/."
           ^ Ansi.reset ]

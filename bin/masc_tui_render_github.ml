@@ -9,27 +9,46 @@ type view =
   ; login_scopes : Masc.Keeper_github_identity.login_scope list
   }
 
+let split_utf8_scalars s =
+  let len = String.length s in
+  let rec loop i acc =
+    if i >= len then List.rev acc
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let step = max 1 (Uchar.utf_decode_length dec) in
+      let take = min step (len - i) in
+      loop (i + take) (String.sub s i take :: acc)
+  in
+  loop 0 []
+;;
+
 let lines ?(ko = false) (view : view) ~base =
   let say korean english = if ko then korean else english in
   let input_lines =
     match view.token_input with
     | Some draft ->
       let masked =
-        let len = String.length draft in
-        if len = 0
-        then say "(비어 있음)" "(empty)"
-        else if len <= 8
-        then String.make len '*'
+        let scalars = split_utf8_scalars draft in
+        let n = List.length scalars in
+        if n = 0
+        then Theme.recede () ^ say "(비어 있음)" "(empty)" ^ Ansi.reset
+        else if n <= 8
+        then String.make n '*'
         else
-          String.sub draft 0 4 ^ String.make (len - 8) '*' ^ String.sub draft (len - 4) 4
+          String.concat "" (List.take 4 scalars)
+          ^ String.make (n - 8) '*'
+          ^ String.concat "" (List.drop (n - 4) scalars)
       in
-      [ Theme.ok ()
-        ^ say "  ╭─ GitHub Personal Access Token (PAT) 설정 ─"
-              "  ╭─ Set GitHub Personal Access Token (PAT) ─"
-        ^ Ansi.reset
-      ; say "  │ 토큰: " "  │ Token: " ^ masked ^ "█"
-      ; "  │ " ^ Ansi.dim ^ say "Enter:저장  Esc:취소" "Enter:save  Esc:cancel" ^ Ansi.reset
-      ; "  ╰─────────────────────────────────────────"
+      let edge = Theme.border_muted () in
+      let pipe = edge ^ "  \xe2\x94\x82 " ^ Ansi.reset in
+      [ edge ^ "  \xe2\x95\xad\xe2\x94\x80 " ^ Ansi.reset
+        ^ Theme.ok () ^ Ansi.bold
+        ^ say "GitHub Personal Access Token (PAT) 설정"
+              "Set GitHub Personal Access Token (PAT)"
+        ^ Ansi.reset ^ edge ^ " \xe2\x94\x80" ^ Ansi.reset
+      ; pipe ^ Theme.recede () ^ say "토큰: " "Token: " ^ Ansi.reset ^ masked ^ "\xe2\x96\x88"
+      ; pipe ^ Theme.recede () ^ say "Enter:저장  Esc:취소" "Enter:save  Esc:cancel" ^ Ansi.reset
+      ; edge ^ "  \xe2\x95\xb0\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80\xe2\x94\x80" ^ Ansi.reset
       ; ""
       ]
     | None -> []
@@ -43,7 +62,7 @@ let lines ?(ko = false) (view : view) ~base =
      it. Drawn from the server's own list so the number and the scope
      the key toggles cannot disagree. *)
   let scope_lines =
-    ((Ansi.dim
+    ((Theme.recede ()
       ^ say "  로그인 권한 범위 (숫자 키로 토글 · L로 로그인)"
             "  Login scopes (digit toggles, L logs in with them)"
       ^ Ansi.reset)
@@ -68,12 +87,18 @@ let lines ?(ko = false) (view : view) ~base =
                  say "임의 URL로 이벤트를 보내는 저장소 웹훅 추가 허용"
                    "may add repo webhooks, which post repo events to any URL"
              in
+             let box =
+               if ticked then Theme.ok () ^ "[x]" ^ Ansi.reset
+               else Theme.recede () ^ "[ ]" ^ Ansi.reset
+             in
              Printf.sprintf
-               "  %d %s %s %s· %s%s"
+               "  %s%d%s %s %s %s· %s%s"
+               Ansi.bold
                (index + 1)
-               (if ticked then "[x]" else "[ ]")
+               Ansi.reset
+               box
                (Masc.Keeper_github_identity.login_scope_to_string scope)
-               Ansi.dim
+               (Theme.recede ())
                note
                Ansi.reset)
           Masc.Keeper_github_identity.all_login_scopes)

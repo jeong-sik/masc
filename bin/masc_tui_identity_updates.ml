@@ -45,7 +45,9 @@ let switch_set
     notice
       ~keeper_name:(Some keeper_name)
       ( Masc_tui_identity_model.Notice_bad
-      , Printf.sprintf "switch %s: %s" provider_id detail )
+      , Printf.sprintf
+          (if state.ui_language = Lang_ko then "스위치 변경 실패 (%s): %s" else "switch %s: %s")
+          provider_id detail )
   | Error (Request_withdrawn refusal) ->
     (* Not sent: the kept-back notice alone, with the provider after it
        (RFC §2). *)
@@ -80,16 +82,38 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
             Masc_tui_identity_model.identity_provider_attached ~providers
               ~provider_id:expectation.ile_provider
         | None -> false in
+      let ko = state.ui_language = Lang_ko in
+      let say korean english = if ko then korean else english in
       let notice = match terminal with
           | Credentials_published (Ok _) -> None
-          | Credentials_published (Error ()) -> Some (Masc_tui_identity_model.Notice_bad, "credentials attached; tool discovery failed, refresh tools to retry")
-          | Login_exchange_failed -> Some (Masc_tui_identity_model.Notice_bad, "login failed; start a new login")
-          | Credential_publication_incomplete -> Some (Masc_tui_identity_model.Notice_bad,
-              "credential storage incomplete; saved values may have changed; check secret storage before another login")
-          | Consent_expired -> Some (Masc_tui_identity_model.Notice_bad, "consent expired; start a new login")
-          | Consent_superseded -> Some (Masc_tui_identity_model.Notice_bad, "login superseded by a newer attempt")
-          | Attempt_unavailable when attached -> Some (Masc_tui_identity_model.Notice_bad, "this server no longer knows how the login ended; the provider is attached, possibly from an earlier login, so check its tools before starting another")
-          | Attempt_unavailable -> Some (Masc_tui_identity_model.Notice_bad, "login status unavailable on this server; start a new login")
+          | Credentials_published (Error ()) ->
+              Some (Masc_tui_identity_model.Notice_bad,
+                say "자격 증명은 연결되었으나 도구 조회에 실패했습니다. 도구를 새로고침해 다시 시도하세요"
+                  "credentials attached; tool discovery failed, refresh tools to retry")
+          | Login_exchange_failed ->
+              Some (Masc_tui_identity_model.Notice_bad,
+                say "로그인에 실패했습니다. 새 로그인을 시작하세요"
+                  "login failed; start a new login")
+          | Credential_publication_incomplete ->
+              Some (Masc_tui_identity_model.Notice_bad,
+                say "자격 증명 저장이 완료되지 않았습니다. 저장 값이 변경되었을 수 있으니 다시 로그인하기 전에 시크릿 저장소를 확인하세요"
+                  "credential storage incomplete; saved values may have changed; check secret storage before another login")
+          | Consent_expired ->
+              Some (Masc_tui_identity_model.Notice_bad,
+                say "동의가 만료되었습니다. 새 로그인을 시작하세요"
+                  "consent expired; start a new login")
+          | Consent_superseded ->
+              Some (Masc_tui_identity_model.Notice_bad,
+                say "더 최근 로그인 시도로 대체되었습니다"
+                  "login superseded by a newer attempt")
+          | Attempt_unavailable when attached ->
+              Some (Masc_tui_identity_model.Notice_bad,
+                say "이 서버에 로그인 완료 기록이 남아 있지 않습니다. 서비스는 이전 로그인으로 이미 연결되어 있을 수 있으니 다시 로그인하기 전에 도구를 확인하세요"
+                  "this server no longer knows how the login ended; the provider is attached, possibly from an earlier login, so check its tools before starting another")
+          | Attempt_unavailable ->
+              Some (Masc_tui_identity_model.Notice_bad,
+                say "이 서버에서 로그인 상태를 확인할 수 없습니다. 새 로그인을 시작하세요"
+                  "login status unavailable on this server; start a new login")
           | Consent_waiting _ | Callback_in_progress -> None in
       (* The expectation is forgotten either way. A reader on another surface
          or another Keeper would otherwise lose the attempt and its reason
@@ -98,8 +122,9 @@ let apply_login_status (state : state) ~report ~catalog expectation result =
       if keeper_detail_target_matches state expectation.ile_keeper then
         state.identity_attempt_error <- notice
       else Option.iter (fun (_, detail) ->
-        report (Printf.sprintf "%s %s login: %s" expectation.ile_keeper
-          expectation.ile_provider detail)) notice
+        report (Printf.sprintf
+          (if ko then "%s %s 로그인: %s" else "%s %s login: %s")
+          expectation.ile_keeper expectation.ile_provider detail)) notice
 
 (* What one reading of a Keeper's providers and attempts tells the read that
    owed it. *)
@@ -206,7 +231,9 @@ let login_started (state : state) request ~now ~report ~notice result =
             ~request:Kept_request.Service_login refusal )
     | Ok (Masc_tui_identity_model.Login_started { expires_at; _ }) when expires_at <= now ->
       notice ~keeper_name:(Some keeper_name)
-        (Masc_tui_identity_model.Notice_bad, "login expired; start a new login")
+        ( Masc_tui_identity_model.Notice_bad
+        , ui_text state ~ko:"로그인이 만료되었습니다. 새 로그인을 시작하세요"
+            ~en:"login expired; start a new login" )
     | Ok (Masc_tui_identity_model.Login_started { provider_id; label; url; expires_at; attempt_id }) ->
       remember_identity_login
         state
@@ -249,16 +276,23 @@ let app_saved ~ko ~keeper_name ~provider_id ~notice result =
      | Ok 0 ->
        ( Masc_tui_identity_model.Notice_ok
        , Printf.sprintf
-           "%s: app recorded. No scopes given, so the service's own list is what will be \
-            asked for."
+           (if ko then
+              "%s: 앱이 등록되었습니다. 권한 범위를 지정하지 않아 서비스 기본 목록을 요청합니다."
+            else
+              "%s: app recorded. No scopes given, so the service's own list is what will be \
+               asked for.")
            provider_id )
      | Ok count ->
        ( Masc_tui_identity_model.Notice_ok
-       , Printf.sprintf
-           "%s: app recorded, asking for %d scope%s."
-           provider_id
-           count
-           (if count = 1 then "" else "s") )
+       , if ko then
+           Printf.sprintf "%s: 앱이 등록되었습니다. 권한 범위 %d개를 요청합니다."
+             provider_id count
+         else
+           Printf.sprintf
+             "%s: app recorded, asking for %d scope%s."
+             provider_id
+             count
+             (if count = 1 then "" else "s") )
      | Error (Request_failed detail) ->
        Masc_tui_identity_model.Notice_bad, Printf.sprintf "%s: %s" provider_id detail
      | Error (Request_withdrawn refusal) ->
@@ -309,7 +343,9 @@ let disconnected (state : state) ~keeper_name ~provider_id ~notice ~refresh resu
      notice
        ~keeper_name:(Some keeper_name)
        ( Masc_tui_identity_model.Notice_bad
-       , Printf.sprintf "disconnect %s: %s" provider_id detail )
+       , Printf.sprintf
+           (if state.ui_language = Lang_ko then "연결 해제 실패 (%s): %s" else "disconnect %s: %s")
+           provider_id detail )
    | Error (Request_withdrawn refusal) ->
      (* Not sent: the kept-back notice alone, with the provider after it
         (RFC §2). *)

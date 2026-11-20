@@ -1,7 +1,7 @@
 import { isDismissEscape } from '../../lib/keyboard'
-// Keeper Workspace — 전체 브로드캐스트 작성기 (rails.jsx BroadcastComposer).
+// Keeper Workspace — 전체 브로드캐스트 작성기.
 // `masc_broadcast`는 content 만 받는다 — 수신 범위(scope)와 경로(via) 선택은
-// 백엔드가 지원하지 않으므로 디자인의 `.bcc-seg`/`.bcc-opt` 선택 UI는 심지
+// 백엔드가 지원하지 않으므로 `.bcc-seg`/`.bcc-opt` 선택 UI는 심지
 // 않았다 (선택해도 delivery에 반영되지 않는 fake 가 된다). 수신자 칩 목록은
 // 실제 broadcast 가 닿는 워크스페이스 keeper 전원 = live `keepers` store.
 // 전송은 기존 board composer 와 같은 sendBroadcast + receipt 처리 경로를 쓴다.

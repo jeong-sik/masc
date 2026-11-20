@@ -250,8 +250,8 @@ function WorkspaceCommandButtons({
     }
   }
 
-  // Prototype menu rows (shell.jsx chat-ovf-menu) render `{glyph} {label}` as
-  // text; `kp-menu-i` is the vendored design class for these items.
+  // Menu rows render `{glyph} {label}` as text; `kp-menu-i` is the vendored
+  // design class for these items.
   const renderMenuItem = (command: WorkspaceCommand): VNode => {
     return html`
       <button
@@ -270,8 +270,8 @@ function WorkspaceCommandButtons({
   }
 
   if (mobile) {
-    // Design's mobile header command button is `.chat-ovf` with the ⋮ glyph
-    // (shell.jsx); the popover wears the vendored `.chat-ovf-menu`.
+    // The mobile header command button is `.chat-ovf` with the ⋮ glyph; the
+    // popover wears the vendored `.chat-ovf-menu`.
     return html`
       <div class="kw-chat-mobile-actions">
         <div class="kw-chat-command-menu">
@@ -295,8 +295,8 @@ function WorkspaceCommandButtons({
                 <div ref=${mobileMenu} class="kw-chat-command-popover chat-ovf-menu v2-monitoring-surface" role="menu" onClick=${(event: Event) => event.stopPropagation()}>
                   ${commands.some(isLifecycleWorkspaceCommand)
                     ? null
-                    // shell.jsx kp-menu-note: the ovf menu explains why the row
-                    // is action-less. The live KeeperPhase enum has no Dead
+                    // kp-menu-note: the ovf menu explains why the row is
+                    // action-less. The live KeeperPhase enum has no Dead
                     // state, so only the transient wording applies (mirrors the
                     // desktop act-quiet note below).
                     : html`<div class="kp-menu-note">전이 중 — 잠시 후 가능</div>`}
@@ -309,8 +309,8 @@ function WorkspaceCommandButtons({
     `
   }
 
-  // Prototype header actions (shell.jsx ChatHeader) are `.act.icon` glyph
-  // buttons; dual-emit the design classes so the vendored skin owns the box.
+  // Header actions are `.act.icon` glyph buttons; dual-emit the design
+  // classes so the vendored skin owns the box.
   const renderIcon = (command: WorkspaceCommand): VNode => {
     return html`
       <button
@@ -340,10 +340,9 @@ function WorkspaceCommandButtons({
     <div class="kw-chat-command-icons" data-testid="kw-chat-command-icons">
       ${lifecycle.map(renderIcon)}
       ${lifecycle.length === 0
-        // Prototype shows a quiet note when the phase exposes no operator
-        // action (shell.jsx: transient phases → '전이 중…'). The live
-        // KeeperPhase enum has no Dead state, so only the transient wording
-        // applies.
+        // A quiet note shows when the phase exposes no operator action
+        // (transient phases → '전이 중…'). The live KeeperPhase enum has no
+        // Dead state, so only the transient wording applies.
         ? html`<span class="act-quiet" title=${keeperDisplayStatus(keeper)}>전이 중…</span>`
         : null}
       ${lifecycle.length > 0 && utility.length > 0
@@ -645,12 +644,11 @@ export function KeeperWorkspaceChat({
   const [searchOpen, setSearchOpen] = useState(false)
   const [composerBusyAction, setComposerBusyAction] = useState<WorkspaceCommandId | null>(null)
   const entries = keeperThreads.value[keeper.name] ?? []
-  // Design's in-thread pending-approval cue (keepers.jsx chat-pendcue): a slim
-  // strip above the transcript linking to the approvals queue — the sole
-  // act-point. Reads the same Gate approval_queue SSOT as the header badge;
-  // the queue row's tool_name fills the design's `pend.tool` slot. Kept in
-  // addition to the header pill because the design draws both signals (the
-  // cue is the one visible while reading the thread).
+  // In-thread pending-approval cue (`.chat-pendcue`): a slim strip above the
+  // transcript linking to the approvals queue — the sole act-point. Reads the
+  // same Gate approval_queue SSOT as the header badge; the queue row's
+  // tool_name fills the cue's tool slot. Kept in addition to the header pill:
+  // the cue is the one visible while reading the thread.
   const pendingCueItem = keeperPendingApprovals(keeper.name)?.[0] ?? null
   const detailOpen = false
   const onToggleDetail = onOpenDetail ?? (() => {})

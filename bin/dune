@@ -1971,6 +1971,14 @@
  (modules masc_tui_task_payloads)
  (libraries masc_types))
 
+;; The task backlog as the TUI reads it: only rows whose bytes changed are
+;; decoded (RFC-tui-backlog-read).
+(library
+ (name masc_tui_backlog_read)
+ (wrapped false)
+ (modules masc_tui_backlog_read)
+ (libraries masc.masc_core masc.masc_types masc.masc_workspace yojson unix))
+
 (library
  (name masc_tui_preference_writer)
  (wrapped false)
@@ -2878,6 +2886,7 @@
  (libraries masc_tui_engine_samples masc_tui_transport_failure masc_tui_preference_writer masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
   masc_tui_task_payloads
+  masc_tui_backlog_read
   masc
   masc.masc_core
   masc.masc_candle

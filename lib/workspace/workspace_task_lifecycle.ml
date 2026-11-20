@@ -64,8 +64,7 @@ let resolve_claim_status ~same_actor ~agent_name ~now task_status =
      | Masc_domain.Claimed { assignee; _ }
      | Masc_domain.InProgress { assignee; _ } ->
        if same_actor assignee then Self_owned else Held_by_other assignee
-     | Masc_domain.Done _ -> Held_terminal task_status
-     | Masc_domain.Cancelled { cancelled_by; _ } -> Held_by_other cancelled_by
+     | Masc_domain.Done _ | Masc_domain.Cancelled _ -> Held_terminal task_status
      | Masc_domain.Todo | Masc_domain.AwaitingVerification _ ->
        (* These constructors are not produced by the status-level decision for
           this branch. Keep the match exhaustive so a future status addition
@@ -98,14 +97,7 @@ let decide
      | Held_terminal (Masc_domain.Done _ as done_status) -> ok done_status
      | Held_pending_verdict _ -> Error Verification_pending_verdict
      | Held_by_other current_assignee ->
-       (match task_status with
-        | Masc_domain.Cancelled _ -> Error Invalid_transition
-        | Masc_domain.Todo
-        | Masc_domain.Claimed _
-        | Masc_domain.InProgress _
-        | Masc_domain.AwaitingVerification _
-        | Masc_domain.Done _ ->
-          Error (Current_owner_required { current_assignee }))
+       Error (Current_owner_required { current_assignee })
      | Held_terminal
          ( Masc_domain.Todo
          | Masc_domain.Claimed _

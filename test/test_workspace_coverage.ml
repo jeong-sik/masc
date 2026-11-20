@@ -1936,6 +1936,47 @@ let test_claim_task_r_already_claimed () =
     | _ -> Alcotest.fail "Expected TaskAlreadyClaimed")
 ;;
 
+let test_claim_task_r_cancelled_is_terminal () =
+  with_test_env (fun config ->
+    let _ = Workspace.add_task config ~title:"Cancelled task" ~priority:1 ~description:"" in
+    update_task config "task-001" (fun (t : Masc_domain.task) ->
+      { t with
+        task_status =
+          Masc_domain.Cancelled
+            { cancelled_by = "alice"
+            ; cancelled_at = "2026-07-13T00:00:00Z"
+            ; reason = Some "withdrawn"
+            }
+      });
+    List.iter
+      (fun caller ->
+         match Workspace.claim_task_r config ~agent_name:caller ~task_id:"task-001" () with
+         | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState detail)) ->
+           Alcotest.(check bool)
+             (caller ^ ": mentions cancelled")
+             true
+             (str_contains detail "cancelled");
+           Alcotest.(check bool)
+             (caller ^ ": mentions terminal")
+             true
+             (str_contains detail "terminal");
+           Alcotest.(check bool)
+             (caller ^ ": does not claim owned by canceller")
+             false
+             (str_contains detail "currently owned by")
+         | Error err ->
+           Alcotest.failf "%s: expected InvalidState, got %s"
+             caller (Masc_domain.masc_error_to_string err)
+         | Ok _ ->
+           Alcotest.failf "%s: cancelled task must not be claimable" caller)
+      [ "bob"; "alice" ];
+    let task = task_by_id config "task-001" in
+    Alcotest.(check string)
+      "cancelled task stays cancelled"
+      "cancelled"
+      (Masc_domain.task_status_to_string task.task_status))
+;;
+
 (* ============================================================ *)
 (* GC (Garbage Collection) Tests                                 *)
 (* ============================================================ *)
@@ -3522,6 +3563,10 @@ let () =
             "claim_task_r already claimed"
             `Quick
             test_claim_task_r_already_claimed
+        ; Alcotest.test_case
+            "claim_task_r rejects cancelled task as terminal"
+            `Quick
+            test_claim_task_r_cancelled_is_terminal
         ] )
     ; (* === GC === *)
       ( "gc"

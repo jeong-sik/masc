@@ -16,6 +16,7 @@ let system_of_text text =
   match
     Keeper_turn_system.issue ~held:None ~lane:Keeper_turn_system.Without_basis
       ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+      ~status:World_constitution_store.Resolved
       ~at:{ World_constitution_store.end_offset = 0; digest = "" }
       ~articles_at:(fun (_ : World_constitution_store.position) -> Ok None)
   with
@@ -3400,7 +3401,7 @@ let amended_system () =
       Keeper_turn_system.issue ~held
         ~lane:(Keeper_turn_system.Agent_core { runtime_id = "official-host-amendments"; front })
         ~render:(fun articles -> "BASE\n" ^ World_constitution_render.articles articles) ~current
-        ~at:(at_of current) ~articles_at
+        ~status:World_constitution_store.Resolved ~at:(at_of current) ~articles_at
     with
     | Ok issued -> issued
     | Error () -> fail "the in-memory ledger does not fail" in

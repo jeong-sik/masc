@@ -32,20 +32,35 @@
     bytes changed, or whose rendering no longer matches its digest, is not
     used. *)
 
+(** The complete current article set
+    ({!Keeper_prompt.constitution_current_block}): every held article, and
+    the notice that an article an unresolved record touched is withheld
+    rather than approved for removal. Bounded by the held articles rather
+    than all inactive ids in history. *)
+type current_norms = private
+  | Not_carried
+      (** The ledger holds no isolated move. A System rendered with older
+          articles names what changed since in [amendments]. *)
+  | In_text of string
+      (** The ledger holds an isolated move, and [text] was rendered with
+          the current articles: its [<norms>] already is the complete set,
+          so nothing travels beside it. The block is kept for bytes that
+          replace [text] ({!with_bytes}). *)
+  | Beside_text of string
+      (** [text] was rendered with other articles, or which articles
+          rendered it is not known, so the block travels with it. Agent Core
+          sends it behind [text] in the System of every request
+          ({!Keeper_run_prompt.assemble_request_context}), so on a turn that
+          has it an article write changes the System a request sends
+          although [text] stays equal. *)
+
 type t = private
   { text : string  (** The System's bytes. *)
   ; amendments : string option
         (** The rendered {!Prompt_block_id.Constitution_amendments} block:
             [Some] only for a System rendered with articles the world has
             since changed. *)
-  ; current_norms : string option
-        (** The complete current article set for native resumption or a
-            projection containing isolated moves. Independent of the recorded System's basis; bounded by
-            the held articles rather than all inactive ids in history.
-            Agent Core sends it behind [text] in the System of every request
-            ({!Keeper_run_prompt.assemble_request_context}), so on a turn that
-            has it an article write changes the System a request sends
-            although [text] stays equal. *)
+  ; current_norms : current_norms
   }
 
 (** The articles a System was rendered with, the ledger position they were
@@ -126,6 +141,7 @@ val issue :
   lane:lane ->
   render:(World_constitution_types.t list -> string) ->
   current:World_constitution_types.t list ->
+  status:World_constitution_store.projection_status ->
   at:World_constitution_store.position ->
   articles_at:(World_constitution_store.position -> (World_constitution_types.t list option, 'e) result) ->
   (t * held, 'e) result
@@ -135,7 +151,14 @@ val issue :
     renders [current] and keeps the runtime bases as they were. The returned
     [held] names the System issued, for the turn to {!write} into the context
     its checkpoint persists. An [articles_at] error is returned as is. Raises
-    [Invalid_argument] when [render] or the block's prompt slot does. *)
+    [Invalid_argument] when [render] or the block's prompt slot does.
+
+    [status] is the projection [current] was read from. With
+    {!World_constitution_store.Isolated_history}, a System rendered with
+    [current], or with a basis that holds the same articles, keeps the
+    complete set {!In_text}. One rendered with a basis whose articles differ
+    carries it {!Beside_text} in place of the delta: a delta would name a
+    withheld article as taken back. *)
 
 val resend :
   held:held option ->
@@ -154,14 +177,16 @@ val resend :
 
 val with_current_norms : World_constitution_types.t list -> t -> t
 (** Replace ordinary amendments with the complete current article set from
-    {!World_constitution_store.load_held}, including an empty set. The System
-    bytes and basis stay exact. Does not approve any isolated move. *)
+    {!World_constitution_store.load_held}, including an empty set, sent
+    {!Beside_text}. The System bytes and basis stay exact. Does not approve
+    any isolated move. *)
 
 val with_bytes : issued:t -> string -> t
 (** The System a request sends when a hook overrides the bytes {!issue}
     gave: [issued] when they are its own, otherwise those bytes with no
     ordinary amendments, since which articles rendered them is not known.
-    The complete current norms remain true for any System and are preserved. *)
+    The complete current norms remain true for any System: a set [issued]
+    kept {!In_text} travels {!Beside_text} with the new bytes. *)
 
 val read : Agent_core.Context.t -> (held option, string) result
 (** What a session context holds. [Ok None] when nothing was written, as in

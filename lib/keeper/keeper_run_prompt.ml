@@ -154,12 +154,16 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
      block: its projection sends a block the session holds again only when
      the bytes change ([Prompt_block_id.resent_when_held]). A turn without
      the complete list carries its delta as the end-context block for both
-     owners. *)
+     owners. A System whose [<norms>] already are the complete set
+     ([Keeper_turn_system.In_text]) carries neither. *)
   let constitution sections =
     Inference_utils.sanitize_text_utf8 (String.concat "\n" sections) in
+  let beside = match system.current_norms with
+    | Keeper_turn_system.Beside_text norms -> [ norms ]
+    | Keeper_turn_system.Not_carried | Keeper_turn_system.In_text _ -> [] in
   let observations, amendments =
     match checkpoint_owner, system.current_norms with
-    | Runtime_execution.Masc_agent_core, Some norms ->
+    | Runtime_execution.Masc_agent_core, Keeper_turn_system.Beside_text norms ->
       (* [Keeper_turn_system.with_current_norms] leaves no delta beside the
          complete list. One that is there rides with it, in the order the
          block joins the two. *)
@@ -167,9 +171,10 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
           (constitution (Option.to_list system.amendments @ [ norms ]))
         :: observations
       , [] )
-    | Runtime_execution.Masc_agent_core, None
-    | Runtime_execution.Official_client, (Some _ | None) ->
-      (match Option.to_list system.amendments @ Option.to_list system.current_norms with
+    | Runtime_execution.Masc_agent_core, (Keeper_turn_system.Not_carried | Keeper_turn_system.In_text _)
+    | Runtime_execution.Official_client,
+      (Keeper_turn_system.Not_carried | Keeper_turn_system.In_text _ | Keeper_turn_system.Beside_text _) ->
+      (match Option.to_list system.amendments @ beside with
        | [] -> observations, []
        | sections ->
          observations, [ Prompt_block_id.Constitution_amendments, constitution sections ])

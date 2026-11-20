@@ -134,20 +134,18 @@ let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id ~he
   let* system, held =
     (match recorded_system with
      | Some { runtime_id; text } ->
+       (* Which articles rendered a recorded System is not certain even when
+          its basis reads back, so every native seed carries the complete set. *)
        Keeper_turn_system.resend ~held ~runtime_id ~current ~articles_at text
+       |> Result.map (fun (system, held) ->
+         Keeper_turn_system.with_current_norms current system, held)
      | None ->
        Keeper_turn_system.issue ~held
          ~lane:(first_request_lane ~config ~meta ~runtime_id history)
          ~render:(Keeper_unified_prompt.render_system_prompt ~workspace_root ~meta ~profile_defaults)
-         ~current ~at ~articles_at
+         ~current ~status:projection.World_constitution_store.status ~at ~articles_at
        |> Result.map (fun (system, held) -> system, Some held))
     |> Result.map_error (fun error -> Constitution_unreadable error)
-  in
-  let system = match recorded_system, projection.status with
-    | Some _, (World_constitution_store.Resolved | World_constitution_store.Isolated_history)
-    | None, World_constitution_store.Isolated_history ->
-      Keeper_turn_system.with_current_norms projection.articles system
-    | None, World_constitution_store.Resolved -> system
   in
   Ok (workspace_root, system, held)
 

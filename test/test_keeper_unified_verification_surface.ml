@@ -8,6 +8,7 @@ let system_of_text text =
   match
     Masc.Keeper_turn_system.issue ~held:None ~lane:Masc.Keeper_turn_system.Without_basis
       ~render:(fun (_ : Masc.World_constitution_types.t list) -> text) ~current:[]
+      ~status:Masc.World_constitution_store.Resolved
       ~at:{ Masc.World_constitution_store.end_offset = 0; digest = "" }
       ~articles_at:(fun (_ : Masc.World_constitution_store.position) -> Ok None)
   with

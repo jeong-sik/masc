@@ -191,8 +191,15 @@ let ok = function
   | Error () -> Alcotest.fail "the in-memory ledger does not fail"
 ;;
 
-let issue ?held ~lane current =
-  ok (System.issue ~held ~lane ~render ~current ~at:(at_of current) ~articles_at)
+let issue ?held ?(status = World_constitution_store.Resolved) ~lane current =
+  ok (System.issue ~held ~lane ~render ~current ~status ~at:(at_of current) ~articles_at)
+;;
+
+(* The complete current set a request carries beside the System bytes. *)
+let sent (system : System.t) =
+  match system.current_norms with
+  | System.Beside_text block -> Some block
+  | System.Not_carried | System.In_text _ -> None
 ;;
 
 let resend ~held ~runtime_id ~current recorded =
@@ -319,6 +326,27 @@ let test_other_bytes_carry_no_amendments () =
   Alcotest.(check bool) "with no amendments" true (Option.is_none recorded.amendments)
 ;;
 
+(* With an isolated move in the ledger a delta would name a withheld article
+   as taken back. A System rendered with the current articles already holds
+   the complete set, so it is not sent a second time; a System kept from an
+   older basis, or bytes that replace either, carry it beside. *)
+let test_an_isolated_ledger_sends_the_complete_set_only_where_the_system_lacks_it () =
+  let kept = article "open before you record" in
+  let written = article "cite the ledger row, not the frame" in
+  let status = World_constitution_store.Isolated_history in
+  let fresh, held = issue ~status ~lane:(agent_core System.No_previous_request) [ kept ] in
+  Alcotest.(check (option string)) "a System rendered with the current articles sends no second set"
+    None (sent fresh);
+  let older, (_ : System.held) = issue ~held ~status ~lane:(agent_core System.Same_front) [ kept; written ] in
+  Alcotest.(check string) "a held front keeps its basis" (render [ kept ]) older.text;
+  Alcotest.(check (option string)) "carries no delta" None older.amendments;
+  Alcotest.(check (option string)) "but the complete current set"
+    (Some (Keeper_prompt.constitution_current_block [ kept; written ])) (sent older);
+  Alcotest.(check (option string)) "bytes that replace a current System carry the set it kept"
+    (Some (Keeper_prompt.constitution_current_block [ kept ]))
+    (sent (System.with_bytes ~issued:fresh "a replacing System"))
+;;
+
 (* A native continuation resends its seed's System. The seed's checkpoint
    says which articles rendered those bytes, so the block names what changed
    since, even after the process that issued them is gone. *)
@@ -376,7 +404,7 @@ let test_a_resent_system_of_unknown_provenance_has_no_block () =
    it in the issued System, so a request that follows tool results adds no
    User tail. An official client receives it as the context block. *)
 let check_withholding_reaches_requests (system : System.t) =
-  let withheld = match system.current_norms with
+  let withheld = match sent system with
     | Some block -> block
     | None -> Alcotest.fail "the current withholding notice is required"
   in
@@ -452,7 +480,7 @@ let test_withholding_survives_unknown_native_bases_and_overrides () =
       check_withholding_reaches_requests issued;
       let overridden = System.with_bytes ~issued "an independently supplied override" in
       Alcotest.(check (option string)) "overriding bytes retains current withholding"
-        issued.current_norms overridden.current_norms;
+        (sent issued) (sent overridden);
       check_withholding_reaches_requests overridden)
     [missing; unknown; mismatched]
 ;;
@@ -851,7 +879,7 @@ let test_a_native_continuation_after_a_restart_keeps_the_block () =
   in
   Alcotest.(check string) "the continuation sends the recorded bytes" seeded.system.text
     resumed.system.text;
-  match resumed.system.current_norms with
+  match sent resumed.system with
   | None -> Alcotest.fail "the articles the recorded System lacks ride the end context"
   | Some block ->
     Alcotest.(check bool) "the article written before the seed" true
@@ -877,7 +905,7 @@ let test_a_native_continuation_without_a_recorded_basis_carries_current_norms ()
   Alcotest.(check string) "the continuation sends the recorded bytes" seeded.system.text
     resumed.system.text;
   Alcotest.(check (option string)) "current norms do not depend on a recorded basis"
-    (Some (Keeper_prompt.constitution_current_block [kept; written])) resumed.system.current_norms
+    (Some (Keeper_prompt.constitution_current_block [kept; written])) (sent resumed.system)
 ;;
 
 (* The old fold issued a basis whose position already included an unresolved
@@ -899,7 +927,8 @@ let test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding ()
   in
   let (_ : System.t), old_held =
     System.issue ~held:None ~lane:System.Without_basis
-      ~render:(fun _ -> seeded.system.text) ~current:[taken] ~at:projection.at
+      ~render:(fun _ -> seeded.system.text) ~current:[taken]
+      ~status:projection.World_constitution_store.status ~at:projection.at
       ~articles_at:(fun _ -> Ok (Some [taken])) |> unwrap
   in
   let seed = checkpoint_of_turn seeded in
@@ -913,7 +942,7 @@ let test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding ()
   Alcotest.(check bool) "reinterpreted basis alone finds no ordinary amendment" true
     (Option.is_none resumed.system.amendments);
   Alcotest.(check (option string)) "an empty current set still overrides the stale norms"
-    (Some (Keeper_prompt.constitution_current_block [])) resumed.system.current_norms;
+    (Some (Keeper_prompt.constitution_current_block [])) (sent resumed.system);
   check_withholding_reaches_requests resumed.system;
   let without_basis = { seed with Agent_core.Checkpoint.context = Agent_core.Context.create_sync () } in
   let unknown =
@@ -938,7 +967,7 @@ let test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding ()
       ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
   in
   Alcotest.(check (option string)) "roster changes cannot revive the native System's old norm"
-    unknown.system.current_norms resolved_native.system.current_norms;
+    (sent unknown.system) (sent resolved_native.system);
   check_withholding_reaches_requests resolved_native.system;
   let another_isolated =
     Types.make ~id:(Types.Article_id.generate ()) ~text:"an unrelated unverified norm"
@@ -952,10 +981,14 @@ let test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding ()
       ~recorded_system:{ Keeper_run_context.runtime_id = agent_core_runtime; text = seeded.system.text }
   in
   Alcotest.(check (option string)) "more inactive history does not enlarge the request snapshot"
-    unknown.system.current_norms more_history.system.current_norms;
+    (sent unknown.system) (sent more_history.system);
   let ordinary = prepare_context world ~runtime_id:agent_core_runtime ~checkpoint:seed in
   Alcotest.(check bool) "an ordinary turn rebuilds without the withdrawn text" false
     (holds ordinary.system taken);
+  Alcotest.(check (option string)) "whose <norms> are the complete set, sent once" None
+    (sent ordinary.system);
+  Alcotest.(check bool) "bytes that replace it carry the complete set" true
+    (Option.is_some (sent (System.with_bytes ~issued:ordinary.system "an override")));
   let readopted =
     Types.make ~id:taken.id ~text:"the explicitly readopted new text"
       ~author:"lane-smith" ~at:3.0 ~evidence:[]
@@ -971,7 +1004,7 @@ let test_a_native_seed_with_a_reinterpreted_basis_carries_current_withholding ()
     seeded.system.text readopted_native.system.text;
   Alcotest.(check (option string)) "readoption replaces an unknown native's old same-id body"
     (Some (Keeper_prompt.constitution_current_block [readopted]))
-    readopted_native.system.current_norms;
+    (sent readopted_native.system);
   check_withholding_reaches_requests readopted_native.system
 ;;
 
@@ -1008,6 +1041,8 @@ let () =
             test_a_basis_whose_ledger_bytes_changed_is_not_used
         ; Alcotest.test_case "other bytes carry no amendments" `Quick
             test_other_bytes_carry_no_amendments
+        ; Alcotest.test_case "an isolated ledger sends the complete set only where the System lacks it" `Quick
+            test_an_isolated_ledger_sends_the_complete_set_only_where_the_system_lacks_it
         ; Alcotest.test_case "a resent System names what changed since its seed" `Quick
             test_a_resent_system_names_what_changed_since_its_seed
         ; Alcotest.test_case "a resent System of unknown provenance has no block" `Quick

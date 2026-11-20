@@ -333,15 +333,22 @@ let test_engine_sample_is_noted () =
 let test_play_room_read_is_noted () =
   let module Room = Masc_tui_play_room in
   let machine = Masc.Machine_lane.Dos in
-  let room, read = Room.poll (Room.active (Room.create ()) true) ~now:0. ~machine in
+  let now = Wake.Mono.now () in
+  let room, read = Room.poll (Room.active (Room.create ()) true) ~now ~machine in
   let read = match read with Some read -> read | None -> fail "an open room reads" in
-  let failed = Room.receive room read ~now:0. (Error "connection lost") in
-  check_noted_in "play room" Wake.Play_room_read ~remaining_s:1.
-    (fun () -> Option.is_some (snd (Room.poll failed ~now:1. ~machine)));
-  let answered = Room.receive room read ~now:0. (Ok { Masc.Play_room.messages = []; members = []; has_more = false }) in
+  let failed = Room.receive room read ~now (Error "connection lost") in
+  Wake.Pass.begin_pass ();
+  check bool "play room: not yet" false
+    (Option.is_some (snd (Room.poll failed ~now:(Wake.Mono.after now 1.) ~machine)));
+  check (option (pair int int64)) "play room: its retry is noted"
+    (Some (reason_number Play_room_read, Int64.add (now :> int64) (seconds 2))) (noted ());
+  Wake.Pass.begin_pass ();
+  check bool "play room: due at its retry" true
+    (Option.is_some (snd (Room.poll failed ~now:(Wake.Mono.after now 2.) ~machine)));
+  let answered = Room.receive room read ~now (Ok { Masc.Play_room.messages = []; members = []; has_more = false }) in
   Wake.Pass.begin_pass ();
   check bool "an answered room waits for a change" true
-    (Option.is_none (snd (Room.poll answered ~now:100. ~machine)));
+    (Option.is_none (snd (Room.poll answered ~now:(Wake.Mono.after now 100.) ~machine)));
   check_nothing_noted "a room with no next read"
 
 (* The terminal read *)

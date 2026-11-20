@@ -1,5 +1,8 @@
 open Alcotest
 module View = Masc_tui_play_room
+(* An instant [s] seconds after one reading of the loop's clock. *)
+let t0 = Masc_tui_wake.Mono.now ()
+let at s = Masc_tui_wake.Mono.after t0 s
 let request = function Some request -> request | None -> fail "room request was not admitted"
 let empty : Masc.Play_room.snapshot = {messages = []; members = []; has_more = false}
 let idle () = View.create () |> fun t -> View.active t true
@@ -13,51 +16,51 @@ let test_retry_and_edit () =
   let t = enter (idle ()) in
   let t, first = View.send t ~machine:Masc.Machine_lane.Dos in
   let first = request first in
-  let t = View.receive t first ~now:1. (Error "connection lost") in
+  let t = View.receive t first ~now:(at 1.) (Error "connection lost") in
   let t, retry = View.send (View.active (View.active t false) true) ~machine:Masc.Machine_lane.Msx in
   let retry = request retry in
   check string "retry keeps id, text and original machine" (body first) (body retry);
   let t = View.paste t " edited" in
-  let t = View.receive t retry ~now:2. (Ok empty) in
+  let t = View.receive t retry ~now:(at 2.) (Ok empty) in
   let _, next = View.send t ~machine:Masc.Machine_lane.Msx in
   let next = request next in
   check bool "a later draft survives acknowledgment" true (has (body next) "edited");
   check bool "new draft has a new receipt" true (body first <> body next)
 
 let test_serial_leave () =
-  let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   let t, blocked = View.send (enter t) ~machine:Masc.Machine_lane.Dos in
   check bool "read owns the pending slot" true (Option.is_none blocked);
-  let t = View.receive (View.active t false) (request read) ~now:2. (Ok empty) in
-  let t, leave = View.poll t ~now:2. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive (View.active t false) (request read) ~now:(at 2.) (Ok empty) in
+  let t, leave = View.poll t ~now:(at 2.) ~machine:Masc.Machine_lane.Dos in
   check bool "closing after read settles issues leave" true (has (body (request leave)) "leave");
-  let t = View.receive t (request leave) ~now:3. (Ok empty) in
-  let _, none = View.poll t ~now:4. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request leave) ~now:(at 3.) (Ok empty) in
+  let _, none = View.poll t ~now:(at 4.) ~machine:Masc.Machine_lane.Dos in
   check bool "closed view no longer polls" true (Option.is_none none)
 
 let test_leave_unknown_retries () =
-  let t, read = View.poll (idle ()) ~now:0. ~machine:Masc.Machine_lane.Dos in
-  let t = View.receive t (request read) ~now:0. (Ok empty) in
-  let t, leave = View.poll (View.active t false) ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 0.) ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request read) ~now:(at 0.) (Ok empty) in
+  let t, leave = View.poll (View.active t false) ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   let leave = request leave in
-  let t = View.receive t leave ~now:2. (Error "connection lost before leave acknowledgement") in
-  let t, early = View.poll t ~now:2. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t leave ~now:(at 2.) (Error "connection lost before leave acknowledgement") in
+  let t, early = View.poll t ~now:(at 2.) ~machine:Masc.Machine_lane.Dos in
   check bool "unknown leave waits for the ordinary polling cadence" true (Option.is_none early);
-  let t, retry = View.poll t ~now:4. ~machine:Masc.Machine_lane.Dos in
+  let t, retry = View.poll t ~now:(at 4.) ~machine:Masc.Machine_lane.Dos in
   let retry = request retry in
   check string "inactive view retries removal of the same client" (body leave) (body retry);
-  let t = View.receive t leave ~now:4. (Ok empty) in
-  let _, pending = View.poll t ~now:5. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t leave ~now:(at 4.) (Ok empty) in
+  let _, pending = View.poll t ~now:(at 5.) ~machine:Masc.Machine_lane.Dos in
   check bool "stale leave acknowledgement cannot release the retry" true (Option.is_none pending);
-  let t = View.receive t retry ~now:5. (Ok empty) in
-  let _, stopped = View.poll t ~now:8. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t retry ~now:(at 5.) (Ok empty) in
+  let _, stopped = View.poll t ~now:(at 8.) ~machine:Masc.Machine_lane.Dos in
   check bool "confirmed leave stops retries" true (Option.is_none stopped)
 
 let test_next_draft_is_separate () =
   let t, first = View.send (enter (idle ())) ~machine:Masc.Machine_lane.Dos in
   let first = request first in
   let t = View.paste t "다음 초안" in
-  let t = View.receive t first ~now:1. (Ok empty) in
+  let t = View.receive t first ~now:(at 1.) (Ok empty) in
   let t, second = View.send t ~machine:Masc.Machine_lane.Dos in
   let second = request second in
   let field key request = View.request_json request |> Yojson.Safe.Util.member key in
@@ -65,7 +68,7 @@ let test_next_draft_is_separate () =
     "다음 초안" (field "text" second |> Yojson.Safe.Util.to_string);
   check bool "the new message has its own id" true (field "message_id" first <> field "message_id" second);
   let t = View.paste t "다음 초안" in
-  let t = View.receive t second ~now:2. (Ok empty) in
+  let t = View.receive t second ~now:(at 2.) (Ok empty) in
   let _, third = View.send t ~machine:Masc.Machine_lane.Dos in
   check string "an identical next draft is still a separate message"
     "다음 초안" (field "text" (request third) |> Yojson.Safe.Util.to_string)
@@ -74,11 +77,11 @@ let test_unknown_send_preserves_next_draft () =
   let t, first = View.send (enter (idle ())) ~machine:Masc.Machine_lane.Dos in
   let first = request first in
   let t = View.paste t "다음 초안" in
-  let t = View.receive t first ~now:1. (Error "first outcome unknown") in
+  let t = View.receive t first ~now:(at 1.) (Error "first outcome unknown") in
   let t, retry = View.send t ~machine:Masc.Machine_lane.Msx in
   check string "editing the composer cannot replace the original receipt or payload"
     (body first) (body (request retry));
-  let t = View.receive t (request retry) ~now:2. (Ok empty) in
+  let t = View.receive t (request retry) ~now:(at 2.) (Ok empty) in
   let _, next = View.send t ~machine:Masc.Machine_lane.Msx in
   let next = request next in
   check bool "a later send submits the new draft with a new receipt" true
@@ -87,12 +90,12 @@ let test_unknown_send_preserves_next_draft () =
 let test_unknown_send_with_empty_next_draft () =
   let t, first = View.send (enter (idle ())) ~machine:Masc.Machine_lane.Dos in
   let first = request first in
-  let t = View.receive t first ~now:1. (Error "unknown") in
+  let t = View.receive t first ~now:(at 1.) (Error "unknown") in
   let t, _ = View.key t "\021" in
   let t, retry = View.send t ~machine:Masc.Machine_lane.Msx in
   check string "clearing the composer still permits the exact earlier retry"
     (body first) (body (request retry));
-  let t = View.receive t (request retry) ~now:2. (Ok empty) in
+  let t = View.receive t (request retry) ~now:(at 2.) (Ok empty) in
   let _, no_draft = View.send t ~machine:Masc.Machine_lane.Msx in
   check bool "an empty next draft does not send after reconciliation" true (Option.is_none no_draft)
 
@@ -100,77 +103,77 @@ let test_withdrawal () =
   let t, send = View.send (enter (idle ())) ~machine:Masc.Machine_lane.Dos in
   let send = request send in
   let t = View.suspend t in
-  let t = View.receive t send ~now:1. (Ok empty) in
+  let t = View.receive t send ~now:(at 1.) (Ok empty) in
   let _, retry = View.send (View.active t true) ~machine:Masc.Machine_lane.Dos in
   check string "confirmed workspace return retries same receipt" (body send) (body (request retry))
 
 let test_retired_read () =
-  let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   let read = request read in
   check bool "a poll is a read" true (View.is_read read);
-  let t, again = View.poll (View.retire_read t) ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t, again = View.poll (View.retire_read t) ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   check bool "a retired read frees the slot for the next poll" true (Option.is_some again);
-  let t = View.receive t read ~now:2. (Ok empty) in
-  let _, blocked = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t read ~now:(at 2.) (Ok empty) in
+  let _, blocked = View.poll t ~now:(at 3.) ~machine:Masc.Machine_lane.Dos in
   check bool "the discarded reply cannot settle the read after it" true (Option.is_none blocked);
   let t, send = View.send (enter (idle ())) ~machine:Masc.Machine_lane.Dos in
   check bool "a send is not a read" false (View.is_read (request send));
-  let _, held = View.poll (View.retire_read t) ~now:5. ~machine:Masc.Machine_lane.Dos in
+  let _, held = View.poll (View.retire_read t) ~now:(at 5.) ~machine:Masc.Machine_lane.Dos in
   check bool "retiring reads keeps a send's receipt" true (Option.is_none held)
 
 let test_successful_read_stops_polling () =
-  let t, read = View.poll (idle ()) ~now:0. ~machine:Masc.Machine_lane.Dos in
-  let t = View.receive t (request read) ~now:1. (Ok empty) in
-  let _, early = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
-  let _, late = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 0.) ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request read) ~now:(at 1.) (Ok empty) in
+  let _, early = View.poll t ~now:(at 3.) ~machine:Masc.Machine_lane.Dos in
+  let _, late = View.poll t ~now:(at 3600.) ~machine:Masc.Machine_lane.Dos in
   check bool "a successful active read has no two-second successor" true (Option.is_none early);
   check bool "a successful active read stays settled" true (Option.is_none late)
 
 let test_failed_read_retries_then_stops () =
-  let t, read = View.poll (idle ()) ~now:0. ~machine:Masc.Machine_lane.Dos in
-  let t = View.receive t (request read) ~now:1. (Error "connection lost") in
-  let _, early = View.poll t ~now:2. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 0.) ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request read) ~now:(at 1.) (Error "connection lost") in
+  let _, early = View.poll t ~now:(at 2.) ~machine:Masc.Machine_lane.Dos in
   check bool "a failed read waits for its retry deadline" true (Option.is_none early);
-  let t, retry = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
-  let t = View.receive t (request retry) ~now:3. (Ok empty) in
-  let _, settled = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  let t, retry = View.poll t ~now:(at 3.) ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request retry) ~now:(at 3.) (Ok empty) in
+  let _, settled = View.poll t ~now:(at 3600.) ~machine:Masc.Machine_lane.Dos in
   check bool "a successful retry ends the cadence" true (Option.is_none settled)
 
 let test_successful_send_stops_polling () =
   let t, send = View.send (enter (idle ())) ~machine:Masc.Machine_lane.Dos in
-  let t = View.receive t (request send) ~now:1. (Ok empty) in
-  let _, later = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request send) ~now:(at 1.) (Ok empty) in
+  let _, later = View.poll t ~now:(at 3600.) ~machine:Masc.Machine_lane.Dos in
   check bool "a successful send does not restart reads" true (Option.is_none later)
 
 let test_revalidate_marks_pending_for_trailing_read () =
-  let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   let t = View.revalidate t in
-  let t = View.receive t (request read) ~now:1. (Ok empty) in
-  let t, trailing = View.poll t ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request read) ~now:(at 1.) (Ok empty) in
+  let t, trailing = View.poll t ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   check bool "the changed read is followed by one trailing read" true
     (View.is_read (request trailing));
-  let t = View.receive t (request trailing) ~now:1. (Ok empty) in
-  let _, settled = View.poll t ~now:3600. ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive t (request trailing) ~now:(at 1.) (Ok empty) in
+  let _, settled = View.poll t ~now:(at 3600.) ~machine:Masc.Machine_lane.Dos in
   check bool "the trailing read settles without another cadence" true (Option.is_none settled)
 
 let test_retired_first_read_keeps_presence () =
-  let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   check bool "the first read is in flight" true (View.is_read (request read));
   let t = View.active (View.retire_read t) false in
-  let _, leave = View.poll t ~now:1. ~machine:Masc.Machine_lane.Dos in
+  let _, leave = View.poll t ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
   check bool "closing after a retired first read still leaves" true
     (has (body (request leave)) "\"leave\"")
 
 let test_withdrawal_preserves_presence_release () =
   List.iter (fun acknowledged ->
-    let t, read = View.poll (idle ()) ~now:1. ~machine:Masc.Machine_lane.Dos in
-    let t = if acknowledged then View.receive t (request read) ~now:1. (Ok empty) else t in
+    let t, read = View.poll (idle ()) ~now:(at 1.) ~machine:Masc.Machine_lane.Dos in
+    let t = if acknowledged then View.receive t (request read) ~now:(at 1.) (Ok empty) else t in
     let t = View.suspend (View.suspend t) in
-    let t, leave = View.poll t ~now:2. ~machine:Masc.Machine_lane.Dos in
+    let t, leave = View.poll t ~now:(at 2.) ~machine:Masc.Machine_lane.Dos in
     check bool "confirmed or possible presence is released after same-workspace return" true
       (has (body (request leave)) "leave");
-    let t = View.receive t (request leave) ~now:3. (Ok empty) in
-    let _, again = View.poll t ~now:4. ~machine:Masc.Machine_lane.Dos in
+    let t = View.receive t (request leave) ~now:(at 3.) (Ok empty) in
+    let _, again = View.poll t ~now:(at 4.) ~machine:Masc.Machine_lane.Dos in
     check bool "confirmed leave ends the obligation" true (Option.is_none again)) [false; true]
 
 let test_paste_and_keys () =
@@ -202,19 +205,19 @@ let test_authenticated_viewer_origin () =
   let keeper = message 3 "same words" in
   let snapshot = {empty with messages = [own; peer; keeper]} in
   let origins t = List.map (View.origin t) snapshot.messages in
-  let t, read = View.poll (idle ()) ~now:0. ~machine:Masc.Machine_lane.Dos in
+  let t, read = View.poll (idle ()) ~now:(at 0.) ~machine:Masc.Machine_lane.Dos in
   let read = request read in
-  let t = View.receive ~viewer:"operator" t read ~now:0. (Ok snapshot) in
+  let t = View.receive ~viewer:"operator" t read ~now:(at 0.) (Ok snapshot) in
   check (list origin) "identical text from another participant stays the peer's"
     [View.Viewer; View.Peer; View.Keeper] (origins t);
   let t = View.revalidate t in
-  let t, _ = View.poll t ~now:3. ~machine:Masc.Machine_lane.Dos in
-  let t = View.receive ~viewer:"guest" t read ~now:3. (Ok snapshot) in
+  let t, _ = View.poll t ~now:(at 3.) ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive ~viewer:"guest" t read ~now:(at 3.) (Ok snapshot) in
   check (list origin) "a stale response cannot replace the authenticated viewer"
     [View.Viewer; View.Peer; View.Keeper] (origins t)
 
 let test_unusable_width_retains_room_state () =
-  let t = refresh (enter (idle ())) ~now:0.
+  let t = refresh (enter (idle ())) ~now:(at 0.)
     (List.init 100 (fun i -> message (i + 1) (String.make 4096 'x'))) in
   let t, _ = View.layout t ~width:4 ~height:3 in
   let _, sent = View.send t ~machine:Masc.Machine_lane.Dos in

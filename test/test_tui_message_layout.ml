@@ -982,9 +982,62 @@ let test_window_positions_name_the_rows_shown () =
       [ 1; 2; 3; 4; 5; 8; 20; 400 ])
     [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
 
+(* The byte-by-byte scans the link readers used, kept here as the answer the
+   jumping search must give. *)
+let reference_url_end text index =
+  let length = String.length text in
+  let rec go at = if at < length && not (Layout.url_ends_at text.[at]) then go (at + 1) else at in
+  go index
+
+let reference_bare_urls text =
+  let length = String.length text in
+  let rec loop index found =
+    if index >= length then List.rev found
+    else if Layout.url_begins_at text index then
+      let stop = reference_url_end text index in
+      loop stop (String.sub text index (stop - index) :: found)
+    else loop (index + 1) found
+  in
+  loop 0 []
+
+let reference_dress text =
+  let length = String.length text in
+  let buffer = Buffer.create length in
+  let rec loop index =
+    if index < length then
+      if Layout.url_begins_at text index then begin
+        let stop = reference_url_end text index in
+        Buffer.add_string buffer "<<";
+        Buffer.add_string buffer (String.sub text index (stop - index));
+        Buffer.add_string buffer ">>";
+        loop stop
+      end
+      else (Buffer.add_char buffer text.[index]; loop (index + 1))
+  in
+  loop 0;
+  Buffer.contents buffer
+
+let test_bare_links_match_the_byte_scan () =
+  let pieces = [| "h"; "ht"; "http"; "http://"; "https://"; "httpx"; "a"; "with"; " "; "\t";
+                  "\""; "'"; ")"; "]"; ">"; "<"; "\x1b"; "\n"; "x.y/z?q=1"; "한"; "hh" |] in
+  let state = Random.State.make [| 54140 |] in
+  for case = 1 to 3000 do
+    let text = String.concat "" (List.init (Random.State.int state 14) (fun _ ->
+      pieces.(Random.State.int state (Array.length pieces)))) in
+    let label what = Printf.sprintf "case %d %s: %S" case what text in
+    check (list string) (label "bare urls") (reference_bare_urls text) (Layout.bare_urls text);
+    let dressed = Layout.dress_bare_links ~open_style:"<<" ~close_style:">>" text in
+    check string (label "dressed row") (reference_dress text) dressed;
+    if reference_bare_urls text = [] then
+      check bool (label "a row without a link is the same string") true (dressed == text)
+  done
+
 let () =
   run "tui_message_layout"
     [
+      ( "bare links"
+      , [ test_case "the jumping search matches the byte scan" `Quick
+            test_bare_links_match_the_byte_scan ] );
       ( "expanded diagnostics"
       , [] );
       ( "scrolled styles", [] );

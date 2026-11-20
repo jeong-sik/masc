@@ -684,42 +684,46 @@ let url_end text index =
   let rec go i = if i < length && not (url_ends_at text.[i]) then go (i + 1) else i in
   go index
 
+(* The first bare URL at or after [index]. Only an 'h' can start one, so
+   the search jumps from one 'h' to the next instead of asking every byte:
+   a reply's body is asked once for its link cards and each of its rows is
+   asked again for underlines, and nearly every English row holds an 'h'. *)
+let rec next_url_begin text index =
+  if index >= String.length text then None
+  else
+    match String.index_from_opt text index 'h' with
+    | None -> None
+    | Some at -> if url_begins_at text at then Some at else next_url_begin text (at + 1)
+
 let bare_urls text =
-  let length = String.length text in
   let rec loop index found =
-    if index >= length then List.rev found
-    else if url_begins_at text index then
-      let stop = url_end text index in
-      loop stop (String.sub text index (stop - index) :: found)
-    else loop (index + 1) found
+    match next_url_begin text index with
+    | None -> List.rev found
+    | Some start ->
+        let stop = url_end text start in
+        loop stop (String.sub text start (stop - start) :: found)
   in
   loop 0 []
 
+(* A row without a URL comes back as it was, uncopied. A row with one is
+   copied a run at a time between its links. *)
 let dress_bare_links ~open_style ~close_style text =
-  (* [url_begins_at] needs an 'h'. Without one the scan below would copy the
-     row byte for byte into a fresh string, so hand the row back untouched.
-     Rows with a link still walk the whole scan. *)
-  if not (String.contains text 'h') then text
-  else begin
-    let length = String.length text in
-    let buffer = Buffer.create (length + 16) in
-    let rec loop index =
-      if index >= length then ()
-      else if url_begins_at text index then begin
-        let stop = url_end text index in
-        Buffer.add_string buffer open_style;
-        Buffer.add_string buffer (String.sub text index (stop - index));
-        Buffer.add_string buffer close_style;
-        loop stop
-      end
-      else begin
-        Buffer.add_char buffer text.[index];
-        loop (index + 1)
-      end
-    in
-    loop 0;
-    Buffer.contents buffer
-  end
+  match next_url_begin text 0 with
+  | None -> text
+  | Some first ->
+      let buffer = Buffer.create (String.length text + 16) in
+      let rec loop copied = function
+        | None -> Buffer.add_substring buffer text copied (String.length text - copied)
+        | Some start ->
+            let stop = url_end text start in
+            Buffer.add_substring buffer text copied (start - copied);
+            Buffer.add_string buffer open_style;
+            Buffer.add_substring buffer text start (stop - start);
+            Buffer.add_string buffer close_style;
+            loop stop (next_url_begin text stop)
+      in
+      loop 0 (Some first);
+      Buffer.contents buffer
 
 let composer_max_rows = 5
 

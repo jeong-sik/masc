@@ -43,6 +43,8 @@ val sign_in_browser : owner -> (Runtime_setup_login_client.browser, string) resu
 
 (** Why a person may not log in to an integration. *)
 type person_refusal =
+  | Invalid_integration
+      (** The id is not a valid {!Authz_types.Integration_id.t}. *)
   | Not_declared
       (** No provider of runtime.toml has the id. The account a person makes
           is used only through the provider its login names
@@ -141,15 +143,14 @@ val key_unusable_message : Runtime_api_key_file.read_error -> string
     account change only inside its call, so no runtime is made on a key that
     a removal or a replacement was taking away.
 
-    The record that linked the account says what it runs on. A login account
-    is of the provider its login receipt names and runs on the login in its
-    home. A key account is of the provider its record names and runs on the
-    key in the file of the generation the records say. That file is read
-    before the home is looked at: an account whose record was written and
-    whose files were not is [Key_unusable Key_missing].
+    The record that linked the account says what it runs on. Both a login
+    account and a key account are of the provider their record names. A login
+    account runs on the login in its home. A key account runs on the key in the
+    file of the generation the records say. That file is read before the home
+    is looked at: an account whose record was written and whose files were not
+    is [Key_unusable Key_missing].
 
-    An account the person does not own, or a login account with no login
-    receipt of theirs, is a 404 with the same sentence. *)
+    An account the person does not own is a 404. *)
 val person_runtime
   :  Runtime_account_call.t
   -> person

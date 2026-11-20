@@ -165,7 +165,7 @@ let takes_key : Client.client -> bool = function
    ({!Login.person_runtime}), so a key is taken only where it is used. *)
 let key_target config ~integration_id =
   match Login.person_target config ~integration_id:(Authz_types.Integration_id.to_string integration_id) with
-  | Error Login.Not_declared ->
+  | Error (Login.Invalid_integration | Login.Not_declared) ->
     Error
       (refused
          R.Bad_request_400

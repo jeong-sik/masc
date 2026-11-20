@@ -444,40 +444,14 @@ let keeper_conversation_reader trusted ~now_ms request =
       | Error reason -> Error (refused reason))
 ;;
 
-(* Why the integration of an account is not known. *)
-type integration_unread =
-  | Login_receipt_missing
-  | Login_receipt_unreadable
-
 (* Why the model of a Runtime is not known. *)
 type model_unread =
-  | Account_integration_unread
   | Configuration_unavailable
   | Not_bound of Runtime_account_runtime.error
 
-let integration_unread_code = function
-  | Login_receipt_missing -> "login_receipt_missing"
-  | Login_receipt_unreadable -> "login_receipt_unreadable"
-;;
-
 let model_unread_code = function
-  | Account_integration_unread -> "account_integration_unread"
   | Configuration_unavailable -> "configuration_unavailable"
   | Not_bound error -> Runtime_account_runtime.error_code error
-;;
-
-(* The integration the login of the account named, read from its receipt
-   as the connect route saved it. *)
-let integration_of ~base_path user_id account =
-  match
-    Runtime_setup_login_receipt.load
-      ~workspace:base_path
-      ~actor:(Runtime_setup_login_session.Person (User_id.to_string user_id))
-      ~login_id:(Provider_account_id.to_string account)
-  with
-  | Ok receipt -> Ok receipt.Runtime_setup_login_receipt.integration_id
-  | Error Runtime_setup_login_receipt.Not_found -> Error Login_receipt_missing
-  | Error Runtime_setup_login_receipt.Unavailable -> Error Login_receipt_unreadable
 ;;
 
 (* The model of the binding of the account's template that makes the
@@ -487,13 +461,12 @@ let integration_of ~base_path user_id account =
    be another name. A Runtime id names its binding, so only
    [template_not_declared] and [runtime_not_bound] come back. *)
 let model_of ~config ~integration id (runtime : Authz_runtime_state.runtime) =
-  match integration, config with
-  | Error (_ : integration_unread), (_ : Runtime_schema.config option) -> Error Account_integration_unread
-  | Ok (_ : string), None -> Error Configuration_unavailable
-  | Ok template, Some config ->
+  match config with
+  | None -> Error Configuration_unavailable
+  | Some config ->
     Runtime_account_runtime.binding_of
       config
-      ~template
+      ~template:integration
       ~provider_id:(Provider_account_id.to_string runtime.provider_account_id)
       ~binding:(Runtime_account_runtime.Runtime (Runtime_id.to_string id))
     |> Result.map (fun (binding : Runtime_schema.binding) -> binding.model_id)
@@ -532,18 +505,16 @@ let removal_code = function
 
 let provider_accounts ~base_path ~config state { user_id; namespace } =
   let runtime_root = Runtime_account_home_layout.person_runtime_root ~base_path ~namespace in
-  (* What an account runs on is read once, so an account and the Runtimes
-     on it are answered from the same reading: the receipt of a login
-     account, and the record of a key account. *)
+  (* What an account runs on is named in its record in the authorization log. *)
   let accounts =
     List.map
       (fun ({ provider_account_id = account; kind; blocked } : Authz_provider_account.shown) ->
         let integration, of_kind =
           match kind with
-          | Authz_provider_account_state.Login ->
-            integration_of ~base_path user_id account, [ "kind", `String "login" ]
+          | Authz_provider_account_state.Login { integration_id } ->
+            Integration_id.to_string integration_id, [ "kind", `String "login" ]
           | Authz_provider_account_state.Key { integration_id; generation } ->
-            ( Ok (Integration_id.to_string integration_id)
+            ( Integration_id.to_string integration_id
             , [ "kind", `String "key"
               ; ( "key"
                 , `String
@@ -592,7 +563,7 @@ let provider_accounts ~base_path ~config state { user_id; namespace } =
              (fun (account, integration, (_ : bool), facts) ->
                `Assoc
                  ((("provider_account_id", `String (Provider_account_id.to_string account)) :: facts)
-                  @ fact "integration_id" integration_unread_code integration))
+                  @ [ "integration_id", `String integration ]))
              accounts) )
     ; ( "runtimes"
       , `List

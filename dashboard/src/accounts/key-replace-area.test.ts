@@ -28,8 +28,8 @@ const idle = { send: nothingSent, leave: vi.fn(), token: () => null, refresh: ()
 
 const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: true }
 const keyAccount = (left: Left | null = null): ProviderAccount =>
-  ({ id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left })
-const loginAccount: ProviderAccount = { id: 'acct_login', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }
+  ({ id: 'acct_key', integration: 'claude_code', held: { kind: 'key', key: 'readable' }, left })
+const loginAccount: ProviderAccount = { id: 'acct_login', integration: 'claude_code', held: { kind: 'login' }, left: null }
 const owning = (...accounts: ProviderAccount[]): Owned => ({ accounts, runtimes: [] })
 
 /** A model of replacements that shows `replacing` for the key account and

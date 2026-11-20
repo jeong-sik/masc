@@ -572,7 +572,10 @@ let declare_providers t =
    token. *)
 let connect t ~user_id ~login_id ~integration models =
   let account = get_ok (Provider_account_id.of_string login_id) in
-  (match Authz_provider_account.link t.routes.R.zone ~user_id ~provider_account_id:account with
+  let integration_id = get_ok (Integration_id.of_string integration) in
+  (match
+     Authz_provider_account.link t.routes.R.zone ~user_id ~provider_account_id:account ~integration_id
+   with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
   (match
@@ -713,7 +716,13 @@ let the_preview_follows_a_login () =
        of the account pass, the list shows. *)
     let user_id = user_of t admin in
     let account = get_ok (Provider_account_id.of_string "account-1") in
-    (match Authz_provider_account.link t.routes.R.zone ~user_id ~provider_account_id:account with
+    (match
+       Authz_provider_account.link
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:account
+         ~integration_id:(get_ok (Integration_id.of_string "claude_code"))
+     with
      | Ok () -> ()
      | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
     let runtime_id = get_ok (Runtime_id.of_string "account-1.claude-sonnet-5-5") in
@@ -730,8 +739,9 @@ let the_preview_follows_a_login () =
      | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
     (* Plan L2b: three accounts whose logins left receipts, named so the log
        keeps them in this order. The login of the first was of Codex, which
-       the workspace declared then and will not declare here. The server
-       refuses to read the receipt of the second. The third is Claude Code. *)
+       the workspace declared then and will not declare here. The receipt of
+       the second is made unreadable on disk; the list still reads its
+       integration from the log record. The third is Claude Code. *)
     let codex = String.make 64 'c' in
     let spoiled = String.make 64 'd' in
     let connected = String.make 64 'e' in
@@ -748,25 +758,21 @@ let the_preview_follows_a_login () =
       Printf.sprintf {|{"runtime_id":"%s.%s","provider_account_id":"%s",%s}|} account model account fact
     in
     let unread code = Printf.sprintf {|"model":null,"unread":"%s"|} code in
-    (* The answer, with the model of the Codex Runtime and of each Runtime of
-       the Claude Code account. The first account left no receipt, so the
-       subscription of it and the model of its Runtime are not known, and so
-       for the account whose receipt is refused. *)
-    let answer ~codex_model connected_models =
+    let answer ~account_1_model ~codex_model ~spoiled_model connected_models =
       Printf.sprintf
         {|{"provider_accounts":[%s],"runtimes":[%s]}|}
         (String.concat
            ","
-           [ account "account-1" {|"integration_id":null,"unread":"login_receipt_missing"|}
+           [ account "account-1" {|"integration_id":"claude_code"|}
            ; account codex {|"integration_id":"codex"|}
-           ; account spoiled {|"integration_id":null,"unread":"login_receipt_unreadable"|}
+           ; account spoiled {|"integration_id":"claude_code"|}
            ; account connected {|"integration_id":"claude_code"|}
            ])
         (String.concat
            ","
-           (runtime "account-1" "claude-sonnet-5-5" (unread "account_integration_unread")
+           (runtime "account-1" "claude-sonnet-5-5" account_1_model
             :: runtime codex "gpt-5.5" codex_model
-            :: runtime spoiled "claude-sonnet-5" (unread "account_integration_unread")
+            :: runtime spoiled "claude-sonnet-5" spoiled_model
             :: List.map (fun (model, fact) -> runtime connected model fact) connected_models))
     in
     (* This workspace has no runtime.toml yet. *)
@@ -774,7 +780,9 @@ let the_preview_follows_a_login () =
       "owns the subscriptions and their Runtimes"
       ( 200
       , answer
+          ~account_1_model:(unread "configuration_unavailable")
           ~codex_model:(unread "configuration_unavailable")
+          ~spoiled_model:(unread "configuration_unavailable")
           (List.map
              (fun model -> model, unread "configuration_unavailable")
              [ "agy-only"; "claude-opus-9"; "claude-sonnet-5" ]) )
@@ -898,6 +906,10 @@ let the_preview_follows_a_login () =
       "a connect of a declared server over HTTP"
       (refused "This connection needs its native account setup before web discovery.")
       (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"local"}|});
+    check_reply
+      "a connect of a malformed integration id fails before starting login"
+      (refused "In multi-account mode a login requires a valid integration id.")
+      (keeper_post Masc.Auth_preview.connect_path {|{"integration_id":"Bad/Id"}|});
     (* With the runtime.toml, a Runtime has the model of the binding of its
        own account's provider that makes its id. The workspace does not
        declare Codex. Claude Code has no binding of claude-opus-9, and only
@@ -906,7 +918,9 @@ let the_preview_follows_a_login () =
       "the models of the Runtimes"
       ( 200
       , answer
+          ~account_1_model:(unread "runtime_not_bound")
           ~codex_model:(unread "template_not_declared")
+          ~spoiled_model:{|"model":"claude-sonnet-5"|}
           [ "agy-only", unread "runtime_not_bound"
           ; "claude-opus-9", unread "runtime_not_bound"
           ; "claude-sonnet-5", {|"model":"claude-sonnet-5"|}
@@ -1259,7 +1273,13 @@ let a_person_keeps_keepers_over_mcp () =
     let csrf = csrf_of t admin in
     let user_id = user_of t admin in
     let account = get_ok (Provider_account_id.of_string "account-1") in
-    (match Authz_provider_account.link t.routes.R.zone ~user_id ~provider_account_id:account with
+    (match
+       Authz_provider_account.link
+         t.routes.R.zone
+         ~user_id
+         ~provider_account_id:account
+         ~integration_id:(get_ok (Integration_id.of_string "claude_code"))
+     with
      | Ok () -> ()
      | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
     (match
@@ -1273,8 +1293,8 @@ let a_person_keeps_keepers_over_mcp () =
      with
      | Ok (_ : Grant_id.t) -> ()
      | Error error -> Alcotest.fail (Authz_runtime.error_detail error));
-    (* Plan L2b: the tool reads the receipts and the runtime.toml of the
-       workspace, as the route does. *)
+    (* Plan L2b: the tool reads the runtime.toml of the workspace and account
+       records of the log, as the route does. *)
     declare_providers t;
     let connected = String.make 64 'e' in
     connect t ~user_id ~login_id:connected ~integration:"claude_code" [ "claude-sonnet-5" ];
@@ -1324,7 +1344,7 @@ let a_person_keeps_keepers_over_mcp () =
       "the Runtimes of the person"
       ( "false"
       , Printf.sprintf
-          {|{"provider_accounts":[{"provider_account_id":"account-1","kind":"login","integration_id":null,"unread":"login_receipt_missing"},{"provider_account_id":"%s","kind":"login","integration_id":"claude_code"}],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1","model":null,"unread":"account_integration_unread"},{"runtime_id":"%s.claude-sonnet-5","provider_account_id":"%s","model":"claude-sonnet-5"}]}|}
+          {|{"provider_accounts":[{"provider_account_id":"account-1","kind":"login","integration_id":"claude_code"},{"provider_account_id":"%s","kind":"login","integration_id":"claude_code"}],"runtimes":[{"runtime_id":"account-1.claude-sonnet-5-5","provider_account_id":"account-1","model":null,"unread":"runtime_not_bound"},{"runtime_id":"%s.claude-sonnet-5","provider_account_id":"%s","model":"claude-sonnet-5"}]}|}
           connected
           connected
           connected )
@@ -1592,7 +1612,8 @@ let a_person_removes_a_key_account () =
       (Authz_provider_account.link
          t.routes.R.zone
          ~user_id
-         ~provider_account_id:(get_ok (Provider_account_id.of_string on_login)));
+         ~provider_account_id:(get_ok (Provider_account_id.of_string on_login))
+         ~integration_id:(get_ok (Integration_id.of_string "claude_code")));
     let pat = pat_with router admin ~csrf in
     let remove ?(browser = fresh_browser ()) headers id =
       send browser router ~meth:"DELETE" ~path:(Server_key_account.entry_prefix ^ id) ~headers
@@ -1761,6 +1782,7 @@ let a_stopped_zone_answers_no_person () =
          t.routes.R.zone
          ~user_id
          ~provider_account_id:(get_ok (Provider_account_id.of_string "account-1"))
+         ~integration_id:(get_ok (Integration_id.of_string "claude_code"))
      with
      | Ok () -> Alcotest.fail "the zone wrote over a log another writer moved"
      | Error error ->

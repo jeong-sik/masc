@@ -20,7 +20,7 @@
     decided against what the owner wrote, never against a default in code.
 
     {b Body.}
-    [{"event":"made","keeper_id":...,"user_id":...,"policy_id":...,"turn_scope":{...}}]
+    [{"event":"made","keeper_id":...,"user_id":...,"engine_name":...,"policy_id":...,"turn_scope":{...}}]
     and [{"event":"assigned","keeper_id":...,"runtime_id":...}], with the
     members in this order. [turn_scope] is a body of {!Authz_scope_body} and
     every other value a string. An assignment names no person: its
@@ -37,6 +37,8 @@ type t =
   | Made of
       { keeper_id : Authz_types.Keeper_id.t
       ; user_id : Authz_types.User_id.t  (** The owner, who makes it. *)
+      ; engine_name : Authz_types.Engine_name.t
+          (** The installation-wide engine name under which this Keeper runs. *)
       ; policy_id : Authz_types.Policy_id.t
           (** The policy the owner's turns of this Keeper run under. *)
       ; turn_scope : Authz_types.Authorization_scope.t  (** The limits of that policy. *)
@@ -61,6 +63,7 @@ type error =
           each of its type. *)
   | Invalid_keeper_id of Authz_id.error
   | Invalid_user_id of Authz_id.error
+  | Invalid_engine_name of Authz_id.error
   | Invalid_runtime_id of Authz_id.error
   | Invalid_policy_id of Authz_id.error
   | Invalid_turn_scope of Authz_scope_body.error

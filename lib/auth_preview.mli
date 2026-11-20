@@ -117,8 +117,7 @@ val keeper_conversation_reader
       [{"provider_account_id":...,"kind":...,"integration_id":...}].
       ["kind"] is ["login"] or ["key"] (RFC
       a-persons-api-key-is-their-own-provider-account 3.8). The integration
-      of a login account is the one its login named, read from its receipt
-      under [base_path]; that of a key account is the one its record names.
+      of both a login account and a key account is the one its record names.
       A key account has ["key"] too: ["readable"], or [key_missing] or
       [key_unreadable] as a use of the account answers
       ({!Runtime_key_account_files.key_state}), or [not_looked_at]. Nothing
@@ -141,10 +140,8 @@ val keeper_conversation_reader
       which may be another name. [config] is the runtime.toml of the
       workspace, [None] when it could not be read.
 
-    What an account runs on is read once per answer. A fact that is not read
-    is [null], and ["unread"] says why. For an integration:
-    [login_receipt_missing] or [login_receipt_unreadable]. For a model:
-    [account_integration_unread], [configuration_unavailable],
+    A model that is not read is [null], and ["unread"] says why:
+    [configuration_unavailable],
     [template_not_declared] (runtime.toml no longer declares the account's
     integration) or [runtime_not_bound] (no binding of it makes the Runtime
     id). *)

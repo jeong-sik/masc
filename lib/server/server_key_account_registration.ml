@@ -34,7 +34,11 @@ let generation_of (person : Login.person) id =
   match Accounts.find state.Authz_state.provider_accounts id with
   | Some { Accounts.owner; kind = Accounts.Key { integration_id = _; generation } }
     when User_id.equal owner person.user_id -> Some generation
-  | Some { Accounts.owner = _; kind = Accounts.Key { integration_id = _; generation = _ } | Accounts.Login }
+  | Some
+      { Accounts.owner = _
+      ; kind =
+          Accounts.Key { integration_id = _; generation = _ } | Accounts.Login { integration_id = _ }
+      }
   | None -> None
 ;;
 

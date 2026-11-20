@@ -14,7 +14,8 @@
     record names the owner. What the provider is and where its home lies stay
     in [runtime.toml], which a later layer checks against this record.
 
-    {b Body.} [{"event":"linked","provider_account_id":...,"user_id":...}]
+    {b Body.}
+    [{"event":"linked","provider_account_id":...,"user_id":...,"integration_id":...}]
     or
     [{"event":"key_linked","provider_account_id":...,"user_id":...,"integration_id":...}],
     or
@@ -23,12 +24,10 @@
     an integer. The labels are on
     disk and renaming one orphans every record written with it. A body with
     other members, the same members in another order, or a member of another
-    type is refused. [linked] keeps its members for that reason: a key account
-    is a record of its own, and not a [linked] with one member more.
+    type is refused.
 
-    {b Integration.} What a login account is an account of is in its login
-    receipt, which the login writes. A key account has no login, so its record
-    names the integration.
+    {b Integration.} Both a login account record and a key account record name
+    in the log the integration the account is for.
 
     {b Generation.} A [key_replaced] names the generation the new key is. The
     state takes the one after the generation it holds and no other, so a
@@ -42,6 +41,8 @@ type t =
   | Linked of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; user_id : Authz_types.User_id.t  (** The owner, who links it. *)
+      ; integration_id : Authz_types.Integration_id.t
+          (** The integration this login connects. *)
       }
   | Key_linked of
       { provider_account_id : Authz_types.Provider_account_id.t

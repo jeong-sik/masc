@@ -408,8 +408,8 @@ const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', mod
 const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false }
 const owned: Owned = {
   accounts: [
-    { id: 'acct_claude_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
-    { id: 'acct_codex_1', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, left: null },
+    { id: 'acct_claude_1', integration: 'claude_code', held: { kind: 'login' }, left: null },
+    { id: 'acct_codex_1', integration: 'codex', held: { kind: 'login' }, left: null },
   ],
   runtimes: [
     { id: 'rt_sonnet', accountId: 'acct_claude_1', model: { read: true, value: 'claude-sonnet-5' } },
@@ -427,7 +427,7 @@ describe('the models a Keeper can be given', () => {
 
   it('leave out the models of a key account whose key the server did not read, and of one a removal or a key replacement was left on', () => {
     const keyOf = (id: string, key: 'readable' | 'key_missing' | 'key_unreadable' | 'not_looked_at', left: Left | null = null): ProviderAccount =>
-      ({ id, integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key }, left })
+      ({ id, integration: 'claude_code', held: { kind: 'key', key }, left })
     const accounts = [
       keyOf('readable', 'readable'), keyOf('missing', 'key_missing'), keyOf('unreadable', 'key_unreadable'), keyOf('unseen', 'not_looked_at'),
       keyOf('left', 'readable', { kind: 'removal', stage: 'key_not_removed' }), keyOf('blocked', 'readable', { kind: 'replacement', stage: 'start_given_up' }),

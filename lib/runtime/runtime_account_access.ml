@@ -311,8 +311,11 @@ let asks_for_nothing provider_account_id claim =
 let own_key ~runtime_root (state : Authz_state.t) provider_account_id claim =
   let expected =
     match Authz_provider_account_state.find state.Authz_state.provider_accounts provider_account_id with
-    | None | Some { Authz_provider_account_state.kind = Authz_provider_account_state.Login; owner = _ }
-      -> Ok None
+    | None
+    | Some
+        { Authz_provider_account_state.kind = Authz_provider_account_state.Login { integration_id = _ }
+        ; owner = _
+        } -> Ok None
     | Some
         { Authz_provider_account_state.kind =
             Authz_provider_account_state.Key { integration_id = _; generation }

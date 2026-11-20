@@ -277,7 +277,12 @@ let test_login_account =
   with_zone (fun ~zone ~base_path ->
     let person = admit zone ~name:"carol" ~hex:'c' in
     let account = get (Provider_account_id.of_string (String.make 64 'c')) in
-    linked (Authz_provider_account.link zone ~user_id:person.Login.user_id ~provider_account_id:account);
+    linked
+      (Authz_provider_account.link
+         zone
+         ~user_id:person.Login.user_id
+         ~provider_account_id:account
+         ~integration_id:(get (Integration_id.of_string "claude_code")));
     let carol = { person; account } in
     removes "an account that holds a login" ~base_path ~by:carol ~of_:carol "not_a_key_account";
     stands "its purge" carol "none";

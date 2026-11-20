@@ -1507,6 +1507,8 @@ module Pae = Authz_provider_account_event
 module Pas = Authz_provider_account_state
 
 let first_account = id_of_string Authz_types.Provider_account_id.of_string "claude-code-user"
+let key_account = id_of_string Authz_types.Provider_account_id.of_string "claude-code-key-user"
+let first_integration = id_of_string Authz_types.Integration_id.of_string "claude_code"
 
 let account_record ~author event =
   match Pae.to_body event with
@@ -1514,7 +1516,9 @@ let account_record ~author event =
   | Ok body -> record_by ~author K.Provider_account body
 ;;
 
-let linked ~by = Pae.Linked { provider_account_id = first_account; user_id = by }
+let linked ~by =
+  Pae.Linked { provider_account_id = first_account; user_id = by; integration_id = first_integration }
+;;
 
 (* Plan D1-1: a person links an account for themselves once, takes no intent,
    and links none for another, an Admin included. *)
@@ -1526,6 +1530,15 @@ let test_provider_accounts () =
     "its owner"
     (Some (Authz_types.User_id.to_string user))
     (Option.map Authz_types.User_id.to_string (Pas.owner state.S.provider_accounts first_account));
+  (match Pas.find state.S.provider_accounts first_account with
+   | Some { Pas.owner; kind = Pas.Login { integration_id } } ->
+     Alcotest.(check bool) "its login owner" true (Authz_types.User_id.equal owner user);
+     Alcotest.(check bool)
+       "its login integration"
+       true
+       (Authz_types.Integration_id.equal integration_id first_integration)
+   | Some { Pas.owner = _; kind = Pas.Key _ } | None ->
+     Alcotest.fail "the linked login account is not in the state with its integration");
   refused_as
     "linked twice"
     state
@@ -1544,9 +1557,6 @@ let test_provider_accounts () =
        (linked ~by:user))
     (S.Provider_account (Pas.Not_a_human (Authz_types.Principal.Service keeper_service)))
 ;;
-
-let key_account = id_of_string Authz_types.Provider_account_id.of_string "claude-code-key-user"
-let first_integration = id_of_string Authz_types.Integration_id.of_string "claude_code"
 
 let key_linked ~by =
   Pae.Key_linked
@@ -1575,7 +1585,7 @@ let test_key_accounts () =
        "the first generation"
        true
        (Authz_types.Key_generation.equal generation Authz_types.Key_generation.first)
-   | Some { Pas.owner = _; kind = Pas.Login } -> Alcotest.fail "the key account reads as a login account"
+   | Some { Pas.owner = _; kind = Pas.Login _ } -> Alcotest.fail "the key account reads as a login account"
    | None -> Alcotest.fail "the key account is not in the state");
   (match Pas.find state.S.provider_accounts first_account with
    | None -> ()
@@ -1590,26 +1600,17 @@ let test_key_accounts () =
      (match Pae.of_body body with
       | Ok event -> Alcotest.(check bool) "read back" true (Pae.equal event (key_linked ~by:user))
       | Error error -> Alcotest.failf "its own body is refused: %s" (Pae.error_to_string error)));
-  (* A login account keeps the body it had before a key account was a kind:
-     the logs on disk hold these bytes, and a log that holds them is read. *)
+  (* A login account carries integration_id on disk in strict member order. *)
   (match Pae.to_body (linked ~by:user) with
    | Error _ -> Alcotest.fail "fixture login account body refused"
    | Ok body ->
      Alcotest.(check string)
        "the body of a login account on disk"
-       {|{"event":"linked","provider_account_id":"claude-code-user","user_id":"user-1"}|}
-       (Authz_body.to_string body));
-  (match
-     Pae.of_body
-       (body_of_json
-          (`Assoc
-              [ "event", `String "linked"
-              ; "provider_account_id", `String "claude-code-user"
-              ; "user_id", `String "user-1"
-              ]))
-   with
-   | Ok event -> Alcotest.(check bool) "a login body of a log on disk is read" true (Pae.equal event (linked ~by:user))
-   | Error error -> Alcotest.failf "a login body of a log on disk is refused: %s" (Pae.error_to_string error));
+       {|{"event":"linked","provider_account_id":"claude-code-user","user_id":"user-1","integration_id":"claude_code"}|}
+       (Authz_body.to_string body);
+     (match Pae.of_body body with
+      | Ok event -> Alcotest.(check bool) "a login body is read back" true (Pae.equal event (linked ~by:user))
+      | Error error -> Alcotest.failf "its own login body is refused: %s" (Pae.error_to_string error)));
   refused_as
     "a key linked twice"
     state
@@ -1620,7 +1621,7 @@ let test_key_accounts () =
     state
     (account_record
        ~author:(human user)
-       (Pae.Linked { provider_account_id = key_account; user_id = user }))
+       (Pae.Linked { provider_account_id = key_account; user_id = user; integration_id = first_integration }))
     (S.Provider_account (Pas.Already_linked key_account));
   refused_as
     "an Admin links a key for another"
@@ -1654,15 +1655,34 @@ let test_key_accounts () =
        ])
     (S.Provider_account_unreadable Pae.Wrong_members);
   refused_as
-    "a login account with an integration"
+    "a login account with no integration"
     (two_admins ())
     (members_of
        [ "event", text "linked"
-       ; "provider_account_id", text "claude-code-key-user"
+       ; "provider_account_id", text "claude-code-user"
        ; "user_id", text "user-1"
+       ])
+    (S.Provider_account_unreadable Pae.Wrong_members);
+  refused_as
+    "a login account with members in another order"
+    (two_admins ())
+    (members_of
+       [ "event", text "linked"
+       ; "user_id", text "user-1"
+       ; "provider_account_id", text "claude-code-user"
        ; "integration_id", text "claude_code"
        ])
-    (S.Provider_account_unreadable Pae.Wrong_members)
+    (S.Provider_account_unreadable Pae.Wrong_members);
+  refused_as
+    "a login account with an invalid integration"
+    (two_admins ())
+    (members_of
+       [ "event", text "linked"
+       ; "provider_account_id", text "claude-code-user"
+       ; "user_id", text "user-1"
+       ; "integration_id", text ""
+       ])
+    (S.Provider_account_unreadable (Pae.Invalid_integration_id Authz_id.Empty))
 ;;
 
 (* ---- Runtimes ---- *)
@@ -1760,6 +1780,9 @@ module Ks = Authz_keeper_state
 
 let first_keeper = id_of_string Authz_types.Keeper_id.of_string "keeper-1"
 let second_keeper = id_of_string Authz_types.Keeper_id.of_string "keeper-2"
+let first_engine_name = id_of_string Authz_types.Engine_name.of_string "kp-engine-1"
+let second_engine_name = id_of_string Authz_types.Engine_name.of_string "kp-engine-2"
+let third_engine_name = id_of_string Authz_types.Engine_name.of_string "kp-engine-3"
 let second_account = id_of_string Authz_types.Provider_account_id.of_string "claude-code-bob"
 let bob_runtime = id_of_string Authz_types.Runtime_id.of_string "claude-code-bob.claude-sonnet-5-5"
 
@@ -1784,8 +1807,14 @@ let fixture_turn_scope =
   }
 ;;
 
-let keeper_made ?(keeper_id = first_keeper) ?(policy_id = first_policy) ~by () =
-  Ke.Made { keeper_id; user_id = by; policy_id; turn_scope = fixture_turn_scope }
+let keeper_made
+      ?(keeper_id = first_keeper)
+      ?(engine_name = first_engine_name)
+      ?(policy_id = first_policy)
+      ~by
+      ()
+  =
+  Ke.Made { keeper_id; user_id = by; engine_name; policy_id; turn_scope = fixture_turn_scope }
 ;;
 
 let assigned ?(keeper_id = first_keeper) runtime_id = Ke.Assigned { keeper_id; runtime_id }
@@ -1800,11 +1829,52 @@ let owned_keepers state user_id =
 
 (* Plan D1-5: a person makes a Keeper for themselves, once, and gives it only
    a Runtime they own. A Keeper name is a person's own (issue #51073): another
-   person makes a Keeper of the same name, and it is another Keeper. Both
-   people here are Admins: an Admin makes no Keeper for another person, gives
-   no Runtime to the Keeper of another person, and gives their own Keeper no
-   Runtime of another person. *)
+   person makes a Keeper of the same name, and it is another Keeper, with its
+   own installation-wide unique engine_name. Both people here are Admins: an
+   Admin makes no Keeper for another person, gives no Runtime to the Keeper
+   of another person, and gives their own Keeper no Runtime of another
+   person. *)
 let test_keepers () =
+  let check_engine_name_error label expected actual =
+    match actual, expected with
+    | Error actual, Error expected -> Alcotest.(check bool) label true (actual = expected)
+    | Ok _, Ok _ -> ()
+    | Error err, Ok _ -> Alcotest.failf "%s: expected Ok, got %s" label (Authz_id.error_to_string err)
+    | Ok _, Error err ->
+      Alcotest.failf "%s: expected Error %s, got Ok" label (Authz_id.error_to_string err)
+  in
+  check_engine_name_error
+    "empty engine_name rejected"
+    (Error Authz_id.Empty)
+    (Authz_types.Engine_name.of_string "");
+  check_engine_name_error
+    "engine_name over 128 bytes rejected"
+    (Error Authz_id.Too_long)
+    (Authz_types.Engine_name.of_string (String.make 129 'a'));
+  check_engine_name_error
+    "engine_name with colon rejected"
+    (Error (Authz_id.Invalid_byte { index = 2 }))
+    (Authz_types.Engine_name.of_string "kp:bad");
+  check_engine_name_error
+    "engine_name with slash rejected"
+    (Error (Authz_id.Invalid_byte { index = 2 }))
+    (Authz_types.Engine_name.of_string "kp/bad");
+  check_engine_name_error
+    "engine_name '.' rejected"
+    (Error Authz_id.Path_segment)
+    (Authz_types.Engine_name.of_string ".");
+  check_engine_name_error
+    "engine_name '..' rejected"
+    (Error Authz_id.Path_segment)
+    (Authz_types.Engine_name.of_string "..");
+  check_engine_name_error
+    "engine_name store dirname rejected"
+    (Error Authz_id.Path_segment)
+    (Authz_types.Engine_name.of_string "tool_usage");
+  Alcotest.(check bool)
+    "128-byte engine_name accepted"
+    true
+    (Result.is_ok (Authz_types.Engine_name.of_string (String.make 128 'a')));
   let state =
     applied_change "a Keeper" (two_admins ()) (keeper_record ~author:(human user) (keeper_made ~by:user ())) None
   in
@@ -1822,8 +1892,56 @@ let test_keepers () =
         ^ Authz_types.Keeper_id.to_string first_keeper
         ^ {|","user_id":"|}
         ^ Authz_types.User_id.to_string user
-        ^ {|","policy_id":"policy-1","turn_scope":{"runtimes":"all","channels":["autonomous","direct"],"allowed_effects":"all"}}|})
-       (Authz_body.to_string body));
+        ^ {|","engine_name":"kp-engine-1","policy_id":"policy-1","turn_scope":{"runtimes":"all","channels":["autonomous","direct"],"allowed_effects":"all"}}|})
+       (Authz_body.to_string body);
+     (match Ke.of_body body with
+      | Ok event -> Alcotest.(check bool) "made body read back" true (Ke.equal event (keeper_made ~by:user ()))
+      | Error error -> Alcotest.failf "made body refused: %s" (Ke.error_to_string error)));
+  let keeper_members_of members =
+    record_by ~author:(human user) K.Keeper (body_of_json (`Assoc members))
+  in
+  let empty_scope =
+    `Assoc
+      [ "runtimes", `String "all"
+      ; "channels", `List [ `String "autonomous"; `String "direct" ]
+      ; "allowed_effects", `String "all"
+      ]
+  in
+  refused_as
+    "made missing engine_name"
+    (two_admins ())
+    (keeper_members_of
+       [ "event", `String "made"
+       ; "keeper_id", `String "keeper-1"
+       ; "user_id", `String "user-1"
+       ; "policy_id", `String "policy-1"
+       ; "turn_scope", empty_scope
+       ])
+    (S.Keeper_unreadable Ke.Wrong_members);
+  refused_as
+    "made with members out of order"
+    (two_admins ())
+    (keeper_members_of
+       [ "event", `String "made"
+       ; "keeper_id", `String "keeper-1"
+       ; "user_id", `String "user-1"
+       ; "policy_id", `String "policy-1"
+       ; "engine_name", `String "kp-engine-1"
+       ; "turn_scope", empty_scope
+       ])
+    (S.Keeper_unreadable Ke.Wrong_members);
+  refused_as
+    "made with invalid engine_name"
+    (two_admins ())
+    (keeper_members_of
+       [ "event", `String "made"
+       ; "keeper_id", `String "keeper-1"
+       ; "user_id", `String "user-1"
+       ; "engine_name", `String "kp:bad"
+       ; "policy_id", `String "policy-1"
+       ; "turn_scope", empty_scope
+       ])
+    (S.Keeper_unreadable (Ke.Invalid_engine_name (Authz_id.Invalid_byte { index = 2 })));
   Alcotest.(check bool)
     "the name is no Keeper of another person"
     true
@@ -1832,6 +1950,10 @@ let test_keepers () =
    | None -> Alcotest.fail "the Keeper is not in the state"
    | Some keeper ->
      Alcotest.(check string)
+       "its engine name"
+       "kp-engine-1"
+       (Authz_types.Engine_name.to_string keeper.Ks.engine_name);
+     Alcotest.(check string)
        "its policy id"
        "policy-1"
        (Authz_types.Policy_id.to_string keeper.Ks.policy_id);
@@ -1839,21 +1961,58 @@ let test_keepers () =
        "its turn scope"
        true
        (Authz_types.Authorization_scope.equal fixture_turn_scope keeper.Ks.turn_scope));
+  (match Ks.find_by_engine_name state.S.keepers "kp-engine-1" with
+   | Some (owner, keeper_id, keeper) ->
+     Alcotest.(check bool) "found owner" true (Authz_types.User_id.equal owner user);
+     Alcotest.(check bool) "found keeper_id" true (Authz_types.Keeper_id.equal keeper_id first_keeper);
+     Alcotest.(check string)
+       "found keeper policy"
+       "policy-1"
+       (Authz_types.Policy_id.to_string keeper.Ks.policy_id)
+   | None -> Alcotest.fail "find_by_engine_name missed kp-engine-1");
+  Alcotest.(check bool)
+    "find_by_engine_name returns None for unknown"
+    true
+    (Option.is_none (Ks.find_by_engine_name state.S.keepers "kp-missing"));
+  Alcotest.(check bool)
+    "find_by_engine_name returns None for invalid grammar"
+    true
+    (Option.is_none (Ks.find_by_engine_name state.S.keepers "kp:bad"));
   refused_as
     "made twice"
     state
-    (keeper_record ~author:(human user) (keeper_made ~policy_id:second_policy ~by:user ()))
+    (keeper_record
+       ~author:(human user)
+       (keeper_made ~engine_name:second_engine_name ~policy_id:second_policy ~by:user ()))
     (S.Keeper (Ks.Already_made first_keeper));
+  refused_as
+    "an engine name another Keeper of the same owner used"
+    state
+    (keeper_record
+       ~author:(human user)
+       (keeper_made ~keeper_id:second_keeper ~engine_name:first_engine_name ~policy_id:second_policy ~by:user ()))
+    (S.Keeper (Ks.Engine_name_already_used first_engine_name));
+  refused_as
+    "an engine name another owner tried to reuse"
+    state
+    (keeper_record
+       ~author:(human bob)
+       (keeper_made ~keeper_id:first_keeper ~engine_name:first_engine_name ~policy_id:second_policy ~by:bob ()))
+    (S.Keeper (Ks.Engine_name_already_used first_engine_name));
   refused_as
     "a policy id another Keeper named"
     state
-    (keeper_record ~author:(human user) (keeper_made ~keeper_id:second_keeper ~by:user ()))
+    (keeper_record
+       ~author:(human user)
+       (keeper_made ~keeper_id:second_keeper ~engine_name:second_engine_name ~by:user ()))
     (S.Keeper (Ks.Policy_named_before first_policy));
   let both =
     applied_change
       "a Keeper of the same name by another person"
       state
-      (keeper_record ~author:(human bob) (keeper_made ~policy_id:second_policy ~by:bob ()))
+      (keeper_record
+         ~author:(human bob)
+         (keeper_made ~engine_name:second_engine_name ~policy_id:second_policy ~by:bob ()))
       None
   in
   Alcotest.(check (list (pair string (option string))))
@@ -1864,6 +2023,18 @@ let test_keepers () =
     "and the first person still owns theirs"
     [ Authz_types.Keeper_id.to_string first_keeper, None ]
     (owned_keepers both user);
+  Alcotest.(check (list string))
+    "all keepers returns keepers across all owners"
+    [ "kp-engine-1"; "kp-engine-2" ]
+    (List.map
+       (fun ((_ : Authz_types.User_id.t), (_ : Authz_types.Keeper_id.t), (k : Ks.keeper)) ->
+         Authz_types.Engine_name.to_string k.Ks.engine_name)
+       (Ks.all both.S.keepers));
+  (match Ks.find_by_engine_name both.S.keepers "kp-engine-2" with
+   | Some (owner, keeper_id, (_ : Ks.keeper)) ->
+     Alcotest.(check bool) "bob found via engine_name" true (Authz_types.User_id.equal owner bob);
+     Alcotest.(check bool) "bob keeper_id found" true (Authz_types.Keeper_id.equal keeper_id first_keeper)
+   | None -> Alcotest.fail "find_by_engine_name missed kp-engine-2");
   (match Ks.find both.S.keepers ~owner:bob first_keeper with
    | None -> Alcotest.fail "the other person's Keeper is not in the state"
    | Some keeper ->
@@ -1907,7 +2078,11 @@ let test_keepers () =
       ; ( "a link of the Admin"
         , account_record
             ~author:(human bob)
-            (Pae.Linked { provider_account_id = second_account; user_id = bob }) )
+            (Pae.Linked
+               { provider_account_id = second_account
+               ; user_id = bob
+               ; integration_id = first_integration
+               }) )
       ; ( "a Runtime of the Admin"
         , runtime_record
             ~author:(human bob)
@@ -1921,7 +2096,12 @@ let test_keepers () =
       ; ( "a Keeper of the Admin"
         , keeper_record
             ~author:(human bob)
-            (keeper_made ~keeper_id:second_keeper ~policy_id:second_policy ~by:bob ()) )
+            (keeper_made
+               ~keeper_id:second_keeper
+               ~engine_name:third_engine_name
+               ~policy_id:second_policy
+               ~by:bob
+               ()) )
       ]
   in
   refused_as
@@ -1955,7 +2135,14 @@ let test_keepers () =
     [ ( Authz_types.Keeper_id.to_string first_keeper
       , Some (Authz_types.Runtime_id.to_string first_runtime) )
     ]
-    (owned_keepers state user)
+    (owned_keepers state user);
+  match Ks.find_by_engine_name state.S.keepers "kp-engine-1" with
+  | Some (_, _, keeper) ->
+    Alcotest.(check (option string))
+      "find_by_engine_name reflects assigned runtime"
+      (Some (Authz_types.Runtime_id.to_string first_runtime))
+      (Option.map Authz_types.Runtime_id.to_string keeper.Ks.runtime)
+  | None -> Alcotest.fail "find_by_engine_name missed assigned keeper"
 ;;
 
 module Pg = Authz_purge_event
@@ -2079,7 +2266,8 @@ let shown_words state ~by =
         "%s, %s, %s"
         (Authz_types.Provider_account_id.to_string provider_account_id)
         (match kind with
-         | Authz_provider_account_state.Login -> "a login"
+         | Authz_provider_account_state.Login { integration_id } ->
+           "a login of " ^ Authz_types.Integration_id.to_string integration_id
          | Authz_provider_account_state.Key { integration_id; generation = _ } ->
            "a key of " ^ Authz_types.Integration_id.to_string integration_id)
         (match blocked with
@@ -2141,7 +2329,9 @@ let test_account_purges () =
   shown
     "a login account beside it"
     (applied_change "a login link" state (account_record ~author:(human user) (linked ~by:user)) None)
-    [ "claude-code-key-user, a key of claude_code, no removal"; "claude-code-user, a login, no removal" ];
+    [ "claude-code-key-user, a key of claude_code, no removal"
+    ; "claude-code-user, a login of claude_code, no removal"
+    ];
   Alcotest.(check string)
     "an account no record linked, by whoever asks"
     "spent"
@@ -2227,7 +2417,7 @@ let key_generation_word state account =
   match Pas.find state.S.provider_accounts account with
   | Some { Pas.owner = _; kind = Pas.Key { integration_id = _; generation } } ->
     string_of_int (Authz_types.Key_generation.to_int generation)
-  | Some { Pas.owner = _; kind = Pas.Login } -> "a login"
+  | Some { Pas.owner = _; kind = Pas.Login { integration_id = _ } } -> "a login"
   | None -> "not linked"
 ;;
 

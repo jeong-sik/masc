@@ -180,7 +180,7 @@ describe('readOwned', () => {
   })
   it('reads the facts the server read', () => {
     expect(readOwned(answer({}, {}))).toEqual({
-      accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }],
+      accounts: [{ id: 'acct_1', integration: 'claude_code', held: { kind: 'login' }, left: null }],
       runtimes: [{ id: 'acct_1.claude-sonnet-5', accountId: 'acct_1', model: { read: true, value: 'claude-sonnet-5' } }],
     })
   })
@@ -213,14 +213,6 @@ describe('readOwned', () => {
     expect(readOwned({ provider_accounts: [account], runtimes: [] })?.accounts[0]?.left).toEqual({ kind: 'replacement', stage: replacement })
   })
   it.each([
-    ['login_receipt_missing', 'login_receipt_missing'],
-    ['login_receipt_unreadable', 'login_receipt_unreadable'],
-    ['a code named later', 'unrecognised'],
-  ] as const)('reads why the subscription of an account is not known: %s as %s', (code, unread) => {
-    expect(readOwned(answer({ integration_id: null, unread: code }, {}))?.accounts[0]?.integration).toEqual({ read: false, unread })
-  })
-  it.each([
-    ['account_integration_unread', 'account_integration_unread'],
     ['configuration_unavailable', 'configuration_unavailable'],
     ['template_not_declared', 'template_not_declared'],
     ['runtime_not_bound', 'runtime_not_bound'],
@@ -242,10 +234,9 @@ describe('readOwned', () => {
     ['a replacement that is no string', answer({ replacement: true }, {})],
     ['a removal and a replacement', answer({ removal: 'start_given_up', replacement: 'start_given_up' }, {})],
     ['an empty integration', answer({ integration_id: '' }, {})],
-    ['an integration and why it was not read', answer({ unread: 'login_receipt_missing' }, {})],
-    ['an unread integration with no reason', answer({ integration_id: null }, {})],
+    ['a null integration', answer({ integration_id: null }, {})],
+    ['an integration that is no string', answer({ integration_id: 5 }, {})],
     ['a missing integration', answer({ integration_id: undefined }, {})],
-    ['a reason with no integration', answer({ integration_id: undefined, unread: 'login_receipt_missing' }, {})],
     ['a reason with no model', answer({}, { model: undefined, unread: 'runtime_not_bound' })],
     ['a Runtime with no account', answer({}, { provider_account_id: undefined })],
     ['a Runtime on an account not listed', answer({}, { provider_account_id: 'acct_2' })],

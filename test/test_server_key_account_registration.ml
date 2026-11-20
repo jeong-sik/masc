@@ -414,7 +414,8 @@ let key_file_of (person : Login.person) ~runtime_root id =
       "claude_code"
       (Integration_id.to_string integration_id);
     get_text (Layout.key_file ~runtime_root ~account_id:id ~generation)
-  | Some { Accounts.owner = _; kind = Accounts.Login } -> Alcotest.fail "the account holds a login"
+  | Some { Accounts.owner = _; kind = Accounts.Login { integration_id = _ } } ->
+    Alcotest.fail "the account holds a login"
   | None -> Alcotest.fail "no record links the account"
 ;;
 
@@ -691,7 +692,8 @@ let generation_of (person : Login.person) id =
   match Accounts.find (state_of person).Authz_state.provider_accounts id with
   | Some { Accounts.owner = _; kind = Accounts.Key { integration_id = _; generation } } ->
     Key_generation.to_int generation
-  | Some { Accounts.owner = _; kind = Accounts.Login } | None -> Alcotest.fail "no key account has this id"
+  | Some { Accounts.owner = _; kind = Accounts.Login { integration_id = _ } } | None ->
+    Alcotest.fail "no key account has this id"
 ;;
 
 (* What a refused replacement leaves: the generation and the key that were
@@ -808,7 +810,13 @@ let test_replacement_refused =
       ~code:"unknown_account";
     (* An account that holds a login, as a login of the person records it. *)
     let login = get (Provider_account_id.of_string "login-account") in
-    (match Authz_provider_account.link zone ~user_id:alice.Login.user_id ~provider_account_id:login with
+    (match
+       Authz_provider_account.link
+         zone
+         ~user_id:alice.Login.user_id
+         ~provider_account_id:login
+         ~integration_id:(get (Integration_id.of_string "claude_code"))
+     with
      | Ok () -> ()
      | Error error -> Alcotest.failf "the login account was not recorded: %s" (Authz_provider_account.error_to_string error));
     refused

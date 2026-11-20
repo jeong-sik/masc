@@ -28,8 +28,11 @@ let write zone ~user_id event =
      | Error error -> Error (Commit_failed error))
 ;;
 
-let link zone ~user_id ~provider_account_id =
-  write zone ~user_id (Authz_provider_account_event.Linked { provider_account_id; user_id })
+let link zone ~user_id ~provider_account_id ~integration_id =
+  write
+    zone
+    ~user_id
+    (Authz_provider_account_event.Linked { provider_account_id; user_id; integration_id })
 ;;
 
 let link_key zone ~user_id ~provider_account_id ~integration_id =

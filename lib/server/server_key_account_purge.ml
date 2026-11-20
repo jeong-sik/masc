@@ -69,7 +69,7 @@ let key_account_of (person : Login.person) id =
   match Authz_provider_account_state.find (state_of person).Authz_state.provider_accounts id with
   | Some { Authz_provider_account_state.owner; kind } when User_id.equal owner person.user_id ->
     (match kind with
-     | Authz_provider_account_state.Login -> Error Not_a_key_account
+     | Authz_provider_account_state.Login { integration_id = _ } -> Error Not_a_key_account
      | Authz_provider_account_state.Key { integration_id = _; generation = _ } -> Ok ())
   | Some (_ : Authz_provider_account_state.account) | None -> Error Not_found
 ;;

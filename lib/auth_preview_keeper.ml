@@ -63,6 +63,7 @@ let refusal_answer (refusal : Ks.refusal) =
     (* An Admin disabled the person after the gate read the log. *)
     error R.Forbidden_403 "The principal is not active."
   | Ks.Already_made (_ : Authz_types.Keeper_id.t)
+  | Ks.Engine_name_already_used (_ : Authz_types.Engine_name.t)
   | Ks.Made_for_another _
   | Ks.Not_a_human _
   | Ks.Not_a_keeper_author _
@@ -77,7 +78,10 @@ let refusal_answer (refusal : Ks.refusal) =
 let failed (error_ : Authz_keeper.error) =
   match error_ with
   | Authz_keeper.Refused refusal -> refusal_answer refusal
-  | Authz_keeper.Id_not_drawn _ | Authz_keeper.Body_not_built _ | Authz_keeper.Commit_failed _ ->
+  | Authz_keeper.Id_not_drawn _
+  | Authz_keeper.Engine_name_not_drawn _
+  | Authz_keeper.Body_not_built _
+  | Authz_keeper.Commit_failed _ ->
     Log.Server.warn "A Keeper record was not written: %s" (Authz_keeper.error_detail error_);
     error R.Service_unavailable_503 not_recorded
 ;;
@@ -143,6 +147,7 @@ let make zone user_id ~body =
            ~keeper_id
            ~turn_scope:own_keeper_turn_scope
            ~draw:Auth.generate_token
+           ~draw_engine_name:(fun () -> "kp-" ^ Auth.generate_token ())
        with
        | Ok () -> Ok (made "made")
        | Error error_ ->
@@ -176,7 +181,13 @@ let assign zone user_id ~body =
     | Error uncertain -> Error (R.zone_uncertain uncertain)
     | Ok keepers ->
       (match Ks.find keepers ~owner:user_id keeper_id with
-       | Some { Ks.runtime = Some current; owner = _; policy_id = _; turn_scope = _ }
+       | Some
+           { Ks.runtime = Some current
+           ; owner = _
+           ; engine_name = _
+           ; policy_id = _
+           ; turn_scope = _
+           }
          when Authz_types.Runtime_id.equal current runtime_id -> Ok (assigned "existing")
        | Some (_ : Ks.keeper) | None ->
          (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id with

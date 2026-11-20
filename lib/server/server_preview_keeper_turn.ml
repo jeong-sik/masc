@@ -44,7 +44,8 @@ let owned_in (person : Login.person) keeper_id =
   | Ok trusted ->
     let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
     (match Ks.find state.Authz_state.keepers ~owner:person.user_id keeper_id with
-     | Some { Ks.runtime; owner = _; policy_id = _; turn_scope = _ } -> Ok (state, runtime)
+     | Some { Ks.runtime; owner = _; engine_name = _; policy_id = _; turn_scope = _ } ->
+       Ok (state, runtime)
      | None -> Error E.Unknown_keeper)
 ;;
 

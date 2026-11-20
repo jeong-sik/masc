@@ -45,9 +45,8 @@ val render :
     the game hints while its composer owns input; an empty string preserves them.
 
     The first frame carries the observation meta (title line); the second is
-    the surface contract's picture this renderer draws (RFC
-    msx-surface-focus-mode stage 1) — the renderer reads pixels only through
-    it and never from the meta's pixel fields.
+    the surface contract's picture this renderer draws — the renderer reads
+    pixels only through it and never from the meta's pixel fields.
 
     [None] is drawn as an empty body under a title that says why it is empty,
     wrapped over at most half the rows the notice and the footer leave, so

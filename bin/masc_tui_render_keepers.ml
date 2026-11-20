@@ -367,7 +367,7 @@ let keeper_waiting_detail ?schedules ?now ~ko (row : Keeper_list_model.row) =
       in
       let others = kwr_waiting_count - 1 in
       Some (keeper_waiting_item_text ?schedules ?now ~ko item
-        ^ (if others > 0 then Printf.sprintf (if ko then " (외 %d)" else " (%d more)") others
+        ^ (if others > 0 then " (" ^ Masc_tui_value.Count.more ~ko others ^ ")"
            else ""))
   | Keeper_list_model.Waiting_observed { kwr_waiting_heads = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None

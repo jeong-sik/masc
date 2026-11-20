@@ -687,9 +687,7 @@ let harness_ledger_lines ?(ko = false) ~cols snapshot =
             let gates =
               if remaining = 0 then gates
               else
-                Printf.sprintf
-                  (if ko then "%s  \xc2\xb7  외 %d건" else "%s  \xc2\xb7  +%d more")
-                  gates remaining
+                gates ^ "  \xc2\xb7  " ^ Masc_tui_value.Count.more ~ko remaining
             in
             let evaluator =
               match snapshot.hs_overview with

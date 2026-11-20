@@ -438,7 +438,6 @@ let tokens_sum_figure = function
 
 let calls_text ~ko n = Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.Call n
 let files_text ~ko n = Masc_tui_value.Count.reading ~ko Masc_tui_value.Count.File n
-let more_text ~ko n = Printf.sprintf (if ko then "%d개 더" else "%d more") n
 let window_text hours = Printf.sprintf "%gh" hours
 
 let cost_text = function
@@ -883,11 +882,11 @@ let fleet_row ~cols input keeper chunk =
 
 let more_line ~ko ~cols n =
   ( fit_line ~cols
-      (with_border [ { text = ellipsis ^ " " ^ more_text ~ko n; tone = Dim } ])
+      (with_border [ { text = ellipsis ^ " " ^ Masc_tui_value.Count.more ~ko n; tone = Dim } ])
   , Target_more )
 
 let indicator_line ~ko ~cols arrow n =
-  ( fit_line ~cols (with_border [ { text = arrow ^ " " ^ more_text ~ko n; tone = Dim } ])
+  ( fit_line ~cols (with_border [ { text = arrow ^ " " ^ Masc_tui_value.Count.more ~ko n; tone = Dim } ])
   , Target_none )
 
 (* The focus block: the selected keeper's newest feed record, call by call,

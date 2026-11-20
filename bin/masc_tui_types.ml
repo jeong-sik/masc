@@ -28296,7 +28296,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
     let lead_cells = Masc_tui_message_layout.display_width lead in
     let layout =
       Facts.layout ~max_cells:(max 1 (max_cells - lead_cells)) ~max_rows:rows_left
-        ~more:(if ko then Printf.sprintf "외 %d" else Printf.sprintf "+%d more") facts in
+        ~more:(Masc_tui_value.Count.more ~ko) facts in
     List.mapi
       (fun index pieces ->
         { csl_lead = (if index = 0 then lead else String.make lead_cells ' ')
@@ -28447,7 +28447,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
               if remaining > 0 && rows_left > 0
               then rows @ lines ~lead:"    " ~rows_left
                   [ fact (Facts.Reading Schedule_settled)
-                      (if ko then Printf.sprintf "외 %d개" remaining else Printf.sprintf "+%d more" remaining)
+                      (Masc_tui_value.Count.more ~ko remaining)
                   ; fact Facts.Plain
                       (say "작업 › 일정에서 전체 확인" "see Work › Schedules for all") ]
               else rows

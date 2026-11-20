@@ -1022,8 +1022,7 @@ let render_section_resources ~cols (state : state) =
          @ body
          @ (if omitted <= 0 then []
             else
-              [ Printf.sprintf (if ko then "    외 %s명" else "    %s more")
-                  (Count.grouped omitted) ]))
+              [ "    " ^ Count.more ~ko omitted ]))
   in
   let day_label at = Masc_tui_value.Utc_day.month_day (Masc_tui_value.Utc_day.of_moment at) in
   let daily_title = match state.task_flow with

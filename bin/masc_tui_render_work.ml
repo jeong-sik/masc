@@ -2315,7 +2315,12 @@ let render_schedule_list (state : state) =
       ~readings:[] ~position:None
   in
 
-  surface_chrome_keys ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules"
+  let drawn_list_scroll = ref 0 in
+  surface_chrome_keys
+    ~overflow:
+      (Self_scrolled
+         (fun () -> List_window_scroll (Schedule_list, !drawn_list_scroll)))
+    state ~terminal_rows ~cols ~surface_key:"schedules"
     ~title:header
     ~keys:
       (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
@@ -2523,10 +2528,12 @@ let render_schedule_list (state : state) =
              Masc_tui_scroll.cursor_normalized ~count state.schedule_cursor
            in
            let scroll_offset =
-             if schedule_cursor >= content_height then
-               schedule_cursor - content_height + 1
-             else 0
+             Masc_tui_scroll.normalize ~count ~height:content_height
+               state.schedule_list_scroll
+             |> Masc_tui_scroll.ensure_visible ~cursor:schedule_cursor
+                  ~height:content_height
            in
+           drawn_list_scroll := scroll_offset;
            let scs_rows_window = Rows.of_list ~first:scroll_offset ~height:content_height snapshot.scs_rows in
            report_drawn_list Schedule_rows ~height:content_height;
            c.position (Masc_tui_value.Position.row ~selected:(Some schedule_cursor) ~total:count);

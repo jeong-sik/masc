@@ -206,6 +206,16 @@ let clamped_scroll_now (state : state) = function
         ; preview_max_scroll = state.board_list_preview_max_scroll
         ; preview_body_rows = state.board_list_preview_body_rows
         }
+  | List_window_scroll (owner, _) ->
+      List_window_scroll
+        ( owner
+        , match owner with
+          | Schedule_list -> state.schedule_list_scroll
+          | Approval_list -> state.approval_list_scroll
+          | Fusion_list_scroll -> state.fusion_list_scroll
+          | Config_themes_list -> state.theme_list_scroll
+          | Workspace_activity_list -> state.workspace_activity_list_scroll
+          | Code_tree_list -> state.code_tree_scroll )
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
   | Context_inspector_response_scroll _ ->
@@ -306,7 +316,8 @@ let reader_after_wheel (reader : clamped_scroll)
   (* Logs use their own bounded Metrics_tail movement through the key path. *)
   | Keeper_logs_scroll _ -> None
   (* List scrolls: the notch moves the list's cursor as the arrow does. *)
-  | Acting _ | Acting_selection _ | Keeper_list_scroll _ | Board_list_scroll _ -> None
+  | Acting _ | Acting_selection _ | Keeper_list_scroll _ | Board_list_scroll _
+  | List_window_scroll _ -> None
   (* Resources has panes of its own that [h] and [l] move between. *)
   | Resource_scroll _ -> None
 

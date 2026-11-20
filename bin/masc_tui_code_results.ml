@@ -97,7 +97,10 @@ let commit_navigation_location state target rest =
   set_code_scope state target.cj_scope;
   state.code_dir <- target.cj_dir;
   state.code_jump_back <- rest;
-  if changed then state.code_listing <- Masc_tui_fetched.clear state.code_listing
+  if changed then begin
+    state.code_tree_scroll <- 0;
+    state.code_listing <- Masc_tui_fetched.clear state.code_listing
+  end
 
 let start_navigation state ~action ~target ~path =
   if not (server_authority_ready state) || state.view <> Code then None
@@ -423,6 +426,7 @@ let take_ready_found_file (state : state) ~input_pending =
            let parent = Filename.dirname path in
            state.code_dir <- (if String.equal parent "." then "" else parent);
            state.code_cursor <- 0;
+           state.code_tree_scroll <- 0;
            state.code_listing <- Masc_tui_fetched.clear state.code_listing;
            state.code_file <- Masc_tui_fetched.clear state.code_file;
            state.code_target_line <- None;

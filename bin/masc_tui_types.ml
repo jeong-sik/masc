@@ -10623,6 +10623,7 @@ type state = {
      did before there was a choice to make. *)
   mutable theme_choice: string option;
   mutable theme_cursor: int;
+  mutable theme_list_scroll: int;
   (* What was in force when the reader entered the themes pane, so Esc can put
      it back. [None] inside [Some] is a real answer -- they were following the
      terminal -- which is why this is an option of an option: the outer one
@@ -11291,6 +11292,7 @@ type state = {
   mutable approval_value_reading:
     (workspace_authority * Masc_tui_approval_value_reading.t) option;
   mutable approval_cursor: int;
+  mutable approval_list_scroll: int;
   mutable pending_approval_action: pending_approval_action option;
   mutable board_listing: board_list_snapshot Masc_tui_fetched.view;
   mutable board_list_reported_error: string option;
@@ -11435,6 +11437,7 @@ type state = {
   mutable schedules_agenda_read: Snapshot_read.t;
   mutable schedules_agenda_freshness: Masc_tui_agenda.schedule_freshness;
   mutable schedule_cursor: int;
+  mutable schedule_list_scroll: int;
   mutable schedule_scroll: int;
   mutable schedule_detail_id: string option;
   (* The wake history of whichever schedule the detail is open on. Carries the
@@ -11687,6 +11690,7 @@ type state = {
   mutable workspace_activity_repo: string option;
   mutable workspace_activity: (string, workspace_activity_read) Masc_tui_fetched.t;
   mutable workspace_activity_cursor: int;
+  mutable workspace_activity_list_scroll: int;
   mutable workspace_activity_context_scroll: int option;
   mutable memory_health: Masc.Tui_decode_memory_health.memory_health_snapshot option;
   mutable memory_health_error: request_failure option;
@@ -11795,6 +11799,7 @@ type state = {
      that row's line number in the whole file, so the lookups are scattered
      rather than sequential and a list walked from the front on every one. *)
   mutable code_file: (string, code_file_document) Masc_tui_fetched.t;
+  mutable code_tree_scroll: int;
   mutable code_file_resume_intent: code_file_load_intent;
   mutable code_drafts: Masc_tui_code_draft.t list;
   mutable code_draft_open: bool;
@@ -11938,6 +11943,7 @@ type state = {
      is not folded into that list's failure; the next list answer clears it. *)
   mutable fusion_launch_error: string option;
   mutable fusion_cursor: int;
+  mutable fusion_list_scroll: int;
   mutable fusion_scroll: int;
   mutable fusion_mode: fusion_mode;
   mutable fusion_detail: Masc.Tui_decode_fusion.fusion_detail option;
@@ -17342,6 +17348,7 @@ let withdraw_fusion_workspace (state : state) =
   state.fusion_launch_error <- None;
   state.fusion_mode <- Fusion_list;
   state.fusion_cursor <- 0;
+  state.fusion_list_scroll <- 0;
   state.fusion_scroll <- 0
 
 (* The launch form belongs to the Fusion surface and to nothing else, so the
@@ -19214,6 +19221,7 @@ let apply_schedule_page_read state request result =
                | None -> 0);
             if not same_page then begin
               state.schedule_detail_id <- None;
+              state.schedule_list_scroll <- 0;
               state.schedule_scroll <- 0;
               state.schedule_cancel_armed <- None
             end;
@@ -19385,6 +19393,7 @@ let apply_workspace_activity_read state request result =
 
 let set_code_scope state scope =
   if state.code_scope <> scope then begin
+    state.code_tree_scroll <- 0;
     state.code_draft_open <- false;
     state.code_catalog <- Masc_tui_fetched.clear state.code_catalog;
     state.code_finder_file <- Masc_tui_fetched.clear state.code_finder_file;
@@ -19408,6 +19417,7 @@ let enter_keeper_code_file state ~keeper ~path =
   let parent = Filename.dirname path in
   state.code_dir <- (if String.equal parent "." then "" else parent);
   state.code_cursor <- 0;
+  state.code_tree_scroll <- 0;
   state.code_listing <- Masc_tui_fetched.clear state.code_listing;
   state.code_file <- Masc_tui_fetched.clear state.code_file;
   state.code_file_resume_intent <- Refresh_code_file;
@@ -21846,6 +21856,7 @@ let create_state
   tools_pane = Tools_surface;
   theme_choice = None;
   theme_cursor = 0;
+  theme_list_scroll = 0;
   theme_before_preview = None;
   theme_filter = `All;
   prompts = Masc_tui_fetched.initial;
@@ -22183,6 +22194,7 @@ let create_state
   approval_detail_scroll = 0;
   approval_value_reading = None;
   approval_cursor = 0;
+  approval_list_scroll = 0;
   pending_approval_action = None;
   board_listing = Masc_tui_fetched.Absent;
   board_list_reported_error = None;
@@ -22252,6 +22264,7 @@ let create_state
   schedules_agenda_read = Snapshot_read.idle;
   schedules_agenda_freshness = Masc_tui_agenda.Refresh_needed;
   schedule_cursor = 0;
+  schedule_list_scroll = 0;
   schedule_scroll = 0;
   schedule_detail_id = None;
   schedule_wake_history = None;
@@ -22411,6 +22424,7 @@ let create_state
   workspace_activity_repo = None;
   workspace_activity = Masc_tui_fetched.initial;
   workspace_activity_cursor = 0;
+  workspace_activity_list_scroll = 0;
   workspace_activity_context_scroll = None;
   memory_health = None;
   memory_health_error = None;
@@ -22465,6 +22479,7 @@ let create_state
   code_finder_file = Masc_tui_fetched.initial;
   code_cursor = 0;
   code_file = Masc_tui_fetched.initial;
+  code_tree_scroll = 0;
   code_file_resume_intent = Refresh_code_file;
   code_drafts = []; code_draft_open = false; code_draft_scroll = 0; code_draft_review = None; code_saved_refreshes = [];
   code_file_scroll = 0;
@@ -22523,6 +22538,7 @@ let create_state
   fusion_runs_open_at_start = None;
   fusion_launch_error = None;
   fusion_cursor = 0;
+  fusion_list_scroll = 0;
   fusion_scroll = 0;
   fusion_mode = Fusion_list;
   fusion_detail = None;
@@ -23686,6 +23702,14 @@ type approval_detail_viewport = {
   adv_presentation : approval_detail_presentation;
 }
 
+type list_scroll_owner =
+  | Schedule_list
+  | Approval_list
+  | Fusion_list_scroll
+  | Config_themes_list
+  | Workspace_activity_list
+  | Code_tree_list
+
 type clamped_scroll =
   | Task_detail of int * (int * int) option
   | Board_read of (int * int)
@@ -23775,6 +23799,9 @@ type clamped_scroll =
       ; preview_max_scroll : int
       ; preview_body_rows : int
       }
+  (* Sticky list viewport offsets kept stationary while the cursor stays on
+     screen instead of recomputing from [cursor - height + 1] every frame. *)
+  | List_window_scroll of list_scroll_owner * int
   (* The context inspector's plain shapes are lines the frame lays out of the
      reading it holds, and the frame windows them. The keypress bounds the
      scroll against the same window, but a reading that lands shorter leaves
@@ -23793,7 +23820,7 @@ let approval_detail_viewport_of_reader = function
          | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
          | Resource_scroll _ | Metrics_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
-         | Board_list_scroll _
+         | Board_list_scroll _ | List_window_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _
          | Queue_panel_presented _ | Help_presented)
   | None -> None
@@ -23809,7 +23836,8 @@ let task_detail_of_reader = function
          | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
          | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
          | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _
-         | Keeper_list_scroll _ | Board_list_scroll _ | Context_inspector_scroll _ | Context_inspector_response_scroll _
+         | Keeper_list_scroll _ | Board_list_scroll _ | List_window_scroll _
+         | Context_inspector_scroll _ | Context_inspector_response_scroll _
          | Queue_panel_presented _ | Help_presented)
   | None -> None
 
@@ -23824,7 +23852,8 @@ let play_card_of_reader = function
          | Planning_detail_scroll _ | Lane_run_detail_scroll _ | Changes_diff_scroll _
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Link_modal_scroll _
-         | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Board_list_scroll _
+         | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
+         | Board_list_scroll _ | List_window_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _
          | Help_presented)
   | None -> None
@@ -23841,7 +23870,7 @@ let queue_owner_of_reader = function
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
-         | Board_list_scroll _
+         | Board_list_scroll _ | List_window_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Help_presented)
   | None -> None
 
@@ -23857,7 +23886,7 @@ let help_is_presented = function
          | Repository_changes_diff_scroll _ | Resource_scroll _ | Metrics_scroll _
          | Approval_detail_scroll _ | Link_modal_scroll _
          | Play_invite_scroll _ | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _
-         | Board_list_scroll _
+         | Board_list_scroll _ | List_window_scroll _
          | Context_inspector_scroll _ | Context_inspector_response_scroll _ | Queue_panel_presented _)
   | None -> false
 
@@ -23880,7 +23909,8 @@ let resource_scroll_position = function
   | Planning_confirmation_scroll _ | Planning_detail_scroll _ | Lane_run_detail_scroll _
   | Changes_diff_scroll _ | Repository_changes_diff_scroll _ | Metrics_scroll _
   | Approval_detail_scroll _ | Link_modal_scroll _ | Play_invite_scroll _
-  | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Board_list_scroll _ | Context_inspector_scroll _
+  | Voice_scroll _ | Preset_detail_scroll _ | Keeper_list_scroll _ | Board_list_scroll _
+  | List_window_scroll _ | Context_inspector_scroll _
   | Context_inspector_response_scroll _ | Queue_panel_presented _
   | Help_presented -> None
 
@@ -23968,6 +23998,13 @@ let apply_clamped_scroll (state : state) = function
       state.board_list_preview_scroll <- preview_scroll;
       state.board_list_preview_max_scroll <- preview_max_scroll;
       state.board_list_preview_body_rows <- preview_body_rows
+  | List_window_scroll (Schedule_list, value) -> state.schedule_list_scroll <- value
+  | List_window_scroll (Approval_list, value) -> state.approval_list_scroll <- value
+  | List_window_scroll (Fusion_list_scroll, value) -> state.fusion_list_scroll <- value
+  | List_window_scroll (Config_themes_list, value) -> state.theme_list_scroll <- value
+  | List_window_scroll (Workspace_activity_list, value) ->
+      state.workspace_activity_list_scroll <- value
+  | List_window_scroll (Code_tree_list, value) -> state.code_tree_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
   | Context_inspector_response_scroll value -> state.context_inspector_response_scroll <- value
 

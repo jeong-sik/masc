@@ -1578,7 +1578,14 @@ let render_themes (state : state) =
   let cursor =
     max 0 (min state.theme_cursor (max 0 (List.length entries - 1)))
   in
-  let scroll = max 0 (cursor - content_height + 1) in
+  let scroll =
+    let count = List.length entries in
+    if count = 0 then 0
+    else
+      Masc_tui_scroll.normalize ~count ~height:content_height
+        state.theme_list_scroll
+      |> Masc_tui_scroll.ensure_visible ~cursor ~height:content_height
+  in
   let name_width = theme_name_width ~cols in
   box_line buf cols
     (zone_two_title ~cols state
@@ -1746,7 +1753,9 @@ let render_themes (state : state) =
   Buffer.add_string buf
     (footer_line ~recovery_in_slot state ~max_cells:cols
        ~hints:(Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:state.config_pane));
-  finish_surface state ~surface_key:"themes" ~rows:terminal_rows ~cols buf
+  finish_surface state
+    ~clamped:(List_window_scroll (Config_themes_list, scroll))
+    ~surface_key:"themes" ~rows:terminal_rows ~cols buf
 
 (* Where the config file being read lives, for the title row beside the strip
    that already names the file. Said from the server's masc root, which is the

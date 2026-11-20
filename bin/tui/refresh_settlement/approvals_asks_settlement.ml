@@ -47,6 +47,7 @@ let apply_approvals_load (state : T.state) result =
   | Error failure ->
       state.T.approval_snapshot <- None;
       state.T.approval_cursor <- 0;
+      state.T.approval_list_scroll <- 0;
       state.T.pending_approval_action <- None;
       (* A read the workspace guard kept back settles as a failed read, and
          its event is the kept-back notice alone, not unreliable data

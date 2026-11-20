@@ -130,7 +130,13 @@ let render_workspace_activity (state : state) repo_id =
           ~path:(activity_path @ [ ui_text state ~ko:"맥락" ~en:"context" ])
           ~readings:[]
           ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count) in
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"workspace-activity"
+  let drawn_list_scroll = ref state.workspace_activity_list_scroll in
+  surface_chrome
+    ~overflow:
+      (Self_scrolled
+         (fun () ->
+           List_window_scroll (Workspace_activity_list, !drawn_list_scroll)))
+    state ~terminal_rows ~cols ~surface_key:"workspace-activity"
     ~title
     ~hints:(match state.workspace_activity_context_scroll with
       | None -> Masc_tui_keys.footer_hints_workspace_activity ~lang:state.ui_language
@@ -157,7 +163,15 @@ let render_workspace_activity (state : state) repo_id =
           c.push_divider ();
           let room = max 1 (budget - 7) in
           report_drawn_list Workspace_activity_rows ~height:room;
-          let first = max 0 (cursor - room + 1) in
+          let first =
+            let count = List.length rows in
+            if count = 0 then 0
+            else
+              Masc_tui_scroll.normalize ~count ~height:room
+                state.workspace_activity_list_scroll
+              |> Masc_tui_scroll.ensure_visible ~cursor ~height:room
+          in
+          drawn_list_scroll := first;
           let rows_window = Rows.of_list ~first:first ~height:room rows in
           for i = 0 to room - 1 do
             match Rows.at rows_window (first + i) with

@@ -407,7 +407,7 @@ let%test "a one-hour write on a row without its price stays unpriced" =
       ~cache_creation_input_tokens:20 ()
   in
   match cost One_hour, cost Provider_default with
-  | Incomplete [ Cache_creation ], Estimated _ -> true
+  | Incomplete components, Estimated _ -> components = [ Cache_creation ]
   | (Estimated _ | Incomplete _), (Estimated _ | Incomplete _) -> false
 ;;
 

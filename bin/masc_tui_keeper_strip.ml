@@ -18,7 +18,18 @@ let runtime (row : Model.row) =
 let name (row : Model.row) = row.keeper.Decode.k_name
 let clean = Terminal_text.single_line
 
-type bucket = Failures | Recoveries | Sound | Paused | Fresh | Today | Cooling | Dormant | Unknown
+type bucket =
+  | Failures
+  | Unexpected_offline
+  | Recoveries
+  | Sound
+  | Paused
+  | Offline
+  | Fresh
+  | Today
+  | Cooling
+  | Dormant
+  | Unknown
 
 let bucket ~now ~age view row =
   match view with
@@ -29,8 +40,13 @@ let bucket ~now ~age view row =
        | Model.Age_unknown -> Unknown)
   | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
       (match Grid.verdict ~now (runtime row) with
-       | Grid.Failing _ -> Failures | Grid.Recovered -> Recoveries
-       | Grid.Sound -> Sound | Grid.Paused -> Paused | Grid.Other -> Unknown)
+       | Grid.Failing _ -> Failures
+       | Grid.Offline { unexpected = true } -> Unexpected_offline
+       | Grid.Recovered -> Recoveries
+       | Grid.Sound -> Sound
+       | Grid.Paused -> Paused
+       | Grid.Offline { unexpected = false } -> Offline
+       | Grid.Other -> Unknown)
 
 let header ~ko ~now ~cells ~view ~selected:_ ~age rows =
   let say korean english = if ko then korean else english in
@@ -39,36 +55,36 @@ let header ~ko ~now ~cells ~view ~selected:_ ~age rows =
      place keep the unreported mark and say what they hold. *)
   let status mark = Masc_tui_value.Mark.glyph mark, Theme.status_tone mark in
   let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
+  let unread = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread in
   (* The age words name the bound each bucket is cut at, as [bucket] reads
      it off [Model.age]. *)
   let groups = match view with
     | Model.By_age ->
-        [Fresh, "█", say "3시간 안" "fresh", Theme.info ();
-         Today, "▆", say "하루 안" "today", Ansi.reset;
-         Cooling, "▃", say "사흘 안" "cooling", Theme.recede ();
-         Dormant, "▁", say "더 오래" "dormant", Theme.recede ();
-         Unknown, unreported, say "나이 보고 안 됨" "age not reported", Theme.recede ()]
+        [Fresh, "█", say "3시간 안" "fresh", "", Theme.info ();
+         Today, "▆", say "하루 안" "today", "", Ansi.reset;
+         Cooling, "▃", say "사흘 안" "cooling", "", Theme.recede ();
+         Dormant, "▁", say "더 오래" "dormant", "", Theme.recede ();
+         Unknown, unreported, say "나이 보고 안 됨" "age not reported", "", Theme.recede ()]
     | Model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
         let failed, failed_tone = status Masc_tui_value.Mark.Failed in
         let caution, caution_tone = status Masc_tui_value.Mark.Caution in
         let settled, settled_tone = status Masc_tui_value.Mark.Settled in
         let paused, paused_tone = status Masc_tui_value.Mark.Paused in
-        [Failures, failed, say "실패" "failing", failed_tone;
-         Recoveries, caution, say "복구" "recovered", caution_tone;
-         Sound, settled, say "정상" "ok", settled_tone;
-         Paused, paused, say "일시정지" "paused", paused_tone;
-         (* [Grid.Other] holds two kinds: a Keeper whose runtime record is
-            absent, not read yet or unreadable, so its health is not known;
-            and an offline Keeper with no failure in the window. An offline
-            Keeper that failed in the window is a recovery. The group keeps
-            the unreported mark of the first kind, and its word names both. *)
-         Unknown, unreported, say "상태 모름·꺼짐" "health unknown or offline", Theme.recede ()] in
+        [Failures, failed, say "실패" "failing", "", failed_tone;
+         Unexpected_offline, caution, say "자율 꺼짐" "auto off", say "꺼짐" "off", caution_tone;
+         Recoveries, caution, say "복구" "recovered", say "복구" "rec", caution_tone;
+         Sound, settled, say "정상" "ok", "", settled_tone;
+         Paused, paused, say "일시정지" "paused", say "정지" "p", paused_tone;
+         Offline, paused, say "오프라인" "offline", say "오프" "off", paused_tone;
+         Unknown, unread, say "미조회" "unread", "", Theme.recede ()] in
   let readings = List.map (fun row -> row, bucket ~now ~age view row) rows in
-  let groups = List.filter_map (fun (key, mark, word, style) ->
+  let groups = List.filter_map (fun (key, mark, word, short, style) ->
     let members = List.filter_map (fun (row, at) -> if at = key then Some row else None) readings in
-    match members with [] -> None | _ :: _ -> Some (mark, word, style, List.length members)) groups in
-  let label long (mark, word, _, count) =
-    if not long then mark ^ string_of_int count
+    match members with [] -> None | _ :: _ -> Some (mark, word, short, style, List.length members)) groups in
+  let label long (mark, word, short, _, count) =
+    if not long then
+      if String.equal short "" then mark ^ string_of_int count
+      else mark ^ short ^ string_of_int count
     else if ko then Printf.sprintf "%s %s %d" mark word count
     else Printf.sprintf "%s %d %s" mark count word in
   let sep_w = 2 * max 0 (List.length groups - 1) in
@@ -80,7 +96,7 @@ let header ~ko ~now ~cells ~view ~selected:_ ~age rows =
   | _ :: _ ->
       "  "
       ^ String.concat "  "
-          (List.map (fun ((_, _, style, _) as group) ->
+          (List.map (fun ((_, _, _, style, _) as group) ->
              style ^ label long group ^ Ansi.reset) groups)
 
 type wake_style = Keeper_wakes | Wake_counts
@@ -284,7 +300,7 @@ let selected_summary ~ko ~now ~activity_cell ~next_run ~recurrence ~memory row =
               say "시작 " "since " ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
           | Some _ | None -> say "시작 ?" "since ?")
     | Grid.Failing _, None -> Some (say "시작 ?" "since ?")
-    | (Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None) -> None in
+    | (Grid.Paused | Grid.Offline _ | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None) -> None in
   let next = match next_run with
     | Next.Scheduled_at at ->
         Some (if Float.is_finite at then
@@ -312,9 +328,9 @@ let selected_summary ~ko ~now ~activity_cell ~next_run ~recurrence ~memory row =
         (match row.Decode.kr_runtime_path_rest with
          | Ok (Some (Decode.Path_rest_serving path)) -> Some ("▹ " ^ clean path.runtime_id)
          | Ok (Some (Decode.Path_rest_resting path)) ->
-             Some (say "◌ 대기 " "◌ wait " ^ clean path.runtime_id)
+             Some (Masc_tui_value.Mark.(glyph Waiting) ^ say " 대기 " " wait " ^ clean path.runtime_id)
          | Error _ | Ok None -> Some "▹ ?")
-    | (Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None)
+    | (Grid.Paused | Grid.Offline _ | Grid.Recovered | Grid.Sound | Grid.Other), (Some _ | None)
     | Grid.Failing _, None -> None in
   let first = clean (name row) ^ " " ^ activity_cell
     ^ (match age with Some age -> " " ^ age | None -> "") in

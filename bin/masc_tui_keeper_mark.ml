@@ -384,19 +384,21 @@ let column_legend_for ~ko =
         ; say "다음 " "next " ^ axis_next_glyph; col Due_column; col Lag_column ]
     , if ko then
         Printf.sprintf
-          "목록 외 모든 뷰는 오른쪽 끝 기준으로 같은 열에 맞춰 %s 선이 일렬로 섭니다: 줄 기호(%s 실패, %s 일시정지, \
-           원인 뷰의 %s 복구됨, %s 그 외), 이름, 턴 흐름, 현재 칸, 예정 시각(%s 예약 깨움, 빈칸 없음, %s 알 수 없는 구간), \
+          "목록 외 모든 뷰는 오른쪽 끝 기준으로 같은 열에 맞춰 %s 선이 일렬로 섭니다: 줄 기호(%s 실패, %s 일시정지·오프라인, \
+           %s 자율 꺼짐·원인 뷰 복구됨, %s 정상, %s 미조회), 이름, 턴 흐름, 현재 칸, 예정 시각(%s 예약 깨움, 빈칸 없음, %s 알 수 없는 구간), \
            다음 예약 실행(하루 내 시각, %s, %s, %s%s 이전 조회, %s 모름), 그리고 가장 뒤처진 키퍼 대비 미처리 턴 막대. \
            2줄 보기에서는 실패 키퍼 아래에 실패 시작(%s), 시도(%s%s%s)와 원인, 다음 런타임(%s, 휴식 중이면 %s %s)이 붙습니다"
           grid_now_line grid_failing_mark grid_paused_mark grid_recovered_mark grid_ok_mark
+          unread_glyph
           grid_wake_mark grid_unknown_range_mark (word Late_word) (word Held_word)
           (word Held_word) unknown_mark unknown_mark axis_before_glyph attempt_glyph
           grid_chain_link attempt_glyph axis_next_glyph grid_wait_glyph (word Wait_word)
       else
         Printf.sprintf
           "every view but the list draws a keeper on the same columns, fixed from the right \
-           edge so the %s lines stand in one column: the row mark (%s failing, %s paused, %s \
-           recovered in the cause view, %s the rest), the name, the turn pulse, the NOW cell, \
+           edge so the %s lines stand in one column: the row mark (%s failing, %s paused or \
+           expected offline, %s unexpected offline or recovered in the cause view, %s sound, \
+           %s unread), the name, the turn pulse, the NOW cell, \
            the state view's known wake count and any partial observation, or the other \
            views' half hours ahead (%s a scheduled wake, blank none, %s an unknown range; \
            entirely unknown or empty windows have one label), the next \
@@ -407,6 +409,7 @@ let column_legend_for ~ko =
            %s since when it fails, the attempts of the failed turn (%s%s%s) and the failure \
            word, and the runtime of the next dispatch (%s, or %s %s while the path rests)"
           grid_now_line grid_failing_mark grid_paused_mark grid_recovered_mark grid_ok_mark
+          unread_glyph
           grid_wake_mark grid_unknown_range_mark (word Late_word) (word Held_word)
           (word Held_word) unknown_mark unknown_mark axis_before_glyph attempt_glyph
           grid_chain_link attempt_glyph axis_next_glyph grid_wait_glyph (word Wait_word) )

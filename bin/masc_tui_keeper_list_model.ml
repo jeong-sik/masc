@@ -530,7 +530,8 @@ let cause_bucket_of_row ~now row =
   | Masc_tui_keeper_verdict.Failing _ -> failing_cause_of_row row
   | Masc_tui_keeper_verdict.Recovered -> Cause_recovered
   | Masc_tui_keeper_verdict.Paused -> Cause_paused
-  | Masc_tui_keeper_verdict.Sound | Masc_tui_keeper_verdict.Other -> Not_failing
+  | Masc_tui_keeper_verdict.Sound | Masc_tui_keeper_verdict.Offline _
+  | Masc_tui_keeper_verdict.Other -> Not_failing
 
 let keeper_name_of_row row = row.keeper.Masc.Tui_decode.k_name
 
@@ -668,7 +669,8 @@ let order_rows ~view ~sort ~now ~outside rows =
     | By_runtime -> List.filter (fun row ->
         match Masc_tui_keeper_verdict.of_runtime ~now (runtime_of_row row) with
         | Masc_tui_keeper_verdict.Failing _ -> true
-        | Masc_tui_keeper_verdict.Paused | Masc_tui_keeper_verdict.Recovered
+        | Masc_tui_keeper_verdict.Paused | Masc_tui_keeper_verdict.Offline _
+        | Masc_tui_keeper_verdict.Recovered
         | Masc_tui_keeper_verdict.Sound | Masc_tui_keeper_verdict.Other -> false) rows
     | Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall -> rows
   in

@@ -2,6 +2,7 @@
 type t =
   | Failing of { resting : bool }
   | Paused
+  | Offline of { unexpected : bool }
   | Recovered
   | Sound
   | Other
@@ -11,5 +12,6 @@ val of_runtime : now:float -> Masc.Tui_decode.keeper_runtime option -> t
 (** Pause takes precedence over failing health. Otherwise a failed or rested
     slot in the last 24 half hours makes a non-failing Keeper recovered,
     including an offline Keeper. A missing pulse cannot establish
-    a recovery. Unread/offline without recovery is
-    [Other], while running/idle without recovery is [Sound]. *)
+    a recovery. An offline Keeper without recovery is [Offline { unexpected }]
+    ([unexpected = true] when autonomous and not paused), an unread roster row
+    is [Other], and running/idle without recovery is [Sound]. *)

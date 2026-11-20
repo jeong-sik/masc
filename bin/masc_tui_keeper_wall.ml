@@ -33,7 +33,7 @@ let group ~now runtime =
   | Some _ | None -> match Grid.verdict ~now runtime with
   | Grid.Failing _ -> Failing
   | Grid.Recovered -> Other
-  | Grid.Paused | Grid.Other -> Other
+  | Grid.Paused | Grid.Offline _ | Grid.Other -> Other
   | Grid.Sound ->
       (match pulse runtime with
        | None -> Other

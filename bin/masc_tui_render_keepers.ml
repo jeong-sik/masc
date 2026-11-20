@@ -788,8 +788,9 @@ let grid_tail_cells (grid : Grid.t) =
    and its Recovered group say it recovered, and the other views draw both
    with the same ok mark. *)
 let grid_gutter_style = function
-  | Grid.Failing { resting = false } -> Theme.warn ()
-  | Grid.Failing { resting = true } | Grid.Paused | Grid.Other -> Theme.recede ()
+  | Grid.Failing { resting = false } | Grid.Offline { unexpected = true } -> Theme.warn ()
+  | Grid.Failing { resting = true } | Grid.Paused | Grid.Offline { unexpected = false }
+  | Grid.Other -> Theme.recede ()
   | Grid.Recovered | Grid.Sound -> Theme.ok ()
 
 let grid_gutter ?(selected = false) view verdict =
@@ -801,8 +802,9 @@ let grid_name (grid : Grid.t) ~yolo verdict name =
   if yolo then Theme.bad () ^ text ^ Ansi.reset
   else
     match verdict with
-    | Grid.Paused -> Theme.recede () ^ text ^ Ansi.reset
-    | Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other -> text
+    | Grid.Paused | Grid.Offline { unexpected = false } -> Theme.recede () ^ text ^ Ansi.reset
+    | Grid.Failing _ | Grid.Offline { unexpected = true }
+    | Grid.Recovered | Grid.Sound | Grid.Other -> text
 
 let grid_repeat count mark = String.concat "" (List.init (max 0 count) (fun _ -> mark))
 
@@ -874,7 +876,7 @@ let grid_due ~ko ~now verdict next_run =
     match next_run, verdict with
     | (Masc_tui_keeper_next_run.Late_since _ | Masc_tui_keeper_next_run.Held_current _), _ ->
         Theme.warn ()
-    | Masc_tui_keeper_next_run.Scheduled_at _, Grid.Paused -> Theme.recede ()
+    | Masc_tui_keeper_next_run.Scheduled_at _, (Grid.Paused | Grid.Offline _) -> Theme.recede ()
     | Masc_tui_keeper_next_run.Scheduled_at _, (Grid.Failing _ | Grid.Recovered | Grid.Sound | Grid.Other) ->
         Theme.info ()
     | ( ( Masc_tui_keeper_next_run.No_schedule | Masc_tui_keeper_next_run.Held_as_of _
@@ -1350,7 +1352,7 @@ let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~
               | Ok None | Error _ -> retry, wait, unknown + 1)
           | None -> retry, wait, unknown + 1) (0, 0, 0) members in
         let parts = (if retry > 0 then [Printf.sprintf "▹ %s %d" (say "재시도" "retry") retry] else [])
-          @ (if wait > 0 then [Printf.sprintf "◌ %s %d" (say "대기" "wait") wait] else [])
+          @ (if wait > 0 then [Printf.sprintf "%s %s %d" Keeper_mark.grid_wait_glyph (say "대기" "wait") wait] else [])
           @ (if unknown > 0 then [Printf.sprintf "? %d" unknown] else []) in
         Keeper_mark.grid_failing_mark ^ " " ^ say "실패" "failing",
         String.concat "  " parts, ""

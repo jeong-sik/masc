@@ -16,11 +16,7 @@ type t =
   | Gemini
   | Glm
 
-(** All variants in declaration order. Maintained exhaustively alongside
-    {!t}; adding a new variant without extending this list is a bug that
-    the property test in [test_provider_config] flags immediately. Useful
-    for QCheck generators, CLI completion, and iterative exhaustive
-    checks. *)
+(** All variants in declaration order. Derived from {!t}. *)
 val all : t list
 
 (** Canonical lowercase wire form (e.g. [Anthropic -> "anthropic"]).

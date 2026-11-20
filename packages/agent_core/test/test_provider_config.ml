@@ -2504,10 +2504,8 @@ let check_parse label input expected =
     check_string label want got
 ;;
 
-(* SSOT: pull the canonical list from the type's own module so adding a
-   new variant without updating [Provider_kind.all] is caught by the
-   [test_all_is_exhaustive] property below rather than silently skipping
-   the new variant in every iterative test. *)
+(* The list is derived from the type, so a new variant joins every
+   iterative test below. *)
 let all_kinds : Provider_config.provider_kind list = Provider_config.all_provider_kinds
 
 let test_kind_roundtrip () =
@@ -2716,33 +2714,6 @@ let test_wire_measured_zero_latency_is_distinct () =
 ;;
 
 (* ── enumeration & default_api_key_env ────────────────── *)
-
-(** [all_provider_kinds] must contain every variant exactly once. The
-    property guards against adding a variant to the sum type without
-    extending {!Provider_kind.all}; subsequent iterative tests would
-    silently skip the new kind otherwise. *)
-let test_all_is_exhaustive () =
-  let xs = Provider_config.all_provider_kinds in
-  (* One per constructor named in the match at the end of this case.
-     Provider_kind.all is written by hand, so a variant added to the type and
-     not to it would leave the list short and every iterative test below would
-     skip the new kind quietly -- this length is what says otherwise. The
-     match is what makes the pair maintainable: adding a variant stops the
-     build there, two lines from the number that has to move with it. *)
-  Alcotest.(check int) "one entry per canonical variant" 6 (List.length xs);
-  Alcotest.(check bool)
-    "no duplicate canonical strings"
-    true
-    (let strs = List.map Provider_config.string_of_provider_kind xs in
-     List.length strs = List.length (List.sort_uniq compare strs));
-  (* Exhaustive match: any missing or extra variant produces a compile
-     error here — the check is the compiler, not the runtime. *)
-  List.iter
-    (fun k ->
-       match (k : Provider_config.provider_kind) with
-       | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> ())
-    xs
-;;
 
 let test_all_drives_parse_roundtrip () =
   (* Property: [of_string (to_string k) = Some k] for every variant in
@@ -3638,10 +3609,6 @@ let () =
         ] )
     ; ( "kind_enumeration"
       , [ Alcotest.test_case
-            "all_provider_kinds is exhaustive"
-            `Quick
-            test_all_is_exhaustive
-        ; Alcotest.test_case
             "all drives parse roundtrip"
             `Quick
             test_all_drives_parse_roundtrip

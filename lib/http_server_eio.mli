@@ -389,15 +389,15 @@ module Router : sig
     upgrade:upgrade option -> Httpun.Request.t -> Http_reqd.t -> unit
 
   (** A route either handles the request in-band ([Owner], [Serving]) or
-      upgrades the connection to WebSocket ([Ws]).  RFC-0281 S3.3.
+      upgrades the connection to WebSocket ([Ws]).
 
       The two in-band targets say which domain the handler runs on when
-      connections run on another domain than the server's root switch (RFC
-      http-transport-runs-on-its-own-domain §3.2). An [Owner] handler runs on
-      the root switch's domain. A [Serving] handler runs on its connection's
-      domain, beside every handler of the other domain, so all it reaches
-      must be safe to share between domains (§3.4). When connections run on
-      the root switch's domain the two are the same place. *)
+      connections run on another domain than the server's root switch. An
+      [Owner] handler runs on the root switch's domain. A [Serving] handler
+      runs on its connection's domain, beside every handler of the other
+      domain, so all it reaches must be safe to share between domains. When
+      connections run on the root switch's domain the two are the same
+      place. *)
   type route_target =
     | Owner of request_handler
     | Serving of request_handler

@@ -487,11 +487,8 @@ let test_complete_stream_openai_backfills_llama_timings_cache_n_on_split_chunks 
           check int "split-chunk cache_read backfilled from timings.cache_n" 1741
             u.cache_read_input_tokens
         | None -> Alcotest.fail "expected usage on split-chunk stream");
-       (match resp.telemetry with
-        | Some tel ->
-          check (option int) "split-chunk reported_cache_read_input_tokens" (Some 1741)
-            tel.reported_cache_read_input_tokens
-        | None -> Alcotest.fail "expected telemetry on split-chunk stream")
+       check (option int) "split-chunk reported_cache_read_input_tokens" (Some 1741)
+         (Types.reported_cache_read_input_tokens resp)
      | Error _ -> Alcotest.fail "expected Ok split-chunk llama stream");
     Eio.Switch.fail sw Exit
   with

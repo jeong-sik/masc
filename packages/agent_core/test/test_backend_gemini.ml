@@ -1157,10 +1157,10 @@ let test_parse_usage_with_thoughts_token_count () =
    | None -> fail "expected usage");
   (match resp.telemetry with
    | Some tel ->
-     check (option int) "reasoning_tokens populated" (Some 260) tel.reasoning_tokens;
-     check (option int) "reported cache read" (Some 80)
-       tel.reported_cache_read_input_tokens
+     check (option int) "reasoning_tokens populated" (Some 260) tel.reasoning_tokens
    | None -> fail "expected telemetry");
+  check (option int) "reported cache read" (Some 80)
+    (Types.reported_cache_read_input_tokens resp);
   (* Negative thoughtsTokenCount is ignored and never shrinks output_tokens. *)
   let neg_json =
     Yojson.Safe.from_string

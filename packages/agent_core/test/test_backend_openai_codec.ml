@@ -3911,11 +3911,8 @@ let test_llama_server_timings_cache_n_and_openrouter_byok_cost () =
         check_int "llama sync cache_read backfilled from timings.cache_n" 1741
           u.cache_read_input_tokens
       | None -> Alcotest.fail "expected usage");
-     (match resp.telemetry with
-      | Some tel ->
-        Alcotest.(check (option int)) "llama sync reported_cache_read" (Some 1741)
-          tel.reported_cache_read_input_tokens
-      | None -> Alcotest.fail "expected telemetry")
+     Alcotest.(check (option int)) "llama sync reported_cache_read" (Some 1741)
+       (Types.reported_cache_read_input_tokens resp)
    | Error _ -> Alcotest.fail "expected Ok llama sync response");
   (* Explicit cached_tokens = 0 takes precedence over timings.cache_n. *)
   let explicit_zero =

@@ -1261,30 +1261,36 @@ let complete_stream_http
               | Some _ -> timings
               | None -> base.timings
             in
+            let base_with_meta =
+              { base with
+                timings = merged_timings
+              ; upstream_provider =
+                  (match upstream_provider with
+                   | Some _ -> upstream_provider
+                   | None -> base.upstream_provider)
+              }
+            in
             (* llama-server frequently emits [timings.cache_n] on the
                [finish_reason] chunk separately from the final [usage] chunk.
                Backfill [cache_read_input_tokens] strictly when usage exists,
                no explicit cache-read count was reported, and [cache_n] is
                bounded within [0 .. input_tokens]; never fabricate [api_usage]
                when [resp.usage = None]. *)
-            let usage, reported_cache_read_input_tokens =
-              match resp.usage, base.reported_cache_read_input_tokens, merged_timings with
+            let usage, telemetry =
+              match
+                resp.usage, Types.reported_cache_read_input_tokens resp, merged_timings
+              with
               | Some u, None, Some { Types.cache_n = Some n; _ }
                 when u.cache_read_input_tokens = 0 && n >= 0 && n <= u.input_tokens ->
-                Some { u with cache_read_input_tokens = n }, Some n
+                ( Some { u with cache_read_input_tokens = n }
+                , Some
+                    (Types.with_reported_cache_usage
+                       ~cache_creation_input_tokens:
+                         (Types.reported_cache_creation_input_tokens resp)
+                       ~cache_read_input_tokens:(Some n)
+                       (Some base_with_meta)) )
               | (Some _ | None), (Some _ | None), (Some _ | None) ->
-                resp.usage, base.reported_cache_read_input_tokens
-            in
-            let telemetry =
-              Some
-                { base with
-                  timings = merged_timings
-                ; reported_cache_read_input_tokens
-                ; upstream_provider =
-                    (match upstream_provider with
-                     | Some _ -> upstream_provider
-                     | None -> base.upstream_provider)
-                }
+                resp.usage, Some base_with_meta
             in
             { resp with usage; telemetry }
         in

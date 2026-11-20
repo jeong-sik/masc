@@ -8,17 +8,15 @@
     per constructor, and its test runs every row through {!classify}. Text a value carries (a message, a stop reason sent as a
     string, a client's detail) is not read.
 
-    A CLI slot is run with {!Keeper_lane_cli_oneshot.run} and its JSON read
-    with {!Librarian_answer.of_json}, not walked with
-    {!Keeper_lane_cli_oneshot.walk}: [walk]'s [validate] returns a rejection
-    as a string, so a {!Librarian_answer.rejection} would reach this module
-    only as the text of [Invalid_domain_output]. *)
+    The ask walks HTTP and CLI slots in one {!Exact_lane_slots.walk}. A CLI
+    slot's JSON is read with {!Librarian_answer.of_json}, so its rejection
+    reaches this module typed, as [Cli_answer_rejected]. *)
 
 (** What one HTTP slot did short of an answer. *)
 type http =
   | Held
-  (** Not called: {!Runtime_exact_lane_backpressure.order} holds the slot
-      until a time its provider stated. *)
+  (** Not called: the walk's order holds the slot until a time its provider
+      stated ({!Exact_lane_walk.walk}). *)
   | Rejected_before_dispatch of Agent_core.Exact_output.candidate_rejection_disposition
   (** The flow passed the slot without sending the question. *)
   | Execution_failed of Agent_core.Exact_output.execution_error_cause
@@ -33,6 +31,12 @@ type cli =
   | Cli_answer_rejected of Librarian_answer.rejection
   (** The client gave one JSON value and {!Librarian_answer.of_json}
       refused it. *)
+  | Cli_seats_full
+  (** Not called: every seat of the client's account was taken and a later
+      slot gave a seat first. *)
+  | Cli_unservable
+  (** Not called: the question cannot be one prompt, or the client's
+      account published no seats. *)
 
 (** A slot the walk left without an answer. *)
 type unanswered =

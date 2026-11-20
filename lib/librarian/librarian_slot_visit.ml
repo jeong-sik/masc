@@ -10,6 +10,8 @@ type http =
 type cli =
   | Cli_failed of Keeper_lane_cli_oneshot.failure
   | Cli_answer_rejected of Librarian_answer.rejection
+  | Cli_seats_full
+  | Cli_unservable
 
 type unanswered =
   | Not_visited
@@ -190,6 +192,8 @@ let classify_unanswered : unanswered -> Librarian_slot_outcome.unanswered = func
   | Http (Rejected_before_dispatch disposition) -> rejected disposition
   | Http (Execution_failed cause) -> execution cause
   | Cli (Cli_failed failure) -> cli_failure failure
+  | Cli Cli_seats_full -> Silent Not_called
+  | Cli Cli_unservable -> Silent Unavailable
   | Http (Answer_rejected rejection) | Cli (Cli_answer_rejected rejection) ->
     Silent (Unusable rejection)
 

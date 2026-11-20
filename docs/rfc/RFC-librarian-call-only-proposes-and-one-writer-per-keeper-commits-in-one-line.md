@@ -615,7 +615,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 2. 스냅샷 바이트를 읽고 그 값을 다시 읽는다. 값이 그대로인데 바이트의 sha 가 다르면 `Memory_diverged` 로 끝난다. 값이 달라졌으면 처음부터 다시 읽는다. 스냅샷은 반영(§8.2)이 읽는 함수로 읽고, sha 를 해석보다 먼저 비교한다. 파일이 없거나, 일반 파일이 아니거나, 읽기가 실패하거나, sha 는 맞는데 해석되지 않으면 `Snapshot_fault` 로 끝난다. 쓰는 쪽은 그 결함에 저장소와 같은 이유로 멈춘다. 이 결함은 저절로 낫지 않으니 쉬고 다시 묻지 않는다.
 3. 턴 기록을 그 offset 부터 읽어 질문을 만든다(§5, §6).
 4. slot 을 선언한 순서대로 걷는다. HTTP slot 과 CLI slot 을 가리지 않는다. 자리를 잡는 방법은 `RFC-exact-lane-walks-one-slot-list` §3.6 이다. 빈 자리가 있는 slot 가운데 앞의 것, 없으면 먼저 비는 자리다.
-5. 걷기 전에 `Runtime_exact_lane_backpressure.order` 를 읽는다. provider 가 「이 시각까지 두라」고 한 slot 은 부르지 않는다. slot 결과마다 `observe` 를 부른다.
+5. 걸음마다 남은 slot 을 다시 정렬한다(`Exact_lane_walk`). provider 가 「이 시각까지 두라」고 한 slot 은 부르지 않는다. HTTP slot 결과는 그 slot 의 관측에 적고, CLI slot 이 계정 사정으로 거절하면 같은 칸에 적는다.
 6. 선언한 slot 마다 결과를 하나씩 붙여 돌려준다.
 
 ```ocaml
@@ -667,8 +667,8 @@ type slot_outcome = Slot_answered | Unanswered of unanswered
 | `Refused (Sized Output_over_reserve)` | `Output_limit_reached` | – |
 | `Refused (Sized Window_reached)` | 창에서 멈춘 응답(새 생성자) | Claude 와 Codex 의 `Context_window_exceeded` 가운데 생성이 시작된 것 |
 | `Refused Unsized` | `Invalid_request`(400, 422), stop reason 이 `Refusal` 이나 `ContentFilter` | Codex 가 타입으로 알린 요청 거절(`Bad_request`, `Cyber_policy`, `Misalignment_policy_violation`) |
-| `Silent Not_called` | `order` 가 잡고 있다(`held_http`), `Seats_full`, 방문이 없다 | `Held`(`order_slots` 가 잡고 있다), Antigravity 의 `Spawn_capacity_busy`, 방문이 없다 |
-| `Silent Unavailable` | slot 이나 runtime 을 선언대로 쓸 수 없다. 계약, 준비, 인증, 결제(402), 측정 불가, 어느 갈래에도 들지 않은 status | 모르는 runtime, official client 아님, client 를 띄우지 못함(`Setup_failure`, 설정 오류, 로그인 없음) |
+| `Silent Not_called` | 걷기의 정렬이 잡고 있다(`Held`), `Seats_full`, 방문이 없다 | `Held`(걷기의 정렬이 잡고 있다), 계정 자리가 꽉 차 뒤 slot 이 먼저 받음(`Cli_seats_full`), Antigravity 의 `Spawn_capacity_busy`, 방문이 없다 |
+| `Silent Unavailable` | slot 이나 runtime 을 선언대로 쓸 수 없다. 계약, 준비, 인증, 결제(402), 측정 불가, 어느 갈래에도 들지 않은 status | 모르는 runtime, official client 아님, 계정이 자리를 발행하지 않음(`Cli_unservable`), client 를 띄우지 못함(`Setup_failure`, 설정 오류, 로그인 없음) |
 | `Silent Busy` | rate limit, 과부하, 서버 오류, quota | `refused_for_binding_rest` |
 | `Silent Lost` | 네트워크, 연결, 본문 시한, 본문을 못 받음, provider 가 끊음, 원인을 타입으로 알 수 없는 provider 오류 | 원인을 타입으로 알 수 없는 실행 실패 |
 | `Silent (Unusable _)` | 본문이 왔는데 쓸 수 없다. JSON 아님, schema 어김, 되돌려 적기 틀림, 비었거나 잘림, 받은 본문이 masc 의 읽기 경계를 넘음(`Response_body_too_large`) | JSON 아님, schema 어김, 답 없이 끝난 턴(`Missing_reply`) |

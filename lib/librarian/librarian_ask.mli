@@ -72,14 +72,13 @@ type room_input =
       outcomes are those facts. With no slot left, nothing is called.
     + Sends the question's text as one user message with no system prompt.
       The answer schema of the question's kind
-      ({!Librarian_question.Made}'s [schema]) is the walk's requirement: the flow and a CLI run
-      each write its sentence after the text. The HTTP slots go in the
-      order {!Runtime_exact_lane_backpressure.order_at} gives at the clock's
-      time, in one flow. A slot whose answer {!Librarian_answer.of_json}
-      refuses passes the question to the next. Only when no HTTP slot
-      answered are the CLI slots run, one at a time, ordered again by
-      {!Keeper_lane_cli_oneshot.order_slots_at} before each, with an empty
-      system prompt.
+      ({!Librarian_question.Made}'s [schema]) is the walk's requirement: an
+      HTTP flow and a CLI run each write its sentence after the text. The
+      HTTP and CLI slots go in one {!Exact_lane_slots.walk}, one slot per
+      step, ordered again at the clock's time before each step. A full slot
+      is passed for a later slot with a free seat, whatever its kind. A CLI
+      slot runs with an empty system prompt. A slot whose answer
+      {!Librarian_answer.of_json} refuses passes the question to the next.
     + The first answer accepted is [Answered]. Otherwise [No_answer] holds
       an outcome for every slot of [lane]: the HTTP slots, then the CLI
       slots, in declared order. A slot the walk did not reach is

@@ -296,6 +296,11 @@ let with_installation ?(auth_config = no_login_client) f =
   Unix.putenv "MASC_HTTPS_PORT" "0";
   Unix.putenv "MASC_HTTP_BASE_URL" "";
   Unix.putenv "MASC_USE_H2" "auto";
+  (* The folder of definitions and the journal are the ones of the base,
+     whatever the shell of the run holds: a MASC_CONFIG_DIR that a run
+     allowing test overrides follows would take the files the cases write
+     out of the temporary directory. An empty value is read as unset. *)
+  Unix.putenv Env_config_core.config_dir_env_key "";
   Eio_main.run (fun env ->
     let root = Filename.temp_dir "server-accounts-" "" in
     Fun.protect

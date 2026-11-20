@@ -90,16 +90,15 @@ type stage_error =
 
 (* [eval]/[source]/[.] are not programs; they are the running shell
    re-parsing text.  The execution surface for a script is [<shell> -c
-   <script>], where these genuinely re-parse (RFC
-   shell-ir-typed-command-substitution §2.4), so the IR — which has no
+   <script>], where these genuinely re-parse, so the IR — which has no
    re-parse step — refuses them by name.  This refusal predates the opening
    of [$(...)]: a substitution that reaches one must meet the same closed
    vocabulary as any other construct.
 
    Deliberately at the parser's bin position rather than in
    [Exec_program.of_string]: the typed argv lane spawns argv directly (no
-   shell), where [eval] already fails as ENOENT, and the RFC asks for no
-   change there. *)
+   shell), where [eval] already fails as ENOENT and needs no refusal of
+   its own. *)
 let shell_builtins = [ "eval"; "source"; "." ]
 
 let raw_to_simple
@@ -117,8 +116,8 @@ let raw_to_simple
     match bin_word with
     | `Expansion -> Error (Stage_outside_subset `Param_expansion)
     | `Substituted ->
-      (* A substituted program name is not opened by this RFC:
-         [$(cmd) args] stays refused. *)
+      (* A substituted program name is not opened: [$(cmd) args] stays
+         refused. *)
       Error (Stage_outside_subset `Cmd_subst)
     | `Word bin_str -> (
       if List.mem bin_str shell_builtins
@@ -197,9 +196,7 @@ let to_shell_ir
    Neither answer is inferred from the source text. An earlier version
    scanned the whole string for the first metacharacter off an ordered list
    after either failure; it had no case for [$], so an expansion next to a
-   redirect was reported as the redirect. RFC execute-subset-dispositions §6
-   recorded the same shape from the other end -- a tag naming the first trip
-   rather than the construct -- and this is where that is closed. *)
+   redirect was reported as the redirect. *)
 let parse_string (source : string) : Shell_ir.t Parsed.t =
   (* One invocation owns the counter. Recursive source parses capture the
      same counter, so substitutions spend their parent's remaining budget. *)
@@ -216,8 +213,7 @@ let parse_string (source : string) : Shell_ir.t Parsed.t =
     | Bash_lexer.Excluded_construct reason -> Parsed.Too_complex reason
     | Bash_lexer.Subst_inner_refusal refusal ->
       (* An inner [$( )] body refused for its own reason; the refusal rides
-         up unchanged — the same rules, the same reasons (RFC
-         shell-ir-typed-command-substitution §2.2). *)
+         up unchanged — the same rules, the same reasons. *)
       refusal
     | Bash_subset.Error -> Parsed.Parse_error (make_parse_error lexbuf)
     (* [int_of_string] on a descriptor the rule matched but no machine has, as

@@ -291,10 +291,9 @@ and word_tail token_count parse_subst first rev_rest = parse
 (* Inside a double-quoted body, read pieces instead of requiring one
    closed literal: chunks stay Lit, [$NAME] and [${NAME}] become Var —
    quoted, so the expansion is one argv element and never re-split — and
-   [$( )] becomes a [Subst] piece, one argv element quoted or not (RFC
-   shell-ir-typed-command-substitution §2.3 item 3).  What bash would run
-   differently in there stays refused by name ([$((], backtick), and a
-   dollar that opens neither a name nor a brace form keeps the
+   [$( )] becomes a [Subst] piece, one argv element quoted or not.  What bash
+   would run differently in there stays refused by name ([$((], backtick),
+   and a dollar that opens neither a name nor a brace form keeps the
    Param_expansion refusal.  The closing quote hands the collected pieces
    back to [word_tail]: a word may continue after it, as in a quoted dir
    followed by /sub.  [first_opt] is [None] only while the quote opened the

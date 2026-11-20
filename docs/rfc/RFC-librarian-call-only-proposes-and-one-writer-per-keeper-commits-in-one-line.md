@@ -504,7 +504,7 @@ type purge_refused = Turn_log_unwritable of io_error
 ```ocaml
 type ask =
   | Read_range of width                 (* 읽은 자리부터 폭만큼. Memory 를 보여 준다 *)
-  | Read_item_alone of item_ref         (* 맨 앞 항목 하나. Memory 를 보여 주지 않는다 *)
+  | Read_item_alone                     (* 맨 앞 항목 하나. Memory 와 하던 일을 보여 주지 않는다 *)
   | Make_room of { after : item_ref }   (* Memory 만 보여 준다. 항목은 없다 *)
 ```
 
@@ -518,6 +518,7 @@ type ask =
 | 6 | 끝 줄 `question-end: <뒤 절반>` | ○ | ○ | ○ |
 
 - 순서는 고정이다. 같은 Memory 에 폭만 다른 질문은 1~4 가 같아서 provider 캐시가 앞부분을 다시 쓴다.
+- `Read_item_alone` 은 인자가 없다. 맨 앞 항목은 꼬리가 정한다. 묻는 동안 읽은 자리를 옮기는 사건은 가던 묻기를 취소하므로(§9.2, §12.4), 그 항목은 묻는 동안 바뀌지 않는다.
 - fact 는 71자 id 대신 `m1 … mN` 으로 가리킨다. 단위도 질문이 붙인 짧은 이름으로 가리킨다. 지금은 답이 긴 id 를 옮겨 적다가 틀려서 답 전체가 거절됐다.
 - 질문 id 는 반쪽 둘이다. 앞 절반은 `sha256(선언, 그 질문이 싣는 Memory 바이트와 하던 일)` 의 반이고, 뒤 절반은 `units:` 줄 바이트 sha256 의 반이다. 두 반쪽은 본문을 나눠 덮는다. 그래서 Memory 만 바뀌면 앞 절반만 바뀐다. 답은 둘 다 되돌려 적는다.
   - 항목만 싣는 질문의 id 는 Memory 가 바뀌어도 같다. 그래야 그 질문에 대한 크기 사실(§7.4)이 직접 쓰기마다 버려지지 않는다.
@@ -553,7 +554,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 - 검사 순서는 고정이다. 문서의 field 집합, 되돌려 적은 반쪽 둘이 문자열인가, 그 반쪽이 물은 질문의 것인가, 그다음이 하던 일과 op 다. 다른 질문의 답은 다른 흠이 있어도 `Echo_mismatch` 다.
 - `Empty_or_partial` 은 빈 글이다. provider 가 중간에 끊은 답은 묻기 층이 이 값으로 바꾼다. 끊긴 것을 아는 곳이 거기다.
 - 답이 적은 이름(`m3`, 단위 이름)은 codec 이 그대로 둔다. 질문의 표에 없는 이름은 계획이 그 op 만 빼는 이유다(§8.2).
-- `Read_item_alone` 의 답에서는 `Add` 와 `working_state = Keep` 만 받는다. 그 밖은 반영하지 않고 `Not_valid_alone` 으로 줄에 적는다. Memory 와 하던 일을 보지 않은 답이 그것을 지우거나 갈아 쓸 수는 없다. 하던 일을 바꾸려 한 것은 op 가 아니어서 계획이 따로 돌려준다(`working_state = Not_valid_alone`).
+- `Read_item_alone` 의 답에서는 `Add` 와 `working_state = Keep` 만 받는다. 그 밖은 반영하지 않고 `Not_valid_alone` 으로 줄에 적는다. Memory 와 하던 일을 보지 않은 답이 그것을 지우거나 갈아 쓸 수는 없다. 하던 일을 바꾸려 한 것은 op 가 아니어서 계획이 따로 돌려준다(`working_state = Alone Not_valid_alone`). 반영 줄의 `shown` 은 그 값에서 나온다(§8.1).
 
 ### 6.3 크기는 provider 가 잰다
 
@@ -615,7 +616,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 type ask_result =                        (* 코드는 Librarian_read_result.t *)
   | Answered of { question : question; answer : answer; slot : string }
   | Nothing_to_ask
-  | No_answer of { slots : (slot_key * unanswered) list }     (* 답한 slot 이 없다. 그래서 답한 slot 을 담지 못한다 *)
+  | No_answer of { question : question; slots : (slot_key * unanswered) list }   (* 답한 slot 이 없다. 그래서 답한 slot 을 담지 못한다 *)
   | Nothing_readable of { reach : reach; missing : missing_at list }
   | Span_unknown of { before : mark; reach : reach }          (* reach 는 그 reset 줄까지 Whole *)
   | Memory_diverged of { expected : Sha256.t; observed : Sha256.t }
@@ -627,7 +628,8 @@ and snapshot_fault = Absent | Not_a_snapshot_file | Not_read     (* 코드는 Li
 and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed: 턴 기록, 단위의 파일을 읽지 못했다 *)
 ```
 
-- `Refused_by_lane` 은 지금 선언된 slot 가운데 질문을 거절한 slot 이 하나는 있는 `No_answer` 이고, `Silent_lane` 은 그런 slot 이 없는 `No_answer` 다. 둘은 `decide` 의 조건이다(§9.3). 폭이 드는 `offered` 와 `lane_result` 의 나머지 칸(`question`, `basis`, `head`)은 L7 이 더한다.
+- `Refused_by_lane` 은 지금 선언된 slot 가운데 질문을 거절한 slot 이 하나는 있는 `No_answer` 이고, `Silent_lane` 은 그런 slot 이 없는 `No_answer` 다. 둘은 `decide` 의 조건이다(§9.3).
+- `No_answer` 는 질문을 싣는다. 폭이 드는 `offered` 는 L7a 가 더했다. 질문이 본 스냅샷 `basis` 는 L7b 가 질문의 칸으로 더했다. 질문을 만들 때 꼬리가 가리킨 스냅샷 sha 이고, 항목만 묻는 질문도 싣는다. §7.4 의 판정이 이것을 지금 스냅샷과 견준다. 남은 칸 `head` 는 L7c 가 더한다.
 
 - 폭과 반영한 수는 결과의 `offered` 에서 읽는다. 쓰는 쪽이 따로 세지 않는다. fiber 가 읽은 뒤에 턴이 닫혔을 수 있다.
 - 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)과 쓰는 쪽이 더는 열려 있지 않은 것은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
@@ -860,7 +862,7 @@ type removal =
 type why_not =
   | Unknown_ref | Ref_used_twice | Source_outside_question
   | Removed_during_flight of { seq : int }
-  | Not_valid_alone            (* 항목만 읽은 답이 Memory 를 지우거나 하던 일을 바꾸려 했다 (§7.4) *)
+  | Not_valid_alone            (* 항목만 읽은 답이 Add 가 아닌 op 를 냈다 (§7.4). 하던 일을 바꾸려 한 것은 Read 의 shown 이 적는다 *)
   | Successor_unsupported      (* 이 op 가 말한 fact 가 근거를 잃어 남지 못했다 *)
 type effects =
   { added : Fact.t list                      (* fact 전체. 지금의 fact 모양 그대로 *)
@@ -870,15 +872,21 @@ type effects =
   ; sources : (Memory_id.t * int list) list }    (* fact 가 나온 단위의 줄 offset *)
 
 type hole =
-  | Item_exceeds_window
+  | Item_exceeds_window of missing_at list   (* 그 항목만 물어도 선언한 slot 이 모두 입력 크기로 거절했다. 그 질문이 싣지 못한 부분 *)
   | Content_missing of missing_at list
   | Line_unreadable of { offset : int; sha : Sha256.t }
   | Unknown_span of { before : mark; after : mark }
   | Turn_log_replaced of { from : Turn_log_id.t; to_ : Turn_log_id.t }
   | Position_lost of { offset : int; length : int }
   | Operator_skipped of { by : string }
+type alone_working_state =
+  | Untouched                  (* 답이 하던 일을 그대로 뒀다 *)
+  | Not_valid_alone            (* 답이 하던 일을 바꾸려 했다. 반영하지 않았다 (§6.2) *)
+type shown =
+  | With_memory                (* Read_range. Memory 와 하던 일을 보여 줬다 *)
+  | Item_alone of alone_working_state   (* Read_item_alone *)
 type cause =
-  | Read of { question : Question_id.t; shown_memory : bool; slot : string; trace : string; missing : missing_at list }
+  | Read of { question : Question_id.t; shown : shown; slot : string; trace : string; missing : missing_at list }
   | Make_room of { question : Question_id.t; after : item_ref; slot : string }
   | Direct of { by : actor; trace : string; write : write }
   | Skip of { hole : hole }

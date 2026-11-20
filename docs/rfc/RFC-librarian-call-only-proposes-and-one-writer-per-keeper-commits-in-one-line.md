@@ -346,6 +346,10 @@ head 를 줄이지 않는 것은 이 함수를 지나지 않는다. 고쳐 쓰�
 
 **meta 를 치우고 Keeper 를 다시 만들면.** boot 때 Keeper meta 를 옆으로 치우고 같은 이름으로 다시 만들면, 새 trace 옆에 옛 턴 기록이 남는다. 알리는 경로를 따로 두지 않는다. 처음 줄을 쓰는 쪽이 head 가 다른 trace 에 있는 것을 보고 `Unannounced` 를 쓴다. 구멍은 옛 head 에서 마지막 줄 뒤에 닫힌 것이고, 턴이 끊기지 않았으면 비어 있다.
 
+- 이 경로는 실제로 있다. Keeper 만들기는 그 Keeper 의 턴 기록과 Memory 파일을 읽지 않는다. 옛 파일이 남아 있어도 거절하지 않는다.
+- 만들기가 거절하는 때는 넷이다. meta 가 이미 있을 때, lifecycle 예약이나 정지의 intake fence 가 있을 때, `create_only` 인데 선언된 config 가 있을 때, 새로 만든 trace 디렉터리가 이미 있을 때다(`keeper_turn_up.ml`, `Keeper_owner_registry.create_meta`, `Keeper_input_birth.reserve_session`).
+- 그래서 다시 만든 Keeper 는 같은 이름의 턴 기록과 Memory 를 이어 쓴다.
+
 읽는 쪽이 받아들이는 순서는 이것 하나다.
 
 ```text
@@ -988,6 +992,16 @@ type write =
 - 그래서 등록된 Keeper 는 한 pulse 안에 산 쓰는 쪽을 갖는다. 프로세스가 시작한 뒤에도, 껐다가 다시 켠 뒤에도 같다.
 - 턴은 등록된 Keeper 에게만 돈다(`keeper_turn.ml:227-236`). 그래서 턴이 보내는 쓰기는 쓰는 쪽을 만난다.
 - 값: 등록되지 않은 Keeper 의 Memory 는 그 쓰는 쪽이 물러난 뒤에는 운영자 route 로도 고치지 못한다. 물러나는 것은 한 pulse 안이다. 답은 `Refused Keeper_retired` 다. Keeper 를 켠 뒤에 고친다.
+
+쓰는 쪽 등록부(`Librarian_writers`)가 이것을 한다.
+
+- 등록부는 Keeper 이름에서 쓰는 쪽으로 가는 표 하나다. 표는 읽은 그 표일 때만 바꾼다(compare-and-set). 그래서 찾기와 넣기가 한 걸음이고, 어느 domain 에서 불러도 같다. 진 쪽이 만든 쓰는 쪽은 돈 적이 없어 그냥 버린다.
+- 쓰는 쪽을 만드는 곳과 그 fiber 가 도는 곳은 다르다. 만드는 곳은 처음 물은 곳이고 어느 domain 이든 된다. fiber 는 등록부를 만든 domain 에서 돈다. 등록부의 fiber 하나가 새 쓰는 쪽을 받아 띄운다.
+- `registered` 는 등록부가 받는 함수 하나다. 그 Keeper 가 Keeper 등록부에 있고 턴 기록을 쓰는지 답한다. `ensure` 와 쓰는 쪽의 `Retire` 가 같은 함수를 본다.
+- 쓰기와 운영자 행동은 `ensure` 로 쓰는 쪽을 찾아 보낸다. 쓰는 쪽이 받기 전에 끝났으면 다시 찾는다. 쓰는 쪽이 없으면, 곧 등록되지 않은 Keeper 면 `Keeper_retired` 다. 다른 까닭으로는 그 답이 나오지 않는다.
+- view 는 기다리지 않는다. 찾은 쓰는 쪽이 내놓은 값을 읽는다. 그사이 끝난 쓰는 쪽이면 다시 찾는다.
+- 물러난 쓰는 쪽은 표에서 빠진다. 표에 있는 것이 그 쓰는 쪽일 때만 뺀다. 그사이 다시 등록된 Keeper 의 새 쓰는 쪽은 그대로 둔다.
+- pulse 는 받은 Keeper 이름마다 `ensure` 를 부르고, 표에 있는데 등록되지 않은 Keeper 의 쓰는 쪽을 물러나게 한다. 물러남의 답을 하나씩 기다린다.
 
 boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬리를 복구한 뒤에 돈다. Keeper 마다 fiber 하나라서, 느린 boot 는 자기 Keeper 의 Memory 만 늦춘다.
 그 전에 턴 기록에는 `Log_started` 가 있다. 프로세스가 시작할 때와 Keeper 를 만들 때 쓴다(§5.2).
@@ -1941,7 +1955,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5f | 맡김(`Librarian_store.adopt`, §8.7). 해석되지 않는 꼬리가 줄이 끝나는 곳을 함께 알린다 | 밖에서 바꾼 스냅샷을 맡기면 줄 하나가 붙고 boot 가 열린다. 다음 반영이 그 줄에 이어진다. sha 가 다르거나 해석되지 않으면 거절하고 쓰지 않는다. 꼬리가 해석되지 않으면 `Started` 를 그 뒤에 쓰고 `seq` 를 1 부터 센다 |
 | L5g | 상태표의 판단(`Librarian_machine`): boot, 직접 쓰기, `Resume`, `Adopt` 가 `Idle`, `Stopped` 에서 하는 일. `Retired` 는 등록부가 답한다. 동기 함수고 fiber 가 없다. 묻기의 상태와 사건은 그것을 만드는 층이 더한다 | 칸마다 하나. 줄을 쓰지 않는 답은 상태와 반영 기록을 그대로 둔다. 밖에서 바꾼 스냅샷을 만난 쓰기가 저장소를 세우고, 그 뒤의 쓰기는 거절된다. 파일을 되돌리고 `Resume` 하면 열린다. `Adopt` 는 `Log_diverged` 와 `Log_unreadable` 에서 받고 그 뒤의 쓰기가 이어진다 |
 | L5h | 쓰는 쪽 fiber(`Librarian_writer`): 잠금, boot, mailbox, 읽는 쪽이 보는 상태, `Retire`. 사건마다 `Librarian_machine` 을 부른다. 등록부와 pulse 는 없다 | boot 전에 온 쓰기가 boot 뒤에 답을 받는다. 쓰기는 온 순서대로 반영된다. 턴 기록이 없으면 멈추고, 생긴 뒤 `Resume` 하면 열린다. 같은 Keeper 의 둘째 쓰는 쪽은 잠금을 못 잡는다. 등록된 Keeper 의 `Retire` 는 버린다. 끝난 쓰는 쪽은 받지 않았다고 답하고, 잠금이 풀려 둘째가 이어서 쓴다 |
-| L5 | **전환.** 쓰는 쪽 등록부와 `ensure` 와 pulse, 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
+| L5i | 쓰는 쪽 등록부(`Librarian_writers`): 표, `ensure`, view, 쓰기와 운영자 행동을 쓰는 쪽에 보내기, `Retire`, pulse. 아직 등록부를 만드는 곳은 없다 | 등록된 Keeper 를 처음 물으면 답이 `Booting` 이고 표에 쓰는 쪽이 생긴다. 등록되지 않은 Keeper 는 view 가 `No_writer` 이고 쓰기와 운영자 행동이 `Keeper_retired` 이며 파일이 생기지 않는다. 같은 Keeper 에 나란히 온 쓰기 둘이 한 쓰는 쪽에서 `seq` 1, 2 가 된다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. 등록된 Keeper 의 `Retire` 는 버린다. 등록에서 뺀 뒤의 `Retire` 뒤에는 잠금이 풀려 있다. pulse 가 묻기 전에 쓰는 쪽을 만든다 |
+| L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |
@@ -2209,7 +2224,6 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | 모르는 것 | 틀리면 달라지는 것 | 확인하는 곳 |
 |---|---|---|
 | registry 에서 Keeper 를 빼는 곳 여섯(파일 다섯, `unregister_exact` 를 부르는 곳)이 그 lane 이 끝난 뒤에 빼는지 | 아니면 도는 턴 아래에서 dashboard purge 가 고쳐 쓴다. 지금 purge 도 같다 | purge 층(L8) |
-| 같은 이름의 runtime 파일이 남아 있을 때 Keeper 만들기가 거절하는지 | 거절하면 「meta 를 치우고 다시 만든 Keeper」 경로(§5.2)가 없다 | reset 층(L3c) |
 | 끝이 결과를 기다리는 tool 요청인 열린 메시지를 닫은 뒤에, 다음 턴이 그 이력을 지금처럼 읽는지. 지금은 턴이 시작할 때 메모리에서 닫는 메시지를 덧붙인다(`keeper_agent_run.ml:229-230`). 닫는 저장은 메시지 목록을 바꾸지 않고 닫힘의 경계만 옮긴다 | 다르게 읽으면 프로세스 시작 단계가 닫는 저장을 하기 전에 그 꼬리를 먼저 고쳐야 한다 | 프로세스 시작 단계의 층(L3a3b4c) |
 | 메시지 codec 이 옛 빌드가 쓴 object 를 같은 바이트로 되돌려 주는지 | 아니면 purge 가 건드리지 않은 메시지의 digest 가 바뀐다. 시험은 풀어낸 값이 아니라 저장된 digest 를 견준다 | purge 층(L8) |
 | bundle 이 다른 object 를 가리키는지 | 가리키면 sweep 이 줄의 bundle 에서 그 object 까지 따라가야 한다 | purge 층(L8) |
@@ -2235,4 +2249,5 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 ### 23.4 정하지 않고 남긴 것
 
 - 파일에 묶인 저장소의 무효 행은 늘기만 하고 턴마다 recall 에 실린다. 이 RFC 는 그 저장소의 쓰기 규칙을 바꾸지 않는다. 바이트 상한을 지우면 그 파일을 묶는 것이 없어진다(#53031).
+- 쓰는 쪽 fiber 가 예상하지 못한 예외로 끝났을 때. 지금은 예외가 그 fiber 를 띄운 switch 를 실패시킨다. 예외를 잡아 그 Keeper 의 쓰는 쪽만 다시 만들게 하면, 매번 같은 곳에서 죽는 쓰는 쪽을 쓰기가 끝없이 다시 만든다. 그 상태를 무엇으로 보이고 언제 다시 만들지는 경보(§12.2)와 함께 정한다. 등록부에 어느 switch 를 줄지는 전환 층이 정한다.
 - 반영 기록을 줄이는 방법. 가장 바쁜 Keeper 가 한 해 1.15 GB 까지 자란다(§10). 이 RFC 는 줄이지 않는다. 줄이는 일은 「지운 claim 을 언제까지 찾을 수 있어야 하는가」를 정해야 할 수 있다.

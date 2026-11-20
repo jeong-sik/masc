@@ -1228,6 +1228,12 @@ type cache_write_lifetime =
   | One_hour
 [@@deriving show, yojson]
 
+let cache_write_lifetime_to_string (lifetime : cache_write_lifetime) =
+  match lifetime with
+  | Provider_default -> "provider_default"
+  | One_hour -> "one_hour"
+;;
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option

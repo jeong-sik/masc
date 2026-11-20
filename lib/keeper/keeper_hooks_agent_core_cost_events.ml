@@ -201,6 +201,18 @@ let assemble_cost_event_payload
     | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _), None
     | Cost_ledger.Resolved_delta, _ -> `Null
   in
+  (* The lifetime the request asked its cache writes to keep. Like the response
+     id it is one request's fact: the turn's resolved spend may sum requests
+     that asked differently, and names none. *)
+  let cache_write_lifetime =
+    match usage_projection, telemetry with
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _),
+      Some { cache_write_lifetime = Some lifetime; _ } ->
+        `String (Agent_core.Types.cache_write_lifetime_to_string lifetime)
+    | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _),
+      (Some { cache_write_lifetime = None; _ } | None)
+    | Cost_ledger.Resolved_delta, _ -> `Null
+  in
   (* The client conversation the counts belong to. A raw observation also
      keeps the client's own total, which a conversation-cumulative count is
      read against; a resolved reading is already a delta and needs neither
@@ -292,6 +304,7 @@ let assemble_cost_event_payload
     Cost_ledger.to_json
       ~extra_fields:
         ([ ("response_id", response_id)
+         ; ("cache_write_lifetime", cache_write_lifetime)
          ; ("non_cached_input_tokens", non_cached_input_tokens)
          ; (key_provider, `String runtime_lane_label)
          ; (key_cost_status, `String cost_status_label)

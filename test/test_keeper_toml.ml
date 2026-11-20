@@ -216,19 +216,32 @@ let test_parse_general_array () =
   | Error e -> fail e
 
 let test_parse_inline_table () =
-  match TL.parse_toml {|point = { x = 1, label = "origin" }|} with
+  (match TL.parse_toml {|point = { x = 1, label = "origin" }|} with
+   | Ok doc ->
+     check (option int) "point.x" (Some 1)
+       (match List.assoc_opt "point.x" doc with
+        | Some (TL.Toml_int value) -> Some value
+        | _ -> None);
+     check (option string) "point.label" (Some "origin")
+       (match List.assoc_opt "point.label" doc with
+        | Some (TL.Toml_string value) -> Some value
+        | _ -> None);
+     check bool "unflattened container key absent" true
+       (Option.is_none (List.assoc_opt "point" doc))
+   | Error e -> fail e);
+  match TL.parse_toml {|points = [{ x = 1, label = "origin" }]|} with
   | Ok doc ->
-    (match List.assoc_opt "point" doc with
-     | Some (TL.Toml_inline_table fields) ->
-       check (option int) "x" (Some 1)
+    (match List.assoc_opt "points" doc with
+     | Some (TL.Toml_array [ TL.Toml_inline_table fields ]) ->
+       check (option int) "array element x" (Some 1)
          (match List.assoc_opt "x" fields with
           | Some (TL.Toml_int value) -> Some value
           | _ -> None);
-       check (option string) "label" (Some "origin")
+       check (option string) "array element label" (Some "origin")
          (match List.assoc_opt "label" fields with
           | Some (TL.Toml_string value) -> Some value
           | _ -> None)
-     | _ -> fail "expected Toml_inline_table")
+     | _ -> fail "expected Toml_array containing Toml_inline_table")
   | Error e -> fail e
 
 let test_parse_datetime_values () =
@@ -703,6 +716,77 @@ let test_profile_rejects_unknown_tools_sibling_key () =
          (String_util.contains_substring detail "unknown keeper TOML keys");
        check bool "names unknown key" true
          (String_util.contains_substring detail "keeper.tools.groups"))
+
+let test_profile_accepts_inline_tables () =
+  let inline_input =
+    {|
+[keeper]
+name = "alpha"
+tools = { native = "none", deny = ["masc_board_post"] }
+skills = { names = ["a", "b"] }
+|}
+  in
+  let table_input =
+    {|
+[keeper]
+name = "alpha"
+
+[keeper.tools]
+native = "none"
+deny = ["masc_board_post"]
+
+[keeper.skills]
+names = ["a", "b"]
+|}
+  in
+  let inline_doc =
+    match TL.parse_toml inline_input with
+    | Ok doc -> doc
+    | Error e -> fail e
+  in
+  let table_doc =
+    match TL.parse_toml table_input with
+    | Ok doc -> doc
+    | Error e -> fail e
+  in
+  check (list string) "inline table produces no unknown keys" []
+    (KTP.detect_unknown_keeper_toml_keys inline_doc);
+  let inline_defaults =
+    match KTP.profile_defaults_of_toml inline_doc with
+    | Ok defaults -> defaults
+    | Error e -> fail e
+  in
+  let table_defaults =
+    match KTP.profile_defaults_of_toml table_doc with
+    | Ok defaults -> defaults
+    | Error e -> fail e
+  in
+  check bool "inline tables match [keeper.tools]/[keeper.skills] defaults" true
+    (inline_defaults = table_defaults);
+  check bool "native posture is Native_none" true
+    (inline_defaults.native_tool_posture = Some Runtime_native_tools.Native_none);
+  check (list string) "deny list parsed" [ "masc_board_post" ]
+    inline_defaults.tool_deny;
+  check (option (list string)) "skills.names parsed" (Some [ "a"; "b" ])
+    inline_defaults.skill_names;
+  let typo_doc =
+    match TL.parse_toml "[keeper]\ntools = { nativ = \"none\" }\n" with
+    | Ok doc -> doc
+    | Error e -> fail e
+  in
+  check (list string) "unknown key inside inline table is surfaced"
+    [ "keeper.tools.nativ" ]
+    (KTP.detect_unknown_keeper_toml_keys typo_doc);
+  let wrong_type_doc =
+    match TL.parse_toml "[keeper]\ntools = { native = 42 }\n" with
+    | Ok doc -> doc
+    | Error e -> fail e
+  in
+  match KTP.profile_defaults_of_toml wrong_type_doc with
+  | Ok _ -> fail "wrong-typed field inside inline table must fail closed"
+  | Error detail ->
+    check bool "wrong-typed inline field names keeper.tools.native" true
+      (String_util.contains_substring detail "keeper.tools.native")
 
 
 
@@ -2366,6 +2450,8 @@ let () =
             test_profile_rejects_invalid_tools_native;
           test_case "rejects unknown [keeper.tools] sibling" `Quick
             test_profile_rejects_unknown_tools_sibling_key;
+          test_case "accepts inline tables for [keeper.tools] and [keeper.skills]" `Quick
+            test_profile_accepts_inline_tables;
           test_case "activation modes" `Quick test_activation_modes;
           test_case "full" `Quick test_profile_full;
           test_case "rejects wrong known-field shape" `Quick

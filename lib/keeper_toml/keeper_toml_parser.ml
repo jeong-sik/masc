@@ -81,8 +81,14 @@ let rec flatten_table path fields =
     (fun (key, value) ->
       let path = path @ [ key ] in
       match value with
-      | Otoml.TomlTable nested -> flatten_table path nested
-      | (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlInlineTable _ | Otoml.TomlTableArray _) as value -> [ string_of_path path, toml_value_of_otoml value ])
+      | Otoml.TomlTable nested | Otoml.TomlInlineTable nested ->
+        flatten_table path nested
+      | ( Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
+        | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
+        | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
+        | Otoml.TomlLocalTime _ | Otoml.TomlArray _
+        | Otoml.TomlTableArray _ ) as value ->
+        [ string_of_path path, toml_value_of_otoml value ])
     fields
 ;;
 

@@ -1420,6 +1420,11 @@ function BdFeed({ posts, onMentions }: { posts: BoardPost[]; onMentions: () => v
       if (applied === boardSearchText.value) return
       boardSearchText.value = applied
       feedVisibleLimit.value = PAGE_SIZE
+      // The list is about to be another one, as on a change of sort or
+      // sub-board. The open post is drawn from the list: left selected, it
+      // would close when the matches leave it out and open again by itself
+      // once the search is cleared.
+      selectedBoardPostId.value = null
       void refreshBoard()
     }, BOARD_SEARCH_DEBOUNCE_MS)
   }

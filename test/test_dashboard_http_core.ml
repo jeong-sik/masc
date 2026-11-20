@@ -6256,6 +6256,41 @@ let test_dashboard_board_payload_narrows_to_the_query () =
         (titles (path ^ "&q=%20%20")))
 ;;
 
+(* The sub-board, the author, the voter and the query come from the request,
+   and any of them may hold the [;] between the parts of the key. Two reads
+   that differ in a part do not share a key, whatever the parts hold. *)
+let test_board_cache_key_keeps_its_parts_apart () =
+  let key ?hearth ?author_filter ?text_query ?voter () =
+    Server_dashboard_http.board_memory_cache_key
+      ~reader:Masc_board_handlers.Board_access.Operator
+      ~base_path:(Some "/workspace")
+      ~hearth
+      ~author_filter
+      ~text_query
+      ~sort_by:Lib.Board_dispatch.Hot
+      ~exclude_system:false
+      ~exclude_automation:false
+      ~limit:100
+      ~offset:0
+      ~voter
+  in
+  let differ label left right = check bool label false (String.equal left right) in
+  differ "a separator in the sub-board does not start the author"
+    (key ~hearth:"a;b" ~author_filter:"c" ())
+    (key ~hearth:"a" ~author_filter:"b;c" ());
+  differ "a voter cannot spell a query"
+    (key ~voter:"-;3:x" ())
+    (key ~text_query:"x;-" ());
+  differ "a part that is absent is not the part that reads as absent"
+    (key ~hearth:"-" ())
+    (key ());
+  differ "a written length is not taken from the value"
+    (key ~hearth:"1:a" ())
+    (key ~hearth:"a" ());
+  check string "equal reads share a key"
+    (key ~hearth:"ops" ~text_query:"needle" ())
+    (key ~hearth:"ops" ~text_query:"needle" ())
+
 (* The PAT route's hostname picks the login lane the token is written to.
    One that is written but unreadable is refused before any Keeper is read;
    falling back to the query or github.com would store the token under a host
@@ -8189,6 +8224,8 @@ let () =
       ( "dashboard behavior contracts",
         [ test_case "dashboard board payload narrows to the query" `Quick
             test_dashboard_board_payload_narrows_to_the_query;
+          test_case "board cache key keeps its parts apart" `Quick
+            test_board_cache_key_keeps_its_parts_apart;
           test_case "Keeper metrics reads only the selected strict window" `Quick
             test_keeper_metrics_reads_selected_strict_window;
           test_case "Skill evidence joins activation and composition" `Quick

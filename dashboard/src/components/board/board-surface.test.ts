@@ -1562,6 +1562,20 @@ describe('BoardSurface Component', () => {
       expect(refreshBoard).toHaveBeenCalledOnce()
     })
 
+    it('closes the open post when a search is applied, as a change of sort or sub-board does', () => {
+      vi.useFakeTimers()
+      boardPosts.value = loadedPosts()
+      selectedBoardPostId.value = 'loaded-1'
+      render(h(BoardSurface, null))
+
+      typeSearch('needle')
+      // Typing alone changes no list.
+      expect(selectedBoardPostId.value).toBe('loaded-1')
+      act(() => { vi.advanceTimersByTime(BOARD_SEARCH_DEBOUNCE_MS) })
+
+      expect(selectedBoardPostId.value).toBeNull()
+    })
+
     it('asks the server for the typed text and shows the posts it finds', async () => {
       const held = await holdBoardReads()
       boardPosts.value = loadedPosts()

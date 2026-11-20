@@ -15,6 +15,43 @@ let dashboard_namespace_truth_http_json =
   Server_dashboard_http_namespace_truth.dashboard_namespace_truth_http_json
 ;;
 
+(* The cache key of one Board list read, made here and nowhere else. Each
+   part that comes from the request or the workspace is written with its
+   length, as [board:list:] writes its own: such a part may hold the [;]
+   between the parts, and two reads that differ in any part must not share a
+   cached payload. An absent part is [-], which no written part is. *)
+let board_memory_cache_key
+      ~reader
+      ~base_path
+      ~hearth
+      ~author_filter
+      ~text_query
+      ~sort_by
+      ~exclude_system
+      ~exclude_automation
+      ~limit
+      ~offset
+      ~voter
+  =
+  let key_part = function
+    | Some value -> Printf.sprintf "%d:%s" (String.length value) value
+    | None -> "-"
+  in
+  Printf.sprintf
+    "board:memory:%s;%s;%s;%s;%b;%b;%d;%d;%s;%s;%s"
+    (Masc_board_handlers.Board_access.cache_key reader)
+    (key_part hearth)
+    (key_part author_filter)
+    (board_sort_label sort_by)
+    exclude_system
+    exclude_automation
+    limit
+    offset
+    (key_part base_path)
+    (key_part voter)
+    (key_part text_query)
+;;
+
 let dashboard_board_payload
       ~reader
       ?config
@@ -33,33 +70,19 @@ let dashboard_board_payload
   let limit = clamp ~min_v:1 ~max_v:500 limit in
   let offset = clamp ~min_v:0 ~max_v:5000 offset in
   let author_filter = Option.map String.trim author_filter in
-  let config_key =
-    match config with
-    | None -> "-"
-    | Some config -> config.Workspace.base_path
-  in
-  (* The query is free text and may hold the [;] that separates key parts,
-     so it is prefixed with its length: two different queries never share a
-     cached payload, and a query cannot read as another key part. *)
-  let text_query_key =
-    match text_query with
-    | Some value -> Printf.sprintf "%d:%s" (String.length value) value
-    | None -> "-"
-  in
   let cache_key =
-    Printf.sprintf
-      "board:memory:%s;%s;%s;%s;%b;%b;%d;%d;%s;%s;%s"
-      (Masc_board_handlers.Board_access.cache_key reader)
-      (Option.value ~default:"-" hearth)
-      (Option.value ~default:"-" author_filter)
-      (board_sort_label sort_by)
-      exclude_system
-      exclude_automation
-      limit
-      offset
-      config_key
-      (Option.value ~default:"-" voter)
-      text_query_key
+    board_memory_cache_key
+      ~reader
+      ~base_path:(Option.map (fun (config : Workspace.config) -> config.base_path) config)
+      ~hearth
+      ~author_filter
+      ~text_query
+      ~sort_by
+      ~exclude_system
+      ~exclude_automation
+      ~limit
+      ~offset
+      ~voter
   in
   (* /api/v1/dashboard/board was measured at 30-44s on hot keeper
      fleets.  The compute below scans the post store, fetches the

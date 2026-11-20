@@ -251,9 +251,8 @@ interface AuthPopoverProps {
 function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
   const panelRef = useRef<HTMLDivElement>(null)
 
-  // Focus trap + restore: delegated to headless-core via useFocusScope.
-  // RFC 0002 Iter 2 — Iter 1 (DialogOverlay PR #11827) is the canonical
-  // reference; same shape as dialog.ts:48-55. AuthPopover is conditionally
+  // Focus trap + restore: delegated to headless-core via useFocusScope,
+  // same shape as dialog.ts:49-56. AuthPopover is conditionally
   // mounted, so `active: true` while the component lives is sufficient —
   // unmount triggers the hook's cleanup which restores focus to the
   // element that was focused before the popover opened (the trigger button).
@@ -263,9 +262,9 @@ function AuthPopover({ popoverId, labelId }: AuthPopoverProps) {
     initialFocus: 'first',
   })
 
-  // ESC closes the popover. Out of useFocusScope's scope per RFC 0001
-  // §"out of scope" — handled inline so each popover can opt in/out of
-  // close-on-ESC behavior independently.
+  // ESC closes the popover. useFocusScope only manages focus, so ESC is
+  // handled inline — each popover can opt in/out of close-on-ESC
+  // behavior independently.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (isDismissEscape(event)) {

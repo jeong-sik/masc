@@ -1206,9 +1206,8 @@ describe('AgentRoster live-only cards', () => {
     const toneByName = (name: string) =>
       rows.find(r => r.textContent?.includes(name))?.getAttribute('data-tone')
     // band → tone: paused=warn, offline=idle (the unambiguous bands).
-    // Draining routes to `paused` band → warn rail (matches
-    // prototype `data.jsx:37,49` `pause` glyph / `warn` tone pairing). It
-    // is NOT in the transient group.
+    // Draining routes to `paused` band → warn rail. It is NOT in the
+    // transient group.
     expect(toneByName('rester')).toBe('warn')
     expect(toneByName('gone')).toBe('idle')
     expect(toneByName('drain')).toBe('warn')

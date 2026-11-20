@@ -161,9 +161,13 @@ provider 거절은 run 안에서 다시 보내지 않는다.
   - provider 시도는 늘 ordinal 0 으로 연다(`packages/agent_core/lib/pipeline/pipeline_execution_scope.ml:116-122`).
   - resume 은 provider 시도가 둘 이상이면 멈춘다(`packages/agent_core/lib/execution_agent_scope.ml:450-451`).
   - 그래서 provider 거절 뒤 같은 턴에서 다시 보내면, 그 턴은 resume 할 수 없다.
-- 11-19 로그에서 provider 거절은 3건이고, 보내기 전 거절은 311초 분량이다. 11-20 은 0 대 31 이다.
-- provider 거절 뒤 턴이 끝나도 기록은 맞다. 그래서 이 3건 때문에 내구 기록의 모양을 바꾸지 않는다.
+- 운영 로그의 route 실패 줄(실패 하나에 한 줄)로 셌다. 11-19 는 보내기 전 거절 259건, provider 거절 7건이다. 11-20 은 지금까지 21건 대 0건이다.
+  - provider 거절 7건은 모두 「Prompt exceeds max length」다.
+- provider 거절 뒤 턴이 끝나도 기록은 맞다. 그래서 이 7건 때문에 내구 기록의 모양을 바꾸지 않는다.
 - provider 거절은 지금처럼 checkpoint 전에는 attempt 사다리가 받고, 뒤에는 턴이 끝난다.
+- checkpoint 뒤 provider 거절로 턴이 끝나는 것은 받아들인 한계다. 이것을 세는 장치는 따로 넣지 않는다.
+  - 보내기 전에 재지 않는 레인(`Body_only`, `lib/runtime/runtime_agent_context.ml:199-207`)에는 보내기 전 거절이 없다. 그 레인에서는 run 안 후보가 돌지 않는다.
+  - 그런 레인이 주력 레인이 되면 다시 본다.
 - attempt 사다리는 남는다. run 안 후보가 이미 쓴 단은 사다리 조건에서 걸러지므로, 후보가 다한 뒤 사다리는 attempt 를 다시 돌리지 않는다.
 
 다른 도구는 넘치면 한 번 줄여 다시 보내고, 줄일 것이 없으면 끝낸다.
@@ -183,11 +187,13 @@ provider 거절은 run 안에서 다시 보내지 않는다.
    - 시험: 창 400,000, 예약 128,000 에서 다음 턴 예측이 272,000 을 넘으면 신호가 켜진다.
 3. 턴의 `effective_budget`. 고칠 코드는 없다. 입력과 견주는 곳이 없다(§1.2).
 4. Librarian 레인. 지금 고칠 코드는 없다. Librarian RFC §6.3 의 비교를 만드는 층이 입력 한도 타입을 받는다. Librarian 담당이 한다.
-5. 넘칠 때 run 안에서 후보로 좁히기(§4.2). agent-core 의 투영 타입과 route, masc 의 투영을 고친다. 사다리의 단이 attempt 상태를 바꾸는 부분은 후보 thunk 와 함께 쓴다.
+5. 넘칠 때 run 안에서 후보로 좁히기(§4.2). agent-core 의 투영 타입과 route, masc 의 투영을 고친다.
+   - 사다리의 단과 run 안 thunk 는 같은 단 함수를 부른다. 단 로직을 두 벌 두지 않는다.
    - 시험: 턴 가운데 안쪽 요청이 입력 한도를 넘으면 같은 run 에서 다음 후보가 받아들여진다. tool 은 다시 돌지 않고 checkpoint 수도 그대로다.
    - 시험: 거절된 후보는 ledger 를 바꾸지 않는다.
    - 시험: 좁힌 뒤의 안쪽 요청은 거절 없이 첫 후보로 들어간다.
    - 시험: 받아들여진 후보 뒤의 thunk 는 불리지 않는다.
+   - 시험: 후보 셋 가운데 셋째가 받아들여지면, provider 시도는 ordinal 0 하나다. `record_provider_request_provenance`(`packages/agent_core/lib/pipeline/pipeline.ml:865`)가 적는 요청은 셋째다.
    - 시험: provider 가 넘침으로 거절하면 다음 후보를 보내지 않는다. 그 턴의 provider 시도는 하나다.
    - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. attempt 사다리는 attempt 를 다시 돌리지 않는다.
 

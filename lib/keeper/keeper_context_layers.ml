@@ -17,7 +17,6 @@ type layer_id =
   | Completion_authority
   | Task_cancellations
   | Pending_mentions
-  | Scope_messages
   | Own_board_posts
   | Board_activity
   | Own_recent_actions
@@ -54,7 +53,6 @@ let ordered =
   ; Completion_authority
   ; Task_cancellations
   ; Pending_mentions
-  ; Scope_messages
   ; Own_board_posts
   ; Board_activity
   ; Own_recent_actions
@@ -83,12 +81,11 @@ let order_index = function
   | Completion_authority -> 13
   | Task_cancellations -> 14
   | Pending_mentions -> 15
-  | Scope_messages -> 16
-  | Own_board_posts -> 17
-  | Board_activity -> 18
-  | Own_recent_actions -> 19
-  | Recent_work -> 20
-  | Fleet_messages -> 21
+  | Own_board_posts -> 16
+  | Board_activity -> 17
+  | Own_recent_actions -> 18
+  | Recent_work -> 19
+  | Fleet_messages -> 20
 ;;
 
 type unattributed = World_frame | Host_workspace_recall | Direct_turn | Unprojected_input
@@ -171,7 +168,6 @@ let layer_name = function
   | Completion_authority -> "completion_authority"
   | Task_cancellations -> "task_cancellations"
   | Pending_mentions -> "pending_mentions"
-  | Scope_messages -> "scope_messages"
   | Own_board_posts -> "own_board_posts"
   | Board_activity -> "board_activity"
   | Own_recent_actions -> "own_recent_actions"
@@ -213,7 +209,7 @@ let resend_on_resume = function
     Sent_when_changed
   | Layer
       ( Goals_awaiting_proof | Autonomous_trigger | Scheduled_automation | Completion_authority
-      | Task_cancellations | Pending_mentions | Scope_messages | Board_activity ) ->
+      | Task_cancellations | Pending_mentions | Board_activity ) ->
     Sent_every_resume
   | Unattributed World_frame -> Sent_with_other_sections
 

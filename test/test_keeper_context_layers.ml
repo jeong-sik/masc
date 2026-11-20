@@ -27,7 +27,6 @@ let all_layers =
     L.Completion_authority;
     L.Task_cancellations;
     L.Pending_mentions;
-    L.Scope_messages;
     L.Own_board_posts;
     L.Board_activity;
     L.Own_recent_actions;

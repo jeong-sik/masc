@@ -813,7 +813,7 @@ let test_proof_state_follows_the_runtime_execution_owner () =
     | Keeper_context_layers.Goal_observations | Current_task | Approval_authority
     | Connected_surfaces | Namespace_state | Workspace_memory | Wiki | Lane_updates
     | Autonomous_trigger | Scheduled_automation | Completion_authority | Task_cancellations
-    | Pending_mentions | Scope_messages | Own_board_posts | Board_activity
+    | Pending_mentions | Own_board_posts | Board_activity
     | Own_recent_actions | Recent_work | Fleet_messages -> None) in
   let assemble checkpoint_owner post_tool_round previous_assembly blocks =
     Keeper_run_prompt.assemble_request_context ~checkpoint_owner

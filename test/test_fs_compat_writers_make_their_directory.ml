@@ -114,10 +114,10 @@ let directory_that_cannot_be_made write () =
       | exception Sys_error _ -> ())
 ;;
 
-(* A regular file at the directory's own place is not a failed making: the
-   making takes it for the directory. The transaction's first look at its
-   file reports it, the same way in a fiber and outside one: the update
-   through its [lstat], the rewrite through its read. *)
+(* A regular file at the directory's own place causes directory creation to
+   fail with [ENOTDIR], which [make_transaction_directory_in_this_job]
+   normalizes to [Sys_error] for both durable update and durable rewrite, in a
+   fiber and outside one (#53324). *)
 let regular_file_where_the_directory_would_be ~reported write () =
   let root = fresh_root () in
   Fun.protect
@@ -182,7 +182,7 @@ let () =
             ])
           [ ( "update_private_file_durable_locked_result"
             , function
-              | Unix.Unix_error (Unix.ENOTDIR, _, _) -> true
+              | Sys_error _ -> true
               | _ -> false )
           ; ( "rewrite_private_file_durable_locked_result"
             , function

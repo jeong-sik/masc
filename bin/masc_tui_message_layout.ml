@@ -75,6 +75,10 @@ type row_action =
   | Action_none
   | Action_unfold_argument
 
+type text_growth =
+  | Grows_at_end of { closed : int; identity : Digest.t; stretch : int }
+  | May_change
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -86,6 +90,7 @@ type markdown_source =
       keeper_name : string;
       request_id : string;
       entry_index : int;
+      growth : text_growth;
     }
   | Markdown_streaming
 

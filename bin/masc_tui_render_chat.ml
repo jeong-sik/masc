@@ -73,6 +73,7 @@ type chat_markdown_identity = {
   cmi_request_id : string;
   cmi_observed_at : float option;
   cmi_entry_index : int;
+  cmi_stretch : int option;
 }
 [@@warning "-69"]
 
@@ -242,10 +243,28 @@ let preview_snapshot lookup =
     | Some value -> value
     | None -> let value=lookup url in Hashtbl.add previews url value; value
 
+(* A streamed stretch keys its render by its stretch as well: the promise
+   that its earlier bytes do not change holds within one stretch. *)
 let growing_markdown_identity (entry : Message_layout.entry) ~keeper_name ~request_id
-    ~entry_index =
+    ~entry_index ~growth =
+  let cmi_stretch = match growth with
+    | Message_layout.Grows_at_end { stretch; _ } -> Some stretch
+    | Message_layout.May_change -> None in
   { cmi_style = entry.style; cmi_keeper_name = keeper_name; cmi_request_id = request_id;
-    cmi_observed_at = None; cmi_entry_index = entry_index }
+    cmi_observed_at = None; cmi_entry_index = entry_index; cmi_stretch }
+
+let settled_bytes = function
+  | Message_layout.Grows_at_end { closed; _ } -> closed
+  | Message_layout.May_change -> 0
+
+(* The body's identity, as [Search.body_identity] gives it. A streamed
+   stretch was digested as its lines arrived. *)
+let entry_body_identity (entry : Message_layout.entry) =
+  match entry.markdown_source with
+  | Message_layout.Markdown_growing { growth = Grows_at_end { identity; _ }; _ } ->
+      Search.digested_identity identity
+  | Message_layout.Markdown_growing { growth = May_change; _ }
+  | Message_layout.Markdown_stable _ | Markdown_streaming -> Search.body_identity entry.body
 
 (* Where a frame's link previews come from. A frame that reads the shared
    preview store alone names the store's generation, which moves only when a
@@ -311,7 +330,7 @@ let body_with_previews ~previews ~mode ~palette_generation ~(entry : Message_lay
 let stable_markdown_identity (entry : Message_layout.entry) ~keeper_name ~request_id
     ~observed_at ~entry_index =
   { cmi_style = entry.style; cmi_keeper_name = keeper_name; cmi_request_id = request_id;
-    cmi_observed_at = Some observed_at; cmi_entry_index = entry_index }
+    cmi_observed_at = Some observed_at; cmi_entry_index = entry_index; cmi_stretch = None }
 
 let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
   fun ~(entry : Message_layout.entry) ~width ->
@@ -340,12 +359,13 @@ let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
               ~observed_at ~entry_index)
             ~text:body
       | Message_layout.Markdown_growing
-          { keeper_name; request_id; entry_index } ->
+          { keeper_name; request_id; entry_index; growth } ->
           Markdown_cache.render_growing chat_markdown_cache
             ~theme_revision:chat_markdown_theme_revision
             ~palette_generation ~width
             ~renderer:(chat_markdown_streaming ~context)
-            ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
+            ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index ~growth)
+            ~settled:(settled_bytes growth)
             ~text:body
       | Message_layout.Markdown_streaming ->
           chat_markdown ~context ~width body)
@@ -367,7 +387,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~dress ~cards ~(entry : Mess
   let fields=ref [] in
   let body=chat_body_with_previews_internal ~on_field:(fun ~index ~url ~start field ->
     fields:=(index,url,start,field):: !fields) ~cards ~mode:link_previews_mode ~entry ~width () in
-  let body_identity=Search.body_identity entry.body in
+  let body_identity=entry_body_identity entry in
   let origins=Array.init (String.length body) (fun offset ->
     if offset<String.length entry.body then Some(body_byte_origin entry body_identity offset)
       else None) in
@@ -490,13 +510,14 @@ let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry
       |> List.fold_left (fun count line -> if String.trim line = "" then count else count + 1) 0 in
     let source_height, line_count =
       match entry.markdown_source with
-      | Message_layout.Markdown_growing { keeper_name; request_id; entry_index } ->
+      | Message_layout.Markdown_growing { keeper_name; request_id; entry_index; growth = _ } ->
         let measured = Markdown_cache.measure_growing_details thinking_height_cache
           ~theme_revision:chat_markdown_theme_revision
           ~palette_generation:context.palette_generation ~width
           ~renderer:(chat_markdown_streaming ~context)
           ~identity:{ cmi_style=entry.style; cmi_keeper_name=keeper_name;
-            cmi_request_id=request_id; cmi_observed_at=None; cmi_entry_index=entry_index }
+            cmi_request_id=request_id; cmi_observed_at=None; cmi_entry_index=entry_index;
+            cmi_stretch=None }
           ~text:entry.body in
         (fun () -> measured.height), measured.nonblank_lines
       | Message_layout.Markdown_stable { keeper_name; request_id; observed_at; entry_index } ->
@@ -505,7 +526,8 @@ let fold_thinking_entry (state : state) ~chat_cols (entry : Message_layout.entry
           ~palette_generation:context.palette_generation ~width
           ~renderer:(chat_markdown ~context)
           ~identity:{ cmi_style=entry.style; cmi_keeper_name=keeper_name;
-            cmi_request_id=request_id; cmi_observed_at=Some observed_at; cmi_entry_index=entry_index }
+            cmi_request_id=request_id; cmi_observed_at=Some observed_at; cmi_entry_index=entry_index;
+            cmi_stretch=None }
           ~text:entry.body |> trimmed_height), logical_lines ()
       | Message_layout.Markdown_streaming ->
         (fun () -> chat_markdown ~context ~width entry.body |> trimmed_height), logical_lines () in
@@ -3489,9 +3511,17 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                     Printf.sprintf "%s \xe2\x86\xba%d" text (attempt + 1)
                 | None -> text
               in
+              let growth = match item.drawn with
+                | Keeper_chat_transcript.Drawn_text (snapshot : Masc_tui_growing_text.snapshot) ->
+                    Message_layout.Grows_at_end
+                      { closed = snapshot.closed; identity = snapshot.identity;
+                        stretch = snapshot.stretch }
+                | Keeper_chat_transcript.Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
+                | Drawn_media _ | Drawn_reply _ | Drawn_status _ | Drawn_error _ ->
+                    Message_layout.May_change in
               let markdown_source =
                 Message_layout.Markdown_growing
-                  { keeper_name; request_id; entry_index }
+                  { keeper_name; request_id; entry_index; growth }
               in
               let entry ?(speaker : string option)
                   ?(heading_boundary = Message_layout.Inherit_heading) ?(body_presentation=Message_layout.Source_body) style role_label body =
@@ -3605,7 +3635,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                       [Masc_tui_chat_media.of_generated media]
                     |> Keeper_chat.terminal_safe_text in
                   entry Message_layout.Keeper (label keeper_label) body
-              | Keeper_chat_transcript.Drawn_text text
+              | Keeper_chat_transcript.Drawn_text { Masc_tui_growing_text.text; _ }
               | Keeper_chat_transcript.Drawn_reply text ->
                   (* No name on the heading, as on the committed rows:
                      this is the keeper's own pane. *)
@@ -4414,11 +4444,11 @@ type chat_source_reads = {
 let block_table ~theme ~width (entry : Message_layout.entry) =
   let context = Chat_theme.body_context theme entry.style in
   match entry.markdown_source with
-  | Message_layout.Markdown_growing {keeper_name; request_id; entry_index} ->
+  | Message_layout.Markdown_growing {keeper_name; request_id; entry_index; growth} ->
       Markdown_cache.growing_blocks chat_markdown_cache
         ~theme_revision:chat_markdown_theme_revision
         ~palette_generation:context.palette_generation ~width
-        ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
+        ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index ~growth)
         ~text:entry.body
   | Message_layout.Markdown_stable {keeper_name; request_id; observed_at; entry_index} ->
       Markdown_cache.completed_blocks chat_markdown_cache
@@ -4479,7 +4509,7 @@ type entry_reads = {
 }
 
 let entry_block_reads ~theme ~width (entry : Message_layout.entry) blocks =
-  let body_identity = lazy (Search.body_identity entry.body) in
+  let body_identity = lazy (entry_body_identity entry) in
   let indexes = Hashtbl.create 8 in
   let block_index block =
     match Hashtbl.find_opt indexes block with
@@ -6208,6 +6238,7 @@ module For_testing = struct
     cmi_request_id : string;
     cmi_observed_at : float option;
     cmi_entry_index : int;
+    cmi_stretch : int option;
   }
   let chat_markdown = chat_markdown
   let fold_thinking_entry = fold_thinking_entry

@@ -496,7 +496,8 @@ let entry_with_source markdown_source body : Layout.entry =
     turn_rail = Layout.Rail_none; action = Layout.Action_none }
 
 let growing_entry = entry_with_source
-  (Layout.Markdown_growing {keeper_name = "alpha"; request_id = "grow"; entry_index = 0})
+  (Layout.Markdown_growing {keeper_name = "alpha"; request_id = "grow"; entry_index = 0;
+    growth = Layout.May_change})
 
 (* Each prefix is its own finished reply: one observation per length, so no
    two lengths share a cached render. *)
@@ -533,6 +534,43 @@ let test_growing_blocks_read_what_the_whole_body_reads =
 let test_finished_blocks_read_what_the_whole_body_reads =
   blocks_read_what_the_whole_body_reads finished_entry
 
+(* A reply streamed in small deltas, cut inside UTF-8 sequences and inside
+   an emoji joined by ZWJ, draws on every frame what the same text sent in
+   one delta draws. The streamed stretch converts each finished line once
+   and promises the render cache those bytes stay; the one sent whole has
+   one line open until its end. *)
+let test_a_streamed_reply_draws_what_arrived () =
+  let reply = String.concat "" [
+    "First **line** with \xC3\xA9 and \xED\x95\x9C\xEA\xB8\x80\n\n";
+    "- item \xF0\x9F\x91\xA8\xE2\x80\x8D\xF0\x9F\x92\xBB done\n";
+    "- a tab\there and a bell \x07 too\n\n";
+    "```ocaml\nlet x = \"\xE2\x80\x8B\"\n```\n";
+    "open line \xE2\x9D\xA4\xEF\xB8\x8F \xE2\x80\xAE end" ] in
+  let live_state request_id =
+    let state = state Layout.Origin_inline in
+    let live = T.turn_log_create ~keeper_name:"alpha" ~request_id ~started_at:300. in
+    T.turn_log_add ~now:300. live ~seq:(Some 0) Live.Run_started;
+    state.msg_live <- Some live;
+    state, live in
+  let text value = Live.Text {text = value; response = Unobserved_scope None} in
+  let streamed, live = live_state "stream-a" in
+  let cuts = [| 1; 2; 3; 5; 8 |] in
+  let rec send offset step =
+    if offset < String.length reply then begin
+      let length = Int.min cuts.(step mod Array.length cuts) (String.length reply - offset) in
+      T.turn_log_add ~now:301. live ~seq:(Some (step + 1)) (text (String.sub reply offset length));
+      let arrived = offset + length in
+      let request_id = Printf.sprintf "whole%03d" step in
+      let whole, whole_live = live_state request_id in
+      T.turn_log_add ~now:301. whole_live ~seq:(Some 1) (text (String.sub reply 0 arrived));
+      let same_name line =
+        String.concat "stream-a" (Astring.String.cuts ~sep:request_id line) in
+      check (list string) (Printf.sprintf "frame after %d bytes" arrived)
+        (List.map same_name (frame_lines whole)) (frame_lines streamed);
+      send arrived (step + 1)
+    end in
+  send 0 0
+
 let test_streaming_frames_leave_the_whole_reply_unread () =
   let state = state Layout.Origin_inline in
   let live = T.turn_log_create ~keeper_name:"alpha" ~request_id:"stream" ~started_at:300. in
@@ -542,12 +580,19 @@ let test_streaming_frames_leave_the_whole_reply_unread () =
   state.msg_live <- Some live;
   ignore (frame_lines state);
   let before = Render.For_testing.source_index_build_count () in
+  let digested = Masc_tui_chat_search.For_testing.digest_count () in
+  let compared = Masc_tui_markdown_render_cache.For_testing.bytes_compared () in
   List.iteri (fun step text ->
     T.turn_log_add ~now:(302. +. float_of_int step) live ~seq:(Some (step + 2))
       (Live.Text {text; response=Unobserved_scope (None)});
     ignore (frame_lines state)) ["\nmore words here"; " and more"; "\n\nnew paragraph"; "\n\n"; "\n"];
   check int "streaming frames read no whole-reply index" before
     (Render.For_testing.source_index_build_count ());
+  check int "streaming frames digest no body: each line was digested as it arrived" digested
+    (Masc_tui_chat_search.For_testing.digest_count ());
+  check bool "streaming frames compare the open line, not the reply before it" true
+    (Masc_tui_markdown_render_cache.For_testing.bytes_compared () - compared
+     < String.length (long_answer "STREAM_"));
   match state.msg_scroll_pin with
   | Some {T.pin_mode=T.Follow_live; pin_points; _} ->
       check bool "the live edge still holds a source byte for the next scroll key" true
@@ -1866,6 +1911,8 @@ let () = run "chat search projection" [
     test_case "replaced preview title is searched whole" `Quick test_replaced_preview_title_is_searched_whole;
     test_case "link cards are composed again only when the store changes" `Quick
       test_link_cards_are_composed_again_only_when_the_store_changes;
+    test_case "a streamed reply draws what arrived" `Quick
+      test_a_streamed_reply_draws_what_arrived;
     test_case "partially mapped document keeps its mapped runs" `Quick
       test_partially_mapped_document_keeps_its_mapped_runs;
     test_case "replaced body is searched whole" `Quick test_replaced_body_is_searched_whole;

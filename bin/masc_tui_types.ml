@@ -18192,7 +18192,7 @@ let held_turn_of_log turn_log =
     Masc_tui_keeper_chat_transcript.drawn turn_log.tl_transcript
     |> List.concat_map (fun (item : Masc_tui_keeper_chat_transcript.drawn_item) ->
          match item.superseded, item.drawn with
-         | None, (Drawn_text text | Drawn_reply text) ->
+         | None, (Drawn_text { Masc_tui_growing_text.text; _ } | Drawn_reply text) ->
              Masc_tui_markdown.mermaid_sources text
          | Some _, _
          | None, (Drawn_media _ | Drawn_thinking _ | Drawn_skill _ | Drawn_tools _

@@ -212,7 +212,8 @@ let image_log_observations (state : T.state) =
                         , item.Keeper_chat_transcript.drawn )
                       with
                       | ( None
-                        , ( Keeper_chat_transcript.Drawn_text text
+                        , ( Keeper_chat_transcript.Drawn_text
+                              { Masc_tui_growing_text.text; _ }
                           | Keeper_chat_transcript.Drawn_reply text ) ) ->
                           Some
                             ( item.Keeper_chat_transcript.origin

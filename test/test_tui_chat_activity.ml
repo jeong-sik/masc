@@ -329,7 +329,7 @@ let test_historical_open_journal_cannot_own_progress () =
       (match Transcript.phase transcript with Stream_ended | Stream_failed _ -> true | Waiting | Working -> false);
     check bool "partial output survives reconciliation" true
       (List.exists (fun (item : Transcript.drawn_item) ->
-        match item.drawn with Drawn_text text -> text = "retained partial output" | _ -> false)
+        match item.drawn with Drawn_text { Masc_tui_growing_text.text; _ } -> text = "retained partial output" | _ -> false)
         (Transcript.drawn transcript));
     check int "no invented journal sequence" 1
       (match Log.resume_position log with After_seq seq -> seq | Whole_turn -> -1))

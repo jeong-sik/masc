@@ -223,7 +223,7 @@ type trail_node =
   | Node_segment_boundary
   | Node_response_boundary
   | Node_thinking of int * float * Buffer.t * thinking_block
-  | Node_text of int * float * Buffer.t * int option
+  | Node_text of int * float * Masc_tui_growing_text.t * int option
   | Node_media of int * float * Masc.Keeper_chat_events.generated_media
   | Node_tool of int
   | Node_superseded of
@@ -270,7 +270,7 @@ type drawn =
   | Drawn_thinking of string list
   | Drawn_skill of skill_activity list
   | Drawn_tools of tool_block
-  | Drawn_text of string
+  | Drawn_text of Masc_tui_growing_text.snapshot
   | Drawn_media of Masc.Keeper_chat_events.generated_media
   | Drawn_reply of string
   | Drawn_status of string
@@ -625,12 +625,13 @@ let replace_thinking ~now t ~block text =
 
 let trail_text ~now t text =
   (match t.reversed_trail with
-   | Node_text (_, _, buffer, scope) :: _ when scope = t.current_stream_scope -> Buffer.add_string buffer text
+   | Node_text (_, _, growing, scope) :: _ when scope = t.current_stream_scope ->
+       Masc_tui_growing_text.append growing text
    | (Node_segment_boundary | Node_response_boundary | Node_text _ | Node_thinking _ | Node_media _ | Node_tool _ | Node_superseded _) :: _ | [] ->
-       let buffer = Buffer.create 256 in
-       Buffer.add_string buffer text;
        let id = fresh_stretch t in
-       t.reversed_trail <- Node_text (id, now, buffer, t.current_stream_scope) :: t.reversed_trail)
+       let growing = Masc_tui_growing_text.create ~stretch:id in
+       Masc_tui_growing_text.append growing text;
+       t.reversed_trail <- Node_text (id, now, growing, t.current_stream_scope) :: t.reversed_trail)
 
 let keeper_name t = t.keeper_name
 let request_id t = t.request_id
@@ -827,12 +828,14 @@ let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~media
           match lines with [] -> acc | lines -> thinking ~segment ~origin ~at lines :: acc
         in
         walk segment acc [] rest
-    | Node_text (origin, at, buffer, stream_scope) :: rest ->
+    | Node_text (origin, at, growing, stream_scope) :: rest ->
         let acc = flush_tools ~segment acc group in
-        let body = safe_block (Buffer.contents buffer) in
+        (* Each finished line was converted for the screen when it arrived;
+           a walk converts the open line alone. *)
+        let snapshot = Masc_tui_growing_text.snapshot growing in
         let acc =
-          if String_util.is_blank body then acc
-          else text ~segment ~origin ~at ~stream_scope body :: acc
+          if String_util.is_blank snapshot.text then acc
+          else text ~segment ~origin ~at ~stream_scope snapshot :: acc
         in
         walk segment acc [] rest
   in
@@ -841,7 +844,8 @@ let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~media
 let trail t =
   project_trail t
     ~thinking:(fun ~segment:_ ~origin:_ ~at:_ lines -> Trail_thinking lines)
-    ~text:(fun ~segment:_ ~origin:_ ~at:_ ~stream_scope:_ text -> Trail_text text)
+    ~text:(fun ~segment:_ ~origin:_ ~at:_ ~stream_scope:_ (snapshot : Masc_tui_growing_text.snapshot) ->
+      Trail_text snapshot.text)
     ~media:(fun ~segment:_ ~origin:_ ~at:_ value -> Trail_media value)
     ~tools:(fun ~segment:_ ~origin:_ ~at:_ block -> Trail_tools block)
     ~skills:(fun ~segment:_ ~origin:_ ~at:_ skills -> Trail_skill skills)

@@ -1472,6 +1472,47 @@ let test_find_renders_candidates_after_the_handler_returns () = at_sizes (fun or
       check bool "it stopped before the last candidate" true (at_retire - second < entries);
       check int "a retired search delivers nothing" 0 !delivered))))
 
+(* Entries shorter than one job go to the worker as the trailing batch, after
+   the last entry's [proceed]. A search retired while that batch waits or
+   renders seals no work: it submits no matcher and delivers nothing. *)
+let test_find_retired_during_the_trailing_batch_delivers_nothing () = at_sizes (fun origin ->
+  let state = state origin in
+  let entries = 4 in
+  state.msg_loaded <- List.init entries (fun index ->
+    let id = Printf.sprintf "tail-%02d" index in
+    row ~id ~request_id:id ~role:user ~text:(Printf.sprintf "TAIL_MATCH %02d" index)
+      (float_of_int index));
+  let built = Render.For_testing.search_candidate_build_count in
+  Fun.protect ~finally:Domain_pool_ref.clear_for_tests (fun () ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.set_switch sw;
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      let worker_drained () = Domain_pool.submit_cpu ~name:"drained" pool Fun.id in
+      (* The one worker holds this job until [gate] opens, so the trailing
+         batch waits behind it. *)
+      let gate = Atomic.make false in
+      Eio.Fiber.fork ~sw (fun () ->
+        Domain_pool.submit_cpu ~name:"gate" pool (fun () ->
+          while not (Atomic.get gate) do Domain.cpu_relax () done));
+      Atomic.incr state.msg_search_generation;
+      let plan = Render.plan_keeper_message_search state ~keeper_name:"alpha"
+          ~needle:"TAIL_MATCH" ~older_than:None in
+      let delivered = ref 0 in
+      let before = built () in
+      Render.launch_keeper_message_search state plan ~deliver:(fun _ -> incr delivered);
+      (* Every entry's [proceed] yields once, twice over, before the batch
+         is submitted. *)
+      for _ = 1 to 4 * entries + 8 do Eio.Fiber.yield () done;
+      check int "the trailing batch waits behind the held job" before (built ());
+      Atomic.incr state.msg_search_generation;
+      Atomic.set gate true;
+      worker_drained ();
+      for _ = 1 to 4 * entries do Eio.Fiber.yield () done;
+      worker_drained ();
+      check int "the trailing batch rendered" entries (built () - before);
+      check int "a search retired during it delivers nothing" 0 !delivered))))
+
 (* Short entries go to the worker together, one job for several. The answer
    it delivers is the one the same search finds in place: the newest match,
    and the cursor that names it. *)
@@ -1634,6 +1675,8 @@ let () = run "chat search projection" [
       test_retired_matcher_stops_before_next_candidate;
     test_case "find renders candidates after the handler returns" `Quick
       test_find_renders_candidates_after_the_handler_returns;
+    test_case "find retired during the trailing batch delivers nothing" `Quick
+      test_find_retired_during_the_trailing_batch_delivers_nothing;
     test_case "batched find answers like the find in place" `Quick
       test_batched_find_answers_like_the_find_in_place;
     test_case "search executor owns frozen source and keeps repeat cursor" `Quick test_search_executor_owns_frozen_source;

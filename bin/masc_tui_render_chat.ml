@@ -4787,7 +4787,12 @@ let build_keeper_message_search_in_steps ~proceed ~run plan =
         List.rev_append (run (fun () ->
           List.map (fun (cards,source) -> build_search_candidate render ~cards source) ordered)) built in
   let rec build built batch bytes = function
-    | [] -> if proceed () then Some (work_of_plan plan (List.rev (flush built batch))) else None
+    | [] ->
+        (* The trailing batch renders after the last entry's [proceed], so
+           [proceed] is asked once more after it: a search retired while it
+           waited or rendered seals no work. *)
+        let built = flush built batch in
+        if proceed () then Some (work_of_plan plan (List.rev built)) else None
     | source :: rest ->
         if proceed () then
           let batch=(search_source_cards plan source,source) :: batch in

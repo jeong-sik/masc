@@ -46,9 +46,9 @@ masc 는 창을 옮길지 정할 때 「입력 ≤ 창」으로 본다.
 | 창 옮김 신호 `past_max_context`·`held_window`(`lib/keeper/keeper_turn_driver_try_provider.ml`, 값은 2140-2144) | binding max-context | 빼지 않는다 |
 | 다음 요청 예측(`lib/keeper/keeper_next_request_forecast.ml:501`) | 같은 값을 따로 읽는다 | 빼지 않는다 |
 | 턴의 `effective_budget`(`lib/keeper/keeper_context_runtime.ml:172`) | binding max-context 와 override 가운데 작은 값 | 빼지 않는다(쓰는 곳은 §6) |
-| Librarian 레인(`lib/keeper/librarian_memory_lane.ml:58-71`, `102-112`) | 창과 레인 선언의 `max_output_tokens` 를 slot 열쇠에 싣는다 | 자기 선언을 예약으로 보낸다. 빼는 곳은 §6 |
+| Librarian 레인(`lib/keeper/librarian_memory_lane.ml:58-71`, `102-112`) | masc 에서는 견주지 않는다. 창과 레인 선언의 `max_output_tokens` 를 slot 열쇠에 싣기만 한다 | HTTP slot 은 레인 선언을 그 요청의 `max_tokens` 로 싣는다(`lib/runtime/runtime_exact_output_registry.ml:684-694`). 미리 세는 slot 은 agent-core `admit` 이 빼고, 그 밖은 provider 가 자기 창으로 거절한다. CLI slot 열쇠에는 예약이 없다 |
 
-출력 예약을 빼는 계산은 agent-core `admit` 에서 읽었다. Librarian 레인은 예약을 자기 선언으로 따로 정한다.
+출력 예약을 빼는 곳은 agent-core `admit` 하나다. Librarian 레인은 예약 값을 자기 선언으로 정할 뿐 빼지 않는다.
 
 ## 2. 규칙
 
@@ -72,8 +72,9 @@ masc 는 창을 옮길지 정할 때 「입력 ≤ 창」으로 본다.
 - 입력과 견주는 곳은 입력 한도 타입만 받는다. 컴파일러가 빠진 곳을 짚는다.
 - 창 원값은 화면 표시와 agent-core 설정에 넘길 때만 쓴다.
 - 창 옮김 신호: 그 자리에 그 요청의 `provider_config` 가 이미 있다(`keeper_turn_driver_try_provider.ml:1992`). 거기서 입력 한도를 구한다.
-- 다음 요청 예측: 같은 config 를 얻는 자리가 필요하다(§6).
-- Librarian 레인: 레인이 보내는 `max_output_tokens` 를 config 에 담아 같은 함수로 한도를 구한다. 레인이 한도를 따로 정하는 곳이 있으면 지운다. Librarian 담당이 확인한다.
+- 다음 요청 예측: 그 runtime 의 API 선언(`Runtime_account_access.api_declaration`, 키와 header 를 뺀 config)으로 같은 함수를 부른다(`input_limit_of_runtime`). 공식 클라이언트 런타임은 §2.5 다.
+- Librarian 레인: masc 에는 레인이 입력과 한도를 견주는 곳이 없어서 지울 계산도 없다.
+  - Librarian RFC §6.3 이 masc 쪽 비교를 하나 둔다. 미리 세지 않는 slot 이 `usage.input_tokens + R > W(s)` 인 질문에 답하면, 답은 반영하고 카운터만 올린다. 그 비교는 입력 한도 타입을 받는다.
 
 ### 2.4 값을 모를 때
 
@@ -94,6 +95,7 @@ agent-core 도 그 요청을 보내지 않는다.
 
 - 신호마다 예약을 따로 빼는 계산. 두 계산이 어긋나면 같은 거절이 다시 난다.
 - binding `max_tokens` 로 예약을 줄이는 설정. 한도가 어디서 오는지 헷갈린다.
+  - Librarian 레인의 `max_output_tokens` 는 이 설정이 아니다. 켠 레인이 꼭 적는 선언이고, 없으면 레인 값을 만들지 않는다(`Reserve_undeclared`, `lib/keeper/librarian_memory_lane.ml:107`). 요청에 실리는 예약 그 자체다.
 - 비율이나 여유분 숫자(예: 「창의 80%」). 근거가 없는 숫자다.
 - provider 의 거절 문장을 읽어 한도를 짐작하는 것.
 
@@ -122,14 +124,13 @@ agent-core 도 그 요청을 보내지 않는다.
 2. masc 창 옮김 신호와 다음 요청 예측이 입력 한도를 받는다. sent prefix RFC §4 의 비교 대상을 바꾼다.
    - 시험: 창 400,000, 예약 128,000 에서 다음 턴 예측이 272,000 을 넘으면 신호가 켜진다.
 3. 턴의 `effective_budget` 과 그 값을 쓰는 곳. §6 결과로 정한다.
-4. Librarian 레인. Librarian 담당이 한다.
+4. Librarian 레인. 지금 고칠 코드는 없다. Librarian RFC §6.3 의 비교를 만드는 층이 입력 한도 타입을 받는다. Librarian 담당이 한다.
 5. 넘칠 때 한 번 줄여 다시 보내기. §4 를 채운 뒤 정한다.
 
 ## 6. 조사할 것
 
 - `effective_budget` 이 입력 한도로 쓰이는 곳. 투영과 `keeper_unified_turn_pre_dispatch.ml:174` 의 후보 비교가 있다.
-- 다음 요청 예측이 그 runtime 의 config 를 얻는 자리.
-- Librarian 레인의 창과 예약이 입력 한도가 되는 곳(exact 경로).
+- exact 경로에서 admitted target 이 받는 창과 레인 slot 열쇠의 `window` 가 같은 값에서 오는지. 같아야 Librarian RFC §6.3 의 비교가 이 RFC 의 함수를 쓸 수 있다.
 - 옛 빌드에서 19:29 KST 에 거절된 입력 529,914 가 어디서 왔는지.
 - checkpoint 뒤 줄이기 재시도를 막는 조건이 지키는 것.
 

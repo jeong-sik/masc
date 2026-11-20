@@ -1,16 +1,15 @@
-// Keeper Workspace — context rail (right). Ported to the keeper-v2 prototype DOM
-// (rails.jsx ContextRail): `.ctx` → `.ctx-scroll` → `.ctx-sec` sections (주의 /
-// 드레인 `.drain-card` while Draining / 런타임 `.rtc-card` with the
-// design's collapsed-by-default `.rtc-head`→`.rtc-detail` disclosure and
+// Keeper Workspace — context rail (right). Ported to the keeper-v2 DOM:
+// `.ctx` → `.ctx-scroll` → `.ctx-sec` sections (주의 /
+// 드레인 `.drain-card` while Draining / 런타임 `.rtc-card` with a
+// collapsed-by-default `.rtc-head`→`.rtc-detail` disclosure and
 // `.rail-hb` heartbeat line / 컨텍스트 `.ctx-card` with `.ctx-usage` +
 // `.ctx-notobs` / 소유 태스크 `.ctx-list`), styled by the vendored SSOT CSS.
 // Live wiring (Keeper object + tasks store + waiting inventory) is
 // unchanged; only the DOM/classes changed. Documented
 // local divergences: the 처리량 `.tps-card` section was removed as low-signal
-// (#22681); the last-turn meter stays (design deleted the gauge; #22681
-// explicitly kept it); and the design's 컴팩션 스냅샷 button has no
-// counterpart here because no backend surface writes it (#29503) — do not
-// port it back from rails.jsx. Data gaps (runtime capability flags, effort
+// (#22681); the last-turn meter stays (#22681 explicitly kept it); and there
+// is no 컴팩션 스냅샷 button because no backend surface writes it (#29503) —
+// do not add one. Data gaps (runtime capability flags, effort
 // segments, memory inspector, live ctx occupancy) are MARKED, never faked.
 
 import { html } from 'htm/preact'
@@ -75,16 +74,15 @@ function formatK(n: number | null | undefined): string | null {
   return n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`
 }
 
-// Design formats the window size as a round k figure (`(ctxWindow / 1000).toFixed(0)k`,
-// rails.jsx ctx-usage) — 200k, not 200.0k.
+// Formats the window size as a round k figure — 200k, not 200.0k.
 function formatWindowK(n: number | null | undefined): string | null {
   if (typeof n !== 'number') return null
   return `${(n / 1000).toFixed(0)}k`
 }
 
-// Design rtc-spec formatting (rails.jsx RailRuntime): round k figures from the
-// catalog's declared max_context / max_output_tokens, '—' when the catalog has
-// no entry — never the mock's hardcoded `max_tokens 4,096`.
+// rtc-spec formatting: round k figures from the catalog's declared
+// max_context / max_output_tokens, '—' when the catalog has no entry — never
+// a hardcoded fallback.
 function formatSpecK(n: number | null | undefined): string {
   return typeof n === 'number' && Number.isFinite(n) && n > 0
     ? `${(n / 1000).toFixed(0)}k`
@@ -154,7 +152,7 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
   `
 }
 
-// Design drain card (rails.jsx ContextRail `.drain-card`): visible only while
+// Drain card (`.drain-card`): visible only while
 // the keeper FSM is Draining. Counts and rows come from the
 // live owned-task list; the 대기 자극 flush sub-list reads the keeper waiting
 // inventory's event_queue_pending rows (the same store the lane strip uses) —
@@ -309,8 +307,8 @@ function RuntimeSection({
     loadRuntimeCatalog()
   }, [])
 
-  // Design RailRuntime disclosure (rails.jsx): the card is collapsed to just
-  // the runtime name by default; `.rtc-head` toggles `.rtc-detail` open.
+  // The runtime card is collapsed to just the runtime name by default;
+  // `.rtc-head` toggles `.rtc-detail` open.
   const [detailOpen, setDetailOpen] = useState(false)
 
   const runtime = keeperRuntimeLabel(keeper)
@@ -534,9 +532,9 @@ function ContextSection({
             </div>`
           : null}
         ${hasMeterData
-          // Design's typed not_observed line (rails.jsx): the meter above is
+          // Typed not_observed line: the meter above is
           // the LAST turn's ratio; the live in-flight occupancy is never
-          // observed, and the design says so instead of implying it.
+          // observed, and this line says so instead of implying it.
           ? html`<div class="ctx-notobs mono">지금 쓰는 양 <b>알 수 없음</b><span class="ctx-notobs-g">마지막 턴 기준 · 재시작하면 초기화</span></div>`
           : null}
         <button type="button" class="cmp-open" data-testid="open-memory-inspector" onClick=${onOpenMemory}>

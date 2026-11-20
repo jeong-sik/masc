@@ -1,8 +1,6 @@
 // Keeper workspace pane resize — drag-to-resize the roster and context-rail
 // columns of the 3-pane chat view, with widths persisted to localStorage.
 //
-// Ported from the v2 design (keepers.jsx startResize + rails.jsx usePersistentW):
-// the design lets the operator widen the roster or context rail and remembers it.
 // The local 3-pane is a CSS grid whose roster/rail columns are driven by the
 // `--kw-roster-w` / `--kw-rail-w` custom properties (keeper-workspace.css), so a
 // resize is just a clamped write to those vars + persistence.
@@ -16,8 +14,8 @@ import { persistentSignal } from '../../lib/persistent-signal'
 
 export type PaneKind = 'roster' | 'rail'
 
-// Clamp ranges mirror the v2 design (keepers.jsx startResize: roster 200..440,
-// ctx 240..480). Named so a future column-width change has a single source.
+// Clamp ranges (roster 200..440, ctx 240..480). Named so a future
+// column-width change has a single source.
 const PANE_BOUNDS: Record<PaneKind, { min: number; max: number; cssVar: string }> = {
   roster: { min: 200, max: 440, cssVar: '--kw-roster-w' },
   rail: { min: 240, max: 480, cssVar: '--kw-rail-w' },

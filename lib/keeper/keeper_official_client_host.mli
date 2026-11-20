@@ -456,18 +456,18 @@ type carried_start_front =
           (RFC-librarian-lifecycle §4.10). No working state is
           carried; the atoms between a Librarian point and the range wait for
           the Librarian. *)
-  | Librarian_working_state of { end_atom : int }
+  | Covered_with_working_state of { end_atom : int }
       (** The Memory writer read this history through [end_atom] and
           committed what the keeper was in the middle of. The range starts
           there and carries that working state in place of the atoms before
           it. [first_atom] is that position clamped to the newest atom, so a
           range the writer read to the end still carries the turn it
           answers; the two differ only then. *)
-  | Librarian_progress of { end_atom : int }
+  | Covered of { end_atom : int }
       (** The Memory writer read this history through [end_atom] and no
           working state goes: the range starts there and nothing is carried
           for the atoms before it, which are in the keeper's memory
-          ([Keeper_carried_front.Librarian_progress] on the Agent Core lane).
+          ([Keeper_carried_front.Covered] on the Agent Core lane).
           [first_atom] is that position clamped to the newest atom. *)
 
 type carried_start =
@@ -539,8 +539,8 @@ val carried_start_range
 
     [librarian_front] is the turn's continuity, read once for every lane
     ({!Keeper_turn_driver_try_provider.read_keeper_continuity}): the writer's
-    read end with its working state ([Librarian_working_state]), the read end
-    alone ([Librarian_progress]), or none. That read end wins when it is at or
+    read end with its working state ([Covered_with_working_state]), the read end
+    alone ([Covered]), or none. That read end wins when it is at or
     past the seed that holds, or the lane's own cut when no seed holds, so a
     writer that read less than the last request carried never moves the
     range back. [turn_start] is not weighed against it: it is where a request

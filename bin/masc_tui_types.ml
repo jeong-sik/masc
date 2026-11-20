@@ -10428,6 +10428,10 @@ type state = {
   mutable voice_config: Yojson.Safe.t option;
   mutable voice_config_error: string option;
   mutable voice_input_device: string option;
+  (* The audio input device chosen in [tui].audio_input_device at boot or on
+     settings reload; workstation-local (not cleared on workspace switch) and
+     distinct from [voice_input_device], which holds the resolved display value. *)
+  mutable boot_audio_input_device: string option;
   (* The admin setup read: each endpoint by id, kind and address. Kept apart
      from voice_config because one route can answer while the other does not,
      and a panel that folded them would report the wrong one as broken. *)
@@ -21577,6 +21581,7 @@ let create_state
   voice_config = None;
   voice_config_error = None;
   voice_input_device = None;
+  boot_audio_input_device = None;
   voice_setup = None;
   voice_setup_error = None;
   voice_wizard = None;

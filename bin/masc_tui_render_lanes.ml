@@ -964,7 +964,7 @@ let render_lanes_overview (state : state) =
           Theme.recede () ^ ui_text state ~ko:"기능 목록 미조회 · r:조회" ~en:"Inventory not read · r:read" ^ Ansi.reset
     | None -> ""
     | Some (Masc_tui_lane_inventory.Category_header category) ->
-        Theme.info ()
+        Ansi.bold ^ Theme.series_tint Masc_tui_theme.Calls 0.8
         ^ "  "
         ^ Masc_tui_lane_inventory.category_label ~ko:(state.ui_language = Lang_ko) category
         ^ Ansi.reset
@@ -1007,8 +1007,8 @@ let render_lanes_overview (state : state) =
   let visible_detail =
     Masc_tui_detail_height.fit ~budget:detail_height ~rows:inventory ~detail:row_detail
       ~too_tall:(Masc_tui_detail_height.Cut_with
-                   (Theme.info (), ui_text state ~ko:"… d: 전체 관측·설정 근거"
-                                     ~en:"… d: full observation and configuration evidence"))
+                   (Theme.recede (), ui_text state ~ko:"… d: 전체 관측·설정 근거"
+                                       ~en:"… d: full observation and configuration evidence"))
       ~blank:(Ansi.reset, "") detail in
   let detail = List.map (fun (style, line) -> style ^ line ^ Ansi.reset) visible_detail in
   let listing, detail =

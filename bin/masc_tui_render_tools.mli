@@ -16,6 +16,11 @@ val tools_selection_line : cols:int -> state -> string
 (** Pinned action target, sharing the exact selection used by Enter/edit.
     The complete reference remains in the scrolling document. *)
 
+val selected_skill_bottom_sheet : cols:int -> height:int -> state -> string list
+(** Docked fixed-height Bottom Sheet summarising the selected Skill on
+    [Tools_surface] without shifting list rows (RFC §8). Returns [[]] when
+    inactive or below minimum geometry. *)
+
 val skill_source_picker_page : state -> terminal_rows:int -> int
 (** The visible source rows after the existing Tools frame and the picker's
     own prefix. Rendering and selection use this same budget. *)

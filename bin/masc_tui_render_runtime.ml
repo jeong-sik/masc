@@ -1337,10 +1337,15 @@ let render_tools (state : state) =
   in
   let sheet_lines =
     match volume_gc_sheet with
-    | None -> []
     | Some sheet ->
         render_progress_sheet ~ko ~now ~available:(max 0 (full_content_height - 1))
           ~width:(framed_inner_width cols) sheet
+    | None ->
+        let reserve =
+          if full_content_height >= 16 then min 8 (full_content_height / 3)
+          else 0
+        in
+        Render_tools.selected_skill_bottom_sheet ~cols ~height:reserve state
   in
   let content_height = max 0 (full_content_height - List.length sheet_lines) in
   let max_scroll = max 0 (drawable - content_height) in

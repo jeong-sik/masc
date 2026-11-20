@@ -2,6 +2,9 @@ module Row = Masc.Lane_addon_types
 module Document = Masc_tui_lane_declaration
 module Action = Masc.Lane_addon_action
 module Application = Masc_tui_lane_application
+module Theme = Masc_tui_ansi.Theme
+module Card = Masc_tui_card
+module Doc = Masc_tui_doc
 
 (* Split written line breaks before neutralising terminal controls. These are
    document blocks (JSON, readings, receipts), not single-line table cells.
@@ -464,13 +467,13 @@ let overview_entries_raw ?(mode=Current_installations) snapshot =
                     instance.id=id && instance.source_path=Some declaration.source_path) instances)
                   declaration.instance_id in
                 if has_worker then None else Some (`Declaration (index, declaration))))
-let category_label = function
-  | Category.Memory_and_judgment -> "Memory & judgment"
-  | Category.Browser -> "Browser"
-  | Category.External_communications -> "External communications"
-  | Category.Voice_and_media -> "Voice & media"
-  | Category.Execution_environment -> "Execution environment"
-  | Category.Analysis -> "Analysis"
+let category_label ?(ko = false) = function
+  | Category.Memory_and_judgment -> if ko then "메모리 · 판단" else "Memory & judgment"
+  | Category.Browser -> if ko then "브라우저" else "Browser"
+  | Category.External_communications -> if ko then "외부 통신" else "External communications"
+  | Category.Voice_and_media -> if ko then "음성 · 미디어" else "Voice & media"
+  | Category.Execution_environment -> if ko then "실행 환경" else "Execution environment"
+  | Category.Analysis -> if ko then "분석" else "Analysis"
 type current_category = Classified of Category.t | Unclassified | Unverified
 let declared_category = function
   | Some category -> Classified category
@@ -509,10 +512,10 @@ let category_rank = function
   | Classified Category.Analysis -> 5
   | Unclassified -> 6
   | Unverified -> 7
-let category_heading = function
-  | Classified c -> category_label c
-  | Unclassified -> "Unclassified"
-  | Unverified -> "Category unverified"
+let category_heading ?(ko = false) = function
+  | Classified c -> category_label ~ko c
+  | Unclassified -> if ko then "미분류" else "Unclassified"
+  | Unverified -> if ko then "분류 미확인" else "Category unverified"
 (* Current installations are grouped by role; within a group the order is the
    raw order, so identity-based cursor anchors stay stable. Retained runs keep
    their run grouping. *)
@@ -860,9 +863,12 @@ let subscription_targets view =
                   : Masc_tui_lane_subscriptions.target)) instance.outputs)
         | _ -> []) config.declarations
   | _ -> []
-let phase_label = function
-  | Row.Attached -> "attached" | Row.Observing -> "observing" | Row.Detaching -> "detaching"
-  | Row.Detached -> "detached" | Row.Failed detail -> "failed: " ^ detail
+let phase_label ?(ko = false) = function
+  | Row.Attached -> if ko then "연결됨" else "attached"
+  | Row.Observing -> if ko then "관측 중" else "observing"
+  | Row.Detaching -> if ko then "분리 중" else "detaching"
+  | Row.Detached -> if ko then "분리됨" else "detached"
+  | Row.Failed detail -> (if ko then "실패: " else "failed: ") ^ detail
 (* A row's moment in the operator's zone, as every other moment on the
    screen. A value the calendar cannot break down is shown as the number it
    is. *)
@@ -1126,11 +1132,11 @@ let diagnostic_lines view =
    [no_reading_yet_text] under a status row reading "Reading · nothing held
    yet", telling the operator to press [r] for a read already on its way; the
    list screens said "Refreshing…" over a first read that refreshes nothing. *)
-let unread_body_text ~failed_note (view : t) =
+let unread_body_text ?(ko = false) ~failed_note (view : t) =
   match view.error, view.snapshot_read_error, view.loading with
   | Some _, _, (true | false) | None, Some _, (true | false) -> failed_note
-  | None, None, true -> "Reading"
-  | None, None, false -> no_reading_yet_text
+  | None, None, true -> if ko then "조회 중" else "Reading"
+  | None, None, false -> if ko then "아직 조회된 내용이 없습니다." else no_reading_yet_text
 
 (* What the status row says about a read or interaction. Kept whole here rather than
    inside the row it draws, so a view can be asked what the row would say.
@@ -1313,45 +1319,61 @@ let removal_block_reason view (instance : instance) =
   | _ -> refusal "Lane configuration owner is incomplete"
 
 (* One item per key or notice, the way [overview_hints] lists them. *)
-let instance_controls view (instance : instance) =
+let instance_controls ?(ko = false) view (instance : instance) =
   let removal = match removal_block_reason view instance with
     | Some reason -> reason
     | None -> match instance.source_path with
-    | Some _ -> "d:remove TOML + worker"
-    | None -> "d:remove worker" in
+    | Some _ -> if ko then "d:TOML·워커 제거" else "d:remove TOML + worker"
+    | None -> if ko then "d:워커 제거" else "d:remove worker" in
   match instance.phase with
   | Row.Attached | Row.Observing ->
       (if can_observe instance then
-         "o:observe" :: (if Option.is_some instance.action_schema then ["a:actions"] else [])
-       else ["worker execution unavailable"]) @ [removal]
-  | Row.Detaching -> ["worker cleanup pending"]
-  | Row.Detached -> ["retained history · D:details"]
+         (if ko then "o:관측" else "o:observe")
+         :: (if Option.is_some instance.action_schema then [if ko then "a:동작" else "a:actions"] else [])
+       else [if ko then "워커 실행 불가" else "worker execution unavailable"]) @ [removal]
+  | Row.Detaching -> [if ko then "워커 정리 대기" else "worker cleanup pending"]
+  | Row.Detached -> [if ko then "보존 이력 · D:상세" else "retained history · D:details"]
   | Row.Failed _ ->
       (if can_observe instance then
-         "o:retry observation" :: (if Option.is_some instance.action_schema then ["a:actions"] else [])
-       else ["worker execution unavailable"]) @ [removal]
+         (if ko then "o:관측 재시도" else "o:retry observation")
+         :: (if Option.is_some instance.action_schema then [if ko then "a:동작" else "a:actions"] else [])
+       else [if ko then "워커 실행 불가" else "worker execution unavailable"]) @ [removal]
 
 (* [drop_hint_items] drops whole items from the back. Keep the way out at
    the front so it remains easy to find even when the other hints give way. *)
-let overview_hints view =
-  let refresh = if view.loading then "Reading" else "r:refresh" in
-  if view.help_open then ["Esc:close help"]
+let overview_hints ?(ko = false) view =
+  let refresh =
+    if view.loading then (if ko then "조회 중" else "Reading")
+    else (if ko then "r:새로고침" else "r:refresh")
+  in
+  if view.help_open then [if ko then "Esc:도움말 닫기" else "Esc:close help"]
   else if Option.is_some view.document_key then
-    ["?:help"; "Esc:back"; "Space:on/off draft"; "E:edit"; "R:records"; "s:save"; "l:reload";
-     "u/U:revision"; "Colon:palette"; "A:command"]
+    if ko then
+      ["?:도움말"; "Esc:뒤로"; "Space:초안 전환"; "E:편집"; "R:레코드"; "s:저장"; "l:다시 읽기";
+       "u/U:리비전"; "::명령"; "A:명령 실행"]
+    else
+      ["?:help"; "Esc:back"; "Space:on/off draft"; "E:edit"; "R:records"; "s:save"; "l:reload";
+       "u/U:revision"; "Colon:palette"; "A:command"]
   else match view.screen with
   | Overview when view.presentation=Technical && view.focus=Configurations
       && Option.is_none view.document_key ->
-      ["?:help"; "Esc:back"]
-      @ (if Option.is_some (selected_source_path view) then ["E:edit TOML"] else [])
-      @ ["Colon:palette"; "A:command"; refresh]
+      [ (if ko then "?:도움말" else "?:help"); (if ko then "Esc:뒤로" else "Esc:back") ]
+      @ (if Option.is_some (selected_source_path view) then [if ko then "E:TOML 편집" else "E:edit TOML"] else [])
+      @ [ (if ko then "::명령" else "Colon:palette"); (if ko then "A:명령 실행" else "A:command"); refresh ]
   | Overview ->
-      ["?:help"; "Colon:palette"; "Esc:back"; "Enter:open"; "h:history/current"; "i:install";
-       "n:new"; "S:subs"; "A:command"; refresh]
+      if ko then
+        ["?:도움말"; "::명령"; "Esc:뒤로"; "Enter:열기"; "h:이력/현재"; "i:설치";
+         "n:새 TOML"; "S:구독"; "A:명령 실행"; refresh]
+      else
+        ["?:help"; "Colon:palette"; "Esc:back"; "Enter:open"; "h:history/current"; "i:install";
+         "n:new"; "S:subs"; "A:command"; refresh]
   | Detail _ ->
-      ["?:help"; "Colon:palette"; "Esc:back"; "A:command"; "1-4:section"; "Tab:next section"; "j/k:move"]
-      @ (match selected_instance view with None -> [] | Some instance -> instance_controls view instance)
-      @ ["D:raw"; "J/K:scroll"; refresh]
+      (if ko then
+         ["?:도움말"; "::명령"; "Esc:뒤로"; "A:명령 실행"; "1-4:탭"; "Tab:다음 탭"; "j/k:이동"]
+       else
+         ["?:help"; "Colon:palette"; "Esc:back"; "A:command"; "1-4:section"; "Tab:next section"; "j/k:move"])
+      @ (match selected_instance view with None -> [] | Some instance -> instance_controls ~ko view instance)
+      @ [ (if ko then "D:원본" else "D:raw"); (if ko then "J/K:스크롤" else "J/K:scroll"); refresh ]
 
 (* The advertised lane action tool, its name and its [action] property, the
    part the operator fills. The host checks a send under the package's tool
@@ -1783,12 +1805,12 @@ let declaration_reading (declaration : declaration) =
   else if declaration.issues<>[] then Needs_attention
   else if declaration.enabled=Some false then Configured_off
   else if Option.is_some declaration.applied then No_current_worker else Pending
-let declaration_reading_word = function
-  | Configuration_issue -> "configuration issue"
-  | Needs_attention -> "needs attention"
-  | Configured_off -> "configured off"
-  | No_current_worker -> "no current worker"
-  | Pending -> "pending"
+let declaration_reading_word ?(ko = false) = function
+  | Configuration_issue -> if ko then "설정 오류" else "configuration issue"
+  | Needs_attention -> if ko then "확인 필요" else "needs attention"
+  | Configured_off -> if ko then "비활성화됨" else "configured off"
+  | No_current_worker -> if ko then "실행 워커 없음" else "no current worker"
+  | Pending -> if ko then "대기 중" else "pending"
 (* The mark follows the application line drawn under the entry
    ([declaration_application]), so the two cannot disagree. A declaration with
    an issue needs attention before any application reading. *)
@@ -1863,11 +1885,106 @@ let snapshot_coverage_lines coverage =
         ^ " · cursor " ^ Option.value ~default:unreported source.cursor
         ^ Option.fold ~none:"" ~some:(fun detail -> " · " ^ detail) source.detail) coverage
 
-let overview_lines ~width view =
+let overview_bottom_sheet ~ko ~width ~height view snapshot entries =
+  if height < 16 || width < Card.min_width then []
+  else
+    let say korean english = if ko then korean else english in
+    match at_cursor entries view.instance_cursor with
+    | None -> []
+    | Some (`Declaration (_, declaration)) ->
+        let title =
+          Option.value
+            ~default:(say "미해결 설치" "unresolved installation")
+            declaration.installation_id
+        in
+        let reading = declaration_reading declaration in
+        let word = Masc.Tui_terminal_text.sanitize_terminal_text (declaration_reading_word ~ko reading) in
+        let symbol, tone =
+          match reading with
+          | Configuration_issue | Needs_attention ->
+              Card.Mark Masc_tui_value.Mark.Failed, Theme.bad ()
+          | Configured_off ->
+              Card.Mark Masc_tui_value.Mark.Paused, Theme.recede ()
+          | No_current_worker | Pending ->
+              Card.Mark Masc_tui_value.Mark.Waiting, Theme.warn ()
+        in
+        let cat =
+          match declaration.ui_category with
+          | Some c -> category_label ~ko c
+          | None -> say "미분류" "Unclassified"
+        in
+        let fields =
+          [ Doc.kv ~tone (say "적용 상태" "Status")
+              (Masc.Tui_terminal_text.sanitize_terminal_text (declaration_application view declaration))
+          ; Doc.kv (say "분류" "Category") cat
+          ; Doc.kv (say "리비전" "Revision")
+              (Printf.sprintf "%s -> %s" (desired_text declaration) (applied_text declaration))
+          ; Doc.kv ~tone:(Theme.recede ()) (say "선언 파일" "TOML")
+              (Masc.Tui_terminal_text.sanitize_terminal_text declaration.source_path)
+          ]
+        in
+        Doc.bottom_sheet ~ko ~width ~height:7 ~role:Masc_tui_theme.Panel_neutral
+          ~title:(Masc.Tui_terminal_text.sanitize_terminal_text title)
+          ~status:{ Card.symbol; word; tone }
+          ~count:(Card.Whole (List.length fields))
+          ~footer_keys:
+            [ { Card.key = "Enter"; label = say "설치 상세" "install" }
+            ; { key = "E"; label = say "편집" "edit" }
+            ; { key = "r"; label = say "새로고침" "refresh" }
+            ]
+          ~body:(fun ~cells -> Doc.kv_rows ~width:cells fields)
+          ()
+    | Some (`Instance item) ->
+        let standing = instance_standing ~off_requested:(off_requested snapshot item) item in
+        let word = Masc.Tui_terminal_text.sanitize_terminal_text (phase_label ~ko item.phase) in
+        let symbol, tone =
+          match item.phase with
+          | Row.Failed _ ->
+              Card.Mark Masc_tui_value.Mark.Failed, Theme.bad ()
+          | Row.Attached | Row.Observing ->
+              Card.Mark Masc_tui_value.Mark.Settled, Theme.ok ()
+          | Row.Detaching ->
+              Card.Mark Masc_tui_value.Mark.Caution, Theme.warn ()
+          | Row.Detached ->
+              Card.Mark Masc_tui_value.Mark.Paused, Theme.recede ()
+        in
+        let cat = category_heading ~ko (current_category snapshot (`Instance item)) in
+        let records_text =
+          if item.observation_seq = 0 then say "첫 관측 대기 중" "awaiting first observation"
+          else Printf.sprintf (if ko then "%d건" else "%d records") item.rows_count
+        in
+        let fields =
+          [ Doc.kv ~tone (say "단계" "Phase") (Masc_tui_lane_standing.word ~korean:ko standing ^ " · " ^ word)
+          ; Doc.kv (say "분류" "Category") cat
+          ; Doc.kv (say "관측 기록" "Records") records_text
+          ]
+          @ Option.to_list (Option.map (fun desc ->
+              Doc.kv (say "설명" "Summary") (Masc.Tui_terminal_text.sanitize_terminal_text desc))
+              item.display.description)
+          @ Option.to_list (Option.map (fun path ->
+              Doc.kv ~tone:(Theme.recede ()) (say "선언 파일" "TOML")
+                (Masc.Tui_terminal_text.sanitize_terminal_text path))
+              item.source_path)
+        in
+        Doc.bottom_sheet ~ko ~width ~height:7 ~role:Masc_tui_theme.Panel_neutral
+          ~title:(Masc.Tui_terminal_text.sanitize_terminal_text (instance_heading snapshot item))
+          ~status:{ Card.symbol; word; tone }
+          ~count:(Card.Whole (List.length fields))
+          ~footer_keys:
+            [ { Card.key = "Enter"; label = say "상세" "open" }
+            ; { key = "o"; label = say "관측" "observe" }
+            ; { key = "r"; label = say "새로고침" "refresh" }
+            ]
+          ~body:(fun ~cells -> Doc.kv_rows ~width:cells fields)
+          ()
+
+let overview_lines ?(ko = false) ?(height = 24) ~width view =
   let wrap = document_rows ~width in
   let texts = List.map (fun line -> Overview_text line) in
   let content = match view.snapshot with
-    | None -> [Overview_text (unread_body_text ~failed_note:"Read failed · r:retry" view)]
+    | None ->
+        [Overview_text (unread_body_text ~ko
+           ~failed_note:(if ko then "조회 실패 · r:재시도" else "Read failed · r:retry") view)]
     | Some snapshot ->
         let active, failed = List.fold_left (fun (active, failed) (item : instance) ->
           match item.phase with
@@ -1878,19 +1995,25 @@ let overview_lines ~width view =
         let count = List.length (List.filter (fun item -> not (retained item)) snapshot.instances) in
         let retained_count = List.length (List.filter retained snapshot.instances) in
         let configuration_summary = match snapshot.configuration with
-          | None -> "TOML not reported"
+          | None -> if ko then "TOML 미보고" else "TOML not reported"
           | Some config ->
               let declared = List.fold_left (fun total (declaration : declaration) ->
                 if Option.is_some declaration.desired then total + 1 else total)
                 0 config.declarations in
               let issues = List.fold_left (fun total (declaration : declaration) ->
                 total + List.length declaration.issues) 0 config.declarations in
-              Printf.sprintf "%d declared%s%s" declared
-                (if issues=0 then "" else Printf.sprintf " · %d config issues" issues)
-                (if config.complete then "" else " · inventory partial") in
-        let heading = Printf.sprintf "Plugins · %s · %d active · %d failed workers%s"
-          configuration_summary active failed
-          (if Option.is_some view.snapshot_read_error then " · STALE" else "") in
+              Printf.sprintf
+                (if ko then "선언 %d개%s%s" else "%d declared%s%s")
+                declared
+                (if issues=0 then "" else Printf.sprintf (if ko then " · 설정 문제 %d건" else " · %d config issues") issues)
+                (if config.complete then "" else if ko then " · 일부 목록" else " · inventory partial") in
+        let heading =
+          Printf.sprintf
+            (if ko then "플러그인 · %s · 활성 %d · 실패 %d%s"
+             else "Plugins · %s · %d active · %d failed workers%s")
+            configuration_summary active failed
+            (if Option.is_some view.snapshot_read_error then (if ko then " · 이전 관측" else " · STALE") else "")
+        in
         let entries = selectable_overview_entries view snapshot in
         (* Keep the selected entry first: wrapped history/count context already
            spends rows before the list in a narrow terminal. *)
@@ -1899,20 +2022,33 @@ let overview_lines ~width view =
           |> List.filter (fun (index,_) -> index >= window && index < window + 9) in
         let empty = match view.overview_mode, snapshot.configuration with
           | Retained_runs, _ when entries=[] ->
-              key_rows ~width ["No retained runs in this snapshot"; "h:current installations"]
+              key_rows ~width
+                (if ko then ["보존된 실행 이력이 없습니다"; "h:현재 설치"]
+                 else ["No retained runs in this snapshot"; "h:current installations"])
           | Retained_runs, _ -> []
           | Current_installations, Some {complete=true;declarations=[];_} when count=0 ->
-              key_rows ~width ["No Plugins installed"; "i:install a package"; "n:new TOML"]
+              key_rows ~width
+                (if ko then ["설치된 플러그인이 없습니다"; "i:패키지 설치"; "n:새 TOML"]
+                 else ["No Plugins installed"; "i:install a package"; "n:new TOML"])
           | Current_installations, Some {complete=false;_} when entries=[] ->
-              key_rows ~width ["Installation inventory incomplete"; "r:refresh"]
+              key_rows ~width
+                (if ko then ["설치 목록이 완전하지 않습니다"; "r:새로고침"]
+                 else ["Installation inventory incomplete"; "r:refresh"])
           | Current_installations, None when entries=[] ->
-              key_rows ~width ["TOML installation status unknown"; "r:refresh"]
+              key_rows ~width
+                (if ko then ["TOML 설치 상태 알 수 없음"; "r:새로고침"]
+                 else ["TOML installation status unknown"; "r:refresh"])
           | Current_installations, (Some _ | None) -> [] in
-        let history = Printf.sprintf "Retained history · %d instances" retained_count in
+        let history =
+          Printf.sprintf
+            (if ko then "보존 이력 · %d개 인스턴스" else "Retained history · %d instances")
+            retained_count
+        in
+        let sheet = overview_bottom_sheet ~ko ~width ~height view snapshot entries in
         texts [heading]
         @ [plain_drawn (key_rows ~width (match view.overview_mode with
-             | Current_installations -> [history; "h:open"]
-             | Retained_runs -> [history; "h:current installations"]))]
+             | Current_installations -> [history; if ko then "h:이력 열기" else "h:open"]
+             | Retained_runs -> [history; if ko then "h:현재 설치" else "h:current installations"]))]
         @ texts [""] @ [plain_drawn empty]
         @ List.concat_map (fun (index,item) ->
             let selected = index = view.instance_cursor in
@@ -1922,19 +2058,19 @@ let overview_lines ~width view =
                   let here = current_category snapshot item in
                   let previous = if index=0 then None else List.nth_opt entries (index-1) in
                   if index<>window && Option.fold ~none:false ~some:(fun p -> current_category snapshot p=here) previous
-                  then [] else texts ["── " ^ category_heading here ^ " ──"] in
+                  then [] else [plain_drawn [Doc.section_rule ~width (category_heading ~ko here)]] in
             role_header @
             match item with
             | `Declaration (_, declaration) ->
-                let name = Option.value ~default:"unresolved installation" declaration.installation_id in
+                let name = Option.value ~default:(if ko then "미해결 설치" else "unresolved installation") declaration.installation_id in
                 let reading = declaration_reading declaration in
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
-                  then Some "E:edit" else None) |> Option.to_list in
+                  then Some (if ko then "E:편집" else "E:edit") else None) |> Option.to_list in
                 entry_lead ~width ~selected (declaration_entry_standing view declaration)
-                  (name ^ " · " ^ declaration_reading_word reading ^ " · " ^ Filename.basename declaration.source_path)
+                  (name ^ " · " ^ declaration_reading_word ~ko reading ^ " · " ^ Filename.basename declaration.source_path)
                 :: texts ["    " ^ declaration_application view declaration]
-                @ [plain_drawn (key_rows ~indent:4 ~width ("Enter:installation" :: edit))]
+                @ [plain_drawn (key_rows ~indent:4 ~width ((if ko then "Enter:설치 상세" else "Enter:installation") :: edit))]
             | `Instance item ->
                 let group_header = match view.overview_mode with
                   | Current_installations -> []
@@ -1945,24 +2081,26 @@ let overview_lines ~width view =
                         | Some (`Declaration _) | None -> false in
                       if same_group && index<>window then [] else
                         let name = match item.source_path with
-                          | Some path -> path | None -> "undeclared" in
+                          | Some path -> path | None -> if ko then "미선언" else "undeclared" in
                         [name ^ " · add-on " ^ item.addon_id ^ " · run " ^ item.run_id] in
-                let count_text = if item.observation_seq=0 then "awaiting first observation"
-                  else Printf.sprintf "%d records" item.rows_count in
+                let count_text =
+                  if item.observation_seq=0 then (if ko then "첫 관측 대기 중" else "awaiting first observation")
+                  else Printf.sprintf (if ko then "기록 %d건" else "%d records") item.rows_count
+                in
                 let off_requested = off_requested snapshot item in
-                let activity = if off_requested then "off requested · " else "" in
+                let activity = if off_requested then (if ko then "종료 요청됨 · " else "off requested · ") else "" in
                 let lead = entry_lead ~width ~selected (instance_standing ~off_requested item)
                   (instance_heading snapshot item ^ " · " ^
                    activity ^
                    (match item.phase with
-                     | Row.Failed _ -> "failed"
-                     | Row.Attached | Observing | Detaching | Detached -> phase_label item.phase) ^
+                     | Row.Failed _ -> if ko then "실패" else "failed"
+                     | Row.Attached | Observing | Detaching | Detached -> phase_label ~ko item.phase) ^
                    " · " ^ count_text) in
-                let controls = key_rows ~indent:4 ~width ("Enter:open" :: instance_controls view item) in
+                let controls = key_rows ~indent:4 ~width ((if ko then "Enter:열기" else "Enter:open") :: instance_controls ~ko view item) in
                 let detail = match item.phase with
                   | Row.Failed detail ->
                       Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (width - 4))
-                        ("D:full · " ^ detail)
+                        ((if ko then "D:전체 · " else "D:full · ") ^ detail)
                       |> List.map (fun line -> "    " ^ line)
                   | Row.Attached | Row.Observing | Row.Detaching | Row.Detached -> [] in
                 texts group_header @ [lead]
@@ -1973,25 +2111,29 @@ let overview_lines ~width view =
                          then Some ("    " ^ declaration_application view d) else None) config.declarations
                    | Current_installations, None | Retained_runs, _ -> [])
                 @ (match view.overview_mode with Current_installations -> []
-                   | Retained_runs -> ["    Instance " ^ item.id])
+                   | Retained_runs -> [(if ko then "    인스턴스 " else "    Instance ") ^ item.id])
                 @ (match view.overview_mode, current_category snapshot (`Instance item), item.ui_category with
                    | Retained_runs, _, _ | _, Unverified, _ -> []
                    | Current_installations, Classified now, Some started when now=started -> []
                    | Current_installations, Unclassified, None -> []
                    | Current_installations, ((Classified _ | Unclassified) as now), started ->
-                       let word = function Some c -> category_label c | None -> "unclassified" in
-                       [Printf.sprintf "    role: worker started as %s · declaration now %s" (word started)
-                          (match now with Classified c -> category_label c | Unclassified | Unverified -> "unclassified")])
-                @ (if index=view.instance_cursor then
+                       let word = function Some c -> category_label ~ko c | None -> if ko then "미분류" else "unclassified" in
+                       [Printf.sprintf
+                          (if ko then "    역할: 시작 시 %s · 현재 선언 %s"
+                           else "    role: worker started as %s · declaration now %s")
+                          (word started)
+                          (match now with Classified c -> category_label ~ko c | Unclassified | Unverified -> if ko then "미분류" else "unclassified")])
+                @ (if index=view.instance_cursor && sheet = [] then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else []))
                 @ [plain_drawn controls] @ texts detail) items
+        @ (if sheet = [] then [] else texts [""] @ [plain_drawn sheet])
   in
   List.concat_map (function
     | Overview_text line -> List.map (fun row -> false, row) (wrap line)
     | Overview_drawn rows -> rows)
     (texts (diagnostic_lines view) @ content @ texts [""]
-     @ [plain_drawn (key_rows ~width (overview_hints view))]
+     @ [plain_drawn (key_rows ~width (overview_hints ~ko view))]
      @ texts (action_lines view))
 
 (* One line of the Plugins help. [Help_keys] names the keys of a screen or a
@@ -2742,7 +2884,7 @@ let lines_with_selection ?(ko = false) ?(height=24) ?(failed_note = "") ~width v
               | receipt -> [if ko then "마지막 증거 영수증" else "Last evidence receipt"] @ receipt @ [""]) in
         let receipt_lines = plain (List.concat_map (document_rows ~width) receipt_lines) in
         (match view.screen with
-        | Overview -> overview_lines ~width view @ receipt_lines
+        | Overview -> overview_lines ~ko ~height ~width view @ receipt_lines
         | Detail _ -> receipt_lines @ detail_lines ~height:(height - List.length receipt_lines) ~width view
             @ (match view.focus with
                | Connections -> links_lines ~width view

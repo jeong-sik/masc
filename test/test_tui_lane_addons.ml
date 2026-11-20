@@ -2229,7 +2229,100 @@ let typed_selection_tracks_cursor_and_two_pane_results () =
   check bool "stacked single-pane Results marks the selected result row" true
     (List.exists (fun (sel, line) -> sel && contains line "Result A") narrow_rows)
 
+let ko_localization_and_overview_bottom_sheet () =
+  let module Category = Masc.Lane_addon_category in
+  let worker : UI.instance =
+    { id = "w-1"
+    ; run_id = "run-1"
+    ; addon_id = "browser-addon"
+    ; title = "Browser Worker"
+    ; revision = "rev-1"
+    ; phase = UI.Row.Attached
+    ; runtime_presence = UI.Live_entry
+    ; observation_seq = 2
+    ; rows_count = 4
+    ; installation_id = Some "browser-main"
+    ; source_path = Some "/config/browser.toml"
+    ; configuration_revision = Some "rev-1"
+    ; binding = `Assoc []
+    ; outputs = [ ("rows", UI.Row.All_lanes) ]
+    ; skills_directory = None
+    ; ui_category = Some Category.Browser
+    ; incarnation = "inc-1"
+    ; action_schema = None
+    ; binding_schema = None
+    ; display =
+        { Masc.Lane_addon_presentation.readings = []
+        ; actions = []
+        ; description = Some "Handles browser checks\x07"
+        }
+    ; host_requests = None
+    ; row_actions = None
+    ; action_tool = None
+    }
+  in
+  let config : UI.configuration =
+    { directory = "/config"
+    ; complete = true
+    ; declarations = []
+    }
+  in
+  let snapshot : UI.snapshot =
+    { instances = [ worker ]
+    ; configuration = Some config
+    ; output = { UI.Row.rows = []; coverage = [] }
+    ; complete = Some true
+    }
+  in
+  let view = { UI.initial with snapshot = Some snapshot; instance_cursor = 0 } in
+  let ko_lines = UI.lines ~ko:true ~height:24 ~width:100 view in
+  let ko_hints = UI.overview_hints ~ko:true view in
+  let en_hints = UI.overview_hints view in
+  check bool "default overview hints stay English" true (List.mem "Enter:open" en_hints);
+  check bool "Korean overview hints localize navigation" true (List.mem "Enter:열기" ko_hints);
+  check bool "Korean overview renders Bottom Sheet top edge and localized heading" true
+    (List.exists
+       (fun line ->
+         let plain = Masc_tui_theme.strip_sgr line in
+         String.starts_with ~prefix:"╭─" plain)
+       ko_lines);
+  List.iter
+    (fun line ->
+      let plain = Masc_tui_theme.strip_sgr line in
+      check bool "Korean overview row fits 100 cells" true
+        (Masc_tui_message_layout.display_width plain <= 100);
+      check bool "Korean overview strips raw control bytes" false
+        (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) plain))
+    ko_lines;
+  let failed_worker = { worker with phase = UI.Row.Failed "bad\nline\x07" } in
+  let failed_snap = { snapshot with instances = [ failed_worker ] } in
+  let failed_lines =
+    UI.lines ~ko:true ~height:24 ~width:100 { view with snapshot = Some failed_snap }
+  in
+  let contains ~needle haystack =
+    let nlen = String.length needle and hlen = String.length haystack in
+    let rec at i =
+      i + nlen <= hlen
+      && (String.equal (String.sub haystack i nlen) needle || at (i + 1))
+    in
+    at 0
+  in
+  check bool "Failed instance uses Failed mark, not Settled" true
+    (List.exists
+       (fun line ->
+         let plain = Masc_tui_theme.strip_sgr line in
+         String.starts_with ~prefix:"╭─" plain && contains ~needle:"\xe2\x9c\x95" plain)
+       failed_lines);
+  List.iter
+    (fun line ->
+      let plain = Masc_tui_theme.strip_sgr line in
+      check bool "Failed overview strips raw control bytes" false
+        (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) plain))
+    failed_lines
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
+  test_case "Korean localization and overview Bottom Sheet render cleanly" `Quick
+    ko_localization_and_overview_bottom_sheet;
   test_case "records overlay keeps draft identity and scroll" `Quick records_overlay_keeps_draft_identity_and_scroll;
   test_case "current category requires exact id and path" `Quick
     current_category_requires_exact_id_and_path;

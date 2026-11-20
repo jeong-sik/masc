@@ -1823,7 +1823,8 @@
  (name masc_tui_board_read_layout)
  (wrapped false)
  (modules masc_tui_board_read_layout)
- (libraries ptime masc_tui_types masc_tui_board_detail masc_tui_frame_timing))
+ (libraries ptime masc_tui_types masc_tui_board_detail masc_tui_frame_timing
+  masc_tui_value))
 
 (library
  (name masc_tui_browser_lane_layout)

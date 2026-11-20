@@ -22,10 +22,11 @@ let comment_gutter_cells = 2
 
 type t = { mutable retained : (source * rows) option }
 
-let close_time seconds =
+let close_time ~now seconds =
   match Ptime.of_float_s seconds with
   | None -> Error seconds
-  | Some timestamp -> Ok (Ptime.to_rfc3339 ~frac_s:0 ~tz_offset_s:0 timestamp)
+  | Some _ ->
+      Ok (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now seconds)
 
 let create () = { retained = None }
 

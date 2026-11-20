@@ -2149,8 +2149,10 @@ let matrix_keeper_row ?(selected = false) matrix ~now row =
 let matrix_legend ~ko ~inner matrix =
   let ids = List.mapi (fun index id -> matrix_letter index ^ " " ^ Terminal_text.single_line id) matrix.matrix_ids in
   let omitted = if matrix.matrix_omitted = 0 then [] else
-    [Printf.sprintf (if ko then "이 폭 밖 런타임 열 +%d" else "+%d runtime columns outside this width")
-       matrix.matrix_omitted] in
+    (* How many columns this width leaves out: a count, never "+N"
+       (RFC tui-one-screen-grammar 6.3). *)
+    [Printf.sprintf (if ko then "이 폭 밖 런타임 열 %s개" else "%s runtime columns outside this width")
+       (Masc_tui_value.Count.grouped matrix.matrix_omitted)] in
   Printf.sprintf
     (if ko then "%s 지난 순회에서 실패 · %s 다음 실행 · %s 쉬는 중 · %s 못 읽음"
      else "%s failed in last walk · %s next head · %s resting head · %s unread head")

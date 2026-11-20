@@ -1491,11 +1491,12 @@ let keeper_message_tool_activity_details state ~keeper_name
       { Tool_detail.fold_rows = tool_document_rows_shown
       ; fold_note =
           (fun hidden ->
+            (* The rows the fold keeps back: a cut-off count, never "+N"
+               (RFC tui-one-screen-grammar 6.3). *)
             let label =
-              Printf.sprintf
-                (if ko then "\xe2\x80\xa6 +%d줄 \xc2\xb7 원문 결과 열기 (/calls)"
-                 else "\xe2\x80\xa6 +%d lines \xc2\xb7 open original result (/calls)")
-                hidden
+              "\xe2\x80\xa6 " ^ Masc_tui_value.Count.more ~ko hidden
+              ^ (if ko then "줄 \xc2\xb7 원문 결과 열기 (/calls)"
+                 else " lines \xc2\xb7 open original result (/calls)")
             in
             match activity.execution_id with
             | None -> label

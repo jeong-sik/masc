@@ -345,12 +345,41 @@ let test_existing_root_startup_only_adds () =
     packages
     (List.sort String.compare (entries_of skills))
 
+let test_relative_base_path_boot_and_resolver_agree () =
+  let root = fresh_dst () in
+  let saved_cwd = Sys.getcwd () in
+  Unix.chdir root;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chdir saved_cwd;
+      Config_dir_resolver.reset ();
+      Fs_compat.remove_tree root)
+    (fun () ->
+      let cwd = Unix.getcwd () in
+      let expected_config_root = Filename.concat cwd "ws/.masc/config" in
+      Fs_compat.mkdir_p (Filename.concat expected_config_root "prompts");
+      Fs_compat.mkdir_p (Filename.concat expected_config_root "keepers");
+      Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
+      Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
+      Masc_test_deps.with_process_env "MASC_CONFIG_BOOTSTRAP" (Some "empty") @@ fun () ->
+      Config_dir_resolver.reset ();
+      (match Seed.missing_runtime_toml_at_boot ~base_path:"ws" with
+       | Seed.Written_at_boot -> ()
+       | Seed.Left_missing reason ->
+         fail ("expected existing relative ws/.masc/config to be recognized: " ^ reason));
+      let resolution = Seed.startup_config_resolution ~base_path:"ws" in
+      check string "startup config root matches bootstrap path"
+        expected_config_root resolution.config_root.path;
+      check bool "startup config root exists" true resolution.config_root.exists)
+
 let () =
   run "Config root embedded seed"
     [ ( "builtin_skills"
       , [ test_case "complete package and operator ownership" `Quick test_builtin_skill_package
         ; test_case "startup on an existing root only adds packages" `Quick
             test_existing_root_startup_only_adds
+        ; test_case "relative base_path bootstrap and resolver agree" `Quick
+            test_relative_base_path_boot_and_resolver_agree
         ] )
     ; ( "seed_missing_from_embedded"
       , [ test_case "writes runtime.toml and prompts" `Quick

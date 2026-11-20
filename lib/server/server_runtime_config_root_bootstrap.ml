@@ -507,8 +507,9 @@ type config_root_bootstrap =
   | Seed_new_root
 
 let base_path_config_root ~base_path =
-  let base_path = Env_config_core.normalize_masc_base_path_input base_path in
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
+  Config_dir_resolver.base_path_config_root
+    ~cwd:(Config_dir_resolver.current_working_dir ())
+    base_path
 ;;
 
 (* A root this caller just created holds nothing but the runtime.toml lock, and

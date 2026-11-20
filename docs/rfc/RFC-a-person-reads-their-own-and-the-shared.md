@@ -37,8 +37,8 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 - Keeper 기록을 읽고 쓰는 함수는 「다룰 수 있는 Keeper」 값을 요구한다. 값은 판정에서만 생긴다. 사람의 Keeper 턴도 주인의 값을 쓴다.
 - 다계정에서 자격 없이 열리는 것은 공개 범위뿐이다. handler 는 호출자를 단일 사용자의 자격에서 다시 찾지 않고 판정에서 받는다.
 - Board 에서 사람과 Keeper 를 적는 칸은 모두 한 principal 타입이 된다. 다계정에서 Board 와 메시지는 다른 주인의 Keeper 를 깨우지 않고, 그 대화에 들어가지도 않는다.
-- 공유 원장은 주인마다 나눈다. 다른 주인의 사실은 한 claim 에 들어가지 못한다.
-- 사용자가 정할 것은 §6 에 여섯 있다.
+- 공유 원장은 주인마다 나눈다. 다른 주인의 사실은 한 claim 에 들어가지 못한다. 그 전까지 다계정 엔진은 큐레이터를 띄우지 않는다.
+- 사용자가 정할 것은 §6 에 일곱 있다.
 
 ## 1. 지금
 
@@ -139,14 +139,22 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 
 - 사실은 출처 Keeper 를 든다(`fact_ref`, `lib/workspace_memory/workspace_memory_ledger.mli:14-26`).
 - claim 은 받친 Keeper 목록을 든다(`:147-153`). 여러 Keeper 가 받친 claim 은 `Consolidated` 나 `Crystallized` 단계가 된다(`:140-143`).
-- 원장을 읽는 문은 다섯 갈래다.
+- 원장 폴더는 함수 하나가 정한다(`Workspace_memory_ledger.directory ~base_path`, `:72`). 폴더에는 원장, 바뀐 기록, briefing 이 든다.
+- 원장을 읽는 자리다.
   - Keeper 도구 `keeper_workspace_memory_read`. 부른 Keeper 를 받지 않고 원장 전체를 읽는다(`lib/keeper/keeper_workspace_memory_read.ml:5-38`).
   - host recall. 그 도구를 못 쓰는 턴에 원장에서 찾은 글을 붙인다(`lib/keeper/keeper_run_tools_hooks.ml:430-446`).
-  - 턴마다 싣는 「읽는 방법」 글(`lib/keeper/keeper_unified_prompt.ml:1327-1353`).
-  - Dashboard 경로 셋. ledger, inventory, context 다(`lib/server/server_routes_http_routes_dashboard.ml:696`, `:703`, `:718`).
-  - MCP resource 둘. `masc://world-memory/claims` 와 `masc://world-memory/log` 다(`lib/mcp_server.ml:246-262`). log 는 원장의 바뀐 기록을 읽는다(`lib/mcp_server_eio_resource.ml:265-266`).
-- 큐레이터는 준비 뒤 lane 에서 뜬다(`lib/server/server_runtime_bootstrap.ml:1576`). 다계정 프로세스도 이 lane 을 띄운다.
-- 큐레이터의 모델 호출은 lane add-on export 를 운영자 주체로 부른다(`lib/server/server_workspace_memory_addon.ml:140`). 엔진 RFC §4 는 lane add-on 길을 읽지 않았다고 적었다.
+  - 턴마다 싣는 원장 글. 읽는 방법과 함께 `ledger_sha256`, claim·conflict·분류 건수, briefing 상태를 싣는다(`lib/keeper/keeper_unified_prompt.ml:1327-1353`). 턴 입력은 Keeper 이름을 받아 읽는다(`lib/keeper/keeper_turn_shared_inputs.ml:7`, `:21`).
+  - Dashboard 경로 둘. ledger 와 inventory 다(`lib/server/server_routes_http_routes_dashboard.ml:696`, `:703`). inventory 응답 캐시의 키는 `base_path` 뿐이다(`lib/server/server_dashboard_http_core_cache.ml:14`).
+  - Dashboard Keeper snapshot 의 prompt preview(`lib/dashboard/dashboard_http_keeper_snapshot.ml:292-293`).
+  - MCP resource 둘. `masc://world-memory/claims` 와 `masc://world-memory/log` 다(`lib/mcp_server.ml:246-262`, `lib/mcp_server_eio_resource.ml:265-266`).
+- 바뀜 알림은 폴더 하나를 전제한다. MCP 알림은 두 URI 의 구독자 모두에게 간다(`lib/mcp_server_eio_resource.ml:140-142`). memory health 방송도 같다(`lib/server/server_memory_health_broadcast.ml:29-32`, `:64`).
+- 관측 metric 은 프로세스에 하나다(`lib/keeper/keeper_workspace_memory_observation_metrics.ml:9-12`).
+- `GET /api/v1/dashboard/workspace-memory-context` 는 원장이 아니라 모든 Keeper 의 기억 저장소를 준다(`lib/server/server_routes_http_routes_dashboard.ml:718`, `lib/server/server_dashboard_http_keeper_memory_health.ml:947`). 범위로는 Keeper 의 것이다.
+- 원장을 쓰는 것은 큐레이터 하나다. 원장(`lib/server/server_workspace_memory_curator.ml:640`, `:739`), 바뀐 기록(`:650`), briefing(`:806`, `:867`)을 쓴다.
+- 큐레이터는 준비 뒤 lane 에서 뜬다(`lib/server/server_runtime_bootstrap.ml:1576`). 다계정 엔진도 같은 길로 띄운다(`:1835`).
+- 큐레이터는 Librarian 기억 lane 을 `Exact.start_flow` 로 직접 부른다(`lib/server/server_workspace_memory_curator.ml:56`, `:280`). 주체 인자는 없고, slot 은 설치의 lane 표가 정한다. Draft #54088 은 큐레이터가 자기 표 `workspace_memory_curator` 로만 묻게 한다.
+- 분류 pass 는 lane 을 보기 전에 reconcile 을 돈다(`:624-666`). reconcile 은 모든 Keeper 의 저장소를 읽고, 사라진 사실이 있으면 원장과 바뀐 기록을 쓴다. 그래서 lane 표를 비워도 원장은 바뀐다.
+- reconcile 은 목록에 없는 Keeper 의 사실을 사라진 것으로 적는다(`vanished_keepers`, `lib/workspace_memory/workspace_memory_ledger.mli:161`).
 
 ## 2. 목표와 하지 않는 것
 
@@ -275,17 +283,29 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 
 - 요구는 이것이다. 사실을 나누는 범위는 같은 주인의 Keeper 와 운영자로 한정한다.
 - 주인은 닫힌 합타입이다. 운영자와 사람 두 갈래다.
-- 단일 사용자의 Keeper 는 모두 운영자 갈래다. 다계정에는 운영자 Keeper 가 없다(연구 기록 §7 의 「운영자 Keeper」 줄). 다계정의 Keeper 는 모두 로그가 적은 주인의 갈래다.
-- 원장과 그 바뀐 기록을 주인마다 따로 둔다. 같은 주인의 Keeper 사실끼리만 합친다.
+- 갈래는 프로세스 종류로 먼저 정한다.
+  - 단일 사용자 프로세스의 Keeper 는 모두 운영자 갈래다. 운영자의 Keeper 는 로그에 없어서, 로그로 찾으면 모두 「없음」이 된다(`lib/auth/authz_keeper_state.mli:19-23`).
+  - 다계정 프로세스만 엔진 이름으로 로그에서 주인을 찾는다(`find_by_engine_name`). 다계정에는 운영자 Keeper 가 없다(연구 기록 §7 의 「운영자 Keeper」 줄).
+- 원장 폴더를 정하는 함수가 주인을 필수 인자로 받는다. 원장, 바뀐 기록, briefing 이 모두 그 폴더에 든다. 읽고 쓰는 곳은 컴파일러가 모두 짚는다.
 - 그래서 다른 주인의 사실은 한 claim 에 들어가지 못한다. 걸러서 막지 않고, 섞일 자리를 없앤다.
-- 큐레이터는 사실을 출처 Keeper 의 주인 원장에만 넣는다. 주인은 엔진 이름으로 로그에서 찾는다(`find_by_engine_name`). 주인을 찾지 못한 사실은 받지 않는다.
-- 읽는 문은 모두 읽는 쪽을 받는다.
+- 한 요청에는 한 주인의 글만 싣는다. 분류 요청은 밀린 사실과 이웃 claim 을 같이 싣고, briefing 요청도 그렇다. 두 주인의 글이 한 요청에 들면 모델이 쓴 claim 글에서 섞인다.
+- claim id 는 주인 안에서만 유일하다고 본다. id 를 키로 쓰는 곳은 주인을 같이 쓴다.
+- 큐레이터는 사실을 출처 Keeper 의 주인 원장에만 넣는다. 주인을 찾지 못한 사실은 받지 않는다.
+- 주인의 Keeper 목록을 만들지 못한 pass 는 통째로 실패한다. 빈 목록으로 가면 reconcile 이 그 Keeper 들의 사실을 모두 사라진 것으로 적는다(§1.7).
+- 큐레이터의 메모리 상태도 주인마다 둔다. 밀린 사실, 진행 중인 요청, 재시도 예약이다. 코드의 `owner` 레코드는 이 RFC 의 「주인」과 이름이 겹쳐서 L6 에서 이름을 바꾼다.
+- 읽는 쪽은 모두 읽는 이를 받는다.
   - Keeper 도구, host recall, 턴 글은 부른 Keeper 를 받는다.
-  - Dashboard 경로 셋과 MCP resource 둘은 보는 이를 받는다.
-  - 모두 그 주인의 원장만 읽는다.
+  - Dashboard 경로 둘, Keeper snapshot preview, MCP resource 둘은 보는 이를 받는다.
+  - inventory 응답 캐시 키에 주인을 넣는다.
+  - 바뀜 알림은 그 원장을 읽을 수 있는 구독자에게만 간다. 관측 metric 은 주인마다 센다.
+- 새 폴더는 blob sweep 의 「참조 없음」 목록에도 넣는다(`lib/server/server_tool_blob_scope.ml:206`).
 - 운영자가 사람의 원장을 제품 화면에서 읽는지는 결정 3 을 따른다. 호스트에 들어가는 운영자는 어느 쪽이든 파일을 읽는다.
 - 단일 사용자에서 주인은 운영자 하나다. 원장은 지금처럼 하나다.
-- 이 층이 들어가기 전에는 다계정에서 큐레이터를 띄우지 않는다. 사람의 Keeper 턴도 큐레이터 입력에 넣지 않는다.
+- 다계정 프로세스는 운영자 갈래 원장을 읽지도 쓰지도 않는다. 단일 사용자로 쓰던 base path 를 다계정으로 띄우면 그 파일은 그대로 남는다. 옮기는 코드는 없다.
+- 이 층이 들어가기 전에는 다계정 엔진이 큐레이터를 띄우지 않는다.
+  - `Server_workspace_memory_curator.start` 를 부르지 않는 코드로 막는다. lane 표를 비우는 것으로는 막지 못한다(§1.7).
+  - 이 코드는 사람의 Keeper 가 엔진에서 도는 단계(엔진 RFC 의 S2)보다 늦게 들어가면 안 된다.
+- 사람의 Keeper 사실을 어느 provider 계정으로 모델에 보내는지는 결정 7 이다.
 - 한 주인 안에서 더 나누는지는 결정 6 이다.
 
 ### 3.9 고르지 않은 길
@@ -322,6 +342,9 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 | 호스트의 것은 Worker 에게 닫힌다 | Worker 가 호스트 경로를 부르면 거절된다 |
 | 메시지와 Board 는 다른 주인의 Keeper 에 닿지 않는다 | 한 사람의 메시지, `@`, Board 글이 다른 사람의 Keeper 대화와 턴을 만들지 않는다 |
 | 원장은 주인마다 나뉜다 | 두 주인의 Keeper 가 같은 사실을 내도 claim 은 주인마다 따로 생긴다 |
+| 다계정 엔진은 큐레이터를 띄우지 않는다 | 다계정 boot 뒤 Keeper 기억이 바뀌어도 원장 폴더의 파일이 그대로다 |
+| 목록을 못 만든 pass 는 원장을 바꾸지 않는다 | 로그 snapshot 읽기가 실패하는 pass 뒤에 원장과 바뀐 기록이 그대로다 |
+| 한 요청에 한 주인 | 분류와 briefing 요청에 실린 사실의 주인이 모두 같다 |
 
 ## 6. 사용자가 정할 것
 
@@ -350,20 +373,26 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 6. **공유 원장을 한 주인 안에서 더 나누나.** 예: 회사 일 Keeper 와 개인 일 Keeper.
    추천: 주인 단위로만 나눈다. 지금 Keeper 정의에는 묶음을 적는 칸이 없다.
    다른 안: Keeper 정의에 묶음을 적고, 묶음마다 원장을 나눈다. 단일 사용자에서도 원장이 나뉜다.
+   단일 사용자에서도 같은 질문이다. 지금도 Keeper 들이 원장 하나를 같이 쓴다.
+7. **사람의 Keeper 사실을 누구의 provider 계정으로 큐레이트하나.** 지금 큐레이터는 설치의 lane slot 을 쓴다(§1.7).
+   추천: 주인의 계정으로 한다. 엔진 RFC 는 곁에서 부르는 호출을 사람의 Keeper 에게 거절했다. 필요하면 「Librarian 을 주인의 계정으로 돌리는 규칙」을 둔다고 적었다(엔진 RFC 265행).
+   다른 안: 설치의 slot 으로 한다. 운영자가 비용을 내고, 운영자의 provider 가 사람의 사실을 받는다.
 
 ## 7. 층
 
 | 층 | 하는 일 | 끝나면 보이는 것 |
 |---|---|---|
+| 먼저 | 다계정 엔진이 큐레이터를 띄우지 않는다. 엔진 RFC 의 S2 보다 늦지 않게 넣는다 | 다계정에서 원장이 바뀌지 않는다 |
 | L0 | 범위 타입. 등록 416곳이 범위를 적는다. `Subpath_dispatch` 둘을 나누고 겹친 경로 넷을 하나로 둔다. 한 PR 은 파일 10개 이하다 | 없다. 동작이 그대로다 |
 | L1 | 보는 이 타입과 「다룰 수 있는 Keeper」 값. Keeper 기록을 읽고 쓰는 함수가 값을 요구한다. handler 는 행위자 타입을 받는다. 단일 사용자 규칙을 지금 검사와 견주는 시험 | 없다 |
 | L2 | SSE 의 세 길이 범위를 적는다. 연결마다 거르고, 모든 Keeper 를 담는 사건은 연결마다 다시 만든다. JSON 가시성 읽기를 지운다 | 없다 |
 | L3 | 다계정 프로세스가 공개, 같이 쓰는 것, Keeper 의 것을 읽기로 연다. 자격 없는 접근은 공개만. Board 읽는 이는 보는 이에서 온다. Dashboard 가 범위로 화면을 고른다 | 구성원이 Board, task, goal 과 자기 Keeper 를 본다 |
 | L4 | Board RFC 를 고친 뒤 Board 의 principal 타입과 쓰기. 사람의 Keeper sandbox 에서 Board 파일을 뺀다 | 구성원이 Board 에 쓴다 |
 | L5 | Keeper 쓰기를 주인으로 연다. 중단, 대화, ask 답, 일정, 승인, 지시, run-next 다. 메시지와 `@` 는 같은 주인의 Keeper 에게만 간다 | 구성원이 자기 Keeper 를 Dashboard 에서 다룬다 |
-| L6 | 공유 원장과 바뀐 기록을 주인마다 나눈다. 읽는 문이 읽는 쪽을 받는다. 주인 없는 사실은 받지 않는다 | 다계정에서 큐레이터를 켤 수 있다 |
+| L6 | 원장 폴더 함수가 주인을 받는다(원장, 바뀐 기록, briefing). 한 요청에 한 주인. 목록을 못 만든 pass 는 실패한다. 캐시 키, 알림, metric 을 주인마다 둔다. 결정 7 의 계정으로 큐레이트한다 | 다계정에서 큐레이터를 켤 수 있다 |
 | L7 | 결정 2 를 따라 호스트의 것을 연다. 비밀값이 실리는 쓰기 응답을 고친다 | Admin 이 Dashboard 로 설정을 바꾼다 |
 
+- 「먼저」 줄은 다계정의 동작만 바꾼다. 큐레이터를 끈다.
 - L0~L2 는 동작을 바꾸지 않는다. L1 과 L2 의 견주는 시험이 이를 보인다. 엔진 RFC 의 S2 와 따로 간다.
 - L3 의 Keeper 의 것은 S2 가 사람의 Keeper 를 엔진에 띄운 뒤에 쓸모가 있다.
 
@@ -371,3 +400,4 @@ related: ["a-persons-keeper-runs-on-the-engine", "board-has-one-writer-and-one-l
 
 - 2026-11-21: 처음 쓴다. 경로 374개를 조사하고 범위 규칙을 세웠다. 공유 원장 범위를 §3.8 로 넣었다.
 - 2026-11-21: 반박 리뷰 한 번을 반영했다. 범위를 하나로 줄이지 않는다. 쓰기와 메시지, 사람의 Keeper 턴도 값을 거친다. 자격 없는 접근과 Board 읽는 이를 판정에 묶었다. 단일 사용자 규칙은 지금 검사를 옮기고 시험으로 견준다.
+- 2026-11-21: 공유 원장 리뷰를 반영했다. 큐레이터가 운영자 주체로 부른다는 줄은 틀려서 지웠다(그 모듈을 부르는 코드가 없다). 읽는 자리 넷, 쓰는 자리, reconcile 의 위험, 다계정 엔진에서 큐레이터를 끄는 코드 줄, 결정 7 을 더했다.

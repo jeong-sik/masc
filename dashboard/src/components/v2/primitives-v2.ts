@@ -1,8 +1,7 @@
-// MASC v2 — primitive component library (ported from prototype primitives.jsx
-// + messages.jsx identity leaves). These wrap the vendored v2.css classes
-// (.dot2 / .sigil / .chip / .meter) and the converged inline-styled <Pill>.
-// Visual identity is 1:1 with the prototype: tone tints come from the same
-// design tokens (PILL_TONES), the sigil pulls its slot color from --kp{slot}.
+// MASC v2 — primitive component library. These wrap the vendored v2.css
+// classes (.dot2 / .sigil / .chip / .meter) and the converged inline-styled
+// <Pill>. Tone tints come from design tokens (PILL_TONES), the sigil pulls
+// its slot color from --kp{slot}.
 
 import { html } from 'htm/preact'
 import type { JSX } from 'preact'
@@ -16,8 +15,8 @@ interface ToneSpec {
   readonly bg: string
 }
 
-// The converged badge palette — one table replaces the prototype's seven
-// forked badge classes. color-mix keeps tints token-derived.
+// The converged badge palette — one table for every badge tone. color-mix
+// keeps tints token-derived.
 export const PILL_TONES: Readonly<Record<PillTone, ToneSpec>> = {
   neutral: { color: 'var(--text-mid)', border: 'var(--border-main)', bg: 'var(--bg-card)' },
   ok: { color: 'var(--status-ok)', border: 'color-mix(in oklab, var(--status-ok) 45%, transparent)', bg: 'color-mix(in oklab, var(--status-ok) 10%, var(--bg-card))' },
@@ -47,8 +46,8 @@ export interface PillProps {
   children?: unknown
 }
 
-/** The converged badge. Inline-styled (the prototype's Pill emits no stable
- * class) so the tone table is the single source of truth. */
+/** The converged badge. Inline-styled (no stable class) so the tone table is
+ * the single source of truth. */
 export function Pill(props: PillProps) {
   const { tone = 'neutral', mono = false, dot = false, dotPulse = false, soft = false, count = false, title, style, children } = props
   const t = PILL_TONES[tone] ?? PILL_TONES.neutral
@@ -110,7 +109,7 @@ export function SigilBadge({ slot, sigil, size = 18, beat = false, title }: { sl
   return html`<${Sigil} slot=${slot} size=${size} heartbeat=${beat} title=${title} fontScale=${0.46}>${sigil}</${Sigil}>`
 }
 
-/** Status dot driven by the coarse run/pause/off status (messages.jsx). */
+/** Status dot driven by the coarse run/pause/off status. */
 export function StatusDot({ status, pulse = false }: { status: string; pulse?: boolean }) {
   const state: DotState = status === 'run' ? 'ok' : status === 'pause' ? 'warn' : status === 'off' ? 'idle' : (status as DotState)
   return html`<${Dot} state=${state} pulse=${pulse} />`

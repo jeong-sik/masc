@@ -619,6 +619,36 @@ let test_existing_dir_and_file_read_each_kind_of_path () =
     ; "a dangling link", dangling, false, false
     ]
 
+let test_resolve_for_base_path_relative_does_not_double () =
+  with_temp_dir "config-dir-rel-base-path" @@ fun root ->
+  let saved_cwd = Sys.getcwd () in
+  Unix.chdir root;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chdir saved_cwd;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      let cwd = Unix.getcwd () in
+      let ws = Filename.concat cwd "ws" in
+      let config = make_config_root (Filename.concat ws Common.masc_dirname) in
+      let custom_cfg = Filename.concat ws "custom-cfg" in
+      mkdir_p custom_cfg;
+      with_env "MASC_BASE_PATH" None @@ fun () ->
+      with_env "MASC_CONFIG_DIR" None @@ fun () ->
+      let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:"ws" in
+      check string "status" "ready"
+        (Config_dir_resolver.status_to_string resolution.status);
+      check bool "config_root exists" true resolution.config_root.exists;
+      check string "config_root path does not double ws" config
+        resolution.config_root.path;
+      with_env "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE" (Some "true") @@ fun () ->
+      with_env "MASC_CONFIG_DIR" (Some "custom-cfg") @@ fun () ->
+      let overridden = Config_dir_resolver.resolve_for_base_path ~base_path:"ws" in
+      check string "relative MASC_CONFIG_DIR anchors to resolved ws"
+        custom_cfg overridden.config_root.path;
+      check string "override source" "env"
+        (Config_dir_resolver.source_to_string overridden.config_root.source))
+
 let () =
   run "config_dir_resolver"
     [ ( "temp directory cleanup",
@@ -649,6 +679,8 @@ let () =
             test_external_config_is_not_a_fallback;
           test_case "publishes one immutable snapshot across domains" `Quick
             test_resolve_publishes_one_immutable_snapshot_across_domains;
+          test_case "resolve_for_base_path resolves relative base path once"
+            `Quick test_resolve_for_base_path_relative_does_not_double;
         ] );
       ( "test_env_sanitization",
         [

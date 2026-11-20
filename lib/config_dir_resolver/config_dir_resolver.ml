@@ -216,20 +216,17 @@ let config_signature_exists config_dir =
 
 let config_dirname = "config"
 
+let resolve_workspace_base_path ~cwd base_path =
+  base_path
+  |> Env_config_core.normalize_masc_base_path_input
+  |> absolute_path_from ~cwd
+
 let base_path_config_root ~cwd base_path =
-  let base_path =
-    base_path
-    |> Env_config_core.normalize_masc_base_path_input
-    |> absolute_path_from ~cwd
-  in
+  let base_path = resolve_workspace_base_path ~cwd base_path in
   Filename.concat (Common.masc_dir_from_base_path ~base_path) config_dirname
 
 let environment_for_workspace ~cwd ~base_path ~env =
-  let base_path =
-    base_path
-    |> Env_config_core.normalize_masc_base_path_input
-    |> absolute_path_from ~cwd
-  in
+  let base_path = resolve_workspace_base_path ~cwd base_path in
   let inherited =
     Array.to_list env
     |> List.filter (fun entry ->
@@ -298,8 +295,7 @@ let inputs_from_env () =
   let cwd, env_base_path = match current_env_base_path_opt () with
     | None -> cwd, None
     | Some base_path ->
-      let base_path = Env_config_core.normalize_masc_base_path_input base_path
-        |> absolute_path_from ~cwd in
+      let base_path = resolve_workspace_base_path ~cwd base_path in
       base_path, Some base_path in
   {
     cwd;
@@ -372,6 +368,9 @@ let mcp_dir () =
   Filename.concat (resolve ()).config_root.path "mcp"
 
 let inputs_for_base_path ~base_path =
+  let base_path =
+    resolve_workspace_base_path ~cwd:(current_working_dir ()) base_path
+  in
   {
     cwd = base_path;
     executable_name = Sys.executable_name;

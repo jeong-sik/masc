@@ -2514,11 +2514,12 @@ let chrome_position ~window ~count ~handed =
       Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count
   | None -> handed
 
-let surface_chrome_position ~overflow ?progress_sheet (state : state) ~terminal_rows ~body =
-  let has_recovery = resolve_has_recovery ~frame:Chrome_screen ~has_recovery:None state in
+let surface_chrome_position ?(frame = Chrome_screen) ~overflow ?progress_sheet (state : state)
+    ~terminal_rows ~body =
+  let has_recovery = resolve_has_recovery ~frame ~has_recovery:None state in
   let count = ref 0 and handed = ref None in
   let pushed () = incr count in
-  body ~budget:(surface_chrome_budget ~frame:Chrome_screen ~has_recovery ?progress_sheet state ~terminal_rows)
+  body ~budget:(surface_chrome_budget ~frame ~has_recovery ?progress_sheet state ~terminal_rows)
     { push = (fun _ -> pushed ())
     ; push_styled = (fun ~style:_ _ -> pushed ())
     ; push_selected = (fun _ -> pushed ())
@@ -2527,7 +2528,7 @@ let surface_chrome_position ~overflow ?progress_sheet (state : state) ~terminal_
     ; next_origin = (fun () -> (0, 0))
     ; position = (fun position -> handed := Some position) };
   chrome_position
-    ~window:(chrome_window ~frame:Chrome_screen ~has_recovery ?progress_sheet state ~terminal_rows ~count:!count overflow)
+    ~window:(chrome_window ~frame ~has_recovery ?progress_sheet state ~terminal_rows ~count:!count overflow)
     ~count:!count ~handed:!handed
 
 let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar

@@ -11,9 +11,11 @@ let seconds_per_day = 24 * seconds_per_hour
 let local_clock ~now ~hour ~minute ~second ~offset =
   let utc_day_start = Float.of_int seconds_per_day *. Float.floor (now /. Float.of_int seconds_per_day) in
   let utc_seconds = (hour * seconds_per_hour) + (minute * seconds_per_minute) + second - offset in
-  let tm = Unix.localtime (utc_day_start +. Float.of_int utc_seconds) in
-  if tm.Unix.tm_sec = 0 then Printf.sprintf "%02d:%02d" tm.tm_hour tm.tm_min
-  else Printf.sprintf "%02d:%02d:%02d" tm.tm_hour tm.tm_min tm.tm_sec
+  (* A zone's offset is whole minutes, so the declared second is the local
+     one. *)
+  let precision = if second = 0 then Masc_tui_value.Instant.To_minute else To_second in
+  Masc_tui_value.Instant.clock_within_day precision
+    (Unix.localtime (utc_day_start +. Float.of_int utc_seconds))
 
 let text ~ko ~now ~summary = function
   | Ok Domain.One_shot -> if ko then "한 번" else "once"

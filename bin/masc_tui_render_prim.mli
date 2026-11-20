@@ -412,16 +412,18 @@ val surface_window_height :
     bounds the scroll asks this, the number the frame draws with. *)
 
 val surface_chrome_position :
+  ?frame:chrome_frame ->
   overflow:overflow ->
   ?progress_sheet:progress_sheet ->
   Masc_tui_types.state ->
   terminal_rows:int ->
   body:(budget:int -> chrome_body -> unit) ->
   Masc_tui_value.Position.t option
-(** The position {!surface_chrome} draws on the title row for this [body],
-    decided the way the contract decides it: a [Scrolled] body's window, or
-    the last position any other body handed. Nothing is drawn. A test reads
-    the decision here rather than from the text. *)
+(** The position {!surface_chrome} draws on the title row for this [body]
+    in [frame] (the same default), decided the way the contract decides it:
+    a [Scrolled] body's window, or the last position any other body handed.
+    Nothing is drawn. A test reads the decision here rather than from the
+    text. *)
 
 val surface_chrome :
   overflow:overflow ->

@@ -468,13 +468,20 @@ let route_of_error_family (err : Agent_core.Error.t) : route =
 
 let route_of_error ~boundary (err : Agent_core.Error.t) : route =
   match Keeper_internal_error.classify_masc_internal_error err with
-  (* Both of these decide their own route whichever boundary reported them.
-     [Terminal_effect_failed] because the effect is the fact, and
+  (* These decide their own route whichever boundary reported them.
+     [Terminal_effect_failed] because the effect is the fact.
+     The two effect fences for the same reason: the lane walk
+     ([Keeper_turn_driver]) builds them from what the adapter observed, and
+     the Keeper turn reads them at the AGENT_CORE boundary. Read there as a
+     bare internal error, a fence after a tool handler ran lost the answer
+     [response_observed] settles a Gate continuation on (#53345).
      [Runtime_connection_closed] because the agent-core family arm would read
      its carrier as a bare internal error and drop the retry the untyped
      [ProviderUnavailable] used to earn. *)
   | Some
       (( Keeper_internal_error.Terminal_effect_failed _
+       | Keeper_internal_error.Provider_attempt_effect_fenced _
+       | Keeper_internal_error.Tool_correction_lost _
        | Keeper_internal_error.Runtime_connection_closed _ ) as internal) ->
     route_of_masc_internal internal
   (* The provider walk reads its result at the AGENT_CORE boundary, after
@@ -496,8 +503,6 @@ let route_of_error ~boundary (err : Agent_core.Error.t) : route =
        | Keeper_internal_error.Internal_bridge_exception _
        | Keeper_internal_error.Internal_contract_rejected _
        | Keeper_internal_error.Incomplete_tool_transcript _
-       | Keeper_internal_error.Provider_attempt_effect_fenced _
-       | Keeper_internal_error.Tool_correction_lost _
        | Keeper_internal_error.Host_stopped_turn _
        | Keeper_internal_error.Receipt_persistence_failed _
        | Keeper_internal_error.Gate_replay_repair_required _ ) as internal) ->

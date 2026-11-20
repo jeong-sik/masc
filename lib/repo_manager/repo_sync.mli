@@ -8,7 +8,7 @@ type advance_outcome =
       (** HEAD already contains [origin/<default_branch>]. *)
   | Skipped_dirty of { staged : int; unstaged : int; conflicted : int }
       (** Tracked local modifications present — the move was skipped to
-          preserve them (RFC-0210 work-preserving rule). *)
+          preserve them. *)
   | Skipped_not_on_default_branch of { current : string }
       (** The clone has a non-default branch (or detached HEAD, reported as
           ["HEAD"]) checked out — the move was skipped. *)

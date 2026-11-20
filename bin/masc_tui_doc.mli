@@ -26,8 +26,51 @@ val section_rule :
 (** [section_rule ~width ?indent ?badge ?badge_tone title] draws a full-width
     hairline section header ([── Title ───────────── badge]) bounded strictly
     within [width] display cells. Uses {!Masc_tui_ansi.Theme.border_muted} for
-    the rule, {!Masc_tui_ansi.Ansi.bold} for the title (never [Theme.info]),
+    the rule, {!Masc_tui_ansi.Ansi.bold} and
+    {!Masc_tui_ansi.Theme.section_heading} for the title (never [Theme.info]),
     and [badge_tone] (default {!Masc_tui_ansi.Theme.recede}) for [badge]. *)
+
+val hairline : width:int -> ?indent:int -> ?tone:string -> unit -> string
+(** [hairline ~width ?indent ?tone ()] renders a calm single-cell horizontal
+    divider ([────...]) bounded strictly within [width] display cells using
+    {!Masc_tui_ansi.Theme.border_muted} by default. *)
+
+val section_header :
+  width:int ->
+  ?indent:int ->
+  ?subtitle:string ->
+  ?right:string ->
+  string ->
+  string
+(** Calm agy-style section heading ([Title · subtitle · right]) rendered with
+    bold {!Masc_tui_ansi.Theme.section_heading} for [title] and
+    {!Masc_tui_ansi.Theme.recede} for metadata, bounded within [width] cells. *)
+
+val preview_footer_hints :
+  width:int ->
+  ?indent:int ->
+  Masc_tui_card.inline_key list ->
+  string
+(** Renders a calm single-line inline key hint strip
+    ([key label · key label ...]) using
+    {!Masc_tui_ansi.Theme.footer_key_style} on keys and
+    {!Masc_tui_ansi.Theme.recede} on descriptions, dropping trailing items as
+    needed to fit within [width] display cells. *)
+
+val docked_preview :
+  width:int ->
+  height:int ->
+  ?indent:int ->
+  ?eyebrow:string ->
+  ?title:string ->
+  ?meta:string ->
+  ?footer_hints:Masc_tui_card.inline_key list ->
+  string list ->
+  string list
+(** Fixed-height calm bottom docked inspector separated by a top hairline rule
+    and optional metadata header and inline footer hints. Always returns exact
+    [height] lines when [width > 0 && height > 0] so parent list rows stay
+    stationary (RFC §8). *)
 
 val kv_rows :
   width:int ->

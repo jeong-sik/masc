@@ -1331,6 +1331,87 @@ let test_diff_rows_fall_back_without_truecolor () =
        ~project:(project Palette.Ansi16) ~kind:`Removed (Some sample.palette))
 ;;
 
+let test_v2_accents_and_pill_clear_contrast_on_every_scheme () =
+  let hues =
+    [ ("Lavender", Masc_tui_theme.For_testing.Lavender)
+    ; ("Sky", Masc_tui_theme.For_testing.Sky)
+    ; ("Mint", Masc_tui_theme.For_testing.Mint)
+    ; ("Peach", Masc_tui_theme.For_testing.Peach)
+    ]
+  in
+  with_lift true (fun () ->
+      List.iter
+        (fun scheme ->
+          let page = background scheme in
+          let sec =
+            Masc_tui_theme.For_testing.section_heading ~colors_enabled:true
+              ~project:truecolor ~surface:Masc_tui_theme.Page
+              (Some scheme.palette)
+          in
+          (match truecolor_rgb ~prefix:truecolor_prefix sec with
+           | Some rgb ->
+             let ratio = Color.contrast_ratio rgb page in
+             check bool
+               (Printf.sprintf "%s: section_heading reads at %.2f" scheme.name
+                  ratio)
+               true
+               (ratio >= text_floor -. 0.01)
+           | None ->
+             Alcotest.failf "%s: section_heading expected Truecolor RGB, got %S"
+               scheme.name sec);
+          List.iter
+            (fun (label, hue) ->
+              let code =
+                Masc_tui_theme.For_testing.entity_accent ~colors_enabled:true
+                  ~project:truecolor ~surface:Masc_tui_theme.Page
+                  (Some scheme.palette) hue
+              in
+              match truecolor_rgb ~prefix:truecolor_prefix code with
+              | Some rgb ->
+                let ratio = Color.contrast_ratio rgb page in
+                check bool
+                  (Printf.sprintf "%s: entity_accent %s reads at %.2f"
+                     scheme.name label ratio)
+                  true
+                  (ratio >= text_floor -. 0.01)
+              | None ->
+                Alcotest.failf
+                  "%s: entity_accent %s expected Truecolor RGB, got %S"
+                  scheme.name label code)
+            hues;
+          let pill =
+            Masc_tui_theme.For_testing.active_tab_pill ~colors_enabled:true
+              ~project:truecolor ~surface:Masc_tui_theme.Page
+              (Some scheme.palette)
+          in
+          match String.index_opt pill 'm' with
+          | Some m_idx ->
+            let bg_code = String.sub pill 0 (m_idx + 1) in
+            let fg_code =
+              String.sub pill (m_idx + 1) (String.length pill - m_idx - 1)
+            in
+            (match
+               ( truecolor_rgb ~prefix:"\027[48;2;" bg_code
+               , truecolor_rgb ~prefix:truecolor_prefix fg_code )
+             with
+             | Some bg_rgb, Some fg_rgb ->
+               let ratio = Color.contrast_ratio fg_rgb bg_rgb in
+               check bool
+                 (Printf.sprintf "%s: active_tab_pill fg/bg reads at %.2f"
+                    scheme.name ratio)
+                 true
+                 (ratio >= text_floor -. 0.01)
+             | _ ->
+               check bool
+                 (Printf.sprintf "%s: non-truecolor pill fell back to selection"
+                    scheme.name)
+                 true (String.equal pill Masc_tui_theme.selection))
+          | None ->
+            Alcotest.failf "%s: expected valid SGR pill, got %S" scheme.name
+              pill)
+        schemes)
+;;
+
 (* AC: :theme <name> switches immediately. [apply] is the same entry the TUI
    command goes through, so accepting a bundled name and rejecting one no
    scheme carries is the whole contract of the switch. *)
@@ -1413,6 +1494,8 @@ let () =
             `Quick test_truecolor_diff_rows_clear_contrast_on_every_scheme
         ; Alcotest.test_case "diff rows fall back cleanly without truecolor"
             `Quick test_diff_rows_fall_back_without_truecolor
+        ; Alcotest.test_case "v2 accents and active tab pill clear contrast on every scheme"
+            `Quick test_v2_accents_and_pill_clear_contrast_on_every_scheme
 
         ] )
     ; ( "toml theme loading"

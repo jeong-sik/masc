@@ -53,8 +53,9 @@ let section_rule ~width ?(indent = 0) ?badge ?badge_tone title =
       | None -> ""
       | Some raw -> String.trim (sanitize raw)
     in
+    let heading_style = Ansi.bold ^ Theme.section_heading () in
     if room <= 4 then
-      margin ^ paint Ansi.bold (clamp_plain ~max_cells:room clean_title)
+      margin ^ paint heading_style (clamp_plain ~max_cells:room clean_title)
     else
       let lead_cells = min 2 (max 1 (room / 8)) in
       let lead = repeat_glyph h lead_cells ^ " " in
@@ -83,7 +84,7 @@ let section_rule ~width ?(indent = 0) ?badge ?badge_tone title =
         else if tail_cells = 1 && badge_cells > 0 then " "
         else ""
       in
-      margin ^ paint rule_sgr lead ^ paint Ansi.bold fitted_title
+      margin ^ paint rule_sgr lead ^ paint heading_style fitted_title
       ^ paint rule_sgr tail ^ badge_part
 
 let kv_rows ~width ?(indent = 2) ?label_style ?(max_label_cells = 18) fields =
@@ -357,3 +358,159 @@ let bottom_sheet ~ko ~width ~height ~role ~title ?status ?count ?scrollbar
   in
   Card.render ?scrollbar ~ko ~style:(card_style ()) ~width ~height
     { Card.edge; body }
+
+let hairline ~width ?(indent = 0) ?tone () =
+  if width <= 0 then ""
+  else
+    let indent = max 0 (min indent (max 0 (width - 1))) in
+    let room = width - indent in
+    if room <= 0 then ""
+    else
+      let margin = String.make indent ' ' in
+      let rule_sgr = Option.value tone ~default:(Theme.border_muted ()) in
+      margin ^ paint rule_sgr (repeat_glyph Masc_tui_theme.Box.h room)
+
+let section_header ~width ?(indent = 0) ?subtitle ?right title =
+  if width <= 0 then ""
+  else
+    let indent = max 0 (min indent (max 0 (width - 1))) in
+    let room = width - indent in
+    if room <= 0 then ""
+    else
+      let margin = String.make indent ' ' in
+      let clean_title = sanitize title in
+      let heading_style = Ansi.bold ^ Theme.section_heading () in
+      let clean_opt = function
+        | None -> None
+        | Some s ->
+          let t = sanitize s in
+          if String.equal (String.trim t) "" then None else Some t
+      in
+      let clean_sub = clean_opt subtitle in
+      let clean_right = clean_opt right in
+      let title_cells = cells clean_title in
+      if title_cells >= room then
+        margin ^ paint heading_style (clamp_plain ~max_cells:room clean_title)
+      else
+        let sep = " · " in
+        let sep_cells = cells sep in
+        let rem = ref (room - title_cells) in
+        let pieces = ref [] in
+        let try_append text =
+          if !rem > sep_cells then begin
+            let fit = clamp_plain ~max_cells:(!rem - sep_cells) text in
+            if not (String.equal fit "") then begin
+              rem := !rem - sep_cells - cells fit;
+              pieces := paint (Theme.recede ()) (sep ^ fit) :: !pieces
+            end
+          end
+        in
+        Option.iter try_append clean_sub;
+        Option.iter try_append clean_right;
+        margin ^ paint heading_style clean_title
+        ^ String.concat "" (List.rev !pieces)
+
+let preview_footer_hints ~width ?(indent = 0) keys =
+  if width <= 0 || keys = [] then ""
+  else
+    let indent = max 0 (min indent (max 0 (width - 1))) in
+    let room = width - indent in
+    if room <= 0 then ""
+    else
+      let margin = String.make indent ' ' in
+      let key_sgr = Theme.footer_key_style () in
+      let label_sgr = Theme.recede () in
+      let sep = " · " in
+      let sep_cells = cells sep in
+      let rendered_sep = paint label_sgr sep in
+      let rec collect used_cells acc = function
+        | [] -> List.rev acc
+        | { Card.key; label } :: rest ->
+          let k = String.trim (sanitize key) in
+          let l = String.trim (sanitize label) in
+          if String.equal k "" && String.equal l "" then
+            collect used_cells acc rest
+          else
+            let part_plain, part_styled =
+              if String.equal l "" then (k, paint key_sgr k)
+              else if String.equal k "" then (l, paint label_sgr l)
+              else (k ^ " " ^ l, paint key_sgr k ^ " " ^ paint label_sgr l)
+            in
+            let need =
+              (if acc = [] then 0 else sep_cells) + cells part_plain
+            in
+            if used_cells + need <= room then
+              collect (used_cells + need) (part_styled :: acc) rest
+            else if acc = [] then
+              let fitted = clamp_plain ~max_cells:room part_plain in
+              [ paint key_sgr fitted ]
+            else List.rev acc
+      in
+      let parts = collect 0 [] keys in
+      if parts = [] then "" else margin ^ String.concat rendered_sep parts
+
+let docked_preview ~width ~height ?(indent = 0) ?eyebrow ?title ?meta
+    ?(footer_hints = []) body_rows =
+  if width <= 0 || height <= 0 then []
+  else
+    let indent = max 0 (min indent (max 0 (width - 1))) in
+    let content_w = max 0 (width - indent) in
+    let margin = String.make indent ' ' in
+    let clean_opt = function
+      | None -> None
+      | Some s ->
+        let t = String.trim (sanitize s) in
+        if String.equal t "" then None else Some t
+    in
+    let header_line =
+      match clean_opt eyebrow, clean_opt title, clean_opt meta with
+      | None, None, None -> None
+      | Some eye, t_opt, m_opt ->
+        Some
+          (section_header ~width ~indent ?subtitle:t_opt ?right:m_opt eye)
+      | None, Some t, m_opt ->
+        Some (section_header ~width ~indent ?subtitle:m_opt t)
+      | None, None, Some m ->
+        let fit = clamp_plain ~max_cells:content_w m in
+        Some (margin ^ paint (Theme.recede ()) fit)
+    in
+    let rule_line = hairline ~width ~indent () in
+    let top_rows =
+      match header_line with
+      | None -> [ rule_line ]
+      | Some hdr -> if height >= 2 then [ rule_line; hdr ] else [ hdr ]
+    in
+    let top_count = List.length top_rows in
+    let footer_row =
+      if height - top_count >= 2 then
+        let hint_line = preview_footer_hints ~width ~indent footer_hints in
+        if String.equal hint_line "" then None else Some hint_line
+      else None
+    in
+    let bottom_rows = match footer_row with Some r -> [ r ] | None -> [] in
+    let body_budget = max 0 (height - top_count - List.length bottom_rows) in
+    let fit_body_row row =
+      let plain = Theme.strip_sgr row in
+      let clean_plain = sanitize plain in
+      if not (String.equal plain clean_plain) then
+        margin ^ clamp_plain ~max_cells:content_w clean_plain
+      else if cells plain <= content_w then
+        margin ^ row
+      else
+        margin ^ clamp_plain ~max_cells:content_w plain
+    in
+    let fitted_body =
+      let rec take n acc = function
+        | _ when n <= 0 -> List.rev acc
+        | [] -> List.rev_append acc (List.init n (fun _ -> ""))
+        | r :: rs -> take (n - 1) (fit_body_row r :: acc) rs
+      in
+      take body_budget [] body_rows
+    in
+    let combined = top_rows @ fitted_body @ bottom_rows in
+    let rec trim_exact n acc = function
+      | _ when n <= 0 -> List.rev acc
+      | [] -> List.rev_append acc (List.init n (fun _ -> ""))
+      | x :: xs -> trim_exact (n - 1) (x :: acc) xs
+    in
+    trim_exact height [] combined

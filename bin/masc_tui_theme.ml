@@ -996,7 +996,116 @@ let diff_row_styles_for ~colors_enabled ~project ~kind palette =
             | None -> fallback ()))
 ;;
 
+type entity_hue =
+  | Lavender
+  | Sky
+  | Mint
+  | Peach
+
+let lerp_accent_for ~colors_enabled ~project ~surface palette ~first ~second ~t =
+  let fallback () =
+    ansi_readable_for ~colors_enabled ~project ~surface palette first
+  in
+  if not colors_enabled then ""
+  else if not !lift_enabled then fallback ()
+  else
+    match palette with
+    | None -> fallback ()
+    | Some pal ->
+      let background = surface_background surface pal in
+      (match
+         Terminal_palette.ansi pal (ansi_color_index first),
+         Terminal_palette.ansi pal (ansi_color_index second)
+       with
+       | Some c1, Some c2 ->
+         let mixed =
+           Color.lerp_oklab ~background ~floor:status_contrast_floor ~t c1 c2
+         in
+         (match project mixed with
+          | Some projected ->
+            if Color.contrast_ratio
+                 (Terminal_palette.estimated_rgb projected) background
+               >= status_contrast_floor
+            then projected_foreground ~colors_enabled (Some projected)
+            else fallback ()
+          | None -> fallback ())
+       | (Some _ | None), (Some _ | None) -> fallback ())
+;;
+
+let entity_accent_for ~colors_enabled ~project ~surface palette = function
+  | Lavender ->
+    lerp_accent_for ~colors_enabled ~project ~surface palette
+      ~first:Bright_blue ~second:Bright_magenta ~t:0.40
+  | Sky ->
+    lerp_accent_for ~colors_enabled ~project ~surface palette
+      ~first:Bright_blue ~second:Bright_cyan ~t:0.45
+  | Mint ->
+    lerp_accent_for ~colors_enabled ~project ~surface palette
+      ~first:Bright_green ~second:Bright_cyan ~t:0.35
+  | Peach ->
+    lerp_accent_for ~colors_enabled ~project ~surface palette
+      ~first:Bright_yellow ~second:Bright_red ~t:0.40
+;;
+
+let section_heading_for ~colors_enabled ~project ~surface palette =
+  entity_accent_for ~colors_enabled ~project ~surface palette Lavender
+;;
+
+let active_tab_pill_light_ratio = 0.16
+let active_tab_pill_dark_ratio = 0.24
+
+let active_tab_pill_for ~colors_enabled ~project ~surface palette =
+  if not colors_enabled then ""
+  else
+    let fallback () = selection_style_for ~colors_enabled ~project palette in
+    match palette with
+    | None -> fallback ()
+    | Some pal ->
+      (match Terminal_palette.ansi pal (ansi_color_index Bright_blue) with
+       | None -> fallback ()
+       | Some hue ->
+         let page = surface_background surface pal in
+         let foreground = Terminal_palette.foreground pal in
+         let ratio =
+           if Color.is_light page then active_tab_pill_light_ratio
+           else active_tab_pill_dark_ratio
+         in
+         let tinted_bg = blend_rgb ~ratio page hue in
+         if tinted_bg = page then fallback ()
+         else
+           (match project tinted_bg with
+            | None -> fallback ()
+            | Some bg_proj ->
+              let bg_rgb = Terminal_palette.estimated_rgb bg_proj in
+              let fg_lifted =
+                Color.lift_for_contrast ~background:bg_rgb
+                  ~floor:status_contrast_floor foreground
+              in
+              if Color.contrast_ratio fg_lifted bg_rgb >= status_contrast_floor
+              then
+                (match project fg_lifted with
+                 | None -> fallback ()
+                 | Some fg_proj ->
+                   let fg_rgb = Terminal_palette.estimated_rgb fg_proj in
+                   if Color.contrast_ratio fg_rgb bg_rgb >= status_contrast_floor
+                   then
+                     projected_background ~colors_enabled (Some bg_proj)
+                     ^ projected_foreground ~colors_enabled (Some fg_proj)
+                   else fallback ())
+              else fallback ()))
+;;
+
+let footer_key_style_for ~colors_enabled =
+  if not colors_enabled then "" else "\027[1m\027[39m"
+;;
+
 module For_testing = struct
+  type nonrec entity_hue = entity_hue =
+    | Lavender
+    | Sky
+    | Mint
+    | Peach
+
   let colors_enabled = colors_enabled_for_environment
   let user_message_background_rgb = user_message_background_rgb
   let user_message_background = user_message_background_for
@@ -1013,6 +1122,10 @@ module For_testing = struct
   let border_muted_rgb = border_muted_rgb
   let border_muted = border_muted_for
   let diff_row_styles = diff_row_styles_for
+  let section_heading = section_heading_for
+  let entity_accent = entity_accent_for
+  let active_tab_pill = active_tab_pill_for
+  let footer_key_style = footer_key_style_for
 end
 
 let ansi_readable ~surface palette color =
@@ -1039,6 +1152,23 @@ let selection_style palette =
   selection_style_for ~colors_enabled ~project:Terminal_palette.best_color
     palette
 ;;
+
+let section_heading ~surface palette =
+  section_heading_for ~colors_enabled ~project:Terminal_palette.best_color
+    ~surface palette
+;;
+
+let entity_accent ~surface palette hue =
+  entity_accent_for ~colors_enabled ~project:Terminal_palette.best_color
+    ~surface palette hue
+;;
+
+let active_tab_pill ~surface palette =
+  active_tab_pill_for ~colors_enabled ~project:Terminal_palette.best_color
+    ~surface palette
+;;
+
+let footer_key_style () = footer_key_style_for ~colors_enabled
 
 let sidebar_selection_background palette =
   if not colors_enabled then None

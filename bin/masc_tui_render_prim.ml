@@ -1007,7 +1007,7 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ~action_style ~show_progress_mark:true ~progress_style:(Theme.info ()) ?preferred_action ?position
-    ~help_key_answers:door_answers ~key_style:(Ansi.bold ^ Theme.accent ())
+    ~help_key_answers:door_answers ~key_style:(Theme.footer_key_style ())
     ~refused_keys:
       (if Masc_tui_theme.colors_enabled then Masc_tui_footer.Shown_dim
        else Masc_tui_footer.Left_out)
@@ -1420,7 +1420,7 @@ let surface_strip (state : state) ~cols =
               (Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
                  surface name
                ^ badge_of_surface surface)
-          + (if i = active then 1 else 0)
+          + (if i = active then 3 else 0)
           + (if i > 0 then 2 else 0))
       ring;
     !cells
@@ -1451,7 +1451,8 @@ let surface_strip (state : state) ~cols =
   in
   let active_label_cells =
     max 0 (budget - active_hidden_cells
-           - Message_layout.display_width Masc_tui_theme.Glyph.current_entry)
+           - Message_layout.display_width Masc_tui_theme.Glyph.current_entry
+           - 2)
   in
   let label i =
     let surface, name = ring.(i) in
@@ -1471,7 +1472,7 @@ let surface_strip (state : state) ~cols =
     (* Cells, not bytes: the badge's middle dot is two bytes and one cell,
        and a byte count windows the strip one entry early. *)
     Message_layout.display_width (label i)
-    + (if i = active then 1 else 0)
+    + (if i = active then 3 else 0)
     + (if i > lo then 2 else 0)
   in
   let window_width lo hi =
@@ -1516,12 +1517,13 @@ let surface_strip (state : state) ~cols =
     let surface, name = ring.(i) in
     let entry =
       if i = active then
-        let sel = Theme.sidebar_selection () in
-        if String.equal sel Masc_tui_theme.selection then
-          sel ^ Ansi.bold ^ Masc_tui_theme.Glyph.current_entry ^ label i ^ Ansi.reset
-        else
-          sel ^ Ansi.bold ^ Theme.accent () ^ Masc_tui_theme.Glyph.current_entry
-          ^ Ansi.default_fg ^ label i ^ Ansi.reset
+        let pill = Theme.active_tab_pill () in
+        let body =
+          " " ^ Masc_tui_theme.Glyph.current_entry ^ label i ^ " "
+        in
+        if String.equal pill "" && String.equal Ansi.bold "" then body
+        else if String.equal pill "" then Ansi.bold ^ body ^ Ansi.reset
+        else pill ^ Ansi.bold ^ body ^ Ansi.reset
       else
         let base_name =
           Masc_tui_types.surface_ring_display_label ~lang:state.ui_language

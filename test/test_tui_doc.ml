@@ -213,7 +213,62 @@ let test_numbered_tab_strip_and_default () =
     in
     check bool (Printf.sprintf "numbered strip fits width %d" width) true
       (Layout.display_width rendered <= width)
-  done
+  done;
+  let unpadded_active_end = contains ~needle:" ▸목표 " unnumbered in
+  check bool "active tab draws padded pill" true unpadded_active_end
+
+let test_v2_chrome_primitives_bounds_and_sanitization () =
+  List.iter
+    (fun width ->
+       let hr = Doc.hairline ~width ~indent:2 () in
+       check bool (Printf.sprintf "hairline fits %d" width) true
+         (display_cells hr <= width);
+       let hdr =
+         Doc.section_header ~width ~indent:2 ~subtitle:"3 members, 1 waiting"
+           ~right:"all on glm" "Roster"
+       in
+       assert_no_control_bytes ~label:(Printf.sprintf "header %d" width) [ hdr ];
+       check bool (Printf.sprintf "section_header fits %d" width) true
+         (display_cells hdr <= width);
+       let hints =
+         Doc.preview_footer_hints ~width ~indent:2
+           [ { Card.key = "Enter\007"; label = "열기\n상세" }
+           ; { Card.key = "Space"; label = "펼치기" }
+           ; { Card.key = "Esc"; label = "닫기\027[2J" }
+           ]
+       in
+       assert_no_control_bytes ~label:(Printf.sprintf "hints %d" width) [ hints ];
+       check bool (Printf.sprintf "hints fit %d" width) true
+         (display_cells hints <= width))
+    [ 0; 1; 2; 3; 6; 15; 40; 80; 120 ];
+  List.iter
+    (fun height ->
+       let rows =
+         Doc.docked_preview ~width:64 ~height ~indent:2 ~eyebrow:"선택한 목표"
+           ~title:"MASC TUI V2" ~meta:"검토 대기 · 3/3"
+           ~footer_hints:
+             [ { Card.key = "Space"; label = "더 보기" }
+             ; { Card.key = "Enter"; label = "상세 열기" }
+             ]
+           [ "첫째 줄 요약"; "둘째 줄\007 제어문자"; "셋째 줄 본문" ]
+       in
+       check int (Printf.sprintf "docked_preview exact height %d" height)
+         (max 0 height) (List.length rows);
+       assert_no_control_bytes ~label:(Printf.sprintf "docked %d" height) rows;
+       List.iter
+         (fun r ->
+            check bool (Printf.sprintf "docked row fits at h=%d" height) true
+              (display_cells r <= 64))
+         rows)
+    [ 0; 1; 2; 3; 6; 12 ];
+  check string "footer_key_style NO_COLOR returns empty" ""
+    (Theme.For_testing.footer_key_style ~colors_enabled:false);
+  check string "active_tab_pill NO_COLOR returns empty" ""
+    (Theme.For_testing.active_tab_pill ~colors_enabled:false
+       ~project:(fun _ -> None) ~surface:Theme.Page None);
+  check string "section_heading NO_COLOR returns empty" ""
+    (Theme.For_testing.section_heading ~colors_enabled:false
+       ~project:(fun _ -> None) ~surface:Theme.Page None)
 
 let () =
   run "tui_doc"
@@ -229,5 +284,7 @@ let () =
             test_callout_and_bottom_sheet_geometry_and_sanitization
         ; test_case "numbered tab_strip default and width bounds" `Quick
             test_numbered_tab_strip_and_default
+        ; test_case "v2 hairline, section_header, footer_hints, docked_preview & theme NO_COLOR" `Quick
+            test_v2_chrome_primitives_bounds_and_sanitization
         ] )
     ]

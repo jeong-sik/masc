@@ -305,11 +305,13 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     (Some [])
     (Keeper_types_profile_toml_io.keeper_toml_files
        (Config_dir_resolver.keepers_dir_for_base_path ~base_path:base));
-  (* Multi-account boot must NOT export MASC_ADMIN_TOKEN or
-     MASC_INTERNAL_MCP_TOKEN into the process environment where person/login
-     CLI children would inherit them, and pre-seeded auth/ tokens remain
-     rejected 401 Legacy_credential_forbidden on person routes. Note test/dune
-     initializes both env vars to "" so inherited shell values never leak. *)
+  (* A multi-account boot exports neither MASC_ADMIN_TOKEN nor
+     MASC_INTERNAL_MCP_TOKEN into the process environment, and the pre-seeded
+     auth/ tokens stay refused (401 Legacy_credential_forbidden) on the routes
+     of a person. test/dune starts the case with both names empty, so the
+     checks below see what the boot exported. A value the shell set would stay
+     in the process; the builders of the children filter it
+     (test_person_child_environment). *)
   let is_blank_env key =
     match Sys.getenv_opt key with
     | None -> true

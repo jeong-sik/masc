@@ -1,0 +1,260 @@
+module Machine = Librarian_machine
+module Store = Librarian_store
+module Level = Librarian_level
+module Last = Librarian_last
+module Log_line = Librarian_log
+module Digest = Agent_core.Checkpoint_objects
+
+let same (a : Digest.digest) (b : Digest.digest) = String.equal (a :> string) (b :> string)
+let digest_json (digest : Digest.digest) = `String (digest :> string)
+
+let state_token : Machine.state -> string = function
+  | Idle _ -> "idle"
+  | Asking _ -> "asking"
+  | Resting _ -> "resting"
+  | Refused_at_bottom _ -> "refused_at_bottom"
+  | Stopped _ -> "stopped"
+;;
+
+let alarm_token : Level.alarm -> string = function
+  | E1 -> "E1"
+  | E2 -> "E2"
+  | E3 -> "E3"
+  | E4 -> "E4"
+  | E5 -> "E5"
+  | W1 -> "W1"
+  | W3 -> "W3"
+;;
+
+let level_token : Level.level -> string = function
+  | Ok -> "ok"
+  | Warn -> "warn"
+  | Error -> "error"
+;;
+
+let failed_token : Librarian_read_result.failed -> string = function
+  | Raised -> "raised"
+  | Flow_stopped -> "flow_stopped"
+  | Read_failed -> "read_failed"
+;;
+
+let store_of : Machine.state -> Store.t option = function
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : Machine.asking) }
+  | Resting store
+  | Refused_at_bottom store -> Some store
+  | Stopped (_ : Store.stop) -> None
+;;
+
+(* The same reading the writer's next ask makes (§9.2): the first unit with
+   an item past the store's tail. A turn log that does not read is counted
+   as unread, as the next ask counts it. *)
+let unread ~config ~keeper store =
+  let turns_path =
+    Keeper_turn_log_store.path_for_keepers_dir
+      ~keepers_dir:(Workspace.keepers_runtime_dir config)
+      ~keeper_id:keeper
+  in
+  Librarian_unread.has_unread
+    (Librarian_unread.read ~turns_path ~until:(First_with_items 1) (Store.tail store))
+;;
+
+let position_json : Log_line.position -> Yojson.Safe.t = function
+  | Before_first -> `String "before_first"
+  | Through { line; within } ->
+    `Assoc
+      [ "line", `Int line
+      ; ( "within"
+        , `String
+            (match within with
+             | Whole -> "whole"
+             | Item (_ : Librarian_unit.item_name) -> "item") )
+      ]
+;;
+
+let tail_fields (tail : Log_line.line) =
+  match tail with
+  | Started { at; _ } ->
+    [ "last_line", `String "started"; "last_line_at", `Float at; "covers_through", `String "before_first" ]
+  | Committed { seq; at; covers_through; _ } ->
+    [ "last_line", `String "commit"
+    ; "last_seq", `Int seq
+    ; "last_line_at", `Float at
+    ; "covers_through", position_json covers_through
+    ]
+;;
+
+let read_json ~now : Last.read -> Yojson.Safe.t = function
+  | Committed -> `Assoc [ "ended", `String "committed" ]
+  | Lane { one_item; silent; basis; slots } ->
+    `Assoc
+      [ "ended", `String "lane"
+      ; "one_item", `Bool one_item
+      ; "silent", `Bool silent
+      ; "about_memory_now", `Bool (Option.fold ~none:false ~some:(same basis) now)
+      ; ( "slots"
+        , `List
+            (List.map
+               (fun ((key : Librarian_memory_lane.slot_key), outcome) ->
+                  `Assoc
+                    [ "slot", `String key.id
+                    ; "outcome", `String (Machine.unanswered_token outcome)
+                    ])
+               slots) )
+      ]
+  | Input_fault -> `Assoc [ "ended", `String "input_fault" ]
+  | Ask_failed failed -> `Assoc [ "ended", `String "ask_failed"; "failed", `String (failed_token failed) ]
+;;
+
+let room_json ~now ~(lane : Machine.declared option) : Last.room -> Yojson.Safe.t = function
+  | Made -> `Assoc [ "ended", `String "made" ]
+  | Unchanged -> `Assoc [ "ended", `String "unchanged" ]
+  | Stale -> `Assoc [ "ended", `String "stale" ]
+  | Not_judged -> `Assoc [ "ended", `String "not_judged" ]
+  | Fits_none { memory; lane = asked_with } ->
+    `Assoc
+      [ "ended", `String "fits_none"
+      ; "about_memory_now", `Bool (Option.fold ~none:false ~some:(same memory) now)
+      ; ( "about_lane_now"
+        , `Bool
+            (match lane with
+             | Some (declared : Machine.declared) ->
+               Librarian_memory_lane.equal asked_with declared.value
+             | None -> false) )
+      ]
+;;
+
+let asking_json : Machine.state -> Yojson.Safe.t = function
+  | Asking { asking; store = (_ : Store.t) } ->
+    `Assoc
+      [ "ask", `Int asking.ask
+      ; "since", `Float asking.since
+      ; ( "asked"
+        , `String
+            (match asking.asked with
+             | Read (Read_range (_ : Librarian_width.width)) -> "range"
+             | Read Read_item_alone -> "item_alone"
+             | Room (_ : Librarian_room_result.asked) -> "room") )
+      ]
+  | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> `Null
+;;
+
+(* A stopped store names why in the words the Memory tools use, and the
+   snapshot file as it is on disk: what an adoption has to name (§12.2). *)
+let stopped_fields ~config ~keeper (stop : Store.stop) =
+  let path =
+    Keeper_memory_os_current_layout.path_for_keepers_dir
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.Workspace.base_path)
+      ~keeper_id:keeper
+  in
+  [ ( "stop"
+    , `String
+        (Keeper_tool_memory_validation.memory_unwritable_to_string
+           (Keeper_tool_memory_validation.Store_stopped stop)) )
+  ; ( "snapshot_file"
+    , match Store.read_snapshot_bytes path with
+      | Ok bytes ->
+        `Assoc
+          [ "sha", digest_json (Digest.digest_of_bytes bytes)
+          ; "bytes", `Int (String.length bytes)
+          ]
+      | Error fault ->
+        `Assoc
+          [ ( "fault"
+            , `String
+                (match (fault : Librarian_snapshot_fault.t) with
+                 | Absent -> "absent"
+                 | Not_a_snapshot_file -> "not_a_snapshot_file"
+                 | Not_read -> "not_read") )
+          ] )
+  ]
+;;
+
+let shown ~state ~alarms fields =
+  let level = Level.level alarms in
+  ( level
+  , `Assoc
+      ([ "state", `String state
+       ; "level", `String (level_token level)
+       ; "alarms", `List (List.map (fun alarm -> `String (alarm_token alarm)) alarms)
+       ]
+       @ fields) )
+;;
+
+let row_with_level ~config ~keeper : Librarian_writer.held -> Level.level * Yojson.Safe.t = function
+  | Held_booting -> shown ~state:"booting" ~alarms:(Level.alarms Booting) [ "unread", `Null ]
+  | Held_retired -> shown ~state:"retired" ~alarms:(Level.alarms Retired) []
+  | Held machine ->
+    let store = store_of machine.state in
+    let unread = Option.fold ~none:false ~some:(unread ~config ~keeper) store in
+    let now = Option.map (fun store -> Log_line.snapshot_after (Store.tail store)) store in
+    let place =
+      match store with
+      | Some store ->
+        tail_fields (Store.tail store)
+        @ [ ( "memory"
+            , `Assoc
+                [ "snapshot", Option.fold ~none:`Null ~some:digest_json now
+                ; "facts", `Int (List.length (Store.memory store).facts)
+                ] )
+          ]
+      | None ->
+        (match machine.state with
+         | Stopped stop -> stopped_fields ~config ~keeper stop
+         | Idle _ | Asking _ | Resting _ | Refused_at_bottom _ -> [])
+    in
+    shown
+      ~state:(state_token machine.state)
+      ~alarms:(Level.alarms (Running { machine; unread }))
+      ([ "unread", (match store with Some _ -> `Bool unread | None -> `Null)
+       ; "lane", `Bool (Option.is_some machine.lane)
+       ; "asking", asking_json machine.state
+       ; "last_read", Option.fold ~none:`Null ~some:(read_json ~now) machine.last_read
+       ; ( "last_room"
+         , Option.fold ~none:`Null ~some:(room_json ~now ~lane:machine.lane) machine.last_room )
+       ; "read_alone", `Bool machine.read_alone
+       ]
+       @ place)
+;;
+
+let row ~config ~keeper held = snd (row_with_level ~config ~keeper held)
+
+let row_for ~config ~keeper =
+  match Keeper_memory_writers.find ~base_path:config.Workspace.base_path with
+  | None -> `Null
+  | Some writers ->
+    (match List.assoc_opt keeper (Librarian_writers.held writers) with
+     | Some held -> row ~config ~keeper held
+     | None -> `Null)
+;;
+
+let section_json ~config =
+  match Keeper_memory_writers.find ~base_path:config.Workspace.base_path with
+  | None -> `Assoc [ "writers", `String "none_in_process" ]
+  | Some writers ->
+    let rows =
+      List.map
+        (fun (keeper, held) -> keeper, row_with_level ~config ~keeper held)
+        (Librarian_writers.held writers)
+    in
+    let at wanted =
+      List.length
+        (List.filter
+           (fun ((_ : string), ((level : Level.level), (_ : Yojson.Safe.t))) ->
+              match level, wanted with
+              | Error, `Error | Warn, `Warn -> true
+              | (Ok | Warn | Error), (`Error | `Warn) -> false)
+           rows)
+    in
+    `Assoc
+      [ "writers", `String "running"
+      ; "error", `Int (at `Error)
+      ; "warn", `Int (at `Warn)
+      ; ( "keepers"
+        , `List
+            (List.map
+               (fun (keeper, ((_ : Level.level), row)) ->
+                  `Assoc [ "keeper", `String keeper; "row", row ])
+               rows) )
+      ]
+;;

@@ -161,6 +161,10 @@ type t =
   (** The last committed read was of an item alone, without Memory (W3). *)
   }
 
+(** A token for one slot's outcome, as the Keeper's log and the operator's
+    row name it. *)
+val unanswered_token : Librarian_slot_outcome.unanswered -> string
+
 (** The store's boot (§8.6): open, or the reason it stopped. *)
 val boot : place -> at:float -> (Librarian_store.t, Librarian_store.stop) result
 

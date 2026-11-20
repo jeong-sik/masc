@@ -725,7 +725,7 @@ let alerts (h : keeper_health) =
 ;;
 
 
-let keeper_health_entry_to_json ~now (h : keeper_health) =
+let keeper_health_entry_to_json ~config ~now (h : keeper_health) =
   let age_bins_json =
     match h.first_seen with
     | None -> `Null
@@ -755,6 +755,9 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ; ( "changes_since_start"
       , Keeper_memory_commit_change.(by_pass_to_json (since_start ~keeper_id:h.keeper_id)) )
     ; "context_cycle", context_cycle_to_json h.context_cycle
+      (* The Memory writer's row, read when the answer is written: it moves
+         with every ask, which no cached row is emptied for (§12.3). *)
+    ; "memory_writer", Keeper_memory_writer_health.row_for ~config ~keeper:h.keeper_id
     ; ( "librarian"
       , `Assoc
           [ ( "state"
@@ -917,7 +920,7 @@ let keeper_memory_health_http_json ~base_path =
     [ "schema", `String schema
     ; "generated_at", `Float generated_at
     ; "execution", Keeper_memory_execution_availability.(to_json (snapshot ~config ~mode:`Live))
-    ; "keepers", `List (List.map (keeper_health_entry_to_json ~now:generated_at) entries)
+    ; "keepers", `List (List.map (keeper_health_entry_to_json ~config ~now:generated_at) entries)
     ; "totals", Keeper_memory_health_totals.totals_to_json totals
     ; "alert_summary", Keeper_memory_health_totals.alert_summary_to_json totals
     ]
@@ -936,7 +939,9 @@ let keeper_memory_health_row_http_json ~base_path ~keeper =
   register_row_roots ~config ~keepers_dir;
   let row =
     if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
-    then keeper_health_entry_to_json ~now:generated_at (cached_keeper_health ~config ~keepers_dir keeper)
+    then
+      keeper_health_entry_to_json ~config ~now:generated_at
+        (cached_keeper_health ~config ~keepers_dir keeper)
     else `Null
   in
   `Assoc [ "schema", `String schema; "generated_at", `Float generated_at; "keeper", row ]

@@ -8,6 +8,8 @@
 
 type error =
   | Id_not_drawn of Authz_id.error  (** [draw] gave a value that is not a policy id. *)
+  | Engine_name_not_drawn of Authz_id.error
+      (** [draw_engine_name] gave a value that is not an engine name. *)
   | Body_not_built of Authz_body.error
   | Refused of Authz_keeper_state.refusal
       (** The state of the zone, read just before the commit, refuses the
@@ -23,15 +25,16 @@ type error =
     server and not for an answer to a person. *)
 val error_detail : error -> string
 
-(** Writes the record that makes [keeper_id] for [user_id], whose turns run
-    under a policy of [user_id] to [user_id] with the id [draw ()] and the
-    limits [turn_scope]. *)
+(** Writes the record that makes [keeper_id] for [user_id], whose engine name
+    is [draw_engine_name ()] and whose turns run under a policy of [user_id]
+    to [user_id] with the id [draw ()] and the limits [turn_scope]. *)
 val make
   :  Authz_zone.t
   -> user_id:Authz_types.User_id.t
   -> keeper_id:Authz_types.Keeper_id.t
   -> turn_scope:Authz_types.Authorization_scope.t
   -> draw:(unit -> string)
+  -> draw_engine_name:(unit -> string)
   -> (unit, error) result
 
 (** Writes the record by which [user_id], the owner of [keeper_id], gives it

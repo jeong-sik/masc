@@ -80,7 +80,8 @@ let person zone ~base_path ~name ~hex =
           ; membership = { workspace_id = workspace; account_home_namespace = namespace }
           }));
   let account = get (Provider_account_id.of_string ("account-" ^ name)) in
-  (match Authz_provider_account.link zone ~user_id ~provider_account_id:account with
+  let integration_id = get (Integration_id.of_string "claude_code") in
+  (match Authz_provider_account.link zone ~user_id ~provider_account_id:account ~integration_id with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
   let runtime = get (Runtime_id.of_string ("account-" ^ name ^ ".model")) in
@@ -103,7 +104,15 @@ let person zone ~base_path ~name ~hex =
     ; allowed_effects = Effect_scope.all
     }
   in
-  (match Authz_keeper.make zone ~user_id ~keeper_id ~turn_scope ~draw:(fun () -> "policy-" ^ name) with
+  (match
+     Authz_keeper.make
+       zone
+       ~user_id
+       ~keeper_id
+       ~turn_scope
+       ~draw:(fun () -> "policy-" ^ name)
+       ~draw_engine_name:(fun () -> "kp-" ^ name)
+   with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
   (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id:runtime with

@@ -100,11 +100,14 @@ let person_reference_refused =
   "In multi-account mode a login makes a new account, and account_ref is not read."
 
 type person_refusal =
+  | Invalid_integration
   | Not_declared
   | No_login of Server_runtime_setup_actions.error
   | Copy_without_owner
 
 let person_refusal_message = function
+  | Invalid_integration ->
+    "In multi-account mode a login requires a valid integration id."
   | Not_declared ->
     "In multi-account mode a login is of a provider this workspace declares, and it \
      declares none of this id."
@@ -114,15 +117,18 @@ let person_refusal_message = function
      setup registry, which has no owner."
 
 let person_target config ~integration_id =
-  match Runtime_schema.provider_of_id config integration_id with
-  | None -> Error Not_declared
-  | Some (_ : Runtime_schema.provider) ->
-    (match Server_runtime_setup_actions.login_target_of_config config ~integration_id with
-     | Error error -> Error (No_login error)
-     | Ok target ->
-       (match target.Server_runtime_setup_actions.client with
-        | Client.Antigravity -> Error Copy_without_owner
-        | Client.Codex | Client.Claude | Client.Muse -> Ok target))
+  match Authz_types.Integration_id.of_string integration_id with
+  | Error _ -> Error Invalid_integration
+  | Ok (_ : Authz_types.Integration_id.t) ->
+    (match Runtime_schema.provider_of_id config integration_id with
+     | None -> Error Not_declared
+     | Some (_ : Runtime_schema.provider) ->
+       (match Server_runtime_setup_actions.login_target_of_config config ~integration_id with
+        | Error error -> Error (No_login error)
+        | Ok target ->
+          (match target.Server_runtime_setup_actions.client with
+           | Client.Antigravity -> Error Copy_without_owner
+           | Client.Codex | Client.Claude | Client.Muse -> Ok target)))
 
 (* What a confirmed login leaves behind. An operator's account is published to
    the setup registry, from which setup selects it. A person's account is
@@ -138,7 +144,10 @@ let finish owner ~base_path ~integration_id ~cli_path ~login_id home =
     let* provider_account_id =
       Authz_types.Provider_account_id.of_string login_id
       |> Result.map_error (fun _ -> account_failure) in
-    Authz_provider_account.link zone ~user_id ~provider_account_id
+    let* integration_id =
+      Authz_types.Integration_id.of_string integration_id
+      |> Result.map_error (fun _ -> account_failure) in
+    Authz_provider_account.link zone ~user_id ~provider_account_id ~integration_id
     |> Result.map (fun () -> Receipt.Linked)
     |> Result.map_error (fun error ->
       "The account was not linked to you: " ^ Authz_provider_account.error_to_string error)
@@ -481,15 +490,12 @@ let person_runtime in_call person ~base_path ~binding =
     Refused (`Bad_request, Server_runtime_setup_actions.error_message error)) result in
   let* state = trusted_state person |> refused in
   let* account = own_account person state id in
-  let* template = match account.Authz_provider_account_state.kind with
-    | Authz_provider_account_state.Key { integration_id; generation = _ } ->
-      Ok (Authz_types.Integration_id.to_string integration_id)
-    | Authz_provider_account_state.Login ->
-      Receipt.load ~workspace:base_path ~actor:(actor_of (Person person)) ~login_id:provider_account_id
-      |> Result.map (fun (receipt : Receipt.t) -> receipt.integration_id)
-      |> Result.map_error (function
-        | Receipt.Not_found -> Refused (`Not_found, unknown_account)
-        | Receipt.Unavailable -> Refused (`Service_unavailable, receipt_failure)) in
+  let template =
+    match account.Authz_provider_account_state.kind with
+    | Authz_provider_account_state.Key { integration_id; generation = _ }
+    | Authz_provider_account_state.Login { integration_id } ->
+      Authz_types.Integration_id.to_string integration_id
+  in
   let* config = Server_runtime_setup_actions.config ~base_path |> setup in
   let* target =
     Server_runtime_setup_actions.login_target_of_config config ~integration_id:template |> setup in
@@ -502,7 +508,7 @@ let person_runtime in_call person ~base_path ~binding =
       ~account_home ~account ~binding
     |> Result.map_error (template_error id) in
   let* runtime = match account.Authz_provider_account_state.kind with
-    | Authz_provider_account_state.Login ->
+    | Authz_provider_account_state.Login { integration_id = _ } ->
       let* account_home = home () in
       runtime ~account_home ~account:Runtime_account_runtime.Login
     | Authz_provider_account_state.Key { integration_id = _; generation } ->

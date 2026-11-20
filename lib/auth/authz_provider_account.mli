@@ -13,12 +13,13 @@ type error =
 
 val error_to_string : error -> string
 
-(** Writes the record that links [provider_account_id] to [user_id], who
-    connected it. *)
+(** Writes the record that links [provider_account_id] to [user_id] for
+    [integration_id], who connected it. *)
 val link
   :  Authz_zone.t
   -> user_id:Authz_types.User_id.t
   -> provider_account_id:Authz_types.Provider_account_id.t
+  -> integration_id:Authz_types.Integration_id.t
   -> (unit, error) result
 
 (** Writes the record that links [provider_account_id] to [user_id] as a key

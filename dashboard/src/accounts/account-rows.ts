@@ -14,7 +14,7 @@ import type { ReplacementsModel } from './key-replace'
 import { ReplaceArea } from './key-replace-area'
 import { Callout, ProblemNote, fell, idTail, keyStaysValidWords, noModelWords, operatorWords, sessionEndedWords } from './notes'
 import { checkable, integrationName } from './wire'
-import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Replacement, Runtime, Withheld } from './wire'
+import type { CallRefusal, Held, Integration, KeyState, ModelUnread, Owned, ProviderAccount, Removal, Replacement, Runtime, Withheld } from './wire'
 
 // ---- what the panel knows of each account ----
 
@@ -22,8 +22,7 @@ import type { CallRefusal, Held, Integration, IntegrationUnread, KeyState, Model
 export interface AccountFacts {
   readonly account: ProviderAccount
   /** The subscription the server offers for the account, or null when the
-      account's subscription is not known or the server no longer offers it:
-      nothing can be done with the account here. */
+      server no longer offers it: nothing can be done with the account here. */
   readonly offered: Integration | null
   /** The Runtimes made on the account. */
   readonly runtimes: readonly Runtime[]
@@ -47,7 +46,7 @@ export type KeeperOn =
       before it starts a client
       (lib/server/server_setup_account_login.ml, `person_runtime`). */
   | { readonly kind: 'key_not_readable' }
-  /** The account's subscription is not known, or the server no longer offers it. */
+  /** The server no longer offers the account's subscription. */
   | { readonly kind: 'not_offered' }
   /** A removal of the account did not go through. The server refuses every
       use of it, whatever its subscription lets a Keeper do. */
@@ -73,9 +72,8 @@ function keeperOn(account: ProviderAccount, offered: Integration | null, checked
     its account (wire.ts, `readOwned`). */
 export function accountFacts(integrations: readonly Integration[], owned: Owned): readonly AccountFacts[] {
   return owned.accounts.map((account) => {
-    const integration = account.integration
     const runtimes = owned.runtimes.filter((runtime) => runtime.accountId === account.id)
-    const offered = integration.read ? integrations.find((one) => one.id === integration.value) ?? null : null
+    const offered = integrations.find((one) => one.id === account.integration) ?? null
     const checked = runtimes.some((runtime) => runtime.model.read)
     return { account, offered, runtimes, checked, keeper: keeperOn(account, offered, checked) }
   })
@@ -84,19 +82,10 @@ export function accountFacts(integrations: readonly Integration[], owned: Owned)
 // ---- words ----
 
 /** The name of the subscription of an account: the name the operator gave
-    the provider, its id when the name is empty, or the id the login named
-    when the server no longer offers it. */
+    the provider, its id when the name is empty, or the id the account
+    names when the server no longer offers it. */
 function subscriptionName(account: ProviderAccount, offered: Integration | null): string {
-  if (!account.integration.read) return '어떤 구독인지 알 수 없는 계정'
-  return offered === null ? account.integration.value : integrationName(offered)
-}
-
-function integrationUnreadWords(unread: IntegrationUnread | 'unrecognised'): string {
-  switch (unread) {
-    case 'login_receipt_missing': return '이 계정의 로그인 기록이 없어요.'
-    case 'login_receipt_unreadable': return '이 계정의 로그인 기록을 읽지 못했어요. 이 서버를 운영하는 사람에게 알려 주세요.'
-    case 'unrecognised': return '서버가 이 계정의 구독을 알려 주지 않았어요.'
-  }
+  return offered === null ? account.integration : integrationName(offered)
 }
 
 /** What the server found of the key file of a key account, when a use of
@@ -227,11 +216,9 @@ function refusedWords(refusal: CallRefusal, name: string): string {
 }
 
 /** Why the model of a Runtime is not known, or null when the row of its
-    account already says it: the subscription is not known, or the server no
-    longer declares it and so does not offer it. */
+    account already says the server no longer declares the subscription. */
 function modelUnreadWords(unread: ModelUnread | 'unrecognised'): string | null {
   switch (unread) {
-    case 'account_integration_unread': return null
     case 'template_not_declared': return null
     case 'configuration_unavailable': return '서버 설정을 읽지 못해서 모델을 알 수 없어요.'
     case 'runtime_not_bound': return '서버 설정이 바뀌어서 이 구독으로 이 모델을 부를 수 없어요.'
@@ -401,9 +388,7 @@ function InUse({ facts, name, checks, card }: {
   const { account, offered } = facts
   const key = account.held.kind === 'key' ? keyWords(account.held.key) : null
   return html`
-    ${account.integration.read
-      ? (offered === null ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null)
-      : html`<p class="hint">${integrationUnreadWords(account.integration.unread)}</p>`}
+    ${offered === null ? html`<p class="hint">이 서버는 이 구독을 더는 제공하지 않아요.</p>` : null}
     ${key === null ? null : html`<p class="hint">${key}</p>`}
     ${facts.keeper.kind === 'refused' ? html`<p class="hint">${refusedWords(facts.keeper.refusal, name)}</p>` : null}
     <${Models} runtimes=${facts.runtimes} />

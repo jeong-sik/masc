@@ -7,6 +7,7 @@ let ( let* ) = Result.bind
 
 type error =
   | Id_not_drawn of Authz_id.error
+  | Engine_name_not_drawn of Authz_id.error
   | Body_not_built of Authz_body.error
   | Refused of Authz_keeper_state.refusal
   | Commit_failed of Authz_zone.error
@@ -15,6 +16,8 @@ let author_of user_id = Author.Authenticated (Principal.Human user_id)
 
 let error_detail = function
   | Id_not_drawn error -> "a drawn policy id was refused: " ^ Authz_id.error_to_string error
+  | Engine_name_not_drawn error ->
+    "a drawn engine name was refused: " ^ Authz_id.error_to_string error
   | Body_not_built error -> "the Keeper body was not built: " ^ Authz_body.error_to_string error
   | Refused refusal -> Authz_keeper_state.refusal_to_string refusal
   | Commit_failed error -> Authz_zone.error_detail error
@@ -45,11 +48,19 @@ let write zone ~user_id event =
         | Error error -> Error (Commit_failed error)))
 ;;
 
-let make zone ~user_id ~keeper_id ~turn_scope ~draw =
+let make zone ~user_id ~keeper_id ~turn_scope ~draw ~draw_engine_name =
+  let* engine_name =
+    Result.map_error
+      (fun error -> Engine_name_not_drawn error)
+      (Engine_name.of_string (draw_engine_name ()))
+  in
   let* policy_id =
     Result.map_error (fun error -> Id_not_drawn error) (Policy_id.of_string (draw ()))
   in
-  write zone ~user_id (Authz_keeper_event.Made { keeper_id; user_id; policy_id; turn_scope })
+  write
+    zone
+    ~user_id
+    (Authz_keeper_event.Made { keeper_id; user_id; engine_name; policy_id; turn_scope })
 ;;
 
 let assign zone ~user_id ~keeper_id ~runtime_id =

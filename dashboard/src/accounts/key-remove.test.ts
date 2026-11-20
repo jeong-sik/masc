@@ -254,8 +254,8 @@ describe('the removal of an account', () => {
 
 const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: true }
 const keyAccount = (removal: Removal | null = null): ProviderAccount =>
-  ({ id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: removal === null ? null : { kind: 'removal', stage: removal } })
-const loginAccount: ProviderAccount = { id: 'acct_login', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }
+  ({ id: 'acct_key', integration: 'claude_code', held: { kind: 'key', key: 'readable' }, left: removal === null ? null : { kind: 'removal', stage: removal } })
+const loginAccount: ProviderAccount = { id: 'acct_login', integration: 'claude_code', held: { kind: 'login' }, left: null }
 const owning = (...accounts: ProviderAccount[]): Owned => ({ accounts, runtimes: [] })
 
 /** Checks no test here drives: a card only needs them to be there. */

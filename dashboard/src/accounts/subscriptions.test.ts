@@ -138,7 +138,7 @@ describe('reading the subscriptions', () => {
         { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
       ],
       owned: {
-        accounts: [{ id: 'acct_1', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }],
+        accounts: [{ id: 'acct_1', integration: 'claude_code', held: { kind: 'login' }, left: null }],
         runtimes: [{ id: 'acct_1.claude-sonnet-5', accountId: 'acct_1', model: { read: true, value: 'claude-sonnet-5' } }],
       },
     })
@@ -600,29 +600,27 @@ describe('what the panel knows of each account', () => {
   ]
   const facts = accountFacts(integrations, {
     accounts: [
-      { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, left: null },
-      { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
-      { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, left: null },
-      { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, left: null },
-      { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
+      { id: 'acct_gone', integration: 'muse', held: { kind: 'login' }, left: null },
+      { id: 'acct_claude', integration: 'claude_code', held: { kind: 'login' }, left: null },
+      { id: 'acct_codex', integration: 'codex', held: { kind: 'login' }, left: null },
+      { id: 'acct_new', integration: 'claude_code', held: { kind: 'login' }, left: null },
     ],
     runtimes: [
       { id: 'acct_codex.gpt-5.5', accountId: 'acct_codex', model: { read: true, value: 'gpt-5.5' } },
       { id: 'acct_claude.claude-opus-9', accountId: 'acct_claude', model: { read: false, unread: 'runtime_not_bound' } },
       { id: 'acct_gone.muse-1', accountId: 'acct_gone', model: { read: false, unread: 'template_not_declared' } },
       { id: 'acct_claude.claude-sonnet-5', accountId: 'acct_claude', model: { read: true, value: 'claude-sonnet-5' } },
-      { id: 'acct_unknown.x', accountId: 'acct_unknown', model: { read: false, unread: 'account_integration_unread' } },
     ],
   })
   const byAccount = <T>(pick: (one: AccountFacts) => T) => facts.map((one) => [one.account.id, pick(one)])
 
   it('keeps the order the server lists the accounts in', () => {
-    expect(facts.map((one) => one.account.id)).toEqual(['acct_gone', 'acct_claude', 'acct_codex', 'acct_unknown', 'acct_new'])
+    expect(facts.map((one) => one.account.id)).toEqual(['acct_gone', 'acct_claude', 'acct_codex', 'acct_new'])
   })
 
-  it('finds the subscription the server offers for an account, and none when it is not known or no longer offered', () => {
+  it('finds the subscription the server offers for an account, and none when it is no longer offered', () => {
     expect(byAccount((one) => (one.offered === null ? null : one.offered.id))).toEqual([
-      ['acct_gone', null], ['acct_claude', 'claude_code'], ['acct_codex', 'codex'], ['acct_unknown', null], ['acct_new', 'claude_code'],
+      ['acct_gone', null], ['acct_claude', 'claude_code'], ['acct_codex', 'codex'], ['acct_new', 'claude_code'],
     ])
   })
 
@@ -631,7 +629,6 @@ describe('what the panel knows of each account', () => {
       ['acct_gone', ['acct_gone.muse-1']],
       ['acct_claude', ['acct_claude.claude-opus-9', 'acct_claude.claude-sonnet-5']],
       ['acct_codex', ['acct_codex.gpt-5.5']],
-      ['acct_unknown', ['acct_unknown.x']],
       ['acct_new', []],
     ])
   })
@@ -641,7 +638,6 @@ describe('what the panel knows of each account', () => {
       ['acct_gone', { kind: 'not_offered' }],
       ['acct_claude', { kind: 'can_run' }],
       ['acct_codex', { kind: 'refused', refusal: 'native_tools_reach_other_homes' }],
-      ['acct_unknown', { kind: 'not_offered' }],
       ['acct_new', { kind: 'needs_model' }],
     ])
   })
@@ -656,8 +652,8 @@ describe('what the panel knows of each account', () => {
   it('tells an account that has a model to check from one whose subscription offers none', () => {
     const owned = {
       accounts: [
-        { id: 'acct_checked', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
-        { id: 'acct_new', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
+        { id: 'acct_checked', integration: 'claude_code', held: { kind: 'login' }, left: null },
+        { id: 'acct_new', integration: 'claude_code', held: { kind: 'login' }, left: null },
       ],
       runtimes: [{ id: 'acct_checked.claude-sonnet-5', accountId: 'acct_checked', model: { read: true, value: 'claude-sonnet-5' } }],
     } as const
@@ -669,11 +665,11 @@ describe('what the panel knows of each account', () => {
   it('says a removal or a key replacement that was left on an account before anything else of it', () => {
     const kinds = accountFacts(integrations, {
       accounts: [
-        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'key_not_removed' } },
-        { id: 'acct_left_gone', integration: { read: true, value: 'muse' }, held: { kind: 'key', key: 'key_missing' }, left: { kind: 'removal', stage: 'start_given_up' } },
-        { id: 'acct_left_refused', integration: { read: true, value: 'codex' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'home_not_removed' } },
-        { id: 'acct_blocked', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'replacement', stage: 'start_given_up' } },
-        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, left: null },
+        { id: 'acct_left', integration: 'claude_code', held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'key_not_removed' } },
+        { id: 'acct_left_gone', integration: 'muse', held: { kind: 'key', key: 'key_missing' }, left: { kind: 'removal', stage: 'start_given_up' } },
+        { id: 'acct_left_refused', integration: 'codex', held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'home_not_removed' } },
+        { id: 'acct_blocked', integration: 'claude_code', held: { kind: 'key', key: 'readable' }, left: { kind: 'replacement', stage: 'start_given_up' } },
+        { id: 'acct_key', integration: 'claude_code', held: { kind: 'key', key: 'key_missing' }, left: null },
       ],
       runtimes: [],
     }).map((one) => [one.account.id, one.keeper.kind])
@@ -685,7 +681,7 @@ describe('what the panel knows of each account', () => {
 
   it('says a Keeper can run on a key account with a checked model only while the server read its key', () => {
     const states = ['readable', 'key_missing', 'key_unreadable', 'not_looked_at', 'unrecognised'] as const
-    const accounts = states.map((key) => ({ id: `acct_${key}`, integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key }, left: null }) as const)
+    const accounts = states.map((key) => ({ id: `acct_${key}`, integration: 'claude_code', held: { kind: 'key', key }, left: null }) as const)
     const runtimes = accounts.map((account) => ({ id: `${account.id}.claude-sonnet-5`, accountId: account.id, model: { read: true, value: 'claude-sonnet-5' } }) as const)
     expect(accountFacts(integrations, { accounts, runtimes }).map((one) => one.keeper.kind))
       .toEqual(['can_run', 'key_not_readable', 'key_not_readable', 'key_not_readable', 'key_not_readable'])
@@ -693,7 +689,7 @@ describe('what the panel knows of each account', () => {
 
   it('counts a model as checked only while the server still finds it in its settings', () => {
     expect(byAccount((one) => one.checked)).toEqual([
-      ['acct_gone', false], ['acct_claude', true], ['acct_codex', true], ['acct_unknown', false], ['acct_new', false],
+      ['acct_gone', false], ['acct_claude', true], ['acct_codex', true], ['acct_new', false],
     ])
   })
 })
@@ -721,26 +717,23 @@ describe('the panel', () => {
     ['nothing connected', read({ accounts: [], runtimes: [] })],
     ['accounts of each kind', read({
       accounts: [
-        { id: 'acct_claude', integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null },
-        { id: 'acct_codex', integration: { read: true, value: 'codex' }, held: { kind: 'login' }, left: null },
-        { id: 'acct_gone', integration: { read: true, value: 'muse' }, held: { kind: 'login' }, left: null },
-        { id: 'acct_unknown', integration: { read: false, unread: 'login_receipt_missing' }, held: { kind: 'login' }, left: null },
-        { id: 'acct_odd', integration: { read: false, unread: 'unrecognised' }, held: { kind: 'login' }, left: null },
+        { id: 'acct_claude', integration: 'claude_code', held: { kind: 'login' }, left: null },
+        { id: 'acct_codex', integration: 'codex', held: { kind: 'login' }, left: null },
+        { id: 'acct_gone', integration: 'muse', held: { kind: 'login' }, left: null },
       ],
       runtimes: [
         { id: 'acct_claude.claude-sonnet-5', accountId: 'acct_claude', model: { read: true, value: 'claude-sonnet-5' } },
         { id: 'acct_claude.claude-opus-9', accountId: 'acct_claude', model: { read: false, unread: 'runtime_not_bound' } },
         { id: 'acct_gone.muse-1', accountId: 'acct_gone', model: { read: false, unread: 'template_not_declared' } },
-        { id: 'acct_unknown.x', accountId: 'acct_unknown', model: { read: false, unread: 'account_integration_unread' } },
-        { id: 'acct_odd.y', accountId: 'acct_odd', model: { read: false, unread: 'unrecognised' } },
+        { id: 'acct_gone.odd', accountId: 'acct_gone', model: { read: false, unread: 'unrecognised' } },
       ],
     })],
     // The first holds a key the server did not find, and the second has a removal left on it.
     // Their subscription takes a key.
     ['key accounts', read({
       accounts: [
-        { id: 'acct_key', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'key_missing' }, left: null },
-        { id: 'acct_left', integration: { read: true, value: 'claude_code' }, held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'key_not_removed' } },
+        { id: 'acct_key', integration: 'claude_code', held: { kind: 'key', key: 'key_missing' }, left: null },
+        { id: 'acct_left', integration: 'claude_code', held: { kind: 'key', key: 'readable' }, left: { kind: 'removal', stage: 'key_not_removed' } },
       ],
       runtimes: [],
     }, true)],

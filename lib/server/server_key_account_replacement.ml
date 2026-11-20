@@ -160,7 +160,8 @@ let remove_left_keys_of ~zone ~base_path id =
     | Ok trusted ->
       let state = (trusted :> Authz_zone.snapshot).Authz_zone.state in
       (match Accounts.find state.Authz_state.provider_accounts id with
-       | None | Some { Accounts.owner = _; kind = Accounts.Login } -> Ok nothing_there
+       | None | Some { Accounts.owner = _; kind = Accounts.Login { integration_id = _ } } ->
+         Ok nothing_there
        | Some { Accounts.owner; kind = Accounts.Key { integration_id = _; generation } } ->
          (match Authz_principal_state.find_membership state.Authz_state.principals owner with
           | Some { Authz_principal_state.workspace_id = _; account_home_namespace = namespace } ->

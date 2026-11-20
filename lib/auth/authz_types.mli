@@ -10,10 +10,18 @@ module Runtime_id : Authz_id.S
 module Provider_account_id : Authz_id.S
 module Grant_id : Authz_id.S
 
-(** The name of a Keeper (plan D1-5). It is the name of
-    [.masc/config/keepers/<name>.toml], and a Keeper record names its owner by
-    it. *)
+(** The name of a Keeper (plan D1-5). It is the owner-scoped name of a
+    person's Keeper in the log, and the engine Keeper name is stored beside
+    it as {!Engine_name}. *)
 module Keeper_id : Authz_id.S
+
+(** The installation-wide engine name of a Keeper (RFC
+    a-persons-keeper-runs-on-the-engine, 3.2). Its grammar matches
+    {!Keeper_id.Keeper_name}: non-empty, at most 128 bytes of ASCII letters,
+    digits, [.], [_], [-], and neither [.] / [..] nor a [keepers/] store
+    directory name. Kept here as an {!Authz_id.S} so [masc.auth] does not
+    depend on [masc.keeper]. *)
+module Engine_name : Authz_id.S
 
 module Policy_id : Authz_id.S
 
@@ -54,8 +62,8 @@ module Conversation_id : Authz_id.S
 
 (** The id of an integration: a provider entry of [runtime.toml] that a person
     may connect an account of (RFC a-persons-api-key-is-their-own-provider-account,
-    3.1). The record of a key account names by it what the key is for. A login
-    account has none in the log: its login receipt names it. *)
+    3.1). Both a login account and a key account name in the log the
+    integration they are for. *)
 module Integration_id : Authz_id.S
 
 (** The generation of the key of a key account (the same RFC, 3.2 and 3.7).

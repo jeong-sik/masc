@@ -6,6 +6,43 @@ module Runtime_id = Authz_id.Make ()
 module Provider_account_id = Authz_id.Make ()
 module Grant_id = Authz_id.Make ()
 module Keeper_id = Authz_id.Make ()
+
+module Engine_name = struct
+  module Id = Authz_id.Make ()
+  include Id
+
+  let max_length = 128
+
+  let is_engine_name_byte = function
+    | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '_' | '-' -> true
+    | _ -> false
+  ;;
+
+  let first_invalid_byte s =
+    let rec scan index =
+      if index >= String.length s
+      then None
+      else if is_engine_name_byte s.[index]
+      then scan (index + 1)
+      else Some index
+    in
+    scan 0
+  ;;
+
+  let of_string s =
+    if String.equal s ""
+    then Error Authz_id.Empty
+    else if String.length s > max_length
+    then Error Authz_id.Too_long
+    else (
+      match first_invalid_byte s with
+      | Some index -> Error (Authz_id.Invalid_byte { index })
+      | None ->
+        if String.equal s "." || String.equal s ".." || Common.is_keepers_root_store_dirname s
+        then Error Authz_id.Path_segment
+        else Id.of_string s)
+  ;;
+end
 module Policy_id = Authz_id.Make ()
 module Session_id = Authz_id.Make ()
 module Pat_id = Authz_id.Make ()

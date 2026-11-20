@@ -289,7 +289,7 @@ const bare: Integration = {
   withheld: [{ model: 'bare-ghost', reason: 'model_undeclared' }, { model: 'bare-notools', reason: 'tools_not_declared' }],
 }
 const codex: Integration = { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_unpublished' }, takesKey: false }
-const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: { read: true, value: integrationId }, held: { kind: 'login' }, left: null }], runtimes: [] })
+const one = (integrationId: string): Owned => ({ accounts: [{ id: 'acct_1', integration: integrationId, held: { kind: 'login' }, left: null }], runtimes: [] })
 
 const card = (checks: ChecksModel, owned: Owned = one('claude_code')) =>
   render(html`
@@ -390,7 +390,7 @@ describe('the card of an account', () => {
 
   it('names the field and the button of each card with the card', () => {
     const two: Owned = {
-      accounts: ['acct_1', 'acct_2'].map((id) => ({ id, integration: { read: true, value: 'claude_code' }, held: { kind: 'login' }, left: null }) as const),
+      accounts: ['acct_1', 'acct_2'].map((id) => ({ id, integration: 'claude_code', held: { kind: 'login' }, left: null }) as const),
       runtimes: [],
     }
     const container = card(showing(undefined), two)

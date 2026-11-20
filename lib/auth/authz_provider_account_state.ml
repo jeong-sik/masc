@@ -6,7 +6,7 @@ module E = Authz_provider_account_event
 module Account_map = Map.Make (Provider_account_id)
 
 type kind =
-  | Login
+  | Login of { integration_id : Integration_id.t }
   | Key of
       { integration_id : Integration_id.t
       ; generation : Key_generation.t
@@ -40,7 +40,7 @@ let key_accounts t =
     (fun provider_account_id { owner = _; kind } accounts ->
       match kind with
       | Key { integration_id = _; generation = _ } -> provider_account_id :: accounts
-      | Login -> accounts)
+      | Login { integration_id = _ } -> accounts)
     t
     []
   |> List.rev
@@ -150,7 +150,8 @@ let replaceable t ~is_active ~removal ~user_id provider_account_id =
     | None -> Error (Not_linked provider_account_id)
     | Some { owner; kind = _ } when not (User_id.equal owner user_id) ->
       Error (Not_the_owner provider_account_id)
-    | Some { owner = _; kind = Login } -> Error (Not_a_key_account provider_account_id)
+    | Some { owner = _; kind = Login { integration_id = _ } } ->
+      Error (Not_a_key_account provider_account_id)
     | Some { owner; kind = Key { integration_id; generation } } ->
       (match removal ~owner provider_account_id with
        | Begun -> Error (Account_removed provider_account_id)
@@ -187,8 +188,9 @@ let replace t ~author ~is_active ~removal ~provider_account_id ~user_id given =
    may write. *)
 let apply t ~(author : Author.t) ~is_active ~removal (event : E.t) =
   match author, event with
-  | Author.Authenticated (Principal.Human id), E.Linked { provider_account_id; user_id } ->
-    link t ~author:id ~is_active ~provider_account_id ~user_id Login
+  | ( Author.Authenticated (Principal.Human id)
+    , E.Linked { provider_account_id; user_id; integration_id } ) ->
+    link t ~author:id ~is_active ~provider_account_id ~user_id (Login { integration_id })
   | ( Author.Authenticated (Principal.Human id)
     , E.Key_linked { provider_account_id; user_id; integration_id } ) ->
     link

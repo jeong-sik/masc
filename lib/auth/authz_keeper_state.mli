@@ -27,6 +27,8 @@
 
 type keeper =
   { owner : Authz_types.User_id.t
+  ; engine_name : Authz_types.Engine_name.t
+      (** The installation-wide engine name of this Keeper. *)
   ; policy_id : Authz_types.Policy_id.t
       (** The policy the owner's turns of this Keeper run under. *)
   ; turn_scope : Authz_types.Authorization_scope.t  (** The limits of that policy. *)
@@ -41,11 +43,23 @@ val empty : t
 (** The Keeper of this id that [owner] made, if they made one. *)
 val find : t -> owner:Authz_types.User_id.t -> Authz_types.Keeper_id.t -> keeper option
 
+(** The owner, Keeper id, and Keeper record for an installation-wide engine
+    name string, if a Keeper was made with that engine name. *)
+val find_by_engine_name
+  :  t
+  -> string
+  -> (Authz_types.User_id.t * Authz_types.Keeper_id.t * keeper) option
+
 (** The Keepers this person owns, in the order of their ids. *)
 val owned_by : t -> Authz_types.User_id.t -> (Authz_types.Keeper_id.t * keeper) list
 
+(** All Keepers across all owners, in the order of [(owner, keeper_id)]. *)
+val all : t -> (Authz_types.User_id.t * Authz_types.Keeper_id.t * keeper) list
+
 type refusal =
   | Already_made of Authz_types.Keeper_id.t  (** Its owner made it before. *)
+  | Engine_name_already_used of Authz_types.Engine_name.t
+      (** Another Keeper record of this installation named this engine name. *)
   | Policy_named_before of Authz_types.Policy_id.t
       (** Another Keeper's record named this policy id. *)
   | Not_made of Authz_types.Keeper_id.t

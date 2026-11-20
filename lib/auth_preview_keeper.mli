@@ -48,7 +48,8 @@ val keeper_id_of : string -> (Authz_types.Keeper_id.t, string) result
 val list : Authz_state.t -> Authz_types.User_id.t -> Login_routes.answer
 
 (** The body is [{"keeper_id": <name>}], a name of the Keeper grammar
-    ({!Keeper_id.Keeper_name}). A 200 JSON
+    ({!Keeper_id.Keeper_name}). When new, a fresh installation-wide unique
+    {!Authz_types.Engine_name} (["kp-..."]) is drawn for the Keeper. A 200 JSON
     [{"keeper_id":...,"record":"made"}], or ["existing"] when the person
     made it before. A Keeper of that name which another person made does
     not count. ["existing"] is read in a

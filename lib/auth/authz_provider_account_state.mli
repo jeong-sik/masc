@@ -29,7 +29,7 @@
 
 (** What an account is, as the record that linked it says. *)
 type kind =
-  | Login
+  | Login of { integration_id : Authz_types.Integration_id.t }
   | Key of
       { integration_id : Authz_types.Integration_id.t
       ; generation : Authz_types.Key_generation.t

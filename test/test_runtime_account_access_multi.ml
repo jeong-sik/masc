@@ -74,7 +74,15 @@ let runtime_and_keeper zone ~user_id ~account ~name =
     ; allowed_effects = Effect_scope.all
     }
   in
-  (match Authz_keeper.make zone ~user_id ~keeper_id ~turn_scope ~draw:(fun () -> "policy-" ^ name) with
+  (match
+     Authz_keeper.make
+       zone
+       ~user_id
+       ~keeper_id
+       ~turn_scope
+       ~draw:(fun () -> "policy-" ^ name)
+       ~draw_engine_name:(fun () -> "kp-" ^ name)
+   with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
   (match Authz_keeper.assign zone ~user_id ~keeper_id ~runtime_id:runtime with
@@ -135,7 +143,13 @@ let person zone ~base_path ~name ~hex =
           ; membership = { workspace_id = workspace; account_home_namespace = namespace }
           }));
   let account = get (Provider_account_id.of_string ("account-" ^ name)) in
-  (match Authz_provider_account.link zone ~user_id ~provider_account_id:account with
+  (match
+     Authz_provider_account.link
+       zone
+       ~user_id
+       ~provider_account_id:account
+       ~integration_id:(get (Integration_id.of_string "claude_code"))
+   with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
   let runtime, keeper = runtime_and_keeper zone ~user_id ~account ~name in
@@ -266,7 +280,13 @@ let make_shared_keeper zone (who : person) ~policy =
     }
   in
   (match
-     Authz_keeper.make zone ~user_id:who.user_id ~keeper_id ~turn_scope ~draw:(fun () -> policy)
+     Authz_keeper.make
+       zone
+       ~user_id:who.user_id
+       ~keeper_id
+       ~turn_scope
+       ~draw:(fun () -> policy)
+       ~draw_engine_name:(fun () -> "kp-" ^ policy)
    with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_keeper.error_detail error));
@@ -1275,6 +1295,7 @@ let test_multi_account () =
              zone
              ~user_id:alice.user_id
              ~provider_account_id:(get (Provider_account_id.of_string "account-late"))
+             ~integration_id:(get (Integration_id.of_string "claude_code"))
          with
          | Ok () -> Alcotest.fail "the zone wrote over a log another writer moved"
          | Error (_ : Authz_provider_account.error) -> ());

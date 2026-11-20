@@ -431,7 +431,13 @@ let join zone ~base_path ~name ~hex ~integration ~client ~model =
   let user_id, namespace = admit zone ~name ~hex in
   let account = get (Provider_account_id.of_string (String.make 64 hex)) in
   login_home ~base_path ~namespace ~account_id:(Provider_account_id.to_string account) ~client;
-  (match Authz_provider_account.link zone ~user_id ~provider_account_id:account with
+  (match
+     Authz_provider_account.link
+       zone
+       ~user_id
+       ~provider_account_id:account
+       ~integration_id:(get (Integration_id.of_string integration))
+   with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
   (match
@@ -483,7 +489,13 @@ let keeper zone (who : someone) name ?(policy = "policy-" ^ name) ?runtime () =
     }
   in
   (match
-     Authz_keeper.make zone ~user_id:who.person.user_id ~keeper_id ~turn_scope ~draw:(fun () -> policy)
+     Authz_keeper.make
+       zone
+       ~user_id:who.person.user_id
+       ~keeper_id
+       ~turn_scope
+       ~draw:(fun () -> policy)
+       ~draw_engine_name:(fun () -> "kp-" ^ policy)
    with
    | Ok () -> ()
    | Error error -> Alcotest.fail (Authz_keeper.error_detail error));

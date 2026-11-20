@@ -120,15 +120,11 @@ export type Fact<T, Unread extends string> =
   | { readonly read: true; readonly value: T }
   | { readonly read: false; readonly unread: Unread | 'unrecognised' }
 
-/** Why the subscription of an account is not known (lib/auth_preview.ml). */
-export type IntegrationUnread = 'login_receipt_missing' | 'login_receipt_unreadable'
-
 /** Why the model of a Runtime is not known (lib/auth_preview.ml,
     `provider_accounts`). A Runtime id names its binding, so of the codes of
     lib/runtime/runtime_account_runtime.ml (`error_code`) only the last two
     come. */
 export type ModelUnread =
-  | 'account_integration_unread'
   | 'configuration_unavailable'
   | 'template_not_declared'
   | 'runtime_not_bound'
@@ -174,7 +170,7 @@ export interface ProviderAccount {
   readonly id: string
   /** The id of the subscription: the one its login was of, or the one its
       key was registered for. */
-  readonly integration: Fact<string, IntegrationUnread>
+  readonly integration: string
   readonly held: Held
   /** Null for an account nothing was left on. */
   readonly left: Left | null
@@ -302,18 +298,8 @@ function readFact<Unread extends string>(
   return json[name] === null && code !== null ? { read: false, unread: readUnread(code) } : null
 }
 
-function readIntegrationUnread(code: string): IntegrationUnread | 'unrecognised' {
-  switch (code) {
-    case 'login_receipt_missing':
-    case 'login_receipt_unreadable':
-      return code
-    default: return 'unrecognised'
-  }
-}
-
 function readModelUnread(code: string): ModelUnread | 'unrecognised' {
   switch (code) {
-    case 'account_integration_unread':
     case 'configuration_unavailable':
     case 'template_not_declared':
     case 'runtime_not_bound':
@@ -354,7 +340,7 @@ function readLeft(json: Readonly<Record<string, unknown>>): Left | null | undefi
 function readAccount(json: unknown): ProviderAccount | null {
   if (!isRecord(json)) return null
   const id = text(json.provider_account_id)
-  const integration = readFact(json, 'integration_id', readIntegrationUnread)
+  const integration = text(json.integration_id)
   const held = readHeld(json)
   const left = readLeft(json)
   return id === null || integration === null || held === null || left === undefined ? null : { id, integration, held, left }

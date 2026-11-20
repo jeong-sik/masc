@@ -50,3 +50,7 @@ type report =
   }
 
 val run : Workspace.config -> report
+
+(** Where a persisted Keeper's log and stores are, from its metadata: the
+    session its trace names. *)
+val place_of : Workspace.config -> Keeper_meta_contract.keeper_meta -> Recorder.place

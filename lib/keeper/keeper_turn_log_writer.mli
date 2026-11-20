@@ -115,3 +115,15 @@ val drop
   -> now:Keeper_turn_log.mark
   -> after:(Keeper_turn_log.mark -> Keeper_turn_log.mark)
   -> Keeper_turn_log.line
+
+(** The first step of a Keeper's store start (§8.6): a log with no complete
+    line gets its [Log_started], at the mark [now] gives. A log that has a
+    line gets nothing and [now] is not called, so the stores are read for a
+    first line only. An open turn is left open, which a process start does
+    not do: a store start comes while the Keeper's turns run. *)
+val start
+  :  at:float
+  -> new_log_id:Keeper_turn_log.Log_id.t
+  -> tail:Keeper_turn_log_store.tail
+  -> now:(unit -> (Keeper_turn_log.mark, 'error) result)
+  -> (Keeper_turn_log.line list, 'error) result

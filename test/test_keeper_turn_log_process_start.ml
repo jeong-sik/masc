@@ -9,6 +9,7 @@ module Codec = Keeper_turn_log_codec
 module Recorder = Keeper_turn_log_recorder
 module Writer = Keeper_turn_log_writer
 module Start = Keeper_turn_log_process_start
+module Store_start = Keeper_turn_log_store_start
 module Objects = Agent_core.Checkpoint_objects
 
 let rec remove_tree path =
@@ -381,6 +382,53 @@ let test_a_keeper_with_no_metadata =
   check bool "no log is made for it" false (Sys.file_exists (log_path place))
 ;;
 
+(* §8.6, §5.2: the store start's first step. A log with no complete line
+   gets its first line, one a turn already started gets nothing, and a turn
+   that is open stays open: a store start comes while turns run. *)
+let test_a_store_start =
+  with_workspace
+  @@ fun config ->
+  let place = persisted_keeper config "store-start" in
+  let first_step label =
+    check (result unit string) label (Ok ()) (Store_start.run config place.keeper_name)
+  in
+  first_step "a Keeper with no log";
+  check string "gets its first line" "started at 0" (log_text place);
+  let (_ : Writer.admitted) = admitted place 1 in
+  first_step "a Keeper whose turn is open";
+  check string "keeps its turn open" "started at 0\nopened 1 at 0" (log_text place)
+;;
+
+(* A turn's first append that comes first starts the log itself: the store
+   start after it writes nothing, so the log has one first line. *)
+let test_a_turn_that_started_the_log =
+  with_workspace
+  @@ fun config ->
+  let place = persisted_keeper config "turn-first" in
+  let (_ : Writer.admitted) = admitted place 1 in
+  check (result unit string) "the store start" (Ok ()) (Store_start.run config place.keeper_name);
+  check string "one first line" "started at 0\nopened 1 at 0" (log_text place)
+;;
+
+(* An append that an interrupted write left as a fragment is not a line: the
+   first step writes the first line at offset 0 and the fragment goes. *)
+let test_a_torn_first_line =
+  with_workspace
+  @@ fun config ->
+  let place = persisted_keeper config "torn" in
+  Fs_compat.mkdir_p (Filename.dirname (log_path place));
+  Fs_compat.save_file (log_path place) "{\"kind\":\"log_sta";
+  check (result unit string) "the store start" (Ok ()) (Store_start.run config place.keeper_name);
+  check string "the log is its first line" "started at 0" (log_text place)
+;;
+
+let test_a_store_start_with_no_metadata =
+  with_workspace
+  @@ fun config ->
+  check bool "a Keeper whose metadata is not on disk gets no first line" true
+    (Result.is_error (Store_start.run config "unknown"))
+;;
+
 let () =
   run "keeper_turn_log_process_start"
     [ ( "process start"
@@ -393,6 +441,12 @@ let () =
         ; test_case "a closing save that fails" `Quick test_a_closing_save_that_fails
         ; test_case "a log that cannot be read" `Quick test_a_log_that_cannot_be_read
         ; test_case "a Keeper with no metadata" `Quick test_a_keeper_with_no_metadata
+        ] )
+    ; ( "store start"
+      , [ test_case "the first line, and an open turn left open" `Quick test_a_store_start
+        ; test_case "a turn that started the log" `Quick test_a_turn_that_started_the_log
+        ; test_case "a torn first line" `Quick test_a_torn_first_line
+        ; test_case "a Keeper with no metadata" `Quick test_a_store_start_with_no_metadata
         ] )
     ]
 ;;

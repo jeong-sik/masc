@@ -85,7 +85,8 @@ let next ~previous ~at (cause : Log.cause) effects =
       ; shown = (_ : Log.shown)
       ; slot = (_ : string)
       ; missing = (_ : Librarian_unit.missing_at list)
-      } ->
+      }
+  | Make_room { trace; question = (_ : Librarian_question_id.t); slot = (_ : string) } ->
     if changes_facts effects
     then
       rewritten ~previous ~at ~effects

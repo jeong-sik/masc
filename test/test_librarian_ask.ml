@@ -22,6 +22,7 @@ let session = "session-1"
 let slot_id = "openrouter.fast"
 let prompt = "You keep one Keeper's Memory."
 let schema = `Assoc [ "type", `String "object" ]
+let schemas = { Librarian_memory_lane.range = schema; item_alone = schema; room = schema }
 let chat_text = "the release train leaves on Friday"
 let claim = "the port is 8935"
 
@@ -178,7 +179,7 @@ let with_fixture ?(binding = "") reply f =
     | Error (_ : Registry.publication_error) -> fail "no registry was published"
   in
   let lane, resolved =
-    match Librarian_memory_lane.resolve ~prompt ~answer_schema:schema registry with
+    match Librarian_memory_lane.resolve ~prompt ~answer_schemas:schemas registry with
     | Ok declared -> declared
     | Error why -> failf "the Librarian lane: %s" (Librarian_memory_lane.show_unavailable why)
   in
@@ -341,7 +342,9 @@ let test_a_slot_answers () =
   let state = boot fixture in
   let result = Ask.run fixture.env (input fixture (tail_of state)) in
   check string "the slot answers" answered (result_text result);
-  check int "one unit was asked about" 1 (List.length (question_of result).shown.units);
+  check int "one unit was asked about" 1
+    (match (question_of result).shown with
+     | Range { units; _ } | Item_alone { units } -> List.length units);
   check int "one request" 1 (Fixture.post_count fixture.server);
   match Fixture.request_bodies fixture.server with
   | [ body ] ->
@@ -398,7 +401,10 @@ let test_the_item_alone_is_sent_without_memory () =
     Ask.run fixture.env { (input fixture (tail_of state)) with asked = Read_item_alone }
   in
   check string "the slot answers" answered (result_text result);
-  check bool "no fact is named" true (Option.is_none (question_of result).shown.memory);
+  check bool "no fact is named" true
+    (match (question_of result).shown with
+     | Item_alone _ -> true
+     | Range _ -> false);
   match Fixture.request_bodies fixture.server with
   | [ body ] ->
     let lines = String.split_on_char '\n' (String.concat "\n" (List.map snd (messages body))) in
@@ -491,7 +497,9 @@ let test_a_direct_write_during_the_read_is_read_again () =
   check string "the slot answers" answered (result_text result);
   check int "two rounds of tail, bytes and tail" 4 !reads;
   check (option int) "the question shows the written fact" (Some 1)
-    (Option.map List.length (question_of result).shown.memory)
+    (match (question_of result).shown with
+     | Range { memory; _ } -> Some (List.length memory)
+     | Item_alone _ -> None)
 ;;
 
 (* G4. Ten body deadlines pass on the ask's clock while another request

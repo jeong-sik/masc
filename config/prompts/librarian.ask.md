@@ -33,14 +33,15 @@ template_variables: []
      - `"chat"`: `role`, `speaker` / `content` / `tool_call`(`id`, `name`); 깨진 줄은 `"chat_unreadable"`.
      - `"external"`: `actor`, `source`, `urgency`, `content`.
      - `"tool_observation"`: `tool_name`, `outcome`(`"succeeded"` | `"failed"` | `"unknown"`); `"untagged"`.
-   - `Read_item_alone`(단일 항목 초과 시)에는 앞 Memory·`working_state` 없이 `u1` 한 항목만 실리고, `Make_room`에는 단위 대신 압축 요청 문장이 실립니다.
-5. `question-end: <뒤 절반>` — 질문 ID의 32자 소문자 hex 뒤 절반(`units:` 해시)
+   - `Read_item_alone`(단일 항목 초과 시)에는 앞 Memory·`working_state` 없이 `u1` 한 항목만 실립니다.
+   - `Make_room`에는 `units:` 줄 대신 `make_room: "..."` 줄이 실립니다. 값은 방금 읽은 항목이 이 Memory 와 함께는 어느 slot 에도 들어가지 않아 그 항목만 따로 읽었다는 문장 하나입니다. 몇 개로, 몇 바이트로 줄이라는 목표는 없습니다.
+5. `question-end: <뒤 절반>` — 질문 ID의 32자 소문자 hex 뒤 절반(`units:` 줄 해시, `Make_room`에서는 `make_room:` 줄 해시)
 
 ### 모드별 허용 범위
 
 - **`Read_range`**: `add`, `seen`, `revise`, `merge`, `drop` 및 `working_state` 변경(`null` 또는 문자열) 모두 가능합니다.
 - **`Read_item_alone`**: **`add` 와 `"working_state": null` 만 허용**됩니다. 보이지 않는 Memory를 추측해 `drop`·`merge`·`revise`·`seen`을 내거나 `working_state`를 덮어쓰지 마세요.
-- **`Make_room`**: 단위가 없으므로 `"from": []`를 쓰는 기존 Memory 정리(`merge`·`revise`·`drop`)와 `working_state` 정리만 합니다(`seen` 금지). 상시 제약·정체성 결정·쓸 날이 남은 기록은 지우지 마세요.
+- **`Make_room`**: 단위가 없으므로 `"from": []`를 쓰는 기존 Memory 정리(`merge`·`revise`·`drop`)와 `working_state` 정리만 합니다. 다시 본 근거가 없으니 `seen` 을, 새로 읽은 것이 없으니 `add` 를 쓰지 마세요. 상시 제약·정체성 결정·쓸 날이 남은 기록은 지우지 마세요.
 
 ## 출력 와이어 계약 (`Librarian_answer`)
 

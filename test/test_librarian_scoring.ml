@@ -43,10 +43,12 @@ let case : Scoring.case =
   { name = "the port moved"
   ; question
   ; shown =
-      { memory =
-          Some [ "m1", Types.memory_id port; "m2", Types.memory_id owner; "m3", Types.memory_id probe ]
-      ; units = [ "u1", 10 ]
-      }
+      Read
+        (Range
+           { memory =
+               [ "m1", Types.memory_id port; "m2", Types.memory_id owner; "m3", Types.memory_id probe ]
+           ; units = [ "u1", 10 ]
+           })
   ; facts = [ port; owner; probe ]
   ; planted = [ "8935" ]
   ; must_keep =
@@ -136,9 +138,11 @@ let test_a_token_memory_already_holds () =
     { name = "the port is known"
     ; question
     ; shown =
-        { memory = Some [ "m1", Types.memory_id known; "m2", Types.memory_id owner ]
-        ; units = [ "u1", 10 ]
-        }
+        Read
+          (Range
+             { memory = [ "m1", Types.memory_id known; "m2", Types.memory_id owner ]
+             ; units = [ "u1", 10 ]
+             })
     ; facts = [ known; owner ]
     ; planted = [ "8935"; "9000" ]
     ; must_keep = []
@@ -177,14 +181,15 @@ let test_an_answer_that_forgets_what_the_turn_was_not_shown () =
     { name = "the turn knew nothing"
     ; question
     ; shown =
-        { memory =
-            Some
-              [ "m1", Types.memory_id cutoff
-              ; "m2", Types.memory_id approvals
-              ; "m3", Types.memory_id hotfix
-              ]
-        ; units = [ "u1", 10 ]
-        }
+        Read
+          (Range
+             { memory =
+                 [ "m1", Types.memory_id cutoff
+                 ; "m2", Types.memory_id approvals
+                 ; "m3", Types.memory_id hotfix
+                 ]
+             ; units = [ "u1", 10 ]
+             })
     ; facts = [ cutoff; approvals; hotfix ]
     ; planted = []
     ; must_keep = []

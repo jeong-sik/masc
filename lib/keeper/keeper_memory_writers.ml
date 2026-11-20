@@ -10,7 +10,7 @@ let rec update change =
 
 let workspace_key ~base_path = Keeper_registry_types.canonical_base_path_exn base_path
 
-let start ~sw ~ask ~start_turn_log ~(config : Workspace.config) =
+let start ~sw ~ask ~ask_room ~start_turn_log ~(config : Workspace.config) =
   let base_path = config.base_path in
   let key = workspace_key ~base_path in
   let memory_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -27,6 +27,7 @@ let start ~sw ~ask ~start_turn_log ~(config : Workspace.config) =
         ; keeper_name
         })
       ~ask
+      ~ask_room
       ~start_turn_log
   in
   update (By_workspace.add key table);
@@ -44,7 +45,7 @@ let find ~base_path = By_workspace.find_opt (workspace_key ~base_path) (Atomic.g
 (* The lane value under the registry published now. A registry that is
    being replaced is not read: the end of the replacement signals the lane
    (§9.5). *)
-let declare ~prompt ~answer_schema writers =
+let declare ~prompt ~answer_schemas writers =
   let undeclared reason =
     Log.Keeper.warn "librarian memory lane has no value: %s" reason;
     Librarian_writers.declaration_changed writers None
@@ -58,13 +59,13 @@ let declare ~prompt ~answer_schema writers =
        | Resolver_snapshot_rejected _ | Targets_refused _ ) as error) ->
     undeclared (Registry.publication_error_to_string error)
   | Ok registry ->
-    (match Librarian_memory_lane.resolve ~prompt ~answer_schema registry with
+    (match Librarian_memory_lane.resolve ~prompt ~answer_schemas registry with
      | Ok (value, resolved) ->
        Librarian_writers.declaration_changed writers (Some { value; resolved })
      | Error why -> undeclared (Librarian_memory_lane.show_unavailable why))
 ;;
 
-let follow_declaration ~sw ~prompt ~answer_schema writers =
+let follow_declaration ~sw ~prompt ~answer_schemas writers =
   (* The registry calls back outside its mutex, from any domain, and the
      callback only signals. Signals that come while a value is being sent
      are one change. *)
@@ -84,7 +85,7 @@ let follow_declaration ~sw ~prompt ~answer_schema writers =
   (* Both revisions are read before the value is: a publication after that
      read wakes the next wait at once. *)
   let rec follow ~catalogue ~lane =
-    declare ~prompt ~answer_schema writers;
+    declare ~prompt ~answer_schemas writers;
     let catalogue, lane =
       Eio.Fiber.first
         (fun () -> Runtime.await_catalogue_change ~after:catalogue, lane)

@@ -1003,6 +1003,12 @@ let never_asks (_ : Masc.Librarian_ask.input) : Masc.Librarian_read_result.t =
   failwith "a Memory writer asked, and the case declares no Librarian lane"
 ;;
 
+(** The room ask of the same writer. A writer asks to make room only after it
+    read an item alone, so a call fails the case. *)
+let never_makes_room (_ : Masc.Librarian_ask.room_input) : Masc.Librarian_room_result.t =
+  failwith "a Memory writer asked to make room, and the case declares no Librarian lane"
+;;
+
 (** Stores for a writer that never asks: its Memory directory stands for
     them. *)
 let stores_of_place (place : Masc.Librarian_machine.place) : Masc.Librarian_unit_content.stores =
@@ -1026,7 +1032,7 @@ let ensure_memory_writer ~sw ~(config : Masc.Workspace.config) name =
   if Option.is_none (Masc.Keeper_memory_writers.find ~base_path)
   then
     ignore
-      (Masc.Keeper_memory_writers.start ~sw ~ask:never_asks
+      (Masc.Keeper_memory_writers.start ~sw ~ask:never_asks ~ask_room:never_makes_room
          ~start_turn_log:(Masc.Keeper_turn_log_store_start.run config) ~config
        : Masc.Librarian_writers.t);
   if not (Masc.Keeper_registry.is_registered ~base_path name)
@@ -1170,7 +1176,7 @@ let commit_memory_read
   in
   let question : Masc.Librarian_read_result.question =
     { Masc.Librarian_read_result.id
-    ; shown = { Masc.Librarian_plan.memory = Some []; units = [ "turn", closing.line ] }
+    ; shown = Masc.Librarian_plan.Range { memory = []; units = [ "turn", closing.line ] }
     ; basis = Masc.Librarian_log.snapshot_after (Masc.Librarian_store.tail store)
     ; reach =
         { Masc.Librarian_read_result.line = closing.line
@@ -1185,7 +1191,7 @@ let commit_memory_read
   in
   let plan =
     Masc.Librarian_plan.of_answer
-      ~shown:question.Masc.Librarian_read_result.shown
+      ~shown:(Masc.Librarian_plan.Read question.Masc.Librarian_read_result.shown)
       ~facts:(Masc.Librarian_store.memory store).Masc.Keeper_memory_os_current_types.facts
       ~removed_since:[]
       ~at:11.

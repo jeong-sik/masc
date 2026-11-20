@@ -183,11 +183,22 @@ let first_seq = 1
 
 (* Where a commit leaves reading. *)
 type reading =
-  | Stays (* A direct write and an adoption do not move it. *)
+  | Stays (* A direct write and an adoption move neither it nor the working state. *)
   | Moves of
       { reach : Librarian_read_result.reach
       ; working_state : Librarian_plan.working_state
       }
+  | Stays_with of Librarian_plan.working_state
+  (* An answer that makes room does not move it, and may replace the working
+     state. *)
+
+(* The working state a line carries: the plan's when it replaced it,
+   otherwise the line before's. *)
+let working_state_after ~(before : string option) : Librarian_plan.working_state -> string option =
+  function
+  | Kept | Alone (_ : Log.alone_working_state) -> before
+  | Replaced text -> Some text
+;;
 
 (* A line carries the reading position and the working state of the line
    before it, unless it moves them. The turn log it reads is always the one
@@ -221,11 +232,10 @@ let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects ~re
       turn_log_offset = reach.turn_log_offset
     ; covers_through = Through { line = reach.line; within = reach.within }
     ; covered = reach.covered
-    ; working_state =
-        (match working_state with
-         | Kept | Alone (_ : Log.alone_working_state) -> kept.working_state
-         | Replaced text -> Some text)
+    ; working_state = working_state_after ~before:kept.working_state working_state
     }
+  | Stays_with working_state ->
+    { kept with working_state = working_state_after ~before:kept.working_state working_state }
 ;;
 
 (* The error of an append does not say whether the line is on disk: a write
@@ -309,6 +319,37 @@ let commit_read t ~at ~(question : Librarian_read_result.question) ~slot (plan :
   in
   commit t ~at ~cause ~effects:plan.effects
     ~reading:(Moves { reach = question.reach; working_state = plan.working_state })
+;;
+
+(* §7.4 「자리 내기」 and §8.4: the line does not move reading. *)
+let commit_room t ~at ~(question : Librarian_room_result.question) ~slot (plan : Librarian_plan.t) =
+  commit t ~at
+    ~cause:(Log.Make_room { question = question.id; slot; trace = question.trace })
+    ~effects:plan.effects ~reading:(Stays_with plan.working_state)
+;;
+
+(* The working state of the tail, as a reading question shows it. *)
+let tail_working_state t =
+  match t.tail with
+  | Started _ -> None
+  | Committed commit -> commit.working_state
+;;
+
+(* [Set ""] clears the working state ({!Librarian_answer.working_state}): a
+   line that holds [""] and a line that holds none both hold no working
+   state, so replacing one with the other changes nothing. *)
+let stated : string option -> string option = function
+  | Some "" | None -> None
+  | Some text -> Some text
+;;
+
+let changes t (plan : Librarian_plan.t) =
+  Envelope.changes_facts plan.effects
+  ||
+  let before = tail_working_state t in
+  not
+    (Option.equal String.equal (stated before)
+       (stated (working_state_after ~before plan.working_state)))
 ;;
 
 let commit_skip t ~at ~hole reach =

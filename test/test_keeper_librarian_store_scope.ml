@@ -312,7 +312,8 @@ let test_operator_retractions_go_through_the_writer () =
           [ "operator-1"; "plan-1"; memory_id_of port; "wrong" ]
           [ operator; trace; id; reason ]
       | Direct { by = Keeper | Operator _; write = Remember _ | Supersede _ | Retract _; _ }
-      | Adopt _ | Read _ | Skip _ -> fail "the last commit line is not the operator's retraction");
+      | Adopt _ | Read _ | Make_room _ | Skip _ ->
+        fail "the last commit line is not the operator's retraction");
      (match last.effects.removed with
       | [ ((fact : Masc.Keeper_memory_os_types.fact), Retracted { by = Operator by; reason }) ] ->
         check (list string) "the fact left with the operator's name and reason"
@@ -482,7 +483,7 @@ let test_operator_resumes_and_adopts () =
         check (pair string string) "the line names the operator and the snapshot"
           ("operator-1", hex (Digest.digest_of_bytes first))
           (by, hex observed)
-      | Direct _ | Read _ | Skip _ -> fail "the last commit line is not the adoption")
+      | Direct _ | Read _ | Make_room _ | Skip _ -> fail "the last commit line is not the adoption")
    | [] -> fail "nothing was committed");
   check int "one line was appended" (before + 1) (List.length (commits a));
   keeper_remembers a owner;

@@ -74,6 +74,7 @@ val create
   -> declared:(unit -> Librarian_machine.declared option)
   -> stores:Librarian_unit_content.stores
   -> ask:(Librarian_ask.input -> Librarian_read_result.t)
+  -> ask_room:(Librarian_ask.room_input -> Librarian_room_result.t)
   -> start_turn_log:(unit -> (unit, string) result)
   -> Librarian_machine.place
   -> t

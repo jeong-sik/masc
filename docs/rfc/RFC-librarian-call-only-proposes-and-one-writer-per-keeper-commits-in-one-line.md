@@ -505,7 +505,7 @@ type purge_refused = Turn_log_unwritable of io_error
 type ask =
   | Read_range of width                 (* 읽은 자리부터 폭만큼. Memory 를 보여 준다 *)
   | Read_item_alone                     (* 맨 앞 항목 하나. Memory 와 하던 일을 보여 주지 않는다 *)
-  | Make_room of { after : item_ref }   (* Memory 만 보여 준다. 항목은 없다 *)
+  | Make_room of { trace : string }    (* Memory 와 하던 일만 보여 준다. 항목은 없다. trace 는 방금 항목만 읽은 단위의 것이다 *)
 ```
 
 | 순서 | 들어가는 것 | `Read_range` | `Read_item_alone` | `Make_room` |
@@ -514,13 +514,14 @@ type ask =
 | 2 | 첫 줄 `question: <앞 절반>` | ○ | ○ | ○ |
 | 3 | 지금 Memory. fact 마다 `m1 … mN` 이름, claim, category, basis, `first_seen`, `last_seen` | ○ | – | ○ |
 | 4 | 하던 일(working state). 마지막 반영 줄의 글 | ○ | – | ○ |
-| 5 | 단위들. §5.5 대로 싣는다 | ○ | 항목 하나 | 「방금 읽은 항목이 Memory 와 함께는 들어가지 않았다」 한 문장 |
+| 5 | 단위들. §5.5 대로 싣는다 | ○ | 항목 하나 | `make_room:` 줄. 「방금 읽은 항목이 Memory 와 함께는 들어가지 않았다」는 문장 하나 |
 | 6 | 끝 줄 `question-end: <뒤 절반>` | ○ | ○ | ○ |
 
 - 순서는 고정이다. 같은 Memory 에 폭만 다른 질문은 1~4 가 같아서 provider 캐시가 앞부분을 다시 쓴다.
+- 코드는 결과 타입으로 둘을 나눈다. `Librarian_machine.asked = Read of Librarian_read_result.asked | Room of Librarian_room_result.asked` 다. 읽는 두 질문은 `read_result` 로, 자리 내기는 `room_result` 로 끝난다(§9.1).
 - `Read_item_alone` 은 인자가 없다. 맨 앞 항목은 꼬리가 정한다. 묻는 동안 읽은 자리를 옮기는 사건은 가던 묻기를 취소하므로(§9.2, §12.4), 그 항목은 묻는 동안 바뀌지 않는다.
 - fact 는 71자 id 대신 `m1 … mN` 으로 가리킨다. 단위도 질문이 붙인 짧은 이름으로 가리킨다. 지금은 답이 긴 id 를 옮겨 적다가 틀려서 답 전체가 거절됐다.
-- 질문 id 는 반쪽 둘이다. 앞 절반은 `sha256(선언, 그 질문이 싣는 Memory 바이트와 하던 일)` 의 반이고, 뒤 절반은 `units:` 줄 바이트 sha256 의 반이다. 두 반쪽은 본문을 나눠 덮는다. 그래서 Memory 만 바뀌면 앞 절반만 바뀐다. 답은 둘 다 되돌려 적는다.
+- 질문 id 는 반쪽 둘이다. 앞 절반은 `sha256(선언, 그 질문이 싣는 Memory 바이트와 하던 일)` 의 반이고, 뒤 절반은 `units:` 줄 바이트 sha256 의 반이다. 자리 내기는 `make_room:` 줄의 반이다. 선언은 그 질문 종류의 답 schema 를 싣는다(§6.2). 두 반쪽은 본문을 나눠 덮는다. 그래서 Memory 만 바뀌면 앞 절반만 바뀐다. 답은 둘 다 되돌려 적는다.
   - 항목만 싣는 질문의 id 는 Memory 가 바뀌어도 같다. 그래야 그 질문에 대한 크기 사실(§7.4)이 직접 쓰기마다 버려지지 않는다.
   - 입력의 앞이나 뒤를 잘라 받는 slot 은 잘린 쪽 절반을 적지 못한다. 그 답은 `Echo_mismatch` 로 버린다.
 - 질문은 (선언, Memory 바이트, 하던 일, 단위, 폭)의 순수 함수다. 시각이나 카운터를 싣지 않는다. 같은 입력에서 같은 바이트가 나오는지를 묻기 층의 시험이 고정한다. 읽는 것이 모두 이미 디스크에 있다. 그래서 보내기 전에 따로 저장할 것이 없다(`persist_before_model_call`).
@@ -541,6 +542,11 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 ```
 
 - 답은 바뀌는 것만 적는다. 답이 이름 붙이지 않은 fact 는 그대로 남는다.
+- 답 schema 는 질문 종류마다 하나다. 질문이 보인 것만 가리킬 수 있게 op 를 고른다.
+  - `Read_range`: op 다섯, 하던 일은 글이나 `null`.
+  - `Read_item_alone`: `add` 하나, 하던 일은 `null`. 가리킬 fact 도 바꿀 하던 일도 보이지 않았다.
+  - `Make_room`: `drop`, `merge`, `revise`, 하던 일은 글이나 `null`. 단위가 없으니 다시 본 것(`seen`)도 새로 안 것(`add`)도 없다.
+  - 디코더는 질문 종류를 모른다. schema 를 따르지 않는 slot 의 답도 같은 규칙으로 읽는다. 그 질문에서 쓸 수 없는 op 는 계획이 종류를 보고 하나씩 뺀다. 항목만 읽은 답의 `add` 밖의 op 는 `Not_valid_alone`, 자리 내기 답의 `add` 와 `seen` 은 `Not_valid_in_room` 이다. 답 전체를 버리지 않는다.
 - 다시 본 것은 이름으로 적는다(`Seen`). 단위가 Memory 의 fact 와 같은 것을 다시 말했으면, 답은 그 fact 의 이름과 그 단위들을 적는다. claim 은 옮겨 적지 않는다.
   - 옮겨 적으면 글자가 조금 다른 새 fact 가 생긴다. 옛 반영에서 답이 글로 가리킨 기억 27개 가운데 18개가 입력 기억과 1~19자 달랐다(연구 문서(#52376) §0).
   - 단위를 하나도 적지 않은 `Seen` 은 질문이 보여 준 Memory 를 되읽은 것이다. 관측이 아니라서 `Schema_violation` 이다.
@@ -629,7 +635,7 @@ and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed:
 ```
 
 - `Refused_by_lane` 은 지금 선언된 slot 가운데 질문을 거절한 slot 이 하나는 있는 `No_answer` 이고, `Silent_lane` 은 그런 slot 이 없는 `No_answer` 다. 둘은 `decide` 의 조건이다(§9.3).
-- `No_answer` 는 질문을 싣는다. 폭이 드는 `offered` 는 L7a 가 더했다. 질문이 본 스냅샷 `basis` 는 L7b 가 질문의 칸으로 더했다. 질문을 만들 때 꼬리가 가리킨 스냅샷 sha 이고, 항목만 묻는 질문도 싣는다. §7.4 의 판정이 이것을 지금 스냅샷과 견준다. 남은 칸 `head` 는 L7c 가 더한다.
+- `No_answer` 는 질문을 싣는다. 폭이 드는 `offered` 는 L7a 가 더했다. 질문이 본 스냅샷 `basis` 는 L7b 가 질문의 칸으로 더했다. 질문을 만들 때 꼬리가 가리킨 스냅샷 sha 이고, 항목만 묻는 질문도 싣는다. §7.4 의 판정이 이것을 지금 스냅샷과 견준다. 남은 칸 `head` 는 그것을 읽는 행(§12, L9)이 더한다. 자리 내기 줄은 항목을 따로 적지 않는다(§8.1).
 
 - 폭과 반영한 수는 결과의 `offered` 에서 읽는다. 쓰는 쪽이 따로 세지 않는다. fiber 가 읽은 뒤에 턴이 닫혔을 수 있다.
 - 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)과 쓰는 쪽이 더는 열려 있지 않은 것은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
@@ -758,7 +764,7 @@ type bottom = { with_memory : judged option; alone : judged option }  (* 맨 앞
 |---|---|---|---|---|
 | 한 항목과 Memory | 반영하고 다시 묻는다 | 바로 그 항목만 묻는다 | `Refused_at_bottom` | `Resting` |
 | 그 항목만(`Read_item_alone`) | 반영한다. 그다음 자리 내기를 한 번 묻는다 | `Skip (Item_exceeds_window)` 을 반영하고 다시 묻는다 | `Refused_at_bottom` | `Resting` |
-| 자리 내기(`Make_room`) | 효과 있는 op 가 있으면 반영한다. 다시 묻는다 | 다시 묻는다 | 다시 묻는다 | 다시 묻는다 |
+| 자리 내기(`Make_room`) | Memory 나 하던 일을 바꾸면 반영한다. 다시 묻는다 | 다시 묻는다 | 다시 묻는다 | 다시 묻는다 |
 
 - **항목만 읽기.** 그 항목을 Memory 와 하던 일 없이 보여 준다. 답에서 `Add` 와 `working_state = Keep` 만 받는다. 그 밖은 반영하지 않고 줄에 적는다. Memory 를 보지 않은 답이 Memory 를 지우거나 하던 일을 갈아 쓸 수는 없다. 항목만 읽기는 「입력」이 있어야 시작한다. 그 답은 묻는 사이에 Memory 나 slot 이 바뀌었어도 반영한다. 더하기만 하는 답이라 잃는 것이 없다.
 - **자리 내기.** Memory 와 하던 일만 보여 주고 줄일 것을 묻는다. 항목만 읽어 반영한 바로 뒤에 한 번 묻는다. 그 묻기 동안 직접 쓰기가 fact 를 지웠거나 lane 값이 바뀌었으면 묻지 않는다. 근거가 이미 옛것이다.
@@ -887,7 +893,7 @@ type shown =
   | Item_alone of alone_working_state   (* Read_item_alone *)
 type cause =
   | Read of { question : Question_id.t; shown : shown; slot : string; trace : string; missing : missing_at list }
-  | Make_room of { question : Question_id.t; after : item_ref; slot : string }
+  | Make_room of { question : Question_id.t; slot : string; trace : string }
   | Direct of { by : actor; trace : string; write : write }
   | Skip of { hole : hole }
   | Adopt of { by : string; observed : Sha256.t }
@@ -905,6 +911,7 @@ type log_line =
 ```
 
 - 마지막 줄 하나면 다시 시작할 수 있다. 그래서 하던 일(`working_state`)을 줄마다 다시 적는다. 크기는 §10 에 있다.
+- `Make_room` 줄은 읽은 자리를 옮기지 않는다. 그래서 그 줄의 `covers_through` 가 방금 항목만 읽은 자리다. 그 항목을 칸으로 따로 적지 않는다. `trace` 는 그 항목이 든 단위의 trace 다. 답이 합치거나 고쳐 만든 fact 가 origin 으로 싣는다.
 - `seq` 는 `Started` 뒤의 첫 `Committed` 가 1 이다. 그 뒤로 줄마다 1 씩 는다. `Started` 를 다시 쓰면 1 부터 다시 센다.
 - `Started.revision` 은 그 줄이 가리키는 스냅샷의 revision 이다. `Committed.revision` 은 그 줄 뒤의 스냅샷의 revision 이다.
 - `Sha256.t` 는 checkpoint object 가 쓰는 digest 타입이다(`Agent_core.Checkpoint_objects.digest`). 스냅샷 바이트의 sha256 을 소문자 16진수 64자로 적는다.
@@ -918,7 +925,7 @@ type log_line =
 
 1. **계획**(순수 함수). `Librarian_plan.of_answer ~shown ~facts ~removed_since ~at ~trace_id answer` 가 새 Memory, `effects`, 받아들인 하던 일을 돌려준다. 새 Memory 는 `Librarian_effects.apply` 를 `effects` 에 적용한 값이다. 그래서 줄만으로 스냅샷을 다시 쓸 수 있다.
 2. **쓰기 전 상태 확인.** `memory-current.json` 을 읽어 sha 를 낸다. 마지막 줄의 `after`(또는 `Started.snapshot`)와 같아야 한다. 다르면 `Stopped (Log_diverged _)` 로 가고 쓰지 않는다(`authoritative_read_only`).
-3. **인코딩.** 지금 쓰는 스냅샷 codec 으로 새 envelope 을 만든다. `revision + 1` 이고 `after = sha256 bytes` 다. `Skip` 이나 효과 없는 답은 바이트를 그대로 두고 `after = basis` 다. 읽은 자리가 움직였으므로 줄은 쓴다.
+3. **인코딩.** 지금 쓰는 스냅샷 codec 으로 새 envelope 을 만든다. `revision + 1` 이고 `after = sha256 bytes` 다. `Skip` 이나 효과 없는 답은 바이트를 그대로 두고 `after = basis` 다. 읽은 자리가 움직였으므로 줄은 쓴다. 자리 내기는 읽은 자리를 옮기지 않으므로, 바이트도 하던 일도 바꾸지 않는 답은 줄을 쓰지 않는다. 하던 일의 `""` 와 없음은 같은 것으로 본다. 둘 다 하던 일이 없다.
    - envelope 은 `revision`, `updated_at`, `source`, `facts`, `change` 다. 지운 이유(`removal`)는 담지 않는다. 그것은 줄에만 있다.
    - `source.kind` 는 `Read` 와 `Make_room` 에서 `librarian`, `Remember` 와 `Supersede` 에서 `explicit_write`, `Retract` 에서 `explicit_retract` 다. `change` 는 `effects` 에서 만든다.
    - `source.trace_id` 는 줄이 싣는 trace 다. 직접 쓰기에서는 그 쓰기가 온 trace 다(`Direct.trace`). Keeper 의 턴이거나, 운영자 route 가 자기 요청에 붙인 이름이다.
@@ -962,7 +969,7 @@ type log_line =
 
 - 상관없는 쓰기 하나가 답 전체를 버리게 하지 않는다. 지금은 반영까지 간 답 19개 가운데 8개를 이렇게 버렸다(§1.1).
 - 질문을 만든 뒤에 한 철회를 그 질문의 답이 되돌리지 못한다.
-- `Make_room` 의 답은 다르다. 기다리는 사이 fact 가 지워졌으면 그 답은 이미 없는 Memory 를 두고 한 말이다. 반영하지 않고 센다.
+- `Make_room` 의 답은 다르다. 기다리는 사이 fact 가 지워졌으면 그 답은 이미 없는 Memory 를 두고 한 말이다. 반영하지 않는다. 마지막 자리 내기의 결과와 Keeper 로그에 남는다.
 
 ### 8.4 읽은 자리가 움직이는 규칙
 
@@ -1158,7 +1165,9 @@ type event =
   | Declaration_changed of lane option
   | Operator of operator_act          (* Resume, Skip_item, Skip_line, Restart_reading, Adopt *)
   | Retire
-and ended = Read_ended of read_result | Room_ended of room_result
+and ended =
+  | Read_ended of { asked : read_asked; result : read_result }   (* 결과는 물은 폭과 같이 온다 *)
+  | Room_ended of room_result
 ```
 
 - 상태 옆에 쓰는 쪽이 메모리에 두는 값이 있다. 폭 기억, 바닥의 크기 사실, Memory 없이 읽었다는 표시, 마지막 묻기의 결과, 마지막 자리 내기의 결과, lane 값, 턴 기록을 마지막으로 본 길이, 그리고 view 다(§11.1).
@@ -1267,14 +1276,15 @@ lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slo
 | `Read_range`, 한 항목 | `Refused_by_lane`, `Silent_lane` | §7.4 의 표. 그 항목만 묻기, `Refused_at_bottom`, `Resting` 가운데 하나 |
 | `Read_item_alone` | `Answered` | `Add` 와 `Keep` 만 반영한다. Memory 없이 읽었다는 표시를 올린다. 묻는 사이 지워진 fact 가 없고 lane 값이 그대로면 바로 `Make_room` 을 묻는다. 아니면 다음 묻기 |
 | `Read_item_alone` | `Refused_by_lane`, `Silent_lane` | §7.4 의 표. `Skip (Item_exceeds_window)` 반영, `Refused_at_bottom`, `Resting` 가운데 하나 |
-| `Make_room` | `Room_answered` | 효과 있는 op 가 있고 묻는 사이 지워진 fact 가 없으면 반영한다. 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
-| `Make_room` | `Room_refused`, `Room_silent`, `Room_failed` | 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
-| `Make_room` | `Memory_diverged` | `Stopped (Log_diverged _)` |
-| `Make_room` | `Snapshot_fault` | 읽는 질문과 같다 |
+| `Make_room` | `Room_answered` | 묻는 사이 지워진 fact 가 없고, 계획이 Memory 나 하던 일을 바꾸면 반영한다. 읽은 자리와 폭 기억, 바닥은 그대로다. 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
+| `Make_room` | `Room_not_answered`(거절과 말 없음), `Room_failed` | 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
+| `Make_room` | `Room_memory_diverged` | `Stopped (Log_diverged _)` |
+| `Make_room` | `Room_snapshot_fault` | 읽는 질문의 `Snapshot_fault` 와 같다 |
 
 - `Refused_by_lane` 과 `Silent_lane` 은 지금 선언된 slot 의 결과만으로 다시 정한다. 묻는 사이 선언에서 빠진 slot 이 한 거절은 세지 않는다. 남은 slot 가운데 거절한 것이 없으면 말 없음이다.
 - 묻는 사이에 lane 값이 바뀌었고 지금 선언된 slot 가운데 결과가 있는 것이 하나도 없으면, 답이 아닌 결과는 `Resting` 으로 가지 않고 다음 묻기다. 그 묻기는 지금 lane 값으로 가므로 되풀이되지 않는다. 운영자가 방금 선언한 lane 에 pulse 한 번을 기다리지 않고 묻는다.
 - 한 항목에서 「입력」과 「모두」를 읽는 것은 결과가 본 스냅샷이 지금의 스냅샷일 때뿐이다. 아니면 다음 묻기다(§7.4).
+- 자리 내기가 어떻게 끝났는지는 카운터(`masc_keeper_librarian_room_outcomes_total`, 이름표 `outcome`)가 센다. 줄을 쓰지 않은 끝도 센다. 그래서 「자리 내기가 Memory 를 얼마나 자주 바꿨나」를 반영 기록 없이 잴 수 있다.
 - 자리 내기의 결과는 마지막 묻기의 결과를 갈아 쓰지 않는다. 그래서 자리 내기는 경고를 켜지도 읽기를 세우지도 않는다. 결과는 온 그대로 적고, 물을 때의 Memory sha 와 lane 값을 같이 적는다. 모든 slot 이 입력 크기로 거절했고 그 둘이 지금 것과 같을 때만 E5 가 켜진다(§12.2).
 
 **`Resting`**

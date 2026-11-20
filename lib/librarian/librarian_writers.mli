@@ -35,6 +35,7 @@ val create
   -> place:(string -> Librarian_machine.place)
   -> stores:(string -> Librarian_unit_content.stores)
   -> ask:(Librarian_ask.input -> Librarian_read_result.t)
+  -> ask_room:(Librarian_ask.room_input -> Librarian_room_result.t)
   -> start_turn_log:(string -> (unit, string) result)
   -> t
 

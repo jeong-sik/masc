@@ -22,6 +22,7 @@ type why_not =
   | Source_outside_question
   | Removed_during_flight of { seq : int }
   | Not_valid_alone
+  | Not_valid_in_room
   | Successor_unsupported
 
 type t =
@@ -40,6 +41,7 @@ let why_not_kind = function
   | Source_outside_question -> "source_outside_question"
   | Removed_during_flight _ -> "removed_during_flight"
   | Not_valid_alone -> "not_valid_alone"
+  | Not_valid_in_room -> "not_valid_in_room"
   | Successor_unsupported -> "successor_unsupported"
 ;;
 

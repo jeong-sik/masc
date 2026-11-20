@@ -60,6 +60,7 @@ type t =
   ; declared : unit -> Machine.declared option
   ; stores : Librarian_unit_content.stores
   ; ask : Librarian_ask.input -> Librarian_read_result.t
+  ; ask_room : Librarian_ask.room_input -> Librarian_room_result.t
   ; start_turn_log : unit -> (unit, string) result
   ; mailbox : event Eio.Stream.t
   ; status : status Atomic.t
@@ -200,15 +201,33 @@ let live t ~sw =
   let start (asking : Machine.asking) =
     let cancelled, cancelling = Eio.Promise.create () in
     out := Some cancelling;
-    let input : Librarian_ask.input =
-      { place = t.place
-      ; stores = t.stores
-      ; tail = tail t
-      ; lane = asking.lane.value
-      ; resolved = asking.lane.resolved
-      ; asked = asking.asked
-      ; bottom = asking.bottom
-      }
+    (* The result comes back with what was asked, so the machine reads a
+       reading result as the reading it asked for. *)
+    let asked () : Machine.ended =
+      match asking.asked with
+      | Read asked ->
+        Read_ended
+          { asked
+          ; result =
+              t.ask
+                { place = t.place
+                ; stores = t.stores
+                ; tail = tail t
+                ; lane = asking.lane.value
+                ; resolved = asking.lane.resolved
+                ; asked
+                ; bottom = asking.bottom
+                }
+          }
+      | Room asked ->
+        Room_ended
+          (t.ask_room
+             { place = t.place
+             ; tail = tail t
+             ; lane = asking.lane.value
+             ; resolved = asking.lane.resolved
+             ; asked
+             })
     in
     Eio.Fiber.fork_daemon ~sw (fun () ->
       (match
@@ -216,10 +235,9 @@ let live t ~sw =
            (fun () ->
               Eio.Promise.await cancelled;
               None)
-           (fun () -> Some (t.ask input))
+           (fun () -> Some (asked ()))
        with
-       | Some result ->
-         Eio.Stream.add t.mailbox (Ask_ended { ask = asking.ask; result = Read_ended result })
+       | Some result -> Eio.Stream.add t.mailbox (Ask_ended { ask = asking.ask; result })
        | None -> ());
       `Stop_daemon)
   in
@@ -319,7 +337,7 @@ let live t ~sw =
   loop state
 ;;
 
-let create ~now ~registered ~declared ~stores ~ask ~start_turn_log place =
+let create ~now ~registered ~declared ~stores ~ask ~ask_room ~start_turn_log place =
   let gone, ended = Eio.Promise.create () in
   let mailbox = Eio.Stream.create max_int in
   Eio.Stream.add mailbox Declaration_changed;
@@ -329,6 +347,7 @@ let create ~now ~registered ~declared ~stores ~ask ~start_turn_log place =
   ; declared
   ; stores
   ; ask
+  ; ask_room
   ; start_turn_log
   ; mailbox
   ; status = Atomic.make Booting

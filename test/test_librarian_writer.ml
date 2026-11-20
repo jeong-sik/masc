@@ -132,6 +132,7 @@ let start ?(registered = fun () -> true) ?(start_turn_log = fun () -> Ok ()) ~sw
   let writer =
     Writer.create ~now:(ticking ()) ~registered ~declared:(fun () -> None)
       ~stores:(Masc_test_deps.stores_of_place place) ~ask:Masc_test_deps.never_asks
+      ~ask_room:Masc_test_deps.never_makes_room
       ~start_turn_log place
   in
   Eio.Fiber.fork_daemon ~sw (fun () ->

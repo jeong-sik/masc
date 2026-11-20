@@ -66,10 +66,11 @@ let held ?(first_seen = 100.0) ?(category = Types.Fact) claim : Types.fact =
 let id = Types.memory_id
 
 let shown_of ?(units = [ "u1", 10 ]) facts : Plan.shown =
-  { memory =
-      Some (List.mapi (fun index fact -> Printf.sprintf "m%d" (index + 1), id fact) facts)
-  ; units
-  }
+  Read
+    (Range
+       { memory = List.mapi (fun index fact -> Printf.sprintf "m%d" (index + 1), id fact) facts
+       ; units
+       })
 ;;
 
 let board_post = "p-0123456789abcdef0123456789abcdef"
@@ -333,12 +334,12 @@ let ans_revise_working_state =
     ]
 ;;
 
-(* Case 7: [Read_item_alone] mode (shown.memory = None): only [add] +
+(* Case 7: [Read_item_alone] mode (no Memory shown): only [add] +
    [working_state = null] apply cleanly. *)
 let case_read_item_alone : Scoring.case =
   { name = "Read_item_alone accepts add with working_state null"
   ; question = asked
-  ; shown = { memory = None; units = [ "u1", 10 ] }
+  ; shown = Read (Item_alone { units = [ "u1", 10 ] })
   ; facts = [ c5_identity ]
   ; planted = [ "8443" ]
   ; must_keep = []

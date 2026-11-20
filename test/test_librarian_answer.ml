@@ -232,6 +232,32 @@ let test_question_id_halves () =
   check bool "not hexadecimal" false (accepted ~front:(String.make 32 'g') ~back)
 ;;
 
+(* What each kind of question lets its answer use (§6.2): the op tokens of
+   its schema and the type of its working state. *)
+let schema_offers (schema : Yojson.Safe.t) =
+  let open Yojson.Safe.Util in
+  let properties = member "properties" schema in
+  let ops =
+    List.concat_map
+      (fun op -> List.map to_string (to_list (member "enum" (member "op" (member "properties" op)))))
+      (to_list (member "anyOf" (member "items" (member "ops" properties))))
+  in
+  ops, Yojson.Safe.to_string (member "type" (member "working_state" properties))
+;;
+
+let test_schema_of_each_question () =
+  let offers = Alcotest.(pair (list string) string) in
+  check offers "Memory and units: every op, either working state"
+    ([ "add"; "drop"; "merge"; "revise"; "seen" ], {|["string","null"]|})
+    (schema_offers Answer.schemas.range);
+  check offers "one item alone: what it says anew, no working state"
+    ([ "add" ], {|"null"|})
+    (schema_offers Answer.schemas.item_alone);
+  check offers "Memory and no unit: the ops that name a fact without a unit"
+    ([ "drop"; "merge"; "revise" ], {|["string","null"]|})
+    (schema_offers Answer.schemas.room)
+;;
+
 let () =
   run "librarian_answer"
     [ ( "codec"
@@ -245,5 +271,6 @@ let () =
         ; test_case "one malformed op" `Quick test_op_rejections
         ] )
     ; "question id", [ test_case "halves" `Quick test_question_id_halves ]
+    ; "schemas", [ test_case "one for each question" `Quick test_schema_of_each_question ]
     ]
 ;;

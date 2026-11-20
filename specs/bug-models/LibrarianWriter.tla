@@ -464,7 +464,7 @@ HandleAsk(msg) ==
                          IF nf = m.facts THEN askNext(SetRoom(m, "unchanged"), "oth")
                          ELSE Committing(Line(m.facts, nf, "room", 0, m.pos, m.tl, msg.no, nf \ m.facts, msg.gret, current, TRUE),
                                          [SetRoom(m, "made") EXCEPT !.facts = nf], "next", G("oth"), mb, fibers, mb)
-             [] res = "room_fits_none" ->                                     \* Room_refused, every declared slot Input_too_large: reading goes on
+             [] res = "room_fits_none" ->                                     \* Room_not_answered, every declared slot Input_too_large: reading goes on
                   askNext([m EXCEPT !.room = "fits_none", !.roomMem = msg.basis, !.roomLane = m.askLane], "oth")
              [] res = "room_other"     -> askNext(SetRoom(m, "not_judged"), "oth")
      IN

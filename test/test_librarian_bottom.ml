@@ -17,7 +17,11 @@ let wide = slot "claude_code.wide"
 let lane ?(unadmitted = []) cli : Lane.t =
   { question =
       { prompt = "memory prompt"
-      ; answer_schema = `Assoc [ "type", `String "object" ]
+      ; answer_schemas =
+          { Lane.range = `Assoc [ "type", `String "object" ]
+          ; item_alone = `Assoc [ "type", `String "object" ]
+          ; room = `Assoc [ "type", `String "object" ]
+          }
       ; max_output_tokens = 4096
       ; thinking = None
       }

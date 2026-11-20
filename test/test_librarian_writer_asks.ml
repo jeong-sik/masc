@@ -30,6 +30,7 @@ let wide = "openrouter.wide"
 let prompt = "You keep one Keeper's Memory."
 let other_prompt = "Keep this Keeper's Memory, with a date on every event."
 let schema = `Assoc [ "type", `String "object" ]
+let schemas = { Lane.range = schema; item_alone = schema; room = schema }
 let max_output_tokens = 1024
 let chat_text = "the release train leaves on Friday"
 
@@ -133,7 +134,7 @@ let declared ?(prompt = prompt) () : Machine.declared =
   match Registry.current () with
   | Error error -> failf "no registry: %s" (Registry.publication_error_to_string error)
   | Ok registry ->
-    (match Lane.resolve ~prompt ~answer_schema:schema registry with
+    (match Lane.resolve ~prompt ~answer_schemas:schemas registry with
      | Ok (value, resolved) -> { value; resolved }
      | Error why -> failf "the Librarian lane: %s" (Lane.show_unavailable why))
 ;;
@@ -350,6 +351,7 @@ let table ?sw fixture ask =
     ~place:(fun (_ : string) -> fixture.place)
     ~stores:(fun (_ : string) -> fixture.stores)
     ~ask
+    ~ask_room:(Ask.run_room fixture.env)
     ~start_turn_log:(fun (_ : string) -> Ok ())
 ;;
 
@@ -423,6 +425,7 @@ let cause_text : Log_line.cause -> string = function
   | Direct _ -> "direct"
   | Adopt _ -> "adopt"
   | Read _ -> "read"
+  | Make_room _ -> "make_room"
   | Skip _ -> "skip"
 ;;
 
@@ -623,7 +626,8 @@ let test_an_ask_reads_the_tail_between_events () =
   in
   let writer =
     Writer.create ~now:Unix.gettimeofday ~registered:(fun () -> true) ~declared:declaration
-      ~stores:fixture.stores ~ask ~start_turn_log:(fun () -> Ok ()) fixture.place
+      ~stores:fixture.stores ~ask ~ask_room:Masc_test_deps.never_makes_room
+      ~start_turn_log:(fun () -> Ok ()) fixture.place
   in
   Eio.Fiber.fork_daemon ~sw:fixture.sw (fun () ->
     Writer.run writer;
@@ -760,7 +764,7 @@ let test_the_watcher_declares_a_published_lane () =
   ignore (close_turn fixture 1 chat_text : int);
   let ask, calls = counted fixture in
   let writers = table fixture ask in
-  Keeper_memory_writers.follow_declaration ~sw:fixture.sw ~prompt ~answer_schema:schema writers;
+  Keeper_memory_writers.follow_declaration ~sw:fixture.sw ~prompt ~answer_schemas:schemas writers;
   Writers.pulse writers [ keeper_id ];
   settled writers;
   check int "no lane, no ask" 0 (Atomic.get calls);

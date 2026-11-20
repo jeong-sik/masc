@@ -25,12 +25,22 @@ type slot_key =
   }
 [@@deriving eq, show]
 
+type schema =
+  (Yojson.Safe.t
+  [@equal Yojson.Safe.equal]
+  [@printer fun fmt json -> Format.pp_print_string fmt (Yojson.Safe.to_string json)])
+[@@deriving eq, show]
+
+type answer_schemas =
+  { range : schema
+  ; item_alone : schema
+  ; room : schema
+  }
+[@@deriving eq, show]
+
 type question_side =
   { prompt : string
-  ; answer_schema :
-      (Yojson.Safe.t
-      [@equal Yojson.Safe.equal]
-      [@printer fun fmt json -> Format.pp_print_string fmt (Yojson.Safe.to_string json)])
+  ; answer_schemas : answer_schemas
   ; max_output_tokens : int
   ; thinking : bool option
   }
@@ -103,7 +113,7 @@ let unadmitted registry =
   |> List.map (fun (slot : Registry.rejected_slot) -> slot.slot_id)
 ;;
 
-let resolve ~prompt ~answer_schema registry =
+let resolve ~prompt ~answer_schemas registry =
   match Registry.declared_lane registry ~lane_id with
   | None -> Error Lane_unconfigured
   | Some decl ->
@@ -120,7 +130,7 @@ let resolve ~prompt ~answer_schema registry =
        Result.bind (keys (http_key ~reserve) selected_slots) (fun http ->
          Result.map
            (fun cli ->
-              ( { question = { prompt; answer_schema; max_output_tokens = reserve; thinking = decl.thinking }
+              ( { question = { prompt; answer_schemas; max_output_tokens = reserve; thinking = decl.thinking }
                 ; http
                 ; cli
                 ; unadmitted = unadmitted registry

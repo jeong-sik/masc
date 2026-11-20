@@ -139,7 +139,10 @@ let test_table_lives_with_its_switch () =
     check bool "no table before the start" true
       (Option.is_none (Host.find ~base_path:config.base_path));
     Eio.Switch.run (fun sw ->
-      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~start_turn_log:(store_start config) ~config in
+      let (_ : Writers.t) =
+        Host.start ~sw ~ask:Masc_test_deps.never_asks
+          ~ask_room:Masc_test_deps.never_makes_room ~start_turn_log:(store_start config) ~config
+      in
       check bool "a table after the start" true
         (Option.is_some (Host.find ~base_path:config.base_path));
       check bool "another workspace has none" true
@@ -154,9 +157,15 @@ let test_a_second_start_replaces_the_table () =
     Eio.Switch.run (fun long ->
       let second =
         Eio.Switch.run (fun short ->
-          let (_ : Writers.t) = Host.start ~sw:short ~ask:Masc_test_deps.never_asks ~start_turn_log:(store_start config) ~config in
+          let (_ : Writers.t) =
+            Host.start ~sw:short ~ask:Masc_test_deps.never_asks
+              ~ask_room:Masc_test_deps.never_makes_room ~start_turn_log:(store_start config) ~config
+          in
           let first = table config in
-          let (_ : Writers.t) = Host.start ~sw:long ~ask:Masc_test_deps.never_asks ~start_turn_log:(store_start config) ~config in
+          let (_ : Writers.t) =
+            Host.start ~sw:long ~ask:Masc_test_deps.never_asks
+              ~ask_room:Masc_test_deps.never_makes_room ~start_turn_log:(store_start config) ~config
+          in
           let second = table config in
           check bool "the later table is the workspace's" false (second == first);
           second)
@@ -168,7 +177,10 @@ let test_a_second_start_replaces_the_table () =
 let test_writers_are_the_registry_s () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~start_turn_log:(store_start config) ~config in
+      let (_ : Writers.t) =
+        Host.start ~sw ~ask:Masc_test_deps.never_asks
+          ~ask_room:Masc_test_deps.never_makes_room ~start_turn_log:(store_start config) ~config
+      in
       start_turn_log config "keeper-a";
       check string "a Keeper that is not registered has no writer" "keeper retired"
         (write config "keeper-a" "the port is 8935");
@@ -180,7 +192,10 @@ let test_writers_are_the_registry_s () =
 let test_files_are_the_workspace_s () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~start_turn_log:(store_start config) ~config in
+      let (_ : Writers.t) =
+        Host.start ~sw ~ask:Masc_test_deps.never_asks
+          ~ask_room:Masc_test_deps.never_makes_room ~start_turn_log:(store_start config) ~config
+      in
       register config "keeper-a";
       start_turn_log config "keeper-a";
       check string "written" "written" (write config "keeper-a" "the port is 8935");
@@ -206,7 +221,10 @@ let test_a_keeper_without_a_turn_log () =
   with_workspace (fun config ->
     ignore (Masc.Workspace.init config ~agent_name:None);
     Eio.Switch.run (fun sw ->
-      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~start_turn_log:(store_start config) ~config in
+      let (_ : Writers.t) =
+        Host.start ~sw ~ask:Masc_test_deps.never_asks
+          ~ask_room:Masc_test_deps.never_makes_room ~start_turn_log:(store_start config) ~config
+      in
       register config "keeper-a";
       persist config "keeper-a";
       check string "the first boot starts the turn log, and the store opens" "written"
@@ -223,7 +241,10 @@ let test_a_keeper_without_a_turn_log () =
 let test_a_closed_turn_is_told_to_the_writer () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~start_turn_log:(store_start config) ~config in
+      let (_ : Writers.t) =
+        Host.start ~sw ~ask:Masc_test_deps.never_asks
+          ~ask_room:Masc_test_deps.never_makes_room ~start_turn_log:(store_start config) ~config
+      in
       register config "keeper-a";
       let place : Recorder.place =
         { keepers_dir = Masc.Workspace.keepers_runtime_dir config

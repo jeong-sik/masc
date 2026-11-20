@@ -7,7 +7,7 @@
     output sizes, and operators already declare different slots for them.
 
     The value is what decides whether an answer or a size fact still holds:
-    the question side (prompt, answer schema, output reserve, thinking) and
+    the question side (prompt, answer schemas, output reserve, thinking) and
     every admitted slot resolved to its key. Two publications that declare
     the same slots in the same order give equal values: the order is the
     order the lane walks, so a reorder gives a different value, and so does
@@ -54,9 +54,22 @@ type slot_key =
   }
 [@@deriving eq, show]
 
+type schema = Yojson.Safe.t [@@deriving eq, show]
+
+(** The schema an answer must match, one for each kind of question (RFC §6.1):
+    what a question shows decides what its answer can name, so each kind has
+    the ops it can name and no other. *)
+type answer_schemas =
+  { range : schema  (** [Read_range]: Memory, the working state and units. *)
+  ; item_alone : schema
+        (** [Read_item_alone]: one item and nothing to name in Memory. *)
+  ; room : schema  (** [Make_room]: Memory and the working state, no unit. *)
+  }
+[@@deriving eq, show]
+
 type question_side =
   { prompt : string  (** The first part of every question's text. *)
-  ; answer_schema : Yojson.Safe.t  (** The schema every answer must match. *)
+  ; answer_schemas : answer_schemas
   ; max_output_tokens : int  (** The lane's declared output reserve. *)
   ; thinking : bool option  (** The lane's declared thinking setting. *)
   }
@@ -96,13 +109,13 @@ val lane_id : string
 
 val resolve
   :  prompt:string
-  -> answer_schema:Yojson.Safe.t
+  -> answer_schemas:answer_schemas
   -> Runtime_exact_output_registry.t
   -> (t * Runtime_exact_output_registry.resolved_lane, unavailable) result
 (** The lane value under one published registry, with the registry's
     resolution of the lane it was read from: a walk and {!lane_held} read
     that resolution, so the two come from one registry. The prompt and the
-    answer schema belong to the asking layer and are passed in; the reserve,
+    answer schemas belong to the asking layer and are passed in; the reserve,
     the thinking setting, the slots and the HTTP windows come from the
     registry. CLI windows and model names come from the runtime table active
     when this is called, so a caller resolves again after every publication

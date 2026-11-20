@@ -128,6 +128,7 @@ let every_why : Effects.why_not list =
   ; Source_outside_question
   ; Removed_during_flight { seq = 7 }
   ; Not_valid_alone
+  ; Not_valid_in_room
   ; Successor_unsupported
   ]
 ;;
@@ -177,6 +178,7 @@ let reset_after_text =
   {|{"trace":"trace-2","closed_messages":0,"session":"","history_bytes":0,"internal_bytes":0,"chat_bytes":120,"external_rows":2}|}
 ;;
 
+let make_room = Log.Make_room { question; slot = "claude_code.fast"; trace = "trace-2" }
 let content_missing = Log.Skip { hole = Content_missing missing }
 let unknown_span = Log.Skip { hole = Unknown_span { before = covered; after = reset_after } }
 let item_exceeds_window = Log.Skip { hole = Item_exceeds_window missing }
@@ -210,6 +212,7 @@ let every_line =
   ; committed ~cause:(read ()) ()
   ; committed ~cause:(read ~shown:(Item_alone Untouched) ~missing:[] ()) ()
   ; committed ~cause:(read ~shown:(Item_alone Not_valid_alone) ()) ()
+  ; committed ~cause:make_room ~effects:full_effects ()
   ; committed ~cause:content_missing ()
   ; committed ~cause:unknown_span ()
   ; committed ~cause:item_exceeds_window ()
@@ -308,6 +311,7 @@ let test_pinned_text () =
     ; {|{"kind":"source_outside_question"}|}
     ; {|{"kind":"removed_during_flight","seq":7}|}
     ; {|{"kind":"not_valid_alone"}|}
+    ; {|{"kind":"not_valid_in_room"}|}
     ; {|{"kind":"successor_unsupported"}|}
     ]
     (List.map
@@ -344,6 +348,11 @@ let test_pinned_text () =
     {|{"kind":"item_alone","working_state":"not_valid_alone"}|}
     (part_text [ "cause"; "shown" ]
        (committed ~cause:(read ~shown:(Item_alone Not_valid_alone) ()) ()));
+  check string "an answer to the question that makes room"
+    (Printf.sprintf
+       {|{"kind":"make_room","question":{"front":"%s","back":"%s"},"slot":"claude_code.fast","trace":"trace-2"}|}
+       (String.make 32 'c') (String.make 32 'd'))
+    (part_text [ "cause" ] (committed ~cause:make_room ()));
   check string "every part a unit can miss"
     (Printf.sprintf
        {|[{"line":120,"parts":[{"kind":"bundle","slice":{"bundle":"%s","skip":0,"take":2}},{"kind":"history_bytes","from":0,"until":10},{"kind":"internal_bytes","from":10,"until":20},{"kind":"chat_bytes","from":0,"until":64},{"kind":"external_rows","from":1,"until":3},{"kind":"undecodable_history_line","offset":10},{"kind":"undecodable_internal_line","offset":20},{"kind":"undecodable_external_row","row":3}]}]|}

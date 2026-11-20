@@ -48,10 +48,10 @@ let probe = observed "the probe runs every minute"
 let memory = [ port; owner; probe ]
 let at = 500.0
 
+let names_of facts = List.mapi (fun index fact -> Printf.sprintf "m%d" (index + 1), id fact) facts
+
 let shown_of facts : Plan.shown =
-  { memory = Some (List.mapi (fun index fact -> Printf.sprintf "m%d" (index + 1), id fact) facts)
-  ; units = [ "u1", 10; "u2", 20 ]
-  }
+  Read (Range { memory = names_of facts; units = [ "u1", 10; "u2", 20 ] })
 ;;
 
 let stated ?(from_units = []) claim : Answer.new_fact =
@@ -76,6 +76,7 @@ let why_text : Effects.why_not -> string = function
   | Source_outside_question -> "source outside question"
   | Removed_during_flight { seq } -> Printf.sprintf "removed during flight at %d" seq
   | Not_valid_alone -> "not valid alone"
+  | Not_valid_in_room -> "not valid in room"
   | Successor_unsupported -> "successor unsupported"
 ;;
 
@@ -302,7 +303,7 @@ let test_removed_during_flight () =
 ;;
 
 let test_alone () =
-  let shown : Plan.shown = { memory = None; units = [ "u1", 10 ] } in
+  let shown : Plan.shown = Read (Item_alone { units = [ "u1", 10 ] }) in
   let result =
     plan ~shown ~working_state:(Answer.Set "replaced without having seen it")
       [ Add (stated ~from_units:[ "u1" ] "the build is green")
@@ -319,6 +320,26 @@ let test_alone () =
     (result.working_state = Plan.Alone Not_valid_alone);
   let kept = plan ~shown [ Add (stated "the build is green") ] in
   check bool "an answer that left it alone" true (kept.working_state = Plan.Alone Untouched)
+;;
+
+(* Memory and no unit (§7.4 「자리 내기」): the answer names facts it was
+   shown and reads nothing new. *)
+let test_room () =
+  let shown : Plan.shown = Room { memory = names_of memory } in
+  let merged = "the port is 8935 and the probe runs every minute" in
+  let result =
+    plan ~shown ~working_state:(Answer.Set "")
+      [ Add (stated "nothing was read")
+      ; Merge { refs = [ "m1"; "m3" ]; into = stated merged }
+      ; Seen { ref_ = "m2"; from_units = [ "u1" ] }
+      ; Drop { ref_ = "m2"; reason = "the team changed" }
+      ]
+  in
+  check refusals "an add and a seen need a unit, so they are left out"
+    [ 0, "not valid in room", Some "nothing was read"; 2, "not valid in room", None ]
+    (not_applied result);
+  check (list string) "the merge and the drop apply" [ merged ] (claims result.facts);
+  check bool "the working state is the answer's" true (result.working_state = Plan.Replaced "")
 ;;
 
 let test_working_state_passes_through () =
@@ -459,7 +480,7 @@ let test_seen_is_screened () =
     [ 0, "unknown ref", None; 1, "source outside question", None; 3, "ref used twice", None ]
     (not_applied result);
   check (list string) "the sound seen applies" [ id port ] result.effects.touched;
-  let alone : Plan.shown = { memory = None; units = [ "u1", 10 ] } in
+  let alone : Plan.shown = Read (Item_alone { units = [ "u1", 10 ] }) in
   check refusals "an answer that saw no Memory cannot see a fact again"
     [ 0, "not valid alone", None ]
     (not_applied (plan ~shown:alone [ Seen { ref_ = "m1"; from_units = [ "u1" ] } ]))
@@ -532,6 +553,7 @@ let () =
             test_a_refused_op_does_not_spend_its_names
         ; test_case "removed during flight" `Quick test_removed_during_flight
         ; test_case "an answer that saw no Memory" `Quick test_alone
+        ; test_case "an answer that saw Memory and no unit" `Quick test_room
         ; test_case "working state" `Quick test_working_state_passes_through
         ; test_case "a seen is screened as a named op" `Quick test_seen_is_screened
         ] )

@@ -75,7 +75,7 @@ let fixture ?(without_turn_log = []) ~sw keepers =
         ~registered:(fun keeper -> List.mem keeper !registered)
         ~place
         ~stores:(fun keeper -> Masc_test_deps.stores_of_place (place keeper))
-        ~ask:Masc_test_deps.never_asks
+        ~ask:Masc_test_deps.never_asks ~ask_room:Masc_test_deps.never_makes_room
         ~start_turn_log:(fun (_ : string) -> Ok ())
   ; registered
   ; memory_dir
@@ -249,7 +249,7 @@ let test_retire_before_the_files_go () =
     (* Nothing holds the files: a writer outside the table takes the lock. *)
     let bare =
       Writer.create ~now:(ticking ()) ~registered:(fun () -> true) ~declared:(fun () -> None)
-        ~stores:(Masc_test_deps.stores_of_place (f.place "keeper-a")) ~ask:Masc_test_deps.never_asks
+        ~stores:(Masc_test_deps.stores_of_place (f.place "keeper-a")) ~ask:Masc_test_deps.never_asks ~ask_room:Masc_test_deps.never_makes_room
         ~start_turn_log:(fun () -> Ok ())
         (f.place "keeper-a")
     in

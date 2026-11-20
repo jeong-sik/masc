@@ -97,9 +97,10 @@ let with_registry runtime_text f =
   f ~root (Registry.current () |> require_ok "published registry")
 
 let schema = `Assoc [ "type", `String "object" ]
+let schemas = { Lane.range = schema; item_alone = schema; room = schema }
 (* The lane value alone: what these cases compare. *)
 let resolve registry =
-  Result.map fst (Lane.resolve ~prompt:"memory prompt" ~answer_schema:schema registry)
+  Result.map fst (Lane.resolve ~prompt:"memory prompt" ~answer_schemas:schemas registry)
 ;;
 let value text = with_registry text (fun ~root:_ registry -> resolve registry)
 

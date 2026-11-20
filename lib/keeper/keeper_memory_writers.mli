@@ -11,6 +11,7 @@
 val start
   :  sw:Eio.Switch.t
   -> ask:(Librarian_ask.input -> Librarian_read_result.t)
+  -> ask_room:(Librarian_ask.room_input -> Librarian_room_result.t)
   -> start_turn_log:(string -> (unit, string) result)
   -> config:Workspace.config
   -> Librarian_writers.t
@@ -36,7 +37,7 @@ val find : base_path:string -> Librarian_writers.t option
 val follow_declaration
   :  sw:Eio.Switch.t
   -> prompt:string
-  -> answer_schema:Yojson.Safe.t
+  -> answer_schemas:Librarian_memory_lane.answer_schemas
   -> Librarian_writers.t
   -> unit
 (** Sends the table the [librarian_memory] lane value now, and again after
@@ -45,7 +46,7 @@ val follow_declaration
     each sees a change the other does not.
 
     - The value is {!Librarian_memory_lane.resolve} with [prompt] and
-      [answer_schema], under the registry published at the signal.
+      [answer_schemas], under the registry published at the signal.
     - A registry that is being replaced ([Publication_busy]) sends nothing:
       the lane's signal comes when the replacement ends.
     - No registry, or a lane with no value, sends [None], and the reason

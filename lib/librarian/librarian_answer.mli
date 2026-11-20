@@ -85,12 +85,23 @@ val rejection_kind : rejection -> string
     what it reads. *)
 val to_json : t -> Yojson.Safe.t
 
-(** The JSON schema every answer is asked to match: the lane value's
-    [answer_schema]. It is built from the field lists the decoder takes, so
-    it names the same fields of every object. The decoder still refuses what
-    the schema does not state: a blank claim, reason or name, an empty or
-    repeated [refs], an unknown category. *)
-val schema : Yojson.Safe.t
+(** The JSON schemas an answer is asked to match, one for each kind of
+    question: the lane value's [answer_schemas]. They are built from the
+    field lists the decoder takes, so they name the same fields of every
+    object.
+
+    - [range]: every op, and a working state that is a string or [null].
+    - [item_alone]: [add] only, and a [null] working state. The question
+      showed no fact to name and no working state to replace.
+    - [room]: [drop], [merge] and [revise], and either working state. The
+      question showed no unit, so nothing is new and nothing is seen again.
+
+    The decoder reads every answer the same way, whichever schema it was
+    asked to match: what a schema leaves out, the plan leaves out op by op
+    ({!Librarian_plan}). The decoder still refuses what no schema states: a
+    blank claim, reason or name, an empty or repeated [refs], an unknown
+    category. *)
+val schemas : Librarian_memory_lane.answer_schemas
 
 (** A new fact alone, with the fields it has inside an op: [claim],
     [category], [basis], [from]. A commit line carries the claim of an op

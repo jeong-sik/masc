@@ -149,7 +149,7 @@ let test_settle_and_interruption_release_receipt_obligations () =
   let resumed = Execution.apply ~now:5. (Execution.Resume_checkpoint (checkpoint ())) suspended |> exec_ok in
   check (list string) "resuming keeps ownership" ["request-a"; "request-b"] (request_ids resumed)
 
-let test_obligation_lists_are_exact_v4_fields () =
+let test_v4_record_writes_every_field () =
   let created = Execution.create ~id:(scope_id 301) ~input:fixture_input ~sources:[] ~now:1. |> exec_ok in
   let json = Execution.to_json created in
   check string "the record format is v4" "masc.keeper_semantic_execution.v4"
@@ -158,7 +158,11 @@ let test_obligation_lists_are_exact_v4_fields () =
     (Yojson.Safe.Util.member "receipt_obligations" json = `List []);
   check bool "an empty Gate list is written, not omitted" true
     (Yojson.Safe.Util.member "gate_obligations" json = `List []);
-  check bool "empty lists round-trip" true (json = Execution.to_json (decoded json));
+  List.iter (fun name ->
+    check bool ("an absent " ^ name ^ " is written as null, not omitted") true
+      (List.assoc_opt name (Yojson.Safe.Util.to_assoc json) = Some `Null))
+    ["native_call"; "input_response_intent"; "input_branch"];
+  check bool "empty lists and nulls round-trip" true (json = Execution.to_json (decoded json));
   let owned = running_with
     [pending_obligation "p"; arrived_obligation "a" "receipt_in_outbox"; arrived_obligation "l" "source_lost"] in
   check bool "every state round-trips" true (Execution.to_json owned = Execution.to_json (decoded (Execution.to_json owned)));
@@ -176,6 +180,9 @@ let test_obligation_lists_are_exact_v4_fields () =
     [ "the v3 format", replaced "schema" (`String "masc.keeper_semantic_execution.v3")
     ; "a record without the receipt list", without "receipt_obligations"
     ; "a record without the Gate list", without "gate_obligations"
+    ; "a record without the native call", without "native_call"
+    ; "a record without the input response intent", without "input_response_intent"
+    ; "a record without the input branch", without "input_branch"
     ; "a duplicate request", with_receipt_obligations [pending_obligation "x"; pending_obligation "x"] owned
     ; "a blank request", with_receipt_obligations [pending_obligation " "] owned
     ; "an unknown resolution", with_receipt_obligations [arrived_obligation "x" "unknown"] owned
@@ -930,7 +937,7 @@ let () =
         test_case "terminal record stays immutable" `Quick test_terminal_record_is_immutable ];
       "receipt ownership", [
         test_case "settling and an interrupting restart release the requests, other transitions keep them" `Quick test_settle_and_interruption_release_receipt_obligations;
-        test_case "the record format is exact v4" `Quick test_obligation_lists_are_exact_v4_fields;
+        test_case "the record format is exact v4" `Quick test_v4_record_writes_every_field;
         test_case "owners are read without the Owner and cancelling releases them" `Quick test_receipt_owners_are_read_without_the_owner_and_cancel_releases_them;
         test_case "a missing journal owns nothing and double ownership is refused" `Quick test_receipt_owners_of_a_missing_store_is_empty_and_double_ownership_is_refused;
         test_case "waiting adds a request and resolving moves a pending entry once" `Quick test_await_and_resolve_receipt_actions;

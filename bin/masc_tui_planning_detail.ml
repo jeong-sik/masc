@@ -45,15 +45,34 @@ let wrapped_indent ~width ~indent tone text =
          (Masc.Tui_terminal_text.sanitize_terminal_text (without_line_end_cr line)))
   |> List.map (fun row -> { tone; text = String.make indent ' ' ^ row })
 
-(* %g drops the trailing ".0" of a whole number and keeps a fraction. *)
-let measure_number value = Printf.sprintf "%g" value
+(* The target as the ledger holds it. %g kept six significant digits, so a
+   target of 1048576 bytes read "1.04858e+06" on the screen the operator
+   approves while the verifier judged against the exact value. A whole number
+   that a float holds exactly is written whole; any other value takes the
+   fewest significant digits that read back as the same float, which is at
+   most 17 for a double. *)
+let exact_integer_bound = 9007199254740992. (* 2^53 *)
+let round_trip_digits = 17
+
+let measure_number (target : Goal_measure.finite) =
+  let value = (target :> float) in
+  if Float.is_integer value && Float.abs value < exact_integer_bound then
+    Printf.sprintf "%.0f" value
+  else
+    let rec shortest digits =
+      let spelled = Printf.sprintf "%.*g" digits value in
+      if digits >= round_trip_digits || Float.equal (float_of_string spelled) value
+      then spelled
+      else shortest (digits + 1)
+    in
+    shortest 1
 
 let measure_text (measure : Goal_measure.t) =
   match measure with
   | Count { noun; total } -> Printf.sprintf "%d %s" (total :> int) (noun :> string)
   | Quantity { unit; direction; target } ->
     let sign = match direction with Goal_measure.At_least -> "≥" | At_most -> "≤" in
-    Printf.sprintf "%s %s %s" sign (measure_number (target :> float)) (unit :> string)
+    Printf.sprintf "%s %s %s" sign (measure_number target) (unit :> string)
   | Done_when { condition } -> (condition :> string)
 
 let wrapped ~width tone text = wrapped_indent ~width ~indent:0 tone text

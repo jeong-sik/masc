@@ -399,6 +399,42 @@ let test_embedded_unparseable_value_stays_whole () =
   check_bool "text with no brace does not split" true
     (Option.is_none (Detail.split_embedded_json "no json here"))
 
+(* A quantity target is printed as the value the ledger holds, so the number
+   the operator approves is the number the verifier judges against. *)
+let test_a_quantity_target_reads_back_as_the_stored_value () =
+  let unit = Goal_measure_fixture.label "bytes" in
+  let target value =
+    match Goal_measure.make_finite value with
+    | Ok target -> target
+    | Error message -> Alcotest.fail message
+  in
+  let shown value =
+    Masc_tui_planning_detail.measure_text
+      (Goal_measure.quantity ~unit ~direction:Goal_measure.At_most ~target:(target value))
+  in
+  List.iter (fun (value, expected) ->
+    Alcotest.(check string) (Printf.sprintf "%h" value) expected (shown value))
+    [ 1048576., "\xe2\x89\xa4 1048576 bytes"
+    ; 1234567., "\xe2\x89\xa4 1234567 bytes"
+    ; 1000000., "\xe2\x89\xa4 1000000 bytes"
+    ; 0.1234567, "\xe2\x89\xa4 0.1234567 bytes"
+    ; 0.1, "\xe2\x89\xa4 0.1 bytes"
+    ; 2.5, "\xe2\x89\xa4 2.5 bytes"
+    ; -3., "\xe2\x89\xa4 -3 bytes" ];
+  (* Every spelling reads back as its float, whole numbers past 2^53 and
+     fractions with seventeen significant digits included. *)
+  let number_of value =
+    let text = shown value in
+    let prefix = "\xe2\x89\xa4 " and suffix = " bytes" in
+    String.sub text (String.length prefix)
+      (String.length text - String.length prefix - String.length suffix)
+  in
+  List.iter (fun value ->
+    Alcotest.(check (float 0.)) (Printf.sprintf "%h reads back" value) value
+      (float_of_string (number_of value)))
+    [ 1048576.; 0.1; 1. /. 3.; 2. ** 60.; 9007199254740993.; 1e-300; -0.75;
+      123456789.123456789; Float.pred 1.; Float.succ 1e15 ]
+
 let () =
   Alcotest.run "tui_planning_detail"
     [ ( "confirmation boundaries"
@@ -430,5 +466,9 @@ let () =
             test_embedded_prose_before_and_after_the_value
         ; Alcotest.test_case "unparseable value stays whole" `Quick
             test_embedded_unparseable_value_stays_whole
+        ] )
+    ; ( "measure text"
+      , [ Alcotest.test_case "a quantity target reads back as the stored value" `Quick
+            test_a_quantity_target_reads_back_as_the_stored_value
         ] )
     ]

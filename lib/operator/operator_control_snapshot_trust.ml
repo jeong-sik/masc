@@ -38,23 +38,68 @@ let project_compact_runtime_trust runtime_trust =
     ]
 ;;
 
+type read =
+  | Read of Yojson.Safe.t
+  | Timed_out of string
+
 let compact_keeper_runtime_trust_observation ~config ~meta =
   let observation = Keeper_runtime_trust_snapshot.summary_observation ~config ~meta in
   {observation with json = project_compact_runtime_trust observation.json}
 ;;
 
-let compact_keeper_runtime_trust_json
+let read_compact_keeper_runtime_trust
       ~read_policy
       ~(config : Workspace.config)
       ~(meta : Keeper_meta_contract.keeper_meta)
   =
   let read () = Keeper_runtime_trust_snapshot.summary_json ~config ~meta in
-  let runtime_trust = match read_policy with
+  let runtime_trust =
+    match read_policy with
     | Dashboard_projection_read.Current -> read ()
-    | Reuse -> Dashboard_cache.get_or_compute
+    | Reuse ->
+      Dashboard_cache.get_or_compute
         (compact_runtime_trust_cache_key ~config ~meta)
         ~ttl:compact_runtime_trust_cache_ttl_sec
         (Pool_work.cpu ~name:__FUNCTION__ read)
   in
-  project_compact_runtime_trust runtime_trust
+  if Dashboard_cache.is_timeout_envelope runtime_trust
+  then
+    let detail =
+      match Json_util.assoc_member_opt "message" runtime_trust with
+      | Some (`String msg) when String.length (String.trim msg) > 0 -> msg
+      | Some _ | None -> "runtime trust cache timed out"
+    in
+    Timed_out detail
+  else Read (project_compact_runtime_trust runtime_trust)
+;;
+
+let keeper_runtime_trust_observation ~read_policy ~config ~meta =
+  try
+    match read_policy with
+    | Dashboard_projection_read.Current ->
+      compact_keeper_runtime_trust_observation ~config ~meta
+    | Reuse ->
+      (match read_compact_keeper_runtime_trust ~read_policy ~config ~meta with
+       | Read json ->
+         { Dashboard_projection_read.json
+         ; next_deadline_unix = None
+         ; completeness = Complete
+         }
+       | Timed_out detail ->
+         { Dashboard_projection_read.json = `Null
+         ; next_deadline_unix = None
+         ; completeness = Partial detail
+         })
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    let detail = Printexc.to_string exn in
+    Log.Dashboard.warn
+      "operator snapshot trust compact failed for keeper %s: %s"
+      meta.Keeper_meta_contract.name
+      detail;
+    { Dashboard_projection_read.json = `Null
+    ; next_deadline_unix = None
+    ; completeness = Partial detail
+    }
 ;;

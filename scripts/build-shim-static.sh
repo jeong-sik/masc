@@ -129,7 +129,7 @@ done
 # distinguishes two builds of the same day.
 build_id="$(git -C "$repo_root" rev-parse --short=8 HEAD 2>/dev/null \
   || date -u +%Y%m%d)"
-release="$(sed -n 's/^(version \(.*\))$/\1/p' "$repo_root/dune-project" | head -1)"
+release="$(sed -n 's/^(version \(.*\))$/\1/p' "$repo_root/dune-project" | sed -n '1p')"
 [ -n "$release" ] || { echo "no (version ...) in dune-project" >&2; exit 1; }
 {
   printf 'let suffix = "+%s"\n' "$build_id"

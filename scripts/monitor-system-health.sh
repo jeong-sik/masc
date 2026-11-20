@@ -168,19 +168,19 @@ notify() {
 fd_top1() {
   lsof -nP 2>/dev/null \
     | awk 'NR>1 {fd[$2]++; cmd[$2]=$1} END {for (p in fd) print fd[p], cmd[p], p}' \
-    | sort -rn | head -1
+    | sort -rn | sed -n '1p'
 }
 
 fd_top5() {
   lsof -nP 2>/dev/null \
     | awk 'NR>1 {fd[$2]++; cmd[$2]=$1} END {for (p in fd) print fd[p], cmd[p], p}' \
-    | sort -rn | head -5 | awk '{printf "%s[%s]:%d ", $2, $3, $1}'
+    | sort -rn | sed -n '1,5p' | awk '{printf "%s[%s]:%d ", $2, $3, $1}'
 }
 
 docker_playground_summary() {
   local helper="$REPO_ROOT/scripts/docker-playground-fd-status.sh"
   [ -x "$helper" ] || return 0
-  "$helper" --limit 3 2>/dev/null | head -20 | tr '\n' ' ' || true
+  "$helper" --limit 3 2>/dev/null | sed -n '1,20p' | tr '\n' ' ' || true
 }
 
 json_string_escape() {
@@ -281,7 +281,7 @@ iteration() {
 
   if [ "$swap_gb" -ge "$SWAP_GB_CRIT" ]; then
     local top_mem
-    top_mem=$(ps -A -o pid,rss,comm | sort -rk2 -n | head -3 | awk '{printf "%s(%dM) ", $3, $2/1024}')
+    top_mem=$(ps -A -o pid,rss,comm | sort -rk2 -n | sed -n '1,3p' | awk '{printf "%s(%dM) ", $3, $2/1024}')
     notify swap CRIT "Swap ${swap_gb}GB" "OOM risk. top RSS: $top_mem"
     pressure_level="CRIT"; pressure_kinds="${pressure_kinds}swap,"
     pressure_summary="${pressure_summary}swap=${swap_gb}G "

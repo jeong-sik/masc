@@ -38,7 +38,7 @@ let measure_message_bytes (m : Types.message) =
        match block with
        | Types.Text text -> acc + String.length text
        | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.ToolUse _
-       | Types.ToolResult _ | Types.Image _ | Types.Document _ | Types.Audio _ -> acc)
+       | Types.ToolResult _ | Types.ToolReference _ | Types.Image _ | Types.Document _ | Types.Audio _ -> acc)
     0
     m.content
 ;;
@@ -107,7 +107,7 @@ let first_text (messages : Types.message list) =
     (match message.content with
      | Types.Text text :: _ -> text
      | [] | (Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.ToolUse _
-             | Types.ToolResult _ | Types.Image _ | Types.Document _ | Types.Audio _) :: _ ->
+             | Types.ToolResult _ | Types.ToolReference _ | Types.Image _ | Types.Document _ | Types.Audio _) :: _ ->
        "<none>")
 ;;
 
@@ -622,7 +622,7 @@ let measure_all_blocks (m : Types.message) =
        | Types.ReasoningDetails _
        | Types.RedactedThinking _
        | Types.ToolUse _
-       | Types.ToolResult _
+       | Types.ToolResult _ | Types.ToolReference _
        | Types.Image _
        | Types.Document _
        | Types.Audio _ -> acc)
@@ -903,7 +903,7 @@ let has_tag tag messages =
          String.length text >= width && String.equal (String.sub text 0 width) tag
        | [] | Types.Text _ :: _ :: _
        | (Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _ | Types.ToolUse _
-          | Types.ToolResult _ | Types.Image _ | Types.Document _ | Types.Audio _) :: _ -> false)
+          | Types.ToolResult _ | Types.ToolReference _ | Types.Image _ | Types.Document _ | Types.Audio _) :: _ -> false)
     messages
 ;;
 

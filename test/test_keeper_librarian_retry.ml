@@ -1458,7 +1458,7 @@ let test_conversation_headers_carry_the_stamped_speaker () =
                   String_util.contains_substring text "speaker=duplicate] repeated"
                 | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _
                 | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _
-                | Llm_provider.Types.ToolResult _ | Llm_provider.Types.Image _
+                | Llm_provider.Types.ToolResult _ | Llm_provider.Types.ToolReference _ | Llm_provider.Types.Image _
                 | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> false)
               message.content)
          messages)
@@ -1473,7 +1473,7 @@ let user_text_of_messages messages =
         (m.content
          |> List.filter_map (function
            | Llm_provider.Types.Text s -> Some s
-           | Llm_provider.Types.ToolResult _ | Llm_provider.Types.ToolUse _
+           | Llm_provider.Types.ToolResult _ | Llm_provider.Types.ToolReference _ | Llm_provider.Types.ToolUse _
            | Llm_provider.Types.Thinking _ | Llm_provider.Types.ReasoningDetails _
            | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.Image _
            | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> None)

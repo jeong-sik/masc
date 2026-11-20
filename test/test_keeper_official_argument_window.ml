@@ -78,7 +78,7 @@ let project ?argument_projection ?(capacity_bytes=max_int) ?carried_front_seed
 let inputs messages = List.concat_map (fun (message : T.message) ->
   List.filter_map (function
     | T.ToolUse {id;input;_} -> Some (id,input)
-    | T.Text _ | Thinking _ | RedactedThinking _ | ReasoningDetails _ | ToolResult _ | Image _ | Document _ | Audio _ -> None)
+    | T.Text _ | Thinking _ | RedactedThinking _ | ReasoningDetails _ | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> None)
     message.content) messages
 let input id messages = match List.assoc_opt id (inputs messages) with
   | Some value -> value | None -> fail ("missing tool occurrence " ^ id)
@@ -258,7 +258,7 @@ let result_body id messages =
     List.find_map (function
       | T.ToolResult {tool_use_id;content;_} when String.equal tool_use_id id -> Some content
       | T.ToolResult _ | T.Text _ | Thinking _ | RedactedThinking _ | ReasoningDetails _
-      | ToolUse _ | Image _ | Document _ | Audio _ -> None)
+      | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> None)
       message.content) messages with
   | Some content -> content
   | None -> fail ("missing tool result " ^ id)

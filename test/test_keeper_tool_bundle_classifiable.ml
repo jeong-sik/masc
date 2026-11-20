@@ -764,7 +764,7 @@ let test_per_candidate_image_projection () =
                   if tool_use_id="load-native-image"
                   then Some (Agent_core.Types.tool_result_outcome_is_error outcome) else None
                 | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-                | ToolUse _ | Image _ | Document _ | Audio _ -> None) in
+                | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> None) in
           check (list bool) "the actual loader result distinguishes load from refusal"
             [not accepted] outcomes;
           let carried = Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent) in

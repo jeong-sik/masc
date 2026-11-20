@@ -42,7 +42,7 @@ let contents (messages : Types.message list) =
             | Types.Thinking _
             | Types.ReasoningDetails _
             | Types.RedactedThinking _
-            | Types.ToolUse _
+            | Types.ToolUse _ | Types.ToolReference _
             | Types.Image _
             | Types.Document _
             | Types.Audio _ -> None)
@@ -211,7 +211,7 @@ let stub_keeps_the_call_id () =
               | Types.Thinking _
               | Types.ReasoningDetails _
               | Types.RedactedThinking _
-              | Types.ToolUse _
+              | Types.ToolUse _ | Types.ToolReference _
               | Types.Image _
               | Types.Document _
               | Types.Audio _ -> None)

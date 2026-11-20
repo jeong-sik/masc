@@ -412,7 +412,7 @@ let inner_text (block : Types.content_block) =
   match block with
   | Types.Text text -> text
   | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
-  | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+  | Types.ToolUse _ | Types.ToolResult _ | Types.ToolReference _ | Types.Image _ | Types.Document _
   | Types.Audio _ -> Alcotest.fail "expected a Text block"
 ;;
 
@@ -430,11 +430,11 @@ let result_texts (message : Types.message) =
                  match inner with
                  | Types.Text text -> Some text
                  | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
-                 | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+                 | Types.ToolUse _ | Types.ToolResult _ | Types.ToolReference _ | Types.Image _ | Types.Document _
                  | Types.Audio _ -> None)
               blocks
        | Types.Text _ | Types.Thinking _ | Types.ReasoningDetails _
-       | Types.RedactedThinking _ | Types.ToolUse _ | Types.Image _ | Types.Document _
+       | Types.RedactedThinking _ | Types.ToolUse _ | Types.ToolReference _ | Types.Image _ | Types.Document _
        | Types.Audio _ -> [])
     message.content
 ;;
@@ -656,7 +656,7 @@ let blocks_lane (message : Types.message) =
           match inner with
           | Types.Text text -> sum + String.length text
           | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
-          | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+          | Types.ToolUse _ | Types.ToolResult _ | Types.ToolReference _ | Types.Image _ | Types.Document _
           | Types.Audio _ -> sum)
        0
        (snd (result_parts message)))

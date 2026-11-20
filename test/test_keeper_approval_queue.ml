@@ -2229,7 +2229,7 @@ let test_resolution_is_durable_and_origin_scoped () =
                 | Tool_output.Invalid_marker { detail } -> Alcotest.fail detail)
              | Agent_core.Types.Thinking _ | Agent_core.Types.ReasoningDetails _
              | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
-             | Agent_core.Types.ToolResult _ | Agent_core.Types.Image _
+             | Agent_core.Types.ToolResult _ | Agent_core.Types.ToolReference _ | Agent_core.Types.Image _
              | Agent_core.Types.Document _ | Agent_core.Types.Audio _ -> None)
            projected_blocks
        in

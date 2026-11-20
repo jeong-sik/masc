@@ -2336,7 +2336,7 @@ let parsed_tool_result_json (cp : Agent_core.Checkpoint.t) =
            | Agent_core.Types.Text _ | Agent_core.Types.Thinking _
            | Agent_core.Types.RedactedThinking _ | Agent_core.Types.ToolUse _
            | Agent_core.Types.Image _ | Agent_core.Types.Document _
-           | Agent_core.Types.Audio _ | Agent_core.Types.ReasoningDetails _ -> None)
+           | Agent_core.Types.ToolReference _ | Agent_core.Types.Audio _ | Agent_core.Types.ReasoningDetails _ -> None)
          m.content)
     cp.messages
 ;;

@@ -89,12 +89,12 @@ let final_response = response (`Assoc ["role", `String "assistant";
 
 let target_result = function
   | Agent_core.Types.ToolResult {tool_use_id; _} -> String.equal tool_use_id target_id
-  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _
   | Image _ | Document _ | Audio _ -> false
 (* The execution journal records provider blocks. *)
 let target_wire_result = function
   | Llm_provider.Types.ToolResult {tool_use_id; _} -> String.equal tool_use_id target_id
-  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _
   | Image _ | Document _ | Audio _ -> false
 let target_results (checkpoint : Agent_core.Checkpoint.t) =
   checkpoint.messages |> List.concat_map (fun (m : Agent_core.Types.message) -> m.content)
@@ -276,7 +276,7 @@ let run_phase ?(empty_terminal = false) ~child ~cut root =
             | None -> fail "provider ran before canonical recovery evidence was checked" in
           let canonical_content = match proof.canonical_result with
             | Agent_core.Types.ToolResult {content; _} -> content
-            | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+            | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _
             | Image _ | Document _ | Audio _ -> fail "canonical recovery evidence is not a ToolResult" in
           check bool "provider receives the canonically settled result, not a repair placeholder" true
             (Yojson.Safe.Util.member "content" (List.hd results) = `String canonical_content);

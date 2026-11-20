@@ -326,7 +326,7 @@ let test_a_changed_range_is_never_confirmed () = with_fixture Atoms @@ fun confi
   never_confirmed "a replaced tool payload" (fun (message:Agent_core.Types.message) ->
     {message with content=List.map (function
       | Agent_core.Types.ToolResult value -> Agent_core.Types.ToolResult {value with content="replaced tool payload"}
-      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block ->
+      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _) as block ->
         block) message.content});
   never_confirmed "a changed origin" (fun (message:Agent_core.Types.message) ->
     {message with origin=Agent_core.Types.System_context})
@@ -350,7 +350,7 @@ let test_richer_producer_snapshot_retains_complete_tool_json () =
   let messages=List.map (fun (message:Agent_core.Types.message) ->
     {message with content=List.map (function
       | Agent_core.Types.ToolResult value -> Agent_core.Types.ToolResult {value with json=Some payload}
-      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _) as block -> block)
+      | (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _) as block -> block)
       message.content}) (Option.get live.messages) in
   (* The producer-value snapshot port retains richer data than its canonical
      checkpoint codec; the live checkpoint read from disk does not. *)
@@ -373,7 +373,7 @@ let test_richer_producer_snapshot_retains_complete_tool_json () =
   check bool "complete producer ToolResult JSON survives disk retention" true
     (List.exists (fun (message:Agent_core.Types.message) -> List.exists (function
       | Agent_core.Types.ToolResult {json;_} -> json=Some payload
-      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _ -> false)
+      | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _ -> false)
       message.content) (Capture.input restored).messages);
   expect_confirmed "the richer original against the checkpoint read from disk" live restored
 

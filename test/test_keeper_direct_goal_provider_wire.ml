@@ -230,7 +230,7 @@ let run_case source () =
         (match goal with Some goal -> check bool "Goal projection is not persisted as conversation" false
            (contains ~needle:goal.id text) | None -> ())
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-      | ToolResult _ | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
+      | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
 (* A turn that serves an admitted request and a turn that does not send Agent
    Core the same System, because the provider caches the request from its
@@ -429,7 +429,7 @@ let test_anthropic_sends_the_first_end_context_again_in_place () =
       List.exists (function
         | Agent_core.Types.Text text -> names_source text
         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content)
+        | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> false) message.content)
       checkpoint.messages in
   match kept with
   | [ message ] ->
@@ -586,7 +586,7 @@ let test_goal_survives_read_then_task_creation ~peer () =
         | Agent_core.Types.ToolResult {tool_use_id; content; outcome; _}
           when String.equal tool_use_id "create-linked-task" -> Some (content, outcome)
         | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Image _ | Document _ | Audio _ -> None) message.content)
+        | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> None) message.content)
       checkpoint.messages in
   let task_result, task_outcome = match task_results with
     | [result] -> result
@@ -632,13 +632,13 @@ let test_goal_survives_read_then_task_creation ~peer () =
     (List.exists (fun (message : Agent_core.Types.message) ->
       List.exists (function Agent_core.Types.Text text -> contains ~needle:measurement.id text
         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content) checkpoint.messages);
+        | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> false) message.content) checkpoint.messages);
   List.iter (fun needle ->
     check bool "host source observation stays out of durable conversation" false
       (List.exists (fun (message : Agent_core.Types.message) ->
         List.exists (function Agent_core.Types.Text text -> contains ~needle text
           | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-          | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content)
+          | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> false) message.content)
         checkpoint.messages)) [peer_name; peer_operation]
 
 let test_completion_observation_survives_tool_reply approved () =
@@ -764,7 +764,7 @@ let test_completion_observation_survives_tool_reply approved () =
   List.iter (fun (message : Agent_core.Types.message) -> List.iter (function
     | Agent_core.Types.Text text -> check bool "authority observation is absent from durable history" false
         (contains ~needle:verification_id text)
-    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | ToolReference _
     | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
 (* Proof state remains visible through the tool loop without appending a

@@ -429,7 +429,7 @@ let measure ~prefix_mib ~unread_mib =
       { m with content = List.map (function
           | Agent_core.Types.Text text -> Agent_core.Types.Text ("unread " ^ text)
           | ( Agent_core.Types.Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-            | ToolResult _ | Image _ | Document _ | Audio _ ) as block -> block) m.content })
+            | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ ) as block -> block) m.content })
       (prefix_messages ~bytes:(unread_mib * mib)) in
   selected_messages_ref := !first_messages_ref @ unread_turns @
     [ message "Unread question after the long history"

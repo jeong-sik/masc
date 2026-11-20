@@ -553,7 +553,7 @@ let test_lookup_evidence_survives_slot_failover_but_not_a_new_review () =
              | _ -> None
            with Yojson.Json_error _ -> None)
         | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
-        | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> None
+        | T.ToolUse _ | T.ToolResult _ | T.ToolReference _ | T.Image _ | T.Document _ | T.Audio _ -> None
       in
       let run_review () =
         let reads = ref 0 and calls = ref [] and results = ref [] and views = ref [] in
@@ -705,7 +705,7 @@ let test_oversized_lookup_handoff_preserves_the_inline_refusal () =
             Alcotest.(check bool) "rejected raw bytes are absent from every text block" false
               (List.exists (function T.Text text -> String_util.contains_substring text body
                 | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
-                | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
+                | T.ToolUse _ | T.ToolResult _ | T.ToolReference _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
             Ok { AR.selected_runtime_id = evaluator_runtime; evaluator_execution = None; verdict = Some (AR.Approve "checked refusal") }
           end)
         (fun () ->
@@ -801,7 +801,7 @@ let test_failed_lookup_handoff_uses_the_full_bridge_envelope () =
               Alcotest.(check bool) "large metadata/data payload never enters any handoff text" false
                 (List.exists (function T.Text text -> String_util.contains_substring text payload
                   | T.Thinking _ | T.RedactedThinking _ | T.ReasoningDetails _
-                  | T.ToolUse _ | T.ToolResult _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
+                  | T.ToolUse _ | T.ToolResult _ | T.ToolReference _ | T.Image _ | T.Document _ | T.Audio _ -> false) blocks);
               Ok { AR.selected_runtime_id = evaluator_runtime; evaluator_execution = None; verdict = Some (AR.Approve "checked failure view") }
             end)
           (fun () ->

@@ -390,31 +390,20 @@ let board_heading_with_tail ~cols head tail =
    with, so the two cannot drift apart. *)
 let census_separator = "  \xc2\xb7  "
 
-(* "Refreshing" on this surface is the pane's own poll in flight -- its
-   resting state between answers. Drawing the word for every poll made the
-   title and the census row flicker at read cadence; the word now waits out
-   the pending display bar the Keeper header rows share, so it names a read
-   that is actually slow. First reads keep their plain words: the pane has
-   nothing else to say. *)
-let board_dataset_refresh_slow state dataset =
-  match Surface_read_order.pending_dataset_age state.http_surface_reads dataset with
-  | Some age when past_pending_display_bar age -> true
-  | Some _ | None -> false
-
 (* Retained values stay readable here, with their availability. The title and
-   reader index only borrow totals from a received, non-pending census. *)
+   reader index only borrow totals from a received, non-pending census. A read
+   in flight over a retained census says nothing on this row: the reading slot
+   at the end of zone 2 does (RFC tui-one-screen-grammar section 8). First
+   reads keep their plain words, since the row has nothing else to say. *)
 let board_hearth_census_line ~cols (state : state) =
   let words ko en = words state ko en in
   let observation,pending=board_census_reading state in
-  let slow=board_dataset_refresh_slow state Surface_read_order.Board_hearths in
   let status=match observation with
     | Masc_tui_fetched.Absent -> Some (if pending then (words "게시판 집계 조회 중" "reading census") else (words "게시판 집계 미조회" "census not read"))
     | Loading -> Some (words "게시판 집계 조회 중" "reading census")
-    | Ready _ -> if slow then Some (words "갱신 중 · 이전 관측" "refreshing; last observed") else None
-    | Stale (_,detail) -> Some ((if slow then (words "갱신 중 · " "refreshing; ") else "")
-        ^ (words "이전 관측 · 조회 실패: " "last observed; unavailable: ") ^ Terminal_text.single_line detail)
-    | Failed detail -> Some ((if slow then (words "재조회 중 · " "retrying; ") else "")
-        ^ (words "조회 실패: " "unavailable: ") ^ Terminal_text.single_line detail) in
+    | Ready _ -> None
+    | Stale (_,detail) -> Some ((words "이전 관측 · 조회 실패: " "last observed; unavailable: ") ^ Terminal_text.single_line detail)
+    | Failed detail -> Some ((words "조회 실패: " "unavailable: ") ^ Terminal_text.single_line detail) in
   let tone=match observation with
     | Masc_tui_fetched.Stale _ | Failed _ -> Theme.bad ()
     | Absent | Loading | Ready _ -> Theme.recede () in
@@ -532,13 +521,12 @@ let board_hearth_census_line ~cols (state : state) =
 let board_posts_status state =
   let words ko en = words state ko en in
   let observation,_=board_posts_reading state in
-  let slow=board_dataset_refresh_slow state Surface_read_order.Board_posts in
   let status=match observation with
     | Masc_tui_fetched.Absent -> Some (words "글 미조회" "posts not read")
     | Loading -> Some (words "글 조회 중" "reading posts")
-    | Ready _ -> if slow then Some (words "글 갱신 중 · 이전 관측" "refreshing posts; last observed") else None
-    | Stale _ -> Some (if slow then (words "글 갱신 중 · 이전 실패" "refreshing posts; last failure retained") else (words "이전 글 목록 · 조회 실패" "last observed posts; unavailable"))
-    | Failed _ -> Some (if slow then (words "글 재조회 중 · 조회 실패" "retrying posts; unavailable") else (words "글 조회 실패" "posts unavailable")) in
+    | Ready _ -> None
+    | Stale _ -> Some (words "이전 글 목록 · 조회 실패" "last observed posts; unavailable")
+    | Failed _ -> Some (words "글 조회 실패" "posts unavailable") in
   match board_posts_snapshot state with
   | Some snapshot when not (board_listing_matches_requested state) ->
       let origin=Printf.sprintf (if state.ui_language = Lang_ko then "이전 관측: %s · 요청: %s" else "last observed: %s; requested: %s")
@@ -825,7 +813,9 @@ let render_board_list (state : state) =
     match write_sheet with
     | Some _ as s -> s
     | None ->
-        if count = 0 && (pending || observation = Masc_tui_fetched.Loading) then
+        if count = 0
+           && Option.is_none (Masc_tui_fetched.value observation)
+           && (pending || observation = Masc_tui_fetched.Loading) then
           Some
             { ps_title = words state "게시글 목록 읽는 중" "Loading Board posts"
             ; ps_detail =
@@ -846,11 +836,7 @@ let render_board_list (state : state) =
         [ (match write_sheet, Masc_tui_fetched.value observation with
            | Some sheet, _ ->
                progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
-           | None, Some _ ->
-               if pending then
-                 progress_inline ~ko ~now ?started_at:list_loading_started
-                   (words state "글 갱신 중" "refreshing posts")
-               else ""
+           | None, Some _ -> ""
            | None, None ->
                if pending || observation = Masc_tui_fetched.Loading then
                  progress_inline ~ko ~now ?started_at:list_loading_started
@@ -933,14 +919,9 @@ let render_board_list (state : state) =
                ("  " ^ progress_inline ~ko ~now ?started_at:list_loading_started
                   (words state "글 조회 중" "Reading Board posts"))
          | Ready _ ->
-             if pending then
-               c.push
-                 ("  " ^ progress_inline ~ko ~now ?started_at:list_loading_started
-                    (words state "이전 목록은 비어 있음 · 글 조회 중" "Last listing empty · reading posts"))
-             else
-               c.push (Theme.recede ()
-                 ^ (if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미조회)" "  (last listing empty; requested query not read)")
-                    else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
+             c.push (Theme.recede ()
+               ^ (if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미조회)" "  (last listing empty; requested query not read)")
+                  else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
       else begin
         Option.iter render_list_error list_error;
         let error_rows = if Option.is_some list_error then 1 else 0 in

@@ -272,7 +272,7 @@ let freeze_for_request (config : t) =
 (* [Backend_anthropic.build_request] writes every breakpoint's [ttl] from
    [cache_extended_ttl], so the writes a response reports were made at this
    lifetime. *)
-let cache_write_lifetime (config : t) =
+let cache_write_lifetime (config : t) : Types.cache_write_lifetime =
   match config.cache_extended_ttl with
   | true -> Types.One_hour
   | false -> Types.Provider_default

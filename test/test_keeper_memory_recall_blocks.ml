@@ -665,6 +665,40 @@ let test_only_a_body_in_the_current_final_assembly_can_be_deferred () =
     Alcotest.(check bool) "a status-only preparation is not an offered body" true
       (Blocks.defer_for_capacity delivery = Ok Keeper_memory_delivery_reprojection.Unchanged))
 
+let test_rendered_body_bytes_histogram_tracks_selected_and_empty_preparations () =
+  with_policy (recall Runtime_schema.All_keepers) (fun () ->
+    let metric = Keeper_metrics.(to_string MemoryRecallRenderedBodyBytes) in
+    let metric_count = Otel_metric_store.histogram_count_name metric in
+    let keeper = "rendered-bytes-telemetry-keeper" in
+    let labels = [ "keeper", keeper ] in
+    let read name = Option.value ~default:0.0 (Otel_metric_store.get_metric_value name ~labels ()) in
+    let run answer =
+      Blocks.prepare_with
+        ~judge:(judging (probe ()) answer)
+        ~read_facts:(reading (probe ()) (Ok facts))
+        ~keeper_id:keeper
+        ~turn_ref
+        ~memory_search_available:true
+      |> some_or_fail
+    in
+    let selected = run (Ok (Turn.Judged carrying_the_first)) in
+    let expected_bytes =
+      match selected.Blocks.body with
+      | Some body -> String.length body
+      | None -> Alcotest.fail "selected recall preparation must render a body"
+    in
+    Alcotest.(check bool) "rendered body is non-empty" true (expected_bytes > 0);
+    Alcotest.(check int) "rendered_body_bytes matches String.length" expected_bytes
+      (Blocks.rendered_body_bytes selected);
+    Alcotest.(check (float 0.0)) "one histogram sample recorded" 1.0 (read metric_count);
+    Alcotest.(check (float 0.0)) "histogram sum matches rendered bytes"
+      (Float.of_int expected_bytes) (read metric);
+    let empty = run (Ok (Turn.Judged carrying_nothing)) in
+    Alcotest.(check int) "empty recall has 0 rendered bytes" 0 (Blocks.rendered_body_bytes empty);
+    Alcotest.(check (float 0.0)) "second histogram sample recorded" 2.0 (read metric_count);
+    Alcotest.(check (float 0.0)) "zero-byte preparation leaves sum unchanged"
+      (Float.of_int expected_bytes) (read metric))
+
 let () =
   Alcotest.run "keeper_memory_recall_blocks"
     [ ( "who gets the texts"
@@ -722,5 +756,7 @@ let () =
             test_capacity_refusal_defers_delivery_and_failover_offers_the_full_body
         ; Alcotest.test_case "only a body in the current final assembly can be deferred" `Quick
             test_only_a_body_in_the_current_final_assembly_can_be_deferred
+        ; Alcotest.test_case "rendered_body_bytes histogram tracks selected and empty preparations" `Quick
+            test_rendered_body_bytes_histogram_tracks_selected_and_empty_preparations
         ] )
     ]

@@ -931,7 +931,12 @@ val rows_of_entry :
     Search uses these rows so a match inside a long entry is reachable.
     Inline metadata uses the same responsive heading decision as
     {!entry_body_cells}; widening restores inline placement. A transition from
-    an inline predecessor opens a heading even within the same turn. *)
+    an inline predecessor opens a heading even within the same turn.
+
+    The domain keeps the rows of the entries it laid out last. The same
+    entry, physical predecessor, width, origin and body lines return those
+    rows without laying them out again. [markdown] is still called first, so
+    a renderer that records what it draws sees every call. *)
 
 val visible_rows :
   ?markdown:(entry:entry -> width:int -> string list) ->
@@ -1113,3 +1118,12 @@ val folded_thought_summary_localized :
   ko:bool -> mark:string -> width:int -> line_count:int -> body:string -> string
 (** Localized variant of {!folded_thought_summary} supporting Korean and
     English labels. *)
+
+module For_testing : sig
+  val rows_built : unit -> int
+  (** How many times {!rows_of_entry} laid an entry's rows out rather than
+      returning the rows kept for it. *)
+
+  val with_no_kept_rows : (unit -> 'a) -> 'a
+  (** Run with this domain's kept rows emptied, restoring them afterwards. *)
+end

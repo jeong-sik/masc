@@ -2231,6 +2231,61 @@ let entry_body_cells ~origin ~inner_width entry =
   let gutter = origin_gutter ~origin ~previous:None entry in
   body_cells_after_gutter ~origin ~inner_width gutter
 
+(* The rows of the entries recent frames drew, per domain. An entry's rows
+   follow from the entry, its predecessor, the pane width, the origin shape
+   and its body lines alone, and a cached Markdown render hands back the same
+   lines, so a frame that changed none of them lays nothing out again. Laid
+   out on every frame, a 1MB reply at the live edge built some 50k rows and
+   their strings each time. *)
+type kept_rows = {
+  kept_entry : entry;
+  kept_previous : entry option;
+  kept_inner_width : int;
+  kept_origin : origin_display;
+  kept_chunks : string list;
+  kept_rows : row list;
+}
+
+let kept_rows_capacity = 32
+
+let kept_rows_key : kept_rows list ref Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> ref [])
+
+let rows_built = Atomic.make 0
+
+let same_previous left right =
+  match left, right with
+  | None, None -> true
+  | Some left, Some right -> left == right
+  | None, Some _ | Some _, None -> false
+
+let find_kept_rows ~entry ~previous ~inner_width ~origin chunks =
+  let held = Domain.DLS.get kept_rows_key in
+  let matches kept =
+    kept.kept_entry == entry
+    && same_previous kept.kept_previous previous
+    && kept.kept_inner_width = inner_width
+    && kept.kept_origin = origin
+    && (kept.kept_chunks == chunks
+        || List.equal String.equal kept.kept_chunks chunks)
+  in
+  match !held with
+  | kept :: _ when matches kept -> Some kept.kept_rows
+  | [] | _ :: _ -> (
+      match List.find_opt matches !held with
+      | Some kept ->
+          held := kept :: List.filter (fun other -> other != kept) !held;
+          Some kept.kept_rows
+      | None -> None)
+
+let keep_rows kept =
+  let held = Domain.DLS.get kept_rows_key in
+  held :=
+    kept
+    :: List.filteri
+         (fun index _ -> index < kept_rows_capacity - 1)
+         (List.filter (fun other -> other.kept_entry != kept.kept_entry) !held)
+
 let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry =
   let configured_origin = origin in
   let origin = entry_origin ~origin ~inner_width entry in
@@ -2261,166 +2316,182 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
          |> List.concat_map (split_cells ~max_cells:body_width))
         @ journal
   in
-  let body_chunks =
-    let rec drop_empty = function
-      | chunk :: rest when String.trim chunk = "" -> drop_empty rest
-      | reversed -> List.rev reversed
+  (* The rows themselves, once the body lines are known. *)
+  let lay_out body_chunks =
+    let body_chunks =
+      let rec drop_empty = function
+        | chunk :: rest when String.trim chunk = "" -> drop_empty rest
+        | reversed -> List.rev reversed
+      in
+      match drop_empty (List.rev body_chunks) with
+      | [] -> [ "" ]
+      | chunks -> chunks
     in
-    match drop_empty (List.rev body_chunks) with
-    | [] -> [ "" ]
-    | chunks -> chunks
-  in
-  let sender_chunks = match origin, entry.style with
-    | Origin_bare, (Inbound | Thinking Thinking_arrived) when not (continues_previous ~previous entry) ->
-        wrap_words ~max_cells:body_width entry.speaker
-    | (Origin_bare, Thinking (Thinking_own))
-    | (Origin_bare, (User | (Keeper | (Status | (Local | (Journal | (Error | (Tool | Skill _))))))))
-    | ((Origin_row | Origin_inline), _) | (Origin_bare, Thinking Thinking_arrived)
-    | (Origin_bare, Inbound) -> [] in
-  let sender_rows = List.length sender_chunks in
-  let body_chunks = sender_chunks @ body_chunks in
-  let body_rows =
-    let margin, rail_cells, label_at, clock_cells =
-      Option.value gutter ~default:("", 0, 0, 0)
-    in
-    let blank = fit_width "" (display_width margin) in
-    let last = List.length body_chunks - 1 in
-    (* The bracket runs the height of the entry, so a wrapped body keeps the
-       line its first row started. Broken at every wrap it would read as one
-       turn per screen line, which is the opposite of what it is for.
+    let sender_chunks = match origin, entry.style with
+      | Origin_bare, (Inbound | Thinking Thinking_arrived) when not (continues_previous ~previous entry) ->
+          wrap_words ~max_cells:body_width entry.speaker
+      | (Origin_bare, Thinking (Thinking_own))
+      | (Origin_bare, (User | (Keeper | (Status | (Local | (Journal | (Error | (Tool | Skill _))))))))
+      | ((Origin_row | Origin_inline), _) | (Origin_bare, Thinking Thinking_arrived)
+      | (Origin_bare, Inbound) -> [] in
+    let sender_rows = List.length sender_chunks in
+    let body_chunks = sender_chunks @ body_chunks in
+    let body_rows =
+      let margin, rail_cells, label_at, clock_cells =
+        Option.value gutter ~default:("", 0, 0, 0)
+      in
+      let blank = fit_width "" (display_width margin) in
+      let last = List.length body_chunks - 1 in
+      (* The bracket runs the height of the entry, so a wrapped body keeps the
+         line its first row started. Broken at every wrap it would read as one
+         turn per screen line, which is the opposite of what it is for.
 
-       The corners go where they mean something: the opening one on the row the
-       entry starts, the closing one on the row it ends. A [Rail_closes] entry
-       whose reply wraps ten rows would otherwise end the turn at the top of
-       its own last paragraph. *)
-    let rail_at index =
-      if rail_cells = 0 then ""
-      else
-        let piece =
-          match entry.turn_rail with
-          | Rail_none -> Rail_none
-          | Rail_says -> Rail_says
-          | Rail_opens -> if index = 0 then Rail_opens else Rail_says
-          | Rail_does -> if index = 0 then Rail_does else Rail_says
-          (* A wrapped body still belongs to the one row that is the turn, so
-             the rows under it continue the line the stub started rather than
-             each standing alone. *)
-          | Rail_stands ->
-              if index = 0 then
-                (if entry.diagnostics = [] then Rail_stands else Rail_opens)
-              else Rail_says
-          (* Diagnostics follow the body, so the corner moves down to the
-             last of them. *)
-          | Rail_closes -> if index = last && entry.diagnostics = [] then Rail_closes else Rail_says
-          (* Only the first row joins. A wrapped arrival keeps its body under
-             the join without drawing a second one, and it never picks up the
-             turn's own line: the turn it landed inside did not produce it. *)
-          | Rail_joins siding -> if index = 0 then Rail_joins siding else Rail_none
-        in
-        turn_rail_gutter piece
-    in
-    body_chunks
-    |> List.mapi (fun index chunk ->
-      { style = entry.style
-      ; kind = (if index < sender_rows then Metadata Sender else Body)
-      ; shade = shade_of_style entry.style
-      ; text = "  " ^ chunk
-      (* The indent sits after the rail: the rail's join belongs on the
-         conversation's line, and the blank run after it is what moves the
-         rest into the arrival's column. *)
-      ; gutter_rail_cells = rail_cells + indent
-      (* A wrapped row's gutter is blanks held at the first row's width: no
-         clock column of its own, so no boundary to hand the renderer. *)
-      ; gutter_clock_cells = (if index = 0 then clock_cells else 0)
-      ; gutter_label_at = (if index = 0 then label_at else rail_cells) + indent
-      ; gutter =
-          rail_at index ^ String.make indent ' '
-          ^ (if index = 0 then margin else blank)
-      (* The fold marker sits at the end of the first row, so that is the
-         row a press lands on. A continuation carries the same text and none
-         of the affordance. *)
-      ; action = (if index = 0 then entry.action else Action_none)
-      })
-  in
-  let diagnostic_rows =
-    let wrap_diagnostic_line line =
-      let len = String.length line in
-      let rec count_indent i =
-        if i < len && Char.equal line.[i] ' ' then count_indent (i + 1) else i
+         The corners go where they mean something: the opening one on the row the
+         entry starts, the closing one on the row it ends. A [Rail_closes] entry
+         whose reply wraps ten rows would otherwise end the turn at the top of
+         its own last paragraph. *)
+      let rail_at index =
+        if rail_cells = 0 then ""
+        else
+          let piece =
+            match entry.turn_rail with
+            | Rail_none -> Rail_none
+            | Rail_says -> Rail_says
+            | Rail_opens -> if index = 0 then Rail_opens else Rail_says
+            | Rail_does -> if index = 0 then Rail_does else Rail_says
+            (* A wrapped body still belongs to the one row that is the turn, so
+               the rows under it continue the line the stub started rather than
+               each standing alone. *)
+            | Rail_stands ->
+                if index = 0 then
+                  (if entry.diagnostics = [] then Rail_stands else Rail_opens)
+                else Rail_says
+            (* Diagnostics follow the body, so the corner moves down to the
+               last of them. *)
+            | Rail_closes -> if index = last && entry.diagnostics = [] then Rail_closes else Rail_says
+            (* Only the first row joins. A wrapped arrival keeps its body under
+               the join without drawing a second one, and it never picks up the
+               turn's own line: the turn it landed inside did not produce it. *)
+            | Rail_joins siding -> if index = 0 then Rail_joins siding else Rail_none
+          in
+          turn_rail_gutter piece
       in
-      let indent_len = count_indent 0 in
-      if indent_len = len then [ "" ]
-      else if indent_len = 0 || indent_len >= body_width then
-        wrap_words ~max_cells:body_width line
-      else
-        let prefix = String.sub line 0 indent_len in
-        let body = String.sub line indent_len (len - indent_len) in
-        wrap_words ~max_cells:(Int.max 1 (body_width - indent_len)) body
-        |> List.map (fun row -> prefix ^ row)
+      body_chunks
+      |> List.mapi (fun index chunk ->
+        { style = entry.style
+        ; kind = (if index < sender_rows then Metadata Sender else Body)
+        ; shade = shade_of_style entry.style
+        ; text = "  " ^ chunk
+        (* The indent sits after the rail: the rail's join belongs on the
+           conversation's line, and the blank run after it is what moves the
+           rest into the arrival's column. *)
+        ; gutter_rail_cells = rail_cells + indent
+        (* A wrapped row's gutter is blanks held at the first row's width: no
+           clock column of its own, so no boundary to hand the renderer. *)
+        ; gutter_clock_cells = (if index = 0 then clock_cells else 0)
+        ; gutter_label_at = (if index = 0 then label_at else rail_cells) + indent
+        ; gutter =
+            rail_at index ^ String.make indent ' '
+            ^ (if index = 0 then margin else blank)
+        (* The fold marker sits at the end of the first row, so that is the
+           row a press lands on. A continuation carries the same text and none
+           of the affordance. *)
+        ; action = (if index = 0 then entry.action else Action_none)
+        })
     in
-    let chunks = entry.diagnostics
-      |> List.concat_map (fun text ->
-           text |> String.split_on_char '\n'
-           |> List.concat_map wrap_diagnostic_line) in
-    let margin, rail_cells, _, _ = Option.value gutter ~default:("", 0, 0, 0) in
-    let blank = fit_width "" (display_width margin) in
-    List.mapi (fun index text ->
-      let rail = match entry.turn_rail with
-        | Rail_none | Rail_joins _ -> Rail_none
-        | (Rail_closes | Rail_stands) when index = List.length chunks - 1 -> Rail_closes
-        | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes -> Rail_says in
-      (* The entry's own style and layer: the renderer draws the bar of the
-         entry's body rows in the two cells before the text. *)
-      { style = entry.style; kind = Metadata Diagnostic;
-        shade = shade_of_style entry.style;
-        text = "  " ^ text;
-        gutter = (if rail_cells = 0 then "" else turn_rail_gutter rail)
-          ^ String.make indent ' ' ^ blank;
-        gutter_rail_cells = rail_cells + indent; gutter_clock_cells = 0;
-        gutter_label_at = rail_cells + indent; action = Action_none }) chunks
-  in
-  (* After the whole body: a row of metadata between two rows of one message
-     reads as the message ending there. *)
-  let body_with_diagnostics = body_rows @ diagnostic_rows in
-  let message_rows = (
+    let diagnostic_rows =
+      let wrap_diagnostic_line line =
+        let len = String.length line in
+        let rec count_indent i =
+          if i < len && Char.equal line.[i] ' ' then count_indent (i + 1) else i
+        in
+        let indent_len = count_indent 0 in
+        if indent_len = len then [ "" ]
+        else if indent_len = 0 || indent_len >= body_width then
+          wrap_words ~max_cells:body_width line
+        else
+          let prefix = String.sub line 0 indent_len in
+          let body = String.sub line indent_len (len - indent_len) in
+          wrap_words ~max_cells:(Int.max 1 (body_width - indent_len)) body
+          |> List.map (fun row -> prefix ^ row)
+      in
+      let chunks = entry.diagnostics
+        |> List.concat_map (fun text ->
+             text |> String.split_on_char '\n'
+             |> List.concat_map wrap_diagnostic_line) in
+      let margin, rail_cells, _, _ = Option.value gutter ~default:("", 0, 0, 0) in
+      let blank = fit_width "" (display_width margin) in
+      List.mapi (fun index text ->
+        let rail = match entry.turn_rail with
+          | Rail_none | Rail_joins _ -> Rail_none
+          | (Rail_closes | Rail_stands) when index = List.length chunks - 1 -> Rail_closes
+          | Rail_opens | Rail_says | Rail_does | Rail_stands | Rail_closes -> Rail_says in
+        (* The entry's own style and layer: the renderer draws the bar of the
+           entry's body rows in the two cells before the text. *)
+        { style = entry.style; kind = Metadata Diagnostic;
+          shade = shade_of_style entry.style;
+          text = "  " ^ text;
+          gutter = (if rail_cells = 0 then "" else turn_rail_gutter rail)
+            ^ String.make indent ' ' ^ blank;
+          gutter_rail_cells = rail_cells + indent; gutter_clock_cells = 0;
+          gutter_label_at = rail_cells + indent; action = Action_none }) chunks
+    in
+    (* After the whole body: a row of metadata between two rows of one message
+       reads as the message ending there. *)
+    let body_with_diagnostics = body_rows @ diagnostic_rows in
+    let message_rows = (
+      match origin with
+      | Origin_inline | Origin_bare -> body_with_diagnostics
+      | Origin_row -> (
+          (* An inline predecessor did not open a separate heading. Do not
+             inherit one merely because both entries belong to the same turn. *)
+          let previous =
+            Option.bind previous (fun previous ->
+              if entry_origin ~origin:configured_origin ~inner_width:pane_width
+                   previous = Origin_row
+              then Some previous else None)
+          in
+          match metadata_row ~previous ~inner_width ~indent entry with
+          | None -> body_with_diagnostics
+          | Some metadata -> metadata :: body_with_diagnostics))
+    in
     match origin with
-    | Origin_inline | Origin_bare -> body_with_diagnostics
-    | Origin_row -> (
-        (* An inline predecessor did not open a separate heading. Do not
-           inherit one merely because both entries belong to the same turn. *)
-        let previous =
-          Option.bind previous (fun previous ->
-            if entry_origin ~origin:configured_origin ~inner_width:pane_width
-                 previous = Origin_row
-            then Some previous else None)
+    | Origin_bare ->
+        (* A separator belongs between entries, never after the transcript.
+           Counting and scrolling therefore see exactly the same final row.
+           Consecutive technical rows (Tool/Thinking/Status) stay tightly grouped,
+           while returning to conversational speech gets a breathing line. *)
+        let is_speech_style = function
+          | User | Inbound | Keeper | Local -> true
+          | Status | Journal | Error | Tool | Skill _ | Thinking _ -> false
         in
-        match metadata_row ~previous ~inner_width ~indent entry with
-        | None -> body_with_diagnostics
-        | Some metadata -> metadata :: body_with_diagnostics))
+        (match previous, message_rows with
+         | Some prev, _ :: _
+           when is_speech_style prev.style || is_speech_style entry.style ->
+             { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
+               style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
+               gutter_label_at = 0; action = Action_none } :: message_rows
+         | Some _, _ :: _
+         | Some _, []
+         | None, ([] | _ :: _) -> message_rows)
+    | Origin_inline | Origin_row ->
+        (match timeline_break_row ~previous ~inner_width:pane_width entry with
+         | None -> message_rows
+         | Some timeline_break -> timeline_break :: message_rows)
   in
-  match origin with
-  | Origin_bare ->
-      (* A separator belongs between entries, never after the transcript.
-         Counting and scrolling therefore see exactly the same final row.
-         Consecutive technical rows (Tool/Thinking/Status) stay tightly grouped,
-         while returning to conversational speech gets a breathing line. *)
-      let is_speech_style = function
-        | User | Inbound | Keeper | Local -> true
-        | Status | Journal | Error | Tool | Skill _ | Thinking _ -> false
-      in
-      (match previous, message_rows with
-       | Some prev, _ :: _
-         when is_speech_style prev.style || is_speech_style entry.style ->
-           { kind = Spacing; text = ""; gutter = ""; shade = Shade_none;
-             style = Status; gutter_rail_cells = 0; gutter_clock_cells = 0;
-             gutter_label_at = 0; action = Action_none } :: message_rows
-       | Some _, _ :: _
-       | Some _, []
-       | None, ([] | _ :: _) -> message_rows)
-  | Origin_inline | Origin_row ->
-      (match timeline_break_row ~previous ~inner_width:pane_width entry with
-       | None -> message_rows
-       | Some timeline_break -> timeline_break :: message_rows)
+  match
+    find_kept_rows ~entry ~previous ~inner_width:pane_width
+      ~origin:configured_origin body_chunks
+  with
+  | Some rows -> rows
+  | None ->
+      let rows = lay_out body_chunks in
+      Atomic.incr rows_built;
+      keep_rows
+        { kept_entry = entry; kept_previous = previous;
+          kept_inner_width = pane_width; kept_origin = configured_origin;
+          kept_chunks = body_chunks; kept_rows = rows };
+      rows
 
 let viewport_gap_text ~inner_width hidden_rows =
   let candidates =
@@ -2600,6 +2671,39 @@ type body_row_position = {
   rows_below : int;
 }
 
+(* The body row each chosen row is, walking the entry's rows once beside the
+   choice. A window keeps the entry's rows in their order and adds only
+   [Viewport_gap] rows of its own, which own no body row; a chosen row that is
+   not physically one of [rows] owns none either. Matching each chosen row
+   against an association of every row walked the whole entry once per
+   visible row. *)
+let body_rows_of_chosen rows chosen =
+  let body_row_after (row : row) body_row =
+    match row.kind with
+    | Body -> body_row + 1
+    | Metadata _ | Spacing | Viewport_gap _ -> body_row
+  in
+  let owned_by (row : row) body_row =
+    match row.kind with
+    | Body -> Some body_row
+    | Metadata _ | Spacing | Viewport_gap _ -> None
+  in
+  let rec walk body_row rows chosen owned =
+    match chosen with
+    | [] -> List.rev owned
+    | (wanted : row) :: rest_chosen -> (
+        match wanted.kind, rows with
+        | Viewport_gap _, _ -> walk body_row rows rest_chosen (None :: owned)
+        | (Body | Metadata _ | Spacing), [] ->
+            walk body_row [] rest_chosen (None :: owned)
+        | (Body | Metadata _ | Spacing), row :: rest ->
+            if row == wanted then
+              walk (body_row_after row body_row) rest rest_chosen
+                (owned_by row body_row :: owned)
+            else walk (body_row_after row body_row) rest chosen owned)
+  in
+  walk 0 rows chosen []
+
 (* Positions belong to the actual immutable rows selected by this producer.
    Generated gaps and rows synthesized by repeat collapse have no original
    row owner and cannot acquire a body position by matching their text. *)
@@ -2616,15 +2720,11 @@ let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
           if List.length rows <= remaining then rows
           else if selected = [] then newest_entry_window ~inner_width ~height:remaining rows
           else take_last remaining rows in
-        let _, owners = List.fold_left (fun (body_row, owners) row ->
-          match row.kind with
-          | Body -> body_row+1, (row,body_row)::owners
-          | Metadata _ | Spacing | Viewport_gap _ -> body_row,owners) (0,[]) rows in
         let below = List.length selected in
         let count = List.length chosen in
-        let owned = List.mapi (fun index row ->
+        let owned = List.mapi (fun index body_row ->
           Option.map (fun body_row -> {entry_index;body_row;
-            rows_below=below+count-index-1}) (List.assq_opt row owners)) chosen
+            rows_below=below+count-index-1}) body_row) (body_rows_of_chosen rows chosen)
           |> List.filter_map Fun.id in
         collect (entry_index-1) (remaining-count) (chosen @ selected) (owned @ positions) older
   in
@@ -3141,3 +3241,13 @@ let folded_thought_summary_localized ~ko ~mark ~width ~line_count ~body =
 
 let folded_thought_summary ~mark ~width ~line_count ~body =
   folded_thought_summary_localized ~ko:false ~mark ~width ~line_count ~body
+
+module For_testing = struct
+  let rows_built () = Atomic.get rows_built
+
+  let with_no_kept_rows run =
+    let held = Domain.DLS.get kept_rows_key in
+    let previous = !held in
+    held := [];
+    Fun.protect ~finally:(fun () -> held := previous) run
+end

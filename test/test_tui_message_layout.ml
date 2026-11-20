@@ -819,6 +819,83 @@ let test_clamped_scrolled_rows_home_and_from_oldest () =
   check int "from_oldest=3 draws full window"
     height (List.length from_oldest_3.rows)
 
+(* {1 Kept rows} *)
+
+let same_rows label expected actual =
+  check bool label true (expected = actual)
+
+(* The rows of an entry drawn again with nothing changed are the rows kept
+   for it; a change to any input lays it out again, as a fresh layout would. *)
+let test_an_entry_drawn_again_returns_its_kept_rows () =
+  let body = String.concat "\n" (List.init 40 (Printf.sprintf "kept line %02d")) in
+  let first = entry Layout.Keeper "alpha" "" body in
+  let next = entry Layout.Keeper "alpha" "" (body ^ "\nmore") in
+  let rendered ~(entry : Layout.entry) ~width:_ =
+    [ "rendered from " ^ String.sub entry.body 0 9 ] in
+  let rows ?markdown ?origin ~inner_width ~previous entry =
+    Layout.rows_of_entry ?markdown ?origin ~inner_width ~previous entry in
+  let base () = rows ~inner_width:60 ~previous:None first in
+  let laid_out = base () in
+  let built = Layout.For_testing.rows_built () in
+  check bool "the same entry returns the kept rows" true (base () == laid_out);
+  check int "nothing is laid out again" built (Layout.For_testing.rows_built ());
+  (* Each draw differs from the base in one input, and the base is the
+     entry's kept layout just before it. *)
+  List.iter (fun (label, draw) ->
+    ignore (base ());
+    let before = Layout.For_testing.rows_built () in
+    let kept = draw () in
+    check bool (label ^ " is laid out again") true
+      (Layout.For_testing.rows_built () > before);
+    same_rows (label ^ " draws what a fresh layout draws")
+      (Layout.For_testing.with_no_kept_rows draw) kept)
+    [ "another width", (fun () -> rows ~inner_width:40 ~previous:None first)
+    ; "another predecessor", (fun () -> rows ~inner_width:60 ~previous:(Some next) first)
+    ; "another origin", (fun () -> rows ~origin:Layout.Origin_bare ~inner_width:60 ~previous:None first)
+    ; "rendered body lines", (fun () -> rows ~markdown:rendered ~inner_width:60 ~previous:None first) ]
+
+(* A window's body positions name the rows it shows: each is the body row
+   the entry's own rows give that physical row, for a newest entry cut by a
+   gap, collapsed repeats and diagnostics after the body. *)
+let test_window_positions_name_the_rows_shown () =
+  let long = String.concat "\n" (List.init 300 (Printf.sprintf "long line %03d")) in
+  let repeated = String.concat "\n" ("start" :: List.init 12 (fun _ -> "same") @ [ "end" ]) in
+  let with_diagnostics =
+    { (entry Layout.Keeper "alpha" "" (long ^ "\n" ^ repeated)) with
+      diagnostics = [ "first diagnostic"; "second diagnostic" ] } in
+  let entries =
+    [ entry Layout.User "you" "" "a question"
+    ; entry Layout.Keeper "alpha" "" repeated
+    ; entry Layout.Keeper "alpha" "" "a short answer"
+    ; with_diagnostics ] in
+  List.iter (fun origin ->
+    List.iter (fun height ->
+      let window = Layout.clamped_scrolled_rows ~origin ~inner_width:50 ~height
+          ~requested:0 entries in
+      let count = List.length window.rows in
+      let expected =
+        List.concat (List.mapi (fun entry_index entry ->
+          let previous = if entry_index = 0 then None
+            else Some (List.nth entries (entry_index - 1)) in
+          let rows = Layout.rows_of_entry ~origin ~inner_width:50 ~previous entry in
+          let _, owners = List.fold_left (fun (body_row, owners) (row : Layout.row) ->
+            match row.kind with
+            | Layout.Body -> body_row + 1, (row, body_row) :: owners
+            | Layout.Metadata _ | Spacing | Viewport_gap _ -> body_row, owners)
+            (0, []) rows in
+          (* The rows the window laid out are the rows kept for each entry,
+             so a shown row is found among them by identity. *)
+          List.filter_map Fun.id (List.mapi (fun index shown ->
+            Option.map (fun body_row -> entry_index, body_row, count - index - 1)
+              (List.assq_opt shown owners)) window.rows)) entries) in
+      let actual = List.map (fun (position : Layout.body_row_position) ->
+        position.entry_index, position.body_row, position.rows_below) window.body_positions in
+      check (list (triple int int int))
+        (Printf.sprintf "height %d: positions name the rows shown" height)
+        (List.sort compare expected) (List.sort compare actual))
+      [ 1; 2; 3; 4; 5; 8; 20; 400 ])
+    [ Layout.Origin_row; Layout.Origin_inline; Layout.Origin_bare ]
+
 let () =
   run "tui_message_layout"
     [
@@ -828,6 +905,10 @@ let () =
       ( "layout across frames"
       , [ test_case "a text laid out again keeps its layout" `Quick
             test_a_text_laid_out_again_keeps_its_layout
+        ; test_case "an entry drawn again returns its kept rows" `Quick
+            test_an_entry_drawn_again_returns_its_kept_rows
+        ; test_case "window positions name the rows shown" `Quick
+            test_window_positions_name_the_rows_shown
         ; test_case "a text is split again after a frame without it" `Quick
             test_a_text_is_split_again_after_a_frame_without_it
         ; test_case "an ASCII text is not kept" `Quick test_an_ascii_text_is_not_kept

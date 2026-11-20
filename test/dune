@@ -5312,7 +5312,7 @@
 (test
  (name test_tui_volume_gc)
  (modules test_tui_volume_gc)
- (libraries alcotest masc masc_tui_volume_gc yojson))
+ (libraries alcotest masc masc_tui_say masc_tui_volume_gc yojson))
 
 (test
  (name test_tui_storage)

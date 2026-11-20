@@ -129,6 +129,33 @@ let test_an_answer_is_read_as_a_report_a_refusal_or_unreadable () =
     (kind (Gc.answer_of_text ~is_error:false (text_of mixed)))
 ;;
 
+let test_verdict_tones_glyphs_and_korean_labels () =
+  let sample =
+    report ~executed:true
+      [ verdict ~work:"w1" "kept-k" Answer.Kept "kept"
+      ; verdict ~build:"b1" "cand-k" Answer.Reclaim_candidate "candidate"
+      ; verdict ~build:"b2" "done-k" Answer.Reclaimed "reclaimed"
+      ; verdict ~build:"b3" "fail-k" Answer.Reclaim_failed "failed"
+      ]
+  in
+  let rendered = Gc.lines ~server_report:None (Gc.answered (Gc.Report sample)) in
+  let has_tone wanted needle =
+    List.exists
+      (fun (tone, text) ->
+        tone = wanted
+        && String.starts_with ~prefix:needle (Masc_tui_say.render Masc_tui_say.Ko text))
+      rendered
+  in
+  Alcotest.(check bool) "kept row uses Dim + waiting mark" true
+    (has_tone Gc.Dim "  \xe2\x97\x8b kept-k: kept (작업 w1, 빌드 \xe2\x80\x94)");
+  Alcotest.(check bool) "candidate row uses Warn + caution mark" true
+    (has_tone Gc.Warn "  \xe2\x96\xb2 cand-k: candidate (작업 \xe2\x80\x94, 빌드 b1)");
+  Alcotest.(check bool) "reclaimed row uses Ok + settled mark" true
+    (has_tone Gc.Ok "  \xe2\x97\x8f done-k: reclaimed (작업 \xe2\x80\x94, 빌드 b2)");
+  Alcotest.(check bool) "failed row uses Bad + failed mark" true
+    (has_tone Gc.Bad "  \xe2\x9c\x95 fail-k: failed (작업 \xe2\x80\x94, 빌드 b3)")
+;;
+
 let () =
   Alcotest.run
     "tui_volume_gc"
@@ -143,6 +170,8 @@ let () =
             test_disarm_takes_back_only_an_armed_press
         ; Alcotest.test_case "an answer is read as a report, a refusal or unreadable" `Quick
             test_an_answer_is_read_as_a_report_a_refusal_or_unreadable
+        ; Alcotest.test_case "verdict tones, glyphs, and korean labels" `Quick
+            test_verdict_tones_glyphs_and_korean_labels
         ] )
     ]
 ;;

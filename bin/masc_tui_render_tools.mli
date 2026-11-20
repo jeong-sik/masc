@@ -55,14 +55,16 @@ type display =
             that instant: the Async pane's request ages, on every row a
             request wraps into. Building the display notes none of them;
             the frame notes those it draws ({!drawn_change}). *)
-  ; entries : (paged_list * int list) option
+  ; entries : (paged_list * cursor_rows list) option
         (** The list the pane draws -- the Skill list on Available, the
             request list on Async while no request is open -- with the rows
             of [lines] each of its entries takes, in order: a Skill with its
             group heading and the rows that say why it was loaded, a request
-            as it wraps. The first entry counts every row above it too, which
-            the window brings in with it. [None] on a pane with no entry in
-            such a list. The frame pages that list by {!drawn_page}. *)
+            as it wraps. The selection's document above the list is as tall
+            for every selection of the loaded list, so each entry takes the
+            same rows whichever entry is selected. [None] on a pane with no
+            entry in such a list. The frame pages that list by
+            {!drawn_page}. *)
   }
 
 val tools_display : ?cols:int -> ?terminal_rows:int -> state -> display
@@ -73,8 +75,30 @@ val drawn_page : display -> rows:int -> (paged_list * int) option
 (** The list the pane draws and the page a key moves it by when the frame's
     window is [rows] rows tall: the fewest entries any such window holds
     whole ({!Masc_tui_scroll.items_always_shown}), since a Skill or a request
-    can wrap and the cursor counts entries. The frame reports it as the
-    list's drawn height. [None] when [entries] is. *)
+    can wrap and the cursor counts entries. The first entry counts every row
+    above it too, which the window brings in with it. The frame reports it
+    as the list's drawn height. [None] when [entries] is. *)
+
+type landing = { entry : cursor_rows; lead : int }
+(** Where a move key left the selection of a Tools list: the rows of
+    [lines] its entry takes, and how many rows above them the window brings
+    in with it. *)
+
+val skill_landing : state -> display -> landing option
+(** The selected Skill on the Available pane's page: its own rows, with the
+    group heading above it when it opens a group and the whole top of the
+    page when it is the first Skill. [None] while no Skill is selected. *)
+
+val request_landing : state -> display -> landing option
+(** The selected async request on the Async pane's page, with the whole top
+    of the page when it is the first request. [None] while no request of
+    the list is selected. *)
+
+val follow : landing -> height:int -> int -> int
+(** The scroll of a [height]-row window that follows [landing] from
+    [scroll]: the entry's last row in view first, then its first with the
+    lead, held to what a window shows together with the entry
+    ({!Masc_tui_scroll.ensure_visible_with_lead}). *)
 
 val drawn_change : display -> (string * string) Masc_tui_rows.t -> float option
 (** The earliest instant a row of [row_changes] that the window draws reads

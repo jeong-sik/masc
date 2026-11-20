@@ -4894,7 +4894,7 @@
   masc_tui_runtime_config_view masc_tui_account_login masc_tui_render_work
   masc_tui_render_tools masc_tui_list_moves masc_tui_scroll masc_tui_overview_tasks
   goal_measure_fixture masc.goal_measure masc.masc_goal masc.masc_types
-  masc.masc_schedule masc.skill_reference yojson))
+  masc.masc_schedule masc.skill_reference unix yojson))
 
 (test
  (name test_tui_render_memory)

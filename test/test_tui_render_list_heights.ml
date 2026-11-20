@@ -384,20 +384,139 @@ let test_schedules_report_the_rows_they_drew () =
     ; wl_cursor = (fun state -> state.schedule_cursor) }
     state
 
+(* Each notice is drawn at both sizes, so the list really shares the body
+   with it. *)
+let check_notices_drawn ~name render state notices =
+  List.iter
+    (fun size ->
+      with_size size (fun () ->
+        let lines, _ = draw render state in
+        List.iter
+          (fun notice ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%dx%d, %s: %S is drawn" (snd size) (fst size) name notice)
+              true (rows_naming notice lines > 0))
+          notices))
+    sizes
+
+(* The rows above and under a Work list take its share of the body: a read
+   that failed, a partial reading, a filter, an armed cancel, a refused
+   form. The list is drawn in what is left, so the report has to be the
+   entries drawn there and not the height the list has without them. *)
+let test_tasks_with_notices_report_the_entries_they_drew () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Planning;
+  state.tasks <- List.init 40 task;
+  state.tasks_error <- Some "coverage read failed for one source";
+  state.goal_task_links <- Goal_links_read_failed "goal links unreadable";
+  let place state index =
+    state.task_focus <-
+      Masc_tui_overview_tasks.Task_focus
+        { selected = Option.map (fun (task : Tui_decode.task) -> task.id) (List.nth_opt state.tasks index) }
+  in
+  check_notices_drawn ~name:"Tasks" Masc_tui_render_work.render_work_tasks state
+    [ "coverage read failed"; "goal links unreadable" ];
+  check_work_list
+    { wl_name = "Task with notices"; wl_list = Task_entries; wl_marker = "tq-"; wl_count = 40
+    ; wl_render = Masc_tui_render_work.render_work_tasks; wl_place = place
+    ; wl_cursor =
+        (fun state ->
+          Option.value ~default:0
+            (Masc_tui_overview_tasks.work_selected_index state.tasks
+               ~selected:(Masc_tui_overview_tasks.selection state.task_focus))) }
+    state
+
+let test_goals_with_notices_report_the_entries_they_drew () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Planning;
+  let goals = List.init 40 goal in
+  state.planning <-
+    Some
+      { pl_goals = goals
+      ; pl_rollup =
+          { pr_active = 40; pr_verifying = 0; pr_awaiting_confirmation = 0; pr_done = 0
+          ; pr_dropped = 0; pr_paused = 0; pr_blocked = 0 }
+      ; pl_backlog =
+          { pb_todo = 0; pb_claimed = 0; pb_running = 0; pb_awaiting_verification = 0
+          ; pb_done = 0; pb_cancelled = 0 }
+      ; pl_goal_history = []
+      ; pl_generated_at = "2026-11-19T00:00:00Z" };
+  (* A failed reload keeps the previous Goals and says so twice (scope and
+     error rows); a filter other than the default draws the modes row. *)
+  state.planning_error <- Some "goal reload failed";
+  state.planning_filter <- Planning_filter_all;
+  state.goal_task_links <- Goal_links_read_failed "goal links unreadable";
+  Alcotest.(check (list string)) "the visible Goals keep the fixture's order"
+    (List.map (fun (goal : planning_goal) -> goal.pg_id) goals)
+    (List.map (fun (goal : planning_goal) -> goal.pg_id)
+       (planning_visible_goals ~filter:state.planning_filter ~sort:state.planning_sort goals));
+  check_notices_drawn ~name:"Goals" Masc_tui_render_work.render_planning_list state
+    [ "goal reload failed"; "goal links unreadable" ];
+  check_work_list
+    { wl_name = "Goal with notices"; wl_list = Goal_entries; wl_marker = "gq-"; wl_count = 40
+    ; wl_render = Masc_tui_render_work.render_planning_list
+    ; wl_place = (fun state index -> state.planning_cursor <- index)
+    ; wl_cursor = (fun state -> state.planning_cursor) }
+    state
+
+let test_schedules_with_notices_report_the_rows_they_drew () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Schedules;
+  let rows = List.init 40 schedule in
+  state.schedules <-
+    Some
+      { scs_observed_at_iso = "2026-11-19T00:00:00Z"
+      ; scs_status = "ok"
+      ; scs_read_error = None
+      ; scs_request_count = Some 40
+      ; scs_truncated = false
+      ; scs_payload_target = None
+      ; scs_paging = Schedule_paging_unavailable
+      ; scs_next_due_iso = None
+      ; scs_counts = None
+      ; scs_rows = rows
+      ; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok };
+  (* The source warning above the list, the armed cancel and the server's
+     refusal under it, and a refused form long enough to wrap: every row the
+     page spends outside the list. *)
+  state.schedules_error <- Some "schedule reload failed";
+  state.schedule_cancel_armed <- Some "schedule-03";
+  state.schedule_cancel_error <- Some ("schedule-04", Request_failed "cancel refused");
+  state.schedule_form_refusal <-
+    Some
+      { sfr_change = Schedule_create
+      ; sfr_reason = Schedule_form_request (Request_failed (String.concat " " (List.init 40 (fun _ -> "refused"))))
+      ; sfr_at = Unix.gettimeofday ()
+      ; sfr_workspace = None };
+  check_notices_drawn ~name:"Schedules" Masc_tui_render_work.render_schedules state
+    [ "schedule reload failed"; "schedule-03"; "cancel refused"; "refused refused" ];
+  check_work_list
+    { wl_name = "schedule with notices"; wl_list = Schedule_rows; wl_marker = "sq-"; wl_count = 40
+    ; wl_render = Masc_tui_render_work.render_schedules
+    ; wl_place = (fun state index -> state.schedule_cursor <- index)
+    ; wl_cursor = (fun state -> state.schedule_cursor) }
+    state
+
 (* The Tools lists are rows of one scrolling page, and an entry can wrap, so
    a page counts the entries a window of the frame's height holds whole
    ({!Masc_tui_render_tools.drawn_page}). The frame draws the window from
    [tools_scroll], which the dispatcher moves to the selected entry after
-   every key: [follow] does that here the way the dispatcher does
-   ([follow_tools_list]), the entry's last row first, then its first. Each
+   every key by the landing and the rule it reads
+   ({!Masc_tui_render_tools.skill_landing},
+   {!Masc_tui_render_tools.request_landing},
+   {!Masc_tui_render_tools.follow}), and these tests read the same. Each
    entry's rows are found in the page by its text, not taken from the
-   renderer's count, and hold the rows above it that the dispatcher's lead
-   brings in with it: a group heading, and above the first entry the whole
-   top of the page. *)
+   renderer's count: from its first row, a group heading when it opens one,
+   to its last. The window brings the whole top of the page in with the
+   first entry.
+
+   Above the list stands the selection's document: the Skill's source,
+   package and revision, or the request's requester and Keeper. These wrap
+   differently for different entries, so the fixtures give the entries
+   values that wrap differently. *)
 module Tools = Masc.Tui_decode_tools
 
-(* Where an entry's rows are in the page: its first row, counting the rows
-   above it the window brings in with it, and its last. *)
+(* Where an entry's rows are in the page. *)
 type entry_rows = { er_first : int; er_last : int }
 
 (* The rows of the window the frame draws the Tools page in, as
@@ -411,11 +530,6 @@ let tools_window state lines =
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
   in
   height, max 0 (layout.sc_count - height)
-
-let follow ~height ~max_scroll (rows : entry_rows) scroll =
-  min max_scroll
-    (Key.ensure_visible ~cursor:rows.er_first ~height
-       (Key.ensure_visible ~cursor:rows.er_last ~height scroll))
 
 (* Whether a page row starts the entry [name]: a row that wraps loses its
    indent, and the selected entry's row has its mark before the name. *)
@@ -438,16 +552,12 @@ let row_where lines label starts =
   | Some row -> row
   | None -> Alcotest.failf "%s is not in the page" label
 
-(* Each entry's rows: from the row that starts it, less the [above] rows the
-   window brings with it, to the row before the next entry's, and the last
-   to the row before [below]. The window brings the top of the page in with
-   the first entry. *)
+(* Each entry's rows: from the row that starts it, less the [above] rows of
+   its own above that row, to the row before the next entry's, and the last
+   to the row before [below]. *)
 let entry_rows lines ~names ~above ~below =
   let firsts =
-    List.mapi
-      (fun index name ->
-        if index = 0 then 0 else row_where lines name (starts_entry name) - above index)
-      names
+    List.mapi (fun index name -> row_where lines name (starts_entry name) - above index) names
   in
   let after = row_where lines "the row under the list" below in
   List.mapi
@@ -458,12 +568,13 @@ let entry_rows lines ~names ~above ~below =
 
 (* One walk down the list with j and one back up with k, the window
    following the cursor. In every page the renderer's count of each entry's
-   rows is the rows the page gives it, and from every window PgDn keeps the
+   rows is the rows the page gives it, every entry stands on the rows it
+   stood on for the first selection, and from every window PgDn keeps the
    last entry it held whole and PgUp the first. [rows display] are each
-   entry's rows in that page, with the rows above it the window brings in
-   with it; [prepare] lays the list out for the terminal's width, and
-   [cursor] / [place] are the selection. *)
-let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
+   entry's rows in that page; [prepare] lays the list out for the terminal's
+   width, [landing] is the dispatcher's, and [cursor] / [place] are the
+   selection. *)
+let check_tools_pages ~name ~list ~count ~prepare ~rows ~landing ~cursor ~place state =
   List.iter
     (fun size ->
       with_size size (fun () ->
@@ -474,6 +585,24 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
           let height, max_scroll = tools_window state display.lines in
           display, rows display, height, max_scroll
         in
+        let spans entries = List.map (fun entry -> entry.er_first, entry.er_last) entries in
+        (* The scroll the dispatcher keeps, from [scroll], and the window the
+           frame draws from it. *)
+        let follow display ~height scroll =
+          match landing state display with
+          | Some landing -> Masc_tui_render_tools.follow landing ~height scroll
+          | None -> Alcotest.failf "%s: the page has no landing for the selection" name
+        in
+        let window ~max_scroll scroll = max 0 (min scroll max_scroll) in
+        (* The window brings the top of the page in with the first entry. *)
+        let whole_in ~shown ~height index entry =
+          (if index = 0 then 0 else entry.er_first) >= shown && entry.er_last < shown + height
+        in
+        let first_selection =
+          place state 0;
+          let _, entries, _, _ = page () in
+          spans entries
+        in
         let scroll = ref 0 in
         let visit at =
           place state at;
@@ -481,19 +610,29 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
           let label =
             Printf.sprintf "%dx%d, %s %d, window %d" (snd size) (fst size) name at !scroll
           in
-          let heights = List.map (fun entry -> entry.er_last - entry.er_first + 1) entries in
-          Alcotest.(check (option (pair bool (list int))))
+          Alcotest.(check (option (pair bool (list (pair int int)))))
             (label ^ ": each entry takes the rows the page gives it")
-            (Some (true, heights))
-            (Option.map (fun (drawn, heights) -> drawn = list, heights) display.entries);
+            (Some (true, spans entries))
+            (Option.map
+               (fun (drawn, reported) ->
+                 ( drawn = list
+                 , List.map
+                     (fun (entry : Masc_tui_render_tools.cursor_rows) ->
+                       entry.first_row, entry.last_row)
+                     reported ))
+               display.entries);
+          Alcotest.(check (list (pair int int)))
+            (label ^ ": the entries stand where they stood for the first selection")
+            first_selection (spans entries);
+          let heights = List.map (fun entry -> entry.er_last - entry.er_first + 1) entries in
           Alcotest.(check bool) (label ^ ": the entries take different rows") true
             (List.length (List.sort_uniq compare (List.tl heights)) > 1);
-          scroll := follow ~height ~max_scroll (List.nth entries at) !scroll;
+          scroll := follow display ~height !scroll;
+          let shown = window ~max_scroll !scroll in
           let whole =
             List.filter_map
-              (fun (index, (entry : entry_rows)) ->
-                if entry.er_first >= !scroll && entry.er_last < !scroll + height then Some index
-                else None)
+              (fun (index, entry) ->
+                if whole_in ~shown ~height index entry then Some index else None)
               (List.mapi (fun index entry -> index, entry) entries)
           in
           let reported =
@@ -511,13 +650,12 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
                | Some moves -> moves key
                | None -> Alcotest.fail "no list answered the move key");
               let landed = cursor state in
-              let _, entries, height, max_scroll = page () in
-              let window = follow ~height ~max_scroll (List.nth entries landed) !scroll in
-              let kept_rows = List.nth entries kept in
+              let display, entries, height, max_scroll = page () in
+              let shown = window ~max_scroll (follow display ~height !scroll) in
               Alcotest.(check bool)
                 (Printf.sprintf "%s: %s to %d keeps entry %d whole" label key_name landed kept)
                 true
-                (kept_rows.er_first >= window && kept_rows.er_last < window + height))
+                (whole_in ~shown ~height kept (List.nth entries kept)))
             [ Key.Page_down, List.fold_left max 0 whole, "PgDn"
             ; Key.Page_up, List.fold_left min count whole, "PgUp" ];
           place state at
@@ -526,13 +664,22 @@ let check_tools_pages ~name ~list ~count ~prepare ~rows ~cursor ~place state =
         for at = count - 1 downto 0 do visit at done))
     sizes
 
-let skill_reference name =
+(* Where a Skill comes from: every third from a source whose id is long, and
+   every third after it a package whose id is longer, so the row that names
+   them above the list takes one, two or three rows. *)
+let skill_reference index name =
+  let source_id, package_id =
+    match index mod 3 with
+    | 0 -> "workspace", name
+    | 1 -> "workspace-" ^ String.make 80 's', name
+    | _ -> "workspace", name ^ "-" ^ String.make 150 'p'
+  in
   match
     Skill_reference.of_yojson
       (`Assoc
          [ ( "identity"
            , `Assoc
-               [ "source_id", `String "workspace"; "package_id", `String name
+               [ "source_id", `String source_id; "package_id", `String package_id
                ; "name", `String name ] )
          ; "content_revision", `String (String.make 64 'a') ])
   with
@@ -556,7 +703,7 @@ let skill index : Tools.effective_skill_profile =
     | _ -> [ Skill_keeper_profile ]
   in
   let name = Printf.sprintf "sk-%02d" index in
-  { esp_reference = skill_reference name; esp_name = name
+  { esp_reference = skill_reference index name; esp_name = name
   ; esp_surface =
       (if composition then
          Masc.Keeper_skill_observability.Composition_skill
@@ -592,9 +739,9 @@ let test_skills_page_by_the_entries_a_window_holds () =
                ; ets_tool_surface_sha256 = None })
       ; ts_usage = None; ts_volume_gc_report = None
       ; ts_storage = { st_host_disk = Host_disk_absent; st_keeper_cleanup = Keeper_cleanup_absent } };
-  (* A group's heading is the row above its first Skill, and the window
-     brings it in with that Skill. The selected Skill's measurement card
-     stands under the list. *)
+  (* A group's heading is the row above its first Skill and part of that
+     Skill's entry. The selected Skill's measurement card stands under the
+     list. *)
   let first_in_group index = index = 0 || index = skill_count / 2 in
   let rows (display : Masc_tui_render_tools.display) =
     entry_rows display.lines
@@ -603,22 +750,23 @@ let test_skills_page_by_the_entries_a_window_holds () =
       ~below:(String.starts_with ~prefix:"\xe2\x94\x8c")
   in
   check_tools_pages ~name:"Skill" ~list:Skill_entries ~count:skill_count
-    ~prepare:(fun ~cols:_ -> ()) ~rows
+    ~prepare:(fun ~cols:_ -> ()) ~rows ~landing:Masc_tui_render_tools.skill_landing
     ~cursor:(fun state -> state.tools_skill_cursor)
     ~place:(fun state index -> state.tools_skill_cursor <- index)
     state
 
 let request_count = 30
 
-(* Every request names the same Keeper, so the selected request's
-   requester row above the list keeps one height. Every third request's
-   ownership is unknown, which says so in more words: with a Keeper name of
-   this length that row wraps at the terminal's width and the others do
-   not. *)
+(* Every fifth request names a Keeper long enough that the requester row
+   above the list wraps at the terminal's width, and its own row with it;
+   the others fit. Every third request's ownership is unknown, which says so
+   in more words: with the shorter Keeper name that row wraps too. *)
 let request ~cols index : Tui_decode.async_request_row =
   { ar_request_id = Printf.sprintf "rq-%02d" index
   ; ar_submitted_by = "operator"
-  ; ar_keeper_name = "keeper-" ^ String.make (cols - 62) 'k'
+  ; ar_keeper_name =
+      (if index mod 5 = 2 then "keeper-" ^ String.make (cols - 30) 'v'
+       else "keeper-" ^ String.make (cols - 62) 'k')
   ; ar_phase = Async_running; ar_submitted_at = 0.
   ; ar_ownership = (if index mod 3 = 0 then Async_ownership_unknown else Async_runtime_owned) }
 
@@ -660,7 +808,7 @@ let test_requests_page_by_the_entries_a_window_holds () =
       ~below:(fun text -> String.starts_with ~prefix:"startup recovery" (String.trim text))
   in
   check_tools_pages ~name:"request" ~list:Async_request_entries ~count:request_count ~prepare
-    ~rows ~cursor:selected
+    ~rows ~landing:Masc_tui_render_tools.request_landing ~cursor:selected
     ~place:(fun state index ->
       state.tools_async_selection <- Some (request_target ~cols:!width index))
     state
@@ -678,6 +826,12 @@ let () =
             test_goals_report_the_entries_they_drew
         ; Alcotest.test_case "the schedule list reports the rows it drew" `Quick
             test_schedules_report_the_rows_they_drew
+        ; Alcotest.test_case "the Task list with notices reports the entries it drew" `Quick
+            test_tasks_with_notices_report_the_entries_they_drew
+        ; Alcotest.test_case "the Goal list with notices reports the entries it drew" `Quick
+            test_goals_with_notices_report_the_entries_they_drew
+        ; Alcotest.test_case "the schedule list with notices reports the rows it drew" `Quick
+            test_schedules_with_notices_report_the_rows_they_drew
         ; Alcotest.test_case "the Skill list pages by the entries a window holds" `Quick
             test_skills_page_by_the_entries_a_window_holds
         ; Alcotest.test_case "the request list pages by the entries a window holds" `Quick

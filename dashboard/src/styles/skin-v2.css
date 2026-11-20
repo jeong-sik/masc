@@ -123,9 +123,8 @@ html[data-skin="v2"]:not([data-theme="paper"]):not([data-theme="styleseed"]) {
   --fs-t3: 11px; --fw-t3: 600; --tr-t3: 0.14em;    /* mid · UPPER */
   --fs-t4: 9px;  --fw-t4: 600; --tr-t4: 0.2em;     /* dim · UPPER */
 
-  /* Composer input/control sizes — half-pixel literals from the
-     Claude-Design prototype (composer.jsx via styles/v2.css). The 2px-base
-     --fs-* ladder has no 14.5/12.5 step, so these are named to pixel-match:
+  /* Composer input/control sizes — half-pixel literals. The 2px-base
+     --fs-* ladder has no 14.5/12.5 step, so these are named:
      textarea 14.5px, send 12.5px. */
   --fs-composer-input: 14.5px;
   --fs-composer-send:  12.5px;

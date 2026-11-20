@@ -2176,7 +2176,7 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | `E3OnHeadLine` | E3 은 읽은 자리가 이미 지난 줄 위에 서지 않는다 |
 | `QueuedWriteEnds`, `ReadsAllOnceRunning` | boot 를 기다린 쓰기는 끝난다. 쓰는 쪽이 계속 돌면 운영자 없이 다 읽는다 |
 
-정상 설정 다섯이 지킨다.
+정상 설정 여섯이 지킨다.
 
 | 설정 | 모양 | 상태 수 |
 |---|---|---|
@@ -2185,6 +2185,7 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | `-boot` | boot. 멈추는 첫 boot(스냅샷, 잠금, `Started` 쓰기 실패), `Resume`, 해석되지 않는 꼬리 줄, `Adopt`, 죽음 | 121,949 |
 | `-turnlog` | 턴 기록의 흠. 해석되지 않는 줄, 알리지 않은 reset, 없어진 내용, `Skip_line`, `Skip_item` | 46,668 |
 | `-live` | 살아 있음 속성 셋 | 7,624 |
+| `-restart` | 턴 기록이 바뀌거나 잘린다, `Restart_reading` | 1,835,459 |
 
 | 옛 규칙이나 심은 버그 | 어긴 속성 |
 |---|---|
@@ -2197,10 +2198,11 @@ Keeper 하나와 그 쓰는 쪽이다. Memory 는 fact 이름의 집합이고, �
 | 반영 기록이 없을 때 턴 줄을 잃은 기록으로 읽는다 | `PassedAccounted` |
 | 줄이 들어가기 전에 읽은 자리를 옮긴다 | `PositionHasLine` |
 | 받아들인 `Skip_line` 이 마지막 묻기의 결과를 남긴다 | `E3OnHeadLine` |
+| 거절한 운영자 행동이 가던 묻기를 취소한다 | `AskingHasAnAsk` |
 | 지금 묻기가 아닌 답을 반영한다 | `AnswerOnlyWhenCurrent` |
 | 계획이 그사이의 철회를 보지 않는다 | `NoUndoRetract` |
 
-닿는다는 것을 보인 가지는 다섯이다. 다시 켠 Keeper 의 쓰기를 새 쓰는 쪽이 반영한다, 맡긴 뒤에 단위를 처음부터 한 번 더 읽는다, 쓰기가 boot 를 기다렸다가 반영된다, boot 중에 턴이 닫힌다, `Retire` 가 boot 하는 쓰는 쪽의 mailbox 에서 기다린다.
+닿는다는 것을 보인 가지는 여섯이다. 다시 켠 Keeper 의 쓰기를 새 쓰는 쪽이 반영한다, 맡긴 뒤에 단위를 처음부터 한 번 더 읽는다, 쓰기가 boot 를 기다렸다가 반영된다, boot 중에 턴이 닫힌다, `Retire` 가 boot 하는 쓰는 쪽의 mailbox 에서 기다린다, `Restart_reading` 줄이 쓰인다.
 
 다루지 않는 것: Keeper 여럿, 파일의 바이트, slot 별 크기 사실.
 

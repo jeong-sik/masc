@@ -4824,12 +4824,52 @@ let test_openai_tool_reference_falls_back_to_result_text () =
   | _ -> Alcotest.fail "expected one OpenAI tool message"
 ;;
 
+let test_openai_responses_mixed_reference_image_falls_back_to_text () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"mixed-reference-model"
+      ~base_url:""
+      ~max_tokens:128
+      ()
+  in
+  let message =
+    msg
+      Tool
+      [ ToolResult
+          { tool_use_id = "load-1"
+          ; content = "now callable:\n- masc_board_list"
+          ; outcome = Tool_succeeded
+          ; json = None
+          ; content_blocks =
+              Some
+                [ ToolReference { tool_name = "masc_board_list" }
+                ; Image { media_type = "image/png"; source = Base64 "aGVsbG8=" }
+                ]
+          }
+      ]
+  in
+  let body = Backend_openai_responses.build_request ~config ~messages:[ message ] () in
+  let output =
+    Yojson.Safe.from_string body
+    |> Yojson.Safe.Util.member "input"
+    |> Yojson.Safe.Util.index 0
+    |> Yojson.Safe.Util.member "output"
+  in
+  Alcotest.(check string)
+    "mixed reference and image keep the canonical text"
+    "now callable:\n- masc_board_list"
+    (Yojson.Safe.Util.to_string output)
+;;
+
 let () =
   Alcotest.run
     "backend_openai_codec"
     [ ( "serialize"
       , [ Alcotest.test_case "tool reference falls back to result text" `Quick
             test_openai_tool_reference_falls_back_to_result_text
+        ; Alcotest.test_case "mixed reference and image falls back to result text" `Quick
+            test_openai_responses_mixed_reference_image_falls_back_to_text
         ; Alcotest.test_case "tool PNG followups keep parallel batch order" `Quick
             test_tool_image_followups_preserve_batch_order
         ; Alcotest.test_case "Ollama tool media retains occurrence ownership" `Quick

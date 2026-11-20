@@ -142,22 +142,26 @@ let responses_tool_json tool =
      :: Backend_openai_serialize.tool_definition_fields definition)
 ;;
 
+let rec content_has_tool_reference blocks =
+  List.exists
+    (function
+      | ToolReference _ -> true
+      | ToolResult { content_blocks = Some nested; _ } -> content_has_tool_reference nested
+      | Text _
+      | Thinking _
+      | ReasoningDetails _
+      | RedactedThinking _
+      | ToolUse _
+      | ToolResult { content_blocks = None; _ }
+      | Image _
+      | Document _
+      | Audio _ -> false)
+    blocks
+;;
+
 let content_string_of_tool_result ~content ~content_blocks =
   match content_blocks with
-  | Some blocks
-    when List.exists
-           (function
-             | ToolReference _ -> true
-             | Text _
-             | Thinking _
-             | ReasoningDetails _
-             | RedactedThinking _
-             | ToolUse _
-             | ToolResult _
-             | Image _
-             | Document _
-             | Audio _ -> false)
-           blocks ->
+  | Some blocks when content_has_tool_reference blocks ->
     Utf8_sanitize.sanitize content
   | Some blocks ->
     Yojson.Safe.to_string (`List (List.map Api_common.content_block_to_json blocks))
@@ -313,7 +317,7 @@ let rec tool_output_parts = function
 
 let function_call_output_content ~content ~content_blocks =
   match content_blocks with
-  | Some blocks when content_has_image blocks ->
+  | Some blocks when not (content_has_tool_reference blocks) && content_has_image blocks ->
     `List (List.concat_map tool_output_parts blocks)
   | Some _ | None -> `String (content_string_of_tool_result ~content ~content_blocks)
 ;;

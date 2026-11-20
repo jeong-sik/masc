@@ -732,6 +732,7 @@ let observe_spent_context_lowered ~stage ~before ~after =
    lowers away after the fold, in the wrapper below and at the serializer's
    own boundary, so every reader sees the transcript the wire sends (#49549). *)
 let merged_prefix_history ~policy ~tools (config : Provider_config.t) projected_messages =
+  let projected_messages = project_tool_references ~config ~tools projected_messages in
   let lowered =
     Message_origin_lowering.drop_expired_turn_scoped_contexts policy projected_messages
   in
@@ -905,7 +906,7 @@ let build_request_payload
    | Ok () -> ()
    | Error error ->
      invalid_arg ("Backend_anthropic.build_request: " ^ Message_origin_lowering.error_to_string error));
-  let messages = project_tool_references ~config ~tools lowered in
+  let messages = lowered in
   (match config.kind, caps.supports_assistant_prefill, List.rev messages with
    | Provider_config.Anthropic, false, { role = Assistant; _ } :: _ ->
      invalid_arg

@@ -954,11 +954,12 @@ let test_deferred_wire_surface_is_stable_across_loading () =
     (loader_json |> Yojson.Safe.Util.member "cache_control" |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string);
   let all_deferred =
     required_tools_json
-      (Agent_turn.prepare_tools
-         ~tools:Tool_set.empty
-         ~deferred_tools:[ first ]
-         ~defer_loading:true
-         ())
+      (fst
+         (Agent_turn.prepare_tools
+            ~tools:Tool_set.empty
+            ~deferred_tools:[ first ]
+            ~defer_loading:true
+            ()))
   in
   (match request all_deferred with
    | _ -> Alcotest.fail "an all-deferred request must be refused"

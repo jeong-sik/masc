@@ -422,6 +422,16 @@ let create
       ()
   =
   let all_tools = Tool_set.of_list tools in
+  let eager_tools =
+    Tool_set.of_list
+      (List.filter
+         (fun (tool : Tool.t) ->
+            not
+              (List.exists
+                 (fun (deferred : Tool.t) -> String.equal tool.schema.name deferred.schema.name)
+                 options.deferred_tools))
+         tools)
+  in
   let state =
     { config; provider_binding = None; messages = config.initial_messages; turn_count = 0; usage = empty_usage }
   in
@@ -435,7 +445,7 @@ let create
   ; lifecycle = None
   ; pending_input = None
   ; tools = all_tools
-  ; eager_tools = all_tools
+  ; eager_tools
   ; net
   ; context = ctx
   ; options

@@ -149,7 +149,7 @@ type placement =
             Cut back to [carry_window] on the calls that grow the carry -- a
             call to a tool the carry does not already hold. The tool array is
             the head of the provider's cache prefix (agent_core's Anthropic
-            backend puts the [cache_control] breakpoint on the last tool), so
+            backend puts the [cache_control] breakpoint on the last non-deferred tool), so
             a turn whose array differs from the turn before forfeits the
             cached read of the whole prefix, history included. A call to a
             name already carried leaves the array identical and is not cut on;

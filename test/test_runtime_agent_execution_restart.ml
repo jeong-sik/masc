@@ -206,7 +206,9 @@ let test_deferred_tools_reach_create_and_resume_options () =
   let config = { config with deferred_tools = [ tool ] } in
   let options = Runtime_agent_context.agent_options ~config ~transport:None in
   let names options =
-    List.map (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name) options.deferred_tools
+    List.map
+      (fun (tool : Agent_core.Tool.t) -> tool.Agent_core.Tool.schema.name)
+      options.Agent_core.Agent_types.deferred_tools
   in
   Alcotest.(check (list string)) "create options carry the surface" [ "deferred" ] (names options);
   let checkpoint : Agent_core.Checkpoint.t =

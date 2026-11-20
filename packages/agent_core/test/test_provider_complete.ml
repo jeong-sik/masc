@@ -2328,6 +2328,40 @@ let test_anthropic_unsupported_reference_falls_back_to_text () =
     (content |> to_string)
 ;;
 
+let test_anthropic_reference_projection_precedes_prefix_digest () =
+  let config =
+    PC.make ~kind:Anthropic ~model_id:"claude-haiku-5-5" ~base_url:"" ~max_tokens:128 ()
+  in
+  let tools = [ `Assoc [ "name", `String "another_tool" ] ] in
+  let stale = make_message ~role:Tool [ reference_result () ] in
+  let fallback =
+    make_message
+      ~role:Tool
+      [ Types.ToolResult
+          { tool_use_id = "load-1"
+          ; content = "now callable:\n- masc_board_list"
+          ; outcome = Types.Tool_succeeded
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let body messages = BA.build_request ~config ~messages ~tools () in
+  Alcotest.(check string)
+    "stale reference and its text fallback have the same wire body"
+    (body fallback)
+    (body stale);
+  let response_content = [ Types.Thinking { content = "stable"; signature = Some "signature" } ] in
+  let prefix messages =
+    BA.transmitted_reasoning_prefix ~config ~messages ~tools ~response_content ()
+  in
+  Alcotest.(check bool) "the digest has a signed reasoning prefix" true (Option.is_some (prefix stale));
+  Alcotest.(check bool)
+    "the digest covers the same sanitized messages that are transmitted"
+    true
+    (prefix stale = prefix fallback)
+;;
+
 let () =
   let open Alcotest in
   run
@@ -2561,6 +2595,8 @@ let () =
         ; test_case "Kimi falls back to result text" `Quick test_kimi_tool_reference_falls_back_to_text
         ; test_case "stale reference falls back to text" `Quick test_anthropic_stale_reference_falls_back_to_text
         ; test_case "unsupported reference falls back to text" `Quick test_anthropic_unsupported_reference_falls_back_to_text
+        ; test_case "reference projection precedes the prefix digest" `Quick
+            test_anthropic_reference_projection_precedes_prefix_digest
         ] )
     ]
 ;;

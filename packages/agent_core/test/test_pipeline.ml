@@ -6259,9 +6259,8 @@ let test_pipeline_uses_resolved_deferred_capability () =
         ~model_id:"m"
         ~base_url:""
         ~model_capabilities_override:
-          (Some
-             { Llm_provider.Capabilities.anthropic_capabilities with
-               supports_deferred_tool_loading = supported })
+          { Llm_provider.Capabilities.anthropic_capabilities with
+            supports_deferred_tool_loading = supported }
         ()
     in
     let options =
@@ -6299,6 +6298,71 @@ let test_pipeline_uses_resolved_deferred_capability () =
          (deferred_json |> Yojson.Safe.Util.member "defer_loading" |> Yojson.Safe.Util.to_bool)
      | Some _ -> Alcotest.fail "supported model received the wrong catalog"
      | None -> Alcotest.fail "supported model lost its deferred catalog")
+;;
+
+let test_create_and_resume_separate_eager_from_deferred () =
+  Eio_main.run
+  @@ fun env ->
+  let loader =
+    Tool.create ~name:"keeper_tool_search" ~description:"Find tools" ~parameters:[] (fun _ ->
+      Ok { Types.content = "loaded"; content_blocks = None; _meta = None })
+  in
+  let deferred =
+    Tool.create ~name:"deferred" ~description:"Deferred" ~parameters:[] (fun _ ->
+      Ok { Types.content = "loaded"; content_blocks = None; _meta = None })
+  in
+  let provider_config =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~provider_id:"claude"
+      ~model_id:"m"
+      ~base_url:""
+      ~model_capabilities_override:
+        { Llm_provider.Capabilities.anthropic_capabilities with
+          supports_deferred_tool_loading = true }
+      ()
+  in
+  let options =
+    { Agent.default_options with
+      provider_config = Some provider_config
+    ; deferred_tools = [ deferred ]
+    }
+  in
+  let agent =
+    Agent.create
+      ~media_store:(History.Memory_store.create ())
+      ~config:(Types.default_config ~model:"m")
+      ~net:env#net
+      ~tools:[ loader; deferred ]
+      ~options
+      ()
+  in
+  let check label agent =
+    match Internal_pipeline.stage_parse agent ~turn_params:Hooks.default_turn_params with
+    | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
+    | Ok (prep, _, _) ->
+      Alcotest.(check (list string))
+        (label ^ ": deferred overlap is not eager")
+        [ "keeper_tool_search" ]
+        prep.visible_tool_names;
+      Alcotest.(check int)
+        (label ^ ": the wire still contains the deferred schema")
+        2
+        (List.length (Option.value prep.tools_json ~default:[]))
+  in
+  check "create" agent;
+  let checkpoint = Agent.checkpoint ~session_id:"deferred-overlap" agent in
+  match
+    Agent.resume
+      ~media_store:(History.Memory_store.create ())
+      ~net:env#net
+      ~checkpoint
+      ~tools:[ loader; deferred ]
+      ~options
+      ()
+  with
+  | Error error -> Alcotest.fail (Agent_checkpoint.resume_error_to_string error)
+  | Ok resumed -> check "resume" resumed
 ;;
 
 let () =
@@ -6721,6 +6785,8 @@ let () =
     ; ( "deferred_tool_loading"
       , [ Alcotest.test_case "pipeline uses resolved capability" `Quick
             test_pipeline_uses_resolved_deferred_capability
+        ; Alcotest.test_case "create and resume separate eager from deferred" `Quick
+            test_create_and_resume_separate_eager_from_deferred
         ] )
     ]
 ;;

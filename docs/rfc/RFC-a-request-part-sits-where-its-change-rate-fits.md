@@ -136,13 +136,15 @@ wire 캡처 3.2시간, 연속한 요청 4,162쌍에서 62번 바뀌었다.
 - 그래서 모두에게 켜지 않고 Keeper 가 고른다.
 
 바꾸는 것:
-- binding(provider × 모델)에 요청 정책 `cache_retention` 을 둔다. 값은 `"5m"` 과 `"1h"` 둘이다.
-  - 닫힌 variant 로 읽는다. 다른 글이면 설정 오류다.
+- binding(provider × 모델)에 요청 정책 `cache-retention` 을 둔다. 값은 `"5m"` 과 `"1h"` 둘이다.
+  - 닫힌 variant(`Runtime_schema.cache_retention`)로 읽는다. 다른 글이면 설정 오류다.
   - 없으면 provider 기본값인 5분이다.
-  - Anthropic kind binding 만 받는다. 다른 kind 에 쓰면 설정 오류다.
+- 받는 곳은 catalog provider 행이 정한다. 행이 `supports_extended_cache_ttl` 을 선언한 Messages 런타임만 받는다.
+  - 같은 Messages wire 를 쓰는 다른 endpoint 는 그 계약을 적지 않았다. `supports_parallel_tool_suppression` 과 같은 방식이다.
+  - 다른 wire 와 공식 클라이언트는 선언을 거절한다.
 - 런타임 어댑터가 `Provider_config.make ~cache_extended_ttl` 로 넘긴다.
 - Agent 설정 조립이 provider 설정의 값을 이어받는다. checkpoint 로 다시 시작할 때도 같다.
-- runtime.toml 편집기가 이 키를 지우지 않고 다시 쓴다.
+- runtime.toml 편집기는 글 단위로 고치므로 이 키를 지우지 않는다.
 
 binding 에 두는 까닭:
 - 레인은 여러 provider 후보를 잇는 목록이다. 구독 공식 클라이언트와 GLM 후보에는 이 값이 뜻이 없다.
@@ -308,8 +310,8 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 | 층 | 내용 | 조건 |
 |---|---|---|
 | L0 | 이 RFC | |
-| L1 | §3.5 규범 목록 한 번 | |
-| L2 | §3.1 `cache_retention` 선언 | D1 |
+| L1 | §3.5 규범 목록 한 번 (#53753) | |
+| L2 | §3.1 catalog 계약 (#53759), binding `cache-retention` 선언 (#53760) | D1 |
 | L3 | §3.2 캐시 결과 투영과 TUI | D1 |
 | L4 | §3.3 Anthropic 도구 불러오기 | D2, 운영자 실제 호출 확인 |
 | L5 | §3.4 역할 나눔과 층별 도착 방식 | D3, 층별 표 리뷰 |
@@ -318,7 +320,7 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 ## 8. 검증
 
 - L1: 격리된 기록이 있는 원장에서 지금 조항으로 그린 System 에는 `<norms_current>` 가 없다. 변경분이 있는 System, native 이어가기, 다른 바이트로 덮어쓴 System 에는 현재 조항 전체가 있다.
-- L2: 설정 파서가 `"5m"`·`"1h"` 만 받는다. 1시간 binding 으로 돈 턴은 응답의 `cache_creation.ephemeral_1h_input_tokens` 가 0 보다 크다. 5~60분 쉰 뒤 첫 요청이 앞부분을 읽는다.
+- L2: 설정 파서가 `"5m"`·`"1h"` 만 받는다. catalog 계약이 없는 provider 와 다른 wire 의 선언은 불러올 때 거절한다. 1시간 binding 으로 돈 턴은 응답의 `cache_creation.ephemeral_1h_input_tokens` 가 0 보다 크다. 5~60분 쉰 뒤 첫 요청이 앞부분을 읽는다.
 - L3: 이 RFC §1.3 의 표를 투영으로 다시 낸다. 같은 기록이면 같은 표가 나온다.
 - L4: 운영자가 실제 호출로 본다. 불러오기 직후 요청이 앞 요청의 입력을 캐시에서 읽는다.
 - L5: 층마다 실린 역할을 요청 캡처로 센다. 이력에 같은 글이 두 번 쌓이지 않는다.

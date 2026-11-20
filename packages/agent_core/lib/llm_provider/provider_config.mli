@@ -373,6 +373,11 @@ val provider_reference : t -> Model_catalog.provider_reference
     including [None]. *)
 val capabilities_for_config_model : t -> Capabilities.capabilities option
 
+val supports_deferred_tool_loading : t -> bool
+(** Whether this exact provider/model may receive deferred tool definitions and
+    tool_reference results. True only on the direct Anthropic wire with an
+    explicit model capability declaration. *)
+
 val cache_write_lifetime : t -> Types.cache_write_lifetime
 (** The lifetime this request's cache writes keep: [One_hour] when
     [cache_extended_ttl] is set (the Anthropic body then writes [ttl = "1h"]

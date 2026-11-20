@@ -580,6 +580,30 @@ let project_tools_for_kind kind tools =
   | Provider_config.Glm -> tools
 ;;
 
+let tool_is_deferred = function
+  | `Assoc fields ->
+    (match List.assoc_opt "defer_loading" fields with
+     | Some (`Bool true) -> true
+     | Some _ | None -> false)
+  | _ -> false
+;;
+
+let add_cache_control_to_last_non_deferred cache_control tools =
+  let rec visit = function
+    | [] ->
+      invalid_arg
+        "Backend_anthropic.build_request: at least one tool must have defer_loading=false"
+    | tool :: rest ->
+      if tool_is_deferred tool
+      then visit rest
+      else
+        (match tool with
+         | `Assoc fields -> `Assoc (("cache_control", cache_control) :: fields) :: rest
+         | other -> other :: rest)
+  in
+  List.rev (visit (List.rev tools))
+;;
+
 (* The request head the prefix digest chains from. This models the API's own
    prefix check — top-level [system] text and the [tools] set — not the wire
    bytes: parameters outside those ([output_config], [tool_choice], [thinking]
@@ -1000,20 +1024,7 @@ let build_request_payload
       let ts = project_tools_for_kind config.kind ts in
       if config.cache_system_prompt
       then (
-        (* Add cache_control to last tool for extended cache prefix *)
-        let ts_with_cache =
-          (* ts is non-empty (outer match guarantees), safe to destructure *)
-          let rev = List.rev ts in
-          let last = List.hd rev
-          and rest = List.tl rev in
-          let last_with_cache =
-            match last with
-            | `Assoc fields ->
-              `Assoc (("cache_control", cache_control_json) :: fields)
-            | other -> other
-          in
-          List.rev (last_with_cache :: rest)
-        in
+        let ts_with_cache = add_cache_control_to_last_non_deferred cache_control_json ts in
         ("tools", `List ts_with_cache) :: body)
       else ("tools", `List ts) :: body
   in

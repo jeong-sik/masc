@@ -55,6 +55,7 @@ type serialization_executor = { run : 'a. (unit -> 'a) -> 'a }
 
 type options =
   { provider_config : Llm_provider.Provider_config.t option
+  ; deferred_tools : Tool.t list
   ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
@@ -130,6 +131,7 @@ type lifecycle_snapshot = Agent_lifecycle.lifecycle_snapshot =
 
 let default_options =
   { provider_config = None
+  ; deferred_tools = []
   ; reasoning_source_change = Llm_provider.Reasoning_history_projection.Reject_incompatible
   ; stream_idle_timeout_s = None
   ; first_event_timeout_s = None

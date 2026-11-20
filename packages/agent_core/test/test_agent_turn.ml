@@ -862,6 +862,117 @@ let test_resolve_turn_params_with_hook () =
   Alcotest.(check (option (float 0.01))) "custom temp" (Some 0.5) params.temperature
 ;;
 
+let deferred_fixture_tool name =
+  Tool.create ~name ~description:(name ^ " description") ~parameters:[] (fun _ ->
+    Ok { Types.content = name; content_blocks = None; _meta = None })
+;;
+
+let required_tools_json = function
+  | Some tools -> tools
+  | None -> Alcotest.fail "expected a non-empty wire tool surface"
+;;
+
+let test_deferred_wire_surface_is_stable_across_loading () =
+  Eio_main.run @@ fun env ->
+  let always = deferred_fixture_tool "always" in
+  let loader = deferred_fixture_tool "keeper_tool_search" in
+  let first = deferred_fixture_tool "first" in
+  let second = deferred_fixture_tool "second" in
+  let deferred_tools = [ first; second ] in
+  let agent =
+    Agent.create
+      ~media_store:(History.Memory_store.create ())
+      ~config:(Types.default_config ~model:"claude-haiku-5-5")
+      ~net:env#net
+      ~tools:[ always; loader ]
+      ()
+  in
+  let prepare () =
+    Agent_turn.prepare_tools
+      ~tools:(Agent.tools agent)
+      ~deferred_tools
+      ~defer_loading:true
+      ()
+  in
+  let before_json, before_visible = prepare () in
+  Agent.extend_tools ~order:[ "keeper_tool_search"; "first"; "second" ] agent [ first ];
+  let after_json, after_visible = prepare () in
+  Alcotest.(check string)
+    "loading does not change the wire tools"
+    (Yojson.Safe.to_string before_json)
+    (Yojson.Safe.to_string after_json);
+  Alcotest.(check (list string)) "initial callable names" [ "always"; "keeper_tool_search" ] before_visible;
+  Alcotest.(check (list string))
+    "a loaded name becomes callable without exposing the other deferred name"
+    [ "always"; "keeper_tool_search"; "first" ]
+    after_visible;
+  let tools = required_tools_json after_json in
+  List.iter
+    (fun json ->
+       let open Yojson.Safe.Util in
+       let name = json |> member "name" |> to_string in
+       if List.mem name [ "first"; "second" ]
+       then Alcotest.(check bool) (name ^ " stays deferred") true (json |> member "defer_loading" |> to_bool)
+       else Alcotest.(check bool) (name ^ " is not deferred" ) true (json |> member "defer_loading" = `Null))
+    tools;
+  let config =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~provider_id:"claude"
+      ~model_id:"claude-haiku-5-5"
+      ~base_url:""
+      ~max_tokens:128
+      ~cache_system_prompt:true
+      ()
+  in
+  let request tools =
+    Llm_provider.Backend_anthropic.build_request
+      ~config
+      ~messages:[ Llm_provider.Types.user_msg "load" ]
+      ~tools
+      ()
+    |> Yojson.Safe.from_string
+  in
+  let before_request = request (required_tools_json before_json) in
+  let after_request = request (required_tools_json after_json) in
+  Alcotest.(check string)
+    "the complete request is byte-identical"
+    (Yojson.Safe.to_string before_request)
+    (Yojson.Safe.to_string after_request);
+  let wire_tools = after_request |> Yojson.Safe.Util.member "tools" |> Yojson.Safe.Util.to_list in
+  List.iter
+    (fun json ->
+       let open Yojson.Safe.Util in
+       let name = json |> member "name" |> to_string in
+       if List.mem name [ "first"; "second" ]
+       then Alcotest.(check bool) (name ^ " has no cache marker") true (json |> member "cache_control" = `Null))
+    wire_tools;
+  let loader_json = List.nth wire_tools 1 in
+  Alcotest.(check string)
+    "the non-deferred loader holds the breakpoint"
+    "ephemeral"
+    (loader_json |> Yojson.Safe.Util.member "cache_control" |> Yojson.Safe.Util.member "type" |> Yojson.Safe.Util.to_string);
+  match request (required_tools_json (Some [ Llm_provider.Tool.schema_to_json first ]) ) with
+  | _ -> Alcotest.fail "an all-deferred request must be refused"
+  | exception Invalid_argument _ -> ()
+;;
+
+let test_deferred_surface_is_ignored_without_capability () =
+  let open Llm_provider in
+  let always = deferred_fixture_tool "always" in
+  let first = deferred_fixture_tool "first" in
+  let tools = Tool_set.of_list [ always ] in
+  let json, visible =
+    Agent_turn.prepare_tools ~tools ~deferred_tools:[ first ] ~defer_loading:false ()
+  in
+  Alcotest.(check (list string)) "only the callable tool is visible" [ "always" ] visible;
+  Alcotest.(check int) "no deferred schema is sent" 1 (List.length (required_tools_json json));
+  Alcotest.(check bool)
+    "the unsupported path carries no defer marker"
+    true
+    (List.hd (required_tools_json json) |> Yojson.Safe.Util.member "defer_loading" = `Null)
+;;
+
 (* ── Test runner ────────────────────────────────────────── *)
 
 let () =
@@ -882,6 +993,14 @@ let () =
             "visible_tool_names preserves order"
             `Quick
             test_prepare_turn_visible_tool_names_preserves_order
+        ; Alcotest.test_case
+            "deferred wire surface is stable across loading"
+            `Quick
+            test_deferred_wire_surface_is_stable_across_loading
+        ; Alcotest.test_case
+            "deferred surface is ignored without capability"
+            `Quick
+            test_deferred_surface_is_ignored_without_capability
         ] )
     ; ( "prepare_messages"
       , [ Alcotest.test_case

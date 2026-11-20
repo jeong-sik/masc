@@ -10,6 +10,8 @@ open Types
 
 let _log = Log.create ~module_name:"agent_turn" ()
 
+module Deferred_name_set = Set.Make (String)
+
 (* [turn_count] is advanced by the collect stage at the end of a provider
    turn, so before a fresh turn starts it is exactly the zero-based ordinal of
    the turn about to run. Read here only, by the turn frontier resolution. *)
@@ -31,13 +33,34 @@ type turn_preparation =
   ; visible_tool_names : string list
   }
 
-let prepare_tools ~(tools : Tool_set.t) () =
+let prepare_tools ~(tools : Tool_set.t) ?(deferred_tools = []) ?(defer_loading = false) () =
   let selected = Tool_set.to_list tools in
+  let wire_selected =
+    if defer_loading
+    then Tool_set.to_list (Tool_set.of_list (selected @ deferred_tools))
+    else selected
+  in
+  let deferred_names =
+    List.fold_left
+      (fun names (tool : Tool.t) -> Deferred_name_set.add tool.schema.name names)
+      Deferred_name_set.empty
+      deferred_tools
+  in
   Schema_observation.surface ~site:Sdk_prepare_json (fun () ->
-    List.map (fun (tool : Tool.t) -> tool.schema) selected);
+    List.map (fun (tool : Tool.t) -> tool.schema) wire_selected);
   let tool_schemas =
     Schema_observation.with_site Sdk_prepare_json (fun () ->
-      List.map Tool.schema_to_json selected) in
+      List.map
+        (fun (tool : Tool.t) ->
+           let json = Tool.schema_to_json tool in
+           if defer_loading && Deferred_name_set.mem tool.schema.name deferred_names
+           then
+             (match json with
+              | `Assoc fields -> `Assoc (("defer_loading", `Bool true) :: fields)
+              | other -> other)
+           else json)
+        wire_selected)
+  in
   let tools_json = if tool_schemas = [] then None else Some tool_schemas in
   let visible_tool_names = List.map (fun (t : Tool.t) -> t.schema.name) selected in
   tools_json, visible_tool_names
@@ -86,8 +109,17 @@ let caller_result f =
     Error (Error.Internal (Printexc.to_string exn))
 ;;
 
-let prepare_turn ~media_store ~tools ~messages ~turn_params ?model_input_projection () =
-  let tools_json, visible_tool_names = prepare_tools ~tools () in
+let prepare_turn
+      ~media_store
+      ~tools
+      ~messages
+      ~turn_params
+      ?(deferred_tools = [])
+      ?(defer_loading = false)
+      ?model_input_projection
+      ()
+  =
+  let tools_json, visible_tool_names = prepare_tools ~tools ~deferred_tools ~defer_loading () in
   let context_message = context_message turn_params in
   let prepared = append_context_message ~messages ~context_message in
   let request_of effective_messages =

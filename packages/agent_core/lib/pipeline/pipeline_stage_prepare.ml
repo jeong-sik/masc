@@ -146,9 +146,16 @@ let%test "last_tool_results_from keeps each result's id, content and outcome" =
 ;;
 
 let prepare_turn_for_agent agent ~turn_params =
+  let defer_loading =
+    match agent.Agent_types.options.provider_config with
+    | Some config -> Llm_provider.Provider_config.supports_deferred_tool_loading config
+    | None -> false
+  in
   Agent_turn.prepare_turn
     ~media_store:agent.media_store
     ~tools:agent.tools
+    ~deferred_tools:agent.Agent_types.options.deferred_tools
+    ~defer_loading
     ~messages:agent.state.messages
     ~turn_params
     ?model_input_projection:agent.model_input_projection

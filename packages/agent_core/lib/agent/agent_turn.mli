@@ -49,8 +49,14 @@ type turn_preparation =
         @since 0.162.0 *)
   }
 
-(** Serialize every caller-supplied tool with its complete input schema. *)
-val prepare_tools : tools:Tool_set.t -> unit -> Yojson.Safe.t list option * string list
+(** Serialize callable tools and, when native deferred loading is enabled, the
+    full deferred catalog without admitting those deferred tools for dispatch. *)
+val prepare_tools
+  :  tools:Tool_set.t
+  -> ?deferred_tools:Tool.t list
+  -> ?defer_loading:bool
+  -> unit
+  -> Yojson.Safe.t list option * string list
 (** Returns [(tools_json, visible_tool_names)].
     [visible_tool_names] mirrors the order of [tools_json] and is empty
     when no tools were supplied.
@@ -77,6 +83,8 @@ val prepare_turn
   -> tools:Tool_set.t
   -> messages:Types.message list
   -> turn_params:Hooks.turn_params
+  -> ?deferred_tools:Tool.t list
+  -> ?defer_loading:bool
   -> ?model_input_projection:Agent_types.model_input_projection
   -> unit
   -> (turn_preparation, Error.t) result

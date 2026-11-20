@@ -160,6 +160,7 @@ type declarative_capability_overrides =
   ; supports_prompt_caching : bool option
   ; prompt_cache_wire : string option
   ; supports_explicit_cache_opt_out : bool option
+  ; supports_deferred_tool_loading : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
   ; supports_seed : bool option
@@ -334,6 +335,10 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
       override_bool
         base.supports_explicit_cache_opt_out
         overrides.supports_explicit_cache_opt_out
+  ; supports_deferred_tool_loading =
+      override_bool
+        base.supports_deferred_tool_loading
+        overrides.supports_deferred_tool_loading
   ; supports_top_k = override_bool base.supports_top_k overrides.supports_top_k
   ; supports_min_p = override_bool base.supports_min_p overrides.supports_min_p
   ; supports_seed = override_bool base.supports_seed overrides.supports_seed
@@ -446,6 +451,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_prompt_caching = entry.supports_prompt_caching
   ; prompt_cache_wire = entry.prompt_cache_wire
   ; supports_explicit_cache_opt_out = entry.supports_explicit_cache_opt_out
+  ; supports_deferred_tool_loading = entry.supports_deferred_tool_loading
   ; supports_top_k = entry.supports_top_k
   ; supports_min_p = entry.supports_min_p
   ; supports_seed = entry.supports_seed

@@ -243,6 +243,8 @@ type capabilities = Capability_profile.capabilities =
   ; supports_prompt_caching : bool
   ; prompt_cache_wire : prompt_cache_wire
   ; supports_explicit_cache_opt_out : bool
+  ; supports_deferred_tool_loading : bool
+    (** Anthropic deferred tool definitions and tool_reference expansion. *)
   ; (* Sampling parameters *)
     supports_top_k : bool
   ; supports_min_p : bool

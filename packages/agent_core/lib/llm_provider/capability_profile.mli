@@ -246,6 +246,9 @@ type capabilities =
     (** Whether the OpenAI Responses endpoint accepts
         [prompt_cache_options = {"mode": "explicit"}] (with zero breakpoints)
         to opt out of automatic cache writes when [cache_system_prompt = false]. *)
+  ; supports_deferred_tool_loading : bool
+    (** The model accepts Anthropic's deferred tool definitions and expands
+        tool_reference blocks in conversation history. *)
   ; (* Sampling parameters *)
     supports_top_k : bool
   ; supports_min_p : bool

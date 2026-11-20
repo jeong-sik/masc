@@ -119,15 +119,18 @@ let next_ask place t ~at store =
   ask place t ~at store ~asked:(Read_range (Librarian_width.next t.narrowing))
 ;;
 
+let stopped ~lane ~last_ask stop =
+  { state = Stopped stop
+  ; lane
+  ; last_ask
+  ; narrowing = Librarian_width.empty
+  ; bottom = Librarian_bottom.empty
+  }
+;;
+
 let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
   match opened with
-  | Error stop ->
-    { state = Stopped stop
-    ; lane
-    ; last_ask
-    ; narrowing = Librarian_width.empty
-    ; bottom = Librarian_bottom.empty
-    }
+  | Error stop -> stopped ~lane ~last_ask stop
   | Ok store ->
     next_ask place
       { state = Idle { store; seen_length = None }
@@ -624,7 +627,7 @@ let resume place ~boot t ~at =
 let adopt { memory_dir; turns_dir; keeper_id } t ~at ~by ~observed =
   match t.state with
   | Idle _ | Asking _ | Resting _ | Refused_at_bottom _ -> t, Not_done Not_stopped
-  | Stopped ((Memory_unreadable | Store_unwritable) as stop) ->
+  | Stopped ((Memory_unreadable | Store_unwritable | Raised _) as stop) ->
     t, Not_done (Act_unavailable (Store_stopped stop))
   | Stopped (Log_diverged _ | Log_unreadable) ->
     (match Store.adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed with

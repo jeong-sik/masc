@@ -185,6 +185,7 @@ let store_stop_to_string = function
   | Librarian_store.Memory_unreadable -> "the Memory snapshot is absent or is not one"
   | Librarian_store.Log_unreadable -> "the last line of the commit log does not decode"
   | Librarian_store.Store_unwritable -> "a read or a write of the store failed"
+  | Librarian_store.Raised _ -> "the Memory writer stopped on an exception it did not expect"
 ;;
 
 let unresolved_to_string = function

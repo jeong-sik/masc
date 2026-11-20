@@ -105,6 +105,7 @@ let stop_text : Store.stop -> string = function
   | Memory_unreadable -> "memory_unreadable"
   | Log_unreadable -> "log_unreadable"
   | Store_unwritable -> "store_unwritable"
+  | Raised { detail } -> "raised: " ^ detail
 ;;
 
 let status_of : Machine.state -> status = function
@@ -181,6 +182,26 @@ let tail t () =
     | None -> None
     | Some (Open line) -> Some (Some line)
     | Some (Booting | Stopped (_ : Store.stop) | Retired) -> Some None)
+;;
+
+(* What one event leaves the loop with. *)
+type step =
+  | Next of Machine.t
+  | Retiring of retirement Eio.Promise.u
+
+(* §9.2: the caller of an event that raised is told the store stopped. An
+   answer it already has stays, since [try_resolve] keeps the first one.
+   Whether the event's line landed is what the commit log holds, and the
+   next boot reads it. Whether a retiring Keeper is still registered was not
+   learnt, so its writer stays, and the next pulse asks again. *)
+let answer_stopped event (stop : Store.stop) =
+  let tell reply answer = ignore (Eio.Promise.try_resolve reply answer : bool) in
+  match event with
+  | Turn_closed | Pulse | Declaration_changed | Ask_ended _ -> ()
+  | Write { reply; _ } -> tell reply (Machine.Unavailable (Store_stopped stop))
+  | Resume reply | Adopt { reply; _ } ->
+    tell reply (Machine.Not_done (Act_unavailable (Store_stopped stop)))
+  | Retire reply -> tell reply Still_registered
 ;;
 
 (* [sw] lives as long as the writer does and owns the lock. The loop returns
@@ -275,18 +296,15 @@ let live t ~sw =
        | Ok (_ : Store.t) -> ());
       opened)
   in
-  let rec loop (state : Machine.t) =
-    Atomic.set t.between (Some (status_of state.state));
-    Eio.Condition.broadcast t.settled;
-    let event = Eio.Stream.take t.mailbox in
-    Atomic.set t.between None;
-    (* The caller has its answer before anyone is told to read Memory. *)
+  (* One event. The caller has its answer before anyone is told to read
+     Memory. *)
+  let step (state : Machine.t) event =
     let settle next reply answer =
       publish t ~was:state next;
       follow ~before:state ~after:next;
       Eio.Promise.resolve reply answer;
       announce t ~was:(revision state) next;
-      loop next
+      Next next
     in
     (* A commit and the reads before the next ask are not cancelled. *)
     let decided (event : Machine.event) =
@@ -296,7 +314,7 @@ let live t ~sw =
       publish t ~was:state next;
       follow ~before:state ~after:next;
       announce t ~was:(revision state) next;
-      loop next
+      Next next
     in
     match event with
     | Turn_closed -> decided Machine.Turn_closed
@@ -315,7 +333,7 @@ let live t ~sw =
       follow ~before:state ~after:next;
       Eio.Promise.resolve reply answer;
       announce t ~was:(revision state) next;
-      loop next
+      Next next
     | Adopt { by; observed; reply } ->
       let next, answer =
         Eio.Cancel.protect (fun () ->
@@ -326,15 +344,56 @@ let live t ~sw =
       if t.registered ()
       then (
         Eio.Promise.resolve reply Still_registered;
-        loop state)
-      else reply
+        Next state)
+      else Retiring reply
+  in
+  (* §9.2: an exception that is not reserved stops this writer and no other.
+     [stopped] makes the value it stops at, the ask that is out is
+     cancelled, and [answer] tells the caller of the event. The fiber goes
+     on taking events, so nothing makes the writer again but a [Resume].
+     Cancellation and the reserved exceptions go on up. *)
+  let stop_on exn ~stopped ~answer =
+    let backtrace = Printexc.get_raw_backtrace () in
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+    let raised : Store.raised = { detail = Printexc.to_string exn } in
+    let next : Machine.t = stopped (Store.Raised raised) in
+    cancel ();
+    Atomic.set t.status (status_of next.state);
+    answer (Store.Raised raised);
+    Log.Keeper.error ~keeper_name:t.place.keeper_id "librarian memory writer raised: %s\n%s"
+      raised.detail
+      (Printexc.raw_backtrace_to_string backtrace);
+    next
+  in
+  let rec loop (state : Machine.t) =
+    Atomic.set t.between (Some (status_of state.state));
+    Eio.Condition.broadcast t.settled;
+    let event = Eio.Stream.take t.mailbox in
+    Atomic.set t.between None;
+    match step state event with
+    | Next next -> loop next
+    | Retiring reply -> reply
+    | exception exn ->
+      loop
+        (stop_on exn
+           ~stopped:(Machine.stopped ~lane:state.lane ~last_ask:state.last_ask)
+           ~answer:(answer_stopped event))
   in
   (* A writer boots with no lane value, so the boot does not ask. The
      declaration is the first event in its mailbox. *)
-  let state = Machine.booted t.place ~at:(t.now ()) ~lane:None ~last_ask:0 (boot ()) in
-  Atomic.set t.status (status_of state.state);
-  announce t ~was:None state;
-  loop state
+  let first () =
+    let state = Machine.booted t.place ~at:(t.now ()) ~lane:None ~last_ask:0 (boot ()) in
+    Atomic.set t.status (status_of state.state);
+    announce t ~was:None state;
+    state
+  in
+  match first () with
+  | state -> loop state
+  | exception exn ->
+    loop
+      (stop_on exn
+         ~stopped:(Machine.stopped ~lane:None ~last_ask:0)
+         ~answer:(fun (_ : Store.stop) -> ()))
 ;;
 
 let create ~now ~registered ~declared ~stores ~ask ~ask_room ~start_turn_log place =

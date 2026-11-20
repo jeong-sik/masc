@@ -14,6 +14,9 @@ type stop =
   | Memory_unreadable
   | Log_unreadable
   | Store_unwritable
+  | Raised of raised
+
+and raised = { detail : string }
 
 type t =
   { log_path : string

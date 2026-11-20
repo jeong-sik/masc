@@ -62,7 +62,9 @@ type status =
       reads this as its first event, and again for every
       {!declaration_changed}.
     - [ask] asks one question ({!Librarian_ask.run}) about the Keeper's
-      stores [stores].
+      stores [stores]. It and [ask_room] run in a fiber under the writer's
+      switch, so they answer every failure as a result: only cancellation
+      and the reserved exceptions ({!Llm_provider.Reserved_exn}) leave them.
     - [start_turn_log] is the store start's first step
       ({!Keeper_turn_log_store_start.run}), run before every boot: the first
       and the one a [Resume] does. [Error] stops the store as
@@ -80,7 +82,10 @@ val create
   -> t
 
 (** The writer's fiber: call it once, in a fiber of its own. It returns when
-    the writer retires.
+    the writer retires. An exception its own code raises while it boots or
+    takes an event stops this writer as [Stopped (Raised _)], and the fiber
+    goes on taking events (§9.2). Only cancellation and the reserved
+    exceptions leave it, and they end the switch it runs in.
 
     The lock is taken without waiting. A writer that does not get it is
     [Stopped Store_unwritable], and {!resume} tries again. The lock is held

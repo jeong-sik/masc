@@ -65,6 +65,7 @@ let stop_text : Store.stop -> string = function
   | Memory_unreadable -> "memory unreadable"
   | Log_unreadable -> "log unreadable"
   | Store_unwritable -> "store unwritable"
+  | Raised { detail } -> "raised: " ^ detail
 ;;
 
 let status_text writer =

@@ -23,6 +23,14 @@ type stop =
   | Store_unwritable
   (** A read or a write failed, or there is no turn log to name. Booting
       again is the way out. *)
+  | Raised of raised
+  (** The writer's own code raised an exception it does not expect, while
+      it booted or took an event (§9.2). No function here returns it.
+      Booting again is the way out. *)
+
+(** What was raised, as [Printexc.to_string] prints it, for an operator to
+    read. Nothing matches on its words. *)
+and raised = { detail : string }
 
 (** The bytes at a snapshot path, as every reader of the file reads them
     first. No file is [Absent], something other than a regular file is

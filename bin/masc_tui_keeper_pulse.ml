@@ -135,20 +135,25 @@ let add_tally (a : Pulse.tally) (b : Pulse.tally) : Pulse.tally =
   { Pulse.ok = a.ok + b.ok; rested = a.rested + b.rested; failed = a.failed + b.failed }
 ;;
 
+type half_hour_tally =
+  | Slot_tally_unknown
+  | Slot_tally_measured of Pulse.tally
+
 (* The decision log writes a rest as a failure (RFC-0515 §2.1), so a rested
    turn makes a failed half hour. *)
-let half_hour_of_tally ~starts_before_known ({ ok; rested; failed } : Pulse.tally) =
-  if failed + rested > 0 then if ok > 0 then Half_hour_failed_and_ok else Half_hour_failed
-  else if ok > 0 then Half_hour_ok
-  else if starts_before_known then Half_hour_unknown
-  else Half_hour_quiet
+let half_hour_of_tally = function
+  | Slot_tally_unknown -> Half_hour_unknown
+  | Slot_tally_measured { ok; rested; failed } ->
+      if failed + rested > 0 then if ok > 0 then Half_hour_failed_and_ok else Half_hour_failed
+      else if ok > 0 then Half_hour_ok
+      else Half_hour_quiet
 ;;
 
 (* Half hour [back] 0 is the server slot that holds [now]. A slot stamped
    after it (the two clocks disagree) belongs to it. *)
-let half_hours ~now ~count pulse =
+let half_hour_tallies ~now ~count pulse =
   let count = max 0 count in
-  let all_unknown () = List.init count (fun _ -> Half_hour_unknown) in
+  let all_unknown () = List.init count (fun _ -> Slot_tally_unknown) in
   match pulse with
   | None -> all_unknown ()
   | Some _ when not (Float.is_finite now) -> all_unknown ()
@@ -166,7 +171,14 @@ let half_hours ~now ~count pulse =
       List.init count (fun position ->
           let back = count - 1 - position in
           let starts = Float.of_int (now_slot - (back * Pulse.slot_seconds)) in
-          half_hour_of_tally ~starts_before_known:(starts < known_since) (tally_of back))
+          let tally = tally_of back in
+          if tally.ok = 0 && tally.rested = 0 && tally.failed = 0 && starts < known_since
+          then Slot_tally_unknown
+          else Slot_tally_measured tally)
+;;
+
+let half_hours ~now ~count pulse =
+  List.map half_hour_of_tally (half_hour_tallies ~now ~count pulse)
 ;;
 
 let half_hour_mark = function

@@ -3142,10 +3142,18 @@ let render_keeper_axes (state : state) =
     | None, Axis_row.Grid _ -> keeper_grid_fleet_row state ~now:now_unix ~grid all_rows
     | Some _, _ | None, (Axis_row.Wall_columns | Axis_row.List_columns) -> None
   in
+  let wall_fleet_rows =
+    match matrix, shape with
+    | None, Axis_row.Wall_columns ->
+        Masc_tui_keeper_wall.fleet_rows ~ko ~cols:inner ~now:now_unix
+          (List.map keeper_row_runtime model_rows)
+    | Some _, (Axis_row.Wall_columns | Axis_row.List_columns | Axis_row.Grid _)
+    | None, (Axis_row.List_columns | Axis_row.Grid _) -> []
+  in
   let col_header_rows =
     match matrix, shape with
     | Some _, _ -> 1
-    | None, Axis_row.Wall_columns -> 2
+    | None, Axis_row.Wall_columns -> 1 + List.length wall_fleet_rows
     | None, Axis_row.List_columns -> 1
     | None, Axis_row.Grid _ -> 1 + if Option.is_some grid_fleet_row then 1 else 0
   in
@@ -3237,8 +3245,7 @@ let render_keeper_axes (state : state) =
    | None, Axis_row.Wall_columns ->
        box_line buf cols
          (Masc_tui_keeper_wall.header ~ko ~cols:inner ~now:now_unix);
-       box_line buf cols (Masc_tui_keeper_wall.fleet ~ko
-         ~cols:inner ~now:now_unix (List.map keeper_row_runtime model_rows))
+       List.iter (box_line buf cols) wall_fleet_rows
    | None, Axis_row.List_columns ->
        box_line_styled buf cols ~style:(Theme.recede ())
          (keeper_column_header ~ko columns)

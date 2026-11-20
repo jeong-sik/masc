@@ -81,6 +81,21 @@ type half_hour =
       (** A turn failed or rested in it and another finished ok. The server
           counts each outcome without their order. *)
 
+type half_hour_tally =
+  | Slot_tally_unknown
+      (** Same unknown rule as {!Half_hour_unknown}: no turns counted and starts
+          before [known_since], or no pulse / non-finite [now]. *)
+  | Slot_tally_measured of Masc.Keeper_turn_pulse.tally
+      (** Measured turn counts in one half-hour slot. *)
+
+val half_hour_tallies :
+  now:float -> count:int -> Masc.Keeper_turn_pulse.pulse option -> half_hour_tally list
+(** The last [count] half hours, oldest first, carrying raw turn tallies from the
+    same slot bucketing as {!half_hours}. *)
+
+val half_hour_of_tally : half_hour_tally -> half_hour
+(** Pure projection from a slot tally reading to its categorical {!half_hour} state. *)
+
 val half_hours :
   now:float -> count:int -> Masc.Keeper_turn_pulse.pulse option -> half_hour list
 (** The last [count] half hours, oldest first, one per server slot. The newest

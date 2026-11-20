@@ -1210,7 +1210,7 @@ let test_response_boundaries_and_usage_survive_wire_and_replay () =
     let projected log =
       let t = T.of_log ~now:2000. log in
       let speech = T.drawn t |> List.filter_map (fun (item:T.drawn_item) ->
-        match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
+        match item.drawn with Drawn_text { Masc_tui_growing_text.text; _ } | Drawn_reply text -> Some text | _ -> None) in
       check (list string) "earlier response and observed stretches stay in place"
         ["EARLIER_RESPONSE";"PREFIX";"SUFFIX";"PREFIX\nSUFFIX"] speech;
       check bool "canonical authority is separate from observed interleaving" true
@@ -1290,7 +1290,7 @@ let test_missing_start_text_scope_survives_journal_and_wire () =
           ~skill_name:"source-review" ~skill_tool_use_id:"missing-read" ~turn_ref:"trace-1#3"
           ~state:Transcript.Skill_delivered ~actions:[] ());
       let rows = List.map (fun (item : Transcript.drawn_item) -> match item.drawn with
-        | Transcript.Drawn_text text -> "text:" ^ text
+        | Transcript.Drawn_text { Masc_tui_growing_text.text; _ } -> "text:" ^ text
         | Drawn_reply text -> "reply:" ^ text
         | Drawn_skill _ -> "skill"
         | Drawn_media _ | Drawn_status _ | Drawn_error _ | Drawn_tools _ | Drawn_thinking _ -> "other")

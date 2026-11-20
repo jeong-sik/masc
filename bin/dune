@@ -764,6 +764,7 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection
+  masc_tui_growing_text
   masc_tui_chat_facts
   masc_tui_message_layout))
 
@@ -2150,6 +2151,7 @@
   masc_tui_keeper_chat_live
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript
+  masc_tui_growing_text
   masc_tui_keeper_control
   masc_tui_keeper_list_model
   masc_tui_keeper_story
@@ -2854,6 +2856,7 @@
   masc_tui_keeper_chat_diff
   masc_tui_keeper_chat_log
   masc_tui_keeper_chat_transcript
+  masc_tui_growing_text
   masc_tui_chat_media
   masc_tui_chat_facts
   masc_tui_keeper_control

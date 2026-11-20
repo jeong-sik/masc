@@ -28,6 +28,8 @@ let body_identity text =
               :: List.filteri (fun index _ -> index < kept_identities_capacity - 1) !held;
       identity
 
+let digested_identity digest = digest
+
 (* Every position names the text it indexes as well as its place: a body by
    its identity, a generated label, preview field or journal field by its
    value. A place can hold another version of its text later, and an offset

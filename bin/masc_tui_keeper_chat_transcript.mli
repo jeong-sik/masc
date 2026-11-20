@@ -627,7 +627,8 @@ type drawn =
   | Drawn_thinking of string list
   | Drawn_skill of skill_activity list
   | Drawn_tools of tool_block
-  | Drawn_text of string  (** A reply stretch as it streamed. *)
+  | Drawn_text of Masc_tui_growing_text.snapshot
+      (** A reply stretch as it streamed, drawn for the screen. *)
   | Drawn_media of Masc.Keeper_chat_events.generated_media
   | Drawn_reply of string
       (** The recorded visible reply. It replaces the response's one observed

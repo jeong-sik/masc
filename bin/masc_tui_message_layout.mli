@@ -106,6 +106,14 @@ type row_action =
   | Action_none
   | Action_unfold_argument
 
+(** What a growing entry's producer promises about its earlier text. *)
+type text_growth =
+  | Grows_at_end of { closed : int; identity : Digest.t; stretch : int }
+      (** One streamed stretch: the first [closed] bytes of the body are the
+          same in every later frame of [stretch], and [identity] is
+          [Digest.string] of the body. *)
+  | May_change  (** No promise; the whole text is compared. *)
+
 type markdown_source =
   | Markdown_stable of {
       keeper_name : string;
@@ -121,6 +129,7 @@ type markdown_source =
       entry_index : int;
           (** Position in the current live trail. Together with the full
               request identity it distinguishes interleaved reply stretches. *)
+      growth : text_growth;
     }
   | Markdown_streaming
 (** Whether a chat entry's Markdown source can be reused. Completed history

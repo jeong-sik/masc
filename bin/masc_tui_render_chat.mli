@@ -167,6 +167,7 @@ module For_testing : sig
     cmi_request_id : string;
     cmi_observed_at : float option;
     cmi_entry_index : int;
+    cmi_stretch : int option;
   }
   val chat_markdown : context:Masc_tui_ansi.Chat_theme.body_context ->
     width:int -> string -> string list

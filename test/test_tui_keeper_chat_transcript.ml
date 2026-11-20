@@ -531,7 +531,7 @@ let drawn_to_string (item : Transcript.drawn_item) =
       "skill:" ^ String.concat "," (List.map (fun (s : Transcript.skill_activity) -> s.skill_name) skills)
   | Transcript.Drawn_tools block -> "tools:" ^ String.concat "|" (Transcript.project_tool_block Transcript.Full block).Transcript.details
   | Transcript.Drawn_media media -> Yojson.Safe.to_string (Masc.Keeper_chat_events.generated_media_to_json media)
-  | Transcript.Drawn_text text -> "text:" ^ text
+  | Transcript.Drawn_text { Masc_tui_growing_text.text; _ } -> "text:" ^ text
   | Transcript.Drawn_reply text -> "reply:" ^ text
   | Transcript.Drawn_status text -> "status:" ^ text
   | Transcript.Drawn_error text -> "error:" ^ text
@@ -2371,7 +2371,7 @@ let test_event_times_survive_log_replay_and_continuation () =
   check (list string) "new canonical reply preserves earlier segment"
     ["First segment."; "Second segment."]
     (List.filter_map (fun (item : Transcript.drawn_item) -> match item.drawn with
-      | Drawn_text text | Drawn_reply text -> Some text | _ -> None) replayed);
+      | Drawn_text { Masc_tui_growing_text.text; _ } | Drawn_reply text -> Some text | _ -> None) replayed);
   check bool "continuation is not a superseded runtime attempt" true
     (List.for_all (fun (item : Transcript.drawn_item) -> item.superseded=None) replayed)
 ;;
@@ -2481,7 +2481,7 @@ let test_native_details_retain_provider_elapsed_with_other_observations () =
 
 let test_response_boundaries_preserve_origins () =
   let speech t = Transcript.drawn t |> List.filter_map (fun (item:Transcript.drawn_item) ->
-    match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) in
+    match item.drawn with Drawn_text { Masc_tui_growing_text.text; _ } | Drawn_reply text -> Some text | _ -> None) in
   let cases = [
     "tool round", [Live.Text {text="COMMENTARY"; response=Unobserved_scope (None)}] @ read_file_call;
     "native tool round", [Live.Text {text="COMMENTARY"; response=Unobserved_scope (None)};
@@ -2516,7 +2516,7 @@ let test_response_boundaries_preserve_origins () =
     check (list string) (label ^ ": exact observed fragments survive")
       ["PREFIX";"SUFFIX"]
       (List.filter_map (fun (item:Transcript.drawn_item) ->
-        match item.drawn with Drawn_text text -> Some text | _ -> None) observations);
+        match item.drawn with Drawn_text { Masc_tui_growing_text.text; _ } -> Some text | _ -> None) observations);
     check bool (label ^ ": every original row keeps content, origin and position") true
       (List.map (fun (item:Transcript.drawn_item) -> item.origin,item.drawn) before
        = List.map (fun (item:Transcript.drawn_item) -> item.origin,item.drawn)
@@ -2621,7 +2621,7 @@ let test_empty_new_response_does_not_replace_prior_message () =
   check (list string) "a response without streamed text leaves earlier output in place"
     ["EARLIER";"FINAL"]
     (List.filter_map (fun (item:Transcript.drawn_item) ->
-       match item.drawn with Drawn_text text | Drawn_reply text -> Some text | _ -> None) items);
+       match item.drawn with Drawn_text { Masc_tui_growing_text.text; _ } | Drawn_reply text -> Some text | _ -> None) items);
   check bool "unstreamed final uses its own synthetic origin" true
     ((List.hd (List.rev items)).origin = Transcript.Reply_of_segment 0)
 ;;

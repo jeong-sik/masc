@@ -14,9 +14,9 @@ let growing_renderer calls ~width text =
   Markdown.render_streaming ~palette:Markdown.plain_palette ~width text
 
 let render_growing cache calls ?(theme_revision = 1)
-    ?(palette_generation = 0) ?(width = 40) identity text =
+    ?(palette_generation = 0) ?(width = 40) ?(settled = 0) identity text =
   Cache.render_growing cache ~theme_revision ~palette_generation ~width
-    ~renderer:(growing_renderer calls) ~identity ~text
+    ~renderer:(growing_renderer calls) ~identity ~settled ~text
 
 let full_markdown ~width text =
   Markdown.render ~palette:Markdown.plain_palette ~width text
@@ -183,6 +183,37 @@ let test_unchanged_growing_snapshot_never_reaches_the_renderer () =
   check (list string) "only the first snapshot was parsed"
     [ text ] (List.rev !calls)
 
+(* A caller that promises its finished lines stay as they are has only the
+   rest compared: the bytes compared grow with what changed, not with the
+   text. The rows are the same as the text rendered in one go. *)
+let test_a_promised_prefix_is_not_compared_again () =
+  let cache = Cache.create ~capacity:4 in
+  let calls = ref [] in
+  let source = Buffer.create 4096 in
+  let line = String.make 200 'w' ^ "\n" in
+  for _ = 1 to 100 do Buffer.add_string source line done;
+  let settled () =
+    match String.rindex_opt (Buffer.contents source) '\n' with Some last -> last + 1 | None -> 0 in
+  ignore (render_growing cache calls ~settled:(settled ()) "entry-a" (Buffer.contents source) : string list);
+  let before = Cache.For_testing.bytes_compared () in
+  for step = 1 to 50 do
+    Buffer.add_string source (if step mod 10 = 0 then "\n" else "x");
+    let text = Buffer.contents source in
+    let actual = render_growing cache calls ~settled:(settled ()) "entry-a" text in
+    check (list string) (Printf.sprintf "rows after step %d" step) (full_markdown ~width:40 text) actual
+  done;
+  check bool "fifty appends compare the open line, not the 20 KB before it" true
+    (Cache.For_testing.bytes_compared () - before < 1_000);
+  let unpromised = Cache.For_testing.bytes_compared () in
+  Buffer.add_string source "y";
+  ignore (render_growing cache calls "entry-a" (Buffer.contents source) : string list);
+  check bool "the next text after a promise of nothing compares from the last promise" true
+    (Cache.For_testing.bytes_compared () - unpromised < 1_000);
+  Buffer.add_string source "z";
+  ignore (render_growing cache calls "entry-a" (Buffer.contents source) : string list);
+  check bool "a text after an empty promise is compared whole" true
+    (Cache.For_testing.bytes_compared () - unpromised > 20_000)
+
 let test_appended_text_parses_only_the_new_suffix () =
   let cache = Cache.create ~capacity:4 in
   let calls = ref [] in
@@ -329,6 +360,8 @@ let () =
             test_closed_blocks_are_not_rendered_again
         ; test_case "unchanged growing snapshot is not parsed again" `Quick
             test_unchanged_growing_snapshot_never_reaches_the_renderer
+        ; test_case "a promised prefix is not compared again" `Quick
+            test_a_promised_prefix_is_not_compared_again
         ; test_case "appended text parses only the new suffix" `Quick
             test_appended_text_parses_only_the_new_suffix
         ; test_case "growing retention is bounded and recent" `Quick

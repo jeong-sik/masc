@@ -5,6 +5,10 @@ val body_identity : string -> body_identity
 (** Asked again for the same string on the same domain, it answers without
     digesting the text again. *)
 
+val digested_identity : Digest.t -> body_identity
+(** [digested_identity (Digest.string text)] is [body_identity text], for a
+    producer that digested the text as it arrived. *)
+
 (** Every position names the text it indexes as well as its place: a body by
     its identity, a generated label, preview field or journal field by its
     value. A place can hold another version of its text under the same

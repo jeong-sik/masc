@@ -36,6 +36,9 @@ module Streaming = struct
     stable_row_count : int;
     rows : string list;
     blocks : (int * int) array;
+    settled : int;
+    (* The first [settled] bytes of [text] are the same in every later text
+       for this key, as the caller promised. *)
   }
 end
 
@@ -216,7 +219,23 @@ let render_keeping_blocks cache ~theme_revision ~palette_generation ~width ~rend
       remember cache { key; rows = rendered.rows; blocks = Kept rendered.blocks };
       rendered.rows
 
-let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
+(* Whether [text] goes on from [kept], whose first [settled] bytes the caller
+   promised are the same in [text]: only the bytes after them are compared.
+   A streaming 1 MB reply compared its whole text byte by byte on every
+   frame. *)
+let bytes_compared = Atomic.make 0
+
+let extends ~settled ~kept text =
+  let kept_length = String.length kept in
+  kept_length <= String.length text
+  && (let start = Int.max 0 (Int.min settled kept_length) in
+      ignore (Atomic.fetch_and_add bytes_compared (kept_length - start) : int);
+      let rec from index =
+        index >= kept_length || (Char.equal kept.[index] text.[index] && from (index + 1))
+      in
+      from start)
+
+let reset_growing cache ~(key : _ Streaming.key) ~settled ~text ~renderer =
   let rendered = renderer ~width:key.width text in
   validate_streaming_render ~source_length:(String.length text) rendered;
   let growing : _ Streaming.growing =
@@ -227,19 +246,20 @@ let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
       stable_row_count = rendered.mutable_row_start;
       rows = rendered.rows;
       blocks = rendered.blocks;
+      settled;
     }
   in
   remember_growing cache growing;
   rendered.rows
 
 let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
-    ~identity ~text =
+    ~identity ~settled ~text =
   let key : _ Streaming.key =
     { identity; width; theme_revision; palette_generation }
   in
   match find_growing cache key with
   | Some growing when String.equal growing.text text -> growing.rows
-  | Some growing when String.starts_with ~prefix:growing.text text ->
+  | Some growing when extends ~settled:growing.settled ~kept:growing.text text ->
       let pending =
         String.sub text growing.stable_source_len
           (String.length text - growing.stable_source_len)
@@ -272,11 +292,12 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
           stable_row_count = growing.stable_row_count + rendered.mutable_row_start;
           rows;
           blocks;
+          settled;
         }
       in
       remember_growing cache updated;
       rows
-  | Some _ | None -> reset_growing cache ~key ~text ~renderer
+  | Some _ | None -> reset_growing cache ~key ~settled ~text ~renderer
 
 let growing_blocks cache ~theme_revision ~palette_generation ~width ~identity
     ~text =
@@ -333,4 +354,5 @@ let measure_growing_details cache ~theme_revision ~palette_generation ~width ~re
 module For_testing = struct
   let retained_entries cache = Masc_tui_lru.size cache.completed
   let retained_growing_entries cache = Masc_tui_lru.size cache.growing
+  let bytes_compared () = Atomic.get bytes_compared
 end

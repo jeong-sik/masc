@@ -70,9 +70,15 @@ val render_growing :
   width:int ->
   renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
   identity:'identity ->
+  settled:int ->
   text:string ->
   string list
 (** Render a source snapshot with an append-sensitive suffix.
+
+    [settled] is the caller's promise that the first [settled] bytes of
+    [text] are the same in every later [text] for this [identity]; [0]
+    promises nothing. A later snapshot is compared only after the bytes the
+    previous one promised.
 
     Closed blocks are retained for the same identity, width, theme revision,
     and palette generation. An unchanged snapshot reuses all rows. An appended
@@ -108,4 +114,7 @@ val measure_growing_details :
 module For_testing : sig
   val retained_entries : 'identity t -> int
   val retained_growing_entries : 'identity t -> int
+  val bytes_compared : unit -> int
+  (** Bytes a growing render compared to see that a new text goes on from
+      the one it kept. *)
 end

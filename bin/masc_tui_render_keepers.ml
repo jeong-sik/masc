@@ -301,7 +301,7 @@ let keeper_task_detail ?tasks ~ko (row : Keeper_list_model.row) =
               in
               task_word ^ label)
             activity.Tui_decode.k_current_task_id
-      | None -> Some (if ko then "작업 조회 불가" else "task not observed"))
+      | None -> Some (if ko then "작업 보고 없음" else "task not reported"))
 
 let schedule_title_for_id (schedules : schedule_snapshot option) schedule_id =
   match schedules with
@@ -3724,7 +3724,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | None, None ->
           (match pending_detail_read state ~tab:Detail_items ~keeper:k.k_name with
            | Some _ -> item_say "  아이템 계정 불러오는 중" "  Loading Item account"
-           | None -> item_say "  아이템 계정 미조회" "  Item account not observed")
+           | None -> item_say "  아이템 계정 미조회" "  Item account not read")
     in
     let is_worn item =
       match portrait_reading with
@@ -4432,10 +4432,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
            | None, None ->
                [ Ansi.dim ^ "  "
                  ^ (if server_authority_ready state then
-                      ui_text state ~ko:"미관측 · r:읽기" ~en:"Not observed · r to read"
+                      ui_text state ~ko:"미조회 · r:읽기" ~en:"Not read · r to read"
                     else
-                      ui_text state ~ko:"미관측 · 워크스페이스 확인 필요"
-                        ~en:"Not observed · workspace confirmation required")
+                      ui_text state ~ko:"미조회 · 워크스페이스 확인 필요"
+                        ~en:"Not read · workspace confirmation required")
                  ^ Ansi.reset ]
            | Some _, (Some _ | None) | None, Some _ -> failure @ progress)
     in
@@ -5051,7 +5051,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                @ List.map row_line closed)
       | Some _ | None ->
           (match error, pending with
-           | None, None -> [ Ansi.dim ^ say "  일정 미관측" "  Schedules not observed" ^ Ansi.reset ]
+           | None, None -> [ Ansi.dim ^ say "  일정 미조회" "  Schedules not read" ^ Ansi.reset ]
            | Some _, (Some _ | None) | None, Some _ -> [])
       in
       error_lines @ progress @ snapshot_lines
@@ -5143,7 +5143,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                 ~ko:(state.ui_language = Lang_ko) ~width partial
             | Some _ | None ->
               [ Ansi.dim ^ (if state.ui_language = Lang_ko then
-                    "  샌드박스 상태 미조회" else "  Sandbox status not observed") ^ Ansi.reset ]
+                    "  샌드박스 상태 미조회" else "  Sandbox status not read") ^ Ansi.reset ]
           in
           let logs =
             match state.keeper_sandbox_logs_inflight with

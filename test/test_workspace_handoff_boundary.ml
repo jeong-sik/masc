@@ -95,7 +95,7 @@ let in_progress assignee : Domain.task_status =
   Domain.InProgress { assignee; started_at = "2026-08-06T00:00:02Z" }
 ;;
 
-(* --- 1. The boundary (RFC-0365 §7 test 1) ------------------------------ *)
+(* --- 1. The boundary --------------------------------------------------- *)
 
 let claim_preserves_the_previous_owners_note () =
   let released = task ~handoff_context:(handoff ()) ~status:Domain.Todo "task-1" in
@@ -130,7 +130,7 @@ let claim_preserves_the_previous_owners_note () =
        h.Domain.updated_by))
 ;;
 
-(* --- 2. Entry-class does not author (RFC-0365 §7 test 2) --------------- *)
+(* --- 2. Entry-class does not author ------------------------------------ *)
 
 (* The fix must not be "entry-class writes whatever it is handed". An entry
    argument is not a handoff, and honouring it would let a claimant rewrite
@@ -166,7 +166,7 @@ let claim_on_a_noteless_task_stays_empty () =
     (summary_of after_claim)
 ;;
 
-(* --- 3. Exit-class authors (RFC-0365 §7 test 3) ------------------------ *)
+(* --- 3. Exit-class authors --------------------------------------------- *)
 
 let release_replaces_the_note () =
   let held =

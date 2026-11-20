@@ -1,7 +1,5 @@
 (* Wiki_graph, Wiki_sources, Wiki_log and Wiki_lint over small fixed wikis, and
-   the order-independence the RFC asks of the graph
-   (RFC-wiki-lint-and-page-contracts §11.1 items 2 and 6, §4.5 and §7 for the
-   log parser and the revision check). *)
+   the graph's order-independence: node order does not change the findings. *)
 
 open Alcotest
 module G = Masc.Wiki_graph
@@ -179,7 +177,7 @@ let test_same_graph_same_output () =
   check (list string) "twice" first second
 ;;
 
-(* --- log.md read back (RFC §7) ------------------------------------------- *)
+(* --- log.md read back ---------------------------------------------------- *)
 
 let journal_line = "## [2026-10-13 20:00] create r1 | alpha | someone | a note\n"
 
@@ -294,7 +292,7 @@ let test_log_empty_content_and_no_final_newline () =
     (List.length (Log.parse "## [2026-10-13 20:00] create r1 | alpha | x").Log.lines)
 ;;
 
-(* --- the log run ahead of the page (RFC §4.5) ---------------------------- *)
+(* --- the log run ahead of the page --------------------------------------- *)
 
 let test_revision_log_gap_is_one_finding_per_page () =
   let nodes =
@@ -353,7 +351,7 @@ let test_revision_log_gap_ignores_a_page_that_is_not_there () =
     (describe (Lint.run (G.of_nodes nodes) ~log))
 ;;
 
-(* --- a line that reached the page and never reached the log (§4.5) ------ *)
+(* --- a line that reached the page and never reached the log ------------- *)
 
 let test_revision_log_hole_finds_the_skipped_line () =
   let nodes =
@@ -453,7 +451,7 @@ let test_revision_log_hole_does_not_start_at_r1 () =
     (describe (Lint.run (G.of_nodes nodes) ~log:starts_at_three))
 ;;
 
-(* --- the report as the tool hands it back (RFC §4.2) -------------------- *)
+(* --- the report as the tool hands it back ------------------------------- *)
 
 let render_with nodes log =
   let request : Report.request = { page = None; kind = None; limit = None; cursor = None } in

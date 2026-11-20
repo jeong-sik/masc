@@ -39,9 +39,9 @@ let test_agent_id_invalid_chars () =
     | Ok _ -> Alcotest.fail (Printf.sprintf "Expected error for invalid chars '%s'" s)
   ) cases
 
-(* A keeper name carries dots (edgar.a.poe). RFC-0393 made a keeper name its
-   own id instead of an encoded string, so the dot reaches this validator
-   directly and a rejection here stops that keeper from claiming its own task.
+(* A keeper name carries dots (edgar.a.poe). The name is the keeper's own id,
+   not an encoded string, so the dot reaches this validator directly and a
+   rejection here stops that keeper from claiming its own task.
    Board widened to the same character set in #8633 and called its pattern "a
    strict superset of both"; this is the half that never followed. *)
 let test_agent_id_allows_dots () =

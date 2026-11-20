@@ -1581,13 +1581,36 @@ let render_terminal_too_small state (reason : Render_schedule.Viewport.too_small
 let render_account_login state view =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
-  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay state ~terminal_rows ~cols
+  let now = Unix.gettimeofday () in
+  let base_title = screen_title (ui_text state ~ko:" 계정 로그인" ~en:" Account Login") in
+  let title =
+    match Masc_tui_account_login.progress_badge ~ko ~now view with
+    | None -> base_title
+    | Some badge -> base_title ^ "  " ^ Theme.info () ^ badge ^ Ansi.reset
+  in
+  let progress_sheet =
+    Option.map
+      (fun (info : Masc_tui_account_login.progress_info) ->
+        { ps_title = info.title
+        ; ps_detail = info.detail
+        ; ps_started_at = info.started_at
+        ; ps_meter =
+            Option.map
+              (fun (pm_done, pm_total, pm_failed) -> { pm_done; pm_total; pm_failed })
+              info.meter
+        ; ps_action_hint = info.action_hint
+        ; ps_blocking = info.blocking
+        })
+      (Masc_tui_account_login.progress_info ~ko view)
+  in
+  surface_chrome ~overflow:Paged_by_cursor ~frame:Chrome_overlay ?progress_sheet ~now
+    state ~terminal_rows ~cols
     ~surface_key:"account-login"
-    ~title:(screen_title (ui_text state ~ko:" 계정 로그인" ~en:" Account Login"))
+    ~title
     ~hints:(Masc_tui_account_login.hints ~ko view)
     ~body:(fun ~budget c ->
       let lines, position =
-        Masc_tui_account_login.visible_lines ~ko ~height:budget ~width:(framed_inner_width cols) view in
+        Masc_tui_account_login.visible_lines ~ko ~now ~height:budget ~width:(framed_inner_width cols) view in
       Option.iter c.position position;
       let width = framed_inner_width cols in
       List.iter
@@ -1597,6 +1620,9 @@ let render_account_login state view =
               if String.starts_with ~prefix:"\xe2\x80\xba " clean then
                 c.push_selected (fit_width (Masc_tui_theme.strip_sgr clean) width)
               else c.push (fit_width clean width)
+          | Masc_tui_account_login.Progress text ->
+              let clean = Masc.Tui_terminal_text.sanitize_terminal_text text in
+              c.push (Theme.info () ^ fit_width clean width ^ Ansi.reset)
           | Masc_tui_account_login.Terminal line ->
               let rendered =
                 Masc_tui_sgr_text.render

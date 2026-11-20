@@ -31,7 +31,16 @@ type activation = Activating | Activation_failed of string | Activation_kept_bac
    that adds a new one. *)
 type account_group = { group_id : string; provider_ids : string list; runtime_ids : string list }
 type list_view = Clients | Accounts of client | Account_providers of client * string list
+type context_batch = {
+  current : model;
+  remaining : model list;
+  total : int;
+  completed : int;
+  failed : (model * string) list;
+  previous_selected : string list;
+}
 type phase = Loading | Providers of list_view | Logging | Models | Refreshing_models | Preparing_context of model
+  | Preparing_context_batch of context_batch
   | Documented_context of model | Saving | Removing
   | Finished of { saved : saved; activation : activation; refresh_failed : bool } | Failed
   | Removal of { provider : provider; revision : string; removal : removal }
@@ -57,6 +66,9 @@ type t = {
   mutable cancel_stream : (unit -> unit) option; mutable recovery : recovery;
   mutable account_emails : account_emails;
   mutable account_groups : account_group list;
+  mutable activity_started_at : float option;
+  mutable failed_context_models : string list;
+  mutable batch_cancelled : bool;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Screen of string | Input_ready
@@ -64,7 +76,8 @@ type event = Started of string * string option | Output of string | Screen of st
 type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Refresh_retry | Select_existing of provider
   | Start of { provider : provider; existing : bool }
   | Input of int * Yojson.Safe.t | Cancel
-  | Recover | Discover | Refresh_models | Prepare of model | Save of model list | Close | Nothing
+  | Recover | Discover | Refresh_models | Prepare of model | Prepare_batch of context_batch | Cancel_prepare
+  | Save of model list | Close | Nothing
   | Preview_removal of { provider : provider; refused : string option }
   | Remove of { provider : provider; revision : string; login_store : string option }
   | Refresh_removed of { client : client; notice : string }
@@ -72,7 +85,20 @@ type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Ref
 let create requested = {requested; generation=0; phase=Loading; providers=[]; provider=None; models=[];
   selected_models=[]; connected_models=[]; account_emails=Email_rows {rows=[]; unattributed=0}; account_groups=[];
   cursor=0; result_scroll=0; saved_scroll_max=0; saved_runtime_ids=[]; account_ref=None; login_id=None; revision=""; existing=[]; default_runtime_id=None; draft="";
-  output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status}
+  output=""; notice="계정 목록을 읽고 있습니다."; input_pending=false; input_sequence=0; cancel_stream=None; recovery=Login_status;
+  activity_started_at=None; failed_context_models=[]; batch_cancelled=false}
+let text_input_active t = match t.phase with
+  | Logging | Documented_context _ -> true
+  | Loading | Providers _ | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+  | Saving | Removing | Finished _ | Failed | Removal _ -> false
+let in_progress t = match t.phase with
+  | Loading | Refreshing_models | Preparing_context _ | Preparing_context_batch _ | Saving | Removing
+  | Finished { activation = Activating; _ } -> true
+  | Logging -> t.input_pending || Option.is_none t.login_id
+  | Providers _ | Models | Documented_context _
+  | Finished { activation = (Active _ | Activation_failed _ | Activation_kept_back _); _ }
+  | Failed | Removal _ -> false
+let note_activity_started ~at t = t.activity_started_at <- Some at
 let begin_attempt t provider ~existing =
   if t.provider <> Some provider then t.account_ref <- None;
   t.provider <- Some provider;
@@ -80,7 +106,8 @@ let begin_attempt t provider ~existing =
   t.login_id <- None; t.recovery <- Login_status; t.result_scroll <- 0;
   t.saved_runtime_ids <- [];
   t.phase <- Logging; t.output <- ""; t.models <- []; t.selected_models <- []; t.connected_models <- [];
-  t.draft <- ""; t.input_pending <- false;
+  t.draft <- ""; t.input_pending <- false; t.activity_started_at <- None; t.failed_context_models <- [];
+  t.batch_cancelled <- false;
   t.notice <- "공식 클라이언트의 안내 주소에서 로그인하세요.";
   previous
 let field name = function `Assoc fields -> (match List.assoc_opt name fields with Some v -> v | None -> `Null) | _ -> `Null
@@ -199,10 +226,12 @@ let accounts_notice = "+ 새 계정: 새 계정 로그인. 계정을 고르면 �
 let index_of equal items = List.find_index equal items |> Option.value ~default:0
 let show_clients ?on t =
   t.phase <- Providers Clients;
+  t.activity_started_at <- None;
   t.cursor <- (match on with Some client -> index_of (( = ) client) (clients t) | None -> 0);
   t.notice <- clients_notice ^ email_notice t.account_emails
 let show_accounts ?on t client =
   t.phase <- Providers (Accounts client);
+  t.activity_started_at <- None;
   (* The account row first: when a client has no catalog entry, its first
      account also carries the new-account row. *)
   let rows = account_rows t client in
@@ -215,17 +244,20 @@ let show_accounts ?on t client =
   t.notice <- accounts_notice ^ email_notice t.account_emails
 let show_account_providers t client ids =
   t.phase <- Providers (Account_providers (client, ids));
+  t.activity_started_at <- None;
   t.cursor <- 0;
   t.notice <- "이 계정의 공급자 연결을 고르세요. Enter/D로 선택한 연결만 지우는 내용을 확인합니다. 다른 연결과 로그인은 남습니다."
 let focused_row t = match t.phase with
   | Providers (Accounts client) -> List.nth_opt (account_rows t client) t.cursor
   | Providers (Account_providers (_, ids)) -> Option.map (fun provider -> Account provider) (List.nth_opt (member_rows t ids) t.cursor)
-  | Providers Clients | Loading | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> None
+  | Providers Clients | Loading | Logging | Models | Refreshing_models | Preparing_context _
+  | Preparing_context_batch _ | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> None
 let focused_client t = match t.phase with
   | Providers Clients -> List.nth_opt (clients t) t.cursor
   | Providers (Accounts client) -> Some client
   | Providers (Account_providers (client, _)) -> Some client
-  | Loading | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ ->
+  | Loading | Logging | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+  | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ ->
     Option.map (fun (p:provider) -> p.client) t.provider
 let requested_client = function
   | "codex" -> Some Codex | "claude" -> Some Claude
@@ -241,12 +273,14 @@ let activation_incomplete t = match t.phase with
   | Saving | Finished {activation = Activating | Activation_failed _ | Activation_kept_back _; _} -> true
   | Failed -> t.recovery = Refresh_configuration
   | Finished {activation = Active _; _}
-  | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Removing | Removal _ -> false
+  | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
+  | Preparing_context_batch _ | Documented_context _ | Removing | Removal _ -> false
 let reopen_saved ~requested t =
   let recoverable = match t.phase with
     | Saving | Finished _ -> true
     | Failed -> t.recovery = Refresh_configuration
-    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Removing | Removal _ -> false in
+    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
+    | Preparing_context_batch _ | Documented_context _ | Removing | Removal _ -> false in
   if not recoverable then None else
   let matches = match t.provider with
     | Some provider ->
@@ -340,7 +374,7 @@ let inventory ?view t json =
       Ok ())
   | _ -> Error "서버 계정 목록을 읽지 못했습니다."
 let save_failed t message =
-  t.recovery <- Refresh_configuration; t.result_scroll <- 0; t.phase <- Failed;
+  t.recovery <- Refresh_configuration; t.result_scroll <- 0; t.phase <- Failed; t.activity_started_at <- None;
   (* The reason leads; the key to press is also in the hints. *)
   t.notice <- message ^ " · r로 설정을 새로 읽은 뒤 다시 저장하세요."
 let refresh_retry t result =
@@ -348,6 +382,7 @@ let refresh_retry t result =
   let refreshed = match result with Ok json -> inventory t json | Error _ as error -> error in
   t.cursor <- cursor;
   t.recovery <- Refresh_configuration;
+  t.activity_started_at <- None;
   match refreshed with
   | Ok () -> t.phase <- Models; t.notice <- "최신 설정을 읽었습니다. 선택한 모델을 확인하고 Enter로 다시 저장하세요."
   | Error _ -> t.result_scroll <- 0; t.phase <- Failed; t.notice <- "최신 설정을 읽지 못했습니다. r로 다시 확인하세요."
@@ -413,7 +448,8 @@ let saved t json =
           List.filter (fun id -> not (List.mem id t.existing)) (List.filter_map Fun.id parsed)
         else []
       | _ -> []);
-    t.cursor <- 0; t.result_scroll <- 0; t.phase <- Finished {saved; activation = Activating; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
+    t.cursor <- 0; t.result_scroll <- 0; t.activity_started_at <- None;
+    t.phase <- Finished {saved; activation = Activating; refresh_failed = false}; t.notice <- saved_notice saved; Ok saved
   | None -> Error "설정 저장 결과를 확인하지 못했습니다"
 let activation_of_result = function
   | Ok json ->
@@ -432,11 +468,13 @@ let activated t saved result =
   t.result_scroll <- 0;
   let activation = activation_of_result result in
   t.phase <- Finished {saved; activation; refresh_failed = false};
+  t.activity_started_at <- None;
   t.cursor <- 0; t.notice <- saved_notice saved;
   match activation with Active _ -> true | Activating | Activation_failed _ | Activation_kept_back _ -> false
 let activation_kept_back t saved notice =
   t.result_scroll <- 0;
   t.phase <- Finished {saved; activation = Activation_kept_back notice; refresh_failed = false};
+  t.activity_started_at <- None;
   t.cursor <- 0; t.notice <- saved_notice saved
 let reconcile_saved_account t json =
   match t.provider, t.saved_runtime_ids, field "runtimes" json with
@@ -460,7 +498,8 @@ let reconcile_saved_account t json =
 let refresh_saved t saved result =
   let activation = match t.phase with
     | Finished {activation; _} -> activation
-    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving | Removing | Failed | Removal _ ->
+    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
+    | Preparing_context_batch _ | Documented_context _ | Saving | Removing | Failed | Removal _ ->
       Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
   let refreshed = match result with
     | Ok json -> (match inventory t json with
@@ -474,7 +513,7 @@ let refresh_saved_kept_back t saved notice =
   let activation = match t.phase with
     | Finished {activation; _} -> activation
     | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
-    | Documented_context _ | Saving | Removing | Failed | Removal _ ->
+    | Preparing_context_batch _ | Documented_context _ | Saving | Removing | Failed | Removal _ ->
       Activation_failed "저장한 설정의 활성화 상태를 확인하지 못했습니다." in
   t.cursor <- 0; t.result_scroll <- 0;
   t.phase <- Finished {saved; activation; refresh_failed = false};
@@ -483,6 +522,7 @@ let input_response ~sequence t result =
   match result with
   | Error _ when sequence=t.input_sequence && t.input_pending ->
     t.input_pending <- false;
+    t.activity_started_at <- None;
     t.notice <- "입력 전달 결과를 확인하지 못했습니다. 로그인 안내를 확인하고 다시 시도하세요."
   | Ok _ | Error _ -> ()
 let models t json =
@@ -501,6 +541,9 @@ let models t json =
       t.connected_models <- List.filter_map (function Some (model, true) -> Some model | Some (_, false) | None -> None) parsed;
       t.models <- available @ t.connected_models;
       t.selected_models <- [];
+      t.failed_context_models <- [];
+      t.batch_cancelled <- false;
+      t.activity_started_at <- None;
       t.cursor <- 0; t.phase <- Models;
       t.notice <- (if available = [] && t.connected_models <> [] then
         "이 계정의 모델은 모두 연결되어 있습니다. ↑↓:확인  r:새로고침  Esc:닫기"
@@ -535,25 +578,113 @@ let refreshed_models t json =
   Ok ()
 let models_refresh_failed t detail =
   t.recovery <- Refresh_model_inventory;
-  t.phase <- Failed; t.result_scroll <- 0;
+  t.phase <- Failed; t.result_scroll <- 0; t.activity_started_at <- None;
   t.notice <- detail ^ " · 선택은 유지됩니다. r로 모델 목록을 다시 읽으세요."
 let selected_account t provider json =
   match reference (field "account_ref" json) with
   | None -> Error "저장된 계정의 참조를 읽지 못했습니다."
   | Some account_ref ->
     t.provider <- Some provider; t.account_ref <- Some account_ref; t.login_id <- None;
-    t.models <- []; t.selected_models <- []; t.connected_models <- []; Ok ()
+    t.models <- []; t.selected_models <- []; t.connected_models <- []; t.failed_context_models <- [];
+    t.batch_cancelled <- false; Ok ()
+let selected_models t =
+  List.filter (fun (model:model) -> List.mem model.id t.selected_models) t.models
 let preparing t model =
   t.phase <- Preparing_context model;
   t.notice <- model.label ^ " · 입력 한도를 확인하고 있습니다."
+let preparing_batch ?at t batch =
+  (if batch.completed = 0 && batch.failed = [] then
+     t.activity_started_at <- at
+   else if Option.is_none t.activity_started_at then
+     t.activity_started_at <- at);
+  t.batch_cancelled <- false;
+  t.phase <- Preparing_context_batch batch;
+  t.cursor <- index_of (fun (model:model) -> model.id = batch.current.id) t.models;
+  let step = batch.completed + List.length batch.failed + 1 in
+  let failed_suffix =
+    match batch.failed with
+    | [] -> ""
+    | rows -> Printf.sprintf ", 실패 %d" (List.length rows)
+  in
+  t.notice <-
+    Printf.sprintf "입력 한도 확인 중 (%d/%d%s) · %s" step batch.total failed_suffix batch.current.label
+let prepared_batch_step t batch outcome =
+  let completed, failed =
+    match outcome with
+    | Ok json ->
+      (match field "model" json, field "context" json with
+       | `String id, `Int n when id = batch.current.id && n > 0 ->
+         t.models <- List.map (fun m -> if m.id = id then { m with context = Some n } else m) t.models;
+         t.selected_models <- id :: List.filter (fun selected -> selected <> id) t.selected_models;
+         t.failed_context_models <- List.filter (fun fid -> fid <> id) t.failed_context_models;
+         batch.completed + 1, batch.failed
+       | _ ->
+         t.failed_context_models <-
+           batch.current.id :: List.filter (fun fid -> fid <> batch.current.id) t.failed_context_models;
+         batch.completed, batch.failed @ [batch.current, "모델 실행 context를 확인하지 못했습니다."])
+    | Error detail ->
+      t.failed_context_models <-
+        batch.current.id :: List.filter (fun fid -> fid <> batch.current.id) t.failed_context_models;
+      batch.completed, batch.failed @ [batch.current, detail]
+  in
+  match batch.remaining with
+  | next :: rest ->
+    Some { current = next; remaining = rest; total = batch.total; completed; failed; previous_selected = batch.previous_selected }
+  | [] ->
+    t.phase <- Models;
+    t.activity_started_at <- None;
+    t.batch_cancelled <- false;
+    let selected_count = List.length (selected_models t) in
+    t.notice <- (
+      match failed with
+      | [] ->
+        Printf.sprintf "입력 한도를 모두 확인하고 모델 %d개를 선택했습니다. Enter로 검증하고 저장하세요."
+          selected_count
+      | (first_failed, first_reason) :: rest_failed ->
+        let failed_count = 1 + List.length rest_failed in
+        if selected_count > 0 then
+          Printf.sprintf
+            "입력 한도 확인 완료: 모델 %d개 선택, %d개 실패 (%s: %s). Enter로 저장하거나 Space로 다시 확인하세요."
+            selected_count failed_count first_failed.label first_reason
+        else
+          Printf.sprintf
+            "입력 한도 확인에 실패했습니다 (%d개, %s: %s). Space로 다시 확인하거나 r로 목록을 새로 읽으세요."
+            failed_count first_failed.label first_reason);
+    None
 let prepare_failed t detail =
+  (match t.phase with
+   | Preparing_context model ->
+     t.failed_context_models <-
+       model.id :: List.filter (fun fid -> fid <> model.id) t.failed_context_models
+   | Preparing_context_batch batch ->
+     t.failed_context_models <-
+       batch.current.id :: List.filter (fun fid -> fid <> batch.current.id) t.failed_context_models
+   | Loading | Providers _ | Logging | Models | Refreshing_models | Documented_context _
+   | Saving | Removing | Finished _ | Failed | Removal _ -> ());
   t.phase <- Models;
+  t.activity_started_at <- None;
   t.notice <- detail ^ " · Space로 다시 확인하거나 다른 모델을 선택하세요."
+let prepare_interrupted t detail =
+  t.phase <- Models;
+  t.activity_started_at <- None;
+  t.notice <- detail
+let cancel_prepare t =
+  let selected_count = List.length (selected_models t) in
+  t.phase <- Models;
+  t.activity_started_at <- None;
+  t.batch_cancelled <- true;
+  t.notice <-
+    (if selected_count > 0 then
+       Printf.sprintf "입력 한도 확인을 중단했습니다. 이미 선택된 모델 %d개는 유지됩니다." selected_count
+     else
+       "입력 한도 확인을 중단했습니다.")
 let prepared t model json = match field "model" json, field "context" json with
   | `String id, `Int n when id=model.id && n>0 ->
     t.models <- List.map (fun m -> if m.id=id then {m with context=Some n} else m) t.models;
     t.selected_models <- id :: List.filter (fun selected -> selected <> id) t.selected_models;
-    t.phase <- Models; t.notice <- "실행 context를 확인하고 모델을 선택했습니다. Enter로 검증하고 저장하세요."; Ok ()
+    t.failed_context_models <- List.filter (fun fid -> fid <> id) t.failed_context_models;
+    t.phase <- Models; t.activity_started_at <- None;
+    t.notice <- "실행 context를 확인하고 모델을 선택했습니다. Enter로 검증하고 저장하세요."; Ok ()
   | _ -> Error "모델 실행 context를 확인하지 못했습니다."
 let removal_change row = match string (field "kind" row) with
   | Some "table" -> Option.map (fun path -> Removed_table path) (string (field "path" row))
@@ -577,11 +708,13 @@ let removal_preview t (provider:provider) ~refused json =
        if List.exists Option.is_none changes then Error "지울 내용의 형식이 올바르지 않습니다."
        else (
          t.phase <- Removal {provider; revision; removal = Removable {changes = List.filter_map Fun.id changes; login_store = string store}};
+         t.activity_started_at <- None;
          t.notice <- lead ^ "Enter를 누르면 아래 내용대로 지우고 저장합니다."; Ok ())
      | _ -> Error "지울 내용의 형식이 올바르지 않습니다.")
   | `String id, Some revision, `String "refused" when id=provider.id ->
     (match string (field "reason" json) with
      | Some reason -> t.phase <- Removal {provider; revision; removal = Unremovable reason};
+       t.activity_started_at <- None;
        t.notice <- lead ^ "이 연결은 지금 지울 수 없습니다."; Ok ()
      | None -> Error "지울 수 없는 이유를 읽지 못했습니다.")
   | _ -> Error "지울 내용을 읽지 못했습니다."
@@ -600,12 +733,12 @@ let receipt t json =
      | `String ("running" | "failed" | "cancelled" | "interrupted"), _, None
        when field "account_ref" json=`Null || Option.is_some selected ->
        t.account_ref <- selected;
-       t.result_scroll <- 0; t.phase <- Failed; t.notice <- "로그인 결과를 재확인했습니다. e로 이 계정에 다시 로그인할 수 있습니다."; Ok false
+       t.result_scroll <- 0; t.phase <- Failed; t.activity_started_at <- None; t.notice <- "로그인 결과를 재확인했습니다. e로 이 계정에 다시 로그인할 수 있습니다."; Ok false
      | _ -> Error "로그인 결과를 확인하지 못했습니다.")
   | _ -> Error "다른 계정의 로그인 결과입니다."
 let event ~generation t message =
   if generation <> t.generation then Nothing else match message with
-  | Started (id, reference) -> t.login_id <- Some id; t.account_ref <- reference; Nothing
+  | Started (id, reference) -> t.login_id <- Some id; t.account_ref <- reference; t.activity_started_at <- None; Nothing
   | Output text ->
     let text = t.output ^ text in
     (* Visible terminal tail only; this never limits or persists the login. *)
@@ -613,15 +746,15 @@ let event ~generation t message =
   | Screen text ->
     (* The server's terminal drew the whole screen; it replaces the last one. *)
     t.output <- text; Nothing
-  | Input_ready -> t.input_pending <- false; Nothing
+  | Input_ready -> t.input_pending <- false; t.activity_started_at <- None; Nothing
   | Complete (reference, authentication) ->
-    t.account_ref <- Some reference; t.draft <- ""; t.phase <- Loading;
+    t.account_ref <- Some reference; t.draft <- ""; t.phase <- Loading; t.activity_started_at <- None;
     t.notice <- (match authentication with Authenticated -> "계정 인증을 확인했습니다." | Login_completed | Credential_captured -> "로그인 자료를 받았습니다."); Discover
   | Login_failed (id, reference) ->
     t.login_id <- Some id; t.account_ref <- reference; t.result_scroll <- 0; t.phase <- Failed;
-    t.draft <- ""; t.input_pending <- false;
+    t.draft <- ""; t.input_pending <- false; t.activity_started_at <- None;
     t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하거나 e로 다시 로그인하세요."; Nothing
-  | Login_error -> t.result_scroll <- 0; t.phase <- Failed; t.draft <- ""; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
+  | Login_error -> t.result_scroll <- 0; t.phase <- Failed; t.draft <- ""; t.activity_started_at <- None; t.notice <- "로그인 절차를 완료하지 못했습니다. r로 상태를 확인하세요."; Nothing
 let append_draft t text =
   let value = t.draft ^ text in
   if String.is_valid_utf_8 value && String.length value <= 65536 then t.draft <- value
@@ -645,7 +778,8 @@ let paste t text = match t.phase with
     (match pasted_line text with
      | Some text -> append_draft t text
      | None -> t.notice <- "여러 줄이나 제어 문자는 붙여넣을 수 없습니다. 한 줄을 확인해 다시 입력하세요.")
-  | Loading | Providers _ | Models | Refreshing_models | Preparing_context _ | Saving | Removing | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
+  | Loading | Providers _ | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+  | Saving | Removing | Finished _ | Failed | Logging | Documented_context _ | Removal _ -> ()
 let submit_input t json =
   t.input_sequence <- t.input_sequence + 1;
   t.input_pending <- true;
@@ -653,6 +787,7 @@ let submit_input t json =
 let is_connected t (model:model) =
   List.exists (fun (connected:model) -> connected.id = model.id) t.connected_models
 let toggle_model t (model:model) =
+  t.batch_cancelled <- false;
   if is_connected t model then (t.notice <- model.label ^ " · 이미 연결된 모델입니다."; Nothing)
   else if List.mem model.id t.selected_models then (
     t.selected_models <- List.filter (fun id -> id <> model.id) t.selected_models;
@@ -670,8 +805,6 @@ let toggle_model t (model:model) =
       t.notice <- model.label ^ " · context 확인 필요. CLI 설정을 확인하고 r로 목록을 새로 읽으세요.";
       Nothing
     | None, None -> Nothing
-let selected_models t =
-  List.filter (fun (model:model) -> List.mem model.id t.selected_models) t.models
 let unavailable_account t (provider:provider) =
   t.notice <- (if not provider.setup_supported then
     "이 연결은 계정 설정을 지원하지 않습니다. 지원되는 공급자 연결을 선택하세요."
@@ -694,7 +827,8 @@ let key t key =
     | Providers (Account_providers (client, ids)) ->
         show_accounts ?on:(List.nth_opt (member_rows t ids) 0) t client; Nothing
     | Documented_context _ -> t.phase <- Models; t.draft <- ""; Nothing
-    | Loading | Providers Clients | Logging | Models | Refreshing_models | Preparing_context _ | Saving | Removing | Finished _ | Failed -> Close) else
+    | Loading | Providers Clients | Logging | Models | Refreshing_models | Preparing_context _
+    | Preparing_context_batch _ | Saving | Removing | Finished _ | Failed -> Close) else
   match t.phase with
   | Removal {provider; revision; removal = Removable {login_store; _}} ->
     if key="\r" || key="\n" || key="enter" then Remove {provider; revision; login_store} else Nothing
@@ -725,16 +859,89 @@ let key t key =
        | _ -> t.notice<-"확인한 한도를 양의 정수로 입력하세요."; Nothing)
     else if key="backspace" || key="\127" then (t.draft<-Masc_tui_message_layout.drop_last_utf8_scalar t.draft; Nothing)
     else if String.length key=1 && key.[0]>='0' && key.[0]<='9' then (paste t key; Nothing) else Nothing
-  | Loading | Refreshing_models | Preparing_context _ | Saving | Removing -> Nothing
+  | Preparing_context _ | Preparing_context_batch _ ->
+    if key="c" || key="C" || key="ctrl-c" || key="\003" then Cancel_prepare else Nothing
+  | Loading | Refreshing_models | Saving | Removing -> Nothing
   | Models when key=" " ->
     (match List.nth_opt t.models t.cursor with
      | Some model -> toggle_model t model
      | None -> Nothing)
-  | Models when key="a" ->
-    let eligible = List.filter (fun (model:model) -> not (is_connected t model) && model.tools <> Some false && Option.is_some model.context) t.models in
-    let all_selected = List.for_all (fun (model:model) -> List.mem model.id t.selected_models) eligible in
-    t.selected_models <- (if all_selected then [] else List.map (fun (model:model) -> model.id) eligible);
-    Nothing
+  | Models when key="a" || key="A" ->
+    let selectable (model:model) =
+      not (is_connected t model) && model.tools <> Some false in
+    let ready =
+      List.filter (fun (model:model) -> selectable model && Option.is_some model.context) t.models in
+    let missing_context =
+      List.filter (fun (model:model) -> selectable model && Option.is_none model.context) t.models in
+    let antigravity = match t.provider with
+      | Some { client = Antigravity; _ } -> true
+      | Some { client = (Codex | Claude | Muse); _ } | None -> false in
+    let preparable =
+      if antigravity then
+        List.filter (fun (model:model) -> not (List.mem model.id t.failed_context_models)) missing_context
+      else [] in
+    let all_selected =
+      ready <> [] && List.for_all (fun (model:model) -> List.mem model.id t.selected_models) ready in
+    if t.batch_cancelled && all_selected then (
+      t.selected_models <- [];
+      t.batch_cancelled <- false;
+      t.notice <- "선택을 모두 해제했습니다.";
+      Nothing)
+    else (match preparable with
+     | first :: rest ->
+       let previous_selected = t.selected_models in
+       t.selected_models <- List.map (fun (model:model) -> model.id) ready;
+       t.batch_cancelled <- false;
+       Prepare_batch
+         { current = first
+         ; remaining = rest
+         ; total = 1 + List.length rest
+         ; completed = 0
+         ; failed = []
+         ; previous_selected
+         }
+     | [] ->
+       t.batch_cancelled <- false;
+       if ready = [] then (
+         t.selected_models <- [];
+         t.notice <- (
+           if missing_context <> [] then
+             (match t.provider with
+              | Some { client = Antigravity; _ } ->
+                Printf.sprintf "입력 한도 확인에 실패한 모델 %d개가 남아 있습니다. Space로 다시 확인하거나 r로 목록을 새로 읽으세요."
+                  (List.length missing_context)
+              | Some { client = (Codex | Claude); _ } ->
+                Printf.sprintf "context 확인이 필요한 모델 %d개는 자동 선택할 수 없습니다. Space로 각 모델의 한도를 입력하세요."
+                  (List.length missing_context)
+              | Some { client = Muse; _ } | None ->
+                Printf.sprintf "context가 확인된 모델이 없습니다(%d개 확인 필요). CLI 설정을 확인하고 r로 목록을 새로 읽으세요."
+                  (List.length missing_context))
+           else if List.for_all (is_connected t) t.models && t.connected_models <> [] then
+             "이 계정의 모델은 모두 연결되어 있습니다. Esc로 닫으세요."
+           else
+             "선택할 수 있는 모델이 없습니다.");
+         Nothing)
+       else if all_selected then (
+         t.selected_models <- [];
+         t.notice <- "선택을 모두 해제했습니다.";
+         Nothing)
+       else (
+         t.selected_models <- List.map (fun (model:model) -> model.id) ready;
+         t.notice <- (
+           if missing_context = [] then
+             Printf.sprintf "모델 %d개를 모두 선택했습니다. Enter로 검증하고 저장하세요." (List.length ready)
+           else
+             match t.provider with
+             | Some { client = Antigravity; _ } ->
+               Printf.sprintf "모델 %d개를 선택했습니다. 이전 확인에 실패한 %d개는 Space로 다시 확인하세요."
+                 (List.length ready) (List.length missing_context)
+             | Some { client = (Codex | Claude); _ } ->
+               Printf.sprintf "모델 %d개를 선택했습니다. 나머지 %d개는 Space로 context 한도를 입력하세요."
+                 (List.length ready) (List.length missing_context)
+             | Some { client = Muse; _ } | None ->
+               Printf.sprintf "모델 %d개를 선택했습니다. 나머지 %d개는 context 확인이 필요합니다(r:새로고침)."
+                 (List.length ready) (List.length missing_context));
+         Nothing))
   | (Finished _ | Failed) when key="up" || key="k" ->
     t.result_scroll <- max 0 (t.result_scroll - 1); Nothing
   | (Finished _ | Failed) when key="down" || key="j" ->
@@ -750,7 +957,8 @@ let key t key =
         | Providers Clients -> List.length (clients t)
         | Providers (Accounts client) -> List.length (account_rows t client)
         | Providers (Account_providers (_, ids)) -> List.length (member_rows t ids)
-        | Models | Refreshing_models | Preparing_context _ | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ -> List.length t.models in
+        | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+        | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ -> List.length t.models in
       t.cursor<-min (max 0 (count-1)) (t.cursor+1); Nothing)
     else if key="r" then (match t.phase with
       | Models -> t.recovery <- Refresh_model_inventory; Refresh_models
@@ -758,7 +966,8 @@ let key t key =
       | Failed when t.recovery=Refresh_configuration -> Refresh_retry
       | Failed when t.recovery=Refresh_model_inventory -> Refresh_models
       | Providers view when Option.is_none t.login_id -> Refresh_list view
-      | Providers _ | Failed | Loading | Logging | Refreshing_models | Preparing_context _ | Documented_context _ | Saving | Removing | Removal _ ->
+      | Providers _ | Failed | Loading | Logging | Refreshing_models | Preparing_context _
+      | Preparing_context_batch _ | Documented_context _ | Saving | Removing | Removal _ ->
         if Option.is_some t.login_id then Recover else Inventory)
     else if key="D" then
       (match focused_row t with
@@ -768,7 +977,7 @@ let key t key =
               show_account_providers t client (List.map (fun (p:provider) -> p.id) members); Nothing
           | Providers (Accounts _), ([] | [_])
           | (Providers (Clients | Account_providers _) | Loading | Logging | Models | Refreshing_models | Preparing_context _
-            | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _), _ ->
+            | Preparing_context_batch _ | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _), _ ->
               Preview_removal {provider; refused = None})
        | Some (New_account _) | None -> Nothing)
     else if key="n" then
@@ -777,7 +986,8 @@ let key t key =
          (match Option.bind (focused_client t) (new_account_provider t) with
           | Some provider -> start_login t provider ~existing:false
           | None -> Nothing)
-       | Models | Refreshing_models | Preparing_context _ | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
+       | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+       | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
          (match t.provider with
           | Some provider -> start_login t provider ~existing:false
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
@@ -787,7 +997,8 @@ let key t key =
          (match focused_row t with
           | Some (Account provider) -> start_login t provider ~existing:true
           | Some (New_account _) | None -> Nothing)
-       | Models | Refreshing_models | Preparing_context _ | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
+       | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+       | Finished _ | Failed | Loading | Logging | Documented_context _ | Saving | Removing | Removal _ ->
          (match t.provider with
           | Some provider -> start_login t provider ~existing:true
           | None -> t.notice <- "r로 계정 목록을 다시 읽은 뒤 계정을 고르세요."; Nothing))
@@ -813,7 +1024,8 @@ let key t key =
               "이 계정의 모델은 모두 연결되어 있습니다. Esc로 닫으세요."
               else "선택한 모델이 없습니다. Space로 모델을 고르세요."); Nothing
           | models -> Save models)
-       | Loading | Logging | Refreshing_models | Preparing_context _ | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> Nothing)
+       | Loading | Logging | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+       | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ -> Nothing)
     else Nothing
 let save_body t models =
   let existing=List.map (fun id -> `Assoc ["runtime_id",`String id]) t.existing in
@@ -823,6 +1035,8 @@ let save_body t models =
   `Assoc (["revision",`String t.revision;"connections",`List [`Assoc ["source",source t;"models",`List model_rows]];
     "selection",`List (existing @ selected)]
     @ (match t.default_runtime_id with None -> [] | Some id -> ["default_runtime_id",`String id]))
+let under_way_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+let waiting_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
 let hints ?(ko = true) t =
   let say korean english = if ko then korean else english in
   match t.phase with
@@ -848,27 +1062,186 @@ let hints ?(ko = true) t =
   | Models ->
       say "↑↓:모델  Space:선택  a:전체  Enter:검증 후 저장  r:새로고침  Esc:닫기"
         "↑↓:model  Space:toggle  a:all  Enter:verify & save  r:refresh  Esc:close"
-  | Refreshing_models -> say "모델 목록 확인 중  Esc:닫기" "Checking models  Esc:close"
-  | Preparing_context _ -> say "입력 한도 확인 중  Esc:닫기" "Checking context limit  Esc:close"
+  | Refreshing_models ->
+      say (under_way_mark ^ " 모델 목록 확인 중  Esc:닫기")
+        (under_way_mark ^ " Checking models  Esc:close")
+  | Preparing_context _ ->
+      say (under_way_mark ^ " 입력 한도 확인 중  c:중단  Esc:닫기")
+        (under_way_mark ^ " Checking context limit  c:stop  Esc:close")
+  | Preparing_context_batch batch ->
+      let step = batch.completed + List.length batch.failed + 1 in
+      say
+        (Printf.sprintf "%s 입력 한도 확인 중 (%d/%d)  c:중단  Esc:닫기" under_way_mark step batch.total)
+        (Printf.sprintf "%s Checking context limits (%d/%d)  c:stop  Esc:close" under_way_mark step batch.total)
   | Finished {activation = Activating; _} ->
-      say "j/k:스크롤  런타임 활성화 중  Esc:닫기" "j/k:scroll  activating runtime  Esc:close"
+      say ("j/k:스크롤  " ^ under_way_mark ^ " 런타임 활성화 중  Esc:닫기")
+        ("j/k:scroll  " ^ under_way_mark ^ " activating runtime  Esc:close")
   | Finished {activation = (Activation_failed _ | Activation_kept_back _); _} ->
       say "j/k:스크롤  r/Enter:활성화 재시도  Esc:닫기" "j/k:scroll  r/Enter:retry activation  Esc:close"
   | Finished {activation = Active _; _} ->
       say "j/k:스크롤  r:목록 새로고침  n:새 계정  Esc:닫기" "j/k:scroll  r:refresh  n:new account  Esc:close"
   | Saving ->
-      say "저장 결과 대기 중 · Esc:닫기 (백그라운드에서 계속)"
-        "Waiting for save result · Esc:close (continues in background)"
+      say (under_way_mark ^ " 저장 결과 대기 중 · Esc:닫기 (백그라운드에서 계속)")
+        (under_way_mark ^ " Waiting for save result · Esc:close (continues in background)")
   | Failed when t.recovery=Refresh_model_inventory ->
       say "↑↓/j/k:결과 스크롤  r:모델 다시 읽기  e:재로그인  n:새 계정  Esc:닫기"
         "↑↓/j/k:scroll  r:reload models  e:re-login  n:new account  Esc:close"
   | Failed ->
       say "↑↓/j/k:결과 스크롤  r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
         "↑↓/j/k:scroll  r:recheck  e:re-login  n:new account  Esc:close"
-  | Loading | Removing ->
-      say "r:상태 재확인  e:재로그인  n:새 계정  Esc:닫기"
-        "r:recheck  e:re-login  n:new account  Esc:close"
-type row = Text of string | Terminal of Masc_tui_sgr_text.line
+  | Loading ->
+      say (under_way_mark ^ " 불러오는 중  Esc:닫기")
+        (under_way_mark ^ " Loading  Esc:close")
+  | Removing ->
+      say (under_way_mark ^ " 연결 삭제 중  Esc:닫기")
+        (under_way_mark ^ " Removing link  Esc:close")
+type row = Text of string | Progress of string | Terminal of Masc_tui_sgr_text.line
+let progress_label ~ko t =
+  let say korean english = if ko then korean else english in
+  match t.phase with
+  | Loading -> Some (say "불러오는 중" "Loading")
+  | Refreshing_models -> Some (say "목록 새로고침 중" "Refreshing")
+  | Preparing_context _ -> Some (say "입력 한도 확인 중" "Checking context")
+  | Preparing_context_batch batch ->
+      let step = batch.completed + List.length batch.failed + 1 in
+      Some (Printf.sprintf (if ko then "입력 한도 확인 %d/%d" else "Checking %d/%d") step batch.total)
+  | Saving -> Some (say "검증·저장 중" "Verifying & saving")
+  | Removing -> Some (say "연결 삭제 중" "Removing")
+  | Finished { activation = Activating; _ } -> Some (say "런타임 활성화 중" "Activating")
+  | Logging when t.input_pending -> Some (say "입력 전달 중" "Sending input")
+  | Logging when Option.is_none t.login_id -> Some (say "세션 준비 중" "Preparing session")
+  | Logging | Providers _ | Models | Documented_context _
+  | Finished { activation = (Active _ | Activation_failed _ | Activation_kept_back _); _ }
+  | Failed | Removal _ -> None
+type progress_info = {
+  title : string;
+  detail : string option;
+  started_at : float option;
+  meter : (int * int * int) option;
+  action_hint : string option;
+  blocking : bool;
+}
+let progress_info ?(ko = true) t =
+  let say korean english = if ko then korean else english in
+  let started_at = t.activity_started_at in
+  match t.phase with
+  | Loading ->
+      Some
+        { title = say "불러오는 중" "Loading"
+        ; detail = Some (if ko then t.notice else "Waiting for setup response from server")
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "Esc:닫기" "Esc:close")
+        ; blocking = true
+        }
+  | Refreshing_models ->
+      Some
+        { title = say "모델 목록 새로고침 중" "Refreshing model list"
+        ; detail = Some (say "기존 선택과 입력 한도는 유지됩니다" "Existing selections and limits are preserved")
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "Esc:닫기" "Esc:close")
+        ; blocking = true
+        }
+  | Preparing_context model ->
+      Some
+        { title = say "입력 한도 확인 중" "Checking context limit"
+        ; detail = Some model.label
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "c:중단 · Esc:닫기" "c:stop · Esc:close")
+        ; blocking = true
+        }
+  | Preparing_context_batch batch ->
+      let done_steps = batch.completed + List.length batch.failed in
+      Some
+        { title = say "입력 한도 일괄 확인 중" "Checking context limits"
+        ; detail = Some batch.current.label
+        ; started_at
+        ; meter = Some (done_steps, batch.total, List.length batch.failed)
+        ; action_hint = Some (say "c:중단 · Esc:닫기" "c:stop · Esc:close")
+        ; blocking = true
+        }
+  | Saving ->
+      Some
+        { title = say "모델 검증·저장 중" "Verifying & saving models"
+        ; detail = Some (if ko then t.notice else "Verifying model responses and tool calls")
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "Esc:닫기 (백그라운드에서 계속)" "Esc:close (continues in background)")
+        ; blocking = true
+        }
+  | Removing ->
+      Some
+        { title = say "공급자 연결 삭제 중" "Removing provider link"
+        ; detail = Some (if ko then t.notice else "Deleting selected provider connection")
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "Esc:닫기" "Esc:close")
+        ; blocking = true
+        }
+  | Finished { activation = Activating; _ } ->
+      Some
+        { title = say "런타임 활성화 중" "Activating runtime"
+        ; detail = Some (say "저장된 설정을 서버 런타임에 적용하고 있습니다" "Applying saved settings to the server runtime")
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "Esc:닫기 (백그라운드에서 계속)" "Esc:close (continues in background)")
+        ; blocking = true
+        }
+  | Logging when t.input_pending ->
+      Some
+        { title = say "입력 전달 중" "Sending input"
+        ; detail = Some (say "공식 클라이언트 응답을 기다리고 있습니다" "Waiting for client acknowledgement")
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "Ctrl-C:취소 · Esc:닫기" "Ctrl-C:cancel · Esc:close")
+        ; blocking = true
+        }
+  | Logging when Option.is_none t.login_id ->
+      Some
+        { title = say "로그인 세션 준비 중" "Preparing login session"
+        ; detail = Some (say "공식 클라이언트 로그인 스트림을 열고 있습니다" "Opening official client login stream")
+        ; started_at
+        ; meter = None
+        ; action_hint = Some (say "Ctrl-C:취소 · Esc:닫기" "Ctrl-C:cancel · Esc:close")
+        ; blocking = true
+        }
+  | Logging | Providers _ | Models | Documented_context _
+  | Finished { activation = (Active _ | Activation_failed _ | Activation_kept_back _); _ }
+  | Failed | Removal _ -> None
+let progress_badge ?(ko = true) ?now t =
+  match progress_label ~ko t with
+  | None -> None
+  | Some label ->
+      let elapsed =
+        match now, t.activity_started_at with
+        | Some now, Some started_at -> " · " ^ Masc_tui_value.Ongoing.since ~now started_at
+        | Some _, None | None, (Some _ | None) -> ""
+      in
+      Some (under_way_mark ^ " " ^ label ^ elapsed)
+let elapsed_suffix ~ko ~now t =
+  match now, t.activity_started_at with
+  | Some now, Some started_at ->
+      let duration = Masc_tui_value.Ongoing.since ~now started_at in
+      if ko then " · " ^ duration ^ " 경과" else " · " ^ duration
+  | Some _, None | None, (Some _ | None) -> ""
+let notice_in_progress t =
+  match t.phase with
+  | Loading | Refreshing_models | Preparing_context _ | Preparing_context_batch _
+  | Saving | Removing -> true
+  | Logging | Providers _ | Models | Documented_context _
+  | Finished _ | Failed | Removal _ -> false
+let strip_trailing_period text =
+  if String.ends_with ~suffix:"." text then
+    String.sub text 0 (String.length text - 1)
+  else text
+let notice_text ~ko ~now t =
+  if notice_in_progress t then
+    let suffix = elapsed_suffix ~ko ~now t in
+    let base = if suffix <> "" then strip_trailing_period t.notice else t.notice in
+    under_way_mark ^ " " ^ base ^ suffix
+  else t.notice
 (* A row with no entry runs on no account: a client prototype, an HTTP
    provider, or Antigravity without a credential file. *)
 let email_state ~ko t (p:provider) =
@@ -926,19 +1299,41 @@ let describe_change ~ko = function
   | Unassigned {keeper; runtime} ->
       if ko then "keeper " ^ keeper ^ " 는 " ^ runtime ^ " 대신 default 로 갑니다"
       else "Keeper " ^ keeper ^ " falls back to default instead of " ^ runtime
-let model_rows ~ko t = List.mapi (fun i (m:model) ->
+let model_rows ~ko t =
   let say korean english = if ko then korean else english in
-  let connected = is_connected t m in
-  let mark = if connected then say "[연결됨] " "[linked] " else if List.mem m.id t.selected_models then "[x] " else "[ ] " in
-  let reason =
-    if connected then ""
-    else if m.tools = Some false then say " · 도구 호출 미지원" " · tools unsupported"
-    else if Option.is_none m.context then say " · context 확인 필요" " · context limit required"
-    else ""
+  let active_prepare_id, queued_ids =
+    match t.phase with
+    | Preparing_context active -> Some active.id, []
+    | Preparing_context_batch batch ->
+        Some batch.current.id, List.map (fun (m : model) -> m.id) batch.remaining
+    | Loading | Providers _ | Logging | Models | Refreshing_models
+    | Documented_context _ | Saving | Removing | Finished _ | Failed | Removal _ ->
+        None, []
   in
-  Text ((if i=t.cursor then "› " else "  ") ^ mark ^ m.label ^ reason)) t.models
+  List.mapi (fun i (m:model) ->
+    let cursor = if i = t.cursor then "› " else "  " in
+    let connected = is_connected t m in
+    if active_prepare_id = Some m.id then
+      Progress (cursor ^ "[" ^ under_way_mark ^ "] " ^ m.label
+                ^ say " · 입력 한도 확인 중" " · checking context")
+    else if List.mem m.id queued_ids then
+      Text (cursor ^ "[" ^ waiting_mark ^ "] " ^ m.label
+            ^ say " · 확인 대기" " · queued")
+    else
+      let mark =
+        if connected then say "[연결됨] " "[linked] "
+        else if List.mem m.id t.selected_models then "[x] "
+        else "[ ] "
+      in
+      let reason =
+        if connected then ""
+        else if m.tools = Some false then say " · 도구 호출 미지원" " · tools unsupported"
+        else if Option.is_none m.context then say " · context 확인 필요" " · context limit required"
+        else ""
+      in
+      Text (cursor ^ mark ^ m.label ^ reason)) t.models
 (* Everything under the notice. *)
-let body_rows ~ko t =
+let body_rows ~ko ~now t =
   let say korean english = if ko then korean else english in
   match t.phase with
   | Providers Clients -> List.mapi (fun i client ->
@@ -952,13 +1347,15 @@ let body_rows ~ko t =
             ^ (match row with New_account _ -> say "+ 새 계정" "+ New account" | Account p -> account_label ~ko t p))) (account_rows t client)
   | Providers (Account_providers (_, ids)) -> List.mapi (fun i (p:provider) ->
       Text ((if i=t.cursor then "› " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
-  | Models | Refreshing_models | Preparing_context _ -> model_rows ~ko t
+  | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _ -> model_rows ~ko t
   | Failed when t.recovery=Refresh_model_inventory -> model_rows ~ko t
   | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
     @ [ Text ((say "로그인 코드: " "Login code: ") ^ String.make (min 40 (String.length t.draft)) '*')
-      ; Text (if t.input_pending then say "입력 전달 중" "Sending input"
-              else if Option.is_none t.login_id then say "로그인 세션 준비 중" "Preparing login session"
-              else say "코드 입력 대기" "Waiting for code") ]
+      ; (if t.input_pending then
+           Progress (under_way_mark ^ " " ^ say "입력 전달 중" "Sending input" ^ elapsed_suffix ~ko ~now t)
+         else if Option.is_none t.login_id then
+           Progress (under_way_mark ^ " " ^ say "로그인 세션 준비 중" "Preparing login session" ^ elapsed_suffix ~ko ~now t)
+         else Text (say "코드 입력 대기" "Waiting for code")) ]
   | Documented_context _ -> [Text ((say "문서 또는 설정의 context 한도(tokens): " "Documented context limit (tokens): ") ^ t.draft)]
   | Removal {provider; removal; _} ->
     Text ((say "지울 공급자 연결: " "Provider link to remove: ") ^ provider.id ^ " · " ^ provider.label ^ account_suffix ~ko t provider) ::
@@ -969,7 +1366,11 @@ let body_rows ~ko t =
      | Unremovable reason -> [Text ((say "지울 수 없습니다: " "Cannot remove: ") ^ reason)])
   | Finished {saved; activation; refresh_failed} ->
     (match activation with
-     | Activating -> [Text (say "저장 완료 · 런타임 활성화 중입니다." "Saved · activating runtime.")]
+     | Activating ->
+       let suffix = elapsed_suffix ~ko ~now t in
+       let base = say "저장 완료 · 런타임 활성화 중입니다." "Saved · activating runtime." in
+       let base = if suffix <> "" then strip_trailing_period base else base in
+       [Progress (under_way_mark ^ " " ^ base ^ suffix)]
      | Activation_failed detail ->
        [ Text (say "저장 완료 · 런타임 활성화 미확인" "Saved · runtime activation unconfirmed"); Text detail
        ; Text (say "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다." "r/Enter: retry activation without saving or re-logging in.") ]
@@ -987,21 +1388,25 @@ let body_rows ~ko t =
          [Text (say "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." "Could not refresh inventory. Press r to check again.")]
        else [])
   | Loading | Saving | Removing | Failed -> []
-let lines ?(ko = true) t = Text t.notice :: body_rows ~ko t
-let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
+let lines ?(ko = true) ?now t =
+  let head = notice_text ~ko ~now t in
+  (if notice_in_progress t then Progress head else Text head) :: body_rows ~ko ~now t
+let row_text = function Text text | Progress text -> text | Terminal line -> Masc_tui_sgr_text.text line
 (* The notice wraps rather than being cut at the pane's edge: a refused
    save's reason ends in the verification code and detail, the part that says
    what to do. The client's own output wraps in every phase: the login
    address it prints is longer than most panes, and a cut one can be neither
    read nor copied (#52278). *)
-let visible_lines ?(ko = true) ~height ~width t =
+let visible_lines ?(ko = true) ?now ~height ~width t =
   if height <= 0 then [], None else
-  let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
-    | [] -> [Text ""]
-    | wrapped -> List.map (fun line -> Text line) wrapped in
+  let wrap_notice_row line = if notice_in_progress t then Progress line else Text line in
+  let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width (notice_text ~ko ~now t) with
+    | [] -> [wrap_notice_row ""]
+    | wrapped -> List.map wrap_notice_row wrapped in
   let results = match t.phase with
     | Finished _ | Failed -> true
-    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving | Removing
+    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
+    | Preparing_context_batch _ | Documented_context _ | Saving | Removing
     | Removal _ -> false in
   let body =
     List.concat_map (fun row -> match row with
@@ -1009,7 +1414,9 @@ let visible_lines ?(ko = true) ~height ~width t =
           List.map (fun line -> Terminal line) (Masc_tui_sgr_text.wrap ~max_cells:width line)
       | Text text when results ->
           List.map (fun line -> Text line) (Masc_tui_message_layout.wrap_words ~max_cells:width text)
-      | Text _ -> [row]) (body_rows ~ko t) in
+      | Progress text when results ->
+          List.map (fun line -> Progress line) (Masc_tui_message_layout.wrap_words ~max_cells:width text)
+      | Text _ | Progress _ -> [row]) (body_rows ~ko ~now t) in
   let rows = notice @ body in
   if results then (
     let count = List.length rows in
@@ -1024,7 +1431,7 @@ let visible_lines ?(ko = true) ~height ~width t =
        hand the window they draw when it hides rows. *)
     let window skip = Masc_tui_value.Position.window ~first:skip ~shown:height ~total:(List.length rows) in
     let skip, position = match t.phase with
-      | Providers _ | Models | Refreshing_models | Preparing_context _ ->
+      | Providers _ | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _ ->
           ( max 0 (t.cursor + List.length notice + 1 - height),
             (match body with
              | [] -> None

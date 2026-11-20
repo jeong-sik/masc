@@ -975,10 +975,23 @@ let post_json_bound ~credential ~host ~port ~path ~body =
     The login panel's request fiber still propagates cancellation on close or
     replacement. Omitting the pool deadline avoids misreporting a slow save as
     failed; connection establishment keeps the pool's existing safety bound. *)
+type setup_post_outcome =
+  | Setup_answered of Yojson.Safe.t
+  | Setup_http_error of string
+  | Setup_transport_error of string
+
 let post_setup_json ~host ~port ~path ~body =
   match http_post_request ~timeout_sec:None ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
   | Ok (status_code, body) -> decode_json ~allow_empty:true ~status_code ~body
+
+let post_setup_json_classified ~host ~port ~path ~body =
+  match http_post_request ~timeout_sec:None ~headers:(auth_headers ()) ~host ~port ~path ~body with
+  | Error e -> Setup_transport_error e
+  | Ok (status_code, body) ->
+      (match decode_json ~allow_empty:true ~status_code ~body with
+       | Ok json -> Setup_answered json
+       | Error detail -> Setup_http_error detail)
 
 (* Shared mutation envelope: the server compares canonical workspace paths. *)
 let expected_workspace_field (identity : Masc.Tui_decode.server_identity) =

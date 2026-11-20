@@ -2170,12 +2170,210 @@ let resolve_has_recovery ~frame ~has_recovery (state : state) =
       in
       Option.is_some (recovery_slot state ~max_cells)
 
-let surface_chrome_budget ?(frame = Chrome_overlay) ?has_recovery state
+type progress_meter = {
+  pm_done : int;
+  pm_total : int;
+  pm_failed : int;
+}
+
+type progress_sheet = {
+  ps_title : string;
+  ps_detail : string option;
+  ps_started_at : float option;
+  ps_meter : progress_meter option;
+  ps_action_hint : string option;
+  ps_blocking : bool;
+}
+
+let progress_started_at_of_ns ~now ~now_ns started_ns =
+  let elapsed_s =
+    Int64.to_float (Int64.max 0L (Int64.sub now_ns started_ns))
+    /. Masc_tui_types.nanoseconds_per_second
+  in
+  now -. elapsed_s
+
+let progress_inline ~ko ~now ?started_at ?detail label =
+  let sanitize = Terminal_text.single_line in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let detail_part =
+    match detail with
+    | Some text when String.trim text <> "" -> " · " ^ sanitize text
+    | Some _ | None -> ""
+  in
+  let elapsed_part =
+    match started_at with
+    | Some at ->
+        let duration = Masc_tui_value.Ongoing.since ~now at in
+        if ko then " · " ^ duration ^ " 경과" else " · " ^ duration
+    | None -> ""
+  in
+  Theme.info () ^ under_way ^ " " ^ sanitize label ^ detail_part ^ elapsed_part ^ Ansi.reset
+
+let progress_sheet_height ~available ~cols (_sheet : progress_sheet) =
+  if available <= 1 || cols < 12 then 0
+  else if available >= 6 && cols >= 32 then 3
+  else 1
+
+let progress_sheet_rows ~available ~cols = function
+  | None -> 0
+  | Some sheet -> progress_sheet_height ~available ~cols sheet
+
+let render_progress_sheet ~ko ~now ~available ~width (sheet : progress_sheet) =
+  let height = progress_sheet_height ~available ~cols:width sheet in
+  if height = 0 then []
+  else
+    let sanitize = Terminal_text.single_line in
+    let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+    let accent = Theme.info () in
+    let elapsed_text =
+      match sheet.ps_started_at with
+      | None -> ""
+      | Some at ->
+          let duration = Masc_tui_value.Ongoing.since ~now at in
+          if ko then duration ^ " 경과" else duration
+    in
+    let step_text =
+      match sheet.ps_meter with
+      | Some { pm_done; pm_total; pm_failed } when pm_total > 0 ->
+          let shown_done = min pm_total (max 0 pm_done) in
+          let fail_part =
+            if pm_failed > 0 then
+              Printf.sprintf (if ko then ", 실패 %d" else ", %d failed") pm_failed
+            else ""
+          in
+          Printf.sprintf (if ko then "완료 %d/%d%s" else "%d/%d done%s")
+            shown_done pm_total fail_part
+      | Some _ | None -> ""
+    in
+    if height = 1 then
+      let parts =
+        [ under_way ^ " " ^ sanitize sheet.ps_title ]
+        @ (if step_text = "" then [] else [ "(" ^ step_text ^ ")" ])
+        @ (match sheet.ps_detail with
+           | Some d when String.trim d <> "" -> [ sanitize d ]
+           | Some _ | None -> [])
+        @ (if elapsed_text = "" then [] else [ elapsed_text ])
+      in
+      let hint_suffix =
+        match sheet.ps_action_hint with
+        | Some h when String.trim h <> "" -> "  " ^ sanitize h
+        | Some _ | None -> ""
+      in
+      let raw = String.concat " · " parts ^ hint_suffix in
+      [ accent ^ fit_width raw width ^ Ansi.reset ]
+    else
+      let inner = max 1 (width - 4) in
+      let title_parts =
+        [ under_way ^ " " ^ sanitize sheet.ps_title ]
+        @ (if step_text = "" then [] else [ step_text ])
+        @ (if elapsed_text = "" then [] else [ elapsed_text ])
+      in
+      let title_raw = String.concat " · " title_parts in
+      let hint_opt =
+        match sheet.ps_action_hint with
+        | Some h when String.trim h <> "" -> Some (sanitize h)
+        | Some _ | None ->
+            if sheet.ps_blocking then
+              Some (if ko then "처리 대기 중" else "Waiting")
+            else None
+      in
+      let top_row =
+        match hint_opt with
+        | Some hint ->
+            let hint_w = Message_layout.display_width hint in
+            let title_w = Message_layout.display_width title_raw in
+            let gap = width - 8 - title_w - hint_w in
+            if gap >= 1 then
+              accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_raw
+              ^ Ansi.reset ^ accent ^ " " ^ draw_hline gap ^ " " ^ Ansi.reset
+              ^ Theme.recede () ^ hint ^ Ansi.reset ^ accent ^ " " ^ Ansi.box_h
+              ^ Ansi.box_tr_round ^ Ansi.reset
+            else if width - 9 - hint_w >= 10 then
+              let max_title = width - 9 - hint_w in
+              let title_fitted = Message_layout.truncate_end max_title title_raw in
+              let fitted_w = Message_layout.display_width title_fitted in
+              let gap = max 1 (width - 8 - fitted_w - hint_w) in
+              accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_fitted
+              ^ Ansi.reset ^ accent ^ " " ^ draw_hline gap ^ " " ^ Ansi.reset
+              ^ Theme.recede () ^ hint ^ Ansi.reset ^ accent ^ " " ^ Ansi.box_h
+              ^ Ansi.box_tr_round ^ Ansi.reset
+            else
+              let max_title = max 1 (width - 6) in
+              let title_fitted = Message_layout.truncate_end max_title title_raw in
+              let rem = max 0 (width - 5 - Message_layout.display_width title_fitted) in
+              accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_fitted
+              ^ Ansi.reset ^ accent ^ " " ^ draw_hline rem ^ Ansi.box_tr_round ^ Ansi.reset
+        | None ->
+            let max_title = max 1 (width - 6) in
+            let title_fitted = Message_layout.truncate_end max_title title_raw in
+            let rem = max 0 (width - 5 - Message_layout.display_width title_fitted) in
+            accent ^ Ansi.box_tl_round ^ Ansi.box_h ^ " " ^ Ansi.bold ^ title_fitted
+            ^ Ansi.reset ^ accent ^ " " ^ draw_hline rem ^ Ansi.box_tr_round ^ Ansi.reset
+      in
+      let detail_raw =
+        match sheet.ps_detail with
+        | Some d when String.trim d <> "" -> sanitize d
+        | Some _ | None ->
+            if sheet.ps_blocking then
+              if ko then "요청을 처리하고 있습니다. 완료되면 자동으로 돌아옵니다."
+              else "Processing request. The screen updates automatically when done."
+            else
+              if ko then "최신 상태를 불러오고 있습니다."
+              else "Loading the latest state."
+      in
+      let middle_content =
+        match sheet.ps_meter with
+        | Some { pm_done; pm_total; pm_failed = _ } when pm_total > 0 && inner >= 20 ->
+            let clamped = min pm_total (max 0 pm_done) in
+            let pct =
+              min 100
+                (max 0
+                   (int_of_float
+                      (Float.floor (float_of_int clamped *. 100. /. float_of_int pm_total))))
+            in
+            let bar_w = min 24 (max 8 (inner / 3)) in
+            let scale =
+              Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion }
+            in
+            let bar =
+              Chart.meter_bar ~width:bar_w ~value:clamped ~max_value:pm_total ~scale
+                ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+            in
+            let pct_label = Printf.sprintf " %3d%%" pct in
+            let readout =
+              Chart.meter_tip_style scale ~value:clamped ~max_value:pm_total
+              ^ pct_label ^ Ansi.reset
+            in
+            let right_w = bar_w + String.length pct_label in
+            let left_w = max 1 (inner - right_w - 2) in
+            let left = fit_width detail_raw left_w in
+            left ^ "  " ^ bar ^ readout
+        | Some _ | None ->
+            fit_width detail_raw inner
+      in
+      let middle_row =
+        accent ^ Ansi.box_v ^ Ansi.reset ^ " " ^ middle_content ^ " "
+        ^ accent ^ Ansi.box_v ^ Ansi.reset
+      in
+      let bottom_row =
+        accent ^ Ansi.box_bl_round ^ draw_hline (max 0 (width - 2))
+        ^ Ansi.box_br_round ^ Ansi.reset
+      in
+      [ top_row; middle_row; bottom_row ]
+
+let surface_chrome_budget ?(frame = Chrome_overlay) ?has_recovery ?progress_sheet state
     ~terminal_rows =
   let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
-  max 1
-    (Masc_tui_types.surface_body_rows state ~terminal_rows
-    - chrome_rows_for ~frame ~has_recovery)
+  let total_budget =
+    max 1
+      (Masc_tui_types.surface_body_rows state ~terminal_rows
+      - chrome_rows_for ~frame ~has_recovery)
+  in
+  let _, cols = get_terminal_size () in
+  let sheet_rows =
+    progress_sheet_rows ~available:total_budget ~cols:(framed_inner_width cols) progress_sheet
+  in
+  max 1 (total_budget - sheet_rows)
 
 (* What a body does with rows past its budget, said at the call rather than
    left to a default. An optional clamp cost nothing to leave out, so a body
@@ -2190,22 +2388,28 @@ type overflow =
 (* The window a [Scrolled] body gets out of [count] rows: the whole budget,
    since its position is on the title row. The key handler that bounds the
    scroll and the frame that draws it both ask this. *)
-let surface_window_height ?(frame = Chrome_overlay) ?has_recovery state
+let surface_window_height ?(frame = Chrome_overlay) ?has_recovery ?progress_sheet state
     ~terminal_rows ~count =
   let has_recovery = resolve_has_recovery ~frame ~has_recovery state in
+  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  let base_chrome = chrome_rows_for ~frame ~has_recovery in
+  let total_budget = max 1 (rows - base_chrome) in
+  let _, cols = get_terminal_size () in
+  let sheet_rows =
+    progress_sheet_rows ~available:total_budget ~cols:(framed_inner_width cols) progress_sheet
+  in
   Masc_tui_scroll.content_height
-    ~rows:(Masc_tui_types.surface_body_rows state ~terminal_rows)
-    ~chrome:(chrome_rows_for ~frame ~has_recovery) ~count ~preview_keep:None
+    ~rows ~chrome:(base_chrome + sheet_rows) ~count ~preview_keep:None
 
 (* The window the contract cuts out of a [Scrolled] body of [count] rows,
    as its height and the scroll it draws from. The other kinds window
    themselves, or need no window. *)
-let chrome_window ?(frame = Chrome_overlay) ?has_recovery (state : state)
+let chrome_window ?(frame = Chrome_overlay) ?has_recovery ?progress_sheet (state : state)
     ~terminal_rows ~count = function
   | Fits | Paged_by_cursor | Self_scrolled _ -> None
   | Scrolled { scroll; report = _ } ->
       let height =
-        surface_window_height ~frame ?has_recovery state ~terminal_rows ~count
+        surface_window_height ~frame ?has_recovery ?progress_sheet state ~terminal_rows ~count
       in
       Some (height, Masc_tui_scroll.normalize ~count ~height scroll)
 
@@ -2217,12 +2421,11 @@ let chrome_position ~window ~count ~handed =
       Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count
   | None -> handed
 
-let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
-  let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+let surface_chrome_position ~overflow ?progress_sheet (state : state) ~terminal_rows ~body =
   let has_recovery = resolve_has_recovery ~frame:Chrome_screen ~has_recovery:None state in
   let count = ref 0 and handed = ref None in
   let pushed () = incr count in
-  body ~budget:(max 1 (rows - chrome_rows_for ~frame:Chrome_screen ~has_recovery))
+  body ~budget:(surface_chrome_budget ~frame:Chrome_screen ~has_recovery ?progress_sheet state ~terminal_rows)
     { push = (fun _ -> pushed ())
     ; push_styled = (fun ~style:_ _ -> pushed ())
     ; push_selected = (fun _ -> pushed ())
@@ -2231,10 +2434,11 @@ let surface_chrome_position ~overflow (state : state) ~terminal_rows ~body =
     ; next_origin = (fun () -> (0, 0))
     ; position = (fun position -> handed := Some position) };
   chrome_position
-    ~window:(chrome_window ~frame:Chrome_screen ~has_recovery state ~terminal_rows ~count:!count overflow)
+    ~window:(chrome_window ~frame:Chrome_screen ~has_recovery ?progress_sheet state ~terminal_rows ~count:!count overflow)
     ~count:!count ~handed:!handed
 
 let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sidebar
+    ?progress_sheet ?now
     (state : state) ~terminal_rows ~cols ~surface_key ~title ~keys
     ~(body : budget:int -> chrome_body -> unit) =
   let setup_started = Masc_tui_frame_timing.start_stage () in
@@ -2280,7 +2484,18 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
     strip_rows + lines_ended_since head ~start:0
   in
   let has_recovery = Option.is_some recovery_in_slot in
-  let budget = max 1 (rows - chrome_rows_for ~frame ~has_recovery) in
+  let total_budget = max 1 (rows - chrome_rows_for ~frame ~has_recovery) in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        let now = match now with Some now -> now | None -> Unix.gettimeofday () in
+        render_progress_sheet ~ko:(state.ui_language = Lang_ko)
+          ~now ~available:total_budget
+          ~width:(framed_inner_width cols) sheet
+  in
+  let sheet_rows = List.length sheet_lines in
+  let budget = max 1 (total_budget - sheet_rows) in
   (* The body's rows are held until it has finished, because only then is
      their count known: which of them the budget shows, and what the row that
      says so reads, are the contract's to work out, not the body's. *)
@@ -2307,7 +2522,15 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
   let materialize_started = Masc_tui_frame_timing.start_stage () in
   let held = List.rev !pushed in
   let count = List.length held in
-  let window = chrome_window ~frame ~has_recovery state ~terminal_rows ~count overflow in
+  let window =
+    if sheet_rows = 0 then
+      chrome_window ~frame ~has_recovery state ~terminal_rows ~count overflow
+    else
+      match overflow with
+      | Fits | Paged_by_cursor | Self_scrolled _ -> None
+      | Scrolled { scroll; report = _ } ->
+          Some (budget, Masc_tui_scroll.normalize ~count ~height:budget scroll)
+  in
   let position = chrome_position ~window ~count ~handed:!handed in
   (match frame with
    | Chrome_screen -> ()
@@ -2364,6 +2587,7 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
   for _ = !used + 1 to budget do
     empty buf cols
   done;
+  List.iter (fun sheet_line -> line buf cols sheet_line) sheet_lines;
   (match recovery_in_slot, frame with
    | None, Chrome_screen -> ()
    | Some row, Chrome_screen ->
@@ -2393,9 +2617,9 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
 
 (* A surface whose footer spelled its own row, filtered to the keys that
    answer. *)
-let surface_chrome ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+let surface_chrome ~overflow ?help_door ?frame ?status ?sidebar ?progress_sheet ?now state ~terminal_rows ~cols
     ~surface_key ~title ~hints ~body =
-  surface_chrome_keys ~overflow ?help_door ?frame ?status ?sidebar state ~terminal_rows ~cols
+  surface_chrome_keys ~overflow ?help_door ?frame ?status ?sidebar ?progress_sheet ?now state ~terminal_rows ~cols
     ~surface_key ~title ~keys:(Masc_tui_footer.Written hints) ~body
 
 

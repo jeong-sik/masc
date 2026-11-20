@@ -5283,9 +5283,9 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
   let needs_identity = match action with
-    | Login.Nothing | Close | Cancel -> false
+    | Login.Nothing | Close | Cancel | Cancel_prepare -> false
     | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _
-    | Start _ | Input _ | Recover | Discover | Refresh_models | Prepare _ | Save _ | Preview_removal _ | Remove _
+    | Start _ | Input _ | Recover | Discover | Refresh_models | Prepare _ | Prepare_batch _ | Save _ | Preview_removal _ | Remove _
     | Refresh_removed _ | Refresh_list _ -> true in
   if action = Login.Nothing then ()
   else if needs_identity && not (server_authority_ready state) then begin
@@ -5305,9 +5305,19 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
              :: List.filter (fun (pending, _, _) -> pending != view)
                   state.account_login_activation_resume;
            view.notice <- "Saved configuration is waiting for workspace reconfirmation before activation."
-       | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover | Login.Refresh_models
+       | Login.Prepare _ ->
+           let ko = state.ui_language = Lang_ko in
+           Login.prepare_interrupted view
+             (kept_back ~ko ~request:Kept_request.Account_login (workspace_identity_unconfirmed ~ko) Nothing_kept)
+       | Login.Prepare_batch batch ->
+           if batch.completed = 0 && batch.failed = [] && view.phase = Login.Models then
+             view.selected_models <- batch.previous_selected;
+           let ko = state.ui_language = Lang_ko in
+           Login.prepare_interrupted view
+             (kept_back ~ko ~request:Kept_request.Account_login (workspace_identity_unconfirmed ~ko) Nothing_kept)
+       | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Cancel_prepare | Login.Recover | Login.Discover | Login.Refresh_models
        | Login.Close | Login.Nothing | Login.Refresh_saved _ | Login.Select_existing _
-       | Login.Start _ | Login.Input (_, _) | Login.Prepare _ | Login.Save _
+       | Login.Start _ | Login.Input (_, _) | Login.Save _
        | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ ->
          view.notice <-
            (let ko = state.ui_language = Lang_ko in
@@ -5325,7 +5335,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   (match action with
    | Login.Input _ | Nothing -> ()
    | Close when Login.activation_incomplete view -> ()
-   | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Recover | Discover | Refresh_models | Prepare _ | Save _ | Close
+   | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _ | Start _ | Cancel | Cancel_prepare | Recover | Discover | Refresh_models | Prepare _ | Prepare_batch _ | Save _ | Close
    | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ ->
      view.generation <- view.generation + 1;
      Option.iter (fun stop -> stop ()) view.cancel_stream;
@@ -5351,9 +5361,9 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
         try Eio.Cancel.sub (fun cancellation ->
           (match action with
            | Login.Input _ -> ()
-           | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover | Login.Refresh_models
+           | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Cancel_prepare | Login.Recover | Login.Discover | Login.Refresh_models
            | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
-           | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Save _
+           | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Prepare_batch _ | Login.Save _
            | Login.Preview_removal _ | Login.Remove _ | Login.Refresh_removed _
            | Login.Refresh_list _ -> view.cancel_stream <- Some (fun () -> Eio.Cancel.cancel cancellation (Failure "login panel superseded")));
           Fun.protect ~finally:(fun () ->
@@ -5361,7 +5371,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
               match action with
                 | Login.Input _ -> ()
                 | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry
-                | Select_existing _ | Start _ | Cancel | Recover | Discover | Refresh_models | Prepare _ | Save _
+                | Select_existing _ | Start _ | Cancel | Cancel_prepare | Recover | Discover | Refresh_models | Prepare _ | Prepare_batch _ | Save _
                 | Close | Nothing | Preview_removal _ | Remove _ | Refresh_removed _
                 | Refresh_list _ -> view.cancel_stream <- None)
             (fun () -> match check_workspace () with Error failure -> enqueue (Error failure) | Ok () -> f ()))
@@ -5370,6 +5380,7 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
         | Unix.Unix_error _ | Sys_error _ | Eio.Io _ | Yojson.Json_error _ ->
           enqueue (Error (Request_failed "The account request did not complete. Recheck its state.")));
       `Stop_daemon) in
+  let now = Unix.gettimeofday () in
   match action with
   | Login.Nothing -> ()
   | Close ->
@@ -5378,14 +5389,17 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     state.account_login <- None
   | Cancel ->
     Option.iter (fun stop -> stop ()) view.cancel_stream; view.cancel_stream<-None;
-    view.draft<-""; view.phase<-Login.Failed; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
+    view.draft<-""; view.phase<-Login.Failed; view.activity_started_at<-None; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
+  | Cancel_prepare ->
+    Login.cancel_prepare view
   | Select_existing provider ->
-    view.phase<-Login.Loading; view.notice<-"저장된 계정의 모델을 읽고 있습니다.";
+    view.phase<-Login.Loading; Login.note_activity_started ~at:now view; view.notice<-"저장된 계정의 모델을 읽고 있습니다.";
     let path = if provider.client=Login.Antigravity then "/api/v1/setup/accounts/antigravity" else "/api/v1/setup/accounts/select" in
     start_job (fun () -> enqueue (post path (`Assoc ["integration_id",`String provider.id])))
   | Start {provider; existing} ->
     (
        let previous = Login.begin_attempt view provider ~existing in
+       Login.note_activity_started ~at:now view;
        start_job (fun () ->
          let selected = if not existing || Option.is_some previous then Ok previous else
            let path = if provider.client=Login.Antigravity then "/api/v1/setup/accounts/antigravity" else "/api/v1/setup/accounts/select" in
@@ -5408,53 +5422,75 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
              | Error (Request_withdrawn _ as failure) -> enqueue (Error failure)
              | Ok () | Error (Request_failed _) -> enqueue (Error (Request_failed "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요."))))
   | Input (_, json) ->
-    (match view.login_id with None -> view.input_pending<-false
-     | Some id -> start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
+    (match view.login_id with None -> view.input_pending<-false; view.activity_started_at<-None
+     | Some id -> Login.note_activity_started ~at:now view; start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
   | Inventory | Refresh_saved _ | Refresh_retry | Refresh_list _ ->
     (match action with
-      | Inventory | Refresh_retry | Refresh_list _ -> view.phase<-Login.Loading
-      | Activate_saved _ | Refresh_saved _ | Select_existing _ | Start _ | Input _ | Cancel
-      | Recover | Discover | Refresh_models | Prepare _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
+      | Inventory | Refresh_list _ ->
+        view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
+        view.notice<-"계정 목록을 읽고 있습니다."
+      | Refresh_retry ->
+        view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
+        view.notice<-"최신 설정을 읽고 있습니다."
+      | Activate_saved _ | Refresh_saved _ | Select_existing _ | Start _ | Input _ | Cancel | Cancel_prepare
+      | Recover | Discover | Refresh_models | Prepare _ | Prepare_batch _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
       | Refresh_removed _ -> ()); start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory")))
   | Recover -> (match view.login_id with
       | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
-      | Some id -> view.phase<-Login.Loading; start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:(login_path id)))))
+      | Some id ->
+        view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
+        view.notice<-"로그인 상태를 확인하고 있습니다.";
+        start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:(login_path id)))))
   | Discover | Refresh_models ->
     (match action with
-     | Refresh_models -> Login.refreshing_models view
-     | Discover -> view.phase<-Login.Loading
+     | Refresh_models -> Login.refreshing_models view; Login.note_activity_started ~at:now view
+     | Discover -> view.phase<-Login.Loading; Login.note_activity_started ~at:now view
      | Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _
-     | Start _ | Input _ | Cancel | Recover | Prepare _ | Save _ | Close | Nothing
+     | Start _ | Input _ | Cancel | Cancel_prepare | Recover | Prepare _ | Prepare_batch _ | Save _ | Close | Nothing
      | Preview_removal _ | Remove _ | Refresh_removed _ | Refresh_list _ -> ());
     let source=Login.source view in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/models" source))
   | Prepare model ->
     Login.preparing view model;
+    Login.note_activity_started ~at:now view;
     let body=`Assoc ["source",Login.source view;"model",`String model.id;"load",`Bool false] in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/context" body))
+  | Prepare_batch batch ->
+    Login.preparing_batch ~at:now view batch;
+    let body=`Assoc ["source",Login.source view;"model",`String batch.current.id;"load",`Bool false] |> Yojson.Safe.to_string in
+    start_job (fun () ->
+      let outcome =
+        match check_workspace () with
+        | Error (Request_withdrawn refusal) -> Error refusal
+        | Error (Request_failed detail) -> Ok (Masc_tui_http.Setup_transport_error detail)
+        | Ok () -> Ok (Masc_tui_http.post_setup_json_classified ~host ~port ~path:"/api/v1/setup/context" ~body)
+      in
+      enqueue_async mailbox (Account_msg (Account_login_batch_step (view, generation, batch, outcome))))
   | Save models ->
     view.phase<-Login.Saving;
+    Login.note_activity_started ~at:now view;
     view.notice<-Printf.sprintf "모델 %d개 검증 중 · 응답과 도구 호출을 확인합니다." (List.length models);
     let body=Login.save_body view models in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
   | Activate_saved saved ->
     Login.activating view saved;
+    Login.note_activity_started ~at:now view;
     start_job (fun () ->
       let result = match check_workspace () with
         | Error _ as error -> error
         | Ok () -> post_setup "/api/v1/runtime/setup/resume" (`Assoc []) in
       enqueue result)
   | Preview_removal {provider; _} ->
-    view.phase<-Login.Loading; view.notice<-"지울 내용을 읽고 있습니다.";
+    view.phase<-Login.Loading; Login.note_activity_started ~at:now view; view.notice<-"지울 내용을 읽고 있습니다.";
     start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
   | Remove {provider; revision; login_store} ->
-    view.phase<-Login.Removing; view.notice<-"선택한 공급자 연결을 지우고 있습니다.";
+    view.phase<-Login.Removing; Login.note_activity_started ~at:now view; view.notice<-"선택한 공급자 연결을 지우고 있습니다.";
     let body=`Assoc ["integration_id",`String provider.id;"revision",`String revision] |> Yojson.Safe.to_string in
     start_job (fun () ->
       let outcome=Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/setup/accounts/remove" ~body in
       enqueue_async mailbox (Account_msg (Account_login_removal (view, generation, provider, login_store, outcome))))
   | Refresh_removed _ ->
-    view.phase<-Login.Loading; start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory")))
+    view.phase<-Login.Loading; Login.note_activity_started ~at:now view; start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory")))
 
   end
 
@@ -16738,6 +16774,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
        | Some _, Login.Finished {saved; activation = (Login.Activation_failed _ | Login.Activation_kept_back _ | Login.Active _); _} ->
          launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
        | Some _, (Login.Loading | Login.Logging | Login.Models | Login.Refreshing_models | Login.Preparing_context _
+           | Login.Preparing_context_batch _
            | Login.Removing | Login.Providers _ | Login.Documented_context _ | Login.Removal _)
        | (None, _) -> launch_account_login_action state ~mailbox view Login.Inventory)
   | Masc_tui_command.Open_settings ->
@@ -19212,6 +19249,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.account_login_activation_resume <- [];
   state.account_login_readings <- [];
   state.account_login_read_resume <- [];
+  state.progress_clocks <- [];
   state.identity_view <- None;
   state.identity_view_error <- None;
   state.identity_logins <- [];
@@ -25046,7 +25084,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Identity_login_started (_, _) | Identity_refreshed (_, _) | Identity_app_saved (_, _, _)
         | Identity_disconnected (_, _, _))
         | Account_msg (Account_login_event (_, _, _) | Account_login_json (_, _, _, _)
-        | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
+        | Account_login_batch_step (_, _, _, _) | Account_login_removal (_, _, _, _, _)) | Github_msg (Github_login_lines (_, _)
         | Github_login_finished (_, _) | Github_token_saved (_, _)) | Observer_msg (Observer_session_ready _ | Observer_opened _
         | Observer_received (_, _) | Observer_closed _ | Observer_retry_due _ | Observer_recovery_ready _ | Observer_recovery_opened _ | Observer_found_account_server _ | Observer_recovery_identity _) | Task_msg (Task_dispatch_completed _ | Task_creation_read_done _) -> ());
         Drawn_changed
@@ -28559,6 +28597,36 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          launch_account_login_action state ~mailbox view action
        | Some _ | None -> ());
       Drawn_changed
+  | Account_msg (Account_login_batch_step (view, generation, batch, outcome)) ->
+      (match List.find_opt (fun current -> current == view)
+          (Option.to_list state.account_login @ state.account_login_detached) with
+       | Some current when current == view && view.generation = generation ->
+         let module Login = Masc_tui_account_login in
+         (match outcome with
+          | Error refusal ->
+            let notice = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
+                ~request:Kept_request.Account_login refusal in
+            Login.prepare_interrupted view notice
+          | Ok (Masc_tui_http.Setup_transport_error detail) ->
+            let notice =
+              if state.ui_language = Lang_ko then
+                detail ^ " · 연결을 확인한 뒤 a로 이어서 확인하세요."
+              else
+                detail ^ " · check the connection and press a to continue."
+            in
+            Login.prepare_interrupted view notice
+          | Ok (Masc_tui_http.Setup_answered json) ->
+            (match Login.prepared_batch_step view batch (Ok json) with
+             | Some next_batch ->
+               launch_account_login_action state ~mailbox view (Login.Prepare_batch next_batch)
+             | None -> ())
+          | Ok (Masc_tui_http.Setup_http_error detail) ->
+            (match Login.prepared_batch_step view batch (Error detail) with
+             | Some next_batch ->
+               launch_account_login_action state ~mailbox view (Login.Prepare_batch next_batch)
+             | None -> ()))
+       | Some _ | None -> ());
+      Drawn_changed
   | Account_msg (Account_login_json (view, generation, action, result)) ->
       state.account_login_readings <- List.filter
         (fun (held, gen, _) -> held != view || gen <> generation) state.account_login_readings;
@@ -28580,18 +28648,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match action with
              | Login.Input (sequence, _) ->
                if sequence = view.input_sequence && view.input_pending then begin
-                 view.input_pending <- false; view.notice <- notice end
+                 view.input_pending <- false; view.activity_started_at <- None; view.notice <- notice end
              | Login.Activate_saved saved ->
                Login.activation_kept_back view saved notice;
                launch_account_login_action state ~mailbox view (Login.Refresh_saved saved)
              | Login.Refresh_saved saved -> Login.refresh_saved_kept_back view saved notice
              | Login.Refresh_retry -> Login.refresh_retry view (Error notice); view.notice <- notice
              | Login.Refresh_models -> Login.models_refresh_failed view notice
+             | Login.Prepare _ | Login.Prepare_batch _ -> Login.prepare_interrupted view notice
              | Login.Save _ -> view.input_pending<-false; view.draft<-""; Login.save_failed view notice
-             | Login.Inventory | Login.Cancel | Login.Recover | Login.Discover | Login.Close | Login.Nothing
-             | Login.Select_existing _ | Login.Start _ | Login.Prepare _ | Login.Preview_removal _
+             | Login.Inventory | Login.Cancel | Login.Cancel_prepare | Login.Recover | Login.Discover | Login.Close | Login.Nothing
+             | Login.Select_existing _ | Login.Start _ | Login.Preview_removal _
              | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ ->
-               view.input_pending<-false; view.draft<-"";
+               view.input_pending<-false; view.draft<-""; view.activity_started_at<-None;
                view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-notice)
           | Either.Right result ->
          let applied = match action, result with
@@ -28606,6 +28675,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              Ok ()
            | Login.Refresh_saved saved, result -> Login.refresh_saved view saved result; Ok ()
            | Login.Refresh_retry, result -> Login.refresh_retry view result; Ok ()
+           | Login.Prepare_batch batch, result ->
+             (match Login.prepared_batch_step view batch result with
+              | Some next_batch ->
+                launch_account_login_action state ~mailbox view (Login.Prepare_batch next_batch)
+              | None -> ());
+             Ok ()
            (* The request's own error is the reason: the server's sentence for a
               refusal ("HTTP 502: Runtime ... did not pass ... verification"),
               the transport's for a dropped connection. A fixed sentence here
@@ -28613,14 +28688,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               failure returns to the same model instead of refreshing the list. *)
            | (Login.Save _ | Login.Prepare _ | Login.Refresh_models), Error detail -> Error detail
            | (Login.Inventory, Error detail) | (Login.Select_existing _, Error detail)
-           | (Login.Start _, Error detail) | (Login.Cancel, Error detail)
+           | (Login.Start _, Error detail) | (Login.Cancel, Error detail) | (Login.Cancel_prepare, Error detail)
            | (Login.Recover, Error detail) | (Login.Discover, Error detail)
            | (Login.Close, Error detail)
            | (Login.Nothing, Error detail) | (Login.Preview_removal _, Error detail)
            | (Login.Remove _, Error detail) | (Login.Refresh_removed _, Error detail)
            | (Login.Refresh_list _, Error detail) -> Error (detail ^ " · r로 다시 확인하세요.")
            | (Login.Inventory, Ok json) | (Login.Select_existing _, Ok json)
-           | (Login.Start _, Ok json) | (Login.Cancel, Ok json) | (Login.Recover, Ok json)
+           | (Login.Start _, Ok json) | (Login.Cancel, Ok json) | (Login.Cancel_prepare, Ok json) | (Login.Recover, Ok json)
            | (Login.Discover, Ok json) | (Login.Refresh_models, Ok json) | (Login.Prepare _, Ok json) | (Login.Save _, Ok json)
            | (Login.Close, Ok json) | (Login.Nothing, Ok json) | (Login.Preview_removal _, Ok json)
            | (Login.Remove _, Ok json) | (Login.Refresh_removed _, Ok json)
@@ -28637,6 +28712,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              | Discover -> Login.models view json
              | Refresh_models -> Login.refreshed_models view json
              | Prepare model -> Login.prepared view model json
+             | Prepare_batch _ -> Ok ()
              | Recover -> (match Login.receipt view json with
                | Ok true -> launch_account_login_action state ~mailbox view Discover; Ok ()
                | Ok false -> Ok () | Error _ as error -> error)
@@ -28653,19 +28729,20 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 | Ok () -> restore_account_login state view; view.notice<-notice; Ok () | Error _ as error -> error)
              (* A removal answers through [Account_login_removal]. *)
              | Remove _ -> Ok ()
-             | Activate_saved _ | Start _ | Cancel | Close | Nothing -> Ok ()) in
+             | Activate_saved _ | Start _ | Cancel | Cancel_prepare | Close | Nothing -> Ok ()) in
          (match applied with
           | Ok () -> ()
           | Error message -> view.input_pending<-false; view.draft<-"";
             (match action with
              | Login.Save _ -> Login.save_failed view message
-             | Login.Prepare _ -> Login.prepare_failed view message
+             | Login.Prepare _ | Login.Prepare_batch _ -> Login.prepare_failed view message
              | Login.Refresh_models -> Login.models_refresh_failed view message
-             | Login.Input _ -> view.notice<-message
-             | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Recover | Login.Discover
+             | Login.Input _ -> view.activity_started_at<-None; view.notice<-message
+             | Login.Inventory | Login.Refresh_retry | Login.Cancel | Login.Cancel_prepare | Login.Recover | Login.Discover
              | Login.Close | Login.Nothing | Login.Activate_saved _ | Login.Refresh_saved _
              | Login.Select_existing _ | Login.Start _ | Login.Preview_removal _
-             | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ -> view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.notice<-message)))
+             | Login.Remove _ | Login.Refresh_removed _ | Login.Refresh_list _ ->
+               view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.activity_started_at<-None; view.notice<-message)))
        | Some _ | None -> ());
       Drawn_changed
   | Account_msg (Account_login_removal (view, generation, provider, login_store, outcome)) ->
@@ -28682,7 +28759,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           | Masc_tui_http.Post_refused message ->
             launch_account_login_action state ~mailbox view (Login.Preview_removal {provider; refused = Some message})
           | Masc_tui_http.Post_unanswered detail ->
-            view.recovery<-Login.Login_status; view.phase<-Login.Failed;
+            view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.activity_started_at<-None;
             view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
        | Some _ | None -> ());
       Drawn_changed
@@ -34844,6 +34921,26 @@ Use relative paths for resources already held in the package. -->
                   && Option.is_none state.account_login
                   && Option.is_none state.voice_agent_voices
                 in
+                let account_login_interrupt_action =
+                  match state.account_login with
+                  | Some view when Option.is_none state.quit_armed ->
+                      (match view.Masc_tui_account_login.phase with
+                       | Masc_tui_account_login.Logging -> Some (view, Masc_tui_account_login.Cancel)
+                       | Masc_tui_account_login.Preparing_context _
+                       | Masc_tui_account_login.Preparing_context_batch _ ->
+                           Some (view, Masc_tui_account_login.Cancel_prepare)
+                       | Masc_tui_account_login.Loading | Providers _ | Models
+                       | Refreshing_models | Documented_context _ | Saving | Removing
+                       | Finished _ | Failed | Removal _ -> None)
+                  | Some _ | None -> None
+                in
+                match account_login_interrupt_action with
+                | Some (view, action) ->
+                  launch_account_login_action state ~mailbox:async_messages view action;
+                  Masc_tui_exit_signals.withdraw_interrupt exit_signals;
+                  Render_schedule.request render_schedule Render_schedule.Background;
+                  None
+                | None ->
                 if chat_pane_active
                    && Option.is_none state.quit_armed
                    && interrupt_active_chat_turn state ~mailbox:async_messages
@@ -36302,9 +36399,9 @@ Use relative paths for resources already held in the package. -->
                   let rows, _ = get_terminal_size () in
                   if panel_owns_commands || Option.is_some presented_queue_input then true
                   else (match Masc_tui_render.frame_choice state ~terminal_rows:rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
-                   | `Queue _ -> true
+                   | `Queue _ | `Account_login _ -> true
                    | `Agenda | `Answering | `Help -> not command_reading
-                   | `Too_small _ | `Play_card _ | `Account_login _ | `Account_server _ | `Palette
+                   | `Too_small _ | `Play_card _ | `Account_server _ | `Palette
                    | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About
                    | `Context | `Keeper_deletions | `Link
                    | `Client_detail _ | `Surface -> false)
@@ -36458,12 +36555,13 @@ Use relative paths for resources already held in the package. -->
          when Option.is_some state.account_login -> ()
        | Some (Pasted _) when state.keeper_deletions_open -> ()
        | Some (Pasted _) when state.about_open -> ()
-       | Some (Pasted paste) when text_target = Some Text_account_login ->
-           Option.iter (fun view ->
-             if paste.Masc_tui_paste.dropped > 0 then
-               view.Masc_tui_account_login.notice <- "붙여넣기 크기를 초과했습니다. 입력을 나눠 다시 전달하세요."
-             else Masc_tui_account_login.paste view paste.Masc_tui_paste.text)
-             state.account_login
+       | Some (Pasted paste) when Option.is_some state.account_login ->
+           if text_target = Some Text_account_login then
+             Option.iter (fun view ->
+               if paste.Masc_tui_paste.dropped > 0 then
+                 view.Masc_tui_account_login.notice <- "붙여넣기 크기를 초과했습니다. 입력을 나눠 다시 전달하세요."
+               else Masc_tui_account_login.paste view paste.Masc_tui_paste.text)
+               state.account_login
        | Some (Pasted paste) when Option.is_some text_target ->
            let text =
              Masc_tui_identity_model.identity_field_paste paste.Masc_tui_paste.text
@@ -36843,6 +36941,7 @@ Use relative paths for resources already held in the package. -->
                cannot read with no way out but Ctrl-C. *)
             (compact_viewport || not state.about_open)
             && (compact_viewport || Option.is_none state.collab)
+            && (compact_viewport || Option.is_none state.account_login)
             && (compact_viewport || Option.is_none state.queue_panel)
             && (compact_viewport
                || quit_key_allowed_for text_target)

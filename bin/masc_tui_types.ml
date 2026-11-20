@@ -10151,6 +10151,9 @@ type state = {
   mutable account_login_readings: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
   mutable account_login_activation_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.saved) list;
   mutable account_login_read_resume: (Masc_tui_account_login.t * int * Masc_tui_account_login.action) list;
+  (* Wall-clock start instants for blocking/pending progress sheets that do not
+     carry their own timestamp, keyed by [(slot, state_signature, started_at)]. *)
+  mutable progress_clocks: (string * string * float) list;
   mutable context_inspector_open: bool;
   mutable context_inspector_keeper: string option;
   mutable context_inspector_loading: bool;
@@ -15083,8 +15086,10 @@ let suspend_keeper_deletions_read state =
 let suspend_account_login_read (view : Masc_tui_account_login.t) =
   view.phase <- (match view.phase with
     | Masc_tui_account_login.Finished outcome -> Finished {outcome with refresh_failed=true}
-    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving
+    | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _
+    | Preparing_context_batch _ | Documented_context _ | Saving
     | Removing | Failed | Removal _ -> Failed);
+  view.activity_started_at <- None;
   view.notice <- "Workspace reading is unconfirmed; read again after identity returns."
 
 let suspend_voice_wizard_read state =
@@ -17190,7 +17195,10 @@ let text_input_target (state : state) ~compact_viewport =
     (match state.collab with
      | Some view when not compact_viewport && Masc_tui_collab.text_input_active view -> Some Text_collab_form
      | Some _ | None -> None)
-  else if Option.is_some state.account_login && not compact_viewport then Some Text_account_login
+  else if Option.is_some state.account_login then
+    (match state.account_login with
+     | Some view when not compact_viewport && Masc_tui_account_login.text_input_active view -> Some Text_account_login
+     | Some _ | None -> None)
   else if state.keeper_deletions_open then None
   else if Option.is_some state.queue_panel then None
   else if state.view = Resources && Option.is_some state.resource_save_prompt then Some Text_resource_save
@@ -20928,6 +20936,7 @@ let modal_owns_keys (state : state) =
   || (state.view = Lanes && Option.is_some state.machine_activity_open)
   || Option.is_some state.client_detail
   || Option.is_some state.collab
+  || Option.is_some state.account_login
   || Option.is_some (play_card_shown state)
 
 (* Where a paste goes once no field has claimed it. A key reaches the chat
@@ -21013,10 +21022,11 @@ let close_repository_changes (state : state) =
   state.repository_changes_diff_scroll <- 0
 
 (* Every overlay [modal_owns_keys] names, closed the way its own Esc closes
-   it, except the invite card: an unrelated event that clears the screen must
-   not take the only copy of a link with it. The inspector and the agenda are
-   only closed when open: closing stops an inspector read in flight, and there
-   is none to stop otherwise. *)
+   it, except the invite card and account login: an unrelated event that
+   clears the screen must not take the only copy of a link, an active login
+   stream, or an in-flight save/activation receipt with it. The inspector and
+   the agenda are only closed when open: closing stops an inspector read in
+   flight, and there is none to stop otherwise. *)
 let close_key_modals (state : state) =
   state.chat_call_reader <- None;
   state.help_open <- false;
@@ -21397,6 +21407,7 @@ let create_state
   account_login_readings = [];
   account_login_read_resume = [];
   account_login_activation_resume = [];
+  progress_clocks = [];
   context_inspector_open = false;
   context_inspector_keeper = None;
   context_inspector_loading = false;
@@ -28923,3 +28934,34 @@ let workspace_entries_count_label total =
   else if total >= workspace_entries_limit then
     Printf.sprintf " (%d+, more not listed)" total
   else Printf.sprintf " (%d)" total
+
+let progress_clock_for (state : state) ~slot ~signature ~now =
+  match
+    List.find_opt
+      (fun (s, _, _) -> String.equal s slot)
+      state.progress_clocks
+  with
+  | Some (_, prev_sig, started_at) when String.equal prev_sig signature ->
+      started_at
+  | Some _ | None ->
+      let rest =
+        List.filter
+          (fun (s, _, _) -> not (String.equal s slot))
+          state.progress_clocks
+      in
+      state.progress_clocks <- (slot, signature, now) :: rest;
+      now
+
+let clear_progress_clock (state : state) ~slot =
+  if List.exists (fun (s, _, _) -> String.equal s slot) state.progress_clocks then
+    state.progress_clocks <-
+      List.filter
+        (fun (s, _, _) -> not (String.equal s slot))
+        state.progress_clocks
+
+let progress_clock_option (state : state) ~slot ~now = function
+  | None ->
+      clear_progress_clock state ~slot;
+      None
+  | Some signature ->
+      Some (progress_clock_for state ~slot ~signature ~now)

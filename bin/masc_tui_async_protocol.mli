@@ -844,6 +844,8 @@ type identity_msg =
 type account_msg =
   | Account_login_event of Masc_tui_account_login.t * int * Masc_tui_account_login.event
   | Account_login_json of Masc_tui_account_login.t * int * Masc_tui_account_login.action * (Yojson.Safe.t, Masc_tui_types.request_failure) result
+  | Account_login_batch_step of Masc_tui_account_login.t * int * Masc_tui_account_login.context_batch
+      * (Masc_tui_http.setup_post_outcome, Masc_tui_types.workspace_refusal) result
   (* A removal's answer keeps what is known about its effect: removed, declined
      by the server in its own words, or unknown. *)
   | Account_login_removal of Masc_tui_account_login.t * int * Masc_tui_account_login.provider * string option

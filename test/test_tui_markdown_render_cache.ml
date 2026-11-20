@@ -87,8 +87,34 @@ let assert_incremental_matches_full ~label ~width chunks =
       let actual = render_growing cache calls ~width label text in
       check (list string)
         (Printf.sprintf "%s at chunk %d %S" label index chunk)
-        (full_markdown ~width text) actual)
+        (full_markdown ~width text) actual;
+      (* The blocks kept across chunks are the blocks of the text rendered
+         in one go. *)
+      check (option (array (pair int int)))
+        (Printf.sprintf "%s blocks at chunk %d %S" label index chunk)
+        (Some (Markdown.render_streaming ~palette:Markdown.plain_palette ~width text).blocks)
+        (Cache.growing_blocks cache ~theme_revision:1 ~palette_generation:0 ~width
+           ~identity:label ~text))
     chunks
+
+(* A finished reply's blocks are read by binary search and by the byte
+   before the next block, so the cache keeps only blocks that describe the
+   text it was given. *)
+let test_kept_blocks_must_describe_the_text () =
+  let cache = Cache.create ~capacity:2 in
+  let other ~width _ =
+    Markdown.render_streaming ~palette:Markdown.plain_palette ~width
+      "first\n\nsecond\n\nthird\n"
+  in
+  match
+    Cache.render_keeping_blocks cache ~theme_revision:1 ~palette_generation:0
+      ~width:40 ~renderer:other ~identity:"entry-a" ~text:"x"
+  with
+  | _ -> fail "blocks past the end of the text were kept"
+  | exception Invalid_argument _ ->
+      check (option (array (pair int int))) "nothing is kept for the text" None
+        (Cache.completed_blocks cache ~theme_revision:1 ~palette_generation:0
+           ~width:40 ~identity:"entry-a" ~text:"x")
 
 let one_byte_chunks text =
   List.init (String.length text) (fun index -> String.make 1 text.[index])
@@ -293,6 +319,8 @@ let () =
             test_retention_is_bounded_and_recent
         ; test_case "every chunk matches the full renderer" `Quick
             test_every_chunk_matches_the_canonical_full_render
+        ; test_case "kept blocks must describe the text" `Quick
+            test_kept_blocks_must_describe_the_text
         ; test_case "measured thought height equals full Markdown" `Quick
             test_measured_height_matches_full_render
         ; test_case "height measurement retains closed blocks and invalidates ownership" `Quick

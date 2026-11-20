@@ -4447,6 +4447,9 @@ let block_source_index ~theme ~width ~body_identity (entry : Message_layout.entr
   let source_end =
     if block + 1 >= Array.length blocks then String.length entry.body
     else
+      (* [next] is at least 1: the render cache keeps only blocks that start
+         in source order from byte 0 or later, so a second block starts past
+         byte 0. *)
       let next = fst blocks.(block + 1) in
       if Char.equal entry.body.[next - 1] '\n' then next - 1 else next in
   let body_rows, runs = search_chat_markdown_range ~theme ~entry ~width ~body_identity

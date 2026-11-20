@@ -29,7 +29,11 @@ module Streaming = struct
     key : 'identity key;
     text : string;
     stable_source_len : int;
-    stable_rows : string list;
+    stable_rows_newest_first : string list;
+    (* The closed rows, newest first: rows a frame closes go in front of the
+       ones closed before. Held in reading order, they were copied whole on
+       every frame of a streaming reply to put a few more at the end. *)
+    stable_row_count : int;
     rows : string list;
     blocks : (int * int) array;
   }
@@ -98,6 +102,15 @@ let take count entries =
   in
   loop 0 [] entries
 
+(* The first [count] entries, newest first, in front of [onto]. *)
+let rev_take_onto count entries onto =
+  let rec loop kept reversed = function
+    | _ when kept = count -> reversed
+    | [] -> reversed
+    | entry :: rest -> loop (kept + 1) (entry :: reversed) rest
+  in
+  loop 0 onto entries
+
 let drop count entries =
   let rec loop remaining = function
     | entries when remaining <= 0 -> entries
@@ -125,24 +138,6 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~identity
       let rows = renderer ~width text in
       remember cache { key; rows; blocks = Not_kept };
       rows
-
-let render_keeping_blocks cache ~theme_revision ~palette_generation ~width ~renderer
-    ~identity ~text =
-  let key : _ Completed.key =
-    { identity; text; width; theme_revision; palette_generation }
-  in
-  let kept = match Masc_tui_lru.find cache.completed identity with
-    | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
-        (match rendered.blocks with
-         | Completed.Kept _ -> Some rendered.rows
-         | Completed.Not_kept -> None)
-    | Some _ | None -> None in
-  match kept with
-  | Some rows -> rows
-  | None ->
-      let (rendered : Masc_tui_markdown.streaming_render) = renderer ~width text in
-      remember cache { key; rows = rendered.rows; blocks = Kept rendered.blocks };
-      rendered.rows
 
 let completed_blocks cache ~theme_revision ~palette_generation ~width ~identity
     ~text =
@@ -181,6 +176,16 @@ let valid_blocks ~source_length ~row_count blocks =
   in
   from 0 (-1) 0
 
+(* How many of [blocks], which run in source order, start before [before]. *)
+let closed_block_count blocks ~before =
+  let rec search low high =
+    if low >= high then low
+    else
+      let middle = low + ((high - low) / 2) in
+      if fst blocks.(middle) < before then search (middle + 1) high else search low middle
+  in
+  search 0 (Array.length blocks)
+
 let validate_streaming_render ~source_length
     (rendered : Masc_tui_markdown.streaming_render) =
   if
@@ -192,6 +197,25 @@ let validate_streaming_render ~source_length
               rendered.blocks)
   then invalid_arg "Markdown streaming renderer returned an invalid boundary"
 
+let render_keeping_blocks cache ~theme_revision ~palette_generation ~width ~renderer
+    ~identity ~text =
+  let key : _ Completed.key =
+    { identity; text; width; theme_revision; palette_generation }
+  in
+  let kept = match Masc_tui_lru.find cache.completed identity with
+    | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
+        (match rendered.blocks with
+         | Completed.Kept _ -> Some rendered.rows
+         | Completed.Not_kept -> None)
+    | Some _ | None -> None in
+  match kept with
+  | Some rows -> rows
+  | None ->
+      let (rendered : Masc_tui_markdown.streaming_render) = renderer ~width text in
+      validate_streaming_render ~source_length:(String.length text) rendered;
+      remember cache { key; rows = rendered.rows; blocks = Kept rendered.blocks };
+      rendered.rows
+
 let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
   let rendered = renderer ~width:key.width text in
   validate_streaming_render ~source_length:(String.length text) rendered;
@@ -199,7 +223,8 @@ let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
     { key;
       text;
       stable_source_len = rendered.mutable_source_start;
-      stable_rows = take rendered.mutable_row_start rendered.rows;
+      stable_rows_newest_first = rev_take_onto rendered.mutable_row_start rendered.rows [];
+      stable_row_count = rendered.mutable_row_start;
       rows = rendered.rows;
       blocks = rendered.blocks;
     }
@@ -221,26 +246,30 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       in
       let rendered = renderer ~width pending in
       validate_streaming_render ~source_length:(String.length pending) rendered;
-      let newly_stable_rows =
-        take rendered.mutable_row_start rendered.rows
+      let stable_rows_newest_first =
+        rev_take_onto rendered.mutable_row_start rendered.rows
+          growing.stable_rows_newest_first
       in
-      let stable_rows = growing.stable_rows @ newly_stable_rows in
-      let rows = stable_rows @ drop rendered.mutable_row_start rendered.rows in
+      let rows =
+        List.rev_append stable_rows_newest_first
+          (drop rendered.mutable_row_start rendered.rows)
+      in
       (* The blocks before the pending text are closed; the pending render
-         numbers its own from zero. *)
-      let stable_row_count = List.length growing.stable_rows in
-      let blocks = Array.append
-        (Array.of_list (List.filter (fun (source_start, _) ->
-           source_start < growing.stable_source_len) (Array.to_list growing.blocks)))
-        (Array.map (fun (source_start, row_start) ->
-           growing.stable_source_len + source_start, stable_row_count + row_start)
-           rendered.blocks) in
+         numbers its own from zero. Blocks run in source order, so the
+         closed ones are a prefix and the array is built once. *)
+      let closed = closed_block_count growing.blocks ~before:growing.stable_source_len in
+      let blocks = Array.init (closed + Array.length rendered.blocks) (fun index ->
+        if index < closed then growing.blocks.(index)
+        else
+          let source_start, row_start = rendered.blocks.(index - closed) in
+          growing.stable_source_len + source_start, growing.stable_row_count + row_start) in
       let updated : _ Streaming.growing =
         { key;
           text;
           stable_source_len =
             growing.stable_source_len + rendered.mutable_source_start;
-          stable_rows;
+          stable_rows_newest_first;
+          stable_row_count = growing.stable_row_count + rendered.mutable_row_start;
           rows;
           blocks;
         }

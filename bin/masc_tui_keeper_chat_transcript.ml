@@ -831,7 +831,8 @@ let project_trail ?(response_boundary = fun acc -> acc) t ~thinking ~text ~media
         let acc = flush_tools ~segment acc group in
         let body = safe_block (Buffer.contents buffer) in
         let acc =
-          if String.trim body = "" then acc else text ~segment ~origin ~at ~stream_scope body :: acc
+          if String_util.is_blank body then acc
+          else text ~segment ~origin ~at ~stream_scope body :: acc
         in
         walk segment acc [] rest
   in

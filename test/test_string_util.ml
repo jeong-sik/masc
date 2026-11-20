@@ -381,6 +381,24 @@ let test_option_trim_agrees_with_trim_nonempty () =
     trim_inputs
 ;;
 
+(* [is_blank] answers [String.trim s = ""] without the copy. Every string of
+   up to three bytes from [String.trim]'s whitespace, a vertical tab and a
+   no-break space byte it keeps, and a letter. *)
+let test_is_blank_agrees_with_trim () =
+  let alphabet = [ " "; "\012"; "\n"; "\r"; "\t"; "\011"; "\xa0"; "a" ] in
+  let rec strings length =
+    if length = 0 then [ "" ]
+    else List.concat_map (fun rest -> List.map (fun byte -> byte ^ rest) alphabet)
+        (strings (length - 1))
+  in
+  List.iter (fun length ->
+    List.iter (fun raw ->
+      check bool (Printf.sprintf "is_blank %S" raw)
+        (String.equal (String.trim raw) "") (SU.is_blank raw))
+      (strings length))
+    [ 0; 1; 2; 3 ]
+;;
+
 let test_option_trim_passes_none_through () =
   check (option string) "None stays None" None (SU.option_trim None)
 ;;
@@ -706,6 +724,8 @@ let () =
       ( "trim_helpers",
         [ test_case "option_trim agrees with trim_nonempty" `Quick
             test_option_trim_agrees_with_trim_nonempty;
+          test_case "is_blank agrees with String.trim" `Quick
+            test_is_blank_agrees_with_trim;
           test_case "None passes through" `Quick
             test_option_trim_passes_none_through;
           test_case "whitespace-only is None" `Quick

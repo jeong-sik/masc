@@ -571,6 +571,25 @@ let test_a_streamed_reply_draws_what_arrived () =
     end in
   send 0 0
 
+(* A streamed stretch promises the render cache that its finished lines stay
+   (RFC #54170). The promise holds within one stretch, so the cache key names
+   the stretch. Here stretch 2 comes to the place stretch 1 held and keeps
+   none of stretch 1's settled bytes; read through stretch 1's promise, the
+   cache would compare only the bytes after it, find "open" in both, and keep
+   stretch 1's closed block "aa". *)
+let test_a_new_stretch_at_the_same_place_is_not_read_through_the_old_promise () =
+  let streamed ~stretch ~closed text = entry_with_source
+    (Layout.Markdown_growing {keeper_name = "alpha"; request_id = "stretches"; entry_index = 0;
+      growth = Layout.Grows_at_end {closed; identity = Digest.string text; stretch}}) text in
+  let first = "aa\n\nopen" and second = "bbb open more words" in
+  ignore (Render.For_testing.block_reads ~width:60 (streamed ~stretch:1 ~closed:4 first));
+  let whole, blocks = Render.For_testing.block_reads ~width:60 (streamed ~stretch:2 ~closed:0 second) in
+  match blocks with
+  | None -> fail "the second stretch kept no blocks"
+  | Some (blocks : Render.For_testing.source_reads) ->
+      check bool "each row's first source byte" true (whole.row_sources = blocks.row_sources);
+      check bool "each source byte's row" true (whole.position_rows = blocks.position_rows)
+
 let test_streaming_frames_leave_the_whole_reply_unread () =
   let state = state Layout.Origin_inline in
   let live = T.turn_log_create ~keeper_name:"alpha" ~request_id:"stream" ~started_at:300. in
@@ -1913,6 +1932,8 @@ let () = run "chat search projection" [
       test_link_cards_are_composed_again_only_when_the_store_changes;
     test_case "a streamed reply draws what arrived" `Quick
       test_a_streamed_reply_draws_what_arrived;
+    test_case "a new stretch at the same place is not read through the old promise" `Quick
+      test_a_new_stretch_at_the_same_place_is_not_read_through_the_old_promise;
     test_case "partially mapped document keeps its mapped runs" `Quick
       test_partially_mapped_document_keeps_its_mapped_runs;
     test_case "replaced body is searched whole" `Quick test_replaced_body_is_searched_whole;

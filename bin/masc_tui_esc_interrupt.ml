@@ -1,17 +1,16 @@
-(* The Esc decision while the chat view shows a keeper whose turn is live,
-   extracted from the dispatch arm in masc_tui.ml so a test can pin the
-   table. test_tui_esc_interrupt pins it; if the dispatch's contract moves,
-   move this derivation and the test together.
+(* What Ctrl-C does while the chat view shows a keeper whose turn is live
+   (RFC §3.4; Esc only leaves the chat). [Queue_steer.interrupt_active_chat_turn]
+   and the chat footer's hint read this table. test_tui_esc_interrupt pins
+   the table and test_tui_chat_escape_and_interrupt_keys pins the keys.
 
-   The swallow exists for one case: an accidental double-Esc right after the
-   first interrupt request, which must not leave the view. That guard is a
-   grace window, not a state: a turn parked in an uncancellable section
+   The swallow exists for one case: an accidental double Ctrl-C right after
+   the first interrupt request, which must not go on to arm quit. That guard
+   is a grace window, not a state: a turn parked in an uncancellable section
    keeps streaming after its signal (masc #29229), possibly indefinitely,
-   and a swallow keyed on the signal's existence held Esc for the rest of
-   the session. Past the window Esc leaves the view; leaving cancels
-   nothing — the interrupt proceeds server-side and the pane can be
-   reopened. A declined or errored request has nothing pending, so it is
-   not guarded at all.
+   and a swallow keyed on the signal's existence would hold Ctrl-C for the
+   rest of the session. Past the window the press goes on to arm quit; the
+   interrupt proceeds server-side. A declined or errored request has nothing
+   pending, so it is not guarded at all.
 
    Both clocks here are monotonic ([Mtime_clock.elapsed_ns]): a wall-clock
    step backwards would make a stale signal look fresh and re-arm the guard

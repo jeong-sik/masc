@@ -171,9 +171,7 @@ let handle_message_key ~terminal_size ~wheel_notch_rows (state : T.state)
   | "esc" ->
       Message_draft_recall.leave_keeper_message state ~drain_queue;
       true
-  (* Q / Ctrl-Q is the leave half of Esc with the interrupt half taken out.
-     Esc's first press on a live turn spends itself stopping the turn, so an
-     operator who wants to walk away and let the turn run needs a quiet exit.
+  (* Q / Ctrl-Q also leave the chat and let the turn run, like Esc.
      Visible Q leaves an active turn only with a wholly empty draft. In a
      transcript-only viewport it leaves without editing hidden input. Ctrl-Q
      (byte 17) leaves regardless of the draft or turn state. *)

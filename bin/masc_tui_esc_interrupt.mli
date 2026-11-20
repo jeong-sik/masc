@@ -1,24 +1,25 @@
-(** What Esc does while the chat view shows a keeper whose turn is live.
+(** What Ctrl-C does while the chat view shows a keeper whose turn is live.
+    Esc only leaves the chat (RFC §3.4).
 
-    The dispatch arm in [masc_tui.ml] and the footer's escape hint in
-    [masc_tui_render.ml] both read this table, so the hint and the act can
-    never diverge. [grace_window_ns] is the deliberate protection the
-    swallow was written for: a second Esc right after the first interrupt
-    request is an accidental double press, not a request to leave. Past the
-    window, a turn that keeps streaming after its signal (masc #29229: a
-    turn parked in an uncancellable section may stream indefinitely) no
-    longer holds Esc — leaving cancels nothing, the interrupt proceeds
-    server-side, and the pane can be reopened. A declined or errored
-    interrupt has nothing pending at all, so Esc leaves immediately. *)
+    [Queue_steer.interrupt_active_chat_turn] and the chat footer's Ctrl-C
+    hint both read this table, so the hint and the act can never diverge.
+    [grace_window_ns] is the deliberate protection the swallow was written
+    for: a second Ctrl-C right after the first interrupt request is an
+    accidental double press, not a request to quit. Past the window, a turn
+    that keeps streaming after its signal (masc #29229: a turn parked in an
+    uncancellable section may stream indefinitely) no longer holds Ctrl-C:
+    the press goes on to arm quit and the interrupt proceeds server-side. A
+    declined or errored interrupt has nothing pending at all, so the press
+    goes on at once. *)
 
 type action =
-  | Launch_interrupt  (** no interrupt requested yet; Esc is the first press *)
-  | Swallow  (** inside the grace window; the press is spent, the view stays *)
-  | Leave  (** the interrupt is stale, declined, or errored; Esc leaves the
-               view without cancelling anything *)
+  | Launch_interrupt  (** no interrupt requested yet; this press sends it *)
+  | Swallow  (** inside the grace window; the press is spent on the turn *)
+  | Leave  (** the interrupt is stale, declined, or errored; the press goes
+               on to arm quit without sending another *)
 
 val grace_window_ns : int64
-(** How long after the signal a second Esc is still read as the accidental
+(** How long after the signal a second Ctrl-C is still read as the accidental
     double press: 2 s, in nanoseconds. *)
 
 val pending_action : now_ns:int64 -> requested_at_ns:int64 -> action

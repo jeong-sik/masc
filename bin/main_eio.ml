@@ -348,6 +348,7 @@ let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
      let started = Unix.gettimeofday () in
      match
        Masc.Keeper_checkpoint_object_sweep.run ~runtime_root
+         ~memory_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:canonical_base_path)
      with
      | exception exn ->
        Log.Server.warn "[Startup] checkpoint object sweep raised: %s" (Printexc.to_string exn)

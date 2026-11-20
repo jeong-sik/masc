@@ -3,8 +3,8 @@
    Pins the closed-variant gate truth table: a lifecycle activity is
    enabled iff BOTH the global (config) kill-switch and the per-keeper
    (meta) flag are true, and every flag defaults to true so the historical
-   always-on behaviour is preserved. Regression guard for the silent-drop
-   that RFC-0297 §P0-1 closes. *)
+   always-on behaviour is preserved. Regression guard against a kill-switch
+   set to false being silently dropped. *)
 
 open Alcotest
 open Masc

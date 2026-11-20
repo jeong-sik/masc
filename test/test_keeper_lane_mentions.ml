@@ -30,7 +30,7 @@ let test_parser_goldens () =
   check ids "two distinct"
     [ "alice"; "alpha" ]
     (parse "@alpha and @alice please");
-  (* Not "alice". RFC-0393 hard cut: the keeper name is the only spelling,
+  (* Not "alice". Hard cut: the keeper name is the only spelling,
      so a keeper-shaped token is its own id and matches no keeper called
      alice. #33104 recorded the same cut in test_playground_paths. *)
   check ids "keeper-shaped form is its own id, not a second spelling"

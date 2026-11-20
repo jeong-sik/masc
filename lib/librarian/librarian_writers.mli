@@ -24,8 +24,10 @@ type t
     [registered] says whether a Keeper has a writer: it is in the Keeper
     registry and writes a turn log. [place] is where that Keeper's files
     are, and [stores] where its turns' content is. [now] stamps every line.
-    [ask] asks one question ({!Librarian_ask.run}). A table starts with no
-    declaration, so no writer asks before {!declaration_changed}. *)
+    [ask] asks one question ({!Librarian_ask.run}). [start_turn_log] is a
+    Keeper's store start first step, which its writer runs before every
+    boot ({!Librarian_writer.create}). A table starts with no declaration,
+    so no writer asks before {!declaration_changed}. *)
 val create
   :  sw:Eio.Switch.t
   -> now:(unit -> float)
@@ -33,6 +35,7 @@ val create
   -> place:(string -> Librarian_machine.place)
   -> stores:(string -> Librarian_unit_content.stores)
   -> ask:(Librarian_ask.input -> Librarian_read_result.t)
+  -> start_turn_log:(string -> (unit, string) result)
   -> t
 
 (** What a Keeper's request reads (§11.1). It does not wait for the writer.

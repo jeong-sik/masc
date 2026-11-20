@@ -1405,6 +1405,7 @@ let claim_and_start_keeper_persistence
     Keeper_memory_writers.start
       ~sw
       ~ask:(Librarian_ask.run { net; clock; base_dir = workspace_config.base_path })
+      ~start_turn_log:(Keeper_turn_log_store_start.run workspace_config)
       ~config:workspace_config
   in
   (* The writers ask only once they hold a lane value, and the value carries

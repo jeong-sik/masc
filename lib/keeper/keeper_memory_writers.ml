@@ -10,7 +10,7 @@ let rec update change =
 
 let workspace_key ~base_path = Keeper_registry_types.canonical_base_path_exn base_path
 
-let start ~sw ~ask ~(config : Workspace.config) =
+let start ~sw ~ask ~start_turn_log ~(config : Workspace.config) =
   let base_path = config.base_path in
   let key = workspace_key ~base_path in
   let memory_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
@@ -27,6 +27,7 @@ let start ~sw ~ask ~(config : Workspace.config) =
         ; keeper_name
         })
       ~ask
+      ~start_turn_log
   in
   update (By_workspace.add key table);
   (* A later start may have replaced this table; only its own entry goes. *)

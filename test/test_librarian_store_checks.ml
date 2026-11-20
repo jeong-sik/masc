@@ -183,7 +183,7 @@ let test_the_blob_sweep_has_a_rule_for_each_file () =
       let writer =
         Writer.create ~now:(fun () -> 200.0) ~registered:(fun () -> true)
           ~declared:(fun () -> None) ~stores:(Masc_test_deps.stores_of_place place)
-          ~ask:Masc_test_deps.never_asks place
+          ~ask:Masc_test_deps.never_asks ~start_turn_log:(fun () -> Ok ()) place
       in
       Eio.Fiber.fork_daemon ~sw (fun () ->
         Writer.run writer;

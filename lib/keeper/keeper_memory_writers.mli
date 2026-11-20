@@ -11,6 +11,7 @@
 val start
   :  sw:Eio.Switch.t
   -> ask:(Librarian_ask.input -> Librarian_read_result.t)
+  -> start_turn_log:(string -> (unit, string) result)
   -> config:Workspace.config
   -> Librarian_writers.t
 (** The table of [config]'s workspace. Its writers run on [sw], in the
@@ -19,7 +20,10 @@ val start
     directory, its turn log in the Keeper runtime directory, and the
     content of its turns in its session directories and the workspace's
     chat and external stores. [ask] asks one question: the server passes
-    {!Librarian_ask.run} with its own network and clock.
+    {!Librarian_ask.run} with its own network and clock. [start_turn_log]
+    is a Keeper's store start first step, run before every boot of its
+    writer: the server passes {!Keeper_turn_log_store_start.run}. The turn
+    log's own modules call this one, so the step comes in from the caller.
 
     The table holds no declaration until {!follow_declaration} sends one,
     so its writers do not ask before then. The table is gone when [sw]

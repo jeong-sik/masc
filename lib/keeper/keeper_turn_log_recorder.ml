@@ -164,6 +164,13 @@ let record_drop ~at ~new_log_id place ~after =
     Ok [ Writer.drop ~at ~new_log_id ~tail ~now ~after ])
 ;;
 
+let record_start ~at ~new_log_id place =
+  append_planned place (fun tail ->
+    Writer.start ~at ~new_log_id ~tail ~now:(fun () ->
+      let* mark, (_ : Keeper_turn_log_marks.covered) = now place in
+      Ok mark))
+;;
+
 let admitted = function
   | Ok (Appended { at; _ }) -> Writer.Recorded { opened = at.last_at }
   | Ok Nothing_to_append | Error (_ : not_recorded) -> Writer.Not_recorded

@@ -76,6 +76,7 @@ let fixture ?(without_turn_log = []) ~sw keepers =
         ~place
         ~stores:(fun keeper -> Masc_test_deps.stores_of_place (place keeper))
         ~ask:Masc_test_deps.never_asks
+        ~start_turn_log:(fun (_ : string) -> Ok ())
   ; registered
   ; memory_dir
   ; place
@@ -249,6 +250,7 @@ let test_retire_before_the_files_go () =
     let bare =
       Writer.create ~now:(ticking ()) ~registered:(fun () -> true) ~declared:(fun () -> None)
         ~stores:(Masc_test_deps.stores_of_place (f.place "keeper-a")) ~ask:Masc_test_deps.never_asks
+        ~start_turn_log:(fun () -> Ok ())
         (f.place "keeper-a")
     in
     Eio.Fiber.fork_daemon ~sw (fun () ->

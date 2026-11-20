@@ -35,7 +35,11 @@ let notice (state : Masc_tui_types.state) ~key =
     | false, true -> "Code/other drafts"
     | false, false -> "unsaved work"
   in
-  let details = if waiting > 0 then Printf.sprintf " +%d unsent" waiting else "" in
+  let details =
+    if waiting > 0 then
+      Printf.sprintf " and %s unsent" (Masc_tui_value.Count.grouped waiting)
+    else ""
+  in
   let pending =
     match sending > 0, unconfirmed_save with
     | true, true -> "; send/save may run"

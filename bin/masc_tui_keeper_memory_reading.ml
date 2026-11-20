@@ -189,6 +189,7 @@ let cells ?(ko = false) ~now = function
         match updated_at with
         | Some at ->
             [ { Masc_tui_keeper_axis_cell.text =
+                  (* tui-value: time since the last update, not a count that grew *)
                   Printf.sprintf "+%s %s %s" (span_since ~now at)
                     (Masc_tui_value.Count.increase added)
                     (Masc_tui_value.Count.decrease removed)

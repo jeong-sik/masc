@@ -4,7 +4,7 @@
 
 ### 요약
 
-1. [0.75.0] 항목은 changelog.d 조각 파일 401개(기존 385개 + 이번 컷에서 PR 제목으로 backfill 한 16개)를 접은 508개 불릿입니다. 절은 Upgrade notes·Fresh state required·Added·Changed·Removed·Fixed·Performance·Documentation·Internal 아홉 절이 각각 하나씩 있습니다.
+1. [0.75.0] 항목은 changelog.d 조각 파일 402개(기존 385개 + 이번 컷에서 PR 제목으로 backfill 한 16개 + 컷 뒤 병합된 #53966 조각 1개)를 접은 509개 불릿입니다. 절은 Upgrade notes·Fresh state required·Added·Changed·Removed·Fixed·Performance·Documentation·Internal 아홉 절이 각각 하나씩 있습니다.
 2. TUI 전면 고도화가 여섯 층 Native Stack(#53860·#53861·#53862·#53863·#53864·#53865, 최상층 merge `11f7b347`)으로 한 번에 들어왔습니다. 타이포그래피·KV·Bottom Sheet·숫자 탭 프리미티브, Goals·Verdicts 계층과 액션 콜아웃, Keeper 24h Braille 활동 월, Memory World→Shared→Keeper→Category 트리와 콕핏, Skills/Plugins 컬러 리스트와 Docked Bottom Sheet, Usage/Metrics 차트가 모두 이 창에 있습니다.
 3. 그 스택에서 넘긴 P2 하나를 릴리스 전에 닫았습니다. Plugins overview 의 Bottom Sheet 가 목록 끝에 붙어 화면 밖으로 밀려나던 문제를 `list_budget = budget - List.length sheet_rows` 로 예산에서 먼저 빼 뷰포트 하단에 도킹했습니다(#53906, main `66d593ab`). 항목이 화면을 넘는 height:20 시험이 함께 들어왔습니다.
 4. 업그레이드 주의는 Upgrade notes 와 Fresh state required 를 먼저 읽으세요. 두 절 모두 이번 창에 각각 하나씩 있습니다.
@@ -825,6 +825,7 @@
 
 ### Fixed
 
+- Restore RFC-0458 §3.4 failed-attempt demotion in `Runtime_candidate_standing.order` and `is_available`: a `Provider_timeout` or `Network_transient` mark recorded by a Keeper no longer exiles that candidate from the recording Keeper's next fresh walk, and no longer skips demotion on deferred retries, intra-walk rotation and one-shot walks (`#53966`, `task-3816`).
 - Keep usage windows when a provider reports no wallet, and retract stale Codex balances across read/update sources and restart when credits become disabled or hidden (#53329).
 - Parse Codex balances only as JSON decimal strings and keep report handling exhaustive under the repository's warnings-as-errors policy (#53329).
 - A Codex credits object or Kimi booster wallet that is out of shape no longer drops the plan windows of the same read: Codex revokes the held balance, Kimi adds no row, and the log names the field (#53329).

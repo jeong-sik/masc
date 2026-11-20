@@ -1578,12 +1578,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
       (match projected with Ok _ -> stream.finish_host_stop () | Error _ -> ());
       projected
     in
-    (* The host keeps its native files in this Keeper's own root
-       (RFC-0495 §2.2), not in the account home other Keepers share. A root
+    (* The host keeps its native files in this Keeper's own root,
+       not in the account home other Keepers share. A root
        that cannot be prepared ends the turn before dispatch rather than
        opening a session in it.
 
-       HIGH-RISK-UNREVIEWED: a new session empties the root first (§2.3).
+       HIGH-RISK-UNREVIEWED: a new session empties the root first.
        Every session left in it was dropped by this claim, and the claim was
        refused while another turn of this Keeper was in Start, Active or
        Turn_inflight, so no host of this Keeper is using the root. *)

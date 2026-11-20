@@ -788,7 +788,7 @@ let recording_effect_attempt ~effect_cell =
     ~observe_effect_attempted:(fun () -> Effect_cell.attempted effect_cell)
 ;;
 
-(* RFC-0390 under [none] and [read]: the CLI may run only the built-ins its
+(* Under [none] and [read] the CLI may run only the built-ins its
    [--tools] list grants, and none of them changes the work, so every effect
    of the turn passes through a MASC handler that [recording_effect_attempt]
    sees. A sent prompt, a write whose delivery is unknown, or a client that

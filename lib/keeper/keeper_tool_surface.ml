@@ -654,16 +654,14 @@ let register_keeper_surface_schema (s : Masc_domain.tool_schema) =
 let () =
   List.iter register_keeper_surface_schema schemas
 
-(* RFC-0182 §3.1 — register ctx-free keeper handlers with
-   [Keeper_dispatch_ref].  Only [masc_keeper_list] today; the
-   remaining keeper tools (status, msg, clear, compact,
-   sandbox lifecycle) use the keeper Eio context and are gated on
-   Phase 5 Eio plumbing scope. *)
-(* RFC-0182 Phase 5 PR-B: [eio_context_missing] returns a typed "Eio context
-   required" failure when masc_keeper_msg / masc_keeper_up etc. are
-   invoked from a path that lacks ?sw / ?clock (e.g. AGENT_CORE handler).
-   Production keeper dispatch from [Mcp_server_eio_execute] always
-   provides them via PR-A.2 plumbing. *)
+(* Register keeper handlers with [Keeper_dispatch_ref].  Most run
+   without the keeper Eio context; [masc_keeper_down],
+   [masc_keeper_delegate], [masc_keeper_msg] and [masc_keeper_up] need
+   it, and the caller passes it as [?sw] / [?clock]. *)
+(* [eio_context_missing] returns a typed "Eio context required" failure
+   when masc_keeper_msg / masc_keeper_up etc. are invoked from a path that
+   lacks ?sw / ?clock (e.g. AGENT_CORE handler). Production keeper
+   dispatch from [Mcp_server_eio_execute] always provides them. *)
 let eio_context_missing tool_name =
   Some
     (tool_result_error_data ~class_:Tool_result.Dependency_unavailable

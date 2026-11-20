@@ -99,63 +99,11 @@ type previous_request =
           against the request before it would describe the wrong pair. *)
   | Request_digested of request_digests
 
-type message_change =
-  | Appended of
-      { kept : int
-      ; added : int
-      }
-      (** The previous list is a prefix of the current list. [added = 0] is
-          an identical list. *)
-  | Tail_removed of
-      { kept : int
-      ; removed : int
-      }
-      (** The current list is a strict prefix of the previous list. *)
-  | Block_dropped of
-      { at : int
-      ; dropped : int
-      ; kept_after : int
-      ; added : int
-      }
-      (** The lists share [at] leading messages, then
-          [previous[at + dropped ..]] is a prefix of [current[at ..]], with
-          [dropped > 0] and [kept_after > 0]. [at = 0] is a drop at the front;
-          [at > 0] is a drop behind messages that stayed in place. The smallest
-          such [dropped] is reported. *)
-  | Rewritten_in_place of
-      { first_index : int
-      ; last_index : int
-      ; rewritten : int
-      ; previous_bytes : int
-      ; current_bytes : int
-      ; first_previous_role : Agent_core.Types.role
-      ; first_current_role : Agent_core.Types.role
-      ; added : int
-      }
-      (** No message moved: the previous list is not longer than the current
-          one, [rewritten] positions between [first_index] and [last_index]
-          hold a different message, and the message after [last_index] in the
-          previous list is equal at the same position in the current one.
-          [previous_bytes] and [current_bytes] sum the rewritten positions.
-          [added] counts messages past the previous list's end. *)
-  | Diverged_at of
-      { index : int
-      ; previous_role : Agent_core.Types.role
-      ; previous_bytes : int
-      ; current_role : Agent_core.Types.role
-      ; current_bytes : int
-      ; previous_count : int
-      ; current_count : int
-      }
-      (** None of the above. [index] is the first position where the two
-          lists differ, which is the number of leading messages the two
-          requests share; both lists hold a message there. *)
-
 type change =
   | First_request_of_turn
   | Previous_request_not_digested
   | Follows_previous_request of
-      { messages : message_change
+      { messages : Message_list_change.t
       ; tools_changed : bool
       }
       (** [tools_changed] compares the tool schema digests in order and does
@@ -166,7 +114,8 @@ val compare_requests : previous:previous_request -> current:request_digests -> c
     [Rewritten_in_place], [Diverged_at]. A pair that fits more than one shape
     because of repeated messages gets the first. *)
 
-val compare_messages : previous:request_digests -> current:request_digests -> message_change
+val compare_messages :
+  previous:request_digests -> current:request_digests -> Message_list_change.t
 (** The message classification {!compare_requests} makes, for any two
     digested requests, including two requests of different turns. *)
 
@@ -181,11 +130,5 @@ val digests_of_parts :
     schemas, without opening a blob. The system prompt part is skipped, as
     {!digest_request} skips it. [Error] names a message part whose stored
     role is not one {!Agent_core.Types.role_of_string} reads. *)
-
-val message_change_to_json : message_change -> Yojson.Safe.t
-
-val message_change_of_json : Yojson.Safe.t -> (message_change, string) result
-(** Reads a {!message_change_to_json} object back. An unknown kind, a missing
-    or negative count, or an unknown role is an error. *)
 
 val change_to_json : change -> Yojson.Safe.t

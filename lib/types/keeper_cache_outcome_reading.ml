@@ -1,6 +1,85 @@
-open Keeper_cache_outcome
-
 let schema = "masc.keeper-cache-outcome.v1"
+
+type request =
+  { turn_ref : Ids.Turn_ref.t
+  ; runtime_id : string
+  ; scope : Runtime_usage_scope.t
+  ; ended_at : float
+  ; latency_ms : int option
+  ; cache_read_tokens : int option
+  ; cache_creation_tokens : int option
+  ; lifetime : Llm_provider.Types.cache_write_lifetime option
+  }
+
+type lifetime_check =
+  | Outlived
+  | Within
+  | Undecided
+[@@deriving enumerate]
+
+type default_unknown =
+  | Default_undeclared
+  | Runtime_inactive
+[@@deriving enumerate]
+
+type lifetime =
+  | Lifetime_unrecorded
+  | Provider_default_unknown of default_unknown
+  | Lifetime_declared of
+      { lifetime_s : float
+      ; check : lifetime_check
+      }
+
+type idle =
+  | Start_unrecorded
+  | Idle of
+      { idle_s : float
+      ; lifetime : lifetime
+      }
+
+type not_compared =
+  | Earlier_turn_not_settled
+  | Snapshot_unread of
+      { turn_ref : Ids.Turn_ref.t
+      ; detail : string
+      }
+  | Snapshot_of_other_runtime of
+      { turn_ref : Ids.Turn_ref.t
+      ; runtime_profile : string
+      }
+
+type prefix =
+  | Compared of
+      { system_changed : bool
+      ; tools_changed : bool
+      ; messages : Message_list_change.t
+      }
+  | Not_compared of not_compared
+
+type earlier =
+  | No_earlier_request of { horizon_s : float }
+  | Earlier of
+      { request : request
+      ; idle : idle
+      ; prefix : prefix
+      }
+
+type t =
+  | Turn_not_in_ledger
+  | Ledger_row_unreadable of string
+  | Not_per_request of request
+  | First_request of
+      { request : request
+      ; other_runtime_since : string option
+      ; earlier : earlier
+      }
+
+type reading =
+  { keeper : string
+  ; turn_ref : Ids.Turn_ref.t
+  ; unattributed_rows : int
+  ; outcome : t
+  }
 
 (* The JSON names of a reading. [to_json] writes them and [of_json] reads
    them back. *)
@@ -175,7 +254,7 @@ let request_to_json (request : request) : Yojson.Safe.t =
     ; ( cache_write_lifetime_key
       , optional
           (fun lifetime ->
-             `String (Agent_core.Types.cache_write_lifetime_to_string lifetime))
+             `String (Llm_provider.Types.cache_write_lifetime_to_string lifetime))
           request.lifetime )
     ]
 ;;
@@ -226,7 +305,7 @@ let prefix_to_json prefix =
      | Compared { system_changed; tools_changed; messages } ->
        [ system_changed_key, `Bool system_changed
        ; tools_changed_key, `Bool tools_changed
-       ; messages_key, Keeper_projection_change.message_change_to_json messages
+       ; messages_key, Message_list_change.to_json messages
        ]
      | Not_compared reason -> [ reason_key, not_compared_to_json reason ])
 ;;
@@ -373,7 +452,7 @@ let request_member fields key =
   let* lifetime =
     optional_member fields cache_write_lifetime_key (function
       | `String label ->
-        (match Agent_core.Types.cache_write_lifetime_of_string label with
+        (match Llm_provider.Types.cache_write_lifetime_of_string label with
          | Some lifetime -> Ok lifetime
          | None -> invalid cache_write_lifetime_key "a known lifetime label or null")
       | _ -> invalid cache_write_lifetime_key "a string or null")
@@ -464,7 +543,7 @@ let prefix_member fields key =
          let* tools_changed = bool_member fields tools_changed_key in
          let* messages =
            let* value = member fields messages_key in
-           Keeper_projection_change.message_change_of_json value
+           Message_list_change.of_json value
          in
          Ok (Compared { system_changed; tools_changed; messages })
        | Not_compared_kind ->

@@ -1,6 +1,9 @@
 module Snapshot = Keeper_provider_input_snapshot
 module Cost_events = Keeper_hooks_agent_core_cost_events
 
+(* The answer's types; this module derives the answer. *)
+open Keeper_cache_outcome_reading
+
 (* The One_hour class asks Anthropic for [ttl = "1h"]. *)
 let one_hour_s = 3600.0
 
@@ -11,17 +14,6 @@ let ledger_clock_resolution_s = 1.0
 
 let seconds_per_day = 86_400.0
 let milliseconds_per_second = 1_000.0
-
-type request =
-  { turn_ref : Ids.Turn_ref.t
-  ; runtime_id : string
-  ; scope : Runtime_usage_scope.t
-  ; ended_at : float
-  ; latency_ms : int option
-  ; cache_read_tokens : int option
-  ; cache_creation_tokens : int option
-  ; lifetime : Agent_core.Types.cache_write_lifetime option
-  }
 
 (* The earliest start the row allows: its whole-second end minus the measured
    latency. *)
@@ -294,69 +286,6 @@ let conclude walk =
 
 (* ── Outcome ─────────────────────────────────────────────────── *)
 
-type lifetime_check =
-  | Outlived
-  | Within
-  | Undecided
-[@@deriving enumerate]
-
-type default_unknown =
-  | Default_undeclared
-  | Runtime_inactive
-[@@deriving enumerate]
-
-type lifetime =
-  | Lifetime_unrecorded
-  | Provider_default_unknown of default_unknown
-  | Lifetime_declared of
-      { lifetime_s : float
-      ; check : lifetime_check
-      }
-
-type idle =
-  | Start_unrecorded
-  | Idle of
-      { idle_s : float
-      ; lifetime : lifetime
-      }
-
-type not_compared =
-  | Earlier_turn_not_settled
-  | Snapshot_unread of
-      { turn_ref : Ids.Turn_ref.t
-      ; detail : string
-      }
-  | Snapshot_of_other_runtime of
-      { turn_ref : Ids.Turn_ref.t
-      ; runtime_profile : string
-      }
-
-type prefix =
-  | Compared of
-      { system_changed : bool
-      ; tools_changed : bool
-      ; messages : Keeper_projection_change.message_change
-      }
-  | Not_compared of not_compared
-
-type earlier =
-  | No_earlier_request of { horizon_s : float }
-  | Earlier of
-      { request : request
-      ; idle : idle
-      ; prefix : prefix
-      }
-
-type t =
-  | Turn_not_in_ledger
-  | Ledger_row_unreadable of string
-  | Not_per_request of request
-  | First_request of
-      { request : request
-      ; other_runtime_since : string option
-      ; earlier : earlier
-      }
-
 type snapshot_view =
   { runtime_profile : string
   ; parts : Snapshot.part list
@@ -443,13 +372,6 @@ let compare_prefix ~earlier ~earlier_snapshot ~current ~current_snapshot =
             ~current:current_digests
       }
 ;;
-
-type reading =
-  { keeper : string
-  ; turn_ref : Ids.Turn_ref.t
-  ; unattributed_rows : int
-  ; outcome : t
-  }
 
 let reading_of_walk walk ~provider_default_s ~current_snapshot ~earlier_snapshot =
   let outcome =

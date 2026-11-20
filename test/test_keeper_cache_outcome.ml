@@ -2,7 +2,7 @@ open Alcotest
 open Masc
 
 module Outcome = Keeper_cache_outcome
-module Outcome_json = Keeper_cache_outcome_json
+module Reading = Keeper_cache_outcome_reading
 module H = Keeper_hooks_agent_core
 module Snapshot = Keeper_provider_input_snapshot
 module T = Agent_core.Types
@@ -67,7 +67,7 @@ let row
 let turn_ref turn = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
 let one_hour _runtime_id = 3600.0
 let claude_default runtime_id =
-  if String.equal runtime_id runtime_a then Ok 300.0 else Error Outcome.Default_undeclared
+  if String.equal runtime_id runtime_a then Ok 300.0 else Error Reading.Default_undeclared
 ;;
 let user text = T.text_message T.User text
 
@@ -128,7 +128,7 @@ let check_json label expected path reading =
     string
     label
     (Yojson.Safe.to_string expected)
-    (Yojson.Safe.to_string (member path (Outcome_json.to_json reading)))
+    (Yojson.Safe.to_string (member path (Reading.to_json reading)))
 ;;
 
 (* Turn 100 and turn 102 ran on runtime A, turn 101 on runtime B between
@@ -162,7 +162,7 @@ let test_the_earlier_request_is_the_same_runtimes () =
       walked
   in
   check int "another Keeper's row is not counted as unattributed" 0
-    reading.Outcome.unattributed_rows;
+    reading.Reading.unattributed_rows;
   check_json "the turn's oldest row is its first request" (`Float (t0 +. 425.))
     [ "outcome"; "request"; "ended_at" ] reading;
   check_json "the runtime used in between" (`String runtime_b)
@@ -251,7 +251,7 @@ let test_rows_that_cannot_be_read () =
     walk ~turn:400 [ Dated_jsonl.Parsed (row ~turn:400 ~at:10 request_row); malformed ]
   in
   check int "a row nobody can be named for is counted" 1
-    (reading counted).Outcome.unattributed_rows;
+    (reading counted).Reading.unattributed_rows;
   let unreadable =
     match row ~turn:400 ~at:10 request_row with
     | `Assoc fields ->
@@ -267,9 +267,9 @@ let test_rows_that_cannot_be_read () =
 
 let test_the_lifetime_check_allows_the_clock_second () =
   let render = function
-    | Outcome.Outlived -> "outlived"
-    | Outcome.Within -> "within"
-    | Outcome.Undecided -> "undecided"
+    | Reading.Outlived -> "outlived"
+    | Reading.Within -> "within"
+    | Reading.Undecided -> "undecided"
   in
   let check_at idle_s expected =
     check string (Printf.sprintf "idle %.1f against 300" idle_s) expected
@@ -282,8 +282,8 @@ let test_the_lifetime_check_allows_the_clock_second () =
 ;;
 
 let test_an_inactive_runtime_leaves_its_default_unknown () =
-  let request ~at : Outcome.request =
-    { Outcome.turn_ref = turn_ref 1
+  let request ~at : Reading.request =
+    { Reading.turn_ref = turn_ref 1
     ; runtime_id = runtime_b
     ; scope = Runtime_usage_scope.Per_request
     ; ended_at = t0 +. at
@@ -296,24 +296,24 @@ let test_an_inactive_runtime_leaves_its_default_unknown () =
   let lifetime =
     match
       Outcome.idle
-        ~provider_default_s:(fun _ -> Error Outcome.Runtime_inactive)
+        ~provider_default_s:(fun _ -> Error Reading.Runtime_inactive)
         ~earlier:(request ~at:10.)
         ~current:(request ~at:400.)
     with
-    | Outcome.Start_unrecorded -> "start unrecorded"
-    | Outcome.Idle { lifetime = Outcome.Lifetime_unrecorded; _ } -> "unrecorded"
-    | Outcome.Idle { lifetime = Outcome.Provider_default_unknown Outcome.Default_undeclared; _ }
+    | Reading.Start_unrecorded -> "start unrecorded"
+    | Reading.Idle { lifetime = Reading.Lifetime_unrecorded; _ } -> "unrecorded"
+    | Reading.Idle { lifetime = Reading.Provider_default_unknown Reading.Default_undeclared; _ }
       -> "undeclared"
-    | Outcome.Idle { lifetime = Outcome.Provider_default_unknown Outcome.Runtime_inactive; _ }
+    | Reading.Idle { lifetime = Reading.Provider_default_unknown Reading.Runtime_inactive; _ }
       -> "runtime inactive"
-    | Outcome.Idle { lifetime = Outcome.Lifetime_declared _; _ } -> "declared"
+    | Reading.Idle { lifetime = Reading.Lifetime_declared _; _ } -> "declared"
   in
   check string "not the catalog's silence" "runtime inactive" lifetime
 ;;
 
 let test_snapshots_compare_the_two_turns () =
-  let request turn : Outcome.request =
-    { Outcome.turn_ref = turn_ref turn
+  let request turn : Reading.request =
+    { Reading.turn_ref = turn_ref turn
     ; runtime_id = runtime_a
     ; scope = Runtime_usage_scope.Per_request
     ; ended_at = t0
@@ -334,17 +334,17 @@ let test_snapshots_compare_the_two_turns () =
     Yojson.Safe.to_string
       (member
          [ "outcome"; "earlier"; "prefix" ]
-         (Outcome_json.to_json
-            { Outcome.keeper
+         (Reading.to_json
+            { Reading.keeper
             ; turn_ref = turn_ref 2
             ; unattributed_rows = 0
             ; outcome =
-                Outcome.First_request
+                Reading.First_request
                   { request = request 2
                   ; other_runtime_since = None
                   ; earlier =
-                      Outcome.Earlier
-                        { request = request 1; idle = Outcome.Start_unrecorded; prefix }
+                      Reading.Earlier
+                        { request = request 1; idle = Reading.Start_unrecorded; prefix }
                   }
             }))
   in
@@ -372,9 +372,9 @@ let test_snapshots_compare_the_two_turns () =
 (* Every shape a reading can take, once. *)
 let readings_of_every_shape () =
   let request ?latency_ms ?lifetime ?(scope = Runtime_usage_scope.Per_request) turn
-    : Outcome.request
+    : Reading.request
     =
-    { Outcome.turn_ref = turn_ref turn
+    { Reading.turn_ref = turn_ref turn
     ; runtime_id = runtime_a
     ; scope
     ; ended_at = t0 +. Float.of_int turn
@@ -385,56 +385,56 @@ let readings_of_every_shape () =
     }
   in
   let reading outcome =
-    { Outcome.keeper; turn_ref = turn_ref 9; unattributed_rows = 2; outcome }
+    { Reading.keeper; turn_ref = turn_ref 9; unattributed_rows = 2; outcome }
   in
   let first ?other_runtime_since earlier =
     reading
-      (Outcome.First_request
+      (Reading.First_request
          { request = request ~latency_ms:1_500 9; other_runtime_since; earlier })
   in
   let earlier idle prefix =
-    Outcome.Earlier
+    Reading.Earlier
       { request = request ~latency_ms:900 ~lifetime:provider_default 8; idle; prefix }
   in
-  let idle lifetime = Outcome.Idle { idle_s = 412.5; lifetime } in
-  let declared lifetime_s check = Outcome.Lifetime_declared { lifetime_s; check } in
+  let idle lifetime = Reading.Idle { idle_s = 412.5; lifetime } in
+  let declared lifetime_s check = Reading.Lifetime_declared { lifetime_s; check } in
   let compared messages =
-    Outcome.Compared { system_changed = true; tools_changed = false; messages }
+    Reading.Compared { system_changed = true; tools_changed = false; messages }
   in
-  let module C = Keeper_projection_change in
-  [ reading Outcome.Turn_not_in_ledger
-  ; reading (Outcome.Ledger_row_unreadable "a request row names no runtime")
+  let module C = Message_list_change in
+  [ reading Reading.Turn_not_in_ledger
+  ; reading (Reading.Ledger_row_unreadable "a request row names no runtime")
   ; reading
-      (Outcome.Not_per_request
+      (Reading.Not_per_request
          (request ~scope:Runtime_usage_scope.Conversation_cumulative 9))
-  ; first ~other_runtime_since:runtime_b (Outcome.No_earlier_request { horizon_s = 3600. })
-  ; first (earlier Outcome.Start_unrecorded (Outcome.Not_compared Outcome.Earlier_turn_not_settled))
+  ; first ~other_runtime_since:runtime_b (Reading.No_earlier_request { horizon_s = 3600. })
+  ; first (earlier Reading.Start_unrecorded (Reading.Not_compared Reading.Earlier_turn_not_settled))
   ; first
       (earlier
-         (idle Outcome.Lifetime_unrecorded)
-         (Outcome.Not_compared
-            (Outcome.Snapshot_unread { turn_ref = turn_ref 8; detail = "no snapshot" })))
+         (idle Reading.Lifetime_unrecorded)
+         (Reading.Not_compared
+            (Reading.Snapshot_unread { turn_ref = turn_ref 8; detail = "no snapshot" })))
   ; first
       (earlier
-         (idle (Outcome.Provider_default_unknown Outcome.Default_undeclared))
-         (Outcome.Not_compared
-            (Outcome.Snapshot_of_other_runtime
+         (idle (Reading.Provider_default_unknown Reading.Default_undeclared))
+         (Reading.Not_compared
+            (Reading.Snapshot_of_other_runtime
                { turn_ref = turn_ref 8; runtime_profile = runtime_b })))
   ; first
       (earlier
-         (idle (Outcome.Provider_default_unknown Outcome.Runtime_inactive))
+         (idle (Reading.Provider_default_unknown Reading.Runtime_inactive))
          (compared (C.Appended { kept = 4; added = 2 })))
   ; first
       (earlier
-         (idle (declared 300. Outcome.Outlived))
+         (idle (declared 300. Reading.Outlived))
          (compared (C.Tail_removed { kept = 3; removed = 1 })))
   ; first
       (earlier
-         (idle (declared 3600. Outcome.Within))
+         (idle (declared 3600. Reading.Within))
          (compared (C.Block_dropped { at = 1; dropped = 2; kept_after = 3; added = 1 })))
   ; first
       (earlier
-         (idle (declared 300. Outcome.Undecided))
+         (idle (declared 300. Reading.Undecided))
          (compared
             (C.Rewritten_in_place
                { first_index = 2
@@ -448,7 +448,7 @@ let readings_of_every_shape () =
                })))
   ; first
       (earlier
-         (idle (declared 300. Outcome.Within))
+         (idle (declared 300. Reading.Within))
          (compared
             (C.Diverged_at
                { index = 1
@@ -460,10 +460,10 @@ let readings_of_every_shape () =
                ; current_count = 6
                })))
   ; reading
-      (Outcome.First_request
+      (Reading.First_request
          { request = request ~latency_ms:20 ~lifetime:T.One_hour 9
          ; other_runtime_since = None
-         ; earlier = Outcome.No_earlier_request { horizon_s = 3600. }
+         ; earlier = Reading.No_earlier_request { horizon_s = 3600. }
          })
   ]
 ;;
@@ -471,25 +471,25 @@ let readings_of_every_shape () =
 let test_a_reading_reads_back_as_written () =
   List.iteri
     (fun index reading ->
-       let written = Outcome_json.to_json reading in
-       match Outcome_json.of_json written with
+       let written = Reading.to_json reading in
+       match Reading.of_json written with
        | Error detail -> failf "shape %d did not read back: %s" index detail
        | Ok read ->
          check
            string
            (Printf.sprintf "shape %d" index)
            (Yojson.Safe.to_string written)
-           (Yojson.Safe.to_string (Outcome_json.to_json read)))
+           (Yojson.Safe.to_string (Reading.to_json read)))
     (readings_of_every_shape ())
 ;;
 
 let test_a_reading_of_another_shape_is_refused () =
   let written =
-    Outcome_json.to_json
-      { Outcome.keeper
+    Reading.to_json
+      { Reading.keeper
       ; turn_ref = turn_ref 9
       ; unattributed_rows = 0
-      ; outcome = Outcome.Turn_not_in_ledger
+      ; outcome = Reading.Turn_not_in_ledger
       }
   in
   let replace key value = function
@@ -497,7 +497,7 @@ let test_a_reading_of_another_shape_is_refused () =
     | other -> other
   in
   let refused label json =
-    check bool label true (Result.is_error (Outcome_json.of_json json))
+    check bool label true (Result.is_error (Reading.of_json json))
   in
   refused "another schema" (replace "schema" (`String "masc.other.v1") written);
   refused "an unknown outcome kind"

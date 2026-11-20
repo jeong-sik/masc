@@ -182,17 +182,17 @@ let test_appended () =
     "history extended"
     ~previous:history
     ~current:(history @ [ user "c"; assistant "d" ])
-    (Change.Appended { kept = 2; added = 2 });
+    (Message_list_change.Appended { kept = 2; added = 2 });
   check_messages
     "identical list"
     ~previous:history
     ~current:history
-    (Change.Appended { kept = 2; added = 0 });
+    (Message_list_change.Appended { kept = 2; added = 0 });
   check_messages
     "from an empty list"
     ~previous:[]
     ~current:history
-    (Change.Appended { kept = 0; added = 2 })
+    (Message_list_change.Appended { kept = 0; added = 2 })
 ;;
 
 let test_signed_zero_json_is_not_memoized_as_the_same_wire () =
@@ -207,7 +207,7 @@ let test_signed_zero_json_is_not_memoized_as_the_same_wire () =
     "signed zero changes provider bytes"
     ~previous:[ positive ]
     ~current:[ negative ]
-    (Change.Diverged_at
+    (Message_list_change.Diverged_at
        { index = 0
        ; previous_role = Agent_core.Types.Assistant
        ; previous_bytes = payload_bytes positive
@@ -223,22 +223,22 @@ let test_block_dropped () =
     "window moved past the oldest messages"
     ~previous:[ user "a"; assistant "b"; user "c"; assistant "d" ]
     ~current:[ user "c"; assistant "d"; user "e" ]
-    (Change.Block_dropped { at = 0; dropped = 2; kept_after = 2; added = 1 });
+    (Message_list_change.Block_dropped { at = 0; dropped = 2; kept_after = 2; added = 1 });
   check_messages
     "a repeated message reports the smallest drop"
     ~previous:[ user "a"; user "x"; user "x" ]
     ~current:[ user "x"; user "x"; user "z" ]
-    (Change.Block_dropped { at = 0; dropped = 1; kept_after = 2; added = 1 });
+    (Message_list_change.Block_dropped { at = 0; dropped = 1; kept_after = 2; added = 1 });
   check_messages
     "a block dropped behind a message that stayed first"
     ~previous:[ user "instruction"; user "o1"; assistant "o2"; user "o3"; assistant "r1" ]
     ~current:[ user "instruction"; user "o3"; assistant "r1"; user "n1" ]
-    (Change.Block_dropped { at = 1; dropped = 2; kept_after = 2; added = 1 });
+    (Message_list_change.Block_dropped { at = 1; dropped = 2; kept_after = 2; added = 1 });
   check_messages
     "a repeated message behind a shared first message"
     ~previous:[ user "x"; user "x"; user "y" ]
     ~current:[ user "x"; user "y"; user "z" ]
-    (Change.Block_dropped { at = 1; dropped = 1; kept_after = 1; added = 1 })
+    (Message_list_change.Block_dropped { at = 1; dropped = 1; kept_after = 1; added = 1 })
 ;;
 
 let test_tail_removed () =
@@ -246,12 +246,12 @@ let test_tail_removed () =
     "current list is a strict prefix"
     ~previous:[ user "a"; assistant "b"; user "c" ]
     ~current:[ user "a" ]
-    (Change.Tail_removed { kept = 1; removed = 2 });
+    (Message_list_change.Tail_removed { kept = 1; removed = 2 });
   check_messages
     "every message removed"
     ~previous:[ user "a" ]
     ~current:[]
-    (Change.Tail_removed { kept = 0; removed = 1 })
+    (Message_list_change.Tail_removed { kept = 0; removed = 1 })
 ;;
 
 let test_rewritten_in_place () =
@@ -261,7 +261,7 @@ let test_rewritten_in_place () =
     "one message replaced, the next one still in place"
     ~previous:[ user "a"; previous_message; user "c" ]
     ~current:[ user "a"; current_message; user "c"; user "d" ]
-    (Change.Rewritten_in_place
+    (Message_list_change.Rewritten_in_place
        { first_index = 1
        ; last_index = 1
        ; rewritten = 1
@@ -280,7 +280,7 @@ let test_rewritten_in_place () =
     ~previous:[ user "s"; old_result; assistant "a1"; old_second; assistant "a2"; user "u" ]
     ~current:
       [ user "s"; shrunk_result; assistant "a1"; shrunk_second; assistant "a2"; user "u" ]
-    (Change.Rewritten_in_place
+    (Message_list_change.Rewritten_in_place
        { first_index = 1
        ; last_index = 3
        ; rewritten = 2
@@ -299,7 +299,7 @@ let test_diverged_at () =
     "a difference with nothing aligned after it"
     ~previous:[ user "a"; previous_message ]
     ~current:[ user "a"; current_message; user "c" ]
-    (Change.Diverged_at
+    (Message_list_change.Diverged_at
        { index = 1
        ; previous_role = Agent_core.Types.User
        ; previous_bytes = payload_bytes previous_message
@@ -312,7 +312,7 @@ let test_diverged_at () =
     "a longer previous list is never read as a rewrite in place"
     ~previous:[ user "a"; user "b"; user "c"; user "d" ]
     ~current:[ user "a"; user "x"; user "c" ]
-    (Change.Diverged_at
+    (Message_list_change.Diverged_at
        { index = 1
        ; previous_role = Agent_core.Types.User
        ; previous_bytes = payload_bytes (user "b")
@@ -382,7 +382,7 @@ let test_long_lists () =
     "long distinct history dropped at the front"
     ~previous:history
     ~current:(List.filteri (fun index _ -> index >= 1_500) history @ numbered "new" 20)
-    (Change.Block_dropped
+    (Message_list_change.Block_dropped
        { at = 0; dropped = 1_500; kept_after = long_count - 1_500; added = 20 });
   check_messages
     "long distinct history dropped behind a pinned first message"
@@ -390,19 +390,19 @@ let test_long_lists () =
     ~current:
       ((user "instruction" :: List.filteri (fun index _ -> index >= 1_500) history)
        @ numbered "new" 20)
-    (Change.Block_dropped
+    (Message_list_change.Block_dropped
        { at = 1; dropped = 1_500; kept_after = long_count - 1_500; added = 20 });
   let same = List.init long_count (fun _ -> user "same") in
   check_messages
     "long repeated history dropped at the front"
     ~previous:(user "oldest" :: same)
     ~current:(same @ [ user "newest" ])
-    (Change.Block_dropped { at = 0; dropped = 1; kept_after = long_count; added = 1 });
+    (Message_list_change.Block_dropped { at = 0; dropped = 1; kept_after = long_count; added = 1 });
   check_messages
     "long repeated history rewritten at the tail"
     ~previous:(same @ [ user "a" ])
     ~current:(same @ [ user "b" ])
-    (Change.Diverged_at
+    (Message_list_change.Diverged_at
        { index = long_count
        ; previous_role = Agent_core.Types.User
        ; previous_bytes = payload_bytes (user "a")
@@ -448,12 +448,12 @@ let test_snapshot_parts_digest_as_their_request () =
   let previous = [ user "a"; assistant "b" ] in
   let current = [ user "a"; assistant "b"; user "c" ] in
   let render_messages change =
-    Yojson.Safe.to_string (Change.message_change_to_json change)
+    Yojson.Safe.to_string (Message_list_change.to_json change)
   in
   check
     string
     "parts classify as the live request"
-    (render_messages (Change.Appended { kept = 2; added = 1 }))
+    (render_messages (Message_list_change.Appended { kept = 2; added = 1 }))
     (render_messages
        (Change.compare_messages
           ~previous:(digests_of_snapshot (snapshot_parts previous))

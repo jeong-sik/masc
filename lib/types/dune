@@ -17,6 +17,8 @@
   runtime_answerer
   runtime_response_identity
   turn_record
+  message_list_change
+  keeper_cache_outcome_reading
   request_observation
   health_status
   types_core

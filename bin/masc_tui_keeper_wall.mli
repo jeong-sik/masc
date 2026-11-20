@@ -16,7 +16,10 @@ val selected_cockpit_rows :
   Masc.Tui_decode.keeper_runtime option -> string list
 (** Five-row docked selected-keeper cockpit combining an agy-style header row
     with a magnified 4-row mirrored 24h waveform and dot-meter telemetry for the
-    highlighted Keeper in [Wall_columns] view ([[]] below 44 columns). *)
+    highlighted Keeper in [Wall_columns] view ([[]] below 44 columns). A
+    window with nothing read draws two rows: the header and the unread label.
+    [status] is plain text: the header sanitises it, so a styled string would
+    show its escape bytes. *)
 val row :
   ?selected:bool -> ko:bool -> cols:int -> now:float -> name:string ->
   Masc.Tui_decode.keeper_runtime option -> string

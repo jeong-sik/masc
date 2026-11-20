@@ -3336,7 +3336,13 @@ let render_keeper_axes (state : state) =
     | Axis_row.Wall_columns -> (
         match matrix, state.keeper_story, portrait, selected_row with
         | None, None, None, Some row when available_rows >= 9 ->
-            let status = keeper_selected_summary state ~now:now_unix row in
+            (* The summary carries the now cell's colour; the cockpit header
+               sanitises its subtitle and would draw the escape bytes as
+               "\x1B[…m", so it is handed the plain text. *)
+            let status =
+              Masc_tui_theme.strip_sgr
+                (keeper_selected_summary state ~now:now_unix row)
+            in
             let cockpit =
               Masc_tui_keeper_wall.selected_cockpit_rows ~ko ~cols:inner
                 ~now:now_unix

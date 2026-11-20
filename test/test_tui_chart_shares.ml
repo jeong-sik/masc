@@ -715,7 +715,8 @@ let btop_braille_curves_and_dot_meters () =
   let down_3 = Braille.braille_curve_rows ~down:true ~tint:plain ~rows:3 pairs_12 in
   Alcotest.(check int) "3-row rising curve" 3 (List.length up_3);
   Alcotest.(check int) "3-row falling curve" 3 (List.length down_3);
-  Alcotest.(check int) "0-row falling curve returns empty" 0
+  (* braille_curve_rows clamps rows to at least one. *)
+  Alcotest.(check int) "0-row falling curve is clamped to one row" 1
     (List.length (Braille.braille_curve_rows ~down:true ~tint:plain ~rows:0 pairs_12));
   (* dot_meter respects bounds from 0 to wide under NO_COLOR. *)
   let no_color_paint = { Theme.depth = Theme.No_color; surface = Theme.Page; palette = None } in

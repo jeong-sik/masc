@@ -198,7 +198,14 @@ let clamped_scroll_now (state : state) = function
           max_scroll = state.config_document_max_scroll;
           confirmation }
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
-  | Board_list_scroll _ -> Board_list_scroll state.board_list_scroll
+  | Board_list_scroll _ ->
+      Board_list_scroll
+        { list_scroll = state.board_list_scroll
+        ; preview_post_id = state.board_list_preview_post_id
+        ; preview_scroll = state.board_list_preview_scroll
+        ; preview_max_scroll = state.board_list_preview_max_scroll
+        ; preview_body_rows = state.board_list_preview_body_rows
+        }
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
   | Context_inspector_response_scroll _ ->

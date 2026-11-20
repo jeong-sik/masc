@@ -11303,9 +11303,18 @@ type state = {
       returns the ordinary wrapped-row scroll position. *)
   mutable board_history_post_id: string option;
   mutable board_cursor: int;
+  (* How tall the selected post's preview under the Board list stands.
+     Space cycles it, Esc folds it back before leaving the list. *)
+  mutable board_preview_mode: docked_preview_mode;
   (* Top row of the Board post list window, kept stationary across cursor
      moves that stay on screen ([Board_list_scroll]). *)
   mutable board_list_scroll: int;
+  (* Docked preview scroll on Board_list, bound to the post id last drawn so
+     moving the cursor to another post starts at the top of its body. *)
+  mutable board_list_preview_post_id: string option;
+  mutable board_list_preview_scroll: int;
+  mutable board_list_preview_max_scroll: int;
+  mutable board_list_preview_body_rows: int;
   mutable msg_find: string;
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
@@ -22181,7 +22190,12 @@ let create_state
   board_comment_landing = None;
   board_history_post_id = None;
   board_cursor = 0;
+  board_preview_mode = Preview_compact;
   board_list_scroll = 0;
+  board_list_preview_post_id = None;
+  board_list_preview_scroll = 0;
+  board_list_preview_max_scroll = 0;
+  board_list_preview_body_rows = 0;
   msg_find = "";
   msg_search_generation = Atomic.make 0;
   msg_find_at = None;
@@ -23751,9 +23765,16 @@ type clamped_scroll =
      row once the list scrolled, and choosing a row above it moved the whole
      window: a second press at the same place named another Keeper. *)
   | Keeper_list_scroll of int
-  (* The Board list window, kept stationary across cursor moves within the
-     visible page so stepping up does not scroll the whole table on every press. *)
-  | Board_list_scroll of int
+  (* The Board list window and its docked preview scroll bounds, reported back
+     from the frame so stepping inside the visible page keeps the table still
+     and J/K scroll only the post currently rendered in the preview. *)
+  | Board_list_scroll of
+      { list_scroll : int
+      ; preview_post_id : string option
+      ; preview_scroll : int
+      ; preview_max_scroll : int
+      ; preview_body_rows : int
+      }
   (* The context inspector's plain shapes are lines the frame lays out of the
      reading it holds, and the frame windows them. The keypress bounds the
      scroll against the same window, but a reading that lands shorter leaves
@@ -23939,7 +23960,14 @@ let apply_clamped_scroll (state : state) = function
       state.config_scroll <- scroll;
       state.config_document_max_scroll <- max_scroll
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
-  | Board_list_scroll value -> state.board_list_scroll <- value
+  | Board_list_scroll
+      { list_scroll; preview_post_id; preview_scroll; preview_max_scroll
+      ; preview_body_rows } ->
+      state.board_list_scroll <- list_scroll;
+      state.board_list_preview_post_id <- preview_post_id;
+      state.board_list_preview_scroll <- preview_scroll;
+      state.board_list_preview_max_scroll <- preview_max_scroll;
+      state.board_list_preview_body_rows <- preview_body_rows
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
   | Context_inspector_response_scroll value -> state.context_inspector_response_scroll <- value
 

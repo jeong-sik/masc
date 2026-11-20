@@ -6770,6 +6770,11 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_listing <- Masc_tui_fetched.Absent;
   state.board_list_reported_error <- None;
   state.board_list_scroll <- 0;
+  state.board_preview_mode <- Preview_compact;
+  state.board_list_preview_post_id <- None;
+  state.board_list_preview_scroll <- 0;
+  state.board_list_preview_max_scroll <- 0;
+  state.board_list_preview_body_rows <- 0;
   state.board_census <- Masc_tui_fetched.Absent;
   state.board_detail <- Board_detail.clear state.board_detail;
   state.board_mode <- Board_list;
@@ -23005,6 +23010,11 @@ let main
                      state.board_hearth <- hearth;
                      state.board_cursor <- 0;
                      state.board_list_scroll <- 0;
+                     state.board_preview_mode <- Preview_compact;
+                     state.board_list_preview_post_id <- None;
+                     state.board_list_preview_scroll <- 0;
+                     state.board_list_preview_max_scroll <- 0;
+                     state.board_list_preview_body_rows <- 0;
                      state.board_mode <- Board_list;
                      goto_surface state ~mailbox:async_messages Board;
                      start_http_refresh ~server_contact state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port:state.port
@@ -26497,7 +26507,13 @@ let main
                 (match state.board_mode with
                  | Board_read _ ->
                      Masc_tui_board_updates.leave_board_detail state
-                 | Board_list -> state.view <- Overview
+                 | Board_list
+                   when state.board_preview_mode <> Preview_compact
+                        && Option.is_some state.board_list_preview_post_id ->
+                     state.board_preview_mode <- Preview_compact
+                 | Board_list ->
+                     state.board_preview_mode <- Preview_compact;
+                     state.view <- Overview
                  | Board_compose -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -27546,6 +27562,11 @@ let main
                ~current:state.board_hearth ~census:(board_census_values state);
            state.board_cursor <- 0;
            state.board_list_scroll <- 0;
+           state.board_preview_mode <- Preview_compact;
+           state.board_list_preview_post_id <- None;
+           state.board_list_preview_scroll <- 0;
+           state.board_list_preview_max_scroll <- 0;
+           state.board_list_preview_body_rows <- 0;
            state.board_mode <- Board_list;
            report_action state "system"
              (match state.board_hearth with
@@ -27733,11 +27754,42 @@ let main
                         state.changes_diff_max_width <- 0;
                         Masc_tui_repo_changes.Diff_geometry.launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
+       | Some (("J" | "K") as key_name)
+         when state.view = Board
+              && (match state.board_mode with
+                  | Board_list -> true
+                  | Board_read _ | Board_compose -> false)
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           let posts = board_posts state in
+           let count = List.length posts in
+           if count > 0 then
+             let cursor = max 0 (min state.board_cursor (count - 1)) in
+             (match List.nth_opt posts cursor with
+              | None -> ()
+              | Some post ->
+                  let current_scroll, max_scroll =
+                    match state.board_list_preview_post_id with
+                    | Some id when String.equal id post.bp_id ->
+                        ( state.board_list_preview_scroll
+                        , state.board_list_preview_max_scroll )
+                    | Some _ | None -> (0, 0)
+                  in
+                  if max_scroll > 0 then
+                    let delta = if String.equal key_name "J" then 1 else -1 in
+                    state.board_list_preview_scroll <-
+                      max 0 (min max_scroll (current_scroll + delta)))
        | Some " "
          when ((state.view = Planning && state.planning_mode = Planning_list
                 && Option.is_none state.task_detail_id
                 && not (Masc_tui_overview_tasks.is_focused state.task_focus))
-               || (state.view = Harness && Option.is_none state.harness_detail))
+               || (state.view = Harness && Option.is_none state.harness_detail)
+               || (state.view = Board
+                   && (match state.board_mode with
+                       | Board_list -> true
+                       | Board_read _ | Board_compose -> false)))
               && not state.composer_focused
               && not (modal_owns_keys state) && not state.palette_open
               && not state.answering_open && not state.link_modal_open
@@ -27746,8 +27798,12 @@ let main
             | Planning ->
                 state.planning_preview_mode <-
                   Masc_tui_types.cycle_docked_preview_mode state.planning_preview_mode
+            | Board ->
+                if Option.is_some state.board_list_preview_post_id then
+                  state.board_preview_mode <-
+                    Masc_tui_types.cycle_docked_preview_mode state.board_preview_mode
             | Harness | Overview | Acting | Metrics | Keepers _ | Memory | Lanes
-            | Clients | Board | Approvals | Schedules | Verification | Fusion
+            | Clients | Approvals | Schedules | Verification | Fusion
             | Repositories | Code | Changes | Connectors | Runtime | Config
             | Resources | Tools | System_logs ->
                 state.harness_preview_mode <-

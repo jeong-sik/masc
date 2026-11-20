@@ -28,8 +28,8 @@ let title_unread ~ko = "(" ^ field_unread ~ko ^ ")"
 let field_failed ~ko = if ko then "조회 실패" else "load failed"
 let title_failed ~ko = "(" ^ field_failed ~ko ^ ")"
 
-(* A reading kept from before a refresh that failed, in RFC-0519 section 2's
-   word. The Runtime probe column and the Metrics Memory and Gate rows draw
+(* A reading kept from before a refresh that failed.
+   The Runtime probe column and the Metrics Memory and Gate rows draw
    it; the fleet line still spells the same pair itself. *)
 let field_stale ~ko = if ko then "이전 관측" else "stale"
 

@@ -100,7 +100,7 @@ let parse_args () =
 
   Arg.parse specs (fun _ -> ()) "masc-tui [OPTIONS]";
 
-  (* The same order `masc start` boots in (RFC workspace-root-resolution), so
+  (* The same order `masc start` boots in, so
      the screen and the server it starts or joins read one workspace. A cwd is
      used only when it holds .masc/config; with none the TUI names the choices
      instead of observing an empty directory. *)

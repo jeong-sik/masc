@@ -1,6 +1,5 @@
 ; A request handled on another domain than its connection: a real httpun
-; connection on a second domain, its handler on the owner domain (RFC
-; http-transport-runs-on-its-own-domain §3.3).
+; connection on a second domain, its handler on the owner domain.
 
 (test
  (name test_http_reqd_relay)

@@ -1,6 +1,6 @@
-; Per-file dune stanza for the RFC-0387 surface: the B1 creation
-; requirement, the verification ledger (+ its observability join), and the
-; stage-2 completion gate (Verifying phase, proof/criterion verdict actions,
+; Per-file dune stanza for goal verification: the success condition a new
+; goal must declare, the verification ledger (+ its observability join), and
+; the completion gate (Verifying phase, proof/criterion verdict actions,
 ; re-arm). Lives here per test/stanzas/README.md to avoid the
 ; conflict-runtime hotspot in the legacy grouped (tests ...) stanza.
 

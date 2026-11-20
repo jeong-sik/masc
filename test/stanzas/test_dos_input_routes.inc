@@ -1,6 +1,6 @@
-; RFC play-link-for-the-shared-machine §2.5 through the real router: a
-; person's press, type, step and pass run the DOS tools under the
-; credential's name and wait for the controller like a Keeper's.
+; The DOS input routes, driven through the real router: a person's press,
+; type, step and pass run the DOS tools under the credential's name and wait
+; for the controller like a Keeper's.
 
 (test
  (name test_dos_input_routes)

@@ -818,7 +818,7 @@ let fact_detail_parts_for_width ?state ~ko ~width (row : memory_fact_row) =
           | Never_retrieved -> text "조회된 적 없음" "Never retrieved"
           | Retrieved { count; distinct_days; last_at } ->
               Printf.sprintf (if ko then "조회 %s회 · %s · 최근 %s" else "Retrieved %s on %s · last %s") (Masc_tui_value.Count.grouped count)
-                (if ko then Printf.sprintf "%d일에 걸쳐" distinct_days else Message_layout.count_noun distinct_days "day")
+                (if ko then Printf.sprintf "%s일에 걸쳐" (Masc_tui_value.Count.grouped distinct_days) else Message_layout.count_noun distinct_days "day")
                 (memory_fact_age_label last_at)
         in
         Printf.sprintf (if ko then "%s · 철회 %s회 · 이전 사실 %s개" else "%s · Retracted %s · Revised from %s") read

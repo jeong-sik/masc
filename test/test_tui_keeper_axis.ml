@@ -27,43 +27,13 @@ let make_keeper_health
     ?updated_at
     ?age_bins
     librarian : Tui_decode_memory_health.memory_keeper_health =
-  { mkh_keeper_id = keeper_id
-  ; mkh_revision = 1
-  ; mkh_updated_at = updated_at
-  ; mkh_facts = 10
-  ; mkh_observed_facts = 8
-  ; mkh_derived_facts = 2
-  ; mkh_support_invalidations = 0
-  ; mkh_snapshot_bytes = 1024
+  { (Memory_keeper_health_fixture.keeper ~keeper_id) with
+    mkh_updated_at = updated_at
   ; mkh_added = added
   ; mkh_removed = removed
-  ; mkh_snapshot_present = true
   ; mkh_age_bins = age_bins
-  ; mkh_facts_by_hour = []
-  ; mkh_changes_since_start = []
-  ; mkh_context_cycle =
-      { mcc_saved = None
-      ; mcc_saved_unreadable = false
-      ; mcc_read_position = None
-      ; mcc_read_position_unreadable = false
-      ; mcc_rewriting_through = None
-      ; mcc_unread_snapshot = Ok []
-      ; mcc_unread_memory = Ok []
-      ; mcc_prepared = None
-      ; mcc_synthesis = None
-      }
   ; mkh_librarian = librarian
-  ; mkh_librarian_failures = 0
-  ; mkh_vision_ingest_errors = 0
-  ; mkh_vision_ingest_error_reasons = []
-  ; mkh_read_error = None
-  ; mkh_source_revision = 1
-  ; mkh_source_facts = 5
   ; mkh_source_invalidations = source_invalidations
-  ; mkh_source_snapshot_bytes = 512
-  ; mkh_source_snapshot_present = true
-  ; mkh_source_read_error = None
-  ; mkh_alerts = []
   }
 ;;
 

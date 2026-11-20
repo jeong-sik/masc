@@ -4776,10 +4776,13 @@
   masc_tui_loader
   yojson))
 
+(include stanzas/memory_keeper_health_fixture.inc)
+
 (test
  (name test_tui_keeper_axis)
  (modules test_tui_keeper_axis)
  (libraries
+  memory_keeper_health_fixture
   alcotest
   masc
   masc.masc_schedule
@@ -4814,6 +4817,7 @@
  (name test_tui_keeper_age_ladder)
  (modules test_tui_keeper_age_ladder)
  (libraries
+  memory_keeper_health_fixture
   alcotest
   masc
   masc_tui_keeper_age_ladder
@@ -4823,6 +4827,7 @@
  (name test_tui_keeper_memory_reading)
  (modules test_tui_keeper_memory_reading)
  (libraries
+  memory_keeper_health_fixture
   alcotest
   masc
   masc_tui_types
@@ -4919,6 +4924,7 @@
  (name test_tui_render_metrics)
  (modules test_tui_render_metrics)
  (libraries
+  memory_keeper_health_fixture
   alcotest
   str
   masc_tui_task_flow
@@ -4961,7 +4967,8 @@
 (test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
- (libraries masc_tui_memory_usage masc_tui_surface_search masc_tui_value
+ (libraries
+  memory_keeper_health_fixture masc_tui_memory_usage masc_tui_surface_search masc_tui_value
   masc_tui_pick_list
   alcotest
   masc

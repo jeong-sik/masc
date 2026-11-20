@@ -20,9 +20,9 @@ let short_sha256 sha256 =
 
 let join = String.concat " \xc2\xb7 "
 
-let label (entry : board_attachment_entry) =
+let label ?(ko = true) (entry : board_attachment_entry) =
   match entry with
-  | Error reason -> join [ "깨진 첨부"; reason ]
+  | Error reason -> join [ (if ko then "깨진 첨부" else "Broken attachment"); reason ]
   | Ok attachment ->
       (* A link's url is its substance, so it stays in the label beside the
          name; an artifact's digest is what the store keys on, not something
@@ -44,18 +44,19 @@ let label (entry : board_attachment_entry) =
       in
       let labelled word = join (word :: segments) in
       (match attachment.ba_kind with
-       | Ak_image -> labelled "Image"
-       | Ak_video -> labelled "Video"
-       | Ak_audio -> labelled "Audio"
-       | Ak_score -> labelled "Score"
+       | Ak_image -> labelled (if ko then "이미지" else "Image")
+       | Ak_video -> labelled (if ko then "동영상" else "Video")
+       | Ak_audio -> labelled (if ko then "오디오" else "Audio")
+       | Ak_score -> labelled (if ko then "악보" else "Score")
        | Ak_midi -> labelled "MIDI"
-       | Ak_file -> labelled "File"
+       | Ak_file -> labelled (if ko then "파일" else "File")
        | Ak_youtube -> labelled "YouTube"
-       | Ak_external_link -> labelled "Link"
+       | Ak_external_link -> labelled (if ko then "링크" else "Link")
        (* The wire's own word for the kind, and still the name and where it
           is: two entries of a kind this build does not know are not the
           same line. *)
-       | Ak_unknown kind -> labelled ("미지원 kind: " ^ kind))
+       | Ak_unknown kind ->
+           labelled ((if ko then "미지원 종류: " else "Unsupported kind: ") ^ kind))
 ;;
 
 (* The open key's resolution: the number a reader sees is 1-based and counts

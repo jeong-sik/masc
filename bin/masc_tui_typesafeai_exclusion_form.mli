@@ -78,7 +78,7 @@ val text_on : t -> (string, t) result
     with the reason on it: a [\[typesafeai\]] written in a shape the line
     editor cannot change, or an edit the reader refuses. *)
 
-val rows : width:int -> height:int -> t -> string list
+val rows : ?ko:bool -> width:int -> height:int -> t -> string list
 (** The form as rows of a pane [width] cells wide: what exclusion keeps from
     which destinations, the Keeper list, what saving would do, and that the
     Board attention judgment still runs on the exact lane for an excluded

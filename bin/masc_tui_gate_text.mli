@@ -3,6 +3,14 @@
     ({!Keeper_approval_lifecycle}); this is where the sentence lives, and
     every match on the sum is total. *)
 
+val lifecycle_line_for :
+  ko:bool ->
+  phase:Keeper_approval_lifecycle.approval_lifecycle_phase ->
+  tool:string option ->
+  summary:string option ->
+  string
+(** Localized {!lifecycle_line} for [ko:true] (Korean) or [ko:false] (English). *)
+
 val lifecycle_line :
   phase:Keeper_approval_lifecycle.approval_lifecycle_phase ->
   tool:string option ->
@@ -10,6 +18,14 @@ val lifecycle_line :
   string
 (** [summary] names what the gated call asked for; without it the line names
     only the tool. *)
+
+val fold_line_for :
+  ko:bool ->
+  phases:Keeper_approval_lifecycle.approval_lifecycle_phase list ->
+  tool:string option ->
+  summary:string option ->
+  string option
+(** Localized {!fold_line} for [ko:true] (Korean) or [ko:false] (English). *)
 
 val fold_line :
   phases:Keeper_approval_lifecycle.approval_lifecycle_phase list ->
@@ -33,7 +49,7 @@ type folded_argument =
             flattening as a fold. *)
   }
 
-val fold_argument : cap:int -> string -> folded_argument
+val fold_argument : ?ko:bool -> cap:int -> string -> folded_argument
 (** One Gate line held to [cap] terminal cells, with what it is holding named
     in cells rather than rows.
 

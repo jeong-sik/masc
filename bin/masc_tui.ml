@@ -11884,7 +11884,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
            the journal hid the gate with it. *)
         ( Message_status
         , Turn_progress
-        , Masc_tui_gate_text.lifecycle_line ~phase ~tool ~summary
+        , Masc_tui_gate_text.lifecycle_line_for
+            ~ko:(state.ui_language = Lang_ko) ~phase ~tool ~summary
         , None
         , [] )
     | Keeper_chat_history.Memory_activity _ ->
@@ -11902,7 +11903,10 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         in
         ( Message_status
         , Turn_progress
-        , Printf.sprintf "Fusion deliberation %s · 상세는 Runs 탭" pointer
+        , Printf.sprintf
+            (if state.ui_language = Lang_ko then "Fusion 합의 %s · 상세는 Runs 탭"
+             else "Fusion deliberation %s · details in Runs tab")
+            pointer
         , None
         , [] )
   in
@@ -13635,6 +13639,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Some _ | None -> Ok ()) in
   let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
   let host = server_peer_host and port = state.port in
+  let ko = state.ui_language = Lang_ko in
   let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
   (* One queued message on the server, and the verb that cancels it. Both the
      single cancel and /queue clear post to this address. *)
@@ -13754,7 +13759,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
       | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
       | Cancel_event _ | Prioritize_event _ ->
           get_json ~host ~port ~path:(root ^ "/waiting-inventory")
-          |> fun result -> Result.bind result (Inbox.waiting_items ~now:(Unix.gettimeofday ())) in
+          |> fun result -> Result.bind result (Inbox.waiting_items ~ko ~now:(Unix.gettimeofday ())) in
     let module Operation_ids = Set.Make(String) in
     let rec read_messages after_sequence seen reversed_pages =
       let suffix = Option.fold ~none:"" ~some:(fun value -> "&after_sequence=" ^ value) after_sequence in
@@ -23724,7 +23729,9 @@ let export_verification_evidence state ~mailbox ~open_file =
       if request.vex_authority = state.workspace_authority
          && request.vex_reading == state.workspace_read_authority
       then Ok () else Error "Workspace changed before the evidence file operation" in
-    report_action state "system" "선택한 증거 사본을 내려받는 중";
+    report_action state "system"
+      (if state.ui_language = Lang_ko then "선택한 증거 사본을 내려받는 중"
+       else "Downloading selected evidence copy");
     launch_guarded_request ~operation:true state ~mailbox
       ~boundary_error:(fun detail -> Request_failed detail)
       ~withdrawn:(fun refusal -> Request_withdrawn refusal)

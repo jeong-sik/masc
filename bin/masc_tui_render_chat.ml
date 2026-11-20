@@ -1678,9 +1678,10 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
    the row draws, and whether pressing it opens anything. Folded twice, the
    text could say it is holding something on a frame where the press says it
    is not. *)
-let gate_fold ~chat_cols ~role_label_column (message : Masc_tui_types.msg_entry)
+let gate_fold ~ko ~chat_cols ~role_label_column (message : Masc_tui_types.msg_entry)
     =
   Masc_tui_gate_text.fold_argument
+    ~ko
     ~cap:(chat_body_line_cells ~chat_cols ~role_label_column)
     message.me_text
 
@@ -1779,6 +1780,7 @@ type visible_timeline_memo = {
   vtm_memory : memory_visibility;
   vtm_reasoning : reasoning_visibility;
   vtm_tools : tool_visibility;
+  vtm_language : ui_language;
   vtm_timeline : (msg_entry * float option) list;
 }
 
@@ -1796,7 +1798,8 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
     when memo.vtm_messages == messages
          && memo.vtm_memory = state.msg_memory_visibility
          && memo.vtm_reasoning = state.msg_reasoning_visibility
-         && memo.vtm_tools = state.msg_tool_visibility ->
+         && memo.vtm_tools = state.msg_tool_visibility
+         && memo.vtm_language = state.ui_language ->
       memo.vtm_timeline
   | Some _ | None ->
       let timeline =
@@ -1809,7 +1812,9 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
           || Masc_tui_types.reasoning_drawn state.msg_reasoning_visibility)
         |> Masc_tui_types.project_memory_history
              ~visibility:state.msg_memory_visibility
-        |> Masc_tui_types.project_gate_history ~visibility:state.msg_tool_visibility
+        |> Masc_tui_types.project_gate_history
+             ~ko:(state.ui_language = Lang_ko)
+             ~visibility:state.msg_tool_visibility
       in
       visible_timeline_memo :=
         Some
@@ -1817,6 +1822,7 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
             vtm_memory = state.msg_memory_visibility;
             vtm_reasoning = state.msg_reasoning_visibility;
             vtm_tools = state.msg_tool_visibility;
+            vtm_language = state.ui_language;
             vtm_timeline = timeline;
           };
       timeline
@@ -2118,10 +2124,16 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
              newlines and appends its own held-cell count, so it is a text of
              its own rather than a prefix of the source. *)
           | Message_status when message.me_gate <> None -> (
-              match state.msg_tool_visibility with
-              | Tools_full -> message.me_text, Message_layout.Source_body
-              | Tools_compact | Tools_results ->
-                  (gate_fold ~chat_cols ~role_label_column message)
+              match state.msg_tool_visibility, message.me_gate with
+              | Tools_full, Some gate ->
+                  Masc_tui_gate_text.lifecycle_line_for
+                    ~ko:(state.ui_language = Lang_ko)
+                    ~phase:gate.gs_phase ~tool:gate.gs_tool ~summary:gate.gs_summary,
+                  Message_layout.Source_body
+              | Tools_full, None -> message.me_text, Message_layout.Source_body
+              | (Tools_compact | Tools_results), (Some _ | None) ->
+                  (gate_fold ~ko:(state.ui_language = Lang_ko)
+                     ~chat_cols ~role_label_column message)
                     .Masc_tui_gate_text.fa_text,
                   Message_layout.Projected_body Message_layout.Projected_summary)
           | Message_thinking | Message_user _ | Message_keeper
@@ -2176,7 +2188,8 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
                (match message.me_role, state.msg_tool_visibility with
                 | Masc_tui_types.Message_status, (Tools_compact | Tools_results)
                   when message.me_gate <> None
-                       && (gate_fold ~chat_cols ~role_label_column message)
+                       && (gate_fold ~ko:(state.ui_language = Lang_ko)
+                             ~chat_cols ~role_label_column message)
                             .Masc_tui_gate_text.fa_held_cells
                           > 0 ->
                     Message_layout.Action_unfold_argument

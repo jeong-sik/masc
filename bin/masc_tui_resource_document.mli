@@ -25,7 +25,7 @@ val external_share_change : Masc_tui_types.state ->
   ((Masc_tui_resource_catalog.report * bool), string) result
 (** Decide a toggle from a known share state. Enabling requires an admitted
     original body; revoking remains possible if that body's later read fails. *)
-val rows : cols:int -> t -> string list
+val rows : ?ko:bool -> cols:int -> t -> string list
 (** [cols] is the actual document pane width, after Activity and optional
     Resources split. Both drawing and search use this projection.
     HTML document mode uses an inert structured terminal reading; source mode
@@ -42,7 +42,7 @@ type diagram = {
   columns : int;
   image : Masc_tui_resource_diagrams.image;
 }
-val layout : cols:int -> t -> string list * diagram list
+val layout : ?ko:bool -> cols:int -> t -> string list * diagram list
 (** One row projection and its prepared PNG slots. Drawing, scrolling and
     placement use this same result. Source mode contains no image slots.
     Reuses one prepared layout per domain only while the complete reading,

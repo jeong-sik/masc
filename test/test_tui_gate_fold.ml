@@ -82,7 +82,7 @@ let test_settled_steps_fold_across_prose () =
     step Approval_resolved_approved; step Approval_replay_applied] in
   let projected = Types.project_gate_history ~visibility:Types.Tools_compact entries in
   check (list string) "prose keeps its position before the settled outcome"
-    [prose.me_text; "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D×2"]
+    [prose.me_text; "미뤘던 호출 적용됨 · Execute · 3단계 · Ctrl-D×2"]
     (describe projected);
   check bool "original prose record is untouched" true (fst (List.hd projected) == prose)
 
@@ -96,7 +96,7 @@ let test_results_keeps_gate_rows_folded () =
   let entries = rows [step Approval_requested; step Approval_resolved_approved;
     step Approval_replay_applied] in
   check (list string) "short results keep the compact Gate history"
-    [ "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D" ]
+    [ "미뤘던 호출 적용됨 · Execute · 3단계 · Ctrl-D" ]
     (describe (Types.project_gate_history ~visibility:Types.Tools_results entries));
   let opened = Types.toggle_tool_visibility Types.Tools_results in
   check string "Ctrl-D opens Gate detail from results" "full"

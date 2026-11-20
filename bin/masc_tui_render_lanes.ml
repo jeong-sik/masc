@@ -2281,6 +2281,14 @@ let client_last_seen_text ~read_at (row : Masc.Tui_decode.client_row) =
   | Some last_seen, Some read_at -> Masc_tui_wire_age.text ~now:read_at last_seen
   | Some _, None | None, (Some _ | None) -> Masc_tui_theme.Glyph.no_value
 
+let client_status_label ~ko status =
+  match ko, status with
+  | true, Masc.Tui_decode.Client_active -> "활성"
+  | true, Masc.Tui_decode.Client_busy -> "작업 중"
+  | true, Masc.Tui_decode.Client_listening -> "대기 중"
+  | true, Masc.Tui_decode.Client_inactive -> "비활성"
+  | false, status -> Masc.Tui_decode.client_status_to_string status
+
 let render_client_detail state (client : Masc.Tui_decode.client_row) =
   let terminal_rows, cols = get_terminal_size () in
   let width = max 1 (framed_inner_width cols - 2) in
@@ -2308,8 +2316,8 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
   let lines =
     detail_section_lines ~first:true (t "1. 연결 상태 · 현재 작업" "1. Status & Activity")
     @ field ~style:status_style (t "상태" "Status")
-        (Masc.Tui_decode.client_status_to_string client.cr_status)
-    @ field (t "대신하는 Keeper" "Acting for") (optional client.cr_keeper_name)
+        (client_status_label ~ko:(state.ui_language = Lang_ko) client.cr_status)
+    @ field (t "대신하는 키퍼" "Acting for") (optional client.cr_keeper_name)
     @ field (t "태스크" "Task")
         (match client.cr_current_task with
          | None -> Masc_tui_theme.Glyph.no_value
@@ -2460,7 +2468,9 @@ let render_clients (state : state) =
       | None -> box_empty buf cols
       | Some row ->
           let open Masc.Tui_decode in
-          let status = client_status_to_string row.cr_status in
+          let status =
+            client_status_label ~ko:(state.ui_language = Lang_ko) row.cr_status
+          in
           let name = Terminal_text.single_line row.cr_name in
           (* Both sides sanitized before they are compared: the cell is
              drawn from this reading, and a name that differs only in the

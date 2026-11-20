@@ -283,11 +283,16 @@ let memory_librarian_stalled_lines ~ko (librarian : memory_librarian_health) =
   match librarian.mlh_stalled with
   | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
     let atoms =
-      if mls_gap_end_atom - mls_gap_start_atom = 1
-      then Printf.sprintf "atom %d is" mls_gap_start_atom
-      else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
+      if mls_gap_end_atom - mls_gap_start_atom = 1 then
+        Printf.sprintf (if ko then "아톰 %d" else "atom %d is") mls_gap_start_atom
+      else
+        Printf.sprintf (if ko then "아톰 %d-%d" else "atoms %d-%d are")
+          mls_gap_start_atom (mls_gap_end_atom - 1)
     in
-    [ Printf.sprintf (if ko then "  Librarian 처리 지연 · %s 요청과 기억 모두에서 빠짐" else "  Librarian stalled · %s in neither the request nor memory") atoms ]
+    [ Printf.sprintf
+        (if ko then "  Librarian 처리 지연 · %s 누락 (요청과 기억 모두에 없음)"
+         else "  Librarian stalled · %s in neither the request nor memory")
+        atoms ]
   | Some (Masc.Tui_decode_memory_health.Stalled_unmeasured { mls_cause; mls_detail }) ->
     let cause =
       match mls_cause with
@@ -385,41 +390,51 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   in
   let context_lines =
     let cycle = k.mkh_context_cycle in
-    let frontier value = Printf.sprintf "atom %d / boundary %d · trace %s"
-      value.mcf_end_atom value.mcf_boundary_line (Terminal_text.single_line value.mcf_trace_id) in
+    let frontier value =
+      Printf.sprintf (if ko then "아톰 %d / 경계 %d · trace %s" else "atom %d / boundary %d · trace %s")
+        value.mcf_end_atom value.mcf_boundary_line (Terminal_text.single_line value.mcf_trace_id)
+    in
     let saved =
       let cut = match cycle.mcc_saved with
         | Some value -> frontier value
-        | None -> if cycle.mcc_saved_unreadable then "unreadable" else "absent" in
+        | None ->
+            if cycle.mcc_saved_unreadable then text "읽기 실패" "unreadable"
+            else text "없음" "absent" in
       (* Where the Librarian has read to belongs beside the cut, not on a line
          of its own: a request starts at the cut and carries the atoms up to
          the position, so the two apart is what the turn pays (#37793). *)
       let read = match cycle.mcc_read_position, cycle.mcc_saved with
         | None, _ ->
           if cycle.mcc_read_position_unreadable
-          then " · read position unreadable"
-          else " · nothing read yet"
+          then text " · 읽은 위치 읽기 실패" " · read position unreadable"
+          else text " · 아직 읽은 기록 없음" " · nothing read yet"
         | Some position, Some value when position > value.mcf_end_atom ->
-          Printf.sprintf " · read to atom %d, %s past the cut" position
-            (Masc_tui_message_layout.count_noun
-               (position - value.mcf_end_atom) "atom")
+          if ko then
+            Printf.sprintf " · 아톰 %d까지 읽음 (경계 이후 %d개)" position
+              (position - value.mcf_end_atom)
+          else
+            Printf.sprintf " · read to atom %d, %s past the cut" position
+              (Masc_tui_message_layout.count_noun
+                 (position - value.mcf_end_atom) "atom")
         | Some position, Some _ | Some position, None ->
-          Printf.sprintf " · read to atom %d" position in
+          Printf.sprintf (if ko then " · 아톰 %d까지 읽음" else " · read to atom %d") position in
       let rewriting = match cycle.mcc_rewriting_through with
         | None -> ""
         | Some through ->
-          Printf.sprintf " · rewriting from atom 0, unused until atom %d" through in
+          Printf.sprintf
+            (if ko then " · 아톰 0부터 재작성 중 (아톰 %d까지 미사용)"
+             else " · rewriting from atom 0, unused until atom %d") through in
       cut ^ read ^ rewriting in
     let prepared, input = match cycle.mcc_prepared with
-      | None -> "not observed since server start", "not observed"
+      | None -> text "서버 시작 이후 미관측" "not observed since server start", text "미관측" "not observed"
       | Some value ->
         let input = match value.mcp_input with
-          | Masc.Tui_decode_memory_health.Context_summarized value -> "summary " ^ frontier value
+          | Masc.Tui_decode_memory_health.Context_summarized value -> text "요약 " "summary " ^ frontier value
           | Masc.Tui_decode_memory_health.Context_absorbed value ->
-            Printf.sprintf "absorbed to atom %d · trace %s · no summary"
+            Printf.sprintf (if ko then "아톰 %d까지 흡수 · trace %s · 요약 없음" else "absorbed to atom %d · trace %s · no summary")
               value.mcpo_end_atom (Terminal_text.single_line value.mcpo_trace_id)
-          | Masc.Tui_decode_memory_health.Context_without_snapshot -> "no snapshot: this turn only"
-          | Masc.Tui_decode_memory_health.Context_not_applied -> "saved context not applied" in
+          | Masc.Tui_decode_memory_health.Context_without_snapshot -> text "스냅샷 없음: 이번 턴만" "no snapshot: this turn only"
+          | Masc.Tui_decode_memory_health.Context_not_applied -> text "저장된 컨텍스트 미적용" "saved context not applied" in
         (* The size as a size. The row drew the digit count -- one live block
            read "446558 request bytes" -- while every other size on this TUI
            goes through the shared ladder and reads "436.1 KB". The heading a
@@ -430,30 +445,47 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
           (Masc_tui_context_inspector.format_bytes value.mcp_request_bytes)
           (Terminal_text.single_line value.mcp_runtime_id), input in
     let synthesis = match cycle.mcc_synthesis with
-      | None -> "not observed since server start"
+      | None -> text "서버 시작 이후 미관측" "not observed since server start"
       | Some value ->
         let module O = Masc.Keeper_continuity_observation in
         let state = match value.state with
-          | O.No_source -> "no new completed source (coverage not inferred)"
-          | (O.Checking | O.Running | O.Committed | O.Disabled | O.Source_unavailable | O.Input_unavailable | O.Not_committed | O.Capacity_refused | O.Cancelled) as state -> O.synthesis_state_to_string state in
+          | O.No_source -> text "새 완료 소스 없음(범위 추정 안 함)" "no new completed source (coverage not inferred)"
+          | O.Checking -> text "확인 중" (O.synthesis_state_to_string O.Checking)
+          | O.Running -> text "실행 중" (O.synthesis_state_to_string O.Running)
+          | O.Committed -> text "반영 완료" (O.synthesis_state_to_string O.Committed)
+          | O.Disabled -> text "비활성" (O.synthesis_state_to_string O.Disabled)
+          | O.Source_unavailable -> text "소스 조회 불가" (O.synthesis_state_to_string O.Source_unavailable)
+          | O.Input_unavailable -> text "입력 조회 불가" (O.synthesis_state_to_string O.Input_unavailable)
+          | O.Not_committed -> text "미반영" (O.synthesis_state_to_string O.Not_committed)
+          | O.Capacity_refused -> text "용량 초과 거절" (O.synthesis_state_to_string O.Capacity_refused)
+          | O.Cancelled -> text "취소됨" (O.synthesis_state_to_string O.Cancelled) in
         let range = match value.range with
-          | None -> " · atom range unavailable"
-          | Some range -> Printf.sprintf " · last selected atoms [%d,%d) / observed completed %d"
-              range.start_atom range.end_atom range.completed_end_atom in
+          | None -> text " · 아톰 범위 조회 불가" " · atom range unavailable"
+          | Some range ->
+              Printf.sprintf
+                (if ko then " · 최근 선택 아톰 [%d,%d) / 관측 완료 %d"
+                 else " · last selected atoms [%d,%d) / observed completed %d")
+                range.start_atom range.end_atom range.completed_end_atom in
         state ^ range ^ " · " ^ memory_updated_text (Some value.observed_at) in
     let unread label = function
-      | Error () -> ["  " ^ label ^ " · unavailable"]
+      | Error () -> ["  " ^ label ^ text " · 조회 불가" " · unavailable"]
       | Ok records ->
-        (Printf.sprintf "  %s · %d recorded unread message(s)" label (List.length records)) ::
+        let count = List.length records in
+        let heading =
+          if ko then Printf.sprintf "  %s · 기록된 미읽음 메시지 %d건" label count
+          else if count = 1 then Printf.sprintf "  %s · 1 recorded unread message" label
+          else Printf.sprintf "  %s · %d recorded unread messages" label count
+        in
+        heading ::
         List.map (fun record ->
           "    " ^ Terminal_text.single_line (Yojson.Safe.to_string
             (Masc.Keeper_librarian_unread.to_json record))) records in
-    unread "Snapshot unread evidence" cycle.mcc_unread_snapshot @
-    unread "Memory cumulative unread evidence" cycle.mcc_unread_memory @
-    ["  Context synthesis · " ^ synthesis;
-     "  Context saved · " ^ saved;
-     "  Request prepared (not provider success) · " ^ prepared;
-     "  Context used · " ^ input]
+    unread (text "스냅샷 미읽음 근거" "Snapshot unread evidence") cycle.mcc_unread_snapshot @
+    unread (text "기억 누적 미읽음 근거" "Memory cumulative unread evidence") cycle.mcc_unread_memory @
+    [text "  컨텍스트 합성 · " "  Context synthesis · " ^ synthesis;
+     text "  저장된 컨텍스트 · " "  Context saved · " ^ saved;
+     text "  준비된 요청(제공자 성공 아님) · " "  Request prepared (not provider success) · " ^ prepared;
+     text "  사용된 컨텍스트 · " "  Context used · " ^ input]
   in
   let source_line =
     Printf.sprintf
@@ -480,10 +512,10 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       (fun (a : Masc.Tui_decode_memory_health.memory_alert) ->
         Printf.sprintf "[%s] %s · %s"
           ((if Masc.Tui_decode_memory_health.memory_alert_is_history a.ma_code
-            then "history " else "")
+            then text "이력 " "history " else "")
            ^ (match Masc.Tui_decode_memory_health.memory_alert_severity a.ma_code with
-              | `Warn -> "warn"
-              | `Error -> "error"))
+              | `Warn -> text "경고" "warn"
+              | `Error -> text "오류" "error"))
           a.ma_label
           (Terminal_text.single_line a.ma_message))
       k.mkh_alerts
@@ -532,8 +564,8 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
          changes without a save succeeding. The action rows follow only when
          [memory_row_visibility] lets them through. *)
       let status_row =
-        Printf.sprintf "  %s · memory %s · %s" k.mkh_keeper_id
-          (memory_state_label (memory_state k)) memory_saved
+        Printf.sprintf (if ko then "  %s · 기억 %s · %s" else "  %s · memory %s · %s")
+          k.mkh_keeper_id (memory_state_label_for ~ko (memory_state k)) memory_saved
       in
       let when_shown kind clauses = if shown_by_default kind then clauses else [] in
       let librarian_action_rows =

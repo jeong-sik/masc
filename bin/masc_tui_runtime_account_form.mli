@@ -88,7 +88,7 @@ val paste : t -> string -> t
 (** Pasted text into the focused text field, without its control
     characters. [Base] takes none. *)
 
-val rows : width:int -> height:int -> t -> string list
+val rows : ?ko:bool -> width:int -> height:int -> t -> string list
 (** The form as rows of a pane [width] cells wide. While filling, at most
     [height] rows are returned, with the current field visible whenever
     [height] is positive. Refusals take space before introductions. A long

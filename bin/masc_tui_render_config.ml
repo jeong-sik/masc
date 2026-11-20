@@ -1901,15 +1901,16 @@ let runtime_config_status_body state ~cols =
   let current = runtime_config_unmatched_current state in
   let palette = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
   let lift = Masc_tui_theme.lift_is_enabled () in
+  let lang = state.ui_language in
   match Domain.DLS.get runtime_status_cache with
-  | Some ((seen, seen_error, seen_current, width, seen_palette, seen_lift), rows)
+  | Some ((seen, seen_error, seen_current, width, seen_palette, seen_lift, seen_lang), rows)
       when Option.equal (==) seen source && seen_error = error
         && Option.equal (==) seen_current current && width = cols
-        && seen_palette = palette && seen_lift = lift -> rows
+        && seen_palette = palette && seen_lift = lift && seen_lang = lang -> rows
   | Some _ | None ->
       let rows = runtime_config_status_lines state ~cols in
       Domain.DLS.set runtime_status_cache
-        (Some ((source, error, current, cols, palette, lift), rows));
+        (Some ((source, error, current, cols, palette, lift, lang), rows));
       rows
 
 let runtime_config_status_rows state ~cols =
@@ -2470,6 +2471,7 @@ let render_config (state : state) =
       let content_height = config_content_height state in
       (* The account form stands where the file is drawn: it is opened on that
          file, and what it saves is that file with one provider added. *)
+      let ko = state.ui_language = Lang_ko in
       match state.runtime_account_form with
       | Some form ->
           let saved = Masc_tui_runtime_account_form.is_saved form in
@@ -2477,7 +2479,7 @@ let render_config (state : state) =
             if saved then max 1 (content_height - 1) else content_height
           in
           let form_rows =
-            Masc_tui_runtime_account_form.rows ~width:(framed_inner_width cols)
+            Masc_tui_runtime_account_form.rows ~ko ~width:(framed_inner_width cols)
               ~height:form_height form
           in
           List.iter c.push (if saved then List.take form_height form_rows else form_rows);
@@ -2495,7 +2497,7 @@ let render_config (state : state) =
              opened on the file, and what it saves is that file with three
              keys of [typesafeai] set. *)
           List.iter c.push
-            (Masc_tui_memory_recall_form.rows ~width:(framed_inner_width cols)
+            (Masc_tui_memory_recall_form.rows ~ko ~width:(framed_inner_width cols)
                ~height:content_height form)
       | None ->
       match state.typesafeai_exclusion_form with
@@ -2503,7 +2505,7 @@ let render_config (state : state) =
           (* The same place again: opened on the file, and what it saves is
              that file with [excluded_keepers] set. *)
           List.iter c.push
-            (Masc_tui_typesafeai_exclusion_form.rows ~width:(framed_inner_width cols)
+            (Masc_tui_typesafeai_exclusion_form.rows ~ko ~width:(framed_inner_width cols)
                ~height:content_height form)
       | None ->
       (match runtime_config_view_error_text state with

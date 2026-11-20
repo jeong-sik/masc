@@ -193,39 +193,50 @@ type hint =
 (* How to get the login the form points at, for [client] with the command's
    [halves]. {!rows} draws a [Run] as the command and wraps a [Say] to the
    pane. *)
-let hints_for client halves =
+let hints_for ~ko client halves =
   match client, halves with
   | D.Codex, Some halves ->
     [ Run halves
     ; Say
-        (Printf.sprintf "(먼저 그 폴더의 config.toml 에 %s = \"%s\")"
+        (Printf.sprintf
+           (if ko then "(먼저 그 폴더의 config.toml 에 %s = \"%s\")"
+            else "(first set %s = \"%s\" in that folder's config.toml)")
            Runtime_verification_codex_home.credentials_store_key
            Runtime_verification_codex_home.credentials_store_file)
     ]
   | D.Claude_code, Some halves ->
     Run halves
     :: List.map
-         (fun typed -> Say ("그다음 claude 안에서 " ^ typed ^ " 을 입력합니다"))
+         (fun typed ->
+            Say
+              (if ko then "그다음 claude 안에서 " ^ typed ^ " 을 입력합니다"
+               else "then type " ^ typed ^ " inside claude"))
          (Option.to_list (typed_after client))
   | D.Muse, Some halves ->
     [ Run halves
-    ; Say "이 HOME의 .config/muse/auth.json 파일이 필요합니다."
-    ; Say "이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
+    ; Say
+        (if ko then "이 HOME의 .config/muse/auth.json 파일이 필요합니다."
+         else "Requires .config/muse/auth.json inside this HOME.")
+    ; Say
+        (if ko then "이 명령은 Keychain 대신 선택한 HOME의 파일에 로그인 정보를 저장합니다."
+         else "This command saves credentials to a file under the chosen HOME instead of Keychain.")
     ]
   | D.Antigravity, _ ->
-    [ Say "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file" ]
+    [ Say
+        (if ko then "OAuth 파일: masc runtime-antigravity-account --sign-in 이 출력하는 credential_file"
+         else "OAuth file: credential_file printed by masc runtime-antigravity-account --sign-in") ]
   | (D.Codex | D.Claude_code | D.Muse), None -> []
 ;;
 
 (* The hints under the fields, for the location typed so far. *)
-let sign_in_hints t =
+let sign_in_hints ~ko t =
   let client = t.ring.chosen.client in
   let home =
     if t.location = ""
     then "<" ^ D.location_label client ^ ">"
     else Filename.quote (D.expand_home ?home_dir:t.home_dir t.location)
   in
-  hints_for client (command_halves t.ring.chosen home)
+  hints_for ~ko client (command_halves t.ring.chosen home)
 ;;
 
 let edit t f =
@@ -309,20 +320,20 @@ let paste t text =
   edit t (fun value -> value ^ kept)
 ;;
 
-let base_label = "복사할 provider"
-let id_label = "새 provider id"
+let base_label ~ko = if ko then "복사할 provider" else "Provider to copy"
+let id_label ~ko = if ko then "새 provider id" else "New provider id"
 
 (* Cells between the widest label and its value. *)
 let label_gap_cells = 2
 
 (* The label column fits the widest label any client can draw, so it stays
    put while the operator cycles through bases. *)
-let label_cells =
+let label_cells ~ko =
   label_gap_cells
   + List.fold_left
       (fun widest label -> max widest (Masc_tui_message_layout.display_width label))
       0
-      (base_label :: id_label :: List.map D.location_label D.all_of_client)
+      (base_label ~ko :: id_label ~ko :: List.map D.location_label D.all_of_client)
 
 (* What a hint row starts with, and what a refusal starts with. *)
 let hint_lead = "  "
@@ -345,37 +356,41 @@ let wrapped ~width ~lead text =
   | first :: rest -> (lead ^ first) :: List.map (fun row -> indent ^ row) rest
 ;;
 
-let command_lead = "  로그인: "
+let command_lead ~ko = if ko then "  로그인: " else "  Sign in: "
 
 (* Show only complete shell segments. A clipped export can still parse,
    so neither half is displayed when either one would be cut by the pane.
    The saved form's copy action always carries the complete command. *)
-let command_rows ~width ~copy_available halves =
-  let whole = command_lead ^ Terminal_text.single_line (one_line halves) in
+let command_rows ~ko ~width ~copy_available halves =
+  let lead = command_lead ~ko in
+  let whole = lead ^ Terminal_text.single_line (one_line halves) in
   if Masc_tui_message_layout.display_width whole <= width
   then [ whole ]
   else (
     let setup, run = halves in
-    let indent = String.make (Masc_tui_message_layout.display_width command_lead) ' ' in
-    let rows = [ command_lead ^ Terminal_text.single_line setup; indent ^ run ] in
+    let indent = String.make (Masc_tui_message_layout.display_width lead) ' ' in
+    let rows = [ lead ^ Terminal_text.single_line setup; indent ^ run ] in
     if List.for_all (fun row -> Masc_tui_message_layout.display_width row <= width) rows
     then rows
     else
       wrapped ~width ~lead:hint_lead
-        (if copy_available
-         then "명령이 화면보다 깁니다. y 를 눌러 전체 명령을 복사하세요."
-         else "명령이 화면보다 깁니다. 저장 후 y 로 전체 명령을 복사하세요."))
+        (if copy_available then
+           if ko then "명령이 화면보다 깁니다. y 를 눌러 전체 명령을 복사하세요."
+           else "Command is wider than the pane. Press y to copy the full command."
+         else
+           if ko then "명령이 화면보다 깁니다. 저장 후 y 로 전체 명령을 복사하세요."
+           else "Command is wider than the pane. Press y after saving to copy the full command."))
 ;;
 
-let hint_rows ~width ~copy_available hints =
+let hint_rows ~ko ~width ~copy_available hints =
   List.concat_map
     (function
       | Say text -> wrapped ~width ~lead:hint_lead text
-      | Run halves -> command_rows ~width ~copy_available halves)
+      | Run halves -> command_rows ~ko ~width ~copy_available halves)
     hints
 ;;
 
-let refusal_rows_in ~width ~room rows =
+let refusal_rows_in ~ko ~width ~room rows =
   if List.length rows <= room then rows
   else if room <= 0 then []
   else if room = 1 then
@@ -384,56 +399,65 @@ let refusal_rows_in ~width ~room rows =
   else
     List.take (room - 1) rows
     @ [ Masc_tui_message_layout.fit_width
-          (refusal_lead ^ "이유 계속 · 창을 키워 읽으세요") width ]
+          (refusal_lead
+           ^ (if ko then "이유 계속 · 창을 키워 읽으세요"
+              else "Reason continues · widen pane to read")) width ]
 ;;
 
-let hints_in ~width ~room hints =
-  let rows = hint_rows ~width ~copy_available:false hints in
+let hints_in ~ko ~width ~room hints =
+  let rows = hint_rows ~ko ~width ~copy_available:false hints in
   if List.length rows <= room then rows
   else if room <= 0 then []
   else
     let notice = Masc_tui_message_layout.fit_width
-        (hint_lead ^ "로그인 안내 계속 · 창을 키워 읽으세요") width in
+        (hint_lead
+         ^ (if ko then "로그인 안내 계속 · 창을 키워 읽으세요"
+            else "Sign-in instructions continue · widen pane to read")) width in
     let copying =
       if List.exists (function Run _ -> true | Say _ -> false) hints
-      then wrapped ~width ~lead:hint_lead "저장 후 y로 전체 명령을 복사하세요."
+      then
+        wrapped ~width ~lead:hint_lead
+          (if ko then "저장 후 y로 전체 명령을 복사하세요."
+           else "Press y after saving to copy the full command.")
       else []
     in
     notice :: (if List.length copying <= room - 1 then copying else [])
 ;;
 
-let filling_rows ~width ~height t =
+let filling_rows ~ko ~width ~height t =
   let height = max 0 height in
   if height = 0 then [] else
+  let label_w = label_cells ~ko in
   let mark field = if t.field = field then "›" else " " in
   let line field label value =
     let lead = if height = 1 && field = t.field && Option.is_some t.error then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " " else "  " in
     Printf.sprintf "%s%s %s %s" lead (mark field)
-      (Masc_tui_message_layout.fit_width label label_cells)
+      (Masc_tui_message_layout.fit_width label label_w)
       (Terminal_text.single_line value)
   in
   let base = t.ring.chosen in
   let count = List.length t.ring.before + 1 + List.length t.ring.after in
   let intro = wrapped ~width ~lead:hint_lead
-      "계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다" in
-  let fields = [ line Base base_label
+      (if ko then "계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다"
+       else "Add account · copies the chosen provider with a separate sign-in location") in
+  let fields = [ line Base (base_label ~ko)
         (Printf.sprintf "\xe2\x80\xb9 %s (%s) \xe2\x80\xba  %d/%d" base.display_name base.id
            (List.length t.ring.before + 1) count)
-    ; line Id id_label t.id
+    ; line Id (id_label ~ko) t.id
     ; line Location (D.location_label base.client) t.location
     ] in
-  let hints = sign_in_hints t in
+  let hints = sign_in_hints ~ko t in
   let errors = match t.error with
      | None -> []
      | Some reason -> wrapped ~width ~lead:refusal_lead reason in
-  let full = intro @ fields @ hint_rows ~width ~copy_available:false hints @ errors @ [ "" ] in
+  let full = intro @ fields @ hint_rows ~ko ~width ~copy_available:false hints @ errors @ [ "" ] in
   if List.length full <= height then full else
     (* Reserve the selected field before any wrapped information. As in the
        other runtime forms, only the field window follows its cursor. *)
     let error_minimum = if errors <> [] && height > 1 then 1 else 0 in
     let hint_minimum = if hints <> [] && height > 1 + error_minimum then 1 else 0 in
-    let errors = refusal_rows_in ~width ~room:(height - 1 - hint_minimum) errors in
-    let hints = hints_in ~width ~room:(height - 1 - List.length errors) hints in
+    let errors = refusal_rows_in ~ko ~width ~room:(height - 1 - hint_minimum) errors in
+    let hints = hints_in ~ko ~width ~room:(height - 1 - List.length errors) hints in
     let room = height - List.length errors - List.length hints in
     let shown = min room (List.length fields) in
     let cursor = match t.field with Base -> 0 | Id -> 1 | Location -> 2 in
@@ -446,15 +470,19 @@ let filling_rows ~width ~height t =
 
 (* The saved account and how to sign it in, drawn the way the form drew
    them, without the fields. *)
-let saved_rows ~width ~id sign_in =
+let saved_rows ~ko ~width ~id sign_in =
   wrapped ~width ~lead:hint_lead
-    (Printf.sprintf "%s 를 저장했습니다 · lane 후보에 넣어야 턴이 갑니다" id)
-  @ hint_rows ~width ~copy_available:true (hints_for sign_in.client (Some (sign_in.setup, sign_in.run)))
+    (Printf.sprintf
+       (if ko then "%s 를 저장했습니다 · lane 후보에 넣어야 턴이 갑니다"
+        else "Saved %s · add it to a lane candidate list so turns route to it")
+       id)
+  @ hint_rows ~ko ~width ~copy_available:true
+      (hints_for ~ko sign_in.client (Some (sign_in.setup, sign_in.run)))
   @ [ "" ]
 ;;
 
-let rows ~width ~height t =
+let rows ?(ko = true) ~width ~height t =
   match t.phase with
-  | Filling -> filling_rows ~width ~height t
-  | Saved { saved_id; saved_sign_in } -> saved_rows ~width ~id:saved_id saved_sign_in
+  | Filling -> filling_rows ~ko ~width ~height t
+  | Saved { saved_id; saved_sign_in } -> saved_rows ~ko ~width ~id:saved_id saved_sign_in
 ;;

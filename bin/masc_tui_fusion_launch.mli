@@ -64,10 +64,11 @@ val request_body : request -> Yojson.Safe.t
 (** The launch endpoint's body: [prompt], [preset], [topology] and
     [web_tools], nothing the endpoint does not read. *)
 
-val lines : t -> string list
+val lines : ?ko:bool -> t -> string list
 (** The overlay's text, top to bottom: the refusal line when there is one,
     the waiting line while a submit is out, then the schema form. *)
 
 val hints : string
+val hints_for : ko:bool -> string
 (** The overlay's footer: the schema form's own keys, the array-item key left
     out because no field here is an array. *)

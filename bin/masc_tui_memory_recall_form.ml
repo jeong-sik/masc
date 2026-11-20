@@ -378,19 +378,26 @@ let text_on t =
        refuse ("고친 결과를 읽지 못했어요 · " ^ describe_errors errors))
 ;;
 
-let intro = "기억 판정 · 켜진 키퍼는 사실 전체와 지침, 이번 턴 입력을 Jev 로 보내요"
-let range_label = "범위"
-let all_warning = "모든 키퍼가 대상이에요. excluded_keepers 에 있는 키퍼만 빠져요."
-let no_roster = "(키퍼 목록이 비어 있어요)"
+let intro ~ko =
+  if ko then "기억 판정 · 켜진 키퍼는 사실 전체와 지침, 이번 턴 입력을 Jev 로 보내요"
+  else "Memory recall · enabled Keepers send facts, instructions, and this turn's input to Jev"
+let range_label ~ko = if ko then "범위" else "Scope"
+let all_warning ~ko =
+  if ko then "모든 키퍼가 대상이에요. excluded_keepers 에 있는 키퍼만 빠져요."
+  else "Applies to all Keepers except those listed in excluded_keepers."
+let no_roster ~ko = if ko then "(키퍼 목록이 비어 있어요)" else "(Keeper roster is empty)"
 
-let applies_note =
-  "저장하면 서버가 바로 읽고 다음 모델 요청부터 바뀌어요. 서버에 Jev 키가 없으면 켜도 보내지 않아요."
+let applies_note ~ko =
+  if ko then
+    "저장하면 서버가 바로 읽고 다음 모델 요청부터 바뀌어요. 서버에 Jev 키가 없으면 켜도 보내지 않아요."
+  else
+    "Saved changes take effect on the next model request. Without a Jev key on the server, nothing is sent."
 ;;
 
-let mode_label = function
-  | Off -> "꺼짐"
-  | Listed -> "고른 키퍼만"
-  | All -> "모든 키퍼"
+let mode_label ~ko = function
+  | Off -> if ko then "꺼짐" else "Off"
+  | Listed -> if ko then "고른 키퍼만" else "Selected Keepers"
+  | All -> if ko then "모든 키퍼" else "All Keepers"
 ;;
 
 let hint_lead = "  "
@@ -416,15 +423,15 @@ let wrapped ~width ~lead text =
 (* Short, because a reason shares a row with a Keeper's name and its other
    marks, and the pane cuts a row at its edge. Exhaustive on purpose: a new
    reason stops the build here. *)
-let reason_label = function
-  | Standing.Environment_switch_off -> "환경 스위치 꺼짐"
-  | Standing.Recall_not_switched_on -> "스위치 꺼짐 · 범위 밖"
-  | Standing.Keeper_excluded -> "제외 목록"
-  | Standing.Lane_disabled -> "Jev 길 꺼짐"
-  | Standing.Access_unpublished -> "Jev 계정 판정 전"
-  | Standing.Host_account_not_shared -> "다계정 · Jev 키 안 씀"
-  | Standing.No_armed_destination -> "Jev 키 없음"
-  | Standing.Refused_by_another_gate -> "다른 게이트가 닫음"
+let reason_label ~ko = function
+  | Standing.Environment_switch_off -> if ko then "환경 스위치 꺼짐" else "env switch off"
+  | Standing.Recall_not_switched_on -> if ko then "스위치 꺼짐 · 범위 밖" else "switch off · out of scope"
+  | Standing.Keeper_excluded -> if ko then "제외 목록" else "excluded"
+  | Standing.Lane_disabled -> if ko then "Jev 길 꺼짐" else "Jev lane disabled"
+  | Standing.Access_unpublished -> if ko then "Jev 계정 판정 전" else "Jev access pending"
+  | Standing.Host_account_not_shared -> if ko then "다계정 · Jev 키 안 씀" else "multi-account · Jev key not shared"
+  | Standing.No_armed_destination -> if ko then "Jev 키 없음" else "no Jev key"
+  | Standing.Refused_by_another_gate -> if ko then "다른 게이트가 닫음" else "closed by another gate"
 ;;
 
 let judged_now (_, standing) =
@@ -462,18 +469,22 @@ let capped ~limit rows =
 
 (* What the server says about the gate as a whole. The environment switch is
    asked before the gate, so one Keeper that names it names it for all. *)
-let server_line = function
-  | Server_unread -> "서버 · 상태를 읽는 중이에요"
-  | Server_unavailable detail -> "서버 · 상태를 읽지 못했어요 · " ^ detail
+let server_line ~ko = function
+  | Server_unread ->
+      if ko then "서버 · 상태를 읽는 중이에요" else "Server · reading status"
+  | Server_unavailable detail ->
+      (if ko then "서버 · 상태를 읽지 못했어요 · " else "Server · could not read status · ") ^ detail
   | Server_read reading ->
     if environment_switch_is_off reading
-    then "서버 · 환경 스위치가 꺼져 있어서 판정 대상이 없어요"
+    then
+      if ko then "서버 · 환경 스위치가 꺼져 있어서 판정 대상이 없어요"
+      else "Server · environment switch is off; no Keepers are judged"
     else (
       match reading.Reading.mrr_lane with
-      | Error reason -> "서버 · " ^ reason_label reason
+      | Error reason -> (if ko then "서버 · " else "Server · ") ^ reason_label ~ko reason
       | Ok () ->
         Printf.sprintf
-          "서버 · Jev 키 있음 · 판정 대상 %d명"
+          (if ko then "서버 · Jev 키 있음 · 판정 대상 %d명" else "Server · Jev key armed · %d judged")
           (List.length (List.filter judged_now reading.Reading.mrr_keepers)))
 ;;
 
@@ -502,50 +513,59 @@ let mark t name =
      | None -> if picked then No_declaration else No_mark)
 ;;
 
-let mark_text = function
+let mark_text ?(ko = true) = function
   | No_mark -> ""
-  | Reached -> "  (판정 대상)"
-  | Not_reached reason -> "  (대상 아님 · " ^ reason_label reason ^ ")"
-  | No_declaration -> "  (서버에 선언이 없어요)"
+  | Reached -> if ko then "  (판정 대상)" else "  (judged)"
+  | Not_reached reason ->
+      (if ko then "  (대상 아님 · " else "  (not judged · ") ^ reason_label ~ko reason ^ ")"
+  | No_declaration ->
+      if ko then "  (서버에 선언이 없어요)" else "  (not declared on server)"
 ;;
 
 let server t = t.server
 
-let standing_suffix t entry = mark_text (mark t entry.keeper.name)
+let standing_suffix ~ko t entry = mark_text ~ko (mark t entry.keeper.name)
 ;;
 
-let entry_suffix entry =
-  (if entry.known then "" else "  (키퍼 목록에 없어요)")
+let entry_suffix ~ko entry =
+  (if entry.known then ""
+   else if ko then "  (키퍼 목록에 없어요)" else "  (not in roster)")
   ^ (match entry.keeper.presence with
-     | Stopped -> "  (멈춰 있어요)"
+     | Stopped -> if ko then "  (멈춰 있어요)" else "  (stopped)"
      | Running | Unknown -> "")
-  ^ if entry.excluded then "  (제외됨 · 보내지 않아요)" else ""
+  ^
+  if entry.excluded then
+    if ko then "  (제외됨 · 보내지 않아요)" else "  (excluded · not sent)"
+  else ""
 ;;
 
 (* The first few names, then how many more: a list of forty keepers is not a
    row. *)
 let shown_names_limit = 4
 
-let names_text names =
+let names_text ~ko names =
   let shown = List.filteri (fun index _ -> index < shown_names_limit) names in
   let more = List.length names - List.length shown in
   String.concat ", " (List.map Terminal_text.single_line shown)
-  ^ if more > 0 then Printf.sprintf " 외 %d명" more else ""
+  ^
+  if more > 0 then
+    Printf.sprintf (if ko then " 외 %d명" else " +%d more") more
+  else ""
 ;;
 
-let summary_text t =
+let summary_text ~ko t =
   match change t with
-  | Unchanged -> "바뀌는 것이 없어요"
-  | Nobody_picked -> "고른 키퍼가 없어요"
+  | Unchanged -> if ko then "바뀌는 것이 없어요" else "no changes"
+  | Nobody_picked -> if ko then "고른 키퍼가 없어요" else "no Keepers selected"
   | Changed detail ->
     let head =
       if detail.before = detail.after
-      then mode_label detail.after
-      else mode_label detail.before ^ " → " ^ mode_label detail.after
+      then mode_label ~ko detail.after
+      else mode_label ~ko detail.before ^ " → " ^ mode_label ~ko detail.after
     in
     let names sign = function
       | [] -> []
-      | names -> [ sign ^ names_text names ]
+      | names -> [ sign ^ names_text ~ko names ]
     in
     let counted text = function
       | 0 -> []
@@ -556,8 +576,12 @@ let summary_text t =
       (head
        :: (names "+" detail.added
            @ names "-" detail.dropped
-           @ counted "파일의 목록 %d명은 남겨요" detail.list_kept
-           @ counted "파일의 목록 %d명은 지워요" detail.list_removed))
+           @ counted
+               (if ko then "파일의 목록 %d명은 남겨요" else "keeps %d listed in file")
+               detail.list_kept
+           @ counted
+               (if ko then "파일의 목록 %d명은 지워요" else "removes %d listed in file")
+               detail.list_removed))
 ;;
 
 (* The slice of [rows] around [cursor] that fits [room], with how many rows
@@ -573,20 +597,26 @@ let window ~room ~cursor rows =
     visible, start, total - start - shown)
 ;;
 
-let rows ~width ~height t =
+let rows ?(ko = true) ~width ~height t =
   let mark index = if t.cursor = index then "›" else " " in
-  let intro_rows = wrapped ~width ~lead:hint_lead intro in
+  let intro_rows = wrapped ~width ~lead:hint_lead (intro ~ko) in
   let server_rows =
-    capped ~limit:server_rows_limit (wrapped ~width ~lead:hint_lead (server_line t.server))
+    capped ~limit:server_rows_limit (wrapped ~width ~lead:hint_lead (server_line ~ko t.server))
   in
-  let range_row = Printf.sprintf "  %s %s  \xe2\x80\xb9 %s \xe2\x80\xba" (mark 0) range_label (mode_label t.mode) in
-  let summary_rows = wrapped ~width ~lead:hint_lead ("저장하면 · " ^ summary_text t) in
+  let range_row =
+    Printf.sprintf "  %s %s  \xe2\x80\xb9 %s \xe2\x80\xba"
+      (mark 0) (range_label ~ko) (mode_label ~ko t.mode)
+  in
+  let summary_rows =
+    wrapped ~width ~lead:hint_lead
+      ((if ko then "저장하면 · " else "On save · ") ^ summary_text ~ko t)
+  in
   let note_rows =
     (match t.mode, t.entries with
-     | All, _ -> wrapped ~width ~lead:hint_lead all_warning
-     | Listed, [] -> wrapped ~width ~lead:hint_lead no_roster
+     | All, _ -> wrapped ~width ~lead:hint_lead (all_warning ~ko)
+     | Listed, [] -> wrapped ~width ~lead:hint_lead (no_roster ~ko)
      | Listed, _ :: _ | Off, _ -> [])
-    @ wrapped ~width ~lead:hint_lead applies_note
+    @ wrapped ~width ~lead:hint_lead (applies_note ~ko)
   in
   let error_rows =
     match t.error with
@@ -605,8 +635,8 @@ let rows ~width ~height t =
                (mark (index + 1))
                (if List.mem entry.keeper.name t.picked then "x" else " ")
                (Terminal_text.single_line entry.keeper.name)
-               (entry_suffix entry)
-               (standing_suffix t entry))
+               (entry_suffix ~ko entry)
+               (standing_suffix ~ko t entry))
           t.entries
       in
       let fixed =
@@ -625,7 +655,10 @@ let rows ~width ~height t =
       then visible
       else
         visible
-        @ [ Printf.sprintf "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)" above below ]
+        @ [ Printf.sprintf
+              (if ko then "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)"
+               else "      … %d above · %d below (↑/↓ to move)")
+              above below ]
   in
   intro_rows @ server_rows @ [ range_row ] @ keeper_rows @ summary_rows @ note_rows @ error_rows @ [ "" ]
 ;;

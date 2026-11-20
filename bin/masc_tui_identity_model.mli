@@ -188,7 +188,7 @@ val identity_cursor_following
 (** Where the cursor lands once the list changes under it: on the provider it
     was on when that one is still listed, else clamped to the new list. *)
 
-val identity_app_form_rows : identity_app_form option -> string list
+val identity_app_form_rows : ?ko:bool -> identity_app_form option -> string list
 
 val identity_provider_declared
   : providers:identity_provider list -> provider_id:string -> bool

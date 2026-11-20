@@ -3,6 +3,20 @@ module Read_unit = Librarian_read_unit
 module Unread = Librarian_unread
 module Scan = Private_jsonl_scan
 module Objects = Agent_core.Checkpoint_objects
+module Chat_types = Keeper_chat_types
+module Delivery_identity = Keeper_chat_delivery_identity
+
+module String_set = Set.Make (String)
+
+module Pair_set = Set.Make (struct
+  type t = string * string
+
+  let compare (a1, b1) (a2, b2) =
+    match String.compare a1 a2 with
+    | 0 -> String.compare b1 b2
+    | c -> c
+  ;;
+end)
 
 type stores =
   { session_dir : session:string -> string
@@ -110,9 +124,11 @@ let byte_rows path (range : Unit.range) start ~budget ~entry ~lacking =
              let reached = at + String.length row + 1 in
              if scan.skipping then Scan.Continue { scan with reached; skipping = false }
              else (
-               let one = entry ~at row in
-               let scan = { found = one :: scan.found; left = counted scan.left one; reached; skipping = false } in
-               if spent scan.left then Scan.Stop scan else Scan.Continue scan)))
+               match entry ~at row with
+               | None -> Scan.Continue { scan with reached; skipping = false }
+               | Some one ->
+                 let scan = { found = one :: scan.found; left = counted scan.left one; reached; skipping = false } in
+                 if spent scan.left then Scan.Stop scan else Scan.Continue scan)))
      with
      | Ok (Stopped scan | Reached_end scan) -> ended scan
      | Error (Not_a_row_start { from = (_ : int); length = (_ : int) }) ->
@@ -123,11 +139,11 @@ let byte_rows path (range : Unit.range) start ~budget ~entry ~lacking =
 let official_rows path file store range start ~budget =
   let entry ~at row =
     match Keeper_turn_fragments.decode_line row with
-    | Ok line -> Item ({ store; at }, Read_unit.Fragment { file; line })
+    | Ok line -> Some (Item ({ store; at }, Read_unit.Fragment { file; line }))
     | Error (_ : Keeper_turn_fragments.read_error) -> (
       match (file : Keeper_turn_fragments.file) with
-      | Main -> Lacking (Undecodable_history_line { offset = at })
-      | Internal -> Lacking (Undecodable_internal_line { offset = at }))
+      | Main -> Some (Lacking (Undecodable_history_line { offset = at }))
+      | Internal -> Some (Lacking (Undecodable_internal_line { offset = at })))
   in
   let lacking range : Unit.missing_part =
     match file with
@@ -137,10 +153,11 @@ let official_rows path file store range start ~budget =
   byte_rows path range start ~budget ~entry ~lacking
 ;;
 
-let chat_rows path range start ~budget =
+let chat_rows ~keep path range start ~budget =
   byte_rows path range start ~budget
     ~entry:(fun ~at row ->
-      Item ({ store = Chat; at }, Read_unit.Chat_row (Keeper_chat_store_line_decode.parse_line_decoded ~file_path:path row)))
+      let parsed = Keeper_chat_store_line_decode.parse_line_decoded ~file_path:path row in
+      if keep parsed then Some (Item ({ store = Chat; at }, Read_unit.Chat_row parsed)) else None)
     ~lacking:(fun range -> Unit.Chat_bytes range)
 ;;
 
@@ -266,13 +283,315 @@ let internal_range : Unread.record -> Unit.range = function
   | Every_record { slices = _; history = _; internal } -> internal
 ;;
 
-let segment stores ~line ~(through : Keeper_turn_log.mark) ~first (segment : Unread.segment) starts budget =
+type external_keys =
+  { event_ids : String_set.t
+  ; delivery_pairs : Pair_set.t
+  }
+
+let empty_external_keys = { event_ids = String_set.empty; delivery_pairs = Pair_set.empty }
+
+let add_external_key keys = function
+  | Read_unit.External_row item ->
+    let event_ids = String_set.add item.event_id keys.event_ids in
+    let delivery_pairs =
+      match item.external_message with
+      | None -> keys.delivery_pairs
+      | Some msg_ref ->
+        Pair_set.add (item.conversation.conversation_id, msg_ref.message_id) keys.delivery_pairs
+    in
+    { event_ids; delivery_pairs }
+  | Read_unit.Chat_row _ | Read_unit.Message _ | Read_unit.Fragment _ -> keys
+;;
+
+let add_entry_external_key keys = function
+  | Item ((_ : Unit.item_name), body) -> add_external_key keys body
+  | Lacking (_ : Unit.missing_part) -> keys
+;;
+
+let external_keys_of_entries entries = List.fold_left add_entry_external_key empty_external_keys entries
+
+type transcript_witnesses =
+  { user_texts : String_set.t
+  ; assistant_texts : String_set.t
+  ; tool_call_ids : String_set.t
+  ; tool_observation_names : String_set.t
+  }
+
+let empty_witnesses =
+  { user_texts = String_set.empty
+  ; assistant_texts = String_set.empty
+  ; tool_call_ids = String_set.empty
+  ; tool_observation_names = String_set.empty
+  }
+;;
+
+let add_non_empty value set = if String.equal value "" then set else String_set.add value set
+let mem_non_empty value set = (not (String.equal value "")) && String_set.mem value set
+
+let is_conversation_user (message : Agent_core.Types.message) =
+  match message.origin with
+  | Agent_core.Types.Conversation ->
+    (match message.role with
+     | Agent_core.Types.User -> true
+     | Agent_core.Types.System | Assistant | Tool -> false)
+  | System_context
+  | Historical_system_context
+  | Recovery_instruction
+  | Tool_result_followup
+  | Agent_instruction -> false
+;;
+
+let is_conversation_assistant (message : Agent_core.Types.message) =
+  match message.origin with
+  | Agent_core.Types.Conversation ->
+    (match message.role with
+     | Agent_core.Types.Assistant -> true
+     | Agent_core.Types.System | User | Tool -> false)
+  | System_context
+  | Historical_system_context
+  | Recovery_instruction
+  | Tool_result_followup
+  | Agent_instruction -> false
+;;
+
+let add_message_tool_call_ids acc (message : Agent_core.Types.message) =
+  List.fold_left
+    (fun ids -> function
+      | Agent_core.Types.ToolUse { id; _ } -> add_non_empty id ids
+      | Agent_core.Types.ToolResult { tool_use_id; _ } -> add_non_empty tool_use_id ids
+      | Agent_core.Types.Text _
+      | Agent_core.Types.Thinking _
+      | Agent_core.Types.ReasoningDetails _
+      | Agent_core.Types.RedactedThinking _
+      | Agent_core.Types.Image _
+      | Agent_core.Types.Document _
+      | Agent_core.Types.Audio _ -> ids)
+    acc
+    message.Agent_core.Types.content
+;;
+
+let add_message_witnesses ~include_user acc (message : Agent_core.Types.message) =
+  let text = Agent_core.Types.text_of_content message.content in
+  let user_texts =
+    if include_user && is_conversation_user message
+    then add_non_empty text acc.user_texts
+    else acc.user_texts
+  in
+  let assistant_texts =
+    if is_conversation_assistant message
+    then add_non_empty text acc.assistant_texts
+    else acc.assistant_texts
+  in
+  let tool_call_ids = add_message_tool_call_ids acc.tool_call_ids message in
+  { acc with user_texts; assistant_texts; tool_call_ids }
+;;
+
+let add_witnesses acc = function
+  | Read_unit.Message message -> add_message_witnesses ~include_user:true acc message
+  | Read_unit.Fragment
+      { file = Keeper_turn_fragments.Main
+      ; line = Keeper_turn_fragments.Fragment (Keeper_turn_fragments.Message { message; _ })
+      } -> add_message_witnesses ~include_user:true acc message
+  | Read_unit.Fragment
+      { file = Keeper_turn_fragments.Internal
+      ; line = Keeper_turn_fragments.Fragment (Keeper_turn_fragments.Message { message; _ })
+      } -> add_message_witnesses ~include_user:false acc message
+  | Read_unit.Fragment
+      { file = Keeper_turn_fragments.Main | Keeper_turn_fragments.Internal
+      ; line =
+          Keeper_turn_fragments.Fragment (Keeper_turn_fragments.Tool_observation { observation; _ })
+      } ->
+    { acc with
+      tool_observation_names = add_non_empty observation.tool_name acc.tool_observation_names
+    }
+  | Read_unit.Fragment
+      { file = Keeper_turn_fragments.Main | Keeper_turn_fragments.Internal
+      ; line = Keeper_turn_fragments.Untagged
+      }
+  | Read_unit.Chat_row _
+  | Read_unit.External_row _ -> acc
+;;
+
+let add_entry_witnesses acc = function
+  | Item ((_ : Unit.item_name), body) -> add_witnesses acc body
+  | Lacking (_ : Unit.missing_part) -> acc
+;;
+
+let witnesses_of_entries entries = List.fold_left add_entry_witnesses empty_witnesses entries
+
+let matches_external_row external_keys (msg : Chat_types.chat_message) =
+  let matches_connector_event =
+    match msg.delivery_provenance with
+    | Some { delivery_key = Delivery_identity.Connector_message req_id; _ } ->
+      String_set.mem (Delivery_identity.Request_id.to_string req_id) external_keys.event_ids
+    | None
+    | Some
+        { delivery_key =
+            ( Operation _
+            | Operation_checkpoint _
+            | Operation_native _
+            | Fusion_run _
+            | Workspace_message _
+            | Approval_lifecycle _
+            | Autonomous_turn _ )
+        ; _
+        } -> false
+  in
+  let matches_delivery_pair =
+    match msg.conversation_id, msg.external_message_id with
+    | Some cid, Some mid -> Pair_set.mem (cid, mid) external_keys.delivery_pairs
+    | Some (_ : string), None | None, (Some (_ : string) | None) -> false
+  in
+  matches_connector_event || matches_delivery_pair
+;;
+
+(* Delivery keys whose rows originate on the chat lane (e.g. Fusion
+   deliberation conclusions via [Fusion_sink.emit], Gate approval lifecycle
+   receipts, workspace broadcasts, autonomous turn tool rows) are never
+   dropped as transcript mirrors. *)
+let is_chat_only_provenance (msg : Chat_types.chat_message) =
+  match msg.delivery_provenance with
+  | Some
+      { delivery_key =
+          ( Delivery_identity.Fusion_run _
+          | Approval_lifecycle _
+          | Autonomous_turn _
+          | Workspace_message _ )
+      ; _
+      } -> true
+  | None
+  | Some
+      { delivery_key =
+          ( Operation _
+          | Operation_checkpoint _
+          | Operation_native _
+          | Connector_message _ )
+      ; _
+      } -> false
+;;
+
+(* When the unit transcript carries exact [ToolUse]/[ToolResult] call ids,
+   only a chat tool row with a matching [tool_call_id] is dropped so a
+   concurrent or different [call_id] stays visible. Official-client
+   [Tool_observation] rows carry no [call_id], so match [tool_call_name]
+   against [tool_observation_names] only when [tool_call_ids] is empty. *)
+let matches_tool_witness witnesses (msg : Chat_types.chat_message) =
+  match msg.tool_call_id with
+  | Some cid when mem_non_empty cid witnesses.tool_call_ids -> true
+  | Some (_ : string) | None ->
+    if String_set.is_empty witnesses.tool_call_ids
+    then (
+      match msg.tool_call_name with
+      | Some name -> mem_non_empty name witnesses.tool_observation_names
+      | None -> false)
+    else false
+;;
+
+(* Layer-2 exact-witness chat deduplication on top of Layer-1 records (#53607):
+   - Corrupt rows, [Role.System], [Role.Request_failure], and chat-only
+     provenance ([Fusion_run], [Approval_lifecycle], [Autonomous_turn],
+     [Workspace_message]) always stay.
+   - [Role.Assistant] mirror rows drop only when their non-empty text matches a
+     [Conversation] [Assistant] message in the unit's transcript.
+   - [Role.Tool] mirror rows drop only when [tool_call_id] matches a transcript
+     [ToolUse]/[ToolResult] id (or [tool_call_name] matches an official-client
+     [Tool_observation] when no [tool_call_id] witnesses exist).
+   - [Role.User] drops only when matched by exact [External_row] keys or when
+     both [turn_ref] is stamped and its non-empty text matches a [Conversation]
+     [User] message in the unit's transcript; unlinked [Operation*]
+     accepted-user rows stay conservatively. *)
+let keep_chat_row ~witnesses ~external_keys (parsed : Keeper_chat_store_line_decode.parsed_line) =
+  match parsed.message with
+  | None -> true
+  | Some msg ->
+    (match msg.role with
+     | Chat_types.Role.System | Chat_types.Role.Request_failure -> true
+     | Chat_types.Role.Assistant ->
+       if is_chat_only_provenance msg
+       then true
+       else not (mem_non_empty msg.content witnesses.assistant_texts)
+     | Chat_types.Role.Tool ->
+       if is_chat_only_provenance msg then true else not (matches_tool_witness witnesses msg)
+     | Chat_types.Role.User ->
+       if matches_external_row external_keys msg
+       then false
+       else if is_chat_only_provenance msg
+       then true
+       else if Option.is_some msg.turn_ref && mem_non_empty msg.content witnesses.user_texts
+       then false
+       else true)
+;;
+
+let take_entries budget entries =
+  let rec loop acc left = function
+    | [] -> { entries = List.rev acc; budget = left }
+    | (_ : entry list) when spent left -> { entries = List.rev acc; budget = left }
+    | one :: rest ->
+      let left = counted left one in
+      let acc = one :: acc in
+      if spent left then { entries = List.rev acc; budget = left } else loop acc left rest
+  in
+  loop [] budget entries
+;;
+
+(* Preloading [non_chat_starts] runs only while [resume] is still inside [Chat];
+   once [resume] moves past [Chat], [has_unread_chat] is [false] and zero
+   preloading runs. Within a single [read] call the preloaded entries are reused
+   directly by [segment] (so [Rest_of_unit] reads each store strictly once).
+   [read] is stateless across [First_items] narrowing calls (#53736), so any
+   per-step witness scan is bounded to one unit's non-chat stores while still
+   consuming unread chat items. *)
+let has_unread_chat (seg : Unread.segment) starts =
+  if is_empty seg.chat then false
+  else
+    List.exists
+      (function
+        | Unit.Chat, From_first -> true
+        | Unit.Chat, After at -> at < seg.chat.until
+        | Unit.Chat, Passed
+        | (Unit.External | Unit.Agent_core | Unit.History | Unit.Internal), (_ : start) -> false)
+      starts
+;;
+
+let non_chat_starts =
+  List.filter_map
+    (function
+      | Unit.Chat -> None
+      | (Unit.External | Unit.Agent_core | Unit.History | Unit.Internal) as store -> Some (store, From_first))
+    Unit.stores
+;;
+
+let all_from_first starts =
+  List.for_all
+    (function
+      | (_ : Unit.store), From_first -> true
+      | (_ : Unit.store), (Passed | After (_ : int)) -> false)
+    starts
+;;
+
+let split_chat_and_full_rest = function
+  | (Unit.Chat, chat_start) :: rest -> if all_from_first rest then Some chat_start else None
+  | ((Unit.External | Unit.Agent_core | Unit.History | Unit.Internal), (_ : start))
+    :: (_ : (Unit.store * start) list) -> None
+  | [] -> None
+;;
+
+let segment
+    ?(keep = fun (_ : Keeper_chat_store_line_decode.parsed_line) -> true)
+    ?preloaded_non_chat
+    stores
+    ~line
+    ~through:(through : Keeper_turn_log.mark)
+    ~first
+    (segment : Unread.segment)
+    starts
+    budget
+  =
   let official = stores.session_dir ~session:through.session in
+  let chat_path = Keeper_chat_store.chat_path ~base_dir:stores.base_path ~keeper_name:stores.keeper_name in
   let read_store (store : Unit.store) start budget =
     match store with
-    | Chat ->
-      chat_rows (Keeper_chat_store.chat_path ~base_dir:stores.base_path ~keeper_name:stores.keeper_name)
-        segment.chat start ~budget
+    | Chat -> chat_rows ~keep chat_path segment.chat start ~budget
     | External ->
       external_rows
         (Keeper_external_attention.attention_path ~base_path:stores.base_path ~keeper_name:stores.keeper_name)
@@ -291,14 +610,24 @@ let segment stores ~line ~(through : Keeper_turn_log.mark) ~first (segment : Unr
       official_rows (Keeper_turn_fragments.path ~session_dir:official Internal) Internal Internal
         (internal_range segment.record) start ~budget
   in
-  List.fold_left
-    (fun read (store, start) ->
-       let* { entries; budget } = read in
-       if spent budget then read
-       else (
-         let* part = read_store store start budget in
-         Ok { entries = entries @ part.entries; budget = part.budget }))
-    (Ok (nothing budget)) starts
+  match preloaded_non_chat, split_chat_and_full_rest starts with
+  | Some non_chat_entries, Some chat_start ->
+    if spent budget then Ok (nothing budget)
+    else
+      let* chat_part = chat_rows ~keep chat_path segment.chat chat_start ~budget in
+      if spent chat_part.budget then Ok chat_part
+      else
+        let rest_part = take_entries chat_part.budget non_chat_entries in
+        Ok { entries = chat_part.entries @ rest_part.entries; budget = rest_part.budget }
+  | None, (_ : start option) | Some (_ : entry list), None ->
+    List.fold_left
+      (fun read (store, start) ->
+         let* { entries; budget } = read in
+         if spent budget then read
+         else (
+           let* part = read_store store start budget in
+           Ok { entries = entries @ part.entries; budget = part.budget }))
+      (Ok (nothing budget)) starts
 ;;
 
 let from_first = List.map (fun store -> store, From_first) Unit.stores
@@ -396,7 +725,9 @@ let read stores (span : Unread.span) ~take =
     | First_items count -> Taking ((count :> int) + 1)
   in
   let first = span.from.closed_messages in
-  let segment = segment stores ~line:span.line ~through:span.through in
+  let seg_read ?keep ?preloaded_non_chat ~first seg starts budget =
+    segment ?keep ?preloaded_non_chat stores ~line:span.line ~through:span.through ~first seg starts budget
+  in
   match span.source with
   | Turn { turn; outcome; opened; unattributed; own } ->
     let own_first = first + messages_of unattributed.record in
@@ -405,8 +736,18 @@ let read stores (span : Unread.span) ~take =
       | None -> from_first, from_first
       | Some name -> if in_own own ~own_first name then [], resumed name else resumed name, from_first
     in
-    let* before = segment ~first unattributed before_starts budget in
-    let* after = segment ~first:own_first own own_starts before.budget in
+    let* before_non_chat, after_non_chat, keep =
+      if has_unread_chat unattributed before_starts || has_unread_chat own own_starts then
+        let* before_nc = seg_read ~first unattributed non_chat_starts Every in
+        let* after_nc = seg_read ~first:own_first own non_chat_starts Every in
+        let unit_entries = before_nc.entries @ after_nc.entries in
+        let external_keys = external_keys_of_entries unit_entries in
+        let witnesses = witnesses_of_entries unit_entries in
+        Ok (Some before_nc.entries, Some after_nc.entries, keep_chat_row ~witnesses ~external_keys)
+      else Ok (None, None, fun (_ : Keeper_chat_store_line_decode.parsed_line) -> true)
+    in
+    let* before = seg_read ~keep ?preloaded_non_chat:before_non_chat ~first unattributed before_starts budget in
+    let* after = seg_read ~keep ?preloaded_non_chat:after_non_chat ~first:own_first own own_starts before.budget in
     let kept, ends = ending take (before.entries @ after.entries) in
     let before = first_entries kept before.entries in
     let after = first_entries (kept - List.length before) after.entries in
@@ -428,7 +769,15 @@ let read stores (span : Unread.span) ~take =
       | None -> from_first
       | Some name -> resumed name
     in
-    let* part = segment ~first held starts budget in
+    let* held_non_chat, keep =
+      if has_unread_chat held starts then
+        let* held_nc = seg_read ~first held non_chat_starts Every in
+        let external_keys = external_keys_of_entries held_nc.entries in
+        let witnesses = witnesses_of_entries held_nc.entries in
+        Ok (Some held_nc.entries, keep_chat_row ~witnesses ~external_keys)
+      else Ok (None, fun (_ : Keeper_chat_store_line_decode.parsed_line) -> true)
+    in
+    let* part = seg_read ~keep ?preloaded_non_chat:held_non_chat ~first held starts budget in
     let kept, ends = ending take part.entries in
     let entries = first_entries kept part.entries in
     Ok

@@ -560,6 +560,48 @@ let test_supersedes_cannot_ride_a_source_bound_claim () =
   | Runtime.Memory_write_ok _ -> Alcotest.fail "supersedes with source_path was accepted"
 ;;
 
+(* What a supersede took out is found by source=absorbed, named with the
+   claim that took its place. source=all leaves it out when that claim
+   answers the same search, and keeps it when only the old claim does. *)
+let test_search_finds_what_a_supersede_took_out () =
+  with_env
+  @@ fun env ->
+  let meta = make_meta "supersede-search" in
+  let first_id = seed env meta "harbor window: monday" in
+  let second = write env meta ~supersedes:first_id "harbor window: tuesday" in
+  check_ok "superseding write" second;
+  let second_id = string_field "memory_id" second in
+  let search source query =
+    Runtime.keeper_memory_search_json
+      ~config:env.config
+      ~meta
+      ~ctx_work:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
+      ~args:(`Assoc [ "query", `String query; "source", `String source; "limit", `Int 10 ])
+    |> Yojson.Safe.from_string
+  in
+  let matches response =
+    match json_field "matches" response with
+    | `List matches -> matches
+    | _ -> Alcotest.fail "expected a matches list"
+  in
+  (match matches (search "absorbed" "harbor window") with
+   | [ absorbed ] ->
+     Alcotest.(check string) "the fact that left" first_id (string_field "memory_id" absorbed);
+     Alcotest.(check string) "how it left" "superseded" (string_field "how" absorbed);
+     Alcotest.(check string) "where it went" second_id (string_field "into" absorbed);
+     Alcotest.(check bool) "which is current" true
+       (json_field "into_current" absorbed = `Bool true)
+   | _ -> Alcotest.fail "expected the superseded fact alone");
+  Alcotest.(check (list string))
+    "the claim that took its place answers, so all leaves the old one out"
+    [ "harbor window: tuesday" ]
+    (List.map (string_field "text") (matches (search "all" "harbor window")));
+  Alcotest.(check (list string))
+    "a query only the old claim answers keeps it"
+    [ "harbor window: monday" ]
+    (List.map (string_field "text") (matches (search "all" "monday")))
+;;
+
 let () =
   let case name body =
     Alcotest.test_case name `Quick (Masc_test_deps.Memory_tool_case.run body)
@@ -583,6 +625,7 @@ let () =
             test_a_librarian_fact_is_superseded_like_the_keepers_own
         ; case "a target that already left" test_a_target_that_already_left
         ; case "search names each current match's origin" test_search_names_each_current_match_origin
+        ; case "search finds what a supersede took out" test_search_finds_what_a_supersede_took_out
         ; case "cannot ride a source-bound claim" test_supersedes_cannot_ride_a_source_bound_claim
         ] )
     ]

@@ -22,12 +22,14 @@ original basis; current facts include exact memory_id, category and origin \
 ordinary ones last_seen (latest re-observation), in UTC ISO 8601. \
 Use a memory_id as a derived \
 conclusion's premise_id only for store='current_memory_snapshot'. \
-source='absorbed' finds facts merged into a newer claim: into is the claim \
-now holding it; into_current=false if not current. source='dropped' retrieves \
-historical removed claims with reasons from the journal; these are not current \
-facts. Check the reason and original evidence before using or writing a new \
-current claim. Search never restores memory. Pending removal finalization is \
-reported as a read failure until a writer recovers it; older journal gaps may remain."""
+source='absorbed' finds facts that left for another fact (how: merged, revised \
+or superseded): into is the claim now holding it; into_current=false if not \
+current. source='dropped' retrieves removed claims that nothing replaced, with \
+the removal and its reason; these are not current facts. Check the reason and \
+original evidence before using or writing a new current claim. Search never \
+restores memory. Both read the Memory commit log: a fact removed before the \
+log started is not there, and memory_log_unreadable_lines means an empty \
+answer is not proof."""
 additional_properties = false
 
 [[params]]
@@ -50,7 +52,7 @@ enum = ["current", "absorbed", "dropped", "history", "all"]
 description = """
 Search scope: current (default, ordinary and source-bound current facts), \
 absorbed (facts \
-merged into a newer claim), dropped (historical removed claims), history (raw messages), or all"""
+that left for another fact), dropped (removed claims nothing replaced), history (raw messages), or all"""
 
 [[params]]
 name = "cursor"

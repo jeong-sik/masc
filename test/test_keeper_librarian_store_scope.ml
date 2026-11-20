@@ -420,8 +420,11 @@ let test_act_route_and_requests () =
     match Act.parse body with
     | Ok Resume -> "resume"
     | Ok (Adopt { observed }) -> "adopt " ^ hex observed
+    | Ok (Restart_reading { observed }) ->
+      "restart " ^ Masc.Keeper_turn_log.Log_id.to_string observed
     | Error (_ : string) -> "refused"
   in
+  let log_id = String.make 32 'e' in
   check string "resume" "resume" (parsed {|{"action":"resume"}|});
   check string "adopt names the snapshot" ("adopt " ^ hex digest)
     (parsed (Printf.sprintf {|{"action":"adopt","observed":"%s"}|} (hex digest)));
@@ -431,7 +434,63 @@ let test_act_route_and_requests () =
   check string "resume with another field" "refused"
     (parsed (Printf.sprintf {|{"action":"resume","observed":"%s"}|} (hex digest)));
   check string "another action" "refused" (parsed {|{"action":"skip"}|});
-  check string "not JSON" "refused" (parsed "resume")
+  check string "not JSON" "refused" (parsed "resume");
+  check string "a restart names the turn log" ("restart " ^ log_id)
+    (parsed (Printf.sprintf {|{"observed":"%s","action":"restart_reading"}|} log_id));
+  check string "a restart without one" "refused" (parsed {|{"action":"restart_reading"}|});
+  check string "a turn log id that is not one" "refused"
+    (parsed {|{"action":"restart_reading","observed":"abc"}|})
+;;
+
+(* The Keeper's turn log is replaced from outside. Reading stands in the old
+   one, and the operator restarts it on the file that is there now. *)
+let test_operator_restarts_reading () =
+  with_workspace @@ fun a ->
+  Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.ensure_memory_writer ~sw ~config:a keeper_name;
+  let act action = Act.act ~base_path:a.base_path ~keeper:keeper_name ~actor:"operator-1" action in
+  let turns_path =
+    Masc.Keeper_turn_log_store.path_for_keepers_dir
+      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:a.base_path)
+      ~keeper_id:keeper_name
+  in
+  let start =
+    match Masc.Keeper_turn_log_store.read_start turns_path with
+    | Ok (Some start) -> start
+    | Ok None | Error (_ : Masc.Keeper_turn_log_store.read_error) -> fail "the Keeper has no turn log"
+  in
+  let replaced =
+    match Masc.Keeper_turn_log.Log_id.of_string (String.make 32 'e') with
+    | Some id -> id
+    | None -> fail "the test log id is not 32 hexadecimal characters"
+  in
+  check string "the file reading stands in" "refused: not replaced"
+    (act_text (act (Restart_reading { observed = start.id })));
+  Sys.remove turns_path;
+  (match
+     Masc.Keeper_turn_log_store.append ~path:turns_path ~at_end:0
+       (Log_started { id = replaced; at = start.at +. 1.0; mark = start.mark }, [])
+   with
+   | Ok (_ : Masc.Keeper_turn_log_store.appended) -> ()
+   | Error (_ : Masc.Keeper_turn_log_store.append_error) -> fail "the new turn log was not written");
+  check string "an id the file does not name" "refused: not replaced"
+    (act_text (act (Restart_reading { observed = start.id })));
+  let before = List.length (commits a) in
+  check string "the id the file names" "open"
+    (act_text (act (Restart_reading { observed = replaced })));
+  (match List.rev (commits a) with
+   | last_line :: _ ->
+     (match last_line.cause with
+      | Skip { hole = Turn_log_replaced { from; to_ } } ->
+        check (pair string string) "the line names both files"
+          (Masc.Keeper_turn_log.Log_id.to_string start.id, String.make 32 'e')
+          (Masc.Keeper_turn_log.Log_id.to_string from, Masc.Keeper_turn_log.Log_id.to_string to_);
+        check int "and reads the new one from its first line" 0 last_line.turn_log_offset
+      | Direct _ | Read _ | Make_room _ | Adopt _ | Skip _ -> fail "the last commit line is not the restart")
+   | [] -> fail "nothing was committed");
+  check int "one line was appended" (before + 1) (List.length (commits a));
+  check string "the file it now reads" "refused: not replaced"
+    (act_text (act (Restart_reading { observed = replaced })))
 ;;
 
 (* The snapshot is replaced from outside by one the commit log does not
@@ -529,6 +588,8 @@ let () =
         ; test_case "purge ends the Memory writer first" `Quick
             test_purge_ends_the_memory_writer_first
         ; test_case "the operator's act route and its requests" `Quick test_act_route_and_requests
+        ; test_case "an operator restarts reading on a replaced turn log" `Quick
+            test_operator_restarts_reading
         ; test_case "an operator resumes and adopts a stopped store" `Quick
             test_operator_resumes_and_adopts
         ; test_case "an operator's action in a process without writers" `Quick

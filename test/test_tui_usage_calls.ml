@@ -154,6 +154,81 @@ let test_answers_that_do_not_fit_the_window_are_refused () =
     ]
 ;;
 
+let test_calls_lines_use_section_rule_heading_and_stay_bounded () =
+  let day_series = series ~width:Series.Series_day ~offset:0 ~step:day ~count:8 in
+  let calls = kept_exn Calls.Last_week day_series in
+  let wide = Calls.lines ~ko:true ~width:80 ~rows:20 calls in
+  check bool "wide Calls heading starts cleanly and keeps section rule and timestamp" true
+    (match wide with
+     | hd :: _ -> String.contains hd ':' && String.length hd > 10
+     | [] -> false);
+  let empty_active =
+    { day_series with
+      tsr_buckets =
+        List.mapi
+          (fun idx (b : Series.tool_series_bucket) ->
+            if idx < 7 then b
+            else
+              { b with
+                tsb_activity =
+                  Series.Series_active
+                    { tsc_calls = 12
+                    ; tsc_failures = 3
+                    ; tsc_deferred = 0
+                    ; tsc_p95_ms = 42.0
+                    }
+              })
+          day_series.tsr_buckets
+    }
+  in
+  let active_calls = kept_exn Calls.Last_week empty_active in
+  let wide_active = Calls.lines ~ko:true ~width:80 ~rows:20 active_calls in
+  let contains_sub hay needle =
+    let hlen = String.length hay and nlen = String.length needle in
+    if nlen = 0 then true
+    else if nlen > hlen then false
+    else
+      let rec check i =
+        if i + nlen > hlen then false
+        else if String.sub hay i nlen = needle then true
+        else check (i + 1)
+      in
+      check 0
+  in
+  check bool "wide active heading renders hairline section rule and timestamp badge" true
+    (match wide_active with
+     | hd :: _ -> contains_sub hd "\xe2\x94\x80" && contains_sub hd "기준"
+     | [] -> false);
+  let has_braille s =
+    let len = String.length s in
+    let rec loop i =
+      if i + 2 >= len then false
+      else if s.[i] = '\xe2' then
+        let b1 = Char.code s.[i + 1] and b2 = Char.code s.[i + 2] in
+        if (b1 = 0xa0 && b2 > 0x80) || (b1 >= 0xa1 && b1 <= 0xa3) then true
+        else loop (i + 1)
+      else loop (i + 1)
+    in
+    loop 0
+  in
+  let calls_curve_rows =
+    List.filter (fun row -> contains_sub row "호출" || has_braille row) wide_active
+  in
+  check bool "wide active Calls chart emits continuous multi-row Braille curve" true
+    (List.exists has_braille calls_curve_rows && List.length calls_curve_rows >= 3);
+  let tall_active = Calls.lines ~ko:true ~width:100 ~rows:30 active_calls in
+  let tall_curve_rows =
+    List.filter (fun row -> has_braille row) tall_active
+  in
+  check bool "tall active Calls chart uses 3-row continuous Braille waves" true
+    (List.length tall_curve_rows >= 3);
+  let narrow_active = Calls.lines ~ko:false ~width:24 ~rows:20 active_calls in
+  check bool "narrow active heading still preserves timestamp badge" true
+    (match narrow_active with
+     | hd :: _ -> contains_sub hd "as of"
+     | [] -> false)
+;;
+
 let () =
   run
     "Tui_usage_calls"
@@ -170,6 +245,8 @@ let () =
             test_the_partial_first_bucket_of_an_answer_is_dropped
         ; test_case "answers that do not fit the window are refused" `Quick
             test_answers_that_do_not_fit_the_window_are_refused
+        ; test_case "calls lines use section rule heading when wide and stay bounded when narrow" `Quick
+            test_calls_lines_use_section_rule_heading_and_stay_bounded
         ] )
     ]
 ;;

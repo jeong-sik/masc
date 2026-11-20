@@ -477,7 +477,29 @@ let test_trend_is_built_from_the_answer () =
   List.iter (fun width -> List.iter (fun line ->
     check bool "chart respects terminal cells" true
       (Masc_tui_message_layout.display_width line <= width))
-    (Masc_tui_usage_trend.plot ~width trend row)) [1; 20; 60]
+    (Masc_tui_usage_trend.plot ~width trend row)) [1; 20; 60];
+  (* Filled-area Braille: a 100% peak activates non-blank Braille dots across
+     all 5 bands down to the 20% band (U+2801..U+28FF, never only blank U+2800). *)
+  let percent_rows =
+    List.filter (fun line -> contains ~affix:"\xe2\x94\x82" line) plot
+  in
+  let has_non_blank_braille s =
+    let len = String.length s in
+    let rec loop i =
+      if i + 2 >= len then false
+      else if s.[i] = '\xe2' then
+        let b1 = Char.code s.[i + 1] and b2 = Char.code s.[i + 2] in
+        if (b1 = 0xa0 && b2 > 0x80) || (b1 >= 0xa1 && b1 <= 0xa3) then true
+        else loop (i + 1)
+      else loop (i + 1)
+    in
+    loop 0
+  in
+  check int "five braille bands from 100% down to 20%" 5 (List.length percent_rows);
+  check bool "lowest band (20%) has filled Braille dots under 100% peak" true
+    (match List.rev percent_rows with
+     | lowest :: _ -> has_non_blank_braille lowest
+     | [] -> false)
 
 let test_plan_history_preserves_out_of_range_reports () =
   let open Masc.Tui_decode_usage in

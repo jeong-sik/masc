@@ -30526,6 +30526,15 @@ Use relative paths for resources already held in the package. -->
                | Some "1" -> Section_fleet
                | Some "2" -> Section_resources
                | Some "3" | None | Some _ -> Section_tools)
+        | Some ("1" | "2" | "3" | "4") as section
+          when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_section <-
+              (match section with
+               | Some "1" -> Usage_plan
+               | Some "2" -> Usage_trend
+               | Some "3" -> Usage_keepers
+               | Some "4" | None | Some _ -> Usage_calls);
+            reset_metrics_scroll state
         | Some ("w" | "W")
           when state.view = Metrics && not state.usage_telemetry_open ->
             let needs = cycle_usage_history_window state in

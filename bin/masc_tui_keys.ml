@@ -691,6 +691,8 @@ let metrics_bindings =
       ~help:"on Plan: show or hide the group for reports at limit or observed exhaustion", Metrics_usage_sections [Usage_plan]
   ; b ~role:Moves ~ko:"보기" Navigate "v / V" "view"
       ~help:"cycle the Usage reading: Plan, Trend, Keepers, Calls; V goes back", Metrics_usage
+  ; b ~role:Moves ~ko:"사용량 섹션" Navigate "1 / 2 / 3 / 4" "Usage section"
+      ~help:"on Usage: 1 Plan, 2 Trend, 3 Keepers, 4 Calls", Metrics_usage
   ; b ~role:Acts ~ko:"1 / 7 / 14일" Navigate "w" "1d / 7d / 14d"
       ~help:"on Usage: cycle the exact UTC day window for provider report history and tool calls", Metrics_usage_sections [Usage_trend; Usage_calls]
   ; b ~role:Acts ~ko:"지표 선택" Navigate "1 / 2 / 3" "telemetry section"

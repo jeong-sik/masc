@@ -62,12 +62,12 @@ val compact : width:int -> row -> bool
 
 val plot : width:int -> t -> row -> string list
 (** A compact daily-level strip when the width cannot fit a full plot;
-    otherwise a five-row braille line plot over the fixed 0–100% scale, with
-    UTC day labels. Each cell draws a 2x4 dot matrix, so the scale has twenty
-    dot-levels. Consecutive reported days are joined; a missing report, an
-    empty report and an uncapped amount break the line and keep their
-    baseline marks, so a gap is never interpolated. Reported zero draws the
-    line along the bottom and 0 on the baseline. Values outside the scale
-    are clipped only for drawing and retain their original [sample.report];
-    an above-limit day keeps its up-arrow in the top row, a below-zero day
-    its down-arrow on the baseline. *)
+    otherwise a five-row filled-area braille curve over the fixed 0–100% scale,
+    with UTC day labels. Each cell draws a 2x4 dot matrix, so the scale has
+    twenty dot-levels. Consecutive reported days are joined and filled to the
+    0% baseline; a missing report, an empty report and an uncapped amount break
+    the curve and keep their baseline marks, so a gap is never interpolated or
+    filled. Reported zero draws along the bottom and 0 on the baseline. Values
+    outside the scale are clipped only for drawing and retain their original
+    [sample.report]; an above-limit day keeps its up-arrow in the top row, a
+    below-zero day its down-arrow on the baseline. *)

@@ -334,7 +334,12 @@ env_http_headers = { "X-Fixture" = "CUSTOM_GATEWAY_HEADER" }
                 check (option string) "declared header retains the admitted value"
                   (Some "declared-header-a") (env_value "CUSTOM_GATEWAY_HEADER" child);
                 check (option string) "undeclared custom key cannot enter the child"
-                  None (env_value "UNDECLARED_GATEWAY_KEY" child)
+                  None (env_value "UNDECLARED_GATEWAY_KEY" child);
+                check (list string) "the account says which names its home asked for"
+                  ["CUSTOM_GATEWAY_HEADER"; "CUSTOM_GATEWAY_KEY"]
+                  (Runtime_official_account.names_asked_by_the_home
+                     (Runtime_account_access.account
+                        (Masc_test_deps.authorized_account execution.account_home)))
               | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                 fail "expected Codex execution")))))))
 

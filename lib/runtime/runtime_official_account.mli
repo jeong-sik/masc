@@ -76,6 +76,13 @@ val source : 'client t -> source
     was given it. [None] for an account of {!capture}, which carries no key
     of a file. *)
 val key_file : 'client t -> string option
+
+(** The names of the environment variables the configuration of the home
+    asks for: [env_key] and [env_http_headers] of the providers in the
+    [config.toml] of a Codex home, sorted. {!capture} took the value of each
+    one the environment of the process has. A Claude Code home asks for
+    none. *)
+val names_asked_by_the_home : 'client t -> string list
 val environment : 'client t -> string array
 (** Return a fresh copy; mutation cannot change the captured selection. *)
 

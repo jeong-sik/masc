@@ -1200,6 +1200,32 @@ let test_only_a_gating_window_is_a_declared_limit () =
   check fill_t "an other-use window recedes with its row" Providers.Row_tone_fill
     (Providers.bar_fill Masc.Tui_decode_usage.Role_counts_other_use)
 
+let test_nonpositive_duration_minutes_rejected () =
+  List.iter
+    (fun bad_minutes ->
+       let json =
+         Yojson.Safe.from_string
+           (Printf.sprintf
+              {|{
+  "provider_usage_windows_since": 1790179140.2,
+  "provider_usage_windows": [
+    { "scope": "provider:codex", "scope_id": "id-codex", "providers": [{"id": "codex", "display_name": "Codex"}],
+      "state": "reported",
+      "windows": [
+        { "limit_id": null, "window": {"kind": "duration_minutes", "minutes": %d}, "role": "gates_model_calls",
+          "utilization": {"unit": "percent", "value": 10},
+          "resets_at": null, "observed_at": 1790180000.0,
+          "source": "codex.account_rate_limits_read" } ] }
+  ]
+}|}
+              bad_minutes)
+       in
+       check bool
+         (Printf.sprintf "duration_minutes=%d fails TUI decode" bad_minutes)
+         true
+         (Result.is_error (Masc.Tui_decode_usage.decode_provider_usage_windows json)))
+    [ 0; -5 ]
+
 let () =
   run "tui_overview_providers"
     [ ( "providers"
@@ -1257,5 +1283,7 @@ let () =
             test_hidden_limit_group_omits_entries
         ; test_case "only a gating window is a declared limit" `Quick
             test_only_a_gating_window_is_a_declared_limit
+        ; test_case "nonpositive duration_minutes is rejected" `Quick
+            test_nonpositive_duration_minutes_rejected
         ] )
     ]

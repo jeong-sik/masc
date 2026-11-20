@@ -612,6 +612,23 @@ let restart_leaves_out_rows_without_a_role () = fixture (fun config scope day ->
     (List.length (restored scope));
   check int "and is still read by the daily history" 1 (List.length (points config (day +. 60.))))
 
+let restart_rejects_nonpositive_duration_kinds () = fixture (fun config scope day ->
+  List.iteri
+    (fun idx (raw_kind, limit_id) ->
+      Dated_jsonl.append (usage_journal config) (`List [`Assoc [
+        "scope_id", `String (History.scope_id scope);
+        "source", `String (Usage.source_to_string Usage.Codex_account_rate_limits_updated);
+        "kind", `String raw_kind; "limit_id", limit_id;
+        "role", `String (Usage.window_role_to_string Usage.Gates_model_calls);
+        "observed_at", `Float (day +. 10. +. float_of_int idx); "resets_at", `Null;
+        "unit", `String "percent"; "value", `Int 42]]))
+    [ "duration_0m", `Null; "duration_-5m", `Null; "duration_90m", `String "valid-90m" ];
+  restore config ~now:(day +. 60.) [ scope ];
+  check (list (pair (option string) (float 0.)))
+    "zero or negative stored durations are rejected while valid sparse siblings survive"
+    [ Some "valid-90m", day +. 12. ]
+    (restored scope))
+
 let () = run "provider usage durable snapshots" ["history", [
   test_case "stored rows carry the window role" `Quick stored_rows_carry_the_window_role;
   test_case "a restart rests a scope only as a live report would" `Quick
@@ -624,6 +641,8 @@ let () = run "provider usage durable snapshots" ["history", [
     restart_puts_back_no_part_of_a_complete_report;
   test_case "a restart leaves out rows without a role" `Quick
     restart_leaves_out_rows_without_a_role;
+  test_case "a restart rejects nonpositive duration kinds" `Quick
+    restart_rejects_nonpositive_duration_kinds;
   test_case "damaged journal retains readable history through the typed decoder" `Quick
     damaged_journal_keeps_readable_history;
   test_case "legacy OpenRouter credit label retains history identity" `Quick

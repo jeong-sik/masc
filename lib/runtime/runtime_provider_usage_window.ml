@@ -27,7 +27,7 @@ type decode_error =
 let window_kind_to_string = function
   | Five_hour -> "5h"
   | Seven_day -> "7d"
-  | Duration_minutes minutes -> Printf.sprintf "%d minutes" minutes
+  | Duration_minutes minutes -> Printf.sprintf "%d minutes" (Positive_minutes.to_int minutes)
   | Provider_label label -> Printf.sprintf "label %S" label
 ;;
 
@@ -197,15 +197,24 @@ let decode_claude_rate_limit_event json =
   Ok { source = Claude_code_rate_limit_event; windows }
 ;;
 
+let greater_than_zero = "greater than 0"
+
+let positive_minutes ~path value =
+  match Positive_minutes.of_int value with
+  | Some mins -> Ok mins
+  | None -> Error (Unexpected_value { path; expected = greater_than_zero })
+;;
+
 (* Window lengths, in minutes, that have a name.  Codex states the length of
    each window; these are exact lengths, not ranges. *)
 let five_hour_minutes = 5 * 60
 let seven_day_minutes = 7 * 24 * 60
 
 let kind_of_minutes minutes =
-  if Int.equal minutes five_hour_minutes
+  let raw = Positive_minutes.to_int minutes in
+  if Int.equal raw five_hour_minutes
   then Five_hour
-  else if Int.equal minutes seven_day_minutes
+  else if Int.equal raw seven_day_minutes
   then Seven_day
   else Duration_minutes minutes
 ;;
@@ -230,7 +239,15 @@ let codex_window ~path ~limit_id ~slot fields =
         Error (Wrong_type { path = member_path path "usedPercent"; expected = "an integer" })
       | None -> Error (Missing_field { path = member_path path "usedPercent" })
     in
-    let* duration = optional_int ~path "windowDurationMins" window_fields in
+    let* raw_duration = optional_int ~path "windowDurationMins" window_fields in
+    let* duration =
+      match raw_duration with
+      | None -> Ok None
+      | Some minutes ->
+        Result.map
+          Option.some
+          (positive_minutes ~path:(member_path path "windowDurationMins") minutes)
+    in
     let* resets_at = optional_int ~path "resetsAt" window_fields in
     Ok
       (Some
@@ -435,8 +452,6 @@ let optional_object ~path name fields =
     Ok (Some (path, object_fields))
 ;;
 
-let greater_than_zero = "greater than 0"
-
 let positive_int ~path value =
   if value > 0
   then Ok value
@@ -472,7 +487,7 @@ let count_within_limit ~path ~limit value =
 let equal_window_kind left right =
   match left, right with
   | Five_hour, Five_hour | Seven_day, Seven_day -> true
-  | Duration_minutes a, Duration_minutes b -> Int.equal a b
+  | Duration_minutes a, Duration_minutes b -> Positive_minutes.equal a b
   | Provider_label a, Provider_label b -> String.equal a b
   | (Five_hour | Seven_day | Duration_minutes _ | Provider_label _), _ -> false
 ;;
@@ -643,10 +658,26 @@ let minutes_per_hour = 60
 let ms_per_second = 1000
 let percent_whole = 100
 
-let zai_window_kind ~unit ~number =
+let zai_window_kind ~path ~unit ~number =
   if Int.equal unit zai_unit_hours
-  then kind_of_minutes (number * minutes_per_hour)
-  else Provider_label (Printf.sprintf "%d x unit %d" number unit)
+  then
+    if number > max_int / minutes_per_hour
+    then
+      Error
+        (Unexpected_value
+           { path = member_path path "number"
+           ; expected = "a positive hour count"
+           })
+    else
+      match Positive_minutes.of_int (number * minutes_per_hour) with
+      | Some mins -> Ok (kind_of_minutes mins)
+      | None ->
+        Error
+          (Unexpected_value
+             { path = member_path path "number"
+             ; expected = "a positive hour count"
+             })
+  else Ok (Provider_label (Printf.sprintf "%d x unit %d" number unit))
 ;;
 
 (* Z.AI states what each row limits in [type]. TOKENS_LIMIT is the model
@@ -669,6 +700,7 @@ let zai_limit ~path json =
   let* unit = required_as int_at ~path "unit" fields in
   let* number = required_as int_at ~path "number" fields in
   let* number = positive_int ~path:(member_path path "number") number in
+  let* kind = zai_window_kind ~path ~unit ~number in
   let* percentage = required_as int_at ~path "percentage" fields in
   let* percentage =
     count_within_limit ~path:(member_path path "percentage") ~limit:percent_whole percentage
@@ -676,7 +708,7 @@ let zai_limit ~path json =
   let* next_reset_ms = optional_int ~path "nextResetTime" fields in
   Ok
     { limit_id = Some limit_type
-    ; kind = zai_window_kind ~unit ~number
+    ; kind
     ; role = zai_window_role limit_type
     ; utilization = Percent percentage
     ; resets_at = Option.map (fun ms -> ms / ms_per_second) next_reset_ms
@@ -782,7 +814,7 @@ let kimi_window_minutes ~path fields =
   if String.equal time_unit kimi_minute_unit
   then (
     let* duration = required_as int_at ~path "duration" window_fields in
-    positive_int ~path:(member_path path "duration") duration)
+    positive_minutes ~path:(member_path path "duration") duration)
   else
     Error (Unexpected_value { path = member_path path "timeUnit"; expected = kimi_minute_unit })
 ;;

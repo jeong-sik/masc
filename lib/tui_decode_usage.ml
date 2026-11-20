@@ -2,10 +2,12 @@ open Tui_decode_fields
 
 open Result.Syntax
 
+module Positive_minutes = Runtime_provider_usage_window.Positive_minutes
+
 type provider_usage_window_kind =
   | Window_five_hour
   | Window_seven_day
-  | Window_duration_minutes of int
+  | Window_duration_minutes of Positive_minutes.t
   | Window_provider_label of string
 
 type provider_usage_utilization =
@@ -66,7 +68,13 @@ let decode_provider_usage_window_kind json =
   | "seven_day" -> Ok Window_seven_day
   | "duration_minutes" ->
       let* minutes = required_int_field json "minutes" in
-      Ok (Window_duration_minutes minutes)
+      (match Positive_minutes.of_int minutes with
+       | Some positive -> Ok (Window_duration_minutes positive)
+       | None ->
+           Error
+             (Printf.sprintf
+                "usage window minutes must be greater than 0, got %d"
+                minutes))
   | "provider_label" ->
       let* label = required_string_field json "label" in
       Ok (Window_provider_label label)

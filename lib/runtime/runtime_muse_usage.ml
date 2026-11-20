@@ -39,26 +39,34 @@ let window ~kind ~used_percent ~resets_at_ms : Usage_window.window =
 let report origin (usage : Runtime_muse_msp.subscription_usage) =
   let rolling = usage.window in
   let weekly = usage.weekly in
-  match Usage_window.window_kind_of_minutes rolling.window_duration_mins with
-  | Usage_window.Seven_day ->
+  match Usage_window.Positive_minutes.of_int rolling.window_duration_mins with
+  | None ->
     Error
-      (Usage_window.Duplicate_window
-         { path = method_name origin; limit_id = None; kind = Usage_window.Seven_day })
-  | (Usage_window.Five_hour | Usage_window.Duration_minutes _ | Usage_window.Provider_label _)
-    as rolling_kind ->
-    Ok
-      { Usage_window.source = Usage_window.Muse_subscription_usage
-      ; windows =
-          [ window
-              ~kind:rolling_kind
-              ~used_percent:rolling.used_percent
-              ~resets_at_ms:rolling.resets_at_ms
-          ; window
-              ~kind:Usage_window.Seven_day
-              ~used_percent:weekly.weekly_used_percent
-              ~resets_at_ms:weekly.weekly_resets_at_ms
-          ]
-      }
+      (Usage_window.Unexpected_value
+         { path = method_name origin ^ ".window.windowDurationMins"
+         ; expected = "greater than 0"
+         })
+  | Some minutes ->
+    (match Usage_window.window_kind_of_minutes minutes with
+     | Usage_window.Seven_day ->
+       Error
+         (Usage_window.Duplicate_window
+            { path = method_name origin; limit_id = None; kind = Usage_window.Seven_day })
+     | (Usage_window.Five_hour | Usage_window.Duration_minutes _ | Usage_window.Provider_label _)
+       as rolling_kind ->
+       Ok
+         { Usage_window.source = Usage_window.Muse_subscription_usage
+         ; windows =
+             [ window
+                 ~kind:rolling_kind
+                 ~used_percent:rolling.used_percent
+                 ~resets_at_ms:rolling.resets_at_ms
+             ; window
+                 ~kind:Usage_window.Seven_day
+                 ~used_percent:weekly.weekly_used_percent
+                 ~resets_at_ms:weekly.weekly_resets_at_ms
+             ]
+         })
 ;;
 
 (* The rest comes first: recording ends in the durable history sink, which

@@ -9,7 +9,7 @@ let kind_rank = function
 
 let compare_kind left right =
   match left, right with
-  | Duration_minutes a, Duration_minutes b -> Int.compare a b
+  | Duration_minutes a, Duration_minutes b -> Positive_minutes.compare a b
   | Provider_label a, Provider_label b -> String.compare a b
   | (Five_hour | Seven_day | Duration_minutes _ | Provider_label _), _ ->
     Int.compare (kind_rank left) (kind_rank right)

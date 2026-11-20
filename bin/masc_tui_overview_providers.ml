@@ -278,7 +278,8 @@ let minutes_label minutes = Masc_tui_value.Interval.text (minutes * seconds_per_
 let kind_label = function
   | Masc.Tui_decode_usage.Window_five_hour -> "5h"
   | Masc.Tui_decode_usage.Window_seven_day -> "7d"
-  | Masc.Tui_decode_usage.Window_duration_minutes minutes -> minutes_label minutes
+  | Masc.Tui_decode_usage.Window_duration_minutes minutes ->
+      minutes_label (Masc.Tui_decode_usage.Positive_minutes.to_int minutes)
   | Masc.Tui_decode_usage.Window_provider_label label -> Terminal_text.single_line label
 
 let window_label (window : Masc.Tui_decode_usage.provider_usage_window) =

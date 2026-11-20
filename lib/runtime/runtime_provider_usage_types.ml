@@ -1,9 +1,18 @@
 (** Canonical immutable values shared by usage decoding and observation reduction. *)
 
+module Positive_minutes = struct
+  type t = int
+
+  let of_int n = if n > 0 then Some n else None
+  let to_int n = n
+  let equal = Int.equal
+  let compare = Int.compare
+end
+
 type window_kind =
   | Five_hour
   | Seven_day
-  | Duration_minutes of int
+  | Duration_minutes of Positive_minutes.t
   | Provider_label of string
 
 type utilization =

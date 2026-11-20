@@ -26,10 +26,19 @@
     or zero window.  There is no TTL and no sweeper: a report whose
     [resets_at] has passed stays until a newer report replaces it. *)
 
+module Positive_minutes : sig
+  type t = Runtime_provider_usage_types.Positive_minutes.t
+
+  val of_int : int -> t option
+  val to_int : t -> int
+  val equal : t -> t -> bool
+  val compare : t -> t -> int
+end
+
 type window_kind = Runtime_provider_usage_types.window_kind =
   | Five_hour
   | Seven_day
-  | Duration_minutes of int
+  | Duration_minutes of Positive_minutes.t
       (** Codex stated a window length that has no name here. *)
   | Provider_label of string
       (** The provider named the window with a label that has no name here
@@ -134,9 +143,10 @@ val source_of_string : string -> source option
 (** The source {!source_to_string} wrote this word for; [None] for any other
     word. *)
 
-val window_kind_of_minutes : int -> window_kind
-(** A window length stated in minutes: exactly 300 is {!Five_hour}, exactly
-    10080 is {!Seven_day}, any other length is {!Duration_minutes}. *)
+val window_kind_of_minutes : Positive_minutes.t -> window_kind
+(** A positive window length stated in minutes: exactly 300 is {!Five_hour},
+    exactly 10080 is {!Seven_day}, any other positive length is
+    {!Duration_minutes}. *)
 
 val window_role_to_string : window_role -> string
 (** The wire word for a role: ["gates_model_calls"], ["counts_other_use"]
@@ -151,10 +161,12 @@ val decode_claude_rate_limit_event : Yojson.Safe.t -> (report, decode_error) res
 val decode_codex_rate_limits_updated : Yojson.Safe.t -> (report, decode_error) result
 (** The [params] of an [account/rateLimits/updated] notification.  A null or
     absent [primary]/[secondary] means "no value in this update" and yields no
-    window, so the window already recorded stands.  [windowDurationMins] of
-    exactly 300 is {!Five_hour} and exactly 10080 is {!Seven_day}; another
-    length is {!Duration_minutes}; no length keeps the slot name as
-    {!Provider_label}. A [credits] object can also add a Credit row: unlimited
+    window, so the window already recorded stands.  When present,
+    [windowDurationMins] must be greater than 0: exactly 300 is {!Five_hour},
+    exactly 10080 is {!Seven_day}, any other positive length is
+    {!Duration_minutes}, and [<= 0] returns [Error (Unexpected_value _)]; no
+    length keeps the slot name as {!Provider_label}. A [credits] object can
+    also add a Credit row: unlimited
     is explicit, a finite [balance] is retained in credit units, and disabled
     or unavailable balances add no row. A [credits] object that is out of shape
     does not fail the decode: it counts as an unavailable balance and is

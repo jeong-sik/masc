@@ -8,7 +8,7 @@ let kind_json = function
   | Usage.Five_hour -> `String "five_hour"
   | Usage.Seven_day -> `String "seven_day"
   | Usage.Duration_minutes minutes ->
-      `String (Printf.sprintf "duration_%dm" minutes)
+      `String (Printf.sprintf "duration_%dm" (Usage.Positive_minutes.to_int minutes))
   | Usage.Provider_label label -> `String (provider_kind_prefix ^ label)
 
 (* The stored word back into the kind [kind_json] wrote it for. *)
@@ -17,9 +17,9 @@ let kind_of_stored kind =
   | "five_hour" -> Some Usage.Five_hour
   | "seven_day" -> Some Usage.Seven_day
   | _ ->
-      (match Scanf.sscanf_opt kind "duration_%dm%!" (fun minutes -> minutes) with
-       | Some minutes -> Some (Usage.Duration_minutes minutes)
-       | None ->
+      (match Scanf.sscanf_opt kind "duration_%dm%!" Usage.Positive_minutes.of_int with
+       | Some (Some minutes) -> Some (Usage.Duration_minutes minutes)
+       | Some None | None ->
            if String.starts_with ~prefix:provider_kind_prefix kind then
              let from = String.length provider_kind_prefix in
              Some (Usage.Provider_label (String.sub kind from (String.length kind - from)))

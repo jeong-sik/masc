@@ -288,7 +288,10 @@ let usage_window_kind_json : Usage.window_kind -> Yojson.Safe.t = function
   | Five_hour -> `Assoc [ "kind", `String "five_hour" ]
   | Seven_day -> `Assoc [ "kind", `String "seven_day" ]
   | Duration_minutes minutes ->
-    `Assoc [ "kind", `String "duration_minutes"; "minutes", `Int minutes ]
+    `Assoc
+      [ "kind", `String "duration_minutes"
+      ; "minutes", `Int (Usage.Positive_minutes.to_int minutes)
+      ]
   | Provider_label label -> `Assoc [ "kind", `String "provider_label"; "label", `String label ]
 ;;
 

@@ -1207,37 +1207,22 @@ let test_the_seed_decides_the_range () =
        (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
 
 let test_a_later_librarian_position_decides_the_range () =
-  check (list int) "the Librarian's read position is past the seed" (from 62)
+  check (list int) "the writer's read end is past the seed" (from 62)
     (carried ~carried_front_seed:(seed_at 50)
-       ~librarian_front:(fun _ ->
-         Ok ((Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 62 })))
+       ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 62; working_state = None })
        (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
 
 (* A response accepted no prior history, but the next request can retain the
-   Librarian's fitting summary and its separately delivered current goal. The
+   writer's fitting working state and its separately delivered current goal. The
    summary must not resurrect the omitted final atom or bypass a real ceiling. *)
 let test_empty_history_keeps_a_fitting_summary () =
   with_fixture @@ fun ~run ~capture ~reports ->
-  let trace_id = "accepted-empty-summary" in
   let summary_marker = "KEEP_CONTINUITY_WITHOUT_OLD_ATOMS" in
   let working_state = summary_marker ^ ": prior work is complete." in
-  let position = match Keeper_turn_boundaries.position_of_messages large_history with
-    | Ok position -> position | Error detail -> fail detail in
-  let lines = [ 1, Ok
-    { Keeper_turn_boundaries.recorded_at = 1.
-    ; event = Keeper_turn_boundaries.Turn_ended
-        { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1
-        ; history_at_start = Fresh_history; position }
-    } ] in
-  let snapshot = match Librarian_continuity_snapshot.capture ~unread_messages:[]
-    ~trace_id ~lines ~messages:large_history ~working_state with
-    | Ok snapshot -> snapshot
-    | Error error -> fail (Librarian_continuity_snapshot.error_to_string error) in
-  let librarian_front messages =
-    (match Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot with
-     | Ok _ -> ()
-     | Error error -> fail (Librarian_continuity_snapshot.error_to_string error));
-    Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+  let librarian_front =
+    Keeper_turn_driver_try_provider.Covered
+      { Keeper_turn_driver_try_provider.end_atom = snd (Runtime_model_input_tail_window.annotate large_history)
+      ; working_state = Some working_state }
   in
   let seed : Keeper_carried_front.seed =
     { first_atom = 64
@@ -1309,13 +1294,12 @@ let test_an_unknown_turn_start_carries_the_newest_atom () =
     (carried (Keeper_carried_front.Turn_boundary_unknown { reason = "fixture" }))
 
 let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
-  let seed_reads = ref 0 and librarian_reads = ref 0 in
+  let seed_reads = ref 0 in
   let evidence = large_history in
   let sent = Keeper_codex_runtime.For_testing.carried_projection
       ~input_source:Masc.Keeper_request_source.Completion_review ~capacity_bytes:1
       ~carried_front_seed:(fun () -> incr seed_reads; (seed_at 60) ())
-      ~librarian_front:(fun _ -> incr librarian_reads;
-        Error (Agent_core.Error.Internal "completion evidence has no Keeper continuity"))
+      ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 62; working_state = Some "Earlier work." })
       ~turn_start:(Keeper_carried_front.Turn_boundary_unknown { reason = "program-owned completion evidence" })
       ~keeper_name:"completion-review-fixture" ~runtime_id:"codex.context" evidence
     |> Result.map_error Agent_core.Error.to_string
@@ -1324,8 +1308,7 @@ let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   check bool "Codex receives the exact full evidence, despite a tiny capacity" true
     (List.map Agent_core.Checkpoint.message_to_json sent
      = List.map Agent_core.Checkpoint.message_to_json evidence);
-  check int "the native completion review does not read a Keeper seed" 0 !seed_reads;
-  check int "the native completion review does not query the Librarian" 0 !librarian_reads
+  check int "the native completion review does not read a Keeper seed" 0 !seed_reads
 
 let test_completion_evidence_reaches_native_writer ~custom_projection () =
   with_fixture @@ fun ~run ~capture ~reports:_ ->
@@ -1341,7 +1324,7 @@ let test_completion_evidence_reaches_native_writer ~custom_projection () =
     ?model_input_projection ~initial_messages:evidence
     ~turn_start:(Keeper_carried_front.Turn_boundary_unknown {reason="independent completion evidence"})
     ~carried_front_seed:(fun () -> fail "completion evidence read a Keeper seed")
-    ~librarian_front:(fun _ -> fail "completion evidence queried the Librarian")
+    ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 1; working_state = Some "Earlier work." })
     ~instructions:"Review the supplied evidence." ~world:"" ());
   let rows = read_requests capture in
   let injected = match params_of "thread/inject_items" rows with
@@ -1437,7 +1420,7 @@ let argument_fixture capture =
   let source () = Keeper_official_client_host.create_argument_source
     ~base_path ~keeper_name:"context-fixture"
     ~seed:(Some seed) ~replay_prefix ~turn_start:boundary in
-  let librarian_front _ = Ok ((Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})) in
+  let librarian_front = Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 1; working_state = None } in
   old,current,history,boundary,source,librarian_front,argument_reader base_path
 
 let test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume () =

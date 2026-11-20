@@ -4547,6 +4547,11 @@
   masc_tui_message_layout))
 
 (test
+ (name test_tui_growing_text)
+ (modules test_tui_growing_text)
+ (libraries alcotest masc_tui_growing_text masc_tui_keeper_chat_projection))
+
+(test
  (name test_tui_markdown_render_cache)
  (modules test_tui_markdown_render_cache)
  (libraries alcotest masc_tui_markdown masc_tui_markdown_render_cache))

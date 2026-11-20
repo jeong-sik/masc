@@ -1215,6 +1215,12 @@
  (libraries masc_tui_markdown masc_tui_link_preview masc_tui_message_layout masc_tui_theme uucp))
 
 (library
+ (name masc_tui_growing_text)
+ (wrapped false)
+ (modules masc_tui_growing_text)
+ (libraries masc.agent_core.digest masc_tui_keeper_chat_projection))
+
+(library
  (name masc_tui_markdown_render_cache)
  (wrapped false)
  (modules masc_tui_markdown_render_cache)

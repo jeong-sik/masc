@@ -76,16 +76,18 @@ type cause_kind =
   | Kind_direct
   | Kind_adopt
   | Kind_read
+  | Kind_make_room
   | Kind_skip
 
 let cause_kind_token = function
   | Kind_direct -> "direct"
   | Kind_adopt -> "adopt"
   | Kind_read -> "read"
+  | Kind_make_room -> "make_room"
   | Kind_skip -> "skip"
 ;;
 
-let cause_kinds = [ Kind_direct; Kind_adopt; Kind_read; Kind_skip ]
+let cause_kinds = [ Kind_direct; Kind_adopt; Kind_read; Kind_make_room; Kind_skip ]
 
 type shown_kind =
   | Kind_shown_memory
@@ -238,6 +240,7 @@ type why_kind =
   | Kind_source_outside_question
   | Kind_removed_during_flight
   | Kind_not_valid_alone
+  | Kind_not_valid_in_room
   | Kind_successor_unsupported
 
 let why_kind_of : Effects.why_not -> why_kind = function
@@ -246,6 +249,7 @@ let why_kind_of : Effects.why_not -> why_kind = function
   | Source_outside_question -> Kind_source_outside_question
   | Removed_during_flight { seq = (_ : int) } -> Kind_removed_during_flight
   | Not_valid_alone -> Kind_not_valid_alone
+  | Not_valid_in_room -> Kind_not_valid_in_room
   | Successor_unsupported -> Kind_successor_unsupported
 ;;
 
@@ -256,6 +260,7 @@ let why_kind_token = function
   | Kind_source_outside_question -> Effects.why_not_kind Source_outside_question
   | Kind_removed_during_flight -> Effects.why_not_kind (Removed_during_flight { seq = 0 })
   | Kind_not_valid_alone -> Effects.why_not_kind Not_valid_alone
+  | Kind_not_valid_in_room -> Effects.why_not_kind Not_valid_in_room
   | Kind_successor_unsupported -> Effects.why_not_kind Successor_unsupported
 ;;
 
@@ -265,6 +270,7 @@ let why_kinds =
   ; Kind_source_outside_question
   ; Kind_removed_during_flight
   ; Kind_not_valid_alone
+  ; Kind_not_valid_in_room
   ; Kind_successor_unsupported
   ]
 ;;
@@ -371,6 +377,13 @@ let cause_to_json = function
       ; f_trace, `String trace
       ; f_missing, missing_to_json missing
       ]
+  | Make_room { question; slot; trace } ->
+    `Assoc
+      [ kind (cause_kind_token Kind_make_room)
+      ; f_question, question_to_json question
+      ; f_slot, `String slot
+      ; f_trace, `String trace
+      ]
   | Skip { hole } -> `Assoc [ kind (cause_kind_token Kind_skip); f_hole, hole_to_json hole ]
 ;;
 
@@ -414,7 +427,7 @@ let why_to_json (why : Effects.why_not) =
   let token = kind (why_kind_token (why_kind_of why)) in
   match why with
   | Removed_during_flight { seq } -> `Assoc [ token; f_seq, `Int seq ]
-  | Unknown_ref | Ref_used_twice | Source_outside_question | Not_valid_alone
+  | Unknown_ref | Ref_used_twice | Source_outside_question | Not_valid_alone | Not_valid_in_room
   | Successor_unsupported -> `Assoc [ token ]
 ;;
 
@@ -686,6 +699,12 @@ let cause_of_json json =
     let* trace = wire_string_field f_trace fields in
     let* missing = list_field f_missing fields missing_at_of_json in
     Ok (Read { question; shown; slot; trace; missing })
+  | Kind_make_room ->
+    let* () = exact_field_names_result [ f_kind; f_question; f_slot; f_trace ] fields in
+    let* question = object_field f_question fields question_of_json in
+    let* slot = wire_string_field f_slot fields in
+    let* trace = wire_string_field f_trace fields in
+    Ok (Make_room { question; slot; trace })
   | Kind_skip ->
     let* () = exact_field_names_result [ f_kind; f_hole ] fields in
     let* hole = object_field f_hole fields hole_of_json in
@@ -763,6 +782,7 @@ let why_of_json json : (Effects.why_not, wire_error) result =
   | Kind_ref_used_twice -> alone Effects.Ref_used_twice
   | Kind_source_outside_question -> alone Effects.Source_outside_question
   | Kind_not_valid_alone -> alone Effects.Not_valid_alone
+  | Kind_not_valid_in_room -> alone Effects.Not_valid_in_room
   | Kind_successor_unsupported -> alone Effects.Successor_unsupported
   | Kind_removed_during_flight ->
     let* () = exact_field_names_result [ f_kind; f_seq ] fields in

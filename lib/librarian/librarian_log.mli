@@ -80,6 +80,19 @@ type cause =
       ; missing : Librarian_unit.missing_at list
       (** What the question could not show of the units it read. *)
       }
+  | Make_room of
+      { question : Librarian_question_id.t
+      ; slot : string (** The id of the slot that answered. *)
+      ; trace : string
+      (** The trace of the item read alone just before. A fact the answer
+          merges or revises into carries it as its origin, and the snapshot
+          the commit leaves names it. *)
+      }
+  (** An answer to the question that showed Memory and the working state and
+      no unit, asked right after an item was read alone (§7.4). It does not
+      move reading, so the line's [covers_through] is where that item ended.
+      Only an answer that changes the snapshot or the working state is
+      committed. *)
   | Skip of { hole : hole }
 
 type commit =

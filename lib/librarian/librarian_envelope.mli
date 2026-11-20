@@ -36,14 +36,18 @@ type refusal =
   (** The snapshot codec does not write the result: a fact said to have lost
       its support names no premise it lacks, or names them out of order. *)
 
+(** Effects that add, see or remove a fact: the snapshot's bytes change. The
+    rest of an answer's effects is the line's. *)
+val changes_facts : Librarian_effects.t -> bool
+
 (** What a cause does to the snapshot, before its line exists. A direct write
     rewrites it: the facts are {!Librarian_effects.apply} of the effects, the
     revision is the one after [previous]'s, it was updated at [at], and its
     source is the write ([explicit_retract] for a retraction,
-    [explicit_write] otherwise) on the trace the cause carries. An answer
-    rewrites it the same way with [librarian] as the source's kind, when its
-    effects add, see or remove a fact; an answer that does none of these
-    leaves the bytes. A skip and an adoption leave the bytes. Never
+    [explicit_write] otherwise) on the trace the cause carries. An answer, to
+    a reading question or to making room, rewrites it the same way with
+    [librarian] as the source's kind, when its effects add, see or remove a
+    fact; an answer that does none of these leaves the bytes. A skip and an adoption leave the bytes. Never
     [Revision_not_next]. *)
 val next
   :  previous:Current.t

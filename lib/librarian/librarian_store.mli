@@ -135,6 +135,29 @@ val commit_read
   -> Librarian_plan.t
   -> committed
 
+(** Commits an answer to the question that makes room (§7.4, §8.4), in the
+    steps of {!commit_direct}. The line does not move reading: it carries the
+    last line's reading position, so [covers_through] is where the item read
+    alone ended. Its working state is the plan's as {!commit_read} takes it.
+    The cause is a [Make_room] of the question's id and trace, by [slot].
+    Effects that add, see or remove a fact rewrite the snapshot with
+    [librarian] as its source on [question.trace]. The writer commits only a
+    plan that {!changes}. *)
+val commit_room
+  :  t
+  -> at:float
+  -> question:Librarian_room_result.question
+  -> slot:string
+  -> Librarian_plan.t
+  -> committed
+
+(** Whether committing [plan] without moving reading changes anything: its
+    effects add, see or remove a fact, or its working state is not the one
+    the last line holds. [""] and no working state are the same: both hold
+    none. An op that was not applied is no change: only an answer with an
+    op that takes effect is committed (§7.4). *)
+val changes : t -> Librarian_plan.t -> bool
+
 (** Passes [hole] with no answer, in the steps of {!commit_direct}: the line
     moves reading to [reach] as {!commit_read} does, has no effects, keeps
     the working state, and leaves the snapshot: [after] is [basis]. *)

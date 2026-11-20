@@ -44,6 +44,11 @@ type cause =
       ; trace : string
       ; missing : Librarian_unit.missing_at list
       }
+  | Make_room of
+      { question : Librarian_question_id.t
+      ; slot : string
+      ; trace : string
+      }
   | Skip of { hole : hole }
 
 type commit =

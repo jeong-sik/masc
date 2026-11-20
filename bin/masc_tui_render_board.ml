@@ -439,7 +439,11 @@ let board_hearth_census_line ~cols (state : state) =
       let tail =
         Printf.sprintf "   %s" (count_reading state Masc_tui_value.Count.Post total)
       in
-      let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
+      (* Hearths cut off at the row's end: a cut-off count, never "+N"
+         (RFC tui-one-screen-grammar 6.3). *)
+      let dropped_note count =
+        census_separator
+        ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) count in
       let label_gap = " " in
       let label=match status with
         | None -> words "게시판" "hearths"

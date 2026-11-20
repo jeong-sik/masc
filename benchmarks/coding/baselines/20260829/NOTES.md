@@ -1,4 +1,4 @@
-# Coding-outcome baseline — 2026-08-29 (RFC-0396 W2 smoke)
+# Coding-outcome baseline — 2026-08-29 (smoke)
 
 > Superseded the same day: the 0/2 below turned out to measure the approval
 > gate, not the model — see [`../20260829-ungated`](../20260829-ungated/NOTES.md)
@@ -7,8 +7,7 @@
 
 First live collection through `scripts/harness_coding_eval.sh`. One case
 (`l1-calc-add`, L1 single-file bug fix), n=2, local Ollama, isolated server
-per invocation. The pass verdict is the case verify script's exit code
-(RFC-0396 D2).
+per invocation. The pass verdict is the case verify script's exit code.
 
 ## Configuration
 
@@ -46,14 +45,14 @@ Interpretation: the LLM round-trip is ~2s, so ~180s per round lives in the
 agent loop between rounds — an apparent wait/backoff when the round output
 does not parse into a tool call. That loop behavior is masc's, not the
 harness's, and is filed as **#31640**. The 17.9k-token keeper prompt is the
-other measured cost driver, which makes RFC-0389-style per-keeper tool-surface
+other measured cost driver, which makes per-keeper tool-surface
 reduction a measurable improvement for this suite.
 
 ## Reading these numbers
 
 This is the honest starting line the corpus exists to draw: with today's
 keeper surface and a local model, even an L1 one-line fix does not complete.
-Tool-improvement PRs (RFC-0396 D6) and #31640 get judged against exactly this
+Tool-improvement PRs and #31640 get judged against exactly this
 report shape — same case, same command, before/after.
 
 ```bash

@@ -1,4 +1,4 @@
-# Coding-outcome baseline, ungated — 2026-08-29 (RFC-0396 W2 complete)
+# Coding-outcome baseline, ungated — 2026-08-29
 
 Same case, same model, same command as [`../20260829`](../20260829/NOTES.md) —
 the only change is that the harness now answers the approval surfaces an
@@ -9,8 +9,8 @@ both episodes starving at the 900s budget; the mechanism landed as #31640.
 
 **pass@1 = 1.00 over n=2 (`min_runs_met=false` — below the n≥5 gate).**
 Both episodes completed and verified green: 117s (8 tool calls) and 95s
-(5 tool calls). The first run's tool sequence carried a live specimen of the
-RFC-0396 D6-1 target: `Edit` missed its `old_string`, the keeper re-`Read`
+(5 tool calls). The first run's tool sequence carried a live specimen of an
+edit miss: `Edit` missed its `old_string`, the keeper re-`Read`
 the file, and the second `Edit` landed — recovery exactly along the path the
 current error message suggests.
 

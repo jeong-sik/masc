@@ -1,6 +1,6 @@
 # Coding-outcome baseline, W3 corpus — 2026-08-29
 
-First collection over the expanded corpus (RFC-0396 W3): 7 cases across
+First collection over the expanded corpus: 7 cases across
 three levels and three languages, docker substrate, `ollama:qwen3:8b`.
 L1 collected at n=5 (the RFC's "fill n≥5 from L1 first"); L2/L3 at n=2
 smoke depth, honestly below the `min_runs_met` gate.
@@ -37,9 +37,9 @@ Tool calls across all 23 episodes:
 
 - **Edit misses run at 30%** (7/23 calls) and several episodes fall back to
   whole-file `Write` after an Edit miss — the measured justification for
-  RFC-0396 D6-1 (edit failure diagnostics). Read misses run at 34%, almost
-  all relative-path probing before the model finds the workspace — the same
-  number D6-4 (navigation/outline) starts from.
+  edit failure diagnostics. Read misses run at 34%, almost
+  all relative-path probing before the model finds the workspace — the
+  number navigation and outline tooling starts from.
 - **Fix-a-bug is harder than write-from-spec at this model size**: both L2
   implement-a-function cases outscore two of the three L1 bug fixes. The
   worst case, l1-bash-classify (0/5), is instructive: the model flipped the

@@ -809,10 +809,42 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
     | Vertex_gemini_api), false -> Ok ()
 ;;
 
+(* The lifetime a binding declares for the cache breakpoints its requests
+   write. Only the Messages wire writes [cache_control], and an endpoint that
+   speaks it accepts the one-hour [ttl] only when its catalog provider row
+   documents it. [Ok] carries whether requests ask for that lifetime. *)
+let validate_cache_retention (provider : Runtime_schema.provider)
+    ~(model_id : string) ~supports_extended_cache_ttl
+    ~(cache_retention : Runtime_schema.cache_retention option) =
+  match cache_retention, provider.api_format with
+  | None, _ -> Ok false
+  | Some retention, Runtime_schema.Messages_api ->
+    (match supports_extended_cache_ttl with
+     | true ->
+       Ok
+         (match retention with
+          | Runtime_schema.One_hour -> true
+          | Runtime_schema.Five_minutes -> false)
+     | false ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares cache-retention = %S, but provider %S has no catalog-declared extended cache TTL contract"
+            provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.id))
+  | Some retention,
+    ( Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api
+    | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
+    | Muse_serve_runtime | Vibe_cli_runtime ) ->
+    Error
+      (Printf.sprintf
+         "binding %s.%s declares cache-retention = %S, but protocol %s cannot carry that request policy"
+         provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.protocol)
+;;
+
 let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num_ctx ?repeat_penalty
     ?max_tokens
     ?repeat_last_n ?return_progress
     ?max_concurrent_requests
+    ?cache_retention
     ~declarations
     ~disable_parallel_tool_use
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
@@ -837,6 +869,10 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
       ~supports_parallel_tool_suppression:(Declarations.supports_parallel_tool_suppression
         declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
       ~disable_parallel_tool_use in
+  let* cache_extended_ttl = validate_cache_retention provider ~model_id:spec.id
+      ~supports_extended_cache_ttl:(Declarations.supports_extended_cache_ttl
+        declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
+      ~cache_retention in
   let* declaration =
     Result.map_error (catalog_row_refusal_text provider) (catalog_declaration declarations provider)
   in
@@ -926,6 +962,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
             ~headers
             ~request_path
             ~disable_parallel_tool_use
+            ~cache_extended_ttl
             ?max_context
             ?model_capabilities_override
             ?model_anthropic_thinking_control_override
@@ -990,6 +1027,7 @@ let materialize_provider_binding ~construction (cfg : Runtime_schema.config) (bi
          ?repeat_last_n:binding.repeat_last_n
          ?return_progress:binding.return_progress
          ?max_concurrent_requests:binding.max_concurrent
+         ?cache_retention:binding.cache_retention
          ~disable_parallel_tool_use:binding.disable_parallel_tool_use
          ?max_tokens:binding.max_tokens
          provider
@@ -1304,9 +1342,14 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
          | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api -> Ok ()
          | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime | Muse_serve_runtime
          | Vibe_cli_runtime ->
-           validate_parallel_tool_policy provider ~model_id:binding.model_id
+           let* () = validate_parallel_tool_policy provider ~model_id:binding.model_id
              ~supports_parallel_tool_suppression:false
              ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
+           (* An official client writes its own cache breakpoints, so a
+              declared lifetime would reach no request. *)
+           validate_cache_retention provider ~model_id:binding.model_id
+             ~supports_extended_cache_ttl:false ~cache_retention:binding.cache_retention
+           |> Result.map (fun (_ : bool) -> ()) in
        let* () = refuse_anthropic_thinking_control_on_official_client provider spec in
        let official result = Result.map
          (fun execution -> {execution;credential_admission=None}) result in

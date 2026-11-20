@@ -327,6 +327,21 @@ val thinking_request : model_spec -> bool option
 
 (** {1 Layer 3: Binding} *)
 
+(** How long the provider keeps the request prefix it caches, declared as a
+    binding's [cache-retention]. *)
+type cache_retention =
+  | Five_minutes  (** ["5m"]: the provider's default lifetime, declared. *)
+  | One_hour
+      (** ["1h"]: every cache write is priced above a five-minute one, and a
+          prefix stays readable across pauses of up to an hour. *)
+[@@deriving show, eq]
+
+val cache_retention_to_string : cache_retention -> string
+(** The declared spelling: ["5m"] or ["1h"]. *)
+
+val cache_retention_of_string : string -> cache_retention option
+(** [None] for any other spelling. *)
+
 type binding =
   { provider_id : string
   ; model_id : string
@@ -345,6 +360,12 @@ type binding =
             This does not change that capability or serialize spawned agents.
             Official-client, native Ollama and Gemini runtimes cannot carry
             this policy and refuse [true]. *)
+  ; cache_retention : cache_retention option
+        (** Request policy for this binding: the lifetime of every cache
+            breakpoint a request writes. Absent keeps the provider's default
+            (five minutes on Anthropic). Only a Messages runtime whose catalog
+            provider row declares [supports_extended_cache_ttl] carries it;
+            any other refuses a declared value at load time. *)
   ; max_tokens : int option
         (** Request-side output budget for this binding ([max_tokens] on Chat
             Completions, [max_output_tokens] on Responses, [num_predict] on

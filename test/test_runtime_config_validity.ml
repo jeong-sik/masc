@@ -4980,6 +4980,7 @@ let test_of_binding_reports_an_undeclared_provider () =
     ; max_context = None
     ; max_concurrent = None
     ; disable_parallel_tool_use = false
+    ; cache_retention = None
     ; max_tokens = None
     ; price_input = None
     ; price_output = None

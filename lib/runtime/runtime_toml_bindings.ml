@@ -97,6 +97,21 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     typed_find_or "a boolean" path tbl "disable-parallel-tool-use"
       Otoml.get_boolean ~default:false
   in
+  (* Whether the provider can carry the declared lifetime is the runtime
+     adapter's decision, which reads the catalog provider row. *)
+  let cache_retention_result =
+    match typed_find "a string" path tbl "cache-retention" Otoml.get_string with
+    | Ok None -> Ok None
+    | Ok (Some raw) ->
+      (match Runtime_schema.cache_retention_of_string raw with
+       | Some retention -> Ok (Some retention)
+       | None ->
+         Error
+           (error
+              (path ^ ".cache-retention")
+              (Printf.sprintf "cache-retention must be \"5m\" or \"1h\"; got %S" raw)))
+    | Error _ as e -> e
+  in
   let max_context_result =
     match typed_find "an integer" path tbl "max-context" Otoml.get_integer with
     | Ok (Some n) when n <= 0 ->
@@ -188,6 +203,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
   let* max_context = max_context_result in
   let* max_concurrent = max_concurrent_result in
   let* disable_parallel_tool_use = disable_parallel_tool_use_result in
+  let* cache_retention = cache_retention_result in
   let* max_tokens = max_tokens_result in
   let* price_input = price_input_result in
   let* price_output = price_output_result in
@@ -205,6 +221,7 @@ let parse_binding_fields (provider_id : string) (model_id : string) (tbl : Otoml
     ; max_context
     ; max_concurrent
     ; disable_parallel_tool_use
+    ; cache_retention
     ; max_tokens
     ; price_input
     ; price_output

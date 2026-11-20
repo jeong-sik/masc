@@ -115,37 +115,178 @@ let compare_config_commit_order (Config_commit_order left) (Config_commit_order 
   Int64.compare left right
 ;;
 
-let config_lock_warning_to_yojson = function
+let lock_release_unconfirmed_code = "runtime_config_lock_release_unconfirmed"
+
+let config_lock_warning_code = function
+  | Config_lock_release_unconfirmed _ -> lock_release_unconfirmed_code
+;;
+
+let config_lock_warning_to_yojson warning =
+  match warning with
   | Config_lock_release_unconfirmed detail ->
     `Assoc
-      [ "code", `String "runtime_config_lock_release_unconfirmed"
+      [ "code", `String (config_lock_warning_code warning)
       ; "detail", `String detail
       ]
 ;;
 
-let config_commit_receipt_to_yojson (receipt : config_commit_receipt) =
-  `Assoc
-    [ ( "source_revision"
-      , `String
-          (config_source_revision_to_string
-             receipt.observation.source_revision) )
-    ; ( "order"
-      , `String (config_commit_order_to_string receipt.order) )
-    ; ( "durability"
-      , `String
-          (match receipt.durability with
-           | Durable -> "durable"
-           | Durability_unconfirmed _ -> "unconfirmed") )
-    ; ( "durability_detail"
-      , (match receipt.durability with
-         | Durable -> `Null
-         | Durability_unconfirmed { detail } -> `String detail) )
-    ; ( "warnings"
-      , `List
-          (List.map config_lock_warning_to_yojson receipt.lock_warnings) )
-    ; ( "ignored_legacy_keys"
-      , `List (List.map (fun key -> `String key) receipt.ignored_legacy_keys) )
-    ]
+(* The fields of one answer object, refused when a name is missing, repeated
+   or unknown: the server writes exactly [expected]. The answer is a lookup
+   into fields that passed that check. *)
+let exact_wire_fields ~what expected = function
+  | `Assoc fields ->
+    if List.sort String.compare (List.map fst fields)
+       = List.sort String.compare expected
+    then
+      Ok
+        (fun name ->
+          match List.assoc_opt name fields with
+          | Some value -> Ok value
+          | None -> Error (Printf.sprintf "%s has no %s" what name))
+    else Error (what ^ " has missing, repeated or unknown fields")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error (what ^ " must be an object")
+;;
+
+let wire_detail ~what = function
+  | `String detail when String.trim detail <> "" -> Ok detail
+  | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+    Error (what ^ " must be a non-blank string")
+;;
+
+let config_lock_warning_of_yojson json =
+  let* field = exact_wire_fields ~what:"a runtime.toml lock warning" [ "code"; "detail" ] json in
+  let* code = field "code" in
+  let* detail = field "detail" in
+  match code with
+  | `String code when String.equal code lock_release_unconfirmed_code ->
+    let* detail = wire_detail ~what:"a lock warning detail" detail in
+    Ok (Config_lock_release_unconfirmed detail)
+  | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+    Error "a runtime.toml lock warning names an unknown code"
+;;
+
+(* The [commit] object of every runtime.toml write answer. The server writes
+   it here and the TUI and the CLI read it back here, so a field added on one
+   side cannot be missed on the other (#53658). *)
+module Config_commit_wire = struct
+  type t =
+    { source_revision : config_source_revision
+    ; order : config_commit_order
+    ; durability : config_durability
+    ; lock_warnings : config_lock_warning list
+    ; ignored_legacy_keys : string list
+    }
+
+  let of_receipt
+        ({ observation; durability; order; lock_warnings; ignored_legacy_keys
+         ; exact_output_registry = _ } : config_commit_receipt) : t
+    =
+    { source_revision = observation.source_revision
+    ; order
+    ; durability
+    ; lock_warnings
+    ; ignored_legacy_keys
+    }
+  ;;
+
+  let field_names =
+    [ "source_revision"; "order"; "durability"; "durability_detail"; "warnings"
+    ; "ignored_legacy_keys" ]
+  ;;
+
+  let to_yojson t =
+    `Assoc
+      [ "source_revision", `String (config_source_revision_to_string t.source_revision)
+      ; "order", `String (config_commit_order_to_string t.order)
+      ; ( "durability"
+        , `String
+            (match t.durability with
+             | Durable -> "durable"
+             | Durability_unconfirmed _ -> "unconfirmed") )
+      ; ( "durability_detail"
+        , (match t.durability with
+           | Durable -> `Null
+           | Durability_unconfirmed { detail } -> `String detail) )
+      ; "warnings", `List (List.map config_lock_warning_to_yojson t.lock_warnings)
+      ; "ignored_legacy_keys", `List (List.map (fun key -> `String key) t.ignored_legacy_keys)
+      ]
+  ;;
+
+  (* The server mints a revision only as a SHA-256 of the text and an order
+     only by counting up from one, and writes the order in decimal; anything
+     else did not come from {!to_yojson}. *)
+  let source_revision_of_yojson = function
+    | `String revision when String_util.is_lowercase_sha256_hex revision ->
+      Ok (Config_source_revision revision)
+    | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+      Error "the commit source_revision must be lowercase SHA-256 hex"
+  ;;
+
+  let order_of_yojson = function
+    | `String text ->
+      (match Int64.of_string_opt text with
+       | Some order
+         when Int64.compare order Int64.zero > 0
+              && String.equal (Int64.to_string order) text -> Ok (Config_commit_order order)
+       | Some _ | None -> Error "the commit order must be a positive decimal int64")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+      Error "the commit order must be a string"
+  ;;
+
+  let durability_of_yojson ~durability ~detail =
+    match durability with
+    | `String "durable" ->
+      (match detail with
+       | `Null -> Ok Durable
+       | `String _ | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+         Error "a durable commit carries no durability_detail")
+    | `String "unconfirmed" ->
+      let* detail = wire_detail ~what:"an unconfirmed commit's durability_detail" detail in
+      Ok (Durability_unconfirmed { detail })
+    | `String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+      Error "the commit durability is neither durable nor unconfirmed"
+  ;;
+
+  let list_of_yojson ~what decode = function
+    | `List rows ->
+      List.fold_right
+        (fun row acc ->
+           let* rest = acc in
+           let* value = decode row in
+           Ok (value :: rest))
+        rows
+        (Ok [])
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+      Error (what ^ " must be a list")
+  ;;
+
+  let of_yojson json =
+    let* field = exact_wire_fields ~what:"the runtime.toml commit" field_names json in
+    let* source_revision = Result.bind (field "source_revision") source_revision_of_yojson in
+    let* order = Result.bind (field "order") order_of_yojson in
+    let* durability_json = field "durability" in
+    let* detail_json = field "durability_detail" in
+    let* durability = durability_of_yojson ~durability:durability_json ~detail:detail_json in
+    let* lock_warnings =
+      Result.bind
+        (field "warnings")
+        (list_of_yojson ~what:"the commit warnings" config_lock_warning_of_yojson)
+    in
+    let* ignored_legacy_keys =
+      Result.bind
+        (field "ignored_legacy_keys")
+        (list_of_yojson ~what:"the commit ignored_legacy_keys" (function
+           | `String key -> Ok key
+           | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+             Error "an ignored legacy key must be a string"))
+    in
+    Ok { source_revision; order; durability; lock_warnings; ignored_legacy_keys }
+  ;;
+end
+
+let config_commit_receipt_to_yojson receipt =
+  Config_commit_wire.(to_yojson (of_receipt receipt))
 ;;
 
 (* The exact-output registry is its own row, not part of [routing]: the

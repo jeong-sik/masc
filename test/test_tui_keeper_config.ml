@@ -759,7 +759,7 @@ let test_unchanged_runtime_assignment_response_decoder () =
       ; "applied", `Bool false
       ; ( "assignment_revision"
         , `Assoc [ "state", `String "runtime_config_missing" ] )
-      ; "warnings", `List [ `Assoc ["code",`String "lock_release_unconfirmed";"detail",`String "unlock failed"] ]
+      ; "warnings", `List [ `Assoc ["code",`String "runtime_config_lock_release_unconfirmed";"detail",`String "unlock failed"] ]
       ]
   in
   let decode json = decode_runtime_assignment_answer ~status:200 ~body:(Yojson.Safe.to_string json) in
@@ -769,7 +769,7 @@ let test_unchanged_runtime_assignment_response_decoder () =
          (reply.revision = `Assoc ["state",`String "runtime_config_missing"]
           && reply.response=valid
           && match reply.warnings with
-             | [{Masc_tui_runtime_config_receipt.code="lock_release_unconfirmed";detail="unlock failed"}] -> true
+             | [ Runtime.Config_lock_release_unconfirmed "unlock failed" ] -> true
              | _ -> false)
    | Ok (Assignment_committed _) | Error _ -> Alcotest.fail "unchanged response was not retained");
   List.iter

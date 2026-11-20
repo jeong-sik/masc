@@ -147,9 +147,13 @@ let finish_save request result t =
   let t = {t with phase=Idle} in
   match request.operation,result with
   | Save write,Saved receipt ->
-    let draft = match t.draft,receipt.Masc_tui_runtime_config_receipt.durability with
-      | Some draft, Durable -> Some {draft with base={draft.base with source_text=write.source_text;source_revision=receipt.source_revision}}
-      | (Some _ | None), Durability_unconfirmed _ | None, Durable -> t.draft in
+    let commit = receipt.Masc_tui_runtime_config_receipt.commit in
+    let draft = match t.draft,commit.Runtime.Config_commit_wire.durability with
+      | Some draft, Runtime.Durable ->
+        let source_revision =
+          Runtime.config_source_revision_to_string commit.Runtime.Config_commit_wire.source_revision in
+        Some {draft with base={draft.base with source_text=write.source_text;source_revision}}
+      | (Some _ | None), Runtime.Durability_unconfirmed _ | None, Runtime.Durable -> t.draft in
     {t with draft;current=None;receipt=Some receipt;
       message=Some Notice.Receipt_received}
   | Save _,Conflict current -> {t with current=Some current;message=Some Notice.Conflict_kept}

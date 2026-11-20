@@ -1,6 +1,16 @@
 open Alcotest
 
 module Receipt = Masc_tui_runtime_config_receipt
+module Commit = Runtime.Config_commit_wire
+
+(* The server names a commit by the SHA-256 of its text; the Skill rows of the
+   same answer repeat it. *)
+let revision = String.make 64 'a'
+
+let replace key value = function
+  | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
+  | _ -> fail "expected object"
+;;
 
 let routing =
   `Assoc
@@ -22,7 +32,7 @@ let keeper_overlay =
     ]
 ;;
 
-let published ?(input_source_revision = "source-7") ?(config_state = "configured") () =
+let published ?(input_source_revision = revision) ?(config_state = "configured") () =
   `Assoc
     [ "state", `String "published"
     ; "input_source_revision", `String input_source_revision
@@ -66,7 +76,7 @@ let receipt
     ; "state", `String "committed"
     ; ( "commit"
       , `Assoc
-          [ "source_revision", `String "source-7"
+          [ "source_revision", `String revision
           ; "order", `String "7"
           ; "durability", `String "durable"
           ; "durability_detail", `Null
@@ -110,11 +120,11 @@ let test_valid_receipt_preserves_typed_outcomes () =
    | Receipt.Not_applied -> ()
    | Receipt.Applied_at_string _ | Receipt.Applied_at_int _ | Receipt.Applied_at_float _ ->
      fail "Keeper applied_at changed representation");
-  check bool "summary renders routing" true
-    (String.starts_with ~prefix:"commit=7 durable routing-applied" (Receipt.summary receipt));
+  check string "commit order" "7"
+    (Runtime.config_commit_order_to_string receipt.commit.Commit.order);
   match receipt.application.skills with
   | Receipt.Skill_published { input_source_revision; config_state; _ } ->
-    check string "input revision" "source-7" input_source_revision;
+    check string "input revision" revision input_source_revision;
     (match config_state with
      | Receipt.Configured -> ()
      | Receipt.Rejected | Receipt.Unreadable -> fail "configured state changed")
@@ -122,7 +132,7 @@ let test_valid_receipt_preserves_typed_outcomes () =
 ;;
 
 let test_rejects_causal_mismatches () =
-  rejected (receipt ~skills:(published ~input_source_revision:"source-6" ()) ());
+  rejected (receipt ~skills:(published ~input_source_revision:(String.make 64 'b') ()) ());
   rejected (receipt ~skills:(superseded ~commit_order:"6" ()) ())
 ;;
 
@@ -139,9 +149,9 @@ let test_accepts_ignored_legacy_keys_and_retains_them () =
          ())
   in
   check (list string) "ignored legacy keys are retained"
-    [ "max-prompt-bytes" ] with_keys.ignored_legacy_keys;
+    [ "max-prompt-bytes" ] with_keys.commit.Commit.ignored_legacy_keys;
   let empty = decoded (receipt ()) in
-  check (list string) "empty ignored legacy keys are fine" [] empty.ignored_legacy_keys
+  check (list string) "empty ignored legacy keys are fine" [] empty.commit.Commit.ignored_legacy_keys
 ;;
 
 let test_rejects_non_string_ignored_legacy_keys () =
@@ -187,15 +197,13 @@ let test_rejects_incomplete_application_receipts () =
    exact-output registry row; a decoder that refuses either refuses every
    real receipt. *)
 let test_durability_detail_is_required_and_retained () =
-  let replace key value = function
-    | `Assoc fields -> `Assoc ((key, value) :: List.remove_assoc key fields)
-    | _ -> fail "expected object" in
   let wire = receipt () in
   let commit = Yojson.Safe.Util.member "commit" wire in
   let uncertain = replace "commit" (replace "durability" (`String "unconfirmed")
     (replace "durability_detail" (`String "original fsync failure") commit)) wire in
   check bool "decoder retains exact uncertainty detail" true
-    ((decoded uncertain).durability = Receipt.Durability_unconfirmed "original fsync failure");
+    ((decoded uncertain).commit.Commit.durability
+     = Runtime.Durability_unconfirmed { detail = "original fsync failure" });
   List.iter (fun invalid -> rejected (replace "commit" invalid wire))
     [ replace "durability" (`String "unconfirmed") commit
     ; replace "durability_detail" (`String "contradictory") commit
@@ -217,19 +225,9 @@ let test_exact_output_registry_and_lock_warnings () =
    | Receipt.Exact_output_registry_applied Receipt.Targets_replacement_catalog
    | Receipt.Exact_output_registry_unpublished
    | Receipt.Exact_output_registry_kept _ -> fail "applied registry changed variant");
-  check (list string) "lock warning codes"
-    [ "runtime_config_lock_release_unconfirmed" ]
-    (List.map (fun (warning : Receipt.lock_warning) -> warning.code) applied.lock_warnings);
-  check bool "summary names the applied registry" true
-    (String.ends_with ~suffix:"exact-registry-applied" (Receipt.summary applied));
-  check bool "summary names the lock warning" true
-    (let summary = Receipt.summary applied in
-     let needle = "lock-warnings=runtime_config_lock_release_unconfirmed" in
-     let rec find i =
-       i + String.length needle <= String.length summary
-       && (String.equal (String.sub summary i (String.length needle)) needle || find (i + 1))
-     in
-     find 0);
+  check bool "lock warning keeps its detail" true
+    (applied.commit.Commit.lock_warnings
+     = [ Runtime.Config_lock_release_unconfirmed "lock file stayed" ]);
   let unpublished =
     decoded
       (receipt
@@ -248,8 +246,6 @@ let test_exact_output_registry_and_lock_warnings () =
      check string "kept reason" "catalog read failed" reason
    | Receipt.Exact_output_registry_applied _ | Receipt.Exact_output_registry_unpublished ->
      fail "kept registry changed variant");
-  check bool "summary names the kept registry" true
-    (String.ends_with ~suffix:"exact-registry-kept/next-boot-unpublished" (Receipt.summary kept));
   rejected
     (receipt
        ~exact:
@@ -279,6 +275,22 @@ let test_exact_output_registry_and_lock_warnings () =
              :: List.remove_assoc "application" fields))
      | _ -> fail "application fixture must be an object")
   | _ -> fail "receipt fixture must be an object"
+;;
+
+(* The commit object goes through the server's own codec, so a revision,
+   order or warning code the server never writes is refused, not displayed. *)
+let test_rejects_commit_the_server_never_writes () =
+  let wire = receipt () in
+  let commit = Yojson.Safe.Util.member "commit" wire in
+  List.iter (fun invalid -> rejected (replace "commit" invalid wire))
+    [ replace "source_revision" (`String "source-7") commit
+    ; replace "order" (`String "07") commit
+    ; replace "order" (`String "0") commit
+    ; replace "warnings"
+        (`List [ `Assoc [ "code", `String "lock_release_unconfirmed"; "detail", `String "x" ] ])
+        commit
+    ; replace "extra" `Null commit
+    ]
 ;;
 
 let test_rejects_false_success_receipt () =
@@ -348,11 +360,18 @@ let test_lane_notice_retains_application_and_durability () =
   check string "kept explains why restarting is not a repair"
     "File saved · exact lanes unchanged: catalog read failed; correct configuration before restart · routing applied · Keeper settings await restart: turn.temperature"
     (Receipt.lane_summary kept);
-  let unpublished = decode (receipt ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:true ()) ()) in
-  let unpublished = {unpublished with Receipt.durability = Receipt.Durability_unconfirmed "fsync fixture"} in
+  let unpublished = receipt ~exact:(exact_output_registry ~status:"unpublished" ~requires_restart:true ()) () in
+  let commit = Yojson.Safe.Util.member "commit" unpublished in
+  let unpublished =
+    decode
+      (replace "commit"
+         (replace "durability" (`String "unconfirmed")
+            (replace "durability_detail" (`String "fsync fixture") commit))
+         unpublished)
+  in
   check bool "unpublished warns" true (Receipt.lane_needs_attention unpublished);
   check bool "uncertainty keeps the original detail independently of the missing registry" true
-    (unpublished.durability = Receipt.Durability_unconfirmed "fsync fixture"
+    (unpublished.commit.Commit.durability = Runtime.Durability_unconfirmed { detail = "fsync fixture" }
      && unpublished.application.exact_output_registry = Receipt.Exact_output_registry_unpublished)
 ;;
 
@@ -398,7 +417,7 @@ let test_lane_notice_reports_skill_application () =
     ; snapshot "unchanged" "unreadable", Some "Skill configuration unreadable; catalog not applied"
     ; superseded (), Some "Skill catalog superseded by commit 8"
     ; `Assoc [ "state", `String "workspace_retired";
-               "input_source_revision", `String "source-7" ],
+               "input_source_revision", `String revision ],
       Some "Skill catalog not applied; workspace retired"
     ; `Assoc [ "state", `String "invalid_workspace" ],
       Some "Skill catalog not applied; invalid workspace" ]
@@ -427,6 +446,8 @@ let () =
             test_rejects_incomplete_application_receipts
         ; test_case "exact-output registry row and lock warnings are decoded" `Quick
             test_exact_output_registry_and_lock_warnings
+        ; test_case "a commit object the server never writes is refused" `Quick
+            test_rejects_commit_the_server_never_writes
         ; test_case "ok=false is rejected" `Quick test_rejects_false_success_receipt
         ] )
     ; ( "preview"

@@ -4893,14 +4893,26 @@ let runtime_document_fixture () =
   Masc_tui_types.put_runtime_config_edit state ~workspace session;
   state,workspace,session
 
+(* The commit object as the server writes it, read by the server's codec. *)
+let runtime_document_commit (durability : Runtime.config_durability) =
+  let durability_json, detail_json = match durability with
+    | Durable -> `String "durable", `Null
+    | Durability_unconfirmed {detail} -> `String "unconfirmed", `String detail in
+  match Runtime.Config_commit_wire.of_yojson (`Assoc [
+    "source_revision",`String (String.make 64 'c'); "order",`String "1";
+    "durability",durability_json; "durability_detail",detail_json;
+    "warnings",`List []; "ignored_legacy_keys",`List []]) with
+  | Ok commit -> commit
+  | Error detail -> Alcotest.fail detail
+
 let runtime_document_receipt durability : Masc_tui_runtime_config_receipt.t =
-  {source_revision="saved"; order="operation-1"; durability; lock_warnings=[]; ignored_legacy_keys=[];
+  {commit=runtime_document_commit durability;
    application={operation="runtime-config"; routing_status=Routing_active;
      routing_requires_restart=false; routing_applied_at=Not_applied;
      keeper_status=Keeper_not_configured; keeper_requires_restart=false;
      keeper_applied_at=Not_applied; keeper_configured_count=0; keeper_pending_keys=[];
      keeper_applied_keys=[]; keeper_preempted_keys=[];
-     skills=Skill_unchanged {input_source_revision="saved"; snapshot_revision="skills";
+     skills=Skill_unchanged {input_source_revision=String.make 64 'c'; snapshot_revision="skills";
        catalog_revision="catalog"; config_state=Configured};
      exact_output_registry=Exact_output_registry_unpublished}}
 
@@ -4929,7 +4941,7 @@ let test_runtime_document_save_owns_exact_input_across_refresh () =
   put_runtime_config_edit ~preserve_view:true state ~workspace refreshed;
   Alcotest.(check bool) "observation preserves editing ownership" true (Edit.same_draft session refreshed);
   Alcotest.(check bool) "confirmed receipt clears its own refreshed draft" true
-    (finish_runtime_document state request prepared (Form_saved (runtime_document_receipt Durable)));
+    (finish_runtime_document state request prepared (Form_saved (runtime_document_receipt Runtime.Durable)));
   Alcotest.(check int) "only submitted draft is completed" 0 (List.length state.runtime_config_edits)
 
 let test_runtime_document_late_success_keeps_same_text_successor () =
@@ -4947,7 +4959,7 @@ let test_runtime_document_late_success_keeps_same_text_successor () =
   Alcotest.(check bool) "old authority cannot own current effects" false (runtime_form_save_current state request);
   Alcotest.(check bool) "receipt cannot delete successor or another workspace" false
     (finish_runtime_document state request (prepare_runtime_document session)
-       (Form_saved (runtime_document_receipt Durable)));
+       (Form_saved (runtime_document_receipt Runtime.Durable)));
   Alcotest.(check int) "both drafts retained" 2 (List.length state.runtime_config_edits);
   Alcotest.(check bool) "exact successor identity retained" true
     (List.exists (fun edit -> edit.rce_workspace=workspace && Edit.same_draft successor edit.rce_session)
@@ -7153,7 +7165,7 @@ let () =
               (Masc_tui_types.Form_unconfirmed "connection ended after possible dispatch"))
         ; Alcotest.test_case "unknown document durability requires post-outcome read and explicit basis" `Quick
             (fun () -> test_runtime_document_uncertainty_requires_new_read
-              (Masc_tui_types.Form_saved (runtime_document_receipt (Durability_unconfirmed "fixture fsync uncertainty"))))
+              (Masc_tui_types.Form_saved (runtime_document_receipt (Runtime.Durability_unconfirmed {detail="fixture fsync uncertainty"}))))
         ; Alcotest.test_case "runtime form transforms only its opening source" `Quick
             test_runtime_form_prepares_original_revision
         ; Alcotest.test_case "runtime form unknown save retains input and rejects duplicate" `Quick

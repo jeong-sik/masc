@@ -4,16 +4,29 @@ let expect label wanted actual = Alcotest.(check int) label wanted actual
 
 module Receipt = Masc_tui_runtime_config_receipt
 
+(* A commit as the server writes it on the wire: the SHA-256 revision of the
+   text, its order, durability and lock warnings. *)
+let commit ?(durability = Runtime.Durable) ?(warnings = []) () =
+  let durability_json, detail_json = match durability with
+    | Runtime.Durable -> `String "durable", `Null
+    | Runtime.Durability_unconfirmed { detail } -> `String "unconfirmed", `String detail in
+  match Runtime.Config_commit_wire.of_yojson (`Assoc [
+    "source_revision", `String (String.make 64 'a'); "order", `String "7";
+    "durability", durability_json; "durability_detail", detail_json;
+    "warnings", `List (List.map Runtime.config_lock_warning_to_yojson warnings);
+    "ignored_legacy_keys", `List [] ]) with
+  | Ok commit -> commit
+  | Error detail -> Alcotest.fail detail
+
 let committed_receipt =
-  { Receipt.source_revision = "source-7"; order = "7"; durability = Receipt.Durable;
-    lock_warnings = []; ignored_legacy_keys = [];
+  { Receipt.commit = commit ();
     application =
       { Receipt.operation = "routing"; routing_status = Receipt.Routing_applied;
         routing_requires_restart = false; routing_applied_at = Receipt.Applied_at_int 7;
         keeper_status = Receipt.Keeper_not_configured; keeper_requires_restart = false;
         keeper_applied_at = Receipt.Not_applied; keeper_configured_count = 0;
         keeper_pending_keys = []; keeper_applied_keys = []; keeper_preempted_keys = [];
-        skills = Receipt.Skill_unchanged { input_source_revision = "source-7";
+        skills = Receipt.Skill_unchanged { input_source_revision = String.make 64 'a';
           snapshot_revision = "snapshot-7"; catalog_revision = "catalog-7";
           config_state = Receipt.Configured };
         exact_output_registry = Receipt.Exact_output_registry_applied Receipt.Targets_runtime_bindings } }
@@ -310,9 +323,8 @@ let test_commit_application_survives_reread () =
   List.iter (fun (application, durability, warning) ->
     List.iter (fun reread ->
       let state = lane_state () in
-      let receipt = { committed_receipt with
-        Receipt.durability;
-        lock_warnings = [{ Receipt.code = "lock-observation"; detail = warning }];
+      let receipt = { Receipt.commit =
+          commit ~durability ~warnings:[ Runtime.Config_lock_release_unconfirmed warning ] ();
         application = { committed_receipt.application with exact_output_registry = application } } in
       state.standalone_lanes_generation <- 2;
       state.runtime_lane_write <- Lane_write_posting;
@@ -337,8 +349,9 @@ let test_commit_application_survives_reread () =
         (runtime_surface_listing_chrome ~rows:100 ~cols:40 state > runtime_surface_listing_chrome ~rows:100 ~cols:140 state))
       [Ok (); Error (Request_failed "HTTP 503: read unavailable")])
     [Receipt.Exact_output_registry_kept {reason = "catalog read failed; prior model order remains"},
-       Receipt.Durable, "configuration lock observation changed";
-     Receipt.Exact_output_registry_unpublished, Receipt.Durability_unconfirmed "fixture fsync uncertainty",
+       Runtime.Durable, "configuration lock observation changed";
+     Receipt.Exact_output_registry_unpublished,
+       Runtime.Durability_unconfirmed { detail = "fixture fsync uncertainty" },
        "file synchronization was not confirmed"]
 
 let test_dismissed_commit_stays_dismissed_after_reread () =

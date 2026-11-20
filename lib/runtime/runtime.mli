@@ -138,10 +138,42 @@ type lane_set_error =
 val lane_set_error_to_string : lane_set_error -> string
 val config_commit_order_to_string : config_commit_order -> string
 val compare_config_commit_order : config_commit_order -> config_commit_order -> int
+val config_lock_warning_code : config_lock_warning -> string
+(** The [code] the wire names the warning by. *)
+
 val config_lock_warning_to_yojson : config_lock_warning -> Yojson.Safe.t
+
+val config_lock_warning_of_yojson : Yojson.Safe.t -> (config_lock_warning, string) result
+(** Reads what {!config_lock_warning_to_yojson} writes; an unknown code or a
+    blank detail is an error. *)
+
+(** The [commit] object of a runtime.toml write answer: the commit's identity,
+    durability and lock warnings, without the configuration text. The server
+    writes it and every OCaml client reads it back through this one codec. *)
+module Config_commit_wire : sig
+  type t = private
+    { source_revision : config_source_revision
+    ; order : config_commit_order
+    ; durability : config_durability
+    ; lock_warnings : config_lock_warning list
+    ; ignored_legacy_keys : string list
+    }
+
+  val of_receipt : config_commit_receipt -> t
+
+  val to_yojson : t -> Yojson.Safe.t
+
+  val of_yojson : Yojson.Safe.t -> (t, string) result
+  (** Reads exactly what {!to_yojson} writes. A missing, repeated or unknown
+      field, a revision that is not lowercase SHA-256 hex, an order that is
+      not a positive decimal int64, a durable commit with a detail, an
+      unconfirmed one with a blank detail, or a warning {!config_lock_warning_of_yojson}
+      refuses is an error. *)
+end
+
 val config_commit_receipt_to_yojson : config_commit_receipt -> Yojson.Safe.t
-(** Public commit identity, durability and lock warnings. Does not expose the
-    configuration text. Unconfirmed durability retains its original detail. *)
+(** [Config_commit_wire.(to_yojson (of_receipt receipt))]. Unconfirmed
+    durability retains its original detail. *)
 val exact_output_registry_application_to_yojson :
   exact_output_registry_application -> Yojson.Safe.t
 (** Registry application is independent of the file's commit/durability. *)

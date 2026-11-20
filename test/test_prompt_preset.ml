@@ -1481,15 +1481,11 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
       | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
         fail "visible commit must remain committed through the wire"
     in
-    check string "wire retains source identity"
-      (Runtime.config_source_revision_to_string receipt.observation.source_revision)
-      decoded_commit.prc_source_revision;
-    check string "wire retains commit order" (Runtime.config_commit_order_to_string receipt.order)
-      decoded_commit.prc_order;
-    check bool "wire retains actual durability including its reason" true
-      (receipt.durability = decoded_commit.prc_durability);
-    check bool "wire retains lock warnings" true
-      (receipt.lock_warnings = decoded_commit.prc_lock_warnings);
+    (* The server writes the commit and the TUI reads it with one codec, so the
+       commit read back is the receipt's own: identity, order, durability with
+       its reason, lock warnings and ignored keys. *)
+    check bool "the TUI reads back the commit the server wrote" true
+      (decoded_commit.prc_commit = Runtime.Config_commit_wire.of_receipt receipt);
     let expected_attention = sync_fails || receipt.lock_warnings <> [] ||
       match receipt.exact_output_registry with
       | Runtime.Exact_output_registry_replaced _ -> false
@@ -1509,8 +1505,9 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
     (match (or_fail (Masc.Tui_decode.decode_preset_restore
       (payload (replace "runtime" ignored_runtime wire)))).prr_runtime with
      | Masc.Tui_decode.Preset_runtime_committed commit ->
-       check string "editor diagnostics do not erase the original commit"
-         decoded_commit.prc_source_revision commit.prc_source_revision
+       check bool "editor diagnostics do not erase the original commit" true
+         (decoded_commit.prc_commit.Runtime.Config_commit_wire.source_revision
+          = commit.prc_commit.Runtime.Config_commit_wire.source_revision)
      | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
        fail "editor diagnostics cannot turn an observed commit into a failed write");
     List.iter (fun (application, expected_registry) ->
@@ -1540,7 +1537,8 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
       (payload (replace "runtime" warned_runtime wire)))).prr_runtime with
      | Masc.Tui_decode.Preset_runtime_committed commit ->
        check bool "lock warning projection retains original detail" true
-         (commit.prc_lock_warnings = receipt.lock_warnings @ warnings);
+         (commit.prc_commit.Runtime.Config_commit_wire.lock_warnings
+          = receipt.lock_warnings @ warnings);
        check bool "lock warning requires attention" true
          (Masc.Tui_decode.preset_runtime_commit_needs_attention commit)
      | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
@@ -1574,7 +1572,7 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
       ];
     (match detail with
      | Some expected -> check (option string) "wire keeps exact original fsync error"
-         (Some expected) (match decoded_commit.prc_durability with
+         (Some expected) (match decoded_commit.prc_commit.Runtime.Config_commit_wire.durability with
             | Runtime.Durability_unconfirmed {detail} -> Some detail
             | Runtime.Durable -> None)
      | None -> ());

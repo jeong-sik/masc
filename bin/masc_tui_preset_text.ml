@@ -85,7 +85,7 @@ let runtime_rows ~ko = function
     [ plain (text ~ko "런타임 · 변경 없음" "Runtime · unchanged") ]
   | D.Preset_runtime_committed commit ->
     [ { tone = Confirmed; text = text ~ko "런타임 · 파일 변경 적용됨" "Runtime · file changes committed" } ]
-    @ (match commit.D.prc_durability with
+    @ (match commit.D.prc_commit.Runtime.Config_commit_wire.durability with
        | Runtime.Durable -> []
        | Runtime.Durability_unconfirmed { detail } ->
          [ caution ("  " ^ caution_mark ^ text ~ko " 적용됨 · 디스크 저장 완료 보고 안 됨 — " " Applied; disk durability not reported — " ^ detail)
@@ -95,7 +95,7 @@ let runtime_rows ~ko = function
     @ List.map
         (function Runtime.Config_lock_release_unconfirmed detail ->
           caution ("  " ^ caution_mark ^ text ~ko " 런타임 잠금 해제 보고 안 됨 — " " Runtime lock release not reported — " ^ detail))
-        commit.D.prc_lock_warnings
+        commit.D.prc_commit.Runtime.Config_commit_wire.lock_warnings
     @ (match commit.D.prc_registry with
        | D.Preset_registry_applied D.Preset_registry_runtime_bindings ->
          [ plain (text ~ko "정확 출력 레인 · 런타임 바인딩 적용" "Exact lanes · runtime bindings applied") ]

@@ -1,7 +1,3 @@
-type durability =
-  | Durable
-  | Durability_unconfirmed of string
-
 type config_state =
   | Configured
   | Rejected
@@ -69,17 +65,8 @@ type application =
   ; exact_output_registry : exact_output_registry_status
   }
 
-type lock_warning =
-  { code : string
-  ; detail : string
-  }
-
 type t =
-  { source_revision : string
-  ; order : string
-  ; durability : durability
-  ; lock_warnings : lock_warning list
-  ; ignored_legacy_keys : string list
+  { commit : Runtime.Config_commit_wire.t
   ; application : application
   }
 
@@ -258,23 +245,6 @@ let decode_exact_output_registry = function
   | _ -> Error "exact-output registry application receipt must be an object"
 ;;
 
-let decode_lock_warnings json =
-  let open Result.Syntax in
-  match json with
-  | `List warnings ->
-    let rec decode acc = function
-      | [] -> Ok (List.rev acc)
-      | `Assoc fields :: rest ->
-        let* () = exact_fields [ "code"; "detail" ] fields in
-        let* code = string_field "code" fields in
-        let* detail = string_field "detail" fields in
-        decode ({ code; detail } :: acc) rest
-      | _ :: _ -> Error "runtime config lock warning must be an object"
-    in
-    decode [] warnings
-  | _ -> Error "runtime config lock warnings must be a list"
-;;
-
 let decode_application ~source_revision ~order = function
   | `Assoc fields ->
     let open Result.Syntax in
@@ -369,98 +339,18 @@ let decode = function
     then Error "runtime config response is not committed"
     else
       let* commit = field "commit" fields in
+      let* commit = Runtime.Config_commit_wire.of_yojson commit in
       let* application = field "application" fields in
-      (match commit with
-       | `Assoc commit_fields ->
-         let* () =
-           exact_fields
-             [ "source_revision"; "order"; "durability"; "durability_detail"
-             ; "warnings"; "ignored_legacy_keys" ] commit_fields
-         in
-         let* lock_warnings = field "warnings" commit_fields in
-         let* lock_warnings = decode_lock_warnings lock_warnings in
-         let* ignored_legacy_keys =
-           string_list_field "ignored_legacy_keys" commit_fields
-         in
-         let* source_revision = string_field "source_revision" commit_fields in
-         let* order = string_field "order" commit_fields in
-         let* durability_detail = field "durability_detail" commit_fields in
-         let* durability =
-           match string_field "durability" commit_fields, durability_detail with
-           | Ok "durable", `Null -> Ok Durable
-           | Ok "unconfirmed", `String detail when String.trim detail <> "" ->
-             Ok (Durability_unconfirmed detail)
-           | (Ok _ | Error _), _ -> Error "runtime config durability or detail is invalid"
-         in
-         let* application = decode_application ~source_revision ~order application in
-         Ok
-           { source_revision; order; durability; lock_warnings
-           ; ignored_legacy_keys; application }
-       | _ -> Error "runtime config commit receipt is missing")
+      let* application =
+        decode_application
+          ~source_revision:
+            (Runtime.config_source_revision_to_string
+               commit.Runtime.Config_commit_wire.source_revision)
+          ~order:(Runtime.config_commit_order_to_string commit.Runtime.Config_commit_wire.order)
+          application
+      in
+      Ok { commit; application }
   | _ -> Error "runtime config commit response must be an object"
-;;
-
-let config_state_to_string = function
-  | Configured -> "configured"
-  | Rejected -> "rejected"
-  | Unreadable -> "unreadable"
-;;
-
-let summary receipt =
-  let durability =
-    match receipt.durability with
-    | Durable -> "durable"
-    | Durability_unconfirmed detail -> "durability-unconfirmed: " ^ detail
-  in
-  let routing =
-    match receipt.application.routing_status with
-    | Routing_active -> "routing-active"
-    | Routing_applied -> "routing-applied"
-  in
-  let keeper =
-    match receipt.application.keeper_status with
-    | Keeper_not_configured -> "keeper-not-configured"
-    | Keeper_pending_restart -> "keeper-pending-restart"
-    | Keeper_applied -> "keeper-applied"
-    | Keeper_preempted_by_env -> "keeper-preempted-by-env"
-    | Keeper_mixed -> "keeper-mixed"
-  in
-  let skills =
-    match receipt.application.skills with
-    | Skill_published { config_state; _ } ->
-      "skills-published/" ^ config_state_to_string config_state
-    | Skill_unchanged { config_state; _ } ->
-      "skills-unchanged/" ^ config_state_to_string config_state
-    | Skill_superseded { applied_order; _ } ->
-      "skills-superseded-by/" ^ applied_order
-    | Skill_workspace_retired _ -> "skills-workspace-retired"
-    | Skill_invalid_workspace -> "skills-invalid-workspace"
-  in
-  let lock_warnings =
-    match receipt.lock_warnings with
-    | [] -> ""
-    | warnings ->
-      Printf.sprintf
-        " lock-warnings=%s"
-        (String.concat "," (List.map (fun warning -> warning.code) warnings))
-  in
-  let exact_output_registry =
-    match receipt.application.exact_output_registry with
-    | Exact_output_registry_applied Targets_runtime_bindings -> "exact-registry-applied"
-    | Exact_output_registry_applied Targets_replacement_catalog ->
-      "exact-registry-applied/replacement-catalog"
-    | Exact_output_registry_unpublished -> "exact-registry-unpublished"
-    | Exact_output_registry_kept _ -> "exact-registry-kept/next-boot-unpublished"
-  in
-  Printf.sprintf
-    "commit=%s %s %s %s %s%s %s"
-    receipt.order
-    durability
-    routing
-    keeper
-    skills
-    lock_warnings
-    exact_output_registry
 ;;
 
 let keeper_lane_warning application =
@@ -493,8 +383,10 @@ let skill_lane_warning = function
 ;;
 
 let lane_needs_attention receipt =
-  (match receipt.durability with Durable -> false | Durability_unconfirmed _ -> true)
-  || receipt.lock_warnings <> []
+  (match receipt.commit.Runtime.Config_commit_wire.durability with
+   | Runtime.Durable -> false
+   | Runtime.Durability_unconfirmed _ -> true)
+  || receipt.commit.Runtime.Config_commit_wire.lock_warnings <> []
   || receipt.application.routing_requires_restart
   || receipt.application.keeper_requires_restart
   || Option.is_some (keeper_lane_warning receipt.application)
@@ -505,9 +397,10 @@ let lane_needs_attention receipt =
 ;;
 
 let lane_summary receipt =
-  let file = match receipt.durability with
-    | Durable -> "File saved"
-    | Durability_unconfirmed detail -> "File written; durability unconfirmed — " ^ detail in
+  let file = match receipt.commit.Runtime.Config_commit_wire.durability with
+    | Runtime.Durable -> "File saved"
+    | Runtime.Durability_unconfirmed { detail } ->
+      "File written; durability unconfirmed — " ^ detail in
   let exact = match receipt.application.exact_output_registry with
     | Exact_output_registry_applied _ -> "exact lanes applied"
     | Exact_output_registry_unpublished -> "exact lanes unavailable; restart required"
@@ -524,7 +417,9 @@ let lane_summary receipt =
         else [])
      @ Option.to_list (keeper_lane_warning receipt.application)
      @ Option.to_list (skill_lane_warning receipt.application.skills)
-     @ List.map (fun warning -> warning.detail) receipt.lock_warnings)
+     @ List.map
+         (function Runtime.Config_lock_release_unconfirmed detail -> detail)
+         receipt.commit.Runtime.Config_commit_wire.lock_warnings)
 ;;
 
 type preview =

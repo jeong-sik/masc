@@ -1899,7 +1899,7 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson otoml masc masc.config masc.keeper_toml masc_tui_runtime_config_receipt masc_tui_theme masc.string_util
+ (libraries yojson otoml masc masc.config masc.keeper_toml masc.runtime masc_tui_runtime_config_receipt masc_tui_theme masc.string_util
   masc_tui_value))
 
 (library
@@ -2457,7 +2457,7 @@
  (name masc_tui_runtime_config_receipt)
  (wrapped false)
  (modules masc_tui_runtime_config_receipt)
- (libraries yojson))
+ (libraries masc.runtime yojson))
 
 (library
  (name masc_tui_interrupt_signal)
@@ -3822,7 +3822,7 @@
  (name masc_tui_machine_activity)
  (wrapped false)
  (modules masc_tui_machine_activity)
- (libraries masc masc.machine_configuration masc.runtime_toml_namespace
+ (libraries masc masc.machine_configuration masc.runtime masc.runtime_toml_namespace
   otoml masc.toml_line_editor masc_tui_activity_notice masc_tui_page_line
   masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
 

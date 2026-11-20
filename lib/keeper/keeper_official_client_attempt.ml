@@ -39,6 +39,20 @@ module Effect_cell = struct
   let read = Atomic.get
 end
 
+let fence_effect_capable_call
+      ~observe_effect_attempted
+      (tool : Keeper_official_client_host.dynamic_tool)
+  =
+  { tool with
+    call =
+      (fun ~call_id input ->
+        (match tool.call_effect input with
+         | Agent_core.Tool.Read_only -> ()
+         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
+        tool.call ~call_id input)
+  }
+;;
+
 type recorder =
   { on_session_settled : Keeper_official_client_session_store.t -> unit
   ; on_results_ready : Keeper_client_tool_outbox.consumption option -> unit

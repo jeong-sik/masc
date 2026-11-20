@@ -2289,6 +2289,60 @@ let test_native_policy_failure_releases_claim () =
          | Error detail -> fail detail)))))
 ;;
 
+(* #53702: the fence the official clients share records an effect only for an
+   input its producer declares [Effect_possible], and records it before the
+   handler runs. Antigravity recorded every MASC call before, so a turn that
+   only read could neither retry nor move to the next runtime. *)
+let test_only_an_effect_capable_call_closes_the_retry_boundary () =
+  let module Cell = Keeper_official_client_attempt.Effect_cell in
+  let module Effect = Keeper_provider_attempt_effect in
+  let entered = ref 0 in
+  let tool : Keeper_official_client_host.dynamic_tool =
+    { name = "masc_probe"
+    ; description = "masc_probe"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    ; loading = Runtime_official_client_tool.Upfront
+    ; result_bound = Runtime_official_client_tool.Unbounded
+    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
+    ; call_effect =
+        (function
+          | `Assoc [ "write", `Bool true ] -> Agent_core.Tool.Effect_possible
+          | _ -> Agent_core.Tool.Read_only)
+    ; call =
+        (fun ~call_id:_ input ->
+           incr entered;
+           match input with
+           | `Assoc [ "write", `Bool true ] -> failwith "committed, then raised"
+           | _ ->
+             { success = true
+             ; content = "read"
+             ; content_blocks = None
+             ; abort_turn = None
+             ; on_response_sent = None
+             })
+    }
+  in
+  let cell = Cell.create () in
+  let fenced =
+    Keeper_official_client_attempt.fence_effect_capable_call
+      ~observe_effect_attempted:(fun () -> Cell.attempted cell)
+      tool
+  in
+  let (_ : Keeper_official_client_host.dynamic_tool_result) =
+    fenced.call ~call_id:"read-1" (`Assoc [])
+  in
+  check int "the read-only handler ran" 1 !entered;
+  check bool "a read-only call leaves the retry boundary open" true
+    (Effect.allows_same_turn_retry (Cell.read cell));
+  (match fenced.call ~call_id:"write-1" (`Assoc [ "write", `Bool true ]) with
+   | (_ : Keeper_official_client_host.dynamic_tool_result) ->
+     fail "the effect-capable handler returned instead of raising"
+   | exception Failure _ -> ());
+  check int "the effect-capable handler ran" 2 !entered;
+  check bool "an effect-capable call is recorded before its handler raised" true
+    (Cell.read cell = Effect.Effect_attempted)
+;;
+
 let test_every_declared_loading_is_eager_on_antigravity () =
   let tool name loading : Keeper_official_client_host.dynamic_tool =
     { name
@@ -2832,6 +2886,10 @@ let () =
             "a refusal-ended run reports and recovers as provider rejected"
             `Quick
             test_actions_denied_reports_and_recovers
+          ; test_case
+            "only an effect-capable call closes the retry boundary"
+            `Quick
+            test_only_an_effect_capable_call_closes_the_retry_boundary
           ; test_case
             "every declared loading is eager on Antigravity"
             `Quick

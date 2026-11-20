@@ -587,21 +587,6 @@ let tool_result (result : Host.dynamic_tool_result) =
   }
 ;;
 
-let muse_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) =
-  { tool with
-    call =
-      (fun ~call_id input ->
-        (* Close the outer same-turn retry boundary before entering user/tool
-           code. The handler may commit and then raise or be cancelled, so
-           observing only its returned value would reopen a duplicate-effect
-           window. *)
-        (match tool.call_effect input with
-         | Agent_core.Tool.Read_only -> ()
-         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
-        tool.call ~call_id input)
-  }
-;;
-
 let find_tool tools name =
   List.find_opt (fun (tool : Host.dynamic_tool) -> String.equal tool.name name) tools
 ;;
@@ -1314,7 +1299,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ()
       with
       | Ok (dynamic_tools, result_producer) ->
-        Ok (List.map (muse_dynamic_tool ~observe_effect_attempted) dynamic_tools, result_producer)
+        Ok
+          ( List.map
+              (Keeper_official_client_attempt.fence_effect_capable_call
+                 ~observe_effect_attempted)
+              dynamic_tools
+          , result_producer )
       | Error error ->
         Host.finish_raw_error ~keeper_name raw_trace_run error;
         Error error

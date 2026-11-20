@@ -41,6 +41,17 @@ module Effect_cell : sig
   val read : t -> Keeper_provider_attempt_effect.t
 end
 
+val fence_effect_capable_call :
+  observe_effect_attempted:(unit -> unit) ->
+  Keeper_official_client_host.dynamic_tool ->
+  Keeper_official_client_host.dynamic_tool
+(** The tool every official client calls MASC through. Entering it for an
+    input its producer declares [Effect_possible] calls
+    [observe_effect_attempted] before the handler runs: the handler may commit
+    and then raise or be cancelled, so observing only its return would reopen
+    a duplicate-effect window. An input declared [Read_only] cannot change the
+    work and observes nothing (#53702). *)
+
 type recorder =
   { on_session_settled : Keeper_official_client_session_store.t -> unit
   ; on_results_ready : Keeper_client_tool_outbox.consumption option -> unit

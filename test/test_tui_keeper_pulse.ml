@@ -385,7 +385,9 @@ let test_half_hour_tallies_share_ssot_with_half_hours () =
     { Pulse.starts_at = Pulse.slot_start now - (back * Pulse.slot_seconds); tally }
   in
   let pulse =
-    { Pulse.known_since = now -. (2.0 *. float_of_int Pulse.slot_seconds)
+    (* At the start of the second slot back: that slot is held, the ones
+       before it are not. *)
+    { Pulse.known_since = Float.of_int (Pulse.slot_start now - (2 * Pulse.slot_seconds))
     ; slots =
         [ slot 0 { Pulse.ok = 4; rested = 0; failed = 0 }
         ; slot 1 { Pulse.ok = 2; rested = 1; failed = 3 }

@@ -344,7 +344,10 @@ let test_a_path_wider_than_the_row_is_drawn_whole () =
       check bool ("the whole path is drawn at " ^ at) true
         (contains ~needle:("masc:" ^ path) without_spaces);
       check bool ("the size of the change is drawn at " ^ at) true
-        (contains ~needle:"(+1-1)" without_spaces);
+        (contains
+           ~needle:
+             ("(" ^ Masc_tui_value.Count.increase 1 ^ Masc_tui_value.Count.decrease 1 ^ ")")
+           without_spaces);
       check bool ("no row of the change is wider than the pane at " ^ at) true
         (List.for_all
            (fun row -> Masc_tui_message_layout.display_width row <= max_line_cells)

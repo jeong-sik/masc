@@ -585,7 +585,7 @@
  (name masc_tui_command)
  (wrapped false)
  (modules masc_tui_command)
- (libraries masc_tui_message_input))
+ (libraries masc_tui_message_input masc_tui_message_layout masc_tui_value))
 
 (library
  (name masc_tui_gate_text)

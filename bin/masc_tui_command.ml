@@ -728,17 +728,14 @@ let bare_slash_spans ~ko entries =
       |> String.concat " "
     in
     let dropped = total - kept_count in
-    let tail, tail_cells =
-      if dropped <= 0 then "", 0
-      else if ko then
-        let text = Printf.sprintf " 외 %d개 (/help)" dropped in
-        (* Each of the two Hangul syllables is 3 UTF-8 bytes and 2 display cells. *)
-        text, String.length text - 2
-      else
-        let text = Printf.sprintf " +%d more (/help)" dropped in
-        text, String.length text
+    (* The words left out are a cut-off count, never "+N" (RFC
+       tui-one-screen-grammar 6.3). The tail is the one piece that is not
+       ASCII in Korean, so it is measured in cells. *)
+    let tail =
+      if dropped <= 0 then ""
+      else " " ^ Masc_tui_value.Count.more ~ko dropped ^ " (/help)"
     in
-    (words, tail, 1 + String.length words + tail_cells)
+    (words, tail, 1 + String.length words + Masc_tui_message_layout.display_width tail)
   in
   (* At most one row of candidates and a dozen words, so the fit is found by
      trying rather than by solving for a marker whose own width depends on how

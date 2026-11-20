@@ -413,7 +413,7 @@ HTTP provider 의 자격 증명이 호스트 계정이라는 결정(계획 D4)�
 
 - 엔진의 대화 경로는 요청자를 문자열 하나로 받는다. 인증이 돌려주는 것은 `agent_name` 이다(조사만 함: `lib/server/server_auth.ml:1100-1131`). 사람의 id 와 PAT 는 이 길에 없다.
 - 연산의 `source` 는 필드 열넷의 닫힌 schema 다(§12.8). 실행기가 열넷을 모두 읽는다(조사만 함: `lib/server/server_routes_http_keeper_stream.ml:606-670`).
-- 엔진이 턴의 주인을 만드는 자리는 하나다. `Fleet_keeper_turn { keeper_name = meta.name }` 이다(`lib/keeper/keeper_agent_run.ml:1490-1492`). 손에 든 것은 Keeper 의 meta 뿐이다.
+- 엔진이 턴의 주인을 만드는 자리는 하나다. `Fleet_keeper_turn { keeper_name = meta.name }` 이다(`lib/keeper/keeper_agent_run.ml:1490-1492`). 손에 든 것은 Keeper 의 `meta` 값(실행 기록을 읽은 것)뿐이다.
 - 그 사이의 층은 셋이다. 실행기, `Keeper_turn`, `Keeper_agent_run` 이다. 요청자 이름은 `Keeper_turn` 에서 `run_turn` 으로 넘어가지 않는다. 연산 id 는 넘어간다(조사만 함: `lib/keeper/keeper_turn.ml:816-876`).
 - 다계정에서 판정은 `Operator_keeper_turn` 을 거절한다(`lib/runtime/runtime_account_access.ml:348`). `admit` 은 같은 요청을 허락한다(`:426-430`).
 - `Keeper_turn` 요청을 만드는 곳은 지금 사람의 턴 경로 하나다(조사만 함: `lib/server/server_preview_keeper_turn.ml:386`).
@@ -469,7 +469,7 @@ HTTP provider 의 자격 증명이 호스트 계정이라는 결정(계획 D4)�
 
 | 걸음 | 묻는 것 | 손에 든 것 | 함수 | 부르는 곳(lib) |
 |---|---|---|---|---|
-| 1 | 이 Keeper 의 route | Keeper 이름이나 meta | `Runtime.runtime_id_for_keeper`, 그것을 싼 wrapper 셋, `Runtime.keeper_dispatch_snapshot` | 45 |
+| 1 | 이 Keeper 의 route | Keeper 이름이나 `meta` 값 | `Runtime.runtime_id_for_keeper`, 그것을 싼 wrapper 셋, `Runtime.keeper_dispatch_snapshot` | 45 |
 | 2 | 이 route 의 후보들 | route 문자열 | `Runtime.resolve_assignment` | 17 |
 | 3 | 이 id 의 Runtime 값 | Runtime id | `Runtime.get_runtime_by_id` 와 칸 하나를 읽는 함수들 | 46 |
 
@@ -780,7 +780,7 @@ config root 와 `runtime.toml` 두 줄은 직접 읽었다. 나머지는 조사�
 ### 21.3 auth 폴더에 쓰는 것
 
 - 엔진 boot 는 Admin credential 을 준비한다. owner 파일이 없으면 이름은 `admin` 이다. credential 과 token 이 둘 다 없으면 token 을 새로 만들어 Admin credential 로 낸다(`lib/server/server_runtime_startup_credentials.ml:6-19`, `lib/auth/auth_credential_token.ml:487-539`). 실패하면 boot 가 멈춘다(`server_runtime_bootstrap.ml:1031-1034`).
-- 단일 사용자 boot 는 그 token 을 프로세스 environment 에 넣는다(`server_runtime_startup_credentials.ml:12`). 다계정 엔진은 넣지 않는다(#53877). 두 token 의 이름을 environment 에서 읽는 곳은 셋이다. boot 의 credential 단계(`server_runtime_startup_credentials.ml:9-11`, `:28-33`, `lib/auth/auth_credential_base.ml:177`), 설정 snapshot(`lib/config/env_config_snapshot.ml:62`), health 응답의 `internal_mcp_auth`(`lib/server/server_routes_http_runtime.ml:153-160`)다. `b9ac941a` 에서 두 이름과 그 상수로 찾았다.
+- 단일 사용자 boot 는 그 token 을 프로세스 environment 에 넣는다(`server_runtime_startup_credentials.ml:12`). 다계정 엔진은 넣지 않는다(#53877). 두 token 의 이름을 environment 에서 읽는 곳은 셋이다. boot 의 credential 단계(`server_runtime_startup_credentials.ml:9-11`, `:28-33`, `lib/auth/auth_credential_base.ml:177`), 설정 snapshot(`lib/config/env_config_snapshot.ml:62`), health 응답의 `internal_mcp_auth`(`lib/server/server_routes_http_runtime.ml:153-160`)다. `b9ac941a` 에서 두 이름과 그 상수로 찾았다. Codex 의 capture 는 이름을 가리지 않고 environment 를 통째로 읽는다(§22.3).
 - 다계정 gate 는 이 bearer 와 internal token header 를 `Legacy_bearer` 로 읽는다. 다계정은 그것을 거절한다고 적혀 있다(`lib/auth/authz_credential_presentation.mli:44-50`, `lib/auth/authz_credential_presentation.ml:62-106`). 계정 서버의 사람 경로는 요청의 credential 을 이 모듈에 넘긴다(`lib/server/server_login_http.ml:268-281`).
 - 하루 한 번 도는 정리가 만료된 agent credential 을 지운다. 첫 실행은 시작 뒤 첫 tick 이다(`lib/server/server_bootstrap_maintenance.ml:297-338, 1005-1016`). 다계정 코드(`lib/auth/authz_*`)에는 그 폴더(`auth/agents`)의 이름이 없다.
 - 조사만 함: authz 로그(`auth/authz.jsonl`)와 사람 폴더(`accounts/`)를 고치는 lane 은 없다. JSONL 보존 정리는 닫힌 목록의 폴더만 지운다.
@@ -824,8 +824,8 @@ config root 와 `runtime.toml` 두 줄은 직접 읽었다. 나머지는 조사�
 
 ### 22.2 Keeper 정의가 생기는 길
 
-- 첫 단계는 config root 를 다루기 전에 끝나지 않은 Keeper 설정 변경을 journal 에서 읽어 되돌린다(`server_runtime_bootstrap.ml:784`). 되돌리기는 정의를 변경 전 내용으로 다시 쓰거나 지운다(`server_bootstrap_maintenance.ml:349-353`). `runtime.toml` 도 다시 쓰거나 지운다(`:354-363`). 정의의 경로는 `<config root>/keepers/<이름>.toml` 이어야 하고, Keeper 이름도 검사한다(`lib/config_journal/keeper_config_journal.ml:216-226`). journal 이 decode 되지 않거나 이 대상 검사를 지나지 못하면 되돌리지 않는다(`Journal_corrupt`). 되돌리다 실패하면 일부만 되돌린 채 끝날 수 있다(`Recovery_failed`, `keeper_config_journal.ml:340-341`, `:370-372`, `:385-386`, `server_bootstrap_maintenance.ml:386-397`). 두 경우 모두 boot 를 멈춘다(`server_runtime_bootstrap.ml:786-789`). 그래서 계정 서버는 journal 이 있으면 boot 를 멈춘다(`lib/server/server_accounts.ml:212-219`, #53790).
-- journal 을 지우면 정의와 `runtime.toml` 은 지금 그대로 남는다. 앞선 boot 가 일부만 되돌렸으면 그 상태다. 단일 사용자 boot 도 같은 첫 단계를 돈다. 다계정 설치를 단일 사용자로 띄우려면 계정을 꺼야 한다(`lib/auth/authz_off.mli:11-21`). 이 빌드는 끈 계정을 다시 켜지 못한다(`:1-3`).
+- 첫 단계는 config root 를 다루기 전에 끝나지 않은 Keeper 설정 변경을 journal 에서 읽어 되돌린다(`server_runtime_bootstrap.ml:784`). 되돌리기는 정의를 변경 전 내용으로 다시 쓰거나 지운다(`server_bootstrap_maintenance.ml:349-353`). `runtime.toml` 도 다시 쓰거나 지운다(`:354-363`). 다시 쓴 정의는 로그에 없는 정의다. 그래서 계정 서버는 journal 이 있으면 boot 를 멈춘다(`lib/server/server_accounts.ml:205-219`, #53790). 정의의 경로는 `<config root>/keepers/<이름>.toml` 이어야 하고, Keeper 이름도 검사한다(`lib/config_journal/keeper_config_journal.ml:216-226`). journal 이 decode 되지 않거나 이 대상 검사를 지나지 못하면 되돌리지 않는다(`Journal_corrupt`). 되돌리다 실패하면 일부만 되돌린 채 끝날 수 있다(`Recovery_failed`, `keeper_config_journal.ml:340-341`, `:370-372`, `:385-386`, `server_bootstrap_maintenance.ml:386-397`). 두 경우 모두 boot 를 멈춘다(`server_runtime_bootstrap.ml:786-789`).
+- journal 을 지우면 정의와 `runtime.toml` 은 지금 그대로 남는다. 앞선 boot 가 일부만 되돌렸으면 그 상태다. 다계정 설치를 단일 사용자로 띄우려면 계정을 끄고 config 에서 다계정 요청을 빼야 한다. 끈 뒤에도 config 가 다계정을 요구하면 boot 는 거절한다(`lib/auth/authz_off.mli:11-15`). 그 단일 사용자 boot 도 같은 첫 단계를 돌아, 엔진처럼 받아들이지 못한 journal 과 되돌리기 실패에서 멈춘다. 이 빌드는 끈 계정을 다시 켜지 못한다(`:1-3`).
 - 정의 폴더 목록 함수는 없는 경로, 폴더가 아닌 경로, stat 하지 못한 경로를 모두 정의가 없는 것으로 읽는다(`lib/keeper/keeper_types_profile_toml_io.ml:199-201`). 계정 서버는 먼저 stat 하고, stat 하지 못한 경로에서 boot 를 멈춘다. 폴더가 아닌 경로는 엔진처럼 정의가 없다고 본다(`server_accounts.ml:188-203`).
 - 정의 폴더 검사는 boot 때 한 번이다. supervisor sweep 이 돌 때마다 `keepalive_keeper_names` 가 정의 폴더를 다시 읽는다. 실행 기록이 없고 방식이 `manual` 이 아닌 정의 파일은 keepalive 후보가 된다(`lib/keeper/keeper_meta_store.ml:534-539, 577-610`, `lib/keeper/keeper_supervisor_reconcile_keepalive.ml:46`). 후보는 `boot_judgment` 를 거쳐 `reconcile_meta` 로 간다(`keeper_supervisor_reconcile_keepalive.ml:151-159`). `lib/keeper` 에는 계정 방식으로 가르는 곳이 없다(`git grep -n -i -E 'multi_account|account_mode|authz_mode|boot_mode' -- lib/keeper` 가 아무것도 찾지 않는다). 조사만 함(#53790 공격 리뷰가 읽음): 그 길은 `handle_keeper_up` 과 `create_keeper` 를 지나 Keeper 설정 journal 을 쓴다(`lib/keeper/keeper_turn_up_config_persistence.ml:519`).
 - 계정 서버의 검사는 실행 기록(`.masc/keepers/*.json`)을 보지 않는다. 엔진은 boot 때 실행 기록으로 owner 를 세운다(`server_runtime_bootstrap.ml:1054`). 그렇게 선 Keeper 의 턴은 다계정 판정이 거절한다. 판정은 운영자 Keeper 의 턴(`Operator_keeper_turn`)을 모두 거절한다(`lib/runtime/runtime_account_access.ml:355`, `:378`). 실행 기록만 있는 Keeper 가 도는지는 읽지 않았다.
@@ -835,7 +835,7 @@ config root 와 `runtime.toml` 두 줄은 직접 읽었다. 나머지는 조사�
 
 - gate 를 지나는 것은 사람 경로(`lib/server/server_login_http.ml:268-317`)와 사람 MCP 경로(`lib/server/server_person_mcp.ml:30-36`)다. 둘은 admin token 과 internal Keeper token 을 legacy credential 로 읽고 거절한다. 다계정 엔진은 두 token 을 environment 에 넣지 않는다(#53877). 프로세스를 띄운 셸이 넣은 값은 남고, 엔진은 그 값을 자기 token 으로 쓴다. internal Keeper token 은 그 hash 도 저장된다(`b9ac941a` 의 `lib/auth/auth_credential_base.ml:177-187`, `lib/server/server_runtime_startup_credentials.ml:9-11`). 시험은 `test/test_server_accounts_engine.ml` 이다(#53756, #53877).
 - 로그인 경로는 cookie 만 본다. cookie 없이 bearer 만 오면 session 이 없는 요청이다(`lib/auth/authz_browser_request.ml:127-141`). health 셋과 console 의 page·파일은 credential 을 읽지 않는다. token 으로 얻는 것은 없다.
-- 사람의 CLI 자식은 builder 가 정한 이름을 받는다. Codex builder 는 홈의 `config.toml` 이 적은 이름도 허용 목록 밖에서 넘긴다. `model_providers` 의 `env_key` 와 `env_http_headers` 다(`lib/runtime/runtime_official_account.ml:112-121`, `:145-148`). 턴과 observe 에서는 판정이 그런 이름을 하나라도 적은 홈을 거절한다(`lib/runtime/runtime_account_access.ml:286-296`, #53704). 로그인 자식은 판정을 거치지 않는다. 사람의 로그인은 기존 계정을 가리키지 못해 늘 새 홈에서 뜬다(`lib/server/server_setup_account_login.ml:158-160`). 시험은 `test/test_person_child_environment.ml` 이다(#53768). Claude Code key 계정의 자식도 시험이 거친다(#53807).
+- 사람의 CLI 자식은 builder 가 정한 이름을 받는다. Codex 의 capture 는 environment 를 통째로 읽고(`lib/runtime/runtime_official_account.ml:135`), 홈의 `config.toml` 이 적은 이름도 허용 목록 밖에서 넘긴다. `model_providers` 의 `env_key` 와 `env_http_headers` 다(`lib/runtime/runtime_official_account.ml:112-121`, `:145-148`). 턴과 observe 에서는 판정이 그런 이름을 하나라도 적은 홈을 거절한다(`lib/runtime/runtime_account_access.ml:286-296`, #53704). 로그인 자식은 판정을 거치지 않는다. 사람의 로그인은 기존 계정을 가리키지 못해 늘 새 홈에서 뜬다(`lib/server/server_setup_account_login.ml:158-160`). 시험은 `test/test_person_child_environment.ml` 이다(#53768). Claude Code key 계정의 자식도 시험이 거친다(#53807).
 - §20.5 가 열어 둔 `Runtime_setup_batch` 는 사람의 요청에서 닿지 않는다. batch 를 띄우는 `Server_runtime_setup_actions.save` 를 부르는 곳은 단일 사용자 설정 경로뿐이다(`lib/server/server_routes_http_routes_setup.ml:177`). 그 경로는 단일 사용자 Dashboard 경로가 붙인다(`lib/server/server_routes_http_routes_dashboard.ml:481`). CLI 는 batch 를 직접 부른다(`bin/masc_cli_runtime_setup.ml:146`, `:170`). 사람 경로의 모듈은 `save` 를 부르지 않는다.
 
 ### 22.4 엔진이 auth 폴더와 skills 에 남기는 것

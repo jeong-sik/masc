@@ -10089,7 +10089,7 @@ type drawn_effect = Drawn_changed | Drawn_unchanged
 
 (* The Tools inventory reader: the reading and the Keeper it is for, its
    failure, the Skill selection and page, the scroll offset, and the Keeper
-   reads in flight, which a frame draws as a refresh. *)
+   reads in flight, which a frame draws only while nothing has been read. *)
 type tools_inventory_view = {
   tiv_inventory : Masc.Tui_decode_tools.tool_snapshot option;
   tiv_keeper : string option;
@@ -10115,11 +10115,11 @@ type keeper_turns_view = {
   ktv_observation : turn_observation_view;
   ktv_error : request_failure option;
   ktv_finishes : (string * float) list;
-  ktv_reading : bool;
 }
 
-(* The Keeper waiting reader. A frame draws the read in progress from the
-   time the screen started waiting for it ([kwv_awaiting_since]). *)
+(* The Keeper waiting reader. A frame draws whether a "nothing waiting" claim
+   holds from the time the screen started waiting for the read
+   ([kwv_awaiting_since]). *)
 type keeper_waiting_view = {
   kwv_rows : Tui_decode.keeper_waiting_row list;
   kwv_failure : Tui_decode.keeper_waiting_failure option;
@@ -13413,11 +13413,6 @@ let set_local_source_observation (state : state) source observation =
   | Local_keepers -> state.local_keeper_observation <- observation
   | Local_work -> state.local_work_observation <- observation
 
-let local_source_pending state source =
-  if Local_read_order.in_flight (local_source_order state source) then
-    Option.map Local_read_observation.pending (local_source_observation state source)
-  else None
-
 let local_source_slow_pending state source =
   if Local_read_order.in_flight (local_source_order state source) then
     match local_source_observation state source with
@@ -14504,15 +14499,14 @@ let equal_turn_observation_view a b =
   | Turns_observed_at _, (Turns_never_observed | Turns_observed) -> false
 
 let[@warning "+9"] equal_keeper_turns_view
-    { ktv_rows; ktv_observation; ktv_error; ktv_finishes; ktv_reading }
+    { ktv_rows; ktv_observation; ktv_error; ktv_finishes }
     { ktv_rows = other_rows; ktv_observation = other_observation; ktv_error = other_error;
-      ktv_finishes = other_finishes; ktv_reading = other_reading } =
+      ktv_finishes = other_finishes } =
   List.equal ( == ) ktv_rows other_rows
   && equal_turn_observation_view ktv_observation other_observation
   && Option.equal equal_request_failure ktv_error other_error
   && List.equal (fun (name, at) (other, other_at) -> String.equal name other && Float.equal at other_at)
        ktv_finishes other_finishes
-  && Bool.equal ktv_reading other_reading
 
 let[@warning "+9"] equal_keeper_waiting_view
     { kwv_rows; kwv_failure; kwv_unverified; kwv_error; kwv_awaiting_since }
@@ -14549,8 +14543,7 @@ let keeper_turns_view ~age_drawn (state : state) =
        | None -> Turns_never_observed
        | Some observed_at -> if age_drawn then Turns_observed_at observed_at else Turns_observed)
   ; ktv_error = state.keeper_turns_error
-  ; ktv_finishes = state.keeper_turn_finishes
-  ; ktv_reading = state.keeper_turns_inflight }
+  ; ktv_finishes = state.keeper_turn_finishes }
 
 let keeper_waiting_view (state : state) =
   { kwv_rows = state.keeper_waiting

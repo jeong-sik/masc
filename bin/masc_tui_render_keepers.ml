@@ -1683,15 +1683,15 @@ let keeper_operations_fields (state : state) ~keeper_name =
         (execution, Theme.warn () ^ t "이전 관측 · 갱신 실패: " "stale · refresh failed: "
           ^ Terminal_text.single_line detail ^ Ansi.reset) :: fields
     | Some _, None | None, (Some _ | None) -> fields in
-  if reading_now then
-    let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-    (execution, Theme.info () ^ under_way ^ " "
-      ^ (match reading with
-         | None -> t "실행 상태 읽는 중" "reading execution snapshot"
-         | Some _ ->
-             t "실행 상태 갱신 중 · 마지막 관측" "refreshing execution snapshot · last observation")
-      ^ Ansi.reset) :: fields
-  else fields
+  (* Only a first read says so on the pane. A read over a held snapshot is the
+     reading slot's to say (RFC tui-one-screen-grammar section 8). *)
+  match reading with
+  | None when reading_now ->
+      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+      (execution, Theme.info () ^ under_way ^ " "
+        ^ t "실행 상태 읽는 중" "reading execution snapshot"
+        ^ Ansi.reset) :: fields
+  | None | Some _ -> fields
 
 type keeper_display_entry =
   | Keeper_world
@@ -2196,16 +2196,14 @@ let proactive_outcome_word ~ko =
    next successful read. With a live roster that is a burst per event, so
    drawing the flag directly made header rows come and go with each burst.
    The age names how long the screen has actually been behind; only that,
-   past the pending display bar, is worth a row or a word. *)
+   past the pending display bar, is worth withholding a claim that nothing is
+   waiting. The read itself is the reading slot's to say, not a row's (RFC
+   tui-one-screen-grammar section 8). *)
 let keeper_waiting_refresh_slow state =
   match Keeper_waiting_read.awaiting_age state.keeper_waiting_read with
   | Some age when past_pending_display_bar age -> Some age
   | Some _ | None -> None
 
-(* The line a slow waiting refresh is said on. Its slot is drawn on every
-   frame, blank while the read keeps up: a line that came and went with each
-   slow read moved every Keeper row below it (60 moves in 180s on a live
-   list, 2026-11-17). *)
 (* The fleet reading's own trouble: a lost stream or failing scans, while the
    last reading stays on screen. [None] while the reading is current. *)
 let keeper_fleet_trouble_line state ~now =
@@ -2222,29 +2220,12 @@ let keeper_fleet_trouble_line state ~now =
   | Masc_tui_fleet_stream.Cannot_read _
   | Masc_tui_fleet_stream.Unavailable _ -> None
 
-let keeper_waiting_refresh_line state =
-  match keeper_waiting_refresh_slow state with
-  | None -> ""
-  | Some age ->
-      (* A length still going reads in whole seconds, then whole minutes
-         (RFC tui-one-screen-grammar §6.2). *)
-      let elapsed = Masc_tui_value.Ongoing.age ~now:(Unix.gettimeofday ())
-          (Int64.to_float age /. 1e9) in
-      let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-      Theme.info ()
-      ^ ui_text state
-          ~ko:("  " ^ under_way ^ " 대기 목록 갱신 중 · 마지막 관측 표시 · " ^ elapsed)
-          ~en:("  " ^ under_way ^ " waiting refresh pending · last observation · " ^ elapsed)
-      ^ Ansi.reset
-
 (* Observation status warnings drawn above the divider only when a stream
-   trouble, slow waiting refresh, or read failure is active. Returns [[]] when
-   healthy so no blank row sits above or below column headers. *)
+   trouble or read failure is active. Returns [[]] when healthy so no blank
+   row sits above or below column headers. *)
 let keeper_observation_status_rows state ~now ~failure =
   match keeper_fleet_trouble_line state ~now, failure with
-  | None, None ->
-      let line = keeper_waiting_refresh_line state in
-      if String.equal line "" then [] else [ line ]
+  | None, None -> []
   | Some trouble, None -> [ trouble ]
   | None, Some failure -> [ failure ]
   | Some trouble, Some failure -> [ trouble; failure ]
@@ -2260,22 +2241,12 @@ let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
       let task_source = match local_rows_page state ~error:state.tasks_error with
         | Page_failed -> text "배정 목록 갱신 실패 · 보존된 배정 작업: " "assignment refresh failed · retained assignment: "
         | Page_unread -> text "배정 목록 미조회 · 보존된 배정 작업: " "assignment source not read · retained assignment: "
-        | Page_empty ->
-            if Option.is_some (local_source_pending state Local_work) then
-              let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-              text (under_way ^ " 배정 목록 갱신 중 · 보존된 배정 작업: ")
-                (under_way ^ " assignment refresh pending · retained assignment: ")
-            else ""
+        | Page_empty -> ""
       in
       let keeper_source = match keeper_rows_page state ~error:state.keepers_error with
         | Page_failed -> text "키퍼 배정 연결 갱신 실패 · " "Keeper assignment link refresh failed · "
         | Page_unread -> text "키퍼 배정 연결 미조회 · " "Keeper assignment link not read · "
-        | Page_empty ->
-            if Option.is_some (local_source_pending state Local_keepers) then
-              let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-              text (under_way ^ " 키퍼 배정 연결 갱신 중 · ")
-                (under_way ^ " Keeper assignment link refreshing · ")
-            else ""
+        | Page_empty -> ""
       in
       (if row.reading.Keeper_control.paused then text "저장된 일시정지 · " "stored pause · " else "")
       ^ keeper_source ^ task_source ^ title
@@ -2285,19 +2256,11 @@ let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
            (if Option.is_some state.keeper_waiting_error || Option.is_some state.keeper_waiting_failure
                || Option.is_some state.keeper_turns_error then
               text "마지막 대기 관측 · 갱신 실패: " "last waiting observation · refresh failed: "
-            else if Option.is_some (keeper_waiting_refresh_slow state) then
-              let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-              text (under_way ^ " 마지막 대기 관측 · 갱신 대기: ")
-                (under_way ^ " last waiting observation · refresh pending: ")
             else "") ^ reason
        | None ->
            let observed ko en =
              (if Option.is_some state.keeper_turns_error then
                 text "마지막 턴 관측 · 갱신 실패: " "last turn observation · refresh failed: "
-              else if state.keeper_turns_inflight then
-                let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-                text (under_way ^ " 마지막 턴 관측 · 갱신 중: ")
-                  (under_way ^ " last turn observation · refreshing: ")
               else "") ^ text ko en
            in
            match row.turn with
@@ -2335,15 +2298,7 @@ let keeper_plain_help (state : state) (row : Keeper_list_model.row) =
              || Option.is_some state.keeper_turns_error)
       in
       let prefix = if retained then text "마지막 관측 · 갱신 실패 · " "last observed · refresh failed · "
-        else
-            (match request with
-             | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
-               when Option.is_some (keeper_waiting_refresh_slow state) ->
-                 let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-                 text (under_way ^ " 마지막 관측 · 갱신 대기 · ")
-                   (under_way ^ " last observed · refresh pending · ")
-             | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
-             | Keeper_list_model.Held_tool _ | Keeper_list_model.Open_questions _ -> "")
+        else ""
       in
       Some (prefix ^ detail)
   | None -> None
@@ -4756,21 +4711,21 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | None -> []
         | Some detail ->
             [ (Theme.bad ()) ^ "  " ^ Terminal_text.single_line detail ^ Ansi.reset ] in
-      let progress = match pending with
-        | None -> []
-        | Some started_ns ->
-            [ loading_row ~started_ns
-                (match observed with
-                 | None -> ui_text state ~ko:"불러오는 중" ~en:"loading"
-                 | Some _ -> ui_text state ~ko:"새로고침 중" ~en:"refreshing") ] in
       match observed with
       | Some lines ->
-          let previous = match error, pending with
-            | None, None -> []
-            | Some _, (Some _ | None) | None, Some _ ->
+          (* A read over held lines says nothing here; the reading slot says
+             it (RFC tui-one-screen-grammar section 8). The label stays for a
+             failure, which is what makes the lines the last observation. *)
+          let previous = match error with
+            | None -> []
+            | Some _ ->
                 [ Ansi.dim ^ ui_text state ~ko:"  이전 관측:" ~en:"  Last observation:" ^ Ansi.reset ] in
-          failure @ progress @ previous @ lines
+          failure @ previous @ lines
       | None ->
+          let progress = match pending with
+            | None -> []
+            | Some started_ns ->
+                [ loading_row ~started_ns (ui_text state ~ko:"불러오는 중" ~en:"loading") ] in
           (match error, pending with
            | None, None ->
                [ Ansi.dim ^ "  "
@@ -5166,13 +5121,13 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         | None -> [] in
       let ko = state.ui_language = Lang_ko in
       let say korean english = if ko then korean else english in
+      (* Only a first read says so here. A read over held schedules is the
+         reading slot's to say (RFC tui-one-screen-grammar section 8). *)
       let progress = match pending with
-        | None -> []
-        | Some started_ns ->
-            [ loading_row ~started_ns (if observed
-                then say "이 키퍼의 일정 새로고침 중 · 이전 관측"
-                       "refreshing this Keeper's schedules · last observation"
-                else say "이 키퍼의 일정 불러오는 중" "loading this Keeper's schedules") ] in
+        | Some started_ns when not observed ->
+            [ loading_row ~started_ns
+                (say "이 키퍼의 일정 불러오는 중" "loading this Keeper's schedules") ]
+        | Some _ | None -> [] in
       let snapshot_lines = match state.keeper_schedules with
       | Some (keeper_name, snapshot) when String.equal keeper_name k.k_name ->
           let rows = snapshot.scs_rows in
@@ -5542,16 +5497,16 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | Some detail ->
                 [ (Theme.bad ()) ^ "  " ^ (if observed then t "이전 관측 · " "STALE · " else "")
                   ^ Terminal_text.single_line detail ^ Ansi.reset ] in
+          (* Only a first read says so here. A read over a held snapshot is the
+             reading slot's to say (RFC tui-one-screen-grammar section 8). *)
+          let first_read = reading_now && not observed in
           let secrets_started =
             Masc_tui_types.progress_clock_option state ~slot:"keeper-detail-secrets" ~now:now_detail
-              (if reading_now then Some k.k_name else None)
+              (if first_read then Some k.k_name else None)
           in
-          let progress = if reading_now then
+          let progress = if first_read then
               [ "  " ^ progress_inline ~ko ~now:now_detail ?started_at:secrets_started
-                  (if observed
-                   then t "실행 상태 갱신 중 · 마지막 관측"
-                       "refreshing execution snapshot · last observation"
-                   else t "실행 상태 읽는 중" "reading execution snapshot") ]
+                  (t "실행 상태 읽는 중" "reading execution snapshot") ]
             else [] in
           let lines = match secret_lines state k with
             | Some lines -> lines

@@ -329,7 +329,7 @@ let evidence_posture_of_snapshot
            | Workspace_verification_store.Evidence_artifact_binary _ ->
              (* A binary item is judgeable on its own terms: the hash, the
                 size, and the filed body are the facts the verdict can rest
-                on (RFC-0436 §4.1). *)
+                on. *)
              true
            | Workspace_verification_store.Evidence_artifact { reference = _; content = _; bytes = _; truncated = true }
            | Workspace_verification_store.Evidence_invalid_reference
@@ -547,9 +547,8 @@ let prepare_review
            [Verdict_rejected] — the producer was never told. The outcome
            recorded as [Infrastructure_unavailable], which schedules no retry.
            The Task then sat in [AwaitingVerification] until an operator
-           noticed (task-568, task-785, task-845, 2026-08-29). RFC-0337
-           (Withdrawn) already removed the hierarchy where evidence shape
-           rejects work ahead of the judge; this was that hierarchy again,
+           noticed (task-568, task-785, task-845, 2026-08-29). Evidence
+           shape does not reject work ahead of the judge; refusing here did,
            minus the notification.
 
            The judge is equipped for it: [submitted_evidence_access] carries

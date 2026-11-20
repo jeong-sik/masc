@@ -1,10 +1,9 @@
-(** Computed-at-export-tick OTel samples for runtime health surfaces that
+(** Periodic OTel samples for runtime health surfaces that
     have no store cell: console-sink writer health (#20684), keeper
     transition-audit drain queue (#20677), fd accounting, and on-disk
-    telemetry store sizes (#20682). Registered once at server bootstrap as
-    an [Otel_metrics] source — the RFC-0217 observable pattern: values are
-    computed when the exporter ticks, so they are always fresh and present
-    from process start (no absence-vs-zero ambiguity). *)
+    telemetry store sizes (#20682). The store writer computes them once at
+    server bootstrap and then every half minute, so they are present from
+    process start (no absence-vs-zero ambiguity). *)
 
 (* Series names live in [Otel_runtime_metric_names] (via the
    [Otel_metric_store] facade): the dashboard runtime-observables endpoint

@@ -413,11 +413,10 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
 
 (* Neutral projection of one keeper chat line for the timeline. The chat
    store (.masc/keeper_chat/<keeper>.jsonl) lives in the keeper subsystem,
-   and this tool module must not reference it (RFC-0194 §3 tool -> keeper
-   boundary). So a keeper-aware caller reads the store, drops tool rows, and
-   passes the surviving user/assistant lines in as [chat_line] values via
-   [build_timeline]'s [load_chat]. This module
-   only maps that neutral data into timeline events. *)
+   and this tool module must not reference it. So a keeper-aware caller
+   reads the store, drops tool rows, and passes the surviving user/assistant
+   lines in as [chat_line] values via [build_timeline]'s [load_chat]. This
+   module only maps that neutral data into timeline events. *)
 type chat_role =
   | Chat_user
   | Chat_assistant

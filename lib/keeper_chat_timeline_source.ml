@@ -2,8 +2,8 @@
    the tool timeline's neutral [Tool_agent_timeline.chat_line] (task-1647).
 
    This lives outside the tool surface on purpose: the tool timeline must not
-   reference the keeper subsystem (RFC-0194 §3 tool -> keeper boundary), so
-   the keeper -> tool direction is inverted here. A caller passes
+   reference the keeper subsystem, so the keeper -> tool direction is
+   inverted here. A caller passes
    [lines_for ~base_dir ~keeper_name] as [Tool_agent_timeline.build_timeline]'s
    [load_chat] reader.
 

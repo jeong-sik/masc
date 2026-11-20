@@ -101,7 +101,7 @@ let execute_tool_eio
   (* mcp_session_id: HTTP MCP session ID for in-process identity continuity. *)
   (* Defensive: bind fiber-local request switch and refresh ambient clock for
      downstream helpers that consult them during a request, without overwriting
-     the process-wide root switch (RFC-0107 / Issue #33570). *)
+     the process-wide root switch (Issue #33570). *)
   Eio_context.with_turn_switch sw (fun () ->
   Eio_context.set_clock clock;
   (* Otel_metric_store: count every inbound tool call *)
@@ -663,8 +663,8 @@ let execute_tool_eio
                       ~tool_name:name
                       (Printf.sprintf "Unknown tool: %s (%s)" name reason))
                | Ok (tag, _token) ->
-                 (* RFC-0084 §2.2 (PR-8) — wrap the tag-based dispatch with
-                    Tool_telemetry.with_span for 4-tuple emission. *)
+                 (* Wrap the tag-based dispatch with Tool_telemetry.with_span
+                    for 4-tuple emission. *)
                  let dispatch_tag_with_telemetry tag =
                    let result, _outcome =
                      Tool_telemetry.with_span ~force_new_trace_id:true ~surface:"mcp" ~tool_name:name (fun _trace_id_thunk ->

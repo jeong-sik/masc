@@ -1,6 +1,5 @@
 (** Managed_asset_sync — converge one runtime config subtree onto the
-    binary-embedded assets (#20929, generalized from the prompt-only sync for
-    RFC prompts-and-tool-definitions-outside-ocaml).
+    binary-embedded assets (#20929, generalized from the prompt-only sync).
 
     The binary embeds the repo's [config/] tree ([Embedded_config]); the
     runtime copies under [<config-root>/prompts], [<config-root>/tools] and

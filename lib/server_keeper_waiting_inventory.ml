@@ -291,7 +291,7 @@ let stimulus_what (stimulus : Keeper_event_queue.stimulus) =
 (* Pending Connector_attention stimuli repeat one row per accepted message
    (the intake invariant keeps every event durable), so a Keeper that cannot
    consume right now — a blocked lane, a stalled cycle — turns the inventory
-   into a wall of identical rows under the display cap. RFC-0377 already
+   into a wall of identical rows under the display cap. Intake already
    drains a same-conversation backlog in one turn, so per-event rows carry no
    operator decision the aggregate loses: this projection collapses every
    pending Connector_attention stimulus into one row per urgency with a count

@@ -97,9 +97,9 @@ val board_fetch_limit :
 
     Resolves a raw author/voter string into a structured identity
     record. A name the keeper registry holds is a keeper
-    ([source: "keeper_registry_name"]); RFC-0393 removed the alias and
-    agent-name lookup tiers because a keeper appears everywhere under
-    its keeper_name. Misses fall through as [`agent`] kind with
+    ([source: "keeper_registry_name"]); there is no alias or agent-name
+    lookup tier, because a keeper appears everywhere under its
+    keeper_name. Misses fall through as [`agent`] kind with
     [source: "raw_agent"]. *)
 
 (** [board_actor_key ~kind id] produces the canonical lookup key

@@ -55,8 +55,8 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
     ~data:(pause_status_reply_json ~keeper_pause reply) ()
 ;;
 
-(* Schemas are generated from the RFC-0057 specs and projected through
-   [Tool_schemas_misc.control_schemas]. *)
+(* Schemas are read from the binary-embedded config/tools/masc_*.toml
+   declarations and projected through [Tool_schemas_misc.control_schemas]. *)
 
 (* Dispatch function *)
 (* Resolved against the same control schemas registration walks, so an

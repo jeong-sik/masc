@@ -1,6 +1,5 @@
 (** One drain of an ego Page's event buffer for every step that reads it,
-    and the tab network log that drain keeps (RFC-browser-ego-cdp-capabilities
-    §3.4). *)
+    and the tab network log that drain keeps. *)
 
 val requests_limit : int
 val path_bytes_limit : int

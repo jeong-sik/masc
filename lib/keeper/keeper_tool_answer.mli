@@ -1,5 +1,4 @@
-(** What a Keeper tool's answer is, read from its own output (RFC
-    a-tool-declares-what-its-answer-is).
+(** What a Keeper tool's answer is, read from its own output.
 
     The repeat guard treats an unchanged output as proof that a call made no
     progress. A receipt field that changes on every call -- a clock, a store

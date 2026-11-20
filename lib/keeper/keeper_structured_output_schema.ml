@@ -31,10 +31,10 @@ let object_schema ~required properties =
     ]
 ;;
 
-(* The observations of this pass's input the claim relied on (RFC-0456
-   §4.1). Positions are the numbers the prompt shows: [turn=N] for a
-   conversation message, a tool observation's [index] for a tool. The decoder
-   checks them against the input. *)
+(* The observations of this pass's input the claim relied on. Positions are
+   the numbers the prompt shows: [turn=N] for a conversation message, a tool
+   observation's [index] for a tool. The decoder checks them against the
+   input. *)
 let librarian_evidence_schema =
   let positions description =
     `Assoc

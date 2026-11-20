@@ -43,7 +43,7 @@ val create :
 
     [redact_text] is the turn's secret redaction, applied to the arguments,
     question and reason of every [Tool_approval_requested] before it is
-    published: the bus feeds the canonical journal (RFC-0412), so what is
+    published: the bus feeds the canonical journal, so what is
     published is what is kept. The wait registered for the same ask carries
     the same three redacted texts, so {!Keeper_tool_approval_registry.pending}
     lists what the event was published with.

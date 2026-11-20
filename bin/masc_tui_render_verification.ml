@@ -814,7 +814,10 @@ let render_harness_list (state : state) =
        current wire cannot distinguish that from the Unix epoch. *)
     | newest :: _, _ when Float.equal newest.hv_at 0.0 ->
         ui_text state ~ko:"시각 보고 안 됨" ~en:"time not reported"
-    | newest :: _, _ -> Masc_domain.iso8601_of_unix_seconds newest.hv_at
+    | newest :: _, _ ->
+        (* The operator's zone (RFC tui-one-screen-grammar 6.1), not the
+           server's ISO text. *)
+        Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) newest.hv_at
     | [], None -> ui_text state ~ko:"미조회" ~en:"not read"
     | [], Some _ -> ui_text state ~ko:"이 페이지에 판정 없음" ~en:"none on this page"
   in
@@ -945,7 +948,7 @@ let harness_goal_lines (state : state) (verdict : Masc.Tui_decode.harness_verdic
          goal_ids
 ;;
 
-let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) =
+let harness_detail_lines ~ko ~width ~now (verdict : Masc.Tui_decode.harness_verdict) =
   let t korean english = if ko then korean else english in
   let field ?(style = Ansi.reset) label value =
     style, harness_labeled label (Terminal_text.single_line value)
@@ -988,7 +991,10 @@ let harness_detail_lines ~ko ~width (verdict : Masc.Tui_decode.harness_verdict) 
     ; field "Gate" verdict.hv_gate
     ; field (t "평가자" "Evaluator") verdict.hv_evaluator
     ; field (t "기록 시각" "Recorded")
-        (Masc_domain.iso8601_of_unix_seconds verdict.hv_at)
+        (* The producer writes zero for an absent time, as the list's latest
+           line already reads; the epoch is not when this was recorded. *)
+        (if Float.equal verdict.hv_at 0.0 then t "시각 보고 안 됨" "time not reported"
+         else Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now verdict.hv_at)
     ]
   (* The reason a task was rejected or approved is the sentence the operator came
      here to read, and it runs long. [field] is one [single_line], so it was cut at
@@ -1011,7 +1017,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
       ~inflight:state.harness_inflight
       ~error:(Option.map (fun detail -> Last_error detail) state.harness_error)
     @ harness_detail_lines ~ko:(state.ui_language = Lang_ko)
-        ~width verdict
+        ~width ~now:(Unix.gettimeofday ()) verdict
     (* Appended rather than woven in: the verdict block is what the server
        said, and what the task is aiming at is read from two other surfaces.
        Keeping them in that order keeps the judged fact above the context. *)

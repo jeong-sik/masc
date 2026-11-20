@@ -46,7 +46,7 @@ val reading_of_server :
     are [Absent]. *)
 
 type answer =
-  { at : float  (** When it arrived, in monotonic seconds. *)
+  { at : Masc_tui_wake.Mono.t  (** When it arrived, on the loop's clock. *)
   ; reading : reading
   }
 (** One [/health] answer, as the TUI received it. *)
@@ -82,7 +82,7 @@ type t
 val stopped : t
 (** No view open, no read out, no answer received. *)
 
-val shown : t -> now:float -> capacity:int -> t
+val shown : t -> now:Masc_tui_wake.Mono.t -> capacity:int -> t
 (** The engine view is on screen and its graphs have room for [capacity]
     times. Opens the view's samples at [now] if they are not open, and keeps
     the newest [capacity] samples if the room changed. *)
@@ -99,7 +99,8 @@ type step =
           can be taken: send one [/health] read now and hand its reading to
           {!answered}. The sampler counts it as out from here. *)
 
-val tick : ?allow_read:bool -> t -> now:float -> newest:answer option -> t * step
+val tick :
+  ?allow_read:bool -> t -> now:Masc_tui_wake.Mono.t -> newest:answer option -> t * step
 (** What the view's samples do at [now], given the newest [/health] answer
     the TUI received. A due sample takes the newest answer if it arrived
     within {!interval_s} seconds before the sample's time and was not taken
@@ -115,7 +116,7 @@ type report =
           not: the caller says so where read failures are said. The blanks
           in the graphs carry each failed time after it. *)
 
-val answered : t -> now:float -> reading -> t * step * report
+val answered : t -> now:Masc_tui_wake.Mono.t -> reading -> t * step * report
 (** The answer to the read {!tick} asked for. A sample still waiting takes
     it at [now]. *)
 

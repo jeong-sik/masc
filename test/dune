@@ -5497,6 +5497,8 @@
 
 (include stanzas/test_keeper_memory_journal_projection.inc)
 
+(include stanzas/test_keeper_memory_left.inc)
+
 (test
  (name test_keeper_memory_journal_serialization)
  (modules test_keeper_memory_journal_serialization)

@@ -581,7 +581,7 @@ let claude_status_refusal ~account ~status detail =
   else claude_auth_refusal ~account ~named:(http_status_name status) detail
 ;;
 
-let failure_of_agent_core_error ~is_person_key error =
+let failure_of_agent_core_error ?(is_person_key = false) error =
   let module Route = Keeper_runtime_failure_route in
   let detail = Agent_core.Error.to_string error in
   match Route.route_of_error ~boundary:Route.Agent_core_execution error with

@@ -17,7 +17,7 @@ val log_verification_evidence_read
 
 val cancel_verification_evidence_load
   :  Masc_tui_types.state
-  -> reason:string
+  -> reason:Masc_tui_types.Verification_evidence_read.failure
   -> unit
 
 val launch_verification_evidence_load

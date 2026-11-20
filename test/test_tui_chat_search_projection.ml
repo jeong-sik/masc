@@ -455,10 +455,10 @@ let test_frame_feedback_consumes_arrival_compensation () = at_sizes (fun origin 
 let long_answer prefix =
   String.concat "\n" (List.init 100 (fun index -> Printf.sprintf "%s%03d" prefix index))
 
-(* A streaming reply's live edge reads its rows from the open suffix alone
-   (#53979). The suffix must give every row it draws the same last source
-   byte the whole body's render gives it, at every point the reply can grow
-   to, including inside a fence whose language is a generated label. *)
+(* A frame reads a row's source bytes from the one block that draws the row
+   (#53979). The blocks must give every row and every source byte the answer
+   the whole body's render gives, at every point the reply can grow to,
+   including inside a fence whose language is a generated label. *)
 let growing_corpus = String.concat "" [
   "# Heading one\n\nA paragraph with **bold**, `code` and a [link](https://example.com) ";
   "that runs long enough to wrap across a narrow pane more than once.\n\n";
@@ -469,32 +469,51 @@ let growing_corpus = String.concat "" [
   "1. first\n2. second\n\n";
   "Closing paragraph without a newline at the end" ]
 
-let growing_entry body : Layout.entry =
+let entry_with_source markdown_source body : Layout.entry =
   { delivery_state = None; style = Layout.Keeper; heading_boundary = Layout.Inherit_heading;
     body_presentation = Layout.Source_body; timestamp = "12:00:00"; timeline_bucket = None;
     diagnostics = []; speaker = "alpha"; role_label = "alpha";
     role_label_mark_cells = Layout.role_label_mark_cells ~style:Layout.Keeper ();
-    request_label = ""; body; journal = [];
-    markdown_source = Layout.Markdown_growing {keeper_name = "alpha"; request_id = "grow"; entry_index = 0};
+    request_label = ""; body; journal = []; markdown_source;
     turn_rail = Layout.Rail_none; action = Layout.Action_none }
 
-let test_growing_suffix_reads_the_rows_the_whole_body_reads () =
+let growing_entry = entry_with_source
+  (Layout.Markdown_growing {keeper_name = "alpha"; request_id = "grow"; entry_index = 0})
+
+(* Each prefix is its own finished reply: one observation per length, so no
+   two lengths share a cached render. *)
+let finished_entry body = entry_with_source
+  (Layout.Markdown_stable {keeper_name = "alpha"; request_id = "done";
+    observed_at = float_of_int (String.length body); entry_index = 0}) body
+
+let blocks_read_what_the_whole_body_reads entry_of () =
   List.iter (fun width ->
     let steps = [| 1; 5; 13; 29 |] in
-    let rec grow length step read_from_suffix =
-      if length > String.length growing_corpus then read_from_suffix else
+    let rec grow length step read_from_blocks =
+      if length > String.length growing_corpus then read_from_blocks else
       let body = String.sub growing_corpus 0 length in
-      let whole, suffix = Render.For_testing.growing_row_end_sources ~width (growing_entry body) in
-      match suffix with
-      | None -> grow (length + steps.(step mod 4)) (step + 1) read_from_suffix
-      | Some (row_start, suffix_rows) ->
-          let expected = List.filter (fun (row, _) -> row >= row_start) whole in
-          check bool (Printf.sprintf "width %d, %d bytes: the suffix from row %d reads the whole body's rows"
-            width length row_start) true (expected = suffix_rows);
-          grow (length + steps.(step mod 4)) (step + 1) (read_from_suffix + 1) in
-    let read_from_suffix = grow 1 0 0 in
-    check bool (Printf.sprintf "width %d: the suffix is read at most growth points" width)
-      true (read_from_suffix * 2 > String.length growing_corpus / 12)) [60; 24]
+      let whole, blocks = Render.For_testing.block_reads ~width (entry_of body) in
+      let next = grow (length + steps.(step mod 4)) (step + 1) in
+      match blocks with
+      | None -> next read_from_blocks
+      | Some (blocks : Render.For_testing.source_reads) ->
+          let label = Printf.sprintf "width %d, %d bytes" width length in
+          check bool (label ^ ": each row's first source byte") true
+            (whole.row_sources = blocks.row_sources);
+          check bool (label ^ ": each row's last source byte") true
+            (whole.row_end_sources = blocks.row_end_sources);
+          check bool (label ^ ": each source byte's row") true
+            (whole.position_rows = blocks.position_rows);
+          next (read_from_blocks + 1) in
+    let read_from_blocks = grow 1 0 0 in
+    check bool (Printf.sprintf "width %d: the blocks are read at most growth points" width)
+      true (read_from_blocks * 2 > String.length growing_corpus / 12)) [60; 24]
+
+let test_growing_blocks_read_what_the_whole_body_reads =
+  blocks_read_what_the_whole_body_reads growing_entry
+
+let test_finished_blocks_read_what_the_whole_body_reads =
+  blocks_read_what_the_whole_body_reads finished_entry
 
 let test_streaming_frames_leave_the_whole_reply_unread () =
   let state = state Layout.Origin_inline in
@@ -508,7 +527,7 @@ let test_streaming_frames_leave_the_whole_reply_unread () =
   List.iteri (fun step text ->
     T.turn_log_add ~now:(302. +. float_of_int step) live ~seq:(Some (step + 2))
       (Live.Text {text; response=Unobserved_scope (None)});
-    ignore (frame_lines state)) ["\nmore words here"; " and more"; "\n\nnew paragraph"];
+    ignore (frame_lines state)) ["\nmore words here"; " and more"; "\n\nnew paragraph"; "\n\n"; "\n"];
   check int "streaming frames read no whole-reply index" before
     (Render.For_testing.source_index_build_count ());
   match state.msg_scroll_pin with
@@ -516,6 +535,73 @@ let test_streaming_frames_leave_the_whole_reply_unread () =
       check bool "the live edge still holds a source byte for the next scroll key" true
         (List.exists (fun (point : T.chat_scroll_point) -> Option.is_some point.source_position) pin_points)
   | Some {T.pin_mode=(T.Hold_scroll | T.Hold_search); _} | None -> fail "the live edge left no pin"
+
+(* Opening a finished reply follows its live edge too. Reading that edge
+   through the whole body's index drew a 1MB reply again with spans, about
+   0.9s on the frame that opened it; its last blocks draw the same rows. *)
+let test_opening_a_finished_reply_leaves_the_whole_reply_unread () =
+  List.iter (fun journal ->
+    let state = state Layout.Origin_inline in
+    (* One paragraph per line and a closing blank line: the last rows on
+       screen sit before the blank line that is the mutable suffix. *)
+    let text = String.concat "" (List.init 100 (fun index -> Printf.sprintf "DONE_%03d\n\n" index)) in
+    if journal then ignore (log state ~id:"done" ~at:1.
+      [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished])
+    else state.msg_loaded <- [row ~id:"done" ~request_id:"done" ~role:T.Message_keeper ~text 1.];
+    let before = Render.For_testing.source_index_build_count () in
+    ignore (frame_lines state);
+    check int (Printf.sprintf "journal %b: the opening frame reads no whole-reply index" journal)
+      before (Render.For_testing.source_index_build_count ());
+    match state.msg_scroll_pin with
+    | Some {T.pin_mode=T.Follow_live; pin_points; _} ->
+        check bool "the live edge holds a source byte" true
+          (List.exists (fun (point : T.chat_scroll_point) -> Option.is_some point.source_position) pin_points)
+    | Some {T.pin_mode=(T.Hold_scroll | T.Hold_search); _} | None -> fail "the live edge left no pin")
+    [false; true]
+
+(* Scrolling back reads the rows the window shows and the point it holds.
+   Each sits in one block, so neither reads the whole reply: that read was
+   about 1.4 s for 1 MB on the first scroll away from the live edge. *)
+let test_scrolling_back_leaves_the_whole_reply_unread () =
+  List.iter (fun journal ->
+    let state = state Layout.Origin_inline in
+    let text = String.concat "" (List.init 100 (fun index -> Printf.sprintf "BACK_%03d\n\n" index)) in
+    if journal then ignore (log state ~id:"back" ~at:1.
+      [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished])
+    else state.msg_loaded <- [row ~id:"back" ~request_id:"back" ~role:T.Message_keeper ~text 1.];
+    let live = frame_lines state in
+    let before = Render.For_testing.source_index_build_count () in
+    T.set_msg_scroll state 7;
+    let scrolled = frame_lines state in
+    let again = frame_lines state in
+    check int (Printf.sprintf "journal %b: scrolling back reads no whole-reply index" journal)
+      before (Render.For_testing.source_index_build_count ());
+    check bool "scrolling back moves the view" true (scrolled <> live);
+    check bool "the held view stays where it was" true (scrolled = again);
+    match state.msg_scroll_pin with
+    | Some {T.pin_mode=T.Hold_scroll; pin_points; _} ->
+        check bool "the held points keep source bytes" true
+          (List.exists (fun (point : T.chat_scroll_point) -> Option.is_some point.source_position) pin_points)
+    | Some {T.pin_mode=(T.Follow_live | T.Hold_search); _} | None -> fail "scrolling back held no point")
+    [false; true]
+
+(* A frame where nothing changed reads the same bodies the frame before it
+   read, at the live edge and scrolled back. Their identities are answered
+   from the last frame: digesting 1 MB was 43% of such a frame. *)
+let test_an_unchanged_frame_digests_no_body () =
+  let state = state Layout.Origin_inline in
+  let text = String.concat "" (List.init 100 (fun index -> Printf.sprintf "SAME_%03d\n\n" index)) in
+  state.msg_loaded <- [row ~id:"same" ~request_id:"same" ~role:T.Message_keeper ~text 1.];
+  let digests = Masc_tui_chat_search.For_testing.digest_count in
+  ignore (frame_lines state);
+  let at_live = digests () in
+  ignore (frame_lines state);
+  check int "an unchanged frame at the live edge digests nothing" at_live (digests ());
+  T.set_msg_scroll state 7;
+  ignore (frame_lines state);
+  let scrolled = digests () in
+  ignore (frame_lines state);
+  check int "an unchanged scrolled frame digests nothing" scrolled (digests ())
 
 let visible_line lines needle =
   match List.find_mapi (fun index line ->
@@ -1787,8 +1873,12 @@ let () = run "chat search projection" [
       test_a_settled_conversation_keeps_its_measured_list;
     test_case "held replies and full suffix geometry" `Quick test_settled_reply_and_complete_suffix;
     test_case "byte rows wait for a pin" `Quick test_byte_rows_wait_for_a_pin;
-    test_case "growing suffix reads the whole body's rows" `Quick test_growing_suffix_reads_the_rows_the_whole_body_reads;
+    test_case "growing blocks read what the whole body reads" `Quick test_growing_blocks_read_what_the_whole_body_reads;
     test_case "streaming frames leave the whole reply unread" `Quick test_streaming_frames_leave_the_whole_reply_unread;
+    test_case "finished blocks read what the whole body reads" `Quick test_finished_blocks_read_what_the_whole_body_reads;
+    test_case "scrolling back leaves the whole reply unread" `Quick test_scrolling_back_leaves_the_whole_reply_unread;
+    test_case "an unchanged frame digests no body" `Quick test_an_unchanged_frame_digests_no_body;
+    test_case "opening a finished reply leaves the whole reply unread" `Quick test_opening_a_finished_reply_leaves_the_whole_reply_unread;
     test_case "a held turn's tool blocks follow the tool stance" `Quick
       test_held_turn_tool_blocks_follow_the_tool_stance;
     test_case "repeated matches within one entry are newest first" `Quick

@@ -84,6 +84,7 @@ type streaming_render = {
   rows : string list;
   mutable_source_start : int;
   mutable_row_start : int;
+  blocks : (int * int) array;
 }
 
 (* {1 Inline markers} *)
@@ -1451,6 +1452,7 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
   let previous_row_start = ref 0 in
   let mutable_source_start = ref 0 in
   let mutable_row_start = ref 0 in
+  let blocks = ref [] in
   let previous_can_absorb_terminal = ref false in
   let mutable_can_absorb_terminal = ref false in
   let mutable_block_started_at_terminal = ref false in
@@ -1507,6 +1509,7 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
       mutable_row_start := !rendered_rows;
       mutable_can_absorb_terminal := can_absorb_terminal;
       mutable_block_started_at_terminal := line.terminal_line;
+      blocks := (line.source_start, !rendered_rows) :: !blocks;
       incr block_count
     end
   in
@@ -1731,6 +1734,7 @@ let render_streaming_internal ?on_block ?on_diagram ?on_semantic ?on_unmapped
   { rows = List.rev !rows;
     mutable_source_start;
     mutable_row_start;
+    blocks = Array.of_list (List.rev !blocks);
   }
 
 let render_streaming ~palette ~width text =

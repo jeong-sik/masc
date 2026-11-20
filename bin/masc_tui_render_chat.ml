@@ -302,6 +302,11 @@ let body_with_previews ~previews ~mode ~palette_generation ~(entry : Message_lay
               composed_palette = palette_generation; composed };
           composed)
 
+let stable_markdown_identity (entry : Message_layout.entry) ~keeper_name ~request_id
+    ~observed_at ~entry_index =
+  { cmi_style = entry.style; cmi_keeper_name = keeper_name; cmi_request_id = request_id;
+    cmi_observed_at = Some observed_at; cmi_entry_index = entry_index }
+
 let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
   fun ~(entry : Message_layout.entry) ~width ->
   let context = Chat_theme.body_context theme entry.style in
@@ -322,16 +327,11 @@ let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
       match entry.markdown_source with
       | Message_layout.Markdown_stable
           { keeper_name; request_id; observed_at; entry_index } ->
-          Markdown_cache.render chat_markdown_cache
+          Markdown_cache.render_keeping_blocks chat_markdown_cache
             ~theme_revision:chat_markdown_theme_revision
-            ~palette_generation ~width ~renderer:(chat_markdown ~context)
-            ~identity:
-              { cmi_style = entry.style;
-                cmi_keeper_name = keeper_name;
-                cmi_request_id = request_id;
-                cmi_observed_at = Some observed_at;
-                cmi_entry_index = entry_index;
-              }
+            ~palette_generation ~width ~renderer:(chat_markdown_streaming ~context)
+            ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
+              ~observed_at ~entry_index)
             ~text:body
       | Message_layout.Markdown_growing
           { keeper_name; request_id; entry_index } ->
@@ -393,21 +393,20 @@ let search_chat_markdown ~link_previews_mode ~theme ~dress ~cards ~(entry : Mess
   {mapped_rows=document.document_rows @ journal_rows;runs=runs @ journal_runs;unavailable}
 
 
-(* The open suffix of a growing entry, numbered as the whole body's render
-   numbers it. [source_start] and [row_start] are the closed prefix the
-   growing render cache holds: the renderer starts a block there, so the
-   suffix draws the rows and runs the whole body draws past that point.
-   Positions keep the whole body's identity and offsets. *)
-let search_chat_markdown_suffix ~theme ~(entry : Message_layout.entry) ~width ~source_start
-    ~row_start =
-  let body = entry.body in
-  let body_identity = Search.body_identity body in
-  let suffix = String.sub body source_start (String.length body - source_start) in
-  let origins = Array.init (String.length suffix) (fun local ->
+(* The bytes [source_start, source_end) of an entry's body, read alone and
+   numbered as the whole body's render numbers them. [source_start] and
+   [row_start] are where the render cache saw a block start, and
+   [source_end] ends a block, so the range draws the rows and runs the whole
+   body draws for those blocks. Positions keep the whole body's identity and
+   offsets. *)
+let search_chat_markdown_range ~theme ~(entry : Message_layout.entry) ~width ~body_identity
+    ~source_start ~source_end ~row_start =
+  let range = String.sub entry.body source_start (source_end - source_start) in
+  let origins = Array.init (String.length range) (fun local ->
     Some (body_byte_origin entry body_identity (source_start + local))) in
   let context = Chat_theme.body_context theme entry.style in
   let palette = chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
-  let document = Markdown.render_document_with_spans ~palette ~width suffix in
+  let document = Markdown.render_document_with_spans ~palette ~width range in
   let shift_origin = function
     | Some (Markdown.Generated {block_start; field; byte}) ->
         Some (Markdown.Generated {block_start = block_start + source_start; field; byte})
@@ -420,7 +419,7 @@ let search_chat_markdown_suffix ~theme ~(entry : Message_layout.entry) ~width ~s
         | Drawn_diagram {block_start} -> Drawn_diagram {block_start = block_start + source_start}) } in
   let document = { document with semantic_runs = List.map shift_run document.semantic_runs } in
   let runs, _ = Search.of_document ~presentation:entry.body_presentation ~body:body_identity
-    ~body_length:(String.length body) ~origins document in
+    ~body_length:(String.length entry.body) ~origins document in
   row_start + List.length document.document_rows, runs
 
 
@@ -4394,66 +4393,156 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
         Hashtbl.add mapped entry_index value;
         value
 
-let body_row_of_point ~source_body entry_index (point : chat_scroll_point) =
-  match point.source_position with
-  | None -> None
-  | Some position -> Option.bind (source_body entry_index) (fun body ->
-      Hashtbl.find_opt (Lazy.force body.source_rows) position)
+(* Where a frame reads a row's first and last source bytes, and a source
+   byte's row. *)
+type chat_source_reads = {
+  row_source : int -> int -> chat_source_position option;
+  row_end_source : int -> int -> chat_source_position option;
+  position_row : int -> chat_source_position -> int option;
+}
 
-(* The open suffix's rows of a growing entry the chat drew this frame, with the
-   row the suffix starts at. [None] when the growing render cache holds no
-   closed prefix for exactly this body and width. *)
-let growing_suffix_index ~theme ~width (entry : Message_layout.entry) =
+(* Every block's first byte and first row in an entry's body, as the render
+   cache holds them for exactly this body and width. [None] when it holds no
+   render of this text: a body drawn with link cards after it is another
+   text, and a streaming entry keeps no render. *)
+let block_table ~theme ~width (entry : Message_layout.entry) =
+  let context = Chat_theme.body_context theme entry.style in
   match entry.markdown_source with
   | Message_layout.Markdown_growing {keeper_name; request_id; entry_index} ->
-      let context = Chat_theme.body_context theme entry.style in
-      Option.map (fun (source_start, row_start) ->
-        let body_rows, runs =
-          search_chat_markdown_suffix ~theme ~entry ~width ~source_start ~row_start in
-        row_start, source_body_index_of_runs
-          ~convert:(fun position -> Some (Durable_position position)) ~body_rows runs)
-        (Markdown_cache.growing_boundary chat_markdown_cache
-           ~theme_revision:chat_markdown_theme_revision
-           ~palette_generation:context.palette_generation ~width
-           ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
-           ~text:entry.body)
-  | Message_layout.Markdown_stable _ | Markdown_streaming -> None
+      Markdown_cache.growing_blocks chat_markdown_cache
+        ~theme_revision:chat_markdown_theme_revision
+        ~palette_generation:context.palette_generation ~width
+        ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
+        ~text:entry.body
+  | Message_layout.Markdown_stable {keeper_name; request_id; observed_at; entry_index} ->
+      Markdown_cache.completed_blocks chat_markdown_cache
+        ~theme_revision:chat_markdown_theme_revision
+        ~palette_generation:context.palette_generation ~width
+        ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
+          ~observed_at ~entry_index)
+        ~text:entry.body
+  | Message_layout.Markdown_streaming -> None
 
-(* The live edge reads one row's last source byte. A growing entry is a new
-   entry on every arrival, so reading it through [source_body] drew the whole
-   reply again with spans on every streaming frame. The closed prefix the
-   growing render cache holds draws none of the open suffix's rows, so a row
-   the suffix draws is read from the suffix alone. *)
-let live_row_end_source state ~keeper_name projection ~inner_width ~theme ~source_body =
+(* The last block whose [key] is at most [value]. *)
+let block_at blocks ~key value =
+  let rec search low high =
+    if high - low <= 1 then low
+    else
+      let middle = (low + high) / 2 in
+      if key blocks.(middle) <= value then search middle high else search low middle in
+  if Array.length blocks = 0 || key blocks.(0) > value then None
+  else Some (search 0 (Array.length blocks))
+
+(* One block of an entry's body, read alone. Another block follows from the
+   byte after the newline that ends this one; without that newline the bytes
+   draw this block's rows and no more. *)
+let block_source_index ~theme ~width ~body_identity (entry : Message_layout.entry) blocks block =
+  let source_start, row_start = blocks.(block) in
+  let source_end =
+    if block + 1 >= Array.length blocks then String.length entry.body
+    else
+      let next = fst blocks.(block + 1) in
+      if Char.equal entry.body.[next - 1] '\n' then next - 1 else next in
+  let body_rows, runs = search_chat_markdown_range ~theme ~entry ~width ~body_identity
+    ~source_start ~source_end ~row_start in
+  source_body_index_of_runs ~convert:(fun position -> Some (Durable_position position))
+    ~body_rows runs
+
+type position_in_body = Body_offset of int | Read_whole_body
+
+let position_in_body = function
+  | Durable_position (Search.Body_byte {offset; _} | Search.Thinking_summary_byte {offset; _}
+                     | Search.Projected_byte {offset; _}) -> Body_offset offset
+  | Durable_position (Search.Body_label {block_start; _} | Search.Projected_label {block_start; _}) ->
+      Body_offset block_start
+  | Durable_position (Search.Thinking_summary_label _ | Search.Preview_byte _
+                     | Search.Journal_byte _ | Search.Request_byte _)
+  | Polled_body_byte _ -> Read_whole_body
+
+type position_read = Read_row of int option | Read_whole
+
+(* The reads of one entry whose blocks the render cache holds. Each block is
+   drawn with spans at most once. *)
+type entry_reads = {
+  entry_row_source : int -> chat_source_position option;
+  entry_row_end_source : int -> chat_source_position option;
+  entry_position_row : chat_source_position -> position_read;
+}
+
+let entry_block_reads ~theme ~width (entry : Message_layout.entry) blocks =
+  let body_identity = lazy (Search.body_identity entry.body) in
+  let indexes = Hashtbl.create 8 in
+  let block_index block =
+    match Hashtbl.find_opt indexes block with
+    | Some index -> index
+    | None ->
+        let index = block_source_index ~theme ~width ~body_identity:(Lazy.force body_identity)
+          entry blocks block in
+        Hashtbl.add indexes block index;
+        index in
+  let row_read field body_row =
+    Option.bind (block_at blocks ~key:snd body_row) (fun block ->
+      Hashtbl.find_opt (field (block_index block)) body_row) in
+  { entry_row_source = row_read (fun index -> index.row_sources);
+    entry_row_end_source = row_read (fun index -> index.row_end_sources);
+    entry_position_row = (fun position ->
+      match position_in_body position with
+      | Read_whole_body -> Read_whole
+      | Body_offset offset ->
+          Read_row (Option.bind (block_at blocks ~key:fst offset) (fun block ->
+            Hashtbl.find_opt (Lazy.force (block_index block).source_rows) position))) }
+
+(* A frame reads a few rows of an entry: the live edge, the rows a scrolled
+   window shows, a held point. Each is drawn by one block, which renders on
+   its own to the same rows and runs, so only the blocks those rows sit in
+   are drawn again with spans. Reading them through [source_body] drew the
+   whole reply with spans: about 1.4 s for 1 MB on the first scroll away
+   from the live edge, and on every streaming frame before that. An entry
+   the render cache holds no blocks for is read whole. *)
+let chat_source_reads state ~keeper_name projection ~inner_width ~theme ~source_body =
   let entries = (scroll_anchor_index projection).indexed_entries in
-  let suffixes = Hashtbl.create 2 in
-  let suffix_index entry_index =
-    match Hashtbl.find_opt suffixes entry_index with
+  let held = Hashtbl.create 4 in
+  let entry_reads entry_index =
+    match Hashtbl.find_opt held entry_index with
     | Some value -> value
     | None ->
-        let entry = entries.(entry_index) in
-        let value = match entry.Message_layout.markdown_source, entry.journal with
-          | Message_layout.Markdown_growing _, [] ->
+        let value =
+          if entry_index < 0 || entry_index >= Array.length entries then None else
+          let entry = entries.(entry_index) in
+          match entry.Message_layout.markdown_source, entry.journal with
+          | (Message_layout.Markdown_growing _ | Markdown_stable _), [] ->
               (match fst (source_mapping_owner state ~keeper_name projection entry_index) with
                | Durable_source ->
-                   growing_suffix_index ~theme entry ~width:(Message_layout.entry_body_cells
-                     ~origin:state.msg_origin_display ~inner_width entry)
+                   let width = Message_layout.entry_body_cells
+                     ~origin:state.msg_origin_display ~inner_width entry in
+                   Option.map (entry_block_reads ~theme ~width entry)
+                     (block_table ~theme ~width entry)
                | Unknown_polled_source | Polled_source _ -> None)
-          | Message_layout.Markdown_growing _, _ :: _
-          | (Message_layout.Markdown_stable _ | Markdown_streaming), _ -> None in
-        Hashtbl.add suffixes entry_index value;
+          | (Message_layout.Markdown_growing _ | Markdown_stable _), _ :: _
+          | Message_layout.Markdown_streaming, _ -> None in
+        Hashtbl.add held entry_index value;
         value in
-  fun entry_index body_row ->
-    let whole () = Option.bind (source_body entry_index) (fun body ->
-      Hashtbl.find_opt body.row_end_sources body_row) in
-    if entry_index < 0 || entry_index >= Array.length entries then whole () else
-    match suffix_index entry_index with
-    | Some (row_start, index) when body_row >= row_start ->
-        Hashtbl.find_opt index.row_end_sources body_row
-    | Some _ | None -> whole ()
+  let whole field entry_index key =
+    Option.bind (source_body entry_index) (fun body -> Hashtbl.find_opt (field body) key) in
+  { row_source = (fun entry_index body_row ->
+      match entry_reads entry_index with
+      | Some reads -> reads.entry_row_source body_row
+      | None -> whole (fun body -> body.row_sources) entry_index body_row);
+    row_end_source = (fun entry_index body_row ->
+      match entry_reads entry_index with
+      | Some reads -> reads.entry_row_end_source body_row
+      | None -> whole (fun body -> body.row_end_sources) entry_index body_row);
+    position_row = (fun entry_index position ->
+      let read_whole () = whole (fun body -> Lazy.force body.source_rows) entry_index position in
+      match entry_reads entry_index with
+      | None -> read_whole ()
+      | Some reads ->
+          (match reads.entry_position_row position with
+           | Read_row row -> row
+           | Read_whole -> read_whole ())) }
 
-let source_point_on_row ~source_body entry_index body_row =
-  Option.bind (source_body entry_index) (fun body -> Hashtbl.find_opt body.row_sources body_row)
+let body_row_of_point ~reads entry_index (point : chat_scroll_point) =
+  Option.bind point.source_position (reads.position_row entry_index)
 
 (* The point's entry still stands, but a view stance (Ctrl-D, Ctrl-N, Ctrl-R)
    replaced the body text the point indexed with another presentation. A Child
@@ -4481,7 +4570,7 @@ let chat_scroll_from_oldest (state : state) =
   | Chat_scroll_from_bottom -> None
   | Chat_scroll_from_oldest offset -> Some offset
 
-let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_body ~inner_width =
+let requested_scroll_from_pin state ~keeper_name projection ~markdown ~reads ~inner_width =
   if state.msg_scroll = max_int || Option.is_some (chat_scroll_from_oldest state) then max_int
   else match state.msg_scroll_pin with
   | Some pin when pin.pin_workspace = state.workspace_authority
@@ -4503,21 +4592,21 @@ let requested_scroll_from_pin state ~keeper_name projection ~markdown ~source_bo
          a surviving Child observation or changed presentation hold the reader.
          Every saved byte may have been removed; a stale numeric distance must not become
          a successful pin to newly arriving content. *)
-      (match List.find_map (scroll_at ~row_of:(body_row_of_point ~source_body)) pin.pin_points with
+      (match List.find_map (scroll_at ~row_of:(body_row_of_point ~reads)) pin.pin_points with
        | Some scroll -> scroll
        | None ->
            Option.value ~default:0
              (List.find_map (scroll_at ~row_of:(surviving_entry_row projection)) pin.pin_points))
   | Some _ | None -> state.msg_scroll
 
-let scroll_position_for_window state ~keeper_name projection ~markdown ~source_body
-    ~live_end_source ~inner_width (window : Message_layout.scroll_window) =
+let scroll_position_for_window state ~keeper_name projection ~markdown ~reads ~inner_width
+    (window : Message_layout.scroll_window) =
   let live_edge = window.scroll = 0 in
   let positions = if live_edge then List.rev window.body_positions else window.body_positions in
   let point_of_position (position : Message_layout.body_row_position) =
     Option.bind (scroll_anchor_at projection position.entry_index) (fun anchor ->
-      let source = if live_edge then live_end_source position.entry_index position.body_row
-        else source_point_on_row ~source_body position.entry_index position.body_row in
+      let source = if live_edge then reads.row_end_source position.entry_index position.body_row
+        else reads.row_source position.entry_index position.body_row in
       Option.map (fun source_position ->
         {scroll_anchor=anchor; body_row=position.body_row; source_position=Some source_position;
          rows_below=position.rows_below}) source) in
@@ -4535,7 +4624,7 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
         && String.equal pin.pin_keeper keeper_name ->
         Some (List.filter_map (fun point ->
           Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor) (fun entry_index ->
-            Option.bind (body_row_of_point ~source_body entry_index point) (fun body_row ->
+            Option.bind (body_row_of_point ~reads entry_index point) (fun body_row ->
               Option.map (fun suffix -> {point with body_row;rows_below=suffix-window.scroll})
                 (Message_layout.scroll_for_body_row ~markdown
                   ~origin:state.msg_origin_display ~inner_width ~entry_index
@@ -4576,7 +4665,7 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
              let pin_points = List.filter_map (fun point ->
                Option.bind (projection_index_of_scroll_anchor projection point.scroll_anchor)
                  (fun entry_index ->
-                   Option.bind (body_row_of_point ~source_body entry_index point) (fun body_row ->
+                   Option.bind (body_row_of_point ~reads entry_index point) (fun body_row ->
                      Option.map (fun suffix -> {point with body_row;rows_below=suffix-window.scroll})
                        (Message_layout.scroll_for_body_row ~markdown
                          ~origin:state.msg_origin_display ~inner_width ~entry_index
@@ -5059,8 +5148,9 @@ let queue_context_lines (state : state) ~keeper_name ~cols ~height =
   let markdown = cached_chat_markdown_with_preview ~previews
       ~link_previews_mode:state.link_previews_mode ~theme in
   let source_body = source_body_lookup state ~keeper_name projection ~inner_width:cols ~theme ~preview in
+  let reads = chat_source_reads state ~keeper_name projection ~inner_width:cols ~theme ~source_body in
   let requested = requested_scroll_from_pin state ~keeper_name projection
-      ~markdown ~source_body ~inner_width:cols in
+      ~markdown ~reads ~inner_width:cols in
   let window = Message_layout.clamped_scrolled_rows ~markdown
       ~origin:state.msg_origin_display ?from_oldest:(chat_scroll_from_oldest state)
       ~inner_width:cols ~height ~requested projection.layout_entries in
@@ -5132,8 +5222,10 @@ let render_keeper_message (state : state) =
     let markdown = cached_chat_markdown_with_preview ~previews
       ~link_previews_mode:state.link_previews_mode ~theme:chat_theme in
     let source_body = source_body_lookup state ~keeper_name projection ~inner_width ~theme:chat_theme ~preview in
+    let reads = chat_source_reads state ~keeper_name projection ~inner_width ~theme:chat_theme
+      ~source_body in
     let requested = requested_scroll_from_pin state ~keeper_name projection
-      ~markdown ~source_body ~inner_width in
+      ~markdown ~reads ~inner_width in
     (* A search can pin a short conversation at scroll zero. If an arrival
        precedes its first paint, the pin already restores a reading position
        although the stored scroll is still zero. Reserve and draw its chrome
@@ -5257,10 +5349,8 @@ let render_keeper_message (state : state) =
     in
     Masc_tui_frame_timing.finish_stage ~name:"chat.window" window_started;
     let scroll = window.scroll and visible_rows = window.rows in
-    let live_end_source = live_row_end_source state ~keeper_name projection ~inner_width
-      ~theme:chat_theme ~source_body in
     let scroll_feedback = scroll_position_for_window state ~keeper_name projection
-      ~markdown ~source_body ~live_end_source ~inner_width window in
+      ~markdown ~reads ~inner_width window in
 
     (* The chat buffer starts below the one-row tab strip, which is added by
        [finish_frame_beside_acting_pane]. Mouse reports count from the terminal's
@@ -6132,21 +6222,37 @@ module For_testing = struct
   let search_candidate_build_count () = Atomic.get search_candidate_builds
   let search_candidate_ui_build_count () = Atomic.get search_candidate_ui_builds
   let search_job_bytes = search_job_bytes
-  let growing_row_end_sources ~width (entry : Message_layout.entry) =
+  type source_reads = {
+    row_sources : (int * Masc_tui_types.chat_source_position) list;
+    row_end_sources : (int * Masc_tui_types.chat_source_position) list;
+    position_rows : (Masc_tui_types.chat_source_position * int) list;
+  }
+
+  let block_reads ~width (entry : Message_layout.entry) =
     let theme = Chat_theme.snapshot () in
     let previews = shared_previews () in
     let preview = preview_lookup previews in
     ignore (cached_chat_markdown_with_preview ~previews ~link_previews_mode:`Off ~theme
       ~entry ~width);
     let sorted table =
-      List.sort compare (Hashtbl.fold (fun row position rows -> (row, position) :: rows) table []) in
+      List.sort compare (Hashtbl.fold (fun key value pairs -> (key, value) :: pairs) table []) in
     let whole = search_chat_markdown ~link_previews_mode:`Off ~theme
       ~dress:(Masc_tui_markdown_theme.dress ())
       ~cards:(link_cards ~preview ~mode:`Off entry) ~entry ~width in
-    let whole_index = source_body_index_of_runs
-      ~convert:(fun position -> Some (Durable_position position))
-      ~body_rows:(List.length whole.mapped_rows) whole.runs in
-    sorted whole_index.row_end_sources,
-    Option.map (fun (row_start, (index : source_body_index)) ->
-      row_start, sorted index.row_end_sources) (growing_suffix_index ~theme ~width entry)
+    let body_rows = List.length whole.mapped_rows in
+    let index = source_body_index_of_runs
+      ~convert:(fun position -> Some (Durable_position position)) ~body_rows whole.runs in
+    let whole_reads = { row_sources = sorted index.row_sources;
+      row_end_sources = sorted index.row_end_sources; position_rows = sorted (Lazy.force index.source_rows) } in
+    whole_reads, Option.map (fun blocks ->
+      let reads = entry_block_reads ~theme ~width entry blocks in
+      let rows = List.init (body_rows + 2) Fun.id in
+      let pick read = List.filter_map (fun row ->
+        Option.map (fun position -> row, position) (read row)) rows in
+      { row_sources = pick reads.entry_row_source;
+        row_end_sources = pick reads.entry_row_end_source;
+        position_rows = List.filter_map (fun (position, _) ->
+          match reads.entry_position_row position with
+          | Read_row row -> Option.map (fun row -> position, row) row
+          | Read_whole -> None) whole_reads.position_rows }) (block_table ~theme ~width entry)
 end

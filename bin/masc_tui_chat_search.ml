@@ -5,7 +5,28 @@ module Layout = Masc_tui_message_layout
 (* Digest of the presented body text. *)
 type body_identity = Digest.t
 
-let body_identity text = Digest.string text
+(* A frame asks for the identity of the bodies it reads, and the next frame
+   asks again for the same strings: the live edge and every scrolled row read
+   through it. Digesting 1 MB takes about 2.3 ms, 43% of a frame where nothing
+   changed. The last few answers are kept per domain, keyed by the string
+   itself; an ephemeron keeps no body alive. *)
+let kept_identities_capacity = 8
+
+let kept_identities : (string, body_identity) Ephemeron.K1.t list ref Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> ref [])
+
+let digests = Atomic.make 0
+
+let body_identity text =
+  let held = Domain.DLS.get kept_identities in
+  match List.find_map (fun kept -> Ephemeron.K1.query kept text) !held with
+  | Some identity -> identity
+  | None ->
+      Atomic.incr digests;
+      let identity = Digest.string text in
+      held := Ephemeron.K1.make text identity
+              :: List.filteri (fun index _ -> index < kept_identities_capacity - 1) !held;
+      identity
 
 (* Every position names the text it indexes as well as its place: a body by
    its identity, a generated label, preview field or journal field by its
@@ -461,3 +482,7 @@ let find ~needle ~before ~body_rows runs =
       find_plain ~needle (skip_optional_boundaries group) consider
     else find_optional_lines ~order ~needle ~eligible group consider) groups;
   !newest
+
+module For_testing = struct
+  let digest_count () = Atomic.get digests
+end

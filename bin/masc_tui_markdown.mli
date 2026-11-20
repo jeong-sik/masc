@@ -112,6 +112,7 @@ type streaming_render = private {
   rows : string list;
   mutable_source_start : int;
   mutable_row_start : int;
+  blocks : (int * int) array;
 }
 (** One canonical render together with its earliest append-sensitive suffix.
 
@@ -122,7 +123,12 @@ type streaming_render = private {
     The boundaries come from the same block walk that produced [rows]. They
     are not a second Markdown scanner. The suffix is normally the final block;
     it also includes a table or header candidate before an incomplete terminal
-    line that an append can still turn into its delimiter or next row. *)
+    line that an append can still turn into its delimiter or next row.
+
+    [blocks] holds every block's first byte with the first row it draws, in
+    source order. Every line outside a fence or table is its own block. The
+    bytes of one block, without the newline that ends it when another block
+    follows, render on their own to exactly that block's rows. *)
 
 val render_streaming :
   palette:palette -> width:int -> string -> streaming_render

@@ -36,6 +36,33 @@ val render :
 (** Render the completed entry [identity] with source [text], or return its
     retained rows when every key field matches. *)
 
+val render_keeping_blocks :
+  'identity t ->
+  theme_revision:int ->
+  palette_generation:int ->
+  width:int ->
+  renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
+  identity:'identity ->
+  text:string ->
+  string list
+(** {!render} through a streaming renderer, which also retains where the
+    render's blocks start, for {!completed_blocks}. Rows retained by {!render}
+    for the same key are rendered again once to learn them. *)
+
+val completed_blocks :
+  'identity t ->
+  theme_revision:int ->
+  palette_generation:int ->
+  width:int ->
+  identity:'identity ->
+  text:string ->
+  (int * int) array option
+(** [Some blocks] when {!render_keeping_blocks} retained exactly [text] for
+    [identity] with these visual fields: every block's first source byte with
+    the first row it draws, as {!Masc_tui_markdown.streaming_render} gives
+    them. [None] when nothing for [text] is retained or {!render} retained
+    it. *)
+
 val render_growing :
   'identity t ->
   theme_revision:int ->
@@ -52,19 +79,17 @@ val render_growing :
     snapshot renders from the previous suffix boundary. A non-prefix snapshot
     or any visual-key change starts again from the complete source. *)
 
-val growing_boundary :
+val growing_blocks :
   'identity t ->
   theme_revision:int ->
   palette_generation:int ->
   width:int ->
   identity:'identity ->
   text:string ->
-  (int * int) option
-(** [Some (source_bytes, rows)] when the growing entry [identity] last
-    rendered exactly [text] with these visual fields: the bytes of its closed
-    blocks and the rows they draw. The rows of [text] after that prefix are
-    what [text]'s remaining bytes render to on their own, numbered from
-    [rows]. [None] when nothing for [text] is retained. *)
+  (int * int) array option
+(** [Some blocks] when the growing entry [identity] last rendered exactly
+    [text] with these visual fields: every block's first source byte with the
+    first row it draws. [None] when nothing for [text] is retained. *)
 
 type measurement = { height : int; nonblank_lines : int }
 

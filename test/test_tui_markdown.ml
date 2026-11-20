@@ -84,6 +84,41 @@ let check_stream_boundary label ~source_start ~row_start source =
   Alcotest.(check int) (label ^ " row boundary") row_start
     streamed.mutable_row_start
 
+let check_blocks label expected source =
+  let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
+  Alcotest.(check (list (pair int int))) label expected (Array.to_list streamed.blocks)
+
+let test_blocks_start_where_their_lines_start () =
+  check_blocks "an empty source is one empty line" [0, 0] "";
+  check_blocks "each line is a block" [0, 0; 6, 1] "alpha\nbeta";
+  check_blocks "a fence is one block from its opening line" [0, 0; 7, 1]
+    "before\n```ocaml\nlet x = 1\n```"
+
+let block_corpus = String.concat "" [
+  "# Heading\n\nA paragraph with **bold** and `code` that wraps past forty cells wide.\n\n";
+  "- item one\n- item two\n  continued\n\n1. first\n2. second\n\n";
+  "> quoted line\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n";
+  "```ocaml\nlet x = 1\n\nlet y = 2\n```\n\n\nclosing words\n\n" ]
+
+(* Every prefix, every block: its bytes, without the newline before the next
+   block, render alone to the rows the whole source draws for it. *)
+let test_each_block_renders_alone () =
+  for length = 0 to String.length block_corpus do
+    let source = String.sub block_corpus 0 length in
+    let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
+    let blocks = streamed.blocks and rows = Array.of_list streamed.rows in
+    Array.iteri (fun block (source_start, row_start) ->
+      let source_end, row_end =
+        if block + 1 < Array.length blocks then
+          let next, next_row = blocks.(block + 1) in
+          (if Char.equal source.[next - 1] '\n' then next - 1 else next), next_row
+        else length, Array.length rows in
+      check_rows (Printf.sprintf "%d bytes, block %d at byte %d" length block source_start)
+        (Array.to_list (Array.sub rows row_start (row_end - row_start)))
+        (Markdown.render_streaming ~palette:tagged ~width:40
+           (String.sub source source_start (source_end - source_start))).rows) blocks
+  done
+
 let test_streaming_boundary_keeps_only_closed_blocks () =
   check_stream_boundary "one newline keeps its line mutable" ~source_start:0
     ~row_start:0 "alpha\n";
@@ -476,6 +511,10 @@ let () =
     ; ( "blocks"
       , [ Alcotest.test_case "streaming keeps only closed blocks" `Quick
             test_streaming_boundary_keeps_only_closed_blocks
+        ; Alcotest.test_case "blocks start where their lines start" `Quick
+            test_blocks_start_where_their_lines_start
+        ; Alcotest.test_case "each block renders alone" `Quick
+            test_each_block_renders_alone
         ; Alcotest.test_case "score snapshots preserve closed source" `Quick
             test_alphatex_sources_preserve_closed_snapshots
         ; Alcotest.test_case "diagram snapshots preserve closed source" `Quick

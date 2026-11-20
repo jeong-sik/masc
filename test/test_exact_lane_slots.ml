@@ -85,17 +85,15 @@ let failure_names passed =
     passed
 ;;
 
-(* An unknown runtime is passed as its typed failure, and no client runs. *)
-let test_a_cli_slot_with_no_runtime_fails_without_running_a_client () =
-  Eio_main.run
-  @@ fun env ->
+(* A walk over [slots] with a runner that counts its runs. *)
+let walk_counting env slots =
   let ran = ref 0 in
   let runner ~runtime:_ ~system_prompt:_ ~output_schema:_ ~prompt:_ =
     incr ran;
     Ok "{}"
   in
   let proceed _ = Ok () in
-  match
+  let result =
     Slots.walk
       ~runner
       ~net:(Eio.Stdenv.net env)
@@ -112,17 +110,57 @@ let test_a_cli_slot_with_no_runtime_fails_without_running_a_client () =
       ~validate_cli:(fun (_ : Yojson.Safe.t) -> Ok ())
       ~before_cli_visit:(fun ~runtime_id:_ -> Ok ())
       ~on_advance:(fun ~failed:_ ~next:_ -> Ok ())
-      [ unknown_runtime "ghost.a"; unknown_runtime "ghost.b" ]
-  with
-  | Walk.Exhausted { passed; standing } ->
+      slots
+  in
+  result, !ran
+;;
+
+(* An unknown runtime is passed as its typed failure, and no client runs. *)
+let test_a_cli_slot_with_no_runtime_fails_without_running_a_client () =
+  Eio_main.run
+  @@ fun env ->
+  match walk_counting env [ unknown_runtime "ghost.a"; unknown_runtime "ghost.b" ] with
+  | Walk.Exhausted { passed; standing }, ran ->
     check (list string) "each slot failed as unknown" [ "unknown ghost.a"; "unknown ghost.b" ]
       (failure_names passed);
     check bool "an unknown runtime is not a rest" false
       (match standing with
        | Walk.Every_slot_resting -> true
        | Walk.Not_every_slot_resting -> false);
-    check int "no client ran" 0 !ran
-  | Walk.Answered _ | Walk.Stopped _ -> fail "the walk was meant to be exhausted"
+    check int "no client ran" 0 ran
+  | (Walk.Answered _ | Walk.Stopped _), (_ : int) -> fail "the walk was meant to be exhausted"
+;;
+
+(* Inside a run's capture, each unknown runtime is recorded as the
+   one-shot's refusal, in walk order, with nothing dispatched. *)
+let test_a_run_capture_records_each_unknown_runtime_as_not_run () =
+  Eio_main.run
+  @@ fun env ->
+  let capture = Exact_lane_slot_capture.create () in
+  let (_ : (_, _, _) Slots.walk_result * int) =
+    Exact_lane_slot_capture.with_capture capture (fun () ->
+      walk_counting env [ unknown_runtime "ghost.a"; unknown_runtime "ghost.b" ])
+  in
+  match Exact_lane_slot_capture.observations capture with
+  | None -> fail "the capture recorded nothing"
+  | Some observations ->
+    check (list string) "one observation per slot, in walk order" [ "ghost.a"; "ghost.b" ]
+      (List.map (fun (observation : Exact_lane_slot_observation.t) -> observation.slot_id)
+         observations);
+    check bool "each is the client's refusal, not dispatched" true
+      (List.for_all
+         (fun (observation : Exact_lane_slot_observation.t) ->
+            (not observation.generation_dispatched)
+            &&
+            match observation.outcome with
+            | Exact_lane_slot_observation.Cli_failed cli ->
+              not (Keeper_exact_walk_failure.cli_was_dispatched cli)
+            | Exact_lane_slot_observation.Unresolved
+            | Exact_lane_slot_observation.Accepted
+            | Exact_lane_slot_observation.Semantic_rejected
+            | Exact_lane_slot_observation.Admission_rejected _
+            | Exact_lane_slot_observation.Execution_failed _ -> false)
+         observations)
 ;;
 
 (* A slot whose own declaration cannot start a flow is a failed visit, not a
@@ -196,6 +234,10 @@ let () =
             "a slot its own declaration cannot start does not stop the walk"
             `Quick
             test_a_slot_its_own_declaration_cannot_start_does_not_stop_the_walk
+        ; test_case
+            "a run capture records each unknown runtime as not run"
+            `Quick
+            test_a_run_capture_records_each_unknown_runtime_as_not_run
         ] )
     ]
 ;;

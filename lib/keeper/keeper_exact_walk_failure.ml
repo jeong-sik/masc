@@ -335,6 +335,7 @@ let cli_observation (failure : Keeper_lane_cli_oneshot.failure) = match failure 
       | None -> native_cause cause in
     {runtime_id;cause}
 
+let cli_invalid_domain_answer ~runtime_id = {runtime_id;cause=Invalid_domain_answer}
 let cli_observation_slot observation = observation.runtime_id
 let cli_was_dispatched observation = match observation.cause with
   | Unknown_runtime | Not_official | Held _ -> false

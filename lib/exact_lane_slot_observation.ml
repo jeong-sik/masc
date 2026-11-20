@@ -129,3 +129,9 @@ let cli ~slot_id ~started_at ~finished_at ~generation_dispatched ~outcome =
    plan_fingerprint=None;request_body_sha256=None;catalog_generation=None;catalog_evidence=None;
    target_identity=None;phase=(if generation_dispatched then Dispatch_started else Prepared);
    generation_dispatched;started_at;finished_at;outcome}
+
+let http_not_sent ~slot_id rejection =
+  {slot_id;lane_key=None;binding=Http_unobserved;call_id=None;flow_id=None;visit_ordinal=None;
+   plan_fingerprint=None;request_body_sha256=None;catalog_generation=None;catalog_evidence=None;
+   target_identity=None;phase=Prepared;generation_dispatched=false;started_at=None;finished_at=None;
+   outcome=Admission_rejected rejection}

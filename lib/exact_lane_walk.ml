@@ -161,17 +161,23 @@ let walk
       ~seats
       ~visit
       ~on_advance
+      ~on_pass
       ~rests
       slots
   =
-  (* [passed] is kept newest first. *)
+  (* [passed] is kept newest first. Every pass goes through [pass], so
+     [on_pass] hears them in the order of [passed]. *)
+  let pass passed entry =
+    on_pass entry;
+    entry :: passed
+  in
   let rec step ~remaining ~last_failure ~passed =
     let callable, held =
       order_by_kind ~now:(now ()) ~kind ~quota_scope_of ~candidate_backpressure_of remaining
     in
     let passed =
       List.fold_left
-        (fun passed (placed, until) -> Held { slot = placed.slot; until } :: passed)
+        (fun passed (placed, until) -> pass passed (Held { slot = placed.slot; until }))
         passed
         held
     in
@@ -180,7 +186,7 @@ let walk
     | first :: rest ->
       let choice = choose ~seats first rest in
       let passed =
-        List.fold_left (fun passed placed -> Seats_full placed.slot :: passed) passed choice.full
+        List.fold_left (fun passed placed -> pass passed (Seats_full placed.slot)) passed choice.full
       in
       let gone = (choice.called :: choice.full) @ List.map fst held in
       let remaining =
@@ -191,7 +197,7 @@ let walk
        | Error stop | Ok (Stop stop) -> Stopped { slot; stop; passed = List.rev passed }
        | Ok (Answer value) -> Answered { slot; value; passed = List.rev passed }
        | Ok (Advance failure) ->
-         step ~remaining ~last_failure:(Some failure) ~passed:(Failed { slot; failure } :: passed))
+         step ~remaining ~last_failure:(Some failure) ~passed:(pass passed (Failed { slot; failure })))
   in
   step
     ~remaining:(List.mapi (fun place slot -> { place; slot }) slots)

@@ -41,3 +41,10 @@ val run_cli :
     the domain verdict with {!cli_outcome}. Times describe client invocation,
     never an unobserved remote provider dispatch or endpoint. *)
 val cli_outcome : slot_id:string -> Exact_lane_slot_observation.outcome -> unit
+val http_not_sent : slot_id:string -> Keeper_exact_walk_failure.local_rejection -> unit
+(** Record an HTTP slot a walk passed before any flow named it
+    ({!Exact_lane_slot_observation.http_not_sent}). *)
+val cli_not_run : Keeper_lane_cli_oneshot.failure -> unit
+(** Record a CLI slot a walk reached or passed without running its client:
+    one held until a time its provider stated, an unknown runtime, or one
+    that is not an official client. Nothing was dispatched. *)

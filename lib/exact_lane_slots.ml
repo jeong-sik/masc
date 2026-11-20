@@ -183,16 +183,17 @@ let visit_http
     Exact_lane_walk.Stop (Http_unstartable { slot_id = slot.slot_id; reason })
   | Ok attempt ->
     let result =
-      Exact.execute_flow_once
-        ?seat
-        ~net
-        ~clock
-        ~before_measurement_dispatch
-        ~on_measurement_terminal
-        ~before_dispatch
-        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
-        ~validate
-        attempt
+      Exact_lane_slot_capture.flow attempt (fun () ->
+        Exact.execute_flow_once
+          ?seat
+          ~net
+          ~clock
+          ~before_measurement_dispatch
+          ~on_measurement_terminal
+          ~before_dispatch
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          ~validate
+          attempt)
     in
     Runtime_exact_lane_backpressure.observe
       ~resolved:{ Registry.selected_slots = [ slot ]; cli_slots = [] }
@@ -209,13 +210,19 @@ let visit_http
           Exact_lane_walk.Stop (Http_stopped { slot_id = slot.slot_id; error })))
 ;;
 
-(* Why a CLI slot the walk reached without a seat runs no client. *)
-let unservable ~runtime_id = function
-  | None -> Cli_failed { runtime_id; failure = Oneshot.Unknown_runtime { runtime_id } }
+(* Why a CLI slot the walk reached without a seat runs no client. A slot
+   the one-shot would refuse by itself is recorded as that refusal. *)
+let unservable ~runtime_id runtime =
+  let refused failure =
+    Exact_lane_slot_capture.cli_not_run failure;
+    Cli_failed { runtime_id; failure }
+  in
+  match runtime with
+  | None -> refused (Oneshot.Unknown_runtime { runtime_id })
   | Some runtime ->
     if is_official_client runtime
     then Cli_seats_unpublished { runtime_id; provider_id = provider_id runtime }
-    else Cli_failed { runtime_id; failure = Oneshot.Not_an_official_client { runtime_id } }
+    else refused (Oneshot.Not_an_official_client { runtime_id })
 ;;
 
 let visit_cli
@@ -239,7 +246,16 @@ let visit_cli
        (match before_cli_visit ~runtime_id with
         | Error record_error -> Exact_lane_walk.Stop (Record_failed record_error)
         | Ok () ->
-          (match Oneshot.run ?runner ~base_dir ~runtime_id ~system_prompt ~requirement ~prompt () with
+          (match
+             Exact_lane_slot_capture.run_cli
+               ?runner
+               ~base_dir
+               ~runtime_id
+               ~system_prompt
+               ~requirement
+               ~prompt
+               ()
+           with
            | Error failure ->
              (* RFC section 3.5: the client's refusal for its account's
                 standing goes in the same cell an HTTP 429 writes. *)
@@ -253,9 +269,30 @@ let visit_cli
              Runtime_candidate_backpressure.note_candidate_success
                ~candidate:runtime.candidate_backpressure;
              (match validate json with
-              | Ok accepted -> Exact_lane_walk.Answer (Cli_answered { runtime_id; accepted })
+              | Ok accepted ->
+                Exact_lane_slot_capture.cli_outcome ~slot_id:runtime_id Exact_lane_slot_observation.Accepted;
+                Exact_lane_walk.Answer (Cli_answered { runtime_id; accepted })
               | Error rejection ->
+                Exact_lane_slot_capture.cli_outcome
+                  ~slot_id:runtime_id
+                  (Exact_lane_slot_observation.Cli_failed
+                     (Keeper_exact_walk_failure.cli_invalid_domain_answer ~runtime_id));
                 Exact_lane_walk.Advance (Cli_rejected { runtime_id; rejection })))))
+;;
+
+(* What the run's capture keeps of a slot passed without a visit, as the
+   walks before this one kept it: a full HTTP slot as a candidate passed for
+   its seats, a held CLI slot as the one-shot's held refusal. A held HTTP
+   slot was left out before any flow, and a failed slot was recorded by its
+   visit. *)
+let record_pass = function
+  | Exact_lane_walk.Seats_full (Http_slot slot) ->
+    Exact_lane_slot_capture.http_not_sent ~slot_id:slot.slot_id Keeper_exact_walk_failure.Seats_full
+  | Exact_lane_walk.Held { slot = Cli_slot { runtime_id; runtime = _ }; until } ->
+    Exact_lane_slot_capture.cli_not_run (Oneshot.Held { runtime_id; until })
+  | Exact_lane_walk.Seats_full (Cli_slot { runtime_id = _; runtime = _ })
+  | Exact_lane_walk.Held { slot = Http_slot _; until = _ }
+  | Exact_lane_walk.Failed { slot = _; failure = _ } -> ()
 ;;
 
 let walk
@@ -310,6 +347,7 @@ let walk
           seat)
     ~on_advance:(fun ~failed ~next ->
       Result.map_error (fun record_error -> Record_failed record_error) (on_advance ~failed ~next))
+    ~on_pass:record_pass
     ~rests
     slots
 ;;

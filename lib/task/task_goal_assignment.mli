@@ -55,14 +55,15 @@ val set_task_goal :
       be told apart from work done for the goal. This is checked before the
       link is read, so a finished task that already has a link is refused as
       finished, not as [Already_assigned].
-    - [Error (Already_assigned _)] — the task already carries one or more
-      goal links; reassignment/unlink is out of scope (RFC-0267 §4, which
-      keeps Phase 2 strictly additive for goalless tasks).
+    - [Error (Already_assigned _)] — the task already carries a link to a
+      different goal or multiple goal links; reassignment/unlink is out of scope
+      (RFC-0267 §4, which keeps Phase 2 strictly additive for goalless tasks).
     - [Error (Link_write_failed _)] — the task and goal are valid, but the
       registry update could not be durably written and verified.
-    - [Ok ()] — Goal identity and open phase, task existence, the unfinished
-      task and the goalless precondition were held through the link write under
-      Goal -> backlog -> links locks.
+    - [Ok ()] — Goal identity and open phase, task existence, and the unfinished
+      precondition were held under Goal -> backlog -> links locks, and either
+      [task_id] had no goal link (so [goal_id] was written) or [task_id]'s sole
+      existing link was already [goal_id] (idempotent retry without rewrite).
 
     Neither an unknown task nor an unknown goal is silently tolerated: both
     are returned as typed errors rather than mapped to a permissive default. *)

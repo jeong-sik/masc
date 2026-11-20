@@ -131,11 +131,14 @@ module For_testing : sig
     'a
 end
 
-(** Add one task-to-goal link only when [task_id] has no existing goal link.
+(** Add one task-to-goal link when [task_id] has no existing goal link, or
+    return [Ok ()] idempotently without rewriting the registry when
+    [task_id]'s sole existing link is already [goal_id].
     The read/check/write sequence runs under the goal-task-links file lock.
     Returns [Error (Already_linked_to_goals existing_goal_ids)] when the task
-    is already linked and [Error (Link_write_failed msg)] when the registry
-    could not be durably written and verified. *)
+    is linked to another goal or multiple goals, and
+    [Error (Link_write_failed msg)] when the registry could not be durably
+    written and verified. *)
 val link_goalless_task_to_goal :
   Workspace_utils_backend_setup.config ->
   goal_id:string ->

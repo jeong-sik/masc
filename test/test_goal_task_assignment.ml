@@ -698,6 +698,39 @@ let test_whitespace_padded_ids_are_trimmed_before_lookup () =
       (List.assoc_opt "goal-a" (Workspace_goal_index.read_goal_task_links config)))
 ;;
 
+let test_same_goal_reassignment_is_idempotent () =
+  with_test_env (fun config ->
+    make_goal config ~id:"goal-a";
+    make_goal config ~id:"goal-b";
+    let task_id = make_unassigned_task config ~title:"idempotent retry" in
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error err -> failf "initial assign should succeed: %s" (err_to_string err));
+    let links_path = Workspace_goal_index.goal_task_links_path config in
+    let initial_ino = (Unix.stat links_path).Unix.st_ino in
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+     | Ok () -> ()
+     | Error err -> failf "same-goal retry should be idempotent, got %s" (err_to_string err));
+    (match Goal_assignment.set_task_goal config ~task_id ~goal_id:" goal-a " with
+     | Ok () -> ()
+     | Error err -> failf "padded same-goal retry should be idempotent, got %s" (err_to_string err));
+    check int "same-goal retry does not rewrite links file"
+      initial_ino
+      (Unix.stat links_path).Unix.st_ino;
+    check (option (list string)) "link list has no duplicates"
+      (Some [ task_id ])
+      (List.assoc_opt "goal-a" (Workspace_goal_index.read_goal_task_links config));
+    (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:"goal-b" ~task_id with
+     | Ok () -> ()
+     | Error err -> fail err);
+    match Goal_assignment.set_task_goal config ~task_id ~goal_id:"goal-a" with
+    | Error (Goal_assignment.Already_assigned { existing_goal_ids; _ }) ->
+      check (list string) "multi-goal link still reports Already_assigned"
+        [ "goal-a"; "goal-b" ] existing_goal_ids
+    | Ok () -> fail "multi-goal link must not be treated as sole-goal idempotent"
+    | Error other -> failf "expected Already_assigned, got %s" (err_to_string other))
+;;
+
 let () =
   run
     "goal_task_assignment"
@@ -717,6 +750,8 @@ let () =
         ; test_case "goalless task links to goal" `Quick test_links_goalless_task
         ; test_case "whitespace-padded ids are trimmed before lookup" `Quick
             test_whitespace_padded_ids_are_trimmed_before_lookup
+        ; test_case "same-goal reassignment is idempotent without rewrite" `Quick
+            test_same_goal_reassignment_is_idempotent
         ; test_case "reassignment is rejected" `Quick test_rejects_reassignment
         ; test_case "a finished task is rejected" `Quick test_rejects_finished_task
         ; test_case

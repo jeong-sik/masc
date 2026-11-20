@@ -742,6 +742,30 @@ let test_ambiguous_links_preserve_evidence_on_task_creation () =
     Alcotest.(check string) "unlinked Task leaves link evidence alone" raw (In_channel.with_open_bin path In_channel.input_all))
 ;;
 
+let test_link_goalless_same_goal_is_idempotent () =
+  with_test_env (fun config ->
+    (match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id:"goal-a" ~task_id:"task-1" with
+     | Ok () -> ()
+     | Error (Workspace_goal_index.Link_write_failed detail) -> Alcotest.fail detail
+     | Error (Workspace_goal_index.Already_linked_to_goals _) -> Alcotest.fail "unexpected conflict");
+    let links_path = Workspace_goal_index.goal_task_links_path config in
+    let initial_ino = (Unix.stat links_path).Unix.st_ino in
+    (match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id:"goal-a" ~task_id:"task-1" with
+     | Ok () -> ()
+     | Error (Workspace_goal_index.Link_write_failed detail) -> Alcotest.fail detail
+     | Error (Workspace_goal_index.Already_linked_to_goals _) -> Alcotest.fail "same-goal link should be idempotent");
+    check_int "same-goal link does not rewrite registry" initial_ino (Unix.stat links_path).Unix.st_ino;
+    (match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id:"goal-b" ~task_id:"task-1" with
+     | Error (Workspace_goal_index.Already_linked_to_goals [ "goal-a" ]) -> ()
+     | Ok () | Error _ -> Alcotest.fail "different goal must return Already_linked_to_goals [goal-a]");
+    (match Workspace_goal_index.link_task_to_goal_result config ~goal_id:"goal-b" ~task_id:"task-1" with
+     | Ok () -> ()
+     | Error detail -> Alcotest.fail detail);
+    match Workspace_goal_index.link_goalless_task_to_goal config ~goal_id:"goal-a" ~task_id:"task-1" with
+    | Error (Workspace_goal_index.Already_linked_to_goals [ "goal-a"; "goal-b" ]) -> ()
+    | Ok () | Error _ -> Alcotest.fail "multi-goal link must return Already_linked_to_goals")
+;;
+
 let () =
   Alcotest.run "workspace_goal_index"
     [ ( "build_goal_task_index"
@@ -810,6 +834,10 @@ let () =
               "a link row without task_ids is not an empty goal"
               `Quick
               test_a_link_row_without_task_ids_is_not_an_empty_goal
+          ; test_case
+              "link_goalless_task_to_goal is idempotent only when solely linked to same goal"
+              `Quick
+              test_link_goalless_same_goal_is_idempotent
           ] )
     ]
 ;;

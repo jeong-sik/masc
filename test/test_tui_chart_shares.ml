@@ -710,6 +710,44 @@ let btop_braille_curves_and_dot_meters () =
   Alcotest.(check string) "full dot_meter_bar draws full 8-dot Braille cells"
     "\xe2\xa3\xbf\xe2\xa3\xbf" full_bar
 
+let styled_sparkline_matches_plain_and_colours () =
+  let no_color_paint =
+    { Theme.depth = Theme.No_color; surface = Theme.Page; palette = None }
+  in
+  let scale_plain = Chart.Series { paint = no_color_paint; series = Theme.Calls } in
+  Alcotest.(check string) "empty series draws nothing" ""
+    (Chart.styled_sparkline ~scale:scale_plain []);
+  let values = [ 0; 25; 50; 75; 100 ] in
+  Alcotest.(check string) "no-color styled sparkline matches plain sparkline"
+    (Chart.sparkline values)
+    (Chart.styled_sparkline ~scale:scale_plain values);
+  let limit_16 =
+    Chart.Declared_limit
+      { Theme.depth = Theme.Colors_16; surface = Theme.Page; palette = None }
+  in
+  let styled = Chart.styled_sparkline ~scale:limit_16 ~reset:"<R>" values in
+  Alcotest.(check string) "stripped styled sparkline matches plain sparkline"
+    (Chart.sparkline values)
+    (Theme.strip_sgr
+       (String.concat "" (String.split_on_char '<' styled |> function
+          | [] -> []
+          | head :: rest ->
+            head :: List.map (fun s ->
+              if String.starts_with ~prefix:"R>" s then String.sub s 2 (String.length s - 2)
+              else "<" ^ s) rest)))
+
+let distribution_bars_align_percentages () =
+  let items =
+    [ { Chart.name = "ok"; count = 100; style = Theme.Ok }
+    ; { Chart.name = "warn"; count = 0; style = Theme.Warn }
+    ]
+  in
+  let rows = Chart.distribution_bars ~width:40 items in
+  Alcotest.(check int) "one row per item" 2 (List.length rows);
+  let plain = List.map Theme.strip_sgr rows in
+  Alcotest.(check bool) "100% and 0% share aligned 3-digit percentage width" true
+    (String.ends_with ~suffix:"(100%)" (List.nth plain 0)
+     && String.ends_with ~suffix:"(  0%)" (List.nth plain 1))
 let () =
   Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
@@ -719,6 +757,10 @@ let () =
       ; Alcotest.test_case "sparkline scale and integer limits" `Quick sparkline_levels
       ; Alcotest.test_case "compact number boundaries" `Quick compact_number_boundaries
       ; Alcotest.test_case "bar fill" `Quick bar_filled_cells
+      ; Alcotest.test_case "styled sparkline matches plain glyphs" `Quick
+          styled_sparkline_matches_plain_and_colours
+      ; Alcotest.test_case "distribution bars align 3-digit percentages" `Quick
+          distribution_bars_align_percentages
       ]
     ; "meter colour",
       [ Alcotest.test_case "declared limit cells by colour depth" `Quick

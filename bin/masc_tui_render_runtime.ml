@@ -52,7 +52,7 @@ let runtime_overall_badge ~ko status =
   let style =
     match status with
     | Runtime_probe_reachable -> (Theme.ok ())
-    | Runtime_probe_no_http_runtimes | Runtime_probe_warming -> Ansi.dim
+    | Runtime_probe_no_http_runtimes | Runtime_probe_warming -> Theme.recede ()
     | Runtime_probe_degraded -> (Theme.warn ())
     | Runtime_probe_unreachable -> (Theme.bad ())
   in
@@ -61,7 +61,7 @@ let runtime_overall_badge ~ko status =
 (* A value the row could not read is one mark (RFC tui-one-screen-grammar
    6.4): not read yet, the read failed, or read and not reported. Why is the
    selected row's detail and the page's own status. *)
-let unknown_cell unknown = Ansi.dim ^ Masc_tui_value.Unknown.glyph unknown ^ Ansi.reset
+let unknown_cell unknown = Theme.recede () ^ Masc_tui_value.Unknown.glyph unknown ^ Ansi.reset
 
 (* The call side of the row: each refusal in warn, else [—] when none is
    recorded and the account usage reads none spent, else the mark of the
@@ -84,7 +84,7 @@ let runtime_route_badge state (runtime : Masc.Tui_decode.runtime_option) =
   | _ :: _ as badges -> String.concat " " badges
   | [] ->
       (match usage with
-       | Ok _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
+       | Ok _ -> Theme.recede () ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
        | Error unknown -> unknown_cell unknown)
 
 let runtime_probe_badge state = function
@@ -97,7 +97,7 @@ let runtime_probe_badge state = function
         | Runtime_provider_reachable -> (Theme.ok ())
         | Runtime_provider_skipped_cli
         | Runtime_provider_skipped_native_auth
-        | Runtime_provider_refused -> Ansi.dim
+        | Runtime_provider_refused -> Theme.recede ()
         | Runtime_provider_missing_auth | Runtime_provider_auth_failed ->
             (Theme.warn ())
         | Runtime_provider_network_error
@@ -114,7 +114,7 @@ let runtime_probe_badge state = function
 let runtime_route_probe_badge state runtime probe =
   runtime_route_badge state runtime ^ " / " ^ runtime_probe_badge state probe
 
-let runtime_probe_detail = function
+let runtime_probe_detail ~ko = function
   | None -> []
   | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
       let latency =
@@ -125,7 +125,9 @@ let runtime_probe_detail = function
       in
       let error = Terminal_text.optional_single_line probe.rpp_error in
       let checked =
-        Some ("checked " ^ Terminal_text.clock_timestamp probe.rpp_checked_at)
+        Some
+          ((if ko then "확인 " else "checked ")
+           ^ Terminal_text.clock_timestamp probe.rpp_checked_at)
       in
       List.filter_map Fun.id [ latency; http; error; checked ]
 
@@ -148,7 +150,7 @@ type runtime_table_column =
   | Runtime_status_column
   | Runtime_detail_column
 
-let runtime_table_cells ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+let runtime_table_layout ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
   let lane_width, candidate_width, identity_width, minimum_status_width = runtime_column_widths cols in
   let status_width = max minimum_status_width status_cells in
   let inner_width = max 1 (framed_inner_width cols - 2) in
@@ -187,20 +189,30 @@ let runtime_table_cells ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label ~cand
     ~drop_order
     [Runtime_lane_column; Runtime_candidate_column; Runtime_identity_column;
      Runtime_status_column; Runtime_detail_column] in
-  List.map (fun column ->
-    let header, value, fold = match column with
-      | Runtime_lane_column ->
-          (match mode with
-           | Masc_tui_types.Runtime_lanes -> if ko then "레인" else "LANE"
-           | Runtime_all -> if ko then "사용 레인" else "USED BY"),
-          lane, (if lane_is_label then Masc_tui_table.Fold_tail else Fold_middle)
-      | Runtime_candidate_column ->
-          candidate_heading, candidate, Masc_tui_table.Fold_middle
-      | Runtime_identity_column -> (if ko then "제공자 / 모델" else "PROVIDER / MODEL"), identity, Masc_tui_table.Fold_middle
-      | Runtime_status_column -> (if ko then "호출 / 연결" else "ROUTE / PROBE"), status, Masc_tui_table.Fold_tail
-      | Runtime_detail_column -> (if ko then "상세" else "DETAIL"), detail, Masc_tui_table.Fold_tail in
-    let column_width = if column = Runtime_candidate_column then layout.flex_width else width column in
-    Masc_tui_table.cell ~header ~width:column_width ~fold value) layout.shown
+  let cells =
+    List.map (fun column ->
+      let header, value, fold = match column with
+        | Runtime_lane_column ->
+            (match mode with
+             | Masc_tui_types.Runtime_lanes -> if ko then "레인" else "LANE"
+             | Runtime_all -> if ko then "사용 레인" else "USED BY"),
+            lane, (if lane_is_label then Masc_tui_table.Fold_tail else Fold_middle)
+        | Runtime_candidate_column ->
+            candidate_heading, candidate, Masc_tui_table.Fold_middle
+        | Runtime_identity_column -> (if ko then "제공자 / 모델" else "PROVIDER / MODEL"), identity, Masc_tui_table.Fold_middle
+        | Runtime_status_column -> (if ko then "호출 / 연결" else "ROUTE / PROBE"), status, Masc_tui_table.Fold_tail
+        | Runtime_detail_column -> (if ko then "상세" else "DETAIL"), detail, Masc_tui_table.Fold_tail in
+      let column_width = if column = Runtime_candidate_column then layout.flex_width else width column in
+      Masc_tui_table.cell ~header ~width:column_width ~fold value) layout.shown
+  in
+  (cells, layout.dropped, inner_width)
+
+let runtime_table_cells ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label ~candidate ~identity ~status ~detail =
+  let cells, _, _ =
+    runtime_table_layout ~ko ~cols ~status_cells ~mode ~lane ~lane_is_label
+      ~candidate ~identity ~status ~detail
+  in
+  cells
 
 let runtime_bool ~ko = function
   | true -> if ko then "예" else "yes"
@@ -539,7 +551,7 @@ let runtime_detail_lines state target ~width =
         | Some (Error detail) ->
             fact ~tone:Page_line.Quiet (say "런타임 이력" "Runtime history") detail
         | Some (Ok evidence) ->
-          Masc_tui_runtime_evidence.lines evidence ~runtime_id:runtime.ro_id
+          Masc_tui_runtime_evidence.lines ~ko evidence ~runtime_id:runtime.ro_id
           |> List.concat_map (fun (label, value) -> fact label value) in
       let failed_attempt =
         match runtime.ro_failed_attempt with
@@ -628,7 +640,7 @@ let runtime_picker_choice_rows ~ko picker =
           push ~selected
             (Printf.sprintf "  %s %s%s" mark
                label
-               (Ansi.dim ^ note ^ Ansi.reset))
+               (if String.equal note "" then "" else Theme.recede () ^ note ^ Ansi.reset))
       | Masc_tui_types.Runtime_choice runtime ->
           let note =
             if List.exists (String.equal runtime.ro_id) picker.rlp_already
@@ -638,7 +650,7 @@ let runtime_picker_choice_rows ~ko picker =
               | Pick_exact_lane_replacement (_, _, _) | Pick_new_lane _ ->
                   say "  (이미 후보)" "  (already a candidate)")
             else if List.exists (String.equal runtime.ro_provider) picker.rlp_providers
-            then say "  (현재 후보와 같은 provider)" "  (same provider as a current candidate)"
+            then say "  (현재 후보와 같은 제공자)" "  (same provider as a current candidate)"
             else ""
           in
           let ctx =
@@ -660,7 +672,7 @@ let runtime_picker_choice_rows ~ko picker =
             (Printf.sprintf "  %s %s%s%s%s" mark
                label
                ctx def
-               (Ansi.dim ^ note ^ Ansi.reset));
+               (if String.equal note "" then "" else Theme.recede () ^ note ^ Ansi.reset));
           (match picker.rlp_pick with
            | Masc_tui_types.Pick_exact_lane _ | Masc_tui_types.Pick_exact_lane_replacement _ ->
                push (say "      쿼터 범위 " "      Quota scope "
@@ -848,13 +860,16 @@ let render_runtime_reading (state : state) =
      call the drawing reads rather than a fixed one. *)
   let chrome_rows = runtime_surface_listing_chrome ~rows:effective_rows ~cols state in
   let content_height = max 0 (effective_rows - chrome_rows) in
+  let cursor =
+    if shown = 0 then 0 else max 0 (min state.runtime_cursor (shown - 1))
+  in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.runtime_surface_scroll max_scroll) in
   let scroll =
     if content_height = 0 then scroll
-    else if state.runtime_cursor < scroll then max 0 state.runtime_cursor
-    else if state.runtime_cursor >= scroll + content_height
-    then min max_scroll (state.runtime_cursor - content_height + 1)
+    else if cursor < scroll then cursor
+    else if cursor >= scroll + content_height
+    then min max_scroll (cursor - content_height + 1)
     else scroll in
   let all_runtimes_window = Rows.of_list ~first:scroll ~height:content_height all_runtimes in
   report_drawn_list Runtime_rows ~height:content_height;
@@ -868,11 +883,11 @@ let render_runtime_reading (state : state) =
     ~body:(fun ~budget:_ c ->
   if shown > 0 then
     c.position
-      (Masc_tui_value.Position.row ~selected:(Some state.runtime_cursor) ~total:shown);
+      (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown);
   let authority_style =
     match state.runtime_surface with
     | Some snapshot when Option.is_some snapshot.rss_probe_error -> (Theme.warn ())
-    | Some _ | None -> Ansi.dim
+    | Some _ | None -> Theme.recede ()
   in
   List.iter (fun row -> c.push_styled ~style:authority_style row) authority_rows;
   c.push_divider ();
@@ -890,7 +905,7 @@ let render_runtime_reading (state : state) =
        let missing_resolved_value =
          match state.runtime_surface_error with
          | None -> field_missing_reading ~ko:(state.ui_language = Lang_ko) ~error:None
-         | Some _ -> Ansi.dim ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
+         | Some _ -> Theme.recede () ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset
        in
        let resolved =
          Option.map (fun (s : Tui_decode.runtime_surface_snapshot) -> s.rss_resolved)
@@ -908,7 +923,7 @@ let render_runtime_reading (state : state) =
                  declared
              in
              (match declared, dropped with
-              | [], [] -> Ansi.dim ^ (if ko then "없음 · 비전 런타임 없음" else "none · no vision runtimes") ^ Ansi.reset
+              | [], [] -> Theme.recede () ^ (if ko then "없음 · 비전 런타임 없음" else "none · no vision runtimes") ^ Ansi.reset
               | declared, dropped ->
                   String.concat " → "
                     (List.map Terminal_text.single_line declared)
@@ -932,17 +947,22 @@ let render_runtime_reading (state : state) =
           the table header and the selected row keep a place (#41143's rule for
           the status column, applied to height). *)
        if not (Masc_tui_types.runtime_media_row_folded ~rows:effective_rows ~cols state) then begin
-         c.push_styled ~style:(Theme.recede ())
-           (Printf.sprintf "  %s %s   %s"
-              (runtime_column runtime_lane_width "media_failover")
+         c.push
+           (Printf.sprintf "  %s  %s  %s"
+              (Theme.recede () ^ runtime_column runtime_lane_width "media_failover" ^ Ansi.reset)
               (runtime_column runtime_candidate_width media_text)
-              (Ansi.dim ^ (if ko then "m:편집 · 비전 호출 순서" else "m edits it · the vision runtimes, in call order") ^ Ansi.reset));
+              (Theme.recede () ^ (if ko then "m:편집 · 비전 호출 순서" else "m edits it · the vision runtimes, in call order") ^ Ansi.reset));
          c.push_divider ()
        end);
+  let header_cells, dropped_cols, table_inner_width =
+    runtime_table_layout ~ko ~cols ~status_cells ~mode:state.runtime_mode
+      ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""
+  in
   let table_cells = runtime_table_cells ~ko ~cols ~status_cells ~mode:state.runtime_mode in
   c.push_styled ~style:(Theme.recede ())
-    ("  " ^ Masc_tui_table.header_row
-      (table_cells ~lane:"" ~lane_is_label:false ~candidate:"" ~identity:"" ~status:"" ~detail:""));
+    ("  "
+     ^ Masc_tui_table.header_row_with_dropped ~ko ~inner_width:table_inner_width
+         ~dropped:dropped_cols header_cells);
   c.push_divider ();
   (match state.runtime_surface_error with
    | None -> ()
@@ -1013,7 +1033,7 @@ let render_runtime_reading (state : state) =
                      (Theme.recede ())
                      ^ (if ko then "미배정" else "unassigned")
                      ^ Ansi.reset
-                 | [ one ] -> one
+                 | [ one ] -> Terminal_text.single_line one
                  | many ->
                      Printf.sprintf
                        (if ko then "레인 %d개" else "%d lanes")
@@ -1032,15 +1052,18 @@ let render_runtime_reading (state : state) =
                  | [] ->
                      [ (Theme.recede ()) ^ (if ko then "[배정 없음]" else "[no keepers]") ^ Ansi.reset ]
                  | [ one ] ->
-                     let stats = keeper_assignment_activity bound_keepers in
+                     let stats = Terminal_text.single_line (keeper_assignment_activity bound_keepers) in
                      [ (Theme.info ())
                        ^ Printf.sprintf
                            (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
-                           one.k_name stats
+                           (Terminal_text.single_line one.k_name) stats
                        ^ Ansi.reset ]
                  | many ->
-                     let stats = keeper_assignment_activity bound_keepers in
-                     let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
+                     let stats = Terminal_text.single_line (keeper_assignment_activity bound_keepers) in
+                     let names =
+                       String.concat ", "
+                         (List.map (fun (k : Tui_decode.keeper) -> Terminal_text.single_line k.k_name) many)
+                     in
                      [ (Theme.info ())
                        ^ Printf.sprintf
                            (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
@@ -1050,20 +1073,22 @@ let render_runtime_reading (state : state) =
                let detail =
                  String.concat " \xc2\xb7 "
                    (default_fact @ assignment_fact
-                    @ (match lanes with [] -> [] | l -> [ String.concat ", " l ])
-                    @ runtime_probe_detail
+                    @ (match lanes with
+                       | [] -> []
+                       | l -> [ String.concat ", " (List.map Terminal_text.single_line l) ])
+                    @ runtime_probe_detail ~ko
                         (Option.bind state.runtime_surface (fun snapshot ->
                            Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
                in
-               let is_selected = index + scroll = state.runtime_cursor in
+               let is_selected = index + scroll = cursor in
                let line = (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row
-                 (table_cells ~lane:(Terminal_text.single_line (Masc_tui_theme.strip_sgr used_by)) ~lane_is_label:(lanes = [])
+                 (table_cells ~lane:used_by ~lane_is_label:(lanes = [])
                    ~candidate:(Terminal_text.single_line runtime.ro_id)
                    ~identity:(Terminal_text.single_line (runtime.ro_provider ^ " / " ^ runtime.ro_model))
                    ~status:(runtime_route_probe_badge state runtime
                      (Option.bind state.runtime_surface (fun snapshot ->
                        Masc.Tui_decode_runtime_probe.runtime_probe_for_id snapshot.Masc.Tui_decode.rss_probe ~runtime_id:runtime.ro_id)))
-                   ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
+                   ~detail) in
                if is_selected then
                  c.push_selected (Masc_tui_theme.strip_sgr line)
                else if Masc_tui_types.runtime_row_deemphasized state runtime then
@@ -1110,15 +1135,18 @@ let render_runtime_reading (state : state) =
               match lane_keepers with
               | [] -> [ (Theme.recede ()) ^ (if ko then "[미배정]" else "[unassigned]") ^ Ansi.reset ]
               | [ one ] ->
-                  let stats = keeper_assignment_activity lane_keepers in
+                  let stats = Terminal_text.single_line (keeper_assignment_activity lane_keepers) in
                   [ (Theme.info ())
                     ^ Printf.sprintf
                         (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
-                        one.k_name stats
+                        (Terminal_text.single_line one.k_name) stats
                     ^ Ansi.reset ]
               | many ->
-                  let stats = keeper_assignment_activity lane_keepers in
-                  let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) many) in
+                  let stats = Terminal_text.single_line (keeper_assignment_activity lane_keepers) in
+                  let names =
+                    String.concat ", "
+                      (List.map (fun (k : Tui_decode.keeper) -> Terminal_text.single_line k.k_name) many)
+                  in
                   [ (Theme.info ())
                     ^ Printf.sprintf
                         (if ko then "[배정: %s%s]" else "[assigned: %s%s]")
@@ -1153,14 +1181,14 @@ let render_runtime_reading (state : state) =
           let detail =
             String.concat " \xc2\xb7 "
               (lane_fact @ assignment_fact @ default_fact
-               @ runtime_probe_detail candidate.rcr_probe)
+               @ runtime_probe_detail ~ko candidate.rcr_probe)
           in
-          let is_selected = index + scroll = state.runtime_cursor in
+          let is_selected = index + scroll = cursor in
           let line = (if is_selected then "\xe2\x80\xba " else "  ") ^ Masc_tui_table.row
             (table_cells ~lane:lane_cell
               ~lane_is_label:(candidate.rcr_candidate_count > 1 && not is_first)
               ~candidate:candidate_label ~identity:provider_model ~status:route_probe
-              ~detail:(Terminal_text.single_line (Masc_tui_theme.strip_sgr detail))) in
+              ~detail) in
           if is_selected then
             c.push_selected (Masc_tui_theme.strip_sgr line)
           else if Masc_tui_types.runtime_row_deemphasized state runtime then
@@ -1422,10 +1450,8 @@ let provider_history_lines ~cols ~rows (state : state) =
                 scopes with
         | None ->
             say "범위 " "scope "
-            ^ Terminal_text.single_line
-                (String.sub scope_id 0
-                   (min Overview_providers.scope_id_cells
-                      (String.length scope_id)))
+            ^ Message_layout.truncate_end Overview_providers.scope_id_cells
+                (Terminal_text.single_line scope_id)
         | Some account -> Overview_providers.scope_name account
       in
       let frame_width = max 1 (framed_inner_width cols) in
@@ -1493,15 +1519,24 @@ let provider_history_lines ~cols ~rows (state : state) =
               Masc_tui_value.Utc_day.date day ^ " " ^ daily_value sample)
               (Masc_tui_usage_trend.dated_samples trend row)
             |> List.concat_map wrap in
-        let body = full_name @ wrap (Terminal_text.single_line limit ^ Terminal_text.single_line row.kind)
-          @ (match email with None -> [] | Some email -> wrap email)
+        let kind_label =
+          let raw = Terminal_text.single_line row.kind in
+          if String.equal raw "account report" then say "계정 보고" "account report"
+          else raw
+        in
+        let recede_lines lines =
+          List.map (fun l -> Theme.recede () ^ l ^ Ansi.reset) lines
+        in
+        let body = full_name @ wrap (Terminal_text.single_line limit ^ kind_label)
+          @ (match email with None -> [] | Some email -> recede_lines (wrap email))
           @ wrap latest
-          @ (if unmetered_credit then [] else Masc_tui_usage_trend.plot ~width:inner trend row)
+          @ (if unmetered_credit then [] else Masc_tui_usage_trend.plot ~ko ~width:inner trend row)
           @ daily
-          @ wrap
-              (Printf.sprintf
-                 (if ko then "%d/%d일(UTC) 보고됨" else "%d/%d UTC days reported")
-                 row.reported_days days) in
+          @ recede_lines
+              (wrap
+                 (Printf.sprintf
+                    (if ko then "%d/%d일(UTC) 보고됨" else "%d/%d UTC days reported")
+                    row.reported_days days)) in
         if bare then body
         else
           let card_edge =
@@ -1532,33 +1567,41 @@ let provider_history_lines ~cols ~rows (state : state) =
       let first =
         Masc_tui_value.Utc_day.of_moment (trend.generated_at -. float_of_int (days - 1) *. 86400.0)
       in
-      (Printf.sprintf
-         (if ko then " 쿼터 범위 추이 (%d일 UTC) · 일별 최근 보고 · %s 기준"
-          else " Quota scope trend (%d UTC days) · latest report per day · as of %s")
-         days (runtime_moment_text trend.generated_at))
-      :: Printf.sprintf
-           (if ko then " %s → %s UTC · 0–100%% 사용 · 0 = 0 보고 · · = 보고 없음 · ○ = 구간 없음 · $ = 상한 없는 USD · C = 미계량 크레딧"
-            else " %s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use · C = Credit without a meter")
-           (Masc_tui_value.Utc_day.month_day first) (Masc_tui_value.Utc_day.month_day as_of)
-      :: say " ↓ 0 미만 · ↑ 한도 초과" " ↓ below zero · ↑ above limit"
+      (" " ^ Ansi.bold
+       ^ Printf.sprintf
+           (if ko then "쿼터 범위 추이 (%d일 UTC) · 일별 최근 보고 · %s 기준"
+            else "Quota scope trend (%d UTC days) · latest report per day · as of %s")
+           days (runtime_moment_text trend.generated_at)
+       ^ Ansi.reset)
+      :: (" " ^ Theme.recede ()
+          ^ Printf.sprintf
+              (if ko then "%s → %s UTC · 0–100%% 사용 · 0 = 0 보고 · · = 보고 없음 · ○ = 구간 없음 · $ = 상한 없는 USD · C = 미계량 크레딧"
+               else "%s → %s UTC · 0–100%% used · 0 = reported zero · · = no report · ○ = reported no windows · $ = uncapped USD use · C = Credit without a meter")
+              (Masc_tui_value.Utc_day.month_day first) (Masc_tui_value.Utc_day.month_day as_of)
+          ^ Ansi.reset)
+      :: (" " ^ Theme.recede () ^ say "↓ 0 미만 · ↑ 한도 초과" "↓ below zero · ↑ above limit" ^ Ansi.reset)
       :: (match trend.unreadable_reports with
           | 0 -> []
           | count ->
-              [ Printf.sprintf
-                  (if ko then "   저장된 보고 %d건 읽기 실패%s · 누락된 날은 비워 둠"
-                   else "   %d stored reports could not be read%s; missing days stay absent")
-                  count
-                  (if Option.is_some state.usage_scope_id then
-                     say " (전체 이력)" " (whole history)"
-                   else "") ])
+              [ "   " ^ Theme.warn ()
+                ^ Printf.sprintf
+                    (if ko then "저장된 보고 %d건 읽기 실패%s · 누락된 날은 비워 둠"
+                     else "%d stored reports could not be read%s; missing days stay absent")
+                    count
+                    (if Option.is_some state.usage_scope_id then
+                       say " (전체 이력)" " (whole history)"
+                     else "")
+                ^ Ansi.reset ])
       @ (match trend.rows with
          | [] ->
-             [ if Option.is_some state.usage_scope_id then
-                 say "   선택한 계정의 보고가 이 기간에 없습니다"
-                   "   No reports for the selected account in this window"
-               else
-                 say "   이 기간에 기록된 보고가 없습니다"
-                   "   No reports recorded in this window" ]
+             [ "   " ^ Theme.recede ()
+               ^ (if Option.is_some state.usage_scope_id then
+                    say "선택한 계정의 보고가 이 기간에 없습니다"
+                      "No reports for the selected account in this window"
+                  else
+                    say "이 기간에 기록된 보고가 없습니다"
+                      "No reports recorded in this window")
+               ^ Ansi.reset ]
          | rows -> arrange rows)
 
 let usage_lines ~cols ~rows (state : state) =
@@ -1617,17 +1660,29 @@ let usage_lines ~cols ~rows (state : state) =
           Option.fold ~none:not_reported ~some:count row.kur_tokens in
         let cost_text row =
           Option.fold ~none:not_reported ~some:(Printf.sprintf "$%.4f") row.kur_cost_usd in
-        let metric_text label value reported missing =
+        let metric_text_plain label value reported missing =
           Printf.sprintf
             (if ko then "%s %s · 보고 %s, 누락 %s" else "%s %s · %s reported, %s missing")
             label value (count reported) (count missing)
+        in
+        let metric_text_styled label value reported missing =
+          let missing_style = if missing > 0 then Theme.warn () else Theme.recede () in
+          let reported_part =
+            if ko then "보고 " ^ count reported else count reported ^ " reported"
+          in
+          let missing_part =
+            if ko then "누락 " ^ count missing else count missing ^ " missing"
+          in
+          Theme.recede () ^ label ^ Ansi.reset ^ " " ^ value
+          ^ Theme.recede () ^ " · " ^ reported_part ^ ", " ^ Ansi.reset
+          ^ missing_style ^ missing_part ^ Ansi.reset
         in
         let tok_label = say "토큰" "Tokens" and cost_label = say "비용" "Cost" in
         let widest_metric = List.fold_left (fun widest row ->
           let width_of label text reported missing value =
             match value row with
             | Some amount when readable row && valid amount ->
-                Message_layout.display_width (metric_text label text reported missing)
+                Message_layout.display_width (metric_text_plain label text reported missing)
             | _ -> 0
           in
           max widest (max
@@ -1635,15 +1690,16 @@ let usage_lines ~cols ~rows (state : state) =
             (width_of cost_label (cost_text row) row.kur_cost_reported row.kur_cost_missing cost_value)))
           0 kuw_rows in
         (* One width per metric set keeps the relative bars comparable. *)
-        let beside = width - widest_metric - 4 in
+        let beside = width - widest_metric - 2 in
         let bar_cells =
           if beside >= Overview_providers.bar_cells_min then min 32 beside
-          else min 32 (max 1 (width - 2)) in
-        let meter value highest row =
+          else min 32 (max 1 width) in
+        let paint = Theme.paint () in
+        let meter ~series value highest row =
           match value row with
           | Some amount when readable row && valid amount ->
               let maximum = Option.value ~default:0. highest in
-              let share = if maximum = 0. then 0. else amount /. maximum in
+              let share = if maximum <= 0. then 0. else amount /. maximum in
               let clamped =
                 if not (Float.is_finite share) then 0.0
                 else Float.min 1.0 (Float.max 0.0 share)
@@ -1652,59 +1708,74 @@ let usage_lines ~cols ~rows (state : state) =
                 if clamped <= 0.0 then 0
                 else max 1 (int_of_float (Float.round (clamped *. 1000.0)))
               in
+              let scale = Masc_tui_chart.Series { paint; series } in
               Some
                 (Masc_tui_chart.dot_meter_bar ~width:bar_cells ~value:scaled
-                   ~max_value:1000
-                   ~scale:
-                     (Masc_tui_chart.Series
-                        { paint = Theme.paint ()
-                        ; series = Masc_tui_theme.Usage
-                        })
+                   ~max_value:1000 ~scale
                    ~track_style:(Theme.recede ()) ~reset:Ansi.reset ())
           | _ -> None
         in
-        [ Printf.sprintf
-            (if ko then " 키퍼 사용량 · 최근 %s · 기록된 턴 지표"
-             else " Keeper usage · last %s · recorded turn metrics")
-            (Overview_providers.minutes_label kuw_window_minutes)
-        ; (if ko then " 기준 " ^ runtime_moment_text kuw_generated_at
-           else " As of " ^ runtime_moment_text kuw_generated_at)
-        ; say " 막대: 지표별 최대 관측값 대비 상대 비율 (쿼터 한도 아님)."
-            " Bars: relative to largest read value per metric; not quota."
-        ; say " 부분 관측 행은 막대를 생략합니다. 누락된 값이 있으면 합계가 실제보다 적을 수 있습니다."
-            " Partial rows: no bars. Missing values can understate totals."
-        ; Printf.sprintf
-            (if ko then " 기준치: 토큰 %s · 비용 %s" else " Scale: tokens %s · cost %s")
-            (scale token_value (fun value -> count (Float.to_int (Float.round value))) token_max)
-            (scale cost_value (Printf.sprintf "$%.4f") cost_max)
+        [ " " ^ Ansi.bold
+          ^ Printf.sprintf
+              (if ko then "키퍼 사용량 · 최근 %s · 기록된 턴 지표"
+               else "Keeper usage · last %s · recorded turn metrics")
+              (Overview_providers.minutes_label kuw_window_minutes)
+          ^ Ansi.reset
+        ; " " ^ Theme.recede ()
+          ^ (if ko then "기준 " ^ runtime_moment_text kuw_generated_at
+             else "As of " ^ runtime_moment_text kuw_generated_at)
+          ^ Ansi.reset
+        ; " " ^ Theme.recede ()
+          ^ say "막대: 지표별 최대 관측값 대비 상대 비율 (쿼터 한도 아님)."
+              "Bars: relative to largest read value per metric; not quota."
+          ^ Ansi.reset
+        ; " " ^ Theme.recede ()
+          ^ say "부분 관측 행은 막대를 생략합니다. 누락된 값이 있으면 합계가 실제보다 적을 수 있습니다."
+              "Partial rows: no bars. Missing values can understate totals."
+          ^ Ansi.reset
+        ; " " ^ Theme.recede ()
+          ^ Printf.sprintf
+              (if ko then "기준치: 토큰 %s · 비용 %s" else "Scale: tokens %s · cost %s")
+              (scale token_value (fun value -> count (Float.to_int (Float.round value))) token_max)
+              (scale cost_value (Printf.sprintf "$%.4f") cost_max)
+          ^ Ansi.reset
         ; "" ]
         @ (if kuw_rows = [] then
-             [ say "   조회된 목록에 키퍼가 없습니다" "   No Keepers in the returned roster" ]
+             [ "   " ^ Theme.recede ()
+               ^ say "조회된 목록에 키퍼가 없습니다" "No Keepers in the returned roster"
+               ^ Ansi.reset ]
             else List.concat_map
               (fun (row : Masc.Tui_decode_usage.keeper_usage_row) ->
                 let tokens = tokens_text row in
                 let cost = cost_text row in
                 let coverage =
                   match row.kur_coverage with
-                  | Keeper_usage_complete -> say "조회됨" "read"
+                  | Keeper_usage_complete ->
+                      Theme.recede () ^ say "조회됨" "read" ^ Ansi.reset
                   | Keeper_usage_partial { malformed_rows; unread_turn_rows } ->
-                      Printf.sprintf
-                        (if ko then "일부 관측 (형식 오류 %d, 미조회 턴 %d) · 합계는 하한값"
-                         else "partial (%d malformed rows, %d unread turn rows) · reported totals are lower bounds")
-                        malformed_rows unread_turn_rows
+                      Theme.warn ()
+                      ^ Printf.sprintf
+                          (if ko then "일부 관측 (형식 오류 %d, 미조회 턴 %d) · 합계는 하한값"
+                           else "partial (%d malformed rows, %d unread turn rows) · reported totals are lower bounds")
+                          malformed_rows unread_turn_rows
+                      ^ Ansi.reset
                   | Keeper_usage_failed reason ->
-                      say "조회 불가: " "unavailable: " ^ Terminal_text.single_line reason
+                      Theme.bad ()
+                      ^ say "조회 불가: " "unavailable: " ^ Terminal_text.single_line reason
+                      ^ Ansi.reset
                 in
                 let width = max 1 (framed_inner_width cols - 3) in
                 let heading =
                   Masc_tui_ansi.Section.style ^ text (Terminal_text.single_line row.kur_name)
                   ^ Ansi.reset
+                  ^ Theme.recede ()
                   ^ Printf.sprintf
-                      (if ko then " · %s턴 · %s" else " · %s turns · %s")
-                      (count row.kur_turn_samples) coverage
+                      (if ko then " · %s턴 · " else " · %s turns · ")
+                      (count row.kur_turn_samples)
+                  ^ Ansi.reset ^ coverage
                 in
                 let metric label value reported missing bar =
-                  metric_text label value reported missing
+                  metric_text_styled label value reported missing
                   ^ Option.fold ~none:"" ~some:(fun bar -> "  " ^ bar) bar
                 in
                 List.concat_map
@@ -1712,9 +1783,9 @@ let usage_lines ~cols ~rows (state : state) =
                         (Masc_tui_message_layout.wrap_styled_words ~max_cells:width line))
                     [ heading
                     ; metric tok_label tokens row.kur_tokens_reported row.kur_tokens_missing
-                        (meter token_value token_max row)
+                        (meter ~series:Masc_tui_theme.Usage token_value token_max row)
                     ; metric cost_label cost row.kur_cost_reported row.kur_cost_missing
-                        (meter cost_value cost_max row)
+                        (meter ~series:Masc_tui_theme.Memory cost_value cost_max row)
                     ]
                 @ [ "" ])
               kuw_rows)
@@ -2047,7 +2118,7 @@ let render_runtime_pick (state : state) =
       (here_row ~cols state
          ~path:[ keeper_name; runtime_step state ]
          ~readings:
-           ([ Ansi.dim ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
+           ([ Theme.recede () ^ ui_text state ~ko:"지금: " ~en:"current: " ^ current
               ^ Ansi.reset ]
             @ (match progress_sheet with
                | None -> []
@@ -2076,7 +2147,7 @@ let render_runtime_pick (state : state) =
            c.push
              ("  " ^ progress_inline ~ko ~now ?started_at:catalog_started (String.trim note))
        | (Runtime_catalog_unread | Runtime_catalog_read | Runtime_catalog_stale _), Some note ->
-           c.push (Ansi.dim ^ note ^ Ansi.reset)
+           c.push (Theme.recede () ^ note ^ Ansi.reset)
        | (Runtime_catalog_unread | Runtime_catalog_loading | Runtime_catalog_read
           | Runtime_catalog_refreshing _ | Runtime_catalog_stale _), None ->
            (* The first header cell spans badge and target, as the rows

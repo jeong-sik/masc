@@ -267,6 +267,21 @@ let track_segment ~track_style ~reset count =
   else track_style ^ repeat meter_track count ^ reset
 ;;
 
+let styled_sparkline ~scale ?min ?max ?(reset = Masc_tui_theme.Sgr.reset) values =
+  let levels = sparkline_levels ?min ?max values in
+  let top = Array.length sparkline_glyphs - 1 in
+  let style_fn =
+    match scale with
+    | Series { paint; series } ->
+      let read = Masc_tui_theme.ramp_reader paint series in
+      fun level -> read ~position:(float_of_int level /. float_of_int top)
+    | Declared_limit _ | Anomaly _ ->
+      fun level ->
+        meter_cell_style scale ~index:0 ~width:1 ~value:level ~max_value:top
+  in
+  styled_run ~reset
+    (List.map (fun level -> (style_fn level, sparkline_glyphs.(level))) levels)
+;;
 let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
@@ -403,13 +418,32 @@ let distribution_shares ~cells counts =
     ; filled_cells = scaled cells count }) counts
 ;;
 
+let distribution_series_of_status = function
+  | Masc_tui_theme.Ok -> Some Masc_tui_theme.Completion
+  | Masc_tui_theme.Info -> Some Masc_tui_theme.Calls
+  | Masc_tui_theme.Warn -> Some Masc_tui_theme.Backlog
+  | Masc_tui_theme.Bad -> Some Masc_tui_theme.Failures
+  | Masc_tui_theme.Muted -> None
+;;
+
 let distribution_bars ~width items =
   if width <= 0 || items = [] then []
   else
+    let paint : Masc_tui_theme.paint =
+      { Masc_tui_theme.depth = Masc_tui_theme.color_depth ()
+      ; surface = Masc_tui_theme.Page
+      ; palette =
+          Masc_tui_terminal_palette.snapshot ()
+          |> Masc_tui_terminal_palette.snapshot_palette
+      }
+    in
+    let track_style = Masc_tui_theme.recede ~surface:paint.surface paint.palette in
+    let reset = Masc_tui_theme.Sgr.reset in
     let count_width = List.fold_left (fun acc it ->
       Stdlib.max acc (String.length (string_of_int (Stdlib.max 0 it.count)))) 5 items in
     let max_name_len = List.fold_left (fun acc it -> Stdlib.max acc (Layout.display_width it.name)) 0 items in
     let name_col_width = Stdlib.min 18 (Stdlib.max 6 max_name_len) in
+    (* "  " + name + "  " + bar + " " + count + " " + "(%3d%%)" (6 cells) *)
     let fixed_cols = 2 + name_col_width + 2 + 1 + count_width + 1 + 6 in
     let bar_width = Stdlib.max 0 (width - fixed_cols) in
     let shares = distribution_shares ~cells:bar_width (List.map (fun it -> it.count) items) in
@@ -417,12 +451,15 @@ let distribution_bars ~width items =
       (fun it share ->
         let count = Stdlib.max 0 it.count in
         let pct = share.percentage in
-        let color = Masc_tui_theme.status it.style in
         let padded_name = Layout.fit_width it.name name_col_width in
         if bar_width <= 0 then
+          let readable_color =
+            Masc_tui_theme.status_readable ~surface:paint.surface paint.palette it.style
+          in
+          let close = if String.equal readable_color "" then "" else reset in
           Layout.fit_width
-            (Printf.sprintf "  %s  %s%*d (%2d%%)%s"
-               padded_name color count_width count pct Masc_tui_theme.Sgr.reset)
+            (Printf.sprintf "  %s  %s%*d (%3d%%)%s"
+               padded_name readable_color count_width count pct close)
             width
         else
           let filled =
@@ -430,13 +467,27 @@ let distribution_bars ~width items =
             else Stdlib.max 1 (Stdlib.min bar_width share.filled_cells)
           in
           let unfilled = Stdlib.max 0 (bar_width - filled) in
-          Printf.sprintf "  %s  %s%s%s%s%s %*d (%2d%%)"
+          let filled_bar =
+            if filled <= 0 then ""
+            else
+              match distribution_series_of_status it.style with
+              | Some series ->
+                let scale = Series { paint; series } in
+                meter_fill_run ~scale ~width:bar_width ~value:filled ~max_value:bar_width
+                  ~reset (List.init filled (fun _ -> meter_fill))
+              | None ->
+                if String.equal track_style "" then repeat meter_fill filled
+                else track_style ^ repeat meter_fill filled ^ reset
+          in
+          let empty_track =
+            if unfilled <= 0 then ""
+            else if String.equal track_style "" then repeat meter_track unfilled
+            else track_style ^ repeat meter_track unfilled ^ reset
+          in
+          Printf.sprintf "  %s  %s%s %*d (%3d%%)"
             padded_name
-            color
-            (repeat meter_fill filled)
-            (Masc_tui_theme.Sgr.reset ^ Masc_tui_theme.Sgr.dim)
-            (repeat meter_track unfilled)
-            Masc_tui_theme.Sgr.reset
+            filled_bar
+            empty_track
             count_width count
             pct)
       items shares

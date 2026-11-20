@@ -101,6 +101,17 @@ val meter_fill_run :
     A colour code goes out only where it differs from the cell before, and
     [reset] closes the run when any code went out. *)
 
+val styled_sparkline :
+  scale:meter_scale ->
+  ?min:int ->
+  ?max:int ->
+  ?reset:string ->
+  int list ->
+  string
+(** An 8-level Unicode sparkline where each cell takes its colour from [scale]
+    according to its level (0 to 7). Neighbouring cells with identical codes
+    coalesce into one escape run, closed by [reset] when any code went out. *)
+
 val meter_bar :
   width:int ->
   value:int ->

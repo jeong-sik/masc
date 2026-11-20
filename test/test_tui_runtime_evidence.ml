@@ -55,7 +55,20 @@ let invalid_dates () =
       (Result.is_error (Evidence.decode json)))
     [payload [bad_recent]; baseline |> map_field "history" (replace_field "observed_at" (`Float 1e300))]
 
+let korean_localization () =
+  let evidence = read (payload [row "one" ~cached:cache]) in
+  let lines = Evidence.lines ~ko:true evidence ~runtime_id:"one" in
+  check bool "Korean history window label and value" true
+    (contains (value "이력 기간" lines) "최근 1440분");
+  check bool "Korean cost store unavailable text" true
+    (contains (value "저장소 범위" lines) "비용 저장소 사용 불가");
+  check bool "Korean outcome label for completed" true
+    (contains (value "최근 비오류 턴" lines) "완료");
+  check bool "Korean recent entry reports input/output tokens" true
+    (contains (value "최근 비오류 턴 기록" lines) "미보고")
+
 let () = run "TUI runtime evidence" ["operator reading", [
   test_case "checkpoint and input-required outcomes retain their meaning" `Quick recent_outcomes;
   test_case "unrenderable timestamps fail decoding" `Quick invalid_dates;
-  test_case "invalid sample coverage" `Quick reject_bad_coverage]]
+  test_case "invalid sample coverage" `Quick reject_bad_coverage;
+  test_case "Korean localization covers labels and values" `Quick korean_localization]]

@@ -60,7 +60,7 @@ val dated_samples : t -> row -> (Masc_tui_value.Utc_day.t * sample option) list
 val compact : width:int -> row -> bool
 (** Whether the plot uses its compact daily-level representation. *)
 
-val plot : width:int -> t -> row -> string list
+val plot : ?ko:bool -> width:int -> t -> row -> string list
 (** A compact daily-level strip when the width cannot fit a full plot;
     otherwise a five-row filled-area braille curve over the fixed 0–100% scale,
     with UTC day labels. Each cell draws a 2x4 dot matrix, so the scale has

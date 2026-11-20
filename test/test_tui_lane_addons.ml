@@ -2370,6 +2370,14 @@ let ko_localization_and_overview_bottom_sheet () =
   check_clean_rows "Failed list_rows" (List.map snd failed_frame.UI.list_rows);
   check_clean_rows "Failed sheet_rows" failed_frame.UI.sheet_rows
 
+let overview_hints_localize_korean_and_english () =
+  let en = UI.overview_hints UI.initial in
+  let ko = UI.overview_hints ~ko:true UI.initial in
+  check bool "english hints keep Esc:back" true (List.mem "Esc:back" en);
+  check bool "korean hints localize Esc:뒤로" true (List.mem "Esc:뒤로" ko);
+  check bool "korean hints localize help" true (List.mem "?:도움말" ko);
+  let help_ko = UI.overview_hints ~ko:true { UI.initial with help_open = true } in
+  check (list string) "korean help close hint" [ "Esc:도움말 닫기" ] help_ko
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "Korean localization and overview Bottom Sheet render cleanly" `Quick
     ko_localization_and_overview_bottom_sheet;
@@ -2416,4 +2424,6 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "every host issue reads back" `Quick every_host_issue_reads_back;
   test_case "an answered installation opens its Results" `Quick answered_installation_opens_its_results;
   test_case "typed selection tracks cursor and two-pane Results" `Quick
-    typed_selection_tracks_cursor_and_two_pane_results]]
+    typed_selection_tracks_cursor_and_two_pane_results;
+  test_case "overview hints localize Korean and English" `Quick
+    overview_hints_localize_korean_and_english]]

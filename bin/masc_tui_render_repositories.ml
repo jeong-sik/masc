@@ -12,6 +12,9 @@ module Render_schedule = Masc_tui_render_schedule
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff
 
+let clamped_cursor ~count cursor =
+  if count <= 0 then 0 else max 0 (min cursor (count - 1))
+
 (* The repositories a keeper can work in.  The server sends both the stored
    path spelling and the absolute path it actually resolves.  The latter is
    what an operator needs before opening a shell or comparing another
@@ -32,7 +35,8 @@ let repository_context_fields ~ko (repo : Masc.Tui_decode.repository) =
 
 let selected_repository_reading (state : state) =
   let selected = Option.bind state.repositories (fun snapshot ->
-    List.nth_opt snapshot.rs_repositories state.repositories_cursor) in
+    let count = List.length snapshot.rs_repositories in
+    List.nth_opt snapshot.rs_repositories (clamped_cursor ~count state.repositories_cursor)) in
   let errors = match state.repositories_error with
     | None -> [] | Some reason ->
         [(if Option.is_some state.repositories then
@@ -83,7 +87,7 @@ type workspace_activity_column = Activity_date | Activity_keeper | Activity_task
 let workspace_activity_cells ~ko ~cols ~date ~keeper ~task ~result ~path =
   let width = function
     | Activity_date -> Masc_tui_value.Instant.cell_width Masc_tui_value.Instant.To_minute | Activity_keeper -> 18 | Activity_task -> 16
-    | Activity_result -> Message_layout.display_width (if ko then "결과" else "RESULT")
+    | Activity_result -> Message_layout.display_width (if ko then "결과" else "Result")
     | Activity_path -> 8 in
   let layout = Masc_tui_table.fit ~inner_width:(max 1 (framed_inner_width cols - 2))
     ~width ~flex:Activity_path ~drop_order:[Activity_task; Activity_date; Activity_keeper]
@@ -91,15 +95,15 @@ let workspace_activity_cells ~ko ~cols ~date ~keeper ~task ~result ~path =
   List.map (fun column ->
     let header, value, fold = match column with
       | Activity_date ->
-          (if ko then "날짜" else "DATE"), date, Masc_tui_table.Fold_tail
+          (if ko then "날짜" else "Date"), date, Masc_tui_table.Fold_tail
       | Activity_keeper ->
-          (if ko then "키퍼" else "KEEPER"), keeper, Masc_tui_table.Fold_middle
+          (if ko then "키퍼" else "Keeper"), keeper, Masc_tui_table.Fold_middle
       | Activity_task ->
-          (if ko then "태스크" else "TASK"), task, Masc_tui_table.Fold_middle
+          (if ko then "태스크" else "Task"), task, Masc_tui_table.Fold_middle
       | Activity_result ->
-          (if ko then "결과" else "RESULT"), result, Masc_tui_table.Fold_tail
+          (if ko then "결과" else "Result"), result, Masc_tui_table.Fold_tail
       | Activity_path ->
-          (if ko then "파일" else "FILE"), path, Masc_tui_table.Fold_middle in
+          (if ko then "파일" else "File"), path, Masc_tui_table.Fold_middle in
     Masc_tui_table.cell ~header ~fold
       ~width:(if column = Activity_path then layout.flex_width else width column) value) layout.shown
 
@@ -150,7 +154,8 @@ let render_workspace_activity (state : state) repo_id =
             (if ko then "  전체 Keeper clone 쓰기 기록  Enter:파일 열기 (코드 화면: H:이력  m:노트)"
              else "  Recorded clone writes from all Keepers  Enter:open file (in Code: H:history  m:notes)");
           let cells = workspace_activity_cells ~ko ~cols in
-          c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
+          c.push_styled ~style:(Theme.recede ())
+            ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();
           let room = max 1 (budget - 7) in
           report_drawn_list Workspace_activity_rows ~height:room;
@@ -182,7 +187,7 @@ let render_workspace_activity (state : state) repo_id =
                     (if change.fc_succeeded then (if ko then "성공" else "ok")
                      else if ko then "실패" else "failed")
                   ~path:(Terminal_text.single_line path)) in
-                if is_selected then c.push_selected line else c.push line
+                if is_selected then c.push_selected_styled line else c.push line
           done;
           c.push_divider ();
           c.push (match selected with
@@ -252,7 +257,8 @@ let repository_git_observation (state : state) (repo : Tui_decode.repository) =
        | Tui_decode.Repository_change_repository observed
          when String.equal requested repo.rp_id && String.equal observed repo.rp_id ->
            let branch = match snapshot.rcs_branch with
-             | Tui_decode.Repository_detached -> "detached HEAD"
+             | Tui_decode.Repository_detached ->
+                 if state.ui_language = Lang_ko then "분리된 HEAD" else "detached HEAD"
              | Tui_decode.Repository_on_branch {name; upstream = _} ->
                  Terminal_text.single_line name in
            let reading = Printf.sprintf "%s · %s %d"
@@ -417,8 +423,9 @@ let render_repository_list (state : state) =
              ~has_reading:(Option.is_some (selected_repository_reading state))
              state.view)
     ~body:(fun ~budget c ->
+      let repo_cursor = clamped_cursor ~count:shown state.repositories_cursor in
       let geometry =
-        repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
+        repository_studio_geometry state ~cols ~budget ~cursor:repo_cursor in
       List.iter c.push geometry.rsg_intro;
       let list_width = geometry.rsg_list_width in
       let detail_width = geometry.rsg_detail_width in
@@ -436,7 +443,7 @@ let render_repository_list (state : state) =
           ^ "  " ^ Message_layout.truncate_middle status_cells status in
       let max_scroll = max 0 (shown - content_height) in
       let scroll = max 0 (min max_scroll
-          (Masc_tui_scroll.ensure_visible ~cursor:state.repositories_cursor
+          (Masc_tui_scroll.ensure_visible ~cursor:repo_cursor
              ~height:content_height state.repositories_scroll)) in
       let repos_window = Rows.of_list ~first:scroll ~height:content_height repos in
       report_drawn_list Repository_rows ~height:content_height;
@@ -461,15 +468,15 @@ let render_repository_list (state : state) =
           match Rows.at repos_window idx with
           | None -> ""
           | Some r ->
-              let is_selected = idx = state.repositories_cursor in
+              let is_selected = idx = repo_cursor in
               let line = row ~selected:is_selected r in
               if is_selected then
-                Theme.selection_style () ^ fit_width line row_width ^ Ansi.reset
+                selection_row_styled ~cells:row_width line
               else line)
       in
       if shown > 0 then
         c.position
-          (Masc_tui_value.Position.row ~selected:(Some state.repositories_cursor)
+          (Masc_tui_value.Position.row ~selected:(Some repo_cursor)
              ~total:shown);
       let lines = geometry.rsg_errors @ lines in
       (* [j/k] steps over a row; with none, the title does not offer it. *)
@@ -606,6 +613,13 @@ type repository_change_authority =
 (* The candidate names the full related record, not just the visible text.
    The caller publishes it only when this exact frame is presented. *)
 let repository_changes_authority state ~surface_key ~terminal_rows ~cols =
+  let changes_cursor =
+    match state.repository_changes with
+    | None -> 0
+    | Some snapshot ->
+        clamped_cursor ~count:(List.length snapshot.rcs_changes)
+          state.repository_changes_cursor
+  in
   let path =
     match state.repository_changes_open, surface_key, state.repository_changes_diff_path with
     | true, "repository-changes", None
@@ -613,9 +627,9 @@ let repository_changes_authority state ~surface_key ~terminal_rows ~cols =
           ~budget:(surface_chrome_budget ~frame:Chrome_screen
             ~has_recovery:(Option.is_some (recovery_slot state ~max_cells:(framed_inner_width cols)))
             state ~terminal_rows)
-          ~cursor:state.repository_changes_cursor ->
+          ~cursor:changes_cursor ->
         Option.bind state.repository_changes (fun snapshot ->
-          List.nth_opt snapshot.rcs_changes state.repository_changes_cursor
+          List.nth_opt snapshot.rcs_changes changes_cursor
           |> Option.map (fun row -> row.rc_path))
     | true, "repository-changes-diff", Some path
       when repository_changes_diff_context_visible state ~terminal_rows ~cols ~path -> Some path
@@ -701,6 +715,9 @@ let render_repository_changes (state : state) =
             }
         else None
       in
+      let changes_cursor =
+        clamped_cursor ~count:(List.length changes) state.repository_changes_cursor
+      in
       let title =
         here_row ~cols state ~path:[ git_changes_step state; scope_name ]
           ~readings:
@@ -721,7 +738,7 @@ let render_repository_changes (state : state) =
              | _ :: _ ->
                  Some
                    (Masc_tui_value.Position.row
-                      ~selected:(Some state.repository_changes_cursor)
+                      ~selected:(Some changes_cursor)
                       ~total:(List.length changes)))
       in
       let recorded_changes = current_keeper_chat_file_changes state in
@@ -729,7 +746,7 @@ let render_repository_changes (state : state) =
         ~title ~hints:(Masc_tui_keys.footer_hints_git_changes ~lang:state.ui_language)
         ~body:(fun ~budget c ->
           let geometry = repository_changes_geometry state ~cols ~budget
-              ~cursor:state.repository_changes_cursor in
+              ~cursor:changes_cursor in
           List.iter
             (function
               | Some ctx_line ->
@@ -770,10 +787,10 @@ let render_repository_changes (state : state) =
             let max_scroll = max 0 (List.length changes - room) in
             let scroll = max 0 (min state.repository_changes_scroll max_scroll) in
             let scroll =
-              match List.nth_opt changes state.repository_changes_cursor with
+              match List.nth_opt changes changes_cursor with
               | None -> scroll
               | Some _ -> Masc_tui_scroll.ensure_visible
-                  ~cursor:state.repository_changes_cursor ~height:room scroll in
+                  ~cursor:changes_cursor ~height:room scroll in
             let changes_window = Rows.of_list ~first:scroll ~height:room changes in
             report_drawn_list Repository_change_rows ~height:room;
             for i = 0 to room - 1 do
@@ -804,7 +821,7 @@ let render_repository_changes (state : state) =
                                     | Some _ | None -> Terminal_text.single_line tid)
                                | None -> Terminal_text.single_line fc.fc_keeper
                              in
-                             " [record:" ^ t ^ "]"
+                             (if ko then " [기록:" else " [record:") ^ t ^ "]"
                          | None -> "")
                     | Some _, false | None, _ -> ""
                   in
@@ -818,7 +835,7 @@ let render_repository_changes (state : state) =
                     if Message_layout.display_width attr + min 8 path_cells <= available
                     then attr else ""
                   in
-                  let is_selected = idx = state.repository_changes_cursor in
+                  let is_selected = idx = changes_cursor in
                   let lead =
                     if geometry.rcg_error_rows = 0 && Option.is_some state.repository_changes_error
                     then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution ^ " "
@@ -833,7 +850,7 @@ let render_repository_changes (state : state) =
                          (max 1 (available - Message_layout.display_width attr)) path)
                       attr
                   in
-                  if is_selected then c.push_selected line
+                  if is_selected then c.push_selected_styled line
                   else c.push line
             done)
 
@@ -897,7 +914,7 @@ let diff_row_span ?(hscroll = 0) ~width (row : Diff.row) =
      where the terminal has no colour. *)
   let text_style =
     match row with
-    | Diff.Context _ -> Span.combine background (Span.weight Ansi.dim)
+    | Diff.Context _ -> Span.combine background (Span.fg (Theme.recede ()))
     | Diff.Removed _ | Diff.Added _ -> background
   in
   let composed =
@@ -1253,7 +1270,7 @@ let render_changes_list (state : state) =
              it is the row an operator is looking for. Dim marks it as an
              attempt rather than hiding it. *)
           if selected then
-            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
+            box_line_selected_styled buf cols line
           else box_line buf cols line
     done;
   (match cursor_change with

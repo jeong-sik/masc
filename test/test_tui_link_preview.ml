@@ -295,6 +295,17 @@ let test_card_source_spans () =
     check int "title's original start does not depend on clipping" 0 narrow.source_start_byte;
     check int "wide title keeps original start too" 0 wide.source_start_byte) samples
 
+let test_modal_hints_localized () =
+  check string "default english single link without image"
+    "o:browser  y:copy  v:image  j/k:scroll  PgUp/PgDn:page  Home/End:first/last  Esc:close"
+    (modal_hints ~total_links:1 ~has_image:false);
+  check string "korean multi link with image"
+    "o:브라우저  y:복사  v:이미지  n/p:이동  j/k:스크롤  PgUp/PgDn:쪽  Home/End:처음/끝  r:이미지 재시도  Esc:닫기"
+    (modal_hints_localized ~ko:true ~total_links:3 ~has_image:true);
+  check string "korean single link without image omits cycle and retry"
+    "o:브라우저  y:복사  v:이미지  j/k:스크롤  PgUp/PgDn:쪽  Home/End:처음/끝  Esc:닫기"
+    (modal_hints_localized ~ko:true ~total_links:1 ~has_image:false)
+
 let () =
   run "tui link preview"
     [ ( "synthesizer"
@@ -316,6 +327,8 @@ let () =
             test_a_refused_image_url_is_remembered_and_said
         ; test_case "an undecided image url says nothing" `Quick
             test_an_undecided_image_url_says_nothing
+        ; test_case "modal hints localize cleanly" `Quick
+            test_modal_hints_localized
         ] )
     ; ( "fetch (og parse)"
       , [ test_case "og full" `Quick test_parse_og_full

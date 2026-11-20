@@ -751,12 +751,22 @@ let render_inline_card_with_spans ~width p =
    link has nothing to cycle to, and a preview with no image has nothing to
    retry. Order is what survives a narrow window: [drop_hint_items] gives up
    whole items from the back and never gives up Esc. *)
+let modal_hints_localized ~ko ~total_links ~has_image =
+  if ko then
+    "o:브라우저  y:복사  v:이미지  "
+    ^ (if total_links > 1 then "n/p:이동  " else "")
+    ^ "j/k:스크롤  PgUp/PgDn:쪽  Home/End:처음/끝  "
+    ^ (if has_image then "r:이미지 재시도  " else "")
+    ^ "Esc:닫기"
+  else
+    "o:browser  y:copy  v:image  "
+    ^ (if total_links > 1 then "n/p:cycle  " else "")
+    ^ "j/k:scroll  PgUp/PgDn:page  Home/End:first/last  "
+    ^ (if has_image then "r:retry image  " else "")
+    ^ "Esc:close"
+
 let modal_hints ~total_links ~has_image =
-  "o:browser  y:copy  v:image  "
-  ^ (if total_links > 1 then "n/p:cycle  " else "")
-  ^ "j/k:scroll  PgUp/PgDn:page  Home/End:first/last  "
-  ^ (if has_image then "r:retry image  " else "")
-  ^ "Esc:close"
+  modal_hints_localized ~ko:false ~total_links ~has_image
 
 let render_modal_card ~width ~height:_ p =
   let card = render_notion_card ~width:(max 1 (width - 4)) p in

@@ -227,6 +227,20 @@ let test_about_candle_frames_are_reused_with_a_bound () =
   check bool "the frame cache stays at sixteen images" true
     (Screen.about_cached_frames () <= 16)
 
+let test_about_facts_localized () =
+  check string "english read count"
+    "Theme: nord  \xc2\xb7  Keepers: 3"
+    (Screen.about_facts ~theme:"nord" (Screen.Keepers_read 3));
+  check string "korean read count"
+    "테마: nord  \xc2\xb7  키퍼: 3명"
+    (Screen.about_facts ~ko:true ~theme:"nord" (Screen.Keepers_read 3));
+  check string "korean unreadable"
+    "테마: 기본  \xc2\xb7  키퍼: 읽기 불가"
+    (Screen.about_facts ~ko:true ~theme:"기본" Screen.Keepers_unreadable);
+  check string "korean unread"
+    "테마: 기본  \xc2\xb7  키퍼: 불러오기 전"
+    (Screen.about_facts ~ko:true ~theme:"기본" Screen.Keepers_unread)
+
 let () =
   run "tui_emblem_screen"
     [ ( "layout"
@@ -257,5 +271,7 @@ let () =
             test_no_picture_keeps_the_count
         ; test_case "candle frames are reused within a bound" `Quick
             test_about_candle_frames_are_reused_with_a_bound
+        ; test_case "about facts localize theme and keeper counts" `Quick
+            test_about_facts_localized
         ] )
     ]

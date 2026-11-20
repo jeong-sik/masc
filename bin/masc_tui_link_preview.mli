@@ -160,5 +160,8 @@ val modal_hints : total_links:int -> has_image:bool -> string
     than one link and the image retry only with an image, because neither key
     does anything otherwise. *)
 
+val modal_hints_localized : ko:bool -> total_links:int -> has_image:bool -> string
+(** Localized variant of {!modal_hints}. *)
+
 val render_modal_card : width:int -> height:int -> og_preview -> string list
 (** Full-width rich embed layout for the link preview overlay. *)

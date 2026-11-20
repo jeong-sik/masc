@@ -1141,6 +1141,31 @@ let framed_line_styled buf cols ~style content =
     [ edge; Ansi.box_v; Ansi.reset; border_padding; style; content; Ansi.reset
     ; border_padding; edge; Ansi.box_v; Ansi.reset ]
 
+(* SGR-preserving full-width selection band inside a boxed overlay frame.
+   Keeps semantic dots, badges, and syntax colors intact over the subtle
+   adaptive selection background; falls back to unbroken reverse video
+   under NO_COLOR or monochrome/unknown palettes. *)
+let framed_line_selected_styled buf cols content =
+  let inner = framed_inner_width cols in
+  let edge = Theme.border_muted () in
+  let edge_open = if String.equal edge "" then "" else edge in
+  let edge_close = if String.equal edge "" then "" else Ansi.reset in
+  match Theme.sidebar_selection_background () with
+  | None | Some "" ->
+      let content = fit_width (Masc_tui_theme.strip_sgr content) inner in
+      add_row buf
+        [ edge_open; Ansi.box_v; edge_close; border_padding
+        ; Theme.selection_style (); content; Ansi.reset
+        ; border_padding; edge_open; Ansi.box_v; edge_close ]
+  | Some bg ->
+      let content =
+        Masc_tui_theme.paint_row_background ~bg (fit_width content inner)
+      in
+      add_row buf
+        [ edge_open; Ansi.box_v; edge_close; border_padding
+        ; content
+        ; border_padding; edge_open; Ansi.box_v; edge_close ]
+
 let framed_empty buf cols =
   let inner = framed_inner_width cols in
   let edge = Theme.border_muted () in
@@ -1360,6 +1385,32 @@ let box_line_selected buf cols content =
   add_row buf
     [ Theme.selection_style (); frame_margin; fit_width content inner; frame_margin
     ; Ansi.reset ]
+
+(* SGR-preserving full-width selection band for a borderless list row. Keeps
+   semantic dots, status colors, and syntax highlighting intact over the subtle
+   adaptive selection background; falls back to unbroken reverse video when no
+   palette background is available (e.g. NO_COLOR / monochrome terminals). *)
+let box_line_selected_styled buf cols content =
+  let inner = framed_inner_width cols in
+  match Theme.sidebar_selection_background () with
+  | None | Some "" ->
+      add_row buf
+        [ Theme.selection_style (); frame_margin
+        ; fit_width (Masc_tui_theme.strip_sgr content) inner; frame_margin
+        ; Ansi.reset ]
+  | Some bg ->
+      add_row buf
+        [ Masc_tui_theme.paint_row_background ~bg
+            (frame_margin ^ fit_width content inner ^ frame_margin) ]
+
+(* SGR-preserving selection band for an inner pane row of [cells] width. *)
+let selection_row_styled ~cells content =
+  match Theme.sidebar_selection_background () with
+  | None | Some "" ->
+      Theme.selection_style ()
+      ^ fit_width (Masc_tui_theme.strip_sgr content) cells ^ Ansi.reset
+  | Some bg ->
+      Masc_tui_theme.paint_row_background ~bg (fit_width content cells)
 
 let box_empty buf cols =
   Buffer.add_string buf (String.make cols ' ');

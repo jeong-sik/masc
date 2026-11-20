@@ -332,14 +332,16 @@ type keeper_count =
   | Keepers_unreadable
   | Keepers_unread
 
-let about_facts ~theme keepers =
+let about_facts ?(ko = false) ~theme keepers =
   let count =
     match keepers with
-    | Keepers_read count -> string_of_int count
-    | Keepers_unreadable -> "unavailable"
-    | Keepers_unread -> "not loaded"
+    | Keepers_read count ->
+        if ko then Printf.sprintf "%d명" count else string_of_int count
+    | Keepers_unreadable -> if ko then "읽기 불가" else "unavailable"
+    | Keepers_unread -> if ko then "불러오기 전" else "not loaded"
   in
-  Printf.sprintf "Theme: %s  \xc2\xb7  Keepers: %s" theme count
+  if ko then Printf.sprintf "테마: %s  \xc2\xb7  키퍼: %s" theme count
+  else Printf.sprintf "Theme: %s  \xc2\xb7  Keepers: %s" theme count
 
 let last_drawn = ref Absent
 let begin_frame () = last_drawn := Absent

@@ -12,6 +12,19 @@ module Render_schedule = Masc_tui_render_schedule
 module Link = Masc_tui_link
 module Chart = Masc_tui_chart
 
+let wrap_style style text =
+  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
+  then text
+  else style ^ text ^ Ansi.reset
+
+let clamped_cursor ~count cursor =
+  if count <= 0 then 0 else max 0 (min cursor (count - 1))
+
+let fusion_run_status_label ~ko = function
+  | Fusion_running -> if ko then "실행 중" else "running"
+  | Fusion_completed -> if ko then "완료" else "completed"
+  | Fusion_failed _ -> if ko then "실패" else "failed"
+
 (* The step the Fusion screens take from Keepers. A feature's own name, the
    same in both languages. *)
 let fusion_step = "Fusion"
@@ -65,6 +78,7 @@ let render_fusion_list (state : state) =
   in
   let entries = Masc_tui_fusion_model.fusion_list_entries state in
   let shown = List.length entries in
+  let cursor = clamped_cursor ~count:shown state.fusion_cursor in
   let history_count = shown - List.length runs in
   let replay_warning = Option.bind snapshot
       (fun snapshot ->
@@ -135,7 +149,7 @@ let render_fusion_list (state : state) =
           ~position:
             (if shown = 0 then None
              else
-               Some (Masc_tui_value.Position.row ~selected:(Some state.fusion_cursor) ~total:shown))
+               Some (Masc_tui_value.Position.row ~selected:(Some cursor) ~total:shown))
   in
   (* Measured from the rows, the way the Approvals table measures its own
      name column. Eighteen of twenty-eight keepers were cut at sixteen while
@@ -183,7 +197,7 @@ let render_fusion_list (state : state) =
   let ko = state.ui_language = Lang_ko in
   let summary_indent = "  " in
   let summary_clauses =
-    match List.nth_opt entries state.fusion_cursor with
+    match List.nth_opt entries cursor with
     | None -> None
     | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence _) ->
         Some
@@ -213,8 +227,8 @@ let render_fusion_list (state : state) =
   in
   let content_height = max 1 (rows - chrome_rows - summary_rows) in
   let scroll =
-    if state.fusion_cursor >= content_height then
-      state.fusion_cursor - content_height + 1
+    if cursor >= content_height then
+      cursor - content_height + 1
     else 0
   in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
@@ -258,8 +272,8 @@ let render_fusion_list (state : state) =
             ^ Terminal_text.single_line evidence.fhe_title
             ^ " · " ^ Link.reference Board_post evidence.fhe_post_id
           in
-          if row_index = state.fusion_cursor then
-            box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+          if row_index = cursor then
+            box_line_selected_styled buf cols ("\xe2\x80\xba " ^ line)
           else box_line buf cols ("  " ^ line)
       | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
           let state_text =
@@ -276,8 +290,8 @@ let render_fusion_list (state : state) =
               ; frow_run = Terminal_text.single_line run.fur_run_id
               }
           in
-          if row_index = state.fusion_cursor then
-            box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+          if row_index = cursor then
+            box_line_selected_styled buf cols ("\xe2\x80\xba " ^ line)
           else box_line buf cols ("  " ^ line)
     done;
   (match summary_clauses with
@@ -316,27 +330,32 @@ let render_fusion_list (state : state) =
    the two numbers it was drawn from. *)
 let fusion_panel_dots ~answered ~failed =
   let cap = 24 in
-  let filled = "\xe2\x97\x8f" in
-  let hollow = "\xe2\x97\x8b" in
+  let filled = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled in
+  let failed_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed in
   let run style mark n =
     if n <= 0 then ""
-    else style ^ String.concat "" (List.init n (fun _ -> mark)) ^ Ansi.reset
+    else wrap_style style (String.concat "" (List.init n (fun _ -> mark)))
   in
   match answered + failed with
   | 0 -> ""
   | total when total > cap ->
-    Printf.sprintf "%s%d\xc3\x97%s%s  %s%d\xc3\x97%s%s"
-      (Theme.ok ()) answered filled Ansi.reset
-      (Theme.bad ()) failed hollow Ansi.reset
-  | _ -> run (Theme.ok ()) filled answered ^ run (Theme.bad ()) hollow failed
+    let ok_part =
+      wrap_style (Theme.ok ()) (Printf.sprintf "%d\xc3\x97%s" answered filled)
+    in
+    let bad_part =
+      wrap_style (Theme.bad ()) (Printf.sprintf "%d\xc3\x97%s" failed failed_mark)
+    in
+    ok_part ^ "  " ^ bad_part
+  | _ -> run (Theme.ok ()) filled answered ^ run (Theme.bad ()) failed_mark failed
 ;;
 
-let fusion_wrapped_block ~width ~indent text =
+let fusion_wrapped_block ~ko ~width ~indent text =
+  let empty_label = if ko then "(비어 있음)" else "(empty)" in
   let body_width = max 1 (width - Message_layout.display_width indent) in
   String.split_on_char '\n' text
   |> List.concat_map (fun raw ->
          let safe = Terminal_text.single_line raw in
-         if String.equal safe "" then [ indent ^ "(empty)" ]
+         if String.equal safe "" then [ indent ^ empty_label ]
          else
            Message_layout.wrap_words ~max_cells:body_width safe
            |> List.map (fun line -> indent ^ line))
@@ -347,14 +366,15 @@ let fusion_safe_markdown_block ~width ~indent text =
   document_markdown ~width:body_width text
   |> List.map (fun line -> Ansi.reset, indent ^ line)
 
-let fusion_markdown_block ~width ~indent text =
-  if String.equal (String.trim text) "" then [ Ansi.dim, indent ^ "(empty)" ]
+let fusion_markdown_block ~ko ~width ~indent text =
+  if String.equal (String.trim text) "" then
+    [ Theme.recede (), indent ^ (if ko then "(비어 있음)" else "(empty)") ]
   else fusion_safe_markdown_block ~width ~indent
       (Keeper_chat.terminal_safe_text ~preserve_newlines:true text)
 
-let fusion_labeled_markdown ~width ~label text =
+let fusion_labeled_markdown ~ko ~width ~label text =
   (Ansi.bold, "  " ^ label)
-  :: fusion_markdown_block ~width ~indent:"    " text
+  :: fusion_markdown_block ~ko ~width ~indent:"    " text
 
 let fusion_tool_actor_text actor =
   match actor.fta_phase with
@@ -471,11 +491,16 @@ let fusion_preview_indent ~frame_width ~indent_cells rows =
   let indent = String.make (min indent_cells (max 0 (frame_width - widest))) ' ' in
   List.map (fun line -> Ansi.reset, indent ^ line) rows, widest > frame_width
 
-let fusion_tool_preview_lines ~width ~frame_width ~label preview =
+let fusion_tool_preview_lines ~ko ~width ~frame_width ~label preview =
   let size =
-    if preview.ftp_truncated
-    then Printf.sprintf "%s bytes; preview truncated" (Masc_tui_value.Count.grouped preview.ftp_bytes)
-    else Printf.sprintf "%s bytes" (Masc_tui_value.Count.grouped preview.ftp_bytes)
+    let bytes_text = Masc_tui_value.Count.grouped preview.ftp_bytes in
+    if preview.ftp_truncated then
+      Printf.sprintf
+        (if ko then "%s바이트 · 미리보기 일부 생략"
+         else "%s bytes; preview truncated")
+        bytes_text
+    else
+      Printf.sprintf (if ko then "%s바이트" else "%s bytes") bytes_text
   in
   let complete_json =
     if preview.ftp_truncated then None
@@ -554,14 +579,16 @@ let fusion_tool_preview_lines ~width ~frame_width ~label preview =
   in
   let markdown_rows text =
     if String.equal (String.trim text) "" then
-      fusion_preview_indent ~frame_width ~indent_cells:6 [ "(empty)" ]
-      |> fst |> List.map (fun (_, line) -> Ansi.dim, line)
+      fusion_preview_indent ~frame_width ~indent_cells:6
+        [ (if ko then "(비어 있음)" else "(empty)") ]
+      |> fst |> List.map (fun (_, line) -> Theme.recede (), line)
     else
       let safe = Keeper_chat.terminal_safe_text ~preserve_newlines:true text in
       let palette = Masc_tui_markdown_theme.palette ~closing:Ansi.reset in
       let source_rows () =
         let heading = Message_layout.split_cells ~max_cells:(max 1 frame_width)
-            "Markdown source:" |> List.map (fun line -> Ansi.dim, line) in
+            (if ko then "마크다운 원문:" else "Markdown source:")
+          |> List.map (fun line -> Theme.recede (), line) in
         heading @ direct_safe_rows ~language:None safe
       in
       let render body_width =
@@ -608,7 +635,7 @@ let fusion_tool_preview_lines ~width ~frame_width ~label preview =
       else if container then fenced_json_rows preview.ftp_text
       else markdown_rows preview.ftp_text
   in
-  [ Ansi.dim, Printf.sprintf "    %s (%s)" label size ] @ rows
+  [ Theme.recede (), Printf.sprintf "    %s (%s)" label size ] @ rows
 
 let fusion_tool_event_lines ~ko ~width ~frame_width = function
   | Fusion_tool_called event ->
@@ -622,7 +649,7 @@ let fusion_tool_event_lines ~ko ~width ~frame_width = function
             event.fte_turn event.fte_planned_index
             (Terminal_text.single_line event.fte_tool_use_id) )
       ]
-      @ fusion_tool_preview_lines ~width ~frame_width
+      @ fusion_tool_preview_lines ~ko ~width ~frame_width
           ~label:(if ko then "입력" else "Input") event.fte_input
   | Fusion_tool_completed event ->
       let status, style, output, failure_suffix =
@@ -651,7 +678,7 @@ let fusion_tool_event_lines ~ko ~width ~frame_width = function
             (Terminal_text.single_line event.fte_tool_use_id)
             failure_suffix )
       ]
-      @ fusion_tool_preview_lines ~width ~frame_width
+      @ fusion_tool_preview_lines ~ko ~width ~frame_width
           ~label:(if ko then "출력" else "Output") output
 
 let fusion_tool_trace_uncached ~ko ~width ~frame_width (trace : Masc.Tui_decode_fusion.fusion_tool_trace) =
@@ -680,9 +707,9 @@ let fusion_tool_trace_uncached ~ko ~width ~frame_width (trace : Masc.Tui_decode_
       let observed =
         match trace.ftt_observed_actors with
         | [] ->
-            [ Ansi.dim, if ko then "  관측된 참여자: (없음)" else "  Observed actors: (none)" ]
+            [ Theme.recede (), if ko then "  관측된 참여자: (없음)" else "  Observed actors: (none)" ]
         | actors ->
-            fusion_wrapped_block ~width ~indent:"  "
+            fusion_wrapped_block ~ko ~width ~indent:"  "
               ((if ko then "관측된 참여자: " else "Observed actors: ")
                ^ String.concat ", " (List.map fusion_tool_actor_text actors))
       in
@@ -699,17 +726,17 @@ let fusion_tool_trace_uncached ~ko ~width ~frame_width (trace : Masc.Tui_decode_
       let events =
         match trace.ftt_events with
         | [] when trace.ftt_complete ->
-            [ Ansi.dim
+            [ Theme.recede ()
             , if ko then "  계측 대상 참여자에서 관측된 도구 호출이 없습니다"
               else "  No Tool calls were observed for instrumented actors" ]
         | [] ->
-            [ Ansi.dim
+            [ Theme.recede ()
             , if ko then "  이 부분 기록에 보존된 도구 이벤트가 없습니다"
               else "  No Tool events retained in this partial ledger" ]
         | events ->
             events
             |> List.concat_map (fun event ->
-                   (Ansi.dim, "") :: fusion_tool_event_lines ~ko ~width ~frame_width event)
+                   (Theme.recede (), "") :: fusion_tool_event_lines ~ko ~width ~frame_width event)
       in
       (coverage :: observed) @ gaps @ events
 
@@ -750,11 +777,11 @@ let fusion_tool_trace_lines ~ko ~width ~frame_width trace =
     lines
 
 let fusion_pipeline_diagram (run : Masc.Tui_decode_fusion.fusion_run) =
-  let glyph_done = (Theme.ok ()) ^ "\xe2\x97\x8f" ^ Ansi.reset in
-  let glyph_active = (Theme.info ()) ^ "\xe2\x97\x90" ^ Ansi.reset in
-  let glyph_waiting = Ansi.dim ^ "\xe2\x97\x8b" ^ Ansi.reset in
-  let glyph_failed = (Theme.bad ()) ^ "\xc3\x97" ^ Ansi.reset in
-  let arrow = " " ^ (Theme.recede ()) ^ "\xe2\x96\xb8" ^ Ansi.reset ^ " " in
+  let glyph_done = wrap_style (Theme.ok ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled) in
+  let glyph_active = wrap_style (Theme.info ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way) in
+  let glyph_waiting = wrap_style (Theme.recede ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting) in
+  let glyph_failed = wrap_style (Theme.bad ()) (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed) in
+  let arrow = " " ^ wrap_style (Theme.recede ()) "\xe2\x96\xb8" ^ " " in
   let status =
     match run.fur_status with
     | Fusion_completed -> `Completed
@@ -804,7 +831,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                        (Terminal_text.single_line answer.fpa_model)
                        answer.fpa_input_tokens answer.fpa_output_tokens )
                  ]
-                 @ fusion_markdown_block ~width ~indent:"    "
+                 @ fusion_markdown_block ~ko ~width ~indent:"    "
                      answer.fpa_answer
              | Fusion_panel_failed failure ->
                  [ ( (Theme.bad ())
@@ -814,12 +841,12 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                        (index + 1)
                        (Terminal_text.single_line failure.fpf_model)
                        (Terminal_text.single_line failure.fpf_reason_code) )
-                 ; Ansi.dim, t "    토큰 사용량: 기록 없음" "    Token usage: not recorded"
+                 ; Theme.recede (), t "    토큰 사용량: 기록 없음" "    Token usage: not recorded"
                  ]
-                 @ fusion_wrapped_block ~width ~indent:"    "
+                 @ fusion_wrapped_block ~ko ~width ~indent:"    "
                      failure.fpf_reason_detail
            in
-           if index = 0 then body else (Ansi.dim, "") :: body)
+           if index = 0 then body else (Theme.recede (), "") :: body)
     |> List.concat
   in
   let panel_token_items =
@@ -827,44 +854,82 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
       (function
         | Fusion_panel_answered answer ->
             Some
-              { Chart.name = Terminal_text.single_line answer.fpa_model
-              ; count = answer.fpa_input_tokens + answer.fpa_output_tokens
-              ; style = Masc_tui_theme.Ok
-              }
+              ( Terminal_text.single_line answer.fpa_model
+              , max 0 (answer.fpa_input_tokens + answer.fpa_output_tokens) )
         | Fusion_panel_failed _ -> None)
       evidence.fe_panel
   in
   let panel_chart_lines =
     if List.length panel_token_items >= 2 then
-      ( Ansi.dim
+      let total_tokens =
+        List.fold_left (fun acc (_, tok) -> acc + tok) 0 panel_token_items
+      in
+      let max_tokens =
+        List.fold_left (fun acc (_, tok) -> max acc tok) 1 panel_token_items
+      in
+      let name_w =
+        List.fold_left
+          (fun acc (name, _) -> max acc (Message_layout.display_width name))
+          8 panel_token_items
+        |> min (max 8 (min 22 (width / 3)))
+      in
+      let bar_w = min 24 (max 6 (width - name_w - 22)) in
+      let rows =
+        List.map
+          (fun (name, tok) ->
+            let share =
+              if total_tokens <= 0 then 0.
+              else float_of_int tok /. float_of_int total_tokens *. 100.
+            in
+            let readout =
+              wrap_style (Theme.recede ())
+                (Printf.sprintf "%s (%.0f%%)"
+                   (Masc_tui_value.Count.grouped tok) share)
+            in
+            if width >= 34 then
+              let bar =
+                Chart.meter_bar ~width:bar_w ~value:tok ~max_value:max_tokens
+                  ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Usage })
+                  ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+              in
+              ( ""
+              , Printf.sprintf "    %s  %s  %s"
+                  (fit_width name name_w) bar readout )
+            else
+              ( ""
+              , Printf.sprintf "    %s  %s"
+                  (fit_width name name_w) readout ))
+          panel_token_items
+      in
+      ( Theme.recede ()
       , if failed = 0 then t "  모델별 토큰 분포:" "  Model token distribution:"
         else
           Printf.sprintf
             (if ko then "  모델별 토큰 분포 (측정 %d/%d 패널):"
              else "  Model token distribution (measured %d/%d panels):")
             answered (answered + failed) )
-      :: List.map (fun row -> (Ansi.reset, row)) (Chart.distribution_bars ~width panel_token_items)
-      @ [ Ansi.dim, "" ]
+      :: rows
+      @ [ Theme.recede (), "" ]
     else []
   in
   let judge_lines =
     match evidence.fe_judge with
     | Fusion_judge_synthesized judge ->
-        [ ( (Theme.info ())
+        [ ( (Theme.accent ())
           , t "  판정 [종합] " "  Judge [synthesized] "
             ^ Terminal_text.single_line judge.fj_decision )
         ]
-        @ fusion_labeled_markdown ~width ~label:(t "최종 답변" "Resolved")
+        @ fusion_labeled_markdown ~ko ~width ~label:(t "최종 답변" "Resolved")
             judge.fj_resolved_answer
-        @ [ Ansi.dim, "" ]
-        @ fusion_labeled_markdown ~width ~label:(t "판정 근거" "Reason") judge.fj_reason
+        @ [ Theme.recede (), "" ]
+        @ fusion_labeled_markdown ~ko ~width ~label:(t "판정 근거" "Reason") judge.fj_reason
     | Fusion_judge_failed failure ->
         [ ( (Theme.bad ())
           , t "  판정 [실패] [" "  Judge [failed] ["
             ^ Terminal_text.single_line failure.fj_failure_code
             ^ "]" )
         ]
-        @ fusion_wrapped_block ~width ~indent:"    " failure.fj_error
+        @ fusion_wrapped_block ~ko ~width ~indent:"    " failure.fj_error
   in
   (* RFC-0284 judge nodes. The canonical [Judge] row above is the final
      synthesis; this block is the topology it came through -- first the
@@ -913,7 +978,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                  let card =
                    match node.fjn_outcome with
                    | Judge_node_synthesized synthesized ->
-                       [ ( (Theme.info ())
+                       [ ( (Theme.accent ())
                          , Printf.sprintf
                              (if ko then "  1차 판정 %d [종합] %s  (입력 %d / 출력 %d)"
                               else "  First %d [synthesized] %s  (%d in / %d out)")
@@ -922,7 +987,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                              synthesized.fjno_input_tokens
                              synthesized.fjno_output_tokens )
                        ]
-                       @ fusion_labeled_markdown ~width
+                       @ fusion_labeled_markdown ~ko ~width
                            ~label:
                              (Printf.sprintf
                                 (if ko then "1차 판정 %d %s" else "First %d %s")
@@ -946,22 +1011,22 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                              (Terminal_text.single_line failed.fjno_failure_code)
                              clock )
                        ]
-                       @ fusion_wrapped_block ~width ~indent:"    "
+                       @ fusion_wrapped_block ~ko ~width ~indent:"    "
                            failed.fjno_error
                  in
-                 (Ansi.dim, "") :: card)
+                 (Theme.recede (), "") :: card)
           |> List.concat
         in
-        [ Ansi.dim, "" ]
+        let arrow = wrap_style (Theme.recede ()) "  \xe2\x94\x80\xe2\x96\xb6  " in
+        [ Theme.recede (), "" ]
         (* The counts are already in pipeline order, so joining them
            with the same arrow the Goal stage rail uses draws the run
            rather than describing it. The shape name stays, at the end,
            because it is what the preset is called. *)
-        @ ( Ansi.dim
-          , Printf.sprintf "  %s  \xe2\x94\x80\xe2\x96\xb6  %s  \xc2\xb7  %s"
-              (fusion_panel_dots ~answered ~failed)
-              (String.concat "  \xe2\x94\x80\xe2\x96\xb6  " counts)
-              shape )
+        @ ( ""
+          , "  " ^ fusion_panel_dots ~answered ~failed
+            ^ arrow ^ String.concat arrow counts
+            ^ wrap_style (Theme.recede ()) ("  \xc2\xb7  " ^ shape) )
         :: first_cards
   in
   let tool_lines =
@@ -1000,13 +1065,13 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
   [ Ansi.bold, t "  제목: " "  Title: " ^ Terminal_text.single_line evidence.fe_title ]
   @ detail_section_heading ~width
       (t "1. 질문 · 최종 판정" "1. Question & Judge Synthesis")
-  @ fusion_markdown_block ~width ~indent:"    " evidence.fe_question
-  @ [ Ansi.dim, "" ]
+  @ fusion_markdown_block ~ko ~width ~indent:"    " evidence.fe_question
+  @ [ Theme.recede (), "" ]
   @ judge_lines
   @ judges_lines
   @ detail_section_heading ~width
       (t "2. 패널 응답 · 토큰 분포" "2. Panel Responses & Tokens")
-  @ [ ( Ansi.dim
+  @ [ ( Theme.recede ()
       , let usage =
           if answered = 0 then t "패널 토큰 사용량: 기록 없음" "panel token usage: not recorded"
           else if failed = 0 then
@@ -1023,7 +1088,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
           (if ko then "  응답 %d / 실패 %d  \xc2\xb7  %s" else "  %d answered / %d failed  \xc2\xb7  %s")
           answered failed usage )
     ]
-  @ (if panel_chart_lines = [] && panel_lines = [] then [] else [ Ansi.dim, "" ])
+  @ (if panel_chart_lines = [] && panel_lines = [] then [] else [ Theme.recede (), "" ])
   @ panel_chart_lines
   @ panel_lines
   @ detail_section_heading ~width
@@ -1032,8 +1097,8 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
   @ detail_section_heading ~width
       (t "4. 시트 라우팅 · 기록 증거" "4. Seat Routes & Board Link")
   @ seat_route_lines
-  @ (if seat_route_lines = [] then [] else [ Ansi.dim, "" ])
-  @ [ ( Ansi.dim
+  @ (if seat_route_lines = [] then [] else [ Theme.recede (), "" ])
+  @ [ ( Theme.recede ()
       , t "  보드 링크: " "  Board link: "
         ^ Link.reference Board_post
             (Terminal_text.single_line evidence.fe_post_id) )
@@ -1041,7 +1106,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
 
 let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
   let run = detail.fud_run in
-  let status = fusion_run_status_to_string run.fur_status in
+  let status = fusion_run_status_label ~ko run.fur_status in
   let now = Unix.gettimeofday () in
   let date_time = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now run.fur_started_at in
   let age = fusion_run_age ~now run in
@@ -1057,24 +1122,21 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
      and Progress says what it is doing about the stop it is on. *)
   let say korean english = if ko then korean else english in
   let run_lines =
-    [ Ansi.bold, say "  실행" "  RUN"
+    [ Ansi.bold, say "  실행" "  Run"
     ; Ansi.reset, say "  단계: " "  Pipeline: " ^ pipeline
       (* No Actions row: every key it named is on the footer, drawn from the
          key table, and this row spelled them three ways ("K Keeper",
          "[Y] Copy Link", "[PgUp/PgDn] Page"). *)
-    ; ( Ansi.dim
+    ; ( Theme.recede ()
       , say "  링크: " "  Link: "
         ^ Link.reference Fusion_run
             (Terminal_text.single_line run.fur_run_id) )
     ; ( Ansi.reset
       , Printf.sprintf
-          (if ko then "  호출자: %s@%s%s %s[키퍼]%s  \xc2\xb7  %s"
-           else "  Caller: %s@%s%s %s[Keeper]%s  \xc2\xb7  %s")
-          (Theme.accent ())
-          (Terminal_text.single_line run.fur_keeper)
-          Ansi.reset
-          (Theme.warn ())
-          Ansi.reset
+          (if ko then "  호출자: %s %s  \xc2\xb7  %s"
+           else "  Caller: %s %s  \xc2\xb7  %s")
+          (wrap_style (Theme.accent ()) ("@" ^ Terminal_text.single_line run.fur_keeper))
+          (wrap_style (Theme.warn ()) (if ko then "[키퍼]" else "[Keeper]"))
           (Link.reference Keeper (Terminal_text.single_line run.fur_keeper)) )
     ; fusion_run_status_color run.fur_status, say "  상태: " "  Status: " ^ status
     ]
@@ -1084,20 +1146,20 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
        | Fusion_stage_completed | Fusion_stage_failed -> []
        | Fusion_stage_accepted | Fusion_stage_panel _ | Fusion_stage_judge _
        | Fusion_stage_computed _ | Fusion_stage_recording_evidence _ ->
-           [ Ansi.dim, say "  진행: " "  Progress: " ^ fusion_run_progress_text ~ko run.fur_stage ])
+           [ Theme.recede (), say "  진행: " "  Progress: " ^ fusion_run_progress_text ~ko run.fur_stage ])
     @ [ ( Ansi.reset
     , say "  구성: " "  Configuration: " ^ Terminal_text.single_line run.fur_preset ^ " \xc2\xb7 "
       ^ Fusion_types.fusion_topology_to_string run.fur_topology )
-    ; Ansi.dim, say "  시작: " "  Started: " ^ started_text
+    ; Theme.recede (), say "  시작: " "  Started: " ^ started_text
     ; Ansi.reset, say "  소요: " "  Duration: " ^ fusion_run_duration ~now run
     ]
     @ (match detail.fud_evidence with
        | None ->
-           [ Ansi.dim
+           [ Theme.recede ()
            , say "  원본 질문·보드 링크: 근거 대기 중"
                "  Original question and Board link: awaiting evidence" ]
        | Some evidence ->
-           [ Theme.info (), say "  보드: " "  Board: " ^ Link.reference Board_post evidence.fe_post_id
+           [ Theme.recede (), say "  보드: " "  Board: " ^ Link.reference Board_post evidence.fe_post_id
            ; Ansi.bold, say "  원본 질문: " "  Original question: " ^ Terminal_text.single_line evidence.fe_question ])
     @
     match run.fur_status with
@@ -1106,7 +1168,7 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
         (match run.fur_decision, run.fur_summary with
          | Some decision, Some summary ->
              [ (Theme.ok ()), say "  결과: " "  Outcome: " ^ Terminal_text.single_line decision ]
-             @ fusion_labeled_markdown ~width ~label:(say "결과 요약" "Outcome summary") summary
+             @ fusion_labeled_markdown ~ko ~width ~label:(say "결과 요약" "Outcome summary") summary
          | (Some _ | None), (Some _ | None) -> [])
     | Fusion_failed failure ->
         [ (Theme.bad ())
@@ -1139,36 +1201,49 @@ let fusion_detail_lines ~ko ~width ~frame_width (detail : fusion_detail) =
         [ (Theme.bad ())
         , say "  퓨전 근거 불변성 위반" "  Fusion evidence invariant violated" ]
   in
-  run_lines @ [ Ansi.dim, "" ] @ evidence_lines
+  run_lines @ [ Theme.recede (), "" ] @ evidence_lines
 
 let fusion_historical_lines ~ko ~width ~frame_width (detail : fusion_historical_detail) =
   let t korean english = if ko then korean else english in
-  [ Ansi.bold, "  HISTORICAL BOARD EVIDENCE"
-  ; Theme.warn (), "  This Board evidence does not provide execution status or finish time"
-  ; Ansi.reset, "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
-  ; Ansi.reset, "  Board author: " ^ Terminal_text.single_line detail.fhd_author
-  ; Theme.info (), "  Board: " ^ Link.reference Board_post detail.fhd_reference.fhe_post_id
-  ; Ansi.reset, "  Title: " ^ Terminal_text.single_line detail.fhd_title
+  [ Ansi.bold, t "  과거 보드 근거" "  Historical Board evidence"
+  ; Theme.warn (),
+    t "  이 보드 근거에는 실행 상태와 종료 시각이 기록되지 않습니다"
+      "  This Board evidence does not provide execution status or finish time"
+  ; Ansi.reset, t "  실행 참조: " "  Run reference: " ^ Terminal_text.single_line detail.fhd_reference.fhe_run_id
+  ; Ansi.reset, t "  보드 작성자: " "  Board author: " ^ Terminal_text.single_line detail.fhd_author
+  ; Theme.recede (), t "  보드: " "  Board: " ^ Link.reference Board_post detail.fhd_reference.fhe_post_id
+  ; Ansi.reset, t "  제목: " "  Title: " ^ Terminal_text.single_line detail.fhd_title
   ]
   @ (match detail.fhd_observations with
      | Error error ->
-         [ Theme.bad (), "  Observed usage could not be decoded: " ^ Terminal_text.single_line error ]
+         [ Theme.bad (),
+           t "  관측된 사용량을 해석하지 못했습니다: " "  Observed usage could not be decoded: "
+           ^ Terminal_text.single_line error ]
      | Ok (usage, cost_usd) ->
          [ Ansi.reset, (match usage with
-             | None -> "  Observed tokens: not recorded"
-             | Some (input, output) -> Printf.sprintf "  Observed tokens: %d input / %d output" input output)
+             | None -> t "  관측된 토큰: 기록 없음" "  Observed tokens: not recorded"
+             | Some (input, output) ->
+                 Printf.sprintf
+                   (if ko then "  관측된 토큰: 입력 %d / 출력 %d"
+                    else "  Observed tokens: %d input / %d output")
+                   input output)
          ; Ansi.reset, (match cost_usd with
-             | None -> "  Observed cost: not recorded"
-             | Some cost -> Printf.sprintf "  Observed cost: $%.4f" cost) ])
-  @ [ Ansi.dim, t "  B:Board 원문  Y:링크 복사  Esc:목록" "  B:Board original  Y:copy link  Esc:back"
-  ; Ansi.dim, "" ]
+             | None -> t "  관측된 비용: 기록 없음" "  Observed cost: not recorded"
+             | Some cost ->
+                 Printf.sprintf
+                   (if ko then "  관측된 비용: $%.4f" else "  Observed cost: $%.4f")
+                   cost) ])
+  @ [ Theme.recede (), t "  B:Board 원문  Y:링크 복사  Esc:목록" "  B:Board original  Y:copy link  Esc:back"
+  ; Theme.recede (), "" ]
   @ (match detail.fhd_evidence with
      | Ok evidence -> fusion_evidence_lines ~ko ~width ~frame_width evidence
      | Error error ->
          clear_fusion_trace_projection ();
-         [ Theme.bad (), "  Structured Fusion evidence could not be decoded: " ^ Terminal_text.single_line error ])
-  @ [ Ansi.dim, ""; Ansi.bold, "  BOARD ORIGINAL" ]
-  @ fusion_markdown_block ~width ~indent:"    " detail.fhd_body
+         [ Theme.bad (),
+           t "  구조화된 Fusion 근거를 해석하지 못했습니다: " "  Structured Fusion evidence could not be decoded: "
+           ^ Terminal_text.single_line error ])
+  @ [ Theme.recede (), ""; Ansi.bold, t "  보드 원문" "  Board original" ]
+  @ fusion_markdown_block ~ko ~width ~indent:"    " detail.fhd_body
 
 let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   let ko = state.ui_language = Lang_ko in
@@ -1250,7 +1325,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
                  ~frame_width:(framed_inner_width cols) original
          | (Some _ | None), Some _ ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, page_failed_note ~ko ]
+             [ Theme.recede (), page_failed_note ~ko ]
          | (Some _ | None), None ->
              clear_fusion_trace_projection ();
              [ Theme.info (),
@@ -1266,7 +1341,7 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
                ^ ui_text state ~ko:"Fusion 상세 불러오는 중" ~en:"Loading exact Fusion detail" ]
          | None, Some _ ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, page_failed_note ~ko ]
+             [ Theme.recede (), page_failed_note ~ko ]
          | Some detail, (Some _ | None) ->
              fusion_detail_lines ~ko ~width:(max 1 (framed_inner_width cols - 4))
                ~frame_width:(framed_inner_width cols) detail)

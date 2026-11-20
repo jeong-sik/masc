@@ -13,12 +13,22 @@ module Render_schedule = Masc_tui_render_schedule
 module Agenda = Masc_tui_agenda
 module Keeper_control = Masc_tui_keeper_control
 
+let wrap_style style text =
+  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
+  then text
+  else style ^ text ^ Ansi.reset
+
+let clamped_cursor ~count cursor =
+  if count <= 0 then 0 else max 0 (min cursor (count - 1))
+
 (* /about: the candle over the surface, with what the TUI is running under
    -- its colour scheme and how many Keepers the workspace holds. *)
 let render_about (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   let theme =
-    Terminal_text.single_line_or ~default:"default" state.theme_choice
+    Terminal_text.single_line_or ~default:(ui_text state ~ko:"기본" ~en:"default")
+      state.theme_choice
   in
   let keepers =
     match state.keepers_error, state.local_keepers with
@@ -51,11 +61,9 @@ let render_about (state : state) =
           | Masc_tui_emblem_screen.Keepers_unreadable
           | Masc_tui_emblem_screen.Keepers_unread -> [])
         ~caption:
-          [ Theme.accent ()
-            ^ "MASC \xc2\xb7 Multi-Agent Shared Context" ^ Ansi.reset
-          ; Ansi.dim
-            ^ Masc_tui_emblem_screen.about_facts ~theme keepers
-            ^ Ansi.reset
+          [ wrap_style (Theme.accent ()) "MASC \xc2\xb7 Multi-Agent Shared Context"
+          ; wrap_style (Theme.recede ())
+              (Masc_tui_emblem_screen.about_facts ~ko ~theme keepers)
           ]
       |> List.iter c.push)
 
@@ -1030,8 +1038,7 @@ let render_link_preview_modal (state : state) =
         ~frame:Chrome_overlay
         ~title:
           (screen_title (ui_text state ~ko:" 링크 미리보기" ~en:" Link preview")
-           ^ "  " ^ Ansi.dim ^ ui_text state ~ko:"(링크 없음)" ~en:"(no links)"
-           ^ Ansi.reset)
+           ^ "  " ^ wrap_style (Theme.recede ()) (ui_text state ~ko:"(링크 없음)" ~en:"(no links)"))
         ~hints:(Masc_tui_keys.footer_hints_link_preview_empty ~lang:state.ui_language)
         ~body:(fun ~budget:_ c ->
           c.push
@@ -1056,7 +1063,8 @@ let render_link_preview_modal (state : state) =
            ^ "  " ^ Ansi.bold
            ^ Terminal_text.single_line site ^ Ansi.reset ^ title_badge)
         ~hints:
-          (Masc_tui_link_preview.modal_hints ~total_links
+          (Masc_tui_link_preview.modal_hints_localized
+             ~ko:(state.ui_language = Lang_ko) ~total_links
              ~has_image:(Option.is_some preview.Masc_tui_link_preview.image_url))
         ~body:(fun ~budget c ->
           let height = max 1 budget in
@@ -1067,7 +1075,8 @@ let render_link_preview_modal (state : state) =
              its rows is read through a window, which then is. *)
           if total_links > 1 then
             c.position
-              (Masc_tui_value.Position.row ~selected:(Some state.link_modal_cursor)
+              (Masc_tui_value.Position.row
+                 ~selected:(Some (clamped_cursor ~count:total_links state.link_modal_cursor))
                  ~total:total_links);
           Option.iter c.position
             (Masc_tui_value.Position.window ~first:scroll ~shown:height ~total);
@@ -1199,9 +1208,11 @@ let render_keeper_deletions (state : state) =
          past the rows, and then the window over that text is. *)
       (match state.keeper_deletions with
        | Some (Ok inventory) when inventory.Keeper_control.operations <> [] ->
+           let count = List.length inventory.Keeper_control.operations in
            c.position
-             (Masc_tui_value.Position.row ~selected:(Some state.keeper_deletions_cursor)
-                ~total:(List.length inventory.Keeper_control.operations))
+             (Masc_tui_value.Position.row
+                ~selected:(Some (clamped_cursor ~count state.keeper_deletions_cursor))
+                ~total:count)
        | Some (Ok _ | Error _) | None -> ());
       List.iteri
         (fun index text ->
@@ -1223,10 +1234,10 @@ let help_title (state : state) ~cols =
   let name = screen_title (" " ^ ui_text state ~ko:"도움말" ~en:"Help") in
   match state.help_filter with
   | Masc_tui_help.Off ->
-      name ^ "  " ^ Ansi.dim
-      ^ (if state.hints_visible then ui_text state ~ko:"힌트 켬" ~en:"hints on"
-         else ui_text state ~ko:"힌트 끔" ~en:"hints off")
-      ^ Ansi.reset
+      name ^ "  "
+      ^ wrap_style (Theme.recede ())
+          (if state.hints_visible then ui_text state ~ko:"힌트 켬" ~en:"hints on"
+           else ui_text state ~ko:"힌트 끔" ~en:"hints off")
   | (Masc_tui_help.Typing query | Masc_tui_help.Kept query) as filter ->
       let caret =
         match filter with
@@ -1348,11 +1359,12 @@ let answering_viewport (state : state) =
 
 let answering_selected_target (state : state) ~lines =
   let count = List.length lines in
+  let cursor = clamped_cursor ~count state.answering_cursor in
   let _, height = answering_viewport state in
   let scroll = Masc_tui_scroll.normalize ~count ~height state.answering_scroll in
-  if state.answering_cursor < scroll || state.answering_cursor >= scroll + height then None
+  if cursor < scroll || cursor >= scroll + height then None
   else
-    match List.nth_opt lines state.answering_cursor with
+    match List.nth_opt lines cursor with
     | Some line -> line.Masc_tui_answering.target
     | None -> None
 
@@ -1677,16 +1689,16 @@ let render_queue_panel (state : state) (panel : queue_panel) =
 let render_answering (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = answering_lines state in
-  let paint (line : Masc_tui_answering.line) =
+  let paint ~prefix (line : Masc_tui_answering.line) =
     let tone_prefix =
       match line.Masc_tui_answering.tone with
       | Masc_tui_answering.Heading -> Ansi.bold
       | Masc_tui_answering.Running -> (Theme.info ())
       | Masc_tui_answering.Done -> Theme.ok ()
       | Masc_tui_answering.Unknown -> Theme.warn ()
-      | Masc_tui_answering.Quiet -> Ansi.dim
+      | Masc_tui_answering.Quiet -> Theme.recede ()
     in
-    "  " ^ tone_prefix ^ line.Masc_tui_answering.text ^ Ansi.reset
+    prefix ^ wrap_style tone_prefix line.Masc_tui_answering.text
   in
   let preview_lines =
     let cursor_preview =
@@ -1719,17 +1731,16 @@ let render_answering (state : state) =
         let preview_width = framed_inner_width cols in
         let name_width = min (Masc_tui_message_layout.display_width (Terminal_text.single_line keeper_name))
           (max 0 ((preview_width - 2) / 2)) in
-        [ Ansi.bold ^ fit_width (Terminal_text.single_line keeper_name) name_width
-          ^ Ansi.reset ^ "  " ^ (Theme.accent ())
-          ^ fit_width doing (max 0 (preview_width - name_width - 2))
-          ^ Ansi.reset
-        ; Ansi.dim ^ tail ^ Ansi.reset
+        [ wrap_style Ansi.bold (fit_width (Terminal_text.single_line keeper_name) name_width)
+          ^ "  "
+          ^ wrap_style (Theme.accent ())
+              (fit_width doing (max 0 (preview_width - name_width - 2)))
+        ; wrap_style (Theme.recede ()) tail
         ]
     | None ->
-        [ Ansi.dim
-          ^ ui_text state ~ko:"실시간 미리보기 \xc2\xb7 이 줄에는 없음"
-              ~en:"live preview \xc2\xb7 none for this row"
-          ^ Ansi.reset
+        [ wrap_style (Theme.recede ())
+            (ui_text state ~ko:"실시간 미리보기 \xc2\xb7 이 줄에는 없음"
+               ~en:"live preview \xc2\xb7 none for this row")
         ; ""
         ]
   in
@@ -1740,9 +1751,14 @@ let render_answering (state : state) =
     ~hints:(Masc_tui_keys.footer_hints_answering ~lang:state.ui_language)
     ~body:(fun ~budget c ->
       let content_height = max 1 (budget - answering_preview_rows) in
+      let count = List.length lines in
+      let selected_row =
+        if state.answering_cursor < 0 then None
+        else Some (clamped_cursor ~count state.answering_cursor)
+      in
       let scroll =
         Masc_tui_scroll.normalize
-          ~count:(List.length lines)
+          ~count
           ~height:content_height
           state.answering_scroll
       in
@@ -1752,13 +1768,13 @@ let render_answering (state : state) =
           if i >= scroll && i < scroll + content_height then begin
             incr drawn;
             let is_selected =
-              i = state.answering_cursor
+              selected_row = Some i
               && Option.is_some line.Masc_tui_answering.target
             in
             if is_selected then
-              c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line.Masc_tui_answering.text)
+              c.push_selected_styled (paint ~prefix:"\xe2\x80\xba " line)
             else
-              c.push (paint line)
+              c.push (paint ~prefix:"  " line)
           end)
         lines;
       for _ = !drawn + 1 to content_height do
@@ -1767,11 +1783,9 @@ let render_answering (state : state) =
       (* The fixed preview panel: what the cursor's keeper is doing right now,
          from the turns poll's live glance. Drawn empty rather than omitted so
          the list above never reflows with the cursor. *)
-      if lines <> [] then
+      if count > 0 then
         c.position
-          (Masc_tui_value.Position.row
-             ~selected:(if state.answering_cursor >= 0 then Some state.answering_cursor else None)
-             ~total:(List.length lines));
+          (Masc_tui_value.Position.row ~selected:selected_row ~total:count);
       c.push_divider ();
       List.iter c.push preview_lines)
 ;;
@@ -1784,13 +1798,16 @@ let render_agenda (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let lines = agenda_lines state in
   let selected = Agenda.selected_index lines ~selected:state.agenda_selected in
-  let paint (line : Agenda.line) =
+  let paint_tone (line : Agenda.line) =
     match line.Agenda.tone with
-    | Agenda.Heading -> Ansi.bold ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Wake -> (Theme.recede ()) ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Question -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Quiet -> Ansi.dim ^ line.Agenda.text ^ Ansi.reset
-    | Agenda.Failed -> (Theme.bad ()) ^ line.Agenda.text ^ Ansi.reset
+    | Agenda.Heading -> Ansi.bold
+    | Agenda.Wake -> Theme.recede ()
+    | Agenda.Question -> Theme.bad ()
+    | Agenda.Quiet -> Theme.recede ()
+    | Agenda.Failed -> Theme.bad ()
+  in
+  let paint (line : Agenda.line) =
+    wrap_style (paint_tone line) line.Agenda.text
   in
   (* Every key of the panel moves -- j/k, the page keys, g/G, Enter and Esc --
      so zone 5 names none of them (RFC tui-one-screen-grammar section 2) and
@@ -1813,13 +1830,13 @@ let render_agenda (state : state) =
         (fun index line ->
           if index >= scroll && index < scroll + height then
             if selected = Some index then
-              let plain = Masc_tui_theme.strip_sgr line.Agenda.text in
+              let raw = line.Agenda.text in
               let marked =
-                if String.length plain >= 2 && plain.[0] = ' ' && plain.[1] = ' ' then
-                  "\xe2\x80\xba " ^ String.sub plain 2 (String.length plain - 2)
-                else "\xe2\x80\xba " ^ plain
+                if String.length raw >= 2 && raw.[0] = ' ' && raw.[1] = ' ' then
+                  "\xe2\x80\xba " ^ String.sub raw 2 (String.length raw - 2)
+                else "\xe2\x80\xba " ^ raw
               in
-              c.push_selected marked
+              c.push_selected_styled (wrap_style (paint_tone line) marked)
             else
               c.push (paint line))
         lines;
@@ -2064,7 +2081,7 @@ let render_account_server state ~version =
     ; say "사람" "People",
       say "브라우저에서 로그인 후 개인 구독·키퍼 사용"
         "Open the address in a browser, sign in, and use your own subscriptions and Keepers."
-    ; "Admin",
+    ; say "관리자" "Admin",
       say "같은 주소에서 로그인 후 초대 링크·허용 계정 관리"
         "Sign in there too, then manage invitation links and allowed accounts."
     ; say "운영 화면" "Operator screens",
@@ -2337,7 +2354,7 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
         (Masc_tui_value.Position.window ~first:scroll ~shown:list_budget ~total:total_list_rows);
       List.iter
         (fun (selected, line) ->
-          if selected then c.push_selected (Masc_tui_theme.strip_sgr line)
+          if selected then c.push_selected_styled line
           else c.push line)
         list_rows;
       if sheet_rows <> [] then begin

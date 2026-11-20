@@ -99,7 +99,7 @@ type keeper_count =
   | Keepers_unreadable  (** The roster could not be read. *)
   | Keepers_unread  (** The roster has not been read yet: no count, not none. *)
 
-val about_facts : theme:string -> keeper_count -> string
+val about_facts : ?ko:bool -> theme:string -> keeper_count -> string
 (** The fact line under the candle on /about: the colour scheme in use and
     the Keeper count, each only as far as it was read. *)
 

@@ -293,6 +293,12 @@ type chrome_body = {
   push : string -> unit;
   push_styled : style:string -> string -> unit;
   push_selected : string -> unit;
+  push_selected_styled : string -> unit;
+      (** Pushes a selected row preserving embedded SGR styling; delegates to
+          [box_line_selected_styled] / [framed_line_selected_styled]
+          ([Masc_tui_ansi.selection_row_styled]), which paints
+          [Theme.sidebar_selection_background ()] when available and otherwise
+          falls back to [Theme.selection_style ()]. *)
   push_divider : unit -> unit;
   push_empty : unit -> unit;
   next_origin : unit -> int * int;
@@ -1085,6 +1091,21 @@ val split_summary_columns :
     stacked fallback on narrow viewports). With [~titled:false] the block has
     no title rows, for a caller that is short of rows and whose rows each name
     themselves; on a narrow viewport the rows then start where a title would. *)
+
+val completion_meter :
+  ?series:Masc_tui_theme.series ->
+  ?track_style:string ->
+  width:int ->
+  label:string ->
+  value:int ->
+  max_value:int ->
+  suffix:string ->
+  unit ->
+  string
+(** A segmented progress meter defaulting to [Masc_tui_theme.Completion] and a
+    receded label/track, for surfaces whose library does not depend on
+    [masc_tui_chart] directly. Pass [?series] or [?track_style] to override the
+    scale series or track colour. *)
 
 val runtime_substrate_heading :
   Masc_tui_types.state ->

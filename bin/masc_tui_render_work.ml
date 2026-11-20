@@ -19,6 +19,24 @@ module Doc = Masc_tui_doc
 module Card = Masc_tui_card
 module Text_block = Masc_tui_text_block
 
+let wrap_style style text =
+  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
+  then text
+  else style ^ text ^ Ansi.reset
+
+let clamped_cursor ~count cursor =
+  if count <= 0 then 0 else max 0 (min cursor (count - 1))
+
+let task_status_mark (status : Masc_domain.task_status) =
+  Masc_tui_value.Mark.glyph
+    (match status with
+     | Masc_domain.Todo -> Masc_tui_value.Mark.Waiting
+     | Masc_domain.Claimed _ | Masc_domain.InProgress _ ->
+         Masc_tui_value.Mark.Under_way
+     | Masc_domain.AwaitingVerification _ -> Masc_tui_value.Mark.Caution
+     | Masc_domain.Done _ -> Masc_tui_value.Mark.Settled
+     | Masc_domain.Cancelled _ -> Masc_tui_value.Mark.Paused)
+
 (* A moment the wire spells out as ISO-8601 text, drawn the way every other
    moment on these screens is: in the operator's zone, with only as much of
    the date as its distance from now needs. *)
@@ -138,8 +156,7 @@ let work_entry_lines ~cells ~height ~selected ~title ~summary ~compact =
     if height = 1 then [lead ^ compact ^ " · " ^ Terminal_text.single_line title]
     else [lead ^ Terminal_text.single_line title; "  " ^ summary] in
   List.map (fun line ->
-    if selected then
-      Theme.selection_style () ^ Message_layout.fit_width (Masc_tui_theme.strip_sgr line) cells ^ Ansi.reset
+    if selected then selection_row_styled ~cells line
     else Message_layout.fit_width line cells) lines
 
 let work_preview_field ~cells label value =
@@ -433,16 +450,16 @@ let render_work_tasks (state : state) =
            rows |> List.mapi (fun index task -> index, task)
            |> List.drop window.first |> List.take window.capacity
            |> List.concat_map (fun (index, (task : Tui_decode.task)) ->
-             let status = task_status_word state task.status in
+             let status_word = task_status_mark task.status ^ " " ^ task_status_word state task.status in
              let owner = match Masc_domain.task_assignee_of_status task.status with
                | Some name -> Terminal_text.single_line name
                | None -> text "미배정" "unassigned" in
              let status_style = if previous then Theme.recede () else task_state_style task.status in
-             let summary = status_style ^ status ^ Ansi.reset
-               ^ Theme.recede () ^ " · " ^ owner ^ Ansi.reset in
+             let summary = wrap_style status_style status_word
+               ^ wrap_style (Theme.recede ()) (" · " ^ owner) in
              work_entry_lines ~cells:geometry.list_width ~height:window.entry_height
                ~selected:(Some index = selected) ~title:task.title ~summary
-               ~compact:status)) in
+               ~compact:status_word)) in
       if count > 0 then
         c.position (Masc_tui_value.Position.row ~selected ~total:count);
       let selected_task = Overview_tasks.work_selected_task state.tasks
@@ -549,7 +566,7 @@ let planning_next_step ~ko (goal : planning_goal) =
   | (Goal_phase.Executing, Proof_idle) | (Goal_phase.Executing, Proof_pending)
   | (Goal_phase.Executing, Proof_proven _) | (Goal_phase.Executing, Proof_stale _)
   | (Goal_phase.Executing, Proof_unreadable _) ->
-    ( Ansi.dim
+    ( Theme.recede ()
     , (text "성공 조건 충족 후 c:검증 요청" "meet success criterion  c:request verification") )
   | (Goal_phase.Verifying, Proof_idle) | (Goal_phase.Verifying, Proof_pending)
   | (Goal_phase.Verifying, Proof_proven _) | (Goal_phase.Verifying, Proof_refuted _)
@@ -566,10 +583,10 @@ let planning_next_step ~ko (goal : planning_goal) =
     (Theme.warn (), (text "최종 확인 대기 · a:근거 조회 및 증거 확인" "awaiting confirmation · a:review proof and confirm"))
   | (Goal_phase.Completed, Proof_idle) | (Goal_phase.Completed, Proof_pending)
   | (Goal_phase.Completed, Proof_proven _) | (Goal_phase.Completed, Proof_refuted _)
-  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Ansi.dim, (text "완료  o:다시 열기" "completed  o:reopen"))
+  | (Goal_phase.Completed, Proof_stale _) | (Goal_phase.Completed, Proof_unreadable _) -> (Theme.recede (), (text "완료  o:다시 열기" "completed  o:reopen"))
   | (Goal_phase.Dropped, Proof_idle) | (Goal_phase.Dropped, Proof_pending)
   | (Goal_phase.Dropped, Proof_proven _) | (Goal_phase.Dropped, Proof_refuted _)
-  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Ansi.dim, (text "중단  o:다시 열기" "abandoned  o:reopen"))
+  | (Goal_phase.Dropped, Proof_stale _) | (Goal_phase.Dropped, Proof_unreadable _) -> (Theme.recede (), (text "중단  o:다시 열기" "abandoned  o:reopen"))
   | (Goal_phase.Paused _, Proof_idle) | (Goal_phase.Paused _, Proof_pending)
   | (Goal_phase.Paused _, Proof_proven _) | (Goal_phase.Paused _, Proof_refuted _)
   | (Goal_phase.Paused _, Proof_stale _) | (Goal_phase.Paused _, Proof_unreadable _) -> (Theme.warn (), (text "일시정지  r:재개 · 연결 작업은 별도 진행" "paused  r:resume · linked Tasks continue independently"))
@@ -618,7 +635,7 @@ let planning_proof_detail ~ko (goal : planning_goal) =
       (* Nothing from the judge. A keeper's own note is the next best thing the
          row has to say, and it is what the operator wrote there to be read. *)
       Option.map
-        (fun note -> (Ansi.dim, text "메모: " "note: " ^ note))
+        (fun note -> (Theme.recede (), text "메모: " "note: " ^ note))
         (Terminal_text.optional_single_line goal.pg_last_review_note)
 ;;
 
@@ -786,7 +803,7 @@ let planning_open_note (state : state) (goal : planning_goal) =
         match task.status with
         | Masc_domain.InProgress _ -> true
         | Todo | Claimed _ | AwaitingVerification _ | Done _ | Cancelled _ -> false) tasks) in
-      if tasks = [] then (if partial then missing "?", faint (Theme.warn ()) else "", Ansi.dim)
+      if tasks = [] then (if partial then missing "?", faint (Theme.warn ()) else "", Theme.recede ())
       else if awaiting > 0 then
         count Masc_tui_value.Count.Task awaiting ^ (if ko then " 검증 대기" else " awaiting verification"),
         faint (Theme.warn ())
@@ -794,7 +811,7 @@ let planning_open_note (state : state) (goal : planning_goal) =
         count Masc_tui_value.Count.Task running ^ (if ko then " 진행 중" else " in progress"),
         faint (if partial then Theme.warn () else Theme.info ())
       else count Masc_tui_value.Count.Open_task (List.length tasks),
-        faint (if partial then Theme.warn () else Ansi.dim)
+        faint (if partial then Theme.warn () else Theme.recede ())
 
 (* The words a Goal at work carries when its due date has passed or cannot be
    read (#39571). The row, the preview and the detail print the same words for
@@ -957,13 +974,29 @@ let render_planning_list (state : state) =
            (* Modes and a read failure can use spare space, but never replace
               the one row Enter would open in a short terminal. *)
            if available >= 8 then begin
-             if show_modes then push_context (" " ^ Theme.recede () ^ modes ^ Ansi.reset);
-             Option.iter (fun detail -> push_context (" " ^ Theme.warn () ^ Terminal_text.single_line detail ^ Ansi.reset))
+             if show_modes then push_context (" " ^ wrap_style (Theme.recede ()) modes);
+             Option.iter (fun detail -> push_context (" " ^ wrap_style (Theme.warn ()) (Terminal_text.single_line detail)))
                state.planning_error
            end;
            let inner = max 1 (framed_inner_width cols) in
+           let rollup = snapshot.pl_rollup in
+           let total_goals =
+             rollup.pr_active + rollup.pr_verifying + rollup.pr_awaiting_confirmation
+             + rollup.pr_done + rollup.pr_paused + rollup.pr_blocked + rollup.pr_dropped
+           in
+           if max 0 (budget - !used) >= 10 && total_goals > 0 && inner >= 36 then begin
+             let meter_w = min 44 (max 20 (inner - 4)) in
+             push_context
+               (" "
+                ^ completion_meter ~width:meter_w
+                    ~label:(text "목표 완료" "Goals done")
+                    ~value:rollup.pr_done ~max_value:total_goals
+                    ~suffix:(Printf.sprintf "%d/%d" rollup.pr_done total_goals)
+                    ())
+           end;
            let body_budget = max 0 (budget - !used) in
-           let selected_goal = List.nth_opt goals state.planning_cursor in
+           let planning_cursor = clamped_cursor ~count state.planning_cursor in
+           let selected_goal = List.nth_opt goals planning_cursor in
            let split =
              Masc_tui_types.docked_vertical_split ~total_rows:body_budget
                ~mode:state.planning_preview_mode
@@ -978,7 +1011,7 @@ let render_planning_list (state : state) =
            let first =
              if capacity <= 0 || count <= capacity then 0
              else
-               max 0 (min (count - capacity) (state.planning_cursor - (capacity / 2)))
+               max 0 (min (count - capacity) (planning_cursor - (capacity / 2)))
            in
            report_drawn_list Goal_entries ~height:capacity;
            let list_header =
@@ -1025,7 +1058,7 @@ let render_planning_list (state : state) =
                |> List.drop first
                |> List.take capacity
                |> List.map (fun (index, (goal : planning_goal)) ->
-                    let selected = index = state.planning_cursor in
+                    let selected = index = planning_cursor in
                     let pointer = if selected then "\xe2\x80\xba " else "  " in
                     let mark = Masc_tui_value.Mark.glyph (planning_phase_mark goal.pg_phase) in
                     let mark_sgr = planning_phase_color goal.pg_phase in
@@ -1054,7 +1087,7 @@ let render_planning_list (state : state) =
            in
            if count > 0 then
              c.position
-               (Masc_tui_value.Position.row ~selected:(Some state.planning_cursor)
+               (Masc_tui_value.Position.row ~selected:(Some planning_cursor)
                   ~total:count);
            let pad_rows =
              max 0 (list_rows - List.length list_header - List.length col_header - List.length entry_lines)
@@ -1229,16 +1262,16 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
        | None -> []
        | Some action ->
            Message_layout.wrap_words ~max_cells:inner_w
-             (Printf.sprintf (if ko then "확인 대기: %s [%s] · 다시 누르면 제출, 다른 키는 취소" else "ARMED: %s [%s] · press again to submit; other keys cancel")
+             (Printf.sprintf (if ko then "확인 대기: %s [%s] · 다시 누르면 제출, 다른 키는 취소" else "Armed: %s [%s] · press again to submit; other keys cancel")
                 (planning_action_label ~ko action) (planning_action_key action))
-           |> List.map (fun line -> "  " ^ Theme.warn () ^ Ansi.bold ^ line ^ Ansi.reset))
+           |> List.map (fun line -> "  " ^ wrap_style (Theme.warn () ^ Ansi.bold) line))
   |> fun rows -> rows @ (match drop_reason with
        | None -> []
        | Some reason ->
            Message_layout.wrap_words ~max_cells:inner_w
-             (Printf.sprintf (if ko then "중단 사유: %s_ · Enter:중단 요청" else "DROP REASON: %s_ · Enter requests drop")
+             (Printf.sprintf (if ko then "중단 사유: %s_ · Enter:중단 요청" else "Drop reason: %s_ · Enter requests drop")
                 (Terminal_text.single_line reason))
-           |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
+           |> List.map (fun line -> "  " ^ wrap_style (Theme.warn ()) line))
 
 (* The proof block sits two cells in. Its rows arrive wrapped by
    [Planning_detail] at [planning_proof_width], which leaves room for that
@@ -1939,7 +1972,7 @@ let schedule_status_tone = function
   | Schedule_contract_values.Scheduled | Schedule_contract_values.Due -> Theme.warn ()
   | Schedule_contract_values.Succeeded -> Theme.ok ()
   | Schedule_contract_values.Failed -> Theme.bad ()
-  | Schedule_contract_values.Cancelled | Schedule_contract_values.Expired -> Ansi.dim
+  | Schedule_contract_values.Cancelled | Schedule_contract_values.Expired -> Theme.recede ()
 
 let schedule_status_mark status =
   Masc_tui_value.Mark.glyph
@@ -2075,7 +2108,7 @@ let schedule_queue_color = function
   | Schedule_contract_values.Queue_matched_terminal_completed -> Theme.ok ()
   | Schedule_contract_values.Queue_retained_terminal_wake
   | Schedule_contract_values.Queue_withdrawn_at_cancel
-  | Schedule_contract_values.Queue_matched_terminal_cancelled -> Ansi.dim
+  | Schedule_contract_values.Queue_matched_terminal_cancelled -> Theme.recede ()
   | Schedule_contract_values.Queue_not_found
   | Schedule_contract_values.Queue_evidence_invalid
   | Schedule_contract_values.Queue_read_error
@@ -2086,7 +2119,7 @@ let schedule_reaction_color = function
   | Schedule_contract_values.Reaction_matched_turn_finished -> Theme.ok ()
   | Schedule_contract_values.Reaction_matched_turn_started
   | Schedule_contract_values.Reaction_matched_stimulus -> Theme.info ()
-  | Schedule_contract_values.Reaction_matched_terminal_cancelled -> Ansi.dim
+  | Schedule_contract_values.Reaction_matched_terminal_cancelled -> Theme.recede ()
   | Schedule_contract_values.Reaction_conflicting_terminal_evidence
   | Schedule_contract_values.Reaction_not_found
   | Schedule_contract_values.Reaction_quarantined
@@ -2283,7 +2316,12 @@ let render_schedule_list (state : state) =
         let warning = if Option.is_some (schedule_source_warning state) then 1 else 0 in
         let cancel = (if Option.is_some state.schedule_cancel_armed then 1 else 0)
           + (if Option.is_some state.schedule_cancel_error then 1 else 0) in
-        let selected = Option.is_some (List.nth_opt snapshot.scs_rows state.schedule_cursor) in
+        let selected =
+          snapshot.scs_rows <> []
+          && Option.is_some
+               (List.nth_opt snapshot.scs_rows
+                  (clamped_cursor ~count:(List.length snapshot.scs_rows) state.schedule_cursor))
+        in
         selected, warning + cancel +
           (if snapshot.scs_rows = [] then schedule_summary_rows + 1
            else schedule_rows_around_list + 1)
@@ -2313,7 +2351,7 @@ let render_schedule_list (state : state) =
             c.push (data_unreliable_row ~cols err)
         | None ->
             let reading = Snapshot_read.in_flight state.schedules_read in
-            c.push ((if reading then Theme.info () else Ansi.dim) ^ page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading ^ Ansi.reset))
+            c.push (wrap_style (if reading then Theme.info () else Theme.recede ()) (page_unread_note_while ~ko:(state.ui_language = Lang_ko) ~reading)))
    | Some snapshot ->
        let warning_rows =
          match schedule_source_warning state with
@@ -2369,11 +2407,11 @@ let render_schedule_list (state : state) =
          let next_due_text =
            match snapshot.scs_next_due_iso with
            | Some iso ->
-               Printf.sprintf
-                 (if ko then "%s  \xc2\xb7  다음 기한: %s%s"
-                  else "%s  \xc2\xb7  Next due: %s%s")
-                 Ansi.dim
-                 (Terminal_text.short_timestamp iso) Ansi.reset
+               wrap_style (Theme.recede ())
+                 (Printf.sprintf
+                    (if ko then "  \xc2\xb7  다음 기한: %s"
+                     else "  \xc2\xb7  Next due: %s")
+                    (Terminal_text.short_timestamp iso))
            | None -> ""
          in
          let page_read_text = match state.schedules_navigation with
@@ -2416,7 +2454,7 @@ let render_schedule_list (state : state) =
                    ~ko:"  (자동 일정 없음 · n 으로 만들기)"
                    ~en:"  (no scheduled automation · press n to create one)"
            in
-           c.push (Ansi.dim ^ empty ^ Ansi.reset)
+           c.push (wrap_style (Theme.recede ()) empty)
          end else begin
            (* Keep two factual rows below the list for delivery state. Without
               it the list says when a wake is due but not whether the dispatch,
@@ -2465,20 +2503,21 @@ let render_schedule_list (state : state) =
            let content_height =
              max 1 (budget - List.length refusal_rows - warning_rows - schedule_rows_around_list - cancel_rows)
            in
+           let schedule_cursor = clamped_cursor ~count state.schedule_cursor in
            let scroll_offset =
-             if state.schedule_cursor >= content_height then
-               state.schedule_cursor - content_height + 1
+             if schedule_cursor >= content_height then
+               schedule_cursor - content_height + 1
              else 0
            in
            let scs_rows_window = Rows.of_list ~first:scroll_offset ~height:content_height snapshot.scs_rows in
            report_drawn_list Schedule_rows ~height:content_height;
-           c.position (Masc_tui_value.Position.row ~selected:(Some state.schedule_cursor) ~total:(List.length snapshot.scs_rows));
+           c.position (Masc_tui_value.Position.row ~selected:(Some schedule_cursor) ~total:count);
            for i = 0 to content_height - 1 do
              let idx = i + scroll_offset in
              match Rows.at scs_rows_window idx with
              | None -> c.push_empty ()
              | Some row -> begin
-               let is_selected = idx = state.schedule_cursor in
+               let is_selected = idx = schedule_cursor in
                let due =
                  match row.sch_due_at_iso with
                  | Some iso -> Terminal_text.column_timestamp iso
@@ -2517,9 +2556,9 @@ let render_schedule_list (state : state) =
                let line =
                  Render_schedule.schedule_row ~status_style:status.tone
                    ~wake_style:last_wake_tone
-                   ~recurrence_style:Ansi.dim ~layout
+                   ~recurrence_style:(Theme.recede ()) ~layout
                    { Render_schedule.srow_status =
-                       bracketed ~max_cells:10 status.word
+                       status.mark ^ " " ^ status.word
                    ; srow_due = due
                    ; srow_target = Terminal_text.single_line subject
                    ; srow_wake = last_wake
@@ -2532,12 +2571,12 @@ let render_schedule_list (state : state) =
                    }
                in
                if is_selected then
-                 c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+                 c.push_selected_styled ("\xe2\x80\xba " ^ line)
                else
                  c.push ("  " ^ line)
              end
            done;
-           (match List.nth_opt snapshot.scs_rows state.schedule_cursor with
+           (match List.nth_opt snapshot.scs_rows schedule_cursor with
             | None ->
                 c.push_empty ();
                 c.push_empty ()
@@ -2656,8 +2695,8 @@ let schedule_turn_rows ~ko
       ]
       |> List.filter_map Fun.id
     in
-    [ Ansi.dim, ""
-    ; Ansi.bold, t "  턴" "  TURN"
+    [ Theme.recede (), ""
+    ; Ansi.bold, t "  턴" "  Turn"
     ]
     @ identity_rows
     @ [ step (t "실행 확인" "Wake seen") row.sch_wake_seen row.sch_stimulus_recorded_at_iso
@@ -2681,13 +2720,13 @@ let schedule_turn_rows ~ko
            | Some (Error raw) -> Terminal_text.single_line raw
            | None -> Masc_tui_theme.Glyph.no_value)
       ; field
-          ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Ansi.dim)
+          ~style:(if Option.is_some row.sch_reaction_reason then Theme.warn () else Theme.recede ())
           (t "사유" "Reason") (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_reaction_reason)
     ; field
         ~style:
           (match row.sch_reaction_quarantined with
            | Some count when count > 0 -> Theme.warn ()
-           | Some _ | None -> Ansi.dim)
+           | Some _ | None -> Theme.recede ())
         (t "격리" "Quarantined")
         (match row.sch_reaction_quarantined with
          | None -> Masc_tui_theme.Glyph.no_value
@@ -2705,18 +2744,18 @@ let schedule_wake_lines ~ko
       ~(history : schedule_wake_history option)
       ~(history_error : (string * string) option) =
   let t korean english = if ko then korean else english in
-  let last_wake = Ansi.bold, t "  마지막 실행" "  LAST WAKE" in
+  let last_wake = Ansi.bold, t "  마지막 실행" "  Last wake" in
   let last_wake_fields =
     [ (let word =
          Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:(schedule_wake_word ~ko)
            row.sch_last_wake_status
        in
        field
-         ~style:(Option.fold ~none:Ansi.dim ~some:schedule_wake_tone row.sch_last_wake_status)
+         ~style:(Option.fold ~none:(Theme.recede ()) ~some:schedule_wake_tone row.sch_last_wake_status)
          (t "상태" "Status") word)
     ; field (t "시작" "Started") (timestamp row.sch_last_wake_started_at_iso)
     ; field
-        ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Ansi.dim)
+        ~style:(if Option.is_some row.sch_last_wake_error then Theme.bad () else Theme.recede ())
         (t "오류" "Error") (Option.value ~default:Masc_tui_theme.Glyph.no_value row.sch_last_wake_error)
     ]
   in
@@ -2738,8 +2777,8 @@ let schedule_wake_lines ~ko
       :: last_wake_fields
       @ [ (Theme.info (), t ("  " ^ under_way ^ " 이 일정의 나머지 실행을 읽는 중") ("  " ^ under_way ^ " loading the rest of this schedule's wakes")) ]
   | Render_schedule.Wake_never ->
-      [ Ansi.bold, t "  실행" "  WAKES"
-      ; (Ansi.dim, t "  (이 일정은 아직 실행된 적 없음)" "  (this schedule has not woken)") ]
+      [ Ansi.bold, t "  실행" "  Wakes"
+      ; (Theme.recede (), t "  (이 일정은 아직 실행된 적 없음)" "  (this schedule has not woken)") ]
   | Render_schedule.Wake_history { count; retention } ->
       let wakes =
         match history with Some h -> h.swh_wakes | None -> []
@@ -2747,7 +2786,7 @@ let schedule_wake_lines ~ko
         (Ansi.bold
         , Printf.sprintf
             (if ko then "  실행 (%d건 보관, 일정당 최대 %d건)"
-             else "  WAKES (%d retained, ceiling %d per schedule)")
+             else "  Wakes (%d retained, ceiling %d per schedule)")
             count retention )
         :: List.concat_map
              (fun (wake : schedule_wake) ->
@@ -2862,7 +2901,7 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   detail_section_heading ~first:true ~width
     (t "1. 현재 상태 · 다음 실행 · 보류 진단" "1. Status & Delivery")
   @ [ (let status = schedule_status_reading ~ko row.sch_status in
-       field ~style:status.tone (t "상태" "Status") status.word)
+       field ~style:status.tone (t "상태" "Status") (status.mark ^ " " ^ status.word))
     ; field (t "예정" "Due") (timestamp row.sch_due_at_iso)
     ; field (t "다음 예정" "Next due") (timestamp row.sch_next_due_at_iso)
     ; field (t "반복" "Recurrence")
@@ -2873,12 +2912,12 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   @ hold_rows
   @ [ field
         ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_queue_color
+          (Option.fold ~none:(Theme.recede ()) ~some:schedule_queue_color
              row.sch_queue_projection_status)
         (t "대기열" "Queue") queue
     ; field
         ~style:
-          (Option.fold ~none:Ansi.dim ~some:schedule_reaction_color
+          (Option.fold ~none:(Theme.recede ()) ~some:schedule_reaction_color
              row.sch_reaction_projection_status)
         (t "반응" "Reaction") reaction
     ]
@@ -2887,8 +2926,8 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
   @ schedule_wake_lines ~ko ~field ~timestamp ~row ~history:wake_history
       ~history_error:wake_history_error
   @ (if keeper_wake then
-       [ Ansi.dim, ""
-       ; Ansi.bold, t "  작업 결과" "  WORK RESULT"
+       [ Theme.recede (), ""
+       ; Ansi.bold, t "  작업 결과" "  Work result"
        ; field (t "해당 턴" "Attribution")
            (t "이 실행이 연 턴 · 시작 줄과 종료 줄 사이"
               "the turn this wake opened, bounded by its start and finish rows")
@@ -2898,11 +2937,11 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
        ]
      else [])
   @ detail_section_heading ~width (t "3. 작업 요약 · 일정 식별자" "3. Summary & Identity")
-  @ [ Ansi.bold, t "  요약" "  SUMMARY" ]
+  @ [ Ansi.bold, t "  요약" "  Summary" ]
   @ (Message_layout.wrap_body ~markdown:document_markdown
        ~max_cells:(max 1 (width - 4)) ~sanitize:Terminal_text.single_line summary
     |> List.map (fun line -> Ansi.reset, "    " ^ line))
-  @ [ Ansi.dim, ""
+  @ [ Theme.recede (), ""
     ; field (t "대상" "Target") (optional row.sch_payload_target)
     ]
   @ target_link
@@ -2920,9 +2959,9 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
     ; field (t "요청 시각" "Requested") (Terminal_text.short_timestamp row.sch_requested_at_iso)
     ]
   @ detail_section_heading ~width (t "4. 페이로드 원문" "4. Payload JSON & Digest")
-  @ [ field "Digest" row.sch_payload_digest
-    ; Ansi.dim, ""
-    ; Ansi.bold, t "  페이로드 JSON" "  PAYLOAD JSON"
+  @ [ field (t "다이제스트" "Digest") row.sch_payload_digest
+    ; Theme.recede (), ""
+    ; Ansi.bold, t "  페이로드 JSON" "  Payload JSON"
     ]
   @ (document_json ~width:(max 1 (width - 4))
        (Yojson.Safe.pretty_to_string row.sch_payload)
@@ -2976,7 +3015,7 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
         else match Message_layout.wrap_words ~max_cells:width line with
         | [] -> [style, ""]
         | lines -> List.map (fun text -> style, text) lines))
-    (if warnings = [] then fields else warnings @ ((Ansi.dim, "") :: fields))
+    (if warnings = [] then fields else warnings @ ((Theme.recede (), "") :: fields))
 
 let schedule_detail_chrome_rows = max 0 (framed_chrome_rows - 2)
 
@@ -3016,7 +3055,7 @@ let schedule_detail_pane (state : state) ~rows ~cols ~runner (row : schedule_row
        ~readings:
          [ (let status =
               schedule_status_reading ~ko:(state.ui_language = Lang_ko) row.sch_status in
-            Printf.sprintf "%s[%s]%s" status.tone status.word Ansi.reset) ]
+            wrap_style status.tone (status.mark ^ " " ^ status.word)) ]
        ~position:(Masc_tui_value.Position.window ~first:scroll ~shown:height ~total:count));
   box_divider buf cols;
   Option.iter (fun error -> box_line buf cols (data_unreliable_row ~cols error)) warning;
@@ -3056,12 +3095,12 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       write_list_sidebar ~framed:false left_buf ~rows ~cols:left_cols
-        ~title:(ui_text state ~ko:"예약" ~en:"Schedules")
+        ~title:(ui_text state ~ko:"일정" ~en:"Schedules")
         ~focused:false
         ~holding:
           (Option.bind state.schedules (fun snapshot ->
                snapshot.scs_request_count))
-        ~labels ~selected:state.schedule_cursor;
+        ~labels ~selected:(clamped_cursor ~count:(List.length labels) state.schedule_cursor);
       let answer =
         schedule_detail_pane state ~rows ~cols:(cols - left_cols) row
           ~runner right_buf

@@ -1875,11 +1875,11 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | | 같은 디렉터리의 curator, verifier, Candle, Goal 기록 | 건드리지 않는다 |
 | run 기록부 | – | 손으로 고치지 않는다. 자기 보존 규칙이 옛 행을 지운다 |
 
-- 새로 생기는 파일은 둘이다. `<keepers_dir>/<k>/turns.jsonl` 과 `<config keepers>/<k>.memory-log.jsonl` 이다. 잠금 `<k>.memory.lock` 이 하나 더 있다. 두 파일 옆에는 저장소 잠금 `<파일>.lock` 이 생긴다.
+- 새로 생기는 파일은 둘이다. `<keepers_dir>/<k>/turns.jsonl` 과 `<config keepers>/<k>.memory-log.jsonl` 이다. 잠금 `<k>.memory.lock` 이 하나 더 있다. 두 파일은 잠금 파일을 따로 두지 않는다. 쓰는 쪽은 그 파일 자체를 잠근다.
 - `validate-stores` 는 두 파일을 첫 줄부터 읽는다. 해석되지 않는 줄은 거절로 세고, 그 줄이 시작하는 offset 을 알린다. 줄바꿈 없이 끝난 꼬리는 줄이 아니다.
 - 반영 기록에서 해석되지 않는 줄 바로 뒤에 `Started` 줄이 있으면 거절이 아니다. 운영자가 읽지 못한 꼬리를 두고 맡긴 자리다(§8.7). 그 줄은 파일에 계속 남으므로, 거절로 세면 그 Keeper 는 검증을 다시 통과하지 못한다.
 - 해석되지 않는 줄 뒤에 반영 줄이 오거나 아무 줄도 없으면 거절이다. 마지막 줄이면 저장소가 boot 에서 멈춘다.
-- Keeper 를 지우면 `memory-log.jsonl`, 그 저장소 잠금, `memory.lock` 도 지운다. 반영 기록만 남으면 같은 이름으로 다시 만든 Keeper 의 저장소가 스냅샷이 없다는 이유로 boot 에서 멈춘다.
+- Keeper 를 지우면 `memory-log.jsonl` 과 `memory.lock` 도 지운다. 반영 기록만 남으면 같은 이름으로 다시 만든 Keeper 의 저장소가 스냅샷이 없다는 이유로 boot 에서 멈춘다.
 - blob sweep 은 `memory-log.jsonl` 과 `memory.lock` 을 blob 을 가리키지 않는 파일로 분류한다. 반영 줄에는 blob key 가 없다. 턴 기록이 있는 `keepers` 트리는 이미 분류돼 있다.
 - 지금 설정에 없는 Keeper 의 `memory-current.json` 은 그대로 둔다. 쓰는 쪽은 등록된 Keeper 에게만 있다.
 

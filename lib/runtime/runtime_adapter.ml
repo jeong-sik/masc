@@ -920,19 +920,19 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
        let request_path =
          request_path_for_http_provider ~provider ~declaration ~kind ~base_url
        in
-       let* credential =
+       let* api_key, admission =
          if person_api
          then
            Ok
-             { Runtime_credential_selection.api_key = Llm_provider.Secret.empty
-             ; admission =
-                 Runtime_credential_selection.person_key_admission ~provider_id:provider.id
-             }
+             ( Llm_provider.Secret.empty
+             , Runtime_credential_selection.person_key_admission ~provider_id:provider.id )
          else
            materialize_credentials_from_declaration
              ~provider_id:provider.id
              ~declaration
              ~credential:provider.credentials
+           |> Result.map (fun (credential : Runtime_credential_selection.materialized) ->
+                credential.api_key, credential.admission)
        in
        let default_headers = Provider_binding.default_headers_for_kind kind in
        let custom_headers =
@@ -971,7 +971,7 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
             ~provider_id:(Runtime_schema.catalog_provider_id provider)
             ~model_id:spec.api_name
             ~base_url
-            ~api_key:(credential.api_key :> string)
+            ~api_key:(api_key :> string)
             ~auth_scheme
             ~credential_source
             ~headers
@@ -1010,7 +1010,7 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
             ()
        |> Llm_provider.Provider_config.with_request_policy request_policy
        in
-       Ok {provider_config;credential_admission=credential.admission}
+       Ok {provider_config;credential_admission=admission}
      | Error reason -> Error reason)
   | Cli _ ->
     Error (Printf.sprintf
@@ -1019,7 +1019,7 @@ let provider_config_from_declared_provider ?(person_api = false) ?binding_max_co
 ;;
 
 (* Materialize the exact HTTP binding and its credential authority together. *)
-let materialize_provider_binding ?(person_api = false) ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
+let materialize_provider_binding_with ~person_api ~construction (cfg : Runtime_schema.config) (binding : Runtime_schema.binding)
     : (provider_materialization, string) result =
   match Runtime_schema.model_of_id cfg binding.model_id with
   | None -> Error (Printf.sprintf "model not found: %s" binding.model_id)
@@ -1048,6 +1048,10 @@ let materialize_provider_binding ?(person_api = false) ~construction (cfg : Runt
          ?max_tokens:binding.max_tokens
          provider
          spec)
+;;
+
+let materialize_provider_binding ~construction cfg binding =
+  materialize_provider_binding_with ~person_api:false ~construction cfg binding
 ;;
 
 (* The official-client executions spawn the path
@@ -1567,7 +1571,7 @@ let materialize_person_execution
                            selected.provider_config)
                   ; credential_admission = Some selected.credential_admission
                   })
-               (materialize_provider_binding ~person_api:true ~construction clean_cfg binding)
+               (materialize_provider_binding_with ~person_api:true ~construction clean_cfg binding)
            | ( ( Runtime_schema.Antigravity_cli_runtime
                | Runtime_schema.Vibe_cli_runtime
                | Runtime_schema.Vertex_gemini_api )

@@ -1726,7 +1726,7 @@ default = "claude_code.sonnet"
               ~template:"codex"
               ~provider_account_id:grace_codex.account
               ~integration_id:codex_integration
-              ~account_home:grace_codex.home
+              ~account_home:(Some grace_codex.home)
               ~binding:(Runtime_account_runtime.Model "codex")
           with
           | Ok rt ->

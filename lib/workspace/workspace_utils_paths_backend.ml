@@ -229,13 +229,13 @@ let strip_prefix prefix s =
 let list_dir config path =
   match key_of_path config path with
   | None ->
-      if Sys.file_exists path && Sys.is_directory path then
+      if Fs_compat.is_directory path then
         Sys.readdir path |> Array.to_list
       else
         []
   | Some _ when
       backend_supports_local_dir config.backend
-      && Sys.file_exists path && Sys.is_directory path ->
+      && Fs_compat.is_directory path ->
       Sys.readdir path |> Array.to_list
   | Some key_prefix ->
       let prefix = key_prefix ^ ":" in

@@ -49,7 +49,7 @@ let prune_internal ?max_entries ?max_bytes ~protected_handle ~dir () :
     (prune_result, string) result =
   let* max_entries = resolve_limit ~name:"max_entries" ?custom:max_entries default_max_entries in
   let* max_bytes = resolve_limit ~name:"max_bytes" ?custom:max_bytes default_max_bytes in
-  if not (Sys.file_exists dir && Sys.is_directory dir) then
+  if not (Fs_compat.is_directory dir) then
     Ok { deleted_count = 0; reclaimed_bytes = 0; remaining_count = 0; remaining_bytes = 0 }
   else
     try

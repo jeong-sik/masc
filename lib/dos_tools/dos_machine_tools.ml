@@ -532,7 +532,7 @@ let saves_dir ~base_path name = Filename.concat (Filename.concat (dos_dir ~base_
    stays here: the caller says only that the inventory is unavailable. *)
 let entries_of dir =
   match
-    if Sys.file_exists dir && Sys.is_directory dir then
+    if Fs_compat.is_directory dir then
       Sys.readdir dir
       |> Array.to_list
       |> List.filter (fun f -> not (String.starts_with ~prefix:"." f))

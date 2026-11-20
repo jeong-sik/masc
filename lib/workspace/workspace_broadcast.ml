@@ -466,7 +466,7 @@ let authoritative_directory_names config directory =
   match key_of_path config directory with
   | None ->
     (try
-       if Sys.file_exists directory && Sys.is_directory directory
+       if Fs_compat.is_directory directory
        then Ok (Sys.readdir directory |> Array.to_list)
        else Ok []
      with
@@ -474,7 +474,7 @@ let authoritative_directory_names config directory =
      | exn -> Error (Printexc.to_string exn))
   | Some _ when backend_supports_local_dir config.backend ->
     (try
-       if Sys.file_exists directory && Sys.is_directory directory
+       if Fs_compat.is_directory directory
        then Ok (Sys.readdir directory |> Array.to_list)
        else Ok []
      with

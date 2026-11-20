@@ -1257,6 +1257,11 @@ val append_lines : string -> string -> unit
 (** Check if file exists. *)
 val file_exists : string -> bool
 
+(** Single-stat directory check. Follows symbolic links like
+    [Stdlib.Sys.is_directory] and returns [false] when missing, not a
+    directory, or unreadable ([Sys_error] / [Eio.Io]). *)
+val is_directory : string -> bool
+
 (** Return file size or None *)
 val file_size : string -> int option
 

@@ -111,7 +111,7 @@ let resolve_workspace_base ~state ~uri =
     | Ok (Some m) -> Some (Keeper_sandbox.host_root_abs_of_meta ~config m)
     | Ok (None) | Error _ -> None
   in
-  let exists_dir p = Sys.file_exists p && Sys.is_directory p in
+  let exists_dir = Fs_compat.is_directory in
   classify_workspace_query
     ~project_base
     ~lookup_repository

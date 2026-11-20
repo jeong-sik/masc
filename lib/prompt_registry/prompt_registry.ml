@@ -475,7 +475,7 @@ let registrations_of_file ~dir file =
 (* Every registration under [dir], in [Sys.readdir] order; [] when [dir]
    is not a directory. Takes no lock. *)
 let scan_prompt_directory dir =
-  if Sys.file_exists dir && Sys.is_directory dir then
+  if Fs_compat.is_directory dir then
     Sys.readdir dir |> Array.to_list
     |> List.concat_map (fun file -> registrations_of_file ~dir file)
   else []
@@ -542,7 +542,7 @@ let dune_sourceroot_markdown_dir () =
       | None -> None
       | Some root ->
           let dir = Filename.concat (Filename.concat root "config") "prompts" in
-          if Sys.file_exists dir && Sys.is_directory dir then Some dir else None
+          if Fs_compat.is_directory dir then Some dir else None
     in
     (* The probe is deterministic, so a racing memo writer stores the same
        value. *)
@@ -659,7 +659,7 @@ let clear () : unit =
     markdown_dir := None;
     (* Clear files if persistence enabled *)
     match persisted_dir with
-    | Some dir when Sys.file_exists dir && Sys.is_directory dir ->
+    | Some dir when Fs_compat.is_directory dir ->
         let files = Sys.readdir dir in
         Array.iter (fun file ->
           if Filename.check_suffix file ".json" then

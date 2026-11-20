@@ -106,7 +106,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       match expand_start_path ~config path with
       | Error error -> Error (Workspace_request_rejected error)
       | Ok expanded ->
-        if not (Sys.file_exists expanded && Sys.is_directory expanded) then
+        if not (Fs_compat.is_directory expanded) then
           Error
             (Workspace_request_rejected
                (Printf.sprintf "Directory not found: %s" expanded))

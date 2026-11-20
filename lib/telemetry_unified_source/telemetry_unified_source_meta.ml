@@ -202,7 +202,7 @@ let discover_keeper_metric_dirs masc_root : (string * string) list =
 
 let is_directory source ~site path =
   protect_source_read source ~site ~default:false (fun () ->
-    Sys.file_exists path && Sys.is_directory path)
+    Env_config_core.existing_dir path)
 
 let is_jsonl_file source ~site path =
   protect_source_read source ~site ~default:false (fun () ->

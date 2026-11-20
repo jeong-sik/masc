@@ -143,7 +143,7 @@ let prune_repo_worktrees ~run_argv ~timeout_sec ~repo_path ~bundle_root =
 
 let repo_dirs_of_bundle ~bundle_root =
   let repos_dir = Filename.concat bundle_root Playground_paths.bundle_repos_dirname in
-  if not (Sys.file_exists repos_dir && Sys.is_directory repos_dir)
+  if not (Fs_compat.is_directory repos_dir)
   then []
   else
     Sys.readdir repos_dir

@@ -356,7 +356,7 @@ let read_event_lines config ~limit =
       List.iter (fun month ->
         if !remaining > 0 then
           let month_path = Filename.concat events_dir month in
-          if Sys.file_exists month_path && Sys.is_directory month_path then
+          if Fs_compat.is_directory month_path then
             let files =
               Sys.readdir month_path
               |> Array.to_list

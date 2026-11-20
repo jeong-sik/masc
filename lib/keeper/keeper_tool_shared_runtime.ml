@@ -116,8 +116,7 @@ let safe_file_exists path =
 ;;
 
 let safe_is_dir path =
-  try Fs_compat.file_exists path && Sys.is_directory path with
-  | Sys_error _ -> false
+  Fs_compat.is_directory path
 ;;
 
 (* Whose filesystem says whether a cwd exists follows where the tree is

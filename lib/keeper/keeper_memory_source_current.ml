@@ -93,7 +93,7 @@ let keeper_id_of_filename filename = Filename.chop_suffix_opt ~suffix filename
 ;;
 
 let list_keeper_ids_for_keepers_dir ~keepers_dir =
-  if not (Sys.file_exists keepers_dir && Sys.is_directory keepers_dir)
+  if not (Fs_compat.is_directory keepers_dir)
   then []
   else
     Sys.readdir keepers_dir

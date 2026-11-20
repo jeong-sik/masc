@@ -30,7 +30,7 @@ let validate_config config =
   then Error "cli_path is empty"
   else if Filename.is_relative config.workdir
   then Error (Printf.sprintf "workdir %S is not absolute" config.workdir)
-  else if not (Sys.file_exists config.workdir && Sys.is_directory config.workdir)
+  else if not (Fs_compat.is_directory config.workdir)
   then Error (Printf.sprintf "workdir %S is not a directory" config.workdir)
   else (
     match config.time_limit_s with

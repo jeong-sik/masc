@@ -197,7 +197,7 @@ let log_toml_discovery_error_once ~file ~error =
 let logged_missing_keepers_dir : (string, unit) Hashtbl.t = Hashtbl.create 4
 
 let keeper_toml_files (dir : string) : string list option =
-  if not (Fs_compat.file_exists dir && Sys.is_directory dir)
+  if not (Fs_compat.is_directory dir)
   then None
   else
     Some

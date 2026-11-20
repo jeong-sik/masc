@@ -8,6 +8,11 @@ val append_file : string -> string -> unit
 val append_lines : string -> string -> unit
 
 val file_exists : string -> bool
+val is_directory : string -> bool
+(** Single-stat directory check. Follows symbolic links like
+    [Stdlib.Sys.is_directory] and returns [false] when missing, not a
+    directory, or unreadable ([Sys_error] / [Eio.Io]). Avoids the TOCTOU second
+    stat of [file_exists p && Sys.is_directory p]. *)
 
 type path_kind =
   | Missing

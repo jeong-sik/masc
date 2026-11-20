@@ -372,8 +372,7 @@ let docker_config_container_root ~container_root =
 ;;
 
 let docker_config_available host_config_root =
-  try Sys.file_exists host_config_root && Sys.is_directory host_config_root with
-  | Sys_error _ -> false
+  Fs_compat.is_directory host_config_root
 ;;
 
 let config_mount ~base_path ~container_root =
@@ -442,12 +441,9 @@ let docker_workspace_state_mounts =
 ;;
 
 let workspace_state_path_available kind path =
-  try
-    match kind with
-    | Workspace_state_file -> Sys.file_exists path && not (Sys.is_directory path)
-    | Workspace_state_dir -> Sys.file_exists path && Sys.is_directory path
-  with
-  | Sys_error _ -> false
+  match kind with
+  | Workspace_state_file -> Env_config_core.existing_file path
+  | Workspace_state_dir -> Fs_compat.is_directory path
 ;;
 
 let unique_preserving_order values =

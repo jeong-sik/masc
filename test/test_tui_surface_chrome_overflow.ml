@@ -86,7 +86,7 @@ let test_a_cut_body_says_what_it_hides () =
   Alcotest.(check bool) "the note takes the budget's last row" false
     (shows lines (row_text (budget - 1)));
   Alcotest.(check bool) "the note counts every row it hides" true
-    (shows lines (Printf.sprintf "+%d rows not shown" (count - (budget - 1))));
+    (shows lines (Printf.sprintf "%d more rows" (count - (budget - 1))));
   Alcotest.(check bool) "a cut body clamps nothing" true
     (Option.is_none clamped);
   Alcotest.(check bool) "a cut body that hands no position has none" true

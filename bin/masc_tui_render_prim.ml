@@ -1671,7 +1671,9 @@ let file_change_evidence_label ~ko = function
        in
        if occurrence_count = 1
        then Some changed
-       else Some (Printf.sprintf "%s (+%d)" changed (occurrence_count - 1)))
+       (* The other matches are a cut-off count, never "+N" (RFC
+          tui-one-screen-grammar 6.3). *)
+       else Some (changed ^ " · " ^ Masc_tui_value.Count.more ~ko (occurrence_count - 1)))
 
 
 (* The selected keeper's file changes as the pane's Changes tab draws
@@ -2653,9 +2655,9 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
       let hidden = count - (budget - 1) in
       draw_note
         (ui_text state
-           ~ko:(Printf.sprintf "  +%d줄 더 있음" hidden)
-           ~en:(Printf.sprintf "  +%d %s not shown" hidden
-                  (if hidden = 1 then "row" else "rows")))
+           ~ko:("  " ^ Masc_tui_value.Count.more ~ko:true hidden ^ "줄")
+           ~en:("  " ^ Masc_tui_value.Count.more ~ko:false hidden
+                ^ (if hidden = 1 then " row" else " rows")))
     end
   in
   let clamped =
@@ -2722,6 +2724,12 @@ let surface_chrome ~overflow ?help_door ?frame ?status ?sidebar ?progress_sheet 
 let refresh_progress_pieces (state : state) =
   let ko = state.ui_language = Lang_ko in
   let text = ui_text state in
+  (* The sources after the first one a notice names: a cut-off count joined
+     as a fact of the same rank, never "+N" (RFC tui-one-screen-grammar 6.3,
+     6.5). *)
+  let and_more = function
+    | [] -> ""
+    | rest -> " · " ^ Masc_tui_value.Count.more ~ko (List.length rest) in
   let surface_name source = if not ko then Surface_read_order.source_name source else
     match source with
     | Surface_read_source.Transport -> "연결" | Board -> "게시판" | Planning -> "목표·작업"
@@ -2754,7 +2762,7 @@ let refresh_progress_pieces (state : state) =
     | source :: rest ->
         [ reading_piece
             (text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
-             ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))) ]
+             ^ and_more rest) ]
   in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
@@ -2763,7 +2771,7 @@ let refresh_progress_pieces (state : state) =
         | [] -> []
         | source :: rest ->
             [ source_name source ^ " " ^ label
-              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ] in
+              ^ and_more rest ] in
       let partials = match Http_refresh_progress.partial_readings progress with
         | [] -> []
         | (_,parts) :: rest ->
@@ -2774,7 +2782,7 @@ let refresh_progress_pieces (state : state) =
             [ text ~ko:"일부 관측: " ~en:"partial: " ^ names Http_refresh_progress.Part_failed
               ^ text ~ko:" 조회 실패; " ~en:" failed; "
               ^ names Http_refresh_progress.Part_received ^ text ~ko:" 관측됨" ~en:" received"
-              ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) ] in
+              ^ and_more rest ] in
       let notices = outcome_notice Http_refresh_progress.Failed_read (text ~ko:"조회 실패" ~en:"read failed")
         @ outcome_notice Http_refresh_progress.Interrupted_read (text ~ko:"조회 중단" ~en:"interrupted") @ partials in
       let component_reads = Http_refresh_progress.unreturned_component_reads progress in
@@ -2797,7 +2805,7 @@ let refresh_progress_pieces (state : state) =
              | part :: rest ->
                  reading_piece
                    (text ~ko:"조회 중: " ~en:"reading " ^ component_name part.cr_component
-                    ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)))
+                    ^ and_more rest)
              | [] -> (match Http_refresh_progress.pending_sources progress with
                  | [] -> (match progress.Http_refresh_progress.readings with
                      | [] -> reading_piece (text ~ko:"새로 조회 중" ~en:"refreshing")
@@ -2805,7 +2813,7 @@ let refresh_progress_pieces (state : state) =
                  | source :: rest ->
                      reading_piece
                        (text ~ko:"조회 중: " ~en:"reading " ^ source_name source
-                        ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)))) in
+                        ^ and_more rest)) in
            notices @ [ pending ])
   | Some _ | None -> foreground
 

@@ -3996,18 +3996,9 @@ let planning_phase_label ~ko = function
    the admin route. [p] is Pause and Resume both: no phase offers the two
    ([Goal_phase.decide_transition]), so the Goal on screen picks the one [p]
    sends, and [r] stays the refresh it is on every other screen. *)
-let planning_action_key = function
-  | Goal_phase.Public_action.Request_complete -> "c"
-  | Goal_phase.Public_action.Drop -> "x"
-  | Goal_phase.Public_action.Reopen -> "o"
-  | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume -> "p"
-  | Goal_phase.Public_action.Block -> "b"
-  | Goal_phase.Public_action.Unblock -> "u"
+let planning_action_key = Masc_tui_types.planning_action_key
 
-let planning_action_of_key ~offers key =
-  let key = String.lowercase_ascii key in
-  List.find_opt (fun action -> String.equal (planning_action_key action) key && offers action)
-    Goal_phase.Public_action.all
+let planning_action_of_key = Masc_tui_types.planning_action_of_key
 
 let planning_action_confirmation_keys action =
   let key = planning_action_key action in

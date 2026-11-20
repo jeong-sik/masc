@@ -4484,6 +4484,19 @@ let planning_goal_offers_action (goal : planning_goal) action =
   && Goal_phase.offers_public_action ~phase:goal.pg_phase ~action
   && (action <> Goal_phase.Public_action.Request_complete || Option.is_some goal.pg_retry_binding)
 
+let planning_action_key = function
+  | Goal_phase.Public_action.Request_complete -> "c"
+  | Goal_phase.Public_action.Drop -> "x"
+  | Goal_phase.Public_action.Reopen -> "o"
+  | Goal_phase.Public_action.Pause | Goal_phase.Public_action.Resume -> "p"
+  | Goal_phase.Public_action.Block -> "b"
+  | Goal_phase.Public_action.Unblock -> "u"
+
+let planning_action_of_key ~offers key =
+  let key = String.lowercase_ascii key in
+  List.find_opt (fun action -> String.equal (planning_action_key action) key && offers action)
+    Goal_phase.Public_action.all
+
 let planning_goal_retains_arm (goal : planning_goal) ~action ~phase ~retry_binding =
   goal.pg_phase = phase && planning_goal_offers_action goal action
   && (action <> Goal_phase.Public_action.Request_complete || goal.pg_retry_binding = retry_binding)

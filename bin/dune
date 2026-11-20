@@ -3283,6 +3283,7 @@
   masc_tui_waiting_inventory
   masc_tui_chat_dispatch
   masc_tui_collab_queue
+  masc_tui_work_actions
   masc_tui_keys
   masc_tui_key_ime
   masc_tui_file_icon

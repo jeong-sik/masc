@@ -1107,105 +1107,6 @@ let use_board_read state ~mailbox ~action =
               | Saved _ | Played | Opened -> Ok (Board_saved_original description) in
         Masc_tui_board_preview_work.run board_image_prepare_worker prepare))
 
-let ensure_img_cache_dir () =
-  let dir = Filename.concat (Filename.get_temp_dir_name ()) "masc_img_cache" in
-  (try Unix.mkdir dir 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  dir
-
-(* An evidence image that is not a PNG, made into one. Kitty takes PNG
-   (f=100) and drops anything else without saying so, so the converters the
-   link preview already uses (sips, ImageMagick, ffmpeg) run first. They block
-   on child processes: only the evidence loader's systhread calls this. An
-   artifact's author chooses the bytes, so each converter runs with no
-   terminal to read and is killed at the deadline: a decompression bomb costs
-   that image, not the evidence pane. A converter that cannot start is that
-   image's failure, not the bundle's. *)
-let image_process_deadline_seconds = 10.
-
-let convert_evidence_image bytes =
-  match
-    Masc_tui_image_cache.prepare_payload
-      ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
-      ~cache_dir:(ensure_img_cache_dir ()) bytes
-  with
-  | result -> result
-  | exception ((Unix.Unix_error _ | Sys_error _) as failure) ->
-      Error (Printexc.to_string failure)
-
-let verification_evidence_outcome = function
-  | Ok _ -> "received"
-  | Error (Verification_evidence_read.Transport _) -> "transport_failed"
-  | Error (Http_error _) -> "http_refused"
-  | Error (Invalid_json _) -> "invalid_json"
-  | Error (Invalid_payload _) -> "invalid_payload"
-  | Error (Launch_failure _) -> "boundary_failed"
-  | Error (Workspace_unconfirmed _) -> "workspace_unconfirmed"
-  | Error (Interrupted _) -> "interrupted"
-  | Error (Kept_back _) -> "kept_back"
-
-let log_verification_evidence_read request ~phase ~outcome =
-  Log.Transport.routine_lazy (fun () ->
-    let key = Masc_tui_fetched.request_key request.ver_ticket in
-    let field get = match request.ver_workspace with None -> `Null | Some identity -> `String (Masc.Tui_decode.Canonical_path.to_string (get identity)) in
-    "tui_verification_evidence=" ^ Yojson.Safe.to_string (`Assoc [
-      "pid",`Int (Unix.getpid ());
-      "task_id",`String key.vek_task_id;"verification_id",`String key.vek_request_id;
-      "request",`Intlit (Int64.to_string (Masc_tui_fetched.request_id request.ver_ticket));
-      "base_path",field (fun identity -> identity.Tui_decode.sid_base_path);
-      "masc_root",field (fun identity -> identity.Tui_decode.sid_masc_root);
-      "observed_ns",`Intlit (Int64.to_string (Mtime_clock.elapsed_ns ()));
-      "phase",`String phase;"outcome",`String outcome]))
-
-(* Original detail request and Task own this observation. A later visit to the
-   same Task creates a fresh ticket; cancellation and reply admission are distinct. *)
-let cancel_verification_evidence_load state ~reason =
-  Option.iter (fun request ->
-    Masc_tui_workspace_job.cancel_observation state ~key:request.ver_job)
-    state.verification_evidence_request;
-  retire_verification_evidence_read state ~reason
-
-let launch_verification_evidence_load state ~mailbox key =
-  if server_authority_ready state then begin
-    Option.iter (fun request ->
-      Masc_tui_workspace_job.cancel_observation state ~key:request.ver_job)
-      state.verification_evidence_request;
-    match begin_verification_evidence_read state key with
-    | None -> ()
-    | Some request ->
-      log_verification_evidence_read request ~phase:"requested" ~outcome:"pending";
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-      let read = Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-        Masc_tui_http.fetch_verification_evidence ~host ~port ~task_id:key.vek_task_id
-          ~verification_id:key.vek_request_id
-          |> Result.map (fun evidence ->
-            Eio_guard.run_in_systhread ~label:"tui-evidence-pictures" (fun () ->
-              Masc_tui_evidence_picture.prepare
-                ~layout:Masc_tui_evidence_picture.One_at_a_time
-                ~display:(Masc_tui_portrait_view.current_display ())
-                ~convert:convert_evidence_image evidence))) in
-      Masc_tui_transport.Workspace_admission.launch_result ~key:request.ver_job ~observation:true state ~mailbox
-        ~on_not_run:(fun () -> log_verification_evidence_read request ~phase:"not_run" ~outcome:"not_started")
-        ~observe_job:(fun event -> log_verification_evidence_read request
-          ~phase:(match event with Masc_tui_workspace_job.Cancellation_requested -> "cancellation_requested"
-            | Registration_released -> "registration_released") ~outcome:"observed")
-        ~boundary_error:(fun detail -> Verification_evidence_read.Launch_failure detail)
-        ~withdrawn:(fun refusal -> Verification_evidence_read.Kept_back refusal)
-        ~deliver:(fun result ->
-          log_verification_evidence_read request ~phase:"delivery_formed" ~outcome:(verification_evidence_outcome result);
-          Verification_msg (Verification_evidence_loaded (request,result)))
-        (fun () ->
-          log_verification_evidence_read request ~phase:"caller_entered" ~outcome:"pending";
-          try
-            let result = match read () with
-              | Ok result -> result
-              | Error refusal -> Error (Verification_evidence_read.Kept_back refusal) in
-            log_verification_evidence_read request ~phase:"caller_observed" ~outcome:(verification_evidence_outcome result);
-            result
-          with Eio.Cancel.Cancelled _ as exn ->
-            let backtrace = Printexc.get_raw_backtrace () in
-            log_verification_evidence_read request ~phase:"caller_interrupted" ~outcome:"interrupted";
-            Printexc.raise_with_backtrace exn backtrace)
-  end
 
 (* The MCP resource inventory, and one resource's text. Each operation
    opens its own session: a human-cadence browser does not earn a held
@@ -1742,52 +1643,20 @@ let launch_fusion_runs_load ?(demand = Masc_tui_fusion_updates.Share) state ~mai
              (Fusion_msg (Fusion_runs_loaded
                 (request, Error (Request_failed "Eio switch is unavailable")))))
 
-let launch_fusion_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~run_id =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  match Masc_tui_fusion_updates.begin_detail state ~demand ~run_id with
-  | None -> ()
-  | Some generation ->
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    let read = Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-      Masc_tui_loader.load_fusion_detail ~host ~port ~run_id) in
-    Masc_tui_transport.Workspace_admission.launch_guarded_async_read state ~mailbox
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Fusion_msg (Fusion_detail_loaded (generation, run_id, result))))
-      read
-  end
-
-let launch_fusion_historical_detail_load ?(demand = Masc_tui_fusion_updates.Share) state ~mailbox ~reference =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  match Masc_tui_fusion_updates.begin_historical state ~demand ~reference with
-  | None -> ()
-  | Some generation ->
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    let read = Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-      Masc_tui_loader.load_fusion_historical_detail ~host ~port ~reference) in
-    Masc_tui_transport.Workspace_admission.launch_guarded_async_read state ~mailbox
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Fusion_msg (Fusion_historical_detail_loaded (generation, reference, result))))
-      read
-  end
-
 let revalidate_visible_fusion state ~mailbox =
   let demand = Masc_tui_fusion_updates.After_change in
   Masc_tui_fusion_updates.revalidate_visible state
     ~runs:(fun () -> launch_fusion_runs_load ~demand state ~mailbox)
-    ~detail:(fun run_id -> launch_fusion_detail_load ~demand state ~mailbox ~run_id)
+    ~detail:(fun run_id -> Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load ~demand state ~mailbox ~run_id)
     ~historical:(fun reference ->
-      launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
+      Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
 
 let resume_fusion_after_observer_failure state ~mailbox =
   Masc_tui_fusion_updates.observer_failed state
     ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
-    ~detail:(fun run_id -> launch_fusion_detail_load state ~mailbox ~run_id)
+    ~detail:(fun run_id -> Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load state ~mailbox ~run_id)
     ~historical:(fun reference ->
-      launch_fusion_historical_detail_load state ~mailbox ~reference)
+      Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load state ~mailbox ~reference)
 
 (* The server's reading of which Keepers the memory recall judgment reaches,
    asked when the [m] form opens and drawn in it. Each open takes a new
@@ -2132,7 +2001,7 @@ let open_measurement_artifact state ~mailbox ~sha256 =
 let reset_verification_rows state =
   state.verification_cursor <- 0;
   state.verification_scroll <- 0;
-  cancel_verification_evidence_load state
+  Masc_tui_work_actions.Verification_actions.cancel_verification_evidence_load state
     ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
   state.verification_detail_request_id <- None;
   state.verification_detail_scroll <- 0;
@@ -2201,25 +2070,6 @@ let task_detail_on_screen (state : state) =
   Masc_tui_task_selection.detail_row ~detail_id:state.task_detail_id
     ~tasks:(Masc_tui_types.task_domain_values state)
 
-(* A removed Goal renders the list, so its stale detail id owns no commands. *)
-let goal_detail_on_screen (state : state) =
-  match state.planning_mode, state.planning with
-  | Planning_detail goal_id, Some snapshot ->
-      List.find_opt (fun (goal : planning_goal) -> String.equal goal.pg_id goal_id)
-        snapshot.pl_goals
-  | Planning_list, _ | Planning_detail _, None -> None
-
-(* The lifecycle request [key] sends from the open Goal detail, if that Goal
-   accepts one under it. *)
-let goal_detail_action (state : state) key =
-  Option.bind (goal_detail_on_screen state) (fun goal ->
-    planning_action_of_key ~offers:(planning_goal_offers_action goal) key)
-
-let schedule_detail_on_screen (state : state) =
-  match state.schedule_detail_id, state.schedules with
-  | Some id, Some snapshot ->
-      List.find_opt (fun row -> String.equal row.sch_schedule_id id) snapshot.scs_rows
-  | Some _, None | None, _ -> None
 
 let list_on_screen (state : state) : on_screen option =
   let terminal_rows, cols = get_terminal_size () in
@@ -2439,7 +2289,7 @@ let list_on_screen (state : state) : on_screen option =
       windowed Approval_items ~count:(List.length (Masc_tui_approvals_model.approval_items state))
         ~cursor:state.approval_cursor (fun index -> state.approval_cursor <- index)
   | Schedules ->
-      (match schedule_detail_on_screen state with
+      (match Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state with
        | Some _ -> None
        | None ->
            let count =
@@ -2611,7 +2461,7 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
        | Board_read _ | Board_list | Board_compose -> None)
   | Planning ->
       (match state.planning_mode with
-       | Planning_detail _ when Option.is_some (goal_detail_on_screen state) ->
+       | Planning_detail _ when Option.is_some (Masc_tui_work_actions.Goal_actions.goal_detail_on_screen state) ->
            pane (fun v -> Planning_detail_scroll v)
        | Planning_detail _ -> None
        (* The id alone is not the screen: one that names a task the backlog
@@ -2627,7 +2477,7 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
            pane (fun v -> Fusion_detail_scroll v)
        | Fusion_list -> None)
   | Schedules ->
-      if Option.is_some (schedule_detail_on_screen state) then
+      if Option.is_some (Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state) then
         pane (fun v -> Schedule_detail_scroll v)
       else None
   | Verification ->
@@ -3335,9 +3185,9 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       (match state.fusion_mode with
        | Fusion_list -> ()
        | Fusion_detail run_id ->
-           launch_fusion_detail_load ~demand state ~mailbox ~run_id
+           Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load ~demand state ~mailbox ~run_id
        | Fusion_historical_detail reference ->
-           launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
+           Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load ~demand state ~mailbox ~reference)
   (* Arriving owes the fleet a read as well as starting one: a read already in
      flight may have begun before a write announced while the surface was off
      screen. Metrics shows the same health and owes it the same way. *)
@@ -3838,9 +3688,9 @@ let launch_owed_history state ~mailbox =
 let launch_owed_fusion state ~mailbox =
   Masc_tui_fusion_updates.retry_due_visible state ~now:(Masc_tui_wake.Mono.now ())
     ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
-    ~detail:(fun run_id -> launch_fusion_detail_load state ~mailbox ~run_id)
+    ~detail:(fun run_id -> Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load state ~mailbox ~run_id)
     ~historical:(fun reference ->
-      launch_fusion_historical_detail_load state ~mailbox ~reference)
+      Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load state ~mailbox ~reference)
 
 (* The Keeper detail's composite reading: Info's execution facts and the
    Secrets tab read one Keeper's [/api/v1/keepers/<name>/composite]. It is
@@ -5742,7 +5592,7 @@ let selected_surface_reference state =
   | Board -> board ()
   | Planning -> planning ()
   | Schedules ->
-      (match schedule_detail_on_screen state with
+      (match Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state with
        | Some row -> Some (Link.reference Schedule row.sch_schedule_id)
        | None ->
            Option.bind state.schedules (fun snapshot ->
@@ -6240,7 +6090,7 @@ let launch_image_opener ?after ~url ~allow_start ~on_result () =
 
 let download_remote_image ?(force_fetch = false) url =
   Masc_tui_image_cache.download ~force_fetch ~run:Masc_tui_image_cache.run_unbounded
-    ~cache_dir:(ensure_img_cache_dir ()) url
+    ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) url
 
 (* Put a picture on the terminal, or say why not. The refusal is text for the
    pane: there is nothing to draw, and taking the screen away from the frame
@@ -6270,7 +6120,7 @@ let image_url_to_mosaic ?(force_fetch = false) ~cols url : Masc_tui_link_preview
       Masc_tui_link_preview.(Refused (Cache_unreadable {
         detail=Masc_tui_image_cache.download_error_text error }))
   | Ok body ->
-    let cache_dir = ensure_img_cache_dir () in
+    let cache_dir = Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir () in
     let decode local_path =
       (* Width is fixed at [cols]; height follows the image's own aspect ratio.
          scale=cols:-2 keeps the ratio and rounds to an even height for the
@@ -6318,7 +6168,7 @@ let retry_image_mosaic img =
       Eio_guard.run_in_systhread ~label:"tui-image-mosaic-retry" (fun () ->
         Masc_tui_link_preview.retry_mosaic img ~retry:(fun () ->
           Masc_tui_image_cache.invalidate_download
-            ~cache_dir:(ensure_img_cache_dir ()) img;
+            ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) img;
           image_url_to_mosaic ~force_fetch:true ~cols:mosaic_cols img));
       `Stop_daemon)
 
@@ -6337,8 +6187,8 @@ let prepare_remote_image_bytes url =
   Result.map Masc_tui_image_cache.download_bytes
     (Masc_tui_image_cache.download ~max_bytes:remote_cell_image_max_bytes
       ~run:(Masc_tui_image_cache.run_bounded ~max_file_bytes:remote_cell_image_max_bytes
-        ~deadline_seconds:image_process_deadline_seconds)
-      ~cache_dir:(ensure_img_cache_dir ()) url)
+        ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds)
+      ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) url)
   |> Result.map_error Masc_tui_image_cache.download_error_text
 
 let remote_fetch_worker = Masc_tui_board_preview_work.create ()
@@ -6392,9 +6242,9 @@ let launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url 
         | Ok source -> Ok (Masc_tui_image_cache.Remote_bounded_source source)
         | Error reason -> Ok (Masc_tui_image_cache.Remote_bounded_failure reason)
       else
-        let cache_dir=ensure_img_cache_dir () in
+        let cache_dir=Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir () in
         let run command = Masc_tui_image_cache.run_bounded
-          ~deadline_seconds:image_process_deadline_seconds command in
+          ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds command in
         match Masc_tui_image_cache.download ~run ~cache_dir image_url with
         | Error error -> Error (Masc_tui_image_cache.download_error_text error)
         | Ok body ->
@@ -6410,8 +6260,8 @@ let launch_remote_image_native_source state ~mailbox ~request ~title ~caption ~p
     ~busy:(failed "another image is still preparing")
     ~on_exception:(fun exn -> Ok (failed (Printexc.to_string exn))) (fun () ->
       let run command = Masc_tui_image_cache.run_bounded
-        ~deadline_seconds:image_process_deadline_seconds command in
-      match Masc_tui_image_cache.prepare_captured_png ~run ~cache_dir:(ensure_img_cache_dir ()) source with
+        ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds command in
+      match Masc_tui_image_cache.prepare_captured_png ~run ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) source with
       | Ok png -> Ok (Masc_tui_image_cache.Remote_native {source;png})
       | Error detail -> Ok (failed detail))
 
@@ -6431,8 +6281,8 @@ let launch_remote_image_cells state ~mailbox ~request ~title ~caption ~page_url 
             ~max_bytes:remote_cell_image_max_bytes
             ~max_cells:remote_cell_image_max_cells
             ~run:(Masc_tui_image_cache.run_bounded ~max_file_bytes:remote_cell_image_max_bytes
-              ~deadline_seconds:image_process_deadline_seconds)
-            ~cache_dir:(ensure_img_cache_dir ()) display source in
+              ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds)
+            ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) display source in
           Ok (Masc_tui_image_cache.Remote_cells {source;cells}))
 
 let launch_remote_image_copy state ~mailbox ~request ~title ~caption ~page_url ~image_url ~reason ~requested_save source =
@@ -6797,13 +6647,13 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
       (Masc_tui_terminal_palette.snapshot_palette palette) in
     let run = match board_worker with
       | Some _ -> (fun command -> Masc_tui_image_cache.run_bounded
-          ~deadline_seconds:image_process_deadline_seconds command)
+          ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds command)
       | None -> Masc_tui_image_cache.run_unbounded in
     let load () =
       Masc_tui_image_requests.load ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port
-        ~cache_dir:ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
+        ~cache_dir:Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ~diagram_width ~diagram_height ~diagram_font_size
         ~diagram_colors ~board_worker ~admit_vector
-        ~run ~vector_run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds)
+        ~run ~vector_run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds)
         ~display source in
     let completion result = Sent_image_ready { request; result=Image_prepared result } in
     (match owner, source with
@@ -6889,15 +6739,15 @@ let prepare_inspected_frame state ~mailbox ~worker_geometry_current =
            let render () =
              let open Result.Syntax in
              let runner = Masc_tui_pele.command_runner
-                 ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds) in
-             let* png = Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~raster ~runner scene in
+                 ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds) in
+             let* png = Masc_tui_pele.render ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) ~raster ~runner scene in
              let* () = match pending.sir_owner with
                | Board_image_read _ when not (Masc_tui_image_cache.has_png_structure png) ->
                    Error "image has an invalid or truncated PNG structure"
                | Board_image_read _ | Local_file_image_read _ | Remote_url_image_read _
                | Draft_image_read _ | Peer_image_read _ -> Ok () in
              let* prepared = Masc_tui_image_cache.prepare_presentation ~run:Masc_tui_image_cache.run_unbounded
-               ~cache_dir:(ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
+               ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) Masc_tui_image_cache.Pixel_graphics png in
              Ok (prepared,Some scene) in
            let result = if not current then None else match pending.sir_owner with
              | Board_image_read _ -> Some (Image_prepared
@@ -7044,8 +6894,8 @@ let prepare_resource_diagrams state ~mailbox ~geometry_stable ~worker_geometry_c
                                      ~now_ms:(Int64.of_float (Unix.gettimeofday () *. 1000.))
                                      ~colors:(Diagrams.colors request) source in
                                    let runner = Masc_tui_pele.command_runner
-                                     ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:image_process_deadline_seconds) in
-                                   Some (Masc_tui_pele.render ~cache_dir:(ensure_img_cache_dir ()) ~runner scene)
+                                     ~run:(Masc_tui_image_cache.run_bounded ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds) in
+                                   Some (Masc_tui_pele.render ~cache_dir:(Masc_tui_work_actions.Verification_actions.ensure_img_cache_dir ()) ~runner scene)
                                  end)) in
                              match result with
                              | Some (Some result) ->
@@ -10040,7 +9890,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.verification_cursor <- 0;
   state.verification_scroll <- 0;
   state.verification_offset <- 0;
-  cancel_verification_evidence_load state
+  Masc_tui_work_actions.Verification_actions.cancel_verification_evidence_load state
     ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
   state.verification_detail_request_id <- None;
   state.verification_detail_scroll <- 0;
@@ -11998,44 +11848,6 @@ let resume_task_followups ~server_contact state ~mailbox ~refresh_inflight
           ~intent:Revalidate ~refresh_inflight ~scoped_refresh_inflight
           ~scoped_refresh_followup ~mailbox) run
 
-(* A proof read is separate from the confirmation key: recovery must never
-   replay the key's second-press mutation. *)
-let launch_goal_confirmation_read state ~mailbox ~goal_id =
-  if Result.is_ok (Goal_store.validate_goal_id goal_id) && server_authority_ready state then
-    match state.server_identity with
-    | None -> ()
-    | Some expected_workspace ->
-    match state.goal_confirmation with
-    | Goal_confirmation.Submitting _ -> ()
-    | Goal_confirmation.Inspecting read ->
-        (match Goal_confirmation_read.start ~equal:String.equal read ~key:goal_id with
-         | Already_loading -> ()
-         | Started (loading, request) ->
-             state.goal_confirmation <- Goal_confirmation.Inspecting loading;
-             state.goal_confirmation_presented <- None;
-             let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-             let workspace = Goal_confirmation.confirmation_workspace_of_identity expected_workspace in
-             let ko = state.ui_language = Lang_ko in
-             Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Goal_confirmation.Read_failed (None, detail))
-               ~withdrawn:(fun refusal -> Goal_confirmation.Read_kept_back
-                 (workspace_refusal_text ~ko ~request:Kept_request.Goal_confirmation_read refusal))
-               ~deliver:(fun result -> Goal_msg (Goal_confirmation_loaded (request, result)))
-               (fun () ->
-                 let open Result.Syntax in
-                 let credential = Masc_tui_http.bind_credential () in
-                 let* runtime_instance_id = match expected_workspace.sid_runtime_instance_id with
-                   | Some instance when String.trim instance <> "" -> Ok instance
-                   | Some _ | None -> Error (Goal_confirmation.Read_failed (Some credential.bound_owner, "Server instance is unavailable; read the server identity again")) in
-                 let* json = Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
-                   ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
-                     Masc_tui_http.fetch_goal_confirmation ~credential ~expected_instance:runtime_instance_id ~host ~port ~goal_id) in
-                 let* confirmation = Goal_confirmation.decode_confirmation ~goal_id ~workspace
-                   ~runtime_instance_id ~credential_headers:credential.bound_headers ~credential_owner:credential.bound_owner json
-                   |> Result.map_error (fun detail -> Goal_confirmation.Read_failed (Some credential.bound_owner, detail)) in
-                 match confirmation.phase with
-                 | Goal_phase.Awaiting_confirmation | Goal_phase.Completed -> Ok confirmation
-                 | Goal_phase.Executing | Goal_phase.Verifying
-                 | Goal_phase.Dropped | Goal_phase.Paused _ | Goal_phase.Blocked _ -> Error (Goal_confirmation.Read_failed (Some credential.bound_owner, "goal is not awaiting confirmation"))))
 
 let resume_goal_confirmation_identity_refresh state ~mailbox =
   if server_authority_ready state then begin
@@ -12049,7 +11861,7 @@ let resume_goal_confirmation_identity_refresh state ~mailbox =
                 && Goal_confirmation.same_confirmation_workspace workspace
                      (Goal_confirmation.confirmation_workspace_of_identity identity)
                 && Goal_confirmation_read.current_key read = Some goal_id ->
-             launch_goal_confirmation_read state ~mailbox ~goal_id
+             Masc_tui_work_actions.Goal_actions.launch_goal_confirmation_read state ~mailbox ~goal_id
          | (Some _ | None), (Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _) -> ())
     | None, _ | Some _, None -> ()
   end
@@ -12237,7 +12049,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
               (match state.goal_confirmation with
                | Goal_confirmation.Inspecting read
                  when Goal_confirmation_read.current_key read = Some goal_id ->
-                   launch_goal_confirmation_read state ~mailbox ~goal_id
+                   Masc_tui_work_actions.Goal_actions.launch_goal_confirmation_read state ~mailbox ~goal_id
                | Goal_confirmation.Inspecting _ | Goal_confirmation.Submitting _ -> ())
           | Planning_list -> ())
      | Tools ->
@@ -12282,7 +12094,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
           | Some snapshot, Some request_id ->
               List.find_opt (fun row -> String.equal row.Tui_decode.vr_request_id request_id)
                 snapshot.Tui_decode.vs_requests
-              |> Option.iter (fun row -> launch_verification_evidence_load state ~mailbox
+              |> Option.iter (fun row -> Masc_tui_work_actions.Verification_actions.launch_verification_evidence_load state ~mailbox
                 {vek_request_id=row.Tui_decode.vr_request_id;vek_task_id=row.vr_task_id})
           | _ -> ())
      | Schedules -> Option.iter (fun schedule_id ->
@@ -12665,29 +12477,6 @@ let move_board_read_scroll state ~by =
       Masc_tui_scroll.step_uncounted ~delta:by state.board_comment_scroll
   else state.board_scroll <- Masc_tui_scroll.step_uncounted ~delta:by state.board_scroll
 
-(* The open post's comment ids in drawn order and the comment its read
-   landed on, while its thread is on screen. *)
-let board_read_thread state ~post_id =
-  match Board_detail.view_for state.board_detail ~post_id with
-  | Board_detail.Ready (_, comments, landing) ->
-      Some (Masc_tui_board_comment_cursor.ordered_ids comments, landing)
-  | Board_detail.Absent | Board_detail.Loading | Board_detail.Failed _ -> None
-
-(* Settle the comment cursor on a drawn comment and ask the next frame to
-   bring it on screen: focusing the comments, and the first vote press on
-   one, should show the comment the keys act on. [None] while no thread is
-   drawn. *)
-let select_board_comment state ~post_id =
-  match board_read_thread state ~post_id with
-  | None -> None
-  | Some (ids, landing) ->
-      let selected =
-        Masc_tui_board_comment_cursor.select ids ~landing
-          state.board_comment_cursor
-      in
-      state.board_comment_cursor <- selected;
-      state.board_comment_follow <- true;
-      selected
 
 (* j/k on the reading. With the comments focused they step the cursor one
    comment along the drawn thread; the frame then scrolls the least that
@@ -12696,7 +12485,7 @@ let select_board_comment state ~post_id =
    readable. *)
 let step_board_reading state ~post_id ~by_wheel ~delta =
   if state.board_comments_focused && not by_wheel then
-    match board_read_thread state ~post_id with
+    match Masc_tui_work_actions.Board_schedule_actions.board_read_thread state ~post_id with
     | None -> ()
     | Some (ids, landing) ->
         state.board_comment_cursor <-
@@ -13591,613 +13380,6 @@ let split_board_draft (text : string) : string * string =
   Board_composer.split_draft text
 
 
-(* A Goal request the workspace guard kept back, with the Goal it was for
-   after the notice. *)
-let goal_kept_back_notice state ~goal_id ~current refusal =
-  workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-    ~request:Kept_request.Goal_transition refusal
-  ^ " · Goal " ^ goal_id ^ (if current then "" else " (earlier request)")
-
-(* Request a goal lifecycle change through the tools route. Runs in a fiber
-   like the other writes; the outcome lands in the shared mailbox and the
-   server's phase rules decide, so the TUI never pre-guesses a transition. *)
-let start_goal_transition ?note ?retry_binding state ~mailbox ~(goal_id : string)
-    ~(action : Goal_phase.Public_action.t) =
-  (* The transition carries the workspace this terminal confirmed, and the
-     server refuses one without it, so a server replaced on the same port
-     cannot receive a transition meant for the Goal the operator read. *)
-  match state.workspace_identity, state.server_identity with
-  | Workspace_identity_match, Some expected_workspace ->
-      Masc_tui_work_requests.Approval_gate_requests.supersede_home_decision_receipt state;
-      let ticket = Random_id.uuid_v7 () in
-      if not (note_goal_action_started state ~goal_id ~ticket) then
-        report_action state "error" ("Goal " ^ goal_id ^ ": a request is still in progress")
-      else begin
-      let origin = Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path
-        ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root ^ ")" in
-      let action_context = " (action " ^ Goal_phase.Public_action.to_string action in
-      let proof_context = match retry_binding with
-        | None -> action_context ^ ")"
-        | Some binding ->
-          action_context ^ "; criterion " ^ binding.Masc.Tui_decode.grb_criterion_revision
-          ^ "; proof request " ^ Option.value ~default:"none" binding.grb_request_id ^ ")" in
-      let annotate_error error =
-        "Goal request did not return a confirmed result; inspect the Goal before retrying: " ^ error ^ proof_context in
-      report_action state "system"
-        (Printf.sprintf "goal %s: %s" goal_id
-           (Goal_phase.Public_action.to_string action));
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-      let port = state.port in
-      Masc_tui_transport.Workspace_admission.launch_guarded_request ~operation:true state ~mailbox
-        ~boundary_error:(fun detail -> Request_failed (annotate_error detail))
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~cancelled:(Goal_msg (Goal_transition_done (goal_id, ticket, origin, Error (Request_failed (annotate_error "Request interrupted; its outcome is unknown. Inspect the Goal before retrying.")))))
-        ~deliver:(fun result -> Goal_msg (Goal_transition_done (goal_id, ticket, origin, Result.map (fun message -> message ^ proof_context) result)))
-        (fun () ->
-          (match
-            Masc_tui_http.post_goal_transition ~expected_workspace
-              ~host ~port ~goal_id ~action ~note ~retry_binding
-          with
-          | Error err -> Error (annotate_error err)
-          | Ok json -> Masc.Tui_decode.tool_envelope_outcome json |> Result.map_error annotate_error)
-          |> Result.map_error (fun detail -> Request_failed detail))
-      end
-  | ( Workspace_identity_match | Workspace_identity_mismatch _
-    | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ ), _ ->
-      Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Goal_transition workspace_identity_unconfirmed Nothing_kept
-
-(* Confirmation uses the operator route and the exact proof read here, never
-   the public MCP action set or a proof obtained at the second keypress. *)
-let handle_goal_confirmation_key state ~mailbox =
-  if state.workspace_identity <> Workspace_identity_match then
-    Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Goal_transition workspace_identity_unconfirmed Nothing_kept
-  else
-  match state.planning_mode with
-  | Planning_list -> ()
-  | Planning_detail goal_id when Result.is_error (Goal_store.validate_goal_id goal_id) ->
-      set_goal_action_error state ~goal_id "Cannot inspect confirmation for this Goal ID"
-  | Planning_detail goal_id ->
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-      state.goal_action_pending <- None;
-      (match state.goal_confirmation with
-       | Goal_confirmation.Submitting _ -> ()
-       | Goal_confirmation.Inspecting read when Goal_confirmation_read.in_flight read ->
-           report_action state "system" "Goal proof is being refreshed; wait for the current result"
-       | Goal_confirmation.Inspecting read ->
-      match Goal_confirmation_read.view_for ~equal:String.equal read ~key:goal_id with
-       | Ready confirmation when not (Option.exists (fun identity ->
-           Goal_confirmation.same_confirmation_workspace confirmation.workspace
-             (Goal_confirmation.confirmation_workspace_of_identity identity)
-           && identity.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity) ->
-           state.goal_confirmation_presented <- None;
-           report_action state "error" "Goal confirmation workspace or server changed; read the proof again";
-           clear_goal_confirmation_revalidation state ~goal_id;
-           launch_goal_confirmation_read state ~mailbox ~goal_id
-       | Ready confirmation when not (Masc_tui_http.credential_owner_is_current confirmation.credential_owner) ->
-           state.goal_confirmation_presented <- None;
-           report_action state "error" "Goal confirmation credential changed; read the proof again";
-           clear_goal_confirmation_revalidation state ~goal_id;
-           launch_goal_confirmation_read state ~mailbox ~goal_id
-       | Ready confirmation when confirmation.phase = Goal_phase.Completed ->
-           report_action state "system" "Goal confirmation is already recorded; no additional request sent"
-       | Ready confirmation when state.goal_confirmation_presented <> Some confirmation ->
-           report_action state "system"
-             (ui_text state
-                ~ko:"증거를 끝까지 읽은 뒤 [a]를 눌러 주세요"
-                ~en:"Read through the proof binding before confirming")
-       | Ready confirmation ->
-           Masc_tui_work_requests.Approval_gate_requests.supersede_home_decision_receipt state;
-           let ticket = Random_id.uuid_v7 () in
-           if not (note_goal_action_started state ~goal_id ~ticket) then
-             report_action state "error" ("Goal " ^ goal_id ^ ": a request is still in progress")
-           else begin
-           let origin = Option.fold ~none:"unconfirmed" ~some:(fun (identity : Masc.Tui_decode.server_identity) ->
-             Masc.Tui_decode.Canonical_path.to_string identity.sid_base_path
-             ^ " (masc root " ^ Masc.Tui_decode.Canonical_path.to_string identity.sid_masc_root ^ ")") state.server_identity
-             ^ " (server instance " ^ confirmation.runtime_instance_id ^ ")" in
-           let verdict = confirmation.Goal_confirmation.verdict in
-           let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
-           let proof_context = " (criterion " ^ criterion.revision
-             ^ "; proof request " ^ verdict.Goal_verification.request_id
-             ^ "; verification run " ^ verdict.verification_run_id ^ ")" in
-           let annotate_error error =
-             "Goal confirmation did not return a confirmed result; inspect the Goal before retrying: " ^ error
-             ^ proof_context in
-           let receipt_authority = Goal_confirmation.confirmation_receipt_authority confirmation in
-           state.goal_confirmation <- Goal_confirmation.Submitting
-               (goal_id, Goal_confirmation.suspend_confirmation_read read);
-           state.planning_scroll <- Planning_scroll_offset 0;
-           let workspace_authority = state.workspace_authority in
-           let workspace_read_authority = state.workspace_read_authority in
-           let expected_workspace = state.server_identity in
-           Masc_tui_transport.Workspace_admission.launch_guarded_request ~operation:true state ~mailbox
-             ~boundary_error:(fun detail -> Request_failed detail)
-             ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-             ~cancelled:(Goal_msg (Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority, Error (Request_failed (annotate_error "request interrupted")))))
-             ~deliver:(fun result -> Goal_msg (Goal_confirmation_submitted (goal_id, ticket, origin, receipt_authority,
-               result |> Result.map (fun message -> message ^ proof_context)
-               |> Result.map_error (function
-                 | Request_failed detail -> Request_failed (annotate_error detail)
-                 | Request_withdrawn refusal -> Request_withdrawn refusal))))
-             (fun () ->
-               Result.map_error (fun detail -> Request_failed detail) @@
-               let open Result.Syntax in
-               let credential = Masc_tui_http.bind_credential () in
-               let* () = if credential.bound_owner == confirmation.credential_owner then Ok ()
-                 else Error "Goal confirmation credential changed; read the proof again" in
-               let authority_current () = workspace_authority = state.workspace_authority
-                 && workspace_read_authority == state.workspace_read_authority
-                 && server_authority_ready state && state.port = port
-                 && Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some confirmation.runtime_instance_id) state.server_identity
-                 && Masc_tui_http.credential_owner_is_current confirmation.credential_owner in
-               let* expected_workspace = match expected_workspace with
-                 | Some expected -> Ok expected
-                 | None -> Error "Goal confirmation workspace is unavailable" in
-               let* () = if authority_current () then Ok ()
-                 else Error "Goal confirmation authority changed; read the proof again" in
-               let* json = Masc_tui_http.post_goal_confirmation ~host ~port confirmation in
-               let* confirmed = Goal_confirmation.decode_confirmation ~goal_id ~workspace:confirmation.workspace
-                 ~runtime_instance_id:confirmation.runtime_instance_id ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner json in
-               let* () = if confirmed.phase = Goal_phase.Completed
-                   && Goal_confirmation.same_confirmation_binding confirmation confirmed
-                 then Ok () else Error "goal confirmation: server did not confirm the inspected proof" in
-               let* () = if authority_current () then Ok ()
-                 else Error "Goal confirmation authority changed before readback" in
-               let* readback_json = Masc_tui_workspace_read.with_binding ~host ~port ~expected:expected_workspace
-                 ~proof:Masc_tui_workspace_read.Request_precondition (fun () ->
-                   Masc_tui_http.fetch_goal_confirmation ~credential ~expected_instance:confirmation.runtime_instance_id ~host ~port ~goal_id)
-                 |> Result.map_error (function
-                   | Goal_confirmation.Read_failed _ -> "Goal confirmation readback failed; inspect the current proof"
-                   | Goal_confirmation.Read_http_error (_, status) -> Printf.sprintf "Goal confirmation readback failed (HTTP %d)" status
-                   | Goal_confirmation.Server_changed _ -> "Goal confirmation server changed before readback"
-                   | Goal_confirmation.Read_kept_back notice -> notice) in
-               let* readback = Goal_confirmation.decode_confirmation ~goal_id ~workspace:confirmation.workspace
-                 ~runtime_instance_id:confirmation.runtime_instance_id ~credential_headers:confirmation.credential_headers ~credential_owner:confirmation.credential_owner readback_json in
-               if authority_current () && readback.phase = Goal_phase.Completed
-                  && Goal_confirmation.same_confirmation_binding confirmation readback
-                  && Goal_confirmation.same_recorded_confirmation confirmed readback
-               then Ok "completion confirmed by readback"
-               else Error "goal confirmation: readback did not match the confirmed proof and operator record"
-             )
-           end
-       | Loading -> ()
-       (* A confirmation read before a failed re-read is not the goal's
-          current state; confirming it would act on what the server no longer
-          answered. Ask again. *)
-       | Absent | Stale _ | Failed _ ->
-           state.planning_scroll <- Planning_scroll_offset 0;
-           clear_goal_confirmation_revalidation state ~goal_id;
-           launch_goal_confirmation_read state ~mailbox ~goal_id)
-
-(* The lifecycle keys on a goal detail. The first press names the action, the
-   same press again submits it, and any other key disarms. A drop opens its
-   reason instead: the Server refuses a drop that does not say why. *)
-let handle_goal_action_key state ~mailbox ~(action : Goal_phase.Public_action.t)
-    =
-  match state.planning_mode with
-  | Planning_detail goal_id when action = Goal_phase.Public_action.Drop ->
-      state.goal_action_pending <- Some (Goal_drop_reason { goal_id; reason = "" });
-      report_action state "system"
-        (Printf.sprintf "type why goal %s is dropped" goal_id)
-  | Planning_detail goal_id -> (
-      match state.goal_action_pending with
-      | Some (Goal_action_armed armed)
-        when String.equal armed.goal_id goal_id
-             && armed.action = action ->
-          state.goal_action_pending <- None;
-          start_goal_transition ?retry_binding:armed.retry_binding state ~mailbox ~goal_id ~action
-      | Some (Goal_action_armed _ | Goal_drop_reason _) | None ->
-          (match goal_detail_on_screen state with
-          | None -> ()
-          | Some goal ->
-          let retry_binding = match action with
-            | Goal_phase.Public_action.Request_complete -> goal.pg_retry_binding
-            | Drop | Reopen | Pause | Resume | Block | Unblock -> None in
-          state.goal_action_pending <- Some (Goal_action_armed { goal_id; action; phase=goal.pg_phase; retry_binding });
-          report_action state "system"
-            (Printf.sprintf "press %s again to %s goal %s"
-               (planning_action_key action)
-               (match action with
-                | Goal_phase.Public_action.Request_complete ->
-                    "request completion of"
-                | Goal_phase.Public_action.Drop -> "drop"
-                | Goal_phase.Public_action.Reopen -> "reopen"
-                | Goal_phase.Public_action.Pause -> "pause"
-                | Goal_phase.Public_action.Resume -> "resume"
-                | Goal_phase.Public_action.Block -> "block"
-                | Goal_phase.Public_action.Unblock -> "unblock")
-               goal_id)))
-  | Planning_list -> ()
-
-
-(* The kind decides the route: a post vote and a comment vote are two
-   requests, and nothing here can send one as the other. *)
-let send_board_vote state ~mailbox ~(up : bool) target =
-  let launch ~deliver read =
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox
-      ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal) ~deliver read in
-  let report = report_action state in
-  match target with
-  | Vote_post post_id ->
-      Masc_tui_board_requests.start_board_vote state ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-        ~report ~launch ~post_id ~up
-  | Vote_comment { post_id; comment_id } ->
-      Masc_tui_board_requests.start_board_comment_vote state
-        ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~report ~launch ~post_id ~comment_id ~up
-
-(* The vote keys. On the list they vote on the row under the cursor; while
-   reading, on the selected comment when the comments have focus and on the
-   open post otherwise. Two presses: the first names the target and
-   direction, the same press again sends it. The target is captured at arm
-   time, kind included, so moving the cursor between presses re-arms for
-   the new target rather than voting on the one the operator left. *)
-let handle_board_vote_key state ~cols ~mailbox ~(up : bool) =
-  let target =
-    match state.board_mode with
-    | Board_list ->
-        Option.map
-          (fun (post : board_post) -> Vote_post post.bp_id)
-          (List.nth_opt (board_posts state) state.board_cursor)
-    | Board_read post_id
-      when Masc_tui_types.board_read_focus state ~cols = Right_pane
-           && state.board_comments_focused ->
-        Option.map
-          (fun comment_id -> Vote_comment { post_id; comment_id })
-          (select_board_comment state ~post_id)
-    | Board_read post_id -> Some (Vote_post post_id)
-    | Board_compose -> None
-  in
-  match target with
-  | None -> ()
-  | Some target -> (
-      match Masc_tui_board_vote.press ~armed:state.board_vote_armed ~target ~up with
-      | Masc_tui_board_vote.Send (target, up) ->
-          state.board_vote_armed <- None;
-          send_board_vote state ~mailbox ~up target
-      | Masc_tui_board_vote.Arm (target, up) ->
-          state.board_vote_armed <- Some (target, up);
-          let ko = state.ui_language = Lang_ko in
-          let key = if up then "v" else "V" in
-          let direction = Masc_tui_board_vote.direction ~ko ~up in
-          let target_text = Masc_tui_board_vote.describe ~ko target in
-          report_action state "system"
-            (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key target_text direction
-             else Printf.sprintf "press %s again to vote %s on %s" key direction target_text))
-
-(* Cancel a schedule through the tools route. Same fiber-and-mailbox shape as
-   the other writes; the server's store rules decide whether the row is still
-   cancellable, so the TUI does not pre-guess from the status column. *)
-let start_schedule_cancel state ~mailbox ~(schedule_id : string) =
-  match state.workspace_identity with
-  | Workspace_identity_unread ->
-      Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Schedule_cancel workspace_identity_unread Nothing_kept
-  | Workspace_identity_match_unconfirmed _ ->
-      Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Schedule_cancel workspace_identity_unconfirmed Nothing_kept
-  | Workspace_identity_match | Workspace_identity_mismatch _ ->
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  let admit = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox in
-  state.schedule_cancel_error <- None;
-  report_action state "system"
-    (if state.ui_language = Lang_ko then Printf.sprintf "일정 %s 취소 보내는 중" schedule_id
-     else Printf.sprintf "cancelling schedule %s" schedule_id);
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  let run_cancel () =
-    let result =
-      match admit () with
-      | Error refusal -> Error (Request_withdrawn refusal)
-      | Ok () ->
-        (match Masc_tui_http.post_schedule_cancel ~host ~port ~schedule_id with
-         | Error detail -> Error (Request_failed detail)
-         | Ok json ->
-           Result.map_error (fun detail -> Request_failed detail)
-             (Masc.Tui_decode.tool_envelope_outcome json))
-    in
-    enqueue_async mailbox (Schedule_msg (Schedule_cancel_done (schedule_id, result)))
-  in
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Masc_tui_transport.Workspace_admission.fork_job state ~mailbox ~sw run_cancel
-  | None -> run_cancel ()
-
-let selected_schedule_row state =
-  match schedule_detail_on_screen state with
-  | Some row -> Some row
-  | None ->
-      Option.bind state.schedules (fun snapshot ->
-        List.nth_opt snapshot.scs_rows state.schedule_cursor)
-
-(* The cancel key on the row under the cursor. Two presses, like the vote
-   keys: the first names the schedule, the same press again sends it. The
-   schedule id is captured at arm time, so moving the cursor between presses
-   re-arms for the new row rather than cancelling the one the operator left. *)
-let handle_schedule_cancel_key state ~mailbox =
-  match selected_schedule_row state with
-  | None -> ()
-  | Some row -> (
-      match state.schedule_cancel_armed with
-      | Some armed when String.equal armed row.sch_schedule_id ->
-          state.schedule_cancel_armed <- None;
-          start_schedule_cancel state ~mailbox
-            ~schedule_id:row.sch_schedule_id
-      | Some _ | None ->
-          state.schedule_cancel_armed <- Some row.sch_schedule_id;
-          state.schedule_cancel_error <- None;
-          report_action state "system"
-            (schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko)
-               row.sch_schedule_id))
-
-(* Send the operator's verdict through the verification route. Same
-   fiber-and-mailbox shape as the other writes; whether the task still awaits
-   verification is the route's store rules to say, so the TUI does not
-   pre-guess from the row it rendered a moment ago. *)
-let start_verification_verdict state ~mailbox ~(task_id : string)
-    ~(verification_id : string) ~(verdict : [ `Approve | `Reject of string ]) =
-  if Option.is_some state.verification_verdict_inflight then ()
-  else begin
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  state.verification_verdict_error <- None;
-  state.verification_verdict_inflight <- Some (task_id, verification_id);
-  let verb = match verdict with `Approve -> "approving" | `Reject _ -> "rejecting" in
-  report_action state "system" (Printf.sprintf "%s %s" verb task_id);
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  let deliver result = Verification_msg (Verification_verdict_done result) in
-  let cancelled =
-    deliver (Error (Request_failed "Verification verdict cancelled"))
-  in
-  let on_not_run () =
-    state.verification_verdict_inflight <- None;
-    state.verification_verdict_error <-
-      Some (Request_failed "Verification verdict could not start")
-  in
-  Masc_tui_transport.Workspace_admission.launch_result ~operation:true ~cancelled ~on_not_run state ~mailbox
-    ~boundary_error:(fun detail -> Request_failed detail)
-    ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-    ~deliver
-    (fun () ->
-      match Masc_tui_transport.Workspace_admission.admit_request state ~mailbox ~authority ~identity ~host ~port () with
-      | Error refusal -> Error (Request_withdrawn refusal)
-      | Ok () ->
-          (match
-             Masc_tui_http.post_verification_verdict ~host ~port ~task_id
-               ~verification_id ~verdict
-           with
-           | Error err -> Error err
-           | Ok json -> Masc.Tui_decode.verification_verdict_outcome json)
-          |> Result.map_error (fun detail -> Request_failed detail))
-  end
-
-(* The row under the Verification cursor, if the list has one. *)
-let verification_cursor_row state =
-  let requests =
-    match state.verification with
-    | None -> []
-    | Some s -> s.Masc.Tui_decode.vs_requests
-  in
-  match state.verification_detail_request_id with
-  | Some request_id ->
-      List.find_opt
-        (fun row ->
-           String.equal row.Masc.Tui_decode.vr_request_id request_id)
-        requests
-  | None -> List.nth_opt requests state.verification_cursor
-
-(* The approve key on the row under the cursor. Two presses, like the cancel
-   and vote keys: the first names the task and request, the same press again
-   sends the verdict. A reload can replace a request for the same task; a
-   press on that new request re-arms instead of approving it. Reject is not
-   armed -- its $EDITOR reason form is the confirmation. *)
-(* Opening a detail is one move -- read the row under the cursor, name it, put
-   the pane at the top of it, fetch what the detail needs -- and each surface
-   spelled that move inside its own Enter arm, guarded on the detail not being
-   open yet.
-
-   [ / ] needs the same move with the opposite guard: the detail IS open and
-   the cursor just moved. Spelled twice, the two would drift, and the shape
-   that drifts here is "which loads run on open" -- a step that forgot one
-   draws the previous row's evidence under the new row's title.
-
-   So the move comes out, ungated, and the two callers bring their own guard.
-   The list each reads is the list its own surface draws: Planning filters and
-   sorts before indexing, and indexing the unsorted goals would open whichever
-   goal happens to sit at that position in the store. *)
-
-let open_planning_detail state ~mailbox =
-  let goals =
-    match state.planning with
-    | None -> []
-    | Some p ->
-        planning_visible_goals ~filter:state.planning_filter
-          ~sort:state.planning_sort p.pl_goals
-  in
-  match List.nth_opt goals state.planning_cursor with
-  | None -> ()
-  | Some g ->
-      state.planning_mode <- Planning_detail g.pg_id;
-      state.planning_scroll <- Planning_scroll_offset 0;
-      state.goal_timeline <- Masc_tui_fetched.clear state.goal_timeline;
-      Masc_tui_work_requests.Tools_task_requests.launch_goal_timeline_load state ~mailbox g.pg_id
-
-(* The list row carries one wake; the whole history comes from the exact
-   lookup, so opening a detail asks for it. Clearing the previous schedule's
-   history first is what stops the pane showing one schedule's attempts under
-   another's name while the answer is in flight. *)
-let open_schedule_detail state ~mailbox =
-  match state.schedules with
-  | None -> ()
-  | Some snapshot ->
-      Option.iter
-        (fun row ->
-          state.schedule_detail_id <- Some row.sch_schedule_id;
-          state.schedule_scroll <- 0;
-          state.schedule_wake_history <- None;
-          state.schedule_wake_history_error <- None;
-          Masc_tui_work_requests.Schedule_call_requests.launch_schedule_wake_history_load state ~mailbox
-            ~schedule_id:row.sch_schedule_id)
-        (List.nth_opt snapshot.scs_rows state.schedule_cursor)
-
-let open_verification_detail state ~mailbox =
-  let requests =
-    match state.verification with
-    | None -> []
-    | Some s -> s.Masc.Tui_decode.vs_requests
-  in
-  match List.nth_opt requests state.verification_cursor with
-  | None -> ()
-  | Some row ->
-      state.verification_detail_request_id <-
-        Some row.Masc.Tui_decode.vr_request_id;
-      state.verification_detail_scroll <- 0;
-      state.verification_evidence_cursor <- 0;
-      state.verification_evidence_index_open <- false;
-      launch_verification_evidence_load state ~mailbox
-        {vek_request_id=row.Masc.Tui_decode.vr_request_id;vek_task_id=row.vr_task_id}
-
-let selected_verification_evidence state =
-  match (if Option.is_some state.verification_detail_request_id then verification_cursor_row state else None) with
-  | None -> None
-  | Some row ->
-    let key = {vek_request_id=row.vr_request_id;vek_task_id=row.vr_task_id} in
-    match Masc_tui_fetched.view_for ~equal:equal_verification_evidence_key state.verification_evidence ~key with
-    | Ready (Masc_tui_evidence_picture.Items items) ->
-      let index = max 0 (min (List.length items - 1) state.verification_evidence_cursor) in
-      Option.map (fun item -> key, index, List.length items, item) (List.nth_opt items index)
-    | Absent | Loading | Failed _ | Stale _ | Ready (Masc_tui_evidence_picture.Access_unavailable _) -> None
-
-let step_verification_evidence state delta =
-  match selected_verification_evidence state with
-  | None ->
-      report_action state "system"
-        (ui_text state
-           ~ko:"증거 내용을 먼저 불러와야 합니다. r로 다시 읽을 수 있습니다."
-           ~en:"Load evidence content first. Press r to reload.")
-  | Some (_, index, count, _) ->
-    state.verification_evidence_cursor <- max 0 (min (count - 1) (index + delta));
-    state.verification_evidence_index_open <- false;
-    state.verification_detail_scroll <- 0
-
-let export_verification_evidence state ~mailbox ~open_file =
-  match selected_verification_evidence state, Eio_context.get_env_opt () with
-  | None, _ ->
-      report_action state "error"
-        (ui_text state ~ko:"현재 제출의 증거를 먼저 불러오세요." ~en:"Load evidence for the current submission first.")
-  | Some _, None ->
-      report_action state "error"
-        (ui_text state ~ko:"이 기기의 파일 시스템을 사용할 수 없습니다." ~en:"File system access is unavailable on this device.")
-  | Some (key, index, _, _), Some env ->
-    let request = {vex_key=key;vex_index=index;vex_authority=state.workspace_authority;
-      vex_reading=state.workspace_read_authority;vex_progress=Atomic.make Masc_tui_evidence_file.Not_started} in
-    let host=Masc_tui_transport.Workspace_admission.server_peer_host and port=state.port in
-    let read = Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-      Masc_tui_http.fetch_verification_evidence_file ~host ~port ~task_id:key.vek_task_id
-        ~verification_id:key.vek_request_id ~index) in
-    let current () =
-      if request.vex_authority = state.workspace_authority
-         && request.vex_reading == state.workspace_read_authority
-      then Ok () else Error "Workspace changed before the evidence file operation" in
-    report_action state "system"
-      (if state.ui_language = Lang_ko then "선택한 증거 사본을 내려받는 중"
-       else "Downloading selected evidence copy");
-    Masc_tui_transport.Workspace_admission.launch_guarded_request ~operation:true state ~mailbox
-      ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~cancelled:(Verification_msg (Verification_evidence_exported (request, Error (Request_failed "File operation interrupted; a local copy or opened viewer may exist. Inspect before retrying."))))
-      ~deliver:(fun result -> Verification_msg (Verification_evidence_exported (request,result)))
-      (fun () ->
-        match read () with
-        | Error refusal -> Error (Request_withdrawn refusal)
-        | Ok file ->
-        Result.map_error (fun detail -> Request_failed detail) @@
-        let open Result.Syntax in
-        let* file = file in
-        let open_file = if not open_file then None else Some (fun path ->
-          Eio_guard.run_in_systhread ~label:"tui-evidence-open" (fun () ->
-            Masc_tui_browser.open_url (Uri.to_string (Uri.make ~scheme:"file" ~path ())))
-          |> Result.map (fun _ -> ())) in
-        Masc_tui_evidence_file.export ~fs:env#fs
-          ~registry_root:(Common.masc_dir_from_base_path ~base_path:state.local_base_path)
-          ~directory:(Filename.get_temp_dir_name ())
-          ~progress:request.vex_progress ~admitted:current ~open_file file)
-
-let open_harness_detail state =
-  match state.harness with
-  | None -> ()
-  | Some snapshot ->
-      Option.iter
-        (fun verdict ->
-          state.harness_detail <-
-            Some (verdict.Masc.Tui_decode.hv_task_id, verdict.hv_at);
-          state.harness_detail_scroll <- 0)
-        (List.nth_opt snapshot.Masc.Tui_decode.hs_verdicts
-           state.harness_cursor)
-
-let open_fusion_detail state ~mailbox =
-  match Masc_tui_fusion_model.selected_fusion_entry state with
-  | None -> ()
-  | Some (Masc.Tui_decode_fusion.Fusion_historical_evidence evidence) ->
-      state.fusion_mode <- Fusion_historical_detail evidence;
-      state.fusion_scroll <- 0;
-      state.fusion_historical_detail <- None;
-      state.fusion_historical_detail_stale <- false;
-      state.fusion_detail_error <- None;
-      launch_fusion_historical_detail_load ~demand:Masc_tui_fusion_updates.After_change
-        state ~mailbox ~reference:evidence
-  | Some (Masc.Tui_decode_fusion.Fusion_retained_run run) ->
-      state.fusion_mode <- Fusion_detail run.fur_run_id;
-      state.fusion_scroll <- 0;
-      state.fusion_detail <- None;
-      state.fusion_detail_stale <- false;
-      state.fusion_detail_error <- None;
-      launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
-        state ~mailbox ~run_id:run.fur_run_id
-
-let open_selected_system_log state =
-  match
-    List.nth_opt
-      (Masc_tui_types.visible_system_log_entries state)
-      (system_logs_page state).lp_cursor
-  with
-  | None -> ()
-  | Some entry ->
-      edit_system_logs_page state (fun page ->
-        {page with lp_detail_seq=Some entry.Tui_decode.sl_seq;lp_detail_scroll=0})
-(* One step through the list a detail was opened from, without closing it.
-   Reading a queue meant Esc, move, Enter for every row -- three keys to do
-   what one does on Changes and the Keeper detail tabs, both of which already
-   spell it [ / ].
-
-   [count] is the surface's own list length, so a step past either end stays
-   put rather than wrapping: a reader walking a queue wants to arrive at the
-   end and know it, not to reappear at the top. *)
-let step_detail_cursor ~count ~cursor ~delta ~set_cursor ~reopen =
-  if count > 0 then begin
-    let next = max 0 (min (count - 1) (cursor + delta)) in
-    if next <> cursor then begin
-      set_cursor next;
-      reopen ()
-    end
-  end
-
-let handle_verification_approve_key state ~mailbox =
-  match verification_cursor_row state with
-  | None -> ()
-  | Some row -> (
-      let task_id = row.Masc.Tui_decode.vr_task_id in
-      let request_id = row.Masc.Tui_decode.vr_request_id in
-      match state.verification_verdict_armed with
-      | Some (armed_task, armed_request)
-        when String.equal armed_task task_id
-             && String.equal armed_request request_id ->
-          state.verification_verdict_armed <- None;
-          start_verification_verdict state ~mailbox ~task_id
-            ~verification_id:request_id ~verdict:`Approve
-      | Some _ | None ->
-          state.verification_verdict_armed <- Some (task_id, request_id);
-          state.verification_verdict_error <- None;
-          report_action state "system"
-            (Printf.sprintf "press a again to approve %s [%s]" task_id request_id))
 
 let open_board_composer_editor state ~restore ~reenter =
   match Masc_tui_editor.editor_command () with
@@ -16728,9 +15910,9 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              if (!fusion_status_seen).open_run then
                (match state.fusion_mode with
                 | Fusion_detail run_id ->
-                    launch_fusion_detail_load ~demand state ~mailbox ~run_id
+                    Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load ~demand state ~mailbox ~run_id
                 | Fusion_historical_detail reference ->
-                    launch_fusion_historical_detail_load ~demand state ~mailbox ~reference
+                    Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load ~demand state ~mailbox ~reference
                 | Fusion_list -> ())
          | Keepers Keeper_detail when state.detail_tab = Detail_runs ->
              launch_fusion_runs_load ~demand state ~mailbox
@@ -17365,7 +16547,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            report_action state "error" (label ^ err)
        | Error (Request_withdrawn refusal) ->
            report_action state "error"
-             (goal_kept_back_notice state ~goal_id ~current refusal));
+             (Masc_tui_work_actions.Goal_actions.goal_kept_back_notice state ~goal_id ~current refusal));
       Drawn_changed
   | Goal_msg (Goal_confirmation_submitted (goal_id, ticket, workspace, authority, result)) ->
       record_goal_action_receipt ~authority state ~goal_id ~ticket ~workspace result;
@@ -17387,7 +16569,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       let label = "Goal " ^ goal_id ^ (if current then "" else " (earlier request)") ^ ": " in
       (match owned, result with
        | _, Error (Request_withdrawn refusal) ->
-           report_action state "error" (goal_kept_back_notice state ~goal_id ~current refusal)
+           report_action state "error" (Masc_tui_work_actions.Goal_actions.goal_kept_back_notice state ~goal_id ~current refusal)
        | false, _ ->
            report_action state "system" (label ^ "confirmation result belongs to an earlier server or credential; inspect the original workspace")
        | true, Ok _ ->
@@ -17449,7 +16631,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             | (Some _ | None), (Some _ | None) -> ());
            (match credential_changed, current, selected_planning_goal_id state with
             | true, true, Some selected when String.equal goal_id selected ->
-                launch_goal_confirmation_read state ~mailbox ~goal_id
+                Masc_tui_work_actions.Goal_actions.launch_goal_confirmation_read state ~mailbox ~goal_id
             | _, _, (Some _ | None) -> ())
        | Goal_confirmation.Submitting _ -> ());
       Drawn_changed
@@ -17483,8 +16665,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       let key = Masc_tui_fetched.request_key request.ver_ticket in
       let admitted = state.verification_detail_request_id = Some key.vek_request_id
         && complete_verification_evidence_read state request result in
-      log_verification_evidence_read request
-        ~phase:(if admitted then "applied" else "discarded") ~outcome:(verification_evidence_outcome result);
+      Masc_tui_work_actions.Verification_actions.log_verification_evidence_read request
+        ~phase:(if admitted then "applied" else "discarded") ~outcome:(Masc_tui_work_actions.Verification_actions.verification_evidence_outcome result);
       Drawn_changed
   | Task_msg (Task_cancel_done (task_id, expected_workspace, result)) ->
       let refresh certainty =
@@ -17596,7 +16778,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                             Masc_tui_board_preview_work.release board_image_open_worker) (fun () ->
                             try Ok (Masc_tui_image_cache.wait_bounded
                               ~cancelled:(fun () -> Atomic.get cancelled)
-                              ~deadline_seconds:image_process_deadline_seconds pid)
+                              ~deadline_seconds:Masc_tui_work_actions.Verification_actions.image_process_deadline_seconds pid)
                             with exn ->
                               (try kill_and_reap () with _ -> ());
                               Error (Printexc.to_string exn)) in
@@ -21635,7 +20817,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       let result = Masc_tui_transport.Request_notice.said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.detail_loaded state ~generation ~run_id result with
        | Reread when state.view = Fusion ->
-           launch_fusion_detail_load state ~mailbox ~run_id
+           Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load state ~mailbox ~run_id
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Detail result
        | Reread | Await_observer | Obsolete -> ());
       Drawn_changed
@@ -21643,7 +20825,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       let result = Masc_tui_transport.Request_notice.said_read_result state ~request:Kept_request.Fusion_read result in
       (match Masc_tui_fusion_updates.historical_detail_loaded state ~generation ~reference result with
        | Reread when state.view = Fusion ->
-           launch_fusion_historical_detail_load state ~mailbox ~reference
+           Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load state ~mailbox ~reference
        | Applied -> settle_fusion_retry state Masc_tui_fusion_updates.Historical result
        | Reread | Await_observer | Obsolete -> ());
       Drawn_changed
@@ -21699,7 +20881,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                           String.equal row.Masc.Tui_decode.vr_request_id
                             request_id)
                        requests) ->
-               cancel_verification_evidence_load state
+               Masc_tui_work_actions.Verification_actions.cancel_verification_evidence_load state
                  ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
                state.verification_detail_request_id <- None;
                state.verification_detail_scroll <- 0
@@ -23237,7 +22419,7 @@ let main
      an empty reason leaves the task unjudged, so no arming gate sits in
      front of it the way one sits in front of the single-key approve. *)
   let handle_verification_reject () =
-    match verification_cursor_row state with
+    match Masc_tui_work_actions.Verification_actions.verification_cursor_row state with
     | None -> ()
     | Some row -> (
         let task_id = row.Masc.Tui_decode.vr_task_id in
@@ -23267,7 +22449,7 @@ let main
                     if String.equal reason "" then
                       report_action state "system" "reject cancelled (empty reason)"
                     else
-                      start_verification_verdict state
+                      Masc_tui_work_actions.Verification_actions.start_verification_verdict state
                         ~mailbox:async_messages ~task_id
                         ~verification_id:row.Masc.Tui_decode.vr_request_id
                         ~verdict:(`Reject reason))))
@@ -24438,7 +23620,7 @@ Use relative paths for resources already held in the package. -->
     (* Every modify attempt retires the earlier refusal, including the ones
        refused before an editor opens; their reason goes to the footer. *)
     state.schedule_form_refusal <- None;
-    match selected_schedule_row state with
+    match Masc_tui_work_actions.Board_schedule_actions.selected_schedule_row state with
     | None ->
       let ko = state.ui_language = Lang_ko in
       report_action state "error"
@@ -26733,7 +25915,7 @@ Use relative paths for resources already held in the package. -->
                   String.equal goal.pg_id armed.goal_id
                   && planning_goal_retains_arm goal ~action:armed.action
                        ~phase:armed.phase ~retry_binding:armed.retry_binding)
-                    (goal_detail_on_screen state) in
+                    (Masc_tui_work_actions.Goal_actions.goal_detail_on_screen state) in
                 if not current || cancelled (planning_action_confirmation_keys armed.action) then
                   state.goal_action_pending <- None
             | Some (Goal_drop_reason _) ->
@@ -28147,7 +27329,7 @@ Use relative paths for resources already held in the package. -->
                    set_goal_action_error state ~goal_id:entry.goal_id "A request is still in progress; the drop reason is retained"
                  else begin
                    clear_goal_action_error state ~goal_id:entry.goal_id;
-                   start_goal_transition state ~mailbox:async_messages ~note:reason
+                   Masc_tui_work_actions.Goal_actions.start_goal_transition state ~mailbox:async_messages ~note:reason
                      ~goal_id:entry.goal_id ~action:Goal_phase.Public_action.Drop
                  end
                | "\127" | "\b" | "backspace" ->
@@ -30266,7 +29448,7 @@ Use relative paths for resources already held in the package. -->
                 state.fusion_detail <- None;
                 state.fusion_detail_stale <- false;
                 state.fusion_detail_error <- None;
-                launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+                Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
                   state ~mailbox:async_messages ~run_id:run.fur_run_id)
        | Some "a" when state.view = Fusion && state.fusion_mode = Fusion_list ->
            launch_fusion_launch_options_load state ~mailbox:async_messages
@@ -30535,8 +29717,8 @@ Use relative paths for resources already held in the package. -->
           mean something else, and on Changes and the Keeper detail tabs it
           already does. *)
        | Some (("[" | "]") as bracket)
-         when state.view = Schedules && Option.is_some (schedule_detail_on_screen state) ->
-           step_detail_cursor
+         when state.view = Schedules && Option.is_some (Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state) ->
+           Masc_tui_work_actions.Detail_navigation.step_detail_cursor
              ~count:
                (match state.schedules with
                 | None -> 0
@@ -30545,11 +29727,11 @@ Use relative paths for resources already held in the package. -->
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.schedule_cursor <- n)
              ~reopen:(fun () ->
-               open_schedule_detail state ~mailbox:async_messages)
+               Masc_tui_work_actions.Detail_navigation.open_schedule_detail state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
          when state.view = Verification
               && Option.is_some state.verification_detail_request_id ->
-           step_detail_cursor
+           Masc_tui_work_actions.Detail_navigation.step_detail_cursor
              ~count:
                (match state.verification with
                 | None -> 0
@@ -30558,10 +29740,10 @@ Use relative paths for resources already held in the package. -->
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.verification_cursor <- n)
              ~reopen:(fun () ->
-               open_verification_detail state ~mailbox:async_messages)
+               Masc_tui_work_actions.Detail_navigation.open_verification_detail state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
          when state.view = Harness && Option.is_some state.harness_detail ->
-           step_detail_cursor
+           Masc_tui_work_actions.Detail_navigation.step_detail_cursor
              ~count:
                (match state.harness with
                 | None -> 0
@@ -30569,11 +29751,11 @@ Use relative paths for resources already held in the package. -->
              ~cursor:state.harness_cursor
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.harness_cursor <- n)
-             ~reopen:(fun () -> open_harness_detail state)
+             ~reopen:(fun () -> Masc_tui_work_actions.Detail_navigation.open_harness_detail state)
        | Some (("[" | "]") as bracket)
          when Option.is_some (selected_planning_goal_id state) ->
            state.home_opened_request <- None;
-           step_detail_cursor
+           Masc_tui_work_actions.Detail_navigation.step_detail_cursor
              ~count:
                (match state.planning with
                 | None -> 0
@@ -30585,7 +29767,7 @@ Use relative paths for resources already held in the package. -->
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.planning_cursor <- n)
              ~reopen:(fun () ->
-               open_planning_detail state ~mailbox:async_messages)
+               Masc_tui_work_actions.Detail_navigation.open_planning_detail state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
          when state.view = Fusion
               && (match state.fusion_mode with
@@ -30598,18 +29780,18 @@ Use relative paths for resources already held in the package. -->
                 state.fusion_detail_error <- None;
                 state.fusion_detail_generation <- state.fusion_detail_generation + 1
             | Some cursor ->
-                step_detail_cursor
+                Masc_tui_work_actions.Detail_navigation.step_detail_cursor
                   ~count:(List.length (Masc_tui_fusion_model.fusion_list_entries state))
                   ~cursor
                   ~delta:(if bracket = "]" then 1 else -1)
                   ~set_cursor:(fun n -> state.fusion_cursor <- n)
-                  ~reopen:(fun () -> open_fusion_detail state ~mailbox:async_messages))
+                  ~reopen:(fun () -> Masc_tui_work_actions.Detail_navigation.open_fusion_detail state ~mailbox:async_messages))
        (* Approvals holds no id -- the detail is a flag over the row under the
           cursor -- so stepping is the cursor move, and the pane follows. *)
        | Some (("[" | "]") as bracket)
          when state.view = Approvals && state.approval_detail_open ->
            state.home_opened_request <- None;
-           step_detail_cursor ~count:(List.length (Masc_tui_approvals_model.approval_items state))
+           Masc_tui_work_actions.Detail_navigation.step_detail_cursor ~count:(List.length (Masc_tui_approvals_model.approval_items state))
              ~cursor:state.approval_cursor
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun n -> state.approval_cursor <- n)
@@ -30617,13 +29799,13 @@ Use relative paths for resources already held in the package. -->
        | Some (("[" | "]") as bracket)
          when state.view = System_logs
               && system_log_detail_open state ->
-           step_detail_cursor
+           Masc_tui_work_actions.Detail_navigation.step_detail_cursor
              ~count:
                (List.length (Masc_tui_types.visible_system_log_entries state))
              ~cursor:(system_logs_page state).lp_cursor
              ~delta:(if bracket = "]" then 1 else -1)
              ~set_cursor:(fun cursor -> edit_system_logs_page state (fun page -> {page with lp_cursor=cursor}))
-             ~reopen:(fun () -> open_selected_system_log state)
+             ~reopen:(fun () -> Masc_tui_work_actions.Detail_navigation.open_selected_system_log state)
        | Some (("[" | "]") as bracket) when state.view = Board ->
            step_board_read state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
@@ -30731,7 +29913,7 @@ Use relative paths for resources already held in the package. -->
              ~read:(launch_resources_read state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
          when state.view = Resources && state.resource_focus = Right_pane ->
-           step_detail_cursor
+           Masc_tui_work_actions.Detail_navigation.step_detail_cursor
              ~count:
                (match visible_resources state with
                 | None -> 0
@@ -30765,7 +29947,7 @@ Use relative paths for resources already held in the package. -->
        | Some (("[" | "]") as bracket) when state.view = Lanes ->
            (match state.lanes_mode with
             | Lanes_run_detail (lane, _) ->
-              step_detail_cursor
+              Masc_tui_work_actions.Detail_navigation.step_detail_cursor
                 ~count:(List.length (Option.value state.lane_runs ~default:[]))
                 ~cursor:state.lane_runs_cursor
                 ~delta:(if bracket = "]" then 1 else -1)
@@ -31525,10 +30707,10 @@ Use relative paths for resources already held in the package. -->
            state.verification_detail_scroll <- 0
        | Some (("e" | "E") as key) when state.view = Verification
            && Option.is_some state.verification_detail_request_id ->
-           step_verification_evidence state (if key = "e" then 1 else -1)
+           Masc_tui_work_actions.Verification_actions.step_verification_evidence state (if key = "e" then 1 else -1)
        | Some (("o" | "s") as key) when state.view = Verification
            && Option.is_some state.verification_detail_request_id ->
-           export_verification_evidence state ~mailbox:async_messages ~open_file:(key = "o")
+           Masc_tui_work_actions.Verification_actions.export_verification_evidence state ~mailbox:async_messages ~open_file:(key = "o")
        | Some "i" when state.view = Overview ->
            goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        | Some "i"
@@ -31598,7 +30780,7 @@ Use relative paths for resources already held in the package. -->
                          not state.board_comments_focused;
                        if state.board_comments_focused then
                          ignore
-                           (select_board_comment state ~post_id : string option)
+                           (Masc_tui_work_actions.Board_schedule_actions.select_board_comment state ~post_id : string option)
                    | Board_detail.Absent | Board_detail.Loading
                    | Board_detail.Ready (_, [], _) | Board_detail.Failed _ -> ())
             | Board_list | Board_compose -> ())
@@ -32178,7 +31360,7 @@ Use relative paths for resources already held in the package. -->
                        ~mailbox:async_messages ~schedule_id
                  | Link.Fusion_run, Fusion, Some run_id ->
                      state.fusion_mode <- Fusion_detail run_id;
-                     launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
+                     Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load ~demand:Masc_tui_fusion_updates.After_change
                        state ~mailbox:async_messages ~run_id
                  | Link.Keeper, Keepers _, Some keeper_name ->
                      (* The roster is a cursor, not an id, so this puts the
@@ -32454,7 +31636,7 @@ Use relative paths for resources already held in the package. -->
             (* Otherwise the bindings are read by a cursor [e] acts on: its
                row list. *)
             | Config when state.config_pane = Config_models -> move_list state page_key
-            | Planning when Option.is_some (goal_detail_on_screen state) ->
+            | Planning when Option.is_some (Masc_tui_work_actions.Goal_actions.goal_detail_on_screen state) ->
                 let count, height = Masc_tui_render.planning_detail_viewport state in
                 state.planning_scroll <- Planning_scroll_offset
                   ((if direction > 0 then Masc_tui_scroll.page_down ~count ~height
@@ -32480,7 +31662,7 @@ Use relative paths for resources already held in the package. -->
                      state.fusion_scroll <-
                        Masc_tui_scroll.step_uncounted ~delta:(direction * page) state.fusion_scroll)
             | Schedules ->
-                if Option.is_some (schedule_detail_on_screen state) then
+                if Option.is_some (Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state) then
                   let count, height = Masc_tui_render.schedule_detail_viewport state in
                   state.schedule_scroll <-
                     (if direction > 0 then Masc_tui_scroll.page_down ~count ~height
@@ -32714,10 +31896,10 @@ Use relative paths for resources already held in the package. -->
                (Masc_tui_scroll.normalize ~count ~height target)
            in
            let open_candle () =
-             open_planning_detail state ~mailbox:async_messages;
-             Option.iter follow_candle (goal_detail_on_screen state)
+             Masc_tui_work_actions.Detail_navigation.open_planning_detail state ~mailbox:async_messages;
+             Option.iter follow_candle (Masc_tui_work_actions.Goal_actions.goal_detail_on_screen state)
            in
-           (match goal_detail_on_screen state with
+           (match Masc_tui_work_actions.Goal_actions.goal_detail_on_screen state with
             | Some goal ->
               read_candle goal.pg_id;
               follow_candle goal
@@ -32732,12 +31914,12 @@ Use relative paths for resources already held in the package. -->
                    open_candle ()
                | None | Some _ -> ()))
        | Some key when state.view = Planning
-           && Option.is_some (goal_detail_action state key) ->
+           && Option.is_some (Masc_tui_work_actions.Goal_actions.goal_detail_action state key) ->
            (* Detail actions take precedence over global navigation.
               The displayed keys and parser share one owner. *)
            Option.iter
-             (fun action -> handle_goal_action_key state ~mailbox:async_messages ~action)
-             (goal_detail_action state key)
+             (fun action -> Masc_tui_work_actions.Goal_actions.handle_goal_action_key state ~mailbox:async_messages ~action)
+             (Masc_tui_work_actions.Goal_actions.goal_detail_action state key)
        | Some "r" | Some "R" ->
            refresh_shared_sources ();
            (* Also reload logs / Board detail if viewing them. *)
@@ -32817,9 +31999,9 @@ Use relative paths for resources already held in the package. -->
                 (match state.fusion_mode with
                  | Fusion_list -> ()
                  | Fusion_detail run_id ->
-                     launch_fusion_detail_load state ~mailbox:async_messages ~run_id
+                     Masc_tui_work_actions.Detail_navigation.launch_fusion_detail_load state ~mailbox:async_messages ~run_id
                  | Fusion_historical_detail reference ->
-                     launch_fusion_historical_detail_load state ~mailbox:async_messages ~reference)
+                     Masc_tui_work_actions.Detail_navigation.launch_fusion_historical_detail_load state ~mailbox:async_messages ~reference)
             | Memory ->
                 Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox:async_messages;
                 (match state.memory_facts_keeper with
@@ -32991,7 +32173,7 @@ Use relative paths for resources already held in the package. -->
                 else goto_surface state ~mailbox:async_messages Planning
             | Verification ->
                 if Option.is_some state.verification_detail_request_id then begin
-                  cancel_verification_evidence_load state
+                  Masc_tui_work_actions.Verification_actions.cancel_verification_evidence_load state
                     ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
                   state.verification_detail_request_id <- None;
                   state.verification_detail_scroll <- 0
@@ -33182,7 +32364,7 @@ Use relative paths for resources already held in the package. -->
                 state.schedule_detail_id <- None;
                 state.schedule_scroll <- 0
             | Verification ->
-                cancel_verification_evidence_load state
+                Masc_tui_work_actions.Verification_actions.cancel_verification_evidence_load state
                   ~reason:(Verification_evidence_read.Interrupted "The original verification detail was closed.");
                 state.verification_detail_request_id <- None;
                 state.verification_detail_scroll <- 0
@@ -33371,7 +32553,7 @@ Use relative paths for resources already held in the package. -->
                  | Fusion_detail _ | Fusion_historical_detail _ ->
                      state.fusion_scroll <- Masc_tui_types.scroll_down_from state.fusion_scroll ~by:1)
             | Schedules ->
-                if Option.is_some (schedule_detail_on_screen state) then
+                if Option.is_some (Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state) then
                   state.schedule_scroll <- Masc_tui_types.scroll_down_from state.schedule_scroll ~by:1
                 else move_list state Masc_tui_scroll.Line_down
             | Overview -> ()
@@ -33606,7 +32788,7 @@ Use relative paths for resources already held in the package. -->
                      if state.fusion_scroll > 0 then
                        state.fusion_scroll <- state.fusion_scroll - 1)
             | Schedules ->
-                if Option.is_some (schedule_detail_on_screen state) then
+                if Option.is_some (Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state) then
                   state.schedule_scroll <- max 0 (state.schedule_scroll - 1)
                 else move_list state Masc_tui_scroll.Line_up
             | Overview -> ()
@@ -33837,17 +33019,17 @@ Use relative paths for resources already held in the package. -->
                       | None -> ())
                  | Board_read _ | Board_compose -> ())
             | Schedules ->
-                (match schedule_detail_on_screen state with
-                 | None -> open_schedule_detail state ~mailbox:async_messages
+                (match Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state with
+                 | None -> Masc_tui_work_actions.Detail_navigation.open_schedule_detail state ~mailbox:async_messages
                  | Some _ -> ())
             | Verification ->
                 (match state.verification_detail_request_id with
                  | Some _ -> ()
                  | None ->
-                     open_verification_detail state ~mailbox:async_messages)
+                     Masc_tui_work_actions.Detail_navigation.open_verification_detail state ~mailbox:async_messages)
             | Harness ->
                 (match state.harness_detail with
-                 | None -> open_harness_detail state
+                 | None -> Masc_tui_work_actions.Detail_navigation.open_harness_detail state
                  | Some _ -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -33872,12 +33054,12 @@ Use relative paths for resources already held in the package. -->
                             "Enter: no task row is chosen; j/k chooses one"
                       | None -> ())
                  | Planning_list ->
-                     open_planning_detail state ~mailbox:async_messages
+                     Masc_tui_work_actions.Detail_navigation.open_planning_detail state ~mailbox:async_messages
                  | Planning_detail _ -> ())
             | Fusion ->
                 (match state.fusion_mode with
                  | Fusion_list ->
-                     open_fusion_detail state ~mailbox:async_messages
+                     Masc_tui_work_actions.Detail_navigation.open_fusion_detail state ~mailbox:async_messages
                  | Fusion_detail _ | Fusion_historical_detail _ -> ())
             | Changes -> (
                 (* The row under the cursor, read as the lines it removed and
@@ -33956,7 +33138,7 @@ Use relative paths for resources already held in the package. -->
                    complete IDs/results; Enter must not open a hidden lane. *)
                 if Option.is_none (Masc_tui_types.runtime_parent state) then
                   Masc_tui_types.open_runtime_row_detail state
-            | System_logs -> open_selected_system_log state
+            | System_logs -> Masc_tui_work_actions.Detail_navigation.open_selected_system_log state
             | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message
             | Acting | Metrics
@@ -34289,8 +33471,8 @@ Use relative paths for resources already held in the package. -->
                           report_action state "system"
                             (Printf.sprintf "closed %s:%d" path line))))
        | Some ("a" | "A") when state.view = Planning
-           && Option.is_some (goal_detail_on_screen state) ->
-           handle_goal_confirmation_key state ~mailbox:async_messages
+           && Option.is_some (Masc_tui_work_actions.Goal_actions.goal_detail_on_screen state) ->
+           Masc_tui_work_actions.Goal_actions.handle_goal_confirmation_key state ~mailbox:async_messages
        | Some "c" | Some "C" when state.view = Board ->
            (* Reply to the post being read. Same pane as a new post; the
               reply target decides the payload and where the operator
@@ -34312,13 +33494,13 @@ Use relative paths for resources already held in the package. -->
            (* Lowercase votes up, uppercase votes down -- the shift is the
               direction, so neither reading needs a second keypress to
               choose one. *)
-           handle_board_vote_key state ~cols:terminal_columns ~mailbox:async_messages
+           Masc_tui_work_actions.Board_schedule_actions.handle_board_vote_key state ~cols:terminal_columns ~mailbox:async_messages
              ~up:(match key with Some "v" -> true | _ -> false)
        | Some "x" | Some "X" when state.view = Schedules ->
            (* Two presses, like every irreversible action here: the first
               names the schedule, the second cancels it. Whether the row is
               still cancellable is the server's store rules to say. *)
-           handle_schedule_cancel_key state ~mailbox:async_messages
+           Masc_tui_work_actions.Board_schedule_actions.handle_schedule_cancel_key state ~mailbox:async_messages
        | Some ("o" | "O") when state.view = System_logs ->
            let source=match System_logs_view.source state.system_logs with
              | Server -> System_logs_view.This_tui | This_tui -> Server in
@@ -34988,7 +34170,7 @@ Use relative paths for resources already held in the package. -->
             | Verification ->
                 (* Two presses, like every irreversible action here: the
                    first names the task, the second sends the approval. *)
-                handle_verification_approve_key state ~mailbox:async_messages
+                Masc_tui_work_actions.Verification_actions.handle_verification_approve_key state ~mailbox:async_messages
             | Approvals ->
                 (* The approval queue owns this surface's arrows and its y/n,
                    so answering a Keeper's question opens as its own mode. *)

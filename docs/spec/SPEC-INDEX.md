@@ -23,7 +23,7 @@ before being used as evidence.
 | `.mli` interfaces under `lib/` | 2,006 |
 | MCP tool modules (`lib/**/tool_*.ml`) | 117 |
 | Test files (`test/*.ml`, top level) | 1,744 |
-| Executables | 22 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`, `masc-reliable-change-g1-check`, `masc-http-probe`, `masc-librarian-replay`, `masc-librarian-continuity`, `masc-librarian-preflight-eval`, `masc-msx-addon-worker`, `masc-dos-addon-worker`, `masc-candle-grant`, `masc-native-addon-launcher`, `masc-browser-addon-worker`) + 5 internal (`public_tool_manifest`, `keeper_store_layout_manifest`, `gen_board_tool_registry`, `lane_fusion_container_probe`, `masc_tui_keys_doc_cli`) |
+| Executables | 21 public (`masc`, `masc-stdio`, `masc-cost`, `masc-trace`, `masc-tui`, `masc-fusion-run`, `masc-checkpoint-purge`, `masc-exec-shim`, `masc-exec-ssh-bootstrap`, `masc-keeper-capability-probe`, `masc-lane-cli-probe`, `masc-deployment-preflight-helper`, `masc-librarian-replay`, `masc-librarian-continuity`, `masc-librarian-preflight-eval`, `masc-msx-addon-worker`, `masc-dos-addon-worker`, `masc-candle-grant`, `masc-native-addon-launcher`, `masc-browser-addon-worker`, `masc-antigravity-path-hook`) + 5 internal (`public_tool_manifest`, `keeper_store_layout_manifest`, `gen_board_tool_registry`, `lane_fusion_container_probe`, `masc_tui_keys_doc_cli`) |
 
 숫자는 2026-10-17 (v0.58.0) 기준. `git ls-files` 로 추적 파일만 세고, 실행 파일은 `bin/dune` 의 `(executable ...)` stanza 에서 `public_name` 유무로 나눴다.
 

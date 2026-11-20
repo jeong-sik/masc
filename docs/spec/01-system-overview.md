@@ -125,8 +125,6 @@ MASC는 최상위 public library(`masc`)와 `lib/` 아래의 도메인별 내부
 | `keeper_capability_probe_cli` | `masc-keeper-capability-probe` | `bin/keeper_capability_probe_cli.ml` | Keeper 런타임 역량 프로브. |
 | `masc_lane_cli_probe` | `masc-lane-cli-probe` | `bin/masc_lane_cli_probe.ml` | 공식 CLI 레인 가용성 프로브. |
 | `deployment_preflight_helper` | `masc-deployment-preflight-helper` | `bin/deployment_preflight_helper.ml` | 배포 사전 점검 헬퍼. |
-| `masc_reliable_change_g1_check` | `masc-reliable-change-g1-check` | `bin/masc_reliable_change_g1_check.ml` | Reliable Change G1 검증기. |
-| `masc_http_probe` | `masc-http-probe` | `bin/masc_http_probe.ml` | HTTP 엔드포인트 상태 프로브. |
 | `masc_librarian_replay` | `masc-librarian-replay` | `bin/masc_librarian_replay.ml` | Librarian 메모리 재생 검증기. |
 | `masc_librarian_continuity` | `masc-librarian-continuity` | `bin/masc_librarian_continuity.ml` | Librarian 연속성 검증기. |
 | `masc_librarian_preflight_eval` | `masc-librarian-preflight-eval` | `bin/masc_librarian_preflight_eval.ml` | Librarian 사전 평가 실행기. |

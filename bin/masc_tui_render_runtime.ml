@@ -495,7 +495,7 @@ let runtime_detail_lines state target ~width =
         | ks ->
             let names = String.concat ", " (List.map (fun (k : Tui_decode.keeper) -> k.k_name) ks) in
             let activity_str = match aggregate_keeper_stats ks with
-              | None -> say "활동 미관측" "activity not observed"
+              | None -> say "활동 보고 없음" "activity not reported"
               | Some (turns, tokens, cost) ->
                 Printf.sprintf
                   (if ko then "%d턴 · %s 토큰 · %s" else "%d turns · %s tokens · %s")

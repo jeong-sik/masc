@@ -141,7 +141,7 @@ let keeper_trail_sentence ~ko ~age = function
             ; candidates_text tried
             ]
         | Keeper_trail.Walk_no_terminal { tried } ->
-            [ (if ko then "종료 미관측" else "terminal not observed"); candidates_text tried ]
+            [ (if ko then "종료 보고 없음" else "end not reported"); candidates_text tried ]
         | Keeper_trail.Walk_no_candidate_failure -> [ reported; no_candidate_failure_text ~ko ]
         | Keeper_trail.Walk_not_captured -> [ reported; walk_not_captured_text ~ko ]
         | Keeper_trail.Walk_unreadable -> [ reported; evidence_unreadable_text ~ko ]
@@ -3615,14 +3615,9 @@ let terminal_drawing (state : state) ~width =
   let facts = match observation with
     | Masc_tui_fetched.Ready (Keeper_execute_snapshot snapshot, observed_at)
     | Stale ((Keeper_execute_snapshot snapshot, observed_at), _) ->
-        [ (if snapshot.kes_active_count > 0 then
-             text
-               ~ko:(Printf.sprintf "실행 중 %s개"
-                      (Masc_tui_value.Count.grouped snapshot.kes_active_count))
-               ~en:(Printf.sprintf "%s active"
-                      (Masc_tui_value.Count.grouped snapshot.kes_active_count))
-           else if snapshot.kes_closed then text ~ko:"끝남" ~en:"closed"
-           else text ~ko:"상태 보고 안 됨" ~en:"state not reported")
+        [ say (Say.of_ko_flag
+                 (Masc_tui_types.keeper_execute_state_text
+                    ~active_count:snapshot.kes_active_count ~closed:snapshot.kes_closed))
         ; Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) observed_at ]
     | Ready (Keeper_execute_none, _) | Stale ((Keeper_execute_none, _), _)
     | Absent | Loading | Failed _ -> [] in

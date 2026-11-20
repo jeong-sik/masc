@@ -355,9 +355,9 @@ type TurnPhase = {
   mono?: boolean
   durationMs: number | null
   durationSource: 'tool_call_log' | 'provider_telemetry' | 'not_recorded'
-  // RFC-0233 §10 — time-to-first-token for the gen phase (null when not
-  // recorded). Kept separate from durationMs (end-to-end request_latency_ms)
-  // so the post-first-chunk decode split is never derived (§9.6 guard).
+  // Time-to-first-token for the gen phase (null when not recorded). Kept
+  // separate from durationMs (end-to-end request_latency_ms) so the
+  // post-first-chunk decode split is never derived.
   ttfrcMs?: number | null
   meta?: string
 }
@@ -446,9 +446,9 @@ function formatTurnList(values: number[]): string {
 function phaseDurationLabel(phase: TurnPhase): string {
   if (phase.durationMs != null) {
     const base = formatMsCompact(phase.durationMs)
-    // RFC-0233 §10 — show time-to-first-token alongside the gen phase's
-    // end-to-end duration when ttfrc_ms is recorded. No decode split: the
-    // post-first-chunk duration is NOT derived (§9.6 fabrication guard).
+    // Show time-to-first-token alongside the gen phase's end-to-end
+    // duration when ttfrc_ms is recorded. No decode split: the
+    // post-first-chunk duration is NOT derived.
     if (phase.kind === 'gen' && phase.ttfrcMs != null) {
       return `${base} · 첫 ${formatMsCompact(phase.ttfrcMs)}`
     }

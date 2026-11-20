@@ -90,10 +90,10 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const runtimeBlocker = keeperRuntimeBlockerHint(keeper)
   const attentionReason = canonicalAttentionReason(keeper.attention_reason?.trim() || null)
   const nextHumanAction = canonicalNextHumanAction(keeper.next_human_action?.trim() || null)
-  // RFC-0135 PR-13: canonical paused predicate. SSOT also covers
-  // FSM phase=Paused / pipeline_stage=paused / status=paused, so the
+  // Canonical paused predicate. SSOT also covers
+  // FSM phase=Paused / pipeline_stage=paused / pause_state=paused, so the
   // "paused + live blocker" composite flag and the attention-reason
-  // label now agree across the four paused axes (RFC §1.5 Cluster C3).
+  // label now agree across the four paused axes.
   const isPaused = isKeeperPaused(keeper)
   const pausedRuntimeBlocker = isPaused && runtimeBlockerClass != null
   const attentionReasonText = attentionReasonLabel(attentionReason, isPaused)

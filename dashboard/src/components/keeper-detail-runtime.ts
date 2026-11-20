@@ -265,10 +265,10 @@ export function KeeperLiveTruthPanel({
     runtimeTrace,
     runtimeResolution,
   })
-  // RFC-0046 §4.3 partial closure: the four inline detail badges that used
-  // to live next to the headline (`phase X · turn Y · fiber ... · live ...`)
-  // were a string-concat-then-split-back projection of the same fields the
-  // row grid below already shows. Dropped — single representation per axis.
+  // The four inline detail badges that used to live next to the headline
+  // (`phase X · turn Y · fiber ... · live ...`) were a
+  // string-concat-then-split-back projection of the same fields the row grid
+  // below already shows. Dropped — single representation per axis.
   const firstWarning = summary.runtimeWarnings[0] ?? null
   const extraWarningCount = Math.max(0, summary.runtimeWarnings.length - 1)
 

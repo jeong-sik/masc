@@ -60,7 +60,7 @@ describe('KeeperWorkspaceRoster', () => {
 
     expect(container.textContent).toContain('전체3')
     // v2 filter chips carry the SHORT label + count ('실행' + '1'), not the old
-    // combined '실행중1' chip label (rails.jsx filter chips).
+    // combined '실행중1' chip label.
     expect(container.textContent).toContain('실행1')
     // The standalone defaults to lifecycle grouping, so the integrated detail
     // surface exposes running, waiting, and stopped groups immediately.
@@ -85,8 +85,8 @@ describe('KeeperWorkspaceRail', () => {
     const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent)
     expect(sectionHeaders).toContain('런타임')
     expect(container.textContent).not.toContain('claude-sonnet-4')
-    // The runtime card follows the design's collapsed-by-default disclosure
-    // (rails.jsx RailRuntime) — open `.rtc-detail` before asserting its rows.
+    // The runtime card is collapsed by default — open `.rtc-detail` before
+    // asserting its rows.
     fireEvent.click(container.querySelector('.rtc-head') as HTMLButtonElement)
     expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
     expect(container.textContent).toContain('agent-core-seoul-1')

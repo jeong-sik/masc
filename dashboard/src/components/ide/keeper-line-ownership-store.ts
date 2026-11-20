@@ -1,10 +1,9 @@
 /**
- * keeper-line-ownership-store — Preact signal adapter for RFC 0019.
+ * keeper-line-ownership-store — Preact signal adapter for keeper line ownership.
  *
  * The accumulator in design-system/headless-core owns the line-range and
  * hue-index rules. This store only publishes immutable snapshots for dashboard
- * consumers and keeps the mock editor on the same contract future live events
- * will use.
+ * consumers; ide-data-workspace-store feeds it git-blame blocks.
  */
 
 import { signal } from '@preact/signals'

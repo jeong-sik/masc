@@ -522,7 +522,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(rows[0]?.textContent).toContain('rama')
   })
 
-  // Design structure (rails.jsx): the open search field sits in its own
+  // The open search field sits in its own
   // `.roster-head` band below `.roster-filters` — the vendored kit rule
   // (v2.css `.roster-head`) owns the band's padding + bottom border.
   it('wraps the open search field in the design .roster-head band', () => {
@@ -663,7 +663,7 @@ describe('KeeperWorkspaceRoster', () => {
     expect(handle?.getAttribute('title')).toBe('/workspace/keepers/keeper-miso')
   })
 
-  // The design's ⬡ sandbox glyph (rails.jsx `.kp-sandbox`) was gated on a
+  // The ⬡ sandbox glyph (`.kp-sandbox`) was gated on a
   // 'local' profile, which the runtime cannot emit — its set is docker /
   // microvm / remote_ssh (keeper_sandbox_config.ml). The glyph is gone rather
   // than left as a branch no row reaches.

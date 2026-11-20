@@ -115,8 +115,8 @@ function mkTask(partial: Partial<Task>): Task {
   return { id: 'T-0', title: 'task', ...partial } as Task
 }
 
-// The runtime card follows the design's collapsed-by-default disclosure
-// (rails.jsx RailRuntime): click `.rtc-head` to open `.rtc-detail`.
+// The runtime card is collapsed by default: click `.rtc-head` to open
+// `.rtc-detail`.
 function openRuntimeDetail(container: Element): void {
   const head = container.querySelector('.rtc-head') as HTMLButtonElement | null
   if (head) fireEvent.click(head)
@@ -660,11 +660,11 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
-    // Design's ctx-usage row (rails.jsx): leading "마지막 턴 input" label,
+    // The ctx-usage row: leading "마지막 턴 input" label,
     // volt-accented value, trailing "마지막 턴 · 창 크기" label.
     expect(container.querySelector('.ctx-usage .ctx-usage-k')?.textContent).toBe('마지막 턴 input')
     expect(container.textContent).toContain('마지막 턴 · 창 크기')
-    // ...and the design's typed not_observed line for live occupancy.
+    // ...and the typed not_observed line for live occupancy.
     expect(container.querySelector('.ctx-notobs')).not.toBeNull()
     expect(meter).not.toBeNull()
     expect(meter?.getAttribute('role')).toBe('meter')

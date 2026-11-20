@@ -14,12 +14,10 @@ import {
   type IdeContextFocusRouteLink,
 } from './ide-state'
 
-// Phase 1 PR-3: IDE editor toolbar — view tabs + LAYERS toggle.
-// View tabs (SOURCE / SPLIT DIFF / UNIFIED / BLAME) are local UI state
-// here; deep linking + editor mode wiring lands in Phase 2 PR-5 once
-// the editor itself is real. The LAYERS toggle uses the RFC 0020
-// controller from headless-core; overlay rendering still arrives in
-// PR-5+ alongside the data sources for each layer.
+// IDE editor toolbar — view tabs + LAYERS toggle.
+// View tabs (SOURCE / SPLIT DIFF / UNIFIED / BLAME) and the active layers
+// are props; ide-shell keeps both in the route params. The LAYERS toggle
+// uses the layered-overlay controller from headless-core.
 
 type ViewTab = 'source' | 'split-diff' | 'unified' | 'blame'
 

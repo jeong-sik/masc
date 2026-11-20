@@ -1,9 +1,8 @@
 import { isDismissEscape } from '../../lib/keyboard'
 // Keeper Workspace — roster pane (left). Search + status filter chips +
-// status-grouped keeper rows. Ported from the v2 design (rails.jsx Roster),
-// wired to the live `keepers` store. Selecting a row routes to that keeper,
-// which swaps the conversation + rail panes (same route shape the detail
-// page already used, so deep links keep working).
+// status-grouped keeper rows, wired to the live `keepers` store. Selecting a
+// row routes to that keeper, which swaps the conversation + rail panes (same
+// route shape the detail page already used, so deep links keep working).
 
 import { html } from 'htm/preact'
 import {
@@ -248,10 +247,10 @@ function keeperScope(keeper: Keeper): string | null {
   return keeperDisplayRuntime(keeper)?.value ?? null
 }
 
-/** The keeper's sandbox location — the design's roster identity sub-line
- *  (rails.jsx renders `k.basepath` here). The live field is `sandbox_target`
- *  (keeper-detail-alert-strip.ts uses the same field); for `docker` it is the
- *  container target, for `remote_ssh` the endpoint's target.
+/** The keeper's sandbox location — the roster identity sub-line. The live
+ *  field is `sandbox_target` (keeper-detail-alert-strip.ts uses the same
+ *  field); for `docker` it is the container target, for `remote_ssh` the
+ *  endpoint's target.
  *  Unlike the alert strip, this deliberately does NOT fall back to
  *  `sandbox_profile`: a bare 'docker'/'microvm' literal is not a useful roster
  *  identity, so RosterRow falls through to the scope proxy (skill/runtime) instead. */
@@ -552,7 +551,7 @@ export function KeeperWorkspaceRoster({
     const close = () => setMenu(null)
     // Esc closes the menu (was: any key — typing in the search box dismissed it);
     // scroll closes it too (capture phase) so the row-anchored menu can't drift
-    // away from its row. Mirrors the design roster menu (rails.jsx).
+    // away from its row.
     const onKey = (event: KeyboardEvent) => {
       if (isDismissEscape(event)) setMenu(null)
     }
@@ -621,8 +620,8 @@ export function KeeperWorkspaceRoster({
     event.stopPropagation()
     const target = event.currentTarget as HTMLElement
     const rosterRect = target.closest('.kw-roster')?.getBoundingClientRect() ?? { left: 0, top: 0 }
-    // Right-click anchors the menu at the cursor (design rails.jsx openMenu); the
-    // ⋯ button right-aligns the menu just below itself.
+    // Right-click anchors the menu at the cursor; the ⋯ button right-aligns the
+    // menu just below itself.
     let anchorRight: number
     let anchorTop: number
     if (event.type === 'contextmenu') {
@@ -758,7 +757,7 @@ export function KeeperWorkspaceRoster({
               </select>
             </div>
             ${searchOpen || query
-              // Design structure (rails.jsx): the search field is its own
+              // The search field is its own
               // `.roster-head` band below `.roster-filters` — the kit rule
               // (v2.css `.roster-head`) supplies the padding + bottom border.
               ? html`

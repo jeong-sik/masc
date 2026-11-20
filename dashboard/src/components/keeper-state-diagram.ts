@@ -147,9 +147,8 @@ export function KeeperStateDiagramPanel({ keeperName, snapshot: externalSnapshot
     return () => { controller.abort() }
   }, [keeperName])
 
-  // RFC-0046 Step 5: keeper.phase (flat field) is no longer surfaced here.
-  // Composite snapshot is the single source of truth; backend two-store
-  // drift detection moves to the FsmHub invariant area (future RFC).
+  // keeper.phase (flat field) is no longer surfaced here.
+  // Composite snapshot is the single source of truth.
   const phaseDiagnosis = useMemo(
     () => snapshot ? normalizePhaseDiagnosis(snapshotPhaseDiagnosis(snapshot)) : null,
     [snapshot],

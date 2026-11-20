@@ -196,7 +196,7 @@ describe('KeeperWorkspaceChat', () => {
     expect(queueLink).not.toBeNull()
     expect(queueLink.textContent).toContain('1')
     expect(queueLink.getAttribute('aria-label')).toContain('결재 대기 1건')
-    // The in-thread design cue (keepers.jsx chat-pendcue) rides the same queue.
+    // The in-thread cue (.chat-pendcue) rides the same queue.
     const pendcue = container.querySelector('[data-testid="keeper-chat-pendcue"]') as HTMLButtonElement
     expect(pendcue).not.toBeNull()
     expect(pendcue.textContent).toContain('승인 대기')

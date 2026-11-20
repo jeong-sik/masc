@@ -290,7 +290,7 @@ type write_error =
       (** The decoded primary has more than one row with this Goal ID. *)
   | Rejected of string
       (** The callback's own error, or a callback result the store refused
-          (identity replaced, title or RFC-0387 B1 condition missing). *)
+          (identity replaced, title, measure or procedure missing). *)
   | Persist_failed of string  (** The write after a successful read failed. *)
 
 val write_error_to_string : write_error -> string

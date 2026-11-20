@@ -1,12 +1,12 @@
 (* Goal store — shared planning goals with a dedicated lifecycle phase.
    [phase] is the only persisted lifecycle representation.
 
-   RFC-0444: the store is read through one closed sum, [source]. A store this
+   The store is read through one closed sum, [source]. A store this
    build cannot read is [Unavailable], carrying the reason, the state of the
    .last-good mirror and the operator's next step; it never reads as an empty
    state. The only empty state is [Uninitialized]: neither goals.json nor its
    mirror exists. 2026-09-08 (#34459) 97 goals read as 0 for 7h29m because
-   the reader folded a decode failure into a default state (B1). *)
+   the reader folded a decode failure into a default state. *)
 
 include Goal_document
 
@@ -259,8 +259,8 @@ let decode_prepared_bytes ~path bytes : (prepared_state, reason) result =
     ~decode:decode_bytes ~prepare:prepare_state
 
 (* The mirror is evidence of how far the primary drifted, never state: a
-   mirror that decodes is reported with its size and stamp and is not served
-   (RFC-0444 §5, "보여주되 서빙하지 않는다"). *)
+   mirror that decodes is reported with its size and stamp and is not
+   served. *)
 let mirror_status_of_read = function
   | File_absent -> Mirror_absent
   | File_unreadable error -> Mirror_unreadable error

@@ -114,11 +114,11 @@ let decide_transition ~phase ~(action : action) =
   | Executing, Drop -> Ok (Move_to Dropped)
   | Executing, Reopen -> Ok (Already Executing)
   | Executing, (Confirm_completion | Record_proof_proven | Record_proof_refuted) -> invalid
-  (* Verifying (RFC-0387 stage 2): the completion request is in the pipeline
-     and the proof is judged out-of-band. The verifier's proof actions leave
-     the phase with a verdict; a repeated [Request_complete] is the explicit
-     retry the RFC substitutes for wall-clock expiry, so it answers [Already]
-     and the handler retries a matching pending proof or reconciles its verdict.
+  (* Verifying: the completion request is in the pipeline and the proof is
+     judged out-of-band. The verifier's proof actions leave the phase with a
+     verdict; a repeated [Request_complete] is the explicit retry in place of
+     wall-clock expiry, so it answers [Already] and the handler retries a
+     matching pending proof or reconciles its verdict.
 
      The operator can also leave without a verdict: [Drop] abandons the goal
      and [Reopen] returns it to [Executing], clearing the pending request.

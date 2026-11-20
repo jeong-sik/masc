@@ -1,13 +1,13 @@
-(** Gate_surface — typed connector surface identity (RFC-0223 §3).
+(** Gate_surface — typed connector surface identity.
 
     A surface is one lane a keeper can hear from or speak to: the
     dashboard, a bound Discord/Slack channel, or any other connector
     speaking the generic gate protocol. Presence is derived from the current
     connector registry, not from persisted chat labels.
 
-    RFC names this module [Surface]; the [Gate_] prefix follows the
-    masc_gate convention ([(wrapped false)] puts modules in the global
-    namespace, so a bare [Surface] is too generic). *)
+    The [Gate_] prefix follows the masc_gate convention ([(wrapped false)]
+    puts modules in the global namespace, so a bare [Surface] is too
+    generic). *)
 
 type t =
   | Dashboard
@@ -41,7 +41,7 @@ val connected_surfaces_for_keeper :
   keeper_name:string -> presence_snapshot
 (** Surfaces currently attached to [keeper_name], recomputed from the
     connector registry's binding stores and liveness sources on every
-    call — no cached presence state (RFC-0223 §2 principle 6).
+    call — no cached presence state.
 
     The dashboard is always present and alive (the bearer-gated chat
     route always exists; no per-keeper dashboard attachment is

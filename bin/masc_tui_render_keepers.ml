@@ -808,32 +808,51 @@ let grid_repeat count mark = String.concat "" (List.init (max 0 count) (fun _ ->
 
 (* Four-stage semantic progression: quiet dot (receded), healthy ok pip (ok),
    mixed half block (warn), pure failed block (bad). *)
-let grid_half_hour_style = function
-  | Masc_tui_keeper_pulse.Half_hour_failed -> Theme.bad ()
-  | Masc_tui_keeper_pulse.Half_hour_failed_and_ok -> Theme.warn ()
-  | Masc_tui_keeper_pulse.Half_hour_ok -> Theme.ok ()
-  | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_unknown ->
-      Theme.recede ()
+let make_half_hour_styler () =
+  let bad = Theme.bad () and warn = Theme.warn () and ok = Theme.ok () and recede = Theme.recede () in
+  function
+  | Masc_tui_keeper_pulse.Half_hour_failed -> bad
+  | Masc_tui_keeper_pulse.Half_hour_failed_and_ok -> warn
+  | Masc_tui_keeper_pulse.Half_hour_ok -> ok
+  | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_unknown -> recede
+
+(* Emit a sequence of [(style, glyph)] cells, writing ANSI SGR transitions only
+   when [style] changes and resetting once at the end. *)
+let emit_styled_cells cells =
+  let buf = Buffer.create (List.length cells * 6) in
+  let open_style = ref "" in
+  List.iter
+    (fun (style, glyph) ->
+      if not (String.equal style !open_style) then begin
+        if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
+        if not (String.equal style "") then Buffer.add_string buf style;
+        open_style := style
+      end;
+      Buffer.add_string buf glyph)
+    cells;
+  if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
+  Buffer.contents buf
 
 (* One mark per half hour of the column, the now slot on the right. *)
-let grid_half_hour_pulse state (grid : Grid.t) ~now pulse =
+let grid_half_hour_pulse _state (grid : Grid.t) ~now pulse =
   let slots = Masc_tui_keeper_pulse.half_hours ~now ~count:grid.side_cells pulse in
   if grid.side_cells = 0 then ""
   else if List.for_all (function
     | Masc_tui_keeper_pulse.Half_hour_unknown -> true
     | Half_hour_quiet | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok -> false) slots then
     Masc_tui_keeper_strip.history_unknown_label ~cells:grid.side_cells
-  else String.concat ""
-    (List.map
-       (fun half_hour ->
-         let mark = match half_hour with
-           | Masc_tui_keeper_pulse.Half_hour_quiet -> Keeper_mark.grid_dot_mark
-           | Half_hour_unknown -> Keeper_mark.grid_unknown_range_mark
-           | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok ->
-               Masc_tui_keeper_pulse.half_hour_mark half_hour in
-         grid_half_hour_style half_hour ^ mark
-         ^ Ansi.reset)
-       slots)
+  else
+    let style_of = make_half_hour_styler () in
+    emit_styled_cells
+      (List.map
+         (fun half_hour ->
+           let mark = match half_hour with
+             | Masc_tui_keeper_pulse.Half_hour_quiet -> Keeper_mark.grid_dot_mark
+             | Half_hour_unknown -> Keeper_mark.grid_unknown_range_mark
+             | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok ->
+                 Masc_tui_keeper_pulse.half_hour_mark half_hour in
+           (style_of half_hour, mark))
+         slots)
 
 let grid_wake_window state ~style slots =
   let ko = state.ui_language = Lang_ko in
@@ -1231,23 +1250,29 @@ let group_pulse ~now members =
   if Masc_tui_keeper_pulse.nothing_read readings then
     Masc_tui_keeper_strip.history_unknown_label ~cells:group_pulse_slots
   else
+    let reading_arrays = List.map Array.of_list readings in
     let peak = max 1 (List.length members) in
     let low_tint = Theme.series_tint Masc_tui_theme.Latency 0.55 in
-    String.concat "" (List.init group_pulse_slots (fun position ->
-      let count, unknown = List.fold_left (fun (count, unknown) slots ->
-        match List.nth_opt slots position with
-        | Some (Masc_tui_keeper_pulse.Half_hour_failed | Masc_tui_keeper_pulse.Half_hour_failed_and_ok) -> count + 1, unknown
-        | Some Masc_tui_keeper_pulse.Half_hour_unknown | None -> count, true
-        | Some (Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_ok) -> count, unknown)
-        (0, false) readings in
-      if count > 0 then
-        let tone =
-          if peak > 1 && count * 3 >= peak * 2 then Theme.bad ()
-          else if peak > 2 && count * 3 <= peak then low_tint
-          else Theme.warn ()
-        in
-        tone ^ Grid.level_glyph ~peak count ^ Ansi.reset
-      else Theme.recede () ^ (if unknown then Keeper_mark.grid_unknown_range_mark else "·") ^ Ansi.reset))
+    let bad = Theme.bad () and warn = Theme.warn () and recede = Theme.recede () in
+    emit_styled_cells
+      (List.init group_pulse_slots (fun position ->
+        let count, unknown = List.fold_left (fun (count, unknown) slots ->
+          if position < Array.length slots then
+            match slots.(position) with
+            | Masc_tui_keeper_pulse.Half_hour_failed | Masc_tui_keeper_pulse.Half_hour_failed_and_ok -> count + 1, unknown
+            | Masc_tui_keeper_pulse.Half_hour_unknown -> count, true
+            | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_ok -> count, unknown
+          else count, true)
+          (0, false) reading_arrays in
+        if count > 0 then
+          let tone =
+            if peak > 1 && count * 3 >= peak * 2 then bad
+            else if peak > 2 && count * 3 <= peak then low_tint
+            else warn
+          in
+          (tone, Grid.level_glyph ~peak count)
+        else
+          (recede, if unknown then Keeper_mark.grid_unknown_range_mark else "·")))
 
 let group_sum project readings =
   List.fold_left (fun total reading ->
@@ -2130,12 +2155,12 @@ let matrix_keeper_row ?(selected = false) matrix ~now row =
         Masc_tui_value.Ongoing.Narrow.since ~now at
     | Keeper_trail.Trail_failed _ -> Keeper_mark.unknown_mark
     | Keeper_trail.Trail_sound -> Masc_tui_theme.Glyph.no_value in
+  let style_of = make_half_hour_styler () in
   let pulse = Option.bind runtime (fun r -> r.Tui_decode.kr_recent_turns)
     |> Masc_tui_keeper_pulse.half_hours ~now ~count:matrix.matrix_pulse_slots
     |> List.map (fun half_hour ->
-         grid_half_hour_style half_hour ^ Masc_tui_keeper_pulse.half_hour_mark half_hour
-         ^ Ansi.reset)
-    |> String.concat "" in
+         (style_of half_hour, Masc_tui_keeper_pulse.half_hour_mark half_hour))
+    |> emit_styled_cells in
   grid_gutter ~selected Keeper_list_model.By_runtime verdict
   ^ fit_width (Terminal_text.single_line row.Keeper_list_model.keeper.Tui_decode.k_name) matrix.matrix_name_cells
   ^ " " ^ String.concat "" cells ^ " " ^ Theme.recede () ^ fit_width last 5 ^ Ansi.reset

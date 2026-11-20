@@ -1,13 +1,8 @@
-(** RFC execute-boundary-is-the-sandbox: the shell runs the line, so most
-    constructs need no advice at all.
+(** The shell runs the line, so most constructs need no advice at all.
 
-    §3.1 of the parent RFC wrote this taxonomy while the subset was what ran,
-    and the claim was that exactly one construct had no call to suggest. That
-    inverted when [script] became a shell. The claim these tests carry now is
-    the other way round: exactly one construct has a move, and inventing
-    one for the rest sends a caller to rewrite code that works -- which
-    happened on 2026-08-31 to a keeper told "this tool runs no shell" about a
-    working [$PWD]. *)
+    Exactly one construct has a move, and inventing one for the rest sends a
+    caller to rewrite code that works -- which happened on 2026-08-31 to a
+    keeper told "this tool runs no shell" about a working [$PWD]. *)
 
 module Rewrite = Keeper_tooling.Subset_rewrite
 module Gate = Masc_exec_command_gate.Shell_command_gate

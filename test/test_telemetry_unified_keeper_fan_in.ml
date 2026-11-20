@@ -7,10 +7,8 @@
 
     That path has no test. These pin what it returns — newest-first, across
     keeper directories, honouring the limit — so the probe stage can be changed
-    without guessing at its contract. The probe currently retains every
-    directory's probe rows, which is a cost proportional to keeper count and
-    the axis RFC-0372 §5 makes the Phase 2 gate; nothing below depends on that
-    retention. *)
+    without guessing at its contract. The probe keeps one timestamp per
+    directory, not its rows; nothing below depends on what the probe keeps. *)
 
 open Alcotest
 

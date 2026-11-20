@@ -1,9 +1,9 @@
-(** test_streamable_http_upgrade — RFC-0100 PR-3 auto-upgrade dispatch.
+(** test_streamable_http_upgrade — auto-upgrade dispatch.
 
     Asserts the policy that gates the POST /mcp → SSE upgrade on the
     streaming-tools registry: tools listed in
     [Server_mcp_streaming_tools] receive SSE framing; tools outside
-    the registry stay on the RFC-0100 PR-2 chunked-JSON shape. The
+    the registry stay on the chunked-JSON shape. The
     full HTTP round-trip is covered by [test_mcp_post_sse_e2e.ml]
     (e2e, slow); these are pure unit assertions on the gate's input
     contract. *)

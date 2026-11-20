@@ -1,6 +1,6 @@
-(* The TUI draws Candle amounts from the roster's decay basis at draw time
-   (RFC-0481 §3.7). The checks are on the computed amounts, read through the
-   module's own text, for one wallet that halves in an hour. *)
+(* The TUI draws Candle amounts from the roster's decay basis at draw time.
+   The checks are on the computed amounts, read through the module's own
+   text, for one wallet that halves in an hour. *)
 
 module Candle = Masc_tui_candle
 module Decode = Masc.Tui_decode

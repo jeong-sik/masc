@@ -5,8 +5,7 @@
     Security fix: validate_registration uses Session.McpSessionStore.peek
     instead of get_or_create, so a client-provided session_id cannot
     auto-bootstrap a new session. Unknown session_ids now return
-    Unknown_session; session creation remains in the initialize handler
-    (RFC-0099 session lifecycle; credential/auth context RFC-0008 / RFC-0019). *)
+    Unknown_session; session creation remains in the initialize handler. *)
 
 open Alcotest
 

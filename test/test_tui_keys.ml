@@ -822,11 +822,10 @@ let test_metrics_is_an_overview_child () =
    screen that holds the operator's decisions was the only one that read as
    settled.
 
-   Approvals is now a Work child (RFC-tui-measured-operator-home), so the stop
-   that leads to it is Work and it stands whatever was read. What must still
-   not read as settled is the reading itself: it is current only once every
-   list came back, and the Dashboard's approvals count marks it with "?"
-   until then. *)
+   Approvals is now a Work child, so the stop that leads to it is Work and it
+   stands whatever was read. What must still not read as settled is the
+   reading itself: it is current only once every list came back, and the
+   Dashboard's approvals count marks it with "?" until then. *)
 let approvals_reading_is_current state =
   state.approval_snapshot <-
     Some

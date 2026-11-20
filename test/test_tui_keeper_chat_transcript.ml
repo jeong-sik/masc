@@ -388,10 +388,10 @@ let test_quarantine_freezes_late_args_and_result () =
   | None -> fail "quarantine diagnostics were dropped"
 ;;
 
-(* The attempt boundary takes nothing back (RFC-0412 §3.3). Everything the
-   earlier attempt produced -- the finished stretch, the tool rows, and the
-   stretch that was still growing when the runtime turned over -- stays in the
-   trail as one superseded block, and the new attempt's stretches follow it.
+(* The attempt boundary takes nothing back. Everything the earlier attempt
+   produced -- the finished stretch, the tool rows, and the stretch that was
+   still growing when the runtime turned over -- stays in the trail as one
+   superseded block, and the new attempt's stretches follow it.
    The buffer accessors cannot show this: they are per-attempt totals and start
    over either way. Only the trail shows it. *)
 let test_runtime_attempt_keeps_the_earlier_attempt_superseded () =

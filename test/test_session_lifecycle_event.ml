@@ -3,7 +3,7 @@
     Pins down the JSON encoding so dashboards / consumers can pattern
     match on a stable shape. Adding a new variant requires touching
     these tests, which forces RFC-level discussion (same discipline as
-    {!test_mcp_error_code} for RFC-0098). *)
+    {!test_mcp_error_code}). *)
 
 open Alcotest
 module E = Session_lifecycle_event

@@ -1,6 +1,6 @@
-(* with_sandbox (RFC-0422 fix): execution reads the dispatch target from
-   the IR, not from a wrapper argument, so the observation stage must hand
-   execution a rewritten IR. Before this existed the stage dispatched the
+(* with_sandbox: execution reads the dispatch target from the IR, not from
+   a wrapper argument, so the observation stage must hand execution a
+   rewritten IR. Before this existed the stage dispatched the
    keeper's effect-built IR unchanged — the "observation" was the real
    call, run with live network, and its exit became the gate's evidence
    (PR #33637, task-1375). *)

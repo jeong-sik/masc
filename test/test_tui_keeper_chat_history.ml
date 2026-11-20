@@ -366,7 +366,7 @@ let test_a_failed_turn_names_the_request_it_came_from () =
    than by hand: [keeper_turn] puts [user_message_of_core_error] of the failed
    turn's error into the tool result, and the stream prefixes "Keeper request
    failed: " to it. A hand-written copy would keep passing after either side
-   changed shape (RFC-0454 §5). *)
+   changed shape. *)
 let persisted_failure_row error =
   "Keeper request failed: "
   ^ Masc.Keeper_agent_error.user_message_of_core_error
@@ -382,8 +382,8 @@ let fence_of cause =
 ;;
 
 (* The two runtime stops the pane draws a lifecycle for, as the runtime
-   reports them (RFC-0454 P2). Before the value existed, the pane searched the
-   row for the sentences these used to be rendered into. *)
+   reports them. Before the value existed, the pane searched the row for the
+   sentences these used to be rendered into. *)
 let host_shutdown =
   Keeper_internal_error.Host_stopped_turn
     { runtime_id = "codex_app_server"

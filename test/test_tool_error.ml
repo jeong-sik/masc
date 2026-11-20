@@ -1,5 +1,4 @@
-(* Alcotest suite for [Tool_error].
-   RFC-0148 §5 acceptance: 7 variant + exn-preservation case. *)
+(* Alcotest suite for [Tool_error]: 7 variant + exn-preservation case. *)
 
 module TE = Tool_error
 

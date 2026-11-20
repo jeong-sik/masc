@@ -216,8 +216,8 @@ let test_a_pump_that_returns_ends_the_connection () =
 ;;
 
 (* A frame that never reaches a socket ends the send at the stall bound.
-   Before RFC-0493 [send_raw] reported success here and the frame stayed in
-   httpun's buffer. *)
+   [send_raw] reports success only for a frame that reached the socket, not
+   one still in httpun's buffer. *)
 let test_send_raw_waits_for_the_socket () =
   Eio_main.run
   @@ fun env ->

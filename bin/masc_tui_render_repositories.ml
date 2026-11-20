@@ -957,7 +957,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let header ~position =
     here_row ~cols state
       ~path:[ ui_text state ~ko:"변경" ~en:"changes"; change_row_address change ]
-      ~readings:[ Printf.sprintf "-%d +%d" removed added ]
+      ~readings:
+        [ Masc_tui_value.Count.decrease removed ^ " " ^ Masc_tui_value.Count.increase added ]
       ~position
   in
   (* Facts about the change the rows themselves cannot carry. *)

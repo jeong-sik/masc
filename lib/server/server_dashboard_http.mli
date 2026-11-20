@@ -51,6 +51,24 @@ val dashboard_memory_http_payload :
   ?config:Workspace.config -> reader:Masc_board_handlers.Board_access.reader -> actor:string option ->
   Httpun.Request.t -> Dashboard_cache.cached_payload
 
+val board_memory_cache_key :
+  reader:Masc_board_handlers.Board_access.reader ->
+  base_path:string option ->
+  hearth:string option ->
+  author_filter:string option ->
+  text_query:string option ->
+  sort_by:Board_dispatch.sort_order ->
+  exclude_system:bool ->
+  exclude_automation:bool ->
+  limit:int ->
+  offset:int ->
+  voter:string option ->
+  string
+(** The cache key of the Board list read that {!dashboard_memory_http_payload}
+    answers with these values, after its bounds and trims. Reads that differ
+    in any part have different keys: a part taken from the request is written
+    with its length, so it cannot read as the part after it. *)
+
 val dashboard_gate_http_json :
   Httpun.Request.t -> base_path:string -> Yojson.Safe.t
 

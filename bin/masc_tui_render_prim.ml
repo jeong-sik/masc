@@ -5372,12 +5372,12 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     | Runtime_usage_scope.Conversation_cumulative ->
         non_request_token_lines "tokens counted across the conversation"
     | Runtime_usage_scope.Usage_scope_unavailable ->
-        non_request_token_lines "tokens reported with unknown scope"
+        non_request_token_lines "tokens reported without their scope"
     | Runtime_usage_scope.Per_request -> (
         match record.usage.input_provenance with
         | Some Turn_input_provenance.Context_estimate ->
             non_request_token_lines "estimated context tokens, not dispatched input"
-        | None -> non_request_token_lines "tokens with unknown input provenance"
+        | None -> non_request_token_lines "tokens reported without their input provenance"
         | Some Turn_input_provenance.Measured_request -> (
         match record.usage.input_tokens, record.context_window with
         (* A figure above MASC's effective shaping ceiling cannot become a
@@ -5454,7 +5454,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
       match record.usage.scope with
       | Runtime_usage_scope.Turn_total -> "client turn total  "
       | Runtime_usage_scope.Conversation_cumulative -> "cumulative  "
-      | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown  "
+      | Runtime_usage_scope.Usage_scope_unavailable -> "scope not reported  "
       | Runtime_usage_scope.Per_request -> ""
     in
     match parts with
@@ -5740,7 +5740,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             ^ Ansi.reset ]
       | Runtime_usage_scope.Usage_scope_unavailable, _ ->
           [ marker ^ Ansi.dim
-            ^ Printf.sprintf " #%-4d %s  usage scope unknown" recent.turn ts
+            ^ Printf.sprintf " #%-4d %s  usage scope not reported" recent.turn ts
             ^ Ansi.reset ]
       | Runtime_usage_scope.Conversation_cumulative, _ ->
           [ marker
@@ -5762,7 +5762,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
               ]
           | None ->
               [ marker ^ Ansi.dim
-                ^ Printf.sprintf " #%-4d %s  count %s; input provenance unknown"
+                ^ Printf.sprintf " #%-4d %s  count %s; input provenance not reported"
                     recent.turn ts (Inspector.format_tokens input)
                 ^ Ansi.reset ]
           | Some Turn_input_provenance.Measured_request -> (

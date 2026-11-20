@@ -121,13 +121,18 @@ type page_name_error = Wiki_page_name.page_name_error =
 val validate_page_name : string -> (string, page_name_error) result
 
 val frontmatter_read_limit : int
-(** Maximum prefix byte count read from a page when scanning frontmatter. *)
+(** Maximum prefix byte count (8,192 bytes) read from a page when scanning
+    frontmatter for index/title metadata. Pages whose frontmatter exceeds
+    this prefix appear as unreadable in listings and are skipped in title
+    prefix search, while direct [masc_wiki_read] and exact-name lookups still
+    open the full file unchanged. *)
 
 val read_frontmatter_cached :
   string -> (frontmatter, frontmatter_error) result option
-(** Read and parse at most {!frontmatter_read_limit} header bytes from a page
-    path, memoized in memory by [(path, mtime, size)]. Returns [None] when the
-    file is absent or unreadable. *)
+(** Read and parse at most {!frontmatter_read_limit} (8 KiB) header bytes from a
+    page path, memoized in memory by [(path, mtime, size)] (external writes
+    that leave both [mtime] and byte size identical are indistinguishable by the
+    stat key). Returns [None] when the file is absent or unreadable. *)
 
 val list_pages : base_path:string -> string list
 (** Every [.md] file directly under {!wiki_root}, as full paths in name

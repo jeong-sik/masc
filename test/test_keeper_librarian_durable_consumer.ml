@@ -754,7 +754,7 @@ let test_failed_commit_and_restart_retry_the_same_range () =
    replacement writes a fresh revision-1 snapshot. Feeding the empty current
    in with no expected revision is what routes the pass through that branch
    instead of skipping the write and leaving the keeper wedged. *)
-let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
+let test_undecodable_current_snapshot_fails_closed_without_quarantine () =
   with_workspace @@ fun config ->
   let module Current = Masc.Keeper_memory_os_current in
   let trace_id = "trace-undecodable-quarantine" in
@@ -5472,8 +5472,8 @@ let () =
             test_queue_cancellation_clears_current_but_preserves_newer_observations
         ; test_case "failed commit and restart retry exact range" `Quick
             test_failed_commit_and_restart_retry_the_same_range
-        ; test_case "undecodable current routes through write-path quarantine" `Quick
-            test_undecodable_current_snapshot_routes_through_write_path_quarantine
+        ; test_case "undecodable current fails closed without write-path quarantine" `Quick
+            test_undecodable_current_snapshot_fails_closed_without_quarantine
         ; test_case "unreadable current stops the pass before commit" `Quick
             test_unreadable_current_snapshot_stops_the_pass_before_commit
         ; test_case "committed range repairs failed progress after restart" `Quick

@@ -392,10 +392,10 @@ let execute_exact_prompt ~base_path ~(lane : resolved_lane_execution) ~schema ~r
                      ~http_detail:detail)))))
 ;;
 
-let commit_two_phase_log ~base_path ~author ~entries ~apply_state =
-  match entries with
-  | [] -> apply_state ()
-  | _ :: _ ->
+let commit_two_phase_log_dynamic ~base_path ~author ~expected_changes ~apply_and_entries =
+  if expected_changes <= 0 then
+    Result.map fst (apply_and_entries ())
+  else
     let log_path = Log_store.log_path ~base_path in
     let batch_id = Random_id.uuid_v7 () in
     let now_iso = iso8601_now () in
@@ -403,49 +403,69 @@ let commit_two_phase_log ~base_path ~author ~entries ~apply_state =
       { batch_id
       ; author
       ; started_at = now_iso
-      ; expected_changes = List.length entries
+      ; expected_changes
       }
     in
     let* base_seq =
       Log_store.prepare_batch ~path:log_path ~header
       |> Result.map_error Log_store.error_to_string
     in
-    let changes =
-      List.mapi
-        (fun idx (fact_id, summary, payload) : Log_store.change_entry ->
-           { seq = base_seq + 1 + idx
-           ; batch_id
-           ; fact_id
-           ; summary
-           ; payload
-           ; recorded_at = now_iso
-           })
-        entries
+    let try_abort reason =
+      match
+        Log_store.abort_prepared_batch
+          ~path:log_path
+          ~batch_id
+          ~aborted_at:(iso8601_now ())
+          ~reason
+      with
+      | Ok () -> ()
+      | Error abort_err ->
+        Log.Server.warn "workspace curator abort batch %s failed: %s" batch_id
+          (Log_store.error_to_string abort_err)
     in
-    (match apply_state () with
-     | Error detail ->
-       (match
-          Log_store.abort_prepared_batch
-            ~path:log_path
-            ~batch_id
-            ~aborted_at:(iso8601_now ())
-            ~reason:detail
-        with
-        | Ok () -> ()
-        | Error abort_err ->
-          Log.Server.warn "workspace curator abort batch %s failed: %s" batch_id
-            (Log_store.error_to_string abort_err));
-       Error detail
-     | Ok value ->
-       let* (_final_seq : int) =
+    match apply_and_entries () with
+    | Error detail ->
+      try_abort detail;
+      Error detail
+    | Ok (value, entries) ->
+      let changes =
+        List.mapi
+          (fun idx (fact_id, summary, payload) : Log_store.change_entry ->
+             { seq = base_seq + 1 + idx
+             ; batch_id
+             ; fact_id
+             ; summary
+             ; payload
+             ; recorded_at = now_iso
+             })
+          entries
+      in
+      (match
          Log_store.commit_prepared_batch
            ~path:log_path
            ~batch_id
            ~changes
            ~committed_at:(iso8601_now ())
-         |> Result.map_error Log_store.error_to_string
-       in
-       Ok value)
+       with
+       | Ok (_final_seq : int) -> Ok value
+       | Error commit_err ->
+         let detail = Log_store.error_to_string commit_err in
+         try_abort ("commit failed after state save: " ^ detail);
+         Log.Server.warn
+           "workspace curator log commit failed after ledger save (batch %s; ledger ahead of log): %s"
+           batch_id
+           detail;
+         Error detail)
+;;
+
+let commit_two_phase_log ~base_path ~author ~entries ~apply_state =
+  commit_two_phase_log_dynamic
+    ~base_path
+    ~author
+    ~expected_changes:(List.length entries)
+    ~apply_and_entries:(fun () ->
+      let* value = apply_state () in
+      Ok (value, entries))
 ;;
 
 let log_entries_of_reconciliation (detailed : Ledger.detailed_reconciliation) =
@@ -694,23 +714,20 @@ let run_classification ~base_path ~(owner : owner) =
                      owner.classification_size <- Request.Up_to (List.length batch.selected));
                  let commit_res =
                    io (fun () ->
-                     let* current_ledger = Ledger.load ~base_path in
-                     let* preview =
-                       Ledger.apply current_ledger ~selected:batch.selected assignments
-                       |> Result.map_error Ledger.apply_error_to_string
-                     in
-                     let entries = log_entries_of_assignments ~ledger:preview assignments in
-                     commit_two_phase_log
+                     commit_two_phase_log_dynamic
                        ~base_path
                        ~author:"workspace-memory-curator"
-                       ~entries
-                       ~apply_state:(fun () ->
-                         let* _ =
+                       ~expected_changes:(List.length assignments)
+                       ~apply_and_entries:(fun () ->
+                         let* applied_ledger =
                            Ledger.update ~base_path (fun latest ->
                              Ledger.apply latest ~selected:batch.selected assignments
                              |> Result.map_error Ledger.apply_error_to_string)
                          in
-                         Ok ()))
+                         let entries =
+                           log_entries_of_assignments ~ledger:applied_ledger assignments
+                         in
+                         Ok ((), entries)))
                  in
                  (match commit_res with
                   | Ok () ->

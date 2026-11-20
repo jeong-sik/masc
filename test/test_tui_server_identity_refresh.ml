@@ -6865,9 +6865,9 @@ let test_waiting_row_epochs_isolate_other_keepers_and_controls () =
     (keeper_waiting_row_current state during_control (turn "alpha"))
 ;;
 
-(* A schedule or a confirmation change names no Keeper (RFC-0481 §3.4). A
-   waiting read begun before it may predate it, so that read is not current;
-   the change itself marks no Keeper unverified, so the drawn rows stay. *)
+(* A schedule or a confirmation change names no Keeper. A waiting read begun
+   before it may predate it, so that read is not current; the change itself
+   marks no Keeper unverified, so the drawn rows stay. *)
 let test_an_unattributed_change_retires_reads_without_blanking_rows () =
   let open Masc_tui_types in
   let state, alpha, _ = local_keeper_source_fixture () in

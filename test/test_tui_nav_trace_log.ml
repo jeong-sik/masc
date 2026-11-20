@@ -1,4 +1,4 @@
-(* The navigation trace file (RFC-0485). These cases hold what the loop hands it
+(* The navigation trace file. These cases hold what the loop hands it
    -- a key, a frame, the footer's hints -- to what lands in the file: the
    state it keeps between calls, the cap, the off switch. What a line holds of
    a key is decided in Masc_tui_nav_trace and tested there. *)

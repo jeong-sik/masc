@@ -145,7 +145,7 @@ let test_another_occurrence_cannot_supply_progress () =
 
 let test_unavailable_is_not_a_negative () =
   let unknown row = match (decoded row).stage with
-    | Observation.Unknown _ -> ()
+    | Observation.Undetermined _ -> ()
     | Observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
     | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
     | Cancelled _ | Settling _ | Transferring _ -> Alcotest.fail "unavailable evidence became confirmed progress" in
@@ -155,7 +155,7 @@ let test_unavailable_is_not_a_negative () =
   stage Observation.Queued (pending () |> replace "keeper_reaction_evidence" `Null)
 
 (* A projection_status token outside the schedule contract is a decode
-   failure, not an [Unknown] stage: the server and this reader share one
+   failure, not an [Undetermined] stage: the server and this reader share one
    table, so an unknown word means the two builds disagree (#36009). *)
 let test_unknown_projection_status_is_refused () =
   refused (pending () |> nested "keeper_queue_evidence"
@@ -175,7 +175,7 @@ let test_terminal_contradiction_cannot_become_completed () =
   let result = (decoded row).stage in
   Alcotest.(check bool) "contradiction is unconfirmed" true
     (match result with
-     | Observation.Unknown _ -> true
+     | Observation.Undetermined _ -> true
      | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
      | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record | Cancelled _
      | Settling _ | Transferring _ -> false)
@@ -189,7 +189,7 @@ let test_cross_source_terminal_disagreement () =
     let result = decoded (terminal outcome cancelled_reaction) in
     Alcotest.(check bool) "terminal disagreement stays unconfirmed" true
       (match result.stage with
-       | Observation.Unknown _ -> true
+       | Observation.Undetermined _ -> true
        | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started
        | Turn_ended _ | Consumed | Completed | Receipt_is_the_record | Cancelled _ | Settling _
        | Transferring _ -> false))
@@ -237,7 +237,7 @@ let test_missing_stimulus_receipt_is_unconfirmed () =
       (`Assoc (("projection_status", `String "missing_stimulus_id") :: identity)) in
   let row = unrecognized `Null in
   let unknown row = match (decoded row).stage with
-    | Observation.Unknown _ -> ()
+    | Observation.Undetermined _ -> ()
     | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
     | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record | Cancelled _
     | Settling _ | Transferring _ -> Alcotest.fail "missing identity became confirmed progress" in
@@ -288,7 +288,7 @@ let test_receipt_is_the_record () =
      newer kind does not drop the page (review on #53163). *)
   let unsupported name row =
     match (decoded row).stage with
-    | Observation.Unknown _ -> ()
+    | Observation.Undetermined _ -> ()
     | Observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _
     | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
     | Cancelled _ | Settling _ | Transferring _ ->

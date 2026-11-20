@@ -733,8 +733,8 @@ let test_decode_keeps_a_page_around_an_unreadable_receipt () =
     (match snapshot.Masc_tui_types.scs_rows with
      | [ first; second ] ->
        (match first.Masc_tui_types.sch_occurrence.Masc.Tui_schedule_observation.stage with
-        | Masc.Tui_schedule_observation.Unknown _ -> ()
-        | _ -> Alcotest.fail "the unreadable receipt's row is not unknown");
+        | Masc.Tui_schedule_observation.Undetermined _ -> ()
+        | _ -> Alcotest.fail "the unreadable receipt's row is not undetermined");
        (match second.Masc_tui_types.sch_occurrence.Masc.Tui_schedule_observation.stage with
         | Masc.Tui_schedule_observation.No_occurrence -> ()
         | _ -> Alcotest.fail "the other row did not read as it is")

@@ -3474,7 +3474,7 @@ let schedule_row_queue_keepers row =
     | Tui_schedule_observation.Transferring { owner; target } -> [ owner; target ]
     | Tui_schedule_observation.No_occurrence | Dispatching | Dispatch_failed _ | Queued
     | Missing | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
-    | Cancelled _ | Unknown _ ->
+    | Cancelled _ | Undetermined _ ->
         []
   in
   List.filter_map Fun.id [ row.sch_payload_keeper_name; row.sch_reaction_keeper_name ] @ holders
@@ -3487,7 +3487,7 @@ let schedule_rows_read_queue_of ~keepers rows =
 let schedule_row_unsettled row =
   match row.sch_occurrence.Tui_schedule_observation.stage with
   | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed
-  | Settling _ | Transferring _ | Unknown _ | Dispatching -> true
+  | Settling _ | Transferring _ | Undetermined _ | Dispatching -> true
   | No_occurrence | Dispatch_failed _ | Completed | Receipt_is_the_record | Cancelled _ -> false
 ;;
 
@@ -3529,7 +3529,7 @@ let chat_schedule_entries ~keeper_name snapshot =
               | Ok (Scheduled | Due | Running | Succeeded | Cancelled | Expired) | Error _ -> false)
          | Dispatch_failed _ | Completed | Receipt_is_the_record | Cancelled _ -> true
          | Dispatching | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Settling _
-         | Transferring _ | Unknown _ -> false)
+         | Transferring _ | Undetermined _ -> false)
     |> List.stable_sort (fun left right -> Option.compare Float.compare (observed right) (observed left))
     |> List.take 1 in
   let selected = List.filter (fun row -> active row || unsettled row) rows @ latest_result in
@@ -28281,6 +28281,42 @@ type chat_schedule_line =
    never a limit on stored jobs or their execution. *)
 let chat_schedule_open_entries = 3
 
+(* An occurrence the evidence does not settle, in a status column: a gap
+   draws its RFC tui-one-screen-grammar 6.4 mark -- evidence not seen yet
+   [◌], a value the receipt did not carry [?], a record this build could
+   not read [✕] -- and records that contradict each other say so. *)
+let schedule_undetermined_mark ~ko (why : Tui_schedule_observation.undetermined) =
+  let gap = Masc_tui_value.Unknown.glyph in
+  match why with
+  | Receipt_not_seen -> gap Masc_tui_value.Unknown.Unread
+  | Stimulus_absent -> gap Masc_tui_value.Unknown.Unreported
+  | Receipt_unsupported _ | Status_unsupported _ | Reaction_unreadable | Queue_unreadable ->
+      gap Masc_tui_value.Unknown.Read_failed
+  | Consumption_conflict | Terminal_disagreement | Queue_still_holds | Reaction_stage_unexpected ->
+      if ko then "기록 충돌" else "conflict"
+
+(* The same occurrence where its line has room for why. *)
+let schedule_undetermined_text ~ko (why : Tui_schedule_observation.undetermined) =
+  let say k e = if ko then k else e in
+  let plain = Masc_tui_keeper_chat_projection.terminal_safe_text in
+  match why with
+  | Receipt_not_seen -> say "Keeper 수신 기록 아직 없음" "not seen by the Keeper yet"
+  | Stimulus_absent -> say "발생 식별자 보고 없음" "occurrence id not reported"
+  | Receipt_unsupported reason ->
+      say "이 빌드가 읽지 못하는 실행 기록: " "run receipt this build cannot read: " ^ plain reason
+  | Status_unsupported status ->
+      say "이 빌드가 읽지 못하는 전달 상태: " "dispatch status this build cannot read: " ^ plain status
+  | Reaction_unreadable -> say "반응 기록을 읽지 못함" "reaction record unreadable"
+  | Queue_unreadable -> say "큐 기록을 읽지 못함" "queue record unreadable"
+  | Consumption_conflict ->
+      say "반응 기록이 처리와 취소를 둘 다 적음" "reaction record says both consumed and cancelled"
+  | Terminal_disagreement ->
+      say "큐와 반응 기록의 종료 결과가 다름" "queue and reaction record disagree on the end"
+  | Queue_still_holds ->
+      say "반응 기록은 끝났는데 큐에 남아 있음" "reaction record ended, queue still holds it"
+  | Reaction_stage_unexpected ->
+      say "반응 기록의 단계가 맞지 않음" "reaction record reports an unexpected stage"
+
 (* The block's facts are laid out here, at the width the pane draws them, so
    the rows the viewport counts are the rows it draws (RFC
    tui-one-screen-grammar section 5.5). [max_rows] is what the viewport can
@@ -28383,13 +28419,13 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
                 Schedule_pending,
                 [ say "턴 종료: " "turn ended: " ^ Masc.Keeper_reaction_ledger.Turn_disposition.to_string disposition
                 ; say "결과 확인 중" "confirming result" ]
-              | Consumed -> Schedule_pending, [say "소비됨" "consumed"; say "결과 미보고" "result unreported"]
+              | Consumed -> Schedule_pending, [say "소비됨" "consumed"; say "결과 보고 없음" "result not reported"]
               | Completed -> Schedule_settled, [say "최근 완료" "completed"]
               | Receipt_is_the_record -> Schedule_settled, [say "전달 완료" "delivered"]
               | Cancelled why -> Schedule_settled, reason (say "취소됨" "cancelled") why
               | Settling _ -> Schedule_pending, [say "결과 기록 중" "settling"]
               | Transferring _ -> Schedule_pending, [say "인계 기록 중" "transferring"]
-              | Unknown why -> Schedule_pending, [plain why] in
+              | Undetermined why -> Schedule_pending, [schedule_undetermined_text ~ko why] in
             let hold = match row.sch_runner_hold with
               | None -> []
               | Some hold ->
@@ -28411,7 +28447,7 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
               | Some at, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                          | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) ->
                   [fact ~label:(say "다음 " "next ") (Facts.Reading Schedule_settled) (local_minute at)]
-              | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Unknown _)
+              | (None | Some _), (No_occurrence | Dispatching | Dispatch_failed _ | Missing | Undetermined _)
               | None, (Queued | Queued_at _ | Turn_started | Turn_ended _ | Consumed | Completed
                       | Receipt_is_the_record | Cancelled _ | Settling _ | Transferring _) -> [] in
             List.map (fact (Facts.Reading tone)) occurrence

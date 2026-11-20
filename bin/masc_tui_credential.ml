@@ -13,8 +13,8 @@ let agent_name = "masc-tui"
 (* The env var an operator may set to override the stored bearer. Named here
    because it appears in three unrelated-looking places: the lookup, the
    argument that tells masc login which name to print, and the command the
-   operator is handed. *)
-let token_env_var = "MASC_TOKEN"
+   operator is handed. The spelling is the one every MASC client reads. *)
+let token_env_var = Env_config_core.client_token_env_key
 
 let login_command =
   Printf.sprintf "masc login --agent %s --client-env %s" agent_name

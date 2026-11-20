@@ -131,6 +131,10 @@ module Tools : sig
   val web_search_timeout_sec : unit -> int
   val web_search_cache_ttl_sec : unit -> float
 
+  val searxng_url_env : string
+  (** [MASC_SEARXNG_URL]; also the credential name the SearXNG provider
+      answers with. *)
+
   val searxng_url_configured : string -> (string option, string) result
   (** What a [web_search.searxng_url] value names, without trailing slashes.
       Blank is unset, [Ok None]. A value that is not an http or https URL with

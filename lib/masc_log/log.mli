@@ -66,8 +66,14 @@ val set_level : level -> unit
 val set_level_from_string : string -> unit
 (** Set the global log level from a string (e.g., from env var). *)
 
+val level_env_key : string
+(** [MASC_LOG_LEVEL], read by {!init_from_env}. *)
+
+val routine_level_env_key : string
+(** [MASC_LOG_ROUTINE_LEVEL]: the level routine telemetry logs at, or [off]. *)
+
 val init_from_env : unit -> unit
-(** Initialize log level from MASC_LOG_LEVEL env var. *)
+(** Initialize log level from {!level_env_key}. *)
 
 val timestamp : unit -> string
 (** Get current timestamp as formatted string. *)

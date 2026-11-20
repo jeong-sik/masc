@@ -187,9 +187,6 @@ val otel_default_enabled : bool
     Named here rather than at the reader because the operator snapshot states
     this default too, and the two disagreed. *)
 
-val otel_default_enabled_s : string
-(** String form of {!otel_default_enabled} for the env snapshot. *)
-
 val otel_default_port : int
 
 val otel_default_url : string

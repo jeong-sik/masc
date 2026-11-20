@@ -17,7 +17,7 @@ let run_cmd cli_base_path =
   (* Capture the external client's credential before owner startup establishes
      any internal runtime credentials. It is never logged or substituted by
      a bootstrap/admin token. *)
-  let stdio_auth_token = Sys.getenv_opt "MASC_TOKEN" in
+  let stdio_auth_token = Sys.getenv_opt Env_config_core.client_token_env_key in
   Printexc.record_backtrace true;
   let workspace =
     Server_base_path_guard.exit_on_no_workspace
@@ -25,7 +25,7 @@ let run_cmd cli_base_path =
   in
   let normalized_base_path = workspace.Workspace_root.root in
   Unix.putenv
-    "MASC_BASE_PATH_RESOLUTION_SOURCE"
+    Env_config_core.base_path_resolution_source_env_key
     (Workspace_root.source_label workspace.Workspace_root.source);
   (* Create an explicit missing workspace root, then freeze the canonical
      owner identity before the lease, environment, backend, or runtime sees it. *)

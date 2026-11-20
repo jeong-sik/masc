@@ -129,6 +129,9 @@ let should_log level =
 let set_level level =
   Atomic.set current_level (level_to_int level)
 
+let level_env_key = "MASC_LOG_LEVEL"
+let routine_level_env_key = "MASC_LOG_ROUTINE_LEVEL"
+
 let routine_level_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
   | "off" | "none" | "silent" -> Some None
@@ -141,15 +144,15 @@ let routine_level () =
   | Some level -> level
   | None ->
       let parsed =
-        match Sys.getenv_opt "MASC_LOG_ROUTINE_LEVEL" with
+        match Sys.getenv_opt routine_level_env_key with
         | None -> Some Debug
         | Some s -> (
             match routine_level_of_string_opt s with
             | Some level -> level
             | None ->
                 Printf.eprintf
-                  "[masc_log] WARN: MASC_LOG_ROUTINE_LEVEL=%S is not a valid level/off; defaulting to Debug\n%!"
-                  s;
+                  "[masc_log] WARN: %s=%S is not a valid level/off; defaulting to Debug\n%!"
+                  routine_level_env_key s;
                 Some Debug)
       in
       Atomic.set routine_level_cache (Some parsed);
@@ -173,7 +176,7 @@ let set_level_from_string s =
 
 (** Initialize from MASC_LOG_LEVEL env var *)
 let init_from_env () =
-  match Sys.getenv_opt "MASC_LOG_LEVEL" with
+  match Sys.getenv_opt level_env_key with
   | Some s -> set_level_from_string s
   | None -> ()
 

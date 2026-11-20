@@ -168,6 +168,8 @@ val host_fd_pressure_poll_interval_sec : unit -> float
 (** {1 Base path / storage} *)
 
 val base_path_env_key : string
+val base_path_resolution_source_env_key : string
+val secret_dir_env_key : string
 
 type base_path_source =
   | From_env of string
@@ -240,8 +242,11 @@ val running_under_test_executable : unit -> bool
 val base_path_prod_guard : string -> string
 
 val test_allow_real_docker_env : string
-(** Name of the hook a refusal message tells the operator to set. The fake
-    docker path's key stays private: callers want the value, not the name. *)
+(** Name of the hook a refusal message tells the operator to set. *)
+
+val test_fake_docker_path_env : string
+(** Name of the fake docker hook; {!Env_keeper_scrub} passes it to Keeper
+    subprocesses. *)
 
 val fake_docker_path_opt : unit -> string option
 (** The fake docker script a test asked for, or [None] when the variable is
@@ -268,12 +273,11 @@ val jsonl_retention_days_env_key : string
     spelling, the way {!admin_token_env_key} already is. *)
 
 val admin_token_env_key : string
+val client_token_env_key : string
 val admin_token_opt : unit -> string option
 
 (** {1 Logging / telemetry} *)
 
-val log_level_env_key : string
-val log_routine_level_env_key : string
 val telemetry_enabled_env_key : string
 
 (** [MASC_PARSE_WARN]. Malformed env values always warn; this flag escalates

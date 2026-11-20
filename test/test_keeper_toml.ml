@@ -1686,7 +1686,7 @@ let test_agent_core_env_drops_non_agent_core_prefix () =
 PATH = "/evil/bin:/usr/bin"
 LD_PRELOAD = "/tmp/hack.so"
 AGENT_CORE_DEFAULT_MODEL = "provider-a/fast"
-MASC_KEEPER_AUTONOMOUS_MAX_TOKENS = "9999"
+MASC_KEEPER_UNLISTED_SETTING = "9999"
 RANDOM_VAR = "nope"
 |} in
   match TL.parse_toml input with
@@ -1701,7 +1701,7 @@ RANDOM_VAR = "nope"
       check bool "PATH dropped" false (List.mem_assoc "PATH" d.agent_core_env);
       check bool "LD_PRELOAD dropped" false (List.mem_assoc "LD_PRELOAD" d.agent_core_env);
       check bool "unlisted keeper key dropped" false
-        (List.mem_assoc "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS" d.agent_core_env);
+        (List.mem_assoc "MASC_KEEPER_UNLISTED_SETTING" d.agent_core_env);
       check bool "RANDOM_VAR dropped" false (List.mem_assoc "RANDOM_VAR" d.agent_core_env)
 
 let test_agent_core_env_absent_means_empty () =

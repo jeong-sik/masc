@@ -640,11 +640,8 @@ fi
 if [ -z "${MASC_GRPC_PORT:-}" ] && [ "$PORT" != "8935" ]; then
     export MASC_GRPC_PORT="$((PORT + 1))"
 fi
-if [ -z "${MASC_WS_PORT:-}" ] && [ "$PORT" != "8935" ]; then
-    export MASC_WS_PORT="$((PORT + 2))"
-fi
 if [ -n "$WORKTREE_PORT_HINT" ] && [ "$PORT" != "8935" ]; then
-    WORKTREE_PORT_HINT="$WORKTREE_PORT_HINT (gRPC=$MASC_GRPC_PORT, WS=$MASC_WS_PORT)"
+    WORKTREE_PORT_HINT="$WORKTREE_PORT_HINT (gRPC=$MASC_GRPC_PORT)"
 fi
 
 if [ "$PRINT_PORT_ONLY" = "1" ]; then
@@ -688,7 +685,6 @@ check_port_in_use() {
 if [ "$HTTP_MODE" = "true" ]; then
     check_port_in_use "$PORT" "HTTP"
     check_port_in_use "${MASC_GRPC_PORT:-8936}" "gRPC"
-    check_port_in_use "${MASC_WS_PORT:-8937}" "WebSocket"
 fi
 
 # Dashboard SPA build (Vite) — routed through the shared helper script.

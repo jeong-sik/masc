@@ -851,7 +851,7 @@ let all =
               (match Env_config_runtime.Tools.searxng_base_url () with
               | Ok url -> url
               | Error detail -> raise (Env_config_core.Config_error detail))))
-      ~env_name:"MASC_SEARXNG_URL"
+      ~env_name:Env_config_runtime.Tools.searxng_url_env
       ~exposure:(Toml_and_env "web_search.searxng_url")
       ~value_kind:String
       ~default:"(none)"
@@ -982,7 +982,7 @@ let all =
       ~env_name:"MASC_OTEL_ENABLED"
       ~exposure:(Toml_and_env "otel.enabled")
       ~value_kind:Boolean
-      ~default:"false"
+      ~default:(display_bool Masc_network_defaults.otel_default_enabled)
       ~consumers:[ "Otel_config.enabled"; "Otel_spans" ]
       ~category:Otel
       "Export OpenTelemetry spans and metrics to the OTLP endpoint"

@@ -7,24 +7,31 @@
 let entry = Env_config_snapshot_collector.entry
 let category = Env_config_snapshot_collector.category
 
-let keeper_registry_entries predicate =
+(* The masc_config section a registry row is listed under. Every registry row
+   reaches the snapshot through this match, so a row is never restated by hand
+   below and a new registry category has to be given a section. *)
+type registry_section =
+  | Keeper_section
+  | Transport_section
+  | Web_search_section
+  | Runtime_section
+
+let registry_section : Keeper_runtime_setting_registry.category -> registry_section =
+  function
+  | Keeper_runtime_setting_registry.Turn | Bootstrap | Lifecycle | Heartbeat
+  | Diagnostics | Supervisor | Metrics | Memory | Media | Sandbox ->
+    Keeper_section
+  | Transport -> Transport_section
+  | Web_search -> Web_search_section
+  | Otel -> Runtime_section
+;;
+
+let registry_entries section =
   Keeper_runtime_setting_registry.all
-  |> List.filter predicate
+  |> List.filter (fun (row : Keeper_runtime_setting_registry.setting) ->
+    registry_section row.category = section)
   |> List.map (fun (row : Keeper_runtime_setting_registry.setting) ->
     entry ~default:row.default_display row.env_name row.description)
-;;
-
-let keeper_runtime_entries =
-  keeper_registry_entries (fun row ->
-    String.starts_with ~prefix:"MASC_KEEPER_" row.env_name)
-;;
-
-let keeper_web_search_entries =
-  keeper_registry_entries (fun row ->
-    match row.category with
-    | Keeper_runtime_setting_registry.Web_search -> true
-    | Turn | Bootstrap | Lifecycle | Heartbeat | Diagnostics | Supervisor
-    | Metrics | Memory | Media | Transport | Sandbox | Otel -> false)
 ;;
 
 let server_entries =
@@ -73,8 +80,8 @@ let host_pressure_entries =
 
 let runtime_entries =
   [
-    entry ~default:"info" Env_config_core.log_level_env_key "Log level override";
-    entry ~default:"debug" Env_config_core.log_routine_level_env_key
+    entry ~default:"info" Log.level_env_key "Log level override";
+    entry ~default:"debug" Log.routine_level_env_key
       "Routine telemetry log level override (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
       "Escalate malformed env parses to Config_error";
@@ -122,7 +129,6 @@ let transport_entries =
        this many unsent events queued, new events are dropped and \
        masc_grpc_events_dropped_total advances.  Stream capacity is 64, \
        default leaves headroom.";
-    entry ~default:"8937" "MASC_WS_PORT" "WebSocket server port";
     entry ~default:"true" "MASC_WS_ENABLED" "Enable WebSocket transport";
     entry ~default:"1048576" "MASC_WS_CLIENT_BUFFER_LIMIT_BYTES"
       "Skip WS dashboard deltas for authenticated sessions whose last reported \
@@ -146,16 +152,6 @@ let transport_entries =
        masc_ws_slice_fanout_skipped_total advances per skip. RFC #10119 \
        Phase 2. Set to false for emergency rollback only.";
     Env_config_runtime.Transport.h2_snapshot_entry;
-    entry ~default:"8938" "MASC_HTTPS_PORT"
-      "HTTPS listener port: TLS 1.3 with ALPN h2 and http/1.1 on one port. \
-       0 turns the listener off.";
-    entry ~default:"(none)" "MASC_TLS_CERT_FILE"
-      "PEM certificate chain for the HTTPS listener. Unset, the server uses a \
-       self-signed pair under <base-path>/.masc/tls and generates it when \
-       missing or within 30 days of expiry.";
-    entry ~default:"(none)" "MASC_TLS_KEY_FILE"
-      "PEM private key for MASC_TLS_CERT_FILE. Set both or neither; one \
-       without the other refuses boot.";
     entry ~default:"240" "MASC_STARTUP_WATCHDOG_SEC"
       "Startup watchdog timeout (seconds)";
     Masc_grpc_transport.snapshot_entry;
@@ -168,16 +164,6 @@ let keeper_entries =
   [
     entry ~default:"(none)" "MASC_TLA_TRACE"
       "Enable TLA+ trace emission";
-  ]
-
-let keeper_execution_entries =
-  [
-    entry ~default:"4000" "MASC_KEEPER_AUTONOMOUS_MAX_TOKENS"
-      "Autonomous execution max tokens";
-  ]
-
-let autonomy_entries =
-  [
   ]
 
 let dashboard_entries =
@@ -213,8 +199,6 @@ let dashboard_entries =
     entry ~default:"8" "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"
       "Transport health timeout";
   ]
-
-(* --- New categories for the 229 missing env vars --- *)
 
 let board_entries =
   [
@@ -253,32 +237,10 @@ let keeper_sandbox_entries =
       "Fail closed unless Docker reports userns support";
   ]
 
-let internal_timer_entries =
-  [
-    entry ~default:"300.0" "MASC_BRIEFING_CACHE_TTL_SEC"
-      "Mission briefing cache TTL (seconds, 5 min)";
-    entry ~default:"300.0" "MASC_LABEL_QUIET_THRESHOLD_SEC"
-      "Dashboard label quiet threshold (seconds, 5 min)";
-    entry ~default:"900.0" "MASC_LABEL_STUCK_THRESHOLD_SEC"
-      "Dashboard label stuck threshold (seconds, 15 min)";
-    entry ~default:"300.0" "MASC_SSE_BUFFER_TTL_SEC"
-      "SSE buffer TTL (seconds, 5 min)";
-  ]
-
 let local_runtime_entries =
   [
     entry ~default:"(derived)" Env_config_core.mcp_url_env_key
       "MASC MCP endpoint URL (derived from base URL when unset)";
-  ]
-
-let message_gc_entries =
-  [
-  ]
-
-let agent_core_sse_entries =
-  [
-    entry ~default:"2.0" "MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC"
-      "SSE relay retry delay after failure (seconds; values below 0.1 use default)";
   ]
 
 let operator_entries =
@@ -291,7 +253,7 @@ let path_entries =
   [
     entry ~default:"(none)" "MASC_ASSETS_DIR"
       "Assets directory override; None when unset";
-    entry ~default:"(none)" "MASC_BASE_PATH_RESOLUTION_SOURCE"
+    entry ~default:"(none)" Env_config_core.base_path_resolution_source_env_key
       "Base path resolution source override; None when unset";
     entry ~default:"(none)" "MASC_BASE_PATH_STRICT"
       "Fail-fast on base path resolution issues";
@@ -330,16 +292,6 @@ let sse_entries =
       "Per-client SSE event stream capacity (clamped 8-1024)";
   ]
 
-(* MASC_TELEMETRY_ENABLED, MASC_LOG_LEVEL, MASC_LOG_ROUTINE_LEVEL and
-   MASC_PARSE_WARN are listed in [runtime_entries] only. The "runtime" category
-   concatenates both lists, so a second listing here would show each of them
-   twice. *)
-let telemetry_entries =
-  [
-    entry ~default:Masc_network_defaults.otel_default_enabled_s "MASC_OTEL_ENABLED"
-      "Enable OpenTelemetry span collection";
-  ]
-
 let test_entries =
   [
     entry ~default:"false" "MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE"
@@ -358,28 +310,27 @@ let category_specs () =
     , server_entries @ path_entries @ test_entries
       @ declared_entries "server" );
     "auth", auth_entries;
-    "transport", transport_entries @ declared_entries "transport";
+    ( "transport"
+    , transport_entries @ registry_entries Transport_section
+      @ declared_entries "transport" );
     "storage", storage_entries @ board_entries;
     ( "runtime"
     , runtime_entries
-      @ message_gc_entries @ internal_timer_entries
-      @ sse_entries @ telemetry_entries
+      @ sse_entries @ registry_entries Runtime_section
       @ tool_entries
       @ host_pressure_entries
       @ declared_entries "runtime" );
     "rate_limiting", rate_limiting_entries;
-    "inference", agent_core_sse_entries @ local_runtime_entries;
+    "inference", local_runtime_entries;
     ( "keeper"
-    , keeper_runtime_entries @ keeper_entries
+    , registry_entries Keeper_section @ keeper_entries
       @ keeper_sandbox_entries );
-    ( "keeper_execution"
-    , keeper_execution_entries @ decision_entries );
-    "autonomy", autonomy_entries;
+    "keeper_execution", decision_entries;
     "dashboard", dashboard_entries;
     "operations", operator_entries;
     "channel", channel_gate_entries;
     "process", shutdown_entries;
-    "web_search", keeper_web_search_entries;
+    "web_search", registry_entries Web_search_section;
     "session", session_entries;
   ]
 

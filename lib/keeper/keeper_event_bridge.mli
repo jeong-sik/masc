@@ -7,8 +7,8 @@
     @since 2.96.0 *)
 
 (** Start the bridge fiber. Subscribes to [bus], waits for events without
-    polling, and retries failed relays after an env-configurable delay
-    ([MASC_AGENT_CORE_SSE_DRAIN_INTERVAL_SEC], default 2s),
+    polling, and retries failed relays after
+    [Env_config_runtime.Agent_core_sse.drain_interval_sec] (2s),
     broadcasts each as an SSE event, and appends each observed serializable
     event to the [.masc/agent-core-events/] store for offline/debugging.
     The server's prune pass removes the store's day files by age.

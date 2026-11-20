@@ -27,16 +27,17 @@ let allow_exact : string list =
   ; "HTTP_PROXY"; "HTTPS_PROXY"; "NO_PROXY"
   ; "SSL_CERT_FILE"
 
-    (* MASC operational — these are read by Env_config_core and friends.
-       This is an exact list; arbitrary [MASC_*] keys are not inherited. *)
-  ; "MASC_BASE_PATH"
-  ; "MASC_BASE_PATH_RESOLUTION_SOURCE"
-  ; "MASC_CONFIG_DIR"
-  ; "MASC_HOST"; "MASC_HTTP_PORT"; "MASC_HTTP_BASE_URL"; "MASC_URL"
-  ; "MASC_LOG_LEVEL"; "MASC_LOG_ROUTINE_LEVEL"
-  ; "MASC_TELEMETRY_ENABLED"; "MASC_PARSE_WARN"
-  ; "MASC_SECRET_DIR"
-  ; "MASC_TEST_FAKE_DOCKER_PATH"
+    (* MASC operational — named by the modules that read them. This is an
+       exact list; arbitrary [MASC_*] keys are not inherited. *)
+  ; Env_config_core.base_path_env_key
+  ; Env_config_core.base_path_resolution_source_env_key
+  ; Env_config_core.config_dir_env_key
+  ; Env_config_core.host_env_key; Env_config_core.http_port_env_key
+  ; Env_config_core.http_base_url_env_key; Env_config_core.mcp_url_env_key
+  ; Log.level_env_key; Log.routine_level_env_key
+  ; Env_config_core.telemetry_enabled_env_key; Env_config_core.parse_warn_env_key
+  ; Env_config_core.secret_dir_env_key
+  ; Env_config_core.test_fake_docker_path_env
   ; "MASC_KEEPER_TEST_DOCKER_LOG"
   ]
 

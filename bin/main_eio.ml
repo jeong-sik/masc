@@ -530,7 +530,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
       raw_base_path canonical_base_path;
   Unix.putenv Env_config_core.base_path_env_key canonical_base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path canonical_base_path;
-  Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
+  Unix.putenv Env_config_core.base_path_resolution_source_env_key resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when
      base_path differed from the repo checkout directory. *)
@@ -1466,7 +1466,8 @@ let mcp_config_client_env =
     "Env var name your MCP client reads to pick up the bearer token. Rendered \
      verbatim into the emitted config."
   in
-  Arg.(value & opt string "MASC_TOKEN" & info ["client-env"] ~docv:"VAR" ~doc)
+  Arg.(value & opt string Env_config_core.client_token_env_key
+       & info ["client-env"] ~docv:"VAR" ~doc)
 
 let mcp_config_expiring =
   let doc =
@@ -4687,7 +4688,7 @@ let setup_validate_runtime base_path =
 
 let ensure_local_operator_login ~base_path ~port ~agent =
   match Auth_login.ensure_local_operator ~base_path ~host:"127.0.0.1" ~port
-      ~agent_name:agent ~token_env_var:"MASC_TOKEN"
+      ~agent_name:agent ~token_env_var:Env_config_core.client_token_env_key
       ~token_lifetime:Auth_login.With_expiry () with
   | Ok None -> 0
   | Ok (Some _) -> prerr_endline "Local operator credential ready."; 0

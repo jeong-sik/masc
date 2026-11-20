@@ -444,7 +444,11 @@ let waiting_items ?(ko = false) ~now json =
     let* consumption = match paused with
       | `Bool true -> Ok (if ko then "일시정지" else "paused")
       | `Bool false -> Ok (if ko then "열림" else "open")
-      | `Null -> Ok (if ko then "알 수 없음" else "unknown")
+      (* The server sends null when it cannot read the Keeper's owner
+         record or the record has no meta: the answer came back without the
+         value, so the header draws the not-reported mark (RFC
+         tui-one-screen-grammar 6.4), never the word "unknown". *)
+      | `Null -> Ok (Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)
       | _ -> Error "Queue paused field must be boolean or null" in
     let* rows = list "waiting_on" keeper in
     let* rows = describe rows in

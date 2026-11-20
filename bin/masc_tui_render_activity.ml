@@ -107,6 +107,7 @@ let render_system_log_detail (state : state) seq =
   let buf = Buffer.create 4096 in
   let lines = system_log_detail_lines state ~seq ~width:(max 1 (framed_inner_width cols - 4)) in
   let content_height = max 1 (rows - 5) in
+  report_drawn_list System_log_detail_rows ~height:content_height;
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min (system_logs_page state).lp_detail_scroll max_scroll) in
   box_top buf cols;

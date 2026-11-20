@@ -1413,7 +1413,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
       (Terminal_text.single_line post.bp_title)
   in
   let title=match board_posts_status state with None -> words state "게시판" "Board" | Some status -> words state "게시판 · " "Board · " ^ status in
-  write_list_sidebar buf ~rows ~cols ~title
+  write_list_sidebar ~list:Board_read_sidebar_rows buf ~rows ~cols ~title
     ~focused:(state.board_focus = Left_pane)
     ~holding:(board_census_holding state ~hearth:(board_posts_query state).bq_hearth)
     ~labels:(List.map format_sidebar_post (board_posts state))

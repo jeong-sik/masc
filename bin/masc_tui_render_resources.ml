@@ -539,6 +539,7 @@ let render_resources (state : state) =
     let content_origin = strip_rows + lines_ended_since pane_buf ~start:0
       + (if pane_buf == buf then 0 else lines_ended_since buf ~start:0) in
     let content_height = max 0 (pane_rows - List.length sheet_lines) in
+    report_drawn_list Resource_document_rows ~height:content_height;
     (match reading with
      | None ->
          draw_list_idle pane_buf pane_cols ~ko ~empty:(no_resources ~ko)

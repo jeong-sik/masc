@@ -3436,7 +3436,7 @@ let list_count_text ~loaded ~holding =
    Asked of every caller rather than defaulted: a list that is filtered
    rather than paged has nothing more to hold, and passing [None] says so
    where leaving it out could not be told from forgetting. *)
-let write_list_sidebar_selection ?(framed = true) buf ~rows ~cols ~title ~focused ~holding
+let write_list_sidebar_selection ?(framed = true) ?list buf ~rows ~cols ~title ~focused ~holding
     ~labels ~selection =
   let draw ?style text = sidebar_line ?style buf ~cols text in
   if framed then draw "";
@@ -3446,6 +3446,7 @@ let write_list_sidebar_selection ?(framed = true) buf ~rows ~cols ~title ~focuse
   draw ~style:(Theme.Side_pane.border_muted ()) (sidebar_rule ~cols);
   let chrome = if framed then framed_chrome_rows else max 0 (framed_chrome_rows - 2) in
   let content_height = max 0 (rows - chrome) in
+  Option.iter (fun list -> report_drawn_list list ~height:content_height) list;
   let first =
     match selection with
     | Some selected when selected >= content_height ->
@@ -3483,9 +3484,9 @@ let write_list_sidebar_selection ?(framed = true) buf ~rows ~cols ~title ~focuse
   if framed then draw ""
 
 (* The same index for a list whose open row is always in it. *)
-let write_list_sidebar ?(framed = true) buf ~rows ~cols ~title ~focused ~holding ~labels
+let write_list_sidebar ?(framed = true) ?list buf ~rows ~cols ~title ~focused ~holding ~labels
     ~selected =
-  write_list_sidebar_selection ~framed buf ~rows ~cols ~title ~focused ~holding ~labels
+  write_list_sidebar_selection ~framed ?list buf ~rows ~cols ~title ~focused ~holding ~labels
     ~selection:(Some selected)
 
 

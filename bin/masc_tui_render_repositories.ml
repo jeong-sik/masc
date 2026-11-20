@@ -153,6 +153,7 @@ let render_workspace_activity (state : state) repo_id =
           c.push ("  " ^ Masc_tui_table.header_row (cells ~date:"" ~keeper:"" ~task:"" ~result:"" ~path:""));
           c.push_divider ();
           let room = max 1 (budget - 7) in
+          report_drawn_list Workspace_activity_rows ~height:room;
           let first = max 0 (cursor - room + 1) in
           let rows_window = Rows.of_list ~first:first ~height:room rows in
           for i = 0 to room - 1 do

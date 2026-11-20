@@ -661,6 +661,7 @@ let verification_detail_pane (state : state) ~rows ~cols
   in
   let evidence_first = List.length before in
   let lines = before @ evidence @ verification_contract_lines state ~width request in
+  report_drawn_list Verification_detail_rows ~height:content_height;
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.verification_detail_scroll max_scroll) in
   let pane_start = Buffer.length buf in
@@ -1240,6 +1241,7 @@ let harness_detail_pane (state : state) ~rows ~cols verdict buf =
     |> judgement_detail_rows ~width
   in
   let content_height = max 1 (rows - max 0 (framed_chrome_rows - 2)) in
+  report_drawn_list Harness_detail_rows ~height:content_height;
   let max_scroll = max 0 (List.length lines - content_height) in
   let scroll = max 0 (min state.harness_detail_scroll max_scroll) in
   box_line buf cols

@@ -43,6 +43,11 @@ let braille_bar_rows ~rows ~level =
 let braille_left_dots_down = [| 0x00; 0x01; 0x03; 0x07; 0x47 |]
 let braille_right_dots_down = [| 0x00; 0x08; 0x18; 0x38; 0xb8 |]
 
+let braille_pair_down ~left ~right =
+  let l = clamp_braille_level left and r = clamp_braille_level right in
+  braille_cell ~mask:(braille_left_dots_down.(l) lor braille_right_dots_down.(r))
+;;
+
 type positive = int
 
 let positive count = if count > 0 then Some count else None
@@ -256,4 +261,75 @@ let braille_mirror ~up_tint ~down_tint ~width ~half_rows ~axis ~maximum ~up ~dow
             (levelled ~dots ~maximum ~cells up)
           @ falling_rows ~tint:down_tint ~rows:half_rows ~dots
               (levelled ~dots ~maximum ~cells down)))
+;;
+
+let interpolate_pairs ~cells samples =
+  if cells <= 0 then []
+  else if samples = [] then List.init cells (fun _ -> (0, 0))
+  else
+    let total_cols = 2 * cells in
+    let arr = Array.of_list samples in
+    let n = Array.length arr in
+    let cols = Array.make total_cols 0 in
+    let span_of i =
+      let lo = Stdlib.min (total_cols - 1) ((i * total_cols) / n) in
+      let raw_hi = (((i + 1) * total_cols) / n) - 1 in
+      let hi = Stdlib.max lo (Stdlib.min (total_cols - 1) raw_hi) in
+      (lo, hi, (lo + hi) / 2)
+    in
+    let paint_linear ~x0 ~h0 ~x1 ~h1 =
+      if h0 > 0 || h1 > 0 then begin
+        let lo_x = Stdlib.min x0 x1 and hi_x = Stdlib.max x0 x1 in
+        let span = hi_x - lo_x in
+        for x = lo_x to hi_x do
+          let t =
+            if span <= 0 then 0.0
+            else float_of_int (x - x0) /. float_of_int (x1 - x0)
+          in
+          let raw =
+            int_of_float
+              (Float.round (float_of_int h0 +. (t *. float_of_int (h1 - h0))))
+          in
+          let h = Stdlib.max 1 raw in
+          if h > cols.(x) then cols.(x) <- h
+        done
+      end
+    in
+    for i = 0 to n - 1 do
+      match arr.(i) with
+      | None -> ()
+      | Some raw_h ->
+          let h = Stdlib.max 0 raw_h in
+          let lo, hi, cx = span_of i in
+          let has_left = i > 0 && Option.is_some arr.(i - 1) in
+          let has_right = i + 1 < n && Option.is_some arr.(i + 1) in
+          if not has_left then begin
+            let shoulder = if h > 0 then Stdlib.max 1 (h / 2) else 0 in
+            paint_linear ~x0:lo ~h0:shoulder ~x1:cx ~h1:h
+          end;
+          if has_right then begin
+            let h_next =
+              match arr.(i + 1) with Some v -> Stdlib.max 0 v | None -> 0
+            in
+            let _, _, next_cx = span_of (i + 1) in
+            paint_linear ~x0:cx ~h0:h ~x1:next_cx ~h1:h_next
+          end else begin
+            let shoulder = if h > 0 then Stdlib.max 1 (h / 2) else 0 in
+            paint_linear ~x0:cx ~h0:h ~x1:hi ~h1:shoulder
+          end
+    done;
+    List.init cells (fun c -> (cols.(2 * c), cols.(2 * c + 1)))
+;;
+
+let braille_curve_rows ?(down = false) ~tint ~rows cell_pairs =
+  let rows = Stdlib.max 1 rows in
+  let dots = rows * braille_top in
+  let clamped =
+    List.map
+      (fun (l, r) ->
+        (Stdlib.max 0 (Stdlib.min dots l), Stdlib.max 0 (Stdlib.min dots r)))
+      cell_pairs
+  in
+  if down then falling_rows ~tint ~rows ~dots clamped
+  else rising_rows ~tint ~rows ~dots clamped
 ;;

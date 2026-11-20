@@ -5,6 +5,8 @@ module Layout = Masc_tui_message_layout
 let bar_full = "\xe2\x96\x88" (* U+2588 FULL BLOCK *)
 let bar_light = "\xe2\x96\x91" (* U+2591 LIGHT SHADE *)
 let meter_fill = "\xe2\x96\xa0" (* U+25A0 BLACK SQUARE *)
+let dot_fill_full = "\xe2\xa3\xbf" (* U+28FF BRAILLE FULL 8-DOT *)
+let dot_fill_half = "\xe2\xa1\x87" (* U+2847 BRAILLE LEFT COLUMN 4-DOT *)
 let meter_track = "\xc2\xb7" (* U+00B7 MIDDLE DOT *)
 let glyph_block_1 = "\xe2\x96\x81" (* U+2581 *)
 let glyph_block_2 = "\xe2\x96\x82" (* U+2582 *)
@@ -259,6 +261,12 @@ let meter_fill_run ~scale ~width ~value ~max_value ~reset glyphs =
   styled_run ~reset (List.mapi (fun index glyph -> (style ~index, glyph)) glyphs)
 ;;
 
+let track_segment ~track_style ~reset count =
+  if count <= 0 then ""
+  else if String.equal track_style "" then repeat meter_track count
+  else track_style ^ repeat meter_track count ^ reset
+;;
+
 let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
@@ -269,16 +277,34 @@ let meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
       meter_fill_run ~scale ~width ~value ~max_value ~reset
         (List.init (Stdlib.max 0 filled) (fun _ -> meter_fill))
     in
-    let track_part =
-      if unfilled <= 0 then ""
-      else if String.equal track_style "" then repeat meter_track unfilled
-      else track_style ^ repeat meter_track unfilled ^ reset
-    in
-    filled_part ^ track_part
+    filled_part ^ track_segment ~track_style ~reset unfilled
 ;;
 
-let meter ~width ~value ~max_value ~scale ?label ?(label_style = "") ?suffix
-    ?(track_style = "") ?suffix_style
+let dot_meter_bar ~width ~value ~max_value ~scale ?(track_style = "")
+    ?(reset = Masc_tui_theme.Sgr.reset) () =
+  if width <= 0 then ""
+  else
+    let clamped_val =
+      Stdlib.max 0 (if max_value > 0 then Stdlib.min value max_value else value)
+    in
+    let subcells = 2 * width in
+    let filled_subs = bar_filled_cells ~width:subcells ~value:clamped_val ~max_value in
+    let full_cells = Stdlib.min width (filled_subs / 2) in
+    let has_half = full_cells < width && filled_subs mod 2 = 1 in
+    let glyphs =
+      List.init full_cells (fun _ -> dot_fill_full)
+      @ (if has_half then [ dot_fill_half ] else [])
+    in
+    let filled_count = List.length glyphs in
+    let unfilled = Stdlib.max 0 (width - filled_count) in
+    let filled_part =
+      meter_fill_run ~scale ~width ~value ~max_value ~reset glyphs
+    in
+    filled_part ^ track_segment ~track_style ~reset unfilled
+;;
+
+let meter_with ~draw_bar ~width ~value ~max_value ~scale ?label ?(label_style = "")
+    ?suffix ?(track_style = "") ?suffix_style
     ?(reset = Masc_tui_theme.Sgr.reset) () =
   if width <= 0 then ""
   else
@@ -326,7 +352,7 @@ let meter ~width ~value ~max_value ~scale ?label ?(label_style = "") ?suffix
     if width >= chrome_cells + 3 then
       let bar_width = width - chrome_cells in
       prefix
-      ^ meter_bar ~width:bar_width ~value:clamped_val ~max_value ~scale
+      ^ draw_bar ~width:bar_width ~value:clamped_val ~max_value ~scale
           ~track_style ~reset ()
       ^ styled_suffix
     else
@@ -339,6 +365,16 @@ let meter ~width ~value ~max_value ~scale ?label ?(label_style = "") ?suffix
         else resolved_suffix_style ^ fallback ^ reset
       in
       Layout.fit_width (prefix ^ styled_fallback) width
+;;
+
+let meter =
+  meter_with ~draw_bar:(fun ~width ~value ~max_value ~scale ~track_style ~reset () ->
+    meter_bar ~width ~value ~max_value ~scale ~track_style ~reset ())
+;;
+
+let dot_meter =
+  meter_with ~draw_bar:(fun ~width ~value ~max_value ~scale ~track_style ~reset () ->
+    dot_meter_bar ~width ~value ~max_value ~scale ~track_style ~reset ())
 ;;
 
 

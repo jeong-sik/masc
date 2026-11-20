@@ -135,6 +135,36 @@ val meter :
     colour; pass [~suffix_style:""] for plain foreground or an explicit SGR to
     override. *)
 
+val dot_meter_bar :
+  width:int ->
+  value:int ->
+  max_value:int ->
+  scale:meter_scale ->
+  ?track_style:string ->
+  ?reset:string ->
+  unit ->
+  string
+(** Fine Braille micro-dot counterpart to {!meter_bar} ([btop] mem/CPU style):
+    draws [2 * width] horizontal sub-cells using full 8-dot Braille (["⣿"])
+    plus half-column Braille (["⡇"]) and middle-dot track (["·"]) in
+    [track_style], styled through {!meter_fill_run}. *)
+
+val dot_meter :
+  width:int ->
+  value:int ->
+  max_value:int ->
+  scale:meter_scale ->
+  ?label:string ->
+  ?label_style:string ->
+  ?suffix:string ->
+  ?track_style:string ->
+  ?suffix_style:string ->
+  ?reset:string ->
+  unit ->
+  string
+(** Fine Braille micro-dot counterpart to {!meter}, using {!dot_meter_bar}
+    between optional [label] and [suffix]. *)
+
 (** {1 Distribution Bars} *)
 
 type bar_item = {

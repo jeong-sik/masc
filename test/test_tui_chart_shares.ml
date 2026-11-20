@@ -675,6 +675,41 @@ let mirror_shared_axis_and_baselines () =
   | (Braille.Drawn _ | Braille.Never_read | Braille.Too_narrow) as other ->
     Alcotest.failf "one side read still draws: %a" (Alcotest.pp graph_t) other
 
+let btop_braille_curves_and_dot_meters () =
+  (* Top-down Braille cells differ cleanly from bottom-up cells. *)
+  Alcotest.(check bool) "braille_pair_down differs from rising braille_pair at level 1" false
+    (String.equal (Braille.braille_pair ~left:1 ~right:1) (Braille.braille_pair_down ~left:1 ~right:1));
+  (* Gap isolation and interpolation across adjacent Some buckets. *)
+  let pairs = Braille.interpolate_pairs ~cells:12 [ Some 8; Some 4; None; Some 6 ] in
+  Alcotest.(check int) "exact requested cell width" 12 (List.length pairs);
+  Alcotest.(check bool) "gap bucket stays zeroed (no cross-gap bridge)" true
+    (match List.nth pairs 6, List.nth pairs 7 with
+     | (0, 0), (0, 0) -> true
+     | _ -> false);
+  Alcotest.(check bool) "bridge between 8 and 4 stays smoothly intermediate" true
+    (let (l, r) = List.nth pairs 2 in
+     l >= 4 && l <= 8 && r >= 4 && r <= 8);
+  (* Rising and falling braille_curve_rows emit expected row counts. *)
+  let up_rows = Braille.braille_curve_rows ~down:false ~tint:plain ~rows:2 pairs in
+  let down_rows = Braille.braille_curve_rows ~down:true ~tint:plain ~rows:2 pairs in
+  Alcotest.(check int) "2-row rising curve" 2 (List.length up_rows);
+  Alcotest.(check int) "2-row falling curve" 2 (List.length down_rows);
+  (* dot_meter_bar subcell half-step precision under NO_COLOR. *)
+  let bar =
+    Chart.dot_meter_bar ~width:4 ~value:1 ~max_value:8
+      ~scale:(Chart.Declared_limit { Theme.depth = Theme.No_color; surface = Theme.Page; palette = None })
+      ~track_style:"" ~reset:"" ()
+  in
+  Alcotest.(check string) "1/8 on 4 cells is one half-dot Braille cell + 3 middle dots"
+    "\xe2\xa1\x87\xc2\xb7\xc2\xb7\xc2\xb7" bar;
+  let full_bar =
+    Chart.dot_meter_bar ~width:2 ~value:8 ~max_value:8
+      ~scale:(Chart.Declared_limit { Theme.depth = Theme.No_color; surface = Theme.Page; palette = None })
+      ~track_style:"" ~reset:"" ()
+  in
+  Alcotest.(check string) "full dot_meter_bar draws full 8-dot Braille cells"
+    "\xe2\xa3\xbf\xe2\xa3\xbf" full_bar
+
 let () =
   Alcotest.run "Chart numeric decisions"
     [ "numeric decisions",
@@ -718,5 +753,7 @@ let () =
       ; Alcotest.test_case "a small value in two rows" `Quick small_value_in_two_rows
       ; Alcotest.test_case "mirror shares one axis and two baselines" `Quick
           mirror_shared_axis_and_baselines
+      ; Alcotest.test_case "btop interpolated curves and dot meters" `Quick
+          btop_braille_curves_and_dot_meters
       ]
     ]

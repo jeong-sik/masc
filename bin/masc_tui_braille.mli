@@ -18,6 +18,12 @@ val braille_pair : left:int -> right:int -> string
     left and right subcolumns (e.g. ["⠀"], ["⢀"], ["⣀"], ["⣠"], ["⣤"], ["⣴"],
     ["⣶"], ["⣾"], ["⣿"]). *)
 
+val braille_pair_down : left:int -> right:int -> string
+(** Top-down counterpart to {!braille_pair}, hanging dots down from the top
+    of a 2x4 Braille cell ([0..4], e.g. ["⠀"], ["⠈"], ["⠉"], ["⠙"], ["⠛"],
+    ["⠟"], ["⠿"], ["⣿"]). Used for falling failure waves and downward mirrored
+    halves so downward series stay visually distinct without colour. *)
+
 val braille_bar_mark : level:int -> string
 (** Symmetric two-dot-wide Braille column at height [level] ([0..4]):
     ["⠀"], ["⣀"], ["⣤"], ["⣶"], ["⣿"]. Level [1], ["⣀"], is the baseline a
@@ -138,3 +144,21 @@ val braille_mirror :
     past its baseline. The lower half's baseline is its top row of dots
     ([⠉] for two zeros). [Never_read] only when neither side has been read.
     Each half takes its own tint, by distance from the middle. *)
+
+val interpolate_pairs : cells:int -> int option list -> (int * int) list
+(** [interpolate_pairs ~cells samples] stretches discrete bucket dot heights
+    ([None] for idle/unread gaps, [Some h] for active heights) smoothly across
+    [cells] Braille cells ([2 * cells] horizontal subcolumns). Consecutive
+    [Some] buckets are linearly interpolated subcolumn by subcolumn, isolated
+    [Some] buckets form soft-shouldered peaks, and [None] buckets remain
+    [(0, 0)] without cross-gap interpolation. *)
+
+val braille_curve_rows :
+  ?down:bool ->
+  tint:tint ->
+  rows:int ->
+  (int * int) list ->
+  string list
+(** Renders pre-computed 2-subcolumn dot heights [(left, right)] (clamped to
+    [0 .. 4 * rows]) as [rows] styled Braille text lines, growing upward from
+    the bottom unless [~down:true] is set for a downward mirror wave. *)

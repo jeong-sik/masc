@@ -358,7 +358,7 @@ let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> 
       (List.assoc "waiting" (fields fact)) in
   List.iter (fun json -> rejected (Semantic.of_json json)) [
     `Assoc (("input_response_intent",fact)::fields encoded);
-    replace "input_response_intent" `Null encoded;
+    `Assoc (List.remove_assoc "input_response_intent" (fields encoded));
     replace "revision" (`Int 3) encoded;
     replace "input_response_intent" (`Assoc (("unknown",`Null)::fields fact)) encoded;
     malformed_response (`Assoc ["kind",`String "later"]);
@@ -369,7 +369,7 @@ let test_intent_strict_codec_and_reference_domain () = with_path @@ fun path -> 
     replace "phase" (`Assoc ["kind",`String "ready"]) encoded];
   List.iter (fun response ->
     let intent=Semantic.input_response_intent ~destination:Semantic.Canonical_input ~waiting ~source:response_source ~candidate:response_candidate ~response |> value in
-    let unprepared=Semantic.of_json (`Assoc (List.remove_assoc "input_response_intent" (fields encoded)))
+    let unprepared=Semantic.of_json (replace "input_response_intent" `Null encoded)
       |> Result.map_error Semantic.error_to_string |> value in
     let prepared=Semantic.apply ~now:7. (Semantic.Prepare_input_response intent) unprepared
         |> Result.map_error Semantic.error_to_string |> value in
@@ -424,7 +424,7 @@ let test_branch_pins_after_consuming_continuation () = with_path @@ fun path -> 
   let unprepared=semantic store |> fun prepared ->
     let json=Semantic.to_json prepared in
     match json with
-    | `Assoc fields -> Semantic.of_json (`Assoc (List.remove_assoc "input_response_intent" fields))
+    | `Assoc fields -> Semantic.of_json (`Assoc (("input_response_intent",`Null)::List.remove_assoc "input_response_intent" fields))
       |> Result.map_error Semantic.error_to_string |> value
     | _ -> fail "expected semantic object" in
   rejected (Semantic.apply ~now:21. (Semantic.Resolve_input_branch {observed=waiting;checkpoint=response_candidate}) unprepared)
@@ -513,7 +513,7 @@ let test_branch_strict_codec () = with_path @@ fun path -> with_store path @@ fu
     "turn_count",`Int reference.turn_count;"sha256",`String reference.sha256] in
   let with_branch branch=replace "input_branch" branch encoded in
   List.iter (fun json -> rejected (Semantic.of_json json)) [
-    with_branch `Null;
+    `Assoc (List.remove_assoc "input_branch" (fields encoded));
     `Assoc (("input_branch",branch)::fields encoded);
     with_branch (`Assoc (("unknown",`Null)::fields branch));
     with_branch (replace "origin" (`Assoc ["kind",`String "interrupted_execution"]) branch);

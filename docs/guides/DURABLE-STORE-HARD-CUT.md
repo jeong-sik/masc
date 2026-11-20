@@ -86,9 +86,11 @@ are `chat-operations.sqlite3-wal`, `chat-operations.sqlite3-shm` and
 store, with every writer stopped before any fresh-state removal.
 
 The current semantic record format is
-`masc.keeper_semantic_execution.v3`, with explicit `native_calls` and
-`receipt_obligations` lists. Earlier records are refused without conversion
-or inferred empty history.
+`masc.keeper_semantic_execution.v4`. Every field is written: the
+`native_calls`, `gate_obligations` and `receipt_obligations` lists even when
+empty, and `native_call`, `input_response_intent` and `input_branch` as `null`
+when there is none. A record that leaves a field out is refused. Earlier
+records are refused without conversion or inferred empty history.
 Both ordinary open paths check every semantic row, including settled records,
 and its indexed scope, revision and phase before configuring the existing
 database. Deployment preflight also reads every durable record. Refusal names
@@ -106,8 +108,8 @@ sweep may collect payloads no other journal names. Preserve the old journal,
 sidecars and dependent session/checkpoint evidence together before choosing
 fresh state; payloads left on disk do not restore the removed ownership or
 authorize continuation. A separate fresh base path keeps the old workspace
-and its ownership records intact. See the
-[#50583 fresh-state entry](../../changelog.d/50583.md) for this format change.
+and its ownership records intact. The #53680 **Fresh state required** entry
+in `CHANGELOG.md` or `changelog.d/` describes this format change.
 
 ### Keeper turn records
 

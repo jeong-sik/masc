@@ -1078,29 +1078,26 @@ let receipt_obligation_json (value : receipt_obligation) = `Assoc
       | Arrived Source_lost -> `Assoc ["kind", `String "arrived"; "resolution", `String "source_lost"]) ]
 
 let to_json execution =
-  `Assoc ([ "schema", `String "masc.keeper_semantic_execution.v3"
+  `Assoc [ "schema", `String "masc.keeper_semantic_execution.v4"
          ; "id", Scope_id.to_json execution.id
          ; "revision", `Intlit (Int64.to_string execution.revision)
          ; "input", (match execution.input with None -> `Null | Some payload -> `Assoc ["payload", payload])
          ; "input_sha256", `String execution.input_sha256
+         ; "gate_obligations", `List (List.map gate_obligation_json execution.gate_obligations)
          ; "receipt_obligations", `List (List.map receipt_obligation_json execution.receipt_obligations)
          ; "sources", `List (List.map source_to_json execution.sources)
          ; "current_sources", `List (List.map source_to_json execution.current_sources)
          ; "frame", Snapshot.to_json execution.frame
          ; "phase", phase_json execution.phase
+         ; "native_call", Keeper_native_call.state_to_json execution.native_call
          ; "native_calls", `List (List.map Keeper_native_call.history_ref_to_json execution.native_calls)
+         ; "input_response_intent", (match execution.input_response_intent with None -> `Null
+             | Some intent -> input_response_intent_json intent)
+         ; "input_branch", (match execution.input_branch with None -> `Null
+             | Some branch -> `Assoc ["origin",recovery_origin_json (Input_wait branch.origin);
+                 "checkpoint",checkpoint_json branch.checkpoint])
          ; "created_at", `Float execution.created_at
          ; "updated_at", `Float execution.updated_at ]
-          @ (match execution.native_call with Keeper_native_call.No_native_call -> []
-             | Keeper_native_call.Active _ | Keeper_native_call.Terminal_unacknowledged _ ->
-               ["native_call", Keeper_native_call.state_to_json execution.native_call])
-          @ (match execution.input_response_intent with None -> []
-             | Some intent -> ["input_response_intent",input_response_intent_json intent])
-          @ (match execution.input_branch with None -> []
-             | Some branch -> ["input_branch",`Assoc ["origin",recovery_origin_json (Input_wait branch.origin);
-                 "checkpoint",checkpoint_json branch.checkpoint]])
-          @ (if execution.gate_obligations = [] then []
-             else ["gate_obligations", `List (List.map gate_obligation_json execution.gate_obligations)]))
 
 let exact names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) = List.sort String.compare names -> Ok fields
@@ -1414,32 +1411,14 @@ let input_branch_of_json json =
 
 let of_json json =
   let decode () =
-    let* input_branch, json = match json with
-      | `Assoc fields ->
-        (match List.assoc_opt "input_branch" fields with
-         | None -> Ok (None,json)
-         | Some value -> let* branch = input_branch_of_json value in
-           Ok (Some branch,`Assoc (List.remove_assoc "input_branch" fields)))
-      | _ -> Ok (None,json) in
-    let* input_response_intent, json = match json with
-      | `Assoc fields ->
-        (match List.assoc_opt "input_response_intent" fields with
-         | None -> Ok (None,json)
-         | Some value -> let* intent = input_response_intent_of_json value in
-           Ok (Some intent,`Assoc (List.remove_assoc "input_response_intent" fields)))
-      | _ -> Ok (None,json) in
-    let native_call_json, json = match json with
-      | `Assoc fields ->
-        (match List.assoc_opt "native_call" fields with
-         | None -> `Null, json
-         | Some value -> value, `Assoc (List.remove_assoc "native_call" fields))
-      | _ -> `Null, json in
-    let* native_call = Keeper_native_call.state_of_json native_call_json in
-    let json = match json with
-      | `Assoc fields when not (List.mem_assoc "gate_obligations" fields) ->
-        `Assoc (("gate_obligations", `List []) :: fields)
-      | json -> json in
-    let* fields = exact ["schema";"id";"revision";"input";"input_sha256";"gate_obligations";"receipt_obligations";"sources";"current_sources";"frame";"phase";"native_calls";"created_at";"updated_at"] json in
+    let* fields = exact ["schema";"id";"revision";"input";"input_sha256";"gate_obligations";"receipt_obligations";"sources";"current_sources";"frame";"phase";"native_call";"native_calls";"input_response_intent";"input_branch";"created_at";"updated_at"] json in
+    let* input_branch = match field "input_branch" fields with
+      | `Null -> Ok None
+      | value -> input_branch_of_json value |> Result.map Option.some in
+    let* input_response_intent = match field "input_response_intent" fields with
+      | `Null -> Ok None
+      | value -> input_response_intent_of_json value |> Result.map Option.some in
+    let* native_call = Keeper_native_call.state_of_json (field "native_call" fields) in
     let* gate_obligations = match field "gate_obligations" fields with
       | `List rows -> decode_list gate_obligation_of_json rows
       | _ -> Error "Gate obligations must be a list" in
@@ -1451,7 +1430,7 @@ let of_json json =
       if List.length (List.sort_uniq String.compare ids) = List.length ids then Ok ()
       else Error "duplicate receipt obligation" in
     let* schema = string "schema" fields in
-    let* () = if schema = "masc.keeper_semantic_execution.v3" then Ok () else Error "unsupported execution schema" in
+    let* () = if schema = "masc.keeper_semantic_execution.v4" then Ok () else Error "unsupported execution schema" in
     let* native_calls = match field "native_calls" fields with
       | `List rows -> decode_list Keeper_native_call.history_ref_of_json rows
       | _ -> Error "native call history must be a list" in

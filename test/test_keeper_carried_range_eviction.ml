@@ -625,8 +625,8 @@ let test_memory_receipt_failure_fences_enclosing_recovery () =
     [overflow; body_refused_by_provider]
 ;;
 
-(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §4 (D1), as
-   rules from what a turn's first request reads to where its range opens.
+(* The size signal, as rules from what a turn's first request reads to
+   where its range opens.
    The pair's ledger last carried a window that opened at atom 4; the last
    completed turn ended at atom 8. Under that window the second turn grew
    from 1,500 to 2,400, so the next turn is expected at 2,400 + 900. *)
@@ -776,8 +776,7 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
 ;;
 
 (* With a Librarian point, a window that stays holds at the start the
-   provider last accepted, even after the Librarian read past it (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.3, D2): the
+   provider last accepted, even after the Librarian read past it: the
    point moves the window only when the window moves. A window not held
    there follows the point. *)
 let test_a_window_that_stays_holds_behind_the_librarian_point () =
@@ -808,8 +807,7 @@ let test_a_window_that_stays_holds_behind_the_librarian_point () =
 
 (* The signal moves a window that stays to the end of what the Librarian
    read when that lies past the window, so the atoms it drops are in memory;
-   a point at or behind the window leaves the turn boundary (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §4). The rest of
+   a point at or behind the window leaves the turn boundary. The rest of
    the turn holds the moved front, even when the Librarian reads on. *)
 let test_the_size_signal_moves_to_the_librarian_point () =
   let history = exchanges ~from:0 10 in
@@ -849,7 +847,7 @@ let test_the_size_signal_moves_to_the_librarian_point () =
 ;;
 
 (* Markers wait for the window to move only while the size signal watches
-   it (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.1). *)
+   it. *)
 let test_markers_wait_only_while_the_size_signal_watches () =
   let history = exchanges ~from:0 10 in
   let held ?(opens_turn = true) ?(input_limit = input_limit_of (Some 400_000)) ledger =

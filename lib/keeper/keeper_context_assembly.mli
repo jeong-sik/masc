@@ -34,8 +34,7 @@ type system_observation =
     Goal snapshot on every request of its turn, from [admitted_source]. Agent
     Core does not issue it: the source rides the end context of the turn's
     first request, so the System does not change with the turn kind
-    (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2;
-    {!Prompt_block_id.injected_on_post_tool_round} says what a later request
+    ({!Prompt_block_id.injected_on_post_tool_round} says what a later request
     of each lane carries). Agent Core
     keeps the current turn's proof state here so tool feedback remains the
     newest message. Official clients receive proof state as turn-scoped input

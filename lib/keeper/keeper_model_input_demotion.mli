@@ -14,8 +14,7 @@
     its prompt cache, so the keeper's agent_core assembly asks for it in two
     places only: the results and verified arguments of turns that already
     ended, once each, on the first request whose window moved after their
-    turn ended (RFC-tool-results-age-out-of-context, RFC
-    a-sent-request-prefix-changes-only-when-the-window-moves §3.1; an
+    turn ended (RFC-tool-results-age-out-of-context; an
     exception to RFC-0363 §3.4.1), and every result of the resend that
     answers a size refusal.
 
@@ -67,8 +66,7 @@ val arguments_before :
   atom:int -> Agent_core.Types.message list -> completed_arguments -> completed_arguments
 (** Keep the occurrences in atoms below [atom] of [messages], the list the
     set was bound over. A window that stays keeps its markers where it last
-    sent them (RFC a-sent-request-prefix-changes-only-when-the-window-moves
-    §3.1), so an argument at or past that atom stays verbatim. This can only
+    sent them, so an argument at or past that atom stays verbatim. This can only
     narrow an already frozen set. *)
 
 val bind_completed_arguments :

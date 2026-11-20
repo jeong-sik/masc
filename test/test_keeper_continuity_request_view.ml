@@ -396,7 +396,7 @@ let test_the_forecast_takes_the_drivers_start () =
 
 (* A window that stays carries the working state it carried when it
    opened, whatever the read end's says now, and none when it opened with
-   none (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.3).
+   none.
    A window that opened anywhere else carries the read end's. *)
 let test_a_window_that_stays_keeps_its_working_state () =
   let messages = source @ [ text T.User "Publish it now." ] in

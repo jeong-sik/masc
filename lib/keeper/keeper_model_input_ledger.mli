@@ -119,8 +119,7 @@ type block =
             bracket it. [None] while no usage has bracketed the range. *)
   }
 
-(** How much one turn grew the input while the window stayed (RFC
-    a-sent-request-prefix-changes-only-when-the-window-moves §4). Every count
+(** How much one turn grew the input while the window stayed. Every count
     is the provider's [input_tokens] for a request, a sample or not: the
     turn's first request carries the turn context and is still the largest
     request of a turn that calls no tool. A request with the turn context
@@ -210,8 +209,7 @@ val next_turn_peak : t -> int option
 (** The input the next turn is expected to reach while the window stays: the
     last request's count plus the largest growth of a turn that finished
     since the ledger started, the current turn included as if it had just
-    finished (RFC a-sent-request-prefix-changes-only-when-the-window-moves
-    §4). [None] while either is unknown. The turn a window opened in has no
+    finished. [None] while either is unknown. The turn a window opened in has no
     count before it under that window, so it adds no growth. A ledger's first
     window has none until its second turn has opened. *)
 

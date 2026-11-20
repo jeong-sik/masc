@@ -9,7 +9,7 @@ let session_id = "in-run-narrowing-consumer"
 let model_id = "in-run-narrowing-fixture"
 let contains text body = String_util.contains_substring body text
 
-(* RFC a-request-fits-by-the-one-input-limit-agent-core-decides §5, layer 5.
+(* After a run's checkpoint stage, a refused request narrows in the same run.
    The fixture provider counts one input token per byte of the request it
    counts, so the window refuses a request before it is sent once that body
    passes the window less the output the request reserves. *)

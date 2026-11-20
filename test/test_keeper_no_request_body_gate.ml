@@ -514,8 +514,7 @@ streaming = false
   check bool "current-turn arguments remain exact on the second HTTP request" true
     (wire_arguments messages "active-call-1" = active_input);
   (* The call ended in an earlier turn, so its arguments go as a reference,
-     as its result does (RFC
-     a-sent-request-prefix-changes-only-when-the-window-moves §3.1). The
+     as its result does. The
      first request has no ledger and demotes them; the second keeps what
      the first sent. *)
   (match Tool_output.normalized_artifact_ref_of_json (wire_arguments messages "call-demote-1") with

@@ -12,8 +12,7 @@
     operation, issued to an official client as a separate System observation
     after [Active_goals]. Agent Core does not issue it: the source stays inside
     the first round's [Dynamic_context], so the System does not change with
-    the turn kind (RFC a-sent-request-prefix-changes-only-when-the-window-moves
-    §3.2). It names that operation's typed source without granting authority
+    the turn kind. It names that operation's typed source without granting authority
     or authenticating a local request as an operator.
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.

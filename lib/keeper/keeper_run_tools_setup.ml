@@ -222,8 +222,7 @@ let deferred_names_absent_from ~declared_names ~actual_names =
    descriptor and lane add-on export. Nothing here depends on whether the run
    serves a chat execution: the tool array is part of the request prefix a
    provider caches, so a surface that followed the run kind rewrote it
-   whenever a chat turn and a self-woken turn took turns (RFC
-   a-sent-request-prefix-changes-only-when-the-window-moves §3.2). A
+   whenever a chat turn and a self-woken turn took turns. A
    [keeper_receipt_wait] call in a run with no chat execution is refused
    ([Keeper_tool_receipt_wait.handle]). *)
 let offered_descriptors ~task_skill_descriptors ~lane_descriptors =

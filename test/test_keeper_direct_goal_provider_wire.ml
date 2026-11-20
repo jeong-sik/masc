@@ -232,8 +232,7 @@ let run_case source () =
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
       | ToolResult _ | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
-(* RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2 (D3).
-   A turn that serves an admitted request and a turn that does not send Agent
+(* A turn that serves an admitted request and a turn that does not send Agent
    Core the same System, because the provider caches the request from its
    first byte. The source rides the first request's end context only; the
    next test shows the lane that keeps that context in its history. An
@@ -321,8 +320,7 @@ let test_admitted_source_leaves_the_agent_core_system () =
    ([Historical_system_context]) and sends it again in place (RFC-AC-041).
    The admitted source rides that first end context, so on this lane it stays
    where the first request put it: never in the System and never a new tail
-   after tool results. The checkpoint keeps it in that row too
-   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2). *)
+   after tool results. The checkpoint keeps it in that row too. *)
 let test_anthropic_sends_the_first_end_context_again_in_place () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;

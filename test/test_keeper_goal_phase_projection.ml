@@ -825,8 +825,7 @@ let test_proof_state_follows_the_runtime_execution_owner () =
     | Some issued -> List.filter_map (function
         | Keeper_context_assembly.Direct_input_source text -> Some text
         | Current_norms _ | Active_goals _ | Goals_awaiting_proof _ -> None) issued.observations in
-  (* RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.2:
-     Agent Core never puts the source in System; it rides the end context of
+  (* Agent Core never puts the source in System; it rides the end context of
      the turn's first request only. *)
   let check_agent_core_source ~first_round (assembly : Keeper_context_assembly.t) =
     check (list string) "Agent Core issues no admitted source in System" []

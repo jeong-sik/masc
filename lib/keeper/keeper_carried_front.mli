@@ -55,16 +55,15 @@ type source =
       (** No provider refused anything: at the turn's first request the
           window stayed where the last request opened it, and that request's
           count plus the largest growth one turn made since the ledger
-          started passed the binding's max-context. The front moved to the
-          turn boundary for the rest of the turn (RFC
-          a-sent-request-prefix-changes-only-when-the-window-moves §4), with
-          no Librarian point or one at or before where the window opened. *)
+          started passed the request's input limit, the window less the
+          output the request reserves. The front moved to the turn boundary
+          for the rest of the turn, with no Librarian point or one at or
+          before where the window opened. *)
   | Librarian_point_at_max_context
       (** As {!Turn_start_at_max_context}, with a Librarian point past where
           the window opened: the front moved to the end of what the
           Librarian read instead of the turn boundary, so the atoms the move
-          drops are in memory (RFC
-          a-sent-request-prefix-changes-only-when-the-window-moves §4). *)
+          drops are in memory. *)
 
 type seed =
   { first_atom : int
@@ -116,8 +115,7 @@ type origin =
           the atoms from the point up to it unsent; which of them are also
           not in memory is {!librarian_gap}'s answer, which weighs the read
           position too. A window that stays holds its start behind the point
-          as well (RFC
-          a-sent-request-prefix-changes-only-when-the-window-moves §3.3):
+          as well:
           the atoms from it up to the point are then in memory and in the
           request both. *)
   | Turn_start of { end_atom : int }

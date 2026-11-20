@@ -279,6 +279,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_hold ]
     ; planted = [ "18935" ]
     ; must_keep = []
+    ; must_remain = []
     }
   in
   let a1 =
@@ -311,6 +312,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_done ]
     ; planted = []
     ; must_keep = []
+    ; must_remain = []
     }
   in
   let a2 =
@@ -331,6 +333,7 @@ let test_l6g_corpus_via_librarian_question_make () =
         [ Types.memory_id f_con, [ "protected main"; "force-push" ]
         ; Types.memory_id f_pref, [ "stacked PR"; "currently migrating"; "3/5" ]
         ]
+    ; must_remain = []
     }
   in
   let a3 =
@@ -374,6 +377,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_con ]
     ; planted = []
     ; must_keep = []
+    ; must_remain = []
     }
   in
   let a4 = answer_json q4 [] in
@@ -414,6 +418,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_rule1; f_rule2; f_rule3 ]
     ; planted = []
     ; must_keep = []
+    ; must_remain = []
     }
   in
   let a5 = answer_json q5 [] in
@@ -475,6 +480,7 @@ let test_l6g_corpus_via_librarian_question_make () =
     ; facts = [ f_rule1; f_rule2; f_rule3 ]
     ; planted = [ "18935~18940" ]
     ; must_keep = []
+    ; must_remain = []
     }
   in
   let a6 =

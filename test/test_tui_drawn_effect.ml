@@ -335,6 +335,124 @@ let test_waiting_read_settles_the_wait () =
         | Some (reading, _follow_up) -> state.keeper_waiting_read <- reading));
   check drawn "a read with nothing awaited" T.Drawn_unchanged (T.keeper_waiting_effect state)
 
+(* The reading slot is no reader's view (RFC tui-one-screen-grammar section 8).
+   A read is begun and ended in the state, and each loop pass asks whether
+   what the slot draws moved since the last frame. Instants are the real
+   clock plus a whole or half second, so the decision under test is the 1 s
+   bar and not the clock's grain. *)
+module Wake = Masc_tui_wake
+
+let at start seconds = Wake.Mono.after start seconds
+
+let show (state : T.state) surface = state.view <- surface
+
+let test_slot_no_frame_yet () =
+  let state = state () in
+  let start = Wake.Mono.now () in
+  check drawn "nothing was drawn yet" T.Drawn_changed
+    (T.step_reading_slot state ~now:start)
+
+let test_slot_start_requests_nothing () =
+  let state = state () in
+  draw_frame state;
+  let start = Wake.Mono.now () in
+  let _read = T.reading_begin state in
+  check drawn "a read inside the bar" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 0.5))
+
+let test_slot_fast_read_requests_nothing () =
+  let state = state () in
+  draw_frame state;
+  let start = Wake.Mono.now () in
+  let settle = T.reading_begin state in
+  settle ~ok:true;
+  check drawn "a read that ended inside the bar" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 0.5));
+  check drawn "and left nothing behind" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 3.0))
+
+let test_slot_turns_on_once () =
+  let state = state () in
+  draw_frame state;
+  let start = Wake.Mono.now () in
+  let _read = T.reading_begin state in
+  check drawn "the read passes the bar" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 1.5));
+  draw_frame state;
+  check drawn "the same read a second later" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 2.5))
+
+(* An answer that draws the same rows still ends the read. The frame that
+   turns the slot off is owed, one bar after the last slow read succeeded. *)
+let test_slot_off_after_the_answer () =
+  let state = state () in
+  draw_frame state;
+  let start = Wake.Mono.now () in
+  let settle = T.reading_begin state in
+  check drawn "on" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 1.5));
+  draw_frame state;
+  settle ~ok:true;
+  check drawn "the length freezes" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 2.0));
+  draw_frame state;
+  check drawn "kept on for one bar" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 2.5));
+  check drawn "off after the bar" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 3.5));
+  draw_frame state;
+  check drawn "and it stays off" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 4.0))
+
+let test_slot_off_at_once_when_the_read_fails () =
+  let state = state () in
+  draw_frame state;
+  let start = Wake.Mono.now () in
+  let settle = T.reading_begin state in
+  check drawn "on" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 1.5));
+  draw_frame state;
+  settle ~ok:false;
+  check drawn "a failure turns it off at once" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 2.0));
+  draw_frame state;
+  check drawn "and no wait follows" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 3.5))
+
+(* A read that reports its end on two paths counts once: the second end must
+   not turn a success into a failure that cancels the wait. *)
+let test_slot_second_end_is_ignored () =
+  let state = state () in
+  draw_frame state;
+  let start = Wake.Mono.now () in
+  let settle = T.reading_begin state in
+  check drawn "on" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 1.5));
+  draw_frame state;
+  settle ~ok:true;
+  settle ~ok:false;
+  check drawn "the length freezes" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 2.0));
+  draw_frame state;
+  check drawn "still on inside the bar" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 2.5));
+  check drawn "off only after the bar" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 3.5))
+
+(* A read belongs to the screen that was open when it began. *)
+let test_slot_counts_a_read_for_its_own_screen () =
+  let state = state () in
+  show state T.Memory;
+  draw_frame state;
+  let start = Wake.Mono.now () in
+  let _read = T.reading_begin state in
+  show state T.Overview;
+  check drawn "the read began for the other screen" T.Drawn_unchanged
+    (T.step_reading_slot state ~now:(at start 1.5));
+  show state T.Memory;
+  check drawn "back on the screen it began for" T.Drawn_changed
+    (T.step_reading_slot state ~now:(at start 2.0))
+
 let () =
   run "tui_drawn_effect"
     [ ( "tools inventory",
@@ -360,4 +478,15 @@ let () =
           test_case "repeated failure" `Quick test_turns_repeated_failure;
           test_case "fresh rows" `Quick test_turns_fresh_rows;
           test_case "finish glow" `Quick test_turns_finish_glow;
-          test_case "awaited waiting settles" `Quick test_turns_settle_awaited_waiting ] ) ]
+          test_case "awaited waiting settles" `Quick test_turns_settle_awaited_waiting ] );
+      ( "reading slot",
+        [ test_case "no frame yet" `Quick test_slot_no_frame_yet;
+          test_case "a read begins" `Quick test_slot_start_requests_nothing;
+          test_case "a fast read" `Quick test_slot_fast_read_requests_nothing;
+          test_case "passes the bar" `Quick test_slot_turns_on_once;
+          test_case "off after the answer" `Quick test_slot_off_after_the_answer;
+          test_case "off when the read fails" `Quick
+            test_slot_off_at_once_when_the_read_fails;
+          test_case "a second end" `Quick test_slot_second_end_is_ignored;
+          test_case "a read's own screen" `Quick
+            test_slot_counts_a_read_for_its_own_screen ] ) ]

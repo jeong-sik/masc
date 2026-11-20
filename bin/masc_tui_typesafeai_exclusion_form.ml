@@ -203,19 +203,26 @@ let text_on t =
      | Error errors -> refuse ("고친 결과를 읽지 못했어요 · " ^ describe_errors errors))
 ;;
 
-let intro = "판정 서버 제외 · 고른 키퍼의 글·기억·맥락은 판정 서버에 보내지 않아요"
+let intro ~ko =
+  if ko then "판정 서버 제외 · 고른 키퍼의 글·기억·맥락은 판정 서버에 보내지 않아요"
+  else "Judgment server exclusions · selected Keepers' posts, memory, and context are not sent"
 
 (* An excluded Keeper is not asked about at any [typesafeai] gate, but its
    Board candidates are still judged: the exact lane takes them
    ([Keeper_board_attention_exact_flow]), and whatever model its slots name
    receives the post. The form says so, because "excluded" reads as "stays
    here". *)
-let board_note =
-  "제외해도 Board 판정은 board_attention_exact 슬롯이 해요. 글은 그 슬롯의 모델로 가요."
+let board_note ~ko =
+  if ko then
+    "제외해도 Board 판정은 board_attention_exact 슬롯이 해요. 글은 그 슬롯의 모델로 가요."
+  else
+    "Even when excluded, Board judgment still runs on board_attention_exact and sends posts to that slot's model."
 ;;
 
-let applies_note = "저장하면 서버가 바로 읽어요."
-let no_roster = "(키퍼 목록이 비어 있어요)"
+let applies_note ~ko =
+  if ko then "저장하면 서버가 바로 읽어요."
+  else "Saved changes are loaded by the server immediately."
+let no_roster ~ko = if ko then "(키퍼 목록이 비어 있어요)" else "(Keeper roster is empty)"
 let hint_lead = "  "
 (* A refusal is the failed mark of RFC tui-one-screen-grammar 7.2 (실패·반려);
    [!] is not a status mark. *)
@@ -236,19 +243,20 @@ let wrapped ~width ~lead text =
   | first :: rest -> (lead ^ first) :: List.map (fun row -> indent ^ row) rest
 ;;
 
-let destinations_text t = "판정 서버 · " ^ String.concat " · " t.destinations
+let destinations_text ~ko t =
+  (if ko then "판정 서버 · " else "Judgment servers · ") ^ String.concat " · " t.destinations
 
 (* An unknown name that is still picked is the one to act on: it excludes
    nobody and stays in the file until it is dropped. *)
-let entry_suffix t entry =
+let entry_suffix ~ko t entry =
   (if entry.known
    then ""
    else if List.mem entry.keeper.name t.picked
-   then "  (키퍼 목록에 없어요 · Space 로 빼요)"
-   else "  (키퍼 목록에 없어요)")
+   then if ko then "  (키퍼 목록에 없어요 · Space 로 빼요)" else "  (not in roster · Space to remove)"
+   else if ko then "  (키퍼 목록에 없어요)" else "  (not in roster)")
   ^
   match entry.keeper.presence with
-  | Stopped -> "  (멈춰 있어요)"
+  | Stopped -> if ko then "  (멈춰 있어요)" else "  (stopped)"
   | Running | Unknown -> ""
 ;;
 
@@ -256,20 +264,23 @@ let entry_suffix t entry =
    row. *)
 let shown_names_limit = 4
 
-let names_text names =
+let names_text ~ko names =
   let shown = List.filteri (fun index _ -> index < shown_names_limit) names in
   let more = List.length names - List.length shown in
   String.concat ", " (List.map Terminal_text.single_line shown)
-  ^ if more > 0 then Printf.sprintf " 외 %d명" more else ""
+  ^
+  if more > 0 then
+    Printf.sprintf (if ko then " 외 %d명" else " +%d more") more
+  else ""
 ;;
 
-let summary_text t =
+let summary_text ~ko t =
   match change t with
-  | Unchanged -> "바뀌는 것이 없어요"
+  | Unchanged -> if ko then "바뀌는 것이 없어요" else "no changes"
   | Changed { added; dropped } ->
     let names sign = function
       | [] -> []
-      | names -> [ sign ^ names_text names ]
+      | names -> [ sign ^ names_text ~ko names ]
     in
     String.concat " · " (names "+" added @ names "-" dropped)
 ;;
@@ -287,13 +298,17 @@ let window ~room ~cursor rows =
     visible, start, total - start - shown)
 ;;
 
-let rows ~width ~height t =
+let rows ~ko ~width ~height t =
   let mark index = if t.cursor = index then "›" else " " in
-  let intro_rows = wrapped ~width ~lead:hint_lead intro in
-  let destination_rows = wrapped ~width ~lead:hint_lead (destinations_text t) in
-  let summary_rows = wrapped ~width ~lead:hint_lead ("저장하면 · " ^ summary_text t) in
+  let intro_rows = wrapped ~width ~lead:hint_lead (intro ~ko) in
+  let destination_rows = wrapped ~width ~lead:hint_lead (destinations_text ~ko t) in
+  let summary_rows =
+    wrapped ~width ~lead:hint_lead
+      ((if ko then "저장하면 · " else "On save · ") ^ summary_text ~ko t)
+  in
   let note_rows =
-    wrapped ~width ~lead:hint_lead board_note @ wrapped ~width ~lead:hint_lead applies_note
+    wrapped ~width ~lead:hint_lead (board_note ~ko)
+    @ wrapped ~width ~lead:hint_lead (applies_note ~ko)
   in
   let error_rows =
     match t.error with
@@ -302,7 +317,7 @@ let rows ~width ~height t =
   in
   let keeper_rows =
     match t.entries with
-    | [] -> wrapped ~width ~lead:hint_lead no_roster
+    | [] -> wrapped ~width ~lead:hint_lead (no_roster ~ko)
     | entries ->
       let drawn =
         List.mapi
@@ -312,7 +327,7 @@ let rows ~width ~height t =
                (mark index)
                (if List.mem entry.keeper.name t.picked then "x" else " ")
                (Terminal_text.single_line entry.keeper.name)
-               (entry_suffix t entry))
+               (entry_suffix ~ko t entry))
           entries
       in
       let fixed =
@@ -328,7 +343,10 @@ let rows ~width ~height t =
       then visible
       else
         visible
-        @ [ Printf.sprintf "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)" above below ]
+        @ [ Printf.sprintf
+              (if ko then "      … 위 %d명 · 아래 %d명 (↑/↓ 로 움직여요)"
+               else "      … %d above · %d below (↑/↓ to move)")
+              above below ]
   in
   intro_rows
   @ destination_rows

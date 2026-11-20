@@ -207,7 +207,10 @@ let document_viewport state ~rows ~cols =
   let pane_cols = if resource_split state ~cols then cols - keeper_roster_pane_cols else cols in
   let count = match Masc_tui_resource_document.current state with
     | None -> 0
-    | Some reading -> List.length (Masc_tui_resource_document.rows ~cols:pane_cols reading) in
+    | Some reading ->
+        List.length
+          (Masc_tui_resource_document.rows ~ko:(state.ui_language = Lang_ko)
+             ~cols:pane_cols reading) in
   count, max 0 (pane_surface_content_height ~rows - save_prompt_height state)
 
 let render_resources (state : state) =

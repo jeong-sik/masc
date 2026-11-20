@@ -291,7 +291,7 @@ let draw ?(ko = false) ~cols (view : view) =
       ~notice:
         (attempt
          @ started
-         @ Masc_tui_identity_model.identity_app_form_rows view.app_form
+         @ Masc_tui_identity_model.identity_app_form_rows ~ko view.app_form
          @ filter_rows)
   in
   let narrowed_by_view =

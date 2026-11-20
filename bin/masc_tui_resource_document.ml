@@ -239,17 +239,18 @@ type piece = Markdown_text of string | Html_text of string
 type origin = Metadata | Selection | Part_heading of int | Part_body of int
   | Read_status | Report_status | Recovery | Save_result | Progress | Failure of int
 
-let resource_document entry
+let resource_document ?(ko = false) entry
     (contents : Masc_tui_mcp.resource_content list option) ~error ~requested ~image_cursor ~text_cursor ~revisions ~presentation ~metadata_expanded ~confirmation ~shared ~share_uncertain ~recovery_preview ~save_notice ~public_url =
+  let say ko_text en_text = if ko then ko_text else en_text in
   let resource = Catalog.metadata entry in
   let present = function
     | Some text when String.trim text <> "" -> text
-    | Some _ | None -> "not supplied"
+    | Some _ | None -> say "제공되지 않음" "not supplied"
   in
   let size =
     match resource.size with
-    | Some bytes -> Printf.sprintf "%d bytes" bytes
-    | None -> "size unknown"
+    | Some bytes -> Printf.sprintf (if ko then "%d바이트" else "%d bytes") bytes
+    | None -> say "크기 알 수 없음" "size unknown"
   in
   let mime = present resource.mime_type in
   let revision_note = match entry with
@@ -257,17 +258,23 @@ let resource_document entry
     | Report report ->
       let available direction = Option.is_some (Catalog.adjacent_revision direction
         ~current:report revisions) in
-      [Printf.sprintf "**Revision:** %d · %d known · { older%s · } newer%s"
-         report.revision.revision (List.length revisions)
-         (if available Catalog.Older then "" else " unavailable")
-         (if available Catalog.Newer then "" else " unavailable")] in
+      [if ko then
+         Printf.sprintf "**리비전:** %d · 확인 %d건 · { 이전%s · } 다음%s"
+           report.revision.revision (List.length revisions)
+           (if available Catalog.Older then "" else " 없음")
+           (if available Catalog.Newer then "" else " 없음")
+       else
+         Printf.sprintf "**Revision:** %d · %d known · { older%s · } newer%s"
+           report.revision.revision (List.length revisions)
+           (if available Catalog.Older then "" else " unavailable")
+           (if available Catalog.Newer then "" else " unavailable")] in
   let details =
     String.concat "\n\n"
       ([ Catalog.origin entry
-      ; "**About:** " ^ present resource.description
+      ; say "**설명:** " "**About:** " ^ present resource.description
       ; "**URI:** `" ^ resource.uri ^ "`"
-      ; "**Name:** " ^ resource.name
-      ; "**Type:** `" ^ mime ^ "` · **Size:** " ^ size
+      ; say "**이름:** " "**Name:** " ^ resource.name
+      ; say "**형식:** `" "**Type:** `" ^ mime ^ say "` · **크기:** " "` · **Size:** " ^ size
       ] @ revision_note)
   in
   let part_document index (part : Masc_tui_mcp.resource_content) =
@@ -281,28 +288,38 @@ let resource_document entry
              ~language:(Option.value (resource_language_of_mime part_mime) ~default:"")
              (Masc_tui_text_block.lines text |> String.concat "\n")))
       | Masc_tui_mcp.Resource_blob {base64} ->
-        Markdown_text (Printf.sprintf "%s · `%s` · %d base64 bytes"
-          (if Masc_tui_resource_images.is_image part_mime then "Image data" else "Binary data")
-          part_mime (String.length base64)) in
+        Markdown_text
+          (Printf.sprintf
+             (if ko then "%s · `%s` · base64 %d바이트" else "%s · `%s` · %d base64 bytes")
+             (if Masc_tui_resource_images.is_image part_mime then say "이미지 데이터" "Image data"
+              else say "바이너리 데이터" "Binary data")
+             part_mime (String.length base64)) in
     match contents with
     | Some (_ :: _ :: _) ->
-      [Part_heading index, Markdown_text (Printf.sprintf "### Part %d · %s" index part_mime); Part_body index, body]
+      [ Part_heading index
+      , Markdown_text (Printf.sprintf (if ko then "### 파트 %d · %s" else "### Part %d · %s") index part_mime)
+      ; Part_body index, body ]
     | Some (_ :: []) | Some [] | None -> [Part_body index, body] in
   let read_status, body = match error, contents with
     | Some detail, _ -> [Read_status, Markdown_text detail], []
-    | None, None when requested -> [Read_status, Markdown_text "(reading resource)"], []
-    | None, None -> [Read_status, Markdown_text "(Enter reads the selected resource.)"], []
-    | None, Some [] -> [Read_status, Markdown_text "(No content parts returned.)"], []
+    | None, None when requested ->
+        [Read_status, Markdown_text (say "(리소스 읽는 중)" "(reading resource)")], []
+    | None, None ->
+        [Read_status, Markdown_text (say "(Enter로 선택한 리소스를 읽습니다.)" "(Enter reads the selected resource.)")], []
+    | None, Some [] ->
+        [Read_status, Markdown_text (say "(반환된 콘텐츠 파트가 없습니다.)" "(No content parts returned.)")], []
     | None, Some parts ->
       let texts = text_parts parts in
       let text_selection = match selected_text_part texts text_cursor with
-        | Some (part, _) -> Some (Printf.sprintf "Text %d/%d · part %d"
-            (text_cursor + 1) (List.length texts) part)
+        | Some (part, _) ->
+            Some (Printf.sprintf (if ko then "텍스트 %d/%d · 파트 %d" else "Text %d/%d · part %d")
+              (text_cursor + 1) (List.length texts) part)
         | None -> None in
       let images = Masc_tui_resource_images.images ~mime_type:resource.mime_type parts in
       let image_selection = match List.nth_opt images image_cursor with
-        | Some (part, _) -> Some (Printf.sprintf "Image %d/%d · part %d"
-            (image_cursor + 1) (List.length images) part)
+        | Some (part, _) ->
+            Some (Printf.sprintf (if ko then "이미지 %d/%d · 파트 %d" else "Image %d/%d · part %d")
+              (image_cursor + 1) (List.length images) part)
         | None -> None in
       let selection = match List.filter_map Fun.id [text_selection; image_selection] with
         | [] -> []
@@ -310,17 +327,29 @@ let resource_document entry
       [], selection
         @ List.concat (List.mapi (fun index part -> part_document (index + 1) part) parts) in
   let confirmation = Option.map (fun status ->
-    "**Confirmation:** " ^ Masc_tui_artifact_checks.description status) confirmation in
+    say "**확인:** " "**Confirmation:** " ^ Masc_tui_artifact_checks.description ~ko status) confirmation in
   let sharing = match entry, share_uncertain, shared with
     | Catalog.Mcp _, (true | false), (Some _ | None) -> None
     | Catalog.Report _, true, (Some _ | None) ->
-      Some "**External sharing:** change unconfirmed; it may still apply. U shows the recorded change before confirmation."
-    | Catalog.Report _, false, None -> Some "**External sharing:** unknown (R: reread this revision)"
-    | Catalog.Report _, false, Some true -> Some "**External sharing:** last observed enabled (P: revoke)"
-    | Catalog.Report _, false, Some false -> Some "**External sharing:** last observed private (P: enable)" in
+      Some (say
+        "**외부 공유:** 변경 미확인(아직 적용될 수 있음). U로 확인 전 기록된 변경을 확인합니다."
+        "**External sharing:** change unconfirmed; it may still apply. U shows the recorded change before confirmation.")
+    | Catalog.Report _, false, None ->
+      Some (say "**외부 공유:** 알 수 없음 (R: 이 리비전 다시 읽기)"
+        "**External sharing:** unknown (R: reread this revision)")
+    | Catalog.Report _, false, Some true ->
+      Some (say "**외부 공유:** 마지막 관측 켜짐 (P: 공유 해제)"
+        "**External sharing:** last observed enabled (P: revoke)")
+    | Catalog.Report _, false, Some false ->
+      Some (say "**외부 공유:** 마지막 관측 비공개 (P: 공유 켜기)"
+        "**External sharing:** last observed private (P: enable)") in
   let link_notice, public_link = match public_url with
-    | Some (Ok url) -> None, "\n\n**Public link:** `" ^ url ^ "` · Y: copy (origin not verified)"
-    | Some (Error detail) -> Some ("**Public link unavailable:** " ^ detail), ""
+    | Some (Ok url) ->
+      None,
+      say "\n\n**공개 링크:** `" "\n\n**Public link:** `" ^ url
+      ^ say "` · Y: 복사 (출처 미검증)" "` · Y: copy (origin not verified)"
+    | Some (Error detail) ->
+      Some (say "**공개 링크 사용 불가:** " "**Public link unavailable:** " ^ detail), ""
     | None -> None, "" in
   let report_status = match List.filter_map Fun.id [confirmation; sharing; link_notice] with
     | [] -> []
@@ -342,7 +371,7 @@ type diagram = {
 type block = { origin : origin; source : Masc_tui_markdown.source_block }
 type document_layout = { lines : string list; pictures : diagram list; blocks : block list }
 
-let prepare_anchored_layout ~cols (reading : t) =
+let prepare_anchored_layout ~ko ~cols (reading : t) =
   let width = max 1 (framed_inner_width cols - 4) in
   let diagram_size image diagrams =
     let cw,ch = Masc_tui_resource_diagrams.cell_pixels diagrams in
@@ -352,7 +381,7 @@ let prepare_anchored_layout ~cols (reading : t) =
        /. float_of_int image.width /. float_of_int ch))) in
     columns,rows in
   let offset = ref 0 and pictures = ref [] and blocks = ref [] in
-  let pieces = resource_document reading.entry reading.contents ~error:reading.error
+  let pieces = resource_document ~ko reading.entry reading.contents ~error:reading.error
     ~requested:reading.requested ~image_cursor:reading.image_cursor
     ~text_cursor:reading.text_cursor ~revisions:reading.revisions
     ~presentation:reading.presentation ~metadata_expanded:reading.metadata_expanded
@@ -365,11 +394,16 @@ let prepare_anchored_layout ~cols (reading : t) =
     | Some diagrams ->
       let completed,total = Masc_tui_resource_diagrams.progress diagrams in
       let progress = if completed < total then
-        [Progress, Markdown_text (Printf.sprintf "Preparing diagrams · %d/%d" completed total)] else [] in
+        [Progress, Markdown_text (Printf.sprintf
+          (if ko then "다이어그램 준비 중 · %d/%d" else "Preparing diagrams · %d/%d")
+          completed total)] else [] in
       let failures = Masc_tui_resource_diagrams.sources (Masc_tui_resource_diagrams.request diagrams)
         |> List.mapi (fun index source ->
-          Option.map (fun detail -> Failure index, Markdown_text ("Diagram preview unavailable: " ^ detail
-            ^ " · r: reread and retry · Ctrl-O: preview selected diagram"))
+          Option.map (fun detail -> Failure index, Markdown_text (
+            (if ko then "다이어그램 미리보기 불가: " else "Diagram preview unavailable: ")
+            ^ detail
+            ^ (if ko then " · r: 다시 읽어 재시도 · Ctrl-O: 선택한 다이어그램 미리보기"
+               else " · r: reread and retry · Ctrl-O: preview selected diagram")))
             (Masc_tui_resource_diagrams.failure ~source diagrams))
         |> List.filter_map Fun.id in
       progress @ failures @ pieces in
@@ -414,28 +448,28 @@ let prepare_anchored_layout ~cols (reading : t) =
   {lines=rows;pictures=List.rev !pictures;blocks=List.rev !blocks}
 
 let document_layout_cache :
-    ((t * int * int * bool * bool) * document_layout) option Domain.DLS.key =
+    ((t * int * int * bool * bool * bool) * document_layout) option Domain.DLS.key =
   Domain.DLS.new_key (fun () -> None)
 
-let anchored_layout ~cols reading =
+let anchored_layout ~ko ~cols reading =
   let palette = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
   let lift = Masc_tui_theme.lift_is_enabled () in
   let table_frame = !(Masc_tui_markdown_theme.table_frame_enabled) in
   match Domain.DLS.get document_layout_cache with
-  | Some ((seen, width, seen_palette, seen_lift, seen_frame), layout)
+  | Some ((seen, width, seen_palette, seen_lift, seen_frame, seen_ko), layout)
       when width=cols && seen_palette=palette && seen_lift=lift && seen_frame=table_frame
-        && Reading.same_reading seen reading -> layout
+        && Bool.equal seen_ko ko && Reading.same_reading seen reading -> layout
   | Some _ | None ->
-      let layout = prepare_anchored_layout ~cols reading in
+      let layout = prepare_anchored_layout ~ko ~cols reading in
       Domain.DLS.set document_layout_cache
-        (Some ((reading, cols, palette, lift, table_frame), layout));
+        (Some ((reading, cols, palette, lift, table_frame, ko), layout));
       layout
 
-let layout ~cols reading =
-  let rendered = anchored_layout ~cols reading in
+let layout ?(ko = false) ~cols reading =
+  let rendered = anchored_layout ~ko ~cols reading in
   rendered.lines,rendered.pictures
 
-let rows ~cols reading = fst (layout ~cols reading)
+let rows ?(ko = false) ~cols reading = fst (layout ~ko ~cols reading)
 
 let recovery_preview_fits ~cols ~height ~requested (reading : t) =
   match reading.recovery_preview, reading.diagrams with
@@ -449,7 +483,10 @@ let recovery_preview_fits ~cols ~height ~requested (reading : t) =
 let search_rows ~cols state =
   match current state with
   | Some reading when Reading.searchable reading ->
-      Some (List.map Masc_tui_theme.strip_sgr (rows ~cols:(resource_content_cols state ~cols) reading))
+      Some
+        (List.map Masc_tui_theme.strip_sgr
+           (rows ~ko:(state.ui_language = Lang_ko)
+              ~cols:(resource_content_cols state ~cols) reading))
   | Some _ | None -> None
 
 let layout_with_search ~cols state (reading : t) =
@@ -457,7 +494,7 @@ let layout_with_search ~cols state (reading : t) =
   let admitted = state.resource_focus=Right_pane && Reading.searchable reading in
   let landing = if admitted then Reading.landing ~cols ~query reading
       state.resource_search_position else None in
-  let rows,pictures = layout ~cols reading in
+  let rows,pictures = layout ~ko:(state.ui_language = Lang_ko) ~cols reading in
   let marked = rows |> List.mapi (fun index text ->
     let mark =
       if admitted && query<>"" && Masc_tui_pick_list.lowercase_contains ~needle:query
@@ -486,7 +523,7 @@ let anchor_reading (state : state) =
 let capture_anchor ~cols ~height state =
   Option.bind (anchor_reading state) (fun reading ->
     Option.bind reading.contents (fun contents ->
-      let rendered = anchored_layout ~cols reading in
+      let rendered = anchored_layout ~ko:(state.ui_language = Lang_ko) ~cols reading in
       let offset = Masc_tui_scroll.Position.offset ~count:(List.length rendered.lines)
         ~height state.resource_scroll in
       let location =
@@ -516,7 +553,7 @@ let restore_anchor ~cols ~height state anchor =
   match anchor_reading state with
   | Some reading when Catalog.equal_key (Catalog.key reading.entry) anchor.key
       && (match reading.contents with Some parts -> parts == anchor.contents | None -> false) ->
-      let rendered = anchored_layout ~cols reading in
+      let rendered = anchored_layout ~ko:(state.ui_language = Lang_ko) ~cols reading in
       let position = match anchor.location with
         | Top -> Some Masc_tui_scroll.Position.first
         | End -> Some (Masc_tui_scroll.Position.move ~count:(List.length rendered.lines)

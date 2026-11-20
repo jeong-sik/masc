@@ -191,15 +191,21 @@ let request_body request =
     ; web_tools_key, `Bool request.web_tools
     ]
 
-let lines launch =
+let lines ?(ko = false) launch =
   (match launch.notice with
    | None -> []
-   | Some (Input_refused detail) -> [ "Input error: " ^ detail ]
-   | Some (Server_refused detail) -> [ "Refused: " ^ detail ]
+   | Some (Input_refused detail) -> [ (if ko then "입력 오류: " else "Input error: ") ^ detail ]
+   | Some (Server_refused detail) -> [ (if ko then "거절됨: " else "Refused: ") ^ detail ]
    | Some (Launch_kept_back notice) -> [ notice ])
   @ (match launch.waiting with
-     | Some request -> [ "Starting the run for " ^ request.keeper ]
+     | Some request ->
+         [ (if ko then request.keeper ^ " 실행 시작 중"
+            else "Starting the run for " ^ request.keeper) ]
      | None -> [])
   @ Form.lines launch.form
 
-let hints = "Tab:field  Left/Right:choice  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
+let hints_for ~ko =
+  if ko then "Tab:필드  ←/→:선택  Ctrl-U:해제  Ctrl-S:검토  Esc:취소"
+  else "Tab:field  Left/Right:choice  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
+
+let hints = hints_for ~ko:false

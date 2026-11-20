@@ -890,11 +890,17 @@ let account_label ~ko t (p:provider) =
   let say korean english = if ko then korean else english in
   let label = match account_group t p with
     | Some group when List.length group.provider_ids > 1 ->
-        Printf.sprintf
-          (if ko then "%s · %s · 연결 %d개 · 모델 설정 %d개"
-           else "%s · %s · %d links · %d models")
-          (client_label p.client) (String.sub group.group_id 0 (min 8 (String.length group.group_id)))
-          (List.length group.provider_ids) (List.length group.runtime_ids)
+        let links = List.length group.provider_ids in
+        let models = List.length group.runtime_ids in
+        let short_id = String.sub group.group_id 0 (min 8 (String.length group.group_id)) in
+        if ko then
+          Printf.sprintf "%s · %s · 연결 %d개 · 모델 설정 %d개"
+            (client_label p.client) short_id links models
+        else
+          Printf.sprintf "%s · %s · %d %s · %d %s"
+            (client_label p.client) short_id
+            links (if links = 1 then "link" else "links")
+            models (if models = 1 then "model" else "models")
     | Some group -> p.label ^ " · " ^ String.sub group.group_id 0 (min 8 (String.length group.group_id))
     | None -> p.label in
   let label =
@@ -939,7 +945,8 @@ let body_rows ~ko t =
       let count = List.length (accounts t client) in
       Text ((if i=t.cursor then "› " else "  ") ^ client_label client
             ^ (if count = 0 then ""
-               else Printf.sprintf (if ko then " · 계정 %d" else " · %d accounts") count))) (clients t)
+               else if ko then Printf.sprintf " · 계정 %d" count
+               else Printf.sprintf " · %d %s" count (if count = 1 then "account" else "accounts")))) (clients t)
   | Providers (Accounts client) -> List.mapi (fun i row ->
       Text ((if i=t.cursor then "› " else "  ")
             ^ (match row with New_account _ -> say "+ 새 계정" "+ New account" | Account p -> account_label ~ko t p))) (account_rows t client)

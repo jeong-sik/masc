@@ -412,19 +412,18 @@ let palette_noun : palette_mode -> string * string = function
   | Masc_tui_types.Palette_worktrees _ -> ("worktree", "worktrees")
   | Masc_tui_types.Palette_search _ -> ("match", "matches")
 
+let palette_noun_ko = function
+  | Masc_tui_types.Palette_jump -> "명령"
+  | Masc_tui_types.Palette_choice _ -> "이름"
+  | Masc_tui_types.Palette_files _ -> "파일"
+  | Masc_tui_types.Palette_locations _ -> "위치"
+  | Masc_tui_types.Palette_branches _ -> "브랜치"
+  | Masc_tui_types.Palette_worktrees _ -> "워크트리"
+  | Masc_tui_types.Palette_search _ -> "일치"
+
 let palette_count ~ko mode count =
   if ko then
-    let noun =
-      match mode with
-      | Masc_tui_types.Palette_jump -> "명령"
-      | Masc_tui_types.Palette_choice _ -> "이름"
-      | Masc_tui_types.Palette_files _ -> "파일"
-      | Masc_tui_types.Palette_locations _ -> "위치"
-      | Masc_tui_types.Palette_branches _ -> "브랜치"
-      | Masc_tui_types.Palette_worktrees _ -> "워크트리"
-      | Masc_tui_types.Palette_search _ -> "일치"
-    in
-    Printf.sprintf "%s %d개" noun count
+    Printf.sprintf "%s %d개" (palette_noun_ko mode) count
   else
     let singular, plural = palette_noun mode in
     Message_layout.count_noun ~plural count singular
@@ -719,9 +718,13 @@ let render_palette (state : state) =
                | Palette_jump | Palette_choice _),
                (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading | Masc_tui_fetched.Ready _
                | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Stale _) ->
-                 c.push ("   No matching "
-                         ^ snd (palette_noun state.palette_mode)
-                         ^ " · Ctrl-U clears the filter")))
+                 c.push
+                   (if state.ui_language = Lang_ko then
+                      "   일치하는 " ^ palette_noun_ko state.palette_mode ^ " 없음 · Ctrl-U로 필터 지우기"
+                    else
+                      "   No matching "
+                      ^ snd (palette_noun state.palette_mode)
+                      ^ " · Ctrl-U clears the filter")))
 
 (* The link preview overlay. [surface_chrome] owns the box, the fill and the
    footer's row. The title names the site, so the footer carries only keys. *)
@@ -849,7 +852,10 @@ let render_play_card (state : state) card =
                  in each direction. *)
               c.push_styled ~style:(Theme.warn ())
                 (Printf.sprintf
-                   "%sthe QR needs a window of %d columns by %d rows"
+                   (if state.ui_language = Lang_ko then
+                      "%sQR을 표시하려면 최소 %d열 × %d행 창이 필요합니다"
+                    else
+                      "%sthe QR needs a window of %d columns by %d rows")
                    play_card_indent
                    (window_cols + max 0 (columns - width))
                    (window_rows + max 0 (rows - budget)))

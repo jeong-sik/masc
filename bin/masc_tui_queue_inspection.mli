@@ -51,7 +51,7 @@ type observation = {
 (** A failed source is distinct from an observed empty source. An event ID
     addresses one exact pending incarnation; a grouped row exposes members
     only when all of their exact addresses are available and distinct. *)
-val waiting_items : now:float -> Yojson.Safe.t -> (item list, string) result
+val waiting_items : ?ko:bool -> now:float -> Yojson.Safe.t -> (item list, string) result
 val operation_items : Yojson.Safe.t -> (item list, string) result
 val edited_input : message:string -> Yojson.Safe.t -> (Yojson.Safe.t, string) result
 val next_sequence : Yojson.Safe.t -> (string option, string) result

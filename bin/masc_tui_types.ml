@@ -1685,7 +1685,7 @@ let librarian_failing_text ?(ko = false) ~since failing =
    lifecycle steps cannot make the same approval occupy several status rows.
    All non-Gate rows keep their original position and text. Problems and
    unresolved operations remain complete; Full restores every original step. *)
-let project_gate_history ~visibility entries =
+let project_gate_history ~ko ~visibility entries =
   match visibility with
   | Tools_full -> entries
   | Tools_compact | Tools_results ->
@@ -1737,9 +1737,10 @@ let project_gate_history ~visibility entries =
             let summary = List.find_map (fun (_, gate) -> gate.gs_summary) reversed in
             Option.map (fun text ->
               last_index,
-              Printf.sprintf "%s · %d steps · %s" text (List.length steps)
-                expand_hint)
-              (Masc_tui_gate_text.fold_line ~phases ~tool:newest.gs_tool ~summary)
+              Printf.sprintf
+                (if ko then "%s · %d단계 · %s" else "%s · %d steps · %s")
+                text (List.length steps) expand_hint)
+              (Masc_tui_gate_text.fold_line_for ~ko ~phases ~tool:newest.gs_tool ~summary)
         | ([] | [ _ ]), _, _
         | _ :: _ :: _, true, _
         | _ :: _ :: _, false,
@@ -1757,7 +1758,20 @@ let project_gate_history ~visibility entries =
         | Some (Some (last_index, text)) ->
             if index = last_index then Some ({ entry with me_text = text }, extra)
             else None
-        | Some None | None -> Some row) entries
+        | Some None | None ->
+            (match entry.me_role, entry.me_gate with
+             | Message_status, Some gate ->
+                 let text =
+                   Masc_tui_gate_text.lifecycle_line_for ~ko
+                     ~phase:gate.gs_phase ~tool:gate.gs_tool ~summary:gate.gs_summary
+                 in
+                 if String.equal entry.me_text text then Some row
+                 else Some ({ entry with me_text = text }, extra)
+             | (Message_status, None)
+             | ((Message_keeper | (Message_autonomous | (Message_local | (Message_error
+                 | (Message_tool | (Message_thinking | (Message_memory
+                 | (Message_user _ | Message_skill _)))))))), _) ->
+                 Some row)) entries
 ;;
 
 type chat_turn = {
@@ -3070,11 +3084,22 @@ let schedule_payload_body = function
     the store itself uses, and a count of zero is left out -- a disposition
     nothing is in is not a fact about this Keeper. *)
 let schedule_counts_line ?(ko = false) counts =
+  let status_label =
+    if not ko then Schedule_domain.schedule_status_to_string
+    else function
+      | Schedule_contract_values.Scheduled -> "예정"
+      | Schedule_contract_values.Due -> "실행 대기"
+      | Schedule_contract_values.Running -> "실행 중"
+      | Schedule_contract_values.Succeeded -> "성공"
+      | Schedule_contract_values.Failed -> "실패"
+      | Schedule_contract_values.Cancelled -> "취소됨"
+      | Schedule_contract_values.Expired -> "만료"
+  in
   let spell statuses =
     counts
     |> List.filter (fun (status, count) -> count > 0 && List.mem status statuses)
     |> List.map (fun (status, count) ->
-           let label = Schedule_domain.schedule_status_to_string status in
+           let label = status_label status in
            if ko then Printf.sprintf "%s %d" label count
            else Printf.sprintf "%d %s" count label)
   in
@@ -6911,14 +6936,16 @@ let current_memory_starving_count (snapshot : Masc.Tui_decode_memory_health.memo
     | Memory_ordinary | Memory_warning | Memory_degraded | Memory_no_current
     | Memory_source_only | Memory_read_error -> count) 0 snapshot.mhs_keepers)
 
-let memory_state_label = function
-  | Memory_ordinary -> "ok"
-  | Memory_warning -> "warning"
-  | Memory_degraded -> "degraded"
-  | Memory_no_current -> "no-current"
-  | Memory_source_only -> "source-only"
-  | Memory_starving -> "STARVING"
-  | Memory_read_error -> "read-error"
+let memory_state_label_for ~ko = function
+  | Memory_ordinary -> if ko then "정상" else "ok"
+  | Memory_warning -> if ko then "경고" else "warning"
+  | Memory_degraded -> if ko then "저하" else "degraded"
+  | Memory_no_current -> if ko then "최신 스냅샷 없음" else "no-current"
+  | Memory_source_only -> if ko then "원본만" else "source-only"
+  | Memory_starving -> if ko then "기억 부족" else "STARVING"
+  | Memory_read_error -> if ko then "조회 오류" else "read-error"
+
+let memory_state_label state = memory_state_label_for ~ko:false state
 
 (* The health row and Keeper axis use the same words for a typed pass end.
    Keeping both languages here also lets search follow either display without
@@ -6981,6 +7008,7 @@ let memory_keeper_search_text (keeper : Masc.Tui_decode_memory_health.memory_kee
   String.concat " "
     ([ keeper.mkh_keeper_id
     ; memory_state_label (memory_state keeper)
+    ; memory_state_label_for ~ko:true (memory_state keeper)
     ; memory_state_text ~ko:true keeper
     ; memory_state_text ~ko:false keeper
     ] @ observed_pass_words @ admission_words)
@@ -24184,6 +24212,8 @@ let runtime_params_viewport (state : state) ~terminal_rows =
 ;;
 
 let keeper_log_diagnostics state =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let snapshot_diagnostics (snapshot : Metrics_tail.snapshot) =
     match snapshot.error with
     | None -> []
@@ -24198,23 +24228,28 @@ let keeper_log_diagnostics state =
     && Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs request.klr_request)
     state.keeper_log_read in
   match keeper_logs_view state with
-  | Masc_tui_fetched.Absent -> [Keeper_log_notice, "Keeper metrics have not been read."]
-  | Loading -> [Keeper_log_notice, "Reading Keeper metrics"]
+  | Masc_tui_fetched.Absent ->
+      [Keeper_log_notice, say "키퍼 메트릭을 아직 조회하지 않았습니다." "Keeper metrics have not been read."]
+  | Loading -> [Keeper_log_notice, say "키퍼 메트릭 조회 중" "Reading Keeper metrics"]
   | Failed detail ->
       let tone = match state.workspace_identity with
         | Workspace_identity_unread | Workspace_identity_mismatch _ -> Keeper_log_notice
         | Workspace_identity_match | Workspace_identity_match_unconfirmed _ -> Keeper_log_failure in
       [tone, detail]
   | Ready snapshot ->
-      (if reading then [Keeper_log_notice, "Refreshing metrics; showing the last observation."] else [])
+      (if reading then
+         [Keeper_log_notice, say "메트릭 새로고침 중 · 마지막 관측 표시 중" "Refreshing metrics; showing the last observation."]
+       else [])
       @ snapshot_diagnostics snapshot
   | Stale (snapshot, detail) ->
-      [Keeper_log_failure, "Last observed metrics · " ^ detail]
-      @ (if reading then [Keeper_log_notice, "Refresh in progress."] else [])
+      [Keeper_log_failure, say "마지막 관측 메트릭 · " "Last observed metrics · " ^ detail]
+      @ (if reading then [Keeper_log_notice, say "새로고침 진행 중" "Refresh in progress."] else [])
       @ snapshot_diagnostics snapshot
 
 (* Count after wrapping; drawing and paging share rows and source diagnostics. *)
 let keeper_log_rows (state : state) ~cols =
+  let ko = state.ui_language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let width = Masc_tui_frame.inner_width ~cols in
   let execute_rows =
     let text_rows tone text =
@@ -24224,46 +24259,60 @@ let keeper_log_rows (state : state) ~cols =
     let render_reading reading read_at =
       let stamp = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) read_at in
       let refresh = if Masc_tui_fetched.in_flight state.keeper_execute_output
-        then " · refreshing" else "" in
-      let observed = text_rows Keeper_log_notice ("Execute output · observed " ^ stamp ^ refresh) in
+        then say " · 새로고침 중" " · refreshing" else "" in
+      let observed = text_rows Keeper_log_notice (say "Execute 출력 · 관측 " "Execute output · observed " ^ stamp ^ refresh) in
       match reading with
       | Keeper_execute_none -> observed @ text_rows Keeper_log_notice
-          "No Execute output observed in this server process."
+          (say "이 서버 프로세스에서 관측된 Execute 출력이 없습니다." "No Execute output observed in this server process.")
       | Keeper_execute_snapshot reading ->
       let state_text =
         if reading.kes_active_count > 0 then
-          Printf.sprintf "%d active" reading.kes_active_count
-        else if reading.kes_closed then "closed"
-        else "state not reported" in
+          Printf.sprintf (if ko then "실행 중 %d" else "%d active") reading.kes_active_count
+        else if reading.kes_closed then say "종료됨" "closed"
+        else say "상태 미보고" "state not reported" in
       let status = match reading.kes_status with
         | `Null -> "" | status -> " · " ^ Yojson.Safe.to_string status in
-      let header = text_rows Keeper_log_notice ("Execute output · " ^ state_text ^ status) in
+      let header = text_rows Keeper_log_notice (say "Execute 출력 · " "Execute output · " ^ state_text ^ status) in
       let active = List.concat_map (fun stream ->
         let task = match stream.kes_task with None -> "" | Some id -> " task=" ^ id in
-        text_rows Keeper_log_fact (Printf.sprintf "active [%d%s] command summary: %s"
-          stream.kes_id task stream.kes_command)) reading.kes_active in
+        text_rows Keeper_log_fact
+          (Printf.sprintf (if ko then "실행 중 [%d%s] 명령 요약: %s" else "active [%d%s] command summary: %s")
+             stream.kes_id task stream.kes_command)) reading.kes_active in
       let truncated = if reading.kes_first_seq > 1 then
         text_rows Keeper_log_warning (Printf.sprintf
-          "Earlier output events are no longer retained (before sequence %d)." reading.kes_first_seq)
+          (if ko then "이전 출력 이벤트는 더 이상 보관되지 않습니다 (시퀀스 %d 이전)."
+           else "Earlier output events are no longer retained (before sequence %d).") reading.kes_first_seq)
         else [] in
       let lines = List.rev reading.kes_lines in
       let visible_note = if reading.kes_lines_omitted > 0 then
-        text_rows Keeper_log_notice (Printf.sprintf "%d older retained output rows omitted from this view."
-          reading.kes_lines_omitted)
+        text_rows Keeper_log_notice
+          (if ko then
+             Printf.sprintf "보관된 이전 출력 %d줄이 이 화면에서 생략되었습니다."
+               reading.kes_lines_omitted
+           else if reading.kes_lines_omitted = 1 then
+             "1 older retained output row omitted from this view."
+           else
+             Printf.sprintf "%d older retained output rows omitted from this view."
+               reading.kes_lines_omitted)
         else [] in
       observed @ header @ active @ truncated @ visible_note @ List.concat_map (fun line ->
         let id = match line.kel_stream_id with None -> "?" | Some id -> string_of_int id in
         let task = match line.kel_task_id with None -> "" | Some id -> " task=" ^ id in
-        let stream = if String.equal line.kel_stream "cmd" then "command summary" else line.kel_stream in
+        let stream =
+          if String.equal line.kel_stream "cmd" then say "명령 요약" "command summary"
+          else line.kel_stream
+        in
         text_rows Keeper_log_fact (Printf.sprintf "#%d [%s %s%s] %s"
           line.kel_seq id stream task line.kel_text)) lines in
     match keeper_execute_view state with
-    | Masc_tui_fetched.Absent -> text_rows Keeper_log_notice "Execute output has not been read."
-    | Loading -> text_rows Keeper_log_notice "Reading Execute output"
-    | Failed detail -> text_rows Keeper_log_failure ("Execute output unavailable: " ^ keeper_execute_failure_detail detail)
+    | Masc_tui_fetched.Absent ->
+        text_rows Keeper_log_notice (say "Execute 출력을 아직 조회하지 않았습니다." "Execute output has not been read.")
+    | Loading -> text_rows Keeper_log_notice (say "Execute 출력 조회 중" "Reading Execute output")
+    | Failed detail ->
+        text_rows Keeper_log_failure (say "Execute 출력 조회 불가: " "Execute output unavailable: " ^ keeper_execute_failure_detail detail)
     | Ready (reading, at) -> render_reading reading at
     | Stale ((reading, at), detail) ->
-      text_rows Keeper_log_failure ("Last Execute output observation is stale: " ^ keeper_execute_failure_detail detail)
+      text_rows Keeper_log_failure (say "이전 Execute 출력 관측(갱신 필요): " "Last Execute output observation is stale: " ^ keeper_execute_failure_detail detail)
       @ render_reading reading at
   in
   let diagnostics = keeper_log_diagnostics state

@@ -954,7 +954,8 @@ let board_read_pane ~focus ~layout (state : state) (list_post : board_post) ~row
                (fun index (entry : board_attachment_entry) ->
                  Printf.sprintf "  [%d] %s%s%s" (index + 1) Ansi.reset
                    (fit_width
-                      (Terminal_text.single_line (Board_attachments.label entry))
+                      (Terminal_text.single_line
+                        (Board_attachments.label ~ko:(state.ui_language = Lang_ko) entry))
                       (max 8 (framed_inner_width body_wrap_cols - 8)))
                    Ansi.reset)
                attachments

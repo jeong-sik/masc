@@ -77,37 +77,37 @@ let keeper_runtime_cells (runtime : keeper_runtime option) =
       Message_layout.display_width phase
       + Message_layout.display_width runtime_id
 
-let keeper_failure_cause_word = function
-  | Keeper_failure_heartbeat -> "heartbeat"
-  | Keeper_failure_turn -> "turn"
-  | Keeper_failure_provider -> "provider"
-  | Keeper_failure_configuration -> "config"
-  | Keeper_failure_client_recovery -> "client recovery"
-  | Keeper_failure_fiber -> "fiber"
-  | Keeper_failure_exception -> "exception"
-  | Keeper_failure_operator_interrupt -> "operator interrupt"
+let keeper_failure_cause_word ~ko = function
+  | Keeper_failure_heartbeat -> if ko then "하트비트" else "heartbeat"
+  | Keeper_failure_turn -> if ko then "턴" else "turn"
+  | Keeper_failure_provider -> if ko then "제공자" else "provider"
+  | Keeper_failure_configuration -> if ko then "설정" else "config"
+  | Keeper_failure_client_recovery -> if ko then "클라이언트 복구" else "client recovery"
+  | Keeper_failure_fiber -> if ko then "파이버" else "fiber"
+  | Keeper_failure_exception -> if ko then "예외" else "exception"
+  | Keeper_failure_operator_interrupt -> if ko then "운영자 중단" else "operator interrupt"
 
 let failing_glyph = Masc_tui_keeper_mark.failing_glyph
 
 (* The detail window and the failure sentence name a receipt's state with the
    same words. *)
-let no_receipt_text = "no receipt"
-let walk_not_captured_text = "candidate walk was not captured"
-let evidence_unreadable_text = "historical evidence unreadable"
-let no_candidate_failure_text = "no candidate failure recorded"
+let no_receipt_text ~ko = if ko then "영수증 없음" else "no receipt"
+let walk_not_captured_text ~ko = if ko then "후보 순회 미기록" else "candidate walk was not captured"
+let evidence_unreadable_text ~ko = if ko then "이력 근거 읽기 실패" else "historical evidence unreadable"
+let no_candidate_failure_text ~ko = if ko then "후보 실패 기록 없음" else "no candidate failure recorded"
 
-let keeper_cause_group_word = function
-  | Keeper_trail.Rate_limited -> "rate limited"
-  | Keeper_trail.Connection -> "connection"
-  | Keeper_trail.Provider -> "provider"
-  | Keeper_trail.Configuration -> "config"
-  | Keeper_trail.Input -> "input capacity"
-  | Keeper_trail.Unusable_reply -> "unusable reply"
-  | Keeper_trail.Effect_fenced -> "effect fenced"
-  | Keeper_trail.Recovery -> "recovery needed"
-  | Keeper_trail.Stopped -> "stopped"
-  | Keeper_trail.Server -> "server"
-  | Keeper_trail.Internal -> "internal"
+let keeper_cause_group_word ~ko = function
+  | Keeper_trail.Rate_limited -> if ko then "요청 한도" else "rate limited"
+  | Keeper_trail.Connection -> if ko then "연결" else "connection"
+  | Keeper_trail.Provider -> if ko then "제공자" else "provider"
+  | Keeper_trail.Configuration -> if ko then "설정" else "config"
+  | Keeper_trail.Input -> if ko then "입력 한도" else "input capacity"
+  | Keeper_trail.Unusable_reply -> if ko then "응답 사용 불가" else "unusable reply"
+  | Keeper_trail.Effect_fenced -> if ko then "효과 차단" else "effect fenced"
+  | Keeper_trail.Recovery -> if ko then "복구 필요" else "recovery needed"
+  | Keeper_trail.Stopped -> if ko then "중지됨" else "stopped"
+  | Keeper_trail.Server -> if ko then "서버" else "server"
+  | Keeper_trail.Internal -> if ko then "내부 오류" else "internal"
 
 (* The age of a failure, or [None] when its time is missing or ahead of the
    clock. The sentence leaves its time piece out then. The width measurement
@@ -121,33 +121,37 @@ let keeper_trail_age ~now = function
    into the text drawn for it, or into [None] to leave the piece out. A
    sentence has one source: the receipt when it holds facts about the turn, the
    server's own cause word otherwise. *)
-let keeper_trail_sentence ~age = function
+let keeper_trail_sentence ~ko ~age = function
   | Keeper_trail.Trail_sound -> None
   | Keeper_trail.Trail_failed { ended_at; last; walk } ->
       let reported =
         match last with
-        | Some cause -> keeper_failure_cause_word cause
-        | None -> "no failure record"
+        | Some cause -> keeper_failure_cause_word ~ko cause
+        | None -> if ko then "실패 기록 없음" else "no failure record"
+      in
+      let candidates_text tried =
+        if ko then Printf.sprintf "후보 %d개" tried
+        else Message_layout.count_noun tried "candidate"
       in
       let rest =
         match walk with
         | Keeper_trail.Walk_ended { runtime_id; cause; tried } ->
-            [ keeper_cause_group_word cause
+            [ keeper_cause_group_word ~ko cause
             ; Terminal_text.single_line runtime_id
-            ; Message_layout.count_noun tried "candidate"
+            ; candidates_text tried
             ]
         | Keeper_trail.Walk_no_terminal { tried } ->
-            [ "terminal not observed"; Message_layout.count_noun tried "candidate" ]
-        | Keeper_trail.Walk_no_candidate_failure -> [ reported; no_candidate_failure_text ]
-        | Keeper_trail.Walk_not_captured -> [ reported; walk_not_captured_text ]
-        | Keeper_trail.Walk_unreadable -> [ reported; evidence_unreadable_text ]
-        | Keeper_trail.Walk_absent -> [ reported; no_receipt_text ]
+            [ (if ko then "종료 미관측" else "terminal not observed"); candidates_text tried ]
+        | Keeper_trail.Walk_no_candidate_failure -> [ reported; no_candidate_failure_text ~ko ]
+        | Keeper_trail.Walk_not_captured -> [ reported; walk_not_captured_text ~ko ]
+        | Keeper_trail.Walk_unreadable -> [ reported; evidence_unreadable_text ~ko ]
+        | Keeper_trail.Walk_absent -> [ reported; no_receipt_text ~ko ]
         | Keeper_trail.Walk_not_applicable -> [ reported ]
       in
       Some (failing_glyph ^ " " ^ String.concat " · " (Option.to_list (age ended_at) @ rest))
 
-let keeper_row_trail_sentence ~age (row : Keeper_list_model.row) =
-  keeper_trail_sentence ~age (Keeper_list_model.trail_of_row row)
+let keeper_row_trail_sentence ~ko ~age (row : Keeper_list_model.row) =
+  keeper_trail_sentence ~ko ~age (Keeper_list_model.trail_of_row row)
 
 (* The sentence is measured with the widest age the AGE column holds, so the
    column it widens does not change width as the clock runs. A failure with no
@@ -603,7 +607,7 @@ let keeper_row_content ?schedules ?tasks ~ko ?context_chip ~(columns : Render_sc
     ~now ~yolo ~selected (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let failure_context =
-    keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row
+    keeper_row_trail_sentence ~ko ~age:(keeper_trail_age ~now) row
   in
   let age =
     match row.last_activity_at with
@@ -1179,9 +1183,9 @@ let grid_failure_since ~ko ~now ~room (runtime : keeper_runtime option) trail =
 
 (* The word for why the failed turn ended: the receipt's cause when it names
    the runtime that ended it, the server's own cause word otherwise. *)
-let grid_failure_word = function
+let grid_failure_word ~ko = function
   | Keeper_trail.Trail_failed { walk = Keeper_trail.Walk_ended { cause; _ }; _ } ->
-      keeper_cause_group_word cause
+      keeper_cause_group_word ~ko cause
   | Keeper_trail.Trail_failed
       { walk =
           ( Keeper_trail.Walk_no_terminal _ | Keeper_trail.Walk_no_candidate_failure
@@ -1189,12 +1193,12 @@ let grid_failure_word = function
           | Keeper_trail.Walk_not_applicable )
       ; last = Some cause
       ; ended_at = _
-      } -> keeper_failure_cause_word cause
+      } -> keeper_failure_cause_word ~ko cause
   | Keeper_trail.Trail_failed { last = None; _ } | Keeper_trail.Trail_sound -> ""
 
 (* In the pulse column: one failed mark per attempt of the failed turn, at most
    [Grid.chain_attempts], then the failure word. *)
-let grid_failure_chain (grid : Grid.t) runtime trail =
+let grid_failure_chain ~ko (grid : Grid.t) runtime trail =
   let recede text = Theme.recede () ^ text ^ Ansi.reset in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
   let shown = List.take Grid.chain_attempts attempts in
@@ -1209,7 +1213,7 @@ let grid_failure_chain (grid : Grid.t) runtime trail =
         ]
   in
   let word =
-    match grid_failure_word trail with
+    match grid_failure_word ~ko trail with
     | "" -> []
     | word -> [ recede word ]
   in
@@ -1251,7 +1255,7 @@ let grid_failure_line ~ko (grid : Grid.t) ~now (row : Keeper_list_model.row) =
     ; (match since with
        | "" -> String.make grid.name_cells ' '
        | since -> Theme.recede () ^ fit_width (grid_since_lead ^ since) grid.name_cells ^ Ansi.reset)
-    ; (if grid.side_cells > 0 then " " ^ grid_failure_chain grid runtime trail else "")
+    ; (if grid.side_cells > 0 then " " ^ grid_failure_chain ~ko grid runtime trail else "")
     ; " "
     ; grid_band grid_blank_now
     ; " "
@@ -1801,7 +1805,7 @@ let keeper_group_heading_text ~ko ~available_cells rows group count =
   | Keeper_list_model.Group_state attention ->
       keeper_state_heading_text ~ko ~available_cells rows attention count
   | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named cause) ->
-      Printf.sprintf "%s %s %d" failing_glyph (keeper_cause_group_word cause) count
+      Printf.sprintf "%s %s %d" failing_glyph (keeper_cause_group_word ~ko cause) count
   | Keeper_list_model.Group_cause Keeper_list_model.Cause_unnamed ->
       Printf.sprintf "%s %s %d" failing_glyph (say "실패 · 원인 미기록" "Failing · unknown cause") count
   | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered ->
@@ -1959,7 +1963,7 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
     Option.to_list
       (Option.map
          (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset)
-         (keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row))
+         (keeper_row_trail_sentence ~ko ~age:(keeper_trail_age ~now) row))
     @ Option.to_list
         (render_attempt_chain
            ~max_cells:(max 0 (inner - story_label_cells))
@@ -2238,11 +2242,11 @@ let keeper_plain_work ?now (state : state) (row : Keeper_list_model.row) =
             else ""
       in
       let keeper_source = match keeper_rows_page state ~error:state.keepers_error with
-        | Page_failed -> text "Keeper 배정 연결 갱신 실패 · " "Keeper assignment link refresh failed · "
-        | Page_unread -> text "Keeper 배정 연결 미조회 · " "Keeper assignment link not read · "
+        | Page_failed -> text "키퍼 배정 연결 갱신 실패 · " "Keeper assignment link refresh failed · "
+        | Page_unread -> text "키퍼 배정 연결 미조회 · " "Keeper assignment link not read · "
         | Page_empty ->
             if Option.is_some (local_source_pending state Local_keepers) then
-              text "Keeper 배정 연결 갱신 중 · " "Keeper assignment link refreshing · " else ""
+              text "키퍼 배정 연결 갱신 중 · " "Keeper assignment link refreshing · " else ""
       in
       (if row.reading.Keeper_control.paused then text "저장된 일시정지 · " "stored pause · " else "")
       ^ keeper_source ^ task_source ^ title
@@ -2370,7 +2374,7 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
   let text ko en = ui_text state ~ko ~en in
   let fit value = Message_layout.fit_width value width in
   match row with
-  | None -> [ Theme.recede () ^ fit (text "선택한 Keeper 없음" "no Keeper selected") ^ Ansi.reset ]
+  | None -> [ Theme.recede () ^ fit (text "선택한 키퍼 없음" "no Keeper selected") ^ Ansi.reset ]
   | Some (row : Keeper_list_model.row) ->
       let help = match keeper_plain_help ~now state row with
         | Some request -> Theme.warn () ^ request ^ Ansi.reset
@@ -2610,7 +2614,7 @@ let keeper_observation_reading (state : state) =
   | errors ->
       let ko = state.ui_language = Lang_ko in
       Some (Masc_tui_detail_reading.create ~ko
-        ~title:(if ko then "Keepers 관측 오류" else "Keeper observation errors")
+        ~title:(if ko then "키퍼 관측 오류" else "Keeper observation errors")
         (List.map (fun (heading, body) ->
           ({heading; body} : Masc_tui_detail_reading.section)) errors))
 
@@ -2892,13 +2896,13 @@ let keeper_plain_list_lines (state : state) ~now projection =
   let content = if content <> [] || projection.kpp_entry_rows = 0 then content else
     [Theme.recede () ^ (if projection.kpp_count > 0 then text "창이 좁아 행 표시 불가" "window too short for a row"
        else match keeper_rows_page state ~error:(Terminal_text.optional_single_line state.keepers_error) with
-         | Page_empty -> text "조회된 Keeper 없음" "Keeper roster empty"
-         | Page_unread -> text "Keeper 목록 미조회" "Keeper roster not read"
-         | Page_failed -> text "Keeper 목록 읽기 실패" "Keeper roster read failed") ^ Ansi.reset]
+         | Page_empty -> text "조회된 키퍼 없음" "Keeper roster empty"
+         | Page_unread -> text "키퍼 목록 미조회" "Keeper roster not read"
+         | Page_failed -> text "키퍼 목록 읽기 실패" "Keeper roster read failed") ^ Ansi.reset]
   in
   if projection.kpp_list_rows = 0 then [] else
     (if projection.kpp_list_rows > 1 then
-      let lead = "  " ^ text "Keeper 목록" "Keepers" in
+      let lead = "  " ^ text "키퍼 목록" "Keepers" in
       let sub = text " · 현재 상태 / 일과 대기" " · current status / work and wait" in
       let lead_cells = Message_layout.display_width lead in
       let header_row =
@@ -3012,7 +3016,7 @@ let render_keeper_axes (state : state) =
       let age ended_at =
         Option.map (fun _ -> widest_age_text) (keeper_trail_age ~now:now_unix ended_at)
       in
-      match keeper_row_trail_sentence ~age row with
+      match keeper_row_trail_sentence ~ko ~age row with
       | Some sentence -> Message_layout.display_width sentence
       | None -> 0)
   in
@@ -4319,17 +4323,17 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       (match (keeper_reading state k).Keeper_control.liveness with
        | Keeper_control.Present runtime ->
          (match runtime.kr_runtime_lane_observation with
-          | None -> wrap ~tone:Ansi.dim (t "영수증 없음" no_receipt_text)
+          | None -> wrap ~tone:Ansi.dim (no_receipt_text ~ko)
           | Some (Receipt.Runtime_lane_not_observed turn) ->
             source turn;
-            wrap ~tone:Ansi.dim (t "후보 순회가 기록되지 않음" walk_not_captured_text)
+            wrap ~tone:Ansi.dim (walk_not_captured_text ~ko)
           | Some (Receipt.Runtime_lane_unreadable {turn;field}) ->
             Option.iter source turn;
-            wrap ~tone:(Theme.warn ()) (t "지난 기록을 읽지 못함" evidence_unreadable_text ^ ": " ^ field)
+            wrap ~tone:(Theme.warn ()) (evidence_unreadable_text ~ko ^ ": " ^ field)
           | Some (Receipt.Runtime_lane_observed {turn;evidence}) ->
             source turn;
             (match evidence.failures with
-             | [] -> wrap ~tone:Ansi.dim (t "기록된 후보 실패 없음" no_candidate_failure_text)
+             | [] -> wrap ~tone:Ansi.dim (no_candidate_failure_text ~ko)
              | failures -> List.iter (fun (failure : Evidence.failure) ->
                  history_row (t "후보:" "Candidate:")
                    (Printf.sprintf "%d · %s" failure.attempt failure.runtime_id);
@@ -5078,11 +5082,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
              Option.fold ~none:false ~some:(fun (cursor, _) -> index = cursor)
                (Masc_tui_fusion_model.selected_keeper_run state)
            in
+           let status_text =
+             if ko then
+               match run.fur_status with
+               | Masc.Tui_decode_fusion.Fusion_running -> "실행 중"
+               | Masc.Tui_decode_fusion.Fusion_completed -> "완료"
+               | Masc.Tui_decode_fusion.Fusion_failed _ -> "실패"
+             else Masc.Tui_decode_fusion.fusion_run_status_to_string run.fur_status
+           in
            let row =
              Printf.sprintf "%s %s · %s · %s · %s"
                (if selected then "›" else " ")
                (fusion_run_clock run)
-               (Masc.Tui_decode_fusion.fusion_run_status_to_string run.fur_status)
+               status_text
                (Terminal_text.single_line run.fur_preset)
                (Terminal_text.single_line run.fur_run_id)
            in
@@ -5442,9 +5454,9 @@ let render_keeper_logs (state : state) =
     let log_snapshot = keeper_log_snapshot state in
     let total_entries = List.length log_snapshot.entries in
     let reading_label = match keeper_logs_view state with
-      | Masc_tui_fetched.Absent -> "not read"
-      | Loading -> "reading metrics"
-      | Failed _ -> "unavailable"
+      | Masc_tui_fetched.Absent -> ui_text state ~ko:"미조회" ~en:"not read"
+      | Loading -> ui_text state ~ko:"메트릭 조회 중" ~en:"reading metrics"
+      | Failed _ -> ui_text state ~ko:"조회 불가" ~en:"unavailable"
       | Ready _ | Stale _ ->
           count_reading state Masc_tui_value.Count.Entry total_entries in
 
@@ -5475,7 +5487,8 @@ let render_keeper_logs (state : state) =
     box_divider buf cols;
 
     box_line_styled buf cols ~style:(Theme.recede ())
-      "  TIME  KIND  LATENCY · full facts below";
+      (ui_text state ~ko:"  시각  종류  지연 · 아래에 전체 기록"
+         ~en:"  TIME  KIND  LATENCY · full facts below");
     box_divider buf cols;
 
     let visible = Rows.of_list ~first:scroll ~height:content_height log_rows in

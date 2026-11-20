@@ -2407,14 +2407,14 @@ let refresh_progress_pieces (state : state) =
   let source_name source = if not ko then Http_refresh_progress.source_name source else
     match source with
     | Http_refresh_progress.Identity_before -> workspace_name ~ko
-    | Approvals -> "승인" | Questions -> "질문" | Keepers -> "Keeper"
+    | Approvals -> "승인" | Questions -> "질문" | Keepers -> "키퍼"
     | Surface_data source -> surface_name source
     | Identity_after -> workspace_name ~ko ^ " 확인" in
   let component_name component = if not ko then Http_refresh_progress.component_name component else
     match component with
     | Http_refresh_progress.Runtime_catalogue -> "런타임 목록" | Provider_windows -> "제공자 한도"
     | Board_posts -> "게시글" | Board_hearths -> "하위 게시판"
-    | Keeper_roster -> "Keeper 목록" | Keeper_candle -> "Candle" in
+    | Keeper_roster -> "키퍼 목록" | Keeper_candle -> "캔들" in
   let component_outcome outcome = if not ko then Http_refresh_progress.component_outcome_name outcome else
     match outcome with
     | Http_refresh_progress.Component_returned Part_received -> "관측됨"
@@ -4033,10 +4033,10 @@ let keeper_control_hints ?(offers_chat = true) ?(taken = []) ~keys state reading
     | Roster_keys ->
         if keeper_list_on_heading state then []
         else if keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
-          window_key (match story with None -> say "World" "world" | Some _ -> close_word)
+          window_key (match story with None -> say "월드" "world" | Some _ -> close_word)
         else
           (match story with
-           | None | Some Masc_tui_keeper_story.Schedule -> window_key (say "Story" "story")
+           | None | Some Masc_tui_keeper_story.Schedule -> window_key (say "스토리" "story")
            | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) ->
                window_key close_word
            | Some Masc_tui_keeper_story.Memory -> [])
@@ -4534,10 +4534,12 @@ let render_diff_surface (state : state) (ds : diff_surface) =
     let empty =
       match (ds.ds_diff, ds.ds_error) with
       | (Some _ | None), Some _ -> page_failed_note ~ko:(state.ui_language = Lang_ko)
-      | None, None -> "  (reading the tree)"
+      | None, None -> ui_text state ~ko:"  (작업 트리 읽는 중)" ~en:"  (reading the tree)"
       | Some diff, None ->
           if diff.Masc.Tui_decode.gd_has_changes then
-            "  (the tree reports a change and sent no lines)"
+            ui_text state
+              ~ko:"  (작업 트리가 변경을 보고했으나 diff 줄이 비어 있음)"
+              ~en:"  (the tree reports a change and sent no lines)"
           else ds.ds_unchanged
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

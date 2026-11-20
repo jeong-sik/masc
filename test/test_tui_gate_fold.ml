@@ -40,7 +40,7 @@ let entry ?gate role text =
   ; me_at = 0.
   }
 
-let step ?(approval = "appr_1") ?(tool = "Execute") ?(summary = None) phase =
+let step ?(ko = true) ?(approval = "appr_1") ?(tool = "Execute") ?(summary = None) phase =
   entry
     ~gate:
       { Types.gs_approval_id = approval
@@ -49,12 +49,13 @@ let step ?(approval = "appr_1") ?(tool = "Execute") ?(summary = None) phase =
       ; gs_summary = summary
       }
     Types.Message_status
-    (Gate_text.lifecycle_line ~phase ~tool:(Some tool) ~summary)
+    (Gate_text.lifecycle_line_for ~ko ~phase ~tool:(Some tool) ~summary)
 
 let said text = entry Types.Message_keeper text
 let rows entries = List.map (fun e -> (e, ())) entries
 let describe folded = List.map (fun (e, _) -> e.Types.me_text) folded
-let fold entries = describe (Types.project_gate_history ~visibility:Types.Tools_compact (rows entries))
+let fold ?(ko = true) entries =
+  describe (Types.project_gate_history ~ko ~visibility:Types.Tools_compact (rows entries))
 
 let test_problems_remain_complete () =
   List.iter (fun phase ->
@@ -80,29 +81,29 @@ let test_settled_steps_fold_across_prose () =
   let prose = said "Liveness: 그대로 보존\n\nnot a status, no substring rewrite" in
   let entries = rows [step Approval_requested; prose;
     step Approval_resolved_approved; step Approval_replay_applied] in
-  let projected = Types.project_gate_history ~visibility:Types.Tools_compact entries in
+  let projected = Types.project_gate_history ~ko:true ~visibility:Types.Tools_compact entries in
   check (list string) "prose keeps its position before the settled outcome"
-    [prose.me_text; "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D×2"]
+    [prose.me_text; "미뤘던 호출 적용됨 · Execute · 3단계 · Ctrl-D×2"]
     (describe projected);
   check bool "original prose record is untouched" true (fst (List.hd projected) == prose)
 
 let test_full_restores_every_original_row () =
   let entries = rows [step Approval_requested; said "verbatim";
     step Approval_resolved_approved; step Approval_replay_applied] in
-  let projected = Types.project_gate_history ~visibility:Types.Tools_full entries in
+  let projected = Types.project_gate_history ~ko:true ~visibility:Types.Tools_full entries in
   check bool "Full returns raw timeline, including identity and clocks" true (projected == entries)
 
 let test_results_keeps_gate_rows_folded () =
   let entries = rows [step Approval_requested; step Approval_resolved_approved;
     step Approval_replay_applied] in
   check (list string) "short results keep the compact Gate history"
-    [ "미뤘던 호출 적용됨 · Execute · 3 steps · Ctrl-D" ]
-    (describe (Types.project_gate_history ~visibility:Types.Tools_results entries));
+    [ "미뤘던 호출 적용됨 · Execute · 3단계 · Ctrl-D" ]
+    (describe (Types.project_gate_history ~ko:true ~visibility:Types.Tools_results entries));
   let opened = Types.toggle_tool_visibility Types.Tools_results in
   check string "Ctrl-D opens Gate detail from results" "full"
     (Types.tool_visibility_to_string opened);
   check bool "the opened Gate history restores its rows" true
-    (Types.project_gate_history ~visibility:opened entries == entries)
+    (Types.project_gate_history ~ko:true ~visibility:opened entries == entries)
 
 let test_identity_is_not_a_tool_name () =
   let entries = [step ~approval:"a" Approval_requested;
@@ -194,6 +195,60 @@ let test_a_failed_continuation_keeps_the_run_open () =
   check (list string) "a failed continuation is not folded away"
     (describe (rows entries)) (fold entries)
 
+let test_english_gate_paths () =
+  check string "English lifecycle_line_for uses English wording"
+    "deferred call applied · Execute"
+    (Gate_text.lifecycle_line_for ~ko:false ~phase:Approval_replay_applied ~tool:(Some "Execute") ~summary:None);
+  let entries =
+    rows
+      [ step ~ko:false Approval_requested
+      ; step ~ko:false Approval_resolved_approved
+      ; step ~ko:false Approval_replay_applied
+      ]
+  in
+  check (list string) "English project_gate_history formats step count in English"
+    [ "deferred call applied · Execute · 3 steps · Ctrl-D×2" ]
+    (describe (Types.project_gate_history ~ko:false ~visibility:Types.Tools_compact entries));
+  let en_folded = Gate_text.fold_argument ~ko:false ~cap:24 (String.make 60 'a') in
+  check bool "English fold_argument reports held cells" true
+    (en_folded.Gate_text.fa_held_cells > 0 && contains en_folded.Gate_text.fa_text "cells");
+  let ko_folded = Gate_text.fold_argument ~ko:true ~cap:24 (String.make 60 'a') in
+  check bool "Korean fold_argument reports held characters in Korean" true
+    (ko_folded.Gate_text.fa_held_cells > 0 && contains ko_folded.Gate_text.fa_text "자")
+
+let test_language_switch_invalidates_gate_timeline_memo () =
+  let module Render = Masc_tui_render_chat in
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous_size = Masc_tui_ansi.get_terminal_size () in
+  let previous_reserved = !(Masc_tui_render_prim.acting_pane_reserved_cols) in
+  let set_size size = ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh
+      cache ~probe:(fun () -> Some size)) in
+  Fun.protect
+    ~finally:(fun () -> set_size previous_size;
+      Masc_tui_render_prim.acting_pane_reserved_cols := previous_reserved)
+    (fun () ->
+      Masc_tui_render_prim.acting_pane_reserved_cols := 0;
+      set_size (30, 120);
+      let state = Types.create_state ~workspace:"test" ~port:8935 () in
+      state.ui_language <- Types.Lang_ko;
+      state.view <- Types.Keepers Types.Keeper_message;
+      state.msg_target_keeper_name <- Some "k";
+      state.msg_tool_visibility <- Types.Tools_compact;
+      state.msg_history <-
+        [ step Approval_requested
+        ; step Approval_resolved_approved
+        ; step Approval_replay_applied
+        ];
+      let ko_frame, _ = Render.render_keeper_message state in
+      let ko_text = String.concat "\n" ko_frame.Masc_tui_frame_presenter.lines in
+      check bool "Korean frame renders Korean folded Gate text" true
+        (contains ko_text "3단계");
+      state.ui_language <- Types.Lang_en;
+      let en_frame, _ = Render.render_keeper_message state in
+      let en_text = String.concat "\n" en_frame.Masc_tui_frame_presenter.lines in
+      check bool "flipping ui_language invalidates memo and renders English folded Gate text" true
+        (contains en_text "3 steps" && not (contains en_text "3단계")))
+
 let () =
   run "tui_gate_fold"
     [ ( "fold"
@@ -212,6 +267,10 @@ let () =
             test_narrow_chat_notice_has_no_old_row_action
         ; test_case "a failed continuation keeps the run open" `Quick
             test_a_failed_continuation_keeps_the_run_open
+        ; test_case "English Gate paths render English wording" `Quick
+            test_english_gate_paths
+        ; test_case "language switch invalidates Gate timeline memo" `Quick
+            test_language_switch_invalidates_gate_timeline_memo
         ] )
     ; ( "argument fold"
       , [] )

@@ -1175,17 +1175,19 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
         (match state.fusion_historical_detail with
          | Some original when original.fhd_reference.fhe_post_id = reference.fhe_post_id
                               && original.fhd_reference.fhe_run_id = reference.fhe_run_id ->
-             (if stale || Option.is_some state.fusion_detail_error then [ Theme.warn (), "  Previous Board reading retained" ] else [])
+             (if stale || Option.is_some state.fusion_detail_error then
+                [ Theme.warn (), ui_text state ~ko:"  이전 게시판 조회를 유지 중" ~en:"  Previous Board reading retained" ]
+              else [])
              @ fusion_historical_lines ~ko ~width:(max 1 (framed_inner_width cols - 4))
                  ~frame_width:(framed_inner_width cols) original
          | Some _ | None ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, "  (waiting for the selected Board original; r retries)" ])
+             [ Ansi.dim, ui_text state ~ko:"  (선택한 게시판 원본 대기 중 · r:재시도)" ~en:"  (waiting for the selected Board original; r retries)" ])
     | Fusion_list | Fusion_detail _ ->
         (match detail, state.fusion_detail_error with
          | None, None ->
              clear_fusion_trace_projection ();
-             [ Ansi.dim, "  (loading exact Fusion detail)" ]
+             [ Ansi.dim, ui_text state ~ko:"  (Fusion 상세 불러오는 중)" ~en:"  (loading exact Fusion detail)" ]
          | None, Some _ ->
              clear_fusion_trace_projection ();
              [ Ansi.dim, page_failed_note ~ko ]
@@ -1203,7 +1205,8 @@ let fusion_detail_pane (state : state) ~rows ~cols run_id buf =
   box_line buf cols header;
   box_divider buf cols;
   if stale then
-    box_line_styled buf cols ~style:(Theme.warn ()) "  Fusion reading may be out of date";
+    box_line_styled buf cols ~style:(Theme.warn ())
+      (ui_text state ~ko:"  Fusion 조회가 오래되었을 수 있음" ~en:"  Fusion reading may be out of date");
   (match state.fusion_detail_error with
    | None -> ()
    | Some error ->
@@ -1291,7 +1294,9 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
             ~ko:"runtime.toml에서 퓨전 프리셋을 불러오는 중"
             ~en:"Reading the Fusion presets from runtime.toml" ]
       , ui_text state ~ko:"Esc:취소" ~en:"Esc:cancel"
-    | Some form -> Masc_tui_fusion_launch.lines form, Masc_tui_fusion_launch.hints
+    | Some form ->
+        let ko = state.ui_language = Lang_ko in
+        Masc_tui_fusion_launch.lines ~ko form, Masc_tui_fusion_launch.hints_for ~ko
   in
   let lines =
     List.concat_map

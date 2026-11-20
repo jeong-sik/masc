@@ -33,7 +33,10 @@ let loaded () =
     ~contents ~width:70 ~cell_pixels:(8,16) ~colors:None);
   state,contents
 let request state = Diagrams.request (Option.get state.Types.resource_diagrams)
-let count state = List.length (Doc.rows ~cols (Option.get (Doc.current state)))
+let count state =
+  List.length
+    (Doc.rows ~ko:(state.Types.ui_language = Types.Lang_ko) ~cols
+       (Option.get (Doc.current state)))
 let offset state = Position.offset ~count:(count state) ~height state.Types.resource_scroll
 let anchor state = Option.get (Doc.capture_anchor ~cols ~height state)
 let source state = Doc.source_position (anchor state)

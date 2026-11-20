@@ -270,9 +270,9 @@ let row_phase ~now source row detail =
      | Scheduled -> let* at = due () in Ok (if at > now then Scheduled at else Due at)
      | Due -> let* at = due () in Ok (Due at))
 
-let waiting_text ~now since =
+let waiting_text ~ko ~now since =
   match Masc_tui_message_layout.age_text ~now ~since with
-  | Some age -> " · waiting " ^ age
+  | Some age -> (if ko then " · 대기 " else " · waiting ") ^ age
   | None -> ""
 
 (* A moment in a queue line reads in the operator's zone (RFC
@@ -280,7 +280,7 @@ let waiting_text ~now since =
    server's ISO text is for copying, not for reading. *)
 let local_moment ~now at = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at
 
-let describe_row ~now row =
+let describe_row ~ko ~now row =
   let* source = string "source" row in
   let* source = Inventory.source_of_string source in
   let* what = string "what" row in
@@ -300,37 +300,44 @@ let describe_row ~now row =
   let* last_due = optional_timestamp "group_last_due_unix" detail in
   let span = match first_due, last_due with
     | Some first, Some last when count > 1 ->
-      Printf.sprintf " · due %s \xe2\x86\x92 %s"
+      Printf.sprintf (if ko then " · 예정 %s \xe2\x86\x92 %s" else " · due %s \xe2\x86\x92 %s")
         (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now first) (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now last)
     | Some _, Some _ | None, None | Some _, None | None, Some _ -> "" in
   let timing = match phase with
     | Pending when source = Inventory.Event_queue_pending ->
       Option.bind since (fun since -> Masc_tui_message_layout.age_text ~now ~since)
-      |> Option.fold ~none:" · unacknowledged" ~some:(fun age -> " · unacknowledged " ^ age)
-    | Pending -> Option.fold ~none:"" ~some:(waiting_text ~now) since
-    | Scheduled at -> " · scheduled for " ^ local_moment ~now at
-    | Due at -> " · due " ^ local_moment ~now at
-    | Running -> " · running"
-    | Settling -> " · settling"
-    | Terminal -> " · terminal"
-    | Unavailable -> " · unavailable" in
+      |> Option.fold
+           ~none:(if ko then " · 미확인" else " · unacknowledged")
+           ~some:(fun age -> (if ko then " · 미확인 " else " · unacknowledged ") ^ age)
+    | Pending -> Option.fold ~none:"" ~some:(waiting_text ~ko ~now) since
+    | Scheduled at -> (if ko then " · 예정 " else " · scheduled for ") ^ local_moment ~now at
+    | Due at -> (if ko then " · 도래 " else " · due ") ^ local_moment ~now at
+    | Running -> if ko then " · 실행 중" else " · running"
+    | Settling -> if ko then " · 정리 중" else " · settling"
+    | Terminal -> if ko then " · 종료됨" else " · terminal"
+    | Unavailable -> if ko then " · 조회 불가" else " · unavailable" in
   Ok { source; count; phase;
        line = Printf.sprintf "  %s%s%s%s" clock (safe what) span timing }
 
-let inventory_counts described =
+let inventory_counts ~ko described =
     let count_phase matches =
       List.fold_left (fun total row -> if matches row.phase then total + row.count else total) 0 described in
     let pending = count_phase (function Pending -> true | Running | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> false) in
-      [ "running", count_phase (function Running -> true | Pending | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> false)
-      ; "scheduled", count_phase (function Scheduled _ -> true | Pending | Running | Due _ | Settling | Terminal | Unavailable -> false)
-      ; "due", count_phase (function Due _ -> true | Pending | Running | Scheduled _ | Settling | Terminal | Unavailable -> false)
-      ; "settling", count_phase (function Settling -> true | Pending | Running | Scheduled _ | Due _ | Terminal | Unavailable -> false)
-      ; "terminal", count_phase (function Terminal -> true | Pending | Running | Scheduled _ | Due _ | Settling | Unavailable -> false)
-      ; "unavailable", count_phase (function Unavailable -> true | Pending | Running | Scheduled _ | Due _ | Settling | Terminal -> false)
+    let label ko_text en_text = if ko then ko_text else en_text in
+      [ label "실행 중" "running", count_phase (function Running -> true | Pending | Scheduled _ | Due _ | Settling | Terminal | Unavailable -> false)
+      ; label "예약됨" "scheduled", count_phase (function Scheduled _ -> true | Pending | Running | Due _ | Settling | Terminal | Unavailable -> false)
+      ; label "도래" "due", count_phase (function Due _ -> true | Pending | Running | Scheduled _ | Settling | Terminal | Unavailable -> false)
+      ; label "정리 중" "settling", count_phase (function Settling -> true | Pending | Running | Scheduled _ | Due _ | Terminal | Unavailable -> false)
+      ; label "종료됨" "terminal", count_phase (function Terminal -> true | Pending | Running | Scheduled _ | Due _ | Settling | Unavailable -> false)
+      ; label "조회 불가" "unavailable", count_phase (function Unavailable -> true | Pending | Running | Scheduled _ | Due _ | Settling | Terminal -> false)
       ]
       |> List.filter (fun (_, count) -> count > 0)
-      |> List.map (fun (label, count) -> Printf.sprintf "%d %s" count label)
-      |> List.cons (Printf.sprintf "%d pending" pending)
+      |> List.map (fun (label, count) ->
+          if ko then Printf.sprintf "%s %d" label count
+          else Printf.sprintf "%d %s" count label)
+      |> List.cons
+           (if ko then Printf.sprintf "대기 %d" pending
+            else Printf.sprintf "%d pending" pending)
       |> String.concat " · "
 
 let first_line text =
@@ -369,7 +376,7 @@ let inventory_item row described =
     | Inventory.Observation_unavailable -> None in
   { id; text = first_line described.line }
 
-let inventory_items ~now row described =
+let inventory_items ~ko ~now row described =
   let summary = inventory_item row described in
   let members = match described.source with
     | Inventory.Event_queue_pending when described.count > 1 ->
@@ -391,7 +398,7 @@ let inventory_items ~now row described =
   | None ->
     (match described.source with
      | Inventory.Event_queue_pending when described.count > 1 ->
-       [summary; {id=None; text="  Individual event identities are unavailable"}]
+       [summary; {id=None; text=(if ko then "  개별 이벤트 식별자를 조회할 수 없습니다" else "  Individual event identities are unavailable")}]
      | Inventory.Event_queue_pending | Inventory.Chat_operation_queued
      | Inventory.Chat_operation_running | Inventory.Hitl_pending | Inventory.Fusion_running
      | Inventory.Schedule_waiting | Inventory.Owner_shutdown
@@ -414,43 +421,48 @@ let inventory_items ~now row described =
     let identities = List.map (fun (reference, revision, _) -> reference, revision) addresses in
     if List.length values <> described.count || List.length addresses <> described.count
        || List.length (List.sort_uniq compare identities) <> described.count then
-      [summary; {id=None; text="  Group member identities unavailable; refresh before changing them"}]
+      [summary; {id=None; text=(if ko then "  그룹 항목 식별자를 조회할 수 없습니다 · 변경 전 새로 조회하세요" else "  Group member identities unavailable; refresh before changing them")}]
     else summary :: List.mapi (fun index (reference, revision, due) ->
       {id=Some (Event (reference, revision));
-       text=Printf.sprintf "    occurrence %d/%d%s · %s"
+       text=Printf.sprintf (if ko then "    항목 %d/%d%s · %s" else "    occurrence %d/%d%s · %s")
          (index + 1) described.count
-         (Option.fold ~none:"" ~some:(fun at -> " · due " ^ local_moment ~now at) due)
+         (Option.fold ~none:""
+            ~some:(fun at -> (if ko then " · 예정 " else " · due ") ^ local_moment ~now at)
+            due)
          (first_line described.line)}) addresses
 
-let waiting_items ~now json =
+let waiting_items ?(ko = false) ~now json =
   let* keepers = list "keepers" json in
   let* global_rows = list "global_waiting_on" json in
   let describe rows = map_result (fun row ->
-    let* described = describe_row ~now row in
-    Ok (described, inventory_items ~now row described)) rows in
+    let* described = describe_row ~ko ~now row in
+    Ok (described, inventory_items ~ko ~now row described)) rows in
   let* global = describe global_rows in
   let* groups = map_result (fun keeper ->
     let* state = string "state" keeper in
     let* paused = field "paused" keeper in
     let* consumption = match paused with
-      | `Bool true -> Ok "paused" | `Bool false -> Ok "open" | `Null -> Ok "unknown"
+      | `Bool true -> Ok (if ko then "일시정지" else "paused")
+      | `Bool false -> Ok (if ko then "열림" else "open")
+      | `Null -> Ok (if ko then "알 수 없음" else "unknown")
       | _ -> Error "Queue paused field must be boolean or null" in
     let* rows = list "waiting_on" keeper in
     let* rows = describe rows in
     let described = List.map fst rows in
-    let header = {id=None; text=Printf.sprintf "Queue %s · %s · %s"
-      consumption (safe state) (inventory_counts described)} in
+    let header = {id=None; text=Printf.sprintf (if ko then "대기열 %s · %s · %s" else "Queue %s · %s · %s")
+      consumption (safe state) (inventory_counts ~ko described)} in
     let has_events = List.exists (fun row -> row.source = Inventory.Event_queue_pending) described in
     let chat_running = List.exists (fun row -> row.source = Inventory.Chat_operation_running) described in
     let notes =
       (if has_events && chat_running then
-         [{id=None; text="Events wait while the current chat holds the turn"}] else []) @
+         [{id=None; text=if ko then "현재 채팅 턴이 진행 중이라 이벤트가 대기합니다" else "Events wait while the current chat holds the turn"}] else []) @
       (if has_events then
-         [{id=None; text="Pending events may already be in the current turn"}] else []) in
+         [{id=None; text=if ko then "대기 중인 이벤트가 이미 현재 턴에 포함됐을 수 있습니다" else "Pending events may already be in the current turn"}] else []) in
     Ok (header :: notes @ List.concat_map snd rows)) keepers in
   let global_items = match global with
     | [] -> []
-    | rows -> {id=None; text="Workspace inventory · " ^ inventory_counts (List.map fst rows)}
+    | rows ->
+      {id=None; text=(if ko then "워크스페이스 대기 현황 · " else "Workspace inventory · ") ^ inventory_counts ~ko (List.map fst rows)}
       :: List.concat_map (fun (_, items) -> List.map (fun item -> {item with id=None}) items) rows in
   Ok (global_items @ List.concat groups)
 

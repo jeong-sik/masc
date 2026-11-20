@@ -1637,7 +1637,7 @@ let keeper_operations_fields (state : state) ~keeper_name =
       [ t "수명 주기:" "Lifecycle:", keeper_lane_lifecycle_text ~ko lane
       ; t "턴:" "Turn:", Terminal_text.single_line
           (Tui_decode.keeper_lane_turn_phase_to_string lane.kl_turn_phase)
-      ; t "쉰 시간:" "Idle:", keeper_lane_idle_text lane.kl_idle_seconds
+      ; t "쉰 시간:" "Idle:", Masc_tui_value.Ongoing.Narrow.text (Float.of_int lane.kl_idle_seconds)
       ; t "마지막 턴 결과:" "Last outcome:", keeper_operations_outcome_text lane.kl_last_outcome
       ; t "마지막 런타임:" "Last runtime:", keeper_last_runtime_text state lane.kl_last_outcome
       ]

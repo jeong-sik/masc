@@ -13,8 +13,8 @@ module Rows = Masc_tui_rows
 module File_icon = Masc_tui_file_icon
 module Diff = Masc_tui_diff
 
-(* Blame reaches further back than the two surfaces [keeper_lane_idle_text]
-   serves. A line untouched since a repository's first year is ordinary, and
+(* Blame reaches further back than [Masc_tui_value.Ongoing.Narrow] reads.
+   A line untouched since a repository's first year is ordinary, and
    "3684d" is not a reading anyone converts in their head. Weeks and years
    continue where that helper stops; the whole label fits three cells so the
    margin stays a margin. *)

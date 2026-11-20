@@ -615,8 +615,6 @@ val fenced_document_text : language:string -> string -> string
 
 val lexed_span : string * String.t -> string
 
-val keeper_lane_idle_text : int -> string
-
 val box_wrapped_field :
   Buffer.t -> int -> head:string -> style:string -> string -> unit
 (** Wrap [body] inside a framed box row of width [cols], prefixing the first

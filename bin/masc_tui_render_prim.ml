@@ -3170,16 +3170,6 @@ let lexed_span (text, kind) =
     if String.equal style "" then text else style ^ text ^ Ansi.reset
 
 
-(* Compact "how long" text the Lanes table's idle column and the Keeper
-   operations preview share -- the preview kept a byte-for-byte copy of this
-   under its own name, 3,600 lines below, until the two were counted. *)
-let keeper_lane_idle_text seconds =
-  let seconds = max 0 seconds in
-  if seconds < 60 then Printf.sprintf "%ds" seconds
-  else if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
-  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
-  else Printf.sprintf "%dd" (seconds / 86400)
-
 
 (* Long question, choice, and reason text was cut to one line with a trailing
    "~", so an operator could not read the decision being asked of them. Each

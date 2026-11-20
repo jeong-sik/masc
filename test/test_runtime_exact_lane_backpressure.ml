@@ -231,6 +231,16 @@ let test_unchanged_save_shares_pressure_cell () =
   check bool "unchanged binding keeps original pressure" true (original == current);
   check bool "replacement registry shares live Keeper pressure" true
     (observation.candidate == current);
+  let admitted =
+    match Runtime.get_runtime_by_id primary with
+    | Some ({ execution = Runtime_execution.Agent_core sealed; _ } : Runtime_instance.t) ->
+      Result.to_option
+        (Llm_provider.Input_budget.resolve_context_limit
+           (Runtime_account_access.api_declaration sealed))
+    | Some (_ : Runtime_instance.t) | None -> fail "the primary runtime is not an HTTP one"
+  in
+  check (option int) "the slot's window is the one its requests are admitted against" admitted
+    observation.window;
   check int "full replacement catalog cannot inherit runtime cells" 0
     (List.length (Runtime.exact_output_runtime_observations
       ~origin:(Runtime.Replacement_catalog_targets { path = "fixture" })

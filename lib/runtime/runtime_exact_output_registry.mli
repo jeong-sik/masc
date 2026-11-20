@@ -87,10 +87,12 @@ type runtime_observation =
   { candidate : Runtime_candidate_backpressure.candidate
   ; quota_scope : Runtime_quota_window.scope
   ; window : int option
-      (** The runtime's resolved window
-          ({!Runtime_instance.resolve_max_context_of_runtime}) when the target
-          was frozen, so a reader keys a slot by the window of the same
-          publication its target came from. *)
+      (** The window the runtime's exact requests are admitted against:
+          {!Llm_provider.Input_budget.resolve_context_limit} of its provider
+          configuration when the target was frozen. A reader keys a slot by
+          the window of the same publication its target came from. [None]
+          when that configuration has no positive window, so every request
+          to it is refused before it is sent. *)
   }
 (** Frozen alongside a target derived from the same materialized runtime.
     Full replacement catalog targets carry no runtime observation. *)

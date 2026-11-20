@@ -566,7 +566,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 
 | 값 | 어디서 오나 | 종류 |
 |---|---|---|
-| slot s 의 창 W(s) | `Runtime_instance.resolve_max_context_of_runtime` (binding, provider, model, capability catalog 순) | 운영자 선언 |
+| slot s 의 창 W(s) | HTTP slot 은 그 runtime 의 provider 설정에서 Agent-Core 의 `Input_budget.resolve_context_limit` 이 읽는 값이다. exact 요청이 견주는 창과 출처가 하나다. CLI slot 은 `Runtime_instance.resolve_max_context_of_runtime` (binding, provider, model, capability catalog 순) | 운영자 선언 |
 | 출력 몫 R | lane 의 `max_output_tokens`. 켠 lane 은 반드시 적는다(§6.4). HTTP slot 의 요청에 `max_tokens` 로 실린다. CLI slot 은 `max_tokens` 를 받지 않는다. catalog 의 출력 한도는 검증에만 쓰는 상한이다 | 운영자 선언 |
 | 질문 q 의 입력 token 수 | 미리 세는 slot(Anthropic, Kimi)은 Agent-Core 가 보내기 전에 센다. 그 밖은 provider 가 받은 뒤 거절하거나, 답과 함께 `usage.input_tokens` 로 알려 준다 | provider 사실 |
 | 폭 | 단위 몇 개, 그다음은 한 단위의 항목 몇 개 | 입력의 구조 |

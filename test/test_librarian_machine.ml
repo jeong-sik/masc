@@ -1094,7 +1094,26 @@ let test_making_room_follows_the_item () =
       ~state:("stopped: " ^ stop_text (Log_diverged { expected; observed }))
       ~fiber:"cancel"
   in
-  ()
+  (* The snapshot is replaced after the question was made: the line is not
+     written, so the answer is not made. *)
+  let place, room = making_room () in
+  let shown = room_question room in
+  let named = Digest.digest_of_bytes (file_bytes (snapshot_path place)) in
+  let other = other_snapshot () in
+  write_file (snapshot_path place) other;
+  let stop : Store.stop =
+    Log_diverged { expected = named; observed = Digest.digest_of_bytes other }
+  in
+  let made = room_outcomes "made" in
+  let stopped = room_outcomes "store_stopped" in
+  let (_ : Machine.t) =
+    step "an answer whose line finds another snapshot" place room
+      (room_ended 3 (room_answered shown [ Drop { ref_ = "m1"; reason = "held elsewhere" } ]))
+      ~state:("stopped: " ^ stop_text stop) ~fiber:"cancel"
+  in
+  check (pair (float 0.0) (float 0.0)) "is counted as the store's stop, not as made"
+    (made, stopped +. 1.0)
+    (room_outcomes "made", room_outcomes "store_stopped")
 ;;
 
 (* {1 Direct writes} *)

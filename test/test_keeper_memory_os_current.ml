@@ -1686,7 +1686,12 @@ let test_purge_plan_removes_memory_sidecars () =
   check bool "plan removes the memory journal" true
     (contains Shutdown.Keeper_memory_journal_artifact);
   check bool "plan removes the absorbed memory rows" true
-    (contains Shutdown.Keeper_memory_absorbed_artifact)
+    (contains Shutdown.Keeper_memory_absorbed_artifact);
+  check bool "plan removes the commit log" true (contains Shutdown.Keeper_memory_log_artifact);
+  check bool "plan removes the commit log's lock" true
+    (contains Shutdown.Keeper_memory_log_lock_artifact);
+  check bool "plan removes the writer's lock" true
+    (contains Shutdown.Keeper_memory_writer_lock_artifact)
 ;;
 
 let durable_range_id : Current.durable_range_id =

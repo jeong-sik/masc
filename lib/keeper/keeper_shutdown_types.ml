@@ -63,6 +63,9 @@ type dashboard_purge_artifact =
   | Keeper_memory_journal_artifact
   | Keeper_memory_journal_lock_artifact
   | Keeper_memory_absorbed_artifact
+  | Keeper_memory_log_artifact
+  | Keeper_memory_log_lock_artifact
+  | Keeper_memory_writer_lock_artifact
   | Keeper_memory_events_artifact
   | Keeper_turn_boundaries_artifact
   | Keeper_librarian_progress_artifact
@@ -620,6 +623,13 @@ let dashboard_purge_artifact_plan ~keeper_name context =
        the quiesced purge may remove it, after its writers have stopped. *)
   ; Keeper_memory_journal_lock_artifact
   ; Keeper_memory_absorbed_artifact
+    (* The commit log names the snapshot its last line left. Left behind, a
+       later keeper with the same name boots against a snapshot that is gone
+       and its Memory store stops. The log's lock and the writer's lock go
+       with it, after the writer has ended. *)
+  ; Keeper_memory_log_artifact
+  ; Keeper_memory_log_lock_artifact
+  ; Keeper_memory_writer_lock_artifact
   ; Keeper_memory_events_artifact
     (* The turn boundary log and progress sit in the workspace's
        per-Keeper runtime directory. Left behind,

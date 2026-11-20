@@ -57,8 +57,12 @@ type t =
 let status t = Atomic.get t.status
 let lock_suffix = ".memory.lock"
 
+let lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
+  Filename.concat keepers_dir (keeper_id ^ lock_suffix)
+;;
+
 let lock_path (place : Machine.place) =
-  Filename.concat place.memory_dir (place.keeper_id ^ lock_suffix)
+  lock_path_for_keepers_dir ~keepers_dir:place.memory_dir ~keeper_id:place.keeper_id
 ;;
 
 let lock_file_permissions = 0o600

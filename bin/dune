@@ -2576,6 +2576,14 @@
   unix))
 
 (library
+ (name masc_tui_memory_tree)
+ (wrapped false)
+ (modules masc_tui_memory_tree)
+ (libraries masc masc_tui_ansi masc_tui_theme masc_tui_message_layout masc_tui_card
+  masc_tui_doc masc_tui_memory_world masc_tui_memory_usage masc_tui_token_scale
+  masc_tui_types masc_tui_scroll masc_tui_value))
+
+(library
  (name masc_tui_render_memory)
  (wrapped false)
  (modules masc_tui_render_memory)
@@ -2585,9 +2593,13 @@
   masc_tui_press
   masc
   masc_tui_ansi
+  masc_tui_card
+  masc_tui_chart
+  masc_tui_doc
   masc_tui_detail_reading
   masc_tui_fetched
   masc_tui_memory_mark
+  masc_tui_memory_tree
   masc_tui_memory_world
   masc_tui_context_inspector
   masc_tui_token_scale
@@ -3214,6 +3226,7 @@
   masc_tui_response_decode
   masc_tui_loader
   masc_tui_memory_world
+  masc_tui_memory_tree
   masc_tui_io_domain
   masc_tui_domains
   masc_tui_features

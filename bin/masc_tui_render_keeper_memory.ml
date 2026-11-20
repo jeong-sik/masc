@@ -82,7 +82,7 @@ let kind_word = Masc_tui_memory_lineage.kind_label
 
 let kind_style = function
   | Activity.Created | Activity.Reobserved -> Theme.ok ()
-  | Activity.Revised | Activity.Absorbed -> Theme.info ()
+  | Activity.Revised | Activity.Absorbed -> Theme.series_tint Masc_tui_theme.Memory 0.8
   | Activity.Retracted | Activity.Invalidated -> Theme.bad ()
   | Activity.Removed | Activity.Relation_unavailable -> Theme.warn ()
 
@@ -174,7 +174,7 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
   (* The selected change is the first drawn; its place is the title row's. *)
   if total > 0 then
     hand_position (Masc_tui_value.Position.row ~selected:(Some offset) ~total);
-  let header = quiet (text "1:최근  2:조회  3:변화  4:저장" "1:recent  2:retrievals  3:changes  4:storage") in
+  let header = Masc_tui_memory_tree.memory_mode_strip ~lead:"" ~ko ~cols:(max 1 (cols - 4)) ~active:`Changes () in
   let scope = match Fetched.value (activity_view state keeper_name) with
     | None -> []
     | Some activity -> [quiet (text

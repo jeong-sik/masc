@@ -2533,7 +2533,7 @@ let bindings_memory_facts =
   ; b ~role:Moves ~ko:"상세" Act "Enter" "detail" ~rows:Needs_row
       ~help:"read the whole fact in a wide overlay that owns the terminal"
   ; b ~role:Acts ~ko:"분류" Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
-  ; b ~role:Acts ~ko:"분류 영역" Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
+  ; b ~role:Acts ~ko:"분류 트리" Act "d" "Hierarchy tree" ~help:"show or hide the World/Category hierarchy tree on wide screens"
   ; b ~role:Acts ~ko:"정렬" Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
   ; b ~role:Acts ~ko:"전체 Keeper" Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
   ; b ~role:Moves ~ko:"필터" Search "/" "filter" ~help:"live text filter / search"

@@ -4971,6 +4971,8 @@
   masc_tui_roster_pane
   masc_tui_scroll
   masc_tui_message_layout
+  masc_tui_memory_tree
+  masc_tui_memory_world
   masc_tui_render_memory
   masc_tui_theme
   masc_tui_types  unix

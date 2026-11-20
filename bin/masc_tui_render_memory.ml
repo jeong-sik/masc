@@ -11,6 +11,9 @@ module Theme = Masc_tui_ansi.Theme
 module Rows = Masc_tui_rows
 module Memory_category = Masc.Keeper_memory_os_types
 module Memory_usage = Masc_tui_memory_usage
+module Chart = Masc_tui_chart
+module Doc = Masc_tui_doc
+module Memory_tree = Masc_tui_memory_tree
 
 let librarian_failure_words ~ko kind =
   let text korean english = if ko then korean else english in
@@ -76,7 +79,7 @@ let facts_stats_row ~ko ~ordinary ~source ~dropped ~sort_label =
 
 let memory_category_filter_text ~ko = function
   | Category_all -> if ko then "전체" else "All"
-  | Category_ordinary category -> memory_category_text ~ko category
+  | Category_ordinary category -> fst (Memory_tree.category_badge ~ko category)
   | Category_source -> if ko then "원본" else "source"
   | Category_dropped -> if ko then "무효화" else "dropped"
 
@@ -704,18 +707,27 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (r
         fact.msf_keeper, Badge_source, fact.msf_claim, Some fact.msf_path
     | Memory_row_invalidation row ->
         row.mi_keeper, Badge_dropped, row.mi_reason, Some row.mi_source_path in
-  let label = match badge with
-    | Badge_category category -> memory_category_text ~ko category
-    | Badge_source -> if ko then "원본" else "source"
-    | Badge_dropped -> if ko then "무효화" else "dropped" in
-  let owner = if is_fleet then
+  let badge_label, badge_style =
+    match badge with
+    | Badge_category category -> Memory_tree.category_badge ~ko category
+    | Badge_source -> Memory_tree.filter_badge ~ko Category_source
+    | Badge_dropped -> Memory_tree.filter_badge ~ko Category_dropped
+  in
+  let keeper_owner = if is_fleet then
       Message_layout.truncate_middle (min 8 (max 1 (inner_width / 6)))
         (Terminal_text.single_line keeper) ^ " "
     else "" in
-  let label_room = min 10 (max 0 (inner_width / 5)) in
-  let label = Message_layout.truncate_middle label_room label in
-  let prefix = "  " ^ owner ^ usage ^ (if label = "" then "" else "[" ^ label ^ "] ") in
-  let room = max 0 (inner_width - Message_layout.display_width prefix) in
+  let badge_pad_w = if inner_width >= 40 then 8 else max 4 (inner_width / 6) in
+  let badge_text = Message_layout.fit_width badge_label badge_pad_w in
+  let colored_badge = badge_style ^ badge_text ^ Ansi.reset ^ " " in
+  let owner_plain =
+    if keeper_owner = "" then "" else Theme.recede () ^ keeper_owner ^ Ansi.reset
+  in
+  let prefix_cells =
+    2 + Message_layout.display_width keeper_owner
+    + Message_layout.display_width usage + badge_pad_w + 1
+  in
+  let room = max 0 (inner_width - prefix_cells) in
   let age = memory_fact_age_label at in
   let path = Option.map (fun path -> Message_layout.truncate_middle 16
       (Terminal_text.single_line path)) path in
@@ -727,40 +739,7 @@ let memory_fact_row_line ~ko ?(is_fleet = false) ?(sort = Sort_recency) ~cols (r
   let claim = Message_layout.truncate_middle
       (max 0 (room - Message_layout.display_width tail)) (Terminal_text.single_line claim) in
   Message_layout.truncate_end inner_width
-    (prefix ^ claim ^ Theme.recede () ^ tail ^ Ansi.reset)
-
-(* One label column for the three detail blocks. They take turns in the same
-   rows as the cursor moves down the list, and each line padded its own label
-   by hand -- "Reason:" and five spaces, "Source Path:" and one -- so a dropped
-   fact put its values a cell right of an ordinary fact's, and its own Reason
-   a cell left of the Source Path under it. The column is sized by the
-   longest label any block draws, so stepping from one kind of row to another
-   leaves the values where they were. A longer label still gets its space. *)
-let detail_label_cells = Message_layout.display_width "Source Path:" + 1
-
-let detail_label label =
-  Printf.sprintf "%s%s%s%s" (Theme.recede ()) label Ansi.reset
-    (String.make
-       (max 1 (detail_label_cells - Message_layout.display_width label))
-       ' ')
-
-let detail_field ~width label value =
-  let indent = String.make (min 4 (max 0 (width - 1))) ' ' in
-  let prefix = indent ^ detail_label label in
-  let prefix_cells = Message_layout.display_width prefix in
-  if prefix_cells < width then
-    Message_layout.wrap_words ~max_cells:(width - prefix_cells) value
-    |> List.mapi (fun index line ->
-         (if index = 0 then prefix else String.make prefix_cells ' ') ^ line)
-  else
-    (* When the label leaves no value cell, it owns a row and the value
-       uses the whole remaining width under the indentation. *)
-    (Message_layout.wrap_words
-       ~max_cells:(max 1 (width - Message_layout.display_width indent)) label
-     |> List.map (fun line -> indent ^ Theme.recede () ^ line ^ Ansi.reset))
-    @ (Message_layout.wrap_words
-         ~max_cells:(max 1 (width - Message_layout.display_width indent)) value
-       |> List.map (fun line -> indent ^ line))
+    ("  " ^ owner_plain ^ usage ^ colored_badge ^ claim ^ Theme.recede () ^ tail ^ Ansi.reset)
 
 (* A claim is prose a Keeper wrote, often paragraphs and a numbered list. The
    list rows fold it to one line because a row has one line to give it; the
@@ -772,11 +751,20 @@ let detail_field ~width label value =
 let detail_claim_lines ?state ~inner_width claim =
   let wrap () =
     let lines =
-      let indent = String.make (min 4 (max 0 (inner_width - 1))) ' ' in
+      let margin = String.make (min 2 (max 0 (inner_width - 1))) ' ' in
+      let guide =
+        if inner_width >= 6 then
+          Theme.panel_border Masc_tui_theme.Panel_memory ^ Masc_tui_theme.Box.v ^ Ansi.reset ^ " "
+        else ""
+      in
+      let guide_w = if inner_width >= 6 then 2 else 0 in
+      let text_w = max 1 (inner_width - String.length margin - guide_w) in
       Message_layout.wrap_body
-        ~max_cells:(max 1 (inner_width - Message_layout.display_width indent))
+        ~max_cells:text_w
         ~sanitize:Terminal_text.single_line claim
-      |> List.map (fun line -> if String.equal line "" then "" else indent ^ line)
+      |> List.map (fun line ->
+           if String.equal line "" then margin ^ (if guide_w > 0 then Theme.panel_border Masc_tui_theme.Panel_memory ^ Masc_tui_theme.Box.v ^ Ansi.reset else "")
+           else margin ^ guide ^ line)
     in
     let count = List.length lines in
     Option.iter
@@ -795,15 +783,17 @@ let detail_claim_lines ?state ~inner_width claim =
 
 type fact_detail_parts = {
   heading : string;
+  heading_plain : string;
   claim_lines : string list;
   claim_line_count : int;
   other_lines : string list;
 }
 
-let memory_fact_detail_parts ?state ~ko ~cols (row : memory_fact_row) =
-  let width = max 1 (framed_inner_width cols) in
-  let field = detail_field ~width in
+let fact_detail_parts_for_width ?state ~ko ~width (row : memory_fact_row) =
+  let width = max 1 width in
   let text korean english = if ko then korean else english in
+  let kv_rows = Doc.kv_rows ~width ~indent:2 ~max_label_cells:12 in
+  let mem_accent () = Theme.series_tint Masc_tui_theme.Memory 0.8 in
   match row with
   | Memory_row_fact fact ->
       let claim_lines, claim_line_count =
@@ -830,57 +820,69 @@ let memory_fact_detail_parts ?state ~ko ~cols (row : memory_fact_row) =
           fact.mf_events.mfe_retracted_count
           (List.length fact.mf_events.mfe_revised_from)
       in
-      let history_lines = field (text "조회·수정:" "History:") history in
+      let cat_label, cat_tone = Memory_tree.category_badge ~ko fact.mf_category in
+      let heading_plain = text "기억한 사실" "Fact Detail" in
       { heading =
-          Printf.sprintf "  %s%s%s%s" Ansi.bold (Theme.info ()) (text "기억한 사실" "Fact Detail") Ansi.reset
+          Printf.sprintf "  %s%s%s%s" Ansi.bold (mem_accent ()) heading_plain Ansi.reset
+      ; heading_plain
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        (* The word comes from [Keeper_memory_os_types.category], a closed
-             set this build spells itself, so it is printed rather than
-             escaped: there is no wire text left in it to escape. *)
-        field (text "Keeper:" "Keeper:") (Terminal_text.single_line fact.mf_keeper)
-        @ field (text "분류:" "Category:") (memory_category_text ~ko fact.mf_category)
-        @ field (text "기록 출처:" "Origin:") (Terminal_text.single_line fact.mf_origin)
-        @ field (text "관측 시점:" "Timeline:")
-            (Printf.sprintf (if ko then "처음 %s · 마지막 %s" else "First: %s · Last: %s")
-               (memory_fact_age_label fact.mf_first_seen)
-               (memory_fact_age_label fact.mf_last_seen))
-        @ history_lines
-        @ field (text "기억 ID:" "Memory ID:") (Terminal_text.single_line fact.mf_memory_id)
+        kv_rows
+          [ Doc.kv ~tone:Ansi.bold (text "키퍼" "Keeper") (Terminal_text.single_line fact.mf_keeper)
+          ; Doc.kv ~tone:cat_tone (text "분류" "Category") cat_label
+          ; Doc.kv (text "기록 출처" "Origin") (Terminal_text.single_line fact.mf_origin)
+          ; Doc.kv (text "관측 시점" "Timeline")
+              (Printf.sprintf (if ko then "처음 %s · 마지막 %s" else "First: %s · Last: %s")
+                 (memory_fact_age_label fact.mf_first_seen)
+                 (memory_fact_age_label fact.mf_last_seen))
+          ; Doc.kv (text "조회·수정" "History") history
+          ; Doc.kv ~tone:(Theme.recede ()) (text "기억 ID" "Memory ID")
+              (Terminal_text.single_line fact.mf_memory_id)
+          ]
       }
   | Memory_row_source_fact fact ->
       let claim_lines, claim_line_count =
         detail_claim_lines ?state ~inner_width:width fact.msf_claim
       in
+      let heading_plain = text "원본에 묶인 사실" "Source-Bound Fact Detail" in
       { heading =
           Printf.sprintf "  %s%s%s%s" Ansi.bold
-            (Theme.info ()) (text "원본에 묶인 사실" "Source-Bound Fact Detail") Ansi.reset
+            (mem_accent ()) heading_plain Ansi.reset
+      ; heading_plain
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        field (text "Keeper:" "Keeper:") (Terminal_text.single_line fact.msf_keeper)
-        @ field (text "원본 경로:" "Bound Path:") (Terminal_text.single_line fact.msf_path)
-        @ field (text "파일 SHA:" "File SHA:")
-            (Printf.sprintf (if ko then "%s · %s처음 관측:%s %s" else "%s · %sFirst Seen:%s %s")
-               (Terminal_text.single_line fact.msf_sha256)
-               (Theme.recede ()) Ansi.reset
-               (memory_fact_age_label fact.msf_first_seen))
+        kv_rows
+          [ Doc.kv ~tone:Ansi.bold (text "키퍼" "Keeper") (Terminal_text.single_line fact.msf_keeper)
+          ; Doc.kv (text "원본 경로" "Bound Path") (Terminal_text.single_line fact.msf_path)
+          ; Doc.kv ~tone:(Theme.recede ()) (text "파일 SHA" "File SHA")
+              (Printf.sprintf (if ko then "%s · 처음 관측: %s" else "%s · First Seen: %s")
+                 (Terminal_text.single_line fact.msf_sha256)
+                 (memory_fact_age_label fact.msf_first_seen))
+          ]
       }
   | Memory_row_invalidation row ->
       let claim_lines, claim_line_count =
         detail_claim_lines ?state ~inner_width:width row.mi_reason in
+      let heading_plain = text "무효화된 사실" "Dropped / Invalidated Fact" in
       { heading =
           Printf.sprintf "  %s%s%s%s" Ansi.bold
-            (Theme.bad ()) (text "무효화된 사실" "Dropped / Invalidated Fact") Ansi.reset
+            (Theme.bad ()) heading_plain Ansi.reset
+      ; heading_plain
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        field (text "Keeper:" "Keeper:") (Terminal_text.single_line row.mi_keeper)
-        @ field (text "원본 경로:" "Source Path:") (Terminal_text.single_line row.mi_source_path)
-        @ field (text "무효화 시점:" "Dropped At:")
-            (memory_fact_age_label row.mi_invalidated_at ^ text " 전" " ago")
+        kv_rows
+          [ Doc.kv ~tone:Ansi.bold (text "키퍼" "Keeper") (Terminal_text.single_line row.mi_keeper)
+          ; Doc.kv (text "원본 경로" "Source Path") (Terminal_text.single_line row.mi_source_path)
+          ; Doc.kv ~tone:(Theme.warn ()) (text "무효화 시점" "Dropped At")
+              (memory_fact_age_label row.mi_invalidated_at ^ text " 전" " ago")
+          ]
       }
+
+let memory_fact_detail_parts ?state ~ko ~cols (row : memory_fact_row) =
+  fact_detail_parts_for_width ?state ~ko ~width:(framed_inner_width cols) row
 
 let fact_detail_line_count parts =
   1 + parts.claim_line_count + List.length parts.other_lines
@@ -1511,7 +1513,12 @@ let memory_overview_rows ~cols ~budget (state : state) =
   let full_header =
     if state.memory_overview_detail then memory_fleet_header_rows ~cols state
     else
-      [memory_compact_fleet_row ~cols state]
+      [ Memory_tree.memory_mode_strip ~ko ~cols ~active:`Storage () ]
+      @ Memory_tree.world_hierarchy_card ~ko
+          ~width:(framed_inner_width cols)
+          ~world:(Masc_tui_memory_world.reading state.memory_world)
+          ~health:state.memory_health
+          ~unit:state.memory_unit
       @ (match keepers with
          | _ :: _ -> []
          | [] ->
@@ -1571,24 +1578,60 @@ let memory_overview_scrolled ~cols ~budget (state : state) =
     ~refused_rows:(refused_rows projection)
     ~context_rows:(List.length projection.context) state
 
-(* A row the operator picks a keeper from: the mark, the name and the state's
-   word. A reading that is off wears its colour on the mark and the word, so a
-   stopped Librarian reads as a warning from across the screen; an ordinary
-   one wears it on the mark alone. Both were the plain text colour. *)
-let memory_selector_line ?(selected = false) ~cols (state : state) keeper =
+(* A row the operator picks a keeper from: the mark, the name, proportional
+   memory bar, counts, stored size and state word. Selected rows still strip
+   SGR down the line while preserving clean columns. *)
+let memory_selector_line ?(selected = false) ?(max_facts = 0) ~cols (state : state) keeper =
+  let ko = state.ui_language = Lang_ko in
   let width = max 1 (framed_inner_width cols - 2) in
-  let name_cells = max 1 (width / 2) in
-  let status_cells = max 1 (width - name_cells - 3) in
   let mark_style, word_style =
     match memory_deviation_style keeper with
     | Some style -> style, style
     | None -> Theme.ok (), ""
   in
-  let word = Message_layout.fit_width (memory_operator_state state keeper) status_cells in
-  (if selected then "\xe2\x80\xba " else "  ")
-  ^ mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset ^ " "
-  ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
-  ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
+  let mark = mark_style ^ memory_state_cell (memory_state keeper) ^ Ansi.reset in
+  let lead = if selected then "\xe2\x80\xba " else "  " in
+  let state_word = memory_operator_state state keeper in
+  if width >= 58 && max_facts > 0 then
+    let name_cells = min 22 (max 14 (width / 3)) in
+    let bar_cells = 10 in
+    let facts_s =
+      if keeper.mkh_snapshot_present then
+        Printf.sprintf (if ko then "%5d건" else "%5d") keeper.mkh_facts
+      else Message_layout.pad_left Masc_tui_theme.Glyph.no_value (if ko then 7 else 5)
+    in
+    let size_s =
+      let raw =
+        if keeper.mkh_snapshot_present then
+          stored_size state.memory_unit keeper.mkh_snapshot_bytes
+        else Masc_tui_theme.Glyph.no_value
+      in
+      Message_layout.pad_left raw 7
+    in
+    let bar =
+      Chart.dot_meter_bar ~width:bar_cells ~value:keeper.mkh_facts ~max_value:max_facts
+        ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
+        ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+    in
+    let used =
+      2 + 2 + name_cells + 2 + bar_cells + 2
+      + Message_layout.display_width facts_s + 2 + 7 + 2
+    in
+    let status_cells = max 1 (width - used) in
+    let word = Message_layout.fit_width state_word status_cells in
+    lead ^ mark ^ " "
+    ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
+    ^ "  " ^ bar ^ "  " ^ facts_s ^ "  "
+    ^ Theme.recede () ^ size_s ^ Ansi.reset
+    ^ "  "
+    ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
+  else
+    let name_cells = max 1 (width / 2) in
+    let status_cells = max 1 (width - name_cells - 3) in
+    let word = Message_layout.fit_width state_word status_cells in
+    lead ^ mark ^ " "
+    ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
+    ^ " " ^ (if word_style = "" then word else word_style ^ word ^ Ansi.reset)
 
 let render_memory_body ~cols ~budget (state : state)
     ~(report_drawn_list : paged_list -> height:int -> unit)
@@ -1601,9 +1644,15 @@ let render_memory_body ~cols ~budget (state : state)
   let query = memory_overview_query state in
   let keepers = visible_memory_keepers state in
   let shown = List.length keepers in
+  let max_facts =
+    List.fold_left
+      (fun acc (k : memory_keeper_health) ->
+        if k.mkh_snapshot_present then max acc k.mkh_facts else acc)
+      0 keepers
+  in
+  let inner_w = max 1 (framed_inner_width cols - 2) in
   let columns =
-    Render_schedule.allocate_memory_columns
-      ~inner_width:(max 1 (framed_inner_width cols - 2))
+    Render_schedule.allocate_memory_columns ~inner_width:inner_w
   in
   let ko = state.ui_language = Lang_ko in
   let sort_label =
@@ -1658,6 +1707,15 @@ let render_memory_body ~cols ~budget (state : state)
   push_divider ();
   push_styled ~style:(Theme.recede ())
     (if state.memory_overview_detail then "  " ^ Render_schedule.memory_header_row ~ko columns
+     else if inner_w >= 58 && max_facts > 0 then
+       let name_cells = min 22 (max 14 (inner_w / 3)) in
+       let facts_h =
+         Message_layout.pad_left (if ko then "기억" else "FACTS") (if ko then 7 else 5)
+       in
+       let size_h = Message_layout.pad_left (if ko then "저장" else "SIZE") 7 in
+       "    " ^ Message_layout.fit_width (if ko then "키퍼" else "KEEPER") name_cells
+       ^ "  " ^ Message_layout.fit_width (if ko then "점유" else "USAGE") 10
+       ^ "  " ^ facts_h ^ "  " ^ size_h ^ "  " ^ (if ko then "상태" else "STATE")
      else ui_text state
        ~ko:"  키퍼 · 상태"
        ~en:"  Keeper · state");
@@ -1727,7 +1785,7 @@ let render_memory_body ~cols ~budget (state : state)
           let line =
             if state.memory_overview_detail then
               memory_row_line ~selected:is_selected ~unit:state.memory_unit columns k
-            else memory_selector_line ~selected:is_selected ~cols state k in
+            else memory_selector_line ~selected:is_selected ~max_facts ~cols state k in
           if is_selected then
             push_selected (Masc_tui_theme.strip_sgr line)
           else push line
@@ -1774,17 +1832,13 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
   let ko = state.ui_language = Lang_ko in
-  let detail =
-    Option.map (memory_fact_detail_parts ~state ~ko ~cols) (List.nth_opt rows cursor)
-  in
-  let total_detail_lines =
-    Option.fold ~none:0 ~some:fact_detail_line_count detail
-  in
+  let width = max 1 (framed_inner_width cols) in
+  let selected_row = List.nth_opt rows cursor in
   let scope_rows = List.length (memory_facts_scope_lines ~cols state) in
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
-     divider. The search row is counted from [memory_search_query], the same
-     value the renderer draws it from. *)
+     divider when not drawn as a bordered bottom sheet. The search row is
+     counted from [memory_search_query], the same value the renderer draws it from. *)
   let chrome_rows =
     4
     + (if Option.is_some (memory_facts_snapshot state) then 1 else 0)
@@ -1792,47 +1846,72 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     + scope_rows
     + (if scope_rows > 0 then 1 else 0)
   in
-  (* The detail is as tall as the tallest loaded fact's (RFC
-     tui-one-screen-grammar §8), so the list above it keeps one height while
-     [j] walks facts of different lengths; a shorter fact's detail ends in
-     blank rows. A fact can be any length: on the live store at thirty rows
-     one fact filled fifteen of them and the list fell to one row of 254
-     facts. The list keeps this many rows before the detail takes any, and
-     what the detail then loses is one keypress away -- [Enter] opens the
-     whole fact in an overlay that owns the terminal. *)
   let room_below_chrome = max 1 (budget - chrome_rows) in
   let detail_budget =
-    (* Less the detail's divider. *)
     max 0 (room_below_chrome - memory_fact_list_floor_rows - 1)
   in
   let tallest = if total = 0 then 0 else tallest_fact_detail_lines ~ko ~cols rows in
-  let detail_lines =
-    match detail with
-    | None -> []
-    | Some parts ->
+  let sheet_height =
+    if total = 0 || detail_budget < 5 || tallest <= 0 || width < Masc_tui_card.min_width
+    then 0
+    else min detail_budget (min 12 (max 6 (tallest + 2)))
+  in
+  let detail_lines, detail_is_sheet =
+    match selected_row with
+    | Some row when sheet_height >= 5 ->
+        let sheet_cells = max 1 (Masc_tui_card.content_cells ~width) in
+        let sheet_parts =
+          fact_detail_parts_for_width ~state ~ko ~width:sheet_cells row
+        in
+        let total_body =
+          sheet_parts.claim_line_count + 1 + List.length sheet_parts.other_lines
+        in
+        let sheet =
+          Doc.bottom_sheet ~ko ~width ~height:sheet_height
+            ~role:Masc_tui_theme.Panel_memory
+            ~title:sheet_parts.heading_plain
+            ~count:(Masc_tui_card.Whole total_body)
+            ~footer_keys:
+              [ { Masc_tui_card.key = "Enter"; label = (if ko then "전체" else "full") }
+              ; { key = "d"; label = (if ko then "트리" else "tree") }
+              ; { key = "c/C"; label = (if ko then "분류" else "cat") }
+              ]
+            ~body:(fun ~cells ->
+              let inner =
+                if cells = sheet_cells then sheet_parts
+                else fact_detail_parts_for_width ~state ~ko ~width:cells row
+              in
+              inner.claim_lines @ [ "" ] @ inner.other_lines)
+            ()
+        in
+        sheet, true
+    | Some row when detail_budget > 0 ->
+        let parts = fact_detail_parts_for_width ?state:None ~ko ~width row in
+        let total_detail_lines = fact_detail_line_count parts in
         let height = min detail_budget (max tallest total_detail_lines) in
-        (* The last row it can draw says what is under the fold, in the
-           window the list below and the other reading panes draw. *)
         let overflow =
           "      "
           ^ Masc_tui_value.Count.more ~ko (total_detail_lines - (height - 1))
           ^ (if ko then " · Enter:전체 사실" else " · Enter for the whole fact")
         in
-        Masc_tui_detail_height.fit_tallest ~budget:detail_budget ~tallest
-          ~too_tall:(Masc_tui_detail_height.Cut_with overflow) ~blank:""
-          (fact_detail_prefix parts total_detail_lines)
+        let lines =
+          Masc_tui_detail_height.fit_tallest ~budget:detail_budget ~tallest
+            ~too_tall:(Masc_tui_detail_height.Cut_with overflow) ~blank:""
+            (fact_detail_prefix parts total_detail_lines)
+        in
+        lines, false
+    | None | Some _ -> [], false
   in
-  (* A budgeted detail that drew nothing also spends no divider. Returning
-     that row to the list keeps tiny viewports full. *)
   let detail_rows =
-    match detail_lines with [] -> 0 | lines -> 1 + List.length lines
+    if detail_is_sheet then List.length detail_lines
+    else match detail_lines with [] -> 0 | lines -> 1 + List.length lines
   in
   let height = max 1 (room_below_chrome - detail_rows) in
   let scroll =
     Masc_tui_scroll.normalize ~count:total ~height state.memory_facts_scroll
     |> Masc_tui_scroll.ensure_visible ~cursor ~height
   in
-  (detail_lines, height, scroll)
+  (detail_lines, detail_is_sheet, height, scroll)
 
 let memory_facts_pane_cols state cols =
   if state.memory_facts_categories_open && cols >= Masc_tui_roster_pane.threshold_cols then
@@ -1840,7 +1919,7 @@ let memory_facts_pane_cols state cols =
   else cols
 
 let memory_facts_content_height ~cols ~budget ~cursor state =
-  let _, height, _ =
+  let _, _, height, _ =
     memory_facts_layout ~cols:(memory_facts_pane_cols state cols) ~budget ~cursor state (memory_fact_rows state)
   in
   height
@@ -1899,7 +1978,13 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
           else text "  d:분류 펼치기" "  d:show categories"
         in
         let pills =
-          if not show_category_strip then text "  c/C:분류  Enter:사실 상세" "  c/C:category  Enter:fact detail"
+          if not show_category_strip then
+            let active_mode =
+              match state.memory_facts_sort with
+              | Sort_retrieved_count -> `Retrieved
+              | Sort_recency | Sort_last_retrieved | Sort_category | Sort_claim -> `Recent
+            in
+            Memory_tree.memory_mode_strip ~ko ~cols ~active:active_mode ()
           else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after)
@@ -1907,7 +1992,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                 Masc_tui_press.(pressable (Press_memory_category filt) text))
               (List.map
                  (fun filt ->
-                   ( Printf.sprintf "%s %s" (memory_category_filter_text ~ko filt)
+                   ( Printf.sprintf "%s %s" (fst (Memory_tree.filter_badge ~ko filt))
                        (count_of filt)
                    , state.memory_facts_category = filt
                    , filt ))
@@ -1944,7 +2029,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
   in
   push_styled ~style:(Theme.recede ()) col_header;
   push_divider ();
-  let detail_lines, content_height, scroll =
+  let detail_lines, detail_is_sheet, content_height, scroll =
     memory_facts_layout ~cols ~budget ~cursor state rows
   in
   if total = 0 then
@@ -2007,7 +2092,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
   (match detail_lines with
    | [] -> ()
    | lines ->
-       push_divider ();
+       if not detail_is_sheet then push_divider ();
        List.iter push lines)
 
 let render_memory_facts_body ~cols ~budget (state : state)
@@ -2019,74 +2104,35 @@ let render_memory_facts_body ~cols ~budget (state : state)
     let width = Masc_tui_roster_pane.pane_cols in
     let fact_cols = memory_facts_pane_cols state cols in
     let fact_inner_cols = framed_inner_width fact_cols in
-    let facts = ref [] in
-    let collect text = facts := text :: !facts in
+    let facts : (bool * string) list ref = ref [] in
+    let handed : (int * Masc_tui_value.Position.t) option ref = ref None in
+    let collect row = facts := row :: !facts in
     render_memory_facts_body_single ~show_category_strip:false ~cols:fact_cols ~budget state
-      ~report_drawn_list ~hand_position
-      ~push:collect
-      ~push_styled:(fun ~style text -> collect (style ^ text ^ Ansi.reset))
+      ~report_drawn_list
+      ~hand_position:(fun pos -> handed := Some (List.length !facts, pos))
+      ~push:(fun text -> collect (false, text))
+      ~push_styled:(fun ~style text ->
+        let styled = if style = "" then text else style ^ text ^ Ansi.reset in
+        collect (true, styled))
       ~push_selected:(fun text ->
-        collect (Theme.selection_style () ^ fit_width text fact_inner_cols ^ Ansi.reset))
+        collect (false, Theme.selection_style () ^ fit_width text fact_inner_cols ^ Ansi.reset))
       ~push_divider:(fun () ->
-        collect (Theme.border_muted () ^ draw_hline fact_inner_cols ^ Ansi.reset))
-      ~push_empty:(fun () -> collect "");
+        collect (true, Theme.border_muted () ^ draw_hline fact_inner_cols ^ Ansi.reset))
+      ~push_empty:(fun () -> collect (false, ""));
     let ko = state.ui_language = Lang_ko in
     let count category = Option.bind (memory_facts_snapshot state)
         (fun snapshot -> category_count state snapshot category) in
-    let header =
-      [ Theme.info () ^ (if ko then "분류" else "Categories") ^ Ansi.reset ^ Ansi.dim ^ (if ko then "  d:접기" else "  d:hide") ^ Ansi.reset
-      ; Theme.recede () ^ (if ko then "c/C:이동  클릭:선택" else "c/C:move  click:select") ^ Ansi.reset
-      ; Theme.border_muted () ^ draw_hline width ^ Ansi.reset
-      ]
-    in
-    let height = max 0 (budget - List.length header) in
     let categories = Category_all :: memory_fact_categories state in
-    let selected =
-      categories |> List.find_mapi (fun index category ->
-        if category = state.memory_facts_category then Some index else None)
-      |> Option.value ~default:0 in
-    let category_scroll = Masc_tui_scroll.ensure_visible ~cursor:selected ~height:(max 1 height) 0 in
-    let entries =
-      categories
-      |> List.filteri (fun index _ -> index >= category_scroll && index < category_scroll + height)
-      |> List.concat_map (fun category ->
-        let count = match count category with None -> "?" | Some count -> string_of_int count in
-        let suffix = " (" ^ count ^ ")" in
-        (* Bound display cells before wrapping: the selected label gets the rail
-           height; other previews get one row. Enter's fact detail retains the
-           complete category value. *)
-        let rows = if category = state.memory_facts_category then max 1 height else 1 in
-        let room = max 1 (rows * (width - 2) - Message_layout.display_width suffix) in
-        let name = Terminal_text.single_line (memory_category_filter_text ~ko category) in
-        let name =
-          Message_layout.truncate_end room name
-        in
-        Message_layout.wrap_words ~max_cells:(width - 2) (name ^ suffix)
-        |> List.mapi (fun line_index text -> category, line_index = 0, text)) in
-    let selected_indices =
-      entries
-      |> List.mapi (fun index (category, _, _) -> index, category)
-      |> List.filter (fun (_, category) -> category = state.memory_facts_category)
-      |> List.map fst in
-    let start_row, end_row = match selected_indices with
-      | [] -> 0, 0
-      | first :: _ -> first, List.hd (List.rev selected_indices) in
-    let span = end_row - start_row + 1 in
-    let scroll =
-      if span <= height then
-        let s = Masc_tui_scroll.ensure_visible ~cursor:end_row ~height:(max 1 height) 0 in
-        Masc_tui_scroll.ensure_visible ~cursor:start_row ~height:(max 1 height) s
-      else
-        start_row
+    let entries = List.map (fun category -> category, count category) categories in
+    let rail =
+      Memory_tree.sidebar_tree_rows ~ko ~width ~height:budget
+        ~world:(Masc_tui_memory_world.reading state.memory_world)
+        ~selected:state.memory_facts_category ~entries
+      |> List.map (function
+           | None, line -> line
+           | Some category, line ->
+               Masc_tui_press.(pressable (Press_memory_category category) line))
     in
-    let rail = header @
-      (entries |> List.filteri (fun index _ -> index >= scroll && index < scroll + height)
-       |> List.map (fun (category, is_first, text) ->
-           let is_selected = category = state.memory_facts_category in
-           let lead = if is_selected && is_first then "\xe2\x80\xba " else "  " in
-           let text = fit_width (lead ^ text) width in
-           let style = if is_selected then Theme.selection_style () else Theme.recede () in
-           Masc_tui_press.(pressable (Press_memory_category category) (style ^ text ^ Ansi.reset)))) in
     let facts = List.rev !facts in
     let height = max (List.length facts) (min budget (List.length rail)) in
     (* Both panes through the list-window helper the scroll panes read: two
@@ -2094,9 +2140,24 @@ let render_memory_facts_body ~cols ~budget (state : state)
        walks either list to find itself. *)
     let rail_window = Rows.of_list ~first:0 ~height rail in
     let facts_window = Rows.of_list ~first:0 ~height facts in
+    (match !handed with
+     | Some (0, pos) -> hand_position pos
+     | Some _ | None -> ());
     for index = 0 to height - 1 do
-      let cell window = Option.value (Rows.at window index) ~default:"" in
-      push (fit_width (cell rail_window) width ^ Theme.border_muted () ^ " │ " ^ Ansi.reset
-        ^ fit_width (cell facts_window) fact_inner_cols)
-    done
+      let rail_cell = Option.value (Rows.at rail_window index) ~default:"" in
+      let is_other, fact_cell =
+        Option.value (Rows.at facts_window index) ~default:(true, "")
+      in
+      let merged =
+        fit_width rail_cell width ^ Theme.border_muted () ^ " │ " ^ Ansi.reset
+        ^ fit_width fact_cell fact_inner_cols
+      in
+      if is_other then push_styled ~style:"" merged else push merged;
+      match !handed with
+      | Some (at, pos) when index + 1 = at -> hand_position pos
+      | Some _ | None -> ()
+    done;
+    (match !handed with
+     | Some (at, pos) when at > height -> hand_position pos
+     | Some _ | None -> ())
   end

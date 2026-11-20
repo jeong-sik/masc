@@ -22224,7 +22224,7 @@ let create_state
   memory_facts_scroll = 0;
   memory_fact_claim_wrap = None;
   memory_facts_category = Category_all;
-  memory_facts_categories_open = false;
+  memory_facts_categories_open = true;
   memory_facts_sort = Sort_recency;
   memory_overview_sort = Mem_overview_facts;
   memory_overview_detail = false;

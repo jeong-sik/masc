@@ -375,6 +375,31 @@ let test_defaults_when_only_sha256_is_given () =
     Alcotest.(check int) "max_bytes default" R.default_max_bytes request.max_bytes
 ;;
 
+let check_absent_artifact_rejection ~label args =
+  let base_path = Filename.temp_dir "keeper_artifact_read_absent_" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_path)
+    (fun () ->
+       let result = R.handle ~base_path ~args in
+       Alcotest.(check bool) (label ^ " uses workflow rejection") true
+         (result.Masc.Keeper_tool_execution.disposition
+          = Tool_result.Failed Tool_result.Workflow_rejection);
+       let body = Yojson.Safe.from_string result.raw_output in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string) (label ^ " error code") "artifact_not_found"
+         (body |> member "error" |> to_string);
+       let message = body |> member "message" |> to_string in
+       check_names ~label ~message [ "sha256="; "answer_sha256=" ])
+;;
+
+let test_absent_artifact_page_and_search () =
+  let absent_sha256 = String.make 64 '0' in
+  check_absent_artifact_rejection ~label:"absent artifact page read"
+    (`Assoc [ "sha256", `String absent_sha256 ]);
+  check_absent_artifact_rejection ~label:"absent artifact search"
+    (`Assoc [ "sha256", `String absent_sha256; "contains", `String "needle" ])
+;;
+
 let () =
   Alcotest.run
     "keeper_artifact_read_request"
@@ -407,6 +432,8 @@ let () =
             test_accepted_request_fields
         ; Alcotest.test_case "omitted fields take their defaults" `Quick
             test_defaults_when_only_sha256_is_given
+        ; Alcotest.test_case "absent sha256 page and search return workflow rejection" `Quick
+            test_absent_artifact_page_and_search
         ] )
     ]
 ;;

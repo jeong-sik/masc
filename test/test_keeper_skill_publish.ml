@@ -674,12 +674,17 @@ let test_owned_draft_validates_and_publishes_exact_bytes () =
   check string "validation identifies frozen bytes"
     Agent_core_sha256.(digest_string source.source_text |> to_hex) validated_sha;
   (* Rejections happen before the editor hook and do not claim a write. *)
-  let reject caller args kind =
+  let reject ?(class_ = Tool_result.Policy_rejection) caller args kind =
     let ((_, data) as outcome) = dispatch caller "keeper_skill_publish" args in
-    failed_with ~code:"composition_draft_rejected" ~class_:Tool_result.Policy_rejection
+    failed_with ~code:"composition_draft_rejected" ~class_
       ~effect_disposition:Tool_result.Proven_pre_effect outcome;
     check string "specific draft refusal" kind Yojson.Safe.Util.(member "draft_error" data |> member "kind" |> to_string);
     check int "rejected draft did not reach publisher" 0 (List.length !calls) in
+  reject ~class_:Tool_result.Workflow_rejection caller
+    (`Assoc [ "package_id", `String "proposed"
+            ; "draft_sha256", `String (String.make 64 '0')
+            ; "evidence", `List [ `String "test:prepared-draft" ] ])
+    "draft_not_found";
   let other_meta = Masc_test_deps.meta_of_json_fixture (`Assoc [ "name", `String "other-author" ])
       |> require "other Keeper" in
   reject (context other_meta authority) publish_args "different_keeper";

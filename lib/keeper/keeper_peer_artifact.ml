@@ -16,8 +16,10 @@ let fetch_error_to_string = function
   | Unreadable detail -> detail
 
 let fetch_error_class = function
-  | Absent _ -> Tool_result.Workflow_rejection
-  | Unreadable _ -> Tool_result.Runtime_failure
+  | Absent _ ->
+    Keeper_blob_lookup_failure.failure_class Keeper_blob_lookup_failure.Absent
+  | Unreadable _ ->
+    Keeper_blob_lookup_failure.failure_class Keeper_blob_lookup_failure.Unreadable
 
 let fetch ~config (artifact : Keeper_peer_artifact_ref.t) =
   let sha256 = (artifact :> string) in

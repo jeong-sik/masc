@@ -134,19 +134,21 @@ The `base` field names a provider preset from
 `default_capabilities`; undeclared fields keep that base's values.  Unrecognised `base` values
 are rejected when the manifest is parsed.
 
+Each preset has one label. A label in another case, with surrounding
+whitespace, or not in this table is rejected.
+
 | Label | Description |
 |-------|-------------|
-| `anthropic`, `claude` | Anthropic Messages preset |
+| `anthropic` | Anthropic Messages preset |
 | `gemini` | Gemini native preset |
-| `glm`, `zhipu`, `glm-coding` | GLM / ZhipuAI |
+| `glm` | GLM / ZhipuAI |
 | `kimi` | Kimi (262K ctx, reasoning) |
-| `openai_compat` | OpenAI-compatible base preset |
 | `ollama` | Ollama local server |
 | `openai_chat` | OpenAI-compatible chat completions; declares no context window (per-model rows or the caller declare it) |
-| `openai`, `openai_compat_chat_extended` | OpenAI-compatible aliases |
 | `openai_chat_extended` | OpenAI GPT with reasoning + top\_k/min\_p |
 | `ollama_cloud` | Ollama Cloud native `/api/chat`; parsed reasoning may be final visible text |
-| `xai`, `mistral`, `cohere`, `mimo`, `nvidia` | Hosted provider presets |
+| `ollama_cloud_v1` | Ollama Cloud OpenAI-compatible `/v1` |
+| `openrouter`, `cohere`, `mimo`, `nvidia` | Hosted provider presets |
 
 ## OCaml API
 

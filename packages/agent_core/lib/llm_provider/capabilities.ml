@@ -1346,16 +1346,6 @@ let%test "capabilities_for_provider_label: anthropic" =
   | None -> false
 ;;
 
-let%test "capabilities_for_provider_label: openai alias" =
-  Option.is_some (capabilities_for_provider_label "openai")
-  && Option.is_some (capabilities_for_provider_label "openai_chat")
-;;
-
-let%test "capabilities_for_provider_label: glm alias" =
-  Option.is_some (capabilities_for_provider_label "glm")
-  && Option.is_some (capabilities_for_provider_label "glm-coding")
-;;
-
 let%test "capabilities_for_provider_label: unknown returns None" =
   Option.is_none (capabilities_for_provider_label "not_a_real_provider_xyz")
 ;;

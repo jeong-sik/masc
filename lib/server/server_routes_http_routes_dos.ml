@@ -1,5 +1,4 @@
-(** HTTP routes that let a person play the shared DOS machine (RFC
-    play-link-for-the-shared-machine §2.5).
+(** HTTP routes that let a person play the shared DOS machine.
 
     [POST /api/v1/dos/press], [/type], [/step] and [/pass] take the body of
     the tool of the same name, check it against that tool's schema, and run

@@ -150,9 +150,8 @@ let add_routes ?clock router =
      state gets; the two sibling handlers say the same to everyone. *)
   |> Server_route.get Server_route.Always_public Server_health_paths.health health_handler
   (* Liveness says the accept loop runs, so it is answered on the
-     connection's domain and does not wait for the main one. It reads the
-     startup state, which is atomics (RFC
-     http-transport-runs-on-its-own-domain §3.4). *)
+     connection's domain and does not wait for the main one. Its body is a
+     constant: it reads no state. *)
   |> Server_route.Serving.get Server_route.Always_public Server_health_paths.liveness liveness_handler
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness readiness_handler
   |> Server_route.get Server_route.Public_read "/.well-known/agent.json" (fun _state req reqd ->

@@ -6,11 +6,10 @@ module Mcp_eio = Mcp_server_eio
 module Pages = Server_routes_http_pages
 
 
-(* RFC-0138 Phase 3 Step 5 — [telemetry_summary_cache_key] deleted
-   along with [Dashboard_cache.get_or_compute] from the cold-start
-   fallback path.  After Step 1/2/3 wired snapshot reads in front of
-   compute, the fallback runs at most once per process and a cache
-   slot is not worth keeping live.  See
+(* [telemetry_summary_cache_key] deleted along with
+   [Dashboard_cache.get_or_compute] from the cold-start fallback path.
+   With snapshot reads in front of compute, the fallback runs at most once
+   per process and a cache slot is not worth keeping live.  See
    [Server_dashboard_snapshot_select.select_telemetry_summary_json]. *)
 
 (** Broadcast handler: parse JSON body, extract "message" string field, and
@@ -30,7 +29,7 @@ let handle_dashboard_workspace = Server_routes_http_dashboard_handlers.handle_da
    Yojson-parsed up to the telemetry read clamp (50k, #20659) entries per
    source across all sources — enough to peg the single Eio domain on a
    non-yielding parse and freeze the keeper fleet. These bound the DEFAULT;
-   since RFC-0372 an explicit n=0 no longer opts out — see
+   an explicit n=0 is bounded too — see
    [resolve_telemetry_limit]. *)
 let default_telemetry_limit = 100
 let default_windowed_telemetry_limit = 2000

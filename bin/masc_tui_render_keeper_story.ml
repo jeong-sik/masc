@@ -22,17 +22,12 @@ let rows ~budget =
   else min target_rows (budget - list_floor)
 ;;
 
-let wrap_style style text =
-  if String.equal style "" || String.equal text "" then text
-  else style ^ text ^ Ansi.reset
-;;
-
-let dim text = wrap_style (Theme.recede ()) text
-let rule text = wrap_style (Theme.border_muted ()) text
-let ok text = wrap_style (Theme.ok ()) text
-let info text = wrap_style (Theme.info ()) text
-let warn text = wrap_style (Theme.warn ()) text
-let bad text = wrap_style (Theme.bad ()) text
+let dim text = Ansi.wrap_style (Theme.recede ()) text
+let rule text = Ansi.wrap_style (Theme.border_muted ()) text
+let ok text = Ansi.wrap_style (Theme.ok ()) text
+let info text = Ansi.wrap_style (Theme.info ()) text
+let warn text = Ansi.wrap_style (Theme.warn ()) text
+let bad text = Ansi.wrap_style (Theme.bad ()) text
 
 let tab ~ko ~current page =
   let hotkey, label = Story.tab_parts ~ko page in

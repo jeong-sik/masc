@@ -217,11 +217,8 @@ let note_lines ?(ko = false) ~days note =
   let title = if ko then "도구 호출" else "Tool calls" in
   [ Printf.sprintf " %s (%s) · %s" title span note ]
 
-let wrap_style style text =
-  if String.equal style "" then text else style ^ text ^ Ansi.reset
-
 let totals_line ~ko ~calls ~failures ~deferred =
-  let sep = wrap_style (Theme.recede ()) " · " in
+  let sep = Ansi.wrap_style (Theme.recede ()) " · " in
   let fail_style =
     if failures > 0 && failures = calls then Theme.bad ()
     else if failures > 0 then Theme.warn ()
@@ -236,7 +233,7 @@ let totals_line ~ko ~calls ~failures ~deferred =
         Printf.sprintf "%s failed (%s)" (grouped_digits failures)
           (percent_text ~failures ~calls)
     in
-    wrap_style fail_style body
+    Ansi.wrap_style fail_style body
   in
   let deferred_part =
     if deferred = 0 then ""
@@ -245,7 +242,7 @@ let totals_line ~ko ~calls ~failures ~deferred =
         if ko then Printf.sprintf "보류 %s건" (grouped_digits deferred)
         else Printf.sprintf "%s deferred" (grouped_digits deferred)
       in
-      sep ^ wrap_style (Theme.warn ()) body
+      sep ^ Ansi.wrap_style (Theme.warn ()) body
   in
   let calls_part =
     if ko then Printf.sprintf " 호출 %s건" (grouped_digits calls)
@@ -670,8 +667,8 @@ let summary_line ?(ko = false) ~cells t =
         if ko then Printf.sprintf "실패 %s" (grouped_digits failures)
         else Printf.sprintf "%s failed" (grouped_digits failures)
       in
-      let fail_colored = wrap_style fail_style fail_str in
-      calls_str ^ wrap_style (Theme.recede ()) " · " ^ fail_colored
+      let fail_colored = Ansi.wrap_style fail_style fail_str in
+      calls_str ^ Ansi.wrap_style (Theme.recede ()) " · " ^ fail_colored
     in
     let without_chart =
       Layout.display_width label + String.length summary_gap

@@ -397,10 +397,6 @@ let reads_selected ~table ~starts ~total ~height cursor =
   let start, stop = selected_lines ~table ~starts ~total cursor in
   (not table) && stop - start + 1 > height
 
-let wrap_style code text =
-  if String.equal code "" || String.equal text "" then text
-  else code ^ text ^ Masc_tui_theme.Sgr.reset
-
 let render ?(ko = false) ~width ?pane rows =
   let qualifier = row_qualifier rows in
   let provider_width = provider_width_of ~ko ~qualifier rows in
@@ -411,14 +407,14 @@ let render ?(ko = false) ~width ?pane rows =
          (Masc_tui_terminal_palette.snapshot ()))
   in
   let dim_if_absent text padded =
-    if String.equal text absent then wrap_style recede padded else padded
+    if String.equal text absent then Masc_tui_theme.Sgr.wrap_style recede padded else padded
   in
   let owner text = if provider_width = 0 then ""
     else String.make gutter ' ' ^ pad text provider_width in
   let styled_owner text =
     if provider_width = 0 then ""
     else if String.equal text "" then String.make (gutter + provider_width) ' '
-    else String.make gutter ' ' ^ wrap_style recede (pad text provider_width)
+    else String.make gutter ' ' ^ Masc_tui_theme.Sgr.wrap_style recede (pad text provider_width)
   in
   let tokens text = if provider_width = 0 then text else pad text tokens_width in
   let styled_model r =
@@ -430,7 +426,7 @@ let render ?(ko = false) ~width ?pane rows =
       match r.context with
       | None -> r.model ^ trailing
       | Some (_, n) ->
-          r.model ^ wrap_style recede (Printf.sprintf " [%d ctx]" n) ^ trailing
+          r.model ^ Masc_tui_theme.Sgr.wrap_style recede (Printf.sprintf " [%d ctx]" n) ^ trailing
   in
   let header =
     pad (model_header ~ko) model_width

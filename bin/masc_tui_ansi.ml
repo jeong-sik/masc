@@ -44,6 +44,7 @@ module Ansi = struct
   let reverse = Masc_tui_theme.Sgr.reverse
   let with_styled_runs = Masc_tui_theme.Sgr.with_styled_runs
   let emit_styled_cells = Masc_tui_theme.Sgr.emit_styled_cells
+  let wrap_style = Masc_tui_theme.Sgr.wrap_style
 
   let box_h = Masc_tui_theme.Box.h
   let box_v = Masc_tui_theme.Box.v

@@ -70,25 +70,21 @@ let apportion ~width ~weights =
    so wide CJK glyphs and multi-byte symbols fill the exact band width. *)
 let display_cells text = Masc_tui_message_layout.display_width text
 
-let wrap_style style text =
-  if String.equal style "" || String.equal text "" then text
-  else style ^ text ^ Sgr.reset
-
 let band_styled ~rule_style ~caption_style ~width ~title ~caption =
   let title_cells = display_cells title in
   let caption_cells = display_cells caption in
   if width >= 9 + title_cells + caption_cells then
     let fill = width - 8 - title_cells - caption_cells in
-    wrap_style rule_style (repeat Box.h 2)
-    ^ " " ^ wrap_style Sgr.bold title ^ " "
-    ^ wrap_style rule_style (repeat Box.h fill)
-    ^ " " ^ wrap_style caption_style caption ^ " "
-    ^ wrap_style rule_style (repeat Box.h 2)
+    Sgr.wrap_style rule_style (repeat Box.h 2)
+    ^ " " ^ Sgr.wrap_style Sgr.bold title ^ " "
+    ^ Sgr.wrap_style rule_style (repeat Box.h fill)
+    ^ " " ^ Sgr.wrap_style caption_style caption ^ " "
+    ^ Sgr.wrap_style rule_style (repeat Box.h 2)
   else if width >= 5 + title_cells then
-    wrap_style rule_style (repeat Box.h 2)
-    ^ " " ^ wrap_style Sgr.bold title ^ " "
-    ^ wrap_style rule_style (repeat Box.h (width - 4 - title_cells))
-  else wrap_style rule_style (repeat Box.h (max 0 width))
+    Sgr.wrap_style rule_style (repeat Box.h 2)
+    ^ " " ^ Sgr.wrap_style Sgr.bold title ^ " "
+    ^ Sgr.wrap_style rule_style (repeat Box.h (width - 4 - title_cells))
+  else Sgr.wrap_style rule_style (repeat Box.h (max 0 width))
 
 let band ~width ~title ~caption =
   band_styled ~rule_style:Sgr.dim ~caption_style:Sgr.dim ~width ~title ~caption
@@ -165,7 +161,7 @@ let ratio_bar ~width ~numerator ~denominator ~scale =
   in
   let empty = max 0 (width - filled) in
   if empty = 0 then fill
-  else fill ^ wrap_style (track_style_of_scale scale) (repeat bar_light empty)
+  else fill ^ Sgr.wrap_style (track_style_of_scale scale) (repeat bar_light empty)
 
 (* The kept atoms are a share of the history, not a use of a limit; the
    caller names the series their run walks. *)
@@ -174,7 +170,7 @@ let reach_bar ~width ~transmitted ~total ~scale =
   let omitted = max 0 (width - sent) in
   let prefix =
     if omitted = 0 then ""
-    else wrap_style (track_style_of_scale scale) (repeat bar_light omitted)
+    else Sgr.wrap_style (track_style_of_scale scale) (repeat bar_light omitted)
   in
   prefix
   ^ Masc_tui_chart.meter_fill_run ~scale ~width ~value:transmitted ~max_value:total
@@ -214,7 +210,7 @@ let reach_pointer_styled ~style ~label:pointer_label ~width ~transmitted ~total 
         else
           String.make cut ' ' ^ Box.bl
     in
-    wrap_style style raw
+    Sgr.wrap_style style raw
 
 let reach_pointer ~label ~width ~transmitted ~total =
   reach_pointer_styled ~style:Sgr.dim ~label ~width ~transmitted ~total
@@ -228,5 +224,5 @@ let stacked_bar ~width ~segments =
     (List.filter_map
        (fun ((style, glyph, _), count) ->
          if count <= 0 then None
-         else Some (wrap_style style (repeat glyph count)))
+         else Some (Sgr.wrap_style style (repeat glyph count)))
        (List.combine segments cells))

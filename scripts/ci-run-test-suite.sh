@@ -194,6 +194,9 @@ disk_usage() {
   fi
 }
 disk_evidence() {
+  # An annotation line is collected by the runner as it streams, so it survives
+  # even when the job dies before the evidence file can be uploaded.
+  echo "::warning::disk band ${1}G crossed: $(df -BG --output=avail / | tail -1) available"
   echo "[test-suite] free space fell below ${1}G; what holds the bytes:"
   df -h /
   echo "[test-suite] largest _build entries (two levels: subtree then its biggest children):"

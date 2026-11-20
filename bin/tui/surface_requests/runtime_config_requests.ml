@@ -214,7 +214,7 @@ let launch_keeper_settings_save (state : Masc_tui_types.state) ~mailbox
                       (Masc_tui_types.Settings_runtime_sync_failed, response)
                 | Error
                     (Masc_tui_http.Keeper_config_refused_before_write
-                       { Masc_tui_http.response; detail }) ->
+                       { response; detail }) ->
                     Masc_tui_types.Settings_refused (response, detail)
                 | Error
                     (( Masc_tui_http.Keeper_config_transport_error _

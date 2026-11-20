@@ -28,7 +28,7 @@ val launch_chat_command_read
   -> mailbox:Masc_tui_transport.Workspace_admission.mailbox
   -> label:string
   -> call:(host:string -> port:int -> ('a, string) result)
-  -> wrap:(('a, Masc_tui_types.request_failure) result -> Masc_tui_async_protocol.chat_command_read_outcome)
+  -> wrap:(('a, Masc_tui_types.request_failure) result -> Masc_tui_async_protocol.async_msg)
   -> unit
 
 val settle_retired_chat_command_reads : Masc_tui_types.state -> unit

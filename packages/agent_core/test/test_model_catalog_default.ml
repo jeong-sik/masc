@@ -439,8 +439,9 @@ let test_responses_sol_rejects_codex_only_ultra () =
    The list covers the Anthropic models masc runs. The Mythos rows are left out
    because they are not part of that set; they carry the same gap, and Mythos
    5.1 shares Fable 5.1's 0.025x cache read, so a row of its own comes with
-   whichever change starts running them. Haiku 5.5 is left out because its row
-   states no price at all, so it has no multiplier to carry.
+   whichever change starts running them. Haiku 5.5 is tested separately below
+   because its row leaves tiered base prices unset while still carrying its
+   tier-invariant cache multipliers.
 
    The middle number is the one-hour write the claude provider accepts
    ([supports_extended_cache_ttl]): every model on the pricing table charges
@@ -1346,10 +1347,10 @@ let test_openrouter_and_haiku_5_5_cache_multipliers () =
   check_or "anthropic/claude-sonnet-5" (Some 1.25) (Some 2.0) (Some 0.1);
   check_or "anthropic/claude-fable-5.1" (Some 1.25) (Some 2.0) (Some 0.025);
   check_or "anthropic/claude-haiku-4.5" (Some 1.25) (Some 2.0) (Some 0.1);
-  check_or "openai/gpt-5.6-sol" (Some 1.0) None (Some 0.1);
-  check_or "google/gemini-3.8-flash" (Some 1.0) None (Some 0.1);
+  check_or "openai/gpt-5.6-sol" (Some 1.25) None (Some 0.1);
+  check_or "google/gemini-3.8-flash" None None (Some 0.1);
   check_or "x-ai/grok-4.6" (Some 1.0) None (Some 0.25);
-  check_or "qwen/qwen3.8-max-0902" (Some 1.0) None (Some 0.2);
+  check_or "qwen/qwen3.8-max-0902" None None (Some 0.125);
   check_or "deepseek/deepseek-v4.1-flash-1017" (Some 1.0) None None;
   check_or "moonshotai/kimi-k3" None None None;
   (* Direct Anthropic claude-haiku-5-5 carries tier-invariant cache multipliers

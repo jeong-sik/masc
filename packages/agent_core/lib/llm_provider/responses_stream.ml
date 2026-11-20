@@ -9,8 +9,10 @@ let responses_member_string_opt key json =
 ;;
 
 let responses_member_int_opt key json =
-  let open Yojson.Safe.Util in
-  json |> member key |> to_int_option
+  match Json_util.assoc_member_opt key json with
+  | Some (`Int n) -> Some n
+  | Some (`Intlit s) -> int_of_string_opt s
+  | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) | None -> None
 ;;
 
 let responses_member_int_default key json =

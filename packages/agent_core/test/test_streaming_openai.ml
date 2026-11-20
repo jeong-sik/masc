@@ -1444,15 +1444,43 @@ let test_responses_stream_cache_write_and_reasoning_tokens () =
     "response.completed"
     {|{"type":"response.completed","response":{"id":"resp_sse_1","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1600,"output_tokens":200,"input_tokens_details":{"cached_tokens":1000,"cache_write_tokens":320},"output_tokens_details":{"reasoning_tokens":64}}}}|}
   ;
-  match Acc.finalize_stream_acc acc with
+  (match Acc.finalize_stream_acc acc with
+   | Ok { usage = Some u; telemetry = Some tel; _ } ->
+     Alcotest.(check int) "responses sse input" 1600 u.input_tokens;
+     Alcotest.(check int) "responses sse output" 200 u.output_tokens;
+     Alcotest.(check int) "responses sse cache_read" 1000 u.cache_read_input_tokens;
+     Alcotest.(check int) "responses sse cache_write" 320 u.cache_creation_input_tokens;
+     Alcotest.(check (option int)) "responses sse reasoning_tokens" (Some 64) tel.reasoning_tokens
+   | Ok _ -> Alcotest.fail "expected finalized responses usage and telemetry"
+   | Error _ -> Alcotest.fail "responses stream with usage details must finalize");
+  (* Non-int detail values degrade to None without failing the terminal SSE frame. *)
+  let tolerant_state =
+    S.create_openai_stream_state ~provider:"openai_compat" ~model:"gpt-5.6-sol" ()
+  in
+  let tolerant_acc = Acc.create_stream_acc () in
+  let feed_tolerant event_type frame =
+    let events, _ = S.responses_sse_to_events tolerant_state (Some event_type) frame in
+    List.iter (Acc.accumulate_event tolerant_acc) events
+  in
+  feed_tolerant
+    "response.created"
+    {|{"type":"response.created","response":{"id":"resp_sse_2","model":"gpt-5.6-sol","status":"in_progress","usage":null}}|}
+  ;
+  feed_tolerant
+    "response.output_text.delta"
+    {|{"type":"response.output_text.delta","output_index":0,"content_index":0,"delta":"ok"}|}
+  ;
+  feed_tolerant
+    "response.completed"
+    {|{"type":"response.completed","response":{"id":"resp_sse_2","model":"gpt-5.6-sol","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":100,"output_tokens":20,"input_tokens_details":{"cached_tokens":10,"cache_write_tokens":"n/a"},"output_tokens_details":{"reasoning_tokens":"n/a"}}}}|}
+  ;
+  match Acc.finalize_stream_acc tolerant_acc with
   | Ok { usage = Some u; telemetry = Some tel; _ } ->
-    Alcotest.(check int) "responses sse input" 1600 u.input_tokens;
-    Alcotest.(check int) "responses sse output" 200 u.output_tokens;
-    Alcotest.(check int) "responses sse cache_read" 1000 u.cache_read_input_tokens;
-    Alcotest.(check int) "responses sse cache_write" 320 u.cache_creation_input_tokens;
-    Alcotest.(check (option int)) "responses sse reasoning_tokens" (Some 64) tel.reasoning_tokens
-  | Ok _ -> Alcotest.fail "expected finalized responses usage and telemetry"
-  | Error _ -> Alcotest.fail "responses stream with usage details must finalize"
+    Alcotest.(check int) "tolerant cache_read" 10 u.cache_read_input_tokens;
+    Alcotest.(check int) "tolerant bad cache_write defaults to 0" 0 u.cache_creation_input_tokens;
+    Alcotest.(check (option int)) "tolerant bad reasoning_tokens stays None" None tel.reasoning_tokens
+  | Ok _ -> Alcotest.fail "expected tolerant finalized responses usage and telemetry"
+  | Error _ -> Alcotest.fail "non-int detail must not fail terminal responses frame"
 ;;
 
 let test_responses_stream_reasoning_tool_and_terminal () =

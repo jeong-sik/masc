@@ -508,6 +508,10 @@
    ; A bootstrap mode of the shell (skip, empty) would change the config root
    ; of every case that boots a server. The empty value reads as unset.
    (MASC_CONFIG_BOOTSTRAP "")
+   ; A public MASC_HTTP_BASE_URL exported in the shell turns strict HTTP auth
+   ; on in every case that serves routes or boots main_eio. The empty value
+   ; reads as unset; cases that test a public URL set it themselves.
+   (MASC_HTTP_BASE_URL "")
    (MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED false))))
 
 ; All standard tests share the masc_test_deps wrapper library

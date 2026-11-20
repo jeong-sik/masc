@@ -731,7 +731,7 @@ let skill_source_lines ~cols ~config ~(sources : Masc.Tui_decode_tools.skill_cat
   in
   let total = List.length sources in
   let heading =
-    ( Ansi.bold
+    ( Ansi.bold ^ Theme.section_heading ()
     , Say.per_language (function
         | Say.Ko -> Printf.sprintf " Skill 출처 · 루트 %d개 중 %d개에 Skill 있음" total ready
         | Say.En -> Printf.sprintf " Skill Sources · %d of %d root%s carrying skills"
@@ -746,7 +746,7 @@ let skill_source_lines ~cols ~config ~(sources : Masc.Tui_decode_tools.skill_cat
         , Say.per_language (fun lang ->
               let label = match lang with Say.Ko -> "활성 루트" | Say.En -> "Active roots" in
               "   "
-              ^ Masc_tui_chart.meter ~width:meter_width ~value:ready ~max_value:(max 1 total)
+              ^ Masc_tui_chart.dot_meter ~width:meter_width ~value:ready ~max_value:(max 1 total)
                   ~label ~label_style:(Theme.recede ())
                   ~suffix:(Printf.sprintf "%d/%d" ready total)
                   ~scale:(Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Capacity })
@@ -2746,7 +2746,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             [ ( ""
               , Say.per_language (fun lang ->
                     let label = match lang with Say.Ko -> "관측 비율" | Say.En -> "Observed" in
-                    Masc_tui_chart.meter
+                    Masc_tui_chart.dot_meter
                       ~width:(min 52 card_inner)
                       ~value:observed_surfaces ~max_value:(max 1 total_surfaces)
                       ~label ~label_style:(Theme.recede ())
@@ -2756,7 +2756,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             ]
         in
         let heading = card ~cols (rows
-          ([ Ansi.bold,
+          ([ Ansi.bold ^ Theme.section_heading (),
              Say.per_language (function
                | Say.Ko -> Printf.sprintf "Skill 사용 집계 · catalog Skill %d개 중 %d개 관측"
                    total_surfaces observed_surfaces
@@ -3368,20 +3368,16 @@ let selected_skill_bottom_sheet ~cols ~height (state : state) =
           ; Masc_tui_doc.kv (say "불러온 이유" "Load reason") load_reasons
           ]
         in
-        Masc_tui_doc.bottom_sheet ~ko ~width ~height
-          ~role:Masc_tui_theme.Panel_neutral
+        let preview_indent = 1 in
+        let preview_cells = max 1 (width - preview_indent) in
+        Masc_tui_doc.docked_preview ~width ~height ~indent:preview_indent
+          ~eyebrow:(say "선택한 Skill" "Selected Skill")
           ~title:(Terminal_text.single_line profile.esp_name)
-          ~status:
-            { Masc_tui_card.symbol = Masc_tui_card.Mark Masc_tui_value.Mark.Settled
-            ; word = mode_word
-            ; tone = mode_tone
-            }
-          ~count:(Masc_tui_card.Whole (List.length fields))
-          ~footer_keys:
+          ~meta:(glyph ^ " " ^ mode_word)
+          ~footer_hints:
             [ { Masc_tui_card.key = "Enter"; label = say "실측" "evidence" }
             ; { key = "f"; label = say "조합" "comp" }
             ; { key = "1-6"; label = say "탭" "tabs" }
             ]
-          ~body:(fun ~cells -> Masc_tui_doc.kv_rows ~width:cells fields)
-          ()
+          (Masc_tui_doc.kv_rows ~width:preview_cells fields)
 ;;

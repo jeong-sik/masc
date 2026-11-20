@@ -270,6 +270,29 @@ let test_v2_chrome_primitives_bounds_and_sanitization () =
     (Theme.For_testing.section_heading ~colors_enabled:false
        ~project:(fun _ -> None) ~surface:Theme.Page None)
 
+let test_docked_preview_chrome_matches_rendered_budget () =
+  let hints = [ { Card.key = "Enter"; label = "open" } ] in
+  let blank_hints = [ { Card.key = "  "; label = " " } ] in
+  check int "eyebrow + footer hints -> 3 chrome rows" 3
+    (Doc.docked_preview_chrome ~eyebrow:"Selected" ~footer_hints:hints ());
+  check int "eyebrow only -> 2 chrome rows" 2
+    (Doc.docked_preview_chrome ~eyebrow:"Selected" ~footer_hints:[] ());
+  check int "footer hints only -> 2 chrome rows" 2
+    (Doc.docked_preview_chrome ~footer_hints:hints ());
+  check int "blank eyebrow + blank hints -> 1 chrome row (hairline only)" 1
+    (Doc.docked_preview_chrome ~eyebrow:"   " ~footer_hints:blank_hints ());
+  let body = [ "body-row-1"; "body-row-2"; "body-row-3"; "body-row-4" ] in
+  let chrome = Doc.docked_preview_chrome ~eyebrow:"Header" ~footer_hints:hints () in
+  let rendered =
+    Doc.docked_preview ~width:64 ~height:(chrome + List.length body) ~indent:1
+      ~eyebrow:"Header" ~footer_hints:hints body
+    |> List.map Theme.strip_sgr
+  in
+  check int "rendered height matches chrome + body" (chrome + List.length body)
+    (List.length rendered);
+  check bool "final body row is never clipped at height = chrome + body" true
+    (List.exists (fun line -> String.trim line = "body-row-4") rendered)
+
 let () =
   run "tui_doc"
     [ ( "doc"
@@ -286,5 +309,7 @@ let () =
             test_numbered_tab_strip_and_default
         ; test_case "v2 hairline, section_header, footer_hints, docked_preview & theme NO_COLOR" `Quick
             test_v2_chrome_primitives_bounds_and_sanitization
+        ; test_case "docked_preview_chrome matches rendered body budget" `Quick
+            test_docked_preview_chrome_matches_rendered_budget
         ] )
     ]

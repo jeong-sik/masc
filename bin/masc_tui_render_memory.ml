@@ -1904,13 +1904,27 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     max 0 (room_below_chrome - memory_fact_list_floor_rows - 1)
   in
   let tallest = if total = 0 then 0 else tallest_fact_detail_lines ~ko ~cols rows in
-  (* [Doc.docked_preview] spends 3 chrome rows (hairline, header, footer hints),
-     so reserve [tallest + 3] (clamped to 7..13) to keep the final metadata row
-     visible whenever [detail_budget] permits. *)
+  let preview_eyebrow = if ko then "선택한 사실" else "Selected Fact" in
+  let preview_footer_hints =
+    [ { Masc_tui_card.key = "Enter"; label = (if ko then "전체" else "full") }
+    ; { key = "d"; label = (if ko then "트리" else "tree") }
+    ; { key = "c/C"; label = (if ko then "분류" else "cat") }
+    ]
+  in
+  let preview_chrome =
+    Doc.docked_preview_chrome ~eyebrow:preview_eyebrow
+      ~footer_hints:preview_footer_hints ()
+  in
+  (* Reserve [tallest + preview_chrome] (clamped to [preview_chrome + 4 .. preview_chrome + 10],
+     i.e. 7..13 with header + footer hints) so the final metadata row stays visible
+     whenever [detail_budget >= tallest + preview_chrome]. *)
   let sheet_height =
     if total = 0 || detail_budget < 5 || tallest <= 0 || width < Masc_tui_card.min_width
     then 0
-    else min detail_budget (min 13 (max 7 (tallest + 3)))
+    else
+      min detail_budget
+        (min (preview_chrome + 10)
+           (max (preview_chrome + 4) (tallest + preview_chrome)))
   in
   let detail_lines, detail_is_sheet =
     match selected_row with
@@ -1925,14 +1939,10 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
         in
         let sheet =
           Doc.docked_preview ~width ~height:sheet_height ~indent:preview_indent
-            ~eyebrow:(if ko then "선택한 사실" else "Selected Fact")
+            ~eyebrow:preview_eyebrow
             ~title:(Masc_tui_theme.strip_sgr sheet_parts.heading_plain)
             ~meta:(Printf.sprintf (if ko then "%d줄" else "%d lines") total_body)
-            ~footer_hints:
-              [ { Masc_tui_card.key = "Enter"; label = (if ko then "전체" else "full") }
-              ; { key = "d"; label = (if ko then "트리" else "tree") }
-              ; { key = "c/C"; label = (if ko then "분류" else "cat") }
-              ]
+            ~footer_hints:preview_footer_hints
             (sheet_parts.claim_lines @ [ "" ] @ sheet_parts.other_lines)
         in
         sheet, true

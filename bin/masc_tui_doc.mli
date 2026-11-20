@@ -72,6 +72,18 @@ val docked_preview :
     [height] lines when [width > 0 && height > 0] so parent list rows stay
     stationary (RFC §8). *)
 
+val docked_preview_chrome :
+  ?eyebrow:string ->
+  ?title:string ->
+  ?meta:string ->
+  ?footer_hints:Masc_tui_card.inline_key list ->
+  unit ->
+  int
+(** Number of chrome rows {!docked_preview} consumes at full height
+    (hairline rule + optional header + optional footer hints). Callers
+    sizing a docked sheet from body height should use this instead of
+    hardcoding a chrome offset. *)
+
 val kv_rows :
   width:int ->
   ?indent:int ->

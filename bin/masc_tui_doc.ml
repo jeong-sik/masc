@@ -110,7 +110,6 @@ let kv_rows ~width ?(indent = 2) ?label_style ?(max_label_cells = 18) fields =
     let two_col =
       natural_col_w > 0 && natural_col_w + gutter_w + 12 <= content_w
     in
-    let col_w = min natural_col_w (max 4 (content_w / 3)) in
     let wrap_clamped max_w value =
       let rows =
         match Text_block.rows ~max_cells:(max 1 max_w) value with
@@ -120,6 +119,7 @@ let kv_rows ~width ?(indent = 2) ?label_style ?(max_label_cells = 18) fields =
       List.map (clamp_plain ~max_cells:max_w) rows
     in
     if two_col then
+      let col_w = min natural_col_w (max 4 (content_w / 3)) in
       let val_w = content_w - col_w - gutter_w in
       let cont_prefix = margin ^ String.make (col_w + gutter_w) ' ' in
       List.concat_map
@@ -451,6 +451,30 @@ let preview_footer_hints ~width ?(indent = 0) keys =
       let parts = collect 0 [] keys in
       if parts = [] then "" else margin ^ String.concat rendered_sep parts
 
+let clean_preview_opt = function
+  | None -> None
+  | Some s ->
+    let t = String.trim (sanitize s) in
+    if String.equal t "" then None else Some t
+
+let has_preview_footer_hints keys =
+  List.exists
+    (fun (fk : Card.inline_key) ->
+       not
+         (String.equal (String.trim (sanitize fk.Card.key)) ""
+          && String.equal (String.trim (sanitize fk.Card.label)) ""))
+    keys
+
+let docked_preview_chrome ?eyebrow ?title ?meta ?(footer_hints = []) () =
+  let has_header =
+    match clean_preview_opt eyebrow, clean_preview_opt title, clean_preview_opt meta with
+    | None, None, None -> false
+    | Some _, _, _ | _, Some _, _ | _, _, Some _ -> true
+  in
+  let top_count = 1 + if has_header then 1 else 0 in
+  let bottom_count = if has_preview_footer_hints footer_hints then 1 else 0 in
+  top_count + bottom_count
+
 let docked_preview ~width ~height ?(indent = 0) ?eyebrow ?title ?meta
     ?(footer_hints = []) body_rows =
   if width <= 0 || height <= 0 then []
@@ -458,14 +482,8 @@ let docked_preview ~width ~height ?(indent = 0) ?eyebrow ?title ?meta
     let indent = max 0 (min indent (max 0 (width - 1))) in
     let content_w = max 0 (width - indent) in
     let margin = String.make indent ' ' in
-    let clean_opt = function
-      | None -> None
-      | Some s ->
-        let t = String.trim (sanitize s) in
-        if String.equal t "" then None else Some t
-    in
     let header_line =
-      match clean_opt eyebrow, clean_opt title, clean_opt meta with
+      match clean_preview_opt eyebrow, clean_preview_opt title, clean_preview_opt meta with
       | None, None, None -> None
       | Some eye, t_opt, m_opt ->
         Some

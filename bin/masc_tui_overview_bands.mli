@@ -23,7 +23,8 @@ val min_rows : int
 
 val plan : available:int -> cols:int -> keeper_count:int -> plan
 (** Pure vertical row budget split between the top telemetry ribbon,
-    the live keepers mini-table, and the lower overview cards.
+    the live keepers mini-table, and the lower overview cards. Independent of
+    [keeper_count] so incoming keeper snapshots never shift lower cards.
     Whenever [With_bands { telemetry_rows; keeper_rows; card_rows }] is
     returned, [telemetry_rows + keeper_rows + card_rows = available],
     [telemetry_rows >= 4], [keeper_rows = 0 || keeper_rows >= 3], and

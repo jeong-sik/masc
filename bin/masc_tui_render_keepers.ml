@@ -2724,6 +2724,38 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
           [ Theme.warn () ^ text "일부 관측" "partial reading" ^ Ansi.reset ]
         else []
   in
+  let alerts =
+    errors
+    @ waiting
+    @ roster
+    @ fleet_gaps
+    @ Option.to_list
+        (Option.map (warning (text "보기 설정: " "view preferences: "))
+           state.keeper_list_preference_notice)
+    @ Option.to_list (local_source_pending_note state Local_keepers)
+  in
+  let status_slot =
+    match alerts with
+    | first :: rest ->
+        if rest = [] then [ fit_width first inner ]
+        else
+          let more =
+            Theme.recede ()
+            (* The alerts after the first: a cut-off count, never "+N"
+               (RFC tui-one-screen-grammar 6.3). *)
+            ^ " (" ^ Masc_tui_value.Count.more ~ko (List.length rest) ^ ")"
+            ^ Ansi.reset
+          in
+          let more_cells =
+            Message_layout.display_width (Masc_tui_theme.strip_sgr more)
+          in
+          [ fit_width first (max 1 (inner - more_cells)) ^ more ]
+    | [] -> (
+        match keeper_pulse_counts_header state ~now ~inner ~selected_row all_rows with
+        | line :: _ -> [ line ]
+        | [] ->
+            [ Theme.recede () ^ "  " ^ text "관측 대기 중" "observing fleet" ^ Ansi.reset ])
+  in
   [ here_row ~cols state ~path:[]
       ~readings:title_readings
       ~position:(keeper_list_position ~stop model_rows)
@@ -2732,10 +2764,7 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
       state.keeper_list_view
   ]
   @ keeper_plain_fleet_lines state ~now ~inner
-  @ keeper_pulse_counts_header state ~now ~inner ~selected_row all_rows
-  @ errors @ fleet_gaps @ roster @ waiting
-  @ Option.to_list (Option.map (warning (text "보기 설정: " "view preferences: ")) state.keeper_list_preference_notice)
-  @ Option.to_list (local_source_pending_note state Local_keepers)
+  @ status_slot
 
 let cap_keeper_headers (state : state) ~inner ~budget headers =
   if List.length headers <= budget then headers
@@ -2963,15 +2992,23 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   (* One divider sits below [headers] and two rows (divider + footer) sit below
      the body; there is no leading blank line so Zone 2 starts on row 2. *)
   let body_rows = max 0 (rows - List.length headers - 1 - 2 - summary_rows - sheet_rows) in
-  let detail_budget = match detail_width with
+  let detail_budget =
+    match detail_width with
     | Some _ -> body_rows
     | None ->
-        min (List.length detail) (max 0 (body_rows - list_floor - 1))
+        if Option.is_none selected_row then 0
+        else
+          let cap = min 10 (max 0 (body_rows - list_floor - 1)) in
+          if cap < 3 then 0 else cap
   in
   let detail_lines =
-    if List.length detail <= detail_budget then detail
-    else if detail_budget = 0 then []
-    else List.take (detail_budget - 1) detail
+    if detail_budget = 0 then []
+    else if List.length detail <= detail_budget then
+      if Option.is_none detail_width then
+        detail @ List.init (detail_budget - List.length detail) (fun _ -> "")
+      else detail
+    else
+      List.take (detail_budget - 1) detail
       @ [Theme.recede () ^ ui_text state ~ko:"→:상세에서 이어 보기" ~en:"→:continue in detail" ^ Ansi.reset]
   in
   let list_rows = match detail_width with
@@ -3220,6 +3257,12 @@ let render_keeper_axes (state : state) =
         max widest (max (failure_sentence_cells row) (keeper_runtime_cells runtime)))
       0 model_rows
   in
+  let latched =
+    Masc_tui_types.latch_keeper_column_widths state.keeper_column_latch
+      ~view:state.keeper_list_view ~density:state.keeper_list_density ~inner
+      ~widest_runtime ~widest_detail
+  in
+  state.keeper_column_latch <- Some latched;
   let columns =
     Render_schedule.allocate_keeper_columns
       (* One line gives the available row to the current work. Two lines
@@ -3232,7 +3275,8 @@ let render_keeper_axes (state : state) =
         | Keeper_list_model.Two_lines -> false
         | Keeper_list_model.One_line -> true)
       ~prioritize_runtime:has_failing_keeper ~inner_width:inner
-      ~widest_runtime ~widest_detail ()
+      ~widest_runtime:latched.kcl_widest_runtime
+      ~widest_detail:latched.kcl_widest_detail ()
   in
   let peak_lag = axis_peak_lag state model_rows in
   let peak_facts = axis_peak_facts state model_rows in

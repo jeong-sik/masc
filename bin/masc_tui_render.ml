@@ -743,7 +743,12 @@ let render_overview (state : state) home =
       (match card_rows with
        | Some rows ->
            List.iter c.push rows;
-           if available > List.length rows then c.push (tool_calls_line ~cells:inner_cols)
+           if available > List.length rows then begin
+             for _ = 1 to available - List.length rows - 1 do
+               c.push ""
+             done;
+             c.push (tool_calls_line ~cells:inner_cols)
+           end
        | None ->
            if state.overview_collapsed_cards <> [] then
              c.push_styled ~style:(Theme.warn ())

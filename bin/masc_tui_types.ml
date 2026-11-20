@@ -3976,6 +3976,35 @@ let docked_vertical_split ~total_rows ~mode ~has_selection =
     let preview_rows = if preview_rows < 4 then 0 else preview_rows in
     { list_rows = total_rows - preview_rows; preview_rows }
 
+(** Monotonic high-water column width latch for the Keepers view so live
+    runtime/task updates never shrink columns mid-inspection and shift text
+    left/right. Resets only when view, density, or inner width changes. *)
+type keeper_column_latch =
+  { kcl_view : Masc_tui_keeper_list_model.view
+  ; kcl_density : Masc_tui_keeper_list_model.density
+  ; kcl_inner : int
+  ; kcl_widest_runtime : int
+  ; kcl_widest_detail : int
+  }
+
+let latch_keeper_column_widths current ~view ~density ~inner ~widest_runtime ~widest_detail =
+  match current with
+  | Some prev
+    when prev.kcl_view = view
+         && prev.kcl_density = density
+         && prev.kcl_inner = inner ->
+      { prev with
+        kcl_widest_runtime = max prev.kcl_widest_runtime widest_runtime
+      ; kcl_widest_detail = max prev.kcl_widest_detail widest_detail
+      }
+  | Some _ | None ->
+      { kcl_view = view
+      ; kcl_density = density
+      ; kcl_inner = inner
+      ; kcl_widest_runtime = widest_runtime
+      ; kcl_widest_detail = widest_detail
+      }
+
 (** The Candle destination follows its section as asynchronous rows change;
     its integer is the last visible offset for a subsequent manual move. *)
 type planning_scroll =
@@ -10909,6 +10938,7 @@ type state = {
       and age views. Those readings are decoded by modules built on this one,
       so the TUI installs the reduction after it creates the state. *)
   mutable keeper_list_density: Masc_tui_keeper_list_model.density;
+  mutable keeper_column_latch: keeper_column_latch option;
   (* The group heading the cursor stands on, and the groups whose rows are
      folded away (RFC-0515 E12). Kept for this session only: neither is a
      choice [tui-keepers.toml] stores. *)
@@ -21850,6 +21880,7 @@ let create_state
   keeper_list_view = Masc_tui_keeper_list_model.Plain;
   keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
+  keeper_column_latch = None;
   keeper_list_focus = None;
   keeper_list_folded = [];
   keeper_list_seen_groups = [];

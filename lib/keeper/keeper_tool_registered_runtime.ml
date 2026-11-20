@@ -11,7 +11,7 @@ open Keeper_tool_shared_runtime
     distinctions into [None], and the fallthrough handler re-derived them by
     running the same effects again, doubling the pre-hook chain, the
     dispatch observers, and the telemetry spans for every tool the guarded
-    dispatcher declined (RFC-0371 §3, keeper_tool_registered_runtime:115). *)
+    dispatcher declined. *)
 
 let unregistered_failure ?reason ~name () =
   let fields =

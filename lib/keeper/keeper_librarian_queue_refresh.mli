@@ -154,7 +154,7 @@ module For_testing : sig
   val run_continuity : ?cli_runner:Keeper_lane_cli_oneshot.runner ->
     ?has_waiting:(unit -> bool) ->
     base_path:string -> keeper_name:string -> unit -> unit
-  (** [has_waiting] replaces the lane's "a unit waits" read (RFC-0467). *)
+  (** [has_waiting] replaces the lane's "a unit waits" read. *)
   val run_with_readers
     :  durable:(unit -> pass_end)
     -> continuity:(unit -> unit)

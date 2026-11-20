@@ -1,4 +1,4 @@
-(** The absorb gate of a librarian pass (RFC-librarian-absorb-gate).
+(** The absorb gate of a librarian pass.
 
     A librarian answer names current memories a new claim absorbs. Before
     the answer is applied, a judgment model (TypeSafe Jev) reads each complete
@@ -18,7 +18,7 @@
     entire Memory range pending on judgment failure, including the proposed
     claims, so a later pass can retry it.
 
-    One exception to "new claims are applied" (RFC-0463 section 2.8): a new
+    One exception to "new claims are applied": a new
     claim that named memories in [absorbs] and had none of them absorbed is
     asked the reverse question -- do the memories it named, which stay
     current, convey each of its statements? When every statement is

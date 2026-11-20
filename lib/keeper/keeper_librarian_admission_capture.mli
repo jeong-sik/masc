@@ -47,7 +47,7 @@ val scope_of_request_id : string -> (string, string) result
     capture/physical equality must still be checked before any effect. *)
 val minted_on : string -> (string, string) result
 (** The UTC day, [YYYY-MM-DD], this execution request ID was minted. An
-    interrupted execution settles under that day (RFC-0500). *)
+    interrupted execution settles under that day. *)
 val package_id : string
 val tool : string
 val create : request_id:string -> parent_part_id:string -> owner:owner ->

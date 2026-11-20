@@ -6,9 +6,7 @@
     = always on" behaviour is preserved; operators opt in to a kill-switch
     by setting a flag to [false].
 
-    This closes RFC-0297 §P0-1: the global kill-switches did not exist in
-    code, so [\[proactive\] enabled = false] in runtime.toml was silently
-    dropped. The closed [gate] sum + exhaustive [gate_enabled] make a
+    The closed [gate] sum + exhaustive [gate_enabled] make a
     missing gate a compile error rather than a silent always-on path
     (CLAUDE.md §FSM sparse match). *)
 

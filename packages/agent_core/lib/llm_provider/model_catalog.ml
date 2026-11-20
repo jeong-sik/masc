@@ -63,6 +63,7 @@ type model_entry =
   ; input_per_million : float option
   ; output_per_million : float option
   ; cache_write_multiplier : float option
+  ; cache_write_1h_multiplier : float option
   ; cache_read_multiplier : float option
   }
 
@@ -180,6 +181,7 @@ let with_model_overrides catalog declarations =
     ; input_per_million = (match previous with Some row -> row.input_per_million | None -> None)
     ; output_per_million = (match previous with Some row -> row.output_per_million | None -> None)
     ; cache_write_multiplier = (match previous with Some row -> row.cache_write_multiplier | None -> None)
+    ; cache_write_1h_multiplier = (match previous with Some row -> row.cache_write_1h_multiplier | None -> None)
     ; cache_read_multiplier = (match previous with Some row -> row.cache_read_multiplier | None -> None)
     } in
   let seen, models = List.fold_left (fun (seen, models) (row : model_entry) ->
@@ -478,6 +480,7 @@ let known_entry_keys =
   ; "input_per_million"
   ; "output_per_million"
   ; "cache_write_multiplier"
+  ; "cache_write_1h_multiplier"
   ; "cache_read_multiplier"
   ]
 ;;
@@ -722,6 +725,9 @@ let parse_entry entry_toml =
   let* cache_write_multiplier =
     float_field ~entry_id "cache_write_multiplier" entry_toml
   in
+  let* cache_write_1h_multiplier =
+    float_field ~entry_id "cache_write_1h_multiplier" entry_toml
+  in
   let* cache_read_multiplier =
     float_field ~entry_id "cache_read_multiplier" entry_toml
   in
@@ -774,6 +780,7 @@ let parse_entry entry_toml =
     ; input_per_million
     ; output_per_million
     ; cache_write_multiplier
+    ; cache_write_1h_multiplier
     ; cache_read_multiplier
     }
 ;;

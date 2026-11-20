@@ -440,14 +440,18 @@ let test_responses_sol_rejects_codex_only_ultra () =
    because they are not part of that set; they carry the same gap, and Mythos
    5.1 shares Fable 5.1's 0.025x cache read, so a row of its own comes with
    whichever change starts running them. Haiku 5.5 is left out because its row
-   states no price at all, so it has no multiplier to carry. *)
+   states no price at all, so it has no multiplier to carry.
+
+   The middle number is the one-hour write the claude provider accepts
+   ([supports_extended_cache_ttl]): every model on the pricing table charges
+   2x base input for it (checked 2026-11-20). *)
 let anthropic_cache_pricing_rows =
-  [ "claude-opus-5-5", 1.25, 0.05
-  ; "claude-sonnet-5", 1.25, 0.1
-  ; "claude-sonnet-5-5", 1.25, 0.05
-  ; "claude-fable-5", 1.25, 0.1
-  ; "claude-fable-5-1", 1.25, 0.025
-  ; "claude-fable-5-2", 1.25, 0.025
+  [ "claude-opus-5-5", 1.25, 2.0, 0.05
+  ; "claude-sonnet-5", 1.25, 2.0, 0.1
+  ; "claude-sonnet-5-5", 1.25, 2.0, 0.05
+  ; "claude-fable-5", 1.25, 2.0, 0.1
+  ; "claude-fable-5-1", 1.25, 2.0, 0.025
+  ; "claude-fable-5-2", 1.25, 2.0, 0.025
   ]
 ;;
 
@@ -456,7 +460,7 @@ let test_anthropic_rows_price_cache_tokens () =
     Model_catalog_test_support.load_repo_model_catalog ~suite:"anthropic cache pricing"
   in
   List.iter
-    (fun (model_id, expected_write, expected_read) ->
+    (fun (model_id, expected_write, expected_hour_write, expected_read) ->
        match Model_catalog.lookup catalog (Llm_provider.Model_identifiers.Model_id.of_string_exn model_id) with
        | None -> failf "%s resolves to no catalog row" model_id
        | Some (entry : Model_catalog.model_entry) ->
@@ -465,6 +469,11 @@ let test_anthropic_rows_price_cache_tokens () =
            (Printf.sprintf "%s prices cache writes" model_id)
            (Some expected_write)
            entry.cache_write_multiplier;
+         check
+           (option (float 0.0001))
+           (Printf.sprintf "%s prices one-hour cache writes" model_id)
+           (Some expected_hour_write)
+           entry.cache_write_1h_multiplier;
          check
            (option (float 0.0001))
            (Printf.sprintf "%s prices cache reads" model_id)

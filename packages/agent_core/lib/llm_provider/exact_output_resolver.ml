@@ -545,6 +545,7 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ; "input_per_million=" ^ option_price model.input_per_million
       ; "output_per_million=" ^ option_price model.output_per_million
       ; "cache_write_multiplier=" ^ option_price model.cache_write_multiplier
+      ; "cache_write_1h_multiplier=" ^ option_price model.cache_write_1h_multiplier
       ; "cache_read_multiplier=" ^ option_price model.cache_read_multiplier
       ])
   in

@@ -84,6 +84,11 @@ type model_entry =
   ; input_per_million : float option
   ; output_per_million : float option
   ; cache_write_multiplier : float option
+  ; cache_write_1h_multiplier : float option
+      (** Price of a one-hour cache write, as a multiple of the base input
+          price. [cache_write_multiplier] prices a write that names no
+          lifetime (five minutes on Anthropic). [None] leaves a one-hour
+          write unpriced. *)
   ; cache_read_multiplier : float option
   }
 

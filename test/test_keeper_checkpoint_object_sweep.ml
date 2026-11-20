@@ -10,6 +10,10 @@ module Retained = Masc.Keeper_retained_checkpoint_sweep
 module Store = Keeper_chat_operation_store
 module Execution = Keeper_semantic_execution
 module Operation = Keeper_chat_operation
+module Turn_log = Masc.Keeper_turn_log
+module Turn_store = Masc.Keeper_turn_log_store
+module Commit_store = Masc.Librarian_log_store
+module Unread = Masc.Keeper_unread_turn_bundles
 
 let string_ok = function Ok value -> value | Error detail -> fail detail
 let store_ok = function Ok value -> value | Error error -> fail (Store.error_to_string error)
@@ -37,8 +41,11 @@ let with_root f =
 let session_dir root session_id =
   Filename.concat (Masc.Keeper_fs.session_store_path_for_runtime_root root) session_id
 
+(* Where the Memory writers' commit logs are. *)
+let memory_dir root = Filename.concat root "memory"
+
 let sweep_result root =
-  Sweep.run ~runtime_root:root
+  Sweep.run ~runtime_root:root ~memory_dir:(memory_dir root)
 
 let sweep root =
   match sweep_result root with Ok report -> report | Error error -> fail (Sweep.error_to_string error)
@@ -175,6 +182,92 @@ let hold_in_gate_preparation root ~keeper_name ~session_id (plan : O.plan) =
          ~execution_digest:operation.execution_digest ~binding ~diagnostic:"held in the store"
        |> store_ok))
 
+(* The one bundle a save of one turn closed. *)
+let only_bundle (plan : O.plan) =
+  match plan.head.history.turns with
+  | [ turn ] -> turn.bundle
+  | _ -> fail "one closed turn"
+
+let log_id hex =
+  match Turn_log.Log_id.of_string (String.make 32 hex) with
+  | Some id -> id
+  | None -> fail "a turn log id is 32 hexadecimal characters"
+
+(* The Keeper whose turn log and commit log the sweep reads. *)
+let reader = "reader"
+let reader_log = log_id 'c'
+
+let turn_log_path root =
+  Turn_store.path_for_keepers_dir
+    ~keepers_dir:(Filename.concat root Common.keepers_runtime_dirname)
+    ~keeper_id:reader
+
+let commit_log_path root =
+  Commit_store.path_for_keepers_dir ~keepers_dir:(memory_dir root) ~keeper_id:reader
+
+let mark ~trace closed_messages = Masc_test_deps.turn_log_mark ~trace_id:trace ~closed_messages
+
+let append_line root ~at_end line =
+  let path = turn_log_path root in
+  mkdir_p (Filename.dirname path);
+  match Turn_store.append ~path ~at_end (line, []) with
+  | Ok appended -> appended
+  | Error (_ : Turn_store.append_error) -> fail "a turn log line was not appended"
+
+(* The reader's turn log, started in [trace] before any message. Its end. *)
+let start_log root ~trace =
+  (append_line root ~at_end:0
+     (Turn_log.Log_started { id = reader_log; at = 1.0; mark = mark ~trace 0 }))
+    .Turn_store.new_end
+
+(* One completed turn of [trace] after [closed] closed messages, appended at
+   [at_end]: its [Opened] line, then a [Closed] line whose own content is the
+   two messages of [bundle]. Where the [Opened] line starts, and the log's new
+   end. *)
+let append_turn root ~at_end ~trace ~closed bundle =
+  let opened =
+    append_line root ~at_end
+      (Turn_log.Opened
+         { at = 2.0
+         ; turn_ref = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:((closed / 2) + 1)
+         ; runtime = "fixture"
+         ; task = Turn_log.No_task
+         ; stimuli = []
+         ; baseline = mark ~trace closed
+         })
+  in
+  let closing =
+    append_line root ~at_end:opened.Turn_store.new_end
+      (Turn_log.Closed
+         { turn = opened.Turn_store.last_at
+         ; at = 3.0
+         ; outcome = Turn_log.Completed
+         ; after = mark ~trace (closed + 2)
+         ; unattributed = []
+         ; own = [ { Turn_log.bundle; skip = 0; take = 2 } ]
+         })
+  in
+  opened.Turn_store.last_at, closing.Turn_store.new_end
+
+(* The reader's commit log ends in a line saying it reads [turn_log] next at
+   [turn_log_offset]. *)
+let commit_tail root ~turn_log ~turn_log_offset =
+  let path = commit_log_path root in
+  mkdir_p (Filename.dirname path);
+  match
+    Commit_store.append ~path ~at_end:0
+      (Masc.Librarian_log.Started
+         { at = 4.0
+         ; turn_log
+         ; snapshot = O.digest_of_bytes "snapshot"
+         ; revision = 0
+         ; turn_log_offset
+         ; covered = mark ~trace:"trace-reader" 0
+         })
+  with
+  | Ok (_ : Commit_store.appended) -> ()
+  | Error (_ : Commit_store.append_error) -> fail "the commit log line was not appended"
+
 let test_every_root_keeps_what_it_reaches () = with_root (fun root ->
   let main = "trace-main" and gated = "trace-gated" in
   (* The canonical's turns before its last segment are named only through
@@ -297,7 +390,8 @@ let test_a_head_it_cannot_read_removes_nothing () =
        write (canonical root "trace-refused") (head_bytes unnamed);
        refused root ~expect:(function
          | Sweep.Root_unusable _ -> true
-         | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Segment_unreachable _ ->
+         | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Segment_unreachable _
+         | Unread_lines_unreadable _ ->
            false)))
     [ (fun (_ : O.plan) -> "not a head")
     ; (fun (plan : O.plan) ->
@@ -309,7 +403,8 @@ let test_a_retained_entry_that_is_not_a_directory_removes_nothing () = with_root
   write (Filename.concat (session_dir root "trace-refused") Checkpoint.retained_dirname) "not a directory";
   refused root ~expect:(function
     | Sweep.Listing_failed _ -> true
-    | Sweep.Owner_stores_unreadable _ | Root_unreadable _ | Root_unusable _ | Segment_unreachable _ -> false))
+    | Sweep.Owner_stores_unreadable _ | Root_unreadable _ | Root_unusable _ | Segment_unreachable _
+    | Unread_lines_unreadable _ -> false))
 
 let test_a_segment_it_cannot_follow_removes_nothing () = with_root (fun root ->
   let current = save_turns ~root ~session_id:"trace-refused" ~marker:"current" (O.turns_per_segment + 1) in
@@ -320,7 +415,8 @@ let test_a_segment_it_cannot_follow_removes_nothing () = with_root (fun root ->
    | None -> fail "the canonical must have a segment");
   refused root ~expect:(function
     | Sweep.Segment_unreachable _ -> true
-    | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Root_unusable _ -> false))
+    | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Root_unusable _
+    | Unread_lines_unreadable _ -> false))
 
 let test_an_unread_operation_store_removes_nothing () = with_root (fun root ->
   ignore (save_turns ~root ~session_id:"trace-refused" ~marker:"unnamed" 2 : O.plan);
@@ -331,8 +427,104 @@ let test_an_unread_operation_store_removes_nothing () = with_root (fun root ->
     | Sweep.Owner_stores_unreadable
         ( Retained.Store_unreadable _ | Metadata_unreadable _ | Prior_input_history_unavailable _
         | Keeper_shares_store_directory _ )
-    | Listing_failed _ | Root_unreadable _ | Root_unusable _ | Segment_unreachable _ ->
+    | Listing_failed _ | Root_unreadable _ | Root_unusable _ | Segment_unreachable _
+    | Unread_lines_unreadable _ ->
       false))
+
+(* Two closed turns of one session whose bundles no head names: only the
+   turn-log lines the reader has yet to read keep them. The commit log tail
+   says where those lines start, when it places the reader in this log. *)
+let test_unread_lines_keep_what_they_point_at () =
+  List.iter
+    (fun (label, tail, first_kept, second_kept) -> with_root (fun root ->
+       let session_id = "trace-reader" in
+       let first, second =
+         match (save_turns ~root ~session_id ~marker:"turn" 2).head.history.turns with
+         | [ first; second ] -> first.bundle, second.bundle
+         | _ -> fail "two closed turns"
+       in
+       let started = start_log root ~trace:session_id in
+       let (_ : int), first_end = append_turn root ~at_end:started ~trace:session_id ~closed:0 first in
+       let second_at, log_end = append_turn root ~at_end:first_end ~trace:session_id ~closed:2 second in
+       tail root ~second_at ~log_end;
+       ignore (sweep root : Sweep.report);
+       check bool (label ^ ": the first turn's bundle") first_kept
+         (Sys.file_exists (object_path root session_id first));
+       check bool (label ^ ": the second turn's bundle") second_kept
+         (Sys.file_exists (object_path root session_id second))))
+    [ ( "read through the first turn"
+      , (fun root ~second_at ~log_end:_ -> commit_tail root ~turn_log:reader_log ~turn_log_offset:second_at)
+      , false
+      , true )
+    ; ( "read through the log's end"
+      , (fun root ~second_at:_ ~log_end -> commit_tail root ~turn_log:reader_log ~turn_log_offset:log_end)
+      , false
+      , false )
+    ; "no commit log", (fun _ ~second_at:_ ~log_end:_ -> ()), true, true
+    ; ( "a tail naming another turn log"
+      , (fun root ~second_at ~log_end:_ -> commit_tail root ~turn_log:(log_id 'd') ~turn_log_offset:second_at)
+      , true
+      , true )
+    ; ( "an offset inside a line"
+      , (fun root ~second_at ~log_end:_ ->
+          commit_tail root ~turn_log:reader_log ~turn_log_offset:(second_at + 1))
+      , true
+      , true )
+    ; ( "a commit log that does not decode"
+      , (fun root ~second_at:_ ~log_end:_ -> write (commit_log_path root) "not a commit line\n")
+      , true
+      , true ) ]
+
+(* A [Reset] line's bundles belong to the trace before it and a [Closed]
+   line's to the trace after it. *)
+let test_a_line_keeps_its_bundles_in_its_own_trace () = with_root (fun root ->
+  let before = "trace-before" and after = "trace-after" in
+  let before_plan = save_turns ~root ~session_id:before ~marker:"before" 1 in
+  let closed_before = only_bundle before_plan in
+  let closed_after = only_bundle (save_turns ~root ~session_id:after ~marker:"after" 1) in
+  let started = start_log root ~trace:before in
+  let reset =
+    append_line root ~at_end:started
+      (Turn_log.Reset
+         { at = 5.0
+         ; cause = Turn_log.Unannounced
+         ; before = mark ~trace:before 2
+         ; after = mark ~trace:after 0
+         ; closed_before = [ { Turn_log.bundle = closed_before; skip = 0; take = 2 } ]
+         })
+  in
+  ignore (append_turn root ~at_end:reset.Turn_store.new_end ~trace:after ~closed:0 closed_after : int * int);
+  ignore (sweep root : Sweep.report);
+  check bool "the reset keeps its bundle in the trace before it" true
+    (Sys.file_exists (object_path root before closed_before));
+  check bool "the turn after it keeps its bundle in its own trace" true
+    (Sys.file_exists (object_path root after closed_after));
+  check bool "what no line names is removed" false
+    (Sys.file_exists (object_path root before before_plan.head.header_objects.system_prompt)))
+
+let unread_lines_refused = function
+  | Sweep.Unread_lines_unreadable error -> Some error
+  | Sweep.Owner_stores_unreadable _ | Listing_failed _ | Root_unreadable _ | Root_unusable _
+  | Segment_unreachable _ ->
+    None
+
+let test_a_turn_log_it_cannot_read_removes_nothing () = with_root (fun root ->
+  ignore (save_turns ~root ~session_id:"trace-refused" ~marker:"unnamed" 2 : O.plan);
+  write (turn_log_path root) "not a turn log line\n";
+  refused root ~expect:(fun error ->
+    match unread_lines_refused error with
+    | Some (Unread.Turn_log_unreadable _) -> true
+    | Some (Unread.Listing_failed _ | Unread.Line_undecodable _) | None -> false))
+
+let test_an_unread_line_it_cannot_decode_removes_nothing () = with_root (fun root ->
+  ignore (save_turns ~root ~session_id:"trace-refused" ~marker:"unnamed" 2 : O.plan);
+  ignore (start_log root ~trace:"trace-refused" : int);
+  Out_channel.with_open_gen [ Open_wronly; Open_append; Open_binary ] 0o644 (turn_log_path root) (fun channel ->
+    Out_channel.output_string channel "not a turn log line\n");
+  refused root ~expect:(fun error ->
+    match unread_lines_refused error with
+    | Some (Unread.Line_undecodable _) -> true
+    | Some (Unread.Listing_failed _ | Unread.Turn_log_unreadable _) | None -> false))
 
 let () =
   run "keeper_checkpoint_object_sweep"
@@ -348,4 +540,13 @@ let () =
             test_a_segment_it_cannot_follow_removes_nothing
         ; test_case "an unread operation store removes nothing" `Quick
             test_an_unread_operation_store_removes_nothing
+        ] )
+    ; ( "unread turn-log lines"
+      , [ test_case "unread lines keep what they point at" `Quick test_unread_lines_keep_what_they_point_at
+        ; test_case "a line keeps its bundles in its own trace" `Quick
+            test_a_line_keeps_its_bundles_in_its_own_trace
+        ; test_case "a turn log it cannot read removes nothing" `Quick
+            test_a_turn_log_it_cannot_read_removes_nothing
+        ; test_case "an unread line it cannot decode removes nothing" `Quick
+            test_an_unread_line_it_cannot_decode_removes_nothing
         ] ) ]

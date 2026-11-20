@@ -67,6 +67,9 @@ type mono_reason =
   | Engine_sample  (** The engine graphs' next sample is due. *)
   | Play_room_read  (** The play room beside a game reads again. *)
   | Tool_series_reread  (** The tool series is read again. *)
+  | Reading_slot
+      (** A read passes the display bar, or the reading slot's wait ends
+          (RFC tui-one-screen-grammar §8). *)
   | Emblem_step  (** The About candle's next step. *)
   | Paste_quiet  (** A paste without its end marker has been quiet long enough to recover. *)
   | Drain_budget_spent  (** The drain left work when its pass budget ran out. *)

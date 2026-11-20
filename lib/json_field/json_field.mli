@@ -33,10 +33,7 @@
     {- [log_wrong_shape] adds a [Log.Misc.warn] line on
        [Wrong_shape] before discarding it. Use where schema drift
        in upstream payloads should be operator-visible without
-       aborting the calling path.}}
-
-    See RFC-0142 §3 Phase 1 for the migration plan and RFC-0088 §3.5
-    for the catch-all anti-pattern this module closes. *)
+       aborting the calling path.}} *)
 
 (** Result of a typed JSON field extraction. *)
 type 'a extraction =

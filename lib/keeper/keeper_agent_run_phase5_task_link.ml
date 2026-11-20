@@ -1,6 +1,6 @@
 (** Keeper_agent_run_phase5_task_link.ml — Phase 5 task link.
 
-    Extracted from [Keeper_agent_run.run_turn] Step 8 body (RFC-0147 PR-9). *)
+    Extracted from [Keeper_agent_run.run_turn]. *)
 
 let run ~config ~(meta : Keeper_meta_contract.keeper_meta)
       ~(acc : Keeper_run_tools.hook_accumulator) ()

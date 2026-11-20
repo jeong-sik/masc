@@ -1,9 +1,7 @@
 (** Error translation helpers for keeper Agent.run orchestration. *)
 
 (* One SSOT for the sentence a failed request shows a person: the typed value
-   renders itself ([Keeper_request_failure.summary]). This used to be four
-   renderers here, and the row they wrote was the only place the cause
-   survived; RFC-0454 D2 moved the decision into the value, so this is the
+   renders itself ([Keeper_request_failure.summary]), so this is the
    projection plus its summary and nothing else. *)
 let user_message_of_core_error err =
   Keeper_request_failure.summary (Keeper_request_failure.of_core_error err)
@@ -73,13 +71,9 @@ let core_termination_semantics_to_string = function
   | Core_error_failure -> "core_error_failure"
 ;;
 
-(* RFC-0042 PR-2.5: typed bridge for agent-core errors. The wire format is the
-   parametrised string [Keeper_terminal_reason.code_of_core_error] writes,
-   wrapped in [Keeper_turn_terminal_code.Agent_core_error]. PR-3 swaps
-   [Keeper_turn_terminal.t.code] from [string] to [Keeper_turn_terminal_code.t]
-   and uses these typed accessors at every emit site. RFC §5.2 defers the
-   sub-sum split (per-variant constructors for Agent errors) to
-   a follow-up RFC. *)
+(* Typed bridge for agent-core errors. The wire format is the parametrised
+   string [Keeper_terminal_reason.code_of_core_error] writes, wrapped in
+   [Keeper_turn_terminal_code.Agent_core_error]. *)
 (* The typed timeout observation is derived here — the one site that still
    holds the original error — and rides the terminal code next to the
    verbatim wire. Consumers stop re-parsing

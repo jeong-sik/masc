@@ -25,14 +25,9 @@ val core_termination_semantics
 
 val core_termination_semantics_to_string : core_termination_semantics -> string
 
-(** RFC-0042 PR-2.5: typed bridge variants of the wire accessors.
+(** Typed bridge variants of the wire accessors.
     Wrap the parametrised wire string [Keeper_terminal_reason.code_of_core_error]
-    writes in [Keeper_turn_terminal_code.Agent_core_error]. PR-3 swaps
-    [Keeper_turn_terminal.t.code] from [string] to
-    [Keeper_turn_terminal_code.t] and uses these accessors at every
-    emit site. RFC §5.2 explicitly defers per-variant constructors
-    (~25-variant explosion); a follow-up RFC will split [Agent_core_error] once
-    production traces narrow the actual sub-kind set.
+    writes in [Keeper_turn_terminal_code.Agent_core_error].
 
     Byte invariant guarded by [test_keeper_core_error_typed_bridge].
 

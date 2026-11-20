@@ -40,7 +40,7 @@ let current = `Assoc ["command",`String (String.make 4000 'c')]
 let raw_history = raw_seed @ [text T.User "Use the earlier commands."] @ exchange "current" current
 let completed_before = snd (Runtime_model_input_tail_window.annotate raw_seed)
 let turn_start = Keeper_carried_front.Turn_boundary {end_atom=completed_before}
-let progress = Choice.Librarian_progress {end_atom=1}
+let progress = Choice.Covered {Choice.end_atom=1; working_state=None}
 let measure = Host.measure_message_bytes
 let size messages = List.fold_left (fun sum message -> sum+measure message) 0 messages
 
@@ -71,7 +71,7 @@ let project ?argument_projection ?(capacity_bytes=max_int) ?carried_front_seed
     ?(librarian_front=progress) ?on_carried_front ?on_model_input_window_observation messages =
   Host.start_range_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "official-arguments" }) ?argument_projection ~measure_message_bytes:measure
     ~capacity_bytes ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
-    ?carried_front_seed ~librarian_front:(fun _ -> Ok librarian_front)
+    ?carried_front_seed ~librarian_front
     ?on_carried_front ?on_model_input_window_observation
     ~turn_start ~keeper_name:"official-arguments" ~runtime_id:"official.sample" messages
   |> Result.map_error Agent_core.Error.to_string |> require
@@ -130,12 +130,12 @@ let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () =
   let seed = accepted_seed raw_history 2 and reads = ref 0 and fronts = ref [] in
   let carried_front_seed () = incr reads; {Keeper_carried_front.no_seed_read with seed=Some seed} in
   let sent = project ?argument_projection:(projection (source base) base) ~carried_front_seed
-    ~librarian_front:Choice.No_position
+    ~librarian_front:Choice.No_read_end
     ~on_carried_front:(fun front ~transmitted_bytes:_ -> fronts:=front::!fronts) raw_history in
   check int "one authority read across select and recut" 1 !reads;
   check bool "the raw opener still admits its carried front" true
     (match !fronts with [Host.Carried_seed _] -> true
-     | [] | _::_::_ | [Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Librarian_snapshot _ | Host.Librarian_progress _] -> false);
+     | [] | _::_::_ | [Host.Lane_cut | Host.Turn_start | Host.Turn_start_unknown _ | Host.Past_refused_start _ | Host.Librarian_working_state _ | Host.Librarian_progress _] -> false);
   ignore (reference (input "beta" sent));
   check bool "discarded alpha is absent" false (List.mem_assoc "alpha" (inputs sent));
   let store = Tool_blob_store.create ~base_path:base in
@@ -186,22 +186,16 @@ let test_storage_failure_restores_raw_and_recuts_to_actual_capacity () = with_ba
     | Tool_output.Not_normalized_artifact_ref -> true
     | Tool_output.Invalid_normalized_artifact_ref _ | Decoded_normalized_artifact_ref _ -> false) (inputs bounded))
 
-let snapshot () =
-  (* Cover alpha's complete exchange. The raw capacity cut reaches beta at
-     atom 2, so a snapshot ending at atom 1 would lose authority before the
-     summary-versus-position comparison this scenario is meant to exercise. *)
-  let messages = List.take 3 raw_seed in
-  let position = Keeper_turn_boundaries.position_of_messages messages |> require in
-  let boundary : Keeper_turn_boundaries.record = {recorded_at=1.;event=Turn_ended
-    {task_context=Keeper_turn_task_context.No_task;turn_ref=Ids.Turn_ref.make ~trace_id:"argument-summary" ~absolute_turn:1;
-     history_at_start=Fresh_history;position}} in
-  Librarian_continuity_snapshot.capture ~unread_messages:[] ~trace_id:"argument-summary"
-    ~lines:[1,Ok boundary] ~messages
-    ~working_state:(String.make (String.length (Yojson.Safe.to_string alpha)) 's')
-  |> Result.map_error Librarian_continuity_snapshot.error_to_string |> require
+(* The writer read alpha's whole exchange, so the read end is where beta's
+   opens. Its working state is as large as alpha's command: beside beta's
+   raw command it does not fit a capacity the stored arguments fit. *)
+let summarized =
+  Choice.Covered
+    { Choice.end_atom = snd (Runtime_model_input_tail_window.annotate (List.take 3 raw_seed))
+    ; working_state = Some (String.make (String.length (Yojson.Safe.to_string alpha)) 's') }
 
 let test_failed_materialization_repeats_summary_choice_without_displacing_atoms () = with_base @@ fun good_base ->
-  let librarian_front = Choice.Librarian_snapshot (snapshot ()) in
+  let librarian_front = summarized in
   let good = project ?argument_projection:(projection (source good_base) good_base) ~librarian_front raw_history in
   let capacity_bytes = size good in
   with_path ~blocked:true @@ fun failed_base ->
@@ -274,7 +268,7 @@ let test_finished_turn_results_leave_as_markers_from_the_floor () = with_base @@
       ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "official-results" })
       ?argument_projection ~measure_message_bytes:measure
       ~capacity_bytes:max_int ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
-      ~librarian_front:(fun _ -> Ok progress)
+      ~librarian_front:progress
       ~turn_start ~keeper_name:"official-results" ~runtime_id:"official.sample" history
     |> Result.map_error Agent_core.Error.to_string |> require in
   let sent = project_with None in
@@ -334,7 +328,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
   in
   let late_seed = accepted_seed evidence 2 in
   List.iter (fun boundary ->
-    let seed_reads = ref 0 and librarian_reads = ref 0 and measured = ref 0 in
+    let seed_reads = ref 0 and measured = ref 0 in
     let windows = ref 0 and carried_fronts = ref 0 in
     let sent = Host.start_range_projection
         ~input_source:Masc.Keeper_request_source.Completion_review ~argument_projection
@@ -342,8 +336,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
         ~capacity_bytes:1 ~unbounded_capacity_bytes:max_int ~reserved_bytes:0
         ~carried_front_seed:(fun () -> incr seed_reads;
           { Keeper_carried_front.no_seed_read with seed = Some late_seed })
-        ~librarian_front:(fun _ -> incr librarian_reads;
-          Error (Agent_core.Error.Internal "completion evidence must not read Keeper continuity"))
+        ~librarian_front:summarized
         ~on_model_input_window_observation:(fun _ -> incr windows)
         ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr carried_fronts)
         ~turn_start:boundary ~keeper_name:"completion-evidence-fixture"
@@ -355,7 +348,6 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
     check bool "large closed arguments stay inline as their original JSON" true
       (input "alpha" sent = alpha && input "beta" sent = beta && input "current" sent = current);
     check int "no durable Keeper seed read" 0 !seed_reads;
-    check int "no Librarian continuity read" 0 !librarian_reads;
     check int "no capacity measurement or shrink planning" 0 !measured;
     check int "no history-window projection callback" 0 !windows;
     check int "no carried-history projection callback" 0 !carried_fronts;

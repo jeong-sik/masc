@@ -71,7 +71,7 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:
     (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
@@ -115,7 +115,7 @@ val run :
     ({!Keeper_official_client_host.carried_start_range}), and injects it into
     the new thread; a [Resume] sends none of the history. The range starts
     where the last answered request's range did ([carried_front_seed]), at the
-    turn's Librarian position ([librarian_front]) when that is later, else at
+    turn's read end ([librarian_front]) when that is later, else at
     [turn_start]. [on_carried_front] reports the front each [Start]
     composition cut, before the write, as on the Claude Code lane; a [Resume]
     reports none. When an overflow retry reaches the zero-history floor, no
@@ -181,7 +181,7 @@ module For_testing : sig
     :  input_source:Keeper_request_source.t ->
     capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
-    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?librarian_front:Keeper_turn_driver_try_provider.continuity
     -> ?on_carried_front:
          (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
     -> turn_start:Keeper_carried_front.turn_start

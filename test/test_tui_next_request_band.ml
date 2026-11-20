@@ -161,8 +161,6 @@ let expected_origin : Front.origin -> Inspector.forecast_carried_origin = functi
   | Front.Carried source -> expected_source source
   | Front.Past_librarian_point { librarian_end_atom; source } ->
     Inspector.Carried_past_librarian_point { librarian_end_atom; front = expected_source source }
-  | Front.Librarian_snapshot { end_atom; boundary_line } ->
-    Inspector.Carried_librarian_snapshot { end_atom; boundary_line }
   | Front.Librarian_progress { end_atom } -> Inspector.Carried_librarian_progress { end_atom }
   | Front.Turn_start { end_atom } -> Inspector.Carried_turn_start { end_atom }
   | Front.Turn_start_unknown { reason } -> Inspector.Carried_turn_start_unknown { reason }
@@ -185,8 +183,7 @@ let test_every_server_origin_decodes () =
       (fun source ->
          [ Front.Carried source; Front.Past_librarian_point { librarian_end_atom = 2; source } ])
       sources
-    @ [ Front.Librarian_snapshot { end_atom = 2; boundary_line = 1 }
-      ; Front.Librarian_progress { end_atom = 2 }
+    @ [ Front.Librarian_progress { end_atom = 2 }
       ; Front.Turn_start { end_atom = 8 }
       ; Front.Turn_start_unknown { reason = "the boundary log is unreadable" }
       ]

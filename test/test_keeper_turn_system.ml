@@ -545,6 +545,7 @@ type world =
   { config : Workspace.config
   ; meta : Keeper_meta_contract.keeper_meta
   ; trace_id : string
+  ; sw : Eio.Switch.t
   }
 
 let runtime_toml =
@@ -635,7 +636,7 @@ let with_world ~keeper_name f =
    with
    | Ok _ -> ()
    | Error detail -> Alcotest.fail detail);
-  f { config; meta; trace_id }
+  f { config; meta; trace_id; sw }
 ;;
 
 let append world entry =
@@ -679,21 +680,25 @@ let observe_request world ~runtime_id =
        ~digest_at ~request ~usage:None)
 ;;
 
-(* The Librarian has read the first [end_atom] atoms, so the next range
-   opens there. *)
+(* The Memory writer has read the first [end_atom] atoms, so the next range
+   opens there (RFC librarian-call-only-proposes §11.1). Each message of the
+   history opens an atom, so the turn it read closes after [end_atom]
+   messages, and a later turn closes the rest of the history. *)
 let read_by_librarian world ~end_atom =
-  match digest_at (end_atom - 1) with
-  | None -> Alcotest.fail "the fixture history holds the read atom"
-  | Some last_atom_digest ->
-    Keeper_librarian_progress.write
-      ~keepers_dir:(Workspace.keepers_runtime_dir world.config)
-      ~keeper_id:world.meta.name
-      { Keeper_librarian_progress.position =
-          { Keeper_librarian_progress.trace_id = world.trace_id; end_atom; last_atom_digest }
-      ; boundary_lines_seen = 0
-      }
-    |> Result.map_error Keeper_librarian_progress.write_error_to_string
-    |> unwrap
+  (match
+     Masc_test_deps.write_closed_turn_log
+       ~keepers_dir:(Workspace.keepers_runtime_dir world.config)
+       ~keeper_name:world.meta.name ~trace_id:world.trace_id
+       [ end_atom; List.length history ]
+   with
+   | read_turn :: (_ : Masc_test_deps.turn_log_closing list) ->
+     Masc_test_deps.commit_memory_read ~config:world.config ~keeper_name:world.meta.name
+       ~trace_id:world.trace_id ~working_state:Librarian_answer.Keep read_turn
+   | [] -> Alcotest.fail "the fixture's turn log has no completed turn");
+  let (_ : Librarian_writer.view) =
+    Masc_test_deps.booted_memory_writer_view ~sw:world.sw ~config:world.config world.meta.name
+  in
+  ()
 ;;
 
 (* The checkpoint a dispatched turn leaves: its history with the context the
@@ -793,8 +798,8 @@ let test_without_a_request_on_the_runtime_the_system_takes_every_article () =
   Alcotest.(check bool) "with no amendments" true (Option.is_none next.amendments)
 ;;
 
-(* (b) The Librarian read past the front the last request opened, so the
-   range moves and the history cache is lost either way. *)
+(* (b) The Memory writer read past the front the last request opened, so
+   the range moves and the history cache is lost either way. *)
 let test_a_moved_front_renders_the_current_articles_on_the_wire () =
   with_world ~keeper_name:"turn-system-moved" @@ fun world ->
   let (_ : Types.t) = write_article world "open before you record" in

@@ -27,7 +27,7 @@ module For_testing : sig
     :  input_source:Keeper_request_source.t ->
     capacity_bytes:int
     -> ?carried_front_seed:(unit -> Keeper_carried_front.seed_read)
-    -> ?librarian_front:Keeper_official_client_host.librarian_front_reader
+    -> ?librarian_front:Keeper_turn_driver_try_provider.continuity
     -> ?on_carried_front:
          (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit)
     -> turn_start:Keeper_carried_front.turn_start
@@ -113,7 +113,7 @@ val run :
   ?on_model_input_window_observation:
     (Runtime_model_input_tail_window.window_observation -> unit) ->
   ?carried_front_seed:(unit -> Keeper_carried_front.seed_read) ->
-  ?librarian_front:Keeper_official_client_host.librarian_front_reader ->
+  ?librarian_front:Keeper_turn_driver_try_provider.continuity ->
   ?on_carried_front:
     (Keeper_official_client_host.carried_start_front -> transmitted_bytes:int -> unit) ->
   turn_start:Keeper_carried_front.turn_start ->
@@ -189,20 +189,19 @@ val run :
     keeper-context-window-in-tokens §13.4). A caller that passes no seed
     starts there, inside the capacity.
 
-    [librarian_front] hands over the turn's continuity choice as a position
-    in the messages it is handed
-    ({!Keeper_turn_driver_try_provider.librarian_position}): a fitting working
-    state, carried in place of the atoms before it, or the Librarian's read
-    position alone, with nothing carried for the atoms before it. It wins
-    when it is at or past the seed that holds, or the capacity's cut when no
-    seed holds, so the range never moves back behind either; [turn_start] is
-    not weighed against it, since it is where a range with no absorbed point
-    begins. The capacity cuts before the working state is known, so whether
-    it goes is decided by {!Keeper_official_client_host.compose_librarian_range}
-    (RFC-0460): it is carried only where it displaces none of the range's
-    atoms, and otherwise the Librarian position goes alone and the turn is
-    not refused. A reader error refuses the request, as the same check
-    refuses an Agent Core request.
+    [librarian_front] hands over the turn's continuity
+    ({!Keeper_turn_driver_try_provider.read_keeper_continuity}): the Memory
+    writer's read end, with the working state it committed carried in place
+    of the atoms before it when there is one, and nothing carried for them
+    otherwise. It wins when it is at or past the seed that holds, or the
+    capacity's cut when no seed holds, so the range never moves back behind
+    either; [turn_start] is not weighed against it, since it is where a range
+    with no read end begins. The capacity cuts before the working state is
+    known, so whether it goes is decided by
+    {!Keeper_official_client_host.compose_librarian_range} (RFC-0460): it is
+    carried only where it displaces none of the range's atoms, and otherwise
+    the read end goes alone and the turn is not refused. Without
+    [librarian_front] the turn has no read end.
 
     [on_carried_front] receives the front the range started from and the
     range's bytes in the canonical encoding, once per composition that cut a

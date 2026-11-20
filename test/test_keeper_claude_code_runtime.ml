@@ -3369,7 +3369,7 @@ let test_start_authority_is_user_context_not_standing_system () =
   let module Host = Keeper_official_client_host in
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
-    let librarian_front _ = Ok Keeper_turn_driver_try_provider.No_position in
+    let librarian_front = Keeper_turn_driver_try_provider.No_read_end in
     let goal_text = "GOAL revision-current measurement=1/4" in
     let first_event = "Approved task-first vrf-first human_operator operator-first" in
     let new_event = "Rejected task-other vrf-new human_operator operator-second" in
@@ -6385,33 +6385,10 @@ let test_a_cold_start_begins_at_the_turn_start () =
          observation.Runtime_model_input_tail_window.transmitted_atoms)
 ;;
 
-(* A snapshot the Librarian wrote after reading [messages] through
-   [end_atom], on a history whose one completed turn ended there. *)
-let snapshot_through ~messages ~end_atom ~working_state =
-  let covered = List.filteri (fun i _ -> i < end_atom) messages in
-  let position =
-    match Keeper_turn_boundaries.position_of_messages covered with
-    | Ok position -> position
-    | Error detail -> fail detail
-  in
-  let line =
-    ( 1
-    , Ok
-        { Keeper_turn_boundaries.recorded_at = 1.
-        ; event =
-            Keeper_turn_boundaries.Turn_ended
-              { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
-              ; history_at_start = Keeper_turn_boundaries.Fresh_history
-              ; position
-              }
-        } )
-  in
-  match
-    Librarian_continuity_snapshot.capture ~unread_messages:[] ~trace_id:"trace-1" ~lines:[ line ] ~messages:covered
-      ~working_state
-  with
-  | Ok snapshot -> snapshot
-  | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
+(* The Memory writer's read end at [end_atom], with the working state it
+   committed. *)
+let read_end_through ~end_atom ~working_state =
+  Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom; working_state = Some working_state }
 ;;
 
 let text_of (message : Agent_core.Types.message) =
@@ -6420,11 +6397,9 @@ let text_of (message : Agent_core.Types.message) =
   | _ -> ""
 ;;
 
-(* The Librarian front reaches the list this lane sends -- a read position
-   as the start, a working state carried in place of the atoms before it --
-   and a list the turn's choice no longer describes refuses the request,
-   as it refuses an Agent Core request, instead of going out from the seed. *)
-let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
+(* The writer's read end reaches the list this lane sends: the read end as
+   the start, and a working state carried in place of the atoms before it. *)
+let test_the_librarian_front_reaches_the_list () =
   let messages = start_seed_history () in
   let seen_front = ref None in
   let project librarian_front =
@@ -6437,7 +6412,7 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
       ~runtime_id:"claude_code.claude-sonnet-5"
       messages
   in
-  (match project (fun _ -> Ok ((Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 100 }))) with
+  (match project (Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 100; working_state = None }) with
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok carried ->
      check (list string) "the range starts at the read position"
@@ -6446,32 +6421,21 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   (match !seen_front with
    | Some (Keeper_official_client_host.Librarian_progress { end_atom = 100 }, bytes) ->
      check bool "the front is reported with the range's bytes" true (bytes > 0)
-   | Some _ -> fail "the reported front is not the read position"
+   | Some _ -> fail "the reported front is not the read end"
    | None -> fail "the composition reported no front");
-  let snapshot =
-    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
-  in
-  (match project (fun _ -> Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))) with
+  let state = "Fifty asks answered so far." in
+  match project (read_end_through ~end_atom:100 ~working_state:state) with
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok carried ->
      (match carried with
       | working :: rest ->
         check string "the working state leads the list"
-          (Keeper_turn_driver_try_provider.working_state_text snapshot)
+          (Keeper_turn_driver_try_provider.working_state_text state)
           (text_of working);
         check (list string) "and the atoms it covers are not sent"
           (encoded (List.filteri (fun i _ -> i >= 100) messages))
           (encoded rest)
-      | [] -> fail "nothing was composed"));
-  let refused _ =
-    Error
-      (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig
-            { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
-  in
-  match project refused with
-  | Error _ -> ()
-  | Ok _ -> fail "a list the turn's choice no longer describes went out"
+      | [] -> fail "nothing was composed")
 ;;
 
 let working_state_not_carried ~reason =
@@ -6485,7 +6449,7 @@ let working_state_not_carried ~reason =
 (* The declared ceiling cuts before the working state is known.
    A working state carried in front of a range the ceiling then has to cut
    would push out atoms it does not cover, so it stays out and the
-   Librarian's position goes alone: the same range, every atom of it. The
+   read end goes alone: the same range, every atom of it. The
    turn is not refused, and the counter says the summary was left out and
    why. *)
 let test_a_working_state_that_would_displace_atoms_stays_out () =
@@ -6512,12 +6476,11 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
      Librarian read to, and nothing for a working state on top. *)
   let capacity_bytes = preamble_bytes + bytes 100 120 in
   let observed = ref None in
-  let project snapshot =
+  let project state =
     observed := None;
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
-      ~librarian_front:(fun _ ->
-        Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+      ~librarian_front:(read_end_through ~end_atom:100 ~working_state:state)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
@@ -6528,15 +6491,15 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
     (not (Runtime_model_input_tail_window.is_synthetic_preamble message))
     && message.role <> Agent_core.Types.System
   in
-  let goes_alone ~reason snapshot =
+  let goes_alone ~reason state =
     let before = working_state_not_carried ~reason in
-    match project snapshot with
+    match project state with
     | Error error -> fail (Agent_core.Error.to_string error)
     | Ok sent ->
-      let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+      let working_state = Keeper_turn_driver_try_provider.working_state_text state in
       check int "the working state stays out" 0
         (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
-      check (list string) "and every atom from the Librarian's position goes"
+      check (list string) "and every atom from the read end goes"
         (encoded (List.filteri (fun i _ -> i >= 100) messages))
         (encoded (List.filter is_atom sent));
       check bool "inside the ceiling" true
@@ -6550,12 +6513,10 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
       check (float 0.) ("counted as " ^ reason) (before +. 1.)
         (working_state_not_carried ~reason)
   in
-  goes_alone ~reason:"displaces_atoms"
-    (snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far.");
+  goes_alone ~reason:"displaces_atoms" "Fifty asks answered so far.";
   (* A working state the ceiling cannot hold beside the pinned messages at
-     all is the same answer: the position goes alone. *)
-  goes_alone ~reason:"does_not_fit"
-    (snapshot_through ~messages ~end_atom:100 ~working_state:(String.make 4_000 'w'))
+     all is the same answer: the read end goes alone. *)
+  goes_alone ~reason:"does_not_fit" (String.make 4_000 'w')
 ;;
 
 (* A range the ceiling already fits goes out as it was cut. When the cut
@@ -6570,17 +6531,14 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
 let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check () =
   let messages = start_seed_history () in
   let measure = Keeper_official_client_host.measure_message_bytes in
-  let snapshot =
-    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
-  in
+  let state = "Fifty asks answered so far." in
   let capacity_bytes =
     List.fold_left (fun total message -> total + measure message) 0 messages * 2
   in
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
-      ~librarian_front:(fun _ ->
-        Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+      ~librarian_front:(read_end_through ~end_atom:100 ~working_state:state)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -6588,7 +6546,7 @@ let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check ()
   with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
-    let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+    let working_state = Keeper_turn_driver_try_provider.working_state_text state in
     check int "the working state is sent" 1
       (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
     let carrier : Agent_core.Types.message =
@@ -6670,21 +6628,18 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)
-   | Ok sent -> goes_as_cut "no Librarian position" sent);
-  (* A snapshot behind the cut does not win the range: the same range goes,
+   | Ok sent -> goes_as_cut "no read end" sent);
+  (* A read end behind the cut does not win the range: the same range goes,
      and no working state is counted as left out. *)
   let before = working_state_not_carried ~reason:"displaces_atoms" in
   match
     project
-      ~librarian_front:(fun _ ->
-        Ok
-          ((Keeper_turn_driver_try_provider.Librarian_snapshot
-             (snapshot_through ~messages ~end_atom:50 ~working_state:"Twenty-five asks."))))
+      ~librarian_front:(read_end_through ~end_atom:50 ~working_state:"Twenty-five asks.")
       ()
   with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
-    goes_as_cut "a snapshot behind the cut" sent;
+    goes_as_cut "a read end behind the cut" sent;
     check (float 0.) "and no working state is counted as left out" before
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
@@ -6693,10 +6648,8 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
 let test_a_working_state_that_displaces_nothing_goes () =
   let messages = start_seed_history () in
   let measure = Keeper_official_client_host.measure_message_bytes in
-  let snapshot =
-    snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
-  in
-  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+  let state = "Fifty asks answered so far." in
+  let working_state = Keeper_turn_driver_try_provider.working_state_text state in
   let pinned : Agent_core.Types.message =
     { origin = Llm_provider.Types.Agent_instruction;  role = System
     ; content = [ Text working_state ]
@@ -6723,8 +6676,7 @@ let test_a_working_state_that_displaces_nothing_goes () =
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
-      ~librarian_front:(fun _ ->
-        Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+      ~librarian_front:(read_end_through ~end_atom:100 ~working_state:state)
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -6765,8 +6717,7 @@ module Argument_start_fixture = struct
   let source ~base_path ~keeper_name seed =
     Host.create_argument_source ~base_path ~keeper_name
       ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
-  let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
-      (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})
+  let librarian_front = Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 1; working_state = None }
   let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
   let reader base_path =
     let schema = Keeper_runtime_schemas_toml.artifact_read in
@@ -7520,9 +7471,9 @@ let () =
             `Quick
             test_a_cold_start_begins_at_the_turn_start
         ; test_case
-            "the Librarian front reaches the list and its error refuses"
+            "the Librarian front reaches the list"
             `Quick
-            test_the_librarian_front_reaches_the_list_and_its_error_refuses
+            test_the_librarian_front_reaches_the_list
         ; test_case
             "a working state that would displace atoms stays out"
             `Quick

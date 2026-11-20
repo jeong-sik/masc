@@ -112,12 +112,11 @@ val turn_start_to_string : turn_start -> string
 
 type origin =
   | Carried of source  (** The front came from a seed. *)
-  | Librarian_snapshot of { end_atom : int; boundary_line : int }
   | Librarian_progress of { end_atom : int }
-      (** The Librarian's durable position: the atoms before [end_atom] are
-          read into memory, and nothing in the request summarizes them. Taken
-          when no saved continuity snapshot fits this history and the
-          position does (RFC keeper-context-window-in-tokens §13.6). *)
+      (** Where the Keeper's Memory writer has read to in this history
+          (RFC librarian-call-only-proposes §11.1): the atoms before
+          [end_atom] are in Memory and are not sent again. The working state
+          the writer committed rides in their place when there is one. *)
   | Past_librarian_point of { librarian_end_atom : int; source : source }
       (** A Librarian point at [librarian_end_atom], and a start the provider
           accepted on this history ([source]: the newest response-observed

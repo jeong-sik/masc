@@ -288,9 +288,9 @@ streaming = false
            })
   in
   let historical_payload = String.make 4000 'z' in
-  (* Atom 0 is the turn the Librarian has read; the completed tool exchange
-     that follows is the one it has not. Only a completed turn the Librarian
-     is behind on reaches the wire at all: with no Librarian position the
+  (* Atom 0 is the turn the Memory writer has read; the completed tool
+     exchange that follows is the one it has not. Only a completed turn the
+     writer is behind on reaches the wire at all: with no read end the
      request starts at the completed boundary (RFC keeper-context-window
      §13.4), and with one it starts there (§13.6). *)
   let initial_messages : Agent_core.Types.message list =
@@ -337,18 +337,22 @@ streaming = false
     (match Keeper_turn_boundaries.append ~keepers_dir ~keeper_id:"demote-proof" record with
      | Ok () -> ()
      | Error error -> fail (Keeper_turn_boundaries.append_error_to_string error));
-    (* The turn start is read from the turn log; the Librarian still reads
-       the boundary line above. *)
-    Masc_test_deps.start_turn_log ~keepers_dir ~keeper_name:"demote-proof" ~trace_id
-      ~closed_messages:(List.length initial_messages);
-    let last_atom_digest =
-      match Runtime_model_input_tail_window.atom_opening_digest initial_messages 0 with
-      | Some digest -> digest
-      | None -> fail "the fixture history opens atom 0" in
-    match Keeper_librarian_progress.write ~keepers_dir ~keeper_id:"demote-proof"
-      { position = { trace_id; end_atom = 1; last_atom_digest }; boundary_lines_seen = 1 } with
-    | Ok () -> ()
-    | Error error -> fail (Keeper_librarian_progress.write_error_to_string error));
+    (* The turn start is read from the turn log: two completed turns, the
+       ask and then the tool exchange. The Memory writer read the first, so
+       its read end is atom 1. The Librarian still reads the boundary line
+       above. *)
+    match
+      Masc_test_deps.write_closed_turn_log ~keepers_dir ~keeper_name:"demote-proof" ~trace_id
+        [ 1; List.length initial_messages ]
+    with
+    | read_turn :: (_ : Masc_test_deps.turn_log_closing list) ->
+      Masc_test_deps.commit_memory_read ~config:(Workspace.default_config base_path)
+        ~keeper_name:"demote-proof" ~trace_id ~working_state:Librarian_answer.Keep read_turn
+    | [] -> fail "the fixture's turn log has no completed turn");
+  let (_ : Librarian_writer.view) =
+    Masc_test_deps.booted_memory_writer_view ~sw ~config:(Workspace.default_config base_path)
+      "demote-proof"
+  in
   let reader =
     let schema = Keeper_runtime_schemas_toml.artifact_read in
     Tool_bridge.agent_core_tool_of_masc_with_execution_env

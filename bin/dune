@@ -392,6 +392,7 @@
   masc_tui_ansi
   masc_tui_braille
   masc_tui_chart
+  masc_tui_doc
   masc_tui_message_layout
   masc_tui_table
   masc_tui_theme
@@ -2563,6 +2564,7 @@
   masc_tui_braille
   masc_tui_card
   masc_tui_chart
+  masc_tui_doc
   masc_tui_context_inspector
   masc_tui_render_schedule
   masc_tui_rows

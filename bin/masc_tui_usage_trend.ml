@@ -199,10 +199,15 @@ let plot ~width trend row =
     let step = (width - axis_cells) / days in
     let pad text = text ^ String.make (max 0 (step - 1)) ' ' in
     let cells = days * step in
+    let dot_cols = cells * 2 in
     let dot_rows = plot_height * 4 in
     let grid = Array.make_matrix plot_height cells 0 in
-    (* A day's dot-column: the middle of its [step] cells. *)
-    let dot_x day = (day * step * 2) + step in
+    (* Stretch reported days edge-to-edge across [0 .. dot_cols - 1] so the
+       btop curve fills the full width of the card. *)
+    let dot_x day =
+      if days <= 1 then cells
+      else (day * (dot_cols - 1)) / (days - 1)
+    in
     let dot_y clipped =
       int_of_float ((1.0 -. clipped) *. float_of_int (dot_rows - 1))
     in
@@ -217,39 +222,41 @@ let plot ~width trend row =
     let plotted =
       List.filter_map
         (fun (day, point) ->
-          Option.map (fun p -> (dot_x day, dot_y p.clipped)) point)
+          Option.map (fun p -> (day, dot_x day, dot_y p.clipped)) point)
         points
     in
-    (* Maximal runs of consecutive days; the line never crosses a gap. Two
-       plotted days are consecutive exactly when their dot-columns are one
-       day-slot apart. *)
+    (* Maximal runs of consecutive day indices; the curve never crosses a gap. *)
     let runs =
       match plotted with
       | [] -> []
-      | first :: rest ->
-          let slot = step * 2 in
-          let rec split current last runs = function
+      | (first_day, _, _) as first :: rest ->
+          let rec split current prev_day runs = function
             | [] -> List.rev (List.rev current :: runs)
-            | ((x, _) as point) :: tail ->
-                if x - last = slot then split (point :: current) x runs tail
-                else split [ point ] x (List.rev current :: runs) tail
+            | ((day, _, _) as point) :: tail ->
+                if day = prev_day + 1 then split (point :: current) day runs tail
+                else split [ point ] day (List.rev current :: runs) tail
           in
-          split [ first ] (fst first) [] rest
+          split [ first ] first_day [] rest
     in
-    (* One run is one unbroken line: each dot-column takes the interpolated
-       height between its two days, filling down to the previous column so a
-       steep move draws a solid stroke. *)
-    let draw_run = function
+    (* One run is one unbroken filled-area Braille curve: each dot-column
+       fills downward from the interpolated height between its two days to
+       the 0% baseline ([dot_rows - 1]) so utilization reads with btop-style
+       density while missing/uncapped gaps stay completely blank above the
+       baseline. *)
+    let draw_run run =
+      let coords = List.map (fun (_, x, y) -> (x, y)) run in
+      match coords with
       | [] -> ()
-      | [ (x, y) ] -> set_dot x y
-      | _ :: _ as run ->
+      | [ (x, y) ] ->
+          for yy = y to dot_rows - 1 do
+            set_dot x yy
+          done
+      | _ :: _ ->
           let prev_y = ref None in
           let stroke x y =
-            let lo, hi =
-              match !prev_y with None -> (y, y) | Some py -> (min py y, max py y)
-            in
+            let lo = match !prev_y with None -> y | Some py -> min py y in
             prev_y := Some y;
-            for yy = lo to hi do
+            for yy = lo to dot_rows - 1 do
               set_dot x yy
             done
           in
@@ -268,7 +275,7 @@ let plot ~width trend row =
                 segments tail
             | _ -> ()
           in
-          segments run
+          segments coords
     in
     List.iter draw_run runs;
     let above_cells =

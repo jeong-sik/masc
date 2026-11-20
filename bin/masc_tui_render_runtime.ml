@@ -1502,16 +1502,22 @@ let provider_history_lines ~cols ~rows (state : state) =
               (Printf.sprintf
                  (if ko then "%d/%d일(UTC) 보고됨" else "%d/%d UTC days reported")
                  row.reported_days days) in
-        let heading = Message_layout.truncate_middle inner name in
-        let edge = Theme.border_muted () in
-        let line text = edge ^ Ansi.box_v ^ Ansi.reset ^ " "
-          ^ Message_layout.fit_width text inner ^ " " ^ edge ^ Ansi.box_v ^ Ansi.reset in
-        if bare then body else
-          (Theme.info () ^ Ansi.box_tl ^ " " ^ Ansi.bold ^ heading ^ Ansi.reset ^ Theme.info ()
-           ^ " " ^ draw_hline (max 0 (card_width - Message_layout.display_width heading - 4))
-           ^ Ansi.box_tr ^ Ansi.reset)
-          :: List.map line body
-          @ [edge ^ Ansi.box_bl ^ draw_hline (max 0 (card_width - 2)) ^ Ansi.box_br ^ Ansi.reset]
+        if bare then body
+        else
+          let card_edge =
+            { Masc_tui_card.name = Terminal_text.single_line name
+            ; key = None
+            ; status = None
+            ; count = None
+            ; focus = Masc_tui_card.Unfocused
+            ; border_accent = Masc_tui_doc.panel_border_accent Masc_tui_theme.Panel_usage
+            ; footer_keys = []
+            }
+          in
+          let card_height = max Masc_tui_card.min_height (2 + List.length body) in
+          Masc_tui_card.render ~ko ~style:(Masc_tui_doc.card_style ())
+            ~width:card_width ~height:card_height
+            { Masc_tui_card.edge = card_edge; body = (fun ~cells:_ -> body) }
       in
       let prefix = String.make indent ' ' in
       let rec arrange = function
@@ -1638,7 +1644,23 @@ let usage_lines ~cols ~rows (state : state) =
           | Some amount when readable row && valid amount ->
               let maximum = Option.value ~default:0. highest in
               let share = if maximum = 0. then 0. else amount /. maximum in
-              Some ("[" ^ Overview_providers.meter ~cells:bar_cells share ^ "]")
+              let clamped =
+                if not (Float.is_finite share) then 0.0
+                else Float.min 1.0 (Float.max 0.0 share)
+              in
+              let scaled =
+                if clamped <= 0.0 then 0
+                else max 1 (int_of_float (Float.round (clamped *. 1000.0)))
+              in
+              Some
+                (Masc_tui_chart.dot_meter_bar ~width:bar_cells ~value:scaled
+                   ~max_value:1000
+                   ~scale:
+                     (Masc_tui_chart.Series
+                        { paint = Theme.paint ()
+                        ; series = Masc_tui_theme.Usage
+                        })
+                   ~track_style:(Theme.recede ()) ~reset:Ansi.reset ())
           | _ -> None
         in
         [ Printf.sprintf
@@ -1683,7 +1705,7 @@ let usage_lines ~cols ~rows (state : state) =
                 in
                 let metric label value reported missing bar =
                   metric_text label value reported missing
-                  ^ Option.fold ~none:"" ~some:(fun bar -> "  " ^ Theme.info () ^ bar ^ Ansi.reset) bar
+                  ^ Option.fold ~none:"" ~some:(fun bar -> "  " ^ bar) bar
                 in
                 List.concat_map
                     (fun line -> List.map (fun text -> "   " ^ text)
@@ -1844,7 +1866,8 @@ let render_metrics (state : state) =
         let usage_sections = [ Usage_plan; Usage_trend; Usage_keepers; Usage_calls ] in
         let usage_tabs reading =
           List.map (fun section -> (usage_label section, section = reading, ())) usage_sections in
-        let draw_tabs ~width tabs = tab_strip ~width ~press:(fun () text -> text) tabs in
+        let draw_tabs ?(numbered = true) ~width tabs =
+          tab_strip ~numbered ~width ~press:(fun () text -> text) tabs in
         let navigation =
           let lead = " "
           and wide_hint = ui_text state ~ko:"   v:다음 보기" ~en:"   v:next view"
@@ -1857,7 +1880,8 @@ let render_metrics (state : state) =
              [v] moves between sections. *)
           let widest_floor =
             List.fold_left
-              (fun widest section -> max widest (tab_strip_min_width (usage_tabs section)))
+              (fun widest section ->
+                max widest (tab_strip_min_width ~numbered:true (usage_tabs section)))
               0 usage_sections in
           let reading = usage_tabs state.usage_section in
           let hint =
@@ -1871,7 +1895,7 @@ let render_metrics (state : state) =
           let strip =
             if strip <> "" then strip
             else
-              draw_tabs ~width:(room hint)
+              draw_tabs ~numbered:false ~width:(room hint)
                 [ (usage_label state.usage_section, true, ()) ] in
           lead ^ strip ^ hint
         in

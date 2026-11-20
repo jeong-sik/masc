@@ -787,6 +787,42 @@ let test_kpi_layout_responsive_tiers () =
        check bool "156 cols 4x1 card has >= 32 text cells" true (card_cells >= 32)
    | Cards_2x2 _ | Compact -> fail "expected Cards_4 at cols=156")
 
+let test_layer6_numbered_pills_and_resource_charts () =
+  let pills = Render_metrics.section_pills_line ~ko:false ~cols:120 ~active:Types.Section_fleet in
+  check bool "section pills show superscript digits 1-3" true
+    (contains pills "\xc2\xb9" && contains pills "\xc2\xb2" && contains pills "\xc2\xb3");
+  let now = Option.get (Masc_domain.parse_iso8601_opt "2026-09-12T00:00:00Z") in
+  let task id created_at status = domain_task ~id ~created_at ~status in
+  let done_by who at = Masc_domain.Done { assignee = who; completed_at = at; notes = None } in
+  let tasks =
+    [ task "t1" "2026-09-11T00:00:00Z" (done_by "alice" "2026-09-11T02:00:00Z")
+    ; task "t2" "2026-09-11T00:00:00Z" (Masc_domain.InProgress { assignee = "alice"; started_at = "2026-09-11T03:00:00Z" })
+    ; task "t3" "2026-09-11T00:00:00Z" Masc_domain.Todo
+    ]
+  in
+  let flow = Masc_tui_task_flow.of_tasks ~now ~archived:Masc_tui_task_flow.Archived.empty tasks in
+  let state = make_state () in
+  state.task_flow <- Some flow;
+  let rows = Render_metrics.render_section_resources ~cols:120 state in
+  let output = String.concat "\n" rows in
+  check bool "section_resources uses hairline rule headers" true
+    (contains output "\xe2\x94\x80\xe2\x94\x80");
+  check bool "section_resources draws open-task distribution bars" true
+    (contains output "%)" && contains output "\xe2\x96\xa0");
+  let has_braille row =
+    contains row "\xe2\xa0" || contains row "\xe2\xa1"
+    || contains row "\xe2\xa2" || contains row "\xe2\xa3"
+  in
+  check bool "section_resources renders 3-row continuous done trend with Braille dots" true
+    (match List.find_index (fun r -> contains r "done trend") rows with
+     | Some idx when idx + 2 < List.length rows ->
+         let r1 = List.nth rows (idx + 1)
+         and r2 = List.nth rows (idx + 2) in
+         String.length r1 > 15 && String.length r2 > 15
+         && has_braille r1 && has_braille r2
+     | Some _ | None -> false)
+;;
+
 let () =
   run "tui_render_metrics"
     [ ( "connection"
@@ -817,7 +853,9 @@ let () =
     ; ( "overview_pulse"
       , [] )
     ; ( "section_pills"
-      , [] )
+      , [ test_case "numbered pills and resource Braille trend + bars" `Quick
+            test_layer6_numbered_pills_and_resource_charts
+        ] )
     ; ( "sections"
       , [ test_case "the tools section escapes the word it counts by" `Quick
             test_the_tools_section_escapes_the_word_it_counts_by

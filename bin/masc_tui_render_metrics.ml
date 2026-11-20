@@ -3,6 +3,7 @@ open Masc_tui_ansi
 module Decode = Masc.Tui_decode
 module Braille = Masc_tui_braille
 module Chart = Masc_tui_chart
+module Doc = Masc_tui_doc
 module Layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 module Count = Masc_tui_value.Count
@@ -265,7 +266,7 @@ let section_pills_line ~ko ~cols ~(active : metrics_section) : string =
   let tab section = (metrics_section_label ~ko section, active = section, section) in
   let line =
     "  "
-    ^ tab_strip
+    ^ tab_strip ~numbered:true
         ~width:(tab_strip_width ~cols ~before:"  " ~after:"")
         ~press:(fun section text ->
           Masc_tui_press.(pressable (Press_metrics_section section)) text)
@@ -773,7 +774,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
   let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   (* A block of this page is headed like every detail section (RFC
      tui-one-screen-grammar §5.2, §7.3). *)
-  let title text = "  " ^ Section.styled_heading ~rule_style:(Theme.recede ()) text in
+  let title text = Doc.section_rule ~width:inner_width ~indent:2 text in
   let gc = Option.bind state.server_identity (fun identity -> identity.Decode.sid_gc) in
   let scheduler = Option.bind state.server_identity (fun identity -> identity.Decode.sid_scheduler) in
   (* Why a block the server identity holds has nothing in it. Not read yet is
@@ -794,7 +795,7 @@ let render_section_fleet ?session_rows ~cols (state : state) =
       let meter_rows =
         if gc.sgc_heap_words > 0 then
           [ "    "
-            ^ Chart.meter ~width:(min 56 (max 24 (inner_width - 4)))
+            ^ Chart.dot_meter ~width:(min 56 (max 24 (inner_width - 4)))
                 ~value:gc.sgc_live_words ~max_value:(max 1 gc.sgc_heap_words)
                 ~label:(say "점유율" "Occupancy")
                 ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
@@ -932,7 +933,7 @@ let render_section_resources ~cols (state : state) =
   let clip text = Layout.truncate_end inner_width text ^ Ansi.reset in
   (* A block of this page is headed like every detail section (RFC
      tui-one-screen-grammar §5.2, §7.3). *)
-  let title text = "  " ^ Section.styled_heading ~rule_style:(Theme.recede ()) text in
+  let title text = Doc.section_rule ~width:inner_width ~indent:2 text in
   let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
@@ -955,6 +956,30 @@ let render_section_resources ~cols (state : state) =
         Masc_tui_task_document.status_tag_label ~ko tag ^ " " ^ Count.grouped count
       in
       let row parts = "    " ^ String.concat " · " parts in
+      let open_dist_items =
+        List.filter_map
+          (fun (tag, count, style) ->
+            if count <= 0 then None
+            else
+              Some
+                { Chart.name = Masc_tui_task_document.status_tag_label ~ko tag
+                ; count
+                ; style
+                })
+          [ (Masc_domain.Task_status_tag.Todo, current.todo, Masc_tui_theme.Muted)
+          ; (Claimed, current.claimed, Masc_tui_theme.Muted)
+          ; (In_progress, current.in_progress, Masc_tui_theme.Info)
+          ; (Awaiting_verification, current.awaiting_verification, Masc_tui_theme.Warn)
+          ]
+      in
+      let open_dist_lines =
+        if open_dist_items = [] then []
+        else
+          Chart.distribution_bars
+            ~width:(min 56 (max 16 (inner_width - 2)))
+            open_dist_items
+          |> List.map (fun bar -> "  " ^ bar)
+      in
       [ row
           [ say "새 작업 " "New tasks " ^ Count.grouped flow.recent.created
           ; in_status Done flow.recent.completed
@@ -967,8 +992,10 @@ let render_section_resources ~cols (state : state) =
             [ in_status Todo current.todo
             ; in_status Claimed current.claimed
             ; in_status In_progress current.in_progress
-            ; in_status Awaiting_verification current.awaiting_verification ]
-      ; row
+            ; in_status Awaiting_verification current.awaiting_verification ] ]
+      @ open_dist_lines
+      @
+      [ row
           [ say "백로그 전체 " "Retained total " ^ Count.grouped (Task_flow.total_count current)
           ; in_status Done current.completed
           ; in_status Cancelled current.cancelled
@@ -995,9 +1022,9 @@ let render_section_resources ~cols (state : state) =
      than dropped silently. The columns are fitted by cells: Printf pads by
      bytes, so a Korean head or name pulled every column after it left. *)
   let assignee_rows_shown = 10 in
-  let assignee_row name done_count open_count lead =
+  let assignee_row ?(bar = "") name done_count open_count lead =
     let count text = " " ^ Layout.pad_left text 6 in
-    "    " ^ Layout.fit_width name 26 ^ count done_count ^ count open_count ^ "  " ^ lead
+    "    " ^ Layout.fit_width name 26 ^ count done_count ^ count open_count ^ "  " ^ lead ^ bar
   in
   let assignee_lines = match state.task_flow with
     | None -> [ no_snapshot ]
@@ -1006,10 +1033,30 @@ let render_section_resources ~cols (state : state) =
        | [] -> [ say "    담당자가 있는 작업이 없습니다." "    No retained task carries an assignee." ]
        | rows ->
          let head = List.filteri (fun index _ -> index < assignee_rows_shown) rows in
+         let max_total =
+           List.fold_left
+             (fun acc (row : Task_flow.assignee_flow) ->
+               max acc (row.af_done + row.af_open))
+             0 head
+         in
+         let bar_for (row : Task_flow.assignee_flow) =
+           if inner_width < 72 || max_total <= 0 then ""
+           else
+             "  "
+             ^ Chart.dot_meter_bar ~width:12 ~value:(row.af_done + row.af_open)
+                 ~max_value:max_total
+                 ~scale:
+                   (Chart.Series
+                      { paint = Theme.paint ()
+                      ; series = Masc_tui_theme.Completion
+                      })
+                 ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+         in
          let body =
            List.map
              (fun (row : Task_flow.assignee_flow) ->
-               assignee_row row.af_assignee (Count.grouped row.af_done)
+               assignee_row ~bar:(bar_for row)
+                 row.af_assignee (Count.grouped row.af_done)
                  (Count.grouped row.af_open)
                  (match row.af_median_lead_hours with
                   | None -> Masc_tui_theme.Glyph.no_value
@@ -1075,28 +1122,47 @@ let render_section_resources ~cols (state : state) =
          | [] -> []
          | (first : Task_flow.day) :: rest ->
            (* A day that completed nothing is the baseline, not a gap
-              (RFC tui-one-screen-grammar 5.6). *)
+              (RFC tui-one-screen-grammar 5.6). Interpolate across 3 text rows
+              (12 vertical dots) aligned under the daily table like btop. *)
+           let all_days = first :: rest in
            let samples =
              List.map (fun (day : Task_flow.day) -> Braille.of_count day.d_completed)
-               (first :: rest)
+               all_days
            in
            let maximum = Braille.graph_maximum samples in
            let axis = Count.grouped maximum in
-           let width = Layout.display_width axis + 1 + ((List.length samples + 1) / 2) in
-           let spark =
-             match
-               Braille.braille_graph
-                 ~tint:(Theme.series_tint Masc_tui_theme.Completion)
-                 ~width ~rows:1 ~axis ~maximum samples
-             with
-             | Braille.Drawn rows -> String.concat "" rows
-             | Braille.Too_narrow ->
-               Count.grouped
-                 (List.fold_left (fun _ (day : Task_flow.day) -> day.d_completed)
-                    first.d_completed rest)
-             | Braille.Never_read -> Unknown.(glyph Unread)
+           let label = Layout.fit_width (say "완료 추세" "done trend") 10 in
+           let table_cells =
+             List.fold_left (fun acc (_, w) -> acc + w) 0 columns
            in
-           [ "    " ^ Layout.fit_width (say "완료 추세" "done trend") 10 ^ " " ^ spark ])
+           let axis_w = Layout.display_width axis in
+           let room = max 0 (inner_width - 15 - axis_w - 1) in
+           let curve_cells = min (max table_cells 14) room in
+           if curve_cells < Braille.graph_min_cells then
+             [ "    " ^ label ^ " "
+               ^ Count.grouped
+                   (List.fold_left (fun _ (day : Task_flow.day) -> day.d_completed)
+                      first.d_completed rest) ]
+           else
+             let rows = 3 in
+             let dots = rows * 4 in
+             let level_opts =
+               List.map
+                 (fun sample -> Some (Braille.braille_level ~dots ~maximum sample))
+                 samples
+             in
+             let pairs = Braille.interpolate_pairs ~cells:curve_cells level_opts in
+             let curve =
+               Braille.braille_curve_rows ~down:false
+                 ~tint:(Theme.series_tint Masc_tui_theme.Completion)
+                 ~rows pairs
+             in
+             let pad_indent = String.make (15 + axis_w + 1) ' ' in
+             List.mapi
+               (fun idx row ->
+                 if idx = 0 then "    " ^ label ^ " " ^ axis ^ " " ^ row
+                 else pad_indent ^ row)
+               curve)
   in
   let turn_lines = match state.keeper_turns_observed_at, state.keeper_turns_error with
     | _, Some error ->
@@ -1185,7 +1251,7 @@ let render_section_tools ~cols (state : state) : string list =
   let ko = state.ui_language = Lang_ko in
   let say korean english = if ko then korean else english in
   let title_mem =
-    "  " ^ Section.styled_heading ~rule_style:(Theme.recede ())
+    Doc.section_rule ~width:inner_width ~indent:2
       (say "Memory OS 사실 저장소" "Memory OS knowledge base & fact store")
   in
   (* The same four states the Gate rows below draw. This read "not loaded --
@@ -1251,7 +1317,7 @@ let render_section_tools ~cols (state : state) : string list =
   in
 
   let title_gate =
-    "  " ^ Section.styled_heading ~rule_style:(Theme.recede ())
+    Doc.section_rule ~width:inner_width ~indent:2
       (say "Gate 승인과 보안 설정" "Gate governance & security stance")
   in
   let gate = gate_observation state in

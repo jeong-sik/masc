@@ -498,7 +498,9 @@ let delta_usage_to_json (usage : Agent_core.Types.delta_usage) =
         (Option.map (fun v -> `Int v) usage.cache_read_input_tokens)
     @ json_opt "cost_usd"
         (Option.bind usage.cost_usd (fun amount ->
-             if Float.is_finite amount then Some (`Float amount) else None)))
+             if Float.is_finite amount then Some (`Float amount) else None))
+    @ json_opt "reasoning_tokens"
+        (Option.map (fun v -> `Int v) usage.reasoning_tokens))
 
 (* One owner for the stop-reason word. The journal and the AGUI projection
    both write [Agent_core.Types.stop_reason_to_string]; re-exporting it here

@@ -439,8 +439,9 @@ let test_responses_sol_rejects_codex_only_ultra () =
    The list covers the Anthropic models masc runs. The Mythos rows are left out
    because they are not part of that set; they carry the same gap, and Mythos
    5.1 shares Fable 5.1's 0.025x cache read, so a row of its own comes with
-   whichever change starts running them. Haiku 5.5 is left out because its row
-   states no price at all, so it has no multiplier to carry.
+   whichever change starts running them. Haiku 5.5 is tested separately below
+   because its row leaves tiered base prices unset while still carrying its
+   tier-invariant cache multipliers.
 
    The middle number is the one-hour write the claude provider accepts
    ([supports_extended_cache_ttl]): every model on the pricing table charges
@@ -976,7 +977,7 @@ let openrouter_rows =
   [ "anthropic/claude-opus-5", 1_000_000, 128_000, 5.0, 25.0, None
   ; "anthropic/claude-sonnet-5", 1_000_000, 128_000, 2.0, 10.0, None
   ; "openai/gpt-5.5", 1_050_000, 128_000, 5.0, 30.0, None
-  ; "openai/gpt-5.6-sol", 1_050_000, 128_000, 2.0, 10.0, None
+  ; "openai/gpt-5.6-sol", 1_050_000, 128_000, 4.0, 20.0, None
   ; "google/gemini-3.8-flash", 1_048_576, 65_536, 0.75, 3.75, None
   ; "x-ai/grok-4.6", 500_000, 450_000, 2.0, 6.0, None
   ; "moonshotai/kimi-k3", 1_048_576, 943_718, 3.0, 15.0, None
@@ -1318,6 +1319,56 @@ let test_empty_capability_vocab_value_is_rejected () =
   | Ok _ -> fail "strict loader accepted tool_schema_conformance = \"\""
 ;;
 
+let test_openrouter_and_haiku_5_5_cache_multipliers () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"cache multipliers"
+  in
+  let entries = Model_catalog.model_entries catalog in
+  (* Verified OpenRouter cache pricing multipliers *)
+  let check_or model_id exp_write exp_1h exp_read =
+    let entry = openrouter_entry entries model_id in
+    check
+      (option (float 0.0001))
+      (model_id ^ " cache_write_multiplier")
+      exp_write
+      entry.cache_write_multiplier;
+    check
+      (option (float 0.0001))
+      (model_id ^ " cache_write_1h_multiplier")
+      exp_1h
+      entry.cache_write_1h_multiplier;
+    check
+      (option (float 0.0001))
+      (model_id ^ " cache_read_multiplier")
+      exp_read
+      entry.cache_read_multiplier
+  in
+  check_or "anthropic/claude-opus-5" (Some 1.25) (Some 2.0) (Some 0.1);
+  check_or "anthropic/claude-sonnet-5" (Some 1.25) (Some 2.0) (Some 0.1);
+  check_or "anthropic/claude-fable-5.1" (Some 1.25) (Some 2.0) (Some 0.025);
+  check_or "anthropic/claude-haiku-4.5" (Some 1.25) (Some 2.0) (Some 0.1);
+  check_or "openai/gpt-5.6-sol" (Some 1.25) None (Some 0.1);
+  check_or "google/gemini-3.8-flash" None None (Some 0.1);
+  check_or "x-ai/grok-4.6" (Some 1.0) None (Some 0.25);
+  check_or "qwen/qwen3.8-max-0902" None None (Some 0.125);
+  check_or "deepseek/deepseek-v4.1-flash-1017" (Some 1.0) None None;
+  check_or "moonshotai/kimi-k3" None None None;
+  (* Direct Anthropic claude-haiku-5-5 carries tier-invariant cache multipliers
+     while keeping tiered input/output base prices unset. *)
+  match
+    Model_catalog.lookup
+      catalog
+      (Llm_provider.Model_identifiers.Model_id.of_string_exn "claude-haiku-5-5")
+  with
+  | None -> Alcotest.fail "claude-haiku-5-5 resolves to no catalog row"
+  | Some entry ->
+    check (option (float 0.0001)) "haiku-5-5 base input stays unset" None entry.input_per_million;
+    check (option (float 0.0001)) "haiku-5-5 base output stays unset" None entry.output_per_million;
+    check (option (float 0.0001)) "haiku-5-5 write" (Some 1.25) entry.cache_write_multiplier;
+    check (option (float 0.0001)) "haiku-5-5 1h write" (Some 2.0) entry.cache_write_1h_multiplier;
+    check (option (float 0.0001)) "haiku-5-5 read" (Some 0.1) entry.cache_read_multiplier
+;;
+
 let () =
   run
     "model catalog default"
@@ -1420,6 +1471,10 @@ let () =
             "OpenRouter refreshed efforts reach the wire"
             `Quick
             test_openrouter_refreshed_efforts_reach_the_wire
+        ; test_case
+            "OpenRouter and Haiku 5.5 cache multipliers"
+            `Quick
+            test_openrouter_and_haiku_5_5_cache_multipliers
         ; test_case
             "empty capability vocab value is rejected"
             `Quick

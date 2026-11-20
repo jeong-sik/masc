@@ -379,6 +379,7 @@ let%test
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
+    ; chunk_upstream_provider = None
     }
   in
   let events, _ = openai_chunk_to_events state chunk in
@@ -418,6 +419,7 @@ let[@warning "-32"] test_content_chunk ?(finish_reason = None) content =
   ; finish_reason
   ; chunk_usage = None
   ; chunk_timings = None
+  ; chunk_upstream_provider = None
   }
 ;;
 
@@ -511,6 +513,7 @@ let%test "openai_chunk_to_events: id-less continuation fragment stays in its cal
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
+    ; chunk_upstream_provider = None
     }
   in
   let state = create_openai_stream_state () in
@@ -564,6 +567,7 @@ let%test
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
+    ; chunk_upstream_provider = None
     }
   in
   let tc tc_index tc_id tc_name args =
@@ -656,6 +660,7 @@ let%test "openai_chunk_to_events: id-less continuation on ambiguous index fails 
     ; finish_reason = None
     ; chunk_usage = None
     ; chunk_timings = None
+    ; chunk_upstream_provider = None
     }
   in
   let tc tc_id args =

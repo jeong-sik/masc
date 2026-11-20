@@ -123,6 +123,7 @@ let delta_usage_of_json json : (Agent_core.Types.delta_usage, string) result =
       ; cache_read_input_tokens =
           json |> member "cache_read_input_tokens" |> to_int_option
       ; cost_usd = json |> member "cost_usd" |> to_float_option
+      ; reasoning_tokens = json |> member "reasoning_tokens" |> to_int_option
       }
   with
   | Type_error (message, _) -> Error ("delta_usage: " ^ message)

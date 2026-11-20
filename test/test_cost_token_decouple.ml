@@ -291,6 +291,7 @@ let test_native_decode_rate_uses_current_field_only () =
     ; provider_internal_action_count = None
     ; ttfrc_ms = None
     ; prefill_ms = None
+    ; upstream_provider = None
     }
   in
   let payload =
@@ -351,6 +352,7 @@ let test_timings_cache_fields_land_on_payload () =
     ; provider_internal_action_count = None
     ; ttfrc_ms = None
     ; prefill_ms = None
+    ; upstream_provider = None
     }
   in
   let payload =
@@ -390,6 +392,36 @@ let test_a_request_row_names_its_cache_lifetime () =
     (string_field (row ~telemetry request) "cache_write_lifetime");
   check_null_field (row request) "cache_write_lifetime";
   check_null_field (row ~telemetry Cost_ledger.Resolved_delta) "cache_write_lifetime"
+;;
+
+let test_upstream_provider_lands_on_request_rows_only () =
+  let module T = Agent_core.Types in
+  let telemetry =
+    { T.default_inference_telemetry with T.upstream_provider = Some "Anthropic" }
+  in
+  let blank_telemetry =
+    { T.default_inference_telemetry with T.upstream_provider = Some "   " }
+  in
+  let row ?telemetry usage_projection =
+    H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
+      ~keeper_turn_id:1 ~agent_core_turn_ordinal:0 ~model:"model"
+      ~usage_projection ~input_tokens:10 ~output_tokens:1 ~cost_usd:0.0
+      ?telemetry ()
+  in
+  let request = Cost_ledger.Raw_observation Runtime_usage_scope.Per_request in
+  let attempt =
+    Cost_ledger.Resolved_attempt_delta
+      { routing_run_id = "run-1"; lane_attempt_index = 0; reading_index = 0 }
+  in
+  check string "raw observation records upstream_provider" "Anthropic"
+    (string_field (row ~telemetry request) "upstream_provider");
+  check string "attempt delta records upstream_provider" "Anthropic"
+    (string_field (row ~telemetry attempt) "upstream_provider");
+  check_absent_field (row request) "upstream_provider";
+  check_absent_field (row ~telemetry:blank_telemetry request) "upstream_provider";
+  check_absent_field (row ~telemetry Cost_ledger.Resolved_delta) "upstream_provider";
+  (* Keeper-facing runtime telemetry JSON must redact upstream_provider to null. *)
+  check_null_field (H.inference_telemetry_to_runtime_json telemetry) "upstream_provider"
 ;;
 
 let test_response_and_settlement_accounting () =
@@ -919,6 +951,8 @@ let () =
             test_timings_cache_fields_land_on_payload;
           test_case "a request row names its cache lifetime" `Quick
             test_a_request_row_names_its_cache_lifetime;
+          test_case "upstream provider lands on request rows only and redacts in runtime json" `Quick
+            test_upstream_provider_lands_on_request_rows_only;
           test_case "turn complete carries both cache counts" `Quick
             test_turn_complete_carries_both_cache_counts;
           test_case "unreported wire cache is null, not zero" `Quick

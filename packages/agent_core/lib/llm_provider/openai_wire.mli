@@ -56,6 +56,10 @@ type openai_chunk =
         chunk (the one carrying [finish_reason]) without opt-in. Includes
         [cache_n], the prompt tokens reused from the slot KV cache. Cloud
         OpenAI-compatible providers do not send it. *)
+  ; chunk_upstream_provider : string option
+    (** Optional top-level ["provider"] string attached by an OpenAI-compatible
+        gateway (e.g. OpenRouter) naming the upstream provider that served the
+        chunk. [None] on direct endpoints or when blank/absent. *)
   }
 
 (** Closed classification of one OpenAI-compatible SSE data payload. Parsing

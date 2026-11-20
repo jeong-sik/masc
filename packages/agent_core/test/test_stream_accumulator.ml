@@ -385,6 +385,7 @@ let test_accumulate_message_delta () =
              ; cache_creation_input_tokens = None
              ; cache_read_input_tokens = None
              ; cost_usd = None
+             ; reasoning_tokens = None
              }
        });
   match Streaming.finalize_stream_acc acc with
@@ -417,6 +418,7 @@ let test_accumulate_message_delta_cache_update () =
              ; cache_creation_input_tokens = Some 25
              ; cache_read_input_tokens = Some 10
              ; cost_usd = None
+             ; reasoning_tokens = None
              }
        });
   match Streaming.finalize_stream_acc acc with
@@ -498,6 +500,7 @@ let test_finalize_text_response () =
               ; cache_creation_input_tokens = None
               ; cache_read_input_tokens = None
               ; cost_usd = None
+              ; reasoning_tokens = None
               }
         }
     ];
@@ -1458,6 +1461,7 @@ let empty_delta_usage : delta_usage =
   ; cache_creation_input_tokens = None
   ; cache_read_input_tokens = None
   ; cost_usd = None
+  ; reasoning_tokens = None
   }
 ;;
 
@@ -1477,6 +1481,7 @@ let test_usage_explicit_zero_is_reported () =
     ; cache_creation_input_tokens = Some 0
     ; cache_read_input_tokens = Some 0
     ; cost_usd = Some 0.0
+    ; reasoning_tokens = None
     }
   in
   match terminal_usage_of_events
@@ -1526,6 +1531,7 @@ let test_usage_replayed_prelude_keeps_newer_cumulative_fields () =
     ; cache_creation_input_tokens = Some 3
     ; cache_read_input_tokens = Some 5
     ; cost_usd = Some 0.0
+    ; reasoning_tokens = None
     }
   in
   let last : delta_usage = { empty_delta_usage with output_tokens = Some 9 } in
@@ -1545,6 +1551,58 @@ let test_usage_replayed_prelude_keeps_newer_cumulative_fields () =
     Alcotest.(check int) "cache write survives prelude replay" 3 measured.cache_creation_input_tokens;
     Alcotest.(check int) "cache read survives omission" 5 measured.cache_read_input_tokens;
     Alcotest.(check (option (float 0.0))) "cost zero survives prelude" (Some 0.0) measured.cost_usd
+;;
+
+let test_usage_reasoning_tokens_propagates_to_telemetry () =
+  let module State = Llm_provider.Complete_stream_state in
+  let first =
+    { empty_delta_usage with
+      input_tokens = Some 100
+    ; output_tokens = Some 20
+    ; reasoning_tokens = Some 15
+    }
+  in
+  let second = { empty_delta_usage with output_tokens = Some 25 } in
+  let events =
+    [ MessageStart { id = "m-r"; model = "m"; usage = None }
+    ; MessageDelta { stop_reason = None; usage = Some first }
+    ; MessageDelta { stop_reason = Some EndTurn; usage = Some second }
+    ; MessageStop
+    ]
+  in
+  let state = List.fold_left State.transition State.empty events in
+  (match State.finalize state with
+   | State.Completed response ->
+     (match response.telemetry with
+      | Some telemetry ->
+        Alcotest.(check (option int))
+          "reasoning_tokens survives omission and lands on telemetry"
+          (Some 15)
+          telemetry.reasoning_tokens
+      | None -> Alcotest.fail "expected telemetry when reasoning_tokens reported")
+   | State.Failed error -> fail_unexpected_stream_error error);
+  (* Unreported reasoning_tokens stays None on the finalized telemetry. *)
+  let no_reasoning_state =
+    List.fold_left
+      State.transition
+      State.empty
+      [ MessageDelta
+          { stop_reason = Some EndTurn
+          ; usage = Some { empty_delta_usage with output_tokens = Some 5 }
+          }
+      ; MessageStop
+      ]
+  in
+  match State.finalize no_reasoning_state with
+  | State.Completed response ->
+    (match response.telemetry with
+     | Some telemetry ->
+       Alcotest.(check (option int))
+         "unreported reasoning_tokens stays None"
+         None
+         telemetry.reasoning_tokens
+     | None -> Alcotest.fail "expected default telemetry record")
+  | State.Failed error -> fail_unexpected_stream_error error
 ;;
 
 let () =
@@ -1729,6 +1787,7 @@ let () =
         ; Alcotest.test_case "explicit zero prelude" `Quick test_usage_zero_start_is_reported
         ; Alcotest.test_case "cost-only zero survives omission" `Quick test_usage_cost_only_zero_survives_omission
         ; Alcotest.test_case "prelude replay keeps newer cumulative fields" `Quick test_usage_replayed_prelude_keeps_newer_cumulative_fields
+        ; Alcotest.test_case "reasoning tokens propagate to telemetry" `Quick test_usage_reasoning_tokens_propagates_to_telemetry
         ] )
     ; ( "map_http_error"
       , [ Alcotest.test_case "http error" `Quick test_map_http_error_http

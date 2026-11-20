@@ -726,18 +726,20 @@ let usage_of_response_json json =
     let member_int key = opt_bind (List.assoc_opt key fields) json_int_opt in
     let input_tokens = member_int "input_tokens" |> Option.value ~default:0 in
     let output_tokens = member_int "output_tokens" |> Option.value ~default:0 in
-    let cached_tokens =
+    let cache_write_tokens, cached_tokens =
       match List.assoc_opt "input_tokens_details" fields with
       | Some (`Assoc detail_fields) ->
-        opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt
-        |> Option.value ~default:0
+        ( opt_bind (List.assoc_opt "cache_write_tokens" detail_fields) json_int_opt
+          |> Option.value ~default:0
+        , opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt
+          |> Option.value ~default:0 )
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-      | None -> 0
+      | None -> 0, 0
     in
     Some
       { input_tokens
       ; output_tokens
-      ; cache_creation_input_tokens = 0
+      ; cache_creation_input_tokens = cache_write_tokens
       ; cache_read_input_tokens = cached_tokens
       ; cost_usd = None
       }
@@ -755,16 +757,17 @@ let telemetry_of_response_json json =
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
       | None -> None
     in
-    let cache_read_input_tokens =
+    let cache_creation_input_tokens, cache_read_input_tokens =
       match List.assoc_opt "input_tokens_details" fields with
       | Some (`Assoc detail_fields) ->
-        opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt
+        ( opt_bind (List.assoc_opt "cache_write_tokens" detail_fields) json_int_opt
+        , opt_bind (List.assoc_opt "cached_tokens" detail_fields) json_int_opt )
       | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
-      | None -> None
+      | None -> None, None
     in
     Some
       (Types.with_reported_cache_usage
-         ~cache_creation_input_tokens:None
+         ~cache_creation_input_tokens
          ~cache_read_input_tokens
          (Some { Types.default_inference_telemetry with reasoning_tokens }))
   | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None ->

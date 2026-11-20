@@ -880,13 +880,12 @@ let stop_reason_to_metric_label = function
 ;;
 
 (** API usage from a single response *)
-(* delta_usage is declared before api_usage on purpose: the two records
-   share field labels, and OCaml resolves an unqualified label to the most
-   recently defined record — the codebase's pervasive unannotated
-   [u.input_tokens] accesses must keep meaning api_usage.
-   Both records carry the same five labels, so a delta_usage literal is not
-   told apart by its field count: state its type (an annotation, or a
-   context that already expects delta_usage) or it is read as api_usage. *)
+(* delta_usage is declared before api_usage and inference_telemetry on purpose:
+   the records share field labels, and OCaml resolves an unqualified label to
+   the most recently defined record — the codebase's pervasive unannotated
+   [u.input_tokens] accesses keep meaning api_usage, and [t.reasoning_tokens]
+   keeps meaning inference_telemetry. State a delta_usage literal's type (an
+   annotation, or a context that already expects delta_usage). *)
 type delta_usage =
   { input_tokens : int option
   ; output_tokens : int option
@@ -894,6 +893,8 @@ type delta_usage =
   ; cache_read_input_tokens : int option
   ; cost_usd : float option [@default None]
     (** Optional provider-reported cumulative charge; zero is authoritative. *)
+  ; reasoning_tokens : int option [@default None]
+    (** Optional provider-reported reasoning/thinking output tokens. *)
   }
 [@@deriving show, yojson]
 
@@ -912,6 +913,7 @@ let delta_usage_of_api_usage (u : api_usage) : delta_usage =
   ; cache_creation_input_tokens = Some u.cache_creation_input_tokens
   ; cache_read_input_tokens = Some u.cache_read_input_tokens
   ; cost_usd = u.cost_usd
+  ; reasoning_tokens = None
   }
 ;;
 
@@ -1254,6 +1256,7 @@ type inference_telemetry =
   ; provider_internal_action_count : int option
   ; ttfrc_ms : float option
   ; prefill_ms : float option
+  ; upstream_provider : string option [@default None]
   }
 [@@deriving show, yojson]
 
@@ -1277,6 +1280,7 @@ let default_inference_telemetry : inference_telemetry =
   ; provider_internal_action_count = None
   ; ttfrc_ms = None
   ; prefill_ms = None
+  ; upstream_provider = None
   }
 ;;
 

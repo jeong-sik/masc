@@ -8,9 +8,15 @@ let responses_member_string_opt key json =
   json |> member key |> to_string_option
 ;;
 
+let responses_member_int_opt key json =
+  match Json_util.assoc_member_opt key json with
+  | Some (`Int n) -> Some n
+  | Some (`Intlit s) -> int_of_string_opt s
+  | Some (`Null | `Bool _ | `Float _ | `String _ | `Assoc _ | `List _) | None -> None
+;;
+
 let responses_member_int_default key json =
-  let open Yojson.Safe.Util in
-  json |> member key |> to_int_option |> Option.value ~default:0
+  responses_member_int_opt key json |> Option.value ~default:0
 ;;
 
 let responses_usage_of_response response =
@@ -19,17 +25,48 @@ let responses_usage_of_response response =
   | `Assoc _ as usage ->
     let input_tokens = responses_member_int_default "input_tokens" usage in
     let output_tokens = responses_member_int_default "output_tokens" usage in
-    let cache_read_input_tokens =
+    let cache_creation_input_tokens, cache_read_input_tokens =
       match usage |> member "input_tokens_details" with
-      | `Assoc _ as details -> responses_member_int_default "cached_tokens" details
-      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0
+      | `Assoc _ as details ->
+        ( responses_member_int_default "cache_write_tokens" details
+        , responses_member_int_default "cached_tokens" details )
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0, 0
     in
     Some
       { input_tokens
       ; output_tokens
-      ; cache_creation_input_tokens = 0
+      ; cache_creation_input_tokens
       ; cache_read_input_tokens
       ; cost_usd = None
+      }
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+let responses_delta_usage_of_response response : Types.delta_usage option =
+  let open Yojson.Safe.Util in
+  match response |> member "usage" with
+  | `Assoc _ as usage ->
+    let input_tokens = responses_member_int_opt "input_tokens" usage in
+    let output_tokens = responses_member_int_opt "output_tokens" usage in
+    let cache_creation_input_tokens, cache_read_input_tokens =
+      match usage |> member "input_tokens_details" with
+      | `Assoc _ as details ->
+        ( responses_member_int_opt "cache_write_tokens" details
+        , responses_member_int_opt "cached_tokens" details )
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None, None
+    in
+    let reasoning_tokens =
+      match usage |> member "output_tokens_details" with
+      | `Assoc _ as details -> responses_member_int_opt "reasoning_tokens" details
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+    in
+    Some
+      { input_tokens
+      ; output_tokens
+      ; cache_creation_input_tokens
+      ; cache_read_input_tokens
+      ; cost_usd = None
+      ; reasoning_tokens
       }
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
@@ -337,10 +374,7 @@ let responses_sse_to_events (state : openai_stream_state) event_type data_str
              { stop_reason =
                  responses_stop_reason_of_response response
                  |> Option.map (Stop_reason_wire.with_refusal ~has_refusal:state.refusal_seen)
-             ; usage =
-                 Option.map
-                   Types.delta_usage_of_api_usage
-                   (responses_usage_of_response response)
+             ; usage = responses_delta_usage_of_response response
              });
         emit MessageStop
       in

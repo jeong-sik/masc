@@ -252,13 +252,26 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
   let usage = json |> member "usage" in
   if usage = `Null then None
   else
+    let prompt_details =
+      match usage |> member "prompt_tokens_details" with
+      | `Assoc _ as details -> Some details
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+    in
     let cached_tokens =
       match member_int_fallback usage [ "prompt_cache_hit_tokens" ] with
       | Some _ as count -> count
       | None ->
-        let details = usage |> member "prompt_tokens_details" in
-        if details = `Null then None
-        else member_int_fallback details [ "cached_tokens" ]
+        Option.bind prompt_details (fun details ->
+          member_int_fallback details [ "cached_tokens" ])
+    in
+    let cache_creation_input_tokens =
+      Option.bind prompt_details (fun details ->
+        member_int_fallback details [ "cache_write_tokens" ])
+    in
+    let reasoning_tokens =
+      match usage |> member "completion_tokens_details" with
+      | `Assoc _ as details -> member_int_fallback details [ "reasoning_tokens" ]
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
     in
     let cost_usd =
       let cost = match member "cost" usage with
@@ -273,9 +286,10 @@ let delta_usage_of_openai_json json : Types.delta_usage option =
     Some
       { input_tokens = member_int_fallback usage [ "prompt_tokens"; "input_tokens" ]
       ; output_tokens = member_int_fallback usage [ "completion_tokens"; "output_tokens" ]
-      ; cache_creation_input_tokens = None
+      ; cache_creation_input_tokens
       ; cache_read_input_tokens = cached_tokens
       ; cost_usd
+      ; reasoning_tokens
       }
 ;;
 
@@ -302,6 +316,7 @@ let telemetry_of_openai_json json =
     if usage = `Null then None else member_float_fallback usage keys
   in
   let system_fingerprint = json |> member "system_fingerprint" |> to_string_option in
+  let upstream_provider = non_blank_json_string (json |> member "provider") in
   let t = json |> member "timings" in
   let prompt_n =
     first_some
@@ -371,6 +386,7 @@ let telemetry_of_openai_json json =
     ; timings
     ; reasoning_tokens
     ; peak_memory_gb
+    ; upstream_provider
     }
 ;;
 

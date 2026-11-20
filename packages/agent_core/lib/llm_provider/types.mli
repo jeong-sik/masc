@@ -669,6 +669,8 @@ type delta_usage =
   ; cache_read_input_tokens : int option
   ; cost_usd : float option [@default None]
     (** Optional provider-reported cumulative charge; zero is authoritative. *)
+  ; reasoning_tokens : int option [@default None]
+    (** Optional provider-reported reasoning/thinking output tokens. *)
   }
 [@@deriving show, yojson]
 
@@ -818,6 +820,10 @@ type inference_telemetry =
   ; ttfrc_ms : float option
     (** Time-to-first-response-chunk in milliseconds (wall-clock). *)
   ; prefill_ms : float option (** Prompt evaluation (prefill) duration in milliseconds. *)
+  ; upstream_provider : string option [@default None]
+    (** Optional upstream provider label reported by a gateway (for example
+        OpenRouter's top-level ["provider"] field). [None] on direct endpoints
+        and when absent or blank. *)
   }
 [@@deriving show, yojson]
 

@@ -361,372 +361,6 @@ let approval_decision_unverified = function
 
 open Masc_tui_async_protocol
 
-let launch_artifact_checks_load state ~mailbox =
-  if server_authority_ready state then
-    match Masc_tui_fetched.refresh ~equal:Unit.equal state.artifact_checks ~key:() with
-    | Already_loading -> ()
-    | Started (reading, request) ->
-      state.artifact_checks <- reading;
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-      Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
-        ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Artifact_msg (Artifact_checks_loaded (request, result)))
-        (fun () ->
-          let open Result.Syntax in
-          Result.map_error (fun detail -> Request_failed detail) @@
-          let* json = Masc_tui_http.get_json ~host ~port ~path:"/api/v1/published-artifact-checks" in
-          Masc_tui_artifact_checks.of_json ~received_at:(Unix.gettimeofday ()) json)
-
-let launch_resources_load state ~mailbox =
-  Masc_tui_resources_requests.launch_list state ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-    ~launch:(Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
-      ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal))
-    ~check:(Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox);
-  launch_artifact_checks_load state ~mailbox
-
-let resource_export_is_current state prompt =
-  if state.workspace_authority <> prompt.rsp_authority
-     || state.workspace_read_authority != prompt.rsp_read_authority then
-    Error "The workspace changed; cancel and select the report again"
-  else match Masc_tui_resource_document.export_source state with
-    | Ok current when Masc_tui_resource_export.same current prompt.rsp_document -> Ok ()
-    | Ok _ -> Error "The selected report revision changed; cancel and select it again"
-    | Error detail -> Error detail
-
-let open_resource_save_prompt state =
-  match Masc_tui_resource_document.export_source state with
-  | Error detail -> report_action state "error" detail
-  | Ok document ->
-    (match workspace_input_identity_of_server state.server_identity with
-     | None -> report_action state "error" "Confirm the workspace before saving this report"
-     | Some workspace ->
-       let directory = Sys.getcwd () in
-       let path = Masc_tui_message_input.create () in
-       Masc_tui_message_input.insert path
-         (Filename.concat directory (Masc_tui_resource_export.suggested_name document));
-       state.resource_save_prompt <- Some {
-         rsp_owner = ref (); rsp_document = document; rsp_path = path;
-         rsp_authority = state.workspace_authority;
-         rsp_read_authority = state.workspace_read_authority;
-         rsp_workspace = workspace; rsp_directory = directory; rsp_error = None })
-
-type resource_save_observation =
-  | Save_not_entered
-  | Save_entered
-  | Save_observed of resource_save_outcome
-
-let save_resource_source state ~mailbox prompt =
-  match resource_export_is_current state prompt with
-  | Error detail -> prompt.rsp_error <- Some detail
-  | Ok () ->
-    let input_path = Masc_tui_message_input.contents prompt.rsp_path in
-    if String.equal input_path "" then prompt.rsp_error <- Some "Enter a destination file path"
-    else if resource_save_pending_for_prompt state prompt then ()
-    else match Eio_context.get_env_opt () with
-    | None -> prompt.rsp_error <- Some "The local filesystem is unavailable"
-    | Some env ->
-      let request = {
-        save_form = prompt.rsp_owner;
-        save_document = prompt.rsp_document; save_input_path = input_path;
-        save_path = resource_save_path prompt; save_workspace = prompt.rsp_workspace } in
-      state.resource_save_receipts <- {save_request=request;save_phase=Resource_save_pending}
-        :: state.resource_save_receipts;
-      prompt.rsp_error <- None;
-      state.resource_scroll <- Masc_tui_scroll.Position.first;
-      let observed = ref Save_not_entered in
-      let boundary detail = match !observed with
-        | Save_not_entered -> Resource_save_not_started detail
-        | Save_entered -> Resource_save_unconfirmed {detail;cause=None}
-        | Save_observed outcome -> outcome in
-      let deliver outcome = Resource_msg (Resource_saved (request, outcome)) in
-      Masc_tui_transport.Workspace_admission.launch_guarded_request ~operation:true state ~mailbox ~boundary_error:boundary
-        ~withdrawn:(fun refusal -> Resource_save_kept_back refusal)
-        ~cancelled_by:(fun () -> deliver (match !observed with
-          | Save_not_entered -> Resource_save_not_started "Save cancelled before file creation"
-          | Save_entered -> Resource_save_interrupted None
-          | Save_observed outcome -> outcome))
-        ~deliver:(function Ok outcome | Error outcome -> deliver outcome)
-        (fun () ->
-          match resource_export_is_current state prompt with
-          | Error detail -> Ok (Resource_save_not_started detail)
-          | Ok () ->
-            observed := Save_entered;
-            match Masc_tui_resource_export.save ~fs:env#fs ~path:request.save_path request.save_document with
-            | result ->
-                let outcome = Resource_save_result result in
-                observed := Save_observed outcome;
-                Ok outcome
-            | exception (Eio.Cancel.Cancelled _ as exn) ->
-                let backtrace = Printexc.get_raw_backtrace () in
-                observed := Save_observed (Resource_save_interrupted
-                  (Masc_tui_resource_export.cancellation exn));
-                Printexc.raise_with_backtrace exn backtrace
-            | exception exn ->
-                let backtrace = Printexc.get_raw_backtrace () in
-                (match Masc_tui_resource_export.cancellation exn with
-                 | Some cancellation ->
-                     observed := Save_observed (Resource_save_interrupted (Some cancellation));
-                     Printexc.raise_with_backtrace exn backtrace
-                 | None ->
-                     let outcome = Resource_save_unconfirmed {
-                       detail=Printexc.to_string exn;cause=Some exn} in
-                     observed := Save_observed outcome;
-                     Ok outcome))
-
-let open_resource_in_dashboard state ~mailbox =
-  match Masc_tui_resource_document.export_source state with
-  | Error detail -> report_action state "error" detail
-  | Ok document ->
-    let authority = state.workspace_authority in
-    let reading = state.workspace_read_authority in
-    let port = state.port in
-    let url = Masc_tui_resource_export.dashboard_url ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port document in
-    let failed detail = Request_failed detail in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request ~operation:true state ~mailbox ~boundary_error:failed
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~cancelled:(Resource_msg (Resource_exported (Masc_tui_resource_export.label document,
-        Error (failed ("Browser opening interrupted; whether the browser opened is unknown: " ^ url)))))
-      ~deliver:(fun result -> Resource_msg (Resource_exported (Masc_tui_resource_export.label document, result)))
-      (fun () ->
-        if authority <> state.workspace_authority || reading != state.workspace_read_authority then
-          Error (failed "The workspace changed before opening this report")
-        else match Masc_tui_resource_document.export_source state with
-        | Error detail -> Error (failed detail)
-        | Ok current when not (Masc_tui_resource_export.same current document) ->
-            Error (failed "The selected report changed before opening")
-        | Ok _ ->
-          Eio_guard.run_in_systhread ~label:"tui-report-browser" (fun () ->
-            Masc_tui_browser.open_url url)
-          |> Result.map (fun opener -> "Opened " ^ url ^ " via " ^ opener ^ "; browser authentication may be required")
-          |> Result.map_error failed)
-
-let launch_resources_read state ~mailbox ~key =
-  withdraw_resource_diagram_pending state;
-  let share_origin = Result.to_option (workspace_change_origin state) in
-  Masc_tui_resources_requests.launch_read state ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-    ~share_origin
-    ~launch:(Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
-      ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal))
-    ~check:(Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox) ~key
-
-let launch_artifact_check_change state ~mailbox =
-  let entry = match state.resource_focus with
-    | Right_pane -> Option.map Masc_tui_resource_document.entry
-        (Masc_tui_resource_document.current state)
-    | Left_pane -> Option.bind (visible_resources state) (fun entries ->
-        List.nth_opt entries state.resources_cursor) in
-  match entry, state.server_identity with
-  | (None | Some (Masc_tui_resource_catalog.Mcp _)), _ ->
-    report_action state "error" "Select a published report revision to check or uncheck"
-  | Some (Report _), None ->
-    Masc_tui_transport.Request_notice.report_kept_back state ~request:Kept_request.Report_check workspace_identity_unread Nothing_kept
-  | Some (Report report), Some expected_workspace ->
-    match Masc_tui_resources_updates.begin_check state ~report with
-    | Error (Request_failed detail) -> report_action state "error" detail
-    | Error (Request_withdrawn refusal) ->
-      Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Report_check refusal
-    | Ok request ->
-      let credential = Masc_tui_http.bind_credential () in
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-      report_action state "system" "Saving confirmation; refresh follows the result";
-      Masc_tui_transport.Workspace_admission.launch_guarded_request ~operation:true state ~mailbox
-        ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Artifact_msg (Artifact_check_changed (request, result)))
-        (fun () -> Masc_tui_http.post_artifact_check ~credential ~expected_workspace
-          ~host ~port ~request
-          |> Result.map_error (fun detail -> Request_failed detail))
-
-module Artifact_share_pending = Masc_tui_artifact_share_pending
-
-let artifact_share_journal_path origin =
-  Artifact_share_pending.journal_path ~masc_root:origin.wi_masc_root
-
-let open_resource_report state =
-  match Masc_tui_resource_document.current state with
-  | Some {entry = Masc_tui_resource_catalog.Report report; _} -> Ok report
-  | Some {entry = Mcp _; _} | None -> Error "Open a published report in the detail pane"
-
-(* The share POST the workspace guard stopped: the notice, the report, and
-   the way to settle the intent already recorded for it, which a later
-   attempt may still apply. *)
-let report_resource_share_kept_back state (request : resource_share_request) refusal =
-  let ko = state.ui_language = Lang_ko in
-  report_action state "error"
-    (String.concat " · "
-       [ workspace_refusal_text ~ko ~request:Kept_request.Resource_share refusal
-       ; request.share_report.id
-       ; (if ko then "U 로 기록된 작업을 맞추세요" else "use U to reconcile the recorded operation") ])
-
-let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allowed =
-  let captured_authority = state.workspace_authority in
-  match state.server_identity, workspace_change_origin state with
-  | Some expected_workspace, Ok origin
-    when entry.Artifact_share_pending.base_path = origin.wi_base_path
-         && entry.masc_root = origin.wi_masc_root && entry.artifact_id = report.Masc_tui_resource_catalog.id ->
-    let operation = entry.request in
-    let path = artifact_share_journal_path origin in
-    let on_observed entries =
-      List.iter (fun (observed : Artifact_share_pending.entry) ->
-        if observed.masc_root = origin.wi_masc_root then record_resource_share_observation state observed) entries in
-    (match Masc_tui_resources_updates.begin_share_change ~recovery state ~report ~entry with
-     | Error (Request_failed detail) -> report_action state "error" detail
-     | Error (Request_withdrawn refusal) ->
-       Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Resource_share refusal
-     | Ok request ->
-       report_action state "system" (if recovery then
-         "Reconciling the original share operation; it may be applied now"
-         else if operation.requested then "Enabling external sharing" else "Revoking external sharing");
-       let credential = Masc_tui_http.bind_credential () in
-       let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-       let identity = Some expected_workspace in
-       let context detail = Printf.sprintf
-         "operation %s, observed share version %d, publication v%d (%s): %s"
-         operation.operation_id operation.expected_version operation.expected_artifact_revision
-         operation.expected_artifact_sha256 detail in
-       let journal_started = ref false in
-       let attempt = Masc_tui_artifact_share_attempt.create () in
-       let failure detail =
-         if !journal_started || Masc_tui_artifact_share_attempt.dispatched attempt
-         then Resource_share_unknown (context detail) else Resource_share_not_started detail in
-       Masc_tui_transport.Workspace_admission.launch_result ~operation:true state ~mailbox
-         ~boundary_error:failure
-         ~cancelled_by:(fun () -> Resource_msg (Resource_share_changed (request, Error (failure "interrupted"))))
-         ~deliver:(fun result -> Resource_msg (Resource_share_changed (request, result)))
-         (fun () ->
-           (* The filesystem transaction and its lock belong to this worker, not
-              to the input loop. A cancelled system-thread write may finish. *)
-           journal_started := true;
-           let prepared = if recovery then
-               Artifact_share_pending.restore ~on_observed ~path entry |> Result.map (fun () -> Artifact_share_pending.Prepared)
-             else Artifact_share_pending.prepare_checked ~on_observed ~path entry in
-           match prepared with
-           | Error detail -> Error (Resource_share_unknown (context ("Share intent storage could not be confirmed: " ^ detail)))
-           | Ok (Artifact_share_pending.Not_prepared detail) ->
-             Ok (Resource_share_not_prepared ("Share intent was not recorded: " ^ detail))
-           | Ok (Artifact_share_pending.Already_pending _) ->
-             Ok (Resource_share_not_prepared "Another recorded share operation must be resolved first")
-           | Ok (Artifact_share_pending.Already_pending_with_storage_failure (_, detail)) ->
-             Ok (Resource_share_not_prepared ("Another operation was observed; journal storage failed: " ^ detail))
-           | Ok Artifact_share_pending.Prepared ->
-             match Masc_tui_artifact_share_attempt.perform attempt
-               ~preflight:(fun () ->
-                 match Masc_tui_transport.Workspace_admission.admit_request state ~mailbox ~authority:captured_authority ~identity ~host ~port () with
-                 | Error refusal -> Error (Request_withdrawn refusal)
-                 | Ok () ->
-                   (match resource_share_dispatch_refusal state ~origin ~entry ~recovery with
-                    | Some detail -> Error (Request_failed detail)
-                    | None when dispatch_allowed () -> Ok ()
-                    | None -> Error (Request_failed "An interrupt or termination is awaiting handling")))
-               ~send:(fun () -> Masc_tui_http.post_artifact_share ~credential ~expected_workspace
-                 ~host ~port ~id:entry.artifact_id ~shared:operation.requested
-                 ~operation_id:operation.operation_id ~expected_version:operation.expected_version
-                 ~expected_artifact_revision:operation.expected_artifact_revision
-                 ~expected_artifact_sha256:operation.expected_artifact_sha256) with
-             | Not_sent (Request_failed detail) -> Ok (Resource_share_not_sent detail)
-             | Not_sent (Request_withdrawn refusal) -> Ok (Resource_share_kept_back refusal)
-             | Sent (Error detail) -> Error (Resource_share_unknown (context detail))
-             | Sent (Ok result) ->
-               (match Artifact_share_pending.settle ~on_observed ~path entry with
-                | Error detail -> Error (Resource_share_unknown
-                    (context ("Receipt arrived but recovery storage did not settle: " ^ detail)))
-                | Ok _ -> Ok (match result with
-                  | Masc_tui_http.Artifact_share_applied shared -> Resource_share_applied shared
-                  | Masc_tui_http.Artifact_share_conflict shared -> Resource_share_conflict shared))))
-  | (Some _ | None), (Ok _ | Error _) ->
-    report_action state "error" "The original share operation belongs to a different or unverified workspace"
-
-let toggle_resource_external_share state ~mailbox ~dispatch_allowed =
-  state.resource_share_recovery_prompt <- None;
-  match Masc_tui_resource_document.external_share_change state, workspace_change_origin state with
-  | Error detail, _ | _, Error detail -> report_action state "error" detail
-  | Ok (report, shared), Ok origin ->
-    (match state.resource_share_version, state.resource_revision_history with
-     | Some expected_version, latest :: _ when String.equal latest.id report.id ->
-       let request : Masc.Published_artifact_share.request = {
-         operation_id=Random_id.uuid_v7 (); expected_version; requested=shared;
-         expected_artifact_revision=latest.revision.revision;
-         expected_artifact_sha256=latest.revision.body.sha256 } in
-       let entry : Artifact_share_pending.entry = {base_path=origin.wi_base_path;
-         masc_root=origin.wi_masc_root; artifact_id=report.id; request} in
-       launch_resource_share state ~mailbox ~report ~entry ~recovery:false ~dispatch_allowed
-     | Some _, _ :: _ | Some _, [] | None, ([] | _ :: _) ->
-       report_action state "error" "Share version or latest publication is unavailable; reread this report")
-
-let begin_resource_share_recovery_lookup state ~mailbox =
-  match open_resource_report state, workspace_change_origin state, state.resource_share_recovery_lookup with
-  | Error detail, _, _ | _, Error detail, _ -> report_action state "error" detail
-  | Ok _, Ok _, Some _ -> report_action state "system" "Checking the recorded share operation"
-  | Ok report, Ok origin, None when List.exists (fun pending ->
-      pending.share_workspace_identity = origin && String.equal pending.share_report.id report.id)
-      state.resource_share_pending ->
-    report_action state "system" "A sharing attempt for this artifact is still running; wait for its result."
-  | Ok report, Ok origin, None ->
-    let request = { recovery_lookup_owner=ref (); recovery_lookup_workspace=state.workspace_authority;
-      recovery_lookup_origin=origin; recovery_lookup_key=Masc_tui_resource_catalog.Report_revision report } in
-    Masc_tui_resources_updates.begin_share_recovery_lookup state ~origin ~report;
-    state.resource_share_recovery_lookup <- Some request;
-    report_action state "system" "Checking the recorded share operation";
-    let path = artifact_share_journal_path origin in
-    Masc_tui_transport.Workspace_admission.launch_result ~observation:true state ~mailbox
-      ~boundary_error:Fun.id
-      ~cancelled:(Resource_msg (Resource_share_recovery_loaded (request, Error "Recovery lookup interrupted")))
-      ~deliver:(fun result -> Resource_msg (Resource_share_recovery_loaded (request, result)))
-      (fun () ->
-        let on_observed entries = List.iter (fun (entry : Artifact_share_pending.entry) ->
-          if entry.masc_root = origin.wi_masc_root then record_resource_share_observation state entry) entries in
-        Artifact_share_pending.observe ~on_observed ~path () |> Result.map (fun (_, entries) ->
-          List.find_opt (fun (entry : Artifact_share_pending.entry) ->
-            entry.base_path = origin.wi_base_path && entry.masc_root = origin.wi_masc_root
-            && entry.artifact_id = report.id) entries))
-
-let recover_resource_external_share state ~mailbox ~confirm ~dispatch_allowed =
-  if not confirm then begin_resource_share_recovery_lookup state ~mailbox
-  else match open_resource_report state, workspace_change_origin state, state.resource_share_recovery_prompt with
-  | Ok report, Ok origin, Some held
-    when held.recovery_workspace = state.workspace_authority
-         && held.recovery_entry.base_path = origin.wi_base_path
-         && held.recovery_entry.masc_root = origin.wi_masc_root
-         && Masc_tui_resource_catalog.equal_key held.recovery_key (Report_revision report) ->
-    if Masc_tui_artifact_share_confirmation.ready held.recovery_confirmation then begin
-      state.resource_share_recovery_prompt <- None;
-      launch_resource_share state ~mailbox ~report ~entry:held.recovery_entry ~recovery:true ~dispatch_allowed
-    end else report_action state "system" "Wait for the recovery preview before confirming."
-  | (Ok _ | Error _), (Ok _ | Error _), (Some _ | None) ->
-    state.resource_share_recovery_prompt <- None;
-    report_action state "system" "Press U to inspect the current recovery operation first."
-
-let resource_share_is_owned state request =
-  List.exists (fun current -> current.share_owner == request.share_owner) state.resource_share_pending
-
-let resource_public_copy_is_current state copy =
-  state.view = Resources && state.resource_focus = Right_pane
-  && state.workspace_authority = copy.public_copy_workspace
-  && state.workspace_read_authority == copy.public_copy_read_authority
-  && workspace_change_origin state = Ok copy.public_copy_origin
-  && match Masc_tui_resource_document.current state with
-     | Some reading ->
-       Masc_tui_resource_catalog.equal_key (Masc_tui_resource_catalog.key reading.entry) copy.public_copy_key
-       && reading.public_url = Some (Ok copy.public_copy_url)
-     | None -> false
-
-let finish_resource_share state request result =
-  withdraw_resource_diagram_pending state;
-  let read_key = Masc_tui_resources_updates.share_changed state request ~result in
-  let key = request.share_workspace_identity, request.share_report.id in
-  match result with
-  | Ok (Resource_share_applied _ | Resource_share_conflict _) -> read_key
-  | Ok (Resource_share_not_prepared _) -> read_key
-  | Error (Resource_share_not_started _) when not request.share_recovery -> read_key
-  | Ok (Resource_share_not_sent _ | Resource_share_kept_back _)
-  | Error (Resource_share_unknown _ | Resource_share_not_started _) ->
-    if not (List.mem key state.resource_share_uncertain_ids) then
-      state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
-    None
-
 (* Wire the web-link-preview background fetcher. On the first cache miss for a
    URL, Masc_tui_link_preview renders the synthesized card immediately and calls
    this hook; the fetched <title>/og:* then replace that entry in the shared
@@ -2563,7 +2197,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       | Config_runtime | Config_models | Config_themes ->
           owe_runtime_config_read state;
           Masc_tui_surface_requests.Runtime_config_requests.launch_runtime_config_load state ~mailbox)
-  | Resources -> launch_resources_load state ~mailbox
+  | Resources -> Masc_tui_resources_control.Resource_io_control.launch_resources_load state ~mailbox
   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state mailbox)
   | Metrics ->
       owe_memory_health_read state;
@@ -10345,7 +9979,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
      | Approvals | Harness | Repositories | Connectors | Runtime | Config | Resources | System_logs -> ());
     (match state.view with
      | Resources -> Option.iter (fun uri ->
-         launch_resources_read state ~mailbox ~key:uri) state.resource_pending_key
+         Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key:uri) state.resource_pending_key
      | Config when state.config_pane = Config_prompts ->
          (match state.prompts_librarian_input_requested, Masc_tui_surface_requests.Prompt_preset_requests.selected_prompt_for_state state with
           | Some prompt_key, Some row when String.equal row.Tui_decode.pr_key prompt_key ->
@@ -11080,28 +10714,28 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              removes read authority, not this outcome or its registered slot. *)
           ignore (settle_resource_save state request outcome)
         | Workspace_operation (Resource_msg (Resource_share_changed (request, result))) ->
-          if resource_share_is_owned state request then begin
-            let read_key = finish_resource_share state request result in
+          if Masc_tui_resources_control.Artifact_share_control.resource_share_is_owned state request then begin
+            let read_key = Masc_tui_resources_control.Artifact_share_control.finish_resource_share ~withdraw_diagram:withdraw_resource_diagram_pending state request result in
             (match result with
              | Ok (Resource_share_applied shared) -> report_action state "system"
                  ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
                   ^ " applied in the original workspace for " ^ request.share_report.id
                   ^ (if shared then "; enabled at response" else "; disabled at response"));
-                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+                 Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
              | Ok (Resource_share_conflict shared) -> report_action state "system"
                  ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
                   ^ " conflicted in the original workspace for " ^ request.share_report.id
                   ^ (if shared then "; enabled at response" else "; disabled at response"));
-                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+                 Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
              | Ok (Resource_share_not_prepared detail) -> report_action state "system"
                  ("The share request for " ^ request.share_report.id ^ " was not recorded or sent: " ^ detail);
-                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+                 Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
              | Ok (Resource_share_not_sent detail) -> report_action state "system"
                  ("The share request for " ^ request.share_report.id ^ " did not send. The recorded operation may still apply; use U to reconcile: " ^ detail);
-                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+                 Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
              | Ok (Resource_share_kept_back refusal) ->
-                 report_resource_share_kept_back state request refusal;
-                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+                 Masc_tui_resources_control.Artifact_share_control.report_resource_share_kept_back state request refusal;
+                 Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
              | Error (Resource_share_unknown detail) -> report_action state "error"
                  ("Previous workspace external sharing result unconfirmed for " ^ request.share_report.id
                   ^ "; use U to reconcile the recorded operation: " ^ detail)
@@ -11109,7 +10743,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                  (if request.share_recovery then
                     "The recovery attempt for " ^ request.share_report.id ^ " did not start; the original operation may still apply: " ^ detail
                   else "The share request for " ^ request.share_report.id ^ " did not start or send: " ^ detail);
-                 Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key)
+                 Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key)
           end
         | Play_msg (Play_invite_issued (request, _, Play_answered (Ok invite))) ->
           (match
@@ -14514,7 +14148,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              ("Confirmation result requires refresh: " ^ detail)
          | Error (Request_withdrawn refusal) ->
              Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Report_check refusal);
-        launch_artifact_checks_load state ~mailbox
+        Masc_tui_resources_control.Resource_io_control.launch_artifact_checks_load state ~mailbox
       end;
       Drawn_changed
   | Resource_msg (Resource_saved (request, outcome)) ->
@@ -14541,7 +14175,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            (match state.resource_content with
             | Some ((Masc_tui_resource_catalog.Report_revision current as key), _)
               when String.equal current.id label ->
-                launch_resources_read state ~mailbox ~key
+                Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key
             | Some ((Masc_tui_resource_catalog.Report_revision _
                     | Masc_tui_resource_catalog.Mcp_uri _), _) | None -> ())
        | Error (Request_failed detail) -> report_action state "error" (label ^ ": " ^ detail)
@@ -14549,31 +14183,31 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            Masc_tui_transport.Request_notice.report_withdrawn state ~request:Kept_request.Report_open refusal);
       Drawn_changed
   | Resource_msg (Resource_share_changed (request, result)) ->
-      if resource_share_is_owned state request then begin
-        let read_key = finish_resource_share state request result in
+      if Masc_tui_resources_control.Artifact_share_control.resource_share_is_owned state request then begin
+        let read_key = Masc_tui_resources_control.Artifact_share_control.finish_resource_share ~withdraw_diagram:withdraw_resource_diagram_pending state request result in
         (match result with
          | Ok (Resource_share_applied shared) ->
              report_action state "system"
                ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
                 ^ " applied for " ^ request.share_report.id
                 ^ (if shared then "; enabled at response" else "; disabled at response"));
-             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
          | Ok (Resource_share_conflict shared) ->
              report_action state "system"
                ("External sharing request to " ^ (if request.share_target then "enable" else "revoke")
                 ^ " conflicted for " ^ request.share_report.id
                 ^ (if shared then "; enabled at response" else "; disabled at response")
                 ^ "; refresh before retrying");
-             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
          | Ok (Resource_share_not_prepared detail) ->
              report_action state "system" ("The share request for " ^ request.share_report.id ^ " was not recorded or sent: " ^ detail);
-             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
          | Ok (Resource_share_not_sent detail) ->
              report_action state "error" ("The share request for " ^ request.share_report.id ^ " did not send. The recorded operation may still apply; use U to reconcile: " ^ detail);
-             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
          | Ok (Resource_share_kept_back refusal) ->
-             report_resource_share_kept_back state request refusal;
-             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key
+             Masc_tui_resources_control.Artifact_share_control.report_resource_share_kept_back state request refusal;
+             Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key
          | Error (Resource_share_unknown detail) ->
              report_action state "error"
                ("External sharing result unconfirmed for " ^ request.share_report.id
@@ -14582,14 +14216,14 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              report_action state "error" (if request.share_recovery then
                "The recovery attempt for " ^ request.share_report.id ^ " did not start; the original operation may still apply: " ^ detail
                else "The share request for " ^ request.share_report.id ^ " did not start or send: " ^ detail);
-             Option.iter (fun key -> launch_resources_read state ~mailbox ~key) read_key)
+             Option.iter (fun key -> Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key) read_key)
       end;
       Drawn_changed
   | Resource_msg (Resource_share_recovery_loaded (request, result)) ->
       (match state.resource_share_recovery_lookup with
        | Some current when current.recovery_lookup_owner == request.recovery_lookup_owner ->
          state.resource_share_recovery_lookup <- None;
-         let selected = match open_resource_report state with
+         let selected = match Masc_tui_resources_control.Artifact_share_control.open_resource_report state with
            | Ok report -> Masc_tui_resource_catalog.equal_key (Report_revision report) request.recovery_lookup_key
            | Error _ -> false in
          if selected && state.view = Resources && state.resource_focus = Right_pane
@@ -14638,7 +14272,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                     state.resource_share_uncertain_ids <- List.filter ((<>) key) state.resource_share_uncertain_ids;
                     state.resource_share_recovery_prompt <- None;
                     report_action state "system" "No recorded share operation; rereading the report";
-                    launch_resources_read state ~mailbox ~key:request.recovery_lookup_key)
+                    Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox ~key:request.recovery_lookup_key)
                | Ok (Some entry) ->
                  if not (List.mem key state.resource_share_uncertain_ids) then
                    state.resource_share_uncertain_ids <- key :: state.resource_share_uncertain_ids;
@@ -18098,7 +17732,7 @@ let drain_async_messages ~server_contact ?deadline_ns ?(input_pending = fun () -
   let changed = changed || retired_image_changed in
   match state.resource_copy_ready with
   | Some copy when !copy_sweep_complete && not (share_input_pending ()) && not (over_budget ()) ->
-    if not (resource_public_copy_is_current state copy) then begin
+    if not (Masc_tui_resources_control.Artifact_share_control.resource_public_copy_is_current state copy) then begin
       state.resource_copy_ready <- None;
       resource_copy_sweep := None;
       report_action state "system" "Public link copy was retired after the report or workspace changed.";
@@ -22589,7 +22223,7 @@ let main
               let input = prompt.rsp_path in
               (match k with
                | "esc" -> state.resource_save_prompt <- None
-               | "\r" | "\n" | "enter" -> save_resource_source state ~mailbox:async_messages prompt
+               | "\r" | "\n" | "enter" -> Masc_tui_resources_control.Resource_io_control.save_resource_source state ~mailbox:async_messages prompt
                | "\127" | "\b" | "backspace" ->
                    prompt.rsp_error <- None;
                    Masc_tui_message_input.backspace input
@@ -25290,19 +24924,19 @@ let main
        | Some "f" when state.view = Resources ->
            Masc_tui_resources_updates.select_scope state
              (Masc_tui_resource_catalog.next_scope state.resource_scope)
-       | Some "s" when state.view = Resources -> open_resource_save_prompt state
-       | Some "o" when state.view = Resources -> open_resource_in_dashboard state ~mailbox:async_messages
+       | Some "s" when state.view = Resources -> Masc_tui_resources_control.Resource_io_control.open_resource_save_prompt state
+       | Some "o" when state.view = Resources -> Masc_tui_resources_control.Resource_io_control.open_resource_in_dashboard state ~mailbox:async_messages
        | Some "c" when state.view = Resources ->
-           launch_artifact_check_change state ~mailbox:async_messages
+           Masc_tui_resources_control.Resource_io_control.launch_artifact_check_change state ~mailbox:async_messages
        | Some ("P" | "U" | "Y" | "!")
            when state.view = Resources && state.resource_focus = Right_pane
                 && (!share_interrupt_barrier || Masc_tui_exit_signals.pending_signal exit_signals) ->
            report_action state "system" "Share action interrupted; use the key again when ready."
        | Some "P" when state.view = Resources && state.resource_focus = Right_pane ->
-           toggle_resource_external_share state ~mailbox:async_messages
+           Masc_tui_resources_control.Artifact_share_control.toggle_resource_external_share state ~mailbox:async_messages
              ~dispatch_allowed:(resource_share_dispatch_allowed ())
        | Some "U" when state.view = Resources && state.resource_focus = Right_pane ->
-           recover_resource_external_share state ~mailbox:async_messages ~confirm:false
+           Masc_tui_resources_control.Artifact_share_control.recover_resource_external_share state ~mailbox:async_messages ~confirm:false
              ~dispatch_allowed:(resource_share_dispatch_allowed ())
        | Some "!" when state.view = Resources && state.resource_focus = Right_pane
              && Option.is_some state.resource_share_recovery_prompt ->
@@ -25310,14 +24944,14 @@ let main
              Option.iter (fun prompt -> Masc_tui_artifact_share_confirmation.withdraw prompt.recovery_confirmation)
                state.resource_share_recovery_prompt;
              report_action state "system" "Wait for pending terminal or signal changes before confirming."
-           end else recover_resource_external_share state ~mailbox:async_messages ~confirm:true
+           end else Masc_tui_resources_control.Artifact_share_control.recover_resource_external_share state ~mailbox:async_messages ~confirm:true
              ~dispatch_allowed:(resource_share_dispatch_allowed ())
        | Some "Y" when state.view = Resources && state.resource_focus = Right_pane ->
-           (match open_resource_report state with
+           (match Masc_tui_resources_control.Artifact_share_control.open_resource_report state with
             | Error detail -> report_action state "error" detail
             | Ok report ->
               let key = Masc_tui_resource_catalog.Report_revision report in
-              launch_resources_read state ~mailbox:async_messages ~key;
+              Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox:async_messages ~key;
               (match state.resource_read_owner with
                | Some owner ->
                  state.resource_copy_pending <- Some {Masc_tui_resource_catalog.key;owner};
@@ -25326,7 +24960,7 @@ let main
        | Some "R" when state.view = Resources && state.resource_focus = Right_pane ->
            (match Masc_tui_resource_document.current state with
             | Some reading ->
-                launch_resources_read state ~mailbox:async_messages
+                Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox:async_messages
                   ~key:(Masc_tui_resource_catalog.key reading.entry)
             | None -> report_action state "error" "Open a resource to reread it")
        | Some "u" when state.view = Resources ->
@@ -25337,7 +24971,7 @@ let main
             | Ok None -> report_action state "system" "No unchecked reports in the current format and date selection"
             | Ok (Some key) ->
               if state.resource_focus = Right_pane then
-                launch_resources_read state ~mailbox:async_messages ~key)
+                Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox:async_messages ~key)
        | Some "t" when state.view = Resources ->
            Masc_tui_resources_updates.toggle_today state ~now:(Unix.gettimeofday ())
        | Some "w" when state.view = Resources ->
@@ -25385,7 +25019,7 @@ let main
          when state.view = Resources && state.resource_focus = Right_pane ->
            Masc_tui_resources_updates.step_revision state
              ~direction:(if bracket = "{" then Masc_tui_resource_catalog.Older else Newer)
-             ~read:(launch_resources_read state ~mailbox:async_messages)
+             ~read:(Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox:async_messages)
        | Some (("[" | "]") as bracket)
          when state.view = Resources && state.resource_focus = Right_pane ->
            Masc_tui_work_actions.Detail_navigation.step_detail_cursor
@@ -25398,7 +25032,7 @@ let main
              ~set_cursor:(fun cursor -> state.resources_cursor <- cursor)
              ~reopen:(fun () ->
                Masc_tui_resources_updates.open_selected state
-                 ~read:(launch_resources_read state ~mailbox:async_messages))
+                 ~read:(Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox:async_messages))
        | Some (("[" | "]") as bracket)
          when state.view = Lanes && state.lanes_mode = Lanes_overview ->
            (* A package row's exact outputs, chosen by name (RFC operator-quiz
@@ -25572,7 +25206,7 @@ let main
                   "Approval list changed; review the updated row before retrying")
        | Some "\r" when state.view = Resources ->
            Masc_tui_resources_updates.open_selected state
-             ~read:(launch_resources_read state ~mailbox:async_messages)
+             ~read:(Masc_tui_resources_control.Resource_io_control.launch_resources_read ~withdraw_diagram:withdraw_resource_diagram_pending state ~mailbox:async_messages)
        | Some "J" when state.view = Resources ->
            move_resource_document state (Masc_tui_scroll.Position.By 1)
        | Some "K" when state.view = Resources ->
@@ -27579,7 +27213,7 @@ let main
                 | Config_runtime | Config_models | Config_themes ->
                     Masc_tui_surface_requests.Runtime_config_requests.launch_runtime_config_load ~force:true state ~mailbox:async_messages)
             | Resources ->
-                launch_resources_load state ~mailbox:async_messages
+                Masc_tui_resources_control.Resource_io_control.launch_resources_load state ~mailbox:async_messages
             | Schedules -> Masc_tui_work_requests.Schedule_call_requests.launch_schedules_load state ~mailbox:async_messages
             | Keepers Keeper_runtime_pick ->
                 Masc_tui_chat_dispatch.Chat_journals.launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages

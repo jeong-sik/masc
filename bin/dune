@@ -3164,14 +3164,43 @@
   masc_tui_image_cache masc_tui_image_payload masc_tui_image_preview
   masc_tui_keeper_chat_projection masc_tui_pele unix))
 
+(library
+ (name masc_tui_domain_requests)
+ (wrapped false)
+ (modules
+  masc_tui_code_requests
+  masc_tui_resources_requests
+  masc_tui_identity_requests
+  masc_tui_github_requests)
+ (libraries
+  masc
+  masc.config
+  masc.runtime
+  masc_eio_context
+  masc_tui_types
+  masc_tui_loader
+  masc_tui_words
+  masc_tui_async_protocol
+  masc_tui_async_read
+  masc_tui_artifact_share_pending
+  masc_tui_browser
+  masc_tui_code_draft
+  masc_tui_code_results
+  masc_tui_fetched
+  masc_tui_identity_model
+  masc_tui_resource_catalog
+  masc_tui_resources_updates
+  masc_tui_response_decode
+  masc_tui_sse_lines
+  eio
+  mtime.clock.os
+  unix
+  yojson))
+
 (executable
  (name masc_tui)
  (modules
   masc_tui
-  masc_tui_code_requests
-  masc_tui_resources_requests
-  masc_tui_identity_requests
-  masc_tui_github_requests
   masc_tui_render
   masc_tui_render_code
   masc_tui_render_resources
@@ -3331,6 +3360,8 @@
   masc_tui_composer_input
   masc_tui_msx_control
   masc_tui_ops_requests
+  masc_tui_domain_requests
+  masc_tui_resources_control
   masc_tui_keys
   masc_tui_key_ime
   masc_tui_file_icon

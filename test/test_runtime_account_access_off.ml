@@ -200,7 +200,7 @@ let test_turned_off () =
             Alcotest.failf "the boot refused: %s" (String.concat "; " (first :: rest))
         in
         (match Access.publish (Access.Single_user single_user) with
-         | Ok () -> ()
+         | Ok (_ : Access.published) -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
         let operator_home =
           get_text

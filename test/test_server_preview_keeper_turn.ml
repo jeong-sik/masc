@@ -674,7 +674,7 @@ let test_turn () =
            Access.publish
              (Access.Multi_account { zone; base_path; now = (fun () -> Float.of_int start_ms /. 1000.) })
          with
-         | Ok () -> ()
+         | Ok (_ : Access.published) -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
         (* What the page of a person is told before any call (plan L2a): the
            Claude Code model runs here, and the Codex one is refused for the

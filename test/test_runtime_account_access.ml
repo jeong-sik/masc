@@ -112,7 +112,15 @@ let test_published_once () =
                 (Runtime_native_tools.to_string posture))
           postures;
         (match Access.publish (Access.Single_user single_user) with
-         | Ok () -> ()
+         | Ok published ->
+           Alcotest.(check string)
+             "the published access is of the base path the judgment gave"
+             (Authz_boot_mode_read.single_user_base_path single_user)
+             (Access.published_base_path published);
+           (match Access.published_access published with
+            | Access.Single_user (_ : Authz_boot_mode_read.single_user) -> ()
+            | Access.Multi_account _ ->
+              Alcotest.fail "the published access is not the single user that was published")
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
         let allowed_but_native () =
           List.iter
@@ -158,7 +166,7 @@ let test_published_once () =
         allowed ();
         (match Access.publish (Access.Single_user single_user) with
          | Error Access.Already_published -> ()
-         | Ok () -> Alcotest.fail "a second publication was taken");
+         | Ok (_ : Access.published) -> Alcotest.fail "a second publication was taken");
         allowed ();
         (* Plan F3a-3: what a person left under the workspace is read at each
            start. The same published process answers by the directory. *)

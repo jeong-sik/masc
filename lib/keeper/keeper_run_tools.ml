@@ -30,6 +30,8 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_assembly : Keeper_context_assembly.t option
   ; mutable wire_prompt_tokens : Keeper_agent_result.wire_prompt_tokens option
+  ; mutable delivered_source_invalidations :
+      Keeper_memory_source_current.invalidation list
   }
 
 type agent_setup = Keeper_run_tools_hooks.agent_setup =

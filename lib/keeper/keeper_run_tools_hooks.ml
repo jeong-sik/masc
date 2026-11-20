@@ -736,6 +736,7 @@ let assemble_hooks
     in
     let on_runtime_attempt (attempt : Keeper_turn_driver.runtime_attempt) =
       host_memory := None;
+      Keeper_run_tools_hook_accumulator.set_delivered_source_invalidations acc [];
       Keeper_memory_recall_blocks.begin_runtime_attempt recall_delivery;
       active_tool_surface_enabled := attempt.tool_surface_enabled;
       active_checkpoint_owner := Some attempt.checkpoint_owner;
@@ -1176,7 +1177,7 @@ let assemble_hooks
                         concurrent first-round assemblies serialize at that
                         file instead of starving the main Eio domain. *)
                      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                       Keeper_memory_os_recall.render_if_enabled
+                       Keeper_memory_os_recall.render_if_enabled_with_delivered
                          ~memory_select_route:(Keeper_request_tool_access.route personal_recall_access
                            ~name:"keeper_memory_select")
                          ~memory_search_available:(recall_tool_available "keeper_memory_search")
@@ -1188,7 +1189,14 @@ let assemble_hooks
                          ~keeper_id:meta.name
                          ~now:(Time_compat.now ())
                          ()) in
-                   Option.iter (record_block Prompt_block_id.Memory_os_recall) ordinary_recall);
+                   match ordinary_recall with
+                   | None ->
+                     Keeper_run_tools_hook_accumulator.set_delivered_source_invalidations acc []
+                   | Some rendered ->
+                     Keeper_run_tools_hook_accumulator.set_delivered_source_invalidations
+                       acc
+                       rendered.Keeper_memory_os_recall.delivered_invalidations;
+                     record_block Prompt_block_id.Memory_os_recall rendered.text);
                 (* The recall judgment (RFC keeper-recall-reaches-the-turn, section
                    4.4). A Keeper that is not judged gets nothing here and reads
                    nothing, and MASC_KEEPER_MEMORY_OS_RECALL=0 turns it off with

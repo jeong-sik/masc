@@ -157,7 +157,9 @@ val upsert_file_fact :
     same way, and the pass asks no further source: the facts after it are
     kept unverified too, instead of each waiting out the read timeout under
     this store's lock. Invalidations
-    survive subsequent turns until [upsert_file_fact] recreates that path.
+    survive subsequent turns until [upsert_file_fact] recreates that path or
+    {!retire_delivered_invalidations} retires an invalidation after a committed
+    turn delivered it.
     Revalidation takes only the source-store lock: its invalidation rendering
     is strictly shorter than the fact it replaces, so it cannot overcommit the
     aggregate byte reservation. Unselected identities are preserved and
@@ -171,6 +173,22 @@ val revalidate :
   -> now:float
   -> unit
   -> (projection, string) result
+
+(** Retire pending invalidations that were rendered into a turn prompt, after
+    that turn and its receipt have committed. Matches each stored invalidation
+    strictly on [(source_path, reason)] and the canonical JSON representation of
+    [invalidated_at], so a concurrently added newer invalidation for the same
+    [source_path] is never removed. Returns the number of retired rows. When
+    [delivered] is empty or matches zero stored invalidations, performs no
+    snapshot write and does not bump [revision]. Removing invalidations only
+    shrinks {!budget_lines}, so only the source-store lock is taken. *)
+val retire_delivered_invalidations :
+  ?clock:float Eio.Time.clock_ty Eio.Resource.t
+  -> keepers_dir:string
+  -> keeper_id:string
+  -> delivered:invalidation list
+  -> unit
+  -> (int, string) result
 
 val render_fact : ?verified:bool -> fact -> string
 (** [~verified:false] marks a fact whose source could not be re-read this

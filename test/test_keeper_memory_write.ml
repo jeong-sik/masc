@@ -1433,13 +1433,16 @@ let test_source_bound_write_discards_stale_claim_and_recreates () =
     "typed invalidation persists in recall"
     true
     (contains ~needle:"reason=source_changed" invalidated_prompt);
-  let without_reader = Masc.Keeper_memory_os_recall.render_if_enabled
+  let without_reader_rendered = Masc.Keeper_memory_os_recall.render_if_enabled_with_delivered
     ~artifact_reader_available:false ~config ~meta ~keepers_dir
     ~keeper_id:meta.name ~now:(Time_compat.now ()) () |> Option.get in
-  Alcotest.(check bool) "search notice reports pending invalidations without per-source growth" true
-    (contains ~needle:"1 pending invalidations" without_reader);
-  Alcotest.(check bool) "search notice does not enumerate source paths" false
-    (contains ~needle:source_path without_reader);
+  let without_reader = without_reader_rendered.text in
+  Alcotest.(check bool) "search notice reports pending invalidations and delivers invalidated source" true
+    (contains ~needle:"1 pending invalidations" without_reader
+     && contains ~needle:source_path without_reader
+     && contains ~needle:"reason=source_changed" without_reader);
+  Alcotest.(check int) "search notice records exact delivered invalidations without retiring pre-commit" 1
+    (List.length without_reader_rendered.delivered_invalidations);
   let blob_root = Tool_blob_store.root_dir
       (Tool_blob_store.create ~base_path) in
   let saved_blob_root = blob_root ^ ".saved" in
@@ -3482,6 +3485,175 @@ let test_ordinary_commit_budget_counts_source_facts () =
     (Fs_compat.load_file source_store_path)
 ;;
 
+let test_source_invalidation_committed_turn_retirement () =
+  with_temp_dir @@ fun base_path ->
+  let module Source = Masc.Keeper_memory_source_current in
+  let module Recall = Masc.Keeper_memory_os_recall in
+  let config = Masc.Workspace.default_config base_path in
+  let meta = make_meta "invalidation-retirement" in
+  let keepers_dir =
+    Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+  in
+  let sandbox_root = Masc.Keeper_sandbox.host_root_abs_of_meta ~config meta in
+  Fs_compat.mkdir_p sandbox_root;
+  let source_path = "deploy.env" in
+  let host_path = Filename.concat sandbox_root source_path in
+  let write_file content =
+    match Fs_compat.save_file_atomic host_path content with
+    | Ok () -> ()
+    | Error detail -> Alcotest.fail detail
+  in
+  let upsert ~now claim =
+    match
+      Source.upsert_file_fact
+        ~ordinary_facts:(ordinary_facts_for ~keepers_dir ~keeper_id:meta.name)
+        ~config ~meta ~keepers_dir ~now ~claim ~source_path ()
+    with
+    | Ok _ -> ()
+    | Error (Source.Store_write_failed detail) -> Alcotest.fail detail
+    | Error (Source.Source_read_failed failure) ->
+      Alcotest.fail (Source.source_read_failure_to_string failure)
+  in
+  let read_snapshot () =
+    match Source.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name with
+    | Ok (Some snap) -> snap
+    | Ok None -> Alcotest.fail "expected source-bound snapshot"
+    | Error detail -> Alcotest.fail detail
+  in
+  let render_demand ~now =
+    match
+      Recall.render_if_enabled_with_delivered
+        ~memory_search_available:true ~artifact_reader_available:false
+        ~config ~meta ~keepers_dir ~keeper_id:meta.name ~now ()
+    with
+    | Some rendered -> rendered
+    | None -> Alcotest.fail "expected recall block"
+  in
+  (* 1. Create a source-bound fact, mutate the file, and invalidate with a
+     fractional float timestamp to exercise JSON float round-trip matching. *)
+  write_file "env=prod-v1\n";
+  upsert ~now:1700000000.125 "Deployment env is prod-v1.";
+  write_file "env=prod-v2\n";
+  (match Source.revalidate ~config ~meta ~keepers_dir ~now:1700000100.1234567 () with
+   | Ok projection ->
+     Alcotest.(check int) "revalidation produces one invalidation" 1
+       (List.length projection.invalidations)
+   | Error detail -> Alcotest.fail detail);
+  let snap_before = read_snapshot () in
+  Alcotest.(check int) "budget_lines counts the pending invalidation" 1
+    (List.length (Source.budget_lines (Some snap_before)));
+  (* 2. Demand notice delivers the invalidation once without mutating disk. *)
+  let delivered_turn1 = render_demand ~now:1700000200.0 in
+  Alcotest.(check bool) "demand notice renders invalidated source_path" true
+    (contains ~needle:"1 pending invalidations" delivered_turn1.text
+     && contains ~needle:source_path delivered_turn1.text
+     && contains ~needle:"reason=source_changed" delivered_turn1.text);
+  Alcotest.(check int) "delivered list captures exact invalidation" 1
+    (List.length delivered_turn1.delivered_invalidations);
+  (* 3. Failed / uncommitted turn retains 100% of invalidations (failure_keeps_evidence). *)
+  (match
+     Recall.retire_after_turn_settlement
+       ~keepers_dir ~keeper_id:meta.name
+       ~settlement:Recall.Turn_not_committed
+       ~delivered:delivered_turn1.delivered_invalidations
+       ()
+   with
+   | Ok retired -> Alcotest.(check int) "uncommitted turn retires nothing" 0 retired
+   | Error detail -> Alcotest.fail detail);
+  let snap_after_fail = read_snapshot () in
+  Alcotest.(check int) "revision unchanged on uncommitted turn"
+    snap_before.revision snap_after_fail.revision;
+  Alcotest.(check int) "invalidation retained on uncommitted turn" 1
+    (List.length snap_after_fail.invalidations);
+  (* 4. Crash between commit and retire self-heals on next committed turn:
+     render again -> still delivered -> commit & retire -> 0 rows & shrunk budget. *)
+  let delivered_turn2 = render_demand ~now:1700000300.0 in
+  Alcotest.(check int) "next turn still receives unretired invalidation" 1
+    (List.length delivered_turn2.delivered_invalidations);
+  (match
+     Recall.retire_after_turn_settlement
+       ~keepers_dir ~keeper_id:meta.name
+       ~settlement:Recall.Turn_committed
+       ~delivered:delivered_turn2.delivered_invalidations
+       ()
+   with
+   | Ok retired -> Alcotest.(check int) "committed turn retires delivered invalidation" 1 retired
+   | Error detail -> Alcotest.fail detail);
+  let snap_after_commit = read_snapshot () in
+  Alcotest.(check int) "revision bumps once on retirement"
+    (snap_before.revision + 1) snap_after_commit.revision;
+  Alcotest.(check int) "invalidations cleared after committed turn" 0
+    (List.length snap_after_commit.invalidations);
+  Alcotest.(check int) "budget_lines shrinks to zero after retirement" 0
+    (List.length (Source.budget_lines (Some snap_after_commit)));
+  let clean_turn = render_demand ~now:1700000400.0 in
+  Alcotest.(check bool) "clean demand notice reports 0 pending invalidations and omits path" true
+    (contains ~needle:"0 pending invalidations" clean_turn.text
+     && not (contains ~needle:source_path clean_turn.text));
+  Alcotest.(check int) "clean turn delivers zero invalidations" 0
+    (List.length clean_turn.delivered_invalidations);
+  (* Repeat retirement of already-retired rows is a no-op with no revision bump. *)
+  (match
+     Source.retire_delivered_invalidations
+       ~keepers_dir ~keeper_id:meta.name
+       ~delivered:delivered_turn2.delivered_invalidations
+       ()
+   with
+   | Ok retired -> Alcotest.(check int) "repeat retirement is a no-op" 0 retired
+   | Error detail -> Alcotest.fail detail);
+  Alcotest.(check int) "repeat retirement does not bump revision"
+    snap_after_commit.revision (read_snapshot ()).revision;
+  (* 5. Concurrent newer invalidation for the EXACT same source_path survives
+     retirement of an earlier delivered invalidation. *)
+  write_file "env=prod-v3\n";
+  upsert ~now:1700000500.0 "Deployment env is prod-v3.";
+  write_file "env=prod-v4\n";
+  (match Source.revalidate ~config ~meta ~keepers_dir ~now:1700000600.25 () with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let earlier_delivered = (render_demand ~now:1700000650.0).delivered_invalidations in
+  Alcotest.(check int) "earlier invalidation delivered" 1 (List.length earlier_delivered);
+  (* Concurrently re-bind and then remove the source file, producing a newer invalidation. *)
+  upsert ~now:1700000700.0 "Deployment env is prod-v4.";
+  Sys.remove host_path;
+  (match Source.revalidate ~config ~meta ~keepers_dir ~now:1700000800.75 () with
+   | Ok _ -> ()
+   | Error detail -> Alcotest.fail detail);
+  let snap_with_newer = read_snapshot () in
+  (match
+     Recall.retire_after_turn_settlement
+       ~keepers_dir ~keeper_id:meta.name
+       ~settlement:Recall.Turn_committed
+       ~delivered:earlier_delivered
+       ()
+   with
+   | Ok retired ->
+     Alcotest.(check int) "stale delivered invalidation cannot retire newer invalidation" 0 retired
+   | Error detail -> Alcotest.fail detail);
+  let snap_after_stale_retire = read_snapshot () in
+  Alcotest.(check int) "newer invalidation keeps revision untouched"
+    snap_with_newer.revision snap_after_stale_retire.revision;
+  (match snap_after_stale_retire.invalidations with
+   | [ (inv : Source.invalidation) ] ->
+     Alcotest.(check string) "same source_path survives" source_path inv.source_path;
+     Alcotest.(check bool) "newer reason survives" true (inv.reason = Source.Source_unavailable)
+   | _ -> Alcotest.fail "expected newer invalidation to survive");
+  (* 6. Filesystem / lock exceptions during post-commit retirement are caught
+     as Error rather than aborting an already-committed turn. *)
+  let not_a_dir = Filename.concat base_path "not-a-directory" in
+  Fs_compat.save_file not_a_dir "blocker";
+  (match
+     Recall.retire_after_turn_settlement
+       ~keepers_dir:not_a_dir ~keeper_id:meta.name
+       ~settlement:Recall.Turn_committed
+       ~delivered:earlier_delivered
+       ()
+   with
+   | Error detail ->
+     Alcotest.(check bool) "caught error is non-empty" true (String.trim detail <> "")
+   | Ok _ -> Alcotest.fail "non-directory keepers_dir must fail with Error")
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_write"
@@ -3575,6 +3747,10 @@ let () =
             "source change discards stale claim until recreation"
             `Quick
             test_source_bound_write_discards_stale_claim_and_recreates
+        ; tool_case
+            "committed turn retires delivered source invalidations"
+            `Quick
+            test_source_invalidation_committed_turn_retirement
         ; tool_case
             "source write has no recall size gate"
             `Quick

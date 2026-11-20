@@ -820,3 +820,69 @@ let revalidate ?(scope = All_sources) ?clock ~config ~meta ~keepers_dir ~now () 
       ; unverified_paths
       }
 ;;
+
+let invalidation_reason_equal a b =
+  match a, b with
+  | Source_changed, Source_changed -> true
+  | Source_unavailable, Source_unavailable -> true
+  | Source_changed, Source_unavailable
+  | Source_unavailable, Source_changed -> false
+;;
+
+let canonical_float_json value =
+  Yojson.Safe.to_string (`Float value)
+;;
+
+let invalidation_matches (a : invalidation) (b : invalidation) =
+  String.equal a.source_path b.source_path
+  && invalidation_reason_equal a.reason b.reason
+  && String.equal
+       (canonical_float_json a.invalidated_at)
+       (canonical_float_json b.invalidated_at)
+;;
+
+let retire_delivered_invalidations ?clock ~keepers_dir ~keeper_id ~delivered () =
+  match delivered with
+  | [] -> Ok 0
+  | _ :: _ ->
+    let+ _snapshot, retired_count =
+      with_commit_notification ~keepers_dir ~keeper_id (fun on_commit ->
+        update_locked
+          ?clock
+          ~keepers_dir
+          ~keeper_id
+          ~on_commit
+          (function
+           | None ->
+             Ok
+               ( { revision = 1
+                 ; updated_at = 0.0
+                 ; trace_id = ""
+                 ; facts = []
+                 ; invalidations = []
+                 }
+               , false
+               , 0 )
+           | Some previous ->
+             let remaining_rev, retired_count =
+               List.fold_left
+                 (fun (kept_rev, retired) inv ->
+                    if List.exists (invalidation_matches inv) delivered
+                    then kept_rev, retired + 1
+                    else inv :: kept_rev, retired)
+                 ([], 0)
+                 previous.invalidations
+             in
+             if retired_count = 0
+             then Ok (previous, false, 0)
+             else
+               Ok
+                 ( { previous with
+                     revision = previous.revision + 1
+                   ; invalidations = List.rev remaining_rev
+                   }
+                 , true
+                 , retired_count )))
+    in
+    retired_count
+;;

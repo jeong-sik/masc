@@ -53,14 +53,13 @@
   masc.slack_lane
   masc.machine_live_publication
   ;; The LSP client the IDE proxy drives. Extracted out of this library so a
-  ;; Keeper tool in [masc] can reach a language server too (RFC
-  ;; a-language-server-the-keeper-can-ask §3.2).
+  ;; Keeper tool in [masc] can reach a language server too.
   masc.lsp_client
   masc.markup_document
   masc.dashboard
   masc.fd_accountant
   masc.event_bus_slots
-  ;; RFC-0056 #20086 extracted Dashboard_tla_specs out of the masc mega-lib into
+  ;; Dashboard_tla_specs lives outside the masc mega-lib, in
   ;; masc.dashboard_tla_specs; server_routes_http_routes_verification consumes it
   ;; directly (specs_json / tlc_results_json) and dune does not re-export through
   ;; the masc dep, so masc_server lists it explicitly.

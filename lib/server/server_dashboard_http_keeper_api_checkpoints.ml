@@ -8,7 +8,7 @@ let stat_json_of_path (path : string) =
   | Unix.Unix_error _ -> `Null
 ;;
 
-(* Read from the head and the few objects the row needs (RFC-0476 §3.5). *)
+(* Read from the head and the few objects the row needs. *)
 let agent_core_checkpoint_summary_json
       ~(source_kind : string)
       ~(snapshot_id : string)
@@ -491,7 +491,7 @@ let purge_install config ~keeper_name ~trace_id ~session_dir
       | Installed installed ->
         (* The archive entries are heads of the checkpoint
            before the purge; while one is there, the object
-           sweep keeps what the purge removed (RFC-0476 §3.3). *)
+           sweep keeps what the purge removed. *)
         let history_warnings =
           match Keeper_checkpoint_store.delete_all_agent_core_history_files ~session_dir with
           | Error detail -> [ "the history archive was not removed: " ^ detail ]

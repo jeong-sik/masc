@@ -426,7 +426,7 @@ let dashboard_gate_resolve_http_json ?workspace_config ~base_path ~created_by ~(
         | `Bool _ | `String _ | `Assoc _ | `List _ ->
           Error (Bad_request "rule_expires_at must be a finite number or null")
     in
-    (* RFC-0305: a missing [decision] field must not default to approve — this
+    (* A missing [decision] field must not default to approve — this
        resolves a pending HITL approval, so an omitted/malformed decision is a
        bad request, not a silent grant. Mirrors the [id]-required check above. *)
     (* Carry the canonical name alongside the decision so the success response
@@ -616,8 +616,8 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
   | Error detail -> Goal_unavailable_envelope.to_yojson detail
   | Ok goals ->
   let rollup = Goal_store.compute_rollup goals in
-  (* RFC-0387 (stage 1): the verification ledger joins each goal at the API
-     boundary (goal_to_yojson is the persistence codec and stays untouched).
+  (* The verification ledger joins each goal at the API boundary
+     (goal_to_yojson is the persistence codec and stays untouched).
      The ledger is loaded ONCE per request and joined in memory; a store that
      does not decode renders the explicit [ledger_error] marker per goal —
      never the pre-verification default, which would disguise corruption as
@@ -746,7 +746,7 @@ let goal_tree_scope_current state (scope : Mcp_server.workspace_scope) =
   Mcp_server.Workspace_scope_epoch.equal scope.epoch (Mcp_server.workspace_scope state).epoch
 ;;
 
-(* RFC-0474 L4d. The tree's key names the goal projection generation, so the
+(* The tree's key names the goal projection generation, so the
    read after any goal or measurement write found no entry and computed the
    tree in the read. On 2026-10-28 one such read took 9.3 s, and
    [/api/v1/dashboard/goals] was the second read that timed out most often in
@@ -937,12 +937,11 @@ let dashboard_bootstrap_http_json
   in
   let namespace_truth =
     slice "namespace_truth" (fun () ->
-      (* RFC-0138 Phase 3 Step 3 follow-up — route through the snapshot
-         selector instead of calling the compute path directly so the
-         lock-free read takes effect for /api/v1/dashboard/bootstrap as
-         well as /project-snapshot.  Without this wire, the
-         "fallback runs ≤1× per process" claim in #16738 is false for
-         bootstrap-driven loads. *)
+      (* Route through the snapshot selector instead of calling the
+         compute path directly so the lock-free read takes effect for
+         /api/v1/dashboard/bootstrap as well as /project-snapshot.  Without
+         this wire, the "fallback runs ≤1× per process" claim in #16738 is
+         false for bootstrap-driven loads. *)
       Server_dashboard_snapshot_select.select_project_snapshot_json
         ~state ~sw ~clock request)
   in

@@ -3,8 +3,7 @@
 module Gw = Discord_gateway_client
 module State = Channel_gate_discord_state
 
-(* Intents requested at IDENTIFY time. Same set as RFC-0203 §Modules
-   and the previous sidecar configuration. *)
+(* Intents requested at IDENTIFY time. *)
 let default_intents : Gw.intent list =
   [ Gw.Guilds
   ; Gw.Guild_messages
@@ -709,10 +708,9 @@ let accept_message_create ~resolved_binding ~dispatch_for_delivery
       { channel = State.channel
       ; channel_user_id = author_id
       ; channel_user_name = Option.value author_name ~default:author_id
-        (* NDT-OK: display name ([global_name] else [username], RFC-0223
-           P1); the snowflake stands in only for malformed payloads
-           missing both — the gate contract requires a non-empty name,
-           and the id fallback preserves the pre-P1 behavior. *)
+        (* NDT-OK: display name ([global_name] else [username]); the
+           snowflake stands in only for malformed payloads missing both —
+           the gate contract requires a non-empty name. *)
       ; channel_workspace_id = Option.value guild_id ~default:""
         (* sound-partial: allow — [guild_id]=None is a DM (a known state,
            not a parse failure), so the "" default at the stringly gate

@@ -42,17 +42,16 @@ include Server_mcp_transport_http_conn
 include Server_mcp_transport_http_respond
 include Server_mcp_transport_http_agui
 
-(* RFC-0100 PR-2: chunked first-flush variant of [Http_reqd.respond_with_string].
+(* Chunked first-flush variant of [Http_reqd.respond_with_string].
    Writes [body] via [Http_reqd.respond_with_streaming] so the response
    uses [Transfer-Encoding: chunked] framing instead of
    [Content-Length: N]. Body bytes and headers (other than transfer-encoding /
    content-length) are byte-identical to the non-chunked form, so well-behaved
    JSON clients are unaffected.
 
-   The 50 ms first-flush budget is implicit at PR-2 — current sync code
-   paths compute the body in well under 50 ms, so the first (and only)
-   chunk flushes immediately. The placeholder-stub flow for slow paths
-   is RFC-0100 PR-3's auto-upgrade work, not this PR.
+   No first-flush deadline is enforced: current sync code paths compute
+   the body in well under 50 ms, so the first (and only) chunk flushes
+   immediately.
 
    The same late-write guard as [Http_reqd.respond_with_string]: a request
    that can no longer take a response raises [Failure], logged at WARN. *)
@@ -254,7 +253,7 @@ let should_stream_post_tools_call request body_str accept_mode =
       (* The [tools/call] request only upgrades to SSE
          framing when the named tool is on the streaming registry
          ([Server_mcp_streaming_tools]). Tools outside the registry stay on
-         the RFC-0100 PR-2 chunked-JSON default. Returns [false] when
+         the chunked-JSON default. Returns [false] when
          [params.name] is missing — a malformed body never triggers the
          streaming branch. *)
       match body_tools_call_name body_str with
@@ -670,9 +669,9 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     Http_reqd.respond_with_string reqd response
                                       body
                                 | json ->
-                                    (* RFC-0100 PR-2: chunked first-flush.
+                                    (* Chunked first-flush.
                                        Body bytes + Content-Type identical
-                                       to pre-PR behaviour; only the
+                                       to the non-chunked form; only the
                                        framing changes (content-length →
                                        transfer-encoding: chunked).
                                        Well-behaved JSON clients are

@@ -114,9 +114,7 @@ val with_cleanups_on_release :
 (** [with_cleanups_on_release ~sw cleanups] runs each cleanup on
     [sw] release.  Each cleanup is wrapped in its own [try/with] so
     a single non-[Cancelled] exception cannot prevent the remaining
-    cleanups (RFC-0194 §3 PR-B spirit: an [Eio.Switch.on_release]
-    callback must be all-or-nothing across its steps).
-    [Eio.Cancel.Cancelled] propagates as usual so structured
+    cleanups.  [Eio.Cancel.Cancelled] propagates as usual so structured
     cancellation honors the enclosing fiber.  Cleanups run in the
     order supplied. *)
 

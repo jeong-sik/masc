@@ -64,7 +64,7 @@ let validate_session_requirement ~session_was_provided body_str =
           "Mcp-Session-Id header required. Call initialize first to obtain a \
            session."
 
-(** RFC-0100 PR-3 — Q3 default: reject [POST /mcp] requests that echo an
+(** Reject [POST /mcp] requests that echo an
     [Mcp-Session-Id] header the server has no state for. Returns [Ok ()]
     when the request is the initial handshake ([initialize]/[ping]/init
     notification — these legitimately mint a new session) or when the

@@ -8,12 +8,11 @@ module Namespace_truth_support = Server_dashboard_http_namespace_truth_support
 
 let namespace_truth_shell_refreshing : bool Atomic.t = Atomic.make false
 
-(* RFC-0138 Phase 3 Step 4 — fallback timeouts are now module constants. Step
-   3 (#16738) wired /project-snapshot through [Dashboard_snapshot], so request
-   paths use stale-while-revalidate after the first seed. The async refresh must
-   still exceed the inner dashboard shell timeout; otherwise a 5s outer timeout
-   cancels the shell render before its timeout fallback can log the active
-   projection labels (#16287). *)
+(* Fallback timeouts are module constants. /project-snapshot reads through
+   [Dashboard_snapshot], so request paths use stale-while-revalidate after the
+   first seed. The async refresh must still exceed the inner dashboard shell
+   timeout; otherwise a 5s outer timeout cancels the shell render before its
+   timeout fallback can log the active projection labels (#16287). *)
 let namespace_truth_cold_safety_margin_s = 4.0
 
 let namespace_truth_shell_refresh_timeout_s =

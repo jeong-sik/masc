@@ -332,7 +332,7 @@ let handle_facts_get state req reqd name =
 
 let handle_journal_get state req reqd name =
   (* Why this keeper's memory looks the way it does. The librarian's passes
-     reach disk here — committed and failed alike since RFC-0361 Part 5 — and
+     reach disk here — committed and failed alike — and
      the internal-agents monitor could show that a pass ran but not what it
      decided. A failed pass is the case an operator actually opens. *)
   if not (Keeper_config.validate_name name)

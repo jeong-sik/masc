@@ -4,7 +4,7 @@
     A [POST /mcp] [tools/call] request promotes to SSE
     framing (same chunked connection, [content-type: text/event-stream])
     only when the named tool appears in this registry. Tools outside the
-    registry receive the chunked-JSON shape introduced by RFC-0100 PR-2.
+    registry receive the chunked-JSON shape.
 
     The registry is a hand-curated SSOT. Each entry should correspond to a
     tool whose handler is wired to emit incremental progress through the
@@ -24,7 +24,7 @@ let streaming_capable_tools =
        only consumers of inline POST→SSE framing exercised by the e2e suite
        (test/test_mcp_post_sse_e2e.ml). Promoting these to the registry
        holds the public contract while non-listed tools default to chunked
-       JSON under RFC-0100 PR-3. *)
+       JSON. *)
     "masc_status"
   ]
 

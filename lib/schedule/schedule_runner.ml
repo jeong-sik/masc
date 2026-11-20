@@ -337,8 +337,8 @@ let load_seen_recovery config =
    every future tick failed the same way with no writer able to replace the
    broken file — the whole scheduler stopped dispatching until an operator
    edited it by hand.
-   RFC-0234 already solved this for [schedules.json] with a [.last-good]
-   mirror (schedule_store.ml); this store gets the same recovery source. A
+   schedule_store.ml already solves this for [schedules.json] with a
+   [.last-good] mirror; this store gets the same recovery source. A
    corrupt primary with no usable mirror still reports [Error] rather than
    silently discarding whatever the bytes may hold, and this function does
    not retry — retrying an unchanged file cannot change the outcome. The

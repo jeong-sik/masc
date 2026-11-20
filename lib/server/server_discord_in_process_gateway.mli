@@ -17,9 +17,7 @@
     Always-on by design: there is no toggle and no fallback transport to
     switch to. If
     [DISCORD_BOT_TOKEN] is unset the gateway logs a warning and
-    skips startup; the server still boots normally.
-
-    See: docs/rfc/RFC-0203-discord-builtin-gateway.md §Phase 3. *)
+    skips startup; the server still boots normally. *)
 
 val default_trigger_policy : Discord_gateway_client.trigger_policy
 (** Policy used when none is configured (empty/unset): the quiet,

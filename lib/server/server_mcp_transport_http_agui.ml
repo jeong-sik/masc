@@ -243,8 +243,7 @@ let handle_presence_events ~deps request reqd =
               let sw = runtime.sw in
               let clock = runtime.clock in
               (* The drain sends the prime too, under the supervisor, so a
-                 stop cancels it while it waits for the socket (RFC-0493
-                 §3.2). *)
+                 stop cancels it while it waits for the socket. *)
               run_sse_pumps ~sw info
                 ~drain:(fun () ->
                   match

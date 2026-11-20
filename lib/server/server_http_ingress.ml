@@ -299,14 +299,13 @@ let serve_admitted ~admitted classification reqd =
 ;;
 
 (* Where a request is handled when its connection runs on another domain
-   than the one that owns the server's root switch (the HTTP serving domain,
-   RFC http-transport-runs-on-its-own-domain §3.3): the owner's queue and the
-   scope its response is written under. A WebSocket route stays with its
-   connection: the upgrade hands the socket to the handler. A [Serving] route
-   stays there too: its registration says its handler may run beside the
-   owner's (§3.4). A request no route matches is the owner's to refuse.
-   [None] on the owner domain, which is every request while the serving
-   domain is off. *)
+   than the one that owns the server's root switch (the HTTP serving domain):
+   the owner's queue and the scope its response is written under. A WebSocket
+   route stays with its connection: the upgrade hands the socket to the
+   handler. A [Serving] route stays there too: its registration says its
+   handler may run beside the owner's. A request no route matches is the
+   owner's to refuse. [None] on the owner domain, which is every request
+   while the serving domain is off. *)
 let owner_relay ~stays_with_connection reqd =
   match Eio_context.owner_post () with
   | None -> None

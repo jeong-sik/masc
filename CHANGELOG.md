@@ -1,5 +1,190 @@
 ## [Unreleased]
 
+## [0.76.0] - 2026-11-20
+
+### 요약
+
+1. [0.76.0] 항목은 changelog.d 조각 103개를 접은 108개 불릿입니다. 절은 Fresh state required·Added·Changed·Fixed·Performance·Documentation·Internal 일곱 절입니다.
+2. person 소유 provider API 키를 운영 표면으로 올렸습니다. 등록·검증(`POST /api/v1/setup/accounts/verify`)·회전·폐기·목록과 seal/authorize 경로, 그리고 authz 레코드의 `engine_name`·`integration_id` 가 함께 들어왔습니다(#53876·#53877·#53881·#53882).
+3. 캐시 축이 여섯 갈래로 넓어졌습니다. `cache_write_tokens` 파싱과 OpenRouter·`claude-haiku-5-5` 캐시 단가(#53922), `cache_session_wire`(#53931), Responses developer carrier 와 explicit cache opt-out(#53961), OpenRouter top-level `cache_control`(#53970), `prompt_cache_breakpoint`(#54071), `cache_session_header`(#54074).
+4. TUI V2 가 이어졌습니다. Oklab 테마 토큰과 tab pill(#53923), Goals·Verdicts 전폭 표와 3단 도킹 프리뷰(#53924), Keepers 24h btop cockpit(#53925), 라이브 업데이트 지터 제거(#53932), Memory/Efficiency 미터와 차트·Usage 시각화(#53886·#53888), 모듈 추출 네 건(#53905·#53916·#53921·#53927). 손으로 적은 개수·부호를 `changes` 검사가 막는 규칙도 이 창에 있습니다(#54044).
+5. `/health?full=1` 이 계산한 절을 모두 싣습니다. `runtime_truth`·`server_hibernation` 두 키가 응답에 더해집니다(#54022).
+6. Fresh state required 두 건을 먼저 읽으세요. 이전 빌드가 만든 authz 레코드와 `task_id` 가 잘못된 task 삭제 영수증이 하드 컷에서 거부됩니다(#53876·#53930).
+7. 창에서 빠진 것: L6 recall 텔레메트리(#54029)는 운영자 결정 ②로 이 창에 들어가지 않았습니다(#54083 이 12개 경로를 의도적으로 제외). 그 PR 의 조각도 넣지 않았습니다.
+
+### Fresh state required
+
+- `authz.jsonl` keeper `made` records created before #53876 omit `engine_name`, and `provider_account` `linked` records created before #53876 omit `integration_id`. Decode now rejects legacy records under the hard cut. Stop the server, clear stale multi-account `.masc/authz.jsonl` logs and re-initialize accounts/keepers before restarting (#53876).
+- A task backlog with a deletion receipt whose `task_id` is empty, longer than 128 characters, or holds a character outside `[A-Za-z0-9_:-]` is no longer read (`#53930`). Before this change `Workspace_task.delete_task_r` wrote a receipt for any `task_id` it was given, whether or not a task had that id, so a workspace that sent such an id to `POST /api/v1/dashboard/tasks/delete` holds one. `read_backlog` then fails with `backlog decode failed for <base>/.masc/tasks/backlog.json`. With the server stopped, remove those receipts from the `task_deletion_receipts` array in that file and in `backlog.json.last-good` beside it, or delete both files to start from an empty backlog.
+
+### Added
+
+- Add installation-wide unique `engine_name` to `Authz_keeper_event.Made` and `Authz_keeper_state` (`find_by_engine_name`, `all`), draw unique `kp-` engine names in `Auth_preview_keeper.make`, and store `integration_id` on `Authz_provider_account_event.Linked` / `Authz_provider_account_state.Login` so both `Login` and `Key` accounts expose `integration_id` directly from authz state (#53876).
+- Seal and authorize person-owned HTTP `Agent_core` provider API keys via `Person_api` and `authorize_api_for` with seal-time credential stripping and `401 -> key_refused` mapping (#53881).
+- Support registering, verifying (`POST /api/v1/setup/accounts/verify`), rotating, purging, and listing HTTP `Agent_core` API-key providers (`connect: ["key"]`) with `No_home` and dashboard console updates (#53882).
+- Parse `prompt_tokens_details.cache_write_tokens` / `input_tokens_details.cache_write_tokens`, streaming `reasoning_tokens` (`completion_tokens_details` and `output_tokens_details`), and optional gateway `upstream_provider` in `agent_core` and keeper cost events (redacted in keeper-facing runtime telemetry), and populate verified OpenRouter and `claude-haiku-5-5` cache pricing multipliers in `models.toml` (`#53922`, relates `#53917`).
+- TUI V2 structural theme tokens (`section_heading`, `entity_accent`, `active_tab_pill`, `footer_key_style`) lifted in Oklab to clear WCAG 4.5:1 contrast, plus calm `Masc_tui_doc` primitives (`hairline`, `section_header`, `preview_footer_hints`, `docked_preview`) (#53923).
+- Add typed `cache_session_wire` declarations on `[[providers]]` (`openrouter` -> `session_id`; `openai`, `openai-responses`, `mistral` -> `prompt_cache_key`) and thread validated `cache_session_key` (<= 256 bytes, omitted on 1-shot `Exact_output_plan` lanes) from multi-turn agent sessions to Chat Completions and OpenAI Responses requests (`#53931`, relates `#53917`).
+- Add typed `responses_system_prompt_carrier` (`developer_message` when `previous_response_id` is absent) and `supports_explicit_cache_opt_out` (`prompt_cache_options: {"mode": "explicit"}` when `cache_system_prompt = false`) on GPT-5.6+ and GPT-6.x `openai-responses` rows (`#53961`, relates `#53917`).
+- OpenRouter top-level `cache_control` emission via closed-sum `prompt_cache_wire` capability on `anthropic/claude-*` rows and capability-gated `cache-retention` admission on `Chat_completions_api` bindings (`#53970`, relates `#53917`).
+- Exhaustive `Keeper_context_layers.author` (`Host_state | Outside_text`) classification across all 21 context layers and row-level `prepare_rows` / `Sent_when_changed` resume deduplication for `Pending_mentions` and `Fleet_messages` (`#54021`, relates `#53917`).
+- Binding-level OpenRouter upstream provider routing filters (`provider-only` / `provider-ignore`) gated on dedicated catalog `supports_provider_routing_filter`, with fail-closed validation, response-cache fingerprint isolation, and sticky-routing preservation (`#54037`, relates `#53917`).
+- The required `changes` check fails a pull request whose changed TUI files write a count by hand (`+N more`, `(+N)`, `-N`) instead of `Masc_tui_value.Count`; a sign that is not a count carries a `(* tui-value: <reason> *)` marker (#54044)
+- OpenAI Responses GPT-5.6+ explicit `prompt_cache_breakpoint` placed immediately before strictly trailing ephemeral `System_context` (with `prompt_cache_options: {"mode": "explicit"}`, walking backward past ineligible `assistant`/`output_text` items to the nearest eligible `user`/`function_call_output`/`developer` item) (`#54071`, relates `#53917`).
+- Catalog-declared `cache_session_header` on `[[providers]]` (enabled as `x-opencode-session` on `opencode_go`) with RFC 7230/forbidden-header parse guards and strict visible-ASCII per-session header override in `Provider_config.effective_request_headers` (`#54074`, relates `#53917`).
+
+### Changed
+
+- Retain `Runtime.loaded_state.source_config`, add credential-free `Runtime_account_access.seal_person` (`Runtime_account_runtime.of_person_template`) resolved on demand inside `authorize`, isolate `MASC_ADMIN_TOKEN` / `MASC_INTERNAL_MCP_TOKEN` from process env in multi-account mode while verifying `/health` `internal_mcp_auth` against the in-memory holder, and enforce linked `Own_account` checks symmetrically with `Keeper_turn` (#53877).
+- Upgrade TUI chart meters, `styled_sparkline`, Oklab `distribution_bars`, Usage Trend/Calls semantic plots, Overview `Latency 1.0` readout, Runtime Evidence Korean localization, and Runtime/Usage rounded trend cards and Oklab Keeper meters (#53886).
+- Add Oklab fact-share and density meters to Memory, strip SGR before `detail_reading`, switch `pack_clauses` overflow to `wrap_styled_words`, and polish Sandbox, Efficiency, Tool-table, and Evidence visuals and Korean copy (#53888).
+- Extract wrapped `masc_tui_operator_actions` library (`Ask_actions`, `Keeper_actions`, `Board_compose_actions`, `Voice_actions`) from `bin/masc_tui.ml` (`-1,136` lines, `23` strict `.mli` exports) (#53905).
+- Extract wrapped `masc_tui_editor_forms` library (`Connector_forms`, `Runtime_config_forms`, `Skill_prompt_forms`, `Workspace_review_forms`, plus private `Write_guard`) from `bin/masc_tui.ml` (`-1,611` lines, `40` strict `.mli` exports) (#53916).
+- Extract wrapped `masc_tui_refresh_settlement` library (`System_log_stream`, `Approvals_asks_settlement`, `Http_dataset_settlement`, `Workspace_settlement`, plus private `Owed_retry`) from `bin/masc_tui.ml` (`-1,087` lines, `33` strict `.mli` exports) (#53921).
+- Active tab pills in `Masc_tui_ansi.tab_strip` and the Zone 1 `surface_strip` now render with subtle tinted backgrounds and inner horizontal padding, while Zone 5 footer keycaps use calm default-foreground bold styling (#53923).
+- Goals and Verdicts list surfaces now use full-width single-line tables paired with a 3-stage bottom docked preview (`Space` cycles compact/half/full, `Esc` collapses before leaving) and full-width detail readers without a left sidebar (#53924).
+- Keepers 24h wall (`Wall_columns`) now renders a 6-row (12-level) mirrored gradient Braille fleet wave paired with a rounded dot-meter summary card on wide terminals (`cols >= 100`) and a docked selected-keeper waveform cockpit (#53925).
+- Extract wrapped `masc_tui_composer_input` library (`Composer_key`, `Paste_drop`, plus private `Composer_focus`) from `bin/masc_tui.ml` (`-312` net lines, `3` strict `.mli` exports) (#53927).
+- Chat edit summaries, chat Memory history rows, the Overview and fleet
+  capacity meters and the Repositories change heading write a decrease
+  with the minus sign `−2`; form error summaries and the Keepers name
+  list write left-out counts as `외 3` / `3 more` (RFC
+  tui-one-screen-grammar 6.3) (#53934).
+- The Lanes screen writes byte and fact counts with a comma past 1,000,
+  and its Korean Memory snapshot line says `사실 N개` where it said
+  `N facts` (RFC tui-one-screen-grammar 6.3) (#53936).
+- The Lanes JSON preview, the Lane Add-on result window and the exit
+  reason write cut-off counts as `3 more` (the exit reason said
+  `[+120 bytes]`, now `[120 more bytes]`), and a board post's negative
+  vote score uses the minus sign `−2` (RFC tui-one-screen-grammar 6.3)
+  (#53955).
+- The chat diff's cut-off notes for recorded rows, line ranges and
+  change annotations put a comma in counts of 1,000 or more (RFC
+  tui-one-screen-grammar 6.3) (#53958).
+- Keeper efficiency, Fusion, Runtime detail and Tools put a comma in
+  turn, call, token and byte counts of 1,000 or more (RFC
+  tui-one-screen-grammar 6.3) (#53962).
+- The chat call reader, chat tool rows, the model runtime table, Config
+  overrides and resource documents put a comma in byte and token counts
+  of 1,000 or more (RFC tui-one-screen-grammar 6.3) (#53967).
+- Extract wrapped `masc_tui_msx_control` library (`Checkpoint_control`, `Live_read`) from `bin/masc_tui.ml` and move MSX view/checkpoint mutable state onto `Masc_tui_types.state` (`-171` lines, `12` strict `.mli` exports) (#53973).
+- Unify Overview tool-call curves, Keepers half-hour pulse marks (`⣀`/`⠤`/`⠛`), `Day_wall` 1-row ECG Braille strips, group/fleet downward failure sparklines, and Overview/Keepers capacity/heap/context meters on fine Braille dots (#53991).
+- Polish TUI Context Inspector (`/context`) stacked bars and token scale meters, Chat context pressure indicators, Keeper Story hierarchy, and `Masc_tui_render_prim` helpers with `NO_COLOR`-safe styling and Korean/English parity (#53996).
+- Polish TUI Metrics/Usage completion meters and axis styling, Braille/Candle/Engine Samples visuals, Overview cards/providers/tasks, Activity stream, and System Logs alongside `#53865` Usage plots (#53997).
+- Add Skill catalog active-root meter, Skill Usage coverage and share meters, localized surface headings, clamped Skill cursor across all readers including the docked Skill bottom sheet, safe Unix timestamps, and Volume GC visual/i18n polish (#53998).
+- Add styled selection bands (`push_selected_styled` / `box_line_selected_styled`), Goal completion meter, Harness verdict presentation and proportional gate distribution bars, and visual/i18n polish across Work, Verification, Fusion, Lanes, Config, Code, Repositories, and Overlays (#53999).
+- Memory facts inspector now uses the calm hairline `Masc_tui_doc.docked_preview` layout, the Memory category tree and keeper changes list use `section_heading` typography and tinted row selection, and Keeper memory summary uses `dot_meter_bar` precision (#54013).
+- Extract wrapped `masc_tui_ops_requests` library (`Overview_harness_requests`, `Fusion_requests`, `Lanes_activity_requests`, `Verification_requests`) from `bin/masc_tui.ml` (`-420` lines, `24` strict `.mli` exports) (#54020).
+- Reorder the TUI Board list columns to place the fixed metadata spine (`mark`, `age`, `author`, `hearth`) ahead of the flexible `title` with right-aligned numeric `score` and `replies`, hide redundant `#hearth` columns when narrowed to a single hearth, mark the active sort column header with `↓` (preserving it in narrow layouts and placing dropped-column badges in the title header's slack), apply deterministic WCAG-lifted per-author identity colours across list/read/comments, keep selection row colours under adaptive selection bands, and make `Board_list` viewport scrolling sticky (`Board_list_scroll`) (#54040).
+- Add a docked live post preview below the TUI Board list using `docked_vertical_split` and `Masc_tui_doc.docked_preview`, with `Space` compact/half/full size cycling, `Esc` preview folding, cached Markdown and closed-post resolution rendering, rich header metadata (author, hearth, age, comments, score, attachments, closed state), inline `J`/`K` preview body scrolling with automatic post-switch reset, empty/short-terminal guards, and Board help documentation (`#54041`).
+- Allow non-user-facing pull requests (docs, tests, comments, compile repairs,
+  and changelog-only work) to declare changelog exemptions per PR via a
+  `### Exempt` section in `changelog.d/<PR>.md` instead of appending to the
+  shared `scripts/changelog-fragments-exempt.txt` tail line, eliminating
+  cross-PR merge conflicts while keeping the legacy list read-only (#54055).
+- `Masc_tui_doc.docked_preview_chrome` now computes docked preview chrome height from one shared helper used by the Memory facts inspector, and `Masc_tui_theme.paint_row_background` documents its trailing reset contract (#54056).
+- Board list selection now uses `push_selected_styled` and active hearth census chips use tinted `sidebar_selection_background` preserving semantic row colors, and Board read-pane section headings use `section_heading` typography (#54058).
+- Promote `masc_tui_domain_requests` library and extract wrapped `masc_tui_resources_control` (`Resource_io_control`, `Artifact_share_control`) from `bin/masc_tui.ml` (`-366` lines, `14` strict `.mli` exports) (#54059).
+- Extract wrapped `masc_tui_repo_changes` library (`Diff_geometry`, `Repository_changes`, `Workspace_file_changes`) from `bin/masc_tui.ml` (`-438` lines, `23` strict `.mli` exports) (#54060).
+- Extract wrapped `masc_tui_media_surface_actions` library (`Clipboard_paste`, `Play_room_control`, `Surface_references`, `Media_listen`) from `bin/masc_tui.ml` (`-364` lines, `14` strict `.mli` exports) (#54061).
+- Tools/Skills, Runtime, and Connectors surfaces now use `dot_meter` Braille progress bars, `section_heading` headers, `push_selected_styled`/`box_line_selected_styled` selection bands, and the calm `Doc.docked_preview` skill inspector (#54066).
+- Metrics, Lanes, and Verification meters now use fine `dot_meter` Braille bars, Metrics KPI cards reuse `Doc.card_style ()`, and the Lanes overview inspector uses `Doc.docked_preview` (#54069).
+- Upgraded the remaining selection bands on Overview, Memory overview and facts, Overlays (detail search, palette, queue, account login, collab), Config forms, Activity, Approvals, Code history, Resources search, and Lanes pickers to `push_selected_styled`, `box_line_selected_styled`, and `selection_row_styled` so semantic colors stay intact over tinted selection backgrounds (#54077).
+- Upgraded the Keeper story context meter (`Masc_tui_render_keepers`) to `Masc_tui_chart.dot_meter` and clarified `Masc_tui_doc.docked_preview_chrome` as a full-width upper bound (#54077).
+
+### Fixed
+
+- Upgrade Browser Lane selection bands, Connectors status dots, Board right-aligned counts/cursor clamping/attachment badges, GitHub UTF-8 scalar PAT masking and Korean copy, and Identity Korean localization with `Notice_bad` hint styling (#53887).
+- Polish live-screenshot Keeper composer/pause/memory-axis Korean copy, Resources focus-aware selection bands and full Korean localization, unified Palette/Approvals gate labels, Overview health section Korean labels, Model Runtime Table receded styling, and Korean particle grammar (#53889).
+- Complete Antigravity lazy MCP tool loading (RFC-0490 L3b+L4): omit the per-tool `eager` map in `mcp_config.json` so `agy` exposes all MASC tools via `call_mcp_tool` instead of silently dropping large schemas past ~62 KB, omit the broad `read_file(*)` deny only in `native_settings_json` `Native_none`, and wire posture-scoped `prepare_read_hook` fail-closed across Keeper turns, readiness verification, and capability probes (#53898).
+- Exclude bridged uncheckpointed official-client turns (`masc.bridged_turn_ref`) from `Canonical_source_guard` history digests via shared `Keeper_official_client_host.is_canonical_source_snapshot_message` across Antigravity and Muse, and wire `Keeper_turn_bridge.prepend_resume_handoff` on Muse `Serve.Resume` so consecutive sessions resume instead of restarting every turn (#53899).
+- Share standing System observation partitioning (`Keeper_official_client_host.canonical_system_guard`) across Codex, Antigravity, and Muse so framed `Canonical_source_guard` resumes preserve vendor sessions across `Current_norms`, `Active_goals`, and `Direct_input_source` updates under an explicit replacement notice while falling back to fresh sessions on `Goals_awaiting_proof`, `base_text` changes, or opaque hook overrides (#53900).
+- Map `Cancelled` tasks to `Held_terminal` in `Workspace_task_lifecycle.resolve_claim_status` and return `InvalidState` instead of blaming the canceller as `AlreadyClaimed` in `Workspace_task_claim.claim_task_r` (`#53908`, fixes `#53078`).
+- Distinguish omitted/`null` `"members"` from explicit `"members": []` via `Board.sub_board_members_field_of_yojson` so sub-board updates (`masc_board_sub_board_update` and `PUT /api/v1/board/sub-boards/<id>`) clear non-owner members instead of ignoring empty lists (`#53909`, fixes `#53085`).
+- Flatten `Otoml.TomlInlineTable` entries recursively inside `Keeper_toml_parser.flatten_table` so inline tables such as `tools = { native = "none" }` and `skills = { names = [...] }` resolve to canonical dotted Keeper profile keys (`#53910`, fixes `#53089`).
+- Make `Workspace_goal_index.link_goalless_task_to_goal` (used by `masc_task_set_goal`) idempotent when a task's sole existing goal link already matches the requested `goal_id`, avoiding spurious errors and unnecessary file rewrites (`#53918`, fixes `#53117`).
+- Report the active `status` filter in `Workspace_query.list_tasks` empty-result text (`No tasks with status '<tag>'.`) instead of claiming there are no active tasks because all are done or cancelled (`#53919`, fixes `#53076`).
+- Preserve trailing `# ...` comments outside quoted strings across `Bool`, `String`, `Int`, `Float`, and multiline array updates in `Toml_line_editor` and `Keeper_toml_loader.rewrite_field_in_content` (`#53920`, fixes `#53088`).
+- Strictly validate `visibility` in `masc_board_post` and `masc_board_list` (both schema enum and runtime handlers) with `Workflow_rejection` instead of silently defaulting unknown values (`#53928`, fixes `#53070`).
+- Return `None` from `Backend_glm.classify_glm_error` for undocumented GLM error codes instead of fabricating `Glm_invalid_request`, preserving HTTP status classification and surfacing provider-reported errors on HTTP 200 envelopes (`#53929`, fixes `#53120`).
+- Validate `task_id` on `Workspace_task.delete_task_r` and `POST /api/v1/dashboard/tasks/delete` via the shared `Types_core.task_deletion_task_id` parser so blank or malformed task IDs cannot persist unreadable deletion receipts (`#53930`, fixes `#53067`).
+- Eliminated live-update layout jitter across Overview, Keepers, and the 24h wall via monotonic high-water column width latching, a constant-height status slot, fixed stacked detail and unread-wave heights, keeper-count-invariant Overview bands, and bottom-pinned tool-call summaries (#53932).
+- The refusal of the account server over a Keeper configuration journal no longer promises a rollback. The boot does not read the journal. The engine would roll back only one that decodes and whose Keeper name and paths fit the installation, and would not start on another or when the rollback fails. Removing the journal leaves the Keeper definition and runtime.toml as they are (#53951).
+- Keepers top headers now always display active observation errors without folding, prioritize `fleet_gaps` and `roster` notices ahead of `waiting`, show up to two advisories before folding with `Count.more`, deduplicate the 24h cockpit `24h` tail note, and backfill changelog fragments for Stack #53926 (#53923, #53924, #53925, #53932) (#53975).
+- A maintenance-loop step that raises no longer ends the loop. The raise is logged as that step's failure and the steps after it, and the next tick, still run, so the Memory writers' pulse and the wake recoveries keep running (#53978).
+- An exception a Keeper's Memory writer does not expect, raised while it
+  boots or takes an event, stops only that writer as `store_stopped_raised`
+  instead of failing the server switch every Keeper runs under. The writer
+  answers the caller of that event and keeps taking events, and an
+  operator `resume` on `/api/v1/keepers/<k>/memory/act` boots it again.
+  Cancellation, `Out_of_memory`, `Stack_overflow` and `Sys.Break` still end
+  the server (#53983).
+- Unify TUI scroll/paging helpers (`Masc_tui_scroll.wheel_or_key_move`, `cursor_move_of_key_move`, overflow-safe `visible_target_for_scroll`) and apply 1-row overlap paging, `Home`/`End`/`g`/`G`/wheel navigation, and visible-row selection snap across the Activity side pane (`Ctrl-W`), Context modal tabs, Lane Add-ons modal, Palette modal, and Link preview modal (removing one-off `u`/`d` aliases) (#53986).
+- Scroll mixed prose + selectable-row TUI modals (`Agenda ;`, `Answering @`, `Queue Ctrl-T`) by viewport height with 1-row overlap while snapping selection onto a visible target row (clearing off-screen selection so `Enter` cannot act on hidden rows), add Chat (`Keeper_message`) `Home` jump-to-oldest + older-history load with overflow-safe clamping and pre-repaint downward recovery, and unify `Home`/`End`/`g`/`G`/wheel paging across `Ask_question`, `Keeper_deletions`, `Play_invite`, `Code`, `Runtime_config`, `Memory_fact_detail`, `Acting_detail`, and `Keeper_navigation` overlays (#53987).
+- Remove the hardcoded `surface_page_rows` (`surface_rows - 8`) and `workspace_activity_page_rows` heuristics, report exact drawn viewport heights across all 18 remaining detail/sidebar/config/resource/browser/workspace panes (`Masc_tui_types.paged_list`), use `Masc_tui_scroll.page_step` 1-row overlap uniformly across all TUI surfaces, and wire `End`/`g`/`G`/mouse wheel navigation into Browser lane and Browser history views (#53988).
+- Align `Offline` vs `Paused` status marks across Keepers grid gutters, strip headers, `Overview` keeper entries, and `Day_wall` by distinguishing `Offline { unexpected : bool }` from `Paused` and reserving `◌` for unread states (#53992).
+- Emit the canonical `System_record` broadcast (`Claimed <task_id>`) from `Workspace_task_schedule.claim_next_r` via shared `Workspace_task_claim.emit_claim_side_effects`, matching `Workspace_task_claim.claim_task_with_details_r` and keeping `auto_start` `Started <task_id>` ordering intact (`#54001`, fixes `#53079`).
+- Overlay keeper TOML declaration defaults (`activation_mode`, `sandbox_profile`, `network_mode`, and related profile-owned fields) in `Operator_control_snapshot.keepers_json` and `Keeper_runtime_trust_snapshot`, falling back to stored/passed `keeper_meta` when no declaration file exists (`#54002`, fixes `#53007`).
+- Enforce finite Unix-seconds bounds (`[0.0, 253_402_300_799.0]`, `1970-01-01T00:00:00Z..9999-12-31T23:59:59Z`) in `Schedule_domain.create_request` and `Schedule_service.create` via `Schedule_domain.valid_unix_seconds` so millisecond, nanosecond, negative, and `Unix.gmtime`-overflowing timestamps are rejected on create and update before ledger persistence (`#54011`, fixes `#53074`).
+- `Masc_tui_doc.kv_rows` now checks the natural label width against the 12-cell value floor before entering two-column mode, `test_tui_render_list_heights` strips inline SGR when matching styled Skill rows, and Keepers top headers place active observation errors ahead of the fleet summary so `cap_keeper_headers` never truncates errors first (#54012).
+- `/health?full=1` now carries every section the full health pass computes. `runtime_truth` and `server_hibernation` were computed on every refresh and left out, because the snapshot kept a section only when the rollup's list named it (#54022).
+- TUI quit notice says how many messages are unsent as "and N unsent" instead of "+N unsent", the paste notice writes its dropped bytes as a cut-off count, and the plus signs that are not counts (editor line arguments, time since an update, how late a run is) carry a `tui-value` marker for the coming PR check (#54031)
+- Memory facts docked preview now reserves all 3 chrome rows (hairline, header, footer hints) so the final metadata row (`Memory ID`, `File SHA`, `Dropped At`) is not clipped, removes redundant trailing ANSI resets after `paint_row_background`, and tests both Korean and English preview headers (#54036).
+- Avoid `SIGPIPE` failures under `set -o pipefail` across 14 shell scripts by replacing `| head` pipelines with EOF-draining `sed -n` and `awk` selections. ([#54049](https://github.com/jeong-sik/masc/pull/54049))
+- Cap Keepers fleet and group downward Braille failure sparklines to light 1..2 dot rows (`⠉`/`⠋`/`⠙`/`⠛`), align `Day_wall` legend `ok(up)` (`⣤`) with `fail(down)` (`⠛`), separate `Invalid` (`✕ config error`) and `Absent` (`‖ offline`) from `Unobserved` (`◌ unread`) in Keepers strip headers, and match `Overview` attention `state_label` tones to `entry.mark_tone` (#54051).
+- TUI writes large byte and turn counts with commas in the Resources report meta line, the response size limit notice, queued attachment sizes, and the keeper assignment and Runtime fleet turn totals (#54053)
+- Unify absent content-addressed blob lookups (`keeper_artifact_read`, `keeper_skill_validate` / `keeper_skill_publish` drafts, `keeper_peer_artifact`, and vision tools) onto `Keeper_blob_lookup_failure` so missing sha256 digests consistently report `workflow_rejection` instead of `policy_rejection`. ([#54064](https://github.com/jeong-sik/masc/pull/54064))
+- Multi-turn Task Completion Review calls (`lib/workspace_metric_hooks.ml`) now pass `~cache_system_prompt:true` through `Keeper_turn_driver_wrappers.run_named_with_masc_tools` (whose default remains `false` for 1-shot callers), enabling prompt caching across review tool rounds (`#54065`, relates `#53917`).
+- Eliminate two-stat `file_exists && Sys.is_directory` directory checks across `lib/` and `bin/` by adding single-stat `Fs_compat.is_directory`, reusing `Env_config_core.existing_dir` / `existing_file`, simplifying `Server_runtime_config_root_bootstrap.existing_root_or`, and adding a regression guard test. ([#54067](https://github.com/jeong-sik/masc/pull/54067))
+- TUI writes counts of 1,000 or more with commas wherever a count is spelled with its noun ("8,347 posts") and across the Memory screen's fact, turn, invalidation and retrieval counts (#54068)
+- TUI writes counts of 1,000 or more with commas in the Work screen's goal, task, schedule request and retained wake counts and in the Tools screen's skill run and timeline event counts (#54073)
+- TUI writes the Lanes screen's run, slot and tool call counts of 1,000 or more with commas (#54082)
+- Retire delivered file-bound memory invalidations (`*.memory-source-current.json`) strictly after a committed turn and its execution receipt succeed, preventing dead invalidations from accumulating in Librarian `facts_budget` and per-turn `Memory_os_recall` prompts (`#54086`, relates `#53031`, `#53917`).
+- TUI writes counts of 1,000 or more with commas in chat file changes (rows written, matches replaced, preview rows withheld) and in lane add-on record counts (#54089)
+- TUI writes byte, character, turn and match counts of 1,000 or more with commas in copy, attachment and preview notices, the Librarian's unprocessed turns, file change matches and the Inspector's turn readings (#54099)
+- TUI chat writes its Korean counts of omitted tool steps, unreadable rows and rows scrolled back with commas, as the English lines already do (#54103)
+- Eliminated the remaining 9 two-stat `file_exists && is_directory` checks across `lib/` and `bin/`, added single-stat `Fs_compat.is_file`, guarded empty paths against Linux `eio_linux` `AT_EMPTY_PATH` false positives, protected `Workspace_utils_paths_backend.is_initialized` with a generation-counter CAS, and tightened `test/test_no_double_stat_dir_check.py` (#54104).
+- Degraded unsupported `Audio` blocks in `Backend_gemini.project_history` before `project_function_response_media` so models without audio input emit the primary audio-omitted placeholder in both top-level and `ToolResult` positions, widened `Api_common.degrade_audio_messages` / `audio_omitted_placeholder` polymorphically over `'source`, and aligned `test_backend_openai_codec` with native OpenAI Responses `input_file` serialization while keeping `Audio` `File_id`/`Url` fail-closed (#54110).
+
+### Performance
+
+- Bucket Keepers half-hour pulse tallies in a single pass, replace quadratic `List.nth_opt` scans in `Day_wall` fleet aggregation with array indexing, and coalesce consecutive ANSI SGR runs across Keepers pulse, strip, matrix, and 24h wall renderers (#53990).
+- Consolidate the four Keepers run-length ANSI SGR emitters into shared `Masc_tui_theme.Sgr.{with_styled_runs,emit_styled_cells}` helpers (with unit tests) and cache prepared `Day_wall` frames per roster snapshot, 30-minute slot boundary, width, language, and theme style key so `j/k` scrolling runs in `O(1)` without recomputing tallies, fleet waves, or group separators (#54050).
+
+### Documentation
+
+- Deleted the implemented RFCs
+  `a-request-fits-by-the-one-input-limit-agent-core-decides` and
+  `a-sent-request-prefix-changes-only-when-the-window-moves` under the RFC
+  lifecycle rule; the RFCs that cited them now name the rule and the code
+  that holds it. The pull request body records what each layer shipped and
+  the post-deploy measurement of the sent-prefix layers (#53938).
+- The interface of `start_engine` and the RFC of a person's Keeper on the engine say what the multi-account engine starts. Of the auxiliary startup of the single-user server it starts only the owner lanes, whose background maintenance starts the workers of the Dashboard snapshot sources and the runtime probe loop of the Dashboard. The RFC says that the engine does not export the operator tokens, and that a value the shell set stays in the process and serves the engine as its token (#53943).
+- The RFC and its research say that from S1 an installation whose boot stops takes no login, and that one whose engine fails takes logins until the failure ends the process. They say why a Keeper configuration journal stops the boot, which journals the engine rolls back, that it does not start when the rollback fails, and that turning the accounts off also asks the config to drop multi-account. They name the three places that read the two operator tokens by name, and the capture of Codex, which reads the whole environment. They call the record `.masc/keepers/<name>.json` by one name and say how far an investigated-only mark reaches (#53943).
+- The fragments of #53813 and #53818 name the scope they fix. The fragment of #53839 says that a turn or a check refuses a Codex home that lists names, and that the sweep makes a late definition without a run record a keepalive candidate (#53943).
+- The interface and the setup guide of the account server say that `GET /health/ready` answers 503 whenever the authorization zone cannot be trusted, after the engine is ready too. The guide says the state comes from a log or a store that stopped, after a failed write or a change by another process, or from a store and a log that do not match, and that only a restart reads the files again. The interface also says that the home and invitation pages still answer then (#53951).
+- Keeper source and test comments state the sent-prefix and input-limit
+  rules without citing the deleted RFCs. The size-signal comments now say
+  the signal compares the next turn's peak with the request's input limit,
+  the window less the output the request reserves, as the code has done
+  since #53574 (#53965).
+
+### Internal
+
+- The test of the environment of a person's children says that the multi-account engine does not export the operator tokens and that a value the shell set stays in the process, and keeps the key file of its key case outside the account home, as a key file is. The engine test drops a library it no longer names (#53945).
+- The dashboard drops comments that pointed at design documents, audits and
+  RFCs that #53389 and #53438 deleted, and states each rule instead. It also
+  removes eight board CSS rules (`.bd-feed-head .spacer`, `.bd-filter`,
+  `.bd-stateblock`) that only kept the kit diffable against the deleted
+  design; no dashboard code renders those classes (#54032).
+- Expose `Masc_tui_scroll.cursor_normalized`, guard `cursor_last` against
+  negative `min_int` underflow, and replace seven duplicate local
+  `clamped_cursor` helpers across TUI renderers with the shared scroll clamp
+  (#54072).
+- Add canonical `Masc_tui_theme.Sgr.wrap_style` (re-exported as
+  `Masc_tui_ansi.Ansi.wrap_style`) with unit tests and replace seven duplicate
+  local `wrap_style` helpers across TUI modules (#54084).
+
 ## [0.75.0] - 2026-11-20
 
 ### 요약

@@ -219,7 +219,10 @@ let invite_rows ~ko ~width ~last_read t controller (row : Masc.Tui_decode.play_i
      ^ (if row.pi_expired then (if ko then " · 만료됨" else " · expired") else "")
      ^ " · " ^ (match row.pi_expires_at with
                 | Some date -> date
-                | None -> if ko then "만료 시각 미기록" else "expiry not recorded"))
+                | None ->
+                    (* No expiry on the credential means it never expires
+                       (RFC tui-one-screen-grammar 6.4). *)
+                    (if ko then "만료 " else "expires ") ^ Masc_tui_theme.Glyph.no_value))
   |> List.mapi (fun index text -> is_selected, (if index = 0 then mark else lead) ^ text)
 
 (* The invites that fit [available] rows: the selected one always, the ones

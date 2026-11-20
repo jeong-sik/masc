@@ -4573,7 +4573,8 @@
   masc
   masc_tui_keeper_chat_diff
   masc_tui_keeper_chat_transcript
-  masc_tui_message_layout))
+  masc_tui_message_layout
+  masc_tui_value))
 
 (test
  (name test_tui_git_diff_decode)

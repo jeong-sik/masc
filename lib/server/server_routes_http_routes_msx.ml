@@ -1,10 +1,10 @@
-(** HTTP routes for the workspace MSX machine (RFC-0439 §3.7, RFC #38695).
+(** HTTP routes for the workspace MSX machine.
 
     Spectating the machine goes through
-    [GET /api/v1/lane-addons/live?source_kind=msx_capture] (RFC #38695).
+    [GET /api/v1/lane-addons/live?source_kind=msx_capture].
 
     [POST /api/v1/msx/press] lets the human at the TUI press keys on the same
-    machine a keeper is playing (RFC-0439 §3.3): [{keys:[..], hold_frames?,
+    machine a keeper is playing: [{keys:[..], hold_frames?,
     frames?, sequence?}] goes to the attached worker under the identity
     [with_tool_actor_auth] resolved for the request, so its edges land in the
     shared ledger next to the keeper's under the name the credential carries.
@@ -257,11 +257,12 @@ let tick_response ~config ~body =
       else result.status, Msx_wire.encode ?code:result.code result.message
 ;;
 
-(* The realtime driver (RFC-0439 §2, poll-cadence tick). The spectating TUI
-   posts this a few times a second to advance the shared machine, so a game
-   flows even when no keeper is pressing a key. Body: {frames:N}, clamped to
-   1..max_frames_per_call; the answer is the advanced frame, so one call both
-   steps and reads. A write, gated like press. *)
+(* A tick on request. No client in this repository posts it: while an
+   observer stream is open, {!Server_machine_spectator} advances the shared
+   machine a few times a second, so a game flows even when no keeper is
+   pressing a key. Body: {frames:N}, clamped to 1..max_frames_per_call; the
+   answer is the advanced frame, so one call both steps and reads. A write,
+   gated like press. *)
 let handle_tick ~config request reqd =
   Http.Request.read_body_async reqd (fun body ->
       let status, json = tick_response ~config ~body in

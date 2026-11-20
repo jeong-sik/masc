@@ -1,5 +1,4 @@
-(** HTTP routes for invites to the shared machine (RFC
-    play-link-for-the-shared-machine §2.4).
+(** HTTP routes for invites to the shared machine.
 
     - [POST /api/v1/play/invites] [{name, hours}] issues a [Player]
       credential and answers [{name, expires_at, link}]. The link carries the

@@ -52,10 +52,10 @@ val startup_sweep_unowned_exact : Mcp_server.server_state -> unit
 (** Run {!Server_unowned_exact_sweep} on a worker domain and log one line. *)
 
 val startup_count_superseded_lanes : Mcp_server.server_state -> unit
-(** Log one {!Lane_addon_superseded_census} line (RFC-0497 layer one): the
-    bytes of the retained Lane instances section 4.1 would delete, of the ones
-    it keeps, and of [observations]. Sizes are read on a worker domain. Moves
-    and deletes nothing. *)
+(** Log one {!Lane_addon_superseded_census} line: the bytes of the retained
+    Lane instances {!Lane_addon_superseded.plan} finds eligible for deletion,
+    of the ones it keeps, and of [observations]. Sizes are read on a worker
+    domain. Moves and deletes nothing. *)
 
 val declared_keeper_names :
   keepers_dir:string -> (string list, string) result

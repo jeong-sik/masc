@@ -292,7 +292,7 @@ val respond_and_drive_upgrade :
     request (RFC 6455 §4.2.1), writes the 101 on [reqd], then drives the
     post-101 connection by handing a ws-direct Endpoint (Server role, bounded by
     [max_message] / [max_frame]) to the Gluten runtime via [upgrade] as a
-    drop-in for the former Httpun_ws.Server_connection.  RFC-0287 §4.1. *)
+    drop-in for the former Httpun_ws.Server_connection. *)
 
 val mcp_websocket_handler :
   ?mcp_auth_token:string ->

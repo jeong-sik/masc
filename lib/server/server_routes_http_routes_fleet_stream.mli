@@ -1,4 +1,4 @@
-(** The fleet events of RFC-0477 as Server-Sent Events.
+(** The fleet events of {!Fleet_stream} as Server-Sent Events.
 
     - [GET] {!Fleet_stream.stream_path} — the first frame is the [Snapshot] the server
       holds, and every later frame is the next change or outage. A frame's [id]

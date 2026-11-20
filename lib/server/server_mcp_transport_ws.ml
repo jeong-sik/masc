@@ -43,9 +43,9 @@ let dispatch_inbound_message session_id body =
     [dashboard_hello] and then read on the SSE forward hot path and the
     dashboard RPC auth gates.  Held in an [Atomic.t] on the session
     ([dashboard_auth]) so the single write and the many reads stay tear-free
-    if dashboard serving moves off the main Eio domain (RFC-0204 §8.4,
-    Phase 1).  [Authenticated] carries the resolved agent name, or [None]
-    when the auth config permits tokenless dashboard reads. *)
+    if dashboard serving moves off the main Eio domain.  [Authenticated]
+    carries the resolved agent name, or [None] when the auth config permits
+    tokenless dashboard reads. *)
 type dashboard_auth_state =
   | Unauthenticated
   | Authenticated of { agent : string option }
@@ -57,8 +57,7 @@ type dashboard_auth_state =
 
 (** A frame for the client. The writer of a connection ([Ws_wsd.t]) has no
     lock and the connection's own fiber reads from it, so only a fiber of the
-    connection's domain writes to it: every other fiber queues one of these
-    (RFC http-transport-runs-on-its-own-domain §3.6). *)
+    connection's domain writes to it: every other fiber queues one of these. *)
 type outbound =
   | Text_frame of Bigstringaf.t
   | Ping_frame
@@ -142,11 +141,9 @@ let sessions_mutex = Stdlib.Mutex.create ()
 let with_sessions_rw f = Stdlib.Mutex.protect sessions_mutex f
 
 (** Side index mapping each dashboard slice to the set of session IDs
-    currently subscribed to it.  Phase 1 of the slice-indexed fanout RFC
-    (#10119): the index is maintained at subscribe / unsubscribe / cleanup
-    time but the broadcast fanout still iterates every session.  Phase 2
-    consults this index to skip raw-SSE-forwards to sessions whose route
-    does not subscribe to the event's slice.
+    currently subscribed to it.  The index is maintained at subscribe /
+    unsubscribe / cleanup time; the broadcast fanout iterates every session
+    and does not read it.
 
     Inner [Hashtbl.t] is keyed by [session_id] with [unit] values — a set.
     Mutated only under [sessions_mutex], so the consistency invariant
@@ -396,8 +393,7 @@ type dashboard_delta_payload_frame = {
 
 (* Cross-domain-safe seq allocator: [fetch_and_add] atomically claims a unique
    slot, so two domains never hand out the same seq.  The old plain
-   read-modify-write lost ~half its updates under true parallelism (RFC-0204
-   Phase 3 gate). *)
+   read-modify-write lost ~half its updates under true parallelism. *)
 let next_dashboard_seq session = Atomic.fetch_and_add session.dashboard_seq 1 + 1
 
 (* Monotonic-max update for a cross-domain counter: retries until our value
@@ -808,7 +804,7 @@ let session_is_backpressured session =
     in
     buffered_limit_exceeded || ack_stale
 
-(** RFC #10119 Phase 2 gate.  When enabled (default since the bandwidth
+(** Slice-index gate.  When enabled (default since the bandwidth
     burst hardening pass), slice-scoped events skip the raw-SSE-forward
     to authenticated sessions whose route does not subscribe to the
     event's slice.  Catch-all events (no slice mapping) still reach
@@ -866,12 +862,12 @@ let send_dashboard_or_raw_sse session (ev : Sse.external_event) =
     | _ ->
         (* Two sub-cases lead here:
            1. The event has a parsed slice but this session's route is
-              not subscribed.  Today we raw-forward anyway so the client
-              can hydrate its store via [handleRawPush].  With the
-              slice-index gate enabled (RFC #10119 Phase 2) we skip
-              instead, since the client cannot do anything useful with
-              a slice it did not request and the wire write is pure
-              waste at the dashboard fleet's scale.
+              not subscribed.  With the slice-index gate enabled (the
+              default) we skip, since the client cannot do anything
+              useful with a slice it did not request and the wire write
+              is pure waste at the dashboard fleet's scale.  With it
+              disabled we raw-forward so the client can hydrate its
+              store via [handleRawPush].
            2. The event has no slice mapping (parse miss or unknown
               event_type).  This is the catch-all path and must still
               raw-forward so events outside the slice vocabulary still
@@ -1193,9 +1189,9 @@ let mcp_websocket_handler
     [Gluten.impl] — drop-in for the former [Httpun_ws.Server_connection.t]:
     it sends the 101 via
     [respond_with_upgrade], then hands the connection to the Gluten
-    runtime via [upgrade].  Omitting the [upgrade] call (the
-    pre-RFC-0281 defect) left the connection undriven, so inbound frames
-    — including the client hello and protocol pongs — were never read.
+    runtime via [upgrade].  Omitting the [upgrade] call leaves the
+    connection undriven, so inbound frames — including the client hello
+    and protocol pongs — are never read.
 
     [handler] builds the per-connection [input_handlers] from the
     [Wsd.t]; the MCP session ({!mcp_websocket_handler}) and the IDE LSP

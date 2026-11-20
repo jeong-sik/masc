@@ -135,7 +135,7 @@ let slack_delivery ~team_id ~channel_id ~channel_name
        ~team_id ~channel_id ~thread_ts:(Some reply_to_thread_ts) ~user_id)
 
 (* ---------------------------------------------------------------- *)
-(* Ambient lane (RFC-0226 parity with the Discord gateway)          *)
+(* Ambient lane (parity with the Discord gateway)                   *)
 (* ---------------------------------------------------------------- *)
 
 (* What a channel is called, for the label a reader sees. [conversations.info]

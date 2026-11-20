@@ -564,8 +564,7 @@ let published_snapshot = function
    there is one: usually an earlier source's, or in the same source a
    directory that sorts first and normalizes to the same name.
    [resolve_reference] finds shadowed entries too, so a reference that
-   resolves is not yet one that turns listing Skills by name see
-   (RFC keeper-self-authored-skills). *)
+   resolves is not yet one that turns listing Skills by name see. *)
 let shadow_winner snapshot identity =
   List.find_map
     (fun (shadow : Skill_catalog_snapshot.shadow) ->

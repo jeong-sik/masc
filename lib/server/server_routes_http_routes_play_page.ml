@@ -1,5 +1,4 @@
-(** The page an invite link opens, and the seat it reads (RFC
-    play-link-for-the-shared-machine §2.6).
+(** The page an invite link opens, and the seat it reads.
 
     [GET /play] is public: the page carries no data. It takes the bearer from
     the link's fragment, drops it from the address bar, and keeps it in

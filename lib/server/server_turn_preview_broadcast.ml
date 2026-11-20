@@ -1,5 +1,5 @@
-(* RFC-0481 §7 decision 2 recommends a quarter second: the answering badge
-   shows whole seconds and one status line. *)
+(* A quarter second between posts: the answering badge shows whole seconds
+   and one status line. *)
 let post_interval_s = 0.25
 
 let announce ~base_path ~keeper_name =

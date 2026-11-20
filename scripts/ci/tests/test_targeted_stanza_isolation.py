@@ -1,7 +1,7 @@
-"""Exercise suite selection through the reader CLI and targeted shell runner.
+"""Exercise suite selection through the prebuild reader and targeted shell runner.
 
-The runner scenario substitutes only the compiler/build command. No Dune build
-or browser runs; the real runner still selects dependencies and starts a fixture.
+The runner scenarios substitute only the build command. No Dune build or
+browser runs; the real runner still selects aliases and what to build first.
 """
 
 import json
@@ -35,192 +35,114 @@ class TargetedStanzaIsolation(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         (self.root / "scripts/ci").mkdir(parents=True)
         (self.root / "test/stanzas").mkdir(parents=True)
-        self.reader = self.root / "scripts/ci/stanza_env.py"
-        shutil.copyfile(SCRIPTS / "ci/stanza_env.py", self.reader)
+        self.reader = self.root / "scripts/ci/alias_prebuild_deps.py"
+        shutil.copyfile(SCRIPTS / "ci/alias_prebuild_deps.py", self.reader)
         self.dune = self.root / "test/dune"
         self.dune.write_text("(include stanzas/test_browser_activity.inc)\n")
         self.inc = self.root / "test/stanzas/test_browser_activity.inc"
         self.inc.write_text(MIXED)
 
-    def read(self, suite="test_browser_activity", *, deps=False):
+    def read(self, suite, directory="test"):
         return subprocess.run(
-            [sys.executable, str(self.reader), *(["--deps"] if deps else []), suite],
+            [sys.executable, str(self.reader), directory, suite],
             cwd=self.root, text=True, capture_output=True, timeout=10,
         )
 
-    def assert_selected(self):
-        for deps, expected in ((False, ["ACTIVITY_MODE=selected"]),
-                               (True, ["test/activity.json"])):
-            with self.subTest(deps=deps):
-                result = self.read(deps=deps)
-                self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(result.stdout.splitlines(), expected)
+    def assert_targets(self, suite, expected, directory="test"):
+        result = self.read(suite, directory)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), expected)
 
-    def test_per_suite_file_does_not_donate_sibling_alias_environment_or_deps(self):
-        self.assert_selected()
-
-    def test_shared_include_and_inline_file_select_the_same_action(self):
-        self.inc.unlink()
-        shared = self.root / "test/stanzas/shared.inc"
-        shared.write_text(MIXED)
-        self.dune.write_text("(include stanzas/shared.inc)\n")
-        self.assert_selected()
-        self.dune.write_text(MIXED)
-        self.assert_selected()
-
-    def test_sibling_named_test_does_not_donate_environment_or_dependencies(self):
-        self.inc.write_text(MIXED + """
+    def test_each_name_gets_only_its_own_stanza_targets(self):
+        # A per-suite include often declares sibling tests and alias rules
+        # too. Their deps belong to their own runs, so a name read from the
+        # same file must not collect them, inline or through an include.
+        sibling = """
 (test (name another_test) (deps other.json)
  (action (setenv ACTIVITY_MODE other (run %{test}))))
-""")
-        self.assert_selected()
+"""
+        for layout in ("included", "inline"):
+            with self.subTest(layout=layout):
+                if layout == "inline":
+                    self.dune.write_text(MIXED + sibling)
+                else:
+                    self.inc.write_text(MIXED + sibling)
+                self.assert_targets("test_browser_activity", ["test/activity.json"])
+                self.assert_targets("test_stdio_browser_activity", ["bin/main_stdio_eio.exe"])
+                self.assert_targets("another_test", ["test/other.json"])
 
-    def test_selected_action_unknown_variable_still_refuses(self):
-        self.inc.write_text(MIXED.replace("ACTIVITY_MODE selected", "ACTIVITY_MODE %{unknown}"))
-        for deps in (False, True):
-            result = self.read(deps=deps)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("ACTIVITY_MODE uses a dune variable", result.stderr)
-            self.assertEqual(result.stdout, "")
-
-    def test_renamed_suite_file_cannot_supply_a_different_named_test(self):
-        self.inc.write_text(MIXED.replace("(name test_browser_activity)", "(name another_test)"))
-        result = self.read()
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("no (test)/(tests) stanza declares", result.stderr)
-
-    def test_rule_only_suite_retains_its_action_and_dependencies(self):
+    def test_a_tests_group_names_its_deps_and_action_targets_once(self):
         self.inc.write_text("""
-(executable (name test_browser_activity))
-(rule (alias runtest) (deps fixture.json)
- (action (setenv ACTIVITY_MODE selected (run test_browser_activity.exe))))
+(tests (names test_browser_activity unrelated_test)
+ (deps launcher.exe)
+ (action (run %{test} %{dep:launcher.exe} %{exe:../bin/masc_tui.exe})))
 """)
-        for deps, expected in ((False, ["ACTIVITY_MODE=selected"]),
-                               (True, ["test/fixture.json"])):
-            result = self.read(deps=deps)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(), expected)
+        self.assert_targets("test_browser_activity", ["test/launcher.exe", "bin/masc_tui.exe"])
+        self.assert_targets("unrelated_test", ["test/launcher.exe", "bin/masc_tui.exe"])
 
-    def write_tree(self, directory, files):
-        for relative, text in files.items():
-            path = directory / relative
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(text)
-
-    def test_source_tree_dep_becomes_one_file_target_per_file(self):
-        # `dune build DIR` accepts a directory and exits 0 while copying
-        # nothing, so the runtest action's source tree is absent in a targeted
-        # run. A file target is copied, so DIR must arrive as its files.
-        tree = self.root / "test/tree"
-        self.write_tree(tree, {"b.txt": "b", "sub/a.txt": "a"})
+    def test_a_rule_names_the_executable_its_action_runs(self):
+        # Six rules declare no (deps ...) at all and name their executable only
+        # as %{exe:PATH} or %{dep:PATH} in the action. Without those paths the
+        # alias still compiles inside the budget.
         self.inc.write_text("""
-(test (name test_browser_activity) (deps (source_tree tree))
- (action (setenv ACTIVITY_MODE selected (run %{test}))))
+(rule
+ (alias runtest-test_browser_activity)
+ (action (run %{exe:../packages/agent_core/bench/bench.exe} test "a name")))
+(rule
+ (alias runtest-test_stdio_browser_activity)
+ (action (run python3 %{dep:activity.py} --binary %{dep:../bin/masc_tui.exe})))
 """)
-        result = self.read(deps=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(),
-                         ["test/tree/b.txt", "test/tree/sub/a.txt"])
+        self.assert_targets("test_browser_activity", ["packages/agent_core/bench/bench.exe"])
+        self.assert_targets("test_stdio_browser_activity",
+                            ["test/activity.py", "bin/masc_tui.exe"])
 
-    def test_source_tree_under_a_root_variable_resolves_from_the_checkout_root(self):
-        # The stanza is written relative to test/, but the root variable names
-        # the checkout root. --deps speaks from the root, so no literal
-        # '%{workspace_root}' may reach `dune build`.
-        prompts = self.root / "config/prompts"
-        self.write_tree(prompts, {"agent_core.md": "a", "nested/grader.md": "g"})
+    def test_only_dune_resolves_expressions_and_unknown_variables(self):
+        # A source tree or glob names source files, which Dune copies inside
+        # the action; an unknown variable would reach `dune build` as a literal
+        # '%{...}'. A root variable names the checkout root.
         self.inc.write_text("""
-(test (name test_browser_activity) (deps (source_tree %{workspace_root}/config/prompts))
- (action (setenv ACTIVITY_MODE selected (run %{test}))))
+(test (name test_browser_activity)
+ (deps (source_tree tree) (glob_files *.json) %{unknown}
+       %{workspace_root}/config/prompts/agent_core.md))
 """)
-        result = self.read(deps=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        targets = result.stdout.splitlines()
-        self.assertEqual(targets, ["config/prompts/agent_core.md",
-                                   "config/prompts/nested/grader.md"])
-        for target in targets:
-            self.assertTrue((self.root / target).is_file(), target)
-            self.assertNotIn("%{", target)
+        self.assert_targets("test_browser_activity", ["config/prompts/agent_core.md"])
 
-    def test_empty_source_tree_contributes_no_target_and_no_directory(self):
-        (self.root / "test/tree").mkdir(parents=True)
+    def test_a_stanza_with_nothing_to_build_answers_empty(self):
         self.inc.write_text("""
-(test (name test_browser_activity) (deps (source_tree tree))
- (action (setenv ACTIVITY_MODE selected (run %{test}))))
+(rule
+ (alias runtest-test_browser_activity)
+ (action (run python3 -c pass)))
 """)
-        result = self.read(deps=True)
-        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assert_targets("test_browser_activity", [])
+
+    def test_a_name_nothing_declares_is_refused_not_answered_as_no_deps(self):
+        # "Nothing carries this name" is not "the stanza needs nothing built":
+        # answering both with an empty list and exit 0 let the runner skip the
+        # preparation for a misread name without a word.
+        result = self.read("test_absent_alias")
+        self.assertEqual(result.returncode, 1, result.stdout)
         self.assertEqual(result.stdout, "")
+        self.assertIn("runtest-test_absent_alias", result.stderr)
 
     def executable(self, path, text):
         path.write_text(f"#!{sys.executable}\n" + text)
         path.chmod(0o755)
 
-    def test_real_targeted_runner_builds_only_selected_deps_then_executes_fixture(self):
-        # No custom action: this exercises the direct executable path. Dune's
-        # directory environment still belongs to that executable's run.
-        self.inc.write_text(MIXED.replace(
-            "(action (setenv ACTIVITY_MODE selected (run %{test})))", ""))
-        self.dune.write_text("(env (_ (env-vars (ACTIVITY_MODE selected))))\n"
-                             "(include stanzas/test_browser_activity.inc)\n")
-        runner = self.root / "scripts/ci-run-targeted-tests.sh"
-        shutil.copyfile(SCRIPTS / runner.name, runner)
-        (self.root / "test/test_browser_activity.ml").touch()
-        commands = self.root / "commands"
-        commands.mkdir()
-        self.executable(commands / "timeout", "import os,sys\nos.execvp(sys.argv[6], sys.argv[6:])\n")
-        self.executable(commands / "opam", """
-import json,os
-from pathlib import Path
-import sys
-Path('build-args.json').write_text(json.dumps(sys.argv[1:]))
-assert sys.argv[1:] == ['exec','--','dune','build','--root','.', '-j','2',
-                       'test/test_browser_activity.exe','test/activity.json'], sys.argv
-path=Path('_build/default/test/test_browser_activity.exe')
-path.parent.mkdir(parents=True)
-path.write_text('#!' + sys.executable + '\\nimport os,json\\nfrom pathlib import Path\\n'
-                + 'Path(os.environ["FIXTURE_RESULT"]).write_text(json.dumps('
-                + '{"mode":os.environ["ACTIVITY_MODE"],"cwd":os.getcwd()}))\\n')
-path.chmod(0o755)
-""")
-        result_path = self.root / "executed.json"
-        env = dict(os.environ, PATH=str(commands) + os.pathsep + os.environ["PATH"],
-                   TARGET_SUITES="test_browser_activity", DUNE_JOBS="2",
-                   CI_TEST_LOG_FILE=str(self.root / "runner.log"),
-                   FIXTURE_RESULT=str(result_path))
-        result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
-                                text=True, capture_output=True, timeout=15)
-        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        executed = json.loads(result_path.read_text())
-        self.assertEqual(executed, {"mode": "selected", "cwd": str(self.root / "_build/default/test")})
-        self.assertNotIn("main_stdio", (self.root / "build-args.json").read_text())
-
-    def test_custom_action_query_preserves_dune_variable_and_argv_ownership(self):
-        self.inc.write_text(MIXED.replace("ACTIVITY_MODE selected", "ACTIVITY_MODE %{workspace_root}"))
-        result = subprocess.run(
-            [sys.executable, str(self.reader), "--action-alias", "test_browser_activity"],
-            cwd=self.root, text=True, capture_output=True, timeout=10,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "@@test/runtest-test_browser_activity\n")
-        self.inc.write_text("(test (name test_browser_activity))\n")
-        result = subprocess.run(
-            [sys.executable, str(self.reader), "--action-alias", "test_browser_activity"],
-            cwd=self.root, text=True, capture_output=True, timeout=10,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "")
-
-    def run_custom_action(self, suite_path, exit_code=0, build_exit_code=0):
+    def run_ocaml_suite(self, suite_path, *, action, exit_code=0, build_exit_code=0):
+        """Run the real runner over one OCaml suite whose stanza lives in the
+        suite's own directory. Each fake `opam` call is recorded with whether
+        it ran under the fake `timeout`."""
         directory, name = suite_path.rsplit("/", 1)
         source = self.root / (suite_path + ".ml")
         source.parent.mkdir(parents=True, exist_ok=True)
         source.touch()
+        action_field = ("(action (chdir nested (setenv DUNE_SOURCEROOT %{workspace_root}"
+                        " (run %{test} %{dep:launcher.exe} \"argument with spaces\"))))"
+                        if action else "")
         (source.parent / "dune").write_text(f"""
 (tests (names {name} unrelated_test)
  (deps launcher.exe)
- (action (chdir nested
-   (setenv DUNE_SOURCEROOT %{{workspace_root}}
-    (run %{{test}} %{{dep:launcher.exe}} "argument with spaces")))))
+ {action_field})
 """)
         runner = self.root / "scripts/ci-run-targeted-tests.sh"
         shutil.copyfile(SCRIPTS / runner.name, runner)
@@ -252,13 +174,14 @@ raise SystemExit(int(os.environ['FAKE_DUNE_EXIT' if is_alias else 'FAKE_BUILD_EX
                                 text=True, capture_output=True, timeout=15)
         invocations = [json.loads(line) for line in
                        (self.root / "opam-calls.jsonl").read_text().splitlines()]
-        expected = [{
-            "argv": ["exec", "--", "dune", "build", "--root", ".", "-j", "2",
-                     f"{suite_path}.exe"],
-            "verbose": None,
-            "timed": False,
-        }]
+        build = ["exec", "--", "dune", "build", "--root", ".", "-j", "2"]
+        expected = [{"argv": build + [f"{suite_path}.exe"], "verbose": None, "timed": False}]
         if build_exit_code == 0:
+            # The action's own dependency is built before the budget starts;
+            # then Dune runs the suite through its per-test alias, the only
+            # call under the budget.
+            expected.append({"argv": build + [f"{directory}/launcher.exe"],
+                             "verbose": None, "timed": False})
             expected.append({
                 "argv": ["exec", "--", "dune", "build", "--root", ".", "--force",
                          "--no-buffer", "--verbose", "-j", "1",
@@ -269,92 +192,34 @@ raise SystemExit(int(os.environ['FAKE_DUNE_EXIT' if is_alias else 'FAKE_BUILD_EX
         self.assertEqual(invocations, expected)
         return result
 
-    def test_custom_action_runs_only_its_nonrecursive_generated_alias(self):
-        # Remove the per-suite include so the named action comes from test/dune.
+    def test_a_plain_test_runs_through_its_generated_alias_not_its_executable(self):
+        # Running the executable from the shell meant re-reading the stanza's
+        # environment and deps outside Dune. Dune's own alias evaluates them.
         self.inc.unlink()
-        result = self.run_custom_action("test/test_browser_activity")
+        result = self.run_ocaml_suite("test/test_browser_activity", action=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_custom_action_runs_only_its_nonrecursive_generated_alias(self):
+        self.inc.unlink()
+        result = self.run_ocaml_suite("test/test_browser_activity", action=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
     def test_external_suite_uses_its_own_directory_alias(self):
-        result = self.run_custom_action("packages/agent_core/test/test_browser_activity")
+        result = self.run_ocaml_suite("packages/agent_core/test/test_browser_activity",
+                                      action=False)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
-    def test_custom_action_failure_is_not_reported_as_success(self):
+    def test_a_suite_failure_is_not_reported_as_success(self):
         self.inc.unlink()
-        result = self.run_custom_action("test/test_browser_activity", exit_code=23)
+        result = self.run_ocaml_suite("test/test_browser_activity", action=False, exit_code=23)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("FAIL exit 23", result.stdout)
 
-    def test_custom_action_build_failure_prevents_the_timed_action(self):
+    def test_a_compile_failure_prevents_the_timed_alias(self):
         self.inc.unlink()
-        result = self.run_custom_action("test/test_browser_activity", build_exit_code=23)
+        result = self.run_ocaml_suite("test/test_browser_activity", action=False,
+                                      build_exit_code=23)
         self.assertEqual(result.returncode, 23, result.stdout + result.stderr)
-
-    def alias_deps(self, suite="test_stdio_browser_activity"):
-        return subprocess.run(
-            [sys.executable, str(self.reader), "--dir", "test", "--alias-deps", suite],
-            cwd=self.root, text=True, capture_output=True, timeout=10,
-        )
-
-    def test_alias_deps_reads_the_rule_that_declares_the_alias(self):
-        # A Python suite is a (rule (alias runtest-NAME) (deps ...)), and the
-        # runner runs it by building the alias. Building the alias compiles its
-        # deps, so a runner that does not name them first spends the suite
-        # budget compiling: run 41730441832 used 601s of 600s and printed no
-        # "Ran N tests" line. This query is what lets the runner build them
-        # outside the budget.
-        (self.root / "test/stdio.py").write_text("print('body')\n")
-        result = self.alias_deps()
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), ["bin/main_stdio_eio.exe"])
-
-    def test_alias_deps_includes_the_executable_named_only_by_an_action(self):
-        # Six rules declare no (deps ...) at all and name their executable only
-        # as %{exe:PATH} in the action. Without that path the alias still
-        # compiles inside the budget.
-        self.inc.write_text("""
-(rule
- (alias runtest-test_browser_activity)
- (action (run %{exe:../packages/agent_core/bench/bench.exe} test "a name")))
-""")
-        result = self.alias_deps("test_browser_activity")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(),
-                         ["packages/agent_core/bench/bench.exe"])
-
-    def test_alias_deps_of_a_missing_alias_is_refused_not_answered_as_no_deps(self):
-        # "No rule carries this alias" is not "the rule needs nothing built":
-        # answering both with an empty list and exit 0 let the runner skip the
-        # preparation for a misread name without a word. A sibling rule must
-        # not donate its deps to a name it does not carry either.
-        result = self.alias_deps("test_absent_alias")
-        self.assertEqual(result.returncode, 1, result.stdout)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("runtest-test_absent_alias", result.stderr)
-
-    def test_alias_deps_of_a_rule_without_deps_is_empty_and_succeeds(self):
-        self.inc.write_text("""
-(rule
- (alias runtest-test_browser_activity)
- (action (run python3 -c pass)))
-""")
-        result = self.alias_deps("test_browser_activity")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "")
-
-    def test_alias_deps_includes_the_files_an_action_names_as_dep(self):
-        # The spelling most Python rules use for the binary they drive. A rule
-        # that names it only there, with no (deps ...), compiled it inside the
-        # suite budget.
-        self.inc.write_text("""
-(rule
- (alias runtest-test_browser_activity)
- (action (run python3 %{dep:activity.py} --binary %{dep:../bin/masc_tui.exe})))
-""")
-        result = self.alias_deps("test_browser_activity")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(),
-                         ["test/activity.py", "bin/masc_tui.exe"])
 
     def run_python_alias_runner(self, alias_name="test_stdio_browser_activity",
                                with_deps=True, prepare_exit_code=0, reader=None):
@@ -463,17 +328,14 @@ raise SystemExit(0 if is_alias else int(os.environ['FAKE_PREPARE_EXIT']))
         # A silent fallback to "no deps" is indistinguishable in the log from
         # the 601s in-budget TIMEOUT this preparation exists to prevent, so the
         # run says it fell back. The alias is still built, under its budget.
-        # A reader that refuses this query: the alias-deps path exits non-zero.
         alias_name = "test_reader_failure"
         result, calls, budgets = self.run_python_alias_runner(alias_name, reader=(
             "import sys\n"
-            "if '--alias-deps' in sys.argv:\n"
-            "    print('simulated reader refusal', file=sys.stderr)\n"
-            "    raise SystemExit(1)\n"
-            "print('test/x.py')\n"
+            "print('simulated reader refusal', file=sys.stderr)\n"
+            "raise SystemExit(1)\n"
         ))
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertIn("could not read the rule's deps", result.stdout)
+        self.assertIn("could not read the alias deps", result.stdout)
         self.assertIn("simulated reader refusal", result.stdout)
         self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)
         self.assertNotIn("(prepare alias dependencies)", result.stdout)
@@ -497,7 +359,7 @@ raise SystemExit(0 if is_alias else int(os.environ['FAKE_PREPARE_EXIT']))
                    CI_TEST_LOG_FILE=str(self.root / "runner.log"))
         result = subprocess.run(["bash", str(runner)], cwd=self.root, env=env,
                                 text=True, capture_output=True, timeout=15)
-        self.assertIn("could not read the rule's deps", result.stdout)
+        self.assertIn("could not read the alias deps", result.stdout)
         self.assertIn(f"no (rule (alias runtest-{alias_name})", result.stdout)
         self.assertNotIn("(prepare alias dependencies)", result.stdout)
         self.assertIn(f"@runtest-{alias_name}: OK", result.stdout)

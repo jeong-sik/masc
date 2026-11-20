@@ -123,8 +123,18 @@ let validate_projected_opaque_reasoning (messages : message list) =
     messages
 ;;
 
+(* Unlike Chat Completions, the OpenAI Responses API defaults function tool
+   [strict] to [true] when omitted. Non-strict tools (including schemas with
+   optional fields, mutually exclusive alternatives, or keywords such as
+   [uniqueItems]) must explicitly send ["strict": false] unless the caller
+   opted into strict mode. *)
 let responses_tool_json tool =
   let definition = Backend_openai_serialize.tool_definition_of_json tool in
+  let definition =
+    match definition.strict with
+    | Some _ -> definition
+    | None -> { definition with strict = Some false }
+  in
   `Assoc
     (("type", `String "function")
      :: Backend_openai_serialize.tool_definition_fields definition)

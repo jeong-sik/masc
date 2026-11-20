@@ -36,7 +36,7 @@ export function AgentDetailMemory({ agentName, keeper }: Props) {
   return html`
     <${CollapsibleSection} class="v2-monitoring-detail" title="기억" mountWhenOpen=${true}>
       <div class="space-y-4">
-        <!-- Memory inspector trigger (rails.jsx:513-515 — ◈ 메모리 보기 · 핀 · 스토어 · 회상) -->
+        <!-- Memory inspector trigger (◈ 메모리 보기 · 핀 · 스토어 · 회상) -->
         <button
           type="button"
           class="cmp-open"

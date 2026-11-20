@@ -270,13 +270,13 @@ export const KeeperChatHistoryMessageSchema = object({
   surface: optional(SurfaceRefSchema),
   conversation_id: optional(string()),
   external_message_id: optional(string()),
-  // RFC-0223 P1 speaker identity, present on user rows written since
-  // then. `speaker_authority` is 'owner' (authenticated dashboard
+  // Speaker identity on user rows (absent on older rows).
+  // `speaker_authority` is 'owner' (authenticated dashboard
   // operator), 'external' (arbitrary person on a connector channel) or
-  // 'keeper' (another registered Keeper; `speaker_id` is its id, RFC-0468);
-  // left as open string() per the same deploy-window rationale as
-  // `role` above. id/name are absent when the route supplies none
-  // (dashboard rows carry authority only).
+  // 'keeper' (another registered Keeper; `speaker_id` is its id);
+  // left as open string() so a value the backend adds ahead of the
+  // dashboard still parses. id/name are absent when the route supplies
+  // none (dashboard rows carry authority only).
   speaker_id: optional(string()),
   speaker_name: optional(string()),
   speaker_authority: optional(string()),

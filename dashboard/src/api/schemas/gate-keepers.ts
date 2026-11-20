@@ -30,8 +30,6 @@ const KeeperLastFailureWireSchema = Schema.Struct({
   at_unix: Schema.NullOr(Schema.Number.pipe(Schema.filter(Number.isFinite))),
 })
 
-// Mirror of the healthy row built by keeper_list_row_json in
-// lib/keeper/keeper_tool_surface_ops.ml. RFC-0393 removed the agent_name
 // Half-hour slots of the last day (RFC-0515 §2.1): [starts_at, ok, rested, failed].
 const RecentTurnsWireSchema = Schema.Struct({
   known_since: Schema.Number,
@@ -40,7 +38,9 @@ const RecentTurnsWireSchema = Schema.Struct({
   ),
 })
 
-// echo key; phase/health/paused/next_action ride the same row.
+// Mirror of the healthy row built by keeper_list_row_json in
+// lib/keeper/keeper_tool_surface_ops.ml; phase/health/paused/next_action
+// ride the same row.
 const GateKeeperWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
   portrait: KeeperPortraitSchema,

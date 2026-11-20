@@ -1776,7 +1776,7 @@ let test_tinker_template_binds_the_catalog_row () =
      with
      | None -> failf "%s must resolve the catalog row" runtime_id
      | Some caps ->
-       check (option int) (runtime_id ^ " context") (Some 65_536) caps.max_context_tokens;
+       check (option int) (runtime_id ^ " context") (Some 1_048_576) caps.max_context_tokens;
        check bool (runtime_id ^ " structured output") false
          caps.supports_structured_output)
 ;;

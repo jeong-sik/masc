@@ -1387,7 +1387,7 @@ let test_for_provider_model_tinker_inkling_2_small () =
   match provider_model_capabilities "tinker" "thinkingmachines/Inkling-2-Small" with
   | Some c ->
     Alcotest.(check bool) "reasoning" true c.supports_reasoning;
-    Alcotest.(check (option int)) "64K context" (Some 65_536) c.max_context_tokens;
+    Alcotest.(check (option int)) "1M sampling window" (Some 1_048_576) c.max_context_tokens;
     Alcotest.(check bool) "json_schema is not applied" false c.supports_structured_output;
     Alcotest.(check bool) "json_object is not applied" false c.supports_response_format_json;
     Alcotest.(check bool) "image input is not declared" false c.supports_image_input

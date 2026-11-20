@@ -987,6 +987,14 @@ let test_turn () =
           "with no built-in tool but the lookup"
           (Some "ToolSearch")
           (after "--tools" (args_of first));
+        (* The sweep of tool blobs does not read the files of the persons
+           (Server_tool_blob_scope). That is safe while the turn has no tool
+           of masc, which could store an output and leave its reference
+           there. *)
+        Alcotest.(check (option string))
+          "with no tool of masc"
+          None
+          (after "--mcp-config" (args_of first));
         let alice_records = records_of ~base_path alice in
         let alice_turns = List.fold_left Filename.concat alice_records [ conversation; "turns.jsonl" ] in
         Alcotest.(check string)

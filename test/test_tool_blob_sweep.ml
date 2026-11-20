@@ -330,8 +330,10 @@ let test_empty_sqlite_and_lane_addon_stores_leave_sweep_classified () =
        | Ok _ -> Alcotest.fail "0-byte sqlite with companion WAL must not bypass sqlite inspection"))
 
 (* The folder of the persons of a multi-account installation is classified.
-   Its files are not read, so bytes that are no JSON record end no scan, and
-   the stale blob beside it becomes deletable on the second scan. *)
+   Its files are not read. Bytes that are no JSON record end no scan, and a
+   reference in them keeps no blob live, so the stale blob becomes deletable
+   on the second scan. A scope that read the folder as records would stop at
+   the first line, and one that read it as payloads would keep the blob. *)
 let test_person_folder_leaves_sweep_classified () =
   with_temp_dir (fun base_path ->
       Unix.chmod base_path 0o700;
@@ -347,7 +349,8 @@ let test_person_folder_leaves_sweep_classified () =
       in
       let client_file = Filename.concat person "official-clients/claude/state.bin" in
       Fs_compat.mkdir_p (Filename.dirname client_file);
-      Fs_compat.save_file client_file "\000not a JSON record";
+      Fs_compat.save_file client_file
+        ("\000not a JSON record\n" ^ O.encode_for_agent_core (O.Stored stale) ^ "\n");
       let first = observe_ok ~base_path in
       Alcotest.(check (list string)) "the folder of the persons is classified" []
         first.unclassified;

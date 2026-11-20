@@ -202,6 +202,7 @@ let runtime_request_config_json (rt : Runtime_instance.t) =
     ; "disable_parallel_tool_use", `Bool cfg.disable_parallel_tool_use
     ; "response_format", response_format_json cfg.response_format
     ; "cache_system_prompt", `Bool cfg.cache_system_prompt
+    ; "cache_extended_ttl", `Bool cfg.cache_extended_ttl
     ; "has_model_capabilities_override", `Bool (Option.is_some cfg.model_capabilities_override)
     ; "has_model_anthropic_thinking_control_override", `Bool (Option.is_some cfg.model_anthropic_thinking_control_override)
     ; "keep_alive", Json_util.string_opt_to_json cfg.keep_alive
@@ -317,6 +318,9 @@ let runtime_declared_spec_json (rt : Runtime_instance.t) =
           ; "is_default", `Bool rt.binding.is_default
           ; "max_concurrent", Json_util.int_opt_to_json rt.binding.max_concurrent
           ; "disable_parallel_tool_use", `Bool rt.binding.disable_parallel_tool_use
+          ; ( "cache_retention"
+            , Json_util.string_opt_to_json
+                (Option.map Runtime_schema.cache_retention_to_string rt.binding.cache_retention) )
           ; "price_input", Json_util.float_opt_to_json rt.binding.price_input
           ; "price_output", Json_util.float_opt_to_json rt.binding.price_output
           ; "keep_alive", Json_util.string_opt_to_json rt.binding.keep_alive

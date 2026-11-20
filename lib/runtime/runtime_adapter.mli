@@ -121,6 +121,11 @@ val materialize_provider_binding
     HTTP wire compatibility alone is not a support contract.
     Native Ollama and Gemini cannot carry it and refuse [true].
 
+    The binding's [cache_retention] is request policy too. A Messages runtime
+    whose catalog provider row declares [supports_extended_cache_ttl] carries
+    it as [Provider_config.cache_extended_ttl]; every other runtime refuses a
+    declared value.
+
     Returns [Error reason] (no silent fallback) when the provider or model id
     is unresolved, or when the provider transport/kind cannot be mapped to a
     concrete provider config. *)
@@ -138,8 +143,8 @@ val materialize_execution
     {!Runtime_execution.Antigravity_cli}; [muse-serve] becomes
     {!Runtime_execution.Muse_serve}; and [vibe-cli] becomes
     {!Runtime_execution.Vibe_cli}. These clients have no supported
-    [disable_parallel_tool_use] control here, so bindings requesting it are
-    refused. Other CLI protocols remain rejected.
+    [disable_parallel_tool_use] or [cache_retention] control here, so bindings
+    declaring either are refused. Other CLI protocols remain rejected.
 
     Official-client credentials retain their adapter-specific interpretation.
     The command is spawned from where {!Runtime_official_cli_install.locate}

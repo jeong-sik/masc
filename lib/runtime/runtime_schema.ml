@@ -399,6 +399,22 @@ let thinking_request (model : model_spec) =
 
 (** {1 Layer 3: Binding — provider × model} *)
 
+type cache_retention =
+  | Five_minutes
+  | One_hour
+[@@deriving show, eq]
+
+let cache_retention_to_string = function
+  | Five_minutes -> "5m"
+  | One_hour -> "1h"
+;;
+
+let cache_retention_of_string = function
+  | "5m" -> Some Five_minutes
+  | "1h" -> Some One_hour
+  | _ -> None
+;;
+
 type binding =
   { provider_id : string
   ; model_id : string
@@ -411,6 +427,7 @@ type binding =
     (** Context override for this provider/model binding, before provider and model defaults. *)
   ; max_concurrent : int option
   ; disable_parallel_tool_use : bool
+  ; cache_retention : cache_retention option
   ; max_tokens : int option
     (** Request-side output budget for this binding ([max_tokens] on Chat
         Completions, [max_output_tokens] on Responses, [num_predict] on Ollama).

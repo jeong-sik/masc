@@ -240,6 +240,11 @@ let agent_config_for_request (config : config) : Agent_core.Types.agent_config =
   ; disable_parallel_tool_use = provider.disable_parallel_tool_use
   ; cache_system_prompt =
       config.cache_system_prompt || provider.cache_system_prompt
+    (* The binding's declared cache lifetime ([cache-retention]). Agent Core
+       copies the agent config onto every request's provider config, so
+       leaving it at the default would send five minutes whatever the
+       binding declared. *)
+  ; cache_extended_ttl = provider.cache_extended_ttl
   ; initial_messages = config.initial_messages
   ; yield_on_tool = config.yield_on_tool
   }

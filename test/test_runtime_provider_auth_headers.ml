@@ -92,6 +92,7 @@ let runpod_binding =
   ; max_context = None
   ; max_concurrent = None
   ; disable_parallel_tool_use = false
+  ; cache_retention = None
   ; max_tokens = None
   ; price_input = None
   ; price_output = None
@@ -3521,6 +3522,71 @@ auth = "none"
       error
   | Ok _ -> fail "provider contract silently accepted a string"
 
+(* RFC a-request-part-sits-where-its-change-rate-fits §3.1. A binding declares
+   the cache lifetime its requests write. The Messages wire carries it only
+   where the catalog provider row documents the one-hour lifetime; another
+   wire refuses the declaration at load time. *)
+let test_cache_retention_requires_a_provider_contract () =
+  let toml = {|[providers.p]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+[models.m]
+[p.m]
+cache-retention = "2h"
+|} in
+  (match Runtime_toml.parse_string toml with
+   | Ok _ -> fail "an unknown cache lifetime silently loaded"
+   | Error errors -> check bool "the error names the binding key" true
+       (List.exists (fun (error : Runtime_toml.parse_error) ->
+            String.equal error.path "p.m.cache-retention") errors));
+  let cfg, binding = parallel_policy_runtime ~provider_id:"glm-coding"
+      ~protocol:"openai-compatible-http" ~model_id:"glm-5.3"
+      ~policy:"cache-retention = \"1h\"" in
+  (match provider_config_for_binding cfg binding with
+   | Error error -> check string "another wire refuses the declaration"
+       "binding glm-coding.probe declares cache-retention = \"1h\", but protocol openai-compatible-http cannot carry that request policy"
+       error
+   | Ok _ -> fail "a Chat Completions binding silently accepted a cache lifetime");
+  let cfg, binding = parallel_policy_runtime ~provider_id:"claude"
+      ~protocol:"messages-http" ~model_id:"claude-fable-5" ~policy:"" in
+  let provider = { (List.hd cfg.providers) with Runtime_schema.id = "fixture-alias" } in
+  let cfg = { cfg with Runtime_schema.providers = [ provider ] } in
+  let binding = { binding with Runtime_schema.provider_id = provider.id } in
+  let catalog value = Printf.sprintf {|[[providers]]
+id = "fixture-provider"
+aliases = ["fixture-alias"]
+kind = "anthropic"
+capabilities_base = "anthropic"
+base_url = "https://fixture.invalid"
+request_path = "/v1/messages"
+auth = "none"
+%s
+|} value in
+  let extended retention =
+    provider_config_for_binding cfg { binding with Runtime_schema.cache_retention = retention }
+    |> Result.map (fun (config : Llm_provider.Provider_config.t) -> config.cache_extended_ttl) in
+  List.iter (fun (declaration, supported) ->
+    with_model_catalog (catalog declaration) (fun () ->
+      check bool "an undeclared lifetime needs no contract" true (extended None = Ok false);
+      check bool "a declared lifetime needs the provider contract" supported
+        (Result.is_ok (extended (Some Runtime_schema.Five_minutes)));
+      check bool "five minutes asks for no extended lifetime" true
+        (match extended (Some Runtime_schema.Five_minutes) with
+         | Ok extended -> not extended
+         | Error _ -> not supported);
+      check bool "one hour reaches the provider config" true
+        (match extended (Some Runtime_schema.One_hour) with
+         | Ok extended -> supported && extended
+         | Error _ -> not supported))
+  ) [ "", false; "supports_extended_cache_ttl = false", false;
+      "supports_extended_cache_ttl = true", true ];
+  match Llm_provider.Model_catalog.of_toml_string ~source:"cache-contract-type"
+      (catalog "supports_extended_cache_ttl = \"true\"") with
+  | Error error -> check string "provider contract rejects a string"
+      "provider entry \"fixture-provider\" field \"supports_extended_cache_ttl\" expected bool"
+      error
+  | Ok _ -> fail "provider contract silently accepted a string"
+
 (* #37849. A config that names a provider reads bare rows only when that
    provider declares serves_bare_models. The runtime mirrors the Terminal-Bench
    anthropic lane: reasoning-effort = "high" and a capabilities block that keeps
@@ -3962,6 +4028,8 @@ let () =
             `Quick test_parallel_policy_wrong_type_is_rejected
         ; test_case "parallel policy requires a canonical provider contract"
             `Quick test_parallel_policy_requires_provider_contract
+        ; test_case "cache retention requires a provider contract"
+            `Quick test_cache_retention_requires_a_provider_contract
         ; test_case "a declared provider reads bare rows only when it serves them"
             `Quick test_declared_provider_reads_bare_rows_only_when_it_serves_them
         ; test_case "the bench anthropic lane sends high with the embedded catalog"

@@ -136,6 +136,40 @@ let test_public_protocol_error_keeps_kind_without_diagnostic () =
     (E.redact_content ~redact_text:Fun.id original = original)
 ;;
 
+let test_public_protocol_error_uses_kind_specific_safe_messages () =
+  let check_kind kind ~expected_distinct_from_default =
+    let error : E.stream_protocol_error =
+      { kind; quarantined_occurrence = None; index = Some 0
+      ; tool_call_id = Some "call-timeout"; event_type = Some private_path
+      ; reason = Some private_detail; raw_bytes = None } in
+    let original = E.Agent_core_stream_protocol_error error in
+    let expected = E.public_protocol_error_message_of_kind kind in
+    check bool "safe message is non-empty" true (String.trim expected <> "");
+    if expected_distinct_from_default then
+      check bool "timeout/incomplete message is distinct from generic unusable-event message"
+        false (String.equal expected E.public_protocol_error_message);
+    (match E.public_content ~redact_text:Fun.id original with
+     | E.Agent_core_stream_protocol_error safe ->
+       check bool "kind preserved" true (safe.kind = kind);
+       check (option string) "kind-specific public message" (Some expected) safe.reason;
+       check (option string) "internal event_type omitted" None safe.event_type
+     | _ -> fail "public projection changed the event kind");
+    let _, projected = Projection.project ~timestamp:11. ~redact_text:Fun.id Projection.initial original in
+    let wire = Ag_ui.event_to_sse (Option.get projected) in
+    assert_private_absent wire;
+    check bool "wire carries kind-specific safe message" true
+      (Astring.String.is_infix ~affix:expected wire)
+  in
+  check_kind E.Sse_timeout ~expected_distinct_from_default:true;
+  check_kind E.Sse_stream_incomplete ~expected_distinct_from_default:true;
+  List.iter
+    (fun kind ->
+       let msg = E.public_protocol_error_message_of_kind kind in
+       check bool "every closed kind has a non-empty safe public message" true
+         (String.trim msg <> ""))
+    E.all_of_stream_protocol_error_kind
+;;
+
 let rec ensure_dir path =
   if not (Sys.file_exists path) then begin
     ensure_dir (Filename.dirname path);
@@ -219,5 +253,6 @@ let () =
       test_case "real journal captures exact-secret public copies" `Quick test_public_journal_copy_redacts_captured_exact_secret;
       test_case "legacy empty error preserves a safe terminal fact" `Quick test_legacy_empty_error_has_safe_public_terminal;
       test_case "protocol error retains typed kind and safe message" `Quick test_public_protocol_error_keeps_kind_without_diagnostic;
+      test_case "timeout and incomplete protocol errors use kind-specific safe messages" `Quick test_public_protocol_error_uses_kind_specific_safe_messages;
       test_case "autonomous failure log keeps captured exact secrets private" `Quick test_autonomous_failure_redacts_log_with_captured_snapshot;
       test_case "autonomous cancellation has no failed-turn diagnostic" `Quick test_autonomous_cancel_has_no_failure_diagnostic]]

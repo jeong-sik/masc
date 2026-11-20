@@ -8,6 +8,8 @@ pull request's changed files are chosen.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import pathlib
 import subprocess
 import sys
@@ -103,6 +105,14 @@ def _git(cwd: pathlib.Path, *args: str) -> str:
     return done.stdout.strip()
 
 
+def run_check(work: pathlib.Path, merge: str) -> int:
+    """The check's verdict, with its report kept out of the job log: the
+    step's own report comes right after these tests and should be the
+    only file:line the log shows."""
+    with contextlib.redirect_stdout(io.StringIO()):
+        return check.check(str(work), merge)
+
+
 class ReadsChangedFiles(unittest.TestCase):
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory(prefix="masc-test-tui-value-")
@@ -128,23 +138,23 @@ class ReadsChangedFiles(unittest.TestCase):
         self._write("bin/tui/shell/guard.mli", 'val x : string (* " +%d" *)\n')
         merge = self._commit("outside the scope")
         self.assertEqual(check.changed_tui_files(str(self.work), merge), ())
-        self.assertEqual(check.check(str(self.work), merge), 0)
+        self.assertEqual(run_check(self.work, merge), 0)
 
     def test_a_changed_file_is_read_whole(self) -> None:
         self._write("bin/masc_tui_old.ml", 'let old = " +%d"\nlet fine = 1\n')
         merge = self._commit("touch a file that already had a hit")
-        self.assertEqual(check.check(str(self.work), merge), 1)
+        self.assertEqual(run_check(self.work, merge), 1)
 
     def test_files_split_under_bin_tui_are_read(self) -> None:
         self._write("bin/tui/shell/quit.ml", 'let x = " +%d unsent"\n')
         merge = self._commit("moved module")
         self.assertEqual(check.changed_tui_files(str(self.work), merge), ("bin/tui/shell/quit.ml",))
-        self.assertEqual(check.check(str(self.work), merge), 1)
+        self.assertEqual(run_check(self.work, merge), 1)
 
     def test_a_removed_file_is_not_read(self) -> None:
         (self.work / "bin/masc_tui_old.ml").unlink()
         merge = self._commit("remove")
-        self.assertEqual(check.check(str(self.work), merge), 0)
+        self.assertEqual(run_check(self.work, merge), 0)
 
 
 if __name__ == "__main__":

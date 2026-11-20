@@ -246,11 +246,68 @@ let growing_markdown_identity (entry : Message_layout.entry) ~keeper_name ~reque
   { cmi_style = entry.style; cmi_keeper_name = keeper_name; cmi_request_id = request_id;
     cmi_observed_at = None; cmi_entry_index = entry_index }
 
-let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
+(* Where a frame's link previews come from. A frame that reads the shared
+   preview store alone names the store's generation, which moves only when a
+   fetched card replaces another; a body composed from it holds until then.
+   Any other lookup answers from something no generation describes, so its
+   bodies are composed again. *)
+type preview_source =
+  | Shared_store of { generation : int; lookup : string -> Masc_tui_link_preview.og_preview }
+  | Other_lookup of (string -> Masc_tui_link_preview.og_preview)
+
+(* The generation is read before any card, so a card fetched during the frame
+   leaves a body keyed by a generation that is already gone. *)
+let shared_previews () =
+  let generation = Masc_tui_link_preview.cache_generation () in
+  Shared_store { generation; lookup = preview_snapshot Masc_tui_link_preview.get_preview }
+
+let preview_lookup = function
+  | Shared_store { lookup; _ } | Other_lookup lookup -> lookup
+
+(* A finished reply's body with its link cards, per entry, as the last frame
+   composed it. Composing asked every link's card again: a reply with 13,000
+   links built 13,000 cards, beyond the synthesized-card memo, on every frame
+   where nothing had changed, about 85 ms of a frame for a 1 MB reply. *)
+type composed_body = {
+  composed_mode : [ `Off | `Compact | `Rich ];
+  composed_width : int;
+  composed_generation : int;
+  composed_palette : int;
+  composed : string;
+}
+
+let composed_bodies : composed_body Source_entry_cache.t = Source_entry_cache.create 64
+let bodies_composed = ref 0
+
+let body_with_previews ~previews ~mode ~palette_generation ~(entry : Message_layout.entry) ~width =
+  let compose lookup = chat_body_with_previews ~preview:lookup ~mode ~entry ~width in
+  match previews, mode, entry.markdown_source with
+  | Other_lookup lookup, _, _
+  | Shared_store { lookup; _ }, `Off, _
+  | Shared_store { lookup; _ }, (`Compact | `Rich), (Message_layout.Markdown_growing _ | Markdown_streaming) ->
+      compose lookup
+  | Shared_store { generation; lookup }, (`Compact | `Rich), Message_layout.Markdown_stable _ -> (
+      let current kept =
+        kept.composed_mode = mode && kept.composed_width = width
+        && kept.composed_generation = generation && kept.composed_palette = palette_generation
+      in
+      match Source_entry_cache.find_opt composed_bodies entry with
+      | Some kept when current kept -> kept.composed
+      | Some _ | None ->
+          incr bodies_composed;
+          let composed = compose lookup in
+          Source_entry_cache.replace composed_bodies entry
+            { composed_mode = mode; composed_width = width; composed_generation = generation;
+              composed_palette = palette_generation; composed };
+          composed)
+
+let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
   fun ~(entry : Message_layout.entry) ~width ->
-  let body = chat_body_with_previews ~preview ~mode:link_previews_mode ~entry ~width in
   let context = Chat_theme.body_context theme entry.style in
   let palette_generation = context.palette_generation in
+  let body =
+    body_with_previews ~previews ~mode:link_previews_mode ~palette_generation ~entry ~width
+  in
   let journal =
     match entry.journal with
     | [] -> []
@@ -2687,6 +2744,7 @@ let rebind_entry_observations entry =
       Source_entry_cache.add table entry value) (Source_entry_cache.find_opt table entry)
   in
   rebind entry_urls;
+  rebind composed_bodies;
   rebind source_body_indexes
 
 (* Positions whose message record, projected moment, and turn edge all
@@ -4637,7 +4695,8 @@ let plan_keeper_message_search ?(preview_lookup=Masc_tui_link_preview.get_previe
     let preview_values=ref [] in
     let preview=preview_snapshot (fun url ->
       let value=preview_lookup url in preview_values:=(url,value):: !preview_values; value) in
-    let markdown=cached_chat_markdown_with_preview ~preview ~link_previews_mode:state.link_previews_mode ~theme in
+    let markdown=cached_chat_markdown_with_preview ~previews:(Other_lookup preview)
+        ~link_previews_mode:state.link_previews_mode ~theme in
     let ceiling, repeat = match older_than with
       | None -> List.length tagged, None
       | Some cursor when cursor.search_workspace <> state.workspace_authority
@@ -4882,7 +4941,8 @@ let admit_keeper_message_search state work ({matched;unavailable_entries} as ans
               | Some value -> Masc_tui_link_preview.get_preview url=value | None -> false) urls)
           then None else
           let theme=Chat_theme.snapshot () in
-          let preview=preview_snapshot Masc_tui_link_preview.get_preview in
+          let previews=shared_previews () in
+          let preview=preview_lookup previews in
           let source_body=source_body_lookup state ~keeper_name:plan.search_keeper projection
             ~inner_width:plan.search_inner_width ~theme ~preview in
           let source=Durable_position ending_position in
@@ -4895,7 +4955,7 @@ let admit_keeper_message_search state work ({matched;unavailable_entries} as ans
                 Option.map (fun body_row -> body_row, Some source) (Hashtbl.find_opt (Lazy.force body.source_rows) source) in
           Option.bind (source_body entry_index) (fun body ->
             Option.bind (landing body) (fun (body_row, source_position) ->
-              let markdown=cached_chat_markdown_with_preview ~preview
+              let markdown=cached_chat_markdown_with_preview ~previews
                 ~link_previews_mode:plan.search_preview_mode ~theme in
               Option.map (fun scroll ->
                 let pin=Some {pin_workspace=plan.search_workspace;pin_keeper=plan.search_keeper;
@@ -4957,8 +5017,9 @@ let queue_context_lines (state : state) ~keeper_name ~cols ~height =
   let chat_cols = Masc_tui_frame.outer_width ~inner:cols in
   let projection = keeper_message_projection state ~keeper_name ~chat_cols in
   let theme = Chat_theme.snapshot () in
-  let preview = preview_snapshot Masc_tui_link_preview.get_preview in
-  let markdown = cached_chat_markdown_with_preview ~preview
+  let previews = shared_previews () in
+  let preview = preview_lookup previews in
+  let markdown = cached_chat_markdown_with_preview ~previews
       ~link_previews_mode:state.link_previews_mode ~theme in
   let source_body = source_body_lookup state ~keeper_name projection ~inner_width:cols ~theme ~preview in
   let requested = requested_scroll_from_pin state ~keeper_name projection
@@ -5029,8 +5090,9 @@ let render_keeper_message (state : state) =
     in
     let projection = keeper_message_projection state ~keeper_name ~chat_cols in
     let inner_width = max 1 (framed_inner_width chat_cols) in
-    let preview = preview_snapshot Masc_tui_link_preview.get_preview in
-    let markdown = cached_chat_markdown_with_preview ~preview
+    let previews = shared_previews () in
+    let preview = preview_lookup previews in
+    let markdown = cached_chat_markdown_with_preview ~previews
       ~link_previews_mode:state.link_previews_mode ~theme:chat_theme in
     let source_body = source_body_lookup state ~keeper_name projection ~inner_width ~theme:chat_theme ~preview in
     let requested = requested_scroll_from_pin state ~keeper_name projection
@@ -6023,6 +6085,7 @@ module For_testing = struct
     ; layout_entries : Message_layout.entry list
     }
   let surviving_entry_row = surviving_entry_row
+  let bodies_composed () = !bodies_composed
   let thinking_height_cache = thinking_height_cache
   let chat_markdown_cache = chat_markdown_cache
   let chat_markdown_theme_revision = chat_markdown_theme_revision
@@ -6032,8 +6095,9 @@ module For_testing = struct
   let search_candidate_build_count () = !search_candidate_builds
   let growing_row_end_sources ~width (entry : Message_layout.entry) =
     let theme = Chat_theme.snapshot () in
-    let preview = preview_snapshot Masc_tui_link_preview.get_preview in
-    ignore (cached_chat_markdown_with_preview ~preview ~link_previews_mode:`Off ~theme
+    let previews = shared_previews () in
+    let preview = preview_lookup previews in
+    ignore (cached_chat_markdown_with_preview ~previews ~link_previews_mode:`Off ~theme
       ~entry ~width);
     let sorted table =
       List.sort compare (Hashtbl.fold (fun row position rows -> (row, position) :: rows) table []) in

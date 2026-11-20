@@ -88,9 +88,9 @@ let reported_rows () =
 
 (* The check above walks [Env_setting.all_rows] only, so a knob that reaches the
    catalogue by module constant or by the feature-flag registry could be listed
-   twice without failing anything. Four log/telemetry knobs were: both
-   [runtime_entries] and [telemetry_entries] land in the "runtime" category, so
-   an operator read the same row twice in one section. *)
+   twice without failing anything. Four log/telemetry knobs were: two hand
+   lists landed in the "runtime" category, so an operator read the same row
+   twice in one section. *)
 let test_no_category_lists_a_knob_twice () =
   let rows = reported_rows () in
   let duplicated =
@@ -129,6 +129,22 @@ let test_shared_knobs_agree_on_default () =
       | _ -> None)
   in
   check (list string) "knobs reported with more than one default" [] disagreeing
+;;
+
+(* Every runtime setting registry row reaches the operator once. The snapshot
+   used to pick registry rows by an env-name prefix and restate others by hand:
+   the three MASC_H2_* rows were never listed, and the HTTPS, TLS and OTel rows
+   were written a second time with their own wording. *)
+let test_every_registry_row_is_reported_once () =
+  let reported = reported_env_names () in
+  let wrong =
+    Keeper_runtime_setting_registry.all
+    |> List.filter_map (fun (row : Keeper_runtime_setting_registry.setting) ->
+      match List.length (List.filter (String.equal row.env_name) reported) with
+      | 1 -> None
+      | n -> Some (Printf.sprintf "%s x%d" row.env_name n))
+  in
+  check (list string) "registry rows not reported exactly once" [] wrong
 ;;
 
 let test_declarations_reach_the_operator_surface () =
@@ -313,6 +329,10 @@ let () =
             "declarations reach the operator surface"
             `Quick
             test_declarations_reach_the_operator_surface
+        ; test_case
+            "every registry row is reported once"
+            `Quick
+            test_every_registry_row_is_reported_once
         ; test_case
             "no declaration is reported twice"
             `Quick

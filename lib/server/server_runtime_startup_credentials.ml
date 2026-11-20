@@ -18,28 +18,20 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
     credential.agent_name source;
   Ok ()
 
+(* [Auth.ensure_internal_keeper_token] keeps an inherited token and exports a
+   generated one under the same name, so the variable is set once it returns. *)
 let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
   let base_path = (Mcp_server.workspace_config state).base_path in
-  let pre_existing =
-    match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
-    | Some raw when String.trim raw <> "" -> true
-    | _ -> false
+  let env_key = Auth.internal_keeper_token_env_key in
+  let inherited =
+    match Sys.getenv_opt env_key with
+    | Some raw -> String.trim raw <> ""
+    | None -> false
   in
-  let raw_token = Auth.ensure_internal_keeper_token base_path in
-  Unix.putenv "MASC_INTERNAL_MCP_TOKEN" raw_token;
-  let post_existing =
-    match Sys.getenv_opt "MASC_INTERNAL_MCP_TOKEN" with
-    | Some raw when String.trim raw <> "" -> true
-    | _ -> false
-  in
-  let source = if pre_existing then "inherited" else "generated" in
-  if post_existing then
-    Log.Server.info
-      "startup internal keeper MCP token synced via MASC_INTERNAL_MCP_TOKEN (source=%s)"
-      source
-  else
-    Log.Server.error
-      "startup internal keeper MCP token sync failed: MASC_INTERNAL_MCP_TOKEN not set after putenv";
+  let (_ : string) = Auth.ensure_internal_keeper_token base_path in
+  let source = if inherited then "inherited" else "generated" in
+  Log.Server.info
+    "startup internal keeper MCP token synced via %s (source=%s)" env_key source;
   Otel_metric_store.inc_counter
     Otel_metric_store.metric_startup_internal_keeper_token_sync
     ~labels:[("source", source)]

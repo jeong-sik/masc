@@ -35,7 +35,7 @@ let of_label raw =
 ;;
 
 let credential_env_names = function
-  | Searxng -> [ "MASC_SEARXNG_URL" ]
+  | Searxng -> [ Env_config_runtime.Tools.searxng_url_env ]
   | Brave | Brave_llm_context -> [ "BRAVE_SEARCH_API_KEY" ]
   | Tavily -> [ "TAVILY_API_KEY" ]
   | Exa -> [ "EXA_API_KEY" ]

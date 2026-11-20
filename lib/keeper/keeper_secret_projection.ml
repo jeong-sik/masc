@@ -36,8 +36,9 @@ let trim_env_opt key =
 let secrets_dirname = "secrets"
 
 let secret_root_info_of_dir ~base_path ~keeper_dir =
-  match trim_env_opt "MASC_SECRET_DIR" with
-  | Some root -> { root = Filename.concat root keeper_dir; source = "MASC_SECRET_DIR" }
+  match trim_env_opt Env_config_core.secret_dir_env_key with
+  | Some root ->
+    { root = Filename.concat root keeper_dir; source = Env_config_core.secret_dir_env_key }
   | None ->
     { root =
         Filename.concat

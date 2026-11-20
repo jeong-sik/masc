@@ -384,6 +384,15 @@ let host_fd_pressure_poll_interval_sec () =
     lookup, config auth diagnostics, runtime-bootstrap putenv) can
     reference the same literal. Issue 8352. *)
 let base_path_env_key = "MASC_BASE_PATH"
+
+(** How the launcher resolved the base path ([explicit_cli], [explicit_env],
+    ...). The launcher and both server binaries write it, the base-path
+    diagnostics read it, and Keeper subprocesses inherit it. *)
+let base_path_resolution_source_env_key = "MASC_BASE_PATH_RESOLUTION_SOURCE"
+
+(** Root above every Keeper's secret projection directory; unset, the
+    projection lives under [<base-path>/.masc/secrets]. *)
+let secret_dir_env_key = "MASC_SECRET_DIR"
 (* http_base_url_env_key is defined above (before masc_http_base_url) so the
    SSOT constant is in scope at first use. *)
 
@@ -691,6 +700,10 @@ let config_dir_env_key = "MASC_CONFIG_DIR"
 (** SSOT for auth env-var names (issue 8352). *)
 let admin_token_env_key = "MASC_ADMIN_TOKEN"
 
+(** The bearer a client (masc-tui, masc-stdio, an emitted MCP config) reads
+    when the operator sets it; [masc login --client-env] defaults to it. *)
+let client_token_env_key = "MASC_TOKEN"
+
 (** Optional startup input for the stored Admin credential. Without an input,
     startup reuses a valid persisted Admin pair and mints only when both paths
     are verified absent; invalid or unreadable authority refuses startup.
@@ -702,9 +715,8 @@ let admin_token_opt () =
 
 (** {1 Logging / Telemetry} *)
 
-(** SSOT for logging / observability env-var names (issue 8352). *)
-let log_level_env_key = "MASC_LOG_LEVEL"
-let log_routine_level_env_key = "MASC_LOG_ROUTINE_LEVEL"
+(** SSOT for observability env-var names (issue 8352). The log level names
+    belong to {!Log}, which reads them. *)
 let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
 (* [parse_warn_env_key] is defined near the top of this module (next to the
    malformed handler that consumes it). *)

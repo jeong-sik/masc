@@ -282,9 +282,6 @@ let otel_default_port = 4318
     described a deployment they did not have. Both sides read this now. *)
 let otel_default_enabled = false
 
-(** String form of {!otel_default_enabled} for the env snapshot. *)
-let otel_default_enabled_s = string_of_bool otel_default_enabled
-
 (** Default URL for OpenTelemetry OTLP HTTP endpoint. *)
 let otel_default_url =
   Printf.sprintf "http://localhost:%d" otel_default_port

@@ -56,7 +56,7 @@ let strict_mode_env_enabled () =
 let resolution_source_opt ?resolution_source () =
   match resolution_source with
   | Some raw -> trim_opt (Some raw)
-  | None -> trim_opt (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE")
+  | None -> trim_opt (Sys.getenv_opt Env_config_core.base_path_resolution_source_env_key)
 
 let unix_error_to_string err op arg =
   let target =

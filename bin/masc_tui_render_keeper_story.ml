@@ -140,7 +140,7 @@ let attention_word ~ko (row : Masc_tui_types.schedule_row) =
        | Turn_started -> Some (say "실행 중" "running")
        | Turn_ended _ | Consumed | Settling _ -> Some (say "정리 중" "settling")
        | Transferring _ -> Some (say "인계 중" "handoff")
-       | Unknown _ -> Some (say "미확인" "unknown")
+       | Undetermined why -> Some (Masc_tui_types.schedule_undetermined_mark ~ko why)
        | No_occurrence | Completed | Receipt_is_the_record | Cancelled _ -> None)
 ;;
 

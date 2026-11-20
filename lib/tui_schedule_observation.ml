@@ -1,3 +1,15 @@
+type undetermined =
+  | Receipt_not_seen
+  | Stimulus_absent
+  | Receipt_unsupported of string
+  | Status_unsupported of string
+  | Reaction_unreadable
+  | Queue_unreadable
+  | Consumption_conflict
+  | Terminal_disagreement
+  | Queue_still_holds
+  | Reaction_stage_unexpected
+
 type stage =
   | No_occurrence
   | Dispatching
@@ -13,7 +25,7 @@ type stage =
   | Cancelled of string option
   | Settling of string
   | Transferring of { owner : string; target : string }
-  | Unknown of string
+  | Undetermined of undetermined
 
 type t = { stage : stage; due_at_iso : string option }
 
@@ -23,9 +35,9 @@ type reaction =
   | Terminal_conflict
 
 let reaction_stage = function
-  | Unobserved -> Unknown "예약 수신 미확인"
+  | Unobserved -> Undetermined Receipt_not_seen
   | Observed stage -> stage
-  | Terminal_conflict -> Unknown "예약 소비 증거 충돌"
+  | Terminal_conflict -> Undetermined Consumption_conflict
 
 open Result.Syntax
 
@@ -134,7 +146,7 @@ let missing_stimulus_stage ~check_identity queue reaction =
     | None -> Ok ()
     | Some _ -> Error "missing stimulus conflicts with bound reaction evidence" in
   let rec no_progress = function
-    | [] -> Ok (Unknown "예약 발생 식별자 미확인")
+    | [] -> Ok (Undetermined Stimulus_absent)
     | field :: rest ->
         let* observed = optional_bool field reaction in
         (match observed with
@@ -181,7 +193,7 @@ let decode row_json =
                it still reads. Identity checks below stay errors: a mismatch
                means another row's evidence was mixed in. *)
             (match Schedule_dispatch_receipt.dispatch_receipt_of_detail detail_json with
-             | Error reason -> Ok (Unknown ("예약 실행 증거 미지원: " ^ reason))
+             | Error reason -> Ok (Undetermined (Receipt_unsupported reason))
              | Ok receipt ->
             let same_id name expected actual =
               if String.equal expected actual then Ok ()
@@ -231,7 +243,7 @@ let decode row_json =
                          | Contract.Reaction_read_error | Contract.Reaction_quarantined
                          | Contract.Reaction_invalid_stimulus_id | Contract.Reaction_missing_stimulus_id
                          | Contract.Reaction_unrecognized_receipt ->
-                             Ok (Observed (Unknown "예약 반응 조회 불가"))
+                             Ok (Observed (Undetermined Reaction_unreadable))
                          | Contract.Reaction_matched_stimulus | Contract.Reaction_matched_turn_started
                          | Contract.Reaction_matched_turn_finished | Contract.Reaction_matched_consumed_ack
                          | Contract.Reaction_matched_terminal_cancelled | Contract.Reaction_not_found ->
@@ -280,31 +292,32 @@ let decode row_json =
                                 | Completed -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
                                 | Turn_started | Turn_ended _ | Consumed | Receipt_is_the_record | Cancelled _ | Settling _
-                                | Transferring _ | Unknown _ -> false)
+                                | Transferring _ | Undetermined _ -> false)
                            | Observed Consumed ->
                                (match result with
                                 | Cancelled _ -> true
                                 | No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
                                 | Turn_started | Turn_ended _ | Consumed | Completed | Receipt_is_the_record
-                                | Settling _ | Transferring _ | Unknown _ -> false)
+                                | Settling _ | Transferring _ | Undetermined _ -> false)
                            | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing
                                       | Turn_started | Turn_ended _ | Completed | Receipt_is_the_record | Settling _
-                                      | Transferring _ | Unknown _) -> false in
-                         matched (if disagrees then Unknown "예약 종결 증거 충돌" else result) in
+                                      | Transferring _ | Undetermined _) -> false in
+                         matched (if disagrees then Undetermined Terminal_disagreement else result) in
                        match reaction_observation with
-                       | Terminal_conflict -> Ok (Unknown "예약 소비 증거 충돌")
+                       | Terminal_conflict -> Ok (Undetermined Consumption_conflict)
                        | Unobserved | Observed _ ->
                          (match projection with
                           | Contract.Queue_matched_pending | Contract.Queue_retained_terminal_wake ->
                               let* owner = text "resolved_owner" queue in
                               if not (String.equal owner keeper) then matched (Queued_at owner)
                               else (match reaction_observation with
-                               | Observed (Consumed | Cancelled _) -> matched (Unknown "예약 큐와 소비 증거 재확인 필요")
-                               | Observed (Unknown _ | Queued | Turn_started | Turn_ended _ as stage) -> matched stage
+                               | Observed (Consumed | Cancelled _) -> matched (Undetermined Queue_still_holds)
+                               | Observed (Undetermined _ | Queued | Turn_started | Turn_ended _ as stage) -> matched stage
                                | Unobserved -> matched Queued
-                               | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌")
+                               | Terminal_conflict -> matched (Undetermined Consumption_conflict)
                                | Observed (No_occurrence | Dispatching | Dispatch_failed _ | Completed | Receipt_is_the_record
-                                          | Missing | Queued_at _ | Settling _ | Transferring _) -> matched (Unknown "예약 반응 재확인 필요"))
+                                          | Missing | Queued_at _ | Settling _ | Transferring _) ->
+                                   matched (Undetermined Reaction_stage_unexpected))
                           | Contract.Queue_matched_terminal_completed ->
                               terminal "completed" (fun _ -> Completed)
                           | Contract.Queue_matched_terminal_cancelled ->
@@ -321,16 +334,16 @@ let decode row_json =
                                | Unobserved | Observed Queued -> matched Missing
                                | Observed ((No_occurrence | Dispatching | Dispatch_failed _ | Completed | Receipt_is_the_record
                                           | Queued_at _ | Missing | Turn_started | Turn_ended _ | Consumed | Cancelled _
-                                          | Settling _ | Transferring _ | Unknown _) as stage) -> matched stage
-                               | Terminal_conflict -> matched (Unknown "예약 소비 증거 충돌"))
+                                          | Settling _ | Transferring _ | Undetermined _) as stage) -> matched stage
+                               | Terminal_conflict -> matched (Undetermined Consumption_conflict))
                           | Contract.Queue_withdrawn_at_cancel -> matched (Cancelled None)
                           | Contract.Queue_read_error | Contract.Queue_evidence_invalid
                           | Contract.Queue_unrecognized_receipt ->
-                              Ok (Unknown "예약 큐 조회 불가"))))))
-        | _ -> Ok (Unknown "예약 전달 상태 미지원") in
+                              Ok (Undetermined Queue_unreadable))))))
+        | other -> Ok (Undetermined (Status_unsupported other)) in
       Ok { stage; due_at_iso }
 
 let needs_attention = function
   | Dispatching | Dispatch_failed _ | Queued | Queued_at _ | Missing | Turn_started | Turn_ended _
-  | Consumed | Settling _ | Transferring _ | Unknown _ -> true
+  | Consumed | Settling _ | Transferring _ | Undetermined _ -> true
   | No_occurrence | Completed | Receipt_is_the_record | Cancelled _ -> false

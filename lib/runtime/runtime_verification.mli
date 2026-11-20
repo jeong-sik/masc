@@ -96,12 +96,13 @@ val failure_code : failure -> string
 val failure_message : failure -> string
 val failure_detail : failure -> string option
 
-val failure_of_agent_core_error : Agent_core.Error.t -> failure
+val failure_of_agent_core_error : ?is_person_key:bool -> Agent_core.Error.t -> failure
 (** The verification failure for a refused Agent Core run, read from the
     error's typed route ([Keeper_runtime_failure_route.route_of_error]), so a
     rate limit, an exhausted quota, an overloaded provider, a refused
     credential, an unreachable endpoint and a model the endpoint does not serve
-    each keep their own code. A route
+    each keep their own code. When [is_person_key] is [true] (defaults to
+    [false]), an HTTP 401 [Auth_failed] maps to {!Key_refused}. A route
     with none of those causes stays [Provider_rejected]. *)
 
 type unmeasured =

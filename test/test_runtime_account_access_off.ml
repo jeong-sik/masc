@@ -291,7 +291,50 @@ let test_turned_off () =
         (match Access.host_access () with
          | Ok (_ : Access.host_account) -> ()
          | Error (Access.Host_unpublished | Access.Host_not_shared) ->
-           Alcotest.fail "the accounts of the host are the operator's after Off")))
+           Alcotest.fail "the accounts of the host are the operator's after Off");
+        let host_api_cfg =
+          Llm_provider.Provider_config.make
+            ~kind:Llm_provider.Provider_config.OpenAI_compat
+            ~model_id:"first-model"
+            ~base_url:"http://127.0.0.1:1/v1"
+            ~api_key:"operator-key"
+            ()
+        in
+        (match Access.authorize_api_for Access.Operator_call (Access.seal_api host_api_cfg) with
+         | Ok (_ : Llm_provider.Provider_config.t) -> ()
+         | Error refusal ->
+           Alcotest.failf "Host_api refused after Off: %s" (Access.refusal_to_string refusal));
+        let person_sealed = Access.seal_person_api ~provider_account_id:alice.account host_api_cfg in
+        let refuse_person label req expected =
+          match Access.authorize_api_for req person_sealed with
+          | Ok (_ : Llm_provider.Provider_config.t) ->
+            Alcotest.failf "%s: authorized Person_api after Off" label
+          | Error refusal ->
+            if not (expected refusal)
+            then
+              Alcotest.failf
+                "%s: refused for another reason: %s"
+                label
+                (Access.refusal_to_string refusal)
+        in
+        refuse_person
+          "Person_api for person's Keeper after Off"
+          (person_turn alice ~runtime:operator_runtime)
+          (function
+            | Access.Off_keeper keeper_id -> String.equal (Keeper_id.to_string keeper_id) alice.keeper
+            | _ -> false);
+        refuse_person
+          "Person_api for person's own account after Off"
+          (Access.Own_account { user_id = alice.user_id; provider_account_id = alice.account })
+          (function
+            | Access.Off_own_account user_id -> User_id.equal user_id alice.user_id
+            | _ -> false);
+        refuse_person
+          "Person_api on person's Runtime for operator Keeper after Off"
+          (turn ~keeper:operator_keeper ~runtime:(Runtime_id.to_string alice.runtime))
+          (function
+            | Access.Off_runtime runtime_id -> Runtime_id.equal runtime_id alice.runtime
+            | _ -> false)))
 ;;
 
 let () =

@@ -292,10 +292,12 @@ let authorize_host_account client =
   Runtime_account_access.authorize_host client |> Result.map_error account_refused
 ;;
 
-(* HIGH-RISK-UNREVIEWED: an Agent_core candidate sends with the key its
-   operator declared, which only a single-user process shares (plan D4). *)
-let authorize_api_provider sealed =
-  Runtime_account_access.authorize_api sealed |> Result.map_error account_refused
+(* HIGH-RISK-UNREVIEWED: an Agent_core candidate authorizes either the host
+   operator key (Single_user) or the person's API key account via
+   [authorize_api_for]. *)
+let authorize_api_provider walk_owner ~runtime_id sealed =
+  Runtime_account_access.authorize_api_for (account_request walk_owner ~runtime_id) sealed
+  |> Result.map_error account_refused
 ;;
 
 (* How long a rate observation holds its path back: the provider's usable
@@ -3791,7 +3793,7 @@ let run_named
       | Runtime_execution.Agent_core sealed ->
        let request_input = Eio.Lazy.force continuity in
        (match
-          match authorize_api_provider sealed with
+          match authorize_api_provider walk_owner ~runtime_id:attempt_runtime_id sealed with
           | Error _ as refused -> refused
           | Ok runtime_provider_config ->
             (match provider_config_transform with

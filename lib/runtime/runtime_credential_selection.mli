@@ -30,6 +30,12 @@ val provider_id : admission -> string
 val requirement : admission -> requirement
 val quota_scope : admission -> Runtime_quota_window.scope
 
+(** Non-secret credential admission for a person-owned HTTP API key account.
+    Reads no key file, environment variable, or operator declaration at
+    materialization time; authorization injects the person's key on demand
+    per request. *)
+val person_key_admission : provider_id:string -> admission
+
 val require_key : materialized -> (Llm_provider.Secret.t, string) result
 (** Fresh discovery requires an explicit or declared credential contract.
     Unknown providers, missing required declarations and empty required values

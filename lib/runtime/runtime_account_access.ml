@@ -749,27 +749,170 @@ let authorize_host client =
 ;;
 
 (* HIGH-RISK-UNREVIEWED: an API provider of the runtime table sends with the
-   credential its operator declared, an account of the host (plan D4). The
-   whole config leaves the seal only through [authorize_api]; a reader gets
-   [api_declaration], without the key and the headers. *)
-type api_sealed = Llm_provider.Provider_config.t
+   credential its operator declared, an account of the host (plan D4). A person
+   API key provider sends only with that person's key file on authorized
+   [Keeper_turn] or [Own_account] requests, never carrying operator
+   credentials or headers from the template. *)
+type api_sealed =
+  | Host_api of Llm_provider.Provider_config.t
+  | Person_api of
+      { provider_account_id : Authz_types.Provider_account_id.t
+      ; template_config : Llm_provider.Provider_config.t
+      }
 
-let seal_api config = config
+let seal_api config = Host_api config
 
-let api_declaration (config : api_sealed) =
+let strip_api_credentials (config : Llm_provider.Provider_config.t) =
+  { config with
+    Llm_provider.Provider_config.api_key = Llm_provider.Secret.empty
+  ; headers = []
+  ; credential_source = Llm_provider.Provider_config.Static_credential
+  }
+;;
+
+let seal_person_api ~provider_account_id config =
+  Person_api { provider_account_id; template_config = strip_api_credentials config }
+;;
+
+let is_person_api = function
+  | Host_api _ -> false
+  | Person_api _ -> true
+;;
+
+let raw_api_config = function
+  | Host_api config -> config
+  | Person_api { provider_account_id = _; template_config } -> template_config
+;;
+
+let api_declaration (sealed : api_sealed) =
+  let config = raw_api_config sealed in
   { config with Llm_provider.Provider_config.api_key = Llm_provider.Secret.empty; headers = [] }
 ;;
 
-let authorize_api config =
-  authorize_host Api_provider |> Result.map (fun Shared_by_single_user -> config)
+let inject_person_api_key (template_config : Llm_provider.Provider_config.t) key =
+  { template_config with
+    Llm_provider.Provider_config.api_key =
+      Llm_provider.Secret.of_string (Runtime_api_key_file.value key)
+  ; headers = Runtime_provider_binding.default_headers_for_kind template_config.kind
+  ; credential_source = Llm_provider.Provider_config.Static_credential
+  }
 ;;
 
-let api_binding_identity config =
-  Agent_core.Binding_identity.of_provider_config ~transport:Agent_core.Binding_identity.Http config
+(* Resolves the key path from the owner's runtime root and the current generation
+   recorded in the log, and reads it via [Runtime_api_key_file.read]. Never
+   exposes filesystem paths in any refusal. *)
+let read_person_api_key ~base_path (state : Authz_state.t) ~owner provider_account_id =
+  let ( let* ) = Result.bind in
+  let* runtime_root = person_root ~base_path state owner in
+  match Authz_provider_account_state.find state.Authz_state.provider_accounts provider_account_id with
+  | Some
+      { Authz_provider_account_state.kind =
+          Authz_provider_account_state.Key { integration_id = _; generation }
+      ; owner = account_owner
+      }
+    when Authz_types.User_id.equal account_owner owner ->
+    (match Layout.key_file ~runtime_root ~account_id:provider_account_id ~generation with
+     | Error detail -> Error (Home_unresolved detail)
+     | Ok key_path ->
+       (match Runtime_api_key_file.read key_path with
+        | Ok key -> Ok key
+        | Error reason -> Error (Account_key_unusable { provider_account_id; reason })))
+  | None
+  | Some { Authz_provider_account_state.kind = Authz_provider_account_state.Login { integration_id = _ }; owner = _ }
+  | Some { Authz_provider_account_state.kind = Authz_provider_account_state.Key _; owner = _ } ->
+    Error (Not_the_account_key provider_account_id)
 ;;
 
-let api_admission_allowances entries = Llm_provider.Provider_admission.allowances_of_configs entries
-let api_admission_snapshot config = Llm_provider.Provider_admission.snapshot_for ~config
+let authorize_person_api_multi ~zone ~base_path ~now ~provider_account_id request =
+  let ( let* ) = Result.bind in
+  match request with
+  | Operator_call -> Error No_operator
+  | Operator_keeper_turn { keeper_name; runtime_id = _ } -> Error (No_operator_keeper keeper_name)
+  | Own_account { user_id; provider_account_id = requested_id } ->
+    if not (Authz_types.Provider_account_id.equal requested_id provider_account_id)
+    then Error (Not_the_account_key requested_id)
+    else
+      on_trusted zone (fun (_ : Authz_zone.trusted) state ->
+        match Ps.find state.Authz_state.principals user_id with
+        | Some { Ps.status = Ps.Active; _ } ->
+          let* () =
+            Result.map_error
+              (fun reason -> Account_unavailable { provider_account_id; reason })
+              (Authz_provider_account.availability state ~user_id provider_account_id)
+          in
+          read_person_api_key ~base_path state ~owner:user_id provider_account_id
+        | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
+  | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->
+    on_trusted zone (fun trusted state ->
+      let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now in
+      if not (Authz_types.Provider_account_id.equal turn.Authz_keeper_turn.provider_account_id provider_account_id)
+      then Error (Not_the_account_key turn.Authz_keeper_turn.provider_account_id)
+      else read_person_api_key ~base_path state ~owner:turn.Authz_keeper_turn.owner provider_account_id)
+;;
+
+let authorize_person_api ~provider_account_id request =
+  match Atomic.get state with
+  | Unpublished -> Error Not_published
+  | Published (Multi_account { zone; base_path; now }) ->
+    authorize_person_api_multi ~zone ~base_path ~now ~provider_account_id request
+  | Published (Single_user single_user) ->
+    (match Authz_boot_mode_read.turned_off single_user with
+     | Some records ->
+       (match request with
+        | Own_account { user_id; provider_account_id = _ } -> Error (Off_own_account user_id)
+        | Keeper_turn { owner = _; keeper_id; channel = _; pat = _; runtime_id = _ } ->
+          Error (Off_keeper keeper_id)
+        | Operator_keeper_turn { keeper_name = _; runtime_id } ->
+          (match off_runtime records runtime_id with
+           | Some refusal -> Error refusal
+           | None ->
+             (match
+                Authz_provider_account_state.find
+                  records.Authz_state.provider_accounts
+                  provider_account_id
+              with
+              | Some { owner; kind = _ } -> Error (Off_own_account owner)
+              | None -> Error (Not_the_account_key provider_account_id)))
+        | Operator_call ->
+          (match
+             Authz_provider_account_state.find
+               records.Authz_state.provider_accounts
+               provider_account_id
+           with
+           | Some { owner; kind = _ } -> Error (Off_own_account owner)
+           | None -> Error No_operator))
+     | None ->
+       (match request with
+        | Operator_call -> Error No_operator
+        | Operator_keeper_turn { keeper_name; runtime_id = _ } -> Error (No_operator_keeper keeper_name)
+        | Own_account { user_id; provider_account_id = _ } -> Error (Not_active user_id)
+        | Keeper_turn _ -> Error (Turn_refused Authz_keeper_turn.Not_bootstrapped)))
+;;
+
+let authorize_api_for request = function
+  | Host_api config ->
+    authorize_host Api_provider |> Result.map (fun Shared_by_single_user -> config)
+  | Person_api { provider_account_id; template_config } ->
+    authorize_person_api ~provider_account_id request
+    |> Result.map (inject_person_api_key template_config)
+;;
+
+let authorize_api sealed = authorize_api_for Operator_call sealed
+
+let api_binding_identity sealed =
+  Agent_core.Binding_identity.of_provider_config
+    ~transport:Agent_core.Binding_identity.Http
+    (raw_api_config sealed)
+;;
+
+let api_admission_allowances entries =
+  Llm_provider.Provider_admission.allowances_of_configs
+    (List.map (fun (id, sealed) -> id, raw_api_config sealed) entries)
+;;
+
+let api_admission_snapshot sealed =
+  Llm_provider.Provider_admission.snapshot_for ~config:(raw_api_config sealed)
+;;
 
 type native_refusal =
   | Native_unpublished

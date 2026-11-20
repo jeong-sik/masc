@@ -129,7 +129,7 @@ val partition_bindings : config -> binding list -> t list * (string * drop_reaso
 val of_person_binding
   :  provider_account_id:Authz_types.Provider_account_id.t
   -> integration_id:Authz_types.Integration_id.t
-  -> account_home:string
+  -> account_home:string option
   -> config
   -> binding
   -> (t, drop_reason) result

@@ -505,7 +505,7 @@ let person_runtime in_call person ~base_path ~binding =
     Client.account_home ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
   let runtime ~account_home ~account =
     Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
-      ~account_home ~account ~binding
+      ~account_home:(Some account_home) ~account ~binding
     |> Result.map_error (template_error id) in
   let* runtime = match account.Authz_provider_account_state.kind with
     | Authz_provider_account_state.Login { integration_id = _ } ->

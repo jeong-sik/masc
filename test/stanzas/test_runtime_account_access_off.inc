@@ -12,4 +12,12 @@
 (test
  (name test_runtime_account_access_off)
  (modules test_runtime_account_access_off)
- (libraries alcotest eio_main masc.auth masc.fs_compat masc.masc_core masc.runtime unix))
+ (libraries
+  alcotest
+  eio_main
+  masc.agent_core.llm_provider
+  masc.auth
+  masc.fs_compat
+  masc.masc_core
+  masc.runtime
+  unix))

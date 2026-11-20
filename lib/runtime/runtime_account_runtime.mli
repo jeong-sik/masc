@@ -65,9 +65,10 @@ val binding_of
 (** The runtime of [binding] of [template] on the account [provider_id].
 
     The provider of the runtime takes its credential from [account] and never
-    from the template: none for a [Login], the key file for a [Key]. So an
-    account of a person runs on no credential the workspace declared for the
-    template.
+    from the template: none for a [Login], the key file for a [Key]. Operator
+    credentials and headers from the template never follow into the account.
+    Official-client templates take [Some home] for [account_home]; HTTP
+    [Agent_core] provider templates have no CLI account home and take [None].
 
     The key file of a [Key] is read before the runtime is made, so a file
     that is missing or gives no key is [Key_missing] or [Key_unreadable] and
@@ -77,22 +78,29 @@ val of_template
   :  Runtime_schema.config
   -> template:string
   -> provider_id:string
-  -> account_home:string
+  -> account_home:string option
   -> account:account
   -> binding:binding
   -> (Runtime_instance.t, error) result
 
-(** Build a person's runtime from [template] with a credential-free person
-    seal ({!Runtime_account_access.seal_person}) for Claude Code / Codex or a
-    declared home ({!Runtime_account_access.declare_muse_home}) for Muse serve,
-    reading no key file, home configuration, or process environment at
-    table-build time (RFC §3.4). Unrelated providers and bindings in the
+(** Build a person's runtime from [template] using the explicit [~account_home]:
+    - Official clients ([Claude_code], [Codex_app_server], [Muse_serve]) take
+      [Some home] and carry credential-free person seals
+      ({!Runtime_account_access.seal_person}) or declared homes
+      ({!Runtime_account_access.declare_muse_home}).
+    - HTTP [Agent_core] providers ([Messages_api], [Chat_completions_api],
+      [Ollama_api], [Gemini_api]) have no CLI account home, take
+      [account_home = None], drop operator credentials and custom headers,
+      preserve catalog provider identity, and carry a credential-free person
+      API seal ({!Runtime_account_access.seal_person_api}).
+    Reads no key file, home configuration, or process environment at table-build
+    time (RFC §3.4 / §3.9). Unrelated providers and bindings in the
     configuration are ignored. *)
 val of_person_template
   :  Runtime_schema.config
   -> template:string
   -> provider_account_id:Authz_types.Provider_account_id.t
   -> integration_id:Authz_types.Integration_id.t
-  -> account_home:string
+  -> account_home:string option
   -> binding:binding
   -> (Runtime_instance.t, error) result

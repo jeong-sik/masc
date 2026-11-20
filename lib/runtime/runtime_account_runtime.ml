@@ -90,6 +90,19 @@ let credentials_of = function
      | Error (Runtime_api_key_file.Key_unreadable why) -> Error (Key_unreadable why))
 ;;
 
+let catalog_provider_of_template (provider : Runtime_schema.provider) ~provider_id =
+  match provider.transport with
+  | Runtime_schema.Cli (_ : string) -> provider.catalog_provider
+  | Runtime_schema.Http (_ : string) ->
+    (match provider.catalog_provider, provider.wire_kind with
+     | Some _ as explicit, _ -> explicit
+     | None, Some _ -> None
+     | None, None ->
+       (match Llm_provider.Catalog_snapshot.(find (current ()) provider.id) with
+        | Some entry when not (String.equal entry.id provider_id) -> Some entry.id
+        | Some _ | None -> None))
+;;
+
 let materialize_single_runtime
     (config : Runtime_schema.config)
     ~(provider : Runtime_schema.provider)
@@ -104,7 +117,7 @@ let materialize_single_runtime
       providers =
         [ { provider with
             id = provider_id
-          ; account_home = Some account_home
+          ; account_home
           ; credentials
           ; enabled = true
           }
@@ -126,44 +139,25 @@ let materialize_single_runtime
      | None -> Error (Not_materialized ("no runtime " ^ id ^ " was materialized")))
 ;;
 
-let of_template
-      (config : Runtime_schema.config)
-      ~template
-      ~provider_id
-      ~account_home
-      ~account
-      ~binding:choice
-  =
-  let ( let* ) = Result.bind in
-  let* provider, binding = template_binding config ~template ~provider_id choice in
-  let* credentials = credentials_of account in
-  materialize_single_runtime
-    config
-    ~provider
-    ~binding
-    ~provider_id
+let materialize_person_binding
+    (config : Runtime_schema.config)
+    ~(provider : Runtime_schema.provider)
+    ~(binding : Runtime_schema.binding)
+    ~provider_account_id
+    ~integration_id
     ~account_home
-    ~credentials
-;;
-
-let of_person_template
-      (config : Runtime_schema.config)
-      ~template
-      ~provider_account_id
-      ~integration_id
-      ~account_home
-      ~binding:choice
   =
   let ( let* ) = Result.bind in
   let provider_id = Authz_types.Provider_account_id.to_string provider_account_id in
-  let* provider, binding = template_binding config ~template ~provider_id choice in
   let person_cfg =
     { config with
       providers =
         [ { provider with
             id = provider_id
-          ; account_home = Some account_home
+          ; catalog_provider = catalog_provider_of_template provider ~provider_id
+          ; account_home
           ; credentials = None
+          ; headers = None
           ; enabled = true
           }
         ]
@@ -190,4 +184,107 @@ let of_person_template
        Error
          (Not_materialized
             (Runtime_config_error.to_diagnostic_text ~config_path:config_label failure)))
+;;
+
+let of_template
+      (config : Runtime_schema.config)
+      ~template
+      ~provider_id
+      ~account_home
+      ~account
+      ~binding:choice
+  =
+  let ( let* ) = Result.bind in
+  let* provider, binding = template_binding config ~template ~provider_id choice in
+  let* credentials = credentials_of account in
+  match provider.api_format, account_home, account with
+  | ( ( Runtime_schema.Messages_api
+      | Runtime_schema.Chat_completions_api
+      | Runtime_schema.Ollama_api
+      | Runtime_schema.Gemini_api
+      | Runtime_schema.Vertex_gemini_api )
+    , Some (_ : string)
+    , (Login | Key _) ) ->
+    Error (Not_materialized "HTTP provider account has no account home")
+  | ( ( Runtime_schema.Messages_api
+      | Runtime_schema.Chat_completions_api
+      | Runtime_schema.Ollama_api
+      | Runtime_schema.Gemini_api
+      | Runtime_schema.Vertex_gemini_api )
+    , None
+    , Login ) ->
+    Error (Not_materialized "HTTP provider account requires an API key")
+  | Runtime_schema.Vertex_gemini_api, None, Key _ ->
+    Error
+      (Not_materialized
+         "vertex-gemini uses Google Application Default Credentials and cannot run as a \
+          person API key account")
+  | ( ( Runtime_schema.Messages_api
+      | Runtime_schema.Chat_completions_api
+      | Runtime_schema.Ollama_api
+      | Runtime_schema.Gemini_api )
+    , None
+    , Key _ ) ->
+    (match
+       Authz_types.Provider_account_id.of_string provider_id,
+       Authz_types.Integration_id.of_string template
+     with
+     | Error _, _ -> Error (Not_materialized "person HTTP account provider_id is invalid")
+     | _, Error _ -> Error (Not_materialized "person HTTP account integration_id is invalid")
+     | Ok provider_account_id, Ok integration_id ->
+       let* runtime =
+         materialize_person_binding
+           config
+           ~provider
+           ~binding
+           ~provider_account_id
+           ~integration_id
+           ~account_home:None
+       in
+       (* Execution stays strictly [seal_person_api] without credentials; preserve
+          the verified key-file path on the metadata provider field for callers
+          inspecting [of_template]'s account binding. *)
+       Ok { runtime with provider = { runtime.provider with credentials } })
+  | ( ( Runtime_schema.Codex_app_server_runtime
+      | Runtime_schema.Claude_code_runtime
+      | Runtime_schema.Antigravity_cli_runtime
+      | Runtime_schema.Muse_serve_runtime
+      | Runtime_schema.Vibe_cli_runtime )
+    , None
+    , (Login | Key _) ) ->
+    Error (Not_materialized "official client account requires an account home")
+  | ( ( Runtime_schema.Codex_app_server_runtime
+      | Runtime_schema.Claude_code_runtime
+      | Runtime_schema.Antigravity_cli_runtime
+      | Runtime_schema.Muse_serve_runtime
+      | Runtime_schema.Vibe_cli_runtime )
+    , Some home
+    , (Login | Key _) ) ->
+    materialize_single_runtime
+      config
+      ~provider
+      ~binding
+      ~provider_id
+      ~account_home:(Some home)
+      ~credentials
+;;
+
+let of_person_template
+      (config : Runtime_schema.config)
+      ~template
+      ~provider_account_id
+      ~integration_id
+      ~account_home
+      ~binding:choice
+  =
+  let ( let* ) = Result.bind in
+  let provider_id = Authz_types.Provider_account_id.to_string provider_account_id in
+  let* provider, binding = template_binding config ~template ~provider_id choice in
+  materialize_person_binding
+    config
+    ~provider
+    ~binding
+    ~provider_account_id
+    ~integration_id
+    ~account_home
 ;;

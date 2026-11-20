@@ -270,7 +270,6 @@ let of_person_binding ~provider_account_id ~integration_id ~account_home cfg bin
     cfg
     binding
 ;;
-
 let capabilities_for_runtime (rt : t) =
   match rt.execution with
   | Runtime_execution.Agent_core sealed ->

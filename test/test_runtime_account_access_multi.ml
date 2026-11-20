@@ -1435,7 +1435,7 @@ default = "claude_code.sonnet"
                   ~template:"claude_code"
                   ~provider_account_id:grace_key.account
                   ~integration_id:claude_integration
-                  ~account_home:grace_key.home
+                  ~account_home:(Some grace_key.home)
                   ~binding:(Runtime_account_runtime.Model "sonnet")
               with
               | Ok rt -> rt
@@ -1473,7 +1473,7 @@ default = "claude_code.sonnet"
              ~template:"muse"
              ~provider_account_id:grace_key.account
              ~integration_id:muse_integration
-             ~account_home:expected_muse_home
+             ~account_home:(Some expected_muse_home)
              ~binding:(Runtime_account_runtime.Model "muse")
          with
          | Error error -> Alcotest.fail (Runtime_account_runtime.error_to_string error)
@@ -1501,17 +1501,49 @@ default = "claude_code.sonnet"
               Runtime_instance.of_person_binding
                 ~provider_account_id:grace_key.account
                 ~integration_id:claude_integration
-                ~account_home:grace_key.home
+                ~account_home:(Some grace_key.home)
                 template_cfg
                 http_binding
             with
             | Ok (_ : Runtime_instance.t) ->
-              Alcotest.fail "of_person_binding must refuse HTTP bindings"
+              Alcotest.fail "of_person_binding must refuse HTTP bindings with account_home"
             | Error (Runtime_config_error.Execution_unbuildable _) -> ()
             | Error reason ->
               Alcotest.failf
-                "unexpected drop reason for HTTP binding: %s"
-                (Runtime_config_error.string_of_drop_reason reason)));
+                "unexpected drop reason for HTTP binding with account_home: %s"
+                (Runtime_config_error.string_of_drop_reason reason));
+           (match
+              Runtime_instance.of_person_binding
+                ~provider_account_id:grace_key.account
+                ~integration_id:claude_integration
+                ~account_home:None
+                template_cfg
+                http_binding
+            with
+            | Error reason ->
+              Alcotest.failf
+                "of_person_binding must build credential-free HTTP binding with account_home=None: %s"
+                (Runtime_config_error.string_of_drop_reason reason)
+            | Ok http_rt ->
+              (match http_rt.Runtime_instance.execution with
+               | Runtime_execution.Agent_core sealed ->
+                 Alcotest.(check bool)
+                   "of_person_binding HTTP seals as Person_api"
+                   true
+                   (Access.is_person_api sealed)
+               | _ -> Alcotest.fail "expected Agent_core execution from HTTP of_person_binding")));
+        (match
+           Runtime_account_runtime.of_person_template
+             template_cfg
+             ~template:"claude_code"
+             ~provider_account_id:grace_key.account
+             ~integration_id:claude_integration
+             ~account_home:None
+             ~binding:(Runtime_account_runtime.Model "sonnet")
+         with
+         | Ok (_ : Runtime_instance.t) ->
+           Alcotest.fail "of_person_template must refuse official CLI binding with account_home=None"
+         | Error _ -> ());
         let claude_cred_cfg =
           { template_cfg with
             Runtime_schema.providers =
@@ -1534,7 +1566,7 @@ default = "claude_code.sonnet"
               Runtime_instance.of_person_binding
                 ~provider_account_id:grace_key.account
                 ~integration_id:claude_integration
-                ~account_home:grace_key.home
+                ~account_home:(Some grace_key.home)
                 claude_cred_cfg
                 claude_binding
             with
@@ -1694,7 +1726,7 @@ default = "claude_code.sonnet"
               ~template:"codex"
               ~provider_account_id:grace_codex.account
               ~integration_id:codex_integration
-              ~account_home:grace_codex.home
+              ~account_home:(Some grace_codex.home)
               ~binding:(Runtime_account_runtime.Model "codex")
           with
           | Ok rt ->
@@ -1750,6 +1782,346 @@ default = "claude_code.sonnet"
                 { provider_account_id = grace_key.account
                 ; reason = Authz_provider_account.Defect Authz_decision.Resource_purged
                 });
+        (* RFC a-persons-api-key-is-their-own-provider-account 3.9: person-owned
+           HTTP API keys. Seal strips operator credentials/headers (Plan D4),
+           authorize_api_for checks zone owner/active/availability and injects
+           the person's current-generation key file, refusing Operator_call,
+           Operator_keeper_turn, cross-owner, login accounts, and open keys
+           without leaking filesystem paths. *)
+        let op_template =
+          Llm_provider.Provider_config.make
+            ~kind:Llm_provider.Provider_config.Anthropic
+            ~model_id:"claude-sonnet-5"
+            ~base_url:"https://api.anthropic.com"
+            ~api_key:"sk-operator-leaked"
+            ~headers:[ "x-api-key", "op-hdr"; "x-operator-secret", "op-secret" ]
+            ()
+        in
+        let person_sealed =
+          Access.seal_person_api ~provider_account_id:frank_key.account op_template
+        in
+        Alcotest.(check bool) "person api seal marked" true (Access.is_person_api person_sealed);
+        let decl = Access.api_declaration person_sealed in
+        Alcotest.(check string) "person api declaration has empty api_key" "" (decl.api_key :> string);
+        Alcotest.(check int) "person api declaration strips headers" 0 (List.length decl.headers);
+        let refuse_api label request sealed expected =
+          match Access.authorize_api_for request sealed with
+          | Ok (_ : Llm_provider.Provider_config.t) ->
+            Alcotest.failf "%s: unexpectedly authorized" label
+          | Error refusal ->
+            if not (expected refusal)
+            then
+              Alcotest.failf
+                "%s: refused for another reason: %s"
+                label
+                (Access.refusal_to_string refusal)
+        in
+        refuse_api
+          "host authorize_api refuses Person_api"
+          Access.Operator_call
+          person_sealed
+          (function
+            | Access.No_operator -> true
+            | _ -> false);
+        (match Access.authorize_api person_sealed with
+         | Error Access.No_operator -> ()
+         | Error refusal ->
+           Alcotest.failf
+             "authorize_api refused Person_api with unexpected reason: %s"
+             (Access.refusal_to_string refusal)
+         | Ok (_ : Llm_provider.Provider_config.t) ->
+           Alcotest.fail "authorize_api allowed Person_api");
+        refuse_api
+          "Operator_keeper_turn refuses Person_api"
+          (Access.Operator_keeper_turn { keeper_name = "k-op"; runtime_id = Runtime_id.to_string frank_key.runtime })
+          person_sealed
+          (function
+            | Access.No_operator_keeper name -> String.equal name "k-op"
+            | _ -> false);
+        (match Access.authorize_api_for (own frank_key ()) person_sealed with
+         | Error refusal ->
+           Alcotest.failf "Own_account on person key refused: %s" (Access.refusal_to_string refusal)
+         | Ok authorized_cfg ->
+           Alcotest.(check string)
+             "Own_account injects person key"
+             "sk-test-the-key-of-frank"
+             (authorized_cfg.api_key :> string);
+           Alcotest.(check (option string))
+             "wire default anthropic-version header present"
+             (Some "2023-06-01")
+             (List.assoc_opt "anthropic-version" authorized_cfg.headers);
+           Alcotest.(check (option string))
+             "operator custom header not carried"
+             None
+             (List.assoc_opt "x-operator-secret" authorized_cfg.headers));
+        (match Access.authorize_api_for (turn frank_key ()) person_sealed with
+         | Error refusal ->
+           Alcotest.failf "Keeper_turn on person key refused: %s" (Access.refusal_to_string refusal)
+         | Ok authorized_cfg ->
+           Alcotest.(check string)
+             "Keeper_turn injects person key"
+             "sk-test-the-key-of-frank"
+             (authorized_cfg.api_key :> string));
+        refuse_api
+          "cross-owner Own_account refuses Person_api"
+          (own bob ~account:frank_key.account ())
+          person_sealed
+          (function
+            | Access.Account_unavailable
+                { provider_account_id; reason = Authz_provider_account.Linked_to_another } ->
+              Provider_account_id.equal provider_account_id frank_key.account
+            | _ -> false);
+        refuse_api
+          "mismatched Own_account id refuses Person_api"
+          (own frank_key ~account:frank.account ())
+          person_sealed
+          (not_the_key_of frank);
+        refuse_api
+          "cross-owner Keeper_turn refuses Person_api"
+          (turn bob ())
+          person_sealed
+          (fun refusal ->
+             match refusal with
+             | Access.Not_the_account_key id -> Provider_account_id.equal id bob.account
+             | _ -> false);
+        refuse_api
+          "Person_api on login account is refused"
+          (own frank ())
+          (Access.seal_person_api ~provider_account_id:frank.account op_template)
+          (not_the_key_of frank);
+        Unix.chmod key_of_frank 0o640;
+        (match Access.authorize_api_for (own frank_key ()) person_sealed with
+         | Ok (_ : Llm_provider.Provider_config.t) ->
+           Unix.chmod key_of_frank 0o600;
+           Alcotest.fail "open key file was authorized"
+         | Error refusal ->
+           Unix.chmod key_of_frank 0o600;
+           let text = Access.refusal_to_string refusal in
+           Alcotest.(check bool)
+             "refusal does not leak key file path"
+             false
+             (String.contains text '/'));
+        (* Purged key account refuses Person_api. *)
+        let purged_key_id = get (Provider_account_id.of_string "account-frank-purged-key") in
+        (match
+           Authz_provider_account.link_key
+             zone
+             ~user_id:frank.user_id
+             ~provider_account_id:purged_key_id
+             ~integration_id:(get (Integration_id.of_string "operator"))
+         with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_provider_account.error_to_string error));
+        (match
+           Option.map
+             (Runtime_api_key_file.write
+                ~runtime_root:frank.runtime_root
+                ~account_id:purged_key_id
+                ~generation:Key_generation.first)
+             (Runtime_api_key_file.key_of_string "sk-test-purged-key")
+         with
+         | Some (Ok ()) -> ()
+         | _ -> Alcotest.fail "purged fixture key not written");
+        (match
+           Authz_purge.start
+             zone
+             ~user_id:frank.user_id
+             (Authz_purge_event.Provider_account
+                { owner = frank.user_id; provider_account_id = purged_key_id })
+         with
+         | Ok () -> ()
+         | Error error -> Alcotest.fail (Authz_purge.error_detail error));
+        refuse_api
+          "purged key account refuses Person_api"
+          (own frank ~account:purged_key_id ())
+          (Access.seal_person_api ~provider_account_id:purged_key_id op_template)
+          (function
+            | Access.Account_unavailable
+                { provider_account_id; reason = Authz_provider_account.Defect Authz_decision.Resource_purged } ->
+              Provider_account_id.equal provider_account_id purged_key_id
+            | _ -> false);
+        (* HTTP verify_as_command against loopback HTTP with Person_api:
+           Operator_call stops before connecting, person key reaches the wire
+           and 401 maps to key_refused while 403 maps to provider_auth_refused. *)
+        Eio.Switch.run (fun sw ->
+          let reply_status = ref 401 in
+          let observed_headers = ref "" in
+          let connections = Atomic.make 0 in
+          let listening =
+            Eio.Net.listen
+              ~sw
+              ~backlog:5
+              ~reuse_addr:true
+              env#net
+              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+          in
+          Eio.Fiber.fork_daemon ~sw (fun () ->
+            while true do
+              Eio.Net.accept_fork ~sw listening ~on_error:(fun _ -> ()) (fun flow _addr ->
+                Atomic.incr connections;
+                let reader = Eio.Buf_read.of_flow ~max_size:65536 flow in
+                let rec read_headers acc =
+                  let line = Eio.Buf_read.line reader in
+                  let trimmed =
+                    let n = String.length line in
+                    if n > 0 && line.[n - 1] = '\r' then String.sub line 0 (n - 1) else line
+                  in
+                  if String.equal trimmed "" then List.rev acc else read_headers (trimmed :: acc)
+                in
+                let header_lines = read_headers [] in
+                let content_len =
+                  List.find_map
+                    (fun line ->
+                       match String.index_opt line ':' with
+                       | Some idx ->
+                         let k = String.lowercase_ascii (String.trim (String.sub line 0 idx)) in
+                         if String.equal k "content-length"
+                         then int_of_string_opt (String.trim (String.sub line (idx + 1) (String.length line - idx - 1)))
+                         else None
+                       | None -> None)
+                    header_lines
+                  |> Option.value ~default:0
+                in
+                let body_str = Eio.Buf_read.take content_len reader in
+                observed_headers := String.concat "\r\n" header_lines ^ "\r\n\r\n" ^ body_str;
+                let status = !reply_status in
+                let reason = if status = 401 then "Unauthorized" else "Forbidden" in
+                let body = {|{"error":{"message":"bad auth","type":"auth_error"}}|} in
+                let response =
+                  Printf.sprintf
+                    "HTTP/1.1 %d %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+                    status
+                    reason
+                    (String.length body)
+                    body
+                in
+                Eio.Flow.copy_string response flow;
+                (try Eio.Flow.shutdown flow `Send with
+                 | Eio.Io _ | Unix.Unix_error _ -> ()))
+            done);
+          let port =
+            match Eio.Net.listening_addr listening with
+            | `Tcp (_, port) -> port
+            | `Unix _ -> Alcotest.fail "expected TCP listening socket"
+          in
+          let http_toml =
+            Printf.sprintf
+              {|
+[runtime]
+default = "operator.first"
+[providers.operator]
+display-name = "Operator endpoint"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/v1"
+[providers.operator.credentials]
+type = "inline"
+value = "sk-operator-must-not-leak"
+[providers.operator.headers]
+x-operator-secret = "op-header-must-not-leak"
+[models.first]
+api-name = "first-model"
+max-context = 4096
+tools-support = true
+streaming = true
+[models.first.capabilities]
+supports-tool-choice = true
+[operator.first]
+|}
+              port
+          in
+          let http_config =
+            match Runtime_toml.parse_string http_toml with
+            | Ok cfg -> cfg
+            | Error _ -> Alcotest.fail "person HTTP fixture runtime.toml refused"
+          in
+          let operator_integration = get (Integration_id.of_string "operator") in
+          let person_runtime =
+            match
+              Runtime_account_runtime.of_person_template
+                http_config
+                ~template:"operator"
+                ~provider_account_id:frank_key.account
+                ~integration_id:operator_integration
+                ~account_home:None
+                ~binding:(Runtime_account_runtime.Model "first")
+            with
+            | Ok rt -> rt
+            | Error err -> Alcotest.fail (Runtime_account_runtime.error_to_string err)
+          in
+          let verify_op =
+            Runtime_verification.verify_as_command
+              ~env
+              ~sw
+              ~private_dir:(Filename.temp_dir ~temp_dir:root "verify-op-" "")
+              ~timeout_s:5.
+              ~account_request:Access.Operator_call
+              person_runtime
+          in
+          (match verify_op.Runtime_verification.failure with
+           | Some failure ->
+             Alcotest.(check string)
+               "operator verification of person runtime refused"
+               "account_not_authorized"
+               (Runtime_verification.failure_code failure)
+           | None -> Alcotest.fail "operator verification of person runtime ran");
+          Alcotest.(check int)
+            "operator verification made no HTTP connections"
+            0
+            (Atomic.get connections);
+          reply_status := 401;
+          observed_headers := "";
+          let verify_401 =
+            Runtime_verification.verify_as_command
+              ~env
+              ~sw
+              ~private_dir:(Filename.temp_dir ~temp_dir:root "verify-401-" "")
+              ~timeout_s:5.
+              ~account_request:(own frank_key ())
+              person_runtime
+          in
+          (match verify_401.Runtime_verification.failure with
+           | Some failure ->
+             Alcotest.(check string)
+               "HTTP 401 on person key verification maps to key_refused"
+               "key_refused"
+               (Runtime_verification.failure_code failure)
+           | None -> Alcotest.fail "HTTP 401 verification unexpectedly succeeded");
+          let contains s sub =
+            let slen = String.length s and sublen = String.length sub in
+            let rec loop i =
+              i + sublen <= slen && (String.equal (String.sub s i sublen) sub || loop (i + 1))
+            in
+            sublen = 0 || loop 0
+          in
+          Alcotest.(check bool)
+            "wire request used person key"
+            true
+            (contains !observed_headers "Bearer sk-test-the-key-of-frank");
+          Alcotest.(check bool)
+            "wire request leaked no operator inline key"
+            false
+            (contains !observed_headers "sk-operator-must-not-leak");
+          Alcotest.(check bool)
+            "wire request leaked no operator header"
+            false
+            (contains !observed_headers "op-header-must-not-leak");
+          reply_status := 403;
+          let verify_403 =
+            Runtime_verification.verify_as_command
+              ~env
+              ~sw
+              ~private_dir:(Filename.temp_dir ~temp_dir:root "verify-403-" "")
+              ~timeout_s:5.
+              ~account_request:(own frank_key ())
+              person_runtime
+          in
+          (match verify_403.Runtime_verification.failure with
+           | Some failure ->
+             Alcotest.(check string)
+               "HTTP 403 on person key verification stays provider_auth_refused"
+               "provider_auth_refused"
+               (Runtime_verification.failure_code failure)
+           | None -> Alcotest.fail "HTTP 403 verification unexpectedly succeeded"));
         (* Bytes another writer added to the log: the next commit finds the
            end moved and stops the log. No decision rests on the state of the
            zone from then on, so no client starts for a person or for a turn
@@ -1793,7 +2165,8 @@ default = "claude_code.sonnet"
           sealed_grace_person
           (function
             | Access.No_operator -> true
-            | _ -> false)))
+            | _ -> false);
+        refuse_api "Person_api in a stopped zone" (own frank_key ()) person_sealed log_stopped))
 ;;
 
 let () =

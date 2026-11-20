@@ -379,26 +379,52 @@ val authorize_host : host_client -> (host_account, refusal) result
 
 (** {1 API providers}
 
-    An Agent_core Runtime sends with the credential that the operator declared
-    for its provider: in the declaration, an environment variable, the setup
-    registry or a file of the host (plan D4). *)
+    A host Agent_core Runtime sends with the credential that the operator
+    declared for its provider: in the declaration, an environment variable,
+    the setup registry or a file of the host (plan D4). A person's HTTP
+    provider key account sends with the person's own key file
+    ({!Runtime_api_key_file}), never carrying operator credentials from the
+    template. *)
 
-(** The provider configuration of an Agent_core Runtime, its credential
-    included. The runtime table holds this, so a reader of the table cannot
-    send with the credential. *)
+(** The provider configuration of an Agent_core Runtime, its credential or
+    person-account binding included. The runtime table holds this, so a reader
+    of the table cannot send with the credential. *)
 type api_sealed
 
-(** Seals a configuration. The seal keeps a reader of the runtime table from
-    the credential. It does not vouch for where the configuration came from:
-    any caller seals any configuration. *)
+(** Seals a host/operator configuration. The seal keeps a reader of the
+    runtime table from the credential. It does not vouch for where the
+    configuration came from: any caller seals any configuration. *)
 val seal_api : Llm_provider.Provider_config.t -> api_sealed
+
+(** Seals an HTTP provider template configuration for a person's API key
+    account [provider_account_id]. Strips [api_key], [headers], and any
+    refreshable [credential_source] at seal time so operator credentials and
+    headers never follow into person accounts (plan D4). *)
+val seal_person_api
+  :  provider_account_id:Authz_types.Provider_account_id.t
+  -> Llm_provider.Provider_config.t
+  -> api_sealed
+
+(** Whether [api_sealed] is sealed for a person's API key account rather than a
+    host/operator account. *)
+val is_person_api : api_sealed -> bool
 
 (** The configuration without its credential: [api_key] and [headers] are
     empty. A reader takes the capabilities, the shape of a request and the
     endpoint from it. *)
 val api_declaration : api_sealed -> Llm_provider.Provider_config.t
 
-(** The configuration to send with, by {!authorize_host} [Api_provider]. *)
+(** Authorizes [api_sealed] for a specific [request]. A host configuration
+    requires a single-user process ({!authorize_host} [Api_provider]). A person
+    configuration requires [Keeper_turn] or [Own_account] via {!Authz_zone.read},
+    verifies owner, active principal, account availability and key-account kind,
+    reads the current-generation key file ({!Runtime_api_key_file.read}), and
+    injects the person's key and wire-default headers into the template. *)
+val authorize_api_for : request -> api_sealed -> (Llm_provider.Provider_config.t, refusal) result
+
+(** The configuration to send with, by {!authorize_host} [Api_provider] (for
+    host-only callers). Refuses person-owned configurations via
+    {!Operator_call}. *)
 val authorize_api : api_sealed -> (Llm_provider.Provider_config.t, refusal) result
 
 (** The binding identity of the configuration. It names the credential by a

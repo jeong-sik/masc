@@ -20,7 +20,7 @@ let counts (m : D.preset_manifest) =
 let failed_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
 let caution_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
 
-let unreadable_only_line = "읽을 수 있는 프리셋이 없습니다 — 아래 줄이 이유입니다"
+let unreadable_only_line = "읽을 수 있는 프리셋이 없습니다 · 아래 줄이 이유입니다"
 
 let listing_lines (snapshot : D.presets_snapshot) =
   let presets =
@@ -30,27 +30,27 @@ let listing_lines (snapshot : D.presets_snapshot) =
        when the fix is to look at why the manifest is unreadable. *)
     | [] when snapshot.D.pss_unreadable <> [] -> [ unreadable_only_line ]
     | [] ->
-      [ "no presets yet — /preset save <name> [description] snapshots the live state" ]
+      [ "no presets yet · /preset save <name> [description] snapshots the live state" ]
     | presets ->
       Printf.sprintf "presets (%d):" (List.length presets)
       :: List.map
            (fun (m : D.preset_manifest) ->
              let description =
-               if String.equal m.D.pm_description "" then "" else " — " ^ m.D.pm_description
+               if String.equal m.D.pm_description "" then "" else " · " ^ m.D.pm_description
              in
              Printf.sprintf "  %s  %s%s  (%s)" m.D.pm_name (counts m) description m.D.pm_created_at)
            presets
   in
   let unreadable =
     List.map
-      (fun (name, reason) -> Printf.sprintf "  %s %s — %s" failed_mark name reason)
+      (fun (name, reason) -> Printf.sprintf "  %s %s · %s" failed_mark name reason)
       snapshot.D.pss_unreadable
   in
   presets @ unreadable
 ;;
 
 let saved_line (m : D.preset_manifest) =
-  Printf.sprintf "saved preset %s — %s" m.D.pm_name (counts m)
+  Printf.sprintf "saved preset %s · %s" m.D.pm_name (counts m)
 ;;
 
 let text ~ko korean english = if ko then korean else english
@@ -88,13 +88,13 @@ let runtime_rows ~ko = function
     @ (match commit.D.prc_commit.Runtime.Config_commit_wire.durability with
        | Runtime.Durable -> []
        | Runtime.Durability_unconfirmed { detail } ->
-         [ caution ("  " ^ caution_mark ^ text ~ko " 적용됨 · 디스크 저장 완료 보고 안 됨 — " " Applied; disk durability not reported — " ^ detail)
+         [ caution ("  " ^ caution_mark ^ text ~ko " 적용됨 · 디스크 저장 완료 보고 안 됨 · " " Applied; disk durability not reported · " ^ detail)
          ; caution (text ~ko "    다시 복원하기 전 저장소를 확인하세요. 재복원은 이전 백업을 덮어씁니다."
              "    Check storage before restoring again; another restore replaces the backup.")
          ])
     @ List.map
         (function Runtime.Config_lock_release_unconfirmed detail ->
-          caution ("  " ^ caution_mark ^ text ~ko " 런타임 잠금 해제 보고 안 됨 — " " Runtime lock release not reported — " ^ detail))
+          caution ("  " ^ caution_mark ^ text ~ko " 런타임 잠금 해제 보고 안 됨 · " " Runtime lock release not reported · " ^ detail))
         commit.D.prc_commit.Runtime.Config_commit_wire.lock_warnings
     @ (match commit.D.prc_registry with
        | D.Preset_registry_applied D.Preset_registry_runtime_bindings ->
@@ -104,9 +104,9 @@ let runtime_rows ~ko = function
        | D.Preset_registry_unpublished ->
          [ caution ("  " ^ caution_mark ^ text ~ko " 정확 출력 레인 · 게시되지 않음, 재시작 필요" " Exact lanes · unpublished; restart required") ]
        | D.Preset_registry_kept reason ->
-         [ caution ("  " ^ caution_mark ^ text ~ko " 정확 출력 레인 · 이전 목록 유지, 다음 시작에 파일을 게시할 수 없음 — "
-             " Exact lanes · previous registry retained; committed file cannot publish at next start — " ^ reason) ])
-  | D.Preset_runtime_failed reason -> [ failure (text ~ko "런타임 · 실패 — " "Runtime · failed — " ^ reason) ]
+         [ caution ("  " ^ caution_mark ^ text ~ko " 정확 출력 레인 · 이전 목록 유지, 다음 시작에 파일을 게시할 수 없음 · "
+             " Exact lanes · previous registry retained; committed file cannot publish at next start · " ^ reason) ])
+  | D.Preset_runtime_failed reason -> [ failure (text ~ko "런타임 · 실패 · " "Runtime · failed · " ^ reason) ]
 ;;
 
 let default_prompt_summary ~ko = function
@@ -295,11 +295,11 @@ let detail_rows ~ko ~(selected : D.preset_manifest option)
     (* A failed refresh keeps the contents it read last, under a line that
        says they are the last read. *)
     | Masc_tui_fetched.Stale (d, Detail_read_failed reason) ->
-      ([ plain ""; caution (text ~ko "새로고침 실패 · 마지막으로 읽은 내용 — " "Refresh failed · last read contents — " ^ reason) ]
+      ([ plain ""; caution (text ~ko "새로고침 실패 · 마지막으로 읽은 내용 · " "Refresh failed · last read contents · " ^ reason) ]
        @ comparison_rows ~ko d, saved_contents_rows ~ko d)
     | Masc_tui_fetched.Stale (d, Detail_kept_back notice) ->
       ([ plain ""; caution notice ] @ comparison_rows ~ko d, saved_contents_rows ~ko d)
-    | Masc_tui_fetched.Failed (Detail_read_failed reason) -> [ plain ""; failure (text ~ko "내용을 읽지 못했습니다 — " "Could not read contents — " ^ reason) ], []
+    | Masc_tui_fetched.Failed (Detail_read_failed reason) -> [ plain ""; failure (text ~ko "내용을 읽지 못했습니다 · " "Could not read contents · " ^ reason) ], []
     | Masc_tui_fetched.Failed (Detail_kept_back notice) -> [ plain ""; failure notice ], []
     | Masc_tui_fetched.Absent -> [], []
   in

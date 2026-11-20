@@ -183,25 +183,25 @@ let empty_title ~(connection : Masc_tui_types.connection_status) source
   let label = Live.source_label source in
   match live with
   | Live.Failed detail ->
-      Printf.sprintf " %s — could not read the machine: %s" label detail
-  | Live.Kept_back notice -> Printf.sprintf " %s — %s" label notice
+      Printf.sprintf " %s · could not read the machine: %s" label detail
+  | Live.Kept_back notice -> Printf.sprintf " %s · %s" label notice
   | Live.Unread -> (
     match connection with
     | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
-        Printf.sprintf " %s — waiting for live screen" label
+        Printf.sprintf " %s · waiting for live screen" label
     | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
       | Masc_tui_types.Booting | Masc_tui_types.Account_server _) as status ->
-        Printf.sprintf " %s — no frame: the server is %s." label
+        Printf.sprintf " %s · no frame: the server is %s." label
           (Masc_tui_types.connection_status_label status))
   | Live.Not_loaded | Live.Showing _ -> (
     match connection with
     | Masc_tui_types.Connected | Masc_tui_types.Degraded ->
-      Printf.sprintf " %s — no machine loaded. A keeper loads one with %s." label
+      Printf.sprintf " %s · no machine loaded. A keeper loads one with %s." label
         (load_tool source)
     | (Masc_tui_types.Disconnected | Masc_tui_types.Connecting
       | Masc_tui_types.Booting | Masc_tui_types.Account_server _) as status ->
       Printf.sprintf
-        " %s — no frame: the server is %s, so nothing could be asked for." label
+        " %s · no frame: the server is %s, so nothing could be asked for." label
         (Masc_tui_types.connection_status_label status))
 
 (* A title names the machine, then its facts of one rank -- mode, media,
@@ -696,7 +696,7 @@ let render_menu ~(write : string -> unit) ?status (state : Masc_tui_types.state)
   in
   line (fit_line cols (match state.msx_menu_mode with
     | Masc_tui_types.Boot_game -> menu_title
-    | Change_disk -> " MSX — change disk (no reboot)"));
+    | Change_disk -> " MSX · change disk (no reboot)"));
   let body_rows = max 0 (rows - 2) in
   (* The reason takes at most half the body, so the list keeps a row whenever
      the body has two and the highlighted row Enter acts on stays on screen. *)

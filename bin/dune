@@ -3324,6 +3324,7 @@
   masc_tui_operator_actions
   masc_tui_editor_forms
   masc_tui_refresh_settlement
+  masc_tui_composer_input
   masc_tui_keys
   masc_tui_key_ime
   masc_tui_file_icon

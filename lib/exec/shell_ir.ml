@@ -22,8 +22,7 @@ type arg =
       (** Command substitution: the child is a complete IR — pipes,
           sequences and nested substitutions use the same grammar. The
           child's stdout becomes exactly one argv element of the parent;
-          there is no word splitting or glob after it (RFC
-          shell-ir-typed-command-substitution §2.1, §2.3). *)
+          there is no word splitting or glob after it. *)
 
 and simple = {
   bin : Exec_program.t;
@@ -50,15 +49,14 @@ and t =
 
 (* Every stage's dispatch target replaced, recursively — including the
    stages a [Subst] child carries, which is what makes a substitution
-   inherit its parent's dispatch target (RFC
-   shell-ir-typed-command-substitution §2.3 item 1). The IR — not a
-   wrapper argument — is what execution reads ({!Exec_dispatch.dispatch}
-   has no sandbox parameter), so a caller that wants the same command run
-   under a different target must hand execution a rewritten IR. The
-   observation stage (RFC-0422) is that caller: it receives the IR the
-   keeper built for its effect target and must run it under the box's
-   target instead. A [Delegated] stage keeps its own target: it names a
-   masc tool call whose routing is the delegation's, not the box's. *)
+   inherit its parent's dispatch target. The IR — not a wrapper argument —
+   is what execution reads ({!Exec_dispatch.dispatch} has no sandbox
+   parameter), so a caller that wants the same command run under a
+   different target must hand execution a rewritten IR. The observation
+   stage is that caller: it receives the IR the keeper built for its effect
+   target and must run it under the box's target instead. A [Delegated]
+   stage keeps its own target: it names a masc tool call whose routing is
+   the delegation's, not the box's. *)
 let rec with_sandbox (target : Sandbox_target.t) (ir : t) : t =
   let rec arg_rewritten = function
     | Subst child -> Subst (with_sandbox target child)

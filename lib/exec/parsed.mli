@@ -14,9 +14,9 @@
     Three arms have no rule and so no producer. [`Control_flow] and
     [`Function_def] need grammar: [if] and [f()] lex as ordinary words, so a
     script using either is reported by whichever excluded lexeme it does
-    reach. [`Unknown_construct] is the refusal RFC execute-subset-dispositions
-    §7 holds open. All three are gaps in the rules, visible as gaps, rather
-    than tags that quietly mean something else. *)
+    reach. [`Unknown_construct] is held open for a construct no rule names.
+    All three are gaps in the rules, visible as gaps, rather than tags that
+    quietly mean something else. *)
 
 type reason_aborted =
   [ `Timeout_50ms | `Depth_limit | `Token_limit_50k ]

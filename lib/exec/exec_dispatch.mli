@@ -41,14 +41,13 @@ val dispatch_simple :
     to now. Every substitution
     child and every stage retains that same budget and epoch; elapsed time is
     subtracted once when deriving a process duration, not from an already
-    reduced child budget (RFC shell-ir-typed-command-substitution §2.3 item 4).
+    reduced child budget.
 
     A [Shell_ir.Subst] in the stage's args or env is evaluated first, by
     dispatching the child IR under the stage's own sandbox target and,
     when the child declares no cwd of its own, the stage's cwd; the
     child's stdout — trailing newlines stripped — becomes exactly one argv
-    element, with no word splitting or glob (RFC
-    shell-ir-typed-command-substitution §2.3). The child reads the same
+    element, with no word splitting or glob. The child reads the same
     [stdin_content] as the parent, and its stderr is streamed through
     [?on_output_chunk] before the parent's own. *)
 

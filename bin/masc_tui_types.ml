@@ -28162,12 +28162,14 @@ let keeper_message_saved_preparation_rows state live =
        | Loaded snapshot -> snapshot_rows snapshot
        | Retained {snapshot;recheck} ->
          let kept = saved ^ say "이전 관측 유지 · " "keeping the last observation · " in
+         (* A recheck under way over a held snapshot draws no row: the reading
+            slot says it (RFC tui-one-screen-grammar section 8). *)
          let note = match recheck with
-           | Details.Recheck_pending -> kept ^ say "재조회 대기" "recheck pending"
-           | Recheck_loading -> kept ^ say "재조회 중" "rechecking"
-           | Recheck_failed detail -> kept ^ say "재조회 실패 · " "recheck failed · " ^ detail
-           | Recheck_kept_back notice -> kept ^ notice in
-         row note :: snapshot_rows snapshot)
+           | Details.Recheck_pending -> Some (kept ^ say "재조회 대기" "recheck pending")
+           | Recheck_loading -> None
+           | Recheck_failed detail -> Some (kept ^ say "재조회 실패 · " "recheck failed · " ^ detail)
+           | Recheck_kept_back notice -> Some (kept ^ notice) in
+         Option.fold ~none:[] ~some:(fun note -> [row note]) note @ snapshot_rows snapshot)
   | Some _ | None -> []
 ;;
 

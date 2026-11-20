@@ -402,6 +402,8 @@ let act_text : Act.answer -> string = function
   | Refused Not_stopped -> "refused: not stopped"
   | Refused Snapshot_mismatch -> "refused: snapshot mismatch"
   | Refused Snapshot_unreadable -> "refused: snapshot unreadable"
+  | Refused Not_replaced -> "refused: not replaced"
+  | Refused Turn_log_unread -> "refused: turn log unread"
   | Refused (Act_unavailable (Store_stopped stop)) -> "refused: stopped: " ^ stop_text stop
   | Refused (Act_unavailable Keeper_retired) -> "refused: keeper not registered"
   | No_writers -> "no writers"

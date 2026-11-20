@@ -387,7 +387,10 @@ let await_commit fixture writers seq =
 let settled writers =
   match Writers.resume writers keeper_id with
   | Not_done Nothing_to_resume -> ()
-  | Done | Not_done (Not_stopped | Snapshot_mismatch | Snapshot_unreadable | Act_unavailable _) ->
+  | Done
+  | Not_done
+      ( Not_stopped | Snapshot_mismatch | Snapshot_unreadable | Not_replaced | Turn_log_unread
+      | Act_unavailable _ ) ->
     fail "the writer was not idle or asking"
 ;;
 

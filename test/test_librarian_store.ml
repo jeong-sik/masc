@@ -477,6 +477,9 @@ let cause_text : Log.cause -> string = function
   | Skip { hole = Unknown_span _ } -> "skip: an unknown span"
   | Skip { hole = Item_exceeds_window (_ : Masc.Librarian_unit.missing_at list) } ->
     "skip: the item fits no slot"
+  | Skip { hole = Turn_log_replaced _ } -> "skip: another turn log"
+  | Skip { hole = Position_lost { offset; length } } ->
+    Printf.sprintf "skip: offset %d of a file of %d bytes" offset length
   | Make_room { question = id; slot; trace } ->
     Printf.sprintf "made room for %s by %s on %s"
       (if Masc.Librarian_question_id.equal id question_id then "the question" else "another")

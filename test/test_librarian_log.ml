@@ -183,6 +183,15 @@ let content_missing = Log.Skip { hole = Content_missing missing }
 let unknown_span = Log.Skip { hole = Unknown_span { before = covered; after = reset_after } }
 let item_exceeds_window = Log.Skip { hole = Item_exceeds_window missing }
 
+let other_log =
+  match Turn_log.Log_id.of_string (String.make 32 'b') with
+  | Some id -> id
+  | None -> fail "the other log id is not 32 hexadecimal characters"
+;;
+
+let turn_log_replaced = Log.Skip { hole = Turn_log_replaced { from = turn_log; to_ = other_log } }
+let position_lost = Log.Skip { hole = Position_lost { offset = 4096; length = 512 } }
+
 let every_line =
   [ started
   ; committed ()
@@ -216,6 +225,8 @@ let every_line =
   ; committed ~cause:content_missing ()
   ; committed ~cause:unknown_span ()
   ; committed ~cause:item_exceeds_window ()
+  ; committed ~cause:turn_log_replaced ~covers_through:Log.Before_first ()
+  ; committed ~cause:position_lost ~covers_through:Log.Before_first ()
   ]
 ;;
 
@@ -380,7 +391,14 @@ let test_pinned_text () =
                    Item_exceeds_window
                      [ { line = 120; parts = [ Chat_bytes { from = 0; until = 64 } ] } ]
                })
-          ()))
+          ()));
+  check string "an operator's restart on another turn log"
+    (Printf.sprintf {|{"kind":"skip","hole":{"kind":"turn_log_replaced","from":"%s","to":"%s"}}|}
+       (String.make 32 'a') (String.make 32 'b'))
+    (part_text [ "cause" ] (committed ~cause:turn_log_replaced ()));
+  check string "an operator's restart at an offset the file does not hold"
+    {|{"kind":"skip","hole":{"kind":"position_lost","offset":4096,"length":512}}|}
+    (part_text [ "cause" ] (committed ~cause:position_lost ()))
 ;;
 
 let replace_once ~old ~by source =

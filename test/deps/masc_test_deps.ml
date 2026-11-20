@@ -1227,6 +1227,8 @@ let booted_memory_writer_view ~sw ~(config : Masc.Workspace.config) name =
        ( Masc.Librarian_machine.Not_stopped
        | Masc.Librarian_machine.Snapshot_mismatch
        | Masc.Librarian_machine.Snapshot_unreadable
+       | Masc.Librarian_machine.Not_replaced
+       | Masc.Librarian_machine.Turn_log_unread
        | Masc.Librarian_machine.Act_unavailable _ ) ->
      failwith "booted_memory_writer_view: the writer did not open its store");
   match Masc.Librarian_writers.view writers name with

@@ -81,8 +81,8 @@ end = struct
      namespacing e.g. keeper:keeper-test-98295-0. Bare colons, multiple colons,
      or leading colons are rejected.
 
-     Dots: keeper names carry them (edgar.a.poe), and RFC-0393 made a keeper name
-     its own id rather than an encoded string, so the dot reaches this validator
+     Dots: keeper names carry them (edgar.a.poe), and a keeper name is its own
+     id rather than an encoded string, so the dot reaches this validator
      directly. Board already widened to the same set in #8633 and called its
      pattern "a strict superset of both"; this closes the half that never followed.
      Path traversal stays blocked by the ".." check above, which this pattern

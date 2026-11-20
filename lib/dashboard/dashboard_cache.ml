@@ -1097,10 +1097,10 @@ let peek_payload key =
 let peek key =
   Option.map (fun entry -> json_of_cached_value entry.payload) (peek_entry key)
 
-(* RFC-0372 Phase 5 — a bounded compute is still not a yielding compute.
+(* A bounded compute is still not a yielding compute.
 
-   Phases 1-4 bounded what one dashboard read returns, how many stores it
-   merges, and how long it may run. None of that changes *where* it runs.
+   Bounding what one dashboard read returns, how many stores it merges, and
+   how long it may run does not change *where* it runs.
    Every HTTP connection is a fiber forked onto one domain
    ([server_bootstrap_http.ml]), and Eio fibers switch only at await points.
    [List.sort] and Yojson decoding contain none, so the domain stops for the
@@ -1131,8 +1131,8 @@ let peek key =
    (see the header note); the pool is the only thing the caller waits on.
 
    The weight is the one the caller declared with its {!Pool_work.t}; the
-   cache has none of its own (RFC-0474 L4b). Pool size then bounds how many
-   computes run at once, so no separate concurrency gate is added. *)
+   cache has none of its own. Pool size then bounds how many computes run at
+   once, so no separate concurrency gate is added. *)
 let offloaded_value produce () = Pool_work.submit produce
 
 (* One compute under the caller's window. A compute that finished as the
@@ -1244,8 +1244,8 @@ let set_default_clock clock =
 
 (* Deliberately generous: this is a backstop against unbounded compute, not a
    latency target. The measured worst case for the widest dashboard read was
-   ~12s before RFC-0372 Phase 1/2; surfaces that want a tighter bound pass
-   their own [timeout_sec]. *)
+   ~12s without a per-request entry ceiling; surfaces that want a tighter
+   bound pass their own [timeout_sec]. *)
 let default_compute_timeout_sec = 30.0
 
 let within_default_compute_window ~key work =

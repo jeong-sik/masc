@@ -378,7 +378,8 @@ let superseded_catalog () =
     | Error Time_codec.Invalid_rfc3339 -> fail "fixture date" in
   let count () = Option.bind state.resources_list (fun entries ->
     Masc_tui_artifact_checks.unchecked_on_day ~day ~entries
-      ~reports_complete:state.resources_reports_complete state.artifact_checks) in
+      ~reports_complete:state.resources_reports_complete state.artifact_checks
+    |> Result.to_option) in
   let first = Updates.begin_listing state in
   let second = Updates.begin_listing state in
   check bool "pending inventory cannot certify count" false state.resources_reports_complete;

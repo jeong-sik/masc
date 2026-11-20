@@ -48,7 +48,7 @@ let ready inventory = let reading, request = begin_read Fetched.initial in
   settle reading request (Ok inventory)
 let unknown = function Checks.Unknown _ -> true | Known _ | Kept_back _ -> false
 let count ?(complete=true) entries reading =
-  Checks.unchecked_on_day ~reports_complete:complete ~day ~entries reading
+  Checks.unchecked_on_day ~reports_complete:complete ~day ~entries reading |> Result.to_option
 
 let exact_revision () =
   let first = report "same bytes" and second = report ~number:2 "same bytes" in

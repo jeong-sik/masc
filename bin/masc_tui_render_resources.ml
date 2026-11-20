@@ -322,10 +322,15 @@ let render_resources (state : state) =
       | Some day ->
           Masc_tui_value.Local_day.text day ^ (if ko then " (이 장비 시각)" else " local") in
     let today = Catalog.local_day (Unix.gettimeofday ()) in
+    (* A count the TUI cannot establish draws its RFC tui-one-screen-grammar
+       6.4 mark; only a read that failed is coloured. *)
     let unchecked = match resource_unchecked_today state ~day:today with
-      | None -> Theme.muted () ^ (if ko then "모름" else "unknown")
-      | Some 0 -> Theme.ok () ^ "0"
-      | Some count -> Theme.warn () ^ string_of_int count in
+      | Error Masc_tui_value.Unknown.Read_failed ->
+          Theme.warn () ^ Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
+      | Error (Masc_tui_value.Unknown.Unread | Masc_tui_value.Unknown.Unreported as gap) ->
+          Theme.muted () ^ Masc_tui_value.Unknown.glyph gap
+      | Ok 0 -> Theme.ok () ^ "0"
+      | Ok count -> Theme.warn () ^ string_of_int count in
     let query = match Masc_tui_fetched.current state.artifact_checks with
       | Some (_, (Ready inventory | Stale (inventory, _))) ->
         Printf.sprintf

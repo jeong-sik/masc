@@ -854,6 +854,31 @@ let test_an_entry_drawn_again_returns_its_kept_rows () =
     ; "another origin", (fun () -> rows ~origin:Layout.Origin_bare ~inner_width:60 ~previous:None first)
     ; "rendered body lines", (fun () -> rows ~markdown:rendered ~inner_width:60 ~previous:None first) ]
 
+(* A streaming reply is a new entry on every arrival. Its body rows are
+   drawn again only from the lines it does not share with the previous
+   arrival, and at its last index, where a closing rail turns its corner. *)
+let test_a_growing_body_draws_only_its_new_rows () =
+  let lines count = String.concat "\n" (List.init count (Printf.sprintf "grown line %03d")) in
+  let arrival ?(turn_rail = Layout.Rail_closes) ?(style = Layout.Keeper) count =
+    { (entry style "alpha" "" (lines count)) with turn_rail } in
+  let draw entry = Layout.rows_of_entry ~origin:Layout.Origin_inline ~inner_width:60
+      ~previous:None entry in
+  let fresh entry = Layout.For_testing.with_no_kept_rows (fun () -> draw entry) in
+  ignore (draw (arrival 100));
+  List.iter (fun (label, next, most) ->
+    let before = Layout.For_testing.body_rows_built () in
+    let rows = draw next in
+    let drawn = Layout.For_testing.body_rows_built () - before in
+    check bool (Printf.sprintf "%s draws at most %d rows (drew %d)" label most drawn) true
+      (drawn <= most);
+    same_rows (label ^ " draws what a fresh layout draws") (fresh next) rows)
+    [ "ten more lines", arrival 110, 11
+    ; "one more line", arrival 111, 2
+    ; "the same lines again", arrival 111, 1
+    ; "fewer lines", arrival 90, 1
+    ; "another rail", arrival ~turn_rail:Layout.Rail_says 90, 90
+    ; "another style", arrival ~style:Layout.User 90, 90 ]
+
 (* A window's body positions name the rows it shows: each is the body row
    the entry's own rows give that physical row, for a newest entry cut by a
    gap, collapsed repeats and diagnostics after the body. *)
@@ -907,6 +932,8 @@ let () =
             test_a_text_laid_out_again_keeps_its_layout
         ; test_case "an entry drawn again returns its kept rows" `Quick
             test_an_entry_drawn_again_returns_its_kept_rows
+        ; test_case "a growing body draws only its new rows" `Quick
+            test_a_growing_body_draws_only_its_new_rows
         ; test_case "window positions name the rows shown" `Quick
             test_window_positions_name_the_rows_shown
         ; test_case "a text is split again after a frame without it" `Quick

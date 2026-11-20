@@ -2231,6 +2231,92 @@ let entry_body_cells ~origin ~inner_width entry =
   let gutter = origin_gutter ~origin ~previous:None entry in
   body_cells_after_gutter ~origin ~inner_width gutter
 
+(* What a body row is drawn from besides its index and its line: the
+   entry's style, rail, diagnostics, action, sender rows and gutter. Two
+   bodies of one shape draw the same row for the same line at the same index,
+   except at either body's last index, where a closing rail turns its corner.
+
+   A streaming reply is a new entry on every arrival, so {!kept_rows} never
+   holds it; laid out again it built every row of a 1MB reply on each frame.
+   Its body grows at the end, so the rows of the lines it shares with the
+   previous arrival are that arrival's rows. *)
+type body_shape = {
+  shape_style : style;
+  shape_turn_rail : turn_rail;
+  shape_diagnostics : bool;
+  shape_action : row_action;
+  shape_sender_rows : int;
+  shape_margin : string;
+  shape_rail_cells : int;
+  shape_label_at : int;
+  shape_clock_cells : int;
+  shape_indent : int;
+}
+
+let same_shape left right =
+  left.shape_style = right.shape_style
+  && left.shape_turn_rail = right.shape_turn_rail
+  && Bool.equal left.shape_diagnostics right.shape_diagnostics
+  && left.shape_action = right.shape_action
+  && Int.equal left.shape_sender_rows right.shape_sender_rows
+  && String.equal left.shape_margin right.shape_margin
+  && Int.equal left.shape_rail_cells right.shape_rail_cells
+  && Int.equal left.shape_label_at right.shape_label_at
+  && Int.equal left.shape_clock_cells right.shape_clock_cells
+  && Int.equal left.shape_indent right.shape_indent
+
+type kept_body = {
+  body_shape : body_shape;
+  body_lines : string array;
+  body_drawn : row array;
+}
+
+let kept_bodies_capacity = 4
+
+let kept_bodies_key : kept_body list ref Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> ref [])
+
+let body_rows_built = Atomic.make 0
+
+let shared_lines left right =
+  let limit = Int.min (Array.length left) (Array.length right) in
+  let rec count index =
+    if index < limit && String.equal left.(index) right.(index) then count (index + 1)
+    else index
+  in
+  count 0
+
+(* The rows of [lines], taking each row that a kept body of the same shape
+   drew for the same line at an index that is last in neither body. *)
+let body_rows_reusing ~shape lines draw =
+  let held = Domain.DLS.get kept_bodies_key in
+  let count = Array.length lines in
+  let reused =
+    List.fold_left (fun best kept ->
+      if not (same_shape kept.body_shape shape) then best
+      else
+        let usable =
+          Int.min (shared_lines kept.body_lines lines)
+            (Int.min (Array.length kept.body_lines - 1) (count - 1))
+        in
+        match best with
+        | Some (_, best_usable) when best_usable >= usable -> best
+        | Some _ | None -> if usable > 0 then Some (kept, usable) else best)
+      None !held
+  in
+  let drawn =
+    Array.init count (fun index ->
+      match reused with
+      | Some (kept, usable) when index < usable -> kept.body_drawn.(index)
+      | Some _ | None ->
+          Atomic.incr body_rows_built;
+          draw index lines.(index))
+  in
+  held :=
+    { body_shape = shape; body_lines = lines; body_drawn = drawn }
+    :: List.filteri (fun index _ -> index < kept_bodies_capacity - 1) !held;
+  Array.to_list drawn
+
 (* The rows of the entries recent frames drew, per domain. An entry's rows
    follow from the entry, its predecessor, the pane width, the origin shape
    and its body lines alone, and a cached Markdown render hands back the same
@@ -2376,8 +2462,14 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           in
           turn_rail_gutter piece
       in
-      body_chunks
-      |> List.mapi (fun index chunk ->
+      let shape =
+        { shape_style = entry.style; shape_turn_rail = entry.turn_rail;
+          shape_diagnostics = entry.diagnostics = []; shape_action = entry.action;
+          shape_sender_rows = sender_rows; shape_margin = margin;
+          shape_rail_cells = rail_cells; shape_label_at = label_at;
+          shape_clock_cells = clock_cells; shape_indent = indent }
+      in
+      body_rows_reusing ~shape (Array.of_list body_chunks) (fun index chunk ->
         { style = entry.style
         ; kind = (if index < sender_rows then Metadata Sender else Body)
         ; shade = shade_of_style entry.style
@@ -3244,10 +3336,13 @@ let folded_thought_summary ~mark ~width ~line_count ~body =
 
 module For_testing = struct
   let rows_built () = Atomic.get rows_built
+  let body_rows_built () = Atomic.get body_rows_built
 
   let with_no_kept_rows run =
     let held = Domain.DLS.get kept_rows_key in
-    let previous = !held in
+    let bodies = Domain.DLS.get kept_bodies_key in
+    let previous = !held and previous_bodies = !bodies in
     held := [];
-    Fun.protect ~finally:(fun () -> held := previous) run
+    bodies := [];
+    Fun.protect ~finally:(fun () -> held := previous; bodies := previous_bodies) run
 end

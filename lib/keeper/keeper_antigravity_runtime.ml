@@ -557,19 +557,30 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
        the final non-carried composition, and retain the mandatory workspace
        note after a system-prompt override. Hooks run once with the candidate
        ordinal; their output determines whether the vendor session can resume. *)
+    let raw_system_prompt = prepared.system_prompt in
     let prepared = { prepared with Host.system_prompt =
-      prepared.system_prompt ^ "\n\n" ^ native_workspace_note } in
+      raw_system_prompt ^ "\n\n" ^ native_workspace_note } in
     (* This CLI offers no replaceable configuration channel. A vendor session
-       that settled against another canonical history or system prompt is
+       that settled against another canonical history or base system prompt is
        superseded by a fresh one seeded from the canonical source; ephemeral
-       world context remains on the existing per-turn prompt path, and bridged
+       world context remains on the existing per-turn prompt path, bridged
        official-client turns are already witnessed by this session or handed
-       off on Resume via [Keeper_turn_bridge.prepend_resume_handoff]. *)
+       off on Resume via [Keeper_turn_bridge.prepend_resume_handoff], and
+       verified standing System observations refresh on Resume under an
+       explicit replacement notice. *)
     let snapshot_messages =
       List.filter Host.is_canonical_source_snapshot_message prepared.messages
     in
+    let system_guard =
+      Host.canonical_system_guard
+        ~raw_system_prompt
+        ~static_notes:[ native_workspace_note ]
+        ~composed_context:prepared.composed_context
+    in
     let snapshot_sha256 = Keeper_official_client_context_codec.canonical_source_sha256
-      ~system_prompt:prepared.system_prompt ~messages:snapshot_messages ~rest:[] in
+      ~system_prompt:system_guard.guard_system_prompt
+      ~messages:snapshot_messages
+      ~rest:system_guard.guard_rest in
     let admission_error reason =
       Keeper_official_client_session_refusal.core_error (Session_store.gate_context_refusal reason) in
     (* A Gate continuation is bound to its original vendor session: completion
@@ -687,7 +698,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
        delivery cannot prove these blocks remain in its current model input,
        so keep the frontier's held set empty and resend on every resume. *)
     let* prompt =
-      Host.framed_prompt_for_turn ?composed_context ~held:[]
+      Host.framed_prompt_for_turn ?composed_context
+        ?resume_system_notice:system_guard.resume_system_notice
+        ~held:[]
         ~delivery:(if is_resume then Host.Framed_resume
        else Host.Framed_start { started_at = Time_compat.now () })
         ~goal prepared

@@ -1189,6 +1189,7 @@ type observed_run =
 let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_blocks ?(accepts_image_input = false) ?model ?account_home ?workspace_root ?hooks ?tools ?on_official_client_tool_boundary ?on_tool_execution
     ?argument_source ?librarian_front
     ?model_input_projection ?on_model_input_window_observation ?on_carried_front
+    ?(system_prompt = "MUSE_FIXTURE_SYSTEM_PROMPT")
     ?(initial_messages = [ user_message "MUSE_FIXTURE_HISTORY" ])
     ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
     ?(admission_timeout_s = 20.) ?(idle_timeout_s = 20.)
@@ -1228,7 +1229,7 @@ let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_block
       ~workspace_root:(Option.value workspace_root ~default:(playground ~base_path))
       ~goal:"Call masc_probe once"
       ~goal_blocks
-      ~system_prompt:"MUSE_FIXTURE_SYSTEM_PROMPT"
+      ~system_prompt
       ~tools:(Option.value tools ~default:[ tool ])
       ~initial_messages
       ~model_input_projection
@@ -2592,6 +2593,75 @@ let test_bridged_official_turns_resume_without_resetting_session () =
       (String_util.contains_substring fresh_prompt "MUSE_BRIDGED_PRIOR_ASSISTANT");
     check bool "fresh Start seeds the new canonical history message" true
       (String_util.contains_substring fresh_prompt "MUSE_REAL_CHECKPOINT_ADDITION"))
+;;
+
+let test_standing_system_observations_resume_with_replacement_notice () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let run_assembled ~base_text ~observations =
+      let assembly =
+        Keeper_context_assembly.assemble
+          ~dynamic_context_partition:None
+          ~existing_extra_system_context:None
+          ~blocks:[]
+        |> Keeper_context_assembly.with_system_observations ~base_text ~observations
+      in
+      let system_prompt =
+        Keeper_context_assembly.effective_system_prompt ~base_text assembly
+      in
+      match
+        (run_turn_with
+           ~composed_context:(fun () -> Some assembly)
+           ~system_prompt
+           ~initial_messages:[]
+           ~base_path
+           ~tool
+           ())
+          .outcome.result
+      with
+      | Ok _ -> ()
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    let notice = Keeper_official_client_host.standing_system_replacement_notice in
+    run_assembled
+      ~base_text:"MUSE_STANDING_BASE_V1"
+      ~observations:
+        [ Keeper_context_assembly.Current_norms "MUSE_NORM_ALPHA"
+        ; Keeper_context_assembly.Active_goals "MUSE_GOAL_ONE"
+        ; Keeper_context_assembly.Direct_input_source "MUSE_OP_ONE"
+        ];
+    let start_prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+    check bool "Start prompt omits resume replacement notice" false
+      (String_util.contains_substring start_prompt notice);
+    run_assembled
+      ~base_text:"MUSE_STANDING_BASE_V1"
+      ~observations:
+        [ Keeper_context_assembly.Current_norms "MUSE_NORM_ALPHA"
+        ; Keeper_context_assembly.Direct_input_source "MUSE_OP_TWO"
+        ];
+    let resume_prompt = read_text (Filename.concat base_path "resume-prompt.txt") in
+    check bool "Resume prompt includes explicit replacement notice" true
+      (String_util.contains_substring resume_prompt notice);
+    check bool "Resume carries updated Direct_input_source" true
+      (String_util.contains_substring resume_prompt "MUSE_OP_TWO");
+    check bool "Resume omits removed Active_goals" false
+      (String_util.contains_substring resume_prompt "MUSE_GOAL_ONE");
+    run_assembled
+      ~base_text:"MUSE_STANDING_BASE_V1"
+      ~observations:[];
+    let empty_resume = read_text (Filename.concat base_path "resume-prompt.txt") in
+    check bool "empty standing snapshot retains explicit replacement notice" true
+      (String_util.contains_substring empty_resume notice);
+    run_assembled
+      ~base_text:"MUSE_STANDING_BASE_V2"
+      ~observations:[ Keeper_context_assembly.Direct_input_source "MUSE_OP_THREE" ];
+    run_assembled
+      ~base_text:"MUSE_STANDING_BASE_V2"
+      ~observations:[ Keeper_context_assembly.Goals_awaiting_proof "MUSE_PROOF_PENDING" ];
+    check (list string) "standing observation transitions follow exact Start/Resume contract"
+      [ "start"; "resume"; "resume"; "start"; "start" ]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
 let test_effective_system_override_starts_fresh () =
@@ -4308,6 +4378,8 @@ let () =
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
         ; test_case "bridged official turns resume without resetting session" `Quick
             test_bridged_official_turns_resume_without_resetting_session
+        ; test_case "standing system observations resume with explicit replacement notice" `Quick
+            test_standing_system_observations_resume_with_replacement_notice
         ; test_case "per-call usage survives missing terminal aggregate" `Quick test_call_usage_survives_missing_terminal_aggregate
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in

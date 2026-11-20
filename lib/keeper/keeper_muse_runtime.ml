@@ -1014,10 +1014,10 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     let* tool_outbox =
       Keeper_client_tool_outbox.load ~base_path ~keeper_name ~viewer:outbox_viewer
       |> Result.map_error internal_error in
+    let raw_system_prompt = prepared.system_prompt in
+    let static_system_notes = posture_notes @ Option.to_list native_workspace_context in
     let prepared = { prepared with
-      system_prompt = String.concat "\n\n"
-        (prepared.system_prompt :: posture_notes
-         @ Option.to_list native_workspace_context) } in
+      system_prompt = String.concat "\n\n" (raw_system_prompt :: static_system_notes) } in
     let tool_surface_sha256 = Session_store.tool_surface_sha256
       ~account_home
       ~account_revision:(Runtime_muse_home.account_revision prepared_home)
@@ -1052,17 +1052,24 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     let canonical_messages =
       List.filter Host.is_canonical_source_snapshot_message prepared.messages
     in
+    let system_guard =
+      Host.canonical_system_guard
+        ~raw_system_prompt
+        ~static_notes:static_system_notes
+        ~composed_context:prepared.composed_context
+    in
     let snapshot_sha256 =
       Keeper_official_client_context_codec.canonical_source_sha256
-        ~system_prompt:prepared.system_prompt
+        ~system_prompt:system_guard.guard_system_prompt
         ~messages:canonical_messages
         ~rest:
-          [ ( "model"
-            , match config.model with
-              | Some model -> `String model
-              | None -> `Null )
-          ; "workspace_root", `String workspace_root
-          ]
+          ([ ( "model"
+             , match config.model with
+               | Some model -> `String model
+               | None -> `Null )
+           ; "workspace_root", `String workspace_root
+           ]
+           @ system_guard.guard_rest)
     in
     let admission_error reason =
       Keeper_official_client_session_refusal.core_error (Session_store.gate_context_refusal reason)
@@ -1243,7 +1250,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
        cure oversized inputs. Session/history continuity remains independent. *)
     let held = [] in
     let* prompt =
-      Host.framed_prompt_for_turn ?composed_context ~held
+      Host.framed_prompt_for_turn ?composed_context
+        ?resume_system_notice:system_guard.resume_system_notice
+        ~held
         ~delivery:(if is_resume then Host.Framed_resume
        else Host.Framed_start { started_at = Time_compat.now () })
         ~goal prepared

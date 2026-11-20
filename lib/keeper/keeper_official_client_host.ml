@@ -34,12 +34,20 @@ type carried_summary = Keeper_official_client_context_projection.carried_summary
   ; resent_every_resume : bool
   }
 
+type canonical_system_guard =
+  Keeper_official_client_context_projection.canonical_system_guard =
+  { guard_system_prompt : string
+  ; guard_rest : (string * Yojson.Safe.t) list
+  ; resume_system_notice : string option
+  }
+
 include
   (Keeper_official_client_context_projection :
     module type of Keeper_official_client_context_projection
       with type composed_context := composed_context
        and type resume_delivery := resume_delivery
        and type carried_summary := carried_summary
+       and type canonical_system_guard := canonical_system_guard
 )
 
 let hook_error ~runtime_label ~hook_name ~stage detail =
@@ -1085,11 +1093,36 @@ let required_frame_label = function
   | Error message -> invalid_arg message
 ;;
 
-let framed_prompt_for_turn ?composed_context ~held ~delivery ~goal (prepared : prepared_turn) =
+let framed_prompt_for_turn ?composed_context ?resume_system_notice ~held ~delivery ~goal
+    (prepared : prepared_turn) =
   match delivery with
   | Framed_resume ->
-    Ok (resume_prompt ~goal ~held ~turn_observation:prepared.turn_observation
-             ?composed_context prepared.messages).prompt
+    (* When a replacement notice declares that omitted standing kinds have no
+       current observation, every current standing observation must appear in
+       this Resume snapshot even if a caller supplied non-empty [held]. *)
+    let effective_held =
+      match resume_system_notice with
+      | None -> held
+      | Some _ ->
+        List.filter
+          (fun (entry : Keeper_official_client_session_store.held_context) ->
+             not
+               (List.exists
+                  (fun block ->
+                     entry.context
+                     = Keeper_official_client_session_store.Context_block block)
+                  standing_system_blocks))
+          held
+    in
+    let prompt =
+      (resume_prompt ~goal ~held:effective_held
+         ~turn_observation:prepared.turn_observation ?composed_context prepared.messages)
+        .prompt
+    in
+    Ok
+      (match resume_system_notice with
+       | None -> prompt
+       | Some notice -> notice ^ Antigravity_input_frame.section_separator ^ prompt)
   | Framed_start { started_at } ->
     let history = render_start_messages ~started_at prepared.messages in
     Ok (start_prompt prepared

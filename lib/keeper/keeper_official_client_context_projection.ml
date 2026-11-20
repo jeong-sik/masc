@@ -286,6 +286,57 @@ let is_canonical_source_snapshot_message message =
   && Option.is_none (Keeper_turn_bridge.bridged_turn_ref_of_message message)
 ;;
 
+let standing_system_blocks =
+  Prompt_block_id.[ Constitution_amendments; Active_goals; Direct_input_source ]
+;;
+
+let supported_standing_system_observation = function
+  | Keeper_context_assembly.Current_norms _
+  | Keeper_context_assembly.Active_goals _
+  | Keeper_context_assembly.Direct_input_source _ -> true
+  | Keeper_context_assembly.Goals_awaiting_proof _ -> false
+;;
+
+let standing_system_replacement_notice =
+  let kinds =
+    String.concat ", " (List.map Prompt_block_id.to_string standing_system_blocks)
+  in
+  "Current host-issued System observation snapshot for: " ^ kinds ^ ".\n"
+  ^ "This snapshot replaces earlier System observations of those kinds. "
+  ^ "An omitted kind has no current System observation. "
+  ^ "Other current-turn observations remain independent."
+;;
+
+type canonical_system_guard =
+  { guard_system_prompt : string
+  ; guard_rest : (string * Yojson.Safe.t) list
+  ; resume_system_notice : string option
+  }
+
+let canonical_system_guard ~raw_system_prompt ~static_notes ~composed_context =
+  let join_notes base = String.concat "\n\n" (base :: static_notes) in
+  let partition =
+    Option.bind composed_context (fun (assembly : Keeper_context_assembly.t) ->
+      match assembly.system_prompt with
+      | Some issued
+        when String.equal issued.text raw_system_prompt
+             && List.for_all supported_standing_system_observation issued.observations ->
+        Some issued
+      | Some _ | None -> None)
+  in
+  match partition with
+  | Some issued ->
+    { guard_system_prompt = join_notes issued.base_text
+    ; guard_rest = [ "system_prompt_scope", `String "issued_base_with_resume_snapshot" ]
+    ; resume_system_notice = Some standing_system_replacement_notice
+    }
+  | None ->
+    { guard_system_prompt = join_notes raw_system_prompt
+    ; guard_rest = []
+    ; resume_system_notice = None
+    }
+;;
+
 module Session_store = Keeper_official_client_session_store
 
 type composed_context = Keeper_context_assembly.t

@@ -1967,8 +1967,8 @@ let test_tinker_inkling_2_small_binds_as_exact_target () =
         | Error _ -> Alcotest.fail "tinker/Inkling-2-Small must bind as an exact target"
         | Ok (_provider, model) ->
           Alcotest.(check (option int))
-            "the bound row carries the 64K window"
-            (Some 65_536)
+            "the bound row carries the 1M sampling window"
+            (Some 1_048_576)
             model.max_context_tokens))
 ;;
 

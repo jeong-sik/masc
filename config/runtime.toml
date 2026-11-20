@@ -584,7 +584,7 @@ path = "/api/tags"
 # fine-tuned LoRA sampler checkpoints
 # (`tinker://<run-id>:train:0/sampler_weights/<step>`). The AGENT_CORE catalog
 # has the provider row and the thinkingmachines/Inkling-2-Small row, so this
-# binding states no capability. The 65,536-token window, the reasoning ladder
+# binding states no capability. The 1,048,576-token window, the reasoning ladder
 # and the missing structured output all come from the row. A `tinker://`
 # checkpoint has no catalog row, so only the provider's preset answers for it.
 # Its model table carries its own capabilities block, which overrides the

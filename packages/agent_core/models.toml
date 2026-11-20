@@ -2445,14 +2445,26 @@ supports_native_streaming = true
 # https://tinker-docs.thinkingmachines.ai/tinker/compatible-apis/openai/).
 # Models & Pricing, checked 2026-11-07
 # (https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/):
-# 64K window on this base id (the 256K window is the separate id
-# thinkingmachines/Inkling-2-Small:peft:262144), 594B total / 17B active MoE,
-# Hybrid + Vision without audio. This id is priced in the training & sampling
-# table, "as of October 19, 2026": $0.30 prefill / $0.03 cached prefill /
-# $1.00 sample per M tokens (https://thinkingmachines.ai/tinker/pricing/).
+# 594B total / 17B active MoE, Hybrid + Vision without audio. This id is
+# priced in the training & sampling table, "as of October 19, 2026": $0.30
+# prefill / $0.03 cached prefill / $1.00 sample per M tokens
+# (https://thinkingmachines.ai/tinker/pricing/).
+# Window, checked 2026-11-21 on the same Models & Pricing page: the row is
+# named "Inkling 2 Small (64K/1M train/sample)", and the page says "A model
+# name with two lengths, such as 64K/1M train/sample, gives the training limit
+# first and the sampling limit second: Inkling 2 Small samples up to 1M tokens
+# on both training options." 64K is the training limit of this base id, and
+# 256K that of the separate id thinkingmachines/Inkling-2-Small:peft:262144.
+# Measured live 2026-11-21 (#53709):
+# - The sampling window is 1,048,576 tokens, counted as prompt plus
+#   max_tokens. The endpoint names the number: a prompt of 1,379,238 tokens
+#   with max_tokens 256 answered 400 with {"detail": "Prompt length plus
+#   max_tokens exceeds the model's context window: 1379238 prompt tokens + 256
+#   max_tokens > 1048576."}. A prompt of 981,955 tokens answered 200, and the
+#   reply returned a marker from the prompt's first line and one from its
+#   midpoint. On 2026-11-07 this id refused above 65,536 (#49654).
 # Measured live 2026-11-07 (#49654):
-# - The window is 65,536 tokens, counted as prompt plus max_tokens. Overflow
-#   is a 400 whose body is {"detail": "..."}.
+# - Overflow is a 400 whose body is {"detail": "..."}.
 # - Reasoning arrives on reasoning_content, streamed before the content, and
 #   is billed inside completion_tokens.
 # - An omitted reasoning_effort means 0.9 (documented), so thinking is on by
@@ -2480,7 +2492,7 @@ accepted_reasoning_efforts = ["minimal", "low", "medium", "high", "xhigh"]
 supports_reasoning = true
 thinking_control_format = "reasoning_effort_default_on"
 reasoning_streaming_format = "delta:reasoning_content"
-max_context_tokens = 65536
+max_context_tokens = 1048576
 input_per_million = 0.3
 output_per_million = 1.0
 cache_read_multiplier = 0.1

@@ -51,11 +51,11 @@ max-concurrent = 4
 
 Do not add a `[models.tinker-inkling-2-small.capabilities]` block that copies the row. A runtime `accepted-reasoning-efforts` replaces the catalog ladder, so a copied ladder that lists `none` brings back the value the row leaves out.
 
-The row declares the following. The behaviour was measured on 2026-11-07.
+The row declares the following. The behaviour was measured on 2026-11-07, and the window again on 2026-11-21.
 
 | Fact | Row | What a request sees |
 | --- | --- | --- |
-| Window | 65,536 tokens, prompt plus `max_tokens` | MASC sends an exact-output request to this row without counting its tokens. The pre-dispatch window check runs only for a row with a `serving_constraint`, and this row has none. The endpoint answers an overflow with HTTP 400 and `{"detail": ...}`, and the exact walk moves to the next slot. The 256K window belongs to the separate ID `thinkingmachines/Inkling-2-Small:peft:262144`, which has no catalog row. |
+| Window | 1,048,576 tokens, prompt plus `max_tokens` | MASC sends an exact-output request to this row without counting its tokens. The pre-dispatch window check runs only for a row with a `serving_constraint`, and this row has none. The endpoint answers an overflow with HTTP 400 and `{"detail": ...}`, and the exact walk moves to the next slot. The number is the sampling limit: on 2026-11-21 the endpoint's 400 named 1,048,576, and a prompt of 981,955 tokens answered 200. Models & Pricing names this ID `64K/1M train/sample`. 64K is its training limit, and 256K that of the separate ID `thinkingmachines/Inkling-2-Small:peft:262144`, which has no catalog row. |
 | Reasoning ladder | `minimal`, `low`, `medium`, `high`, `xhigh` | `none` is refused before dispatch. The endpoint accepts it, but the model still reasoned on long prompts. An omitted effort means 0.9. Reasoning arrives on `reasoning_content` and is billed as completion tokens. |
 | `response_format` | Neither JSON mode nor native schema | The endpoint answers 200 to `json_schema` and `json_object` and applies neither. A provider-schema request is refused before dispatch. |
 | Tool choice | Tool calls, `required`, parallel calls | A named `tool_choice` is refused before dispatch, because it is neither documented nor measured. |
@@ -77,7 +77,7 @@ When `save_weights_for_sampler` produces a checkpoint URI, bind it as a new mode
 
 The checkpoint is an exact-output slot only when runtime.toml states five keys. `max-context` may sit on the model, the binding or the provider table. A provider's `max-context` is the operator's value too: it counts, answers for every model of that provider, and is read before the model table's. The capabilities block states the other four: `accepted-reasoning-efforts`, `supports-response-format-json`, `supports-structured-output` and `max-output-tokens`. The rest of what an exact request reads describes the provider's API and follows the `openai_chat` preset unless stated. Of those, `thinking-support` on the model table and `thinking-control-format` and `supports-system-prompt` in the block have keys; the schema dialect, document input and the endpoint's behaviour without a reasoning control have none.
 
-The example below states all five and copies what the `thinkingmachines/Inkling-2-Small` row declares. That row declares no output ceiling; the example's 32,768 is the `max_tokens` the checkpoint's evaluation requests send. An exact request's `max_tokens` comes from the lane's `max_output_tokens`, and the declared `max-output-tokens` is used only to cut that value down. A lane without `max_output_tokens` sends no `max_tokens`, as above, so the example's Librarian lane states 32,768 as well. The lane's budget goes to every slot it lists, and the window counts it together with the prompt. A checkpoint's own behaviour was not measured. Declare the window of the base the run trained on: 65,536 for `thinkingmachines/Inkling-2-Small`, 262,144 for `thinkingmachines/Inkling-2-Small:peft:262144`. Restart MASC to load the row:
+The example below states all five. Its effort ladder, JSON mode and native schema copy what the `thinkingmachines/Inkling-2-Small` row declares. That row declares no output ceiling; the example's 32,768 is the `max_tokens` the checkpoint's evaluation requests send. An exact request's `max_tokens` comes from the lane's `max_output_tokens`, and the declared `max-output-tokens` is used only to cut that value down. A lane without `max_output_tokens` sends no `max_tokens`, as above, so the example's Librarian lane states 32,768 as well. The lane's budget goes to every slot it lists, and the window counts it together with the prompt. A checkpoint's own behaviour was not measured, its window included: the row's 1,048,576 was measured on the base ID only. Declare the training limit of the base the run trained on: 65,536 for `thinkingmachines/Inkling-2-Small`, 262,144 for `thinkingmachines/Inkling-2-Small:peft:262144`. Restart MASC to load the row:
 
 ```toml
 [models.tinker-inkling-ckpt]
@@ -142,7 +142,7 @@ The scripts in `scripts/tinker/librarian/` are one-shot commands; stop invoking 
 
 ## 4. Pricing & Model Selection Reference
 
-Training & sampling prices in USD per million tokens, "as of October 19, 2026" on the [Tinker pricing page](https://thinkingmachines.ai/tinker/pricing/). Context, size and type come from [Models & Pricing](https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/). Both were checked on 2026-11-07. Only `thinkingmachines/Inkling-2-Small` has an AGENT_CORE catalog row.
+Training & sampling prices in USD per million tokens, "as of October 19, 2026" on the [Tinker pricing page](https://thinkingmachines.ai/tinker/pricing/). Context, size and type come from [Models & Pricing](https://tinker-docs.thinkingmachines.ai/tinker/models/models_and_pricing/). Both were checked on 2026-11-07. The Context column is the training limit. On 2026-11-21 the page named the two Inkling 2 Small rows `64K/1M train/sample` and `256K/1M train/sample`: both sample up to 1M tokens. Only `thinkingmachines/Inkling-2-Small` has an AGENT_CORE catalog row.
 
 | Model ID | Total / active params | Type | Context | Prefill (cached) | Sample | Train |
 | --- | --- | --- | --- | --- | --- | --- |

@@ -3,11 +3,10 @@
 
    The arithmetic is the turn driver's (RFC keeper-context-window-in-tokens
    §13.4, §13.6): the range starts where
-   [Keeper_turn_driver_try_provider.choose_range_start] says -- a fitting
-   Librarian snapshot, else the Librarian's read position, else the pair's
-   front, else the turn start -- over the durable history with the wake line
-   appended as the newest atom. The Librarian's files and the front
-   are read live; R (tool schemas + keeper
+   [Keeper_turn_driver_try_provider.choose_range_start] says -- the Memory
+   writer's read end, else the pair's front, else the turn start -- over the
+   durable history with the wake line appended as the newest atom. The
+   writer's view and the front are read live; R (tool schemas + keeper
    instructions) and the pinned blocks (memory recall, dynamic context, ...)
    are taken from the turn records of completed turns on the same runtime,
    because a turn measures them with the encoder the composition uses and
@@ -172,8 +171,7 @@ let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~ac
             | Keeper_carried_front.Librarian_point_at_max_context )
         ; _
         }
-    | Keeper_turn_driver_try_provider.From_snapshot _
-    | Keeper_turn_driver_try_provider.From_read_position _
+    | Keeper_turn_driver_try_provider.From_covered _
     | Keeper_turn_driver_try_provider.Past_librarian_point _
     | Keeper_turn_driver_try_provider.From_turn_boundary _ -> None
   in
@@ -446,10 +444,10 @@ let read_range ~config ~keeper_name ~trace_id history =
   let wake, (_ : int) = wake_line () in
   let messages = history @ [ wake ] in
   let atom_count, digest_at = Runtime_model_input_tail_window.atom_opening_index messages in
-  (* The Librarian point every candidate of the turn starts from, as the
-     driver chooses it once per turn. Its notes are the turn's to log; a
-     reader here only looks. *)
-  let continuity, (_ : Keeper_turn_driver_try_provider.continuity_note list) =
+  (* The read end every candidate of the turn starts from, as the driver
+     reads it once per turn. Its note is the turn's to log; a reader here
+     only looks. *)
+  let continuity, (_ : Keeper_turn_driver_try_provider.continuity_note option) =
     Keeper_turn_driver_try_provider.read_keeper_continuity
       ~config ~keeper_name ~trace_id ~messages:history
   in
@@ -511,9 +509,9 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
     | Some _ | None -> None, Lazy.force reads.seed, None, None, None
   in
   let accepted =
-    match Keeper_turn_driver_try_provider.continuity_choice reads.continuity with
-    | Keeper_turn_driver_try_provider.Chose_a_librarian_point -> Lazy.force reads.seed
-    | Keeper_turn_driver_try_provider.Chose_no_point -> None
+    match reads.continuity with
+    | Keeper_turn_driver_try_provider.Covered _ -> Lazy.force reads.seed
+    | Keeper_turn_driver_try_provider.No_read_end -> None
   in
   { carried =
       carry_indexed

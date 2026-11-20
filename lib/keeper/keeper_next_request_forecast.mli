@@ -4,8 +4,8 @@
     RFC keeper-context-window-in-tokens §13.4 and §13.6, run forward: the
     range starts where {!Keeper_turn_driver_try_provider.choose_range_start}
     says, over the durable checkpoint with the autonomous wake line appended
-    as the newest atom. The Librarian point is the one the turn driver
-    chooses ({!Keeper_turn_driver_try_provider.read_keeper_continuity}); the
+    as the newest atom. The Librarian point is the Memory writer's read end
+    the turn driver reads ({!Keeper_turn_driver_try_provider.read_keeper_continuity}); the
     front beside it is the pair's ledger while the history holds it
     (process-local, absent after a restart until the first response
     observation), else the range the newest response-observed turn record on
@@ -204,7 +204,7 @@ type range_reads =
         (** Opening-digest lookup for [messages]. *)
   ; continuity : Keeper_turn_driver_try_provider.continuity
         (** {!Keeper_turn_driver_try_provider.read_keeper_continuity}; its
-            notes are not logged. *)
+            note is not logged. *)
   ; turn_start : Keeper_carried_front.turn_start
   ; this_turn_start : int option
         (** Where the next turn begins: after every atom of the history

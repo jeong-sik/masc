@@ -261,14 +261,14 @@ type carried_start_front =
           this turn's boundary or on the newest atom alone, and stays at the
           refused start when the history has no later atom
           (RFC-librarian-lifecycle §4.10). *)
-  | Librarian_snapshot of { absorbed_through : int; boundary_line : int }
-      (** The Librarian absorbed the history through [absorbed_through] and
-          wrote what the keeper was in the middle of; the range starts there
-          and carries that working state instead of the atoms it summarises. *)
+  | Librarian_working_state of { end_atom : int }
+      (** The Memory writer read the history through [end_atom]; the range
+          starts there and carries the working state the writer committed
+          instead of the atoms before it. *)
   | Librarian_progress of { end_atom : int }
-      (** The Librarian read the history through [end_atom] and no working
-          state fits it; the range starts there, and the atoms before it are
-          in the keeper's memory. *)
+      (** The Memory writer read the history through [end_atom]; the range
+          starts there, the atoms before it are in the keeper's memory, and
+          nothing stands in for them. *)
 
 type carried_start =
   { messages : Agent_core.Types.message list
@@ -280,24 +280,10 @@ type carried_start =
   ; accepted_front : Keeper_carried_front.seed option
   }
 
-type librarian_position = Keeper_turn_driver_try_provider.librarian_position
-
 let project_source source_projection messages =
   match source_projection with
   | None -> Ok messages
   | Some project -> project messages
-
-type librarian_front_reader =
-  Agent_core.Types.message list -> (librarian_position, Agent_core.Error.t) result
-
-(* Every official lane takes the reader as an optional argument and applies
-   it to the list it is about to cut; this turns "the caller named none" into
-   "no position for these messages" once, here, rather than in each lane. *)
-let read_librarian_front reader messages =
-  match reader with
-  | None -> Ok Keeper_turn_driver_try_provider.no_librarian_position
-  | Some read -> read messages
-;;
 
 let carried_start_front_to_string = function
   | Carried_seed source ->
@@ -306,35 +292,34 @@ let carried_start_front_to_string = function
   | Turn_start -> "turn_start"
   | Turn_start_unknown _ -> "turn_start_unknown"
   | Past_refused_start _ -> "past_refused_start"
-  (* The same word the Agent Core lane logs for this front
-     ([Keeper_carried_front.origin_to_string]), so one search finds both. *)
-  | Librarian_snapshot _ -> "librarian_snapshot"
+  (* The same word the Agent Core lane logs for a range that opens at the
+     writer's read end ([Keeper_carried_front.origin_to_string]), so one
+     search finds both. *)
   | Librarian_progress _ -> "librarian_progress"
+  | Librarian_working_state _ -> "librarian_progress_with_working_state"
 ;;
 
 let warn_if_sent_on_unknown_start ~keeper_name = function
   | Turn_start_unknown { reason } ->
     Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
-  | Carried_seed _ | Lane_cut | Turn_start | Past_refused_start _ | Librarian_snapshot _
+  | Carried_seed _ | Lane_cut | Turn_start | Past_refused_start _ | Librarian_working_state _
   | Librarian_progress _ -> ()
 ;;
 
 let continuity_observation_input ~trace_id ~continuity front =
   match front, continuity with
-  | Librarian_snapshot { absorbed_through; boundary_line }, _ ->
-    Keeper_continuity_observation.Summarized
-      { trace_id; end_atom = absorbed_through; boundary_line }
-  | Librarian_progress { end_atom }, _ -> Keeper_continuity_observation.Absorbed { trace_id; end_atom }
+  | (Librarian_working_state { end_atom } | Librarian_progress { end_atom }), _ ->
+    Keeper_continuity_observation.Absorbed { trace_id; end_atom }
   | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _), None ->
     Keeper_continuity_observation.Not_applied
-  | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _), Some chosen ->
-    (match Keeper_turn_driver_try_provider.continuity_choice chosen with
-     | Keeper_turn_driver_try_provider.Chose_no_point ->
-       Keeper_continuity_observation.Without_snapshot
-     | Keeper_turn_driver_try_provider.Chose_a_librarian_point ->
-       (* The turn chose a Librarian point and this request did not start
-          there: the seed or the lane's own cut sat past it. *)
-       Keeper_continuity_observation.Not_applied)
+  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _)
+    , Some Keeper_turn_driver_try_provider.No_read_end ) ->
+    Keeper_continuity_observation.Without_snapshot
+  | ( (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _)
+    , Some (Keeper_turn_driver_try_provider.Covered _) ) ->
+    (* The turn has a read end and this request did not start there: the
+       seed or the lane's own cut sat past it. *)
+    Keeper_continuity_observation.Not_applied
 ;;
 
 (* Where a start seed begins (RFC keeper-context-window-in-tokens §10.4). The
@@ -376,7 +361,6 @@ type range_plan =
   | Absorbed_through of
       { first_atom : int
       ; absorbed_through : int
-      ; boundary_line : int
       ; working_state : string
       }
 
@@ -480,10 +464,8 @@ let carried_start_range_on_source
      lane cut past it is already later. *)
   let librarian_end_atom =
     match librarian_front with
-    | Keeper_turn_driver_try_provider.Librarian_snapshot
-        (snapshot : Librarian_continuity_snapshot.t) -> Some snapshot.end_atom
-    | Keeper_turn_driver_try_provider.Librarian_progress { end_atom } -> Some end_atom
-    | Keeper_turn_driver_try_provider.No_position -> None
+    | Keeper_turn_driver_try_provider.Covered { end_atom; working_state = _ } -> Some end_atom
+    | Keeper_turn_driver_try_provider.No_read_end -> None
   in
   let refused_first_atom =
     match seed_read.Keeper_carried_front.refused_start with
@@ -550,45 +532,44 @@ let carried_start_range_on_source
   let plan =
     match past_refused_start, librarian_front with
     | Some (first_atom, front), _ -> Plain (first_atom, front)
-    | None, Keeper_turn_driver_try_provider.Librarian_snapshot
-        (snapshot : Librarian_continuity_snapshot.t)
-      when snapshot.end_atom >= librarian_must_reach ->
-      (* Without an accepted empty boundary, keep the newest atom so a
-         snapshot alone cannot remove the turn being answered. A provider-
-         accepted empty range keeps its witnessed end instead: the official
-         client receives the current goal separately. *)
-      Absorbed_through
-        { first_atom =
-            librarian_first_atom snapshot.end_atom
-        ; absorbed_through = snapshot.end_atom
-        ; boundary_line = snapshot.end_boundary_line
-        ; working_state = Keeper_turn_driver_try_provider.working_state_text snapshot
-        }
-    | None, Keeper_turn_driver_try_provider.Librarian_progress { end_atom }
+    | ( None
+      , Keeper_turn_driver_try_provider.Covered
+          { end_atom; working_state = Some working_state } )
       when end_atom >= librarian_must_reach ->
-      (* The Librarian read through [end_atom] and no working state fits: the
-         atoms before it are in the keeper's memory and nothing stands in for
-         them, as on the Agent Core lane
+      (* Without an accepted empty boundary, keep the newest atom so a
+         working state alone cannot remove the turn being answered. A
+         provider-accepted empty range keeps its witnessed end instead: the
+         official client receives the current goal separately. *)
+      Absorbed_through
+        { first_atom = librarian_first_atom end_atom
+        ; absorbed_through = end_atom
+        ; working_state = Keeper_turn_driver_try_provider.working_state_text working_state
+        }
+    | None, Keeper_turn_driver_try_provider.Covered { end_atom; working_state = None }
+      when end_atom >= librarian_must_reach ->
+      (* The writer read through [end_atom] and committed no working state:
+         the atoms before it are in the keeper's memory and nothing stands
+         in for them, as on the Agent Core lane
          ([Keeper_carried_front.Librarian_progress]). Keep the newest atom
          unless an accepted empty boundary already permits omitting it. *)
       Plain
         ( librarian_first_atom end_atom
         , Librarian_progress { end_atom } )
-    | None, ( Keeper_turn_driver_try_provider.Librarian_snapshot _
-            | Keeper_turn_driver_try_provider.Librarian_progress _
-            | Keeper_turn_driver_try_provider.No_position ) ->
+    | ( None
+      , ( Keeper_turn_driver_try_provider.Covered _
+        | Keeper_turn_driver_try_provider.No_read_end ) ) ->
       let first_atom, front = seed_or_lane in
       Plain (first_atom, front)
   in
   let carried_messages, first_atom, front =
     match plan with
-    | Absorbed_through { first_atom; absorbed_through; boundary_line; working_state } ->
+    | Absorbed_through { first_atom; absorbed_through; working_state } ->
       (* The working state stands in front of the range, in the same System
          place this lane puts every other piece of context it composes; see
          [working_state_message] for what that place is on each client. *)
       ( working_state_message working_state :: messages
       , first_atom
-      , Librarian_snapshot { absorbed_through; boundary_line } )
+      , Librarian_working_state { end_atom = absorbed_through } )
     | Plain (first_atom, front) -> messages, first_atom, front
   in
   (* The cut is the same for every front. The window's omission preamble
@@ -623,7 +604,7 @@ let carried_start_range_on_source
    | Plain
        ( _
        , ( Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
-         | Librarian_snapshot _ | Librarian_progress _ ) ) -> ());
+         | Librarian_working_state _ | Librarian_progress _ ) ) -> ());
   Log.Keeper.info
     ~keeper_name
     "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
@@ -765,14 +746,14 @@ let working_state_left_out_detail = function
 
 let carries_working_state (windowed : windowed_range) =
   match windowed.carried.front with
-  | Librarian_snapshot _ -> true
+  | Librarian_working_state _ -> true
   | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
   | Librarian_progress _ -> false
 ;;
 
 (* A zero-width range can already be the request the provider accepted.
    Its witness survived admission and the lane's own cut; retain that fact
-   when a Librarian snapshot replaces the range's presentation. A later
+   when the writer's working state replaces the range's presentation. A later
    capacity cut that removes a nonempty range has no such authority. *)
 let has_accepted_empty_range (carried : carried_start) =
   match carried.accepted_front with
@@ -791,7 +772,7 @@ let has_accepted_empty_range (carried : carried_start) =
    gap the lane's own cut exists to keep out of the range. So the range is
    composed with it first; when that window kept every atom of the range, it
    goes. Otherwise the same position is composed alone
-   ([Librarian_progress] at the snapshot's end: the atoms before it are in
+   ([Librarian_progress] at the read end: the atoms before it are in
    the keeper's memory, and nothing stands in for them), and the working
    state goes only if the window kept as many atoms with it as without it
    and at least the newest one. An explicitly accepted empty range also
@@ -806,14 +787,14 @@ let has_accepted_empty_range (carried : carried_start) =
    of that composition. *)
 let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
   match librarian_front with
-  | Keeper_turn_driver_try_provider.Librarian_progress _
-  | Keeper_turn_driver_try_provider.No_position -> compose librarian_front
-  | Keeper_turn_driver_try_provider.Librarian_snapshot
-      (snapshot : Librarian_continuity_snapshot.t) ->
+  | Keeper_turn_driver_try_provider.No_read_end
+  | Keeper_turn_driver_try_provider.Covered { working_state = None; end_atom = _ } ->
+    compose librarian_front
+  | Keeper_turn_driver_try_provider.Covered { end_atom; working_state = Some _ } ->
     let with_state = compose librarian_front in
     (match with_state with
      | Ok windowed when not (carries_working_state windowed) ->
-       (* The snapshot did not win the range -- the seed or the lane's own
+       (* The read end did not win the range -- the seed or the lane's own
           cut sat past it -- so nothing was pinned, and the position alone
           would be this same range. *)
        with_state
@@ -823,8 +804,7 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
        with_state
      | Ok _ | Error _ ->
        let* alone =
-         compose
-           (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=snapshot.end_atom})
+         compose (Keeper_turn_driver_try_provider.Covered { end_atom; working_state = None })
        in
        let leave_out reason =
          Log.Keeper.warn
@@ -834,7 +814,7 @@ let compose_librarian_range ~keeper_name ~runtime_id ~compose librarian_front =
             alone until it has read far enough for its summary to fit"
            runtime_id
            (working_state_left_out_label reason)
-           snapshot.end_atom
+           end_atom
            (match alone.atoms_kept with
             | 0 -> "none"
             | kept -> string_of_int (alone.carried.history_atom_count - kept))
@@ -970,7 +950,9 @@ let start_range_projection ~input_source ?argument_projection
   match input_source with
   | Keeper_request_source.Completion_review -> Ok messages
   | Keeper_request_source.Keeper_history _ ->
-  let* librarian_front = read_librarian_front librarian_front messages in
+  let librarian_front =
+    Option.value librarian_front ~default:Keeper_turn_driver_try_provider.No_read_end
+  in
   let plan = plan_arguments argument_projection ~measure_message_bytes messages in
   let source_messages = messages in
   let planned_messages = plan.messages in
@@ -1063,9 +1045,6 @@ let carried_history_projection ~input_source
   : Keeper_history_projection.t
   =
   fun history_messages ->
-  let* frozen = match input_source with
-    | Keeper_request_source.Completion_review -> Ok Keeper_turn_driver_try_provider.no_librarian_position
-    | Keeper_request_source.Keeper_history _ -> read_librarian_front librarian_front history_messages in
   let window = ref None and front = ref None in
   let* sent = start_range_projection
       ~input_source
@@ -1075,7 +1054,7 @@ let carried_history_projection ~input_source
     ?on_model_input_window_observation:(Option.map
       (fun _ observation -> window := Some observation) on_model_input_window_observation)
     ?carried_front_seed
-    ~librarian_front:(fun _ -> Ok frozen)
+    ?librarian_front
     ?on_carried_front:(Option.map
       (fun _ observed ~transmitted_bytes -> front := Some (observed,transmitted_bytes))
       on_carried_front)

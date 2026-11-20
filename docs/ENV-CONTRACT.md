@@ -192,7 +192,7 @@ Precedence:
 | `OLLAMA_API_KEY` | `(none)` | Env-only credential; presence admits the `ollama` provider. |
 | `ZAI_API_KEY` | `(none)` | Env-only credential; the `zai` provider (z.ai Web Search MCP, GLM Coding Plan) reads it when named in `provider`, `provider_order` or `fallbacks`. It is not in the default order. A `zai` search is three requests, each under `timeout_sec`. The `glm-coding` model provider reads the same variable. |
 
-Web artifact corpus (RFC-0383): every truncation offload stores the full
+Web artifact corpus: every truncation offload stores the full
 extraction as a content-addressed blob in the `Tool_blob_store`
 (`<base>/.masc/tool_blobs/<sha[0..1]>/<sha256>`) — the exact store
 `keeper_artifact_read` resolves (#28820) — and appends one

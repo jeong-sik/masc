@@ -30,7 +30,7 @@
 ```
 <system> keeper.md 본문(첫 마커 앞) </system>   ← 이 세계가 돌아가는 방식. keeper 전원이 글자 그대로 공유
 keeper.md ### worldview                         ← <world> 이 세계의 가치관. 운영자가 덮어쓴다
-keeper.md ### constitution                      ← <norms> keeper 가 쓴 규범 (RFC-0442). 조항이 없으면 빠진다
+keeper.md ### constitution                      ← <norms> keeper 가 쓴 규범. 조항이 없으면 빠진다
 keeper.md ### identity                          ← "당신은 <이름>이다"
 keeper.md ### workspace                         ← 샌드박스 루트
 <role> keeper TOML 의 instructions </role>

@@ -1,6 +1,6 @@
 # Keeper egress policy
 
-The operator runbook for `network_mode = "policy"` (RFC-0415).
+The operator runbook for `network_mode = "policy"`.
 
 `network_mode` used to be a switch. `none` gives a keeper no network, and
 `inherit` gives it the whole internet, so a keeper that needs one host gets

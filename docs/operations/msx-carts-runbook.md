@@ -1,7 +1,7 @@
 # MSX cartridges
 
 The operator runbook for the game images the workspace MSX machine
-(RFC-0439) can load.
+can load.
 
 ## Where they live
 

@@ -36,7 +36,7 @@ val render :
 (** Render the completed entry [identity] with source [text], or return its
     retained rows when every key field matches. *)
 
-val render_with_last_block :
+val render_keeping_blocks :
   'identity t ->
   theme_revision:int ->
   palette_generation:int ->
@@ -46,24 +46,22 @@ val render_with_last_block :
   text:string ->
   string list
 (** {!render} through a streaming renderer, which also retains where the
-    render's last content block starts, for {!completed_last_block}. Rows
-    retained by {!render} for the same key are rendered again once to learn
-    it. *)
+    render's blocks start, for {!completed_blocks}. Rows retained by {!render}
+    for the same key are rendered again once to learn them. *)
 
-val completed_last_block :
+val completed_blocks :
   'identity t ->
   theme_revision:int ->
   palette_generation:int ->
   width:int ->
   identity:'identity ->
   text:string ->
-  (int * int) option
-(** [Some (source_byte, row)] when {!render_with_last_block} retained exactly
-    [text] for [identity] with these visual fields: where the last block
-    holding more than blank lines starts, and its first row. The rows from
-    [row] are what [text]'s bytes from [source_byte] render to on their own.
-    [None] when nothing for [text] is retained, {!render} retained it, or
-    every line of [text] is blank. *)
+  (int * int) array option
+(** [Some blocks] when {!render_keeping_blocks} retained exactly [text] for
+    [identity] with these visual fields: every block's first source byte with
+    the first row it draws, as {!Masc_tui_markdown.streaming_render} gives
+    them. [None] when nothing for [text] is retained or {!render} retained
+    it. *)
 
 val render_growing :
   'identity t ->
@@ -81,20 +79,17 @@ val render_growing :
     snapshot renders from the previous suffix boundary. A non-prefix snapshot
     or any visual-key change starts again from the complete source. *)
 
-val growing_last_block :
+val growing_blocks :
   'identity t ->
   theme_revision:int ->
   palette_generation:int ->
   width:int ->
   identity:'identity ->
   text:string ->
-  (int * int) option
-(** [Some (source_byte, row)] when the growing entry [identity] last
-    rendered exactly [text] with these visual fields: where the last block
-    holding more than blank lines starts, and its first row. The rows from
-    [row] are what [text]'s bytes from [source_byte] render to on their own;
-    a suffix of blank lines leaves the block before it. [None] when nothing
-    for [text] is retained or every line is blank. *)
+  (int * int) array option
+(** [Some blocks] when the growing entry [identity] last rendered exactly
+    [text] with these visual fields: every block's first source byte with the
+    first row it draws. [None] when nothing for [text] is retained. *)
 
 type measurement = { height : int; nonblank_lines : int }
 

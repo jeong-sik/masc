@@ -112,7 +112,7 @@ type streaming_render = private {
   rows : string list;
   mutable_source_start : int;
   mutable_row_start : int;
-  last_content_block : (int * int) option;
+  blocks : (int * int) array;
 }
 (** One canonical render together with its earliest append-sensitive suffix.
 
@@ -125,12 +125,10 @@ type streaming_render = private {
     it also includes a table or header candidate before an incomplete terminal
     line that an append can still turn into its delimiter or next row.
 
-    [last_content_block] is the first byte of the last block whose first line
-    holds more than blanks, with the first row that block draws. Every line
-    outside a fence or table is its own block, so the bytes from there render
-    on their own to exactly the rows from there. A source ending in blank
-    lines has its mutable suffix in those blank lines and its last content
-    block before them. [None] when every block is blank. *)
+    [blocks] holds every block's first byte with the first row it draws, in
+    source order. Every line outside a fence or table is its own block. The
+    bytes of one block, without the newline that ends it when another block
+    follows, render on their own to exactly that block's rows. *)
 
 val render_streaming :
   palette:palette -> width:int -> string -> streaming_render

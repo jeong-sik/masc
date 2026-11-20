@@ -199,12 +199,15 @@ module For_testing : sig
   val search_job_bytes : int
   (** Body bytes of consecutive candidates one worker job renders; a larger
       entry is a job of its own. *)
-  val row_end_sources :
-    width:int -> Message_layout.entry ->
-    (int * Masc_tui_types.chat_source_position) list
-    * (int * (int * Masc_tui_types.chat_source_position) list) option
-  (** Draw an entry through the chat's Markdown as a frame does, then give
-      each row's last source byte from the whole body's render and, when the
-      render cache holds that render's open-suffix boundary, the row it
-      starts at and the rows of the open suffix rendered alone. *)
+  type source_reads = {
+    row_sources : (int * Masc_tui_types.chat_source_position) list;
+    row_end_sources : (int * Masc_tui_types.chat_source_position) list;
+    position_rows : (Masc_tui_types.chat_source_position * int) list;
+  }
+
+  val block_reads : width:int -> Message_layout.entry -> source_reads * source_reads option
+  (** Draw an entry through the chat's Markdown as a frame does, then read
+      every row's first and last source byte and every source byte's row,
+      once from the whole body's render and, when the render cache holds the
+      body's blocks, once more from the blocks alone. *)
 end

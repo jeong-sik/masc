@@ -7,13 +7,13 @@ module Completed = struct
     palette_generation : int;
   }
 
-  (* A renderer of rows alone does not say where the last block starts. *)
-  type last_block = Not_kept | Kept of (int * int) option
+  (* A renderer of rows alone does not say where its blocks start. *)
+  type blocks = Not_kept | Kept of (int * int) array
 
   type 'identity rendered = {
     key : 'identity key;
     rows : string list;
-    last_block : last_block;
+    blocks : blocks;
   }
 end
 
@@ -31,7 +31,7 @@ module Streaming = struct
     stable_source_len : int;
     stable_rows : string list;
     rows : string list;
-    last_block : (int * int) option;
+    blocks : (int * int) array;
   }
 end
 
@@ -123,17 +123,17 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~identity
       rendered.rows
   | Some _ | None ->
       let rows = renderer ~width text in
-      remember cache { key; rows; last_block = Not_kept };
+      remember cache { key; rows; blocks = Not_kept };
       rows
 
-let render_with_last_block cache ~theme_revision ~palette_generation ~width ~renderer
+let render_keeping_blocks cache ~theme_revision ~palette_generation ~width ~renderer
     ~identity ~text =
   let key : _ Completed.key =
     { identity; text; width; theme_revision; palette_generation }
   in
   let kept = match Masc_tui_lru.find cache.completed identity with
     | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
-        (match rendered.last_block with
+        (match rendered.blocks with
          | Completed.Kept _ -> Some rendered.rows
          | Completed.Not_kept -> None)
     | Some _ | None -> None in
@@ -141,19 +141,18 @@ let render_with_last_block cache ~theme_revision ~palette_generation ~width ~ren
   | Some rows -> rows
   | None ->
       let (rendered : Masc_tui_markdown.streaming_render) = renderer ~width text in
-      remember cache
-        { key; rows = rendered.rows; last_block = Kept rendered.last_content_block };
+      remember cache { key; rows = rendered.rows; blocks = Kept rendered.blocks };
       rendered.rows
 
-let completed_last_block cache ~theme_revision ~palette_generation ~width ~identity
+let completed_blocks cache ~theme_revision ~palette_generation ~width ~identity
     ~text =
   let key : _ Completed.key =
     { identity; text; width; theme_revision; palette_generation }
   in
   match Masc_tui_lru.find cache.completed identity with
   | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
-      (match rendered.last_block with
-       | Completed.Kept last_block -> last_block
+      (match rendered.blocks with
+       | Completed.Kept blocks -> Some blocks
        | Completed.Not_kept -> None)
   | Some _ | None -> None
 
@@ -171,6 +170,17 @@ let find_growing cache (key : _ Streaming.key) =
 let remember_growing cache (growing : _ Streaming.growing) =
   Masc_tui_lru.set cache.growing growing.key.identity growing
 
+(* Block starts in source order, each inside the source and the rows. *)
+let valid_blocks ~source_length ~row_count blocks =
+  let rec from index previous_source previous_row =
+    index >= Array.length blocks
+    || (let source_start, row_start = blocks.(index) in
+        source_start > previous_source && source_start <= source_length
+        && row_start >= previous_row && row_start <= row_count
+        && from (index + 1) source_start row_start)
+  in
+  from 0 (-1) 0
+
 let validate_streaming_render ~source_length
     (rendered : Masc_tui_markdown.streaming_render) =
   if
@@ -178,11 +188,8 @@ let validate_streaming_render ~source_length
     || rendered.mutable_source_start > source_length
     || rendered.mutable_row_start < 0
     || rendered.mutable_row_start > List.length rendered.rows
-    || (match rendered.last_content_block with
-        | None -> false
-        | Some (source_start, row_start) ->
-            source_start < 0 || source_start > source_length
-            || row_start < 0 || row_start > List.length rendered.rows)
+    || not (valid_blocks ~source_length ~row_count:(List.length rendered.rows)
+              rendered.blocks)
   then invalid_arg "Markdown streaming renderer returned an invalid boundary"
 
 let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
@@ -194,7 +201,7 @@ let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
       stable_source_len = rendered.mutable_source_start;
       stable_rows = take rendered.mutable_row_start rendered.rows;
       rows = rendered.rows;
-      last_block = rendered.last_content_block;
+      blocks = rendered.blocks;
     }
   in
   remember_growing cache growing;
@@ -219,13 +226,15 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       in
       let stable_rows = growing.stable_rows @ newly_stable_rows in
       let rows = stable_rows @ drop rendered.mutable_row_start rendered.rows in
-      (* A pending suffix of blank lines keeps the last block it followed:
-         that block is closed, so it still starts the same rows. *)
-      let last_block = match rendered.last_content_block with
-        | Some (source_start, row_start) ->
-            Some (growing.stable_source_len + source_start,
-              List.length growing.stable_rows + row_start)
-        | None -> growing.last_block in
+      (* The blocks before the pending text are closed; the pending render
+         numbers its own from zero. *)
+      let stable_row_count = List.length growing.stable_rows in
+      let blocks = Array.append
+        (Array.of_list (List.filter (fun (source_start, _) ->
+           source_start < growing.stable_source_len) (Array.to_list growing.blocks)))
+        (Array.map (fun (source_start, row_start) ->
+           growing.stable_source_len + source_start, stable_row_count + row_start)
+           rendered.blocks) in
       let updated : _ Streaming.growing =
         { key;
           text;
@@ -233,20 +242,20 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
             growing.stable_source_len + rendered.mutable_source_start;
           stable_rows;
           rows;
-          last_block;
+          blocks;
         }
       in
       remember_growing cache updated;
       rows
   | Some _ | None -> reset_growing cache ~key ~text ~renderer
 
-let growing_last_block cache ~theme_revision ~palette_generation ~width ~identity
+let growing_blocks cache ~theme_revision ~palette_generation ~width ~identity
     ~text =
   let key : _ Streaming.key =
     { identity; width; theme_revision; palette_generation }
   in
   match find_growing cache key with
-  | Some growing when String.equal growing.text text -> growing.last_block
+  | Some growing when String.equal growing.text text -> Some growing.blocks
   | Some _ | None -> None
 
 let row_extent rows =

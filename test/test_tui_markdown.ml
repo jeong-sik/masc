@@ -84,44 +84,39 @@ let check_stream_boundary label ~source_start ~row_start source =
   Alcotest.(check int) (label ^ " row boundary") row_start
     streamed.mutable_row_start
 
-let check_last_content_block label expected source =
+let check_blocks label expected source =
   let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
-  Alcotest.(check (option (pair int int))) label expected streamed.last_content_block
+  Alcotest.(check (list (pair int int))) label expected (Array.to_list streamed.blocks)
 
-(* A reply ending in a blank line has only that line in its mutable suffix;
-   the rows a reader sees last belong to the block before it. *)
-let test_last_content_block_skips_trailing_blank_lines () =
-  check_last_content_block "an empty source has none" None "";
-  check_last_content_block "blank lines alone have none" None "\n\n  \n";
-  check_last_content_block "a final line is the last block" (Some (6, 1)) "alpha\nbeta";
-  check_last_content_block "a trailing blank line leaves the line before it"
-    (Some (7, 2)) "alpha\n\nbeta\n\n";
-  check_last_content_block "a fence counts from its opening line"
-    (Some (7, 1)) "before\n```ocaml\nlet x = 1\n```\n\n";
-  check_last_content_block "an open fence holds its blank lines"
-    (Some (7, 1)) "before\n```ocaml\nlet x = 1\n\n\n"
+let test_blocks_start_where_their_lines_start () =
+  check_blocks "an empty source is one empty line" [0, 0] "";
+  check_blocks "each line is a block" [0, 0; 6, 1] "alpha\nbeta";
+  check_blocks "a fence is one block from its opening line" [0, 0; 7, 1]
+    "before\n```ocaml\nlet x = 1\n```"
 
-let last_block_corpus = String.concat "" [
+let block_corpus = String.concat "" [
   "# Heading\n\nA paragraph with **bold** and `code` that wraps past forty cells wide.\n\n";
   "- item one\n- item two\n  continued\n\n1. first\n2. second\n\n";
   "> quoted line\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n";
   "```ocaml\nlet x = 1\n\nlet y = 2\n```\n\n\nclosing words\n\n" ]
 
-(* Every prefix: the bytes from the last content block render alone to the
-   rows the whole source draws from that block's row. *)
-let test_last_content_block_renders_alone () =
-  for length = 0 to String.length last_block_corpus do
-    let source = String.sub last_block_corpus 0 length in
+(* Every prefix, every block: its bytes, without the newline before the next
+   block, render alone to the rows the whole source draws for it. *)
+let test_each_block_renders_alone () =
+  for length = 0 to String.length block_corpus do
+    let source = String.sub block_corpus 0 length in
     let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
-    match streamed.last_content_block with
-    | None -> ()
-    | Some (source_start, row_start) ->
-        let rec drop count rows = if count <= 0 then rows else match rows with
-          | [] -> [] | _ :: rest -> drop (count - 1) rest in
-        check_rows (Printf.sprintf "%d bytes from byte %d" length source_start)
-          (drop row_start streamed.rows)
-          (Markdown.render_streaming ~palette:tagged ~width:40
-             (String.sub source source_start (length - source_start))).rows
+    let blocks = streamed.blocks and rows = Array.of_list streamed.rows in
+    Array.iteri (fun block (source_start, row_start) ->
+      let source_end, row_end =
+        if block + 1 < Array.length blocks then
+          let next, next_row = blocks.(block + 1) in
+          (if Char.equal source.[next - 1] '\n' then next - 1 else next), next_row
+        else length, Array.length rows in
+      check_rows (Printf.sprintf "%d bytes, block %d at byte %d" length block source_start)
+        (Array.to_list (Array.sub rows row_start (row_end - row_start)))
+        (Markdown.render_streaming ~palette:tagged ~width:40
+           (String.sub source source_start (source_end - source_start))).rows) blocks
   done
 
 let test_streaming_boundary_keeps_only_closed_blocks () =
@@ -516,10 +511,10 @@ let () =
     ; ( "blocks"
       , [ Alcotest.test_case "streaming keeps only closed blocks" `Quick
             test_streaming_boundary_keeps_only_closed_blocks
-        ; Alcotest.test_case "last content block skips trailing blank lines" `Quick
-            test_last_content_block_skips_trailing_blank_lines
-        ; Alcotest.test_case "last content block renders alone" `Quick
-            test_last_content_block_renders_alone
+        ; Alcotest.test_case "blocks start where their lines start" `Quick
+            test_blocks_start_where_their_lines_start
+        ; Alcotest.test_case "each block renders alone" `Quick
+            test_each_block_renders_alone
         ; Alcotest.test_case "score snapshots preserve closed source" `Quick
             test_alphatex_sources_preserve_closed_snapshots
         ; Alcotest.test_case "diagram snapshots preserve closed source" `Quick

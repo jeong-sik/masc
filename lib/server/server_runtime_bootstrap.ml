@@ -997,7 +997,10 @@ let initialize_owner_state_blocking
           { detail = Runtime.strict_init_error_to_string error })
   in
   (match runtime_initialization with
-   | Ok Runtime.Initialized -> Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
+   | Ok Runtime.Initialized ->
+     if Runtime.is_multi_account ()
+     then Log.Server.info "Runtime initialized in multi-account mode (no shared default runtime)"
+     else Log.Server.info "Runtime default initialized: %s" (Runtime.get_default_runtime_id ())
    | Ok (Runtime.Initialized_degraded degradation) ->
      Log.Server.warn "Runtime initialized in degraded catalog mode: %s"
        (Runtime.startup_degradation_to_string degradation)

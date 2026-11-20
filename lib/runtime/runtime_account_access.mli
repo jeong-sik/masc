@@ -190,12 +190,21 @@ val publish_host_tool
   -> config_dir:string option
   -> (unit, string * string list) result
 
+(** The access this process published, if any. [None] before publication. *)
+val current : unit -> t option
+
 val is_multi_account : unit -> bool
 (** Whether this process has published {!Multi_account} access. Diagnostics use
     this to know when operator tokens are intentionally kept out of process
     environment variables; authorization decisions still read the published
     witness directly. *)
 
+(** Whether [path] lies under the workspace's [.masc/accounts] directory.
+    Returns [false] before publication. *)
+val is_person_home : string -> bool
+
+(** Whether [sealed] was built for a person's account ({!seal_person}). *)
+val is_person_sealed : _ sealed -> bool
 (** What a CLI starts for. *)
 type request =
   | Keeper_turn of

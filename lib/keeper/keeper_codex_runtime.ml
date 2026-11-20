@@ -232,7 +232,8 @@ let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_comple
 (* A late report stays with the CLI home selected for this turn, even if the
    provider row is rebound while the app-server is running. *)
 let record_usage_windows ~quota_scope report =
-  Runtime_provider_usage_window.record
+  if not (Runtime_provider_usage_window.is_person_or_multi_account_scope quota_scope)
+  then Runtime_provider_usage_window.record
     ~scope:quota_scope ~observed_at:(Time_compat.now ()) report
 ;;
 
@@ -243,6 +244,7 @@ let record_usage_windows ~quota_scope report =
    outlives this turn ({!Runtime_provider_usage_read.read_codex_after_spent_usage_refusal}),
    and the refused turn returns without waiting on it. *)
 let read_usage_after_quota_refusal ~keeper_name ~quota_scope ~clock ~cwd ~account config =
+  if Runtime_provider_usage_window.is_person_or_multi_account_scope quota_scope then () else
   match Runtime_provider_usage_read.read_codex_after_spent_usage_refusal
           ~clock ~cwd ~scope:quota_scope ~account config with
   | Runtime_provider_usage_read.Started | Runtime_provider_usage_read.Already_reading -> ()

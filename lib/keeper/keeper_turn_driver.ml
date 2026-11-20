@@ -840,7 +840,11 @@ type untried_progress =
    is logged where it is read; the walk reads only the quota window it may
    have written. *)
 let read_runtime_usage_after_account_refusal runtime =
-  match Runtime_provider_usage_read.http_read_of_runtime runtime with
+  if Runtime_account_access.is_multi_account ()
+     || Runtime_execution.is_person_execution runtime.Runtime_instance.execution
+  then ()
+  else
+    match Runtime_provider_usage_read.http_read_of_runtime runtime with
   | None -> ()
   | Some http ->
     let (_ : Runtime_provider_usage_read.account_refusal_outcome) =

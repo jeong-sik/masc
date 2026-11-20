@@ -351,7 +351,15 @@ val record : scope:Runtime_quota_window.scope -> observed_at:float -> report -> 
     This is how a provider that never reports a typed refusal (Antigravity
     answers a spent quota as turn text) still orders behind its siblings once
     its usage read says the quota is gone. A report never says a scope has
-    room: a window the table already holds stands until its own reset. *)
+    room: a window the table already holds stands until its own reset.
+
+    No-op in multi-account mode or for a person's account home scope
+    (RFC a-persons-keeper-runs-on-the-engine §6.5): person usage is never
+    added to the operator quota window table or durable usage history. *)
+
+val is_person_or_multi_account_scope : Runtime_quota_window.scope -> bool
+(** Whether [scope] belongs to a person's account home or the process runs
+    in multi-account mode, so operator usage tables/logs must not record it. *)
 
 val restore :
   scope:Runtime_quota_window.scope -> now:float -> (float * report) list -> unit

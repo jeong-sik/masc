@@ -1306,7 +1306,16 @@ let rest_scope ~scope ~coverage ~now held =
   | No_gating_window | Room_left -> ()
 ;;
 
+let is_person_or_multi_account_scope scope =
+  Runtime_account_access.is_multi_account ()
+  ||
+  match Runtime_quota_window.official_client_home scope with
+  | Some home -> Runtime_account_access.is_person_home home
+  | None -> false
+;;
+
 let record ~scope ~observed_at (report : report) =
+  if is_person_or_multi_account_scope scope then () else
   let shape = report_shape report.source in
   match shape, report.windows with
   | Sparse_update, [] -> ()

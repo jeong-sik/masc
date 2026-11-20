@@ -124,7 +124,16 @@ let read_frontmatter_cached path =
         with
         | exception Sys_error _ -> None
         | slice ->
-          let parsed = parse_frontmatter slice in
+          let parsed =
+            match parse_frontmatter slice with
+            | Ok _ as ok -> ok
+            | Error _ as err ->
+              if size > frontmatter_read_limit then
+                (match Fs_compat.load_file path with
+                 | full -> parse_frontmatter full
+                 | exception Sys_error _ -> err)
+              else err
+          in
           (match Unix.stat path with
            | { Unix.st_mtime = mtime2; st_size = size2; _ }
              when Float.equal mtime mtime2 && size = size2 ->

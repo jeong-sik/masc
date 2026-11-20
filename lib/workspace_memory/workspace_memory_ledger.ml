@@ -65,11 +65,6 @@ let corroboration_stage_to_string = function
   | Consolidated -> "consolidated"
   | Crystallized -> "crystallized"
 
-let stage_rank = function
-  | Observed -> 0
-  | Consolidated -> 1
-  | Crystallized -> 2
-
 type claim_provenance =
   { claim_id : string
   ; claim : string
@@ -82,7 +77,6 @@ type claim_provenance =
 type provenance_change =
   { provenance : claim_provenance
   ; prior_stage : corroboration_stage
-  ; preserved_stage : corroboration_stage
   ; prior_support_count : int
   ; vanished_keepers : string list
   }
@@ -697,11 +691,6 @@ let reconcile_detailed t keepers =
     |> List.filter_map (fun (claim_id, provenance) ->
          match String_map.find_opt claim_id prior_provenance with
          | Some prior when provenance.support_count < prior.support_count ->
-           let preserved_stage =
-             if stage_rank prior.stage > stage_rank provenance.stage
-             then prior.stage
-             else provenance.stage
-           in
            let vanished_keepers =
              match String_map.find_opt claim_id vanished_keepers_by_claim with
              | Some keepers -> String_set.elements keepers
@@ -710,7 +699,6 @@ let reconcile_detailed t keepers =
            Some
              { provenance
              ; prior_stage = prior.stage
-             ; preserved_stage
              ; prior_support_count = prior.support_count
              ; vanished_keepers
              }

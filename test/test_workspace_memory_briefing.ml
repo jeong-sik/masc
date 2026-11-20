@@ -252,6 +252,20 @@ let test_invalid_sources_and_render_failure_do_not_consume () =
       ~render:(fun _ -> Error "template unavailable") B.empty with
    | Error "template unavailable" -> () | _ -> Alcotest.fail "render failure hidden")
 
+let test_locked_update_round_trip_and_noop () = with_directory (fun directory ->
+  let a = source "a" "Initial published claim" in
+  let published = finish [a] "Initial summary" B.empty in
+  let saved =
+    get (B.update ~directory (fun _current -> Ok published))
+  in
+  expect_current [a] saved "Initial summary";
+  let loaded = get (B.load ~directory) in
+  Alcotest.(check bool) "reloaded state matches locked update" true
+    (Yojson.Safe.equal (B.to_json saved) (B.to_json loaded));
+  let noop = get (B.update ~directory (fun current -> Ok current)) in
+  Alcotest.(check bool) "no-op update preserves state" true
+    (Yojson.Safe.equal (B.to_json saved) (B.to_json noop)))
+
 let () = Alcotest.run "Workspace memory briefing"
   ["behavior", [
      Alcotest.test_case "one shared publication avoids repeated model work" `Quick test_shared_summary_reuse;
@@ -262,4 +276,5 @@ let () = Alcotest.run "Workspace memory briefing"
      Alcotest.test_case "no refresh persists obsolete pass cleanup" `Quick test_no_refresh_discards_obsolete_pass;
      Alcotest.test_case "strict storage and model output" `Quick test_strict_storage_and_output;
      Alcotest.test_case "actual refusal bisects without losing whole entries" `Quick test_actual_refusal_narrows_without_losing_entries;
+     Alcotest.test_case "locked update round-trip and no-op skip" `Quick test_locked_update_round_trip_and_noop;
      Alcotest.test_case "invalid source and render failure boundary" `Quick test_invalid_sources_and_render_failure_do_not_consume]]

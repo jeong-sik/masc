@@ -105,18 +105,27 @@ let observation_to_yojson = function
       | Failed failure -> ["status", `String "failed"; "failure", Typesafeai_client.failure_to_yojson failure]
     in `Assoc (fields @ ["elapsed_s", `Float elapsed_s; "request", request_json request])
 
-let permits_publication = function
-  | Checking _
-  | Complete
-      { result =
-          ( Judged { verdict = Needs_revision; _ }
-          | Invalid_answer _
-          | Failed _ )
-      ; _
-      } -> false
+type withholding_kind =
+  | Not_withheld
+  | Needs_revision
+  | Review_failed of string
+
+let withholding_kind = function
   | Skipped _
   | Complete { result = Judged { verdict = Faithful | Insufficient_evidence; _ }; _ } ->
-    true
+    Not_withheld
+  | Checking _ -> Review_failed "review incomplete"
+  | Complete { result = Judged { verdict = Needs_revision; _ }; _ } -> Needs_revision
+  | Complete { result = Invalid_answer { detail; _ }; _ } ->
+    Review_failed ("invalid review answer: " ^ detail)
+  | Complete { result = Failed failure; _ } ->
+    Review_failed
+      ("review failed: " ^ Yojson.Safe.to_string (Typesafeai_client.failure_to_yojson failure))
+
+let permits_publication obs =
+  match withholding_kind obs with
+  | Not_withheld -> true
+  | Needs_revision | Review_failed _ -> false
 
 let run ?(observe = fun _ -> ()) ~clock ~keeper_id ~input ~proposed () =
   let finish observation = observe observation; observation in

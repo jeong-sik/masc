@@ -254,9 +254,9 @@ let batch capture=capture.original_batch
 let input capture=capture.original_input
 let expected_revision capture=capture.revision
 let now capture=capture.parsing_now
-(* Schema 3: the preparation's substitutions carry the two turn-material slot
-   names, both empty. A schema 2 capture was prepared without them. *)
-let capture_schema=3
+(* Schema 4: working_context carries [withheld] separately from [unavailable]
+   (fail-closed hard cut over schema 3 captures prepared without it). *)
+let capture_schema=4
 let to_json capture = `Assoc ["schema",`Int capture_schema;"kind",`String "execution";
   "request_id",`String capture.id;"parent_part_id",`String capture.parent;"owner",owner_to_json capture.owner;
   "destination",Destination.to_json capture.destination;

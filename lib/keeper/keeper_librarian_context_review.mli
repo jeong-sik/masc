@@ -4,6 +4,15 @@ type verdict = Faithful | Needs_revision | Insufficient_evidence
 
 type observation
 val observation_to_yojson : observation -> Yojson.Safe.t
+type withholding_kind =
+  | Not_withheld
+  | Needs_revision
+  | Review_failed of string
+
+val withholding_kind : observation -> withholding_kind
+(** Classify whether publication is permitted, revised by review, or blocked
+    fail-closed due to an incomplete/invalid/failed review call. *)
+
 val permits_publication : observation -> bool
 (** Only {!Skipped} (missing policy, excluded keeper, or empty proposal) and an
     explicit {!Faithful} or {!Insufficient_evidence} verdict permit publication.

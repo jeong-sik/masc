@@ -35,6 +35,15 @@ let public_tool_help_schemas () =
    the calling fiber because it may yield through the registry mailbox. *)
 let run_blocking_resource_io f = Eio_unix.run_in_systhread ~label:"mcp-resource-io" f
 
+let run_blocking_resource_result f =
+  run_blocking_resource_io (fun () ->
+    try f () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | Sys_error detail -> Error (Mcp_error_code.Internal_error, detail)
+    | Unix.Unix_error (err, fn, arg) ->
+      Error (Mcp_error_code.Internal_error, Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err)))
+;;
+
 type resource_target =
   | Tool_help_index
   | Tool_help of string
@@ -136,7 +145,7 @@ let briefing_to_json = function
 (* Storage read/decode errors have no narrower variant in [Mcp_error_code.t]
    than [Internal_error] (unlike malformed URIs or unknown keepers, which use
    [Invalid_params]). *)
-let read_world_memory_claims_json ~briefing_template ~base_path =
+let rec read_world_memory_claims_json ?(attempt = 1) ~briefing_template ~base_path () =
   match Workspace_memory_ledger.observe_with_briefing_template ~briefing_template ~base_path with
   | Workspace_memory_ledger.Missing ->
     Ok
@@ -154,7 +163,10 @@ let read_world_memory_claims_json ~briefing_template ~base_path =
      | Ok ledger ->
        if not (String.equal (Workspace_memory_ledger.sha256 ledger) descriptor.ledger_sha256)
        then
-         Error (Mcp_error_code.Internal_error, "workspace ledger changed during the read")
+         if attempt < 2 then
+           read_world_memory_claims_json ~attempt:(attempt + 1) ~briefing_template ~base_path ()
+         else
+           Error (Mcp_error_code.Internal_error, "workspace ledger changed during the read")
        else
          let module String_map = Map.Make (String) in
          let add_member map id fact_ref =
@@ -211,15 +223,40 @@ let read_world_memory_claims_json ~briefing_template ~base_path =
              ]))
 ;;
 
-let read_world_memory_log_json ~base_path =
+let default_world_memory_log_limit = 100
+let max_world_memory_log_limit = 500
+
+let take_prefix_rev_rem n items =
+  let rec loop acc left = function
+    | [] -> List.rev acc, []
+    | rest when left <= 0 -> List.rev acc, rest
+    | item :: rest -> loop (item :: acc) (left - 1) rest
+  in
+  loop [] n items
+;;
+
+let read_world_memory_log_json ~since_seq ~limit ~base_path =
   let log_path = Workspace_memory_log.log_path ~base_path in
   match Workspace_memory_log.recover_file ~path:log_path with
   | Error err -> Error (Mcp_error_code.Internal_error, Workspace_memory_log.error_to_string err)
   | Ok report ->
+    let total_committed_changes = List.length report.committed_changes in
+    let filtered =
+      List.filter
+        (fun (entry : Workspace_memory_log.change_entry) -> entry.seq > since_seq)
+        report.committed_changes
+    in
+    let page_entries, remaining = take_prefix_rev_rem limit filtered in
+    let has_more = remaining <> [] in
+    let next_since_seq =
+      match List.rev page_entries with
+      | last :: _ -> last.seq
+      | [] -> since_seq
+    in
     let committed_changes =
       List.map
         (fun entry -> Workspace_memory_log.record_to_yojson (Workspace_memory_log.Change entry))
-        report.committed_changes
+        page_entries
     in
     let incomplete_batches =
       List.map
@@ -236,6 +273,11 @@ let read_world_memory_log_json ~base_path =
       (`Assoc
         [ "schema", `String "workspace.memory.log.v1"
         ; "last_committed_seq", `Int report.last_committed_seq
+        ; "since_seq", `Int since_seq
+        ; "limit", `Int limit
+        ; "total_committed_changes", `Int total_committed_changes
+        ; "has_more", `Bool has_more
+        ; "next_since_seq", `Int next_since_seq
         ; "committed_changes", `List committed_changes
         ; "incomplete_batches", `List incomplete_batches
         ; "aborted_batches", `List (List.map (fun id -> `String id) report.aborted_batches)
@@ -685,15 +727,20 @@ let handle_read_resource_eio state id params =
                 (Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing).effective
               in
               (match
-                 run_blocking_resource_io (fun () ->
-                   read_world_memory_claims_json ~briefing_template ~base_path:config.base_path)
+                 run_blocking_resource_result (fun () ->
+                   read_world_memory_claims_json ~briefing_template ~base_path:config.base_path ())
                with
                | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
                | Error err -> Error err)
           | World_memory_log ->
+              let since_seq = max 0 (Mcp_server.int_query_param uri "since_seq" ~default:0) in
+              let limit =
+                min max_world_memory_log_limit
+                  (max 1 (Mcp_server.int_query_param uri "limit" ~default:default_world_memory_log_limit))
+              in
               (match
-                 run_blocking_resource_io (fun () ->
-                   read_world_memory_log_json ~base_path:config.base_path)
+                 run_blocking_resource_result (fun () ->
+                   read_world_memory_log_json ~since_seq ~limit ~base_path:config.base_path)
                with
                | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
                | Error err -> Error err)

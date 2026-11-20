@@ -679,7 +679,7 @@ let () =
             `Quick
             test_reader_cursor_progression_and_sticky_retry
         ; Alcotest.test_case
-            "context overflow bisection (4 -> 2 -> 1) and atomic persistence"
+            "context overflow bisection (4 -> 2 -> 1) and save/load persistence"
             `Quick
             test_context_overflow_bisection_and_persistence
         ] )

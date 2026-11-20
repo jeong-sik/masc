@@ -314,11 +314,23 @@ let test_header_longer_than_the_bound_still_parses () =
     ^ "\nsource: research\nauthor: codex\ncreated: 2026-10-13\nrevision: 1\ntags: []\n---\n"
   in
   with_wiki ~documents:[ "long.md", header ^ "body\n" ] (fun state ->
-    match find_listed "masc://wiki/long" (listed state) with
-    | None -> fail "expected masc://wiki/long to be listed"
-    | Some resource ->
-      check (option string) "title comes from the whole header" (Some "Long Doc")
-        resource.title)
+    (match find_listed "masc://wiki/long" (listed state) with
+     | None -> fail "expected masc://wiki/long to be listed"
+     | Some resource ->
+       check (option string) "title comes from the whole header" (Some "Long Doc")
+         resource.title);
+    let base_path = (Lib.Mcp_server.workspace_config state).Lib.Workspace.base_path in
+    match Lib.Tool_wiki.read_index_entries ~base_path with
+    | Error detail -> fail ("read_index_entries failed: " ^ detail)
+    | Ok entries ->
+      let found =
+        List.exists
+          (function
+            | Lib.Wiki_journal.Page { file = "long.md"; title = "Long Doc"; _ } -> true
+            | Lib.Wiki_journal.Page _ | Lib.Wiki_journal.Unreadable _ -> false)
+          entries
+      in
+      check bool "cached frontmatter falls back beyond 8 KiB prefix" true found)
 ;;
 
 (* A file whose name is not a valid page topic would resolve to a different

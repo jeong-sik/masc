@@ -21,7 +21,7 @@ import type {
   TelemetryEntry,
   TelemetrySourceSummary,
 } from '../../api/dashboard'
-import { keepers, boardPosts, boardTotal, boardHearthFilter, boardSearchText, lastBoardRefreshAt, shellRuntimeResolution } from '../../store'
+import { keepers, boardPosts, boardTotal, boardListOnScreen, boardHearthFilter, boardSearchText, lastBoardRefreshAt, shellRuntimeResolution, type BoardListQuery } from '../../store'
 import type { Goal } from '../../types/core'
 import { dashboardFullHealthResource } from '../dashboard-full-health-state'
 
@@ -1047,9 +1047,21 @@ describe('Overview board domain card', () => {
     cleanup()
     boardPosts.value = []
     boardTotal.value = null
+    boardListOnScreen.value = null
     lastBoardRefreshAt.value = null
     boardHearthFilter.value = ''
     boardSearchText.value = ''
+  })
+
+  /** The query a list on screen answers: the whole Board unless narrowed. */
+  const listQuery = (narrowed: Partial<BoardListQuery> = {}): BoardListQuery => ({
+    sort: 'recent',
+    excludeSystem: true,
+    excludeAutomation: false,
+    author: '',
+    hearth: '',
+    search: '',
+    ...narrowed,
   })
 
   function boardCardText(container: Element): string {
@@ -1102,20 +1114,58 @@ describe('Overview board domain card', () => {
   // The list in the store is the Board surface's: under a sub-board or a
   // search its total counts that list. Three matches are not a Board of three.
   it.each([
-    ['a search', () => { boardSearchText.value = 'needle' }],
-    ['a sub-board', () => { boardHearthFilter.value = 'lab' }],
-  ])('does not show the total of %s as the total of the Board', (_name, narrow) => {
+    ['a search', { search: 'needle' }],
+    ['a sub-board', { hearth: 'lab' }],
+    ['an author', { author: 'keeper' }],
+  ] as const)('does not show the total of %s as the total of the Board', (_name, narrowed) => {
     boardPosts.value = [
       { id: 'p-1', author: 'a', title: 't1', content: 'c1', created_at: '2026-08-05T00:00:00Z' },
     ] as unknown as typeof boardPosts.value
     boardTotal.value = 3
+    boardListOnScreen.value = { query: listQuery(narrowed), requestId: 1 }
     lastBoardRefreshAt.value = '2026-08-05T00:00:02Z'
-    narrow()
 
     const { container } = render(h(Overview, null))
     const text = boardCardText(container)
 
     expect(text).toContain('불러온 포스트')
     expect(text).not.toContain('전체 포스트')
+  })
+
+  // What decides is the list on screen, not the filters. The operator has
+  // cleared the search and the whole list has not answered: the total is
+  // still the count of the matches.
+  it('does not show the matches as the Board once the search is cleared and the whole list has not answered', () => {
+    boardPosts.value = [
+      { id: 'p-1', author: 'a', title: 't1', content: 'c1', created_at: '2026-08-05T00:00:00Z' },
+    ] as unknown as typeof boardPosts.value
+    boardTotal.value = 3
+    boardListOnScreen.value = { query: listQuery({ search: 'needle' }), requestId: 1 }
+    boardSearchText.value = ''
+    lastBoardRefreshAt.value = '2026-08-05T00:00:02Z'
+
+    const { container } = render(h(Overview, null))
+    const text = boardCardText(container)
+
+    expect(text).toContain('불러온 포스트')
+    expect(text).not.toContain('전체 포스트')
+  })
+
+  // The other way round: the operator has typed a search and the whole list
+  // is still on screen. Its total is the Board's.
+  it('still shows the Board total while a search the operator typed has not answered', () => {
+    boardPosts.value = [
+      { id: 'p-1', author: 'a', title: 't1', content: 'c1', created_at: '2026-08-05T00:00:00Z' },
+    ] as unknown as typeof boardPosts.value
+    boardTotal.value = 441
+    boardListOnScreen.value = { query: listQuery(), requestId: 1 }
+    boardSearchText.value = 'needle'
+    lastBoardRefreshAt.value = '2026-08-05T00:00:02Z'
+
+    const { container } = render(h(Overview, null))
+    const text = boardCardText(container)
+
+    expect(text).toContain('전체 포스트')
+    expect(text).toContain('441')
   })
 })

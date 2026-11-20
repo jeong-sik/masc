@@ -11,7 +11,7 @@ import {
   BoardSurface,
   normalizeBoardDetailWidth,
 } from './board-surface'
-import { boardPosts, boardLoading, boardListReadFailed, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardSearchText, boardHasMore, boardLoadingMore, boardOffset, boardTotal, lastBoardRefreshAt, messages, shellAuthSummary, keepers } from '../../store'
+import { boardPosts, boardLoading, boardListReadFailed, boardListOnScreen, type BoardListQuery, boardSortMode, boardExcludeSystem, boardExcludeAutomation, boardHiddenCategories, boardAuthorFilter, boardHearthFilter, boardSearchText, boardHasMore, boardLoadingMore, boardOffset, boardTotal, lastBoardRefreshAt, messages, shellAuthSummary, keepers } from '../../store'
 import { route } from '../../router'
 import { createPost, fetchBoardPost } from '../../api'
 import { requestBoardContextInference, voteComment, votePost } from '../../api/board'
@@ -261,6 +261,7 @@ describe('BoardSurface Component', () => {
     boardPosts.value = []
     boardLoading.value = false
     boardListReadFailed.value = false
+    boardListOnScreen.value = null
     boardHasMore.value = false
     boardLoadingMore.value = false
     boardSortMode.value = 'recent'
@@ -1661,6 +1662,81 @@ describe('BoardSurface Component', () => {
       expect(await within(await screen.findByTestId('bd-unified-feed')).findByText('needle in an article')).toBeInTheDocument()
     })
 
+    const countLabel = () => document.querySelector('.bd-feed-head .ns')?.textContent
+    const boardCount = () => screen.queryByTestId('bd-sub-all-count')?.textContent ?? null
+    /** A read of the list the operator is on, as a Board event starts one. */
+    const readListAgain = () => act(() => { void refreshBoard() })
+
+    // The total is the list's on screen. From a change of the search text
+    // until the read answers, that list is the previous query's: its total
+    // under the new word would count the Board as matches, or the matches as
+    // the Board.
+    it('counts each list under the word for what it answers, and no list while the next one is read', async () => {
+      const held = await holdBoardReads()
+      render(h(BoardSurface, null))
+
+      await readListAgain()
+      await waitFor(() => expect(held).toHaveLength(1))
+      held[0]?.answer(loadedPosts())
+      await firstPageRead(0)
+      expect(countLabel()).toBe('전체 2개')
+      expect(boardCount()).toBe('2')
+
+      typeSearch('needle')
+      await pauseTyping()
+      await waitFor(() => expect(held).toHaveLength(2))
+      // The two loaded posts are still on screen; they are not two matches.
+      expect(feedTitles()).toEqual(['first loaded post', 'second loaded post'])
+      expect(countLabel()).toBe('불러오는 중…')
+      // The list on screen is still the whole Board, so its count stands.
+      expect(boardCount()).toBe('2')
+
+      held[1]?.answer([match('older-1', 'needle in an older post')])
+      await firstPageRead(1)
+      expect(countLabel()).toBe('일치 1개')
+      // One match is not a Board of one post.
+      expect(boardCount()).toBeNull()
+
+      typeSearch('')
+      await pauseTyping()
+      await waitFor(() => expect(held).toHaveLength(3))
+      // The match is still on screen; it is not a Board of one post.
+      expect(feedTitles()).toEqual(['needle in an older post'])
+      expect(countLabel()).toBe('불러오는 중…')
+      expect(boardCount()).toBeNull()
+
+      held[2]?.answer(loadedPosts())
+      await firstPageRead(2)
+      expect(countLabel()).toBe('전체 2개')
+      expect(boardCount()).toBe('2')
+    })
+
+    // A Board event reads the list on screen again. That list already answers
+    // the search, so what it says stays while the read is on the wire.
+    it('keeps saying no post matches while the same search is read again', async () => {
+      const held = await holdBoardReads()
+      render(h(BoardSurface, null))
+
+      typeSearch('needle')
+      await pauseTyping()
+      await waitFor(() => expect(held).toHaveLength(1))
+      // Nothing on screen answers the search yet.
+      expect(screen.getByText(/게시판 불러오는 중/)).toBeInTheDocument()
+      held[0]?.answer([])
+      await firstPageRead(0)
+      expect(screen.getByTestId('bd-search-miss').textContent).toBe('게시판 전체에 일치하는 글이 없습니다')
+
+      await readListAgain()
+      await waitFor(() => expect(held).toHaveLength(2))
+      expect(boardLoading.value).toBe(true)
+      expect(screen.getByTestId('bd-search-miss').textContent).toBe('게시판 전체에 일치하는 글이 없습니다')
+      expect(screen.queryByText(/게시판 불러오는 중/)).toBeNull()
+      expect(countLabel()).toBe('일치 0개')
+
+      held[1]?.answer([])
+      await firstPageRead(1)
+    })
+
     it('holds the next-page button while a page of matches is on the wire', () => {
       boardSearchText.value = 'needle'
       boardPosts.value = [hiddenMatch()]
@@ -1695,6 +1771,80 @@ describe('BoardSurface Component', () => {
       render(h(BoardSurface, null))
 
       expect(screen.getByTestId('bd-search-miss').textContent).toBe('#ops에 일치하는 글이 없습니다')
+    })
+  })
+
+  // The number beside "전체" in the rail and the count in the feed head are
+  // the total of the list on screen.
+  describe('counts of the list on screen', () => {
+    const listQuery = (narrowed: Partial<BoardListQuery> = {}): BoardListQuery => ({
+      sort: 'recent',
+      excludeSystem: true,
+      excludeAutomation: false,
+      author: '',
+      hearth: '',
+      search: '',
+      ...narrowed,
+    })
+    const showList = (total: number, narrowed: Partial<BoardListQuery> = {}) => {
+      boardPosts.value = [makePost({ id: 'post-1', title: 'a post', body: 'content', author: 'keeper', post_kind: 'direct' })]
+      boardTotal.value = total
+      boardListOnScreen.value = { query: listQuery(narrowed), requestId: 1 }
+    }
+
+    afterEach(() => {
+      boardTotal.value = null
+    })
+
+    it('gives the total of the whole list beside "전체"', () => {
+      showList(441)
+      render(h(BoardSurface, null))
+
+      const count = screen.getByTestId('bd-sub-all-count')
+      expect(count.textContent).toBe('441')
+      expect(count).toHaveAttribute('title', '전체 441개')
+    })
+
+    it.each([
+      ['a sub-board', { hearth: 'ops' }],
+      ['a search', { search: 'needle' }],
+      ['an author', { author: 'keeper' }],
+    ] as const)('gives no count beside "전체" while the list on screen answers %s', (_name, narrowed) => {
+      showList(3, narrowed)
+      render(h(BoardSurface, null))
+
+      expect(screen.getByTestId('bd-sub-all')).toBeInTheDocument()
+      expect(screen.queryByTestId('bd-sub-all-count')).toBeNull()
+    })
+
+    // The sub-board the operator picked has not answered: the list on screen
+    // is the whole Board, and its total is the Board's.
+    it('keeps the count beside "전체" while a sub-board the operator picked has not answered', () => {
+      showList(441)
+      boardHearthFilter.value = 'ops'
+      boardLoading.value = true
+      render(h(BoardSurface, null))
+
+      expect(screen.getByTestId('bd-sub-all-count').textContent).toBe('441')
+    })
+
+    // The word before the count names what the list on screen is. The search
+    // box is already empty here and no read has started: the three rows are
+    // still the matches of the search that filled the list.
+    it('counts a searched list as matches in the feed head, whatever the search box holds', () => {
+      showList(3, { search: 'needle' })
+      boardSearchText.value = ''
+      render(h(BoardSurface, null))
+
+      expect(document.querySelector('.bd-feed-head .ns')?.textContent).toBe('일치 3개')
+    })
+
+    it('counts the whole list as the Board in the feed head, whatever the search box holds', () => {
+      showList(441)
+      boardSearchText.value = 'needle'
+      render(h(BoardSurface, null))
+
+      expect(document.querySelector('.bd-feed-head .ns')?.textContent).toBe('전체 441개')
     })
   })
 

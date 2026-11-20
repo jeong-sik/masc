@@ -1258,7 +1258,7 @@ function OverviewDomainSection({
            refreshBoard, so boardPosts is empty here on every fresh load.
            Rendering its length printed "전체 포스트 0" while the board route
            and the post store both held posts. lastBoardRefreshAt stays null
-           until refreshBoard or hydrateBoardSnapshot runs, so it separates
+           until refreshBoard answers, so it separates
            "never loaded" from "loaded and empty". boardTotal is null whenever
            the server pages the result (server_dashboard_http.ml emits total
            only when the whole result fits the fetched window), so the

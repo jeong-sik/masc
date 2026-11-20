@@ -703,9 +703,6 @@ let decode_provider_input ~expected_keeper ~expected_turn_ref = function
   | `Assoc _ -> Error "provider-input response fields are not exact"
   | _ -> Error "provider-input response is not an object"
 
-(* The answer must be the part the list named, and its bytes must be the
-   ones the list counted and hashed; anything else is another part. A message
-   or a tool schema is stored as compact JSON and read here indented. *)
 (* The server writes the answer with the same module, so the reader is the
    server's own; this checks only that the answer is about the asked turn. *)
 let decode_cache_outcome ~expected_keeper ~expected_turn_ref json =
@@ -719,6 +716,9 @@ let decode_cache_outcome ~expected_keeper ~expected_turn_ref json =
       then Error "cache outcome names another turn"
       else Ok reading
 
+(* The answer must be the part the list named, and its bytes must be the
+   ones the list counted and hashed; anything else is another part. A message
+   or a tool schema is stored as compact JSON and read here indented. *)
 let decode_part (key : part_key) = function
   | `Assoc fields
     when exact_fields
@@ -1413,6 +1413,7 @@ let provider_usage_summary ?(ko = false) (usage : Turn_record.usage) =
 let cache_outcome_summary (reading : Keeper_cache_outcome_reading.reading) =
   let module R = Keeper_cache_outcome_reading in
   let module M = Message_list_change in
+  let module Count = Masc_tui_value.Count in
   let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
   let tokens = Option.fold ~none:unreported ~some:format_tokens in
   let setting = Masc_tui_value.Interval.of_seconds in
@@ -1442,16 +1443,26 @@ let cache_outcome_summary (reading : Keeper_cache_outcome_reading.reading) =
           (Option.value (Masc_tui_message_layout.elapsed_text idle_s) ~default:unreported)
           (lifetime held)
   in
-  let messages = function
-    | M.Appended { kept; added } -> Printf.sprintf "%d messages kept, %d added" kept added
-    | M.Tail_removed { kept; removed } ->
-        Printf.sprintf "%d messages kept, last %d removed" kept removed
-    | M.Block_dropped { at; dropped; _ } ->
-        Printf.sprintf "%d messages dropped after the first %d" dropped at
-    | M.Rewritten_in_place { first_index; rewritten; _ } ->
-        Printf.sprintf "%d messages rewritten after the first %d" rewritten first_index
-    | M.Diverged_at { index; _ } ->
-        Printf.sprintf "messages differ after the first %d" index
+  (* Every shape opens with the messages the two requests share, so the
+     cache could read no further than that count; the rest says what came
+     after it. *)
+  let messages change =
+    let figure = Count.grouped in
+    let kept shared = Count.reading ~ko:false Count.Message shared ^ " kept" in
+    match change with
+    | M.Appended { kept = shared; added } ->
+        Printf.sprintf "%s, %s added" (kept shared) (figure added)
+    | M.Tail_removed { kept = shared; removed } ->
+        Printf.sprintf "%s, %s removed from the end" (kept shared) (figure removed)
+    | M.Block_dropped { at; dropped; kept_after; added } ->
+        Printf.sprintf "%s, then %s dropped, %s moved up, %s added" (kept at) (figure dropped)
+          (figure kept_after) (figure added)
+    | M.Rewritten_in_place { first_index; rewritten; added; _ } ->
+        Printf.sprintf "%s, then %s rewritten, %s added" (kept first_index) (figure rewritten)
+          (figure added)
+    | M.Diverged_at { index; previous_count; current_count; _ } ->
+        Printf.sprintf "%s, then %s replaced by %s" (kept index)
+          (figure (previous_count - index)) (figure (current_count - index))
   in
   let prefix = function
     | R.Compared { system_changed; tools_changed; messages = change } ->
@@ -1489,7 +1500,9 @@ let cache_outcome_summary (reading : Keeper_cache_outcome_reading.reading) =
   in
   match reading.R.unattributed_rows with
   | 0 -> outcome
-  | rows -> Printf.sprintf "%s · %d ledger rows unattributed" outcome rows
+  | rows ->
+      Printf.sprintf "%s · %s unattributed in the cost ledger" outcome
+        (Count.reading ~ko:false Count.Entry rows)
 ;;
 
 (* The part a pane shows. On the request tab: the opened item, or with none

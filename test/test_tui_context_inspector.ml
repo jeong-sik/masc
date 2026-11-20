@@ -909,7 +909,7 @@ let test_cache_outcome_line_states_the_server_facts () =
              { system_changed = false; tools_changed = false
              ; messages = Message_list_change.Appended { kept = 12; added = 2 } })));
   check string "a lifetime still running and a changed prefix"
-    (counts ^ " · idle 6m55s, within its 1h lifetime · system prompt changed, 2 messages rewritten after the first 5")
+    (counts ^ " · idle 6m55s, within its 1h lifetime · system prompt changed, 5 messages kept, then 2 rewritten, 0 added")
     (first
        (earlier ~idle:(idle 3600. R.Within)
           (R.Compared
@@ -920,12 +920,36 @@ let test_cache_outcome_line_states_the_server_facts () =
                    ; current_bytes = 12; first_previous_role = Llm_provider.Types.Tool
                    ; first_current_role = Llm_provider.Types.User; added = 0 } })));
   check string "inputs another runtime answered are not compared"
-    (counts ^ " · idle time unknown, a request has no latency · inputs not compared, trace-cache#8 last ran on glm.air · 3 ledger rows unattributed")
+    (counts ^ " · idle time unknown, a request has no latency · inputs not compared, trace-cache#8 last ran on glm.air · 3 entries unattributed in the cost ledger")
     (first ~unattributed_rows:3
        (earlier ~idle:R.Start_unrecorded
           (R.Not_compared
              (R.Snapshot_of_other_runtime
                 { turn_ref = turn_ref "trace-cache" 8; runtime_profile = "glm.air" }))));
+  (* A shape opens with the messages both requests share, so a change at the
+     very front reads as none kept, not as a position. *)
+  let shape change =
+    first
+      (earlier ~idle:(idle 3600. R.Within)
+         (R.Compared { system_changed = false; tools_changed = false; messages = change }))
+  in
+  let within = counts ^ " · idle 6m55s, within its 1h lifetime · " in
+  check string "a list that differs from its first message"
+    (within ^ "0 messages kept, then 4 replaced by 6")
+    (shape
+       (Message_list_change.Diverged_at
+          { index = 0; previous_role = Llm_provider.Types.User; previous_bytes = 10
+          ; current_role = Llm_provider.Types.User; current_bytes = 12
+          ; previous_count = 4; current_count = 6 }));
+  check string "a block dropped at the front"
+    (within ^ "0 messages kept, then 3 dropped, 4 moved up, 1 added")
+    (shape (Message_list_change.Block_dropped { at = 0; dropped = 3; kept_after = 4; added = 1 }));
+  check string "one shared message is singular"
+    (within ^ "1 message kept, 2 removed from the end")
+    (shape (Message_list_change.Tail_removed { kept = 1; removed = 2 }));
+  check string "a long shared list is grouped"
+    (within ^ "1,250 messages kept, 0 added")
+    (shape (Message_list_change.Appended { kept = 1_250; added = 0 }));
   check string "no earlier request within the horizon"
     (counts ^ " · no earlier request on this runtime in 1h")
     (first (R.No_earlier_request { horizon_s = 3600. }));

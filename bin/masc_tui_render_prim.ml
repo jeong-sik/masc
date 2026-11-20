@@ -7092,15 +7092,16 @@ let context_exact_input_lines ~cols ~scale state ~response ~response_parts
          server found it from the cost ledger and the two turns' snapshots.
          The usage above is the turn's last request; this is its first. *)
       let first_request_lines =
-        let dim text =
+        let styled style text =
           Context_bars.wrap ~width text
-          |> List.map (fun line -> "  " ^ Ansi.dim ^ line ^ Ansi.reset)
+          |> List.map (fun line -> "  " ^ style ^ line ^ Ansi.reset)
         in
         match cache_outcome with
-        | Inspector.Not_requested -> dim "First request cache reason not read"
-        | Inspector.Pending -> dim "First request cache reason is still loading"
+        | Inspector.Not_requested -> styled Ansi.dim "First request cache reason not read"
+        | Inspector.Pending -> styled Ansi.dim "First request cache reason is still loading"
         | Inspector.Observed (Error detail) ->
-            dim
+            (* The same colour as the unavailable response line below. *)
+            styled (Theme.bad ())
               ("First request cache reason unavailable: "
                ^ Keeper_chat.terminal_safe_text detail)
         | Inspector.Observed (Ok reading) ->

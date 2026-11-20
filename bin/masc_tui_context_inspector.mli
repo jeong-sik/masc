@@ -504,7 +504,9 @@ val cache_outcome_summary : Keeper_cache_outcome_reading.reading -> string
 (** One line under that usage: the turn's first request's cache counts, how
     long its runtime was idle against the lifetime the earlier request asked
     for, and where the two turns' inputs first differ, with each unknown
-    named. It states the server's facts and picks no cause among them. *)
+    named. A message change opens with the messages the two requests share
+    ([0 messages kept] when they share none). It states the server's facts
+    and picks no cause among them. *)
 
 val client_context_tokens :
   scope:Runtime_usage_scope.t -> provenance:Turn_input_provenance.t option ->

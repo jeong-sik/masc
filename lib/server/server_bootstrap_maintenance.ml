@@ -881,30 +881,46 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                 (Keeper_registry.all ~base_path:config.base_path ())))
         (Keeper_memory_writers.find ~base_path:config.base_path)
     in
-    reconcile_goal_events ();
-    reconcile_composition_completions ();
-    reconcile_owned_job_completions ();
-    reconcile_unread_tool_results ();
-    reconcile_prepared_continuations ();
-    reconcile_ask_answers ();
-    project_transition_outboxes Server_transition_outbox_recovery.Startup;
+    (* Each step of a pass has its own boundary. The steps do not depend on
+       one another, so a step that raises is logged as that step's failure
+       and the steps after it, and the next tick, still run. Without the
+       boundary one raise ended this fiber: no step ran again until the
+       server restarted, the Memory writers' pulse among them. *)
+    let run_steps =
+      Server_bootstrap_loops_fiber.run_steps
+        ~on_error:(Server_bootstrap_loops_fiber.log_server_step_failure "maintenance")
+    in
+    run_steps
+      [ "goal_events", reconcile_goal_events
+      ; "composition_completions", reconcile_composition_completions
+      ; "owned_job_completions", reconcile_owned_job_completions
+      ; "unread_tool_results", reconcile_unread_tool_results
+      ; "prepared_continuations", reconcile_prepared_continuations
+      ; "ask_answers", reconcile_ask_answers
+      ; ( "transition_outboxes"
+        , fun () -> project_transition_outboxes Server_transition_outbox_recovery.Startup )
+      ];
     let rec loop () =
       Eio.Time.sleep clock maintenance_tick_sec;
-      (* A payout that could not be prepared (a Task or the links did not read)
-         is tried again on this tick. It comes before the work below so that a
-         step that raises cannot skip the retry. *)
-      Candle_payout_worker.pulse ();
-      Server_workspace_memory_curator.retry_pending_observations
-        ~base_path:(Mcp_server.workspace_config state).base_path;
-      project_transition_outboxes Server_transition_outbox_recovery.Maintenance;
-      reconcile_broadcast_mentions ();
-      reconcile_goal_events ();
-      reconcile_composition_completions ();
-      reconcile_owned_job_completions ();
-      reconcile_unread_tool_results ();
-      reconcile_prepared_continuations ();
-      reconcile_ask_answers ();
-      pulse_memory_writers ();
+      run_steps
+        [ (* A payout that could not be prepared (a Task or the links did not
+             read) is tried again on this tick. *)
+          "candle_payout", Candle_payout_worker.pulse
+        ; ( "curator_pending_observations"
+          , fun () ->
+              Server_workspace_memory_curator.retry_pending_observations
+                ~base_path:(Mcp_server.workspace_config state).base_path )
+        ; ( "transition_outboxes"
+          , fun () -> project_transition_outboxes Server_transition_outbox_recovery.Maintenance )
+        ; "broadcast_mentions", reconcile_broadcast_mentions
+        ; "goal_events", reconcile_goal_events
+        ; "composition_completions", reconcile_composition_completions
+        ; "owned_job_completions", reconcile_owned_job_completions
+        ; "unread_tool_results", reconcile_unread_tool_results
+        ; "prepared_continuations", reconcile_prepared_continuations
+        ; "ask_answers", reconcile_ask_answers
+        ; "memory_writers", pulse_memory_writers
+        ];
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

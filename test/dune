@@ -7212,6 +7212,11 @@
  (libraries alcotest masc masc_server masc_test_deps eio_main eio.mock unix))
 
 (test
+ (name test_server_bootstrap_loops_fiber)
+ (modules test_server_bootstrap_loops_fiber)
+ (libraries alcotest masc_server eio))
+
+(test
  (name test_keeper_cleanup_status)
  (modules test_keeper_cleanup_status)
  (libraries alcotest masc yojson))

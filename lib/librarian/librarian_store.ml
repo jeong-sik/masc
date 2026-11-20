@@ -40,7 +40,7 @@ module Snapshot_fault = Librarian_snapshot_fault
 
 (* What the snapshot path holds. A read that failed says nothing about the
    file: it is not "no snapshot". *)
-let read_bytes path : (string, Snapshot_fault.t) result =
+let read_snapshot_bytes path : (string, Snapshot_fault.t) result =
   match Fs_compat.load_regular_file_opt path with
   | Ok None -> Error Snapshot_fault.Absent
   | Ok (Some bytes) -> Ok bytes
@@ -49,7 +49,7 @@ let read_bytes path : (string, Snapshot_fault.t) result =
   | Error (Fs_compat.Regular_file_unreadable (_ : string)) -> Error Snapshot_fault.Not_read
 ;;
 
-let decoded bytes =
+let decode_snapshot bytes =
   match Yojson.Safe.from_string bytes with
   | exception Yojson.Json_error (_ : string) -> None
   | json ->
@@ -61,10 +61,10 @@ let decoded bytes =
 (* The digest is of the bytes the file holds, not of the bytes the codec
    would write for what they decode to. *)
 let read_snapshot path =
-  match read_bytes path with
+  match read_snapshot_bytes path with
   | Error fault -> Error fault
   | Ok bytes ->
-    (match decoded bytes with
+    (match decode_snapshot bytes with
      | None -> Error Snapshot_fault.Not_a_snapshot_file
      | Some memory -> Ok (memory, Digest.digest_of_bytes bytes))
 ;;
@@ -227,7 +227,7 @@ let append t (line : Log.commit) =
 ;;
 
 let commit_direct t ~at ~by ~trace write effects =
-  match read_bytes t.snapshot_path with
+  match read_snapshot_bytes t.snapshot_path with
   | Error fault -> Stopped (stop_of_snapshot_fault fault)
   | Ok bytes ->
     let observed = Digest.digest_of_bytes bytes in
@@ -271,14 +271,14 @@ let adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed =
     Keeper_memory_os_current_layout.path_for_keepers_dir ~keepers_dir:memory_dir ~keeper_id
   in
   let* memory =
-    match read_bytes snapshot_path with
+    match read_snapshot_bytes snapshot_path with
     | Error Snapshot_fault.Not_read -> Error (Not_adopted Store_unwritable)
     | Error (Absent | Not_a_snapshot_file) -> Error Snapshot_mismatch
     | Ok bytes ->
       if not (same (Digest.digest_of_bytes bytes) observed)
       then Error Snapshot_mismatch
       else (
-        match decoded bytes with
+        match decode_snapshot bytes with
         | Some memory -> Ok memory
         | None -> Error Snapshot_unreadable)
   in

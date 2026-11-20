@@ -999,7 +999,7 @@ describe('Overview prototype surface', () => {
     expect(container.querySelectorAll('[data-testid="overview-kpis"] .ov-kpi')).toHaveLength(7)
   })
 
-  // Gap 2: attention panel title includes full subtitle (overview.jsx:119)
+  // Gap 2: attention panel title includes full subtitle
   it('attention panel h3 includes the full prototype title with subtitle', () => {
     const { container } = render(h(Overview, null))
     const attn = container.querySelector('[data-testid="overview-attention"]')
@@ -1007,7 +1007,7 @@ describe('Overview prototype surface', () => {
     expect(h3?.textContent).toBe('주의 필요 · 지금 손이 필요한 것')
   })
 
-  // Gap 3: telemetry panel shows "로그 보기 →" button link (overview.jsx:143)
+  // Gap 3: telemetry panel shows "로그 보기 →" button link
   it('telemetry panel header shows a "로그 보기 →" link button', () => {
     const { container } = render(h(Overview, null))
     const tel = container.querySelector('[data-testid="overview-telemetry"]')

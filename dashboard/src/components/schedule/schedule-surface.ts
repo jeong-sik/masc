@@ -3,8 +3,8 @@
 // Two views over the schedule projection, read from the shared schedule
 // resources (GET /api/v1/dashboard/scheduled-automation):
 //   · 캘린더 — the always-on polling strip (interval) above a day agenda
-//     (scheduled + oneshot). Ported from the keeper-v2 prototype (schedule.jsx).
-//     It draws the active-only page: every schedule still going to run.
+//     (scheduled + oneshot). It draws the active-only page: every schedule
+//     still going to run.
 //   · 목록   — the mature diagnostic list/cards/signal feed in
 //     tools/scheduled-automation-panel.ts (variant "v2"), reused verbatim so the
 //     route does not fork the backed schedule semantics. It draws the fleet

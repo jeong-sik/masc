@@ -1,0 +1,8 @@
+source	value	outcome	why
+the ask's own fold	a declared slot with no visit	Silent Not_called	the walk ended before it, or the slot was not admitted
+Runtime_exact_lane_backpressure.order	a slot in held_http	Silent Not_called	the provider stated a time; the walk does not call it
+the Librarian's answer check	Not_json	Silent (Unusable Not_json)	the answer is not one JSON value
+the Librarian's answer check	Schema_violation	Silent (Unusable Schema_violation)	the answer breaks the declared schema
+the Librarian's answer check	Echo_mismatch	Silent (Unusable Echo_mismatch)	the answer echoes another snapshot or another range
+the Librarian's answer check	Empty_or_partial	Silent (Unusable Empty_or_partial)	the answer is empty or cut
+the Librarian's answer check	accepted	Slot_answered	the proposal goes to the writer

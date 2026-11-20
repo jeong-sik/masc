@@ -90,9 +90,10 @@ let tool_info_to_json (info : tool_info) : Yojson.Safe.t =
    an arbitrary one of them in a column an operator is about to join on. An
    empty list is the honest answer for a tool no model can call. *)
 (* Which public names a tool is offered under is a fact the Keeper domain
-   owns, and this module is a tool surface: RFC-0194 has the dependency
-   pointing the other way. It arrives as an argument -- the caller is the
-   server, which is above both domains and may name either.
+   owns, and this module is a tool surface: the dependency points the other
+   way, from the Keeper domain to the tool surface. It arrives as an
+   argument -- the caller is the server, which is above both domains and
+   may name either.
 
    [None] is the honest answer where a caller has no descriptor set to ask,
    and it is what the empty default gives: a tool no model can call has no

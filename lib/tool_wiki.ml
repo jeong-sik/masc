@@ -669,7 +669,7 @@ let lint_nodes ~base_path =
 (* [log.md] read for the lint. A wiki that has never been written has no log
    yet, and that is an empty log, not a failure to read. A log that is there
    but cannot be read is an error, not an empty log: "nothing is wrong" and
-   "nothing could be read" must stay different answers (§7). The one parser
+   "nothing could be read" must stay different answers. The one parser
    in the runtime is {!Wiki_log}, so the lint and any later consumer read the
    same words the same way. *)
 let lint_log ~base_path =
@@ -752,11 +752,9 @@ let handle_lint ~tool_name ~start_time ctx args : Tool_result.result =
           workflow_err ~tool_name ~start_time (Wiki_lint_report.problem_to_string problem)
         | Ok json -> text_ok ~tool_name ~start_time (Yojson.Safe.to_string json)))
 
-(* RFC-0189 PR-1b.7 — boundary projection. Handlers are typed; the
-   dispatch ABI stays [Tool_result.result option] so external callers
-   (mcp_server_eio_execute, keeper_tag_dispatch) remain unchanged.
-   PR-1c will move the Tool_dispatch.handler ABI to result, removing
-   this bridge. *)
+(* Boundary projection. Handlers are typed; the dispatch ABI is
+   [Tool_result.result option], which the external callers
+   (mcp_server_eio_execute, keeper_tag_dispatch) consume. *)
 (* The name is resolved against the same [definitions] list registration walks,
    and the operation is matched, so an operation added to
    [Tool_schemas_wiki] is a compile error here rather than an advertised

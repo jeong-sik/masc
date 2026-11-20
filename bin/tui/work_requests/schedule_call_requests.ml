@@ -248,7 +248,7 @@ let open_chat_call_reader ?execution_id (state : T.state) ~mailbox keeper_name =
     | Some cco_workspace ->
         let from_rows =
           T.chat_rows_for state keeper_name
-          |> List.concat_map (fun (row : T.message_entry) ->
+          |> List.concat_map (fun (row : T.msg_entry) ->
                match row.T.me_tool_block with
                | Some block -> block.Keeper_chat_transcript.activities
                | None -> [])

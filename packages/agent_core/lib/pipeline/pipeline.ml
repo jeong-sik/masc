@@ -124,10 +124,10 @@ let stage_route
              dispatch_sync
                ~sw ?clock ~trace_context ?on_provider_failure
                ~on_reasoning_replay_exclusion ?before_provider_attempt ~provider_config agent prep
-             |> Llm_provider.Completion_outcome.map_result (Result.map (fun response ->
+             |> Llm_provider.Completion_outcome.map_result (Result.map (fun ((response, _) as sent) ->
                   Llm_provider.Streaming.emit_synthetic_events response
                     (Llm_provider.Complete_stream.emit_stream_event on_event);
-                  response))
+                  sent))
            end else
              dispatch_stream
                ~sw
@@ -145,7 +145,7 @@ let stage_route
                ())
   in
   Llm_provider.Completion_outcome.map_result
-    (Result.map (fun response -> provider_config, response)) result
+    (Result.map (fun (response, sent) -> provider_config, response, sent)) result
 ;;
 
 (* ── Stage 4: Collect ────────────────────────────────────── *)
@@ -845,7 +845,10 @@ let run_new_turn
   let* () = Pipeline_execution_scope.record_turn_ready execution
     ~tool_names:prep.Agent_turn.visible_tool_names in
   (* Stage 3: Route exactly once. Provider [ContextOverflow] remains a typed
-     error; AGENT_CORE does not mutate the transcript or retry implicitly. *)
+     error; AGENT_CORE does not mutate the transcript or retry implicitly.
+     Before sending, a request refused as larger than the input limit gives
+     way to the caller's next narrower request in the same provider attempt
+     ({!Agent_types.model_input_candidates}). *)
   let api_outcome =
     stage_route
       ~sw
@@ -869,10 +872,10 @@ let run_new_turn
   let outcome =
     match api_result with
     | Error e -> Error e
-    | Ok (provider_config, response) ->
+    | Ok (provider_config, response, (sent : Agent_turn.turn_request)) ->
       let* response, rejected_tool_calls =
         stage_collect ?raw_trace_run ?clock ~turn ~provider_config
-          ~context_message:prep.Agent_turn.context_message ~execution agent response
+          ~context_message:sent.Agent_turn.context_message ~execution agent response
         |> tag_error "collect"
       in
       (match Pipeline_execution_scope.provider execution with

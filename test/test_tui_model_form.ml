@@ -238,6 +238,18 @@ let test_context_presets_keep_custom_and_operator_name () =
   let copied = List.find (fun (b:Runtime_schema.binding) -> b.model_id="operator-name") parsed.bindings in
   check (option int) "editing the name stops preset renaming" (Some 750000) copied.max_context
 
+let test_rows_with_selection_tracks_focused_field () =
+  let form = F.create F.Edit (row source) in
+  let selected = List.filter fst (F.rows_with_selection ~width:80 ~height:16 form) in
+  check int "edit starts on one selected field" 1 (List.length selected);
+  check bool "edit highlights context field" true
+    (String.starts_with ~prefix:"› Context tokens" (snd (List.hd selected)));
+  let next = edit form "tab" in
+  let next_selected = List.filter fst (F.rows_with_selection ~width:80 ~height:16 next) in
+  check int "tab keeps one selected field" 1 (List.length next_selected);
+  check bool "tab moves selection to effort" true
+    (String.starts_with ~prefix:"› Reasoning effort" (snd (List.hd next_selected)))
+
 let () = run "Account model variants" ["model editing", [
   test_case "explicit effort replaces uncontrolled reasoning in edit and copy" `Quick test_effort_replaces_uncontrolled_reasoning;
   test_case "context presets preserve custom input and copy identity" `Quick test_context_presets_keep_custom_and_operator_name;
@@ -248,4 +260,5 @@ let () = run "Account model variants" ["model editing", [
   test_case "dotted parent cannot lose settings" `Quick test_dotted_parent_refusal;
   test_case "Ollama requested context follows variant" `Quick test_ollama_context;
   test_case "Ollama Copy preserves unchanged request context" `Quick test_copy_preserves_ollama_request_context;
-  test_case "temperature display and edit round-trip" `Quick test_temperature_round_trip]]
+  test_case "temperature display and edit round-trip" `Quick test_temperature_round_trip;
+  test_case "rows_with_selection tracks focused field" `Quick test_rows_with_selection_tracks_focused_field]]

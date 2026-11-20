@@ -39,6 +39,10 @@ val sidebar_selection : Masc_tui_terminal_palette.t option -> string
     to reverse video without a usable colour palette. Indexed colours use
     xterm defaults for projection, not observed slot values. *)
 
+val sidebar_selection_background : Masc_tui_terminal_palette.t option -> string option
+(** Just the background SGR of {!sidebar_selection} when colours and a palette
+    are available, or [None] when falling back to reverse video. *)
+
 val selection_style : Masc_tui_terminal_palette.t option -> string
 (** A Truecolor accent-tinted selection band derived from the active palette
     with a foreground verified to clear WCAG 4.5:1 over the tinted band, and
@@ -581,6 +585,12 @@ val strip_sgr : string -> string
     would cut the band short — so the selected row folds its colours and
     the reverse is the emphasis. Text with no SGR opener reuses its original
     string; ordinary byte spans are preserved verbatim. *)
+
+val paint_row_background : bg:string -> string -> string
+(** Overlay [bg] across a styled row while preserving foreground SGR colours,
+    attributes, and private hit marks ([ESC [=...m]). Inner background codes
+    are dropped and [bg] is re-applied after any embedded SGR reset so the
+    highlight band never breaks mid-row. *)
 
 (** The shared glyph vocabulary. Plain text — callers colour it. *)
 module Glyph : sig

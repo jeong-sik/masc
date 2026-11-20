@@ -1131,9 +1131,9 @@ let render_section_resources ~cols (state : state) =
       @ List.map
           (fun (name, lane, started_at_unix) ->
               Printf.sprintf
-                (if ko then "    %s  턴 %8s  레인 %s" else "    %s  turn %8s  lane %s")
+                (if ko then "    %s  턴 %s  레인 %s" else "    %s  turn %s  lane %s")
                 (Layout.fit_width name 18)
-                (Masc_tui_value.Ongoing.since ~now started_at_unix)
+                (Layout.pad_left (Masc_tui_value.Ongoing.since ~now started_at_unix) 8)
                 (Masc_tui_answering.lane_word ~ko lane))
           running
   in

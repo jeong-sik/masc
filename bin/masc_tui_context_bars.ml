@@ -66,19 +66,13 @@ let apportion ~width ~weights =
    the operator loses the caption either way. Dropping it deliberately at least
    leaves a clean rule, and the screen's closing lines still carry the same
    sentence. *)
-(* Cells of a title or caption: one per UTF-8 scalar. The rungs are box
-   drawing and "≈", each one cell wide, so counting bytes drew a band two
-   cells short of the edge as soon as a caption carried a token figure. *)
-let scalar_cells text =
-  let cells = ref 0 in
-  String.iter
-    (fun c -> if Char.code c land 0xC0 <> 0x80 then incr cells)
-    text;
-  !cells
+(* Display cells of a title or caption, measured via Unicode East Asian Width
+   so wide CJK glyphs and multi-byte symbols fill the exact band width. *)
+let display_cells text = Masc_tui_message_layout.display_width text
 
 let band ~width ~title ~caption =
-  let title_cells = scalar_cells title in
-  let caption_cells = scalar_cells caption in
+  let title_cells = display_cells title in
+  let caption_cells = display_cells caption in
   if width >= 9 + title_cells + caption_cells then
     let fill = width - 8 - title_cells - caption_cells in
     Sgr.dim ^ repeat Box.h 2 ^ Sgr.reset ^ " " ^ Sgr.bold ^ title ^ Sgr.reset
@@ -106,6 +100,7 @@ let wrap ~width text =
     let length = String.length text in
     let lines = ref [] in
     let current = Buffer.create (width + 8) in
+    let current_cells = ref 0 in
     let index = ref 0 in
     while !index < length do
       let gap_start = !index in
@@ -119,15 +114,21 @@ let wrap ~width text =
       done;
       let word = String.sub text word_start (!index - word_start) in
       if not (String.equal word "") then
-        if Buffer.length current = 0 then Buffer.add_string current word
-        else if Buffer.length current + gap + String.length word <= width then begin
+        let word_cells = display_cells word in
+        if Buffer.length current = 0 then begin
+          Buffer.add_string current word;
+          current_cells := word_cells
+        end
+        else if !current_cells + gap + word_cells <= width then begin
           Buffer.add_string current (String.make gap ' ');
-          Buffer.add_string current word
+          Buffer.add_string current word;
+          current_cells := !current_cells + gap + word_cells
         end
         else begin
           lines := Buffer.contents current :: !lines;
           Buffer.clear current;
-          Buffer.add_string current word
+          Buffer.add_string current word;
+          current_cells := word_cells
         end
     done;
     if Buffer.length current > 0 then lines := Buffer.contents current :: !lines;
@@ -160,12 +161,13 @@ let reach_bar ~width ~transmitted ~total ~scale =
 let reach_pointer ~label:pointer_label ~width ~transmitted ~total =
   let sent = fill_cells ~width ~numerator:transmitted ~denominator:total in
   let cut = max 0 (width - sent) in
+  let label_cells = display_cells pointer_label in
   (* The corner has to sit on the first sent cell, not on the last omitted one:
      one cell to its left it labels the history it is telling the reader was
      left behind. *)
   Sgr.dim
-  ^ (if cut >= String.length pointer_label + 2 then
-       String.make (cut - String.length pointer_label - 2) ' '
+  ^ (if cut >= label_cells + 2 then
+       String.make (cut - label_cells - 2) ' '
        ^ pointer_label ^ " " ^ Box.h ^ Box.br
      else String.make cut ' ' ^ Box.bl ^ " " ^ pointer_label)
   ^ Sgr.reset

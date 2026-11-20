@@ -406,11 +406,116 @@ let test_age_buckets_the_last_update () =
        ])
 ;;
 
+let test_truncated_agenda_falls_back_to_keeper_schedules () =
+  let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
+  let mk_row ~id ~keeper ~due =
+    { Masc_tui_types.sch_schedule_id = id
+    ; sch_schedule_instance_id = "inst-1"
+    ; sch_status = "scheduled"
+    ; sch_source = "operator"
+    ; sch_requested_by = "operator"
+    ; sch_scheduled_by = "operator"
+    ; sch_requested_at_iso = "2026-11-07T00:00:00Z"
+    ; sch_due_at_iso = Some due
+    ; sch_next_due_at_iso = Some due
+    ; sch_expires_at_iso = None
+    ; sch_recurrence_summary = ""
+    ; sch_recurrence = Ok Schedule_domain.One_shot
+    ; sch_payload_digest = "digest"
+    ; sch_payload = `Assoc []
+    ; sch_payload_kind = None
+    ; sch_payload_support = "supported"
+    ; sch_payload_dispatch_tool = None
+    ; sch_payload_target = None
+    ; sch_payload_keeper_name = Some keeper
+    ; sch_payload_summary = Some "Daily check"
+    ; sch_last_wake_status = None
+    ; sch_last_wake_started_at_iso = None
+    ; sch_last_wake_error = None
+    ; sch_queue_projection_status = None
+    ; sch_queue_pending_count = None
+    ; sch_reaction_projection_status = None
+    ; sch_reaction_latest_at_iso = None
+    ; sch_reaction_kind = None
+    ; sch_reaction_keeper_name = None
+    ; sch_reaction_stimulus_id = None
+    ; sch_reaction_post_id = None
+    ; sch_reaction_reason = None
+    ; sch_wake_seen = None
+    ; sch_turn_started = None
+    ; sch_turn_finished = None
+    ; sch_queue_ack_seen = None
+    ; sch_wake_cancelled = None
+    ; sch_stimulus_recorded_at_iso = None
+    ; sch_turn_started_recorded_at_iso = None
+    ; sch_turn_finished_recorded_at_iso = None
+    ; sch_queue_ack_recorded_at_iso = None
+    ; sch_wake_cancelled_recorded_at_iso = None
+    ; sch_reaction_quarantined = None
+    ; sch_occurrence =
+        { Masc.Tui_schedule_observation.stage = No_occurrence; due_at_iso = None }
+    ; sch_runner_hold = None
+    }
+  in
+  let snap ~truncated rows : Masc_tui_types.schedule_snapshot =
+    { scs_observed_at = 1794045600.
+    ; scs_status = "ok"
+    ; scs_read_error = None
+    ; scs_request_count = Some (List.length rows)
+    ; scs_truncated = truncated
+    ; scs_payload_target = None
+    ; scs_paging = Schedule_paging_unavailable
+    ; scs_next_due_iso = None
+    ; scs_counts = None
+    ; scs_rows = rows
+    ; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok
+    }
+  in
+  state.schedules_agenda <-
+    Some (snap ~truncated:true [ mk_row ~id:"sch-other" ~keeper:"other" ~due:"2026-11-07T11:00:00Z" ]);
+  (match Axis.next_run state ~keeper_name:"target" with
+   | Masc_tui_keeper_next_run.Not_before _ -> ()
+   | Masc_tui_keeper_next_run.(No_schedule | Scheduled_at _ | Late_since _
+     | Held_current _ | Held_as_of _ | Unknown) ->
+       Alcotest.fail "truncated agenda without per-keeper snapshot should be Not_before");
+  state.keeper_schedules <-
+    Some
+      ( "target"
+      , snap ~truncated:false
+          [ mk_row ~id:"sch-target" ~keeper:"target" ~due:"2026-11-07T14:20:00Z" ] );
+  (match Axis.next_run state ~keeper_name:"target" with
+   | Masc_tui_keeper_next_run.Scheduled_at _ -> ()
+   | Masc_tui_keeper_next_run.(No_schedule | Late_since _
+     | Held_current _ | Held_as_of _ | Not_before _ | Unknown) ->
+       Alcotest.fail "loaded first-page keeper_schedules should resolve Scheduled_at");
+  state.schedules_agenda_error <- Some "agenda failed";
+  (match Axis.next_run state ~keeper_name:"target" with
+   | Masc_tui_keeper_next_run.Not_before _ -> ()
+   | Masc_tui_keeper_next_run.(No_schedule | Scheduled_at _ | Late_since _
+     | Held_current _ | Held_as_of _ | Unknown) ->
+       Alcotest.fail "schedules_agenda_error must suppress keeper_schedules fallback");
+  state.schedules_agenda_error <- None;
+  state.keeper_schedules <-
+    Some
+      ( "target"
+      , snap ~truncated:true
+          [ mk_row ~id:"sch-earlier" ~keeper:"other" ~due:"2026-11-07T10:30:00Z" ] );
+  match Axis.next_run state ~keeper_name:"target" with
+  | Masc_tui_keeper_next_run.Not_before t ->
+      Alcotest.(check bool) "sharper Not_before bound from global agenda is preserved" true
+        (t >= 1794049200.0)
+  | Masc_tui_keeper_next_run.(No_schedule | Scheduled_at _ | Late_since _
+    | Held_current _ | Held_as_of _ | Unknown) ->
+      Alcotest.fail "truncated keeper_schedules must not degrade Not_before"
+;;
+
 let () =
   Alcotest.run "tui_keeper_axis"
     [ ( "axis segments"
       , [ Alcotest.test_case "extracts scheduled and memory cells" `Quick
             test_segments_extracts_scheduled_and_memory_cells
+        ; Alcotest.test_case "truncated agenda falls back to keeper_schedules" `Quick
+            test_truncated_agenda_falls_back_to_keeper_schedules
         ] )
     ; ( "axis cell fit"
       , [ Alcotest.test_case "leaves the DETAIL its floor" `Quick

@@ -89,6 +89,7 @@ val paste : t -> string -> t
     characters. [Base] takes none. *)
 
 val rows : ko:bool -> width:int -> height:int -> t -> string list
+val rows_with_selection : ko:bool -> width:int -> height:int -> t -> (bool * string) list
 (** The form as rows of a pane [width] cells wide. While filling, at most
     [height] rows are returned, with the current field visible whenever
     [height] is positive. Refusals take space before introductions. A long

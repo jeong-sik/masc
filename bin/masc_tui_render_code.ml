@@ -910,7 +910,13 @@ let render_code (state : state) =
     in
     let content_height = max 0 (full_content_height - List.length code_sheet_lines) in
     let file_scroll total_lines =
-      max 0 (min state.code_file_scroll (max 0 (total_lines - content_height)))
+      let clamped =
+        max 0 (min state.code_file_scroll (max 0 (total_lines - content_height)))
+      in
+      if total_lines <= 0 then 0
+      else
+        let cursor = max 0 (min state.code_file_cursor (total_lines - 1)) in
+        Masc_tui_scroll.ensure_visible ~cursor ~height:content_height clamped
     in
     (* Where the file pane's window stands, for the title row while this
        pane has the keys. Each reading below hands its own window. *)
@@ -1057,9 +1063,11 @@ let render_code (state : state) =
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
+         | Some (Some _, line) when i = 0 ->
+             box_line_selected pane_buf pane_cols
+               ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
          | Some (_, line) ->
-             box_line pane_buf pane_cols
-               ("  " ^ (if i = 0 then Ansi.bold else "") ^ line ^ Ansi.reset)
+             box_line pane_buf pane_cols ("  " ^ line ^ Ansi.reset)
          | None -> box_empty pane_buf pane_cols
        done
      else

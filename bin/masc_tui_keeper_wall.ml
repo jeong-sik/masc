@@ -84,8 +84,10 @@ let header ~ko ~cols ~now =
 let marks hours =
   String.concat "" (List.map (fun hour ->
     let tone = match hour with
-      | Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok -> Theme.warn ()
-      | Pulse.Half_hour_ok | Pulse.Half_hour_quiet | Pulse.Half_hour_unknown -> Theme.recede () in
+      | Pulse.Half_hour_failed -> Theme.bad ()
+      | Pulse.Half_hour_failed_and_ok -> Theme.warn ()
+      | Pulse.Half_hour_ok -> Theme.ok ()
+      | Pulse.Half_hour_quiet | Pulse.Half_hour_unknown -> Theme.recede () in
     let glyph = match hour with
       | Pulse.Half_hour_unknown -> Masc_tui_keeper_mark.grid_unknown_range_mark
       | Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok
@@ -116,6 +118,13 @@ let fleet ~ko ~cols ~now runtimes =
     Pulse.failure_count (List.map (fun hours ->
       match List.nth_opt hours position with Some hour -> hour | None -> Pulse.Half_hour_unknown) all)) in
   let peak = Pulse.peak_failure_count counts in
+  let peak_lower = Pulse.failure_lower_bound peak in
+  let low_tint = Theme.series_tint Masc_tui_theme.Latency 0.55 in
+  let fail_tone n =
+    if peak_lower > 1 && n * 3 >= peak_lower * 2 then Theme.bad ()
+    else if peak_lower > 2 && n * 3 <= peak_lower then low_tint
+    else Theme.warn ()
+  in
   prefix name_cells " " (if ko then "전체" else "fleet")
   ^ band ~count all (fun () ->
       String.concat "" (List.map (function
@@ -124,5 +133,5 @@ let fleet ~ko ~cols ~now runtimes =
         | Pulse.Exact 0 ->
             Theme.recede () ^ Pulse.half_hour_mark Pulse.Half_hour_quiet ^ Ansi.reset
         | (Pulse.Exact n | Pulse.At_least n) ->
-            Theme.warn () ^ Grid.level_glyph ~peak:(Pulse.failure_lower_bound peak) n ^ Ansi.reset) counts))
+            fail_tone n ^ Grid.level_glyph ~peak:peak_lower n ^ Ansi.reset) counts))
   ^ Theme.recede () ^ (if ko then " │ 최대 " else " │ peak ") ^ Ansi.reset ^ count_text peak

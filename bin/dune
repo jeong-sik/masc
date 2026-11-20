@@ -339,7 +339,7 @@
  (name masc_tui_context_bars)
  (wrapped false)
  (modules masc_tui_context_bars)
- (libraries masc_tui_chart masc_tui_theme))
+ (libraries masc_tui_chart masc_tui_message_layout masc_tui_theme))
 
 (library
  (name masc_tui_chart)
@@ -1899,7 +1899,7 @@
  (name masc_tui_keeper_config)
  (wrapped false)
  (modules masc_tui_keeper_config)
- (libraries yojson otoml masc masc.config masc.keeper_toml masc.runtime masc_tui_runtime_config_receipt masc_tui_theme masc.string_util
+ (libraries yojson otoml masc masc.config masc.keeper_toml masc.runtime masc_tui_message_layout masc_tui_runtime_config_receipt masc_tui_theme masc.string_util
   masc_tui_value))
 
 (library

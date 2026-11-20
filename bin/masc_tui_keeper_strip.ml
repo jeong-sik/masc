@@ -87,8 +87,8 @@ type wake_style = Keeper_wakes | Wake_counts
 
 let unreported_mark = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
-let window_label ~cells full narrow =
-  Theme.recede ()
+let window_label ?(style = Theme.recede ()) ~cells full narrow =
+  style
   ^ Layout.fit_width (if Layout.display_width full <= cells then full else narrow) cells
   ^ Ansi.reset
 
@@ -108,16 +108,17 @@ let wake_summary ~ko slots =
     | Next.Wakes_with_unknown count -> known + max 0 count, true
     | Next.Wakes_unknown -> known, true) (0, false) slots in
   if cells = 0 then "" else
+  let wakes_tint = Theme.series_tint Masc_tui_theme.Wakes in
   match known, unknown with
   | 0, true -> unreported_band ~cells
   | 0, false -> empty_band ~cells
   | count, true ->
-      window_label ~cells
-        (if ko then Printf.sprintf "%d회 이상 예약" count else Printf.sprintf "%d+ wakes" count)
+      window_label ~style:(wakes_tint 0.65) ~cells
+        (if ko then Printf.sprintf "예약 %d+" count else Printf.sprintf "%d+ wakes" count)
         (Printf.sprintf "%d+" count)
   | count, false ->
-      window_label ~cells
-        (if ko then Printf.sprintf "%d회 예약" count else Printf.sprintf "%d wakes" count)
+      window_label ~style:(wakes_tint 0.78) ~cells
+        (if ko then Printf.sprintf "예약 %d" count else Printf.sprintf "%d wakes" count)
         (string_of_int count)
 
 let wake_strip ~style slots =
@@ -140,9 +141,9 @@ let wake_strip ~style slots =
         (0, None) slots
     in
     let flat = match min_pos with Some m -> m = peak | None -> true in
-    (* Keep wake strips calm: a uniform cadence draws a quiet low sparkline
-       instead of a solid neon full-block wall, and varying counts cap at
-       six-eighths height with a muted wakes tint. *)
+    (* Keep wake strips calm while still showing green Oklab progression:
+       uniform cadences draw a soft low sparkline, and varying counts step
+       smoothly along the Wakes series ramp up to six-eighths height. *)
     let wake_level count =
       if flat then "\xe2\x96\x82" (* ▂ *)
       else
@@ -151,13 +152,13 @@ let wake_strip ~style slots =
         let idx = min (n - 1) (((count * n + peak - 1) / max 1 peak) - 1) in
         glyphs.(max 0 idx)
     in
+    let tint = Theme.series_tint Masc_tui_theme.Wakes in
     let tone = match style with
-      | Keeper_wakes -> fun _ -> Theme.recede ()
+      | Keeper_wakes -> fun _ -> tint 0.7
       | Wake_counts ->
-          let tint = Theme.series_tint Masc_tui_theme.Wakes in
           fun count ->
-            if flat then Theme.recede ()
-            else tint (0.45 *. (float_of_int count /. float_of_int (max 1 peak)))
+            if flat then tint 0.48
+            else tint (0.35 +. (0.65 *. (float_of_int count /. float_of_int (max 1 peak))))
     in
     String.concat "" (List.map (fun slot ->
       let quiet cell = Theme.recede () ^ Grid.strip_mark cell ^ Ansi.reset in
@@ -192,11 +193,18 @@ let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows
   let peak = List.fold_left (fun p (n, _) -> max p n) 0 counts in
   let pulse =
     if Pulse.nothing_read readings then history_unknown_label ~cells:grid.side_cells
-    else String.concat "" (List.map (fun (n, unknown) ->
-      if n > 0 then Theme.warn () ^ Grid.level_glyph ~peak n ^ Ansi.reset
-      else Theme.recede ()
-        ^ (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")
-        ^ Ansi.reset) counts) in
+    else
+      let low_tint = Theme.series_tint Masc_tui_theme.Latency 0.55 in
+      let fail_tone n =
+        if peak > 1 && n * 3 >= peak * 2 then Theme.bad ()
+        else if peak > 2 && n * 3 <= peak then low_tint
+        else Theme.warn ()
+      in
+      String.concat "" (List.map (fun (n, unknown) ->
+        if n > 0 then fail_tone n ^ Grid.level_glyph ~peak n ^ Ansi.reset
+        else Theme.recede ()
+          ^ (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")
+          ^ Ansi.reset) counts) in
   let active = List.filter (fun row -> match runtime row with
     | Some row -> not row.Decode.kr_paused | None -> true) rows in
   let future = match active with
@@ -224,8 +232,13 @@ let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows
     else (if ko then "전체 최대 " else "fleet max ") ^ pulse_max in
   Some { name
   ; pulse; strip
-  ; due = let label = (if ko then "최대" else "max ") ^ wake_max in
-      if Layout.display_width label <= Grid.due_cells then label else Layout.compact_count wake_peak }
+  ; due =
+      let label = (if ko then "최대" else "max ") ^ wake_max in
+      if Layout.display_width label <= Grid.due_cells then label
+      else
+        let compact = "\xe2\x86\x91" ^ wake_max in
+        if Layout.display_width compact <= Grid.due_cells then compact
+        else Layout.compact_count wake_peak }
 
 let selected_summary ~ko ~now ~activity_cell ~next_run ~recurrence ~memory row =
   let say korean english = if ko then korean else english in

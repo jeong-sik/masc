@@ -424,22 +424,25 @@ let hints_in ~ko ~width ~room hints =
     notice :: (if List.length copying <= room - 1 then copying else [])
 ;;
 
-let filling_rows ~ko ~width ~height t =
+let filling_rows_with_selection ~ko ~width ~height t =
+  let plain lines = List.map (fun line -> false, line) lines in
   let height = max 0 height in
   if height = 0 then [] else
   let label_w = label_cells ~ko in
   let mark field = if t.field = field then "›" else " " in
   let line field label value =
-    let lead = if height = 1 && field = t.field && Option.is_some t.error then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " " else "  " in
+    let selected = t.field = field in
+    let lead = if height = 1 && selected && Option.is_some t.error then Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " " else "  " in
+    selected,
     Printf.sprintf "%s%s %s %s" lead (mark field)
       (Masc_tui_message_layout.fit_width label label_w)
       (Terminal_text.single_line value)
   in
   let base = t.ring.chosen in
   let count = List.length t.ring.before + 1 + List.length t.ring.after in
-  let intro = wrapped ~width ~lead:hint_lead
+  let intro = plain (wrapped ~width ~lead:hint_lead
       (if ko then "계정 하나 더 · 고른 provider 를 복사하고 로그인 위치만 바꿉니다"
-       else "Add account · copies the chosen provider with a separate sign-in location") in
+       else "Add account · copies the chosen provider with a separate sign-in location")) in
   let fields = [ line Base (base_label ~ko)
         (Printf.sprintf "\xe2\x80\xb9 %s (%s) \xe2\x80\xba  %d/%d" base.display_name base.id
            (List.length t.ring.before + 1) count)
@@ -450,7 +453,7 @@ let filling_rows ~ko ~width ~height t =
   let errors = match t.error with
      | None -> []
      | Some reason -> wrapped ~width ~lead:refusal_lead reason in
-  let full = intro @ fields @ hint_rows ~ko ~width ~copy_available:false hints @ errors @ [ "" ] in
+  let full = intro @ fields @ plain (hint_rows ~ko ~width ~copy_available:false hints @ errors @ [ "" ]) in
   if List.length full <= height then full else
     (* Reserve the selected field before any wrapped information. As in the
        other runtime forms, only the field window follows its cursor. *)
@@ -465,7 +468,7 @@ let filling_rows ~ko ~width ~height t =
     let fields = List.take shown (List.drop first fields) in
     let remaining = room - List.length fields in
     let intro = if List.length intro <= remaining then intro else [] in
-    intro @ fields @ errors @ hints
+    intro @ fields @ plain errors @ plain hints
 ;;
 
 (* The saved account and how to sign it in, drawn the way the form drew
@@ -481,8 +484,13 @@ let saved_rows ~ko ~width ~id sign_in =
   @ [ "" ]
 ;;
 
-let rows ~ko ~width ~height t =
+let rows_with_selection ~ko ~width ~height t =
   match t.phase with
-  | Filling -> filling_rows ~ko ~width ~height t
-  | Saved { saved_id; saved_sign_in } -> saved_rows ~ko ~width ~id:saved_id saved_sign_in
+  | Filling -> filling_rows_with_selection ~ko ~width ~height t
+  | Saved { saved_id; saved_sign_in } ->
+      List.map (fun line -> false, line) (saved_rows ~ko ~width ~id:saved_id saved_sign_in)
+;;
+
+let rows ~ko ~width ~height t =
+  List.map snd (rows_with_selection ~ko ~width ~height t)
 ;;

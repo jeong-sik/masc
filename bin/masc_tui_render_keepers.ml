@@ -208,7 +208,18 @@ let keeper_flag_cell (liveness : Keeper_control.liveness) =
         | Some (Mark.Remote_ssh as known), _ ->
           (Theme.category Theme.Slot_1) ^ Mark.sandbox_letter known ^ Ansi.reset
         | None, other when String.length other > 0 ->
-          (Theme.warn ()) ^ String.uppercase_ascii (String.sub other 0 1) ^ Ansi.reset
+          let decoded = String.get_utf_8_uchar other 0 in
+          let first =
+            if Uchar.utf_decode_is_valid decoded then
+              let cp = Uchar.to_int (Uchar.utf_decode_uchar decoded) in
+              let printable = cp >= 0x20 && cp <> 0x7F && not (cp >= 0x80 && cp <= 0x9F) in
+              let len = Uchar.utf_decode_length decoded in
+              let slice = String.sub other 0 len in
+              let glyph = if len = 1 then String.uppercase_ascii slice else slice in
+              if printable && Message_layout.display_width glyph = 1 then glyph else "?"
+            else "?"
+          in
+          (Theme.warn ()) ^ first ^ Ansi.reset
         | None, _ -> Theme.recede () ^ "?" ^ Ansi.reset
       in
       Mark.activation_letter row.kr_activation_mode ^ gap ^ sandbox
@@ -795,11 +806,12 @@ let grid_name (grid : Grid.t) ~yolo verdict name =
 
 let grid_repeat count mark = String.concat "" (List.init (max 0 count) (fun _ -> mark))
 
-(* Failures remain prominent; successful history is secondary to current work. *)
+(* Four-stage semantic progression: quiet dot (receded), healthy ok pip (ok),
+   mixed half block (warn), pure failed block (bad). *)
 let grid_half_hour_style = function
-  | Masc_tui_keeper_pulse.Half_hour_failed | Masc_tui_keeper_pulse.Half_hour_failed_and_ok ->
-      Theme.warn ()
-  | Masc_tui_keeper_pulse.Half_hour_ok -> Theme.recede ()
+  | Masc_tui_keeper_pulse.Half_hour_failed -> Theme.bad ()
+  | Masc_tui_keeper_pulse.Half_hour_failed_and_ok -> Theme.warn ()
+  | Masc_tui_keeper_pulse.Half_hour_ok -> Theme.ok ()
   | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_unknown ->
       Theme.recede ()
 
@@ -815,7 +827,7 @@ let grid_half_hour_pulse state (grid : Grid.t) ~now pulse =
     (List.map
        (fun half_hour ->
          let mark = match half_hour with
-           | Masc_tui_keeper_pulse.Half_hour_quiet -> " "
+           | Masc_tui_keeper_pulse.Half_hour_quiet -> Keeper_mark.grid_dot_mark
            | Half_hour_unknown -> Keeper_mark.grid_unknown_range_mark
            | Half_hour_ok | Half_hour_failed | Half_hour_failed_and_ok ->
                Masc_tui_keeper_pulse.half_hour_mark half_hour in
@@ -858,25 +870,27 @@ let grid_due ~ko ~now verdict next_run =
 let grid_level_cells = 2
 
 (* The right column of the activity columns: the librarian's unread turns and
-   their level against [peak_lag]. A reading without a measured lag draws the
-   word its lag cell already uses. *)
+   their level against [peak_lag]. The column header already names Lag/지연,
+   so unmeasured/unknown rows draw a clean "?" and refused rows draw "!"
+   instead of repeating an English "lag ?" / "mem ?" prefix on every row. *)
 let grid_lag_cell (grid : Grid.t) ~peak_lag memory =
-  let fitted (cell : Masc_tui_keeper_axis_cell.t) =
-    style_axis_cell { cell with text = Message_layout.pad_left cell.text grid.mem_cells }
-  in
   match memory with
   | Memory_reading.Row { lag = Memory_reading.Lag turns; _ } ->
-      fitted
-        { Masc_tui_keeper_axis_cell.text =
-            Message_layout.pad_left (string_of_int turns) (grid.mem_cells - grid_level_cells)
-            ^ " " ^ Grid.level_glyph ~peak:peak_lag turns
-        ; tone = (if turns > 0 then Masc_tui_keeper_axis_cell.Attention else Masc_tui_keeper_axis_cell.Quiet)
-        }
-  | Memory_reading.Row { lag = Memory_reading.Lag_unmeasured; _ } | Memory_reading.Unknown
-  | Memory_reading.No_row | Memory_reading.Refused _ -> (
-      match Memory_reading.lag_cell memory with
-      | Some cell -> fitted cell
-      | None -> String.make grid.mem_cells ' ')
+      let tone =
+        if turns <= 0 then Theme.recede ()
+        else if peak_lag > 1 && turns * 3 >= peak_lag * 2 then Theme.bad ()
+        else Theme.warn ()
+      in
+      let content =
+        Message_layout.pad_left (string_of_int turns) (grid.mem_cells - grid_level_cells)
+        ^ " " ^ Grid.level_glyph ~peak:peak_lag turns
+      in
+      tone ^ Message_layout.pad_left content grid.mem_cells ^ Ansi.reset
+  | Memory_reading.Row { lag = Memory_reading.Lag_unmeasured; _ } | Memory_reading.Unknown ->
+      Theme.recede () ^ Message_layout.pad_left Keeper_mark.unknown_mark grid.mem_cells ^ Ansi.reset
+  | Memory_reading.Refused _ ->
+      Theme.bad () ^ Message_layout.pad_left "!" grid.mem_cells ^ Ansi.reset
+  | Memory_reading.No_row -> String.make grid.mem_cells ' '
 
 let grid_fitted cells (cell : Masc_tui_keeper_axis_cell.t) =
   style_axis_cell { cell with text = fit_width cell.text cells }
@@ -915,13 +929,19 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
         if bar_cells <= 0 then 0
         else Grid.lag_fill ~cells:bar_cells ~peak:peak_lag turns
       in
-      let bar_tone =
+      let scale =
+        let paint = Theme.paint () in
         match gap with
-        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured -> Theme.warn ()
-        | Memory_reading.No_gap -> Theme.recede ()
+        | Memory_reading.Gap _ | Memory_reading.Gap_unmeasured ->
+            Chart.Declared_limit paint
+        | Memory_reading.No_gap ->
+            Chart.Series { paint; series = Masc_tui_theme.Backlog }
       in
       let bar =
-        (if filled > 0 then bar_tone ^ grid_repeat filled "\xe2\x94\x81" (* ━ *) ^ Ansi.reset else "")
+        (if filled > 0 then
+           Chart.meter_fill_run ~scale ~width:bar_cells ~value:turns ~max_value:(max 1 peak_lag)
+             ~reset:Ansi.reset (List.init filled (fun _ -> "\xe2\x94\x81" (* ━ *)))
+         else "")
         ^ ground (max 0 (bar_cells - filled))
       in
       let count_str =
@@ -930,7 +950,8 @@ let grid_lag_bar (grid : Grid.t) ~peak_lag memory =
         else
           let num = Masc_tui_chart.format_compact_num turns in
           let pad = String.make (max 0 (label_w - Message_layout.display_width num)) ' ' in
-          bar_tone ^ fit_width (pad ^ num) label_w ^ Ansi.reset
+          let tip = Chart.meter_tip_style scale ~value:turns ~max_value:(max 1 peak_lag) in
+          tip ^ fit_width (pad ^ num) label_w ^ Ansi.reset
       in
       bar ^ count_str
   | Memory_reading.Row { lag = Memory_reading.Lag_unmeasured; _ } ->
@@ -1210,6 +1231,8 @@ let group_pulse ~now members =
   if Masc_tui_keeper_pulse.nothing_read readings then
     Masc_tui_keeper_strip.history_unknown_label ~cells:group_pulse_slots
   else
+    let peak = max 1 (List.length members) in
+    let low_tint = Theme.series_tint Masc_tui_theme.Latency 0.55 in
     String.concat "" (List.init group_pulse_slots (fun position ->
       let count, unknown = List.fold_left (fun (count, unknown) slots ->
         match List.nth_opt slots position with
@@ -1217,7 +1240,13 @@ let group_pulse ~now members =
         | Some Masc_tui_keeper_pulse.Half_hour_unknown | None -> count, true
         | Some (Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_ok) -> count, unknown)
         (0, false) readings in
-      if count > 0 then Theme.warn () ^ Grid.level_glyph ~peak:(List.length members) count ^ Ansi.reset
+      if count > 0 then
+        let tone =
+          if peak > 1 && count * 3 >= peak * 2 then Theme.bad ()
+          else if peak > 2 && count * 3 <= peak then low_tint
+          else Theme.warn ()
+        in
+        tone ^ Grid.level_glyph ~peak count ^ Ansi.reset
       else Theme.recede () ^ (if unknown then Keeper_mark.grid_unknown_range_mark else "·") ^ Ansi.reset))
 
 let group_sum project readings =
@@ -1413,7 +1442,7 @@ let grid_header state (grid : Grid.t) (columns : Axis_row.columns) =
            | Plain | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall ->
                Keeper_mark.grid_next_column_word ~ko:(state.ui_language = Lang_ko) ~window)
         , word Keeper_mark.Due_column
-        , Message_layout.pad_left (word Keeper_mark.Lag_column) (grid.mem_cells - grid_level_cells) )
+        , Message_layout.pad_left (word Keeper_mark.Lag_column) grid.mem_cells )
     | Axis_row.Memory_columns ->
         ( word Keeper_mark.Keeper_column
         , pulse_header
@@ -1457,23 +1486,56 @@ let grid_header state (grid : Grid.t) (columns : Axis_row.columns) =
    runs its turns, so keepers that were visibly turning were listed as not
    running (2026-09-16). Executable is the set with a live fiber (Running or
    Failing), which is the fact the label names. *)
+(* Format a list of keeper names to fit within [max_cells] without slicing
+   a name in half, summarizing remaining keepers as "외 N명" / "+N more". *)
+let fit_keeper_name_list ~ko ~max_cells names =
+  let clean_names = List.map Terminal_text.single_line names in
+  let total = List.length clean_names in
+  let more_suffix remaining =
+    if remaining <= 0 then ""
+    else if ko then Printf.sprintf " 외 %d명" remaining
+    else Printf.sprintf " +%d more" remaining
+  in
+  let rec take acc used count = function
+    | [] -> String.concat ", " (List.rev acc)
+    | name :: rest ->
+        let sep = if acc = [] then 0 else 2 in
+        let name_w = Message_layout.display_width name in
+        let remaining = total - count - 1 in
+        let suffix_w = Message_layout.display_width (more_suffix remaining) in
+        if used + sep + name_w + suffix_w <= max_cells then
+          take (name :: acc) (used + sep + name_w) (count + 1) rest
+        else if acc = [] then
+          if remaining > 0 && suffix_w < max_cells then
+            fit_width name (max 1 (max_cells - suffix_w)) ^ more_suffix remaining
+          else fit_width name max_cells
+        else
+          String.concat ", " (List.rev acc) ^ more_suffix (total - count)
+  in
+  take [] 0 0 clean_names
+
 let keeper_fleet_gap_lines ~ko (fleet : fleet_safety) =
   let say korean english = if ko then korean else english in
   let names = Masc.Fleet_stream.Names.to_list in
   let subtract from_names remove_names =
     List.filter (fun name -> not (List.mem name remove_names)) from_names
   in
+  (* Keepers whose fiber is alive but cannot take a turn are already reported
+     under [running_without_turn]; exclude them from [not_running] so a
+     running fleet never prints the same names twice as "not running". *)
+  let running_names = names fleet.fs_running_names in
+  let executable_names = names fleet.fs_executable_names in
   let not_running =
-    subtract (names fleet.fs_bootable_names) (names fleet.fs_executable_names)
+    subtract (subtract (names fleet.fs_bootable_names) executable_names) running_names
   in
   let running_without_turn =
-    subtract (names fleet.fs_running_names) (names fleet.fs_executable_names)
+    subtract running_names executable_names
   in
   List.filter_map
     (fun (names, label, color) ->
        match names with
        | [] -> None
-       | _ -> Some (color, label, String.concat ", " names))
+       | _ -> Some (color, label, names))
     [ (not_running, say "실행 안 됨" "not running", (Theme.bad ()))
     ; (running_without_turn, say "실행 중이나 턴 못 돎" "running, cannot take a turn", (Theme.warn ()))
     ; (* Failing subsets that need operator action: turn configuration
@@ -2610,8 +2672,10 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
     | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; _ } ->
         List.map
           (fun (color, label, names) ->
-            Printf.sprintf "%s  %s: %s%s" color label
-              (Terminal_text.single_line names) Ansi.reset)
+            let prefix = Printf.sprintf "%s (%d): " label (List.length names) in
+            let avail = max 8 (cells - Message_layout.display_width prefix) in
+            let summary = fit_keeper_name_list ~ko ~max_cells:avail names in
+            Printf.sprintf "%s  %s%s%s" color prefix summary Ansi.reset)
           (keeper_fleet_gap_lines ~ko fleet)
     | Masc_tui_fleet_stream.Awaiting_first_reading
     | Masc_tui_fleet_stream.Unreachable _
@@ -2935,6 +2999,14 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary
   ; kpp_sheet_lines = sheet_lines }
 
+let paint_selected_keeper_row ~width text =
+  let fitted = fit_width text width in
+  match Theme.sidebar_selection_background () with
+  | Some bg when not (String.equal bg "") ->
+      Masc_tui_theme.paint_row_background ~bg fitted
+  | Some _ | None ->
+      Theme.sidebar_selection () ^ Masc_tui_theme.strip_sgr fitted ^ Ansi.reset
+
 let keeper_plain_list_lines (state : state) projection =
   let width = projection.kpp_list_width in
   let text ko en = ui_text state ~ko ~en in
@@ -2950,7 +3022,7 @@ let keeper_plain_list_lines (state : state) projection =
           ^ keeper_group_heading_text ~ko:(state.ui_language = Lang_ko)
               ~available_cells:(max 1 (width - 4)) (keeper_list_rows state) group count in
         [ if selected then
-            Theme.sidebar_selection () ^ fit_width (Masc_tui_theme.strip_sgr heading) width ^ Ansi.reset
+            paint_selected_keeper_row ~width (keeper_group_heading_style group ^ heading ^ Ansi.reset)
           else
             fit_width (keeper_group_heading_style group ^ heading ^ Ansi.reset) width ]
     | Keeper_display_row (_, row) as entry ->
@@ -2962,11 +3034,9 @@ let keeper_plain_list_lines (state : state) projection =
         let now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko) row in
         let primary = prefix ^ now_cell in
         let emit value =
-          let value = fit_width value width in
           let value =
-            if selected then
-              Theme.sidebar_selection () ^ Masc_tui_theme.strip_sgr value ^ Ansi.reset
-            else value
+            if selected then paint_selected_keeper_row ~width value
+            else fit_width value width
           in
           pressable (Press_keeper_row row.keeper.Tui_decode.k_name) value
         in
@@ -3294,10 +3364,15 @@ let render_keeper_axes (state : state) =
   report_drawn_list Keeper_stops
     ~height:(Masc_tui_scroll.items_always_shown ~heights ~rows:entry_rows);
   let entries_window = List.take window_entries (List.drop scroll_offset entries) in
-  (* Strip visual SGR before adding pressable marks: those marks also end in
-     [m] and must reach the frame presenter. *)
-  let selected_line text =
-    box_line_styled buf cols ~style:(Theme.sidebar_selection ()) text in
+  (* Preserve semantic foreground colours on the selected row when a palette
+     background is available, while falling back to reverse video (with SGR
+     stripped before pressable marks) on non-colour terminals. *)
+  let emit_row ~selected ~press text =
+    if selected then
+      box_line buf cols (press (paint_selected_keeper_row ~width:inner text))
+    else
+      box_line buf cols (press (fit_width text inner))
+  in
   List.iter
     (function
       | Keeper_world as entry ->
@@ -3316,10 +3391,7 @@ let render_keeper_axes (state : state) =
             ; strip = fit_width world.strip (Grid.strip_cells grid)
             ; due = fit_width world.due Grid.due_cells
             ; right = Message_layout.pad_left world.right grid.mem_cells }) in
-          let press value = pressable Press_keeper_world (fit_width value inner) in
-          if selected then
-            selected_line (press (Masc_tui_theme.strip_sgr text))
-          else box_line buf cols (press text)
+          emit_row ~selected ~press:(pressable Press_keeper_world) text
       | Keeper_group_heading (group, count) as entry ->
           let selected = keeper_entry_selected stop entry in
           let text =
@@ -3349,9 +3421,7 @@ let render_keeper_axes (state : state) =
                   ~pulse:(grid_group_pulse state grid list_reading group)
                   ~selected title
           in
-          if selected then
-            selected_line (Masc_tui_theme.strip_sgr text)
-          else box_line buf cols text
+          emit_row ~selected ~press:Fun.id text
       | Keeper_display_row (position, row) as entry ->
           if wall_separator position then box_line buf cols (Theme.recede () ^ draw_hline inner ^ Ansi.reset);
           let selected = keeper_entry_selected stop entry in
@@ -3375,14 +3445,10 @@ let render_keeper_axes (state : state) =
                 grid_keeper_row state grid grid_columns ~view:state.keeper_list_view ~peak_lag
                   ~peak_facts ~now:now_unix ~yolo ~selected row
           in
-          let press text =
-            pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name)
-              (fit_width text inner)
-          in
           let emit text =
-            if selected then
-              selected_line (press (Masc_tui_theme.strip_sgr text))
-            else box_line buf cols (press text)
+            emit_row ~selected
+              ~press:(pressable (Press_keeper_row row.Keeper_list_model.keeper.Tui_decode.k_name))
+              text
           in
           emit primary;
           (* Only a row that draws a second line builds one. *)
@@ -4670,7 +4736,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                    ^ tail
                  in
                  if index = selected_index then
-                   Theme.selection_style () ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset
+                   Theme.selection_style () ^ fit_width (Masc_tui_theme.strip_sgr line) inner ^ Ansi.reset
                  else line)
               connectors
           in
@@ -4758,7 +4824,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                           removal
                       in
                       if selected then
-                        Theme.selection_style () ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset
+                        Theme.selection_style () ^ fit_width (Masc_tui_theme.strip_sgr line) inner ^ Ansi.reset
                       else if missing_keeper then
                         (Theme.bad ()) ^ line ^ Ansi.reset
                       else line)

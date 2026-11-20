@@ -249,10 +249,11 @@ let grid_lag_header = "lag"
 let grid_pulse_header ~window = axis_before_glyph ^ " " ^ window
 let grid_next_header ~window = "next " ^ axis_next_glyph ^ " " ^ window
 
-(* The views' pulse draws one mark per half hour (RFC-0515 §2.4.3): the
-   lowest bar for ok turns, a full one for failed turns ([grid_full_mark])
-   and a half one for a half hour that holds both. *)
-let grid_pulse_ok_mark = "\xe2\x96\x81" (* ▁ *)
+(* The views' pulse draws one mark per half hour (RFC-0515 §2.4.3): a crisp
+   small square pip for ok turns (so consecutive ok slots read as individual
+   dots instead of fusing into a line), a half block for mixed half hours,
+   and a tall block for failed turns ([grid_full_mark]). *)
+let grid_pulse_ok_mark = "\xe2\x96\xaa" (* ▪ *)
 let grid_pulse_failed_and_ok_mark = "\xe2\x96\x84" (* ▄ *)
 
 (* The memory and age views, the failure line and the group titles. *)

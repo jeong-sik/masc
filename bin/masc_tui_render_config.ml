@@ -2044,9 +2044,12 @@ let render_config_models (state : state) =
   let content_height = max 1 (raw_content_height - List.length sheet_lines) in
   (match state.runtime_model_form with
    | Some form ->
-       let lines = Masc_tui_model_form.rows ~input_locked:(runtime_form_input_locked state)
+       let lines = Masc_tui_model_form.rows_with_selection ~input_locked:(runtime_form_input_locked state)
            ~width:(max 1 (framed_inner_width cols - 2)) ~height:content_height form in
-       List.iter (fun line -> box_line buf cols ("  " ^ Terminal_text.single_line line)) lines;
+       List.iter (fun (selected, line) ->
+         let text = "  " ^ Terminal_text.single_line line in
+         if selected then box_line_selected buf cols text
+         else box_line buf cols text) lines;
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
        box_line buf cols
@@ -3137,6 +3140,9 @@ let render_config (state : state) =
       (* The account form stands where the file is drawn: it is opened on that
          file, and what it saves is that file with one provider added. *)
       let ko = state.ui_language = Lang_ko in
+      let push_form_row (selected, line) =
+        if selected then c.push_selected line else c.push line
+      in
       match state.runtime_account_form with
       | Some form ->
           let saved = Masc_tui_runtime_account_form.is_saved form in
@@ -3145,10 +3151,10 @@ let render_config (state : state) =
           in
           if form_height > 0 then begin
             let form_rows =
-              Masc_tui_runtime_account_form.rows ~ko ~width:(framed_inner_width cols)
+              Masc_tui_runtime_account_form.rows_with_selection ~ko ~width:(framed_inner_width cols)
                 ~height:form_height form
             in
-            List.iter c.push (if saved then List.take form_height form_rows else form_rows)
+            List.iter push_form_row (if saved then List.take form_height form_rows else form_rows)
           end;
           (* The saved form stays open for its copy key, and the footer can
              lose it: the save notice leads that row and the fitter keeps only
@@ -3163,16 +3169,16 @@ let render_config (state : state) =
           (* Same place and same reason as the account form: the form is
              opened on the file, and what it saves is that file with three
              keys of [typesafeai] set. *)
-          List.iter c.push
-            (Masc_tui_memory_recall_form.rows ~ko ~width:(framed_inner_width cols)
+          List.iter push_form_row
+            (Masc_tui_memory_recall_form.rows_with_selection ~ko ~width:(framed_inner_width cols)
                ~height:content_height form)
       | None ->
       match state.typesafeai_exclusion_form with
       | Some form ->
           (* The same place again: opened on the file, and what it saves is
              that file with [excluded_keepers] set. *)
-          List.iter c.push
-            (Masc_tui_typesafeai_exclusion_form.rows ~ko ~width:(framed_inner_width cols)
+          List.iter push_form_row
+            (Masc_tui_typesafeai_exclusion_form.rows_with_selection ~ko ~width:(framed_inner_width cols)
                ~height:content_height form)
       | None ->
       (match runtime_config_view_error_text state with

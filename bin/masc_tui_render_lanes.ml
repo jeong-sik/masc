@@ -624,8 +624,16 @@ let render_exact_lane_provider_editor (state : state) editor =
             | Masc_tui_types.Pick_refused refusal ->
               (* The bracket carries the refusal: a note after the model
                  is the first thing the frame cuts. *)
-              box_line_styled buf cols ~style:(Theme.recede ())
-                (line (Masc_tui_types.runtime_pick_refusal_tag ~ko:(state.ui_language = Lang_ko) refusal) "")
+              let refused_line =
+                line
+                  (Masc_tui_types.runtime_pick_refusal_tag
+                     ~ko:(state.ui_language = Lang_ko) refusal)
+                  ""
+              in
+              if picker.rlp_selected_row = Some offset then
+                box_line_selected buf cols refused_line
+              else
+                box_line_styled buf cols ~style:(Theme.recede ()) refused_line
             | Masc_tui_types.Pick_available ->
               (if picker.rlp_selected_row = Some offset
                then box_line_selected buf cols

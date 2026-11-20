@@ -9,8 +9,26 @@ type memory_cache_entry =
   ; index : Masc_tui_keeper_memory_reading.index
   }
 
+type keeper_schedule_cache_entry =
+  { snap : Masc_tui_types.schedule_snapshot
+  ; index : Masc_tui_keeper_next_run.index
+  }
+
 let last_schedule_index : schedule_cache_entry option ref = ref None
+let last_keeper_schedule_index : keeper_schedule_cache_entry option ref = ref None
 let last_memory_index : memory_cache_entry option ref = ref None
+
+let get_keeper_schedule_index (snapshot : Masc_tui_types.schedule_snapshot) =
+  match !last_keeper_schedule_index with
+  | Some entry when entry.snap == snapshot -> entry.index
+  | Some _ | None ->
+      let index =
+        Masc_tui_keeper_next_run.index_of_agenda
+          ~freshness:Masc_tui_agenda.Last_read (Some snapshot)
+      in
+      last_keeper_schedule_index := Some { snap = snapshot; index };
+      index
+;;
 
 let get_schedule_index (state : Masc_tui_types.state) =
   match !last_schedule_index with
@@ -61,18 +79,85 @@ let runtime_cells ~now = function
           (Masc_tui_keeper_pulse.pulse_cell ~now runtime.Masc.Tui_decode.kr_recent_turns) )
 ;;
 
+let keeper_schedule_first_page (state : Masc_tui_types.state) ~keeper_name =
+  match state.keeper_schedules with
+  | Some (name, snapshot)
+    when String.equal name keeper_name && Option.is_none snapshot.scs_read_error ->
+      (match snapshot.scs_paging with
+       | Masc_tui_types.Schedule_paging_unavailable
+       | Masc_tui_types.Schedule_paging { page_cursor = None; _ } -> Some snapshot
+       | Masc_tui_types.Schedule_paging { page_cursor = Some _; _ } -> None)
+  | Some _ | None -> None
+;;
+
+let resolved_next_run (state : Masc_tui_types.state) ~keeper_name =
+  let agenda_run = Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name in
+  match state.schedules_agenda_error with
+  | Some _ -> agenda_run
+  | None ->
+      (match agenda_run with
+       | Masc_tui_keeper_next_run.Unknown ->
+           (match keeper_schedule_first_page state ~keeper_name with
+            | Some snapshot ->
+                Masc_tui_keeper_next_run.find
+                  (get_keeper_schedule_index snapshot) ~keeper_name
+            | None -> agenda_run)
+       | Masc_tui_keeper_next_run.Not_before t1 ->
+           (match keeper_schedule_first_page state ~keeper_name with
+            | None -> agenda_run
+            | Some snapshot ->
+                (match
+                   Masc_tui_keeper_next_run.find
+                     (get_keeper_schedule_index snapshot) ~keeper_name
+                 with
+                 | Masc_tui_keeper_next_run.Unknown -> agenda_run
+                 | Masc_tui_keeper_next_run.Not_before t2 ->
+                     Masc_tui_keeper_next_run.Not_before (Float.max t1 t2)
+                 | (Masc_tui_keeper_next_run.No_schedule
+                   | Masc_tui_keeper_next_run.Scheduled_at _
+                   | Masc_tui_keeper_next_run.Late_since _
+                   | Masc_tui_keeper_next_run.Held_current _
+                   | Masc_tui_keeper_next_run.Held_as_of _) as keeper_run ->
+                     keeper_run))
+       | Masc_tui_keeper_next_run.No_schedule
+       | Masc_tui_keeper_next_run.Scheduled_at _
+       | Masc_tui_keeper_next_run.Late_since _
+       | Masc_tui_keeper_next_run.Held_current _
+       | Masc_tui_keeper_next_run.Held_as_of _ -> agenda_run)
+;;
+
 let run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
   Masc_tui_keeper_next_run.cell ~ko:(state.ui_language = Masc_tui_types.Lang_ko) ~now
-    (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)
+    (resolved_next_run state ~keeper_name)
 ;;
 
 (* A failed agenda read keeps the last list, so the strip says nothing about
-   it until a read succeeds (RFC-0515 §2.4.4). *)
+   it until a read succeeds (RFC-0515 §2.4.4). When the global agenda is
+   truncated, a loaded first-page per-keeper schedule snapshot fills in the
+   selected keeper's slots so the table agrees with its Schedule panel. *)
 let wake_strip (state : Masc_tui_types.state) ~now ~ahead ~keeper_name =
   match state.schedules_agenda_error with
   | Some _ -> Masc_tui_keeper_next_run.unknown_strip ~ahead
   | None ->
-      Masc_tui_keeper_next_run.wake_strip (get_schedule_index state) ~now ~ahead ~keeper_name
+      let slots =
+        Masc_tui_keeper_next_run.wake_strip (get_schedule_index state) ~now ~ahead ~keeper_name
+      in
+      let has_unknown =
+        List.exists
+          (function
+            | Masc_tui_keeper_next_run.Wakes_unknown
+            | Masc_tui_keeper_next_run.Wakes_with_unknown _ -> true
+            | Masc_tui_keeper_next_run.Wakes _ -> false)
+          slots
+      in
+      if not has_unknown then slots
+      else
+        match keeper_schedule_first_page state ~keeper_name with
+        | Some snapshot ->
+            Masc_tui_keeper_next_run.wake_strip
+              (get_keeper_schedule_index snapshot)
+              ~now ~ahead ~keeper_name
+        | None -> slots
 ;;
 
 let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime
@@ -149,29 +234,36 @@ let age_of_memory ~now = function
 
 let outside (state : Masc_tui_types.state) ~now ~keeper_name : Masc_tui_keeper_list_model.outside =
   let memory = Masc_tui_keeper_memory_reading.find (memory_index state) ~keeper_name in
-  { due =
-      due_of_next_run ~now
-        (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)
+  { due = due_of_next_run ~now (resolved_next_run state ~keeper_name)
   ; follow = follow_of_memory memory
   ; age = age_of_memory ~now memory
   }
 ;;
 
 let next_run (state : Masc_tui_types.state) ~keeper_name =
-  Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name
+  resolved_next_run state ~keeper_name
 ;;
 
 let next_recurrence (state : Masc_tui_types.state) ~keeper_name =
-  match state.schedules_agenda_error, state.schedules_agenda, next_run state ~keeper_name with
-  | None, Some snapshot, Masc_tui_keeper_next_run.Scheduled_at due
-    when snapshot.scs_read_error = None ->
-      let matching = List.filter (fun (row : Masc_tui_types.schedule_row) ->
-        row.sch_payload_keeper_name = Some keeper_name && row.sch_runner_hold = None
-        && Masc_tui_types.schedule_row_due_time row = Some due
-        && (match Schedule_domain.schedule_status_of_string row.sch_status with
-            | Ok (Schedule_domain.Scheduled | Schedule_domain.Running) | Error _ -> true
-            | Ok (Schedule_domain.Due | Schedule_domain.Succeeded | Schedule_domain.Failed
-                 | Schedule_domain.Cancelled | Schedule_domain.Expired) -> false)) snapshot.scs_rows in
+  match state.schedules_agenda_error, next_run state ~keeper_name with
+  | None, Masc_tui_keeper_next_run.Scheduled_at due ->
+      let find_in (snapshot : Masc_tui_types.schedule_snapshot) =
+        if Option.is_some snapshot.scs_read_error then []
+        else
+          List.filter (fun (row : Masc_tui_types.schedule_row) ->
+            row.sch_payload_keeper_name = Some keeper_name && row.sch_runner_hold = None
+            && Masc_tui_types.schedule_row_due_time row = Some due
+            && (match Schedule_domain.schedule_status_of_string row.sch_status with
+                | Ok (Schedule_domain.Scheduled | Schedule_domain.Running) | Error _ -> true
+                | Ok (Schedule_domain.Due | Schedule_domain.Succeeded | Schedule_domain.Failed
+                     | Schedule_domain.Cancelled | Schedule_domain.Expired) -> false)) snapshot.scs_rows
+      in
+      let matching =
+        match Option.fold ~none:[] ~some:find_in state.schedules_agenda with
+        | [] ->
+            Option.fold ~none:[] ~some:find_in (keeper_schedule_first_page state ~keeper_name)
+        | rows -> rows
+      in
       (match matching with
        | [row] -> (match Schedule_domain.schedule_status_of_string row.sch_status, row.sch_recurrence with
            | Ok (Schedule_domain.Scheduled | Schedule_domain.Running), Ok recurrence -> Some recurrence
@@ -180,8 +272,9 @@ let next_recurrence (state : Masc_tui_types.state) ~keeper_name =
                 | Schedule_domain.Cancelled | Schedule_domain.Expired), (Ok _ | Error _)
            | Error _, (Ok _ | Error _) -> None)
        | [] | _ :: _ :: _ -> None)
-  | (Some _ | None), (Some _ | None),
-      (Masc_tui_keeper_next_run.Scheduled_at _ | Masc_tui_keeper_next_run.No_schedule
+  | Some _, _
+  | None,
+      (Masc_tui_keeper_next_run.No_schedule
        | Masc_tui_keeper_next_run.Late_since _ | Masc_tui_keeper_next_run.Held_current _
        | Masc_tui_keeper_next_run.Held_as_of _ | Masc_tui_keeper_next_run.Not_before _
        | Masc_tui_keeper_next_run.Unknown) -> None

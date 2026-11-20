@@ -407,17 +407,19 @@ val verify_internal_keeper_token :
     Symlinks to regular files are accepted and cancellation propagates. *)
 
 val ensure_internal_keeper_token :
-  string -> string
+  ?export_env:bool -> string -> string
 
 val ensure_keeper_credentials :
-  string -> agent_names:string list ->
+  ?export_env:bool -> string -> agent_names:string list ->
   ((string * (string * agent_credential, masc_error) result) list, masc_error) result
 (** Batch startup sync under one admitted token index. Every publisher validates
     current named-owner and UUID authority before writing. After a failure,
-    authority is reread before any later independent Keeper is synchronized. *)
+    authority is reread before any later independent Keeper is synchronized.
+    Pass [~export_env:false] in multi-account mode so the internal keeper
+    token is never exported into process environment variables. *)
 
 val ensure_keeper_credential :
-  string -> agent_name:string ->
+  ?export_env:bool -> string -> agent_name:string ->
   (string * agent_credential, masc_error) result
 (** [ensure_keeper_credential config ~agent_name] returns a valid credential,
     backed by a per-keeper raw bearer token file. Current ownership, raw-token

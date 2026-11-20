@@ -440,6 +440,7 @@ type materialized_config =
   ; admission_allowances : Llm_provider.Provider_admission.published_allowances
       (** One agreed allowance per provider account, published to provider
           admission by [set_loaded]. *)
+  ; source_config : Runtime_schema.config
   }
 
 let degrade_loaded_for_missing_catalog
@@ -698,6 +699,7 @@ let materialize_config
     ; machines = cfg.machines
     ; media_readers = cfg.media_readers
     ; admission_allowances
+    ; source_config = cfg
     }
   in
   Ok (loaded, cfg.exact_output_lane_decls)
@@ -765,6 +767,7 @@ type loaded_state =
   ; media_readers : Runtime_schema.media_reader_decl list option
   ; lsp_servers : (string * (string * string list)) list
   ; config_path : string option
+  ; source_config : Runtime_schema.config option
   ; startup_degradation : startup_degradation option
   ; exact_slots : exact_slot_degradation
         (* Exact slots this file declares on a provider without
@@ -786,6 +789,7 @@ let empty_loaded_state : loaded_state =
   ; media_readers = None
   ; lsp_servers = []
   ; config_path = None
+  ; source_config = None
   ; startup_degradation = None
   ; exact_slots = { gaps = []; emptied_lane_ids = [] }
   }
@@ -1172,6 +1176,7 @@ let set_loaded
     ; media_readers = Some loaded.media_readers
     ; lsp_servers = loaded.lsp_servers
     ; config_path = Some config_path
+    ; source_config = Some loaded.source_config
     ; startup_degradation
     ; exact_slots =
         exact_slot_degradation_of
@@ -1473,6 +1478,7 @@ let runtime_state () = Atomic.get loaded_state_ref
 let browser_configuration () = (runtime_state ()).browser
 let machine_configuration () = (runtime_state ()).machines
 let media_reader_declarations () = (runtime_state ()).media_readers
+let source_config () = (runtime_state ()).source_config
 
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes

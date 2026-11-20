@@ -3,13 +3,13 @@
    Contains admin/internal token sync, bootable keeper credential sync,
    and shared token rotation. *)
 
-let sync_admin_token_env (state : Mcp_server.server_state) =
+let sync_admin_token_env ?(export_env = true) (state : Mcp_server.server_state) =
   let base_path = (Mcp_server.workspace_config state).base_path in
   let open Result.Syntax in
   let* raw_token, credential, source =
     Auth.prepare_startup_admin_token base_path
       ~raw_token:(Env_config_core.admin_token_opt ()) in
-  Unix.putenv Env_config_core.admin_token_env_key raw_token;
+  if export_env then Unix.putenv Env_config_core.admin_token_env_key raw_token;
   let source = match source with
     | Auth.Stored_admin_token -> "stored"
     | Auth.Minted_admin_token -> "minted"
@@ -18,9 +18,12 @@ let sync_admin_token_env (state : Mcp_server.server_state) =
     credential.agent_name source;
   Ok ()
 
-(* [Auth.ensure_internal_keeper_token] keeps an inherited token and exports a
-   generated one under the same name, so the variable is set once it returns. *)
-let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
+(* [Auth.ensure_internal_keeper_token] keeps an inherited token and (when
+   [export_env] is true) exports a generated one under the same name, so in
+   single-user mode the variable is set once it returns; in multi-account mode
+   it stays in memory and auth hash storage without leaking to child CLI
+   processes. *)
+let sync_internal_keeper_token_env ?(export_env = true) (state : Mcp_server.server_state) =
   let base_path = (Mcp_server.workspace_config state).base_path in
   let env_key = Auth.internal_keeper_token_env_key in
   let inherited =
@@ -28,7 +31,7 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
     | Some raw -> String.trim raw <> ""
     | None -> false
   in
-  let (_ : string) = Auth.ensure_internal_keeper_token base_path in
+  let (_ : string) = Auth.ensure_internal_keeper_token ~export_env base_path in
   let source = if inherited then "inherited" else "generated" in
   Log.Server.info
     "startup internal keeper MCP token synced via %s (source=%s)" env_key source;
@@ -38,7 +41,7 @@ let sync_internal_keeper_token_env (state : Mcp_server.server_state) =
     ~delta:1.0
     ()
 
-let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
+let sync_bootable_keeper_credentials ?(export_env = true) (state : Mcp_server.server_state) =
   let base_path = (Mcp_server.workspace_config state).base_path in
   let keeper_names =
     Keeper_runtime.bootable_keeper_names (Mcp_server.workspace_config state)
@@ -55,7 +58,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
             ( synced_count,
               (keeper_name, Masc_domain.masc_error_to_string err) :: failed ))
       (0, [])
-      (match Auth.ensure_keeper_credentials base_path ~agent_names:keeper_names with
+      (match Auth.ensure_keeper_credentials ~export_env base_path ~agent_names:keeper_names with
        | Ok results -> results
        | Error error -> List.map (fun name -> name, Error error) keeper_names)
   in

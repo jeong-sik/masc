@@ -83,6 +83,9 @@ val key_file : 'client t -> string option
     one the environment of the process has. A Claude Code home asks for
     none. *)
 val names_asked_by_the_home : 'client t -> string list
+(** The names of the environment variables declared in [home/config.toml] for
+    a Codex home, validated without reading the process environment. *)
+val codex_asked_names : home:string -> (string list, string) result
 val environment : 'client t -> string array
 (** Return a fresh copy; mutation cannot change the captured selection. *)
 

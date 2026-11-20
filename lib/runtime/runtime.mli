@@ -777,6 +777,11 @@ val machine_configuration : unit -> Machine_configuration.t option
     means no valid configuration is currently published. *)
 
 val media_reader_declarations : unit -> Runtime_schema.media_reader_decl list option
+
+(** The parsed configuration that {!set_loaded} materialized the active runtime
+    table from, carried in the same atomic loaded state. [None] before boot
+    publishes a runtime configuration or after {!enter_setup_required}. *)
+val source_config : unit -> Runtime_schema.config option
 (** The immutable declaration list from the same atomic loaded state.
     [None] means no configuration is published; [Some []] is a valid published
     configuration with no media reader declarations. A returned list remains

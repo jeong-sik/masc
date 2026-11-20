@@ -137,7 +137,7 @@ val restore_persisted_sessions : Mcp_server.server_state -> unit
 val bootstrap_server_state_blocking : Mcp_server.server_state -> unit
 (** {1 Startup Tasks} *)
 
-val sync_bootable_keeper_credentials : Mcp_server.server_state -> unit
+val sync_bootable_keeper_credentials : ?export_env:bool -> Mcp_server.server_state -> unit
 
 type lazy_startup_task = Restore_sessions
 

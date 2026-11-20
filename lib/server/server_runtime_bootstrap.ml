@@ -1038,12 +1038,17 @@ let initialize_owner_state_blocking
   let t1 = Eio.Time.now clock in
   Log.Server.info "State created (runtime state) in %.1fs" (t1 -. t0);
   bootstrap_server_state_blocking state;
-  (match sync_admin_token_env state with
+  let export_operator_tokens =
+    match Runtime_account_access.published_access access with
+    | Runtime_account_access.Single_user (_ : Authz_boot_mode_read.single_user) -> true
+    | Runtime_account_access.Multi_account _ -> false
+  in
+  (match sync_admin_token_env ~export_env:export_operator_tokens state with
     | Ok () -> ()
     | Error error ->
       raise (Owner_initialization_failed (Admin_credential_bootstrap_failed error)));
-  sync_internal_keeper_token_env state;
-  sync_bootable_keeper_credentials state;
+  sync_internal_keeper_token_env ~export_env:export_operator_tokens state;
+  sync_bootable_keeper_credentials ~export_env:export_operator_tokens state;
   (* Shutdown admission restore below is mailbox-linearized by the Keeper
      Owner. Install the inventory before persistence preparation so a durable
      shutdown fence can be restored on a real process restart. The operation

@@ -19,6 +19,7 @@
   eio
   eio.unix
   eio_main
+  httpun
   masc
   masc.auth
   masc.config

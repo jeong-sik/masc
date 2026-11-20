@@ -126,6 +126,18 @@ val partition_bindings : config -> binding list -> t list * (string * drop_reaso
     Native-only, empty, disabled and unresolved batches do not read unused HTTP
     declarations. Input order and typed drop reasons are preserved. *)
 
+val of_person_binding
+  :  provider_account_id:Authz_types.Provider_account_id.t
+  -> integration_id:Authz_types.Integration_id.t
+  -> account_home:string
+  -> config
+  -> binding
+  -> (t, drop_reason) result
+(** Materialize one binding for a person's account via
+    {!Runtime_adapter.materialize_person_execution}, using [~account_home] and
+    reading no key files, home configuration, or process environment. Unrelated
+    bindings in [config] are ignored. *)
+
 val quota_scope_of_runtime : t -> Runtime_quota_window.scope
 (** Non-secret quota-scope identity derived from this resolved runtime
     snapshot.  Use this form across a provider call so a concurrent catalog

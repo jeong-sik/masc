@@ -3,12 +3,53 @@
 module Ps = Authz_principal_state
 module Layout = Runtime_account_home_layout
 
-type 'client sealed = 'client Runtime_official_account.t
+type 'client person_sealed =
+  { person_client : 'client Runtime_official_account.client
+  ; provider_account_id : Authz_types.Provider_account_id.t
+  ; integration_id : Authz_types.Integration_id.t
+  ; account_home : string
+  }
+
+type 'client sealed =
+  | Captured of 'client Runtime_official_account.t
+  | Person_account of 'client person_sealed
+
 type 'client authorized = 'client Runtime_official_account.t
 
-let seal account = account
-let home sealed = Runtime_official_account.home sealed
-let same left right = Runtime_official_account.same left right
+let seal account = Captured account
+
+let seal_person ~client ~provider_account_id ~integration_id ~account_home =
+  Person_account { person_client = client; provider_account_id; integration_id; account_home }
+;;
+
+let home = function
+  | Captured sealed -> Runtime_official_account.home sealed
+  | Person_account person -> person.account_home
+;;
+
+let same_client
+    (type a b)
+    (left : a Runtime_official_account.client)
+    (right : b Runtime_official_account.client)
+  =
+  match left, right with
+  | Runtime_official_account.Claude_code, Runtime_official_account.Claude_code
+  | Runtime_official_account.Codex, Runtime_official_account.Codex -> true
+  | ( Runtime_official_account.Claude_code, Runtime_official_account.Codex
+    | Runtime_official_account.Codex, Runtime_official_account.Claude_code ) -> false
+;;
+
+let same left right =
+  match left, right with
+  | Captured a, Captured b -> Runtime_official_account.same a b
+  | Person_account a, Person_account b ->
+    same_client a.person_client b.person_client
+    && Authz_types.Provider_account_id.equal a.provider_account_id b.provider_account_id
+    && Authz_types.Integration_id.equal a.integration_id b.integration_id
+    && String.equal a.account_home b.account_home
+  | Captured _, Person_account _ | Person_account _, Captured _ -> false
+;;
+
 let account authorized = authorized
 
 type muse_home = string
@@ -105,6 +146,12 @@ let published_base_path = function
   | Multi_account { zone = _; base_path; now = _ } -> base_path
 ;;
 
+let is_multi_account () =
+  match Atomic.get state with
+  | Published (Multi_account _) -> true
+  | Unpublished | Published (Single_user _) -> false
+;;
+
 let publish_host_tool ~base_path ~config_dir =
   match Authz_boot_mode_read.tool ~base_path ~config_dir with
   | Error _ as refused -> refused
@@ -147,7 +194,16 @@ type refusal =
   | Home_unresolved of string
   | Not_a_declared_home
   | Not_the_account_home of Authz_types.Provider_account_id.t
+  | Not_the_account_integration of
+      { provider_account_id : Authz_types.Provider_account_id.t
+      ; expected : Authz_types.Integration_id.t
+      ; claimed : Authz_types.Integration_id.t
+      }
   | Not_the_account_key of Authz_types.Provider_account_id.t
+  | Account_key_unusable of
+      { provider_account_id : Authz_types.Provider_account_id.t
+      ; reason : Runtime_api_key_file.read_error
+      }
   | Home_asks_for_environment of Authz_types.Provider_account_id.t
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
@@ -187,10 +243,21 @@ let refusal_to_string = function
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
+  | Not_the_account_integration { provider_account_id; expected; claimed } ->
+    Printf.sprintf
+      "the sealed account of %s names integration %s, not %s"
+      (Authz_types.Provider_account_id.to_string provider_account_id)
+      (Authz_types.Integration_id.to_string claimed)
+      (Authz_types.Integration_id.to_string expected)
   | Not_the_account_key provider_account_id ->
     Printf.sprintf
       "the account was not captured on the key the log gives %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
+  | Account_key_unusable { provider_account_id; reason } ->
+    Printf.sprintf
+      "the key file of %s could not be read: %s"
+      (Authz_types.Provider_account_id.to_string provider_account_id)
+      (Runtime_api_key_file.read_error_to_string reason)
   | Home_asks_for_environment provider_account_id ->
     Printf.sprintf
       "the configuration of the home of %s names variables of the environment of the server, \
@@ -475,8 +542,178 @@ let official_claim sealed =
   }
 ;;
 
-let authorize request sealed =
-  judge request (official_claim sealed) |> Result.map (fun () -> sealed)
+let person_expected_home ~runtime_root provider_account_id (person : _ person_sealed) =
+  match
+    Layout.home
+      ~runtime_root
+      (layout_client person.person_client)
+      ~account_id:(Authz_types.Provider_account_id.to_string provider_account_id)
+  with
+  | Error detail -> Error (Home_unresolved detail)
+  | Ok expected ->
+    if
+      Authz_types.Provider_account_id.equal provider_account_id person.provider_account_id
+      && String.equal expected person.account_home
+    then Ok expected
+    else Error (Not_the_account_home provider_account_id)
+;;
+
+let capture_person_account
+    (type client)
+    ~runtime_root
+    ~expected_home
+    ~provider_account_id
+    ~(kind : Authz_provider_account_state.kind)
+    (person : client person_sealed)
+  : (client Runtime_official_account.t, refusal) result
+  =
+  let check_integration integration_id =
+    if Authz_types.Integration_id.equal integration_id person.integration_id
+    then Ok ()
+    else
+      Error
+        (Not_the_account_integration
+           { provider_account_id; expected = integration_id; claimed = person.integration_id })
+  in
+  let capture_login () =
+    let ( let* ) = Result.bind in
+    let* () =
+      match person.person_client with
+      | Runtime_official_account.Claude_code -> Ok ()
+      | Runtime_official_account.Codex ->
+        (match Runtime_official_account.codex_asked_names ~home:expected_home with
+         | Error detail -> Error (Home_unresolved detail)
+         | Ok [] -> Ok ()
+         | Ok ((_ : string) :: (_ : string list)) ->
+           Error (Home_asks_for_environment provider_account_id))
+    in
+    match
+      Runtime_official_account.capture
+        ~client:person.person_client
+        ~declaration:(Some expected_home)
+    with
+    | Error detail -> Error (Home_unresolved detail)
+    | Ok captured ->
+      (match Runtime_official_account.names_asked_by_the_home captured with
+       | [] -> Ok captured
+       | (_ : string) :: (_ : string list) ->
+         Error (Home_asks_for_environment provider_account_id))
+  in
+  let ( let* ) = Result.bind in
+  match person.person_client, kind with
+  | ( (Runtime_official_account.Claude_code | Runtime_official_account.Codex)
+    , Authz_provider_account_state.Login { integration_id } ) ->
+    let* () = check_integration integration_id in
+    capture_login ()
+  | ( Runtime_official_account.Codex
+    , Authz_provider_account_state.Key { integration_id; generation = _ } ) ->
+    let* () = check_integration integration_id in
+    Error (Not_the_account_key provider_account_id)
+  | ( Runtime_official_account.Claude_code
+    , Authz_provider_account_state.Key { integration_id; generation } ) ->
+    let* () = check_integration integration_id in
+    (match Layout.key_file ~runtime_root ~account_id:provider_account_id ~generation with
+     | Error detail -> Error (Home_unresolved detail)
+     | Ok key_file ->
+       (match
+          Runtime_official_account.capture_on_key
+            ~declaration:(Some expected_home)
+            ~key_file
+        with
+        | Ok captured -> Ok captured
+        | Error (Runtime_official_account.Key_not_read reason) ->
+          Error (Account_key_unusable { provider_account_id; reason })
+        | Error (Runtime_official_account.Key_not_captured detail) ->
+          Error (Home_unresolved detail)))
+;;
+
+let authorize_person request (person : _ person_sealed) =
+  match Atomic.get state with
+  | Unpublished -> Error Not_published
+  | Published (Single_user single_user) ->
+    (match Authz_boot_mode_read.turned_off single_user with
+     | Some records ->
+       let claim =
+         { client = layout_client person.person_client
+         ; declared_home = Some person.account_home
+         ; key_file = None
+         ; asked_names = []
+         }
+       in
+       (match
+          after_off
+            ~base_path:(Authz_boot_mode_read.single_user_base_path single_user)
+            records
+            request
+            claim
+        with
+        | Error refusal -> Error refusal
+        | Ok () -> Error No_operator)
+     | None ->
+       (match request with
+        | Operator_call -> Error No_operator
+        | Operator_keeper_turn { keeper_name; runtime_id = _ } ->
+          Error (No_operator_keeper keeper_name)
+        | Own_account { user_id; provider_account_id = _ }
+        | Keeper_turn { owner = user_id; keeper_id = _; channel = _; pat = _; runtime_id = _ } ->
+          Error (No_membership user_id)))
+  | Published (Multi_account { zone; base_path; now }) ->
+    (match request with
+     | Operator_call -> Error No_operator
+     | Operator_keeper_turn { keeper_name; runtime_id = _ } ->
+       Error (No_operator_keeper keeper_name)
+     | Own_account { user_id; provider_account_id } ->
+       on_trusted zone (fun (_ : Authz_zone.trusted) state ->
+         match Ps.find state.Authz_state.principals user_id with
+         | Some { Ps.status = Ps.Active; _ } ->
+           let ( let* ) = Result.bind in
+           let* runtime_root = person_root ~base_path state user_id in
+           let* expected_home = person_expected_home ~runtime_root provider_account_id person in
+           let* () =
+             Result.map_error
+               (fun reason -> Account_unavailable { provider_account_id; reason })
+               (Authz_provider_account.availability state ~user_id provider_account_id)
+           in
+           (match
+              Authz_provider_account_state.find
+                state.Authz_state.provider_accounts
+                provider_account_id
+            with
+            | None -> Error (Not_the_account_home provider_account_id)
+            | Some { Authz_provider_account_state.kind; owner = _ } ->
+              capture_person_account
+                ~runtime_root
+                ~expected_home
+                ~provider_account_id
+                ~kind
+                person)
+         | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
+     | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->
+       on_trusted zone (fun trusted state ->
+         let ( let* ) = Result.bind in
+         let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now in
+         let owner = turn.Authz_keeper_turn.owner in
+         let provider_account_id = turn.Authz_keeper_turn.provider_account_id in
+         let* runtime_root = person_root ~base_path state owner in
+         let* expected_home = person_expected_home ~runtime_root provider_account_id person in
+         match
+           Authz_provider_account_state.find
+             state.Authz_state.provider_accounts
+             provider_account_id
+         with
+         | None -> Error (Not_the_account_home provider_account_id)
+         | Some { Authz_provider_account_state.kind; owner = _ } ->
+           capture_person_account
+             ~runtime_root
+             ~expected_home
+             ~provider_account_id
+             ~kind
+             person))
+;;
+
+let authorize request = function
+  | Captured sealed -> judge request (official_claim sealed) |> Result.map (fun () -> sealed)
+  | Person_account person -> authorize_person request person
 ;;
 
 let authorize_muse request account =

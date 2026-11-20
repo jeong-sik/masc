@@ -230,7 +230,7 @@ let handle_keeper_action (state : T.state) ~base_path ~mailbox action =
         Masc_tui_loader.report_action state "system"
           (Printf.sprintf
              (if ko then "%s 지금 %s 불가 (%s)" else "%s cannot %s right now (%s)")
-             keeper.T.k_name label
+             keeper.Masc.Tui_decode.k_name label
              (Keeper_control.status_label ~ko reading
               ^ (match reading.Keeper_control.liveness with
                  | Keeper_control.Invalid detail -> ": " ^ detail
@@ -240,7 +240,7 @@ let handle_keeper_action (state : T.state) ~base_path ~mailbox action =
         match
           Keeper_control.gate_transition
             ~inflight:(Option.is_some state.T.keeper_action_inflight)
-            ~pending:state.T.keeper_action_pending ~keeper:keeper.T.k_name action
+            ~pending:state.T.keeper_action_pending ~keeper:keeper.Masc.Tui_decode.k_name action
         with
         | Keeper_control.Gate_blocked_inflight ->
             Masc_tui_loader.report_action state "system"
@@ -249,8 +249,8 @@ let handle_keeper_action (state : T.state) ~base_path ~mailbox action =
             state.T.keeper_action_pending <- Some pending;
             let key = Keeper_control.action_key action in
             Masc_tui_loader.report_action ~show_in_footer:false state "system"
-              (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key keeper.T.k_name label
-               else Printf.sprintf "Press %s again to %s %s" key label keeper.T.k_name);
+              (if ko then Printf.sprintf "%s 한 번 더 누르면 %s %s" key keeper.Masc.Tui_decode.k_name label
+               else Printf.sprintf "Press %s again to %s %s" key label keeper.Masc.Tui_decode.k_name);
 
             (* Shutdown is undone by a boot. Delete is not undone at all, so
                the arm names what goes -- the same list the dashboard shows
@@ -261,4 +261,4 @@ let handle_keeper_action (state : T.state) ~base_path ~mailbox action =
                   else "Delete stops the Keeper and waits for lane shutdown before removing: ")
                  ^ String.concat ", " (Keeper_control.purge_artifacts ~ko))
         | Keeper_control.Gate_submit ->
-            start_keeper_action state ~base_path ~mailbox keeper.T.k_name action
+            start_keeper_action state ~base_path ~mailbox keeper.Masc.Tui_decode.k_name action

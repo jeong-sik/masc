@@ -449,10 +449,8 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
   let card_height = if graphs then 5 else 4 in
   let render_card ~card_w ?status ?count ?(role = Masc_tui_theme.Panel_neutral) ~title_style name lines =
     let style =
-      { Masc_tui_card.border = Theme.border_muted ()
-      ; focused_border = Theme.border_focus ()
-      ; title_style = Ansi.bold ^ title_style
-      ; reset = Ansi.reset
+      { (Masc_tui_doc.card_style ()) with
+        title_style = Ansi.bold ^ title_style
       }
     in
     Masc_tui_card.render ~ko ~style ~width:card_w ~height:card_height
@@ -494,7 +492,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let live_line =
         match layout with
         | Cards_4 { card_cells; _ } | Cards_2x2 { card_cells; _ } when gc.sgc_heap_words > 0 ->
-          Chart.meter ~width:card_cells ~value:gc.sgc_live_words
+          Chart.dot_meter ~width:card_cells ~value:gc.sgc_live_words
             ~max_value:(max 1 gc.sgc_heap_words)
             ~label:(say "점유" "Live") ~label_style:(Theme.recede ()) ~suffix:live
             (* The heap grows as the GC asks for more, so live words against
@@ -579,7 +577,7 @@ let render_kpi_cards ~cols (state : state) (kpis : metrics_kpis) : string list =
       let done_line =
         match layout with
         | Cards_4 { card_cells; _ } | Cards_2x2 { card_cells; _ } when total > 0 ->
-          Chart.meter ~width:card_cells ~value:count.completed
+          Chart.dot_meter ~width:card_cells ~value:count.completed
             ~max_value:(max 1 total)
             ~label:(say "완료" "Done") ~label_style:(Theme.recede ())
             ~suffix:(Count.grouped count.completed)
@@ -1023,7 +1021,7 @@ let render_section_resources ~cols (state : state) =
       let completion_meter =
         if total > 0 then
           [ "    "
-            ^ Chart.meter ~width:(min 56 (max 24 (inner_width - 4)))
+            ^ Chart.dot_meter ~width:(min 56 (max 24 (inner_width - 4)))
                 ~value:current.completed ~max_value:(max 1 total)
                 ~label:(say "완료율" "Completion") ~label_style:(Theme.recede ())
                 ~suffix:(Printf.sprintf "%s/%s" (Count.grouped current.completed) (Count.grouped total))
@@ -1430,7 +1428,7 @@ let render_section_tools ~cols (state : state) : string list =
             List.map
               (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
                 let bar =
-                  Chart.meter ~width:16 ~value:k.mkh_facts
+                  Chart.dot_meter ~width:16 ~value:k.mkh_facts
                     ~max_value:(max 1 total_facts)
                     ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Memory })
                     ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()

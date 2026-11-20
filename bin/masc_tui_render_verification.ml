@@ -955,7 +955,7 @@ let harness_ledger_lines ~ko ~cols snapshot =
                   else None
                 in
                 let bar =
-                  Chart.meter ~width:m_width ~value:calibration.hcal_approve
+                  Chart.dot_meter ~width:m_width ~value:calibration.hcal_approve
                     ~max_value:calibration.hcal_total
                     ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
                     ~label:(if ko then "승인율" else "Approved")

@@ -470,7 +470,7 @@ let meter_tip_style_matches_scale () =
     (Theme.status_readable ~surface:Theme.Page None Theme.Bad)
     (Chart.meter_tip_style limit_16 ~value:150 ~max_value:100);
   Alcotest.(check string) "series tip matches its 16-colour hue"
-    Theme.Sgr.bright_cyan
+    Theme.Sgr.bright_blue
     (Chart.meter_tip_style series_16 ~value:50 ~max_value:100);
   Alcotest.(check string) "anomaly tip takes alarm colour"
     (Theme.status_readable ~surface:Theme.Page None Theme.Bad)

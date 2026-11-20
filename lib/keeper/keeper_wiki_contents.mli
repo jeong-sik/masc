@@ -1,5 +1,4 @@
-(** The wiki table of contents a Keeper turn carries (RFC
-    keepers-see-the-wiki-table-of-contents).
+(** The wiki table of contents a Keeper turn carries.
 
     The turn reads it once at its start, from the pages through
     {!Tool_wiki.read_index_entries}, not from [index.md]. The runtime.toml

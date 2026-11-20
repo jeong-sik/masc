@@ -11112,6 +11112,9 @@ type state = {
      A change is read at once by the waiting read itself. *)
   mutable keeper_waiting_owed: Masc_tui_owed_read.t;
   mutable keeper_waiting_read: Keeper_waiting_read.t;
+  (* Per-session heard waiting-inventory generation handle for Keeper chat
+     reconcile watchers. *)
+  waiting_inventory: Masc_tui_waiting_inventory.t;
   mutable msg_preparation_details: Masc_tui_preparation_details.t;
   mutable keeper_observed_interrupts: observed_interrupt list;
   mutable keeper_run_next_inflight: Masc_tui_keeper_chat_projection.request list;
@@ -21936,6 +21939,7 @@ let create_state
   keeper_previews_unread = [];
   keeper_waiting_owed = Masc_tui_owed_read.settled;
   keeper_waiting_read = Keeper_waiting_read.idle;
+  waiting_inventory = Masc_tui_waiting_inventory.create ();
   msg_preparation_details = Masc_tui_preparation_details.empty;
   keeper_observed_interrupts = [];
   keeper_run_next_inflight = [];

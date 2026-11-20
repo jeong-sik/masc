@@ -500,19 +500,22 @@ let has_key ~key line =
    past its own line -- a bracketed array, a triple-quoted string -- and a
    replacement that took only the first line would leave the rest of the old
    value behind as loose text the loader cannot read. *)
-let skip_value ~opening rest =
+let split_value ~opening rest =
   let state = scan_line outside opening in
   if is_structural state
-  then rest
+  then [], rest
   else (
-    let rec consume state = function
-      | [] -> []
+    let rec consume acc state = function
+      | [] -> List.rev acc, []
       | line :: tail ->
         let next = scan_line state line in
-        if is_structural next then tail else consume next tail
+        if is_structural next then List.rev (line :: acc), tail
+        else consume (line :: acc) next tail
     in
-    consume state rest)
+    consume [] state rest)
 ;;
+
+let skip_value ~opening rest = snd (split_value ~opening rest)
 
 let boolean_assignment ~key line =
   match Otoml.Parser.from_string_result (String.trim line) with
@@ -521,6 +524,44 @@ let boolean_assignment ~key line =
   | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
   | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
   | Ok (Otoml.TomlTable _) | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> false
+;;
+
+let complete_assignment text =
+  match Otoml.Parser.from_string_result (String.trim text) with
+  | Ok (Otoml.TomlTable [ _ ]) -> true
+  | Error _
+  | Ok (Otoml.TomlTable ([] | _ :: _ :: _))
+  | Ok (Otoml.TomlString _) | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+  | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _) | Ok (Otoml.TomlLocalDateTime _)
+  | Ok (Otoml.TomlLocalDate _) | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+  | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> false
+;;
+
+let trailing_comment_of_span ~opening ~extra_lines =
+  let prefix_lines, closing =
+    match List.rev extra_lines with
+    | [] -> [], opening
+    | last :: rev_middle -> opening :: List.rev rev_middle, last
+  in
+  let prefix_before =
+    match prefix_lines with
+    | [] -> ""
+    | _ :: _ -> String.concat "\n" prefix_lines ^ "\n"
+  in
+  let rec comment from =
+    match String.index_from_opt closing from '#' with
+    | None -> if String.ends_with ~suffix:"\r" closing then "\r" else ""
+    | Some at when complete_assignment (prefix_before ^ String.sub closing 0 at) ->
+      let rec start index =
+        if index > 0 && (closing.[index - 1] = ' ' || closing.[index - 1] = '\t')
+        then start (index - 1)
+        else index
+      in
+      let index = start at in
+      String.sub closing index (String.length closing - index)
+    | Some at -> comment (at + 1)
+  in
+  comment 0
 ;;
 
 let boolean_trailing_comment ~key opening =
@@ -584,11 +625,12 @@ let replace_or_append_value section_lines ~key ~value =
     (match from_key with
      | [] -> before @ [ line ]
      | opening :: rest ->
+       let extra_lines, after = split_value ~opening rest in
        let line = match value with
-         | Bool _ -> line ^ boolean_trailing_comment ~key opening
-         | String _ | Int _ | Float _ -> line
+         | Bool _ | String _ | Int _ | Float _ ->
+           line ^ trailing_comment_of_span ~opening ~extra_lines
        in
-       before @ (line :: skip_value ~opening rest))
+       before @ (line :: after))
 ;;
 
 let remove_key section_lines ~key =
@@ -804,13 +846,23 @@ let edit_table_float content ~path ~key ~value =
    string element. *)
 let replace_or_append_multiline_array section_lines ~key ~values =
   let block = multiline_array_lines ~key ~values in
+  let append_comment comment lines =
+    if String.equal comment "" then lines
+    else
+      match List.rev lines with
+      | [] -> lines
+      | last :: rev_rest -> List.rev ((last ^ comment) :: rev_rest)
+  in
   match find_structural_index (has_key ~key) section_lines with
   | None -> insert_into_section section_lines block
   | Some index ->
     let before, from_key = split_at index section_lines in
     (match from_key with
      | [] -> before @ block
-     | opening :: rest -> before @ block @ skip_value ~opening rest)
+     | opening :: rest ->
+       let extra_lines, after = split_value ~opening rest in
+       let comment = trailing_comment_of_span ~opening ~extra_lines in
+       before @ append_comment comment block @ after)
 ;;
 
 let edit_table_multiline_array content ~path ~key ~values =

@@ -287,6 +287,38 @@ enabled = false # keep this choice
       (Keeper_toml_loader.toml_bool_opt (doc_of path) "autonomous.enabled"))
 ;;
 
+let test_modified_non_bool_values_keep_their_trailing_comments () =
+  let contents =
+    runtime_base
+    ^ {|
+[heartbeat]
+interval_sec = 30 # 측정값
+[web_search]
+cache_ttl_sec = 2.5  # ttl note
+searxng_url = "http://localhost:8888#anchor"  # search endpoint
+|}
+  in
+  with_config contents (fun path ->
+    check bool "updates across int, float, and string succeed" true
+      (applied path
+         [ parsed ~key:"heartbeat.interval_sec" ~value:"45"
+         ; parsed ~key:"web_search.cache_ttl_sec" ~value:"5.0"
+         ; parsed ~key:"web_search.searxng_url" ~value:"http://localhost:9999"
+         ]);
+    let updated = read path in
+    check bool "modified int keeps trailing comment" true
+      (contains updated "interval_sec = 45 # 측정값\n");
+    check bool "modified float keeps trailing comment" true
+      (contains updated "cache_ttl_sec = 5.0  # ttl note\n");
+    check bool "modified string keeps trailing comment outside quotes" true
+      (contains updated "searxng_url = \"http://localhost:9999\"  # search endpoint\n");
+    let doc = doc_of path in
+    check (option int) "updated int loads back" (Some 45)
+      (Keeper_toml_loader.toml_int_opt doc "heartbeat.interval_sec");
+    check (option string) "updated url loads back" (Some "http://localhost:9999")
+      (Keeper_toml_loader.toml_string_opt doc "web_search.searxng_url"))
+;;
+
 let test_an_existing_integer_spelling_of_a_float_is_unchanged () =
   let contents = runtime_base ^ "\n[web_search]\ncache_ttl_sec = 2 # duration\n" in
   with_config contents (fun path ->
@@ -503,6 +535,8 @@ let () =
         ; test_case "a second run changes nothing" `Quick test_a_second_run_changes_nothing
         ; test_case "existing values keep their trailing comments" `Quick
             test_existing_values_keep_their_trailing_comments
+        ; test_case "modified non-bool values keep their trailing comments" `Quick
+            test_modified_non_bool_values_keep_their_trailing_comments
         ; test_case "an integer spelling of a float stays unchanged" `Quick
             test_an_existing_integer_spelling_of_a_float_is_unchanged
         ; test_case "an existing invalid value is still refused" `Quick

@@ -194,6 +194,41 @@ let longest_target_table_path ~base_path ~target_path lines =
   loop 0 None
 ;;
 
+let trailing_comment_of_span lines start last =
+  let closing = lines.(last) in
+  let prior =
+    if start >= last then ""
+    else
+      let prefix = List.init (last - start) (fun offset -> lines.(start + offset)) in
+      String.concat "\n" prefix ^ "\n"
+  in
+  let complete candidate =
+    match Otoml.Parser.from_string_result (normalize_source (String.trim candidate)) with
+    | Ok (Otoml.TomlTable [ _ ]) -> true
+    | Error _
+    | Ok (Otoml.TomlTable ([] | _ :: _ :: _))
+    | Ok (Otoml.TomlString _) | Ok (Otoml.TomlInteger _) | Ok (Otoml.TomlFloat _)
+    | Ok (Otoml.TomlBoolean _) | Ok (Otoml.TomlOffsetDateTime _)
+    | Ok (Otoml.TomlLocalDateTime _) | Ok (Otoml.TomlLocalDate _)
+    | Ok (Otoml.TomlLocalTime _) | Ok (Otoml.TomlArray _)
+    | Ok (Otoml.TomlInlineTable _) | Ok (Otoml.TomlTableArray _) -> false
+  in
+  let rec find from =
+    match String.index_from_opt closing from '#' with
+    | None -> ""
+    | Some at when complete (prior ^ String.sub closing 0 at) ->
+      let rec start_ws index =
+        if index > 0 && (closing.[index - 1] = ' ' || closing.[index - 1] = '\t')
+        then start_ws (index - 1)
+        else index
+      in
+      let start_index = start_ws at in
+      String.sub closing start_index (String.length closing - start_index)
+    | Some at -> find (at + 1)
+  in
+  find 0
+;;
+
 let rewrite_field_in_content
       ~(table : string)
       ~(key : string)
@@ -282,7 +317,7 @@ let rewrite_field_in_content
                    if (not found) && table_path @ assignment_path = target_path
                    then (
                      (match replacement_line assignment_path with
-                      | Some line -> add_line line
+                      | Some line -> add_line (line ^ trailing_comment_of_span lines index last_index)
                       | None -> ());
                      loop (last_index + 1) current_table_path true)
                    else (

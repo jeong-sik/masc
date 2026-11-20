@@ -229,6 +229,64 @@ let test_dotted_assignments_follow_semantic_path () =
           (L.toml_string_opt doc "keeper.tools.native"))
 ;;
 
+let test_update_field_preserves_trailing_comments () =
+  let source =
+    {|[keeper]
+network_mode = "none"  # 메모
+turns = 7 # turn limit
+always_allow = false # safety
+url = "https://example.test/a#frag" # endpoint
+plain_hash = "https://example.test/b#frag"
+mention_targets = [
+  "a",
+]  # targets
+|}
+  in
+  let has_line content line =
+    List.mem line (String.split_on_char '\n' content)
+  in
+  let require label = function
+    | Ok v -> v
+    | Error msg -> failf "%s: %s" label msg
+  in
+  let s1 =
+    L.update_field_in_content ~table:"keeper" ~key:"network_mode" ~value:"inherit" source
+    |> require "network_mode"
+  in
+  check bool "string preserves trailing comment" true
+    (has_line s1 {|network_mode = "inherit"  # 메모|});
+  let s2 =
+    L.edit_keeper_fields_in_content s1
+      [ "turns", L.Set (L.Toml_int 12)
+      ; "always_allow", L.Set (L.Toml_bool true)
+      ]
+    |> require "turns and always_allow"
+  in
+  check bool "int preserves trailing comment" true
+    (has_line s2 "turns = 12 # turn limit");
+  check bool "bool preserves trailing comment" true
+    (has_line s2 "always_allow = true # safety");
+  let s3 =
+    L.update_field_in_content ~table:"keeper" ~key:"url" ~value:"https://example.test/next" s2
+    |> require "url"
+  in
+  check bool "hash inside string ignored while trailing comment kept" true
+    (has_line s3 {|url = "https://example.test/next" # endpoint|});
+  let s4 =
+    L.update_field_in_content ~table:"keeper" ~key:"plain_hash" ~value:"https://example.test/clean" s3
+    |> require "plain_hash"
+  in
+  check bool "hash inside string without comment stays comment-free" true
+    (has_line s4 {|plain_hash = "https://example.test/clean"|});
+  let s5 =
+    L.edit_keeper_fields_in_content s4
+      [ "mention_targets", L.Set (L.Toml_string_array [ "b" ]) ]
+    |> require "mention_targets"
+  in
+  check bool "multiline value preserves closing trailing comment" true
+    (has_line s5 {|mention_targets = ["b"]  # targets|})
+;;
+
 let () =
   run
     "Keeper_toml_loader"
@@ -246,6 +304,10 @@ let () =
             "dotted assignments follow semantic paths"
             `Quick
             test_dotted_assignments_follow_semantic_path
+        ; test_case
+            "updates preserve trailing comments across value types"
+            `Quick
+            test_update_field_preserves_trailing_comments
         ; test_case
             "instructions survive saving"
             `Quick

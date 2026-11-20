@@ -12,9 +12,8 @@ this table deserves a pin:
 
 This suite pins the present behaviour; it does not endorse it. When the
 ownership-identity work lands — #31861 option (a), the one-shot
-assignee-correction migration approved on 2026-08-29; RFC-0393 forbids
-reinterpreting historical decorated strings — the affected rows change in
-the same PR and this diff tells the story.
+assignee-correction migration approved on 2026-08-29 — the affected rows
+change in the same PR and this diff tells the story.
 
 The suite builds two configs from distinct temp base paths and requires the
 same answer under both, which is the observable content of "the config is

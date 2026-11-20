@@ -277,9 +277,8 @@ let initialize_build_filesystem root =
   Fs_compat.mkdir_p (Filename.concat work "new/_build");
   write (Filename.concat work "new/_build/old-output") "output before the first handoff"
 
-(* The guest agent behind [--publish-socket] (RFC
-   microvm-guest-agent-over-socket 3.5), as this fixture runs it: a process
-   that outlives the [run -d] call that started it, as a guest's first
+(* The guest agent behind [--publish-socket], as this fixture runs it: a
+   process that outlives the [run -d] call that started it, as a guest's first
    process does. It serves while the lease file holds its token; [delete]
    and the next [run -d] take the lease away, and so does removing the
    fixture root. An agent whose test runner was killed before it removed
@@ -405,7 +404,7 @@ let start_fixture_agent ~root row =
   | _ :: _ :: _ -> fail "the fixture guest publishes more than its agent socket"
 
 (* A guest that ends cleanly takes its agent with it, and the runtime
-   removes the published socket file (RFC 4.5). *)
+   removes the published socket file. *)
 let retire_fixture_agent ~root row =
   List.iter (fun path ->
     match Unix.unlink path with

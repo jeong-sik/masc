@@ -1,15 +1,16 @@
 (* The engine of a multi-account installation (RFC
    a-persons-keeper-runs-on-the-engine, S1, §5): the account server starts it
-   on the access it published, and the engine comes up on that access with
-   no Keeper definition of its own.
+   on the access it published. The engine comes up on that access with no
+   Keeper definition of its own, and a store it refuses ends the process.
 
    The access, the run registries and the persistence of the Keepers are set
-   once per process, so this executable boots once, and its one case reads
-   all it checks from that boot. It does not link masc_test_deps, which
-   publishes the access of a single user when it starts. The process is
+   once per process, so each boot has a process of its own: the boot that
+   comes up runs in this one, and the boot that ends its process runs in a
+   child of this executable. The executable does not link masc_test_deps,
+   which publishes the access of a single user when it starts. A process is
    prepared as the HTTP boot prepares it before the engine (bin/main_eio.ml):
-   a canonical base path in MASC_BASE_PATH, the random generator, the
-   Eio-aware locks, the clock, the lease with the facts of its stores, and a
+   the lease with the facts of its stores, a canonical base path in
+   MASC_BASE_PATH, the random generator, the Eio-aware locks, the clock, and a
    server session switch, which cancels the lanes of the engine when the case
    ends. *)
 
@@ -115,31 +116,105 @@ let token_of name =
   | Some _ | None -> Alcotest.failf "the engine put no %s in the environment" name
 ;;
 
-(* An activated installation that has no config root, and the judgment of its
-   boot. Each runs in an Eio loop of its own, as [masc auth bootstrap] and the
-   entry of the boot run them: the bootstrap must be called from a fiber, and
-   only the judged value leaves the loop. No TLS listener, no public identity
-   and the default HTTP mode: the listener is the loopback port alone,
-   whatever the shell of the run holds. An empty value is read as unset. *)
-let installation_judged ~base ~config ~store =
+(* ---- the installation and the process ---- *)
+
+type installation =
+  { root : string
+  ; base : string
+  ; config : string
+  ; owner : string
+  }
+
+(* The places of an installation below [root]. *)
+let installation_at root =
+  { root
+  ; base = Filename.concat root "base"
+  ; config = Filename.concat root "config"
+  ; owner = Filename.concat root "owner"
+  }
+;;
+
+(* No TLS listener, no public identity and the default HTTP mode: the
+   listener is the loopback port alone, whatever the shell of the run holds.
+   An empty value is read as unset. A child process of the case inherits
+   them. *)
+let listen_on_loopback_alone () =
+  Unix.putenv "MASC_HTTPS_PORT" "0";
+  Unix.putenv "MASC_HTTP_BASE_URL" "";
+  Unix.putenv "MASC_USE_H2" "auto"
+;;
+
+(* An activated installation with no config root, in a temporary directory
+   that the case removes. The entry of the boot hands the engine a canonical
+   base path (bin/main_eio.ml), and so does this case. The bootstrap runs in
+   an Eio loop of its own, as [masc auth bootstrap] runs it: it must be
+   called from a fiber. *)
+let with_installation run =
+  let root = Unix.realpath (Filename.temp_dir "server-accounts-engine-" "") in
+  Fun.protect ~finally:(fun () -> remove_tree root)
+  @@ fun () ->
+  let installation = installation_at root in
+  Unix.mkdir installation.base 0o700;
+  Unix.mkdir installation.owner 0o700;
+  Eio_main.run (fun (_ : Eio_unix.Stdenv.base) ->
+    match
+      Authz_bootstrap.fresh_bootstrap
+        { Authz_bootstrap.base_path = installation.base
+        ; config_dir = Some installation.config
+        ; external_store = Filename.concat (Filename.concat root "store") "external.jsonl"
+        ; workspace_id = workspace
+        ; now_ms = (fun () -> at_ms)
+        }
+    with
+    | Ok _ -> ()
+    | Error error -> Alcotest.failf "bootstrap refused: %s" (Authz_bootstrap.error_to_string error));
+  write_file (Auth.auth_config_file installation.base) no_login_client;
+  run installation
+;;
+
+(* The judgment of the boot, in an Eio loop of its own as the entry of the
+   boot runs it. Only the judged value leaves the loop. *)
+let judged installation =
   Eio_main.run
   @@ fun (_ : Eio_unix.Stdenv.base) ->
-  (match
-     Authz_bootstrap.fresh_bootstrap
-       { Authz_bootstrap.base_path = base
-       ; config_dir = Some config
-       ; external_store = store
-       ; workspace_id = workspace
-       ; now_ms = (fun () -> at_ms)
-       }
-   with
-   | Ok _ -> ()
-   | Error error -> Alcotest.failf "bootstrap refused: %s" (Authz_bootstrap.error_to_string error));
-  write_file (Auth.auth_config_file base) no_login_client;
-  match Read.boot ~base_path:base ~config_dir:(Some config) ~anonymous_mutations:false with
+  match
+    Read.boot
+      ~base_path:installation.base
+      ~config_dir:(Some installation.config)
+      ~anonymous_mutations:false
+  with
   | Ok (Read.Multi_account multi_account) -> multi_account
   | Ok (Read.Single_user (_ : Read.single_user)) -> Alcotest.fail "the boot found a single user"
   | Error (first, rest) -> Alcotest.failf "the boot refused: %s" (String.concat "; " (first :: rest))
+;;
+
+(* The process as the HTTP entry prepares it before the engine: the BasePath
+   lease with the facts of its stores, the canonical base path in
+   MASC_BASE_PATH, and in the loop of the server the random generator, the
+   Eio-aware locks, the clock and a server session switch. *)
+let with_the_process_of_a_server installation run =
+  let lease =
+    match
+      Server_startup_takeover.acquire_base_path_lock ~run_dir:installation.owner installation.base
+    with
+    | Server_startup_takeover.Base_path_acquired lease -> lease
+    | Server_startup_takeover.Base_path_already_owned _
+    | Server_startup_takeover.Base_path_rejected _ ->
+      Alcotest.fail "the lease of the installation was not acquired"
+  in
+  Fun.protect ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
+  @@ fun () ->
+  (match Server_startup_takeover.keep_store_facts lease with
+   | Server_startup_takeover.Store_facts_kept -> ()
+   | Server_startup_takeover.Lease_not_held -> Alcotest.fail "the lease just taken is not held");
+  Unix.putenv Env_config_core.base_path_env_key installation.base;
+  Workspace_utils_backend_setup.cache_resolved_base_path installation.base;
+  Eio_main.run
+  @@ fun env ->
+  Crypto_rng.ensure_default ();
+  Eio_guard.enable ();
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Server_session_switch.run (fun ~runtime_sw sw -> run ~env ~runtime_sw ~sw lease)
 ;;
 
 (* What the case waits for comes within the time the startup watchdog gives
@@ -153,43 +228,16 @@ let within_the_watchdog ~clock what promise =
   | Error `Timeout -> Alcotest.failf "%s did not come within the startup watchdog" what
 ;;
 
+(* ---- the engine that comes up ---- *)
+
 let test_the_engine_comes_up_on_the_access_of_the_installation () =
-  Unix.putenv "MASC_HTTPS_PORT" "0";
-  Unix.putenv "MASC_HTTP_BASE_URL" "";
-  Unix.putenv "MASC_USE_H2" "auto";
-  (* The entry of the boot hands the engine a canonical base path
-     (bin/main_eio.ml), and so does this case. *)
-  let root = Unix.realpath (Filename.temp_dir "server-accounts-engine-" "") in
-  Fun.protect ~finally:(fun () -> remove_tree root)
-  @@ fun () ->
-  let base = Filename.concat root "base" in
-  let config = Filename.concat root "config" in
-  let store = Filename.concat (Filename.concat root "store") "external.jsonl" in
-  let owner = Filename.concat root "owner" in
-  Unix.mkdir base 0o700;
-  Unix.mkdir owner 0o700;
-  let multi_account = installation_judged ~base ~config ~store in
-  let lease =
-    match Server_startup_takeover.acquire_base_path_lock ~run_dir:owner base with
-    | Server_startup_takeover.Base_path_acquired lease -> lease
-    | Server_startup_takeover.Base_path_already_owned _
-    | Server_startup_takeover.Base_path_rejected _ ->
-      Alcotest.fail "the lease of the installation was not acquired"
-  in
-  Fun.protect ~finally:(fun () -> Server_startup_takeover.release_base_path_lease lease)
-  @@ fun () ->
-  (match Server_startup_takeover.keep_store_facts lease with
-   | Server_startup_takeover.Store_facts_kept -> ()
-   | Server_startup_takeover.Lease_not_held -> Alcotest.fail "the lease just taken is not held");
-  Unix.putenv Env_config_core.base_path_env_key base;
-  Workspace_utils_backend_setup.cache_resolved_base_path base;
-  Eio_main.run
-  @@ fun env ->
-  Crypto_rng.ensure_default ();
-  Eio_guard.enable ();
-  Time_compat.set_clock (Eio.Stdenv.clock env);
-  Server_session_switch.run
-  @@ fun ~runtime_sw sw ->
+  listen_on_loopback_alone ();
+  with_installation
+  @@ fun installation ->
+  let multi_account = judged installation in
+  let base = installation.base in
+  with_the_process_of_a_server installation
+  @@ fun ~env ~runtime_sw ~sw lease ->
   let port = free_port () in
   let started, start = Eio.Promise.create () in
   let listening, set_listening = Eio.Promise.create () in
@@ -265,14 +313,118 @@ let test_the_engine_comes_up_on_the_access_of_the_installation () =
     ]
 ;;
 
+(* ---- the engine that a store refuses ---- *)
+
+(* The boot of an installation whose store the engine refuses ends its
+   process, so it runs in a child: this executable again, with [child_flag]
+   and the root of the installation. *)
+let child_flag = "--boot-the-installation-at"
+
+(* The file the child makes when the account server hands it the access, so
+   the parent tells an engine that ended its process from a boot that never
+   started one. *)
+let engine_started_marker root = Filename.concat root "engine-started"
+
+(* The child: the judgment, the process of a server and the account server,
+   which starts the engine. The engine ends the process; a refused boot ends
+   it too, and leaves no marker. *)
+let boot_the_installation_at root =
+  let installation = installation_at root in
+  let multi_account = judged installation in
+  with_the_process_of_a_server installation
+  @@ fun ~env ~runtime_sw ~sw lease ->
+  match
+    Server_accounts.run
+      ~sw
+      ~env
+      ~address:loopback
+      ~port:(free_port ())
+      ~lease
+      ~start_engine:(fun access ->
+        write_file (engine_started_marker root) "";
+        ignore
+          (Server_runtime_bootstrap.start_engine ~sw ~runtime_sw ~env ~accept_store_quarantine:false access
+           : Mcp_server.server_state Eio.Promise.t))
+      multi_account
+  with
+  | Ok () -> ()
+  | Error refusal -> Alcotest.fail (Server_accounts.refusal_to_string refusal)
+;;
+
+(* An engine that hangs before readiness is ended by the startup watchdog of
+   the child within one period. The parent waits two, so it sees that end. *)
+let watchdog_periods_the_parent_waits = 2.
+let poll_interval_s = 0.05
+
+(* The status of the child, or [None] when it did not end in time; the
+   parent then ends it. *)
+let rec status_of_child pid ~deadline =
+  match Unix.waitpid [ Unix.WNOHANG ] pid with
+  | exception Unix.Unix_error (Unix.EINTR, _, _) -> status_of_child pid ~deadline
+  | 0, (_ : Unix.process_status) ->
+    if Unix.gettimeofday () > deadline
+    then (
+      Unix.kill pid Sys.sigkill;
+      ignore (Unix.waitpid [] pid : int * Unix.process_status);
+      None)
+    else (
+      Unix.sleepf poll_interval_s;
+      status_of_child pid ~deadline)
+  | (_ : int), status -> Some status
+;;
+
+let test_a_refused_store_ends_the_process () =
+  listen_on_loopback_alone ();
+  with_installation
+  @@ fun installation ->
+  (* A Keeper configuration journal that does not decode. The first step of
+     the engine reads it before it builds any state, and refuses it
+     (Keeper_config_recovery_failed). *)
+  write_file
+    (Keeper_config_journal.journal_path_for_base_path ~base_path:installation.base)
+    "not a journal";
+  let pid =
+    Unix.create_process
+      Sys.executable_name
+      [| Sys.executable_name; child_flag; installation.root |]
+      Unix.stdin
+      Unix.stdout
+      Unix.stderr
+  in
+  let deadline =
+    Unix.gettimeofday ()
+    +. (watchdog_periods_the_parent_waits *. Server_startup_state.watchdog_timeout_sec ())
+  in
+  let status = status_of_child pid ~deadline in
+  Alcotest.(check bool)
+    "the account server started the engine"
+    true
+    (Sys.file_exists (engine_started_marker installation.root));
+  match status with
+  | None -> Alcotest.fail "the process did not end within two startup watchdogs"
+  | Some (Unix.WEXITED 0) -> Alcotest.fail "the process ended with 0"
+  | Some (Unix.WEXITED (_ : int)) -> ()
+  | Some (Unix.WSIGNALED signal) -> Alcotest.failf "the process ended on signal %d" signal
+  | Some (Unix.WSTOPPED signal) -> Alcotest.failf "the process stopped on signal %d" signal
+;;
+
+(* The case of the refused store runs first: it boots in a child, and this
+   process has started no engine when it spawns one. *)
 let () =
-  Alcotest.run
-    "server_accounts_engine"
-    [ ( "the engine of a multi-account installation"
-      , [ Alcotest.test_case
-            "it comes up on the access of the installation"
-            `Quick
-            test_the_engine_comes_up_on_the_access_of_the_installation
-        ] )
-    ]
+  match Array.to_list Sys.argv with
+  | [ (_ : string); flag; root ] when String.equal flag child_flag -> boot_the_installation_at root
+  | (_ : string list) ->
+    Alcotest.run
+      "server_accounts_engine"
+      [ ( "the engine of a multi-account installation"
+        , [ Alcotest.test_case
+              "a store it refuses ends the process"
+              `Quick
+              test_a_refused_store_ends_the_process
+          ; Alcotest.test_case
+              "it comes up on the access of the installation"
+              `Quick
+              test_the_engine_comes_up_on_the_access_of_the_installation
+          ] )
+      ]
 ;;

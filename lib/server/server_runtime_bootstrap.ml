@@ -1730,9 +1730,9 @@ let handle_initialization_failure error =
       error
 ;;
 
-(* Runs the initialization of an owner in the fiber forked for it. Whatever it
-   raises ends at [handle_initialization_failure], so the fiber never fails
-   the switch it runs under. *)
+(* Runs the initialization of an owner in the fiber forked for it. A failure of
+   [initialize] ends at [handle_initialization_failure]. A cancellation is
+   raised on, and so is what the handling itself raises. *)
 let owner_initialization initialize =
   try initialize () with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -2236,6 +2236,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
              failures);
       ());
 
+  (* 2b. The startup watchdog ([start_startup_watchdog]). *)
   start_startup_watchdog ~sw ~clock;
 
   (* 3. Start serving -- /health responds before init completes *)

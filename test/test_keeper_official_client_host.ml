@@ -3934,6 +3934,54 @@ let test_unsupported_choice_refuses_before_projection () =
   check bool "refused tool choice cannot enter a materializing projection" false !projected
 ;;
 
+let effect_cell_at (reading : Keeper_provider_attempt_effect.t) =
+  let module Cell = Keeper_official_client_attempt.Effect_cell in
+  let cell = Cell.create () in
+  (match reading with
+   | Keeper_provider_attempt_effect.No_effect_observed -> ()
+   | Keeper_provider_attempt_effect.Observation_unavailable -> Cell.unobserved cell
+   | Keeper_provider_attempt_effect.Effect_attempted -> Cell.attempted cell);
+  cell
+;;
+
+let check_effect_moves label move cases =
+  List.iter
+    (fun (before, expected) ->
+       let cell = effect_cell_at before in
+       move cell;
+       move cell;
+       check string
+         (Printf.sprintf "%s from %s" label (Keeper_provider_attempt_effect.to_string before))
+         (Keeper_provider_attempt_effect.to_string expected)
+         (Keeper_provider_attempt_effect.to_string
+            (Keeper_official_client_attempt.Effect_cell.read cell)))
+    cases
+;;
+
+let test_uncertainty_keeps_a_stronger_effect_reading () =
+  check_effect_moves "unobserved" Keeper_official_client_attempt.Effect_cell.unobserved
+    Keeper_provider_attempt_effect.
+      [ No_effect_observed, Observation_unavailable
+      ; Observation_unavailable, Observation_unavailable
+      ; Effect_attempted, Effect_attempted ]
+;;
+
+let test_a_quiet_record_clears_only_uncertainty () =
+  check_effect_moves "quiet" Keeper_official_client_attempt.Effect_cell.quiet
+    Keeper_provider_attempt_effect.
+      [ No_effect_observed, No_effect_observed
+      ; Observation_unavailable, No_effect_observed
+      ; Effect_attempted, Effect_attempted ]
+;;
+
+let test_an_attempted_effect_replaces_every_reading () =
+  check_effect_moves "attempted" Keeper_official_client_attempt.Effect_cell.attempted
+    Keeper_provider_attempt_effect.
+      [ No_effect_observed, Effect_attempted
+      ; Observation_unavailable, Effect_attempted
+      ; Effect_attempted, Effect_attempted ]
+;;
+
 let () =
   run
     "keeper official-client host"
@@ -4307,6 +4355,20 @@ let () =
             "the result bound follows the bundle bounds"
             `Quick
             test_result_bound_follows_the_bundle_bounds
+        ] )
+    ; ( "attempt effect cell"
+      , [ test_case
+            "uncertainty keeps a stronger effect reading"
+            `Quick
+            test_uncertainty_keeps_a_stronger_effect_reading
+        ; test_case
+            "a quiet record clears only uncertainty"
+            `Quick
+            test_a_quiet_record_clears_only_uncertainty
+        ; test_case
+            "an attempted effect replaces every reading"
+            `Quick
+            test_an_attempted_effect_replaces_every_reading
         ] )
     ]
 ;;

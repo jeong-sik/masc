@@ -312,10 +312,14 @@ let retire_after_turn_settlement ?clock ~keepers_dir ~keeper_id ~settlement ~del
   match settlement with
   | Turn_not_committed -> Ok 0
   | Turn_committed ->
-    Keeper_memory_source_current.retire_delivered_invalidations
-      ?clock
-      ~keepers_dir
-      ~keeper_id
-      ~delivered
-      ()
+    (try
+       Keeper_memory_source_current.retire_delivered_invalidations
+         ?clock
+         ~keepers_dir
+         ~keeper_id
+         ~delivered
+         ()
+     with
+     | Eio.Cancel.Cancelled _ as error -> raise error
+     | exn -> Error (Printexc.to_string exn))
 ;;

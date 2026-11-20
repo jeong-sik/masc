@@ -3637,7 +3637,21 @@ let test_source_invalidation_committed_turn_retirement () =
    | [ (inv : Source.invalidation) ] ->
      Alcotest.(check string) "same source_path survives" source_path inv.source_path;
      Alcotest.(check bool) "newer reason survives" true (inv.reason = Source.Source_unavailable)
-   | _ -> Alcotest.fail "expected newer invalidation to survive")
+   | _ -> Alcotest.fail "expected newer invalidation to survive");
+  (* 6. Filesystem / lock exceptions during post-commit retirement are caught
+     as Error rather than aborting an already-committed turn. *)
+  let not_a_dir = Filename.concat base_path "not-a-directory" in
+  Fs_compat.save_file not_a_dir "blocker";
+  (match
+     Recall.retire_after_turn_settlement
+       ~keepers_dir:not_a_dir ~keeper_id:meta.name
+       ~settlement:Recall.Turn_committed
+       ~delivered:earlier_delivered
+       ()
+   with
+   | Error detail ->
+     Alcotest.(check bool) "caught error is non-empty" true (String.trim detail <> "")
+   | Ok _ -> Alcotest.fail "non-directory keepers_dir must fail with Error")
 ;;
 
 let () =

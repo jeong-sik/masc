@@ -78,7 +78,9 @@ val render_if_enabled
     [delivered] invalidations via
     {!Keeper_memory_source_current.retire_delivered_invalidations} strictly when
     [settlement = Turn_committed]; leaves the store untouched and returns
-    [Ok 0] on [Turn_not_committed]. *)
+    [Ok 0] on [Turn_not_committed]. Non-cancellation filesystem/lock exceptions
+    are caught and returned as [Error] so post-commit retirement cannot abort
+    an already-committed turn; [Eio.Cancel.Cancelled] propagates unchanged. *)
 val retire_after_turn_settlement
   :  ?clock:float Eio.Time.clock_ty Eio.Resource.t
   -> keepers_dir:string

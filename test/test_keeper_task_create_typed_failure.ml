@@ -104,7 +104,7 @@ let test_task_create_goal_link_write_failure_returns_typed_failure () =
 (* Pure classifier coverage over [Workspace_task.add_task_error]
    variants, constructed directly rather than reproduced end-to-end:
    [keeper_task_create]'s live tool args never set [predecessor_task_id]
-   (RFC-0323 W2 scopes that arg to [masc_add_task]), so [Unknown_predecessor]
+   (only [masc_add_task] takes that arg), so [Unknown_predecessor]
    / [Predecessor_not_terminal] cannot be produced through this tool's
    argument surface today. This proves the two routing buckets stay
    separated regardless. *)

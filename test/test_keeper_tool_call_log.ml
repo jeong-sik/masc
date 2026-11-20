@@ -1119,7 +1119,7 @@ let test_turn_context_fields_stored () =
       (Some "ok")
       (Safe_ops.json_string_opt "wire_outcome" entry))
 
-(* RFC-0225 §3.3 regression: two runs of the SAME keeper each carry their
+(* Regression: two runs of the SAME keeper each carry their
    own cell — setting one must not disturb the other. Under the previous
    keeper_name-keyed global the second set overwrote the first and the
    first run's tool calls were logged with the second run's identity. *)

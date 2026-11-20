@@ -523,11 +523,10 @@ fi
 %s|} (Filename.quote guest) (Filename.quote (Filename.concat base "guest-inspect.json"))
     (Filename.quote (Filename.concat base "guest-inspect.json")) fake_ssh_success_script
 
-(* The agent an Apple guest publishes (RFC microvm-guest-agent-over-socket
-   3.5), with the answers [fake_ssh_success_script] gives: a hello this
-   host's check accepts, then the shim's probe, or for a request the remote
-   file and a clean trailer once the whole frame has arrived. It serves
-   until [sw] ends. *)
+(* The agent an Apple guest publishes, with the answers
+   [fake_ssh_success_script] gives: a hello this host's check accepts, then
+   the shim's probe, or for a request the remote file and a clean trailer
+   once the whole frame has arrived. It serves until [sw] ends. *)
 let serve_fake_apple_agent ~sw ~net ~host_socket =
   let module Relay = Exec_ssh_protocol.Relay in
   ensure_dir (Filename.dirname host_socket);

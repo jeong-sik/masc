@@ -10,7 +10,7 @@
       degrade record ([Sink_degraded] -> warn log + counter), never a
       pre-dispatch error.
     - P1b: the store is bounded by TurnRecord reachability — after the current
-      commit attempt, every exact run referenced by the RFC-0358 window
+      commit attempt, every exact run referenced by the TurnRecord window
       survives, while orphan/unreachable regular JSONL files are removed.
     - Consumer level: a traced turn yields non-[None]
       [run_result.trace_ref]/[run_validation] via exactly the projection

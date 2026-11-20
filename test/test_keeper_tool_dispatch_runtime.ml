@@ -2430,9 +2430,9 @@ let test_real_directory_release_failure_preserves_effect_truth () =
 
 (* The constitution tools reach their handler only if the name routes through
    the descriptor to Tool_constitution_write / Tool_constitution_remove. The
-   RFC-0442 suites call the runtime functions directly, so that hop was carried
-   by the exhaustive match alone: a descriptor pointed at the wrong handler
-   still compiles. This drives it the way a keeper does, by name. *)
+   constitution suites call the runtime functions directly, so that hop was
+   carried by the exhaustive match alone: a descriptor pointed at the wrong
+   handler still compiles. This drives it the way a keeper does, by name. *)
 let test_constitution_tools_dispatch_by_name () =
   with_exec_fixture
     "keeper_tool_dispatch_runtime_constitution"
@@ -8251,8 +8251,8 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
                  "effect_outcome_unknown"
                  (Tool_result.failure_effect_disposition_to_string
                     failure.effect_disposition);
-               (* RFC-0454 D1: the failure names the node that failed, and its
-                  failure object travels as an object. *)
+               (* The failure names the node that failed, and its failure
+                  object travels as an object. *)
                let payload =
                  match failure.detail with
                  | Keeper_terminal_effect_detail.Composition_failed
@@ -9407,8 +9407,8 @@ let test_composition_terminal_requires_terminal_outer_invocation () =
    way the executor builds one. *)
 
 
-(* The masc_* tools route through the RFC-0182 3.1 workspace dispatch ref,
-   which Mcp_server_eio_execute fills from its own module initializer. Nothing
+(* The masc_* tools route through the workspace dispatch ref, which
+   Mcp_server_eio_execute fills from its own module initializer. Nothing
    else in this executable names that module, so the linker drops it and those
    tools fail before emitting anything. Naming one value links it. *)
 let _links_workspace_dispatch_registration =

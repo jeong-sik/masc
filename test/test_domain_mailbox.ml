@@ -1,8 +1,7 @@
 (* Domain_mailbox: operations cross from other domains to one fiber in order,
-   and the end of the mailbox loses none (RFC
-   http-transport-runs-on-its-own-domain §3.3). Every case sends from real
-   domains: a second sender on the serving domain could not take the
-   interleavings the gate exists for. *)
+   and the end of the mailbox loses none. Every case sends from real domains:
+   a second sender on the serving domain could not take the interleavings the
+   gate exists for. *)
 
 let with_domains f = Eio_main.run (fun env -> f (Eio.Stdenv.domain_mgr env))
 

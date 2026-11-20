@@ -1,13 +1,14 @@
-(* E2 of RFC http-transport-runs-on-its-own-domain: a [Serving] route answers
-   while the owner domain is stuck, and an [Owner] route waits for it.
+(* A [Serving] route answers while the owner domain is stuck, and an [Owner]
+   route waits for it.
 
    A real httpun connection runs through [Server_http_ingress.http1_handler]
    over a socket pair. One task on the owner's queue then computes for
    [block_s] without yielding. With the connection on a second domain the
    [Serving] route answers during the block; with the connection on the
    owner's domain the same route answers only after it, which is the
-   difference the RFC is for. The client is a bare socket on a second domain
-   in both placements, so the block never stops the client itself. *)
+   difference the second domain makes. The client is a bare socket on a
+   second domain in both placements, so the block never stops the client
+   itself. *)
 
 let block_s = 0.5
 let serving_answer_bound_s = 0.05

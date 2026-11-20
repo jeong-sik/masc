@@ -5,8 +5,7 @@
     ([Keeper_tools_agent_core_bundle]). The sentences a Keeper may read are
     authored in config/tools/*.toml: a file's top-level [description] (the
     catalog row, [Config.raw_all_tool_schemas]) or its [keeper_projection]
-    description (the deliberately narrower Keeper shape, RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2). A descriptor may read
+    description (the deliberately narrower Keeper shape). A descriptor may read
     the file of its public name (tools/Read.toml) rather than of its internal
     name (tools/tool_read_file.toml), and a few catalog rows are still OCaml
     records with no file, so the sentences a descriptor may carry are those of

@@ -1,4 +1,4 @@
-(** test_keeper_state_machine — RFC-0002 keeper state machine tests.
+(** test_keeper_state_machine — keeper state machine tests.
 
     Pure unit tests for the deterministic core:
     - derive_phase priority ordering

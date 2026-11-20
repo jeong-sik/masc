@@ -118,8 +118,7 @@ let test_a_wedged_attempt_is_stalled () =
 let test_a_tool_in_flight_is_not_a_stall () =
   (* One Execute ran 120s inside beta's window without refreshing the
      progress signal. A tool that has been issued but not completed is work,
-     not a stall -- the exclusion [active_tool_count] has documented since
-     RFC-0197 with no code reading it until now. *)
+     not a stall -- the exclusion [active_tool_count] documents. *)
   let now = attempt_started_at +. 500.0 in
   check bool "a tool in flight suppresses the stall verdict" false
     (Try_provider.attempt_stalled

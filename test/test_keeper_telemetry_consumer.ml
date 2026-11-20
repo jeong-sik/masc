@@ -8,15 +8,13 @@
 
     This test runs [spawn_subscriber] under a switch and then asks the
     main fiber to perform a short sleep loop. If the drain fiber yields
-    (the contract from RFC-0063 §6, encoded by PR #14499 as
-    [Eio.Time.sleep clock drain_interval_s]), the main fiber's sleeps
+    ([Eio.Time.sleep clock drain_interval_s]), the main fiber's sleeps
     fire and the counter reaches its target. If a future change drops
     the yield, the main fiber's first sleep never wakes up and the test
     hangs — the CI wall-clock cutoff catches it.
 
     Regression context: PR #14491 introduced [spawn_subscriber] without
-    a yield; PR #14499 restored cooperative behaviour; RFC-0063 §7-D
-    classifies this style of harness as "partial coverage, low cost". *)
+    a yield; PR #14499 restored cooperative behaviour. *)
 
 module KTC = Masc.Keeper_telemetry_consumer
 

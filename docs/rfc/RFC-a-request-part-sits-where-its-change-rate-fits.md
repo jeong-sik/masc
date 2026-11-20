@@ -145,6 +145,11 @@ wire 캡처 3.2시간, 연속한 요청 4,162쌍에서 62번 바뀌었다.
 - 런타임 어댑터가 `Provider_config.make ~cache_extended_ttl` 로 넘긴다.
 - Agent 설정 조립이 provider 설정의 값을 이어받는다. checkpoint 로 다시 시작할 때도 같다.
 - runtime.toml 편집기는 글 단위로 고치므로 이 키를 지우지 않는다.
+- 1시간 쓰기는 값이 다르다. 공식 가격표에서 모든 모델이 기본 입력의 2배다(5분은 1.25배).
+  - 모델 행이 `cache_write_1h_multiplier` 를 선언한다.
+  - 가격 출처는 그 요청이 쓴 등급을 든다. `Provider_config.pricing_source` 가 요청 본문의 `ttl` 과 같은 `cache_extended_ttl` 로 정한다.
+  - 1시간 값이 없는 모델의 1시간 쓰기는 값 없이 남는다. 5분 값으로 바꿔 매기지 않는다.
+  - 이 층이 binding 선언보다 먼저 들어간다. 그래야 1시간을 켤 수 있게 된 순간부터 `cost_usd` 가 청구와 맞는다.
 
 binding 에 두는 까닭:
 - 레인은 여러 provider 후보를 잇는 목록이다. 구독 공식 클라이언트와 GLM 후보에는 이 값이 뜻이 없다.
@@ -311,7 +316,7 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 |---|---|---|
 | L0 | 이 RFC | |
 | L1 | §3.5 규범 목록 한 번 (#53753) | |
-| L2 | §3.1 catalog 계약 (#53759), binding `cache-retention` 선언 (#53760) | D1 |
+| L2 | §3.1 catalog 계약 (#53759), 모델 행의 1시간 값 (#53779), 가격 계산 (#53780), binding `cache-retention` 선언 (#53760) | D1 |
 | L3 | §3.2 캐시 결과 투영과 TUI | D1 |
 | L4 | §3.3 Anthropic 도구 불러오기 | D2, 운영자 실제 호출 확인 |
 | L5 | §3.4 역할 나눔과 층별 도착 방식 | D3, 층별 표 리뷰 |
@@ -320,7 +325,7 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 ## 8. 검증
 
 - L1: 격리된 기록이 있는 원장에서 지금 조항으로 그린 System 에는 `<norms_current>` 가 없다. 변경분이 있는 System, native 이어가기, 다른 바이트로 덮어쓴 System 에는 현재 조항 전체가 있다.
-- L2: 설정 파서가 `"5m"`·`"1h"` 만 받는다. catalog 계약이 없는 provider 와 다른 wire 의 선언은 불러올 때 거절한다. 1시간 binding 으로 돈 턴은 응답의 `cache_creation.ephemeral_1h_input_tokens` 가 0 보다 크다. 5~60분 쉰 뒤 첫 요청이 앞부분을 읽는다.
+- L2: 설정 파서가 `"5m"`·`"1h"` 만 받는다. catalog 계약이 없는 provider 와 다른 wire 의 선언은 불러올 때 거절한다. 1시간 binding 으로 돈 턴은 응답의 `cache_creation.ephemeral_1h_input_tokens` 가 0 보다 크고, 비용 행의 캐시 쓰기 몫이 2배 값이다. 5~60분 쉰 뒤 첫 요청이 앞부분을 읽는다.
 - L3: 이 RFC §1.3 의 표를 투영으로 다시 낸다. 같은 기록이면 같은 표가 나온다.
 - L4: 운영자가 실제 호출로 본다. 불러오기 직후 요청이 앞 요청의 입력을 캐시에서 읽는다.
 - L5: 층마다 실린 역할을 요청 캡처로 센다. 이력에 같은 글이 두 번 쌓이지 않는다.

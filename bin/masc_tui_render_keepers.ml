@@ -3330,11 +3330,41 @@ let render_keeper_axes (state : state) =
         Masc_tui_render_keeper_story.rows ~budget:available_rows
     | None -> 0
   in
-  let selected_summary = match state.keeper_story, selected_row with
-    | None, Some row when available_rows > 0 ->
-        Some (keeper_selected_summary state ~now:now_unix row)
-    | (Some _ | None), (Some _ | None) -> None in
-  let summary_rows = match selected_summary with Some _ -> 1 | None -> 0 in
+  let wall_cockpit_rows =
+    match shape with
+    | Axis_row.Wall_columns -> (
+        match matrix, state.keeper_story, portrait, selected_row with
+        | None, None, None, Some row when available_rows >= 9 ->
+            (* The summary carries the now cell's colour; the cockpit header
+               sanitises its subtitle and would draw the escape bytes as
+               "\x1B[…m", so it is handed the plain text. *)
+            let status =
+              Masc_tui_theme.strip_sgr
+                (keeper_selected_summary state ~now:now_unix row)
+            in
+            let cockpit =
+              Masc_tui_keeper_wall.selected_cockpit_rows ~ko ~cols:inner
+                ~now:now_unix
+                ~name:row.Keeper_list_model.keeper.Tui_decode.k_name
+                ~status (keeper_row_runtime row)
+            in
+            if available_rows - List.length cockpit >= 4 then cockpit else []
+        | (Some _ | None), (Some _ | None), (Some _ | None), (Some _ | None) ->
+            [])
+    | Axis_row.List_columns | Axis_row.Grid _ -> []
+  in
+  let selected_summary =
+    if wall_cockpit_rows <> [] then None
+    else
+      match state.keeper_story, selected_row with
+      | None, Some row when available_rows > 0 ->
+          Some (keeper_selected_summary state ~now:now_unix row)
+      | (Some _ | None), (Some _ | None) -> None
+  in
+  let summary_rows =
+    if wall_cockpit_rows <> [] then List.length wall_cockpit_rows
+    else match selected_summary with Some _ -> 1 | None -> 0
+  in
   let content_rows = max 0 (available_rows - story_rows - summary_rows) in
   let legend = match matrix with
     | None -> []
@@ -3511,7 +3541,10 @@ let render_keeper_axes (state : state) =
       draw_keeper_story buf ~cols ~rows:story_rows ~now:now_unix ~inner state page selected_row)
     state.keeper_story;
 
-  Option.iter (draw_keeper_selected_summary buf ~cols) selected_summary;
+  if wall_cockpit_rows <> [] then
+    List.iter (box_line buf cols) wall_cockpit_rows
+  else
+    Option.iter (draw_keeper_selected_summary buf ~cols) selected_summary;
   List.iter (box_line buf cols) axes_sheet_lines;
   box_divider buf cols;
   Buffer.add_string buf

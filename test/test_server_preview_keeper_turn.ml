@@ -2428,7 +2428,7 @@ streaming = true
            | `Assoc fields ->
              (match List.assoc_opt "verification" fields, List.assoc_opt "runtime" fields with
               | Some (`Assoc verif), Some `Null ->
-                Alcotest.(check bool) "401 verification passed=false" true (List.assoc_opt "passed" verif = Some (`Bool false));
+                Alcotest.(check bool) "401 verification status=failed" true (List.assoc_opt "status" verif = Some (`String "failed"));
                 (match List.assoc_opt "failure" verif with
                  | Some (`Assoc f) ->
                    Alcotest.(check bool)
@@ -2456,7 +2456,7 @@ streaming = true
            | `Assoc fields ->
              (match List.assoc_opt "verification" fields, List.assoc_opt "runtime" fields with
               | Some (`Assoc verif), Some (`Assoc rt) ->
-                Alcotest.(check bool) "200 verification passed=true" true (List.assoc_opt "passed" verif = Some (`Bool true));
+                Alcotest.(check bool) "200 verification status=verified" true (List.assoc_opt "status" verif = Some (`String "verified"));
                 Alcotest.(check bool) "first pass records runtime=made" true (List.assoc_opt "record" rt = Some (`String "made"))
               | _ -> Alcotest.failf "expected passed verification + made runtime in %S" (Yojson.Safe.to_string v200))
            | _ -> Alcotest.fail "expected assoc verify response");
@@ -2474,7 +2474,7 @@ streaming = true
            | `Assoc fields ->
              (match List.assoc_opt "verification" fields, List.assoc_opt "runtime" fields with
               | Some (`Assoc verif), Some (`Assoc rt) ->
-                Alcotest.(check bool) "rotated verification passed=true" true (List.assoc_opt "passed" verif = Some (`Bool true));
+                Alcotest.(check bool) "rotated verification status=verified" true (List.assoc_opt "status" verif = Some (`String "verified"));
                 Alcotest.(check bool) "rotated verify records runtime=existing" true (List.assoc_opt "record" rt = Some (`String "existing"))
               | _ -> Alcotest.failf "expected existing runtime after rotation in %S" (Yojson.Safe.to_string v200_rot))
            | _ -> Alcotest.fail "expected assoc verify response");

@@ -1796,7 +1796,7 @@ endpoint = "http://127.0.0.1:1/v1"
 
 [providers.custom_http.credentials]
 type = "env"
-value = "MASC_TEST_UNUSED_HTTP_ENV_KEY"
+key = "MASC_TEST_UNUSED_HTTP_ENV_KEY"
 
 [providers.local]
 display-name = "Local server"
@@ -1814,7 +1814,7 @@ max-context = 1000000
 tools-support = true
 streaming = true
 
-[models."anthropic/claude-sonnet-5"]
+[models.or-sonnet]
 api-name = "anthropic/claude-sonnet-5"
 max-context = 200000
 tools-support = false
@@ -1834,7 +1834,7 @@ streaming = true
 
 [claude_code."claude-sonnet-5"]
 
-[openrouter."anthropic/claude-sonnet-5"]
+[openrouter.or-sonnet]
 
 [custom_http.custom-tool-model]
 
@@ -1875,7 +1875,7 @@ streaming = true
        Alcotest.(check bool)
          "openrouter resolves catalog model tools-support=true despite TOML false"
          true
-         (List.assoc_opt "models" fields = Some (`List [ `String "anthropic/claude-sonnet-5" ]));
+         (List.assoc_opt "models" fields = Some (`List [ `String "or-sonnet" ]));
        Alcotest.(check bool)
          "openrouter calls allowed"
          true

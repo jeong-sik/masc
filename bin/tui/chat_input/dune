@@ -1,0 +1,26 @@
+(library
+ (name masc_tui_chat_input)
+ (wrapped true)
+ (libraries
+  masc
+  masc.config
+  masc.keeper_registry
+  masc_eio_context
+  masc_tui_types
+  masc_tui_loader
+  masc_tui_render_chat
+  masc_tui_paste_spill
+  masc_tui_message_input
+  masc_tui_message_layout
+  masc_tui_command
+  masc_tui_image_preview
+  masc_tui_chat_media
+  masc_tui_keeper_chat_log
+  masc_tui_keeper_chat_projection
+  masc_tui_keeper_chat_queue
+  masc_tui_keeper_chat_transcript
+  masc_tui_composer
+  masc_tui_roster_pane
+  masc_tui_keys
+  eio
+  unix))

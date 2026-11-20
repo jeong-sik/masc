@@ -1,5 +1,4 @@
-(** The card an issued play invite is drawn as (RFC
-    play-link-for-the-shared-machine §2.4).
+(** The card an issued play invite is drawn as.
 
     Pure, so a test reads the exact rows an operator sees. The link a card
     holds is a credential: the server keeps only the token's hash, so the

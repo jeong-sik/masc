@@ -2569,7 +2569,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
         ; _
         }
       ->
-        (* Each Keeper's answer is its own read (RFC-0483). A failed read
+        (* Each Keeper's answer is its own read. A failed read
            keeps the Keeper's last answer, so its counts stay in the totals. *)
         let answered_rows =
           List.concat_map

@@ -51,8 +51,7 @@ Context window precedence (binding `max-context` > provider `max-context` >
 model `max-context` > catalog, `lib/runtime/runtime_instance.ml`) is
 documented with examples in
 [spec/14-configuration.md](spec/14-configuration.md) §3. A runtime that
-resolves a window from **neither** the TOML nor the catalog fails at load
-(RFC-0206 §2.1).
+resolves a window from **neither** the TOML nor the catalog fails at load.
 
 ## 2. `[providers.<id>]` — how to connect
 
@@ -163,7 +162,7 @@ Resolution (`lib/runtime/runtime_adapter.ml` and `lib/runtime/runtime_toml.ml`):
   `[providers.<id>.usage-read.credit]` table adds `url` for the account Credit
   endpoint. It uses the same credential and refresh period; its URL follows
   the same HTTPS and provider-host checks as the primary `url`.
-- `capabilities` (RFC-0058 §2.4): `supports-inline-tools`,
+- `capabilities`: `supports-inline-tools`,
   `argv-prompt-preflight`, `uses-messages-caching`.
 
 ## 3. `[models.<id>]` — what a model is
@@ -174,7 +173,7 @@ bindings and lanes.
 | Key | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `api-name` | string | the table id | model id sent on the wire (`model-name` is an accepted alias) |
-| `max-context` | positive int | catalog | operator window override; fail-close at load when no source resolves (RFC-0206 §2.1) |
+| `max-context` | positive int | catalog | operator window override; fail-close at load when no source resolves |
 | `tools-support` | bool | `false` | whether a turn may carry tools. An official-client row is answered by this key. An Agent Core row is answered by its AGENT_CORE catalog row when the catalog has one for this provider and model; the key is read only for a model the catalog has no row for, together with `[models.<id>.capabilities]` |
 | `thinking-support` | bool | absent | absent = follow the caller's policy; on a `reasoning-uncontrolled` row it only says the model thinks and sends no request. When set on an Agent Core row, every turn sends it, so the configuration is refused at load (`Thinking_requests_inadmissible`, naming each runtime) when request admission refuses the request it builds, for example `true` on a `reasoning-effort` wire with no effort to send |
 | `preserve-thinking` | bool | absent | replay policy for prior-turn reasoning |

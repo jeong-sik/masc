@@ -36,7 +36,7 @@ val render :
 (** Render the completed entry [identity] with source [text], or return its
     retained rows when every key field matches. *)
 
-val render_with_suffix :
+val render_with_last_block :
   'identity t ->
   theme_revision:int ->
   palette_generation:int ->
@@ -46,10 +46,11 @@ val render_with_suffix :
   text:string ->
   string list
 (** {!render} through a streaming renderer, which also retains where the
-    render's open suffix starts, for {!completed_boundary}. Rows retained by
-    {!render} for the same key are rendered again once to learn it. *)
+    render's last content block starts, for {!completed_last_block}. Rows
+    retained by {!render} for the same key are rendered again once to learn
+    it. *)
 
-val completed_boundary :
+val completed_last_block :
   'identity t ->
   theme_revision:int ->
   palette_generation:int ->
@@ -57,11 +58,12 @@ val completed_boundary :
   identity:'identity ->
   text:string ->
   (int * int) option
-(** [Some (source_bytes, rows)] when {!render_with_suffix} retained exactly
-    [text] for [identity] with these visual fields: the bytes before the
-    render's open suffix and the rows they draw. The rows after that are what
-    the suffix bytes render to on their own, numbered from [rows]. [None]
-    when nothing for [text] is retained, or {!render} retained it. *)
+(** [Some (source_byte, row)] when {!render_with_last_block} retained exactly
+    [text] for [identity] with these visual fields: where the last block
+    holding more than blank lines starts, and its first row. The rows from
+    [row] are what [text]'s bytes from [source_byte] render to on their own.
+    [None] when nothing for [text] is retained, {!render} retained it, or
+    every line of [text] is blank. *)
 
 val render_growing :
   'identity t ->
@@ -79,7 +81,7 @@ val render_growing :
     snapshot renders from the previous suffix boundary. A non-prefix snapshot
     or any visual-key change starts again from the complete source. *)
 
-val growing_boundary :
+val growing_last_block :
   'identity t ->
   theme_revision:int ->
   palette_generation:int ->
@@ -87,11 +89,12 @@ val growing_boundary :
   identity:'identity ->
   text:string ->
   (int * int) option
-(** [Some (source_bytes, rows)] when the growing entry [identity] last
-    rendered exactly [text] with these visual fields: the bytes of its closed
-    blocks and the rows they draw. The rows of [text] after that prefix are
-    what [text]'s remaining bytes render to on their own, numbered from
-    [rows]. [None] when nothing for [text] is retained. *)
+(** [Some (source_byte, row)] when the growing entry [identity] last
+    rendered exactly [text] with these visual fields: where the last block
+    holding more than blank lines starts, and its first row. The rows from
+    [row] are what [text]'s bytes from [source_byte] render to on their own;
+    a suffix of blank lines leaves the block before it. [None] when nothing
+    for [text] is retained or every line is blank. *)
 
 type measurement = { height : int; nonblank_lines : int }
 

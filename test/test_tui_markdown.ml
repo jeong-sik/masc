@@ -84,6 +84,46 @@ let check_stream_boundary label ~source_start ~row_start source =
   Alcotest.(check int) (label ^ " row boundary") row_start
     streamed.mutable_row_start
 
+let check_last_content_block label expected source =
+  let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
+  Alcotest.(check (option (pair int int))) label expected streamed.last_content_block
+
+(* A reply ending in a blank line has only that line in its mutable suffix;
+   the rows a reader sees last belong to the block before it. *)
+let test_last_content_block_skips_trailing_blank_lines () =
+  check_last_content_block "an empty source has none" None "";
+  check_last_content_block "blank lines alone have none" None "\n\n  \n";
+  check_last_content_block "a final line is the last block" (Some (6, 1)) "alpha\nbeta";
+  check_last_content_block "a trailing blank line leaves the line before it"
+    (Some (7, 2)) "alpha\n\nbeta\n\n";
+  check_last_content_block "a fence counts from its opening line"
+    (Some (7, 1)) "before\n```ocaml\nlet x = 1\n```\n\n";
+  check_last_content_block "an open fence holds its blank lines"
+    (Some (7, 1)) "before\n```ocaml\nlet x = 1\n\n\n"
+
+let last_block_corpus = String.concat "" [
+  "# Heading\n\nA paragraph with **bold** and `code` that wraps past forty cells wide.\n\n";
+  "- item one\n- item two\n  continued\n\n1. first\n2. second\n\n";
+  "> quoted line\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n";
+  "```ocaml\nlet x = 1\n\nlet y = 2\n```\n\n\nclosing words\n\n" ]
+
+(* Every prefix: the bytes from the last content block render alone to the
+   rows the whole source draws from that block's row. *)
+let test_last_content_block_renders_alone () =
+  for length = 0 to String.length last_block_corpus do
+    let source = String.sub last_block_corpus 0 length in
+    let streamed = Markdown.render_streaming ~palette:tagged ~width:40 source in
+    match streamed.last_content_block with
+    | None -> ()
+    | Some (source_start, row_start) ->
+        let rec drop count rows = if count <= 0 then rows else match rows with
+          | [] -> [] | _ :: rest -> drop (count - 1) rest in
+        check_rows (Printf.sprintf "%d bytes from byte %d" length source_start)
+          (drop row_start streamed.rows)
+          (Markdown.render_streaming ~palette:tagged ~width:40
+             (String.sub source source_start (length - source_start))).rows
+  done
+
 let test_streaming_boundary_keeps_only_closed_blocks () =
   check_stream_boundary "one newline keeps its line mutable" ~source_start:0
     ~row_start:0 "alpha\n";
@@ -476,6 +516,10 @@ let () =
     ; ( "blocks"
       , [ Alcotest.test_case "streaming keeps only closed blocks" `Quick
             test_streaming_boundary_keeps_only_closed_blocks
+        ; Alcotest.test_case "last content block skips trailing blank lines" `Quick
+            test_last_content_block_skips_trailing_blank_lines
+        ; Alcotest.test_case "last content block renders alone" `Quick
+            test_last_content_block_renders_alone
         ; Alcotest.test_case "score snapshots preserve closed source" `Quick
             test_alphatex_sources_preserve_closed_snapshots
         ; Alcotest.test_case "diagram snapshots preserve closed source" `Quick

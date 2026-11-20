@@ -522,7 +522,7 @@ let test_streaming_frames_leave_the_whole_reply_unread () =
   List.iteri (fun step text ->
     T.turn_log_add ~now:(302. +. float_of_int step) live ~seq:(Some (step + 2))
       (Live.Text {text; response=Unobserved_scope (None)});
-    ignore (frame_lines state)) ["\nmore words here"; " and more"; "\n\nnew paragraph"];
+    ignore (frame_lines state)) ["\nmore words here"; " and more"; "\n\nnew paragraph"; "\n\n"; "\n"];
   check int "streaming frames read no whole-reply index" before
     (Render.For_testing.source_index_build_count ());
   match state.msg_scroll_pin with
@@ -537,7 +537,9 @@ let test_streaming_frames_leave_the_whole_reply_unread () =
 let test_opening_a_finished_reply_leaves_the_whole_reply_unread () =
   List.iter (fun journal ->
     let state = state Layout.Origin_inline in
-    let text = long_answer "DONE_" in
+    (* One paragraph per line and a closing blank line: the last rows on
+       screen sit before the blank line that is the mutable suffix. *)
+    let text = String.concat "" (List.init 100 (fun index -> Printf.sprintf "DONE_%03d\n\n" index)) in
     if journal then ignore (log state ~id:"done" ~at:1.
       [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished])
     else state.msg_loaded <- [row ~id:"done" ~request_id:"done" ~role:T.Message_keeper ~text 1.];

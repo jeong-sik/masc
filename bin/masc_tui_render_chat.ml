@@ -327,7 +327,7 @@ let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
       match entry.markdown_source with
       | Message_layout.Markdown_stable
           { keeper_name; request_id; observed_at; entry_index } ->
-          Markdown_cache.render_with_suffix chat_markdown_cache
+          Markdown_cache.render_with_last_block chat_markdown_cache
             ~theme_revision:chat_markdown_theme_revision
             ~palette_generation ~width ~renderer:(chat_markdown_streaming ~context)
             ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
@@ -4400,21 +4400,21 @@ let body_row_of_point ~source_body entry_index (point : chat_scroll_point) =
   | Some position -> Option.bind (source_body entry_index) (fun body ->
       Hashtbl.find_opt (Lazy.force body.source_rows) position)
 
-(* The open suffix's rows of an entry the chat drew this frame, with the row
-   the suffix starts at. [None] when the render cache holds no boundary for
+(* The rows of an entry's last content block onward, read alone, with the
+   row that block starts at. [None] when the render cache holds no block for
    exactly this body and width: a body drawn with link cards after it is
    another text, and a streaming entry keeps no render. *)
 let suffix_index ~theme ~width (entry : Message_layout.entry) =
   let context = Chat_theme.body_context theme entry.style in
   let boundary = match entry.markdown_source with
     | Message_layout.Markdown_growing {keeper_name; request_id; entry_index} ->
-        Markdown_cache.growing_boundary chat_markdown_cache
+        Markdown_cache.growing_last_block chat_markdown_cache
           ~theme_revision:chat_markdown_theme_revision
           ~palette_generation:context.palette_generation ~width
           ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
           ~text:entry.body
     | Message_layout.Markdown_stable {keeper_name; request_id; observed_at; entry_index} ->
-        Markdown_cache.completed_boundary chat_markdown_cache
+        Markdown_cache.completed_last_block chat_markdown_cache
           ~theme_revision:chat_markdown_theme_revision
           ~palette_generation:context.palette_generation ~width
           ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
@@ -4431,9 +4431,10 @@ let suffix_index ~theme ~width (entry : Message_layout.entry) =
 (* The live edge reads one row's last source byte. A growing entry is a new
    entry on every arrival, so reading it through [source_body] drew the whole
    reply again with spans on every streaming frame, and a finished reply drew
-   it once more on the frame that opened it. The closed prefix the render
-   cache holds draws none of the open suffix's rows, so a row the suffix draws
-   is read from the suffix alone. *)
+   it once more on the frame that opened it. The blocks before the last
+   content block draw none of its rows, so a row it draws is read from it
+   alone. That block, not the mutable suffix, because a reply ending in a
+   blank line has only that blank line in its suffix. *)
 let live_row_end_source state ~keeper_name projection ~inner_width ~theme ~source_body =
   let entries = (scroll_anchor_index projection).indexed_entries in
   let suffixes = Hashtbl.create 2 in

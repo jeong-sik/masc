@@ -7,12 +7,13 @@ module Completed = struct
     palette_generation : int;
   }
 
+  (* A renderer of rows alone does not say where the last block starts. *)
+  type last_block = Not_kept | Kept of (int * int) option
+
   type 'identity rendered = {
     key : 'identity key;
     rows : string list;
-    suffix : (int * int) option;
-        (* The open suffix's first byte and row, when a streaming render
-           produced [rows]; a renderer of rows alone leaves it unknown. *)
+    last_block : last_block;
   }
 end
 
@@ -30,6 +31,7 @@ module Streaming = struct
     stable_source_len : int;
     stable_rows : string list;
     rows : string list;
+    last_block : (int * int) option;
   }
 end
 
@@ -121,33 +123,38 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~identity
       rendered.rows
   | Some _ | None ->
       let rows = renderer ~width text in
-      remember cache { key; rows; suffix = None };
+      remember cache { key; rows; last_block = Not_kept };
       rows
 
-let render_with_suffix cache ~theme_revision ~palette_generation ~width ~renderer
+let render_with_last_block cache ~theme_revision ~palette_generation ~width ~renderer
     ~identity ~text =
   let key : _ Completed.key =
     { identity; text; width; theme_revision; palette_generation }
   in
-  match Masc_tui_lru.find cache.completed identity with
-  | Some ({ suffix = Some _; _ } as rendered : _ Completed.rendered)
-    when same_rest key rendered.key ->
-      rendered.rows
-  | Some _ | None ->
+  let kept = match Masc_tui_lru.find cache.completed identity with
+    | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
+        (match rendered.last_block with
+         | Completed.Kept _ -> Some rendered.rows
+         | Completed.Not_kept -> None)
+    | Some _ | None -> None in
+  match kept with
+  | Some rows -> rows
+  | None ->
       let (rendered : Masc_tui_markdown.streaming_render) = renderer ~width text in
       remember cache
-        { key; rows = rendered.rows
-        ; suffix = Some (rendered.mutable_source_start, rendered.mutable_row_start) };
+        { key; rows = rendered.rows; last_block = Kept rendered.last_content_block };
       rendered.rows
 
-let completed_boundary cache ~theme_revision ~palette_generation ~width ~identity
+let completed_last_block cache ~theme_revision ~palette_generation ~width ~identity
     ~text =
   let key : _ Completed.key =
     { identity; text; width; theme_revision; palette_generation }
   in
   match Masc_tui_lru.find cache.completed identity with
   | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
-      rendered.suffix
+      (match rendered.last_block with
+       | Completed.Kept last_block -> last_block
+       | Completed.Not_kept -> None)
   | Some _ | None -> None
 
 let same_visual_rest (left : _ Streaming.key) (right : _ Streaming.key) =
@@ -171,6 +178,11 @@ let validate_streaming_render ~source_length
     || rendered.mutable_source_start > source_length
     || rendered.mutable_row_start < 0
     || rendered.mutable_row_start > List.length rendered.rows
+    || (match rendered.last_content_block with
+        | None -> false
+        | Some (source_start, row_start) ->
+            source_start < 0 || source_start > source_length
+            || row_start < 0 || row_start > List.length rendered.rows)
   then invalid_arg "Markdown streaming renderer returned an invalid boundary"
 
 let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
@@ -182,6 +194,7 @@ let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
       stable_source_len = rendered.mutable_source_start;
       stable_rows = take rendered.mutable_row_start rendered.rows;
       rows = rendered.rows;
+      last_block = rendered.last_content_block;
     }
   in
   remember_growing cache growing;
@@ -206,6 +219,13 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
       in
       let stable_rows = growing.stable_rows @ newly_stable_rows in
       let rows = stable_rows @ drop rendered.mutable_row_start rendered.rows in
+      (* A pending suffix of blank lines keeps the last block it followed:
+         that block is closed, so it still starts the same rows. *)
+      let last_block = match rendered.last_content_block with
+        | Some (source_start, row_start) ->
+            Some (growing.stable_source_len + source_start,
+              List.length growing.stable_rows + row_start)
+        | None -> growing.last_block in
       let updated : _ Streaming.growing =
         { key;
           text;
@@ -213,20 +233,20 @@ let render_growing cache ~theme_revision ~palette_generation ~width ~renderer
             growing.stable_source_len + rendered.mutable_source_start;
           stable_rows;
           rows;
+          last_block;
         }
       in
       remember_growing cache updated;
       rows
   | Some _ | None -> reset_growing cache ~key ~text ~renderer
 
-let growing_boundary cache ~theme_revision ~palette_generation ~width ~identity
+let growing_last_block cache ~theme_revision ~palette_generation ~width ~identity
     ~text =
   let key : _ Streaming.key =
     { identity; width; theme_revision; palette_generation }
   in
   match find_growing cache key with
-  | Some growing when String.equal growing.text text ->
-      Some (growing.stable_source_len, List.length growing.stable_rows)
+  | Some growing when String.equal growing.text text -> growing.last_block
   | Some _ | None -> None
 
 let row_extent rows =

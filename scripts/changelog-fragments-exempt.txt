@@ -43,3 +43,112 @@
 51879  # fragment backfill: its payload is the fragments of #51830, #51832 and #51842, which stack #51826 merged without them
 52683  # docs only: account-server sign-in PATH prerequisite and 503 recovery; no runtime behavior change
 52738  # fragment backfill: its payload is the fragments of #52598, #52599, #52601, #52603, #52604, #52605, #52606, #52611 and #52620, which the Farm stack merged without them
+52608  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52609  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52610  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52612  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52625  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52626  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52664  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52684  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52697  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52709  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52710  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52711  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52712  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52714  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52715  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52717  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52722  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52723  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52724  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52734  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52735  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52736  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52742  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52744  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52745  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52746  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52747  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52748  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52750  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52752  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52753  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52756  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52757  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52758  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52760  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52762  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52764  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52765  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52775  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52776  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52778  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52782  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52783  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52784  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52786  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52787  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52788  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52792  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52793  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52794  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52795  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52796  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52797  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52800  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52801  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52804  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52805  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52806  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52809  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52810  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52812  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52814  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52818  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52821  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52825  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52828  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52831  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52832  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52834  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52835  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52836  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52838  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52840  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52843  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52844  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52845  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52846  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52848  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52849  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52850  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52853  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52854  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52881  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52887  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52893  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52894  # already carried by the [Unreleased] entry citing this number; no separate fragment to avoid a double entry
+52928  # the path-argument semantics change is carried by fragment 52936.md, which cites this number
+52918  # test only (one file): approval-queue marker-line skip; no user-facing behavior
+52922  # release CI script only: opam index refresh before lock resolve; no user-facing behavior
+52925  # release CI script only: dependency block keeps a remote opam index in the container; no user-facing behavior
+52926  # docs only (mli comment): msx lane caller-path error axis; no user-facing behavior
+52927  # build tooling only: notices collector learns matrix 0.2.0 notice shapes; no user-facing behavior
+52930  # build tooling only: notices collector covers dune-build-info 3.25.0 and uring 2.7.0; no user-facing behavior
+52931  # test only (one file): missing cart/disk path is Invalid_request; no user-facing behavior
+52933  # test only: isolates retained-artifact checks and clears the Eio fs handle; no user-facing behavior
+52934  # CI workflow only: pr-check runs the notice collector tests before merge; no user-facing behavior
+52935  # docs only (one comment): test/dune orphan comment states the wiring; no user-facing behavior
+52938  # CI workflow only: notice collector tests isolated with a manual-copy note; no user-facing behavior
+52939  # test only: expects 403 for a refused Origin instead of a hard-coded 401; no user-facing behavior
+52940  # test only (one file): judge_operands premise the parser accepts; no user-facing behavior
+52941  # test only: bounds the FIFO prune child wait so a stuck child fails one case; no user-facing behavior
+52979  # review bot ruleset only: follows the main ruleset single required approval; no user-facing behavior
+53024  # changelog work only: backports the v0.73.1 release changelog to main
+53185  # docs only (research note): btop-line TUI screen grammar survey; no user-facing behavior
+53201  # docs only: what each Tool calls arrangement gives up; no user-facing behavior
+53212  # docs only (RFC): TUI two-language screen text layer; no user-facing behavior
+53304  # behavior-preserving refactor: composition execution modes spelled once and read back from one list; no user-facing behavior
+53313  # behavior-preserving refactor: a parted help section stays one value with its heading; no user-facing behavior
+53458  # test only (one file): metrics cached-window count expectation; no user-facing behavior

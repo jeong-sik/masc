@@ -19,9 +19,8 @@
     The [masc_batch_add_tasks] / [masc_broadcast] / [masc_heartbeat]
     bindings read their deliberately narrower descriptions and input
     schemas from the [agent_core_projection] tables of the tools' own
-    [config/tools/masc_*.toml] declarations (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2); a missing or
-    undecodable projection refuses the boot. *)
+    [config/tools/masc_*.toml] declarations; a missing or undecodable
+    projection refuses the boot. *)
 
 (** {1 Typed binding} *)
 

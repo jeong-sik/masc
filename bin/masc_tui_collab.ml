@@ -177,7 +177,7 @@ let controller_summary ?(ko = false) = function
   | Masc.Tui_decode.Play_machine_absent ->
       [if ko then "로드된 DOS 머신이 없습니다." else "No DOS machine is loaded."]
   | Masc.Tui_decode.Play_controller_unobserved reason ->
-      [(if ko then "DOS 조작자 미확인: " else "DOS controller unknown: ")
+      [(if ko then "DOS 조작자를 읽지 못함: " else "DOS controller could not be read: ")
        ^ Masc.Tui_terminal_text.sanitize_terminal_text reason]
 
 (* Prose wraps at the overlay's width instead of being cut at the frame's edge:

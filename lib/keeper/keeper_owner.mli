@@ -128,10 +128,10 @@ type turn_in_flight =
 
     The exclusion is an invariant; the *order* in which contending lanes get
     the freed slot is not specified here and is not fair today — a queued chat
-    operation is offered the slot synchronously when a turn ends, while the
-    autonomous lane discovers it only on its next keepalive poll. RFC-0373
-    measures the resulting starvation and is where an admission policy belongs.
-    Any such policy must keep the invariant above, not merely the counter. *)
+    operation is offered the slot synchronously when a turn ends, and the
+    autonomous lane is woken only when the slot is still unclaimed after that
+    ([on_turn_slot_released] of {!start}). An admission policy that orders
+    them must keep the invariant above, not merely the counter. *)
 
 (** Wire spelling of a {!turn_lane} ("autonomous" / "chat_operation" /
     "maintenance"). Every projection that serializes a lane reads this one
@@ -301,10 +301,10 @@ val start
     A chat producer notifies the Owner through {!wake_operation_drain} — "the
     Owner never polls", as the {!operation_runner} contract says — while the
     autonomous lane has no such channel and rediscovers the slot only on its
-    next keepalive cadence. RFC-0373 measured what that costs: over 2026-08-12
-    all 50 autonomous deferrals named a chat holder, one held the slot 16.3
-    minutes across 5 consecutive cycles, and the keeper carrying the most chat
-    traffic lost 18.6% of its autonomous cycles.
+    next keepalive cadence. What that costs, measured over 2026-08-12: all 50
+    autonomous deferrals named a chat holder, one held the slot 16.3 minutes
+    across 5 consecutive cycles, and the keeper carrying the most chat traffic
+    lost 18.6% of its autonomous cycles.
 
     The callback runs on the Owner fiber. It must not block, and an exception
     it raises is contained rather than propagated — a lost wake degrades to the

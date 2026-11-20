@@ -108,9 +108,7 @@ let trace_id_of_line ~file ~line_number line =
 
    With a per-file budget the listing costs O(entries x budget) no matter what
    any single turn wrote, and the bound is a property of each file alone —
-   whether a file is counted never depends on its neighbours. RFC-0228 §2
-   principle 3 states the same rule for the keeper-facing lane pull: paging
-   must not reintroduce full-file scans.
+   whether a file is counted never depends on its neighbours.
 
    256 KiB was chosen by replaying the same corpus at several budgets: it
    counts 95.2% of turns exactly while the slowest keeper's whole listing costs

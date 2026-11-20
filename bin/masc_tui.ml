@@ -1485,7 +1485,6 @@ let machine_changes_allowed state =
   && Option.is_none (checkpoint_for_workspace state)
   && not (Option.exists (fun workspace -> Hashtbl.mem checkpoint_storage_errors (checkpoint_root workspace)) state.server_identity)
 let machine_change_refusal = "MSX control requires a verified server matching this TUI's local workspace."
-type lane_addons_slice_source = Cached_snapshot | Fresh_inventory
 let decode_play_mutation decode = function
   | Masc_tui_http.Post_answered json -> Play_answered (decode json)
   | Masc_tui_http.Post_refused detail -> Play_refused detail
@@ -4279,829 +4278,6 @@ let pr_number_of_subject subject =
    keeper / repo axes the file itself was read through, so the margin
    describes the checkout on screen rather than whichever one the server
    would default to. *)
-let map_lane_addons state f =
-  match state.lane_addons with
-  | Some view -> state.lane_addons <- Some (f view)
-  | None -> state.lane_addons_cached <- f state.lane_addons_cached
-
-let lane_addons_input_failure detail =
-  Some (Masc_tui_lane_addons.Input_failure detail)
-
-let lane_addons_detail_failure detail =
-  Some (Masc_tui_lane_addons.Detail_read_failure detail)
-
-(* A lane add-on request the workspace guard stopped, said as kept back and
-   never as a failed read or request (RFC §2). *)
-let lane_addons_kept_back state ~request refusal =
-  Some (Masc_tui_lane_addons.Kept_back
-    (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal))
-
-(* An installer read the guard stopped: like a failed read, the installer
-   goes back to what it showed before the read, but only when that read is
-   the one pending. *)
-let lane_installer_kept_back state (view : Masc_tui_lane_addons.t) read refusal =
-  match view.installer with
-  | Some installer when Masc_tui_lane_installer.pending_read installer = Some read ->
-      let installer = Masc_tui_lane_installer.suspend_read installer in
-      let package_directory = match read with
-        | Masc_tui_lane_installer.Read_catalog _ -> Masc_tui_lane_installer.directory installer
-        | Masc_tui_lane_installer.Read_preview _ -> view.package_directory in
-      {view with loading=false;installer=Some installer;package_directory;
-        error=lane_addons_kept_back state ~request:Kept_request.Addon_read refusal;scroll=0}
-  | Some _ | None -> view
-
-let launch_lane_application state ~mailbox =
-  if server_authority_ready state then begin
-  let module Addons = Masc_tui_lane_addons in
-  match state.lane_addons with
-  | None -> ()
-  | Some view ->
-      (match Addons.begin_application_read view with
-       | None -> ()
-       | Some (view, ticket) ->
-           state.lane_addons <- Some view;
-           let host=Masc_tui_transport.Workspace_admission.server_peer_host and port=state.port in
-           Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox
-             ~boundary_error:(fun detail -> Request_failed detail)
-             ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-             ~deliver:(fun result -> Lane_msg (Lane_application_loaded (ticket,result)))
-             (fun () -> Result.bind
-               (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/lane-addons")
-               Addons.decode_configuration
-               |> Result.map_error (fun detail -> Request_failed detail)))
-  end
-
-let lane_addons_request_failure detail =
-  Some (Masc_tui_lane_addons.Request_failure detail)
-
-let lane_addons_request_failure_kind request =
-  let module Addons = Masc_tui_lane_addons in
-  match request with
-  | Addons.Inspect -> `Inventory
-  | Addons.Slice _ | Addons.Action_status _ -> `Detail
-  | Addons.Attach _ | Addons.Observe _ | Addons.Detach _
-  | Addons.Evidence _ | Addons.Act _ | Addons.Subscriptions _ -> `Request
-
-let lane_addons_failure_for_request request detail : lane_addons_failure =
-  match lane_addons_request_failure_kind request with
-  | `Inventory -> `Inventory detail
-  | `Detail -> `Detail detail
-  | `Request -> `Request detail
-
-let launch_lane_package_catalog state ~mailbox directory =
-  if server_authority_ready state then begin
-  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-  if view.loading then () else (
-    state.lane_addons_generation <- state.lane_addons_generation + 1;
-    let generation = state.lane_addons_generation in
-    state.lane_addons_reading <- Some generation;
-    let pending = Result.bind (Option.to_result ~none:"No installation wizard" view.installer)
-      (Masc_tui_lane_installer.begin_catalog ~request_id:generation ~directory) in
-    match pending with
-    | Error detail -> state.lane_addons <- Some {view with error=lane_addons_input_failure detail}
-    | Ok installer ->
-      state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None;scroll=0};
-      let host=Masc_tui_transport.Workspace_admission.server_peer_host and port=state.port in
-      let query = match directory with None -> ""
-        | Some path -> "?directory=" ^ Masc_tui_http.percent_encode_query_value path in
-      Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox
-        ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Lane_msg (Lane_package_catalog_loaded (generation,directory,result)))
-        (fun () -> Masc_tui_http.get_json ~host ~port ~path:("/api/v1/lane-addons/package-catalog" ^ query)
-          |> Result.map_error (fun detail -> Request_failed detail)))
-  end
-
-let launch_lane_package_preview state ~mailbox path =
-  if server_authority_ready state then begin
-  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-  if view.loading then () else (
-    state.lane_addons_generation <- state.lane_addons_generation + 1;
-    let generation = state.lane_addons_generation in
-    state.lane_addons_reading <- Some generation;
-    let pending = Result.bind (Option.to_result ~none:"No installation wizard" view.installer)
-      (Masc_tui_lane_installer.begin_preview ~request_id:generation ~path) in
-    match pending with
-    | Error detail -> state.lane_addons <- Some {view with error=lane_addons_input_failure detail}
-    | Ok installer ->
-    state.lane_addons <- Some {view with generation;installer=Some installer;loading=true;error=None};
-    let host=Masc_tui_transport.Workspace_admission.server_peer_host and port=state.port in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox
-      ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~deliver:(fun result -> Lane_msg (Lane_package_preview_loaded (generation,path,result)))
-      (fun () -> Masc_tui_http.get_json ~host ~port
-        ~path:("/api/v1/lane-addons/package-preview?manifest_path=" ^ Masc_tui_http.percent_encode_query_value path)
-        |> Result.map_error (fun detail -> Request_failed detail)))
-  end
-
-let lane_draft_directory (view : Masc_tui_lane_addons.t) =
-  Option.bind view.snapshot (fun snapshot ->
-    Option.map (fun (config : Masc_tui_lane_addons.configuration) -> config.directory)
-      snapshot.configuration)
-
-let launch_lane_declaration state ~mailbox ~edit request =
-  if server_authority_ready state then begin
-  let module Document = Masc_tui_lane_declaration in
-  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-  let create_directory = lane_draft_directory view in
-  if view.loading then
-    map_lane_addons state (fun view -> {view with error=lane_addons_input_failure "A request is pending; drafts remain editable"})
-  else match (match request with
-    | Document.Read path -> Result.map (fun _ -> ()) (Document.find_for_path ?create_directory ~path view.documents)
-    | Document.Save _ -> Ok ()) with
-  | Error detail -> state.lane_addons <- Some {view with document_key=None;
-      editor_ready=false; scroll=0; error=lane_addons_input_failure detail}
-  | Ok () -> (
-    state.lane_addons_generation <- state.lane_addons_generation + 1;
-    let generation = state.lane_addons_generation in
-    state.lane_addons_reading <- (match request with Document.Read _ -> Some generation | Save _ -> None);
-    state.lane_nested_read_resume <- (match request with
-      | Document.Read path -> Some (generation, Lane_declaration_read {path; edit})
-      | Document.Save _ -> None);
-    let document_key = Some (match request with Document.Read path -> Filename.basename path | Document.Save session -> session.file_name) in
-    state.lane_addons <- Some {view with generation;loading=true;error=None;editor_ready=false;document_key;
-      application_reading=Masc_tui_lane_application.empty};
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-    let perform () =
-      let open Result.Syntax in
-      let* status, body = match request with
-        | Document.Read source_path -> Masc_tui_http.http_get ~host ~port
-            ~path:("/api/v1/lane-addons/declaration?source_path=" ^ Masc_tui_http.percent_encode_query_value source_path)
-        | Document.Save session -> Masc_tui_http.http_post ~host ~port
-            ~headers:(Masc_tui_http.auth_headers ()) ~path:"/api/v1/lane-addons/declaration"
-            ~body:(Yojson.Safe.to_string (Document.write_json session)) in
-      Document.decode_response request ~status ~body in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox
-      ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~deliver:(fun result -> Lane_msg (Lane_declaration_loaded (generation, request, edit, create_directory, result)))
-      (fun () -> Result.map_error (fun detail -> Request_failed detail) (perform ())))
-  end
-
-let launch_lane_subscriptions state ~mailbox request =
-  if server_authority_ready state then begin
-  let module Subs = Masc_tui_lane_subscriptions in
-  match state.lane_addons with
-  | None -> ()
-  | Some view when view.loading -> ()
-  | Some view ->
-      state.lane_addons_generation <- state.lane_addons_generation + 1;
-      let generation=state.lane_addons_generation in
-      state.lane_addons_reading <- (match request with Subs.Inspect -> Some generation | Save _ -> None);
-      state.lane_nested_read_resume <- (match request with
-        | Subs.Inspect -> Some (generation, Lane_subscriptions_read)
-        | Subs.Save _ -> None);
-      state.lane_addons <- Some {view with generation;loading=true;error=None};
-      let host=Masc_tui_transport.Workspace_admission.server_peer_host and port=state.port in
-      Masc_tui_transport.Workspace_admission.launch_guarded_request
-        ~operation:(match request with Subs.Inspect -> false | Subs.Save _ -> true)
-        state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Lane_msg (Lane_subscriptions_loaded (generation,result)))
-        (fun () -> Result.bind (Masc_tui_http.post_json ~host ~port
-          ~path:"/api/v1/lane-addons/subscriptions"
-          ~body:(Yojson.Safe.to_string (Subs.request_json request))) Subs.decode
-          |> Result.map_error (fun detail -> Request_failed detail))
-  end
-
-let launch_lane_addons ?target state ~mailbox request =
-  if not (server_authority_ready state) then
-    report_action state "error" (Masc_tui_transport.Request_notice.kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
-      ~request:Kept_request.Addon_request)
-  else begin
-  let module Addons = Masc_tui_lane_addons in
-  let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-  match Addons.request_read_target ?target view request with
-  | Error refusal -> state.lane_addons <- Some (Addons.refuse_read_scope view refusal)
-  | Ok target ->
-  if view.loading then
-    (* The answer to the key just pressed goes at the top of the pane, so a
-       reader scrolled into a draft would not see it. *)
-    state.lane_addons <- Some {view with scroll=0;
-      error=lane_addons_input_failure "A Lane request is pending; Esc returns to existing activity"}
-  else (
-  state.lane_addons_generation <- state.lane_addons_generation + 1;
-  let generation = state.lane_addons_generation in
-  (match request, target with
-   | Addons.Inspect, Addons.Read_detail (instance_id, incarnation) ->
-       state.lane_addons_owed <- Option.map (fun ((owner, epoch), owed) ->
-         if String.equal owner instance_id && String.equal epoch incarnation
-         then ((owner, epoch), Masc_tui_owed_read.started owed)
-         else ((owner, epoch), owed)) state.lane_addons_owed
-   | Addons.Inspect, (Addons.Read_screen | Addons.Read_installation_results _)
-   | (Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
-     | Addons.Evidence _ | Addons.Act _ | Addons.Action_status _
-     | Addons.Subscriptions _), _ -> ());
-  state.lane_addons_reading <- (match request with
-    | Addons.Inspect | Slice _ | Action_status _ -> Some generation
-    | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> None);
-  let last_action, action_receipt = match request with
-    | Addons.Act action -> Some action, None
-    | Addons.Action_status action -> Some action, view.action_receipt
-    | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
-    | Addons.Evidence _ | Addons.Subscriptions _ -> view.last_action, view.action_receipt in
-  let presentation = match request with
-    | Addons.Subscriptions _ -> Addons.Technical
-    | Addons.Inspect | Attach _ | Observe _ | Detach _ | Slice _ | Evidence _ | Act _
-    | Action_status _ -> view.presentation in
-  let application_reading = match lane_addons_request_failure_kind request with
-    | `Request -> Masc_tui_lane_application.suspend view.application_reading
-    | `Inventory | `Detail -> view.application_reading in
-  let initial_detail = match target with
-    | Addons.Read_detail (id, incarnation) -> Some (id, incarnation)
-    | Addons.Read_screen | Addons.Read_installation_results _ -> None in
-  let pending_view = { (Addons.set_presentation view presentation) with generation; loading = true; error = None;
-    application_reading; draft = None;action_menu=None;last_action;action_receipt } in
-  state.lane_addons <- Some pending_view;
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-  let broadcast_path=Filename.concat
-    (Common.masc_dir_from_base_path ~base_path:state.local_base_path) "tui-lane-broadcast.jsonl" in
-  let broadcast_scope=Masc_tui_types.broadcast_workspace_scope
-    ~local_paths:state.local_workspace_paths state.server_identity in
-  let broadcast_workspace_verified=state.workspace_identity=Masc_tui_types.Workspace_identity_match in
-  let authority = state.workspace_authority in
-  let identity = state.server_identity in
-  let check_request = Masc_tui_transport.Workspace_admission.admission_sequence state ~mailbox ~authority ~identity ~host ~port in
-  (* Each request in the chain is admitted again. The guard's refusal stays
-     apart from the request's own failure, which [kind] names. *)
-  let guarded kind send = match check_request () with
-    | Error refusal -> Error (`Kept_back refusal)
-    | Ok () -> Result.map_error kind (send ()) in
-  let get_json kind ~path = guarded kind (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
-  let post_json kind ~path ~body =
-    guarded kind (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
-  let perform () =
-    let open Result.Syntax in
-    let inventory_failure detail = `Inventory detail in
-    let detail_failure detail = `Detail detail in
-    let request_failure detail = `Request detail in
-    let detail_result result = Result.map_error detail_failure result in
-    let request_result result = Result.map_error request_failure result in
-    let reply ?snapshot ?receipt ?action ?diagnostic ?(inventory_read=`Unchanged) ?kept_back () =
-      {lar_snapshot=snapshot;lar_receipt=receipt;lar_action=action;
-       lar_diagnostic=diagnostic;lar_inventory_read=inventory_read;lar_kept_back=kept_back} in
-    let inspect () =
-      try
-        let* json = get_json inventory_failure ~path:"/api/v1/lane-addons" in
-        Result.map_error inventory_failure (Addons.decode json)
-      with Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Error (inventory_failure (Printexc.to_string exn)) in
-    match request with
-    | Addons.Inspect ->
-        let* snapshot = inspect () in
-        let retained = Option.bind initial_detail (fun (id, incarnation) ->
-          List.find_opt (fun (item : Addons.instance) ->
-            item.id = id && item.incarnation = incarnation
-            && item.runtime_presence = Addons.Retained_binding) snapshot.instances) in
-        (match retained with
-         | None -> Ok (reply ~snapshot ~inventory_read:`Read ())
-         | Some item ->
-             let history = Result.bind
-               (get_json detail_failure ~path:("/api/v1/lane-addons/slice?run_id="
-                 ^ Masc_tui_http.percent_encode_query_value item.run_id))
-               (fun json -> detail_result (Addons.decode_slice ~snapshot json)) in
-             (match history with
-              | Ok snapshot -> Ok (reply ~snapshot ~inventory_read:`Read ())
-              | Error (`Detail detail) -> Ok (reply ~snapshot ~inventory_read:`Read
-                  ~diagnostic:(Addons.Detail_read_failure detail) ())
-              | Error (`Kept_back refusal) ->
-                  Ok (reply ~snapshot ~inventory_read:`Read ~kept_back:refusal ())))
-    | Addons.Subscriptions args ->
-        let* json = post_json request_failure
-          ~path:"/api/v1/lane-addons/subscriptions"
-          ~body:(Yojson.Safe.to_string args) in
-        Ok (reply ~receipt:json ())
-    | Addons.Slice query ->
-        let path = match query with
-          | [] -> "/api/v1/lane-addons/slice"
-          | _ :: _ ->
-              let query = List.map (fun (key, value) -> key ^ "=" ^ Masc_tui_http.percent_encode_query_value value) query |> String.concat "&" in
-              "/api/v1/lane-addons/slice?" ^ query in
-        let* json = get_json detail_failure ~path in
-        let* previous, source = match view.snapshot with
-          | Some snapshot -> Ok (snapshot, Cached_snapshot)
-          | None -> let* snapshot = inspect () in
-              Ok (snapshot, Fresh_inventory) in
-        let inventory_read = match source with
-          | Cached_snapshot -> `Unchanged
-          | Fresh_inventory -> `Read in
-        (match Addons.decode_slice ~snapshot:previous json with
-         | Ok snapshot -> Ok (reply ~snapshot ~inventory_read ())
-         | Error detail ->
-             (match source with
-              | Fresh_inventory -> Ok (reply ~snapshot:previous ~inventory_read
-                  ~diagnostic:(Addons.Detail_read_failure detail) ())
-              | Cached_snapshot -> Error (`Detail detail)))
-    | Addons.Act action | Addons.Action_status action ->
-        let* json = match request with
-          | Addons.Act _ -> post_json request_failure
-              ~path:"/api/v1/lane-addons/actions"
-              ~body:(Yojson.Safe.to_string (Addons.action_json action))
-          | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
-          | Addons.Evidence _ | Addons.Action_status _ | Addons.Subscriptions _ -> get_json detail_failure
-              ~path:("/api/v1/lane-addons/actions?instance_id="
-              ^ Masc_tui_http.percent_encode_query_value action.instance_id ^ "&request_id="
-              ^ Masc_tui_http.percent_encode_query_value action.request_id) in
-        let* receipt = (match request with
-          | Addons.Act _ -> request_result (Addons.action_receipt action json)
-          | Addons.Inspect | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Slice _
-          | Addons.Evidence _ | Addons.Action_status _ | Addons.Subscriptions _ -> detail_result (Addons.action_receipt action json)) in
-        Ok (reply ~receipt:json ~action:receipt ())
-    | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ | Addons.Evidence _ ->
-        let suffix, body = match request with
-          | Addons.Attach json -> "attach", json
-          | Addons.Observe id -> "observe", `Assoc ["instance_id", `String id]
-          | Addons.Detach id -> "detach", `Assoc ["instance_id", `String id]
-          | Addons.Evidence json -> "evidence", json
-          | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _ | Addons.Subscriptions _ -> assert false in
-        let broadcast=match request,body with
-          | Addons.Evidence _,`Assoc fields -> List.assoc_opt "broadcast" fields=Some (`Bool true)
-          | (Addons.Evidence _, (`Null | (`List _ | (`Bool _ | (`Float _ | (`Int _ | (`Intlit _ | `String _)))))))
-          | ((Addons.Inspect | (Addons.Attach _ | (Addons.Observe _ | (Addons.Detach _ | (Addons.Slice _ | (Addons.Act _ | (Addons.Action_status _ | Addons.Subscriptions _))))))), _) -> false in
-        let credential=Masc_tui_http.bind_credential () in
-        let* scope = if not broadcast then Ok None
-          else if not broadcast_workspace_verified then Error (`Request
-            "Verify the server workspace before sharing evidence via Broadcast")
-          else (match broadcast_scope with
-            | Some scope -> Ok (Some scope)
-            | None -> Error (`Request "Verify the server workspace before sharing evidence via Broadcast")) in
-        let* principal = match scope with
-          | None -> Ok None
-          | Some _ -> guarded request_failure
-              (fun () -> Masc_tui_http.lane_broadcast_principal_bound ~credential ~host ~port)
-              |> Result.map Option.some in
-        let* body = match principal,scope with
-          | None,_ -> Ok body
-          | Some principal,Some scope -> request_result (Masc_tui_lane_broadcast_pending.prepare
-              ~path:broadcast_path ~scope ~credential:principal body)
-          | Some _,None -> Error (`Request "Broadcast workspace scope is unavailable") in
-        let post ~path ~body = if broadcast then
-            guarded request_failure
-              (fun () -> Masc_tui_http.post_json_bound ~credential ~host ~port ~path ~body)
-          else post_json request_failure ~path ~body in
-        let* receipt = post
-          ~path:("/api/v1/lane-addons/" ^ suffix)
-          ~body:(Yojson.Safe.to_string body) in
-        let diagnostic = match principal,scope with
-          | None,_ -> None
-          | Some principal,Some scope ->
-              (match Masc_tui_lane_broadcast_pending.acknowledge
-                ~path:broadcast_path ~scope ~credential:principal ~request:body receipt with
-               | Ok () -> None
-               | Error detail -> Some (Addons.Request_failure
-                   ("Broadcast receipt received; retry tracking could not be confirmed: " ^ detail)))
-          | Some _,None -> Some (Addons.Request_failure "Broadcast workspace scope is unavailable") in
-        (match request with
-         | Addons.Evidence _ ->
-             (* Preserving evidence does not change worker inventory. That
-                inventory omits retained rows, so applying it here would erase
-                the original result view after its receipt was saved. *)
-             Ok (reply ~receipt ?diagnostic ())
-         | Addons.Attach _ | Addons.Observe _ | Addons.Detach _ ->
-             (match inspect () with
-              | Ok snapshot -> Ok (reply ~snapshot ~receipt ?diagnostic ~inventory_read:`Read ())
-              | Error (`Inventory detail) ->
-                  Ok (reply ~receipt ?diagnostic ~inventory_read:(`Failed detail) ())
-              (* The change was applied; only the read after it was kept back. *)
-              | Error (`Kept_back refusal) -> Ok (reply ~receipt ?diagnostic ~kept_back:refusal ()))
-         | Addons.Inspect | Addons.Slice _ | Addons.Act _ | Addons.Action_status _
-         | Addons.Subscriptions _ -> assert false)
-  in
-  Masc_tui_transport.Workspace_admission.launch_guarded_request
-    ~operation:(match request with
-      | Addons.Inspect | Slice _ | Action_status _ -> false
-      | Attach _ | Observe _ | Detach _ | Evidence _ | Act _ | Subscriptions _ -> true)
-    state ~mailbox
-    ~boundary_error:(lane_addons_failure_for_request request)
-    ~withdrawn:(fun refusal -> `Kept_back refusal)
-    ~deliver:(fun result -> Lane_msg (Lane_addons_loaded (generation, target, result)))
-    perform)
-  end
-
-let launch_browser_history state ~mailbox ~reload =
-  if server_authority_ready state then begin
-  match state.browser_history with
-  | None -> ()
-  | Some history ->
-      state.browser_history_generation <- state.browser_history_generation + 1;
-      let generation = state.browser_history_generation in
-      (* A recovered read owns Loading again. A second identity outage must
-         retire and resume this request just like the first one. *)
-      let history = Browser_history.start_read ~reload history in
-      state.browser_history <- Some history;
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-      if reload then
-        Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
-          ~boundary_error:(fun detail -> Request_failed detail)
-          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-          ~deliver:(fun result -> Browser_msg (Browser_history_list_loaded (generation, result)))
-          (fun () -> Masc_tui_http.fetch_keeper_calls ~host ~port
-            ~keeper_name:history.keeper_name ~limit:100
-            |> Result.map_error (fun detail -> Request_failed detail))
-      else begin
-        let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-        let fetch () = Browser_msg (Browser_history_page_loaded (generation,
-          match Browser_history.selected history with
-          | None -> Error "No retained observations in these 100 recent tool calls"
-          | Some entry -> Masc_tui_http.fetch_browser_observation ~host ~port entry.artifact)) in
-        let perform () =
-          try fetch () with
-          | Eio.Cancel.Cancelled _ as error -> raise error
-          | error -> Browser_msg (Browser_history_page_loaded (generation,Error (Printexc.to_string error))) in
-        (match Eio_context.get_switch_opt () with
-         | None -> state.browser_history <- Some {history with content=List_failed "Eio switch is unavailable"}
-         | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () ->
-             enqueue_async mailbox (perform ()); `Stop_daemon))
-      end
-  end else begin
-    (* Opening or changing history can own a loading state after the last
-       identity failure already retired reads. Keep this unsent selection
-       eligible for recovery too. *)
-    state.browser_history_generation <- state.browser_history_generation + 1;
-    state.browser_history <- Option.map Browser_history.suspend state.browser_history
-  end
-
-let launch_browser_lane state ~mailbox operation =
-  let open Browser_lane_view in
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  if server_authority_ready state then begin
-  match state.browser_lane with
-  | Some view when Option.is_some state.browser_history ->
-      (match operation with
-       | Read -> state.browser_lane <- Some (defer_read view)
-       | Read_refresh | Discover _ | Screenshot _
-       | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
-       | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-       | Viewport_observed _ | Viewport_pointer _ -> ())
-  | None -> ()
-  | Some view when busy view -> ()
-  | Some view when (match operation with
-    | Read | Read_refresh | Screenshot _ | Scene_read _ | Scene_regions _
-    | Scene_scroll _ | Scene_refresh _ | Scene_focus _ | Scene_click _
-    | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-    | Viewport_observed _ | Viewport_pointer _ -> true
-    | Discover _ -> false)
-      && not (selected_client_available view) ->
-      state.browser_lane <- Some { view with client_picker = Some 0;
-        scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None;
-        load = Failed "Choose a connected browser before reading its tabs" }
-  | Some view ->
-      (* Scene geometry belongs to its observation. Browser effects and explicit
-         reads and effectful gestures withdraw it before dispatch; a scroll
-         keeps the prior observation visible while its replacement is checked;
-         a screenshot may itself observe a
-         navigation, so dismissing its overlay must not resurrect old nodes.
-         Scene_click and Scene_follow retain their exact reference in
-         [operation], and the matching completion can install the newly
-         observed scene. A follow additionally pins the navigation receipt so
-         a same-URL reload cannot be mistaken for a completed transition; a
-         failed destination read keeps that guard for [Scene_follow_refresh]
-         and never carries the old region scope into the destination. A cadence
-         refresh keeps its frame visible so periodic observations do not erase
-         the operator's reading position. Operator input supersedes a cadence
-         result; effects still use the observed document/URL checks. Failed
-         refreshes withdraw that scene. *)
-      let view = match operation with
-        | Discover _ | Read_refresh | Scene_refresh _ | Viewport_observed _ -> view
-        | Read | Screenshot _
-        | Scene_read _ | Scene_regions _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _ | Viewport_pointer _ ->
-            { view with scene = None; scene_cursor = 0; scene_scope = None; scene_delta = None }
-        | Scene_scroll _ -> view
-        | Scene_click _ | Scene_focus _ -> { view with scene = None; scene_cursor = 0; scene_delta = None }
-      in
-      state.browser_lane_generation <- state.browser_lane_generation + 1;
-      let generation = state.browser_lane_generation in
-      let image_generation = state.image_request_generation in
-      let launched = { view with load = Loading (generation, operation);
-        read_continuation = (match operation with
-          | Read -> No_read_continuation
-          | Discover _ | Screenshot _ | Read_refresh
-          | Scene_read _ | Scene_regions _ | Scene_refresh _ | Scene_scroll _ | Scene_focus _
-          | Scene_click _ | Scene_follow _ | Scene_follow_refresh _ | Viewport_refresh _
-          | Viewport_observed _ | Viewport_pointer _ -> view.read_continuation);
-        read_view = Browser_lane_view.read_view_for_operation operation view.read_view;
-        refresh_pending =
-          if operation_is_refresh operation then Some generation else view.refresh_pending } in
-      (* The picker withholds the previous list and host while asking again.
-         Its dated startup recovery evidence remains until a successful list answers.
-         Every other request leaves what the last discovery said. *)
-      state.browser_lane <- Some (match operation with
-        | Discover Choose_client -> Browser_lane_view.withdraw_discovery launched
-        | Discover Read_after_discovery | Read | Read_refresh
-        | Screenshot _ | Scene_read _ | Scene_regions _ | Scene_scroll _ | Scene_refresh _
-        | Scene_focus _ | Scene_click _ | Scene_follow _ | Scene_follow_refresh _
-        | Viewport_refresh _ | Viewport_observed _ | Viewport_pointer _ -> launched);
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-      (* The mailbox is the effect boundary. Cancellation still belongs to
-         the switch; unexpected transport failures become visible errors. *)
-      let call f =
-        try f () with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn -> Error (Printexc.to_string exn)
-      in
-      let perform () =
-        match operation with
-        | Discover _ -> Browser_msg (Browser_lane_clients_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port)))
-        | Read | Read_refresh -> Browser_msg (Browser_lane_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_lane ~host ~port view)))
-        | Scene_read tab_id -> Browser_msg (Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene ~host ~port ~view ~tab_id ())))
-        | Scene_regions tab_id -> Browser_msg (Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
-              ~scene_view:Browser_lane.Regions ~host ~port ~view ~tab_id ())))
-        | Scene_scroll {tab_id;expected_url;scene_view;scope;delta_y;_} -> Browser_msg (Browser_lane_scene_loaded
-            (generation, call (fun () -> Result.bind
-              (Masc_tui_http.scroll_browser_scene ~host ~port ~view ~tab_id
-                 ~expected_url ~delta_y)
-              (fun () -> Masc_tui_http.fetch_browser_scene
-                 ?scope ~expected_url ~scene_view
-                 ~host ~port ~view ~tab_id ()))))
-        | Scene_refresh {tab_id;scene_view;scope} -> Browser_msg (Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.refresh_browser_scene
-              ~host ~port ~view ~tab_id ~scene_view ~scope)))
-        | Scene_focus {tab_id;target} -> Browser_msg (Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
-              ~scope:target ~host ~port ~view ~tab_id ())))
-        | Scene_click {tab_id;document_id;node_id;expected_url;scope} -> Browser_msg (Browser_lane_scene_loaded
-            (generation, call (fun () -> Result.bind
-              (Masc_tui_http.click_browser_scene ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url)
-              (fun () -> Masc_tui_http.fetch_browser_scene ?scope ~host ~port ~view ~tab_id ()))))
-        | Scene_follow {tab_id;document_id;node_id;expected_url} -> Browser_msg (Browser_lane_follow_loaded
-            (generation, call (fun () ->
-              match Masc_tui_http.follow_browser_scene
-                  ~host ~port ~view ~tab_id ~document_id ~node_id ~expected_url with
-              | Error detail -> Error detail
-              | Ok receipt ->
-                  let expected_source : Masc.Browser_scene.navigation_source =
-                    {url=expected_url; document_id=document_id} in
-                  if receipt.navigation_source <> expected_source then
-                    Error "follow receipt navigation source mismatch"
-                  else
-                    Ok (receipt, Masc_tui_http.fetch_browser_scene
-                      ?expected_url:(Some receipt.destination_url)
-                      ?navigation_source:(Some receipt.navigation_source)
-                      ~host ~port ~view ~tab_id ()))))
-        | Scene_follow_refresh {tab_id;guard;scene_view} -> Browser_msg (Browser_lane_scene_loaded
-            (generation, call (fun () -> Masc_tui_http.fetch_browser_scene
-              ~scene_view
-              ~expected_url:guard.expected_url
-              ~navigation_source:guard.navigation_source
-              ~host ~port ~view ~tab_id ())))
-        | Screenshot tab_id | Viewport_refresh {tab_id;_} | Viewport_observed tab_id -> Browser_msg (Browser_lane_screenshot_ready {
-            generation; image_generation;
-            result = call (fun () -> Masc_tui_http.fetch_browser_lane_screenshot
-              ~host ~port ~view ~tab_id);
-          })
-        | Viewport_pointer {tab_id;expected_url;action} -> Browser_msg (Browser_lane_screenshot_ready {
-            generation; image_generation;
-            result = call (fun () -> Result.bind
-              (Masc_tui_http.act_browser_viewport ~host ~port ~view ~tab_id ~expected_url ~action)
-              (fun () -> Masc_tui_http.fetch_browser_lane_screenshot ~host ~port ~view ~tab_id));
-          })
-      in
-      (match Eio_context.get_switch_opt () with
-       | Some sw ->
-           (* Inventory and page content settle independently. A slow activity
-              read must not delay the page result or change its owner. *)
-           if operation_is_refresh operation && view.source=Live then
-             Eio.Fiber.fork_daemon ~sw (fun () ->
-               Eio.Fiber.yield ();
-               enqueue_async mailbox (Browser_msg (Browser_lane_clients_loaded
-                 (generation, call (fun () -> Masc_tui_http.fetch_browser_lane_clients ~host ~port))));
-               `Stop_daemon);
-           Eio.Fiber.fork_daemon ~sw (fun () ->
-             let message = perform () in
-             enqueue_async mailbox (if operation_is_read operation then message else Workspace_operation message); `Stop_daemon)
-       | None ->
-           state.browser_lane <- Some { view with load = Failed "Eio switch is unavailable" })
-  end
-
-let refresh_browser_lane state ~mailbox =
-  match state.browser_lane with
-  | Some view when not (Browser_lane_view.busy view) ->
-      state.browser_lane <- Some (Browser_lane_view.refresh view);
-      launch_browser_lane state ~mailbox
-        (match view.selection, view.source with
-         | Live_unbound, _ -> Discover Choose_client
-         | Unbound, _ | (Bound_automatic | Bound_explicit), Live -> Discover Read_after_discovery)
-  | Some _ | None -> ()
-
-let open_browser_lane state ~mailbox =
-  show_browser_lane state;
-  release_composer_for_browser_reader state;
-  refresh_browser_lane state ~mailbox
-
-let launch_runtime_surface_load state ~mailbox ~force =
-  if server_authority_ready state then begin
-  match state.runtime_surface_inflight with
-  | Some _ -> if force then state.runtime_surface_force_pending <- true
-  | None ->
-      state.runtime_surface_generation <- state.runtime_surface_generation + 1;
-      let generation = state.runtime_surface_generation in
-      state.runtime_surface_inflight <- Some generation;
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-      let port = state.port in
-      Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Runtime_msg (Runtime_surface_loaded (generation, result)))
-        (fun () -> Masc_tui_loader.load_runtime_surface ~host ~port ~force
-          |> Result.map_error (fun detail -> Request_failed detail))
-  end
-
-let launch_repositories_load state ~mailbox =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  if state.repositories_inflight then ()
-  else begin
-    state.repositories_inflight <- true;
-    state.repositories_owed <- Masc_tui_owed_read.started state.repositories_owed;
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-      ~on_not_run:(fun () ->
-        state.repositories_inflight <- false;
-        state.repositories_owed <- Masc_tui_owed_read.abandoned state.repositories_owed)
-      ~deliver:(fun result ->
-        enqueue_async mailbox (Repository_msg (Repositories_loaded result)))
-      (fun () -> Masc_tui_loader.load_repositories ~host ~port)
-  end
-  end
-
-let launch_memory_input_load state ~mailbox ~refresh =
-  if server_authority_ready state then begin
-  if state.view = Memory && Option.is_none state.memory_facts_keeper
-     && Masc_tui_transport.Workspace_admission.same_workspace_identity state.server_identity state.server_identity then
-    match selected_memory_keeper state with
-    | None -> ()
-    | Some keeper ->
-      let key = keeper.Masc.Tui_decode_memory_health.mkh_keeper_id in
-      let current = Masc_tui_fetched.current_key state.memory_input in
-      if refresh || current <> Some key then
-        match Masc_tui_fetched.start ~equal:String.equal state.memory_input ~key with
-        | Masc_tui_fetched.Already_loading -> ()
-        | Masc_tui_fetched.Started (next, request) ->
-          state.memory_input <- next;
-          state.memory_input_owed <- Masc_tui_owed_read.started state.memory_input_owed;
-          let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-          Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-            ~deliver:(fun result -> Memory_msg (Memory_input_loaded (request, result)))
-            (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key
-              |> Result.map_error (fun detail -> Request_failed detail))
-  end
-
-(* The newest turns of the Keeper the Story window draws. The window follows
-   the cursor, so asking for a Keeper other than the one held starts a read for
-   it and the held turns are no longer drawn. The caller asks for none while a
-   read for another Keeper is on the wire: see [launch_owed_keeper_story_turns]. *)
-let launch_keeper_story_turns_load state ~mailbox ~keeper_name ~refresh =
-  if server_authority_ready state then begin
-    let current = Masc_tui_fetched.current_key state.keeper_story_turns in
-    if refresh || current <> Some keeper_name then
-      match
-        Masc_tui_fetched.start ~equal:String.equal state.keeper_story_turns ~key:keeper_name
-      with
-      | Masc_tui_fetched.Already_loading -> ()
-      | Masc_tui_fetched.Started (next, request) ->
-          state.keeper_story_turns <- next;
-          state.keeper_story_turns_owed <-
-            Masc_tui_owed_read.started state.keeper_story_turns_owed;
-          let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-          Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-            ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-            ~deliver:(fun result ->
-              Keeper_msg (Keeper_story_turns_loaded (request, result)))
-            (fun () -> Masc_tui_http.fetch_keeper_story_turns ~host ~port ~keeper_name
-              |> Result.map_error (fun detail -> Request_failed detail))
-  end
-
-(* Independent Memory dock sources deliver without waiting for one another. *)
-let launch_memory_activity_read state ~mailbox ~keeper_name ~refresh
-    source owed ~set_source ~set_owed ~deliver read =
-  if server_authority_ready state
-     && (refresh || Masc_tui_fetched.current_key source <> Some keeper_name) then
-    match Masc_tui_fetched.start ~equal:String.equal source ~key:keeper_name with
-    | Masc_tui_fetched.Already_loading -> ()
-    | Masc_tui_fetched.Started (next, request) ->
-      set_source next;
-      set_owed (Masc_tui_owed_read.started owed);
-      Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
-        ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Keeper_msg (deliver request result))
-        (fun () -> Result.map_error (fun detail -> Request_failed detail) (read ()))
-
-let launch_memory_health_load state ~mailbox =
-  if server_authority_ready state then begin
-  if state.memory_health_inflight
-     || not (Masc_tui_transport.Workspace_admission.same_workspace_identity state.server_identity state.server_identity) then ()
-  else begin
-    state.memory_health_inflight <- true;
-    state.memory_health_owed <- Masc_tui_owed_read.started state.memory_health_owed;
-    (* The rows owed stay owed through this read: the server may answer the
-       fleet from a cache older than their writes, and an answer older than
-       the one held is not applied. Reading them after it costs one row each. *)
-    let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-    let port = state.port in
-    Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-      ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-      ~deliver:(fun result -> Memory_msg (Memory_loaded (Fleet_health_read result)))
-      (fun () -> Masc_tui_loader.load_memory_health ~host ~port
-        |> Result.map_error (fun detail -> Request_failed detail))
-  end
-
-  end
-
-(* The oldest Keeper a push named, read as its own row (RFC-0487). It shares
-   the in-flight mark with the fleet read: one memory health read at a time.
-   The Keeper leaves the list only when its read starts, so a read that
-   cannot start yet keeps it owed. *)
-let launch_owed_memory_health_row state ~mailbox =
-  match state.memory_health_rows_owed with
-  | [] -> ()
-  | keeper :: rest ->
-      if server_authority_ready state
-         && not state.memory_health_inflight
-         && Masc_tui_transport.Workspace_admission.same_workspace_identity state.server_identity state.server_identity
-      then begin
-        state.memory_health_rows_owed <- rest;
-        state.memory_health_inflight <- true;
-        let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-        let port = state.port in
-        Masc_tui_transport.Workspace_admission.launch_guarded_request state ~mailbox ~boundary_error:(fun detail -> Request_failed detail)
-          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-          ~deliver:(fun result -> Memory_msg (Memory_loaded (Row_health_read { keeper; result })))
-          (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper
-            |> Result.map_error (fun detail -> Request_failed detail))
-      end
-
-(* Ask for [key]'s facts and run [read] for them, unless that read is already
-   in flight. *)
-
-let launch_memory_facts_read state ~mailbox ~key read =
-  if server_authority_ready state then begin
-  match Masc_tui_fetched.start ~equal:String.equal state.memory_facts ~key with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (memory_facts, request) ->
-      state.memory_facts <- memory_facts;
-      (* The read's answer belongs to the workspace authority that asked for
-         it. A same-port identity change withdraws this browser's owner and
-         with it this request; an unscoped delivery would let workspace A's
-         held facts land in workspace B's browser because the request key
-         names a Keeper, not a workspace (#41163). *)
-      state.memory_facts_owed <- Masc_tui_owed_read.started state.memory_facts_owed;
-      Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
-        ~boundary_error:(fun detail -> Request_failed detail)
-        ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-        ~deliver:(fun result -> Memory_msg (Memory_facts_loaded (request, result)))
-        (fun () -> Result.map_error (fun detail -> Request_failed detail) (read ()))
-  end
-
-let launch_memory_facts_load state ~mailbox ~keeper_name =
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  launch_memory_facts_read state ~mailbox ~key:keeper_name (fun () ->
-      Result.map
-        (fun snapshot -> (snapshot, None))
-        (Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name))
-
-let launch_all_memory_facts_load state ~mailbox =
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  launch_memory_facts_read state ~mailbox ~key:"*" (fun () ->
-    match state.memory_health with
-    | None ->
-      (* Without the health read there is no keeper list to merge. An empty
-         "all keepers" view would read as memory that is empty. *)
-      Error "keeper list not read yet (memory health has not loaded)"
-    | Some health ->
-      let loads =
-        List.map
-          (fun (k : Masc.Tui_decode_memory_health.memory_keeper_health) ->
-            let keeper_name = k.Masc.Tui_decode_memory_health.mkh_keeper_id in
-            ( keeper_name,
-              try Masc_tui_loader.load_memory_facts ~host ~port ~keeper_name with
-              | Eio.Cancel.Cancelled _ as exn -> raise exn
-              | exn -> Error (Printexc.to_string exn) ))
-          health.Masc.Tui_decode_memory_health.mhs_keepers
-      in
-      (* One answer: the merged facts and the keepers missing from them
-         travel together, so the handler never has to keep one answer across
-         another. *)
-      Ok (Masc.Tui_decode_memory_facts.merge_keeper_memory_facts
-        ~refused:health.mhs_refused_keepers loads))
-
-let open_all_fleet_memory state ~mailbox =
-  state.memory_page <- Memory_facts;
-  state.memory_facts_keeper <- Some "*";
-  state.memory_facts <- Masc_tui_fetched.clear state.memory_facts;
-  state.memory_facts_cursor <- 0;
-  state.memory_facts_scroll <- 0;
-  state.memory_facts_category <- Category_all;
-  launch_all_memory_facts_load state ~mailbox
-
 let repository_change_scope_equal left right =
   match left, right with
   | Tui_decode.Repository_change_project, Tui_decode.Repository_change_project ->
@@ -6973,7 +6149,7 @@ let launch_owed_browser_observation state ~mailbox =
         match Browser_lane_view.observation_operation ?viewport view with
         | Some operation ->
             state.browser_observation_owed <- Masc_tui_owed_read.started owed;
-            launch_browser_lane state ~mailbox operation
+            Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox operation
         | None -> state.browser_observation_owed <- Masc_tui_owed_read.abandoned owed
       end
 
@@ -7015,7 +6191,7 @@ let launch_owed_lane_addons state ~mailbox =
                     let owed = Masc_tui_owed_read.abandoned owed in
                     state.lane_addons_owed <- Some ((owner, epoch), owed);
                     if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed then
-                      launch_lane_addons state ~mailbox
+                      Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox
                         ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
                         Masc_tui_lane_addons.Inspect
                   end
@@ -7172,7 +6348,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       owe_async_requests_read state;
       owe_memory_health_read state;
       owe_memory_world_read state;
-      launch_memory_health_load state ~mailbox
+      Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox
   | Keepers
       ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
       | Keeper_runtime_pick ) ->
@@ -7205,10 +6381,10 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Memory ->
       owe_memory_health_read state;
       owe_memory_world_read state;
-      launch_memory_health_load state ~mailbox
+      Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox
   | Repositories ->
       owe_repositories_read state;
-      launch_repositories_load state ~mailbox
+      Masc_tui_surface_requests.Memory_repository_requests.launch_repositories_load state ~mailbox
   | Harness ->
       owe_harness_read state;
       launch_harness_load state ~mailbox
@@ -7221,8 +6397,8 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       | None ->
           owe_connectors_read state;
           Masc_tui_surface_requests.Connector_volume_requests.launch_connectors_load state ~mailbox
-      | Some _ -> refresh_browser_lane state ~mailbox)
-  | Runtime -> launch_runtime_surface_load state ~mailbox ~force:false
+      | Some _ -> Masc_tui_surface_requests.Lane_browser_requests.refresh_browser_lane state ~mailbox)
+  | Runtime -> Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:false
   | Tools ->
       owe_async_requests_read state;
       owe_tools_reads state;
@@ -7243,7 +6419,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Code -> Masc_tui_code_requests.launch_entries_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state mailbox)
   | Metrics ->
       owe_memory_health_read state;
-      launch_memory_health_load state ~mailbox;
+      Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox;
       launch_keeper_tool_approvals_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_gate_snapshot_load ~intent:Snapshot_read.Refresh state ~mailbox;
       launch_keeper_tool_modes_load state ~mailbox
@@ -8146,7 +7322,7 @@ let launch_owed_runtime_surface state ~mailbox =
     in
     state.runtime_surface_owed <- read;
     if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
-      launch_runtime_surface_load state ~mailbox ~force:false
+      Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:false
   end
 
 let launch_owed_runtime_config state ~mailbox =
@@ -8178,7 +7354,7 @@ let launch_owed_repositories state ~mailbox =
     in
     state.repositories_owed <- read;
     if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
-      launch_repositories_load state ~mailbox
+      Masc_tui_surface_requests.Memory_repository_requests.launch_repositories_load state ~mailbox
   end
 
 (* The engine graphs' own [/health] read. It asks which server answers, as
@@ -8270,10 +7446,10 @@ let launch_owed_memory_health state ~mailbox =
     match read, state.memory_health, state.memory_health_rows_owed with
     | (Masc_tui_owed_read.Owed _ | Waiting _ | Reading _), _, _ ->
         if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read then
-          launch_memory_health_load state ~mailbox
+          Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox
     | Settled, Some held, _ :: _ ->
         (match held.Masc.Tui_decode_memory_health.mhs_refused_keepers with
-         | [] -> launch_owed_memory_health_row state ~mailbox
+         | [] -> Masc_tui_surface_requests.Memory_repository_requests.launch_owed_memory_health_row state ~mailbox
          | _ :: _ ->
              state.memory_health_rows_owed <- [];
              owe_memory_health_read state)
@@ -8318,7 +7494,7 @@ let launch_owed_memory_input state ~mailbox =
       else Masc_tui_owed_read.abandoned state.memory_input_owed
     in
     state.memory_input_owed <- read;
-    launch_memory_input_load state ~mailbox
+    Masc_tui_surface_requests.Memory_repository_requests.launch_memory_input_load state ~mailbox
       ~refresh:((not reading) && Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read)
   end
 
@@ -8861,7 +8037,7 @@ let launch_owed_keeper_story_turns state ~mailbox =
         reading && Masc_tui_fetched.current_key state.keeper_story_turns <> Some keeper_name
       in
       if not other_keeper_reading then
-        launch_keeper_story_turns_load state ~mailbox ~keeper_name
+        Masc_tui_surface_requests.Memory_repository_requests.launch_keeper_story_turns_load state ~mailbox ~keeper_name
           ~refresh:(Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read)
 
 (* One visible demand owns each shared source. A hidden preview cannot
@@ -8886,8 +8062,8 @@ let launch_owed_memory state ~mailbox =
      if not (reading && Masc_tui_fetched.current_key state.memory_facts <> Some key)
         && (Masc_tui_fetched.current_key state.memory_facts <> Some key
             || Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed) then
-       if String.equal key "*" then launch_all_memory_facts_load state ~mailbox
-       else launch_memory_facts_load state ~mailbox ~keeper_name:key);
+       if String.equal key "*" then Masc_tui_surface_requests.Memory_repository_requests.launch_all_memory_facts_load state ~mailbox
+       else Masc_tui_surface_requests.Memory_repository_requests.launch_memory_facts_load state ~mailbox ~keeper_name:key);
   let activity_key = match state.view, state.memory_page, state.memory_facts_keeper with
     | Memory, Memory_changes, Some keeper when not (String.equal keeper "*") -> Some keeper
     | Memory, (Memory_facts | Memory_changes), (Some _ | None) -> None
@@ -8901,7 +8077,7 @@ let launch_owed_memory state ~mailbox =
     let owed = if reading then state.memory_activity_owed else Masc_tui_owed_read.abandoned state.memory_activity_owed in
     state.memory_activity_owed <- owed;
     if not (reading && Masc_tui_fetched.current_key state.memory_activity <> Some keeper_name) then
-      launch_memory_activity_read state ~mailbox ~keeper_name
+      Masc_tui_surface_requests.Memory_repository_requests.launch_memory_activity_read state ~mailbox ~keeper_name
         ~refresh:(Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed)
         state.memory_activity owed
         ~set_source:(fun source -> state.memory_activity <- source)
@@ -14474,10 +13650,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Lane_addons input ->
       Masc_tui_message_input.clear state.msg_input;
       (match Masc_tui_lane_addons.parse_request input with
-       | Ok request -> launch_lane_addons state ~mailbox request
+       | Ok request -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox request
        | Error detail ->
            let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
-           state.lane_addons <- Some { view with error = lane_addons_input_failure detail })
+           state.lane_addons <- Some { view with error = Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail })
   | Masc_tui_command.Open_metrics ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Metrics;
@@ -14887,7 +14063,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Open_fleet_memory ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Memory;
-      open_all_fleet_memory state ~mailbox
+      Masc_tui_surface_requests.Memory_repository_requests.open_all_fleet_memory state ~mailbox
   | Masc_tui_command.Find_in_chat query ->
       (* A new query starts at the newest message; [Find_next] below carries on
          from wherever this landed. *)
@@ -17822,7 +16998,7 @@ let open_installation_results state ~mailbox declaration_id =
     report_action state "system" "A Lane request is pending; open the Results again when it finishes"
   else begin
     state.lane_addons <- Some {view with screen=Addons.Overview};
-    launch_lane_addons ~target:(Addons.Read_installation_results declaration_id)
+    Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons ~target:(Addons.Read_installation_results declaration_id)
       state ~mailbox Addons.Inspect
   end
 
@@ -17841,7 +17017,7 @@ let open_lane_inventory_selection state ~mailbox =
     let view = Option.value ~default:state.lane_addons_cached state.lane_addons in
     if view.loading then
       state.lane_addons <- Some {view with scroll=0;
-        error=lane_addons_input_failure "A Lane request is pending; the current draft and request are retained"}
+        error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "A Lane request is pending; the current draft and request are retained"}
     else open_view view in
   match selected_inventory_lane state with
   | None -> show_lanes_action_error state "Read the Lane inventory before opening a row"
@@ -17864,7 +17040,7 @@ let open_lane_inventory_selection state ~mailbox =
                    | Unbound | Live_unbound -> false) then view
             else Browser_lane_view.switch_source lane view) state.browser_lane;
           release_composer_for_browser_reader state;
-          refresh_browser_lane state ~mailbox
+          Masc_tui_surface_requests.Lane_browser_requests.refresh_browser_lane state ~mailbox
       | Machine Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
       | Machine Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
       | Declaration path -> open_addon (fun view ->
@@ -17874,17 +17050,17 @@ let open_lane_inventory_selection state ~mailbox =
              E is the explicit external-editor action, s is the only save. *)
           match Masc_tui_lane_declaration.find_for_path ~path view.documents with
           | Ok (Some draft) -> state.lane_addons <- Some (Addons.put_document view draft)
-          | Ok None -> launch_lane_declaration state ~mailbox ~edit:false
+          | Ok None -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_declaration state ~mailbox ~edit:false
               (Masc_tui_lane_declaration.Read path)
           | Error detail -> state.lane_addons <- Some {view with document_key=None;
-              error=lane_addons_input_failure detail})
+              error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
       | Manual_instance {instance_id;incarnation} -> open_addon (fun view ->
           state.lane_addons <- Some { (Addons.set_presentation view Addons.Summary) with screen=Addons.Detail (instance_id,incarnation);
             focus=Addons.Timeline; row_cursor = -1; scroll=0; selected=[];
             document_key=None; error=None};
           (* Inspect first even for a retained worker: its identity must exist
              in the fresh snapshot before a history slice can join it. *)
-          launch_lane_addons ~target:(Addons.Read_detail (instance_id,incarnation))
+          Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons ~target:(Addons.Read_detail (instance_id,incarnation))
             state ~mailbox Addons.Inspect)
 
 (* What a press on marked text does: the same move the key for that place
@@ -18642,7 +17818,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
          && prior.source = current.source
          && Browser_lane_view.same_selected_client prior.selected_client current.selected_client
          && prior.selected_tab = current.selected_tab ->
-           launch_browser_lane state ~mailbox operation
+           Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox operation
      | _ -> ());
     if state.runtime_catalog_resume then launch_runtime_catalog_load state ~mailbox;
     launch_surface_reads state ~mailbox state.view;
@@ -18741,8 +17917,8 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
           | Lanes_overview | Lanes_inventory_detail _ -> ())
      | Memory ->
          (match state.memory_facts_keeper with
-          | Some "*" -> launch_all_memory_facts_load state ~mailbox
-          | Some keeper_name -> launch_memory_facts_load state ~mailbox ~keeper_name
+          | Some "*" -> Masc_tui_surface_requests.Memory_repository_requests.launch_all_memory_facts_load state ~mailbox
+          | Some keeper_name -> Masc_tui_surface_requests.Memory_repository_requests.launch_memory_facts_load state ~mailbox ~keeper_name
           | None -> ())
      | Keepers (Keeper_list | (Keeper_detail | Keeper_logs)) | Overview | Acting | Metrics | Clients
      | Approvals | Harness | Repositories | Connectors | Runtime | Config | Resources | System_logs -> ());
@@ -18777,16 +17953,16 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
          (match nested, pending with
           | Some (generation, Lane_subscriptions_read), _
             when generation = view.generation && Option.is_some view.subscription_panel ->
-              launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect
+              Masc_tui_surface_requests.Lane_browser_requests.launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect
           | Some (generation, Lane_declaration_read {path; edit}), _
             when generation = view.generation && view.document_key = Some (Filename.basename path) ->
-              launch_lane_declaration state ~mailbox ~edit (Masc_tui_lane_declaration.Read path)
+              Masc_tui_surface_requests.Lane_browser_requests.launch_lane_declaration state ~mailbox ~edit (Masc_tui_lane_declaration.Read path)
           | _, Some (generation, read) when generation = view.generation ->
               (match read with
-               | Masc_tui_lane_installer.Read_catalog directory -> launch_lane_package_catalog state ~mailbox directory
-               | Read_preview path -> launch_lane_package_preview state ~mailbox path)
+               | Masc_tui_lane_installer.Read_catalog directory -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_package_catalog state ~mailbox directory
+               | Read_preview path -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_package_preview state ~mailbox path)
           | (None | Some (_, (Lane_subscriptions_read | Lane_declaration_read _))), _
-            when not view.loading -> launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
+            when not view.loading -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
           | (None | Some (_, (Lane_subscriptions_read | Lane_declaration_read _))), _ -> ()));
     if state.context_inspector_open then Option.iter (fun keeper_name ->
       launch_context_inspector_load state ~mailbox ~keeper_name) state.context_inspector_keeper;
@@ -18798,7 +17974,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
        | None, _ -> ());
     if state.keeper_deletions_open then Masc_tui_surface_requests.Keeper_surface_requests.launch_keeper_deletions state ~mailbox ();
     (match state.browser_history with
-     | Some {resume=Some resume; _} -> launch_browser_history state ~mailbox
+     | Some {resume=Some resume; _} -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_history state ~mailbox
          ~reload:(match resume with Browser_history.Reload_list -> true | Reload_selection -> false)
      | Some _ | None -> ());
     (* The move may retire data that another collector took from this pass.
@@ -21495,10 +20671,10 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             (match retry with
              | Browser_scene_observation (_, _, operation) ->
                  state.browser_lane_read_resume <- None;
-                 launch_browser_lane state ~mailbox operation
+                 Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox operation
              | Lane_subscriptions_observation _ ->
                  state.lane_nested_read_resume <- None;
-                 launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect);
+                 Masc_tui_surface_requests.Lane_browser_requests.launch_lane_subscriptions state ~mailbox Masc_tui_lane_subscriptions.Inspect);
             Drawn_changed
         | Some _ | None -> drawn
       end else begin (match message with
@@ -21703,7 +20879,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         (schedule_form_refusal_text ~ko:(state.ui_language = Lang_ko) form_refusal);
       Drawn_changed
   | Lane_msg (Lane_package_catalog_loaded (generation,directory,result)) ->
-      map_lane_addons state (fun view ->
+      Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
         if view.generation<>generation then view else
         let receive result =
           let response = Option.bind view.installer
@@ -21713,16 +20889,16 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
           | Some (installer,error) ->
               {view with loading=false;installer=Some installer;
                 package_directory=Masc_tui_lane_installer.directory installer;
-                error=Option.bind error lane_addons_detail_failure;scroll=0} in
+                error=Option.bind error Masc_tui_surface_requests.Lane_browser_requests.lane_addons_detail_failure;scroll=0} in
         match result with
         | Ok json -> receive (Ok json)
         | Error (Request_failed detail) -> receive (Error detail)
         | Error (Request_withdrawn refusal) ->
-            lane_installer_kept_back state view
+            Masc_tui_surface_requests.Lane_browser_requests.lane_installer_kept_back state view
               (Masc_tui_lane_installer.Read_catalog directory) refusal);
       Drawn_changed
   | Lane_msg (Lane_package_preview_loaded (generation,path,result)) ->
-      map_lane_addons state (fun view ->
+      Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
         if view.generation<>generation then view else
         let receive result =
           let response = Option.bind view.installer
@@ -21731,12 +20907,12 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
           | None -> view
           | Some (installer,error) ->
               {view with loading=false;installer=Some installer;
-                error=Option.bind error lane_addons_detail_failure;scroll=0} in
+                error=Option.bind error Masc_tui_surface_requests.Lane_browser_requests.lane_addons_detail_failure;scroll=0} in
         match result with
         | Ok json -> receive (Ok json)
         | Error (Request_failed detail) -> receive (Error detail)
         | Error (Request_withdrawn refusal) ->
-            lane_installer_kept_back state view
+            Masc_tui_surface_requests.Lane_browser_requests.lane_installer_kept_back state view
               (Masc_tui_lane_installer.Read_preview path) refusal);
       Drawn_changed
   | Keeper_msg (Keeper_queue_resume_confirmed (keeper_name, generation, confirmation, request_ids)) ->
@@ -21858,7 +21034,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       drain_queued_message state ~base_path ~mailbox;
       Drawn_changed
   | Lane_msg (Lane_application_loaded (ticket,result)) ->
-      map_lane_addons state (fun view ->
+      Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
         match result with
         | Ok configuration ->
             Masc_tui_lane_addons.finish_application_read view ticket (Ok configuration)
@@ -21873,7 +21049,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       (match state.lane_nested_read_resume with
        | Some (pending, _) when pending = generation -> state.lane_nested_read_resume <- None
        | Some _ | None -> ());
-      map_lane_addons state (fun view ->
+      Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
         if view.generation<>generation then view else
         match result with
         | Ok snapshot ->
@@ -21886,7 +21062,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             (* The panel keeps what it showed; the notice says the request
                was not sent. *)
             {view with loading=false;
-              error=lane_addons_kept_back state ~request:Kept_request.Addon_request refusal});
+              error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_kept_back state ~request:Kept_request.Addon_request refusal});
       Drawn_changed
   | Lane_msg (Lane_addons_loaded (generation, target, result)) ->
       let showing = Option.is_some state.lane_addons in
@@ -21912,7 +21088,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                in
                ((owed_owner, owed_epoch), next)) state.lane_addons_owed
        | Masc_tui_lane_addons.Read_screen | Masc_tui_lane_addons.Read_installation_results _ -> ());
-      map_lane_addons state (fun view ->
+      Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
         if view.generation <> generation then view else
         if not (Masc_tui_lane_addons.read_still_wanted view ~showing target)
         then {view with loading=false} else
@@ -21924,16 +21100,16 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             let detail_read_error = match target with
               | Masc_tui_lane_addons.Read_detail (id, incarnation) -> Some (id, incarnation, detail)
               | Read_screen | Read_installation_results _ -> view.detail_read_error in
-            {view with loading=false;error=lane_addons_detail_failure detail;detail_read_error}
+            {view with loading=false;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_detail_failure detail;detail_read_error}
         | Error (`Request detail) ->
-            {view with loading=false;error=lane_addons_request_failure detail}
+            {view with loading=false;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_request_failure detail}
         | Error (`Kept_back refusal) ->
             {view with loading=false;
-              error=lane_addons_kept_back state ~request:Kept_request.Addon_request refusal}
+              error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_kept_back state ~request:Kept_request.Addon_request refusal}
         | Ok reply ->
             (* A follow-up read the guard stopped is said as kept back. *)
             let diagnostic = match reply.lar_kept_back with
-              | Some refusal -> lane_addons_kept_back state ~request:Kept_request.Addon_read refusal
+              | Some refusal -> Masc_tui_surface_requests.Lane_browser_requests.lane_addons_kept_back state ~request:Kept_request.Addon_read refusal
               | None -> reply.lar_diagnostic in
             let view = match reply.lar_snapshot with
               | None -> view
@@ -21975,7 +21151,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               && Option.is_none view.draft && Option.is_none view.document_key
               && Option.is_none view.action_menu && Option.is_none view.installer && Option.is_none view.subscription_panel
               && Option.is_none view.evidence_prompt ->
-           launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
+           Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox Masc_tui_lane_addons.Inspect
        | (Ok { lar_action = Some { Masc.Lane_addon_action.state = (Masc.Lane_addon_action.Confirmed | Masc.Lane_addon_action.Failed_before_effect | Masc.Lane_addon_action.Outcome_unknown);_};_}, None)
        | (Ok { lar_action = Some { state = (Masc.Lane_addon_action.Queued | Masc.Lane_addon_action.Running);_};_}, _)
        | (Ok { lar_action = None;_}, _) | (Error _, _)
@@ -21990,16 +21166,16 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       let module Addons = Masc_tui_lane_addons in
       let module Document = Masc_tui_lane_declaration in
       let visible = Option.is_some state.lane_addons in
-      map_lane_addons state (fun view ->
+      Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
         if view.generation <> generation then view else
         let view = {view with loading=false} in
         match result with
         | Error (Request_failed detail) ->
             {view with error=(match request with
-              | Document.Read _ -> lane_addons_detail_failure detail
-              | Document.Save _ -> lane_addons_request_failure detail)}
+              | Document.Read _ -> Masc_tui_surface_requests.Lane_browser_requests.lane_addons_detail_failure detail
+              | Document.Save _ -> Masc_tui_surface_requests.Lane_browser_requests.lane_addons_request_failure detail)}
         | Error (Request_withdrawn refusal) ->
-            {view with error=lane_addons_kept_back state refusal ~request:(match request with
+            {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_kept_back state refusal ~request:(match request with
               | Document.Read _ -> Kept_request.Addon_read
               | Document.Save _ -> Kept_request.Addon_request)}
         | Ok response ->
@@ -22010,7 +21186,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               | Document.Save _ -> Ok (List.find_opt (fun (s : Document.session) -> s.file_name=key) view.documents) in
             match existing with
             | Error detail -> {view with document_key=None;editor_ready=false;scroll=0;
-                error=lane_addons_input_failure detail}
+                error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail}
             | Ok existing ->
             let session = match existing, response with
               | Some session, _ -> Some (Document.after_response session response)
@@ -22026,10 +21202,10 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             (* Same reason as the pending note: a rejection is the answer to
                the save, and it is drawn above the draft the reader is in. *)
             | Document.Rejected failure ->
-                {view with error=lane_addons_request_failure failure.message;scroll=0}
+                {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_request_failure failure.message;scroll=0}
             | Document.Read_document _ | Document.Written _ -> {view with error=None;editor_ready=(view.editor_ready || (edit && selected && visible))});
       (match state.lane_addons with
-       | Some view when view.generation=generation -> launch_lane_application state ~mailbox
+       | Some view when view.generation=generation -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_application state ~mailbox
        | Some _ | None -> ());
       Drawn_changed
   (* The capture messages carry the keeper the capture was started for, and
@@ -23565,7 +22741,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               (match outcome with
                | Form_saved _ | Form_unconfirmed _ ->
                    launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox;
-                   launch_runtime_surface_load state ~mailbox ~force:true;
+                   Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:true;
                    launch_lanes_reread state ~mailbox
                | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _ | Form_conflict _ -> ())
             end;
@@ -25258,7 +24434,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              if active then (
                Masc_tui_surface_requests.Runtime_config_requests.launch_runtime_config_load ~force:true state ~mailbox;
                launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox;
-               launch_runtime_surface_load state ~mailbox ~force:true);
+               Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:true);
              Masc_tui_surface_requests.Account_requests.launch_account_login_action state ~mailbox view (Login.Refresh_saved saved);
              Ok ()
            | Login.Refresh_saved saved, result -> Login.refresh_saved view saved result; Ok ()
@@ -27281,7 +26457,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              cursor_after;
            (match written with
             | Masc_tui_types.Runtime_surface_list ->
-                launch_runtime_surface_load state ~mailbox ~force:true
+                Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:true
             | Masc_tui_types.Standalone_lanes_list -> launch_lanes_reread state ~mailbox)
        | Error _ -> ());
       Drawn_changed
@@ -27326,7 +26502,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
           | Ok snapshot ->
               let entries = Browser_history.entries snapshot in
               state.browser_history <- Some (Browser_history.select 0 entries history);
-              launch_browser_history state ~mailbox ~reload:false)
+              Masc_tui_surface_requests.Lane_browser_requests.launch_browser_history state ~mailbox ~reload:false)
        | _ -> ());
       Drawn_changed
   | Browser_msg (Browser_history_page_loaded (generation, result)) ->
@@ -27349,7 +26525,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                (if generation=state.browser_lane_generation
                 then Browser_lane_view.accept_activity result view else view),false in
            state.browser_lane <- Some next;
-           if read then launch_browser_lane state ~mailbox Browser_lane_view.Read);
+           if read then Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox Browser_lane_view.Read);
       Drawn_changed
   | Browser_msg (Browser_lane_loaded (generation, result)) ->
       state.browser_lane <- Option.map
@@ -27528,7 +26704,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                (Error (Request_withdrawn refusal)));
       if is_current && state.runtime_surface_force_pending then begin
         state.runtime_surface_force_pending <- false;
-        launch_runtime_surface_load state ~mailbox ~force:true
+        Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox ~force:true
       end;
       Drawn_changed
   | Workspace_msg (Workspace_activity_loaded (request, result)) ->
@@ -29815,9 +28991,9 @@ let main
                ~reenter:(fun () -> Masc_tui_shell.Terminal_session.take_back terminal_session) ~suffix:".toml" session.text with
              (* The lane add-ons pane is still English, so the reason in it is
                 too; the pane's own layer moves both. *)
-             | Error abort -> map_lane_addons state (fun view ->
-                 {view with error=lane_addons_input_failure (Masc_tui_editor.abort_detail ~ko:false abort ^ "; TOML draft retained")})
-             | Ok text -> map_lane_addons state (fun view ->
+             | Error abort -> Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
+                 {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure (Masc_tui_editor.abort_detail ~ko:false abort ^ "; TOML draft retained")})
+             | Ok text -> Masc_tui_surface_requests.Lane_browser_requests.map_lane_addons state (fun view ->
                  Addons.put_document {view with error=None;scroll=0}
                    {session with text;message=Some "Draft edited; s saves through the shared TOML owner"}))
   in
@@ -29825,13 +29001,13 @@ let main
     let module Addons = Masc_tui_lane_addons in
     let path = Addons.selected_source_path view in
     match path with
-    | None -> state.lane_addons <- Some {view with error=lane_addons_input_failure "Choose a current declaration .toml file; directory issues have no file to edit"}
+    | None -> state.lane_addons <- Some {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Choose a current declaration .toml file; directory issues have no file to edit"}
     | Some path ->
         (match Masc_tui_lane_declaration.find_for_path ~path view.documents with
          | Ok (Some session) -> state.lane_addons <- Some (Addons.put_document {view with editor_ready=true;scroll=0} session)
-         | Ok None -> launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path)
+         | Ok None -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_declaration state ~mailbox:async_messages ~edit:true (Masc_tui_lane_declaration.Read path)
          | Error detail -> state.lane_addons <- Some {view with document_key=None;
-             editor_ready=false;scroll=0;error=lane_addons_input_failure detail})
+             editor_ready=false;scroll=0;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
   in
   (* Raw edits join the same owned operation as structured forms. Retain the
      exact session before dispatch; neither a duplicate nor a refusal loses it. *)
@@ -31878,7 +31054,7 @@ Use relative paths for resources already held in the package. -->
                  (match Browser_lane_view.pointer_decision view shot action with
                   | Browser_lane_view.Pointer_consumed -> ()
                   | Browser_lane_view.Pointer_send operation ->
-                      launch_browser_lane state ~mailbox:async_messages operation
+                      Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages operation
                   | Browser_lane_view.Pointer_unserved unserved ->
                       close ();
                       state.browser_lane <-
@@ -31916,7 +31092,7 @@ Use relative paths for resources already held in the package. -->
                point to point. *)
             | Mouse_left_drag _ -> ()
             | Key ("esc" | "q") -> close ()
-            | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
+            | Key "r" -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})
             | Key ("j" | "down") -> scroll_at {x=0.5;y=0.5} 120
             | Key ("k" | "up") -> scroll_at {x=0.5;y=0.5} (-120)
             | Mouse_wheel (Masc.Tui_mouse_protocol.Wheel_down,row,column) -> wheel row column 120
@@ -34118,8 +33294,8 @@ Use relative paths for resources already held in the package. -->
                   state.lane_addons_generation <- state.lane_addons_generation + 1;
                   update {next with generation=state.lane_addons_generation} in
                 let selected action = match Addons.selected_instance view with
-                  | None -> update { view with error = lane_addons_input_failure "Choose an attached instance first" }
-                  | Some instance -> launch_lane_addons state ~mailbox:async_messages (action instance.id) in
+                  | None -> update { view with error = Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Choose an attached instance first" }
+                  | Some instance -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages (action instance.id) in
                 let scroll_lane_addons ~page ~down =
                   let terminal_rows, cols = get_terminal_size () in
                   let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
@@ -34140,15 +33316,15 @@ Use relative paths for resources already held in the package. -->
                      else if view.loading then (
                        if key="esc" then invalidate {view with installer=None;loading=false;error=None;scroll=0})
                      else (match Masc_tui_lane_installer.handle ~key installer with
-                       | Error detail -> update {view with error=lane_addons_input_failure detail}
+                       | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail}
                        | Ok (Updated installer) -> update {view with installer=Some installer;error=None;scroll=0}
                        | Ok Cancel -> invalidate {view with installer=None;error=None;scroll=0}
                        | Ok Declare -> invalidate {view with installer=None;draft=Some "";naming=true;document_key=None;error=None;scroll=0}
-                       | Ok (Browse directory) -> launch_lane_package_catalog state ~mailbox:async_messages directory
-                       | Ok (Preview path) -> launch_lane_package_preview state ~mailbox:async_messages path
+                       | Ok (Browse directory) -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_package_catalog state ~mailbox:async_messages directory
+                       | Ok (Preview path) -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_package_preview state ~mailbox:async_messages path
                        | Ok (Draft session) ->
                            if List.exists (fun (existing : Masc_tui_lane_declaration.session) -> existing.file_name=session.file_name) view.documents
-                           then update {view with error=lane_addons_input_failure "A draft with this installation name is already open; choose another name or edit the existing draft."}
+                           then update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "A draft with this installation name is already open; choose another name or edit the existing draft."}
                            else update (Addons.put_document {view with installer=None;error=None;scroll=0} session))
                  | None -> match view.evidence_prompt with
                  | Some _ ->
@@ -34158,15 +33334,15 @@ Use relative paths for resources already held in the package. -->
                       | "k" | "up" -> update (Addons.move_evidence view (-1))
                       | "\r" | "\n" | "enter" ->
                           (match Addons.submit_evidence view with
-                           | Ok (next, request) -> update next; launch_lane_addons state ~mailbox:async_messages request
-                           | Error detail -> update {view with evidence_prompt=None;error=lane_addons_input_failure detail})
+                           | Ok (next, request) -> update next; Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages request
+                           | Error detail -> update {view with evidence_prompt=None;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
                       | _ -> ())
                  | None when Option.is_some view.records ->
                      if key="pageup" || key="pagedown" then
                        scroll_lane_addons ~page:true ~down:(key="pagedown")
                      else (match Addons.edit_records ~key view with
                       | Ok next -> update next
-                      | Error detail -> update {view with error=lane_addons_input_failure detail;scroll=0})
+                      | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail;scroll=0})
                  | None -> match view.subscription_panel,view.action_menu,view.draft with
                  | Some panel,_,_ ->
                      let module Subs = Masc_tui_lane_subscriptions in
@@ -34180,20 +33356,20 @@ Use relative paths for resources already held in the package. -->
                       | "a" -> set (Subs.add panel)
                       | "d" -> set (Subs.remove panel)
                       | "r" when not (Subs.is_confirming_save panel) ->
-                          launch_lane_subscriptions state ~mailbox:async_messages Subs.Inspect
+                          Masc_tui_surface_requests.Lane_browser_requests.launch_lane_subscriptions state ~mailbox:async_messages Subs.Inspect
                       | "\r" | "\n" | "enter" ->
                           let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
                           let panel,request=Subs.enter ~keepers ~targets:(Addons.subscription_targets view) panel in
                           set panel;
-                          Option.iter (launch_lane_subscriptions state ~mailbox:async_messages) request
+                          Option.iter (Masc_tui_surface_requests.Lane_browser_requests.launch_lane_subscriptions state ~mailbox:async_messages) request
                       | _ -> ())
                  | None,Some {form=Some _;_}, _ ->
                      if key="pageup" || key="pagedown" then
                        scroll_lane_addons ~page:false ~down:(key = "pagedown")
                      else (match Addons.edit_action ~key view with
                       | Ok (next,None) -> update next
-                      | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
-                      | Error detail -> update {view with error=lane_addons_input_failure detail})
+                      | Ok (_,Some action) -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
+                      | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
                  | None,Some _, _ ->
                      (match key with
                       | "esc" -> update {view with action_menu=None;scroll=0}
@@ -34203,8 +33379,8 @@ Use relative paths for resources already held in the package. -->
                       | "\r" | "\n" | "enter" ->
                           (match Addons.enter_action view with
                            | Ok (next,None) -> update next
-                           | Ok (_,Some action) -> launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
-                           | Error detail -> update {view with action_menu=None;error=lane_addons_input_failure detail})
+                           | Ok (_,Some action) -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
+                           | Error detail -> update {view with action_menu=None;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
                       | _ -> ())
                  (* A line that takes letters owns them. This branch answered
                     "3", "q", "r" and "s" as surface commands first, so typing
@@ -34218,15 +33394,15 @@ Use relative paths for resources already held in the package. -->
                       | "\r" | "\n" | "enter" ->
                           if view.naming then
                             (match Masc_tui_lane_declaration.create draft with
-                             | Error detail -> update {view with error=lane_addons_input_failure detail}
+                             | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail}
                              | Ok fresh ->
                                  let session = Option.value ~default:fresh
                                    (List.find_opt (fun (s : Masc_tui_lane_declaration.session) -> s.file_name=fresh.file_name) view.documents) in
                                  update (Addons.put_document {view with draft=None;naming=false;editor_ready=true;scroll=0;error=None} session))
                           else
                             (match Addons.parse_request draft with
-                             | Ok request -> launch_lane_addons state ~mailbox:async_messages request
-                             | Error detail -> update { view with error = lane_addons_input_failure detail })
+                             | Ok request -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages request
+                             | Error detail -> update { view with error = Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail })
                       | "\127" | "\b" | "backspace" -> update { view with draft = Some (Masc_tui_message_layout.drop_last_utf8_scalar draft) }
                       | "\021" -> update { view with draft = Some "" }
                       | text when (String.length text = 1 && Char.code text.[0] >= 32) || (String.length text > 1 && Char.code text.[0] >= 0x80) -> update { view with draft = Some (draft ^ text) }
@@ -34240,7 +33416,7 @@ Use relative paths for resources already held in the package. -->
                            ~down:(key="j" || key="down" || key="J" || key="pagedown")
                      | _ when view.help_open -> ()
                      | "r" when Option.is_some view.document_key ->
-                         launch_lane_application state ~mailbox:async_messages
+                         Masc_tui_surface_requests.Lane_browser_requests.launch_lane_application state ~mailbox:async_messages
                      | "esc" when Option.is_some view.document_key -> update {view with document_key=None;scroll=0}
                      | "esc" when view.presentation<>Addons.Summary -> update { (Addons.set_presentation view Addons.Summary) with
                          focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
@@ -34248,7 +33424,7 @@ Use relative paths for resources already held in the package. -->
                      | "esc" | "q" -> state.lane_addons_cached <- view; state.lane_addons <- None
                      | ("\r" | "\n" | "enter") when view.screen=Addons.Overview ->
                          if view.loading then update {view with scroll=0;
-                           error=lane_addons_input_failure "Wait for the current Lane read before opening a worker."}
+                           error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Wait for the current Lane read before opening a worker."}
                          else (
                          let next = Addons.open_selected_instance view in
                          update next;
@@ -34257,15 +33433,15 @@ Use relative paths for resources already held in the package. -->
                               let request = match view.overview_mode with
                                 | Addons.Retained_runs -> Addons.Slice ["run_id",item.run_id]
                                 | Addons.Current_installations -> Addons.Inspect in
-                              launch_lane_addons ~target:(Addons.Read_detail (item.id,item.incarnation))
+                              Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons ~target:(Addons.Read_detail (item.id,item.incarnation))
                                 state ~mailbox:async_messages request
                           | Addons.Overview, (Some _ | None) | Addons.Detail _, None -> ()))
                      | "i" ->
-                         if view.loading then update {view with error=lane_addons_input_failure "Wait for the current Lane request before opening installation."}
+                         if view.loading then update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Wait for the current Lane request before opening installation."}
                          else (
                            let installer = Masc_tui_lane_installer.browse ?directory:view.package_directory () in
                            invalidate {view with installer=Some installer;document_key=None;error=None;scroll=0};
-                           launch_lane_package_catalog state ~mailbox:async_messages view.package_directory)
+                           Masc_tui_surface_requests.Lane_browser_requests.launch_lane_package_catalog state ~mailbox:async_messages view.package_directory)
                      | "n" -> update {view with draft=Some "";naming=true;document_key=None;scroll=0}
                      | ":" ->
                          state.palette_open <- true;
@@ -34276,24 +33452,24 @@ Use relative paths for resources already held in the package. -->
                      | "R" ->
                          (match Addons.open_records view with
                           | Ok next -> update next
-                          | Error detail -> update {view with error=lane_addons_input_failure detail})
+                          | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
                      | "E" ->
                          (match Addons.selected_document view with
                           | Some _ -> update {view with editor_ready=true}
                           | None -> select_lane_document view)
                      | " " when Option.is_some (Addons.selected_document view) ->
-                         if view.loading then update {view with error=lane_addons_input_failure
+                         if view.loading then update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure
                            "Wait for the current document request; the draft is retained"}
                          else (match Addons.selected_document view with
                            | None -> ()
                            | Some session ->
                                match Masc_tui_lane_declaration.toggle_enabled session with
-                               | Error detail -> update {view with error=lane_addons_input_failure detail}
+                               | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail}
                                | Ok session -> update (Addons.put_document {view with error=None;scroll=0} session))
                      | "s" ->
                          (match Addons.selected_document view with
-                          | None -> update {view with error=lane_addons_input_failure "Open a TOML draft with n or E first"}
-                          | Some session -> launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Save session))
+                          | None -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Open a TOML draft with n or E first"}
+                          | Some session -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Save session))
                      | "l" ->
                          (match Addons.selected_document view with
                           | None -> ()
@@ -34302,15 +33478,15 @@ Use relative paths for resources already held in the package. -->
                                 | Some base, _ | None, Some base -> Some base.source_path
                                 | None, None -> Option.bind view.snapshot (fun snapshot ->
                                     Option.map (fun (config : Addons.configuration) -> Filename.concat config.directory session.file_name) snapshot.configuration) in
-                              (match path with None -> update {view with error=lane_addons_input_failure "Configuration directory unknown; r inspects it"}
-                               | Some path -> launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Read path)))
+                              (match path with None -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Configuration directory unknown; r inspects it"}
+                               | Some path -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_declaration state ~mailbox:async_messages ~edit:false (Masc_tui_lane_declaration.Read path)))
                      | "u" | "U" ->
                          (match Addons.selected_document view with
                           | None -> ()
                           | Some session ->
                               let apply = if key="u" then Masc_tui_lane_declaration.use_current_revision else Masc_tui_lane_declaration.replace_with_current in
                               (match apply session with Ok session -> update (Addons.put_document {view with error=None} session)
-                               | Error detail -> update {view with error=lane_addons_input_failure detail}))
+                               | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail}))
                      | "r" ->
                          let request = match view.screen, view.overview_mode, Addons.selected_instance view with
                            | Addons.Detail _, Addons.Retained_runs, Some item ->
@@ -34318,7 +33494,7 @@ Use relative paths for resources already held in the package. -->
                            | Addons.Overview, _, _
                            | Addons.Detail _, Addons.Current_installations, _
                            | Addons.Detail _, Addons.Retained_runs, None -> Addons.Inspect in
-                         launch_lane_addons state ~mailbox:async_messages request
+                         Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages request
                      | "h" when view.screen=Addons.Overview -> update (Addons.toggle_history view)
                      | "S" ->
                          if not view.loading then (
@@ -34326,28 +33502,28 @@ Use relative paths for resources already held in the package. -->
                            let panel=Masc_tui_lane_subscriptions.initial ~keepers
                              ~targets:(Addons.subscription_targets view) in
                            update {view with subscription_panel=Some panel;document_key=None;scroll=0};
-                           launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
+                           Masc_tui_surface_requests.Lane_browser_requests.launch_lane_subscriptions state ~mailbox:async_messages Masc_tui_lane_subscriptions.Inspect)
                      | "D" -> update { (Addons.set_presentation view
                          (if view.presentation=Addons.Technical then Addons.Summary else Addons.Technical)) with
                          focus=(if view.screen=Addons.Overview then Addons.Instances else view.focus);scroll=0}
                      | "f" -> update (Addons.toggle_flow view)
                      | "a" ->
                          if view.loading || Option.is_some (Addons.pending_action view)
-                         then update {view with error=lane_addons_input_failure "An action or read is pending; t checks its status."}
+                         then update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "An action or read is pending; t checks its status."}
                          else (match Addons.open_actions ~request_id:(Random_id.uuid_v7 ()) view with
                            | Ok next -> update next
-                           | Error detail -> update {view with error=lane_addons_input_failure detail})
+                           | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
                      | "t" ->
-                         (match view.last_action with None -> update {view with error=lane_addons_input_failure "No action request yet; A opens a command, then act submits one"}
-                          | Some request -> launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
+                         (match view.last_action with None -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "No action request yet; A opens a command, then act submits one"}
+                          | Some request -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages (Addons.Action_status request))
                      | "o" ->
                          (match Addons.selected_instance view with
                           | Some instance when Addons.can_observe instance -> selected (fun id -> Addons.Observe id)
-                          | Some _ | None -> update {view with error=lane_addons_input_failure "Select an active worker to observe; D shows retained state."})
+                          | Some _ | None -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Select an active worker to observe; D shows retained state."})
                      | "d" ->
                          (match Addons.selected_instance view with
                           | Some item -> (match Addons.removal_block_reason view item with
-                              | Some reason -> update {view with error=lane_addons_input_failure reason}
+                              | Some reason -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure reason}
                               | None -> selected (fun id -> Addons.Detach id))
                           | None -> selected (fun id -> Addons.Detach id))
                      | "1" when view.screen<>Addons.Overview -> update {view with focus=Addons.Timeline;scroll=0}
@@ -34392,7 +33568,7 @@ Use relative paths for resources already held in the package. -->
                          let keepers = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
                          (match Addons.open_evidence ~request_id:(Random_id.uuid_v7 ()) ~keepers view with
                           | Ok next -> update next
-                          | Error detail -> update {view with error=lane_addons_input_failure detail})
+                          | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
                      | _ -> ()))
        (* A retained form owns its paste target, but a frame showing only the
           resize prompt cannot accept hidden edits or submit writes. Keep
@@ -34997,7 +34173,7 @@ Use relative paths for resources already held in the package. -->
            (match browser_lane_on_screen state with
             | Some _ -> leave_browser_lane state ~mailbox:async_messages
             | None ->
-                open_browser_lane state ~mailbox:async_messages);
+                Masc_tui_surface_requests.Lane_browser_requests.open_browser_lane state ~mailbox:async_messages);
            Render_schedule.request render_schedule Render_schedule.Force
        (* Writing an answer takes every printable key, the way the row search
           and the app form do, and it sits above the answering arm because
@@ -35913,7 +35089,7 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_dos) ->
                      open_dos_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_lane_addons) ->
-                     launch_lane_addons state ~mailbox:async_messages
+                     Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
                  | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
                      open_installation_results state ~mailbox:async_messages declaration_id
@@ -35921,7 +35097,7 @@ Use relative paths for resources already held in the package. -->
                      goto_surface state ~mailbox:async_messages Lanes;
                      open_lane_run_list state ~mailbox:async_messages lane
                  | Some (_, Masc_tui_palette.Palette_browser_lane) ->
-                     open_browser_lane state ~mailbox:async_messages
+                     Masc_tui_surface_requests.Lane_browser_requests.open_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_connectors) ->
                      (* Close the lane first: Connectors renders the lane
                         whenever it is on screen, so asking for the transport
@@ -36439,7 +35615,7 @@ Use relative paths for resources already held in the package. -->
                                     | Viewport_refresh _ | Viewport_observed _
                                     | Viewport_pointer _ ))) as other -> other) }
                  | "r" when not (busy view) ->
-                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
+                     Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "A" when not (busy view) ->
                      state.browser_lane <- Some {view with advanced_choices = not view.advanced_choices; client_picker=Some 0}
                  | "j" | "down" | "k" | "up" when not (busy view) ->
@@ -36452,7 +35628,7 @@ Use relative paths for resources already held in the package. -->
                       | Some choice ->
                           let selected = choose_browser choice view in
                           state.browser_lane <- Some selected;
-                          Option.iter (launch_browser_lane state ~mailbox:async_messages)
+                          Option.iter (Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages)
                             (browser_choice_operation choice ~before:view selected))
                  | _ -> ()))
        | Some key when String.length key = 1 && Char.code key.[0] = 15
@@ -36469,7 +35645,7 @@ Use relative paths for resources already held in the package. -->
                 | Some false, _ -> refuse terminal_draws_no_images
                 | _, None -> refuse "Read and select a browser tab before taking a screenshot"
                 | (Some true | None), Some tab_id ->
-                    launch_browser_lane state ~mailbox:async_messages
+                    Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                       (Browser_lane_view.Screenshot tab_id))
        | Some key when Browser_history.owns_key key && Option.is_some (browser_history_on_screen state) ->
            (match state.browser_history with
@@ -36478,16 +35654,16 @@ Use relative paths for resources already held in the package. -->
                 (match key with
                  | "esc" | "left" | "h" ->
                      close_browser_history state;
-                     Option.iter (fun operation -> launch_browser_lane state ~mailbox:async_messages operation)
+                     Option.iter (fun operation -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages operation)
                        (Option.bind state.browser_lane Browser_lane_view.pending_read)
                  | "[" | "]" ->
                      Option.iter (fun next ->
                        state.browser_history <- Some next;
-                       launch_browser_history state ~mailbox:async_messages ~reload:false)
+                       Masc_tui_surface_requests.Lane_browser_requests.launch_browser_history state ~mailbox:async_messages ~reload:false)
                        (Browser_history.move (if key="[" then -1 else 1) history)
                  | "r" ->
                      state.browser_history <- Some (Browser_history.create history.keeper_name);
-                     launch_browser_history state ~mailbox:async_messages ~reload:true
+                     Masc_tui_surface_requests.Lane_browser_requests.launch_browser_history state ~mailbox:async_messages ~reload:true
                  | "y" ->
                      Option.iter
                        (fun context ->
@@ -36510,9 +35686,9 @@ Use relative paths for resources already held in the package. -->
             | None -> report_action state "system" "Choose a Keeper to read its retained observations"
             | Some keeper ->
                 state.browser_history <- Some (Browser_history.create keeper.k_name);
-                launch_browser_history state ~mailbox:async_messages ~reload:true)
+                Masc_tui_surface_requests.Lane_browser_requests.launch_browser_history state ~mailbox:async_messages ~reload:true)
        | Some "B" when state.view = Connectors ->
-           open_browser_lane state ~mailbox:async_messages
+           Masc_tui_surface_requests.Lane_browser_requests.open_browser_lane state ~mailbox:async_messages
        | Some (("esc" | "left" | "c" | "A" | "[" | "]" | "j" | "k" | "J" | "K" | "N" | "P"
                | "up" | "down" | "pageup" | "pagedown" | "home" | "r"
                | "b" | "m" | "s" | "v" | "n" | "p" | "y" | "tab" | "\t" | "shift-tab" | "\r" | "\n" | "enter"
@@ -36537,7 +35713,7 @@ Use relative paths for resources already held in the package. -->
                 in
                 let read view =
                   state.browser_lane <- Some view;
-                  launch_browser_lane state ~mailbox:async_messages Read
+                  Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages Read
                 in
                 let reveal_selection selected =
                   let terminal_rows, cols = get_terminal_size () in
@@ -36550,10 +35726,10 @@ Use relative paths for resources already held in the package. -->
                      leave_browser_lane state ~mailbox:async_messages
                  | "A" when not (busy view) ->
                      state.browser_lane <- Some {view with advanced_choices = true; client_picker=Some 0};
-                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
+                     Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "b" when not (busy view) ->
                      state.browser_lane <- Some { view with client_picker = Some 0 };
-                     launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
+                     Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages (Discover Choose_client)
                  | "[" | "]" when not (busy view) ->
                      read (select_tab (if key = "[" then -1 else 1) view)
                  | ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9") as key
@@ -36565,9 +35741,9 @@ Use relative paths for resources already held in the package. -->
                      (match view.selected_tab with
                       | Some tab_id ->
                           (match view.scene_guard with
-                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                           | Some guard -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                                (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
-                           | None -> launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id))
+                           | None -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages (Scene_regions tab_id))
                       | None -> ())
                  | "m" when not (busy view) ->
                      (match Browser_lane_view.primary_region_action view with
@@ -36575,16 +35751,16 @@ Use relative paths for resources already held in the package. -->
                           (* First [m] observes the landmark map. A second
                              [m] focuses the exact main/article reference;
                              no label or URL heuristic is used. *)
-                          launch_browser_lane state ~mailbox:async_messages
+                          Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                             (Scene_regions tab_id)
                       | Primary_guarded_regions {tab_id;guard} ->
-                          launch_browser_lane state ~mailbox:async_messages
+                          Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                             (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Regions})
                       | Primary_focus {tab_id;index;target} ->
                           let focused = {view with scene_cursor = index;
                             scene_scope = Browser_lane_view.scene_scope_context_for_index view index} in
                           state.browser_lane <- Some focused;
-                          launch_browser_lane state ~mailbox:async_messages
+                          Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id;target})
                       | Primary_error Browser_lane_view.No_primary_region ->
                           state.browser_lane <- Some {view with
@@ -36598,30 +35774,30 @@ Use relative paths for resources already held in the package. -->
                       | Some _, _ -> read {view with scene = None; scene_delta = None; scroll = 0}
                       | None, Some tab_id ->
                           (match view.scene_guard with
-                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                           | Some guard -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                                (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Content})
-                           | None -> launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id))
+                           | None -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages (Scene_read tab_id))
                       | None, None -> ())
                  | "r" ->
                      (match view.scene, view.selected_tab with
                       | None, Some tab_id ->
                           (match view.scene_guard with
-                           | Some guard -> launch_browser_lane state ~mailbox:async_messages
+                           | Some guard -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                                (Scene_follow_refresh {tab_id;guard;scene_view=Browser_lane.Content})
-                           | None -> refresh_browser_lane state ~mailbox:async_messages)
+                           | None -> Masc_tui_surface_requests.Lane_browser_requests.refresh_browser_lane state ~mailbox:async_messages)
                       | Some scene, Some tab_id ->
                           let operation = match scene.content.scope, scene.content.view with
                             | Some target, _ -> Scene_focus {tab_id;target}
                             | None, Browser_lane.Regions -> Scene_regions tab_id
                             | None, Browser_lane.Content -> Scene_read tab_id in
-                          launch_browser_lane state ~mailbox:async_messages operation
-                      | None, None | Some _, None -> refresh_browser_lane state ~mailbox:async_messages)
+                          Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages operation
+                      | None, None | Some _, None -> Masc_tui_surface_requests.Lane_browser_requests.refresh_browser_lane state ~mailbox:async_messages)
                  | "J" | "K" when Option.is_some view.scene && not (busy view) ->
                      (match view.scene, view.selected_tab with
                       | Some scene, Some tab_id ->
                           let distance = int_of_float scene.content.height in
                           let delta_y = if key = "J" then distance else -distance in
-                          launch_browser_lane state ~mailbox:async_messages
+                          Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                             (Scene_scroll {tab_id;document_id=scene.content.document_id;
                               expected_url=scene.content.url;
                               scene_view=scene.content.view;scope=scene.content.scope;delta_y})
@@ -36652,12 +35828,12 @@ Use relative paths for resources already held in the package. -->
                            | Some Read_region ->
                           state.browser_lane <- Some {view with
                             scene_scope = Browser_lane_view.scene_scope_context_for_node view node};
-                          launch_browser_lane state ~mailbox:async_messages
+                          Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                             (Scene_focus {tab_id=scene.tab_id;target={document_id=scene.content.document_id;node_id=node.node_id}})
-                           | Some Follow_link -> launch_browser_lane state ~mailbox:async_messages
+                           | Some Follow_link -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                           (Scene_follow {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url})
-                           | Some Click_control -> launch_browser_lane state ~mailbox:async_messages
+                           | Some Click_control -> Masc_tui_surface_requests.Lane_browser_requests.launch_browser_lane state ~mailbox:async_messages
                           (Scene_click {tab_id=scene.tab_id;document_id=scene.content.document_id;
                             node_id=node.node_id;expected_url=scene.content.url;scope=scene.content.scope})
                            | None -> ())
@@ -37514,7 +36690,7 @@ Use relative paths for resources already held in the package. -->
               && Option.is_none state.memory_facts_keeper ->
            state.memory_overview_detail <- not state.memory_overview_detail
        | Some ("a" | "A") when state.view = Memory ->
-           open_all_fleet_memory state ~mailbox:async_messages
+           Masc_tui_surface_requests.Memory_repository_requests.open_all_fleet_memory state ~mailbox:async_messages
        (* Resources and Tools hang off Config the way Connectors hangs off
           Runtime: not on the Tab ring, one key from their parent. Both
           cases, like every other hang-off hop (c|C, f|F, p|P), and no
@@ -39191,7 +38367,7 @@ Use relative paths for resources already held in the package. -->
                     ~host:Masc_tui_transport.Workspace_admission.server_peer_host
                     ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state async_messages)
             | Keepers Keeper_list ->
-                launch_memory_health_load state ~mailbox:async_messages
+                Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
                 ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Refresh)
             | Keepers Keeper_calls ->
@@ -39257,16 +38433,16 @@ Use relative paths for resources already held in the package. -->
                  | Fusion_historical_detail reference ->
                      launch_fusion_historical_detail_load state ~mailbox:async_messages ~reference)
             | Memory ->
-                launch_memory_health_load state ~mailbox:async_messages;
+                Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox:async_messages;
                 (match state.memory_facts_keeper with
                  | Some "*" ->
-                     launch_all_memory_facts_load state ~mailbox:async_messages
+                     Masc_tui_surface_requests.Memory_repository_requests.launch_all_memory_facts_load state ~mailbox:async_messages
                  | Some keeper_name ->
-                     launch_memory_facts_load state ~mailbox:async_messages
+                     Masc_tui_surface_requests.Memory_repository_requests.launch_memory_facts_load state ~mailbox:async_messages
                        ~keeper_name
                  | None -> ())
             | Repositories ->
-                launch_repositories_load state ~mailbox:async_messages
+                Masc_tui_surface_requests.Memory_repository_requests.launch_repositories_load state ~mailbox:async_messages
             | Changes -> (
                 match state.changes_keeper with
                 | Some keeper_name ->
@@ -39276,9 +38452,9 @@ Use relative paths for resources already held in the package. -->
             | Connectors ->
                 (match browser_lane_on_screen state with
                  | None -> Masc_tui_surface_requests.Connector_volume_requests.launch_connectors_load state ~mailbox:async_messages
-                 | Some _ -> refresh_browser_lane state ~mailbox:async_messages)
+                 | Some _ -> Masc_tui_surface_requests.Lane_browser_requests.refresh_browser_lane state ~mailbox:async_messages)
             | Runtime ->
-                launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
+                Masc_tui_surface_requests.Memory_repository_requests.launch_runtime_surface_load state ~mailbox:async_messages ~force:true;
                 if Option.is_some state.runtime_lane_pick || Option.is_some state.slot_editor then
                   launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
             | Tools ->
@@ -39312,7 +38488,7 @@ Use relative paths for resources already held in the package. -->
             | Keepers Keeper_runtime_pick ->
                 launch_runtime_catalog_load ~intent:Snapshot_read.Refresh state ~mailbox:async_messages
             | Metrics ->
-                launch_memory_health_load state ~mailbox:async_messages;
+                Masc_tui_surface_requests.Memory_repository_requests.launch_memory_health_load state ~mailbox:async_messages;
                 launch_keeper_tool_modes_load state ~mailbox:async_messages
             | Overview | Acting | Approvals | System_logs -> ());
            add_event state "system" "Manual refresh"
@@ -40362,7 +39538,7 @@ Use relative paths for resources already held in the package. -->
                             state.memory_facts_cursor <- 0;
                             state.memory_facts_scroll <- 0;
                             state.memory_facts_category <- Category_all;
-                            launch_memory_facts_load state
+                            Masc_tui_surface_requests.Memory_repository_requests.launch_memory_facts_load state
                               ~mailbox:async_messages ~keeper_name)))
             | Repositories -> (
                 (* Enter opens the repository's own tree on the Code surface,
@@ -40669,7 +39845,7 @@ Use relative paths for resources already held in the package. -->
                         Masc_tui_code_requests.launch_file_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state async_messages)
                           ~path)))
        | Some "o" | Some "O" | Some "A" when state.view = Lanes ->
-           launch_lane_addons state ~mailbox:async_messages
+           Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages
              Masc_tui_lane_addons.Inspect
        | Some "o" when state.view = Changes ->
            (* Hand the selected change to the operator's editor. The row is

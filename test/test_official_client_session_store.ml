@@ -2163,8 +2163,33 @@ let test_a_held_section_no_layer_names_refuses_load_and_preflight () =
        | Keeper_durable_store.Refuse_boot _ -> true
        | Keeper_durable_store.Degrade_typed _ | Keeper_durable_store.Preflight_only _ -> false);
     let report = preflight () in
-    check (pair int int) "the preflight counts the binding as refused" (1, 1)
-      (report.Keeper_durable_store.rows, report.Keeper_durable_store.refused))
+    (* [claim_with_context_frontier] writes both primary [session.json] and a
+       retained copy under [runtimes/]; rewriting [session.json] leaves the
+       retained copy readable while refusing the primary. *)
+    check (pair int int) "the preflight counts both bindings and refuses the corrupted primary" (2, 1)
+      (report.Keeper_durable_store.rows, report.Keeper_durable_store.refused);
+    let rdir = Filename.concat (Filename.dirname state_path) "runtimes" in
+    let retained_name =
+      match Sys.readdir rdir |> Array.to_list with
+      | [ name ] when Filename.check_suffix name ".json" -> name
+      | _ -> fail "expected single retained binding copy under runtimes/"
+    in
+    let retained_copy = Filename.concat rdir retained_name in
+    let valid_original =
+      held_section_named (Keeper_context_layers.source_name wiki) original
+    in
+    let corrupted_copy = held_section_named "no_layer_has_this_name" original in
+    Yojson.Safe.to_file state_path valid_original;
+    Yojson.Safe.to_file retained_copy corrupted_copy;
+    let retained_only_report = preflight () in
+    check (pair int int) "corrupting only the retained copy still refuses it" (2, 1)
+      (retained_only_report.Keeper_durable_store.rows,
+       retained_only_report.Keeper_durable_store.refused);
+    Yojson.Safe.to_file state_path corrupted_copy;
+    let both_corrupted_report = preflight () in
+    check (pair int int) "corrupting both primary and retained refuses both" (2, 2)
+      (both_corrupted_report.Keeper_durable_store.rows,
+       both_corrupted_report.Keeper_durable_store.refused))
 
 let test_changed_canonical_source_claims_a_fresh_session () =
   with_workspace "masc-context-fresh-" (fun base_path ->

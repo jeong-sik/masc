@@ -23,11 +23,12 @@
     meta ([<masc>/keepers/<name>.json]) and the current Memory OS snapshot
     ([config/keepers/<name>.memory-current.json]) are [Refuse_boot]: without
     them a keeper starts as another keeper or with empty memory, and
-    overwrites what it lost. The official-client session binding
-    ([<masc>/keepers/<name>/official-client-runtime/session.json]) is
-    [Refuse_boot] too: while it does not decode, every turn of its keeper
-    fails (2026-09-26, #38986); moved aside under its store lock, the
-    keeper's next claim starts a new vendor session. The event queue
+    overwrites what it lost. The official-client session bindings
+    ([<masc>/keepers/<name>/official-client-runtime/session.json] and its
+    retained [runtimes/*.json] copies) are [Refuse_boot] too: while any does
+    not decode, turns of that keeper on the affected runtime fail (#38986,
+    #53754); moved aside under the store lock, the next claim starts a new
+    vendor session. The event queue
     ([<masc>/keepers/<name>/event-queue-v*.json] and its transition WAL) is
     [Refuse_boot] as well: while it does not decode, the keeper does not
     register and takes no turn; the row names the file that failed, and the

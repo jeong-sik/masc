@@ -1189,6 +1189,38 @@ let load_retained_for_runtime ~state_dir ~client_kind ~runtime_id =
            })
 ;;
 
+let is_retained_binding_filename name =
+  Filename.check_suffix name ".json"
+  && not (String.contains name '/')
+  && not (String.contains name '\000')
+  && not (String.equal name ".")
+  && not (String.equal name "..")
+;;
+
+let load_retained_path ~rdir ~name =
+  let rpath = Filename.concat rdir name in
+  let* binding_opt = load_path rpath in
+  match binding_opt with
+  | None -> Ok None
+  | Some binding ->
+    let expected_name =
+      retained_filename
+        ~client_kind:binding.client_kind
+        ~runtime_id:binding.runtime_id
+    in
+    if String.equal name expected_name
+    then Ok (Some binding)
+    else
+      Error
+        (Not_current
+           { path = rpath
+           ; detail =
+               Printf.sprintf
+                 "retained official-client session filename mismatch: expected %s"
+                 expected_name
+           })
+;;
+
 let is_incomplete_phase = function
   | Start _ | Active _ | Turn_inflight _ -> true
   | Ready | Recovery_required _ | Settled _ -> false
@@ -1231,12 +1263,12 @@ let retained_bindings ~base_path ~keeper_name =
        | entries ->
          entries
          |> Array.to_list
-         |> List.filter (fun name -> Filename.check_suffix name ".json")
+         |> List.filter is_retained_binding_filename
          |> List.sort String.compare
          |> List.fold_left
               (fun acc name ->
                  let* acc = acc in
-                 let* loaded = load_path (Filename.concat rdir name) in
+                 let* loaded = load_retained_path ~rdir ~name in
                  Ok (match loaded with None -> acc | Some b -> b :: acc))
               (Ok [])
          |> Result.map List.rev)
@@ -1358,9 +1390,9 @@ type stored_binding =
   }
 
 (* [state_dir] writes under [Common.keepers_runtime_dir_of_base], so that is
-   the directory listed here. Every entry [path] accepts is read with
-   [load_path], the reader every claim uses, so this reads exactly the files
-   a claim would read, a linked keeper
+   the directory listed here. Every entry [path] accepts is inspected across
+   both the primary [session.json] and retained [runtimes/*.json] copies with
+   [load_path] / [load_retained_path], the readers claims use, a linked keeper
    directory included. Ordinary metadata files are not Keeper directories.
    A name [path] refuses is left out: [state_dir] refuses it too, so this
    store never wrote there. Directory inspection failures refuse discovery
@@ -1389,7 +1421,56 @@ let stored_bindings ~base_path =
        | { Unix.st_kind = Unix.(S_REG | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
          Ok None)
   in
-  let inspect_binding keeper_name state_path =
+  let inspect_file ~keeper_name ~allow_absent ~file_path ~decode =
+    match Unix.lstat file_path with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+      if allow_absent
+      then Ok None
+      else Error ("official-client session disappeared during discovery: " ^ file_path)
+    | exception Unix.Unix_error (cause, _, _) ->
+      filesystem_error file_path "failed to inspect" cause
+    | _ ->
+      (match decode () with
+       | Ok None ->
+         Error ("official-client session disappeared during discovery: " ^ file_path)
+       | Ok (Some binding) ->
+         Ok (Some { keeper_name; path = file_path; decoded = Ok binding })
+       | Error rejection ->
+         Ok (Some { keeper_name; path = file_path; decoded = Error rejection }))
+  in
+  let inspect_retained_bindings ~keeper_name ~state_dir =
+    let rdir = retained_dir ~state_dir in
+    match Unix.lstat rdir with
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
+    | exception Unix.Unix_error (cause, _, _) ->
+      filesystem_error rdir "failed to inspect" cause
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      (match Sys.readdir rdir with
+       | exception Sys_error detail ->
+         Error (Printf.sprintf "failed to list %s: %s" rdir detail)
+       | entries ->
+         entries
+         |> Array.to_list
+         |> List.filter is_retained_binding_filename
+         |> List.sort String.compare
+         |> List.fold_left
+              (fun acc name ->
+                 let* acc = acc in
+                 let rpath = Filename.concat rdir name in
+                 let* binding =
+                   inspect_file
+                     ~keeper_name
+                     ~allow_absent:false
+                     ~file_path:rpath
+                     ~decode:(fun () -> load_retained_path ~rdir ~name)
+                 in
+                 Ok (match binding with None -> acc | Some b -> b :: acc))
+              (Ok [])
+         |> Result.map List.rev)
+    | { Unix.st_kind = Unix.(S_REG | S_LNK | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+      Error ("retained official-client runtimes entry is not a directory: " ^ rdir)
+  in
+  let inspect_bindings keeper_name state_path =
     let state_dir = Filename.dirname state_path in
     let* state_dir_exists =
       match Unix.lstat state_dir with
@@ -1408,20 +1489,20 @@ let stored_bindings ~base_path =
         Error ("official-client session entry is not a directory: " ^ state_dir)
     in
     if not state_dir_exists
-    then Ok None
+    then Ok []
     else
-      match Unix.lstat state_path with
-      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
-      | exception Unix.Unix_error (cause, _, _) ->
-        filesystem_error state_path "failed to inspect" cause
-      | _ ->
-        (match load_path state_path with
-         | Ok None ->
-           Error ("official-client session disappeared during discovery: " ^ state_path)
-         | Ok (Some binding) ->
-           Ok (Some { keeper_name; path = state_path; decoded = Ok binding })
-         | Error rejection ->
-           Ok (Some { keeper_name; path = state_path; decoded = Error rejection }))
+      let* primary =
+        inspect_file
+          ~keeper_name
+          ~allow_absent:true
+          ~file_path:state_path
+          ~decode:(fun () -> load_path state_path)
+      in
+      let* retained = inspect_retained_bindings ~keeper_name ~state_dir in
+      Ok
+        (match primary with
+         | None -> retained
+         | Some binding -> binding :: retained)
   in
   match Unix.lstat keepers_dir with
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok []
@@ -1440,17 +1521,17 @@ let stored_bindings ~base_path =
                match state_path with
                | None -> Ok collected
                | Some state_path ->
-                 let* binding = inspect_binding keeper_name state_path in
-                 Ok (match binding with None -> collected | Some binding -> binding :: collected))
+                 let* bindings = inspect_bindings keeper_name state_path in
+                 Ok (List.rev_append bindings collected))
             (Ok [])
        |> Result.map List.rev)
 ;;
 
 (* The lock is [store_lock_path] of [state_dir], the one [with_store_lock]
-   takes for every claim and transition. Under it the binding is read again:
-   one that decodes now, or is gone, is not moved. The observed form keeps a
-   completed rename when only the release fails, as [clear_then_with_lock]
-   does. *)
+   takes for every claim and transition. Under it the addressed binding file
+   is read again: one that decodes now, or is gone, is not moved. The
+   observed form keeps a completed rename when only the release fails, as
+   [clear_then_with_lock] does. *)
 type move_error =
   | Move_read_failed of read_error
   | Binding_readable of string
@@ -1466,17 +1547,66 @@ let move_error_to_string = function
   | Rename_failed detail -> detail
 ;;
 
-let move_aside ~base_path ~keeper_name ~rejected_path =
+type binding_file =
+  | Primary of string
+  | Retained of { rdir : string; name : string; path : string }
+
+let classify_binding_path ~directory ~keeper_name ~binding_path =
+  let primary_path = Filename.concat directory filename in
+  let rdir = retained_dir ~state_dir:directory in
+  if String.equal binding_path primary_path
+  then Ok (Primary primary_path)
+  else if String.equal (Filename.dirname binding_path) rdir
+  then (
+    let name = Filename.basename binding_path in
+    if is_retained_binding_filename name
+       && String.equal (Filename.concat rdir name) binding_path
+    then Ok (Retained { rdir; name; path = binding_path })
+    else
+      Error
+        (Move_read_failed
+           (Invalid_path ("invalid retained official-client session path: " ^ binding_path))))
+  else
+    Error
+      (Move_read_failed
+         (Invalid_path
+            (Printf.sprintf
+               "path is not an official-client session binding for keeper %s: %s"
+               keeper_name
+               binding_path)))
+;;
+
+let reread_binding_for_move = function
+  | Primary state_path -> state_path, load_path state_path
+  | Retained { rdir; name; path = state_path } ->
+    let decoded =
+      match Unix.lstat rdir with
+      | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok None
+      | exception Unix.Unix_error (cause, _, _) ->
+        Error (Unreadable { path = rdir; detail = Unix.error_message cause })
+      | { Unix.st_kind = Unix.S_DIR; _ } -> load_retained_path ~rdir ~name
+      | { Unix.st_kind = Unix.(S_REG | S_LNK | S_CHR | S_BLK | S_FIFO | S_SOCK); _ } ->
+        Error
+          (Unreadable
+             { path = rdir
+             ; detail = "retained official-client runtimes path is not a directory"
+             })
+    in
+    state_path, decoded
+;;
+
+let move_aside ~base_path ~keeper_name ~binding_path ~rejected_path =
   let* directory =
     state_dir ~base_path ~keeper_name
     |> Result.map_error (fun detail -> Move_read_failed (Invalid_path detail))
   in
-  let state_path = Filename.concat directory filename in
+  let* target = classify_binding_path ~directory ~keeper_name ~binding_path in
   match
     File_lock_eio.with_durable_lock_observed
       ~lock_path:(store_lock_path directory)
       (fun () ->
-         match load_path state_path with
+         let state_path, decoded = reread_binding_for_move target in
+         match decoded with
          | Ok (Some (_ : t)) -> Error (Binding_readable state_path)
          | Ok None -> Error (Binding_missing state_path)
          | Error ((Invalid_path _ | Unreadable _) as error) ->

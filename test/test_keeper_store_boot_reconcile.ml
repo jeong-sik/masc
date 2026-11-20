@@ -1280,7 +1280,7 @@ let test_session_io_refuses_boot_and_direct_quarantine () =
   check bool "quarantine carries the mandatory I/O refusal" true
     (report.R.failed = [ failure ] && report.R.quarantined = []);
   let rejected_path = path ^ ".quarantine-test" in
-  (match Session.move_aside ~base_path ~keeper_name ~rejected_path with
+  (match Session.move_aside ~base_path ~keeper_name ~binding_path:path ~rejected_path with
    | Error error -> check bool "the locked reread retains its I/O cause" true
        (error = Session.Move_read_failed read_error)
    | Ok () -> fail "an I/O failure authorized a direct rename");
@@ -1404,6 +1404,313 @@ let test_a_binding_behind_a_linked_keeper_directory_refuses_boot () =
     (stores_of examination.R.undecodable);
   check (list string) "for the linked keeper" [ "linked" ]
     (List.map (fun (u : R.undecodable) -> u.R.keeper) examination.R.undecodable)
+;;
+
+let claim_and_settle ~base_path ~keeper_name ~client_kind ~runtime_id ~session_id ~turn_id ~at =
+  let surface = Session.tool_surface_sha256 ~native_posture:Runtime_native_tools.Native_none [] in
+  let unwrap label = function Ok v -> v | Error detail -> failf "%s: %s" label detail in
+  let claimed =
+    Session.claim
+      ~base_path
+      ~keeper_name
+      ~expected:None
+      ~client_kind
+      ~owner_epoch:(Session.process_epoch ())
+      ~runtime_id
+      ~tool_surface_sha256:surface
+      ~updated_at:at
+    |> unwrap "claim"
+  in
+  let active =
+    Session.mark_active ~base_path ~keeper_name ~expected:claimed ~session_id ~updated_at:(at +. 1.)
+    |> unwrap "mark_active"
+  in
+  let starting =
+    Session.mark_turn_starting ~base_path ~keeper_name ~expected:active ~session_id ~updated_at:(at +. 2.)
+    |> unwrap "mark_turn_starting"
+  in
+  let started =
+    Session.mark_turn_started
+      ~base_path
+      ~keeper_name
+      ~expected:starting
+      ~session_id
+      ~turn_id
+      ~turn_count:starting.Session.turn_count
+      ~updated_at:(at +. 3.)
+    |> unwrap "mark_turn_started"
+  in
+  Session.settle ~base_path ~keeper_name ~expected:started ~session_id ~turn_id ~updated_at:(at +. 4.)
+  |> unwrap "settle"
+;;
+
+let retained_file_with_prefix ~state_path ~prefix =
+  let rdir = Filename.concat (Filename.dirname state_path) "runtimes" in
+  let matches =
+    Sys.readdir rdir
+    |> Array.to_list
+    |> List.filter (fun name ->
+      String.starts_with ~prefix name && Filename.check_suffix name ".json")
+    |> List.sort String.compare
+  in
+  match matches with
+  | [ name ] -> Filename.concat rdir name
+  | _ -> failf "expected single retained file with prefix %s in %s" prefix rdir
+;;
+
+let test_retained_session_copy_only_refuses_boot_preflight_and_quarantines () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "sound" in
+  let state_path = Session.path ~base_path ~keeper_name |> Result.get_ok in
+  ignore
+    (claim_and_settle
+       ~base_path
+       ~keeper_name
+       ~client_kind:Session.Codex
+       ~runtime_id:"codex.default"
+       ~session_id:"thread-1"
+       ~turn_id:"turn-1"
+       ~at:10.);
+  let retained_path = retained_file_with_prefix ~state_path ~prefix:"codex_" in
+  Unix.unlink state_path;
+  write_bytes retained_path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let digest = file_digest retained_path in
+  let examination = R.examine config in
+  check (list string) "boot names only the retained copy" [ "official_client_session" ]
+    (stores_of examination.R.undecodable);
+  check (list string) "at the exact runtimes path" [ retained_path ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  check int "no I/O failure" 0 (List.length examination.R.unreadable);
+  check int "no discovery failure" 0 (List.length examination.R.discovery_failures);
+  (match R.admit ~accept_quarantine:false examination with
+   | Ok _ -> fail "boot must refuse an undecodable retained copy"
+   | Error refusals ->
+     let refusal = R.refusal_to_string refusals in
+     check bool "the refusal names the keeper and retained path" true
+       (String_util.contains_substring refusal ("official_client_session keeper=sound path=" ^ retained_path)));
+  (match D.reader D.Id.Official_client_session with
+   | D.Refuse_boot (_, scan) ->
+     (match D.run scan ~base_path with
+      | Ok { D.rows = 1; refused = 1; first_refusal = Some detail; _ } ->
+        check bool "preflight names the keeper" true
+          (String.starts_with ~prefix:"sound: " detail);
+        check bool "preflight names the retained path" true
+          (String_util.contains_substring detail retained_path)
+      | Ok report -> failf "expected (rows=1, refused=1), got (%d, %d)" report.D.rows report.D.refused
+      | Error detail -> failf "preflight scan failed: %s" detail)
+   | D.Degrade_typed _ | D.Preflight_only _ -> fail "session store must refuse boot");
+  let report = R.quarantine ~now:1_700_000_010.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.path; rejected_path; moved_with = None; _ } ], [] ->
+     check string "quarantined path matches retained copy" retained_path path;
+     check bool "retained copy was moved aside" false (Sys.file_exists retained_path);
+     check string "rejected copy preserves exact bytes" digest (file_digest rejected_path)
+   | _ -> fail "expected exactly one quarantined retained copy");
+  let after = R.examine config in
+  check int "examine after quarantine has no undecodable rows" 0 (List.length after.R.undecodable);
+  check int "examine after quarantine has no unreadable rows" 0 (List.length after.R.unreadable);
+  check int "examine after quarantine has no discovery failures" 0 (List.length after.R.discovery_failures);
+  match
+    Session.load_for_runtime
+      ~base_path
+      ~keeper_name
+      ~client_kind:Session.Codex
+      ~runtime_id:"codex.default"
+  with
+  | Ok None -> ()
+  | Ok (Some _) -> fail "a binding survived quarantine"
+  | Error err -> failf "load_for_runtime still refused after quarantine: %s" (Session.read_error_to_string err)
+;;
+
+let test_retained_session_copy_quarantines_without_moving_healthy_primary () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "switched" in
+  let state_path = Session.path ~base_path ~keeper_name |> Result.get_ok in
+  ignore
+    (claim_and_settle
+       ~base_path
+       ~keeper_name
+       ~client_kind:Session.Codex
+       ~runtime_id:"codex.default"
+       ~session_id:"thread-codex"
+       ~turn_id:"turn-c1"
+       ~at:10.);
+  let codex_path = retained_file_with_prefix ~state_path ~prefix:"codex_" in
+  let claude_settled =
+    claim_and_settle
+      ~base_path
+      ~keeper_name
+      ~client_kind:Session.Claude_code
+      ~runtime_id:"claude.default"
+      ~session_id:"sess-claude"
+      ~turn_id:"turn-cl1"
+      ~at:20.
+  in
+  let claude_path = retained_file_with_prefix ~state_path ~prefix:"claude_code_" in
+  let primary_digest = file_digest state_path in
+  let claude_digest = file_digest claude_path in
+  write_bytes codex_path "{\"schema\":\"masc.keeper.official-client-session.v1\"}";
+  let codex_digest = file_digest codex_path in
+  let examination = R.examine config in
+  check int "healthy primary and healthy retained copy remain readable" 2 examination.R.readable;
+  check (list string) "only the broken retained copy is undecodable" [ codex_path ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  let report = R.quarantine ~now:1_700_000_020.0 config examination in
+  (match report.R.quarantined, report.R.failed with
+   | [ { R.path; rejected_path; moved_with = None; _ } ], [] ->
+     check string "only the stale codex copy moved" codex_path path;
+     check bool "stale codex copy is gone" false (Sys.file_exists codex_path);
+     check string "rejected codex copy kept original bytes" codex_digest (file_digest rejected_path)
+   | _ -> fail "expected only the stale codex retained copy to move");
+  check string "primary session.json was untouched" primary_digest (file_digest state_path);
+  check string "healthy claude retained copy was untouched" claude_digest (file_digest claude_path);
+  check bool "primary remains readable" true
+    (Session.load ~base_path ~keeper_name = Ok (Some claude_settled));
+  check bool "claude retained remains readable" true
+    (Session.load_for_runtime
+       ~base_path
+       ~keeper_name
+       ~client_kind:Session.Claude_code
+       ~runtime_id:"claude.default"
+     = Ok (Some claude_settled));
+  check bool "codex now reads as absent" true
+    (Session.load_for_runtime
+       ~base_path
+       ~keeper_name
+       ~client_kind:Session.Codex
+       ~runtime_id:"codex.default"
+     = Ok None)
+;;
+
+let test_retained_session_filename_mismatch_refuses_boot_and_quarantines () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let keeper_name = "mismatched" in
+  let state_path = Session.path ~base_path ~keeper_name |> Result.get_ok in
+  ignore
+    (claim_and_settle
+       ~base_path
+       ~keeper_name
+       ~client_kind:Session.Codex
+       ~runtime_id:"codex.default"
+       ~session_id:"thread-1"
+       ~turn_id:"turn-1"
+       ~at:10.);
+  let valid_bytes = Fs_compat.load_file state_path in
+  let real_retained = retained_file_with_prefix ~state_path ~prefix:"codex_" in
+  Unix.unlink state_path;
+  Unix.unlink real_retained;
+  let mismatched_path = Filename.concat (Filename.dirname real_retained) "codex_wrong_digest.json" in
+  write_bytes mismatched_path valid_bytes;
+  let examination = R.examine config in
+  check (list string) "mismatched filename refuses boot" [ mismatched_path ]
+    (List.map (fun (u : R.undecodable) -> u.R.path) examination.R.undecodable);
+  (match examination.R.undecodable with
+   | [ u ] ->
+     check bool "rejection mentions filename mismatch" true
+       (String_util.contains_substring u.R.rejection "filename mismatch")
+   | _ -> fail "expected single undecodable mismatched retained file");
+  let report = R.quarantine ~now:1_700_000_030.0 config examination in
+  check int "mismatched copy quarantined" 1 (List.length report.R.quarantined);
+  check int "no quarantine failure" 0 (List.length report.R.failed);
+  check bool "mismatched file removed from runtimes/" false (Sys.file_exists mismatched_path);
+  check int "subsequent examine is clean" 0
+    (List.length (R.examine config).R.undecodable)
+;;
+
+let test_retained_session_blocked_dir_io_and_invalid_move_path () =
+  with_workspace
+  @@ fun config ->
+  let base_path = config.Workspace.base_path in
+  let blocked_rdir_keeper = "blocked-rdir" in
+  let blocked_rdir_state =
+    Session.path ~base_path ~keeper_name:blocked_rdir_keeper |> Result.get_ok
+  in
+  let rdir = Filename.concat (Filename.dirname blocked_rdir_state) "runtimes" in
+  write_bytes rdir "not a directory";
+  let examination = R.examine config in
+  check bool "non-directory runtimes refuses discovery" true
+    (List.exists
+       (fun (f : R.discovery_failure) ->
+          f.R.store = D.Refusing.Official_client_session
+          && String_util.contains_substring f.R.rejection rdir)
+       examination.R.discovery_failures);
+  List.iter
+    (fun accept_quarantine ->
+       match R.admit ~accept_quarantine examination with
+       | Ok _ -> fail "non-directory runtimes admitted boot"
+       | Error failures ->
+         check bool "discovery refusal survives quarantine flag" true
+           (List.exists
+              (function
+                | R.Discovery_failed { store = D.Refusing.Official_client_session; _ } -> true
+                | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ ->
+                  false)
+              failures))
+    [ false; true ];
+  Unix.unlink rdir;
+  let bad_entry_keeper = "blocked-entry" in
+  let bad_entry_state =
+    Session.path ~base_path ~keeper_name:bad_entry_keeper |> Result.get_ok
+  in
+  let bad_entry_path =
+    Filename.concat (Filename.concat (Filename.dirname bad_entry_state) "runtimes") "bad.json"
+  in
+  Fs_compat.mkdir_p bad_entry_path;
+  let exam2 = R.examine config in
+  check bool "directory entry in runtimes is unreadable" true
+    (List.exists
+       (fun (f : R.failure) ->
+          f.R.store = D.Refusing.Official_client_session
+          && String.equal f.R.keeper bad_entry_keeper
+          && String.equal f.R.path bad_entry_path)
+       exam2.R.unreadable);
+  check int "I/O failure is not marked undecodable" 0 (List.length exam2.R.undecodable);
+  (match R.admit ~accept_quarantine:true exam2 with
+   | Ok _ -> fail "unreadable retained entry admitted boot"
+   | Error failures ->
+     check bool "unreadable retained entry refuses boot even with quarantine flag" true
+       (List.exists
+          (function
+            | R.Unreadable { store = D.Refusing.Official_client_session; path; _ } ->
+              String.equal path bad_entry_path
+            | R.Unreadable _ | R.Discovery_failed _ | R.Undecodable _ | R.Quarantine_failed _ -> false)
+          failures));
+  let rejected_path = bad_entry_path ^ ".rejected-test" in
+  (match
+     Session.move_aside
+       ~base_path
+       ~keeper_name:bad_entry_keeper
+       ~binding_path:bad_entry_path
+       ~rejected_path
+   with
+   | Error (Session.Move_read_failed (Session.Unreadable { path; _ })) ->
+     check string "move_aside reports exact unreadable retained path" bad_entry_path path
+   | Error err -> failf "expected Unreadable, got %s" (Session.move_error_to_string err)
+   | Ok () -> fail "directory entry in runtimes authorized rename");
+  check bool "no rejected destination was created" false (Sys.file_exists rejected_path);
+  let state_dir = Filename.dirname bad_entry_state in
+  List.iter
+    (fun bad_path ->
+       match
+         Session.move_aside
+           ~base_path
+           ~keeper_name:bad_entry_keeper
+           ~binding_path:bad_path
+           ~rejected_path:(bad_path ^ ".rejected")
+       with
+       | Error (Session.Move_read_failed (Session.Invalid_path _)) -> ()
+       | Error err -> failf "expected Invalid_path for %s, got %s" bad_path (Session.move_error_to_string err)
+       | Ok () -> failf "invalid binding_path %s unexpectedly succeeded" bad_path)
+    [ Filename.concat state_dir "bridge-cursors.json"
+    ; Filename.concat (Filename.concat state_dir "runtimes") "nested/sub.json"
+    ; Filename.concat (Filename.dirname state_dir) "outside.json"
+    ]
 ;;
 
 let queue_dir ~base_path = Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) "sound"
@@ -2448,6 +2755,14 @@ let () =
             `Quick test_an_unreadable_session_binding_refuses_boot
         ; test_case "a binding behind a linked keeper directory refuses boot" `Quick
             test_a_binding_behind_a_linked_keeper_directory_refuses_boot
+        ; test_case "a retained copy without session.json refuses boot, preflight, and quarantines"
+            `Quick test_retained_session_copy_only_refuses_boot_preflight_and_quarantines
+        ; test_case "quarantining a stale retained copy leaves healthy primary and peer copies"
+            `Quick test_retained_session_copy_quarantines_without_moving_healthy_primary
+        ; test_case "a retained copy with mismatched filename refuses boot and quarantines"
+            `Quick test_retained_session_filename_mismatch_refuses_boot_and_quarantines
+        ; test_case "blocked runtimes dir, unreadable retained entry, and invalid move_aside path fail closed"
+            `Quick test_retained_session_blocked_dir_io_and_invalid_move_path
         ] )
     ; ( "event queue"
       , [ test_case "indirect queue files refuse and quarantine their directory entries" `Quick

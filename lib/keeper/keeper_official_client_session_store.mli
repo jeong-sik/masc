@@ -346,14 +346,16 @@ type stored_binding =
   }
 
 val stored_bindings : base_path:string -> (stored_binding list, string) result
-(** Every binding file under the keepers directory {!path} writes to, decoded
-    with {!load}'s decoder, in keeper-name order. Each entry is read the way
-    a claim reads it, a linked keeper directory included; a keeper without
-    the file is left out, and so is an entry whose name {!path} refuses,
-    because this store never writes there. [Ok []] when the keepers
-    directory does not exist; [Error] when it exists but cannot be inspected
-    or listed. Reads only. The deploy preflight and boot reconcile both read
-    the store through this. *)
+(** Every binding file under the keepers directory — both the primary
+    [session.json] {!path} writes to and every retained [runtimes/*.json] copy —
+    decoded with {!load}'s decoder, in keeper-name order (primary first, then
+    sorted retained copies whose filenames match their decoded identity). Each
+    entry is read the way a claim reads it, a linked keeper directory included;
+    a keeper without a file is left out, and so is an entry whose name {!path}
+    refuses, because this store never writes there. [Ok []] when the keepers
+    directory does not exist; [Error] when it, a session directory, or a
+    [runtimes] directory cannot be inspected or listed. Reads only. The deploy
+    preflight and boot reconcile both read the store through this. *)
 
 type move_error =
   | Move_read_failed of read_error
@@ -365,16 +367,23 @@ type move_error =
 val move_error_to_string : move_error -> string
 
 val move_aside :
-  base_path:string -> keeper_name:string -> rejected_path:string -> (unit, move_error) result
-(** Rename the keeper's binding to [rejected_path] while holding the store
-    lock every claim and transition takes. The binding is read again under
-    the lock; one that decodes now, or is gone, is left alone and the result
+  base_path:string ->
+  keeper_name:string ->
+  binding_path:string ->
+  rejected_path:string ->
+  (unit, move_error) result
+(** Rename one rejected binding file ([binding_path] — either the keeper's
+    primary [session.json] or a [.json] entry directly inside its [runtimes]
+    directory) to [rejected_path] while holding the store lock every claim and
+    transition takes. Any other [binding_path] returns
+    [Error (Move_read_failed (Invalid_path _))]. The addressed file is read
+    again under the lock (with retained filenames verified against their decoded
+    identity); one that decodes now, or is gone, is left alone and the result
     is [Error]. An I/O or path failure from this fresh read is
-    [Move_read_failed] and never authorizes a rename. Only [Invalid_json]
-    or [Not_current] content rejection permits moving the file. The
-    keeper's next claim finds no binding and starts a new
-    vendor session. A rename that completed stays [Ok] even when releasing
-    the lock fails; that failure is logged. *)
+    [Move_read_failed] and never authorizes a rename. Only [Invalid_json] or
+    [Not_current] content rejection permits moving the file. A rename that
+    completed stays [Ok] even when releasing the lock fails; that failure is
+    logged. *)
 
 val clear_then :
   base_path:string -> keeper_name:string -> (unit -> 'a) -> ('a, string) result

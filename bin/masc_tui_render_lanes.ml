@@ -1486,8 +1486,13 @@ let lane_run_payload_lines ?(ko = false) ~width json =
   match json with
   | `Assoc (_ :: _ as fields) ->
     let omitted count =
-      if ko then Printf.sprintf "… 필드 %d개 더 있음 (표시 생략)" count
-      else Printf.sprintf "… %d more %s not rendered" count (if count = 1 then "field" else "fields")
+      if ko then
+        Printf.sprintf "… 필드 %s개 더 있음 (표시 생략)"
+          (Masc_tui_value.Count.grouped count)
+      else
+        Printf.sprintf "… %s %s not rendered"
+          (Masc_tui_value.Count.more ~ko:false count)
+          (if count = 1 then "field" else "fields")
     in
     let fields =
       List.mapi

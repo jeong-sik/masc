@@ -2445,7 +2445,10 @@ let window_spans ~rows ~focus spans =
   let count = List.length spans in
   let first, shown = result_window ~rows ~focus ~count in
   let above = first and below = count - (first + shown) in
-  let more hidden arrow = Span.text (muted_style ()) (Printf.sprintf "%s %d more" arrow hidden) in
+  let more hidden arrow =
+    Span.text (muted_style ())
+      (arrow ^ " " ^ Masc_tui_value.Count.more ~ko:false hidden)
+  in
   List.filteri (fun index _ -> index >= first && index < first + shown) spans
   |> List.mapi (fun index item ->
        if index = 0 && above > 0 then more (above + 1) "↑", false

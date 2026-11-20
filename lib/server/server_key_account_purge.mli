@@ -83,7 +83,7 @@ val resume : zone:Authz_zone.t -> base_path:string -> unit
     caller hands the witness of the call of that account. [Account_busy] is
     not answered. *)
 val remove_in_call
-  :  Server_setup_account_login.in_call
+  :  Runtime_account_call.t
   -> person:Server_setup_account_login.person
   -> base_path:string
   -> Authz_types.Provider_account_id.t

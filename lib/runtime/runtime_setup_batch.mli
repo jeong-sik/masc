@@ -57,14 +57,10 @@ type readiness =
     and says nothing about whether they ever passed a check. [limited] lists
     what was called and published unmeasured, and may be empty. A caller
     must not report the save as verified. *)
-type commit_record = { source_revision : string; order : string;
-                       durability : Runtime.config_durability;
-                       lock_warnings : Runtime.config_lock_warning list }
-(** What the publishing commit reported: the revision it wrote, its order, its
-    durability and the lock warnings, from this process's commit or from the
-    running server's answer. *)
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
-                 readiness:readiness; commit:commit_record }
+                 readiness:readiness; commit:Runtime.Config_commit_wire.t }
+(** [commit] is what the publishing commit reported, from this process's
+    commit or from the running server's answer. *)
 val error_message : error -> string
 (** One line: how the step ended and why, never a child's log. *)
 val error_detail : error -> string option
@@ -107,7 +103,8 @@ val configure : ?pending_credentials:Runtime_setup_credentials.pending list -> ?
     after visible publication in the same cancellation-protected phase. *)
 val configure_text : ?default_lane_id:string -> binary:string -> original_text:string ->
   expected_revision:revision -> specs:Runtime_setup_spec.t list -> runtime_ids:string list ->
-  default_runtime_id:string -> verify:bool -> commit:(string -> (commit_record,error) result) ->
+  default_runtime_id:string -> verify:bool ->
+  commit:(string -> (Runtime.Config_commit_wire.t,error) result) ->
   unit -> (receipt,error) result
 (** {!configure} for a workspace whose running server is the writer of
     runtime.toml (RFC-0482 §3.2). The save is decided against [original_text],
@@ -117,6 +114,12 @@ val configure_text : ?default_lane_id:string -> binary:string -> original_text:s
     local lock is held, so [commit] must refuse a text that moved since
     [original_text] with [Changed_configuration]. Takes no pending
     credentials: only the server's own setup route passes those. *)
+
+val commit_of_answer : string -> (Runtime.Config_commit_wire.t, string) result
+(** The commit in the running server's answer to a runtime.toml text save: the
+    answer's [commit] member, read by {!Runtime.Config_commit_wire.of_yojson}.
+    A body that is not a JSON object, an answer without [commit] or a commit
+    that codec refuses is an error. *)
 
 val receipt_json : receipt -> Yojson.Safe.t
 (** [commit.warnings] carries public warning codes only, never private lock paths

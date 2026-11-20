@@ -57,7 +57,7 @@ val apply_voice_setup :
 
 val publish_setup_text :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> server -> source -> text:string ->
-  (Runtime_setup_batch.commit_record, Runtime_setup_batch.error) result
+  (Runtime.Config_commit_wire.t, Runtime_setup_batch.error) result
 
 val table_store :
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t -> server ->

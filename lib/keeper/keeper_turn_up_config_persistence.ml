@@ -183,10 +183,7 @@ let warning_to_yojson = function
       ; "detail", `String detail
       ]
   | Runtime_config_lock_release_unconfirmed detail ->
-    `Assoc
-      [ "code", `String "runtime_config_lock_release_unconfirmed"
-      ; "detail", `String detail
-      ]
+    Runtime.config_lock_warning_to_yojson (Runtime.Config_lock_release_unconfirmed detail)
 
 let warnings_of_runtime_assignment_write = function
   | Runtime.Assignment_unchanged _ -> []

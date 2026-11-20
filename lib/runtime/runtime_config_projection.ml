@@ -190,6 +190,8 @@ module Config_commit_wire = struct
     }
   ;;
 
+  let attach_lock_warnings warnings t = { t with lock_warnings = t.lock_warnings @ warnings }
+
   let field_names =
     [ "source_revision"; "order"; "durability"; "durability_detail"; "warnings"
     ; "ignored_legacy_keys" ]

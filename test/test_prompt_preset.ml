@@ -1507,7 +1507,9 @@ let test_restore_retains_visible_commit_observation ~sync_fails () =
      | Masc.Tui_decode.Preset_runtime_committed commit ->
        check bool "editor diagnostics do not erase the original commit" true
          (decoded_commit.prc_commit.Runtime.Config_commit_wire.source_revision
-          = commit.prc_commit.Runtime.Config_commit_wire.source_revision)
+          = commit.prc_commit.Runtime.Config_commit_wire.source_revision);
+       check Alcotest.(list string) "the TUI keeps the legacy keys the server ignored"
+         [ "max-prompt-bytes" ] commit.prc_commit.Runtime.Config_commit_wire.ignored_legacy_keys
      | Masc.Tui_decode.Preset_runtime_unchanged | Masc.Tui_decode.Preset_runtime_failed _ ->
        fail "editor diagnostics cannot turn an observed commit into a failed write");
     List.iter (fun (application, expected_registry) ->

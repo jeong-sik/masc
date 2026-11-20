@@ -2231,36 +2231,39 @@ let typed_selection_tracks_cursor_and_two_pane_results () =
 
 let ko_localization_and_overview_bottom_sheet () =
   let module Category = Masc.Lane_addon_category in
-  let worker : UI.instance =
-    { id = "w-1"
-    ; run_id = "run-1"
+  let make_worker idx : UI.instance =
+    let id = Printf.sprintf "w-%d" (idx + 1) in
+    { id
+    ; run_id = Printf.sprintf "run-%d" (idx + 1)
     ; addon_id = "browser-addon"
-    ; title = "Browser Worker"
+    ; title = Printf.sprintf "Browser Worker %d" (idx + 1)
     ; revision = "rev-1"
     ; phase = UI.Row.Attached
     ; runtime_presence = UI.Live_entry
     ; observation_seq = 2
-    ; rows_count = 4
-    ; installation_id = Some "browser-main"
-    ; source_path = Some "/config/browser.toml"
+    ; rows_count = 4 + idx
+    ; installation_id = Some (Printf.sprintf "browser-%d" (idx + 1))
+    ; source_path = Some (Printf.sprintf "/config/browser-%d.toml" (idx + 1))
     ; configuration_revision = Some "rev-1"
     ; binding = `Assoc []
     ; outputs = [ ("rows", UI.Row.All_lanes) ]
     ; skills_directory = None
     ; ui_category = Some Category.Browser
-    ; incarnation = "inc-1"
+    ; incarnation = Printf.sprintf "inc-%d" (idx + 1)
     ; action_schema = None
     ; binding_schema = None
     ; display =
         { Masc.Lane_addon_presentation.readings = []
         ; actions = []
-        ; description = Some "Handles browser checks\x07"
+        ; description =
+            (if idx = 0 then Some "Handles browser checks\x07" else None)
         }
     ; host_requests = None
     ; row_actions = None
     ; action_tool = None
     }
   in
+  let worker = make_worker 0 in
   let config : UI.configuration =
     { directory = "/config"
     ; complete = true
@@ -2274,31 +2277,19 @@ let ko_localization_and_overview_bottom_sheet () =
     ; complete = Some true
     }
   in
+  let tall_snapshot : UI.snapshot =
+    { instances = List.init 9 make_worker
+    ; configuration = Some config
+    ; output = { UI.Row.rows = []; coverage = [] }
+    ; complete = Some true
+    }
+  in
   let view = { UI.initial with snapshot = Some snapshot; instance_cursor = 0 } in
-  let ko_lines = UI.lines ~ko:true ~height:24 ~width:100 view in
+  let tall_view = { UI.initial with snapshot = Some tall_snapshot; instance_cursor = 0 } in
   let ko_hints = UI.overview_hints ~ko:true view in
   let en_hints = UI.overview_hints view in
   check bool "default overview hints stay English" true (List.mem "Enter:open" en_hints);
   check bool "Korean overview hints localize navigation" true (List.mem "Enter:열기" ko_hints);
-  check bool "Korean overview renders Bottom Sheet top edge and localized heading" true
-    (List.exists
-       (fun line ->
-         let plain = Masc_tui_theme.strip_sgr line in
-         String.starts_with ~prefix:"╭─" plain)
-       ko_lines);
-  List.iter
-    (fun line ->
-      let plain = Masc_tui_theme.strip_sgr line in
-      check bool "Korean overview row fits 100 cells" true
-        (Masc_tui_message_layout.display_width plain <= 100);
-      check bool "Korean overview strips raw control bytes" false
-        (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) plain))
-    ko_lines;
-  let failed_worker = { worker with phase = UI.Row.Failed "bad\nline\x07" } in
-  let failed_snap = { snapshot with instances = [ failed_worker ] } in
-  let failed_lines =
-    UI.lines ~ko:true ~height:24 ~width:100 { view with snapshot = Some failed_snap }
-  in
   let contains ~needle haystack =
     let nlen = String.length needle and hlen = String.length haystack in
     let rec at i =
@@ -2307,18 +2298,77 @@ let ko_localization_and_overview_bottom_sheet () =
     in
     at 0
   in
-  check bool "Failed instance uses Failed mark, not Settled" true
+  let has_sheet_top lines =
+    List.exists
+      (fun line -> String.starts_with ~prefix:"╭─" (Masc_tui_theme.strip_sgr line))
+      lines
+  in
+  let tall_frame = UI.viewport_frame ~ko:true ~height:20 ~width:100 tall_view in
+  check bool "tall worker list genuinely overflows 20-row viewport" true
+    (tall_frame.UI.total_list_rows > 20);
+  check bool "docked Bottom Sheet is non-empty at scroll = 0" true
+    (tall_frame.UI.sheet_rows <> []);
+  check bool "docked Bottom Sheet renders rounded top edge even when list overflows" true
+    (has_sheet_top tall_frame.UI.sheet_rows);
+  check int "list_budget reserves exact sheet height"
+    (20 - List.length tall_frame.UI.sheet_rows) tall_frame.UI.list_budget;
+  check int "tall list fills list_budget exactly"
+    tall_frame.UI.list_budget (List.length tall_frame.UI.list_rows);
+  check int "docked list + sheet fills viewport height exactly" 20
+    (List.length tall_frame.UI.list_rows + List.length tall_frame.UI.sheet_rows);
+  check bool "scroll-windowed list_rows does not embed Bottom Sheet" false
+    (has_sheet_top (List.map snd tall_frame.UI.list_rows));
+  check bool "UI.lines does not embed Bottom Sheet inside scrollable document" false
+    (has_sheet_top (UI.lines ~ko:true ~height:20 ~width:100 tall_view));
+  let scrolled_frame =
+    UI.viewport_frame ~ko:true ~height:20 ~width:100 { tall_view with scroll = 8 }
+  in
+  check bool "scrolled tall list advances scroll window" true
+    (scrolled_frame.UI.scroll > 0);
+  check (list string) "docked Bottom Sheet stays pinned while list scrolls"
+    tall_frame.UI.sheet_rows scrolled_frame.UI.sheet_rows;
+  let short_frame = UI.viewport_frame ~ko:true ~height:14 ~width:100 view in
+  check int "short viewport (< 16) omits docked Bottom Sheet" 0
+    (List.length short_frame.UI.sheet_rows);
+  check int "short viewport gives full budget to list_rows" 14
+    short_frame.UI.list_budget;
+  check bool "short viewport keeps selected description inline in list_rows" true
+    (List.exists
+       (fun (_, line) -> contains ~needle:"Handles browser checks" (Masc_tui_theme.strip_sgr line))
+       short_frame.UI.list_rows);
+  let suppressed_frame =
+    UI.viewport_frame ~ko:true ~allow_docked_sheet:false ~height:20 ~width:100 tall_view
+  in
+  check int "suppressed sheet returns empty sheet_rows" 0
+    (List.length suppressed_frame.UI.sheet_rows);
+  check int "suppressed sheet gives full viewport budget to list_rows" 20
+    suppressed_frame.UI.list_budget;
+  let check_clean_rows label rows =
+    List.iter
+      (fun line ->
+        let plain = Masc_tui_theme.strip_sgr line in
+        check bool (label ^ " fits 100 cells") true
+          (Masc_tui_message_layout.display_width plain <= 100);
+        check bool (label ^ " strips raw control bytes") false
+          (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) plain))
+      rows
+  in
+  check_clean_rows "Korean tall list_rows" (List.map snd tall_frame.UI.list_rows);
+  check_clean_rows "Korean docked sheet_rows" tall_frame.UI.sheet_rows;
+  let failed_worker = { worker with phase = UI.Row.Failed "bad\nline\x07" } in
+  let failed_snap = { snapshot with instances = [ failed_worker ] } in
+  let failed_frame =
+    UI.viewport_frame ~ko:true ~height:24 ~width:100
+      { view with snapshot = Some failed_snap }
+  in
+  check bool "Failed instance docked Bottom Sheet uses Failed mark, not Settled" true
     (List.exists
        (fun line ->
          let plain = Masc_tui_theme.strip_sgr line in
          String.starts_with ~prefix:"╭─" plain && contains ~needle:"\xe2\x9c\x95" plain)
-       failed_lines);
-  List.iter
-    (fun line ->
-      let plain = Masc_tui_theme.strip_sgr line in
-      check bool "Failed overview strips raw control bytes" false
-        (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) plain))
-    failed_lines
+       failed_frame.UI.sheet_rows);
+  check_clean_rows "Failed list_rows" (List.map snd failed_frame.UI.list_rows);
+  check_clean_rows "Failed sheet_rows" failed_frame.UI.sheet_rows
 
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "Korean localization and overview Bottom Sheet render cleanly" `Quick

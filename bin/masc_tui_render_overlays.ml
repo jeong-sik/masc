@@ -2314,16 +2314,24 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
           (Masc_tui_lane_addons.overview_hints ~ko:(state.ui_language = Lang_ko) view))
     ~body:(fun ~budget c ->
       let inner_width = framed_inner_width cols in
-      let lines =
-        Masc_tui_lane_addons.lines_with_selection ~ko:(state.ui_language = Lang_ko)
+      let ({ Masc_tui_lane_addons.list_rows; scroll; list_budget; total_list_rows; sheet_rows }
+            : Masc_tui_lane_addons.viewport_frame) =
+        Masc_tui_lane_addons.viewport_frame
+          ~ko:(state.ui_language = Lang_ko)
+          ~allow_docked_sheet:(Option.is_none progress_sheet)
           ~height:budget ~width:inner_width view
       in
-      let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in
       Option.iter c.position
-        (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total:(List.length lines));
-      lines
-      |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
-      |> List.iter (fun (selected, line) ->
-           if selected then c.push_selected (Masc_tui_theme.strip_sgr line)
-           else c.push line))
+        (Masc_tui_value.Position.window ~first:scroll ~shown:list_budget ~total:total_list_rows);
+      List.iter
+        (fun (selected, line) ->
+          if selected then c.push_selected (Masc_tui_theme.strip_sgr line)
+          else c.push line)
+        list_rows;
+      if sheet_rows <> [] then begin
+        for _ = List.length list_rows + 1 to list_budget do
+          c.push_empty ()
+        done;
+        List.iter c.push sheet_rows
+      end)
 

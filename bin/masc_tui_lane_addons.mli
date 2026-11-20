@@ -295,6 +295,28 @@ val lines_with_selection : ?ko:bool -> ?height:int -> ?failed_note:string -> wid
     full-row selection band on it. Two-pane Results rows leave selection false
     so the left-pane selection does not bleed across the vertical divider. *)
 
+type viewport_frame = {
+  list_rows : (bool * string) list;
+  scroll : int;
+  list_budget : int;
+  total_list_rows : int;
+  sheet_rows : string list;
+}
+(** A single viewport projection of the Add-ons screen: [list_rows] is the
+    scroll-windowed slice of the scrollable body fitting inside [list_budget]
+    rows, and [sheet_rows] is the fixed-height Overview Bottom Sheet docked
+    beneath it (empty outside Overview, when suppressed, or when the viewport
+    is too short/narrow to dock). *)
+
+val viewport_frame :
+  ?ko:bool ->
+  ?allow_docked_sheet:bool ->
+  ?failed_note:string ->
+  height:int ->
+  width:int ->
+  t ->
+  viewport_frame
+
 val instance_standing : off_requested:bool -> instance -> Masc_tui_lane_standing.t
 (** How a worker entry stands. [off_requested] is a declaration of the same
     installation switched off while the worker is still attached. An attached

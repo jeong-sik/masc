@@ -12,9 +12,12 @@
     one is installed ({!Domain_pool_ref.submit_cpu_or_inline}), so the
     caller's domain keeps running its other fibers meanwhile.
 
-    A term shorter than three characters matches no text through the trigram
-    tokenizer. It is quoted into the query like any other term and simply
-    contributes nothing; the caller's substring tiers still answer it. *)
+    A term shorter than three UTF-8 characters falls back to SQL [LIKE] candidate
+    filtering paired with {!String_util.contains_query_term_ci}: short ASCII word
+    terms (1–2 alphanumeric characters) enforce ASCII word boundaries (so [RC]
+    matches [RC는] and [RC-12] while excluding [source]/[SRC], and [no] excludes
+    [astronomy]), while short non-ASCII or punctuated terms keep case-insensitive
+    substring matching. *)
 
 type error = Index_unavailable of string
 

@@ -140,7 +140,39 @@ type row_filter =
   | All_rows
   | Excluding of { owner : string; limit : int }
 
-let search db ~count ~filter compiled =
+let count_short_term_hits claim short_terms =
+  List.fold_left
+    (fun acc term -> if String_util.contains_query_term_ci claim term then acc + 1 else acc)
+    0
+    short_terms
+;;
+
+let compare_hit (oa, sa) (ob, sb) =
+  match Float.compare sa sb with
+  | 0 -> Int.compare oa ob
+  | c -> c
+;;
+
+let take_prefix limit items =
+  let rec loop acc left = function
+    | [] -> List.rev acc
+    | _ when left <= 0 -> List.rev acc
+    | x :: rest -> loop (x :: acc) (left - 1) rest
+  in
+  loop [] limit items
+;;
+
+let column_opt_double statement col =
+  match Sqlite3.column statement col with
+  | Sqlite3.Data.NULL -> Ok None
+  | Sqlite3.Data.FLOAT value -> Ok (Some value)
+  | Sqlite3.Data.INT value -> Ok (Some (Int64.to_float value))
+  | Sqlite3.Data.NONE | Sqlite3.Data.TEXT _ | Sqlite3.Data.BLOB _ ->
+    Error (Index_unavailable "memory index returned non-numeric BM25 score")
+;;
+
+let search db ~claims ~filter compiled =
+  let count = Array.length claims in
   let like_count = List.length compiled.short_terms in
   let* sql =
     match compiled.trigram_expr, compiled.short_terms with
@@ -158,53 +190,41 @@ let search db ~count ~filter compiled =
       let like_terms =
         List.init like_count (fun i -> Printf.sprintf "claim LIKE ?%d ESCAPE '\\'" (i + 1))
       in
-      let score_expr = "-(" ^ String.concat " + " like_terms ^ ")" in
       let where_like = "(" ^ String.concat " OR " like_terms ^ ")" in
       Ok
         (match filter with
          | All_rows ->
-           Printf.sprintf
-             "SELECT ordinal, %s FROM memory_search WHERE %s ORDER BY 2, ordinal"
-             score_expr
-             where_like
+           Printf.sprintf "SELECT ordinal FROM memory_search WHERE %s" where_like
          | Excluding _ ->
            Printf.sprintf
-             "SELECT ordinal, %s FROM memory_search WHERE %s AND owner != ?%d ORDER BY 2, ordinal LIMIT ?%d"
-             score_expr
+             "SELECT ordinal FROM memory_search WHERE %s AND owner != ?%d"
              where_like
-             (like_count + 1)
-             (like_count + 2))
+             (like_count + 1))
     | Some _, _ :: _ ->
       let like_terms =
         List.init like_count (fun i -> Printf.sprintf "(m.claim LIKE ?%d ESCAPE '\\')" (i + 1))
       in
-      let score_expr = "COALESCE(f.score, 0.0) - (" ^ String.concat " + " like_terms ^ ")" in
       let where_like = String.concat " OR " like_terms in
       let match_param = like_count + 1 in
       Ok
         (match filter with
          | All_rows ->
            Printf.sprintf
-             "SELECT m.ordinal, %s FROM memory_search AS m \
+             "SELECT m.ordinal, f.score FROM memory_search AS m \
               LEFT JOIN (SELECT rowid, bm25(memory_search) AS score FROM memory_search WHERE memory_search MATCH ?%d) AS f \
               ON m.rowid = f.rowid \
-              WHERE (f.rowid IS NOT NULL OR %s) \
-              ORDER BY 2, m.ordinal"
-             score_expr
+              WHERE (f.rowid IS NOT NULL OR %s)"
              match_param
              where_like
          | Excluding _ ->
            Printf.sprintf
-             "SELECT m.ordinal, %s FROM memory_search AS m \
+             "SELECT m.ordinal, f.score FROM memory_search AS m \
               LEFT JOIN (SELECT rowid, bm25(memory_search) AS score FROM memory_search WHERE memory_search MATCH ?%d) AS f \
               ON m.rowid = f.rowid \
-              WHERE (f.rowid IS NOT NULL OR %s) AND m.owner != ?%d \
-              ORDER BY 2, m.ordinal LIMIT ?%d"
-             score_expr
+              WHERE (f.rowid IS NOT NULL OR %s) AND m.owner != ?%d"
              match_param
              where_like
-             (match_param + 1)
-             (match_param + 2))
+             (match_param + 1))
   in
   with_statement
     db
@@ -242,8 +262,9 @@ let search db ~count ~filter compiled =
               Ok (idx + 1))
        in
        let* () =
-         match filter with
-         | Excluding { owner; limit } ->
+         match filter, compiled.short_terms with
+         | All_rows, _ -> Ok ()
+         | Excluding { owner; limit }, [] ->
            let* () =
              check
                db
@@ -254,7 +275,11 @@ let search db ~count ~filter compiled =
              db
              "bind memory result limit"
              (Sqlite3.bind statement (next_param + 1) (Sqlite3.Data.INT (Int64.of_int limit)))
-         | All_rows -> Ok ()
+         | Excluding { owner; limit = (_ : int) }, _ :: _ ->
+           check
+             db
+             "bind excluded memory owner"
+             (Sqlite3.bind statement next_param (Sqlite3.Data.TEXT owner))
        in
        let rec rows hits =
          match Sqlite3.step statement with
@@ -263,8 +288,28 @@ let search db ~count ~filter compiled =
            let ordinal = Sqlite3.column_int statement 0 in
            if ordinal < 0 || ordinal >= count
            then Error (Index_unavailable "memory index returned an ordinal outside its input")
-           else rows ((ordinal, Sqlite3.column_double statement 1) :: hits)
-         | Sqlite3.Rc.DONE -> Ok (List.rev hits)
+           else (
+             match compiled.trigram_expr, compiled.short_terms with
+             | _, [] -> rows ((ordinal, Sqlite3.column_double statement 1) :: hits)
+             | None, short_terms ->
+               let short_hits = count_short_term_hits claims.(ordinal) short_terms in
+               if short_hits > 0
+               then rows ((ordinal, -. float_of_int short_hits) :: hits)
+               else rows hits
+             | Some _, short_terms ->
+               let* trigram_score = column_opt_double statement 1 in
+               let short_hits = count_short_term_hits claims.(ordinal) short_terms in
+               if Option.is_some trigram_score || short_hits > 0
+               then
+                 let score = Option.value trigram_score ~default:0.0 -. float_of_int short_hits in
+                 rows ((ordinal, score) :: hits)
+               else rows hits)
+         | Sqlite3.Rc.DONE ->
+           (match compiled.short_terms, filter with
+            | [], (All_rows | Excluding _) -> Ok (List.rev hits)
+            | _ :: _, All_rows -> Ok (List.sort compare_hit hits)
+            | _ :: _, Excluding { owner = (_ : string); limit } ->
+              Ok (take_prefix limit (List.sort compare_hit hits)))
          | Sqlite3.Rc.OK | Sqlite3.Rc.ERROR | Sqlite3.Rc.INTERNAL | Sqlite3.Rc.PERM
          | Sqlite3.Rc.ABORT | Sqlite3.Rc.BUSY | Sqlite3.Rc.LOCKED | Sqlite3.Rc.NOMEM
          | Sqlite3.Rc.READONLY | Sqlite3.Rc.INTERRUPT | Sqlite3.Rc.IOERR | Sqlite3.Rc.CORRUPT
@@ -302,6 +347,7 @@ let rank_many_with ~queries ~texts =
        caller's fiber cannot yield inside it. The workspace curator ranks the
        whole workspace ledger: on domain 0 that held the server's HTTP answers
        and logs for tens of seconds (2026-10-07). *)
+    let claims = Array.of_list (List.map snd texts) in
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ @@ fun () ->
     (try
        with_database (Sqlite3.db_open ":memory:") (fun db ->
@@ -310,11 +356,11 @@ let rank_many_with ~queries ~texts =
            | [] ->
              Ok
                ( List.rev results
-               , { index_builds = 1; indexed_rows = List.length texts; queries_executed = executed }
+               , { index_builds = 1; indexed_rows = Array.length claims; queries_executed = executed }
                )
            | (_, None) :: rest -> search_all ([] :: results) executed rest
            | (filter, Some plan) :: rest ->
-             let* ranked = search db ~count:(List.length texts) ~filter plan in
+             let* ranked = search db ~claims ~filter plan in
              search_all (ranked :: results) (executed + 1) rest
          in
          search_all [] 0 compiled)
@@ -360,6 +406,7 @@ let close_db_in_pool db =
    run one after another, so the database is never used by two at once and
    [Sqlite3.db_close] never runs on the caller's Eio scheduler domain. *)
 let with_excluding_owners ~texts ~max_results f =
+  let claims = Array.of_list (List.map snd texts) in
   let opened = ref None in
   let stats = ref no_work in
   let table () =
@@ -378,7 +425,7 @@ let with_excluding_owners ~texts ~max_results f =
       in
       opened := Some db;
       stats := { !stats with index_builds = !stats.index_builds + 1;
-                             indexed_rows = !stats.indexed_rows + List.length texts };
+                             indexed_rows = !stats.indexed_rows + Array.length claims };
       Ok db
   in
   let rank queries =
@@ -397,7 +444,7 @@ let with_excluding_owners ~texts ~max_results f =
               let* ranked =
                 search
                   db
-                  ~count:(List.length texts)
+                  ~claims
                   ~filter:(Excluding { owner; limit = max_results })
                   plan
               in

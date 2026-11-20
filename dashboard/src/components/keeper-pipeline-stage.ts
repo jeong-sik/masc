@@ -21,10 +21,10 @@ const STAGES: { key: PipelineStage; label: string }[] = [
  * Compact badge variant for roster cards.
  * Shows only the current stage as a small pill.
  *
- * Note: A wider `PipelineStageBar` once lived here. RFC-0046 removed
- * its sole caller (keeper detail) in favour of the FsmHub composite
- * snapshot; the badge survives because agent-monitor / fleet roster
- * still need a one-axis stage hint outside the FSM hub.
+ * Note: A wider `PipelineStageBar` once lived here. Its sole caller
+ * (keeper detail) moved to the FsmHub composite snapshot; the badge
+ * survives because agent-monitor still needs a one-axis stage hint
+ * outside the FSM hub.
  */
 export function PipelineStageBadge({
   stage,

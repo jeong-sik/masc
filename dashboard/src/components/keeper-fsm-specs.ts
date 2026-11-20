@@ -68,8 +68,8 @@ const TURN_FSM_STATE_ALIASES: Readonly<Record<string, KeeperTurnFsmState>> = {
 
 // 19 canonical turn_phase transitions. Mirrors the GADT enumeration in
 // `module Turn_phase_transition` in
-// `lib/keeper_registry/keeper_registry_types_turn_phase.ml` (RFC-0072
-// Phase 4b/5). Every constructor on the GADT corresponds to one
+// `lib/keeper_registry/keeper_registry_types_turn_phase.ml`. Every
+// constructor on the GADT corresponds to one
 // edge here; adding a new constructor in OCaml must be paired with a new
 // edge in this list, otherwise the dashboard visualization hides a real
 // transition the runtime can take. The previous list omitted the four

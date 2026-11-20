@@ -1,9 +1,9 @@
 // MASC Dashboard — retained redacted execution records and the next prompt.
 //
-// The server has carried these four views since RFC-0366 and the raw-trace
-// reader landed, but nothing rendered them: the routes, the decoders and their
-// tests were all green with zero consumers, so the only way to read a turn was
-// curl. This is the consumer.
+// The server has carried these four views since the operator note and the
+// raw-trace reader landed, but nothing rendered them: the routes, the decoders
+// and their tests were all green with zero consumers, so the only way to read a
+// turn was curl. This is the consumer.
 //
 // Read-only except the operator note, which is the one place an operator can
 // put a sentence in front of the next turn.

@@ -5,8 +5,8 @@
    Graphiti #1728, and runtime recall telemetry code-reviewer 0/925).
 
    Verifies two contracts deterministically without model calls:
-   1. Curated synthetic corpus scored via [Librarian_scoring] and settled via
-      [Librarian_plan] covering:
+   1. Curated 12-case synthetic corpus scored via [Librarian_scoring] and settled
+      via [Librarian_plan] covering:
       - Dated usable-until memories with closed unit timestamps BEFORE target
         date (must NOT be dropped, both with new facts and as a no-op).
       - Dated usable-until memories whose closed unit timestamps and event
@@ -27,11 +27,12 @@
         (arXiv 2609.36457, arXiv 2608.11775) and dual-kept constraint +
         claim-prose [working_state] bridge (arXiv 2608.22752,
         code-reviewer 0/925 recall).
-   2. Prompt contract verification for [config/prompts/librarian.ask.md]:
-      exists (and legacy layer-numbered [librarian-l6.md] removed), registers
-      and renders via [Prompt_registry] with zero undeclared template
-      variables, aligns with [Librarian_answer] wire keys plus all empirical
-      L6g rules, and leaves legacy [config/prompts/librarian.md] untouched. *)
+      - Paired unknowing-reply non-erasure vs explicit operator retraction
+        with original claim language preserved (Ollama 18936 regression).
+   2. Legacy prompt guard and PR coexistence boundary: leaves
+      [config/prompts/librarian.md] untouched (and confirms neither removed
+      [librarian-l6.md] nor L6-stacked [librarian.ask.md] owned by PR #53583
+      are duplicated here). *)
 
 open Alcotest
 module Answer = Masc.Librarian_answer
@@ -81,38 +82,43 @@ let board_ref_post =
 
 let observed_basis_json = {|{"kind":"observed"}|}
 
+let json_str s = Yojson.Safe.to_string (`String s)
+
 let observed_board_basis_json post_id =
-  Printf.sprintf {|{"kind":"observed","board":{"post_id":%S}}|} post_id
+  Printf.sprintf {|{"kind":"observed","board":{"post_id":%s}}|} (json_str post_id)
 ;;
 
 let answer_json ?(working_state = "null") ops =
   Printf.sprintf
-    {|{"question":%S,"question_end":%S,"working_state":%s,"ops":[%s]}|}
-    front back working_state (String.concat "," ops)
+    {|{"question":%s,"question_end":%s,"working_state":%s,"ops":[%s]}|}
+    (json_str front) (json_str back) working_state (String.concat "," ops)
 ;;
 
 let op_add ?(category = "fact") ?(basis = observed_basis_json) ?(from = [ "u1" ]) claim =
   Printf.sprintf
-    {|{"op":"add","claim":%S,"category":%S,"basis":%s,"from":[%s]}|}
-    claim category basis (String.concat "," (List.map (Printf.sprintf "%S") from))
+    {|{"op":"add","claim":%s,"category":%s,"basis":%s,"from":[%s]}|}
+    (json_str claim) (json_str category) basis
+    (String.concat "," (List.map json_str from))
 ;;
 
 let op_drop ref_ reason =
-  Printf.sprintf {|{"op":"drop","ref":%S,"reason":%S}|} ref_ reason
+  Printf.sprintf {|{"op":"drop","ref":%s,"reason":%s}|} (json_str ref_) (json_str reason)
 ;;
 
 let op_merge ?(category = "fact") ?(basis = observed_basis_json) ?(from = []) refs claim =
   Printf.sprintf
-    {|{"op":"merge","refs":[%s],"claim":%S,"category":%S,"basis":%s,"from":[%s]}|}
-    (String.concat "," (List.map (Printf.sprintf "%S") refs))
-    claim category basis (String.concat "," (List.map (Printf.sprintf "%S") from))
+    {|{"op":"merge","refs":[%s],"claim":%s,"category":%s,"basis":%s,"from":[%s]}|}
+    (String.concat "," (List.map json_str refs))
+    (json_str claim) (json_str category) basis
+    (String.concat "," (List.map json_str from))
 ;;
 
 let op_revise ?(category = "fact") ?(basis = observed_basis_json) ?(from = [ "u1" ]) ref_ claim
   =
   Printf.sprintf
-    {|{"op":"revise","ref":%S,"claim":%S,"category":%S,"basis":%s,"from":[%s]}|}
-    ref_ claim category basis (String.concat "," (List.map (Printf.sprintf "%S") from))
+    {|{"op":"revise","ref":%s,"claim":%s,"category":%s,"basis":%s,"from":[%s]}|}
+    (json_str ref_) (json_str claim) (json_str category) basis
+    (String.concat "," (List.map json_str from))
 ;;
 
 let read_scored label (case : Scoring.case) text =
@@ -428,6 +434,67 @@ let ans_progressive_merge_and_bridge =
     ]
 ;;
 
+(* Case 11: Paired contrast (A) — Keeper unknowing reply ("모른다" / "확인 불가")
+   without explicit unit contradiction MUST produce empty [ops: []] rather than
+   dropping or rewriting existing Memory facts into English boilerplate. *)
+let c11_ci_owner =
+  held ~first_seen:60.0 ~category:Types.Constraint
+    "Core auth CI requires OCAMLRUNPARAM=b on macOS runners."
+;;
+
+let c11_endpoint =
+  held ~first_seen:95.0 ~category:Types.Fact
+    "Primary staging endpoint is staging-eu2.internal."
+;;
+
+let case_unknowing_reply_non_erasure : Scoring.case =
+  { name = "keeper unknowing reply keeps existing facts untouched"
+  ; question = asked
+  ; shown = shown_of [ c11_ci_owner; c11_endpoint ]
+  ; facts = [ c11_ci_owner; c11_endpoint ]
+  ; planted = []
+  ; must_keep = []
+  }
+;;
+
+let ans_unknowing_reply_non_erasure = answer_json []
+
+(* Case 12: Paired contrast (B) — Explicit operator retraction + unit host update
+   drops the lifted freeze rule and revises only the superseded endpoint while
+   preserving original claim language and unrelated standing preferences. *)
+let c12_freeze_rule =
+  held ~first_seen:90.0 ~category:Types.Constraint
+    "화요일 CI 핫픽스 머지 동결 규칙이 활성화되어 있습니다."
+;;
+
+let c12_old_host =
+  held ~first_seen:110.0 ~category:Types.Fact
+    "스테이징 API 호스트는 https://api-eu1.staging.internal 입니다."
+;;
+
+let c12_style =
+  held ~first_seen:70.0 ~category:Types.Preference
+    "보고는 한국어 핵심 요약 위주로 작성합니다."
+;;
+
+let case_explicit_retraction_and_lang_keep : Scoring.case =
+  { name = "explicit operator retraction drops target and revises in unit language"
+  ; question = asked
+  ; shown = shown_of [ c12_freeze_rule; c12_old_host; c12_style ]
+  ; facts = [ c12_freeze_rule; c12_old_host; c12_style ]
+  ; planted = [ "api-eu2.staging.internal" ]
+  ; must_keep = []
+  }
+;;
+
+let ans_explicit_retraction_and_lang_keep =
+  answer_json
+    [ op_drop "m1" "Operator explicitly lifted the Tuesday CI hotfix freeze rule."
+    ; op_revise ~category:"fact" ~from:[ "u1" ] "m2"
+        "스테이징 API 호스트는 https://api-eu2.staging.internal 입니다."
+    ]
+;;
+
 let corpus : (Scoring.case * string) list =
   [ case_upcoming_usable_until, ans_upcoming_usable_until
   ; case_upcoming_usable_until_noop, ans_upcoming_usable_until_noop
@@ -439,6 +506,8 @@ let corpus : (Scoring.case * string) list =
   ; case_keeper_echo_noop, ans_keeper_echo_noop
   ; case_targeted_contradiction_relative_date, ans_targeted_contradiction_relative_date
   ; case_progressive_merge_and_bridge, ans_progressive_merge_and_bridge
+  ; case_unknowing_reply_non_erasure, ans_unknowing_reply_non_erasure
+  ; case_explicit_retraction_and_lang_keep, ans_explicit_retraction_and_lang_keep
   ]
 ;;
 
@@ -664,13 +733,70 @@ let test_progressive_merge_and_bridge () =
   check bool "progressive merged fact inherits earliest first_seen (80.0)" true merged_earliest_kept
 ;;
 
+let test_unknowing_reply_non_erasure_and_retraction () =
+  let unknowing_reading =
+    read_scored "unknowing reply" case_unknowing_reply_non_erasure
+      ans_unknowing_reply_non_erasure
+  in
+  check int "unknowing reply emits 0 ops" 0 unknowing_reading.ops;
+  check int "no ops left out on unknowing reply" 0
+    (List.length unknowing_reading.not_applied);
+  check bool "unknowing reply leaves memory unchanged" false unknowing_reading.changed;
+  let unknowing_plan =
+    settle_plan "unknowing reply" case_unknowing_reply_non_erasure
+      ans_unknowing_reply_non_erasure
+  in
+  check bool "CI constraint kept on unknowing reply" true
+    (has_claim c11_ci_owner.claim unknowing_plan.facts);
+  check bool "endpoint fact kept on unknowing reply" true
+    (has_claim c11_endpoint.claim unknowing_plan.facts);
+  check (list string) "unknowing reply drops nothing" [] (dropped_claims unknowing_plan);
+  (* Contrast: overwriting m1 with English failure boilerplate destroys c11_ci_owner. *)
+  let bad_overwrite =
+    answer_json
+      [ op_revise ~category:"constraint" ~from:[ "u1" ] "m1"
+          "Provided context lacks CI failure details."
+      ]
+  in
+  let bad_plan =
+    settle_plan "unknowing boilerplate overwrite" case_unknowing_reply_non_erasure
+      bad_overwrite
+  in
+  check bool "boilerplate revise erases original constraint" false
+    (has_claim c11_ci_owner.claim bad_plan.facts);
+  let retract_reading =
+    read_scored "explicit retraction" case_explicit_retraction_and_lang_keep
+      ans_explicit_retraction_and_lang_keep
+  in
+  check int "explicit retraction + host revise emits 2 ops" 2 retract_reading.ops;
+  check int "no ops left out on retraction" 0 (List.length retract_reading.not_applied);
+  check bool "explicit retraction changes memory" true retract_reading.changed;
+  check int "updated staging host recovered" 1 retract_reading.recovered;
+  let retract_plan =
+    settle_plan "explicit retraction" case_explicit_retraction_and_lang_keep
+      ans_explicit_retraction_and_lang_keep
+  in
+  check (list string) "lifted freeze rule dropped"
+    [ c12_freeze_rule.claim ] (dropped_claims retract_plan);
+  check bool "revised host preserves Korean unit phrasing" true
+    (has_claim "스테이징 API 호스트는 https://api-eu2.staging.internal 입니다."
+       retract_plan.facts);
+  check bool "unrelated Korean style preference kept untouched" true
+    (has_claim c12_style.claim retract_plan.facts);
+  (match retract_plan.effects.added with
+   | [ revised ] ->
+     check (float 0.0) "revised host preserves original first_seen" 110.0
+       revised.first_seen
+   | added -> failf "expected one revised host fact, got %d" (List.length added))
+;;
+
 let expected_corpus_tally =
-  {|answers 10
+  {|answers 12
 thrown away 0
-ops 11
+ops 13
 ops left out 0
-answers that changed Memory 8
-planted 9, in Memory afterwards 9
+answers that changed Memory 9
+planted 10, in Memory afterwards 10
 merged away 8, kept by the merge 8
 |}
 ;;
@@ -688,14 +814,15 @@ let test_corpus_tally_pinned () =
     tally.merge_expected tally.merge_kept
 ;;
 
-let test_prompt_contract () =
+let test_legacy_prompt_untouched () =
   let ask_path = Masc_test_deps.source_path "config/prompts/librarian.ask.md" in
   let old_l6_path = Masc_test_deps.source_path "config/prompts/librarian-l6.md" in
   let legacy_path = Masc_test_deps.source_path "config/prompts/librarian.md" in
-  check bool "config/prompts/librarian.ask.md exists" true (Sys.file_exists ask_path);
+  (* Prompt file ownership lives exclusively in PR #53583 so this PR can coexist cleanly. *)
+  check bool "config/prompts/librarian.ask.md is omitted here (owned by #53583)"
+    false (Sys.file_exists ask_path);
   check bool "old config/prompts/librarian-l6.md removed" false (Sys.file_exists old_l6_path);
   check bool "config/prompts/librarian.md exists" true (Sys.file_exists legacy_path);
-  let ask_text = Masc_test_deps.read_file ask_path in
   let legacy_text = Masc_test_deps.read_file legacy_path in
   (* Verify legacy prompt remains untouched with legacy wire schema tokens. *)
   List.iter
@@ -703,82 +830,31 @@ let test_prompt_contract () =
        check bool ("legacy librarian.md retains " ^ legacy_token) true
          (contains_substring ~needle:legacy_token legacy_text))
     [ "new_claims"; "supersedes"; "absorbs"; "working_contexts"; "admission_policy" ];
-  (* Verify librarian.ask.md aligns with Librarian_answer wire schema & empirical L6g rules. *)
-  List.iter
-    (fun wire_or_rule_token ->
-       check bool ("librarian.ask.md documents contract token " ^ wire_or_rule_token) true
-         (contains_substring ~needle:wire_or_rule_token ask_text))
-    [ {|"question"|}
-    ; {|"question_end"|}
-    ; {|"working_state"|}
-    ; {|"ops"|}
-    ; {|"ops": []|}
-    ; "빈 답 금지 규정을 따르지 않습니다"
-    ; {|"add"|}
-    ; {|"drop"|}
-    ; {|"merge"|}
-    ; {|"revise"|}
-    ; {|"seen"|}
-    ; {|{"op": "seen", "ref": "m5", "from": ["u1"]}|}
-    ; {|"from": []|}
-    ; "하나 이상"
-    ; "자기 발언에서 그대로 인용·되풀이한 것은 다시 본 것이 아닙니다"
-    ; "last_seen"
-    ; {|"observed"|}
-    ; "m1"
-    ; "u1"
-    ; "closed_at"
-    ; "closed_after_admission"
-    ; "unattributed"
-    ; "runtime_context"
-    ; "missing"
-    ; "tool_observation"
-    ; "no_wall_clock_death"
-    ; "상대 날짜"
-    ; "절대 날짜"
-    ; "진행형"
-    ; "한정어"
-    ; "곁다리 fact"
-    ; "원천에서 다시 얻을 수 있는 세부"
-    ; "`claim` 내용 그대로"
-    ; "Memory fact 로도 함께 두고"
-    ];
-  (* Verify librarian.ask.md does not reintroduce legacy output schema keys. *)
-  List.iter
-    (fun legacy_output_key ->
-       check bool ("librarian.ask.md omits legacy output key " ^ legacy_output_key) false
-         (contains_substring ~needle:legacy_output_key ask_text))
-    [ {|"new_claims"|}
-    ; {|"working_contexts"|}
-    ; {|"supersedes"|}
-    ; {|"absorbs"|}
-    ];
-  (* Verify Prompt_registry registration and rendering with zero template drift. *)
+  (* Verify Prompt_registry loads legacy prompt cleanly without duplicating librarian.ask. *)
   Prompt_registry.clear ();
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   Masc.Prompt_defaults.init ();
   Fun.protect
     ~finally:Prompt_registry.clear
     (fun () ->
-       check bool "librarian.ask resolves from File source" true
+       check bool "librarian.ask key is Missing on amendment-only branch" true
          (match Prompt_registry.prompt_source "librarian.ask" with
-          | Prompt_registry.File -> true
-          | Prompt_registry.Override | Prompt_registry.Missing -> false);
+          | Prompt_registry.Missing -> true
+          | Prompt_registry.File | Prompt_registry.Override -> false);
        check bool "old librarian-l6 key is Missing" true
          (match Prompt_registry.prompt_source "librarian-l6" with
           | Prompt_registry.Missing -> true
           | Prompt_registry.File | Prompt_registry.Override -> false);
-       (match Prompt_registry.render_prompt_template "librarian.ask" [] with
-        | Ok rendered ->
-          check bool "rendered librarian.ask prompt is non-empty" true
-            (String.trim rendered <> "")
-        | Error detail -> failf "librarian.ask failed to render: %s" detail);
-       let ask_issues =
+       check bool "legacy librarian key resolves from File source" true
+         (match Prompt_registry.prompt_source "librarian" with
+          | Prompt_registry.File -> true
+          | Prompt_registry.Override | Prompt_registry.Missing -> false);
+       let legacy_issues =
          Prompt_registry.validate_prompt_templates ()
-         |> List.filter (fun (key, (_ : string)) -> String.equal key "librarian.ask")
+         |> List.filter (fun (key, (_ : string)) -> String.equal key "librarian")
        in
-       check int "librarian.ask has zero undeclared template variables" 0
-         (List.length ask_issues))
+       check int "legacy librarian prompt has zero undeclared template variables" 0
+         (List.length legacy_issues))
 ;;
 
 let () =
@@ -800,9 +876,14 @@ let () =
             `Quick test_targeted_contradiction_relative_date
         ; test_case "progressive merge preservation and working_state bridge"
             `Quick test_progressive_merge_and_bridge
+        ; test_case "paired unknowing-reply non-erasure vs explicit operator retraction"
+            `Quick test_unknowing_reply_non_erasure_and_retraction
         ; test_case "synthetic corpus tally pinned via Librarian_scoring" `Quick
             test_corpus_tally_pinned
         ] )
-    ; "prompt_contract", [ test_case "librarian.ask.md wire & registry contract" `Quick test_prompt_contract ]
+    ; ( "legacy_prompt_guard"
+      , [ test_case "legacy librarian.md untouched and librarian.ask deferred to #53583"
+            `Quick test_legacy_prompt_untouched
+        ] )
     ]
 ;;

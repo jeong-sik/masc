@@ -21,7 +21,7 @@ related:
 
 이 문서는 RFC `#53148` (*Librarian 의 모델 호출은 제안만 하고, 반영은 Keeper 마다 하나인 쓰는 쪽이 기록 한 줄로 한다*), 병합·교정 시 가장 이른 `first_seen` 상속(`#53538`, `main` 반영 완료), 그리고 단위가 기존 fact 를 다시 말했을 때 문장 복사 없이 이름으로 재확인하는 `seen` op(`#53543`, `{"op":"seen","ref":"m5","from":["u1"]}`) 위에 놓이는 **두 가지 후속 스키마 개정안**을 정의한다.
 
-- **구현 연기 (Deferred Stack)**: 본 문서는 스키마 변경을 현재 L6g(`config/prompts/librarian.ask.md`, `test_librarian_l6g_scoring.ml`) PR 에서 **즉시 코드로 적용하지 않는다**. L6 (`feat/librarian-l6*`)와 `#53543` (`seen`) 스택이 병합된 뒤 그 위에 별도 스택 PR 로 올려 `Librarian_answer`, `Librarian_plan`, `Keeper_memory_os_types` 를 확장한다.
+- **구현 연기 (Deferred Stack) 및 파일 소유권 분리**: 본 문서는 스키마 변경을 현재 L6g 스택 PR 에서 **즉시 코드로 적용하지 않는다**. `config/prompts/librarian.ask.md` 정본 소유권은 L6 스택 PR `#53583` (`feat/librarian-l6g-on-l6c`) 에 두고(공존 충돌 방지), 이 PR(`#53577`)은 `main` 기반 결정적 `test_librarian_l6g_scoring.ml` 채점 스위트, 설계 청사진, 그리고 L6(`#53605`/`#53583`/`#53606`) + `#53543`(`seen`) 병합 뒤 그 위에 적층할 `Librarian_answer`, `Librarian_plan`, `Keeper_memory_os_types` 스키마 개정 초안을 제공한다.
 - **현행 L6g 유지 계약**: 스키마 개정 전까지 L6g 질문 프롬프트(`config/prompts/librarian.ask.md`, L10 컷오버에서 레이어 번호 의존을 없앤 기능 이름)는 `#53148` · `#53538` · `#53543` 와이어 계약(`question`, `question_end`, `working_state`, `ops` 의 `add`/`drop`/`merge`/`revise`/`seen` 및 빈 `"ops": []` 허용, 단일 `category`, `basis: { kind: "observed" }`, `seen` 시 `claim` 비복사·비어 있지 않은 `"from"` 필수·자기 말 되풀이 제외)과 정렬되며, `test_librarian_l6g_scoring.ml` 은 `main` 의 현행 4-op `Librarian_answer` 디코더 위에서 코퍼스 채점을 유지한다. `config/prompts/librarian.md` 레거시 경로는 건드리지 않는다.
 - **헌법 준수 (`docs/constitution.xml`)**:
   - `magic_number` / `budget_gate` 금지: 숫자·빈도·나이 임계값으로 승격하거나 삭제하지 않는다.
@@ -52,25 +52,26 @@ related:
 
 ### 1.2 L6g 고정 합성 코퍼스 채점 (`test/test_librarian_l6g_scoring.ml`, `Librarian_scoring`)
 
-`dune exec --root . test/test_librarian_l6g_scoring.exe` 실행을 통해 `Librarian_scoring` 으로 직접 측정한 결과 (`10` 개 합성 케이스: 쓸 날이 남은 기억 보존 + 변경 없음 + 완료된 쓸 날 기록 인과 삭제 + `Constraint`/`Preference` 교차 카테고리 `merge` + 상시 정체성 제약 대 일시 큐 스냅샷 + `revise` 및 `Read_item_alone` 가드레일 + Keeper 자기 되풀이 빈 `ops: []` + 표적 모순 해소·상대 날짜 절대화 + 진행형·수치 `merge` 보존 및 `working_state` 다리·제약 이중 보존):
+`dune exec --root . test/test_librarian_l6g_scoring.exe` 실행을 통해 `Librarian_scoring` 으로 직접 측정한 결과 (`12` 개 합성 케이스: 쓸 날이 남은 기억 보존 + 변경 없음 + 완료된 쓸 날 기록 인과 삭제 + `Constraint`/`Preference` 교차 카테고리 `merge` + 상시 정체성 제약 대 일시 큐 스냅샷 + `revise` 및 `Read_item_alone` 가드레일 + Keeper 자기 되풀이 빈 `ops: []` + 표적 모순 해소·상대 날짜 절대화 + 진행형·수치 `merge` 보존 및 `working_state` 다리·제약 이중 보존 + 쌍을 이룬 "모른다" 비삭제 대조 vs 운영자 명시적 철회 및 원문 언어 보존):
 
 ```text
-answers 10
+answers 12
 thrown away 0
-ops 11
+ops 13
 ops left out 0
-answers that changed Memory 8
-planted 9, in Memory afterwards 9
+answers that changed Memory 9
+planted 10, in Memory afterwards 10
 merged away 8, kept by the merge 8
 ```
 
-- **와이어·스크리닝 무손실**: `thrown away 0`, `ops left out 0` (10/10 유효 디코드 및 계획 반영).
-- **정보 회수율**: `planted 9, in Memory afterwards 9` (`9/9` 회복).
+- **와이어·스크리닝 무손실**: `thrown away 0`, `ops left out 0` (12/12 유효 디코드 및 계획 반영).
+- **정보 회수율**: `planted 10, in Memory afterwards 10` (`10/10` 회복).
 - **교차 카테고리 · 진행형 `merge` 보존**: `merged away 8, kept by the merge 8` (`8/8` 필수 토큰 보존; `Constraint` + `Preference` 합성이 스키마 거절 없이 `Constraint` 로 수용되며, 진행형·수치·날짜가 단순 현재로 납작해지지 않음).
 - **대조 검증**:
   - 동일 `upcoming_usable_until` 기억을 레거시 오판("일회성 체크포인트")으로 `drop` 하면 `c1_dated_hold` 가 즉시 삭제됨(`dropped_claims = [c1_dated_hold.claim]`).
   - 동일 `ref` 에 `revise` 와 `drop` 을 함께 적으면 두 번째 op 가 `Ref_used_twice` 로 걸러짐.
   - `Read_item_alone` (`shown.memory = None`) 에서 `drop` 또는 비-`null` `working_state` 를 쓰면 `Not_valid_alone` 으로 차단됨.
+  - `"모른다"` 턴에서 `m1` 을 `"Provided context lacks CI failure details."` 로 덮어쓰는 회귀 응답은 원본 제약을 소실시킴(`has_claim c11_ci_owner.claim bad_plan.facts = false`).
 
 단, 현재 L6 (`main`) 의 `Librarian_answer.new_fact` 와 `Keeper_memory_os_types.fact` 에는 `category` 가 **단일 필드**로만 존재하므로, 교차 카테고리 병합 후에는 검색/회수 계층에서 보조 카테고리 색인(`preference` 등)이 문장 텍스트 안에만 남고 타입 필드로는 사라진다. 또한 기억 자체가 `Standing` 인지 `Bounded` 인지 구조화된 표시가 없어, 프롬프트 지침에만 의존해야 한다. 아래 두 개정안은 L6 위에 이 두 구조를 타입으로 추가한다.
 

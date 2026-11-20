@@ -360,14 +360,20 @@ let unanswered_token : Librarian_slot_outcome.unanswered -> string = function
    [Made] writes a line, so the counter is where the others are seen. *)
 type room_end =
   | Made
-  (** Its plan changes Memory or the working state, so it goes to the commit
-      log, whose failure stops the store as any commit's does. *)
+  (** Its line is on disk (§8.2 step 4), whether or not the snapshot was
+      written after it. *)
   | Proposed_nothing (** Its answer had no op, and kept the working state. *)
   | Left_out (** Every op it proposed was left out (§8.2). *)
   | Stale (** A direct write removed a fact while it was asked (§8.3). *)
   | Unanswered (** No slot answered. *)
   | Failed (** The ask failed before or during its walk. *)
-  | Store_stopped (** The snapshot is not the one the log names. *)
+  | Snapshot_refused
+  (** Its plan changes Memory, and the snapshot codec does not write the
+      result: no line, and reading rests as for any such commit. *)
+  | Store_stopped
+  (** The store stopped: the snapshot was not the one the log names when it
+      was asked or when its line was to be written, or the line could not be
+      written. *)
 
 let room_end_token = function
   | Made -> "made"
@@ -376,7 +382,15 @@ let room_end_token = function
   | Stale -> "stale"
   | Unanswered -> "unanswered"
   | Failed -> "failed"
+  | Snapshot_refused -> "snapshot_refused"
   | Store_stopped -> "store_stopped"
+;;
+
+let envelope_refusal_text : Librarian_envelope.refusal -> string = function
+  | Revision_not_next { snapshot; line } ->
+    Printf.sprintf "revision_not_next (snapshot %d, line %d)" snapshot line
+  | Facts_inconsistent detail -> "facts_inconsistent: " ^ detail
+  | Not_encodable detail -> "not_encodable: " ^ detail
 ;;
 
 let count_room place room_end =
@@ -414,9 +428,17 @@ let ended_room place t ~at store (asking : asking) : Room_result.t -> t = functi
        in
        if Store.changes store plan
        then (
-         count_room place Made;
-         settled t store (Store.commit_room store ~at ~question ~slot plan) ~after:(fun store ->
-           next_ask place t ~at store))
+         let committed = Store.commit_room store ~at ~question ~slot plan in
+         (* Counted by what the commit did: an answer is made once its line
+            is on disk. *)
+         (match committed with
+          | Committed { store = (_ : Store.t); line = (_ : Librarian_log.commit) }
+          | Committed_without_snapshot (_ : Librarian_log.commit) -> count_room place Made
+          | Stopped (_ : Store.stop) -> count_room place Store_stopped
+          | Not_a_snapshot refusal ->
+            room_not_committed place Snapshot_refused
+              (Printf.sprintf "the answer of %s: %s" slot (envelope_refusal_text refusal)));
+         settled t store committed ~after:(fun store -> next_ask place t ~at store))
        else (
          (match plan.effects.not_applied with
           | [] -> room_not_committed place Proposed_nothing ("the answer of " ^ slot)

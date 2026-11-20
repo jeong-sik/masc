@@ -200,7 +200,7 @@ type approval_change =
   | Installation_asks_changed of { declaration_id : string }
       (** [lane_addon_asks_changed] *)
 
-(** What a Keeper roster push says changed (RFC-0481 §3.2). *)
+(** What a Keeper roster push says changed. *)
 type roster_change =
   | Keeper_row_changed of { keeper : string }
       (** [keeper_row_changed]: that Keeper's row may have changed,
@@ -208,7 +208,7 @@ type roster_change =
   | Every_row_changed
       (** [keeper_roster_changed]: a value every row reads changed. *)
 
-(** What a Keeper turns push says changed (RFC-0481 §3.4, §3.5). Either one
+(** What a Keeper turns push says changed. Either one
     reads the turns again. *)
 type turn_change =
   | Turn_state

@@ -932,7 +932,7 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
         ]
         @ fusion_wrapped_block ~ko ~width ~indent:"    " failure.fj_error
   in
-  (* RFC-0284 judge nodes. The canonical [Judge] row above is the final
+  (* Judge nodes. The canonical [Judge] row above is the final
      synthesis; this block is the topology it came through -- first the
      observed shape as one line, then one card per first-pass lens.
      Meta/stage/final nodes stay in the shape line only: their output

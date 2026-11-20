@@ -67,12 +67,14 @@ type shown =
 
 (** What becomes of the Keeper's working state. *)
 type working_state =
-  | Kept
-  | Replaced of string (** [Replaced ""] clears it. *)
-  | Not_valid_alone
-  (** The answer replaced it, but the question had not shown it. It is kept:
-      an answer that did not see the working state cannot replace it. The
-      attempt is its own case so the commit line can record it. *)
+  | Kept (** The question showed it, and the answer kept it. *)
+  | Replaced of string
+  (** The question showed it, and the answer replaced it. [Replaced ""]
+      clears it. *)
+  | Alone of Librarian_log.alone_working_state
+  (** The question showed one item and not the working state, so it is
+      kept: an answer that did not see it cannot replace it. Which of the
+      two the answer did is what the commit line records. *)
 
 type t =
   { facts : fact list (** [Librarian_effects.apply ~at] of [effects]. *)

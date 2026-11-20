@@ -211,6 +211,7 @@ let input fixture tail : Ask.input =
   ; lane = fixture.lane
   ; resolved = fixture.resolved
   ; asked = Read_range All
+  ; bottom = Librarian_bottom.empty
   }
 ;;
 
@@ -227,7 +228,8 @@ let tail_of (state : Machine.t ref) () : Librarian_log.line option =
   match value.state with
   | Idle { store; seen_length = (_ : int option) }
   | Asking { store; asking = (_ : Machine.asking) }
-  | Resting store -> Some (Store.tail store)
+  | Resting store
+  | Refused_at_bottom store -> Some (Store.tail store)
   | Stopped (_ : Store.stop) -> None
 ;;
 
@@ -364,6 +366,49 @@ let test_a_size_refusal_is_the_slots_outcome () =
     (result_text (Ask.run fixture.env (input fixture (tail_of state))))
 ;;
 
+(* §7.4 「묻기는 bottom 을 받는다」: a slot with a size fact under the
+   question's id is not called, and its fact is its outcome. *)
+let test_a_slot_with_a_fact_is_not_called () =
+  with_fixture (refuse `Request_entity_too_large)
+  @@ fun fixture ->
+  let state = boot fixture in
+  let refused = "no answer: " ^ slot_id ^ " Refused (Sized Input_too_large)" in
+  let first = Ask.run fixture.env (input fixture (tail_of state)) in
+  check string "the first ask" refused (result_text first);
+  check int "calls the slot" 1 (Fixture.post_count fixture.server);
+  let bottom =
+    match first with
+    | No_answer { question; slots } ->
+      Librarian_bottom.learn Librarian_bottom.empty With_memory question.id slots
+    | Answered _ | Nothing_to_ask | Nothing_readable _ | Span_unknown _ | Memory_diverged _
+    | Snapshot_fault _ | Input_fault _ | Ask_failed _ -> fail "the first ask had an answer"
+  in
+  let again = Ask.run fixture.env { (input fixture (tail_of state)) with bottom } in
+  check string "the same question again" refused (result_text again);
+  check int "calls nothing" 1 (Fixture.post_count fixture.server)
+;;
+
+(* §7.4 「항목만 읽기」: the question shows the head item and neither Memory
+   nor the working state. *)
+let test_the_item_alone_is_sent_without_memory () =
+  with_fixture echo
+  @@ fun fixture ->
+  let state = boot fixture in
+  let result =
+    Ask.run fixture.env { (input fixture (tail_of state)) with asked = Read_item_alone }
+  in
+  check string "the slot answers" answered (result_text result);
+  check bool "no fact is named" true (Option.is_none (question_of result).shown.memory);
+  match Fixture.request_bodies fixture.server with
+  | [ body ] ->
+    let lines = String.split_on_char '\n' (String.concat "\n" (List.map snd (messages body))) in
+    let labelled label = List.exists (String.starts_with ~prefix:label) lines in
+    check bool "no memory line" false (labelled "memory:");
+    check bool "no working state line" false (labelled "working_state:");
+    check bool "the units line" true (labelled "units:")
+  | bodies -> failf "%d requests reached the provider" (List.length bodies)
+;;
+
 let test_a_slot_says_nothing () =
   with_fixture (refuse `Internal_server_error)
   @@ fun fixture ->
@@ -425,7 +470,7 @@ let test_a_direct_write_during_the_read_is_read_again () =
     if Int.equal !reads 1
     then (
       let next, answer =
-        Machine.write !state ~at:write_at ~by:Librarian_effects.Keeper ~trace:session
+        Machine.write fixture.place !state ~at:write_at ~by:Librarian_effects.Keeper ~trace:session
           (Librarian_direct.Remember
              { claim
              ; category = Keeper_memory_os_types.Constraint
@@ -507,6 +552,9 @@ let () =
     [ ( "slots"
       , [ test_case "a slot answers" `Quick test_a_slot_answers
         ; test_case "a size refusal is the slot's outcome" `Quick test_a_size_refusal_is_the_slots_outcome
+        ; test_case "a slot with a fact is not called" `Quick test_a_slot_with_a_fact_is_not_called
+        ; test_case "the item alone is sent without Memory" `Quick
+            test_the_item_alone_is_sent_without_memory
         ; test_case "a slot says nothing" `Quick test_a_slot_says_nothing
         ] )
     ; ( "memory"

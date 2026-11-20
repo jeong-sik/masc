@@ -620,6 +620,7 @@
   test_librarian_unread
   test_librarian_unit_content
   test_librarian_width
+  test_librarian_bottom
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask
@@ -977,6 +978,7 @@
   test_librarian_unread
   test_librarian_unit_content
   test_librarian_width
+  test_librarian_bottom
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask

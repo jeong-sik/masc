@@ -7,11 +7,14 @@ type reach =
   ; turn_log_offset : int
   }
 
-type asked = Read_range of Librarian_width.width
+type asked =
+  | Read_range of Librarian_width.width
+  | Read_item_alone
 
 type question =
   { id : Librarian_question_id.t
   ; shown : Librarian_plan.shown
+  ; basis : Digest.digest
   ; reach : reach
   ; trace : string
   ; missing : Librarian_unit.missing_at list

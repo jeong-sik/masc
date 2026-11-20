@@ -30,6 +30,9 @@ type input =
   ; resolved : Runtime_exact_output_registry.resolved_lane
   (** The lane's slots, from the publication [lane] was resolved under. *)
   ; asked : Librarian_read_result.asked (** What the writer asks for. *)
+  ; bottom : Librarian_bottom.t
+  (** The head item's size facts as the writer held them when the ask
+      started. A slot with one under the question's id is not called. *)
   }
 
 (** Asks once about every unit not yet read (§7.1, steps 1 to 6).
@@ -51,7 +54,13 @@ type input =
       read to its end. The question carries what was read
       ({!Librarian_width.offered}), and its reach ends where the last unit's
       read ended. A question with no item that can be read is
-      [Nothing_readable].
+      [Nothing_readable]. [Read_item_alone] reads the head item as
+      {!Librarian_width.head_item} does and shows it alone
+      ({!Librarian_question.Item_alone}); the snapshot is read as for any
+      question, and the question's [basis] names it.
+    + Leaves out every slot that has a size fact under the question's id in
+      [bottom] ({!Librarian_bottom.known}), HTTP and CLI alike. Their
+      outcomes are those facts. With no slot left, nothing is called.
     + Sends the question's text as one user message with no system prompt.
       The answer schema is the walk's requirement: the flow and a CLI run
       each write its sentence after the text. The HTTP slots go in the
@@ -64,7 +73,7 @@ type input =
     + The first answer accepted is [Answered]. Otherwise [No_answer] holds
       an outcome for every slot of [lane]: the HTTP slots, then the CLI
       slots, in declared order. A slot the walk did not reach is
-      [Silent Not_called].
+      [Silent Not_called]; one left out for its fact is [Refused (Sized _)].
 
     A walk that stops on masc's side, or a writer that is no longer open, is
     [Ask_failed Flow_stopped]. A snapshot, turn log or unit file that cannot

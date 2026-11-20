@@ -20,6 +20,7 @@ type asking =
   ; lane : declared
   ; removed_since : (string * int) list
   ; asked : Read_result.asked
+  ; bottom : Librarian_bottom.t
   }
 
 type state =
@@ -32,6 +33,7 @@ type state =
       ; asking : asking
       }
   | Resting of Store.t
+  | Refused_at_bottom of Store.t
   | Stopped of Store.stop
 
 type t =
@@ -39,6 +41,7 @@ type t =
   ; lane : declared option
   ; last_ask : int
   ; narrowing : Librarian_width.t
+  ; bottom : Librarian_bottom.t
   }
 
 let boot { memory_dir; turns_dir; keeper_id } ~at =
@@ -52,7 +55,7 @@ let turns_path { turns_dir; keeper_id; memory_dir = (_ : string) } =
 (* §9.2 "the next ask". The length is read before the turn log: read after,
    a turn appended in between would count as seen, and with its hint missed
    no pulse would find it. *)
-let next_ask place t ~at store =
+let ask place t ~at store ~asked =
   let seen_length = Fs_compat.file_size (turns_path place) in
   let idle = { t with state = Idle { store; seen_length } } in
   match t.lane with
@@ -74,7 +77,8 @@ let next_ask place t ~at store =
                 ; since = at
                 ; lane = declared
                 ; removed_since = []
-                ; asked = Read_range (Librarian_width.next t.narrowing)
+                ; asked
+                ; bottom = t.bottom
                 }
             }
       ; last_ask = ask
@@ -82,12 +86,29 @@ let next_ask place t ~at store =
     else idle
 ;;
 
+(* The width memory says how wide; the head item alone is asked only from
+   the bottom's verdict. *)
+let next_ask place t ~at store =
+  ask place t ~at store ~asked:(Read_range (Librarian_width.next t.narrowing))
+;;
+
 let booted place ~at ~lane ~last_ask (opened : (Store.t, Store.stop) result) =
   match opened with
-  | Error stop -> { state = Stopped stop; lane; last_ask; narrowing = Librarian_width.empty }
+  | Error stop ->
+    { state = Stopped stop
+    ; lane
+    ; last_ask
+    ; narrowing = Librarian_width.empty
+    ; bottom = Librarian_bottom.empty
+    }
   | Ok store ->
     next_ask place
-      { state = Idle { store; seen_length = None }; lane; last_ask; narrowing = Librarian_width.empty }
+      { state = Idle { store; seen_length = None }
+      ; lane
+      ; last_ask
+      ; narrowing = Librarian_width.empty
+      ; bottom = Librarian_bottom.empty
+      }
       ~at store
 ;;
 
@@ -119,25 +140,33 @@ let late place t (result : Read_result.t) =
 (* §9.2 "a failed commit". Effects that make no snapshot mean the plan and
    the snapshot codec disagree. The store is as it was, and asking again at
    once would ask the same question, so the writer rests until a pulse.
-   [narrowing] is what the writer remembers once the commit is on disk. *)
+   [narrowing] is what the writer remembers once the commit is on disk.
+   Every commit here moves reading, so the head item's size facts are about
+   an item already passed (§7.4 「읽은 자리가 움직였다」). *)
 let after_commit place t ~at store ~narrowing (committed : Store.committed) =
   match committed with
   | Committed { store; line = (_ : Librarian_log.commit) } ->
-    next_ask place { t with narrowing } ~at store
+    next_ask place { t with narrowing; bottom = Librarian_bottom.empty } ~at store
   | Committed_without_snapshot (_ : Librarian_log.commit) ->
     { t with state = Stopped Store_unwritable }
   | Stopped stop -> { t with state = Stopped stop }
   | Not_a_snapshot (_ : Librarian_envelope.refusal) -> { t with state = Resting store }
 ;;
 
-(* §9.3 "Refused_by_lane, Silent_lane": only the slots the lane declares now
-   are read. A refusal from one of them narrows by what the question carried
-   and asks again at once (§7.6), unless the question carried one item: that
-   is the bottom, and the writer rests. With no refusal, when none of them
-   is in the result and the lane value moved while the ask was out, asking
-   again uses the new value and does not repeat; otherwise the writer rests.
-   A refusal narrows what the writer holds now: after a declaration that
-   changed only slots, the ask is still out and what it holds is empty. *)
+(* §7.3 「Refused_by_lane, Silent_lane」 and §7.4: only the slots the lane
+   declares now are read. Above the bottom, a refusal from one of them
+   narrows by what the question carried and asks again at once (§7.6). At
+   the bottom the refusals for size are learnt first, whatever the result
+   saw, and then folded over the slots declared now, only while the
+   snapshot the question was made against is the one now. Every slot sized
+   for the input: the item with Memory gives way to the item alone, and the
+   item alone is skipped. Every slot sized and not all for the input:
+   [Refused_at_bottom]. Otherwise, and with no refusal above the bottom, the
+   writer rests, unless none of them is in the result and the lane value
+   moved while the ask was out: asking again uses the new value and does not
+   repeat. A refusal narrows what the writer holds now: after a declaration
+   that changed only slots, the ask is still out and what it holds is
+   empty. *)
 let no_answer place t ~at store (asking : asking) (question : Read_result.question) slots =
   let declared_now =
     match t.lane with
@@ -149,27 +178,66 @@ let no_answer place t ~at store (asking : asking) (question : Read_result.questi
       (fun ((key : Lane.slot_key), _) -> List.exists (Lane.equal_slot_key key) declared_now)
       slots
   in
-  let refused =
-    List.exists
-      (fun ((_ : Lane.slot_key), (outcome : Librarian_slot_outcome.unanswered)) ->
-         match outcome with
-         | Refused (_ : Librarian_slot_outcome.refusal) -> true
-         | Silent (_ : Librarian_slot_outcome.silence) -> false)
-      still_declared
-  in
   let lane_moved =
     match t.lane with
     | None -> true
     | Some declared -> not (Lane.equal declared.value asking.lane.value)
   in
-  match refused, Librarian_width.breadth question.offered, asking.asked with
-  | true, Wider wider, Read_range asked ->
-    next_ask place { t with narrowing = Librarian_width.refused t.narrowing ~asked wider } ~at store
-  | true, One_item, Read_range (_ : Librarian_width.width) -> { t with state = Resting store }
-  | false, (One_item | Wider (_ : Librarian_width.wider)), Read_range (_ : Librarian_width.width) ->
+  let rest t =
     if List.is_empty still_declared && lane_moved
     then next_ask place t ~at store
     else { t with state = Resting store }
+  in
+  (* §7.4 「옛 Memory 를 두고 한 판정으로 내려가지 않는다」. *)
+  let judged_now =
+    String.equal
+      (question.basis :> string)
+      (Librarian_log.snapshot_after (Store.tail store) :> string)
+  in
+  let verdict () : Librarian_bottom.verdict =
+    match t.lane with
+    | None -> Not_all
+    | Some declared -> Librarian_bottom.fold declared.value slots
+  in
+  match asking.asked, Librarian_width.breadth question.offered with
+  | Read_range asked, Wider wider ->
+    let refused =
+      List.exists
+        (fun ((_ : Lane.slot_key), (outcome : Librarian_slot_outcome.unanswered)) ->
+           match outcome with
+           | Refused (_ : Librarian_slot_outcome.refusal) -> true
+           | Silent (_ : Librarian_slot_outcome.silence) -> false)
+        still_declared
+    in
+    if refused
+    then
+      next_ask place { t with narrowing = Librarian_width.refused t.narrowing ~asked wider } ~at
+        store
+    else rest t
+  | Read_range (_ : Librarian_width.width), One_item ->
+    let t = { t with bottom = Librarian_bottom.learn t.bottom With_memory question.id slots } in
+    if not judged_now
+    then next_ask place t ~at store
+    else (
+      match verdict () with
+      | Input -> ask place t ~at store ~asked:Read_item_alone
+      | All_not_input -> { t with state = Refused_at_bottom store }
+      | Not_all -> rest t)
+  | Read_item_alone, (One_item | Wider (_ : Librarian_width.wider)) ->
+    let t = { t with bottom = Librarian_bottom.learn t.bottom Alone question.id slots } in
+    if not judged_now
+    then next_ask place t ~at store
+    else (
+      match verdict () with
+      | Input ->
+        let narrowing =
+          Librarian_width.committed t.narrowing
+            (Librarian_width.passed question.offered question.reach.within)
+        in
+        after_commit place t ~at store ~narrowing
+          (Store.commit_skip store ~at ~hole:(Item_exceeds_window question.missing) question.reach)
+      | All_not_input -> { t with state = Refused_at_bottom store }
+      | Not_all -> rest t)
 ;;
 
 (* The current ask's result (§9.3, the table under "Asking a"). *)
@@ -216,9 +284,11 @@ let table place t ~at event =
   match t.state, event with
   (* Idle, Turn_closed: a unit closed, so the next ask reads it. *)
   | Idle { store; seen_length = (_ : int option) }, Turn_closed -> next_ask place t ~at store
-  (* Asking, Resting, Stopped, Turn_closed: the ask that is out reads to the
-     end it saw, a rest waits for the pulse, a stopped store reads nothing. *)
-  | (Asking _ | Resting _ | Stopped _), Turn_closed -> t
+  (* Asking, Resting, Refused_at_bottom, Stopped, Turn_closed: the ask that
+     is out reads to the end it saw, a rest waits for the pulse, a head item
+     every slot sized waits for an event that changes its question, a
+     stopped store reads nothing. *)
+  | (Asking _ | Resting _ | Refused_at_bottom _ | Stopped _), Turn_closed -> t
   (* Idle, Pulse: a length other than the one seen, or one not read, is a
      turn whose hint did not come; the same length is not read. *)
   | Idle { store; seen_length }, Pulse ->
@@ -230,20 +300,23 @@ let table place t ~at event =
     (match t.lane with
      | Some declared when Lane.lane_held ~now:at declared.resolved -> t
      | Some _ | None -> next_ask place t ~at store)
-  (* Asking, Stopped, Pulse: an ask is out, or the store is stopped. *)
-  | (Asking _ | Stopped _), Pulse -> t
+  (* Asking, Refused_at_bottom, Stopped, Pulse: an ask is out, the head
+     item's question gets the same answer however late it is asked again
+     (§7.4), or the store is stopped. *)
+  | (Asking _ | Refused_at_bottom _ | Stopped _), Pulse -> t
   (* Asking, Ask_ended of the current ask: its result is committed or ends
      the ask. *)
   | Asking { store; asking }, Ask_ended { ask; result = Read_ended result }
     when Int.equal ask asking.ask -> ended place t ~at store asking result
-  (* Asking, Ask_ended of another number; Idle, Resting, Stopped, Ask_ended:
-     a late answer. *)
-  | ( (Idle _ | Asking _ | Resting _ | Stopped _)
+  (* Asking, Ask_ended of another number; Idle, Resting, Refused_at_bottom,
+     Stopped, Ask_ended: a late answer. *)
+  | ( (Idle _ | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _)
     , Ask_ended { ask = (_ : int); result = Read_ended result } ) -> late place t result
-  (* Idle, Resting, Declaration_changed: the new value is held and the next
-     ask reads with it; with no value that is Idle. *)
-  | (Idle { store; seen_length = (_ : int option) } | Resting store), Declaration_changed lane ->
-    next_ask place { t with lane } ~at store
+  (* Idle, Resting, Refused_at_bottom, Declaration_changed: the new value is
+     held and the next ask reads with it; with no value that is Idle. A size
+     fact needs no clearing: a slot of another value has another key. *)
+  | ( (Idle { store; seen_length = (_ : int option) } | Resting store | Refused_at_bottom store)
+    , Declaration_changed lane ) -> next_ask place { t with lane } ~at store
   (* Asking, Declaration_changed: with the question side the same only the
      slots changed, and the ask goes on. Another question side, or no lane
      value, gives the next ask a new number, so the ask that is out is
@@ -291,8 +364,8 @@ let removed_by (line : Librarian_log.commit) =
     line.effects.removed
 ;;
 
-let write t ~at ~by ~trace write =
-  let commit store ~stay =
+let write place t ~at ~by ~trace write =
+  let commit store ~after =
     match Direct.plan ~by ~at ~trace_id:trace (Store.memory store).facts write with
     | Already_held -> t, Already_held
     | Already_done -> t, Already_done
@@ -300,7 +373,7 @@ let write t ~at ~by ~trace write =
     | Refused refusal -> t, Refused refusal
     | Writes { effects; facts = (_ : Keeper_memory_os_types.fact list) } ->
       (match Store.commit_direct store ~at ~by ~trace write effects with
-       | Committed { store; line } -> { t with state = stay store line }, Written line
+       | Committed { store; line } -> after store line, Written line
        | Committed_without_snapshot line ->
          { t with state = Stopped Store_unwritable }, Written line
        | Stopped stop -> { t with state = Stopped stop }, Unavailable (Store_stopped stop)
@@ -308,12 +381,22 @@ let write t ~at ~by ~trace write =
   in
   match t.state with
   | Idle { store; seen_length } ->
-    commit store ~stay:(fun store (_ : Librarian_log.commit) -> Idle { store; seen_length })
+    commit store ~after:(fun store (_ : Librarian_log.commit) ->
+      { t with state = Idle { store; seen_length } })
   | Asking { store; asking } ->
-    commit store ~stay:(fun store line ->
-      Asking
-        { store; asking = { asking with removed_since = asking.removed_since @ removed_by line } })
-  | Resting store -> commit store ~stay:(fun store (_ : Librarian_log.commit) -> Resting store)
+    commit store ~after:(fun store line ->
+      { t with
+        state =
+          Asking
+            { store
+            ; asking = { asking with removed_since = asking.removed_since @ removed_by line }
+            }
+      })
+  | Resting store ->
+    commit store ~after:(fun store (_ : Librarian_log.commit) -> { t with state = Resting store })
+  (* Memory changed, so the head item with Memory is another question (§9.3). *)
+  | Refused_at_bottom store ->
+    commit store ~after:(fun store (_ : Librarian_log.commit) -> next_ask place t ~at store)
   | Stopped stop -> t, Unavailable (Store_stopped stop)
 ;;
 
@@ -332,20 +415,21 @@ let resume place ~boot t ~at =
   match t.state with
   | Stopped (_ : Store.stop) ->
     booted place ~at ~lane:t.lane ~last_ask:t.last_ask (boot ()), Done
-  | Resting store -> next_ask place t ~at store, Done
+  | Resting store | Refused_at_bottom store ->
+    next_ask place { t with bottom = Librarian_bottom.empty } ~at store, Done
   | Idle _ | Asking _ -> t, Not_done Nothing_to_resume
 ;;
 
 let adopt { memory_dir; turns_dir; keeper_id } t ~at ~by ~observed =
   match t.state with
-  | Idle _ | Asking _ | Resting _ -> t, Not_done Not_stopped
+  | Idle _ | Asking _ | Resting _ | Refused_at_bottom _ -> t, Not_done Not_stopped
   | Stopped ((Memory_unreadable | Store_unwritable) as stop) ->
     t, Not_done (Act_unavailable (Store_stopped stop))
   | Stopped (Log_diverged _ | Log_unreadable) ->
     (match Store.adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed with
      | Ok store ->
-       next_ask { memory_dir; turns_dir; keeper_id } { t with narrowing = Librarian_width.empty } ~at
-         store
+       next_ask { memory_dir; turns_dir; keeper_id } { t with narrowing = Librarian_width.empty }
+         ~at store
        , Done
      | Error Snapshot_mismatch -> t, Not_done Snapshot_mismatch
      | Error Snapshot_unreadable -> t, Not_done Snapshot_unreadable
@@ -360,7 +444,7 @@ type fiber_change =
 
 let out = function
   | Asking { asking; store = (_ : Store.t) } -> Some asking
-  | Idle _ | Resting _ | Stopped _ -> None
+  | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> None
 ;;
 
 let fiber_change ~before ~after =

@@ -38,6 +38,10 @@ type width =
       none among them. *)
   | Items of count (** The first this many unread items of the first unit that holds items. *)
 
+(** The first unread item alone: what a question that shows one item and
+    no Memory reads (§7.4, [Read_item_alone]). *)
+val head_item : width
+
 (** What one question carried, as the ask that made it counted (§7.1). *)
 type offered =
   { units : int (** Units that hold items. A unit that holds none is not counted. *)

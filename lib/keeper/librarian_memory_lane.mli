@@ -66,6 +66,12 @@ type t =
   { question : question_side
   ; http : slot_key list  (** Admitted HTTP slots, in declared order. *)
   ; cli : slot_key list  (** Declared CLI slots, in declared order. *)
+  ; unadmitted : string list
+        (** Ids of the declared HTTP slots the registry did not admit
+            ({!Runtime_exact_output_registry.rejected_slots}), in declared
+            order. Nothing walks them and nothing learns their size, so a
+            lane that declares one never has a size fact from every slot it
+            declares (§7.4 「모두」). *)
   }
 [@@deriving eq, show]
 

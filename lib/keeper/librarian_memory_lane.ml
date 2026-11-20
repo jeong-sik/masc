@@ -40,6 +40,7 @@ type t =
   { question : question_side
   ; http : slot_key list
   ; cli : slot_key list
+  ; unadmitted : string list
   }
 [@@deriving eq, show]
 
@@ -92,6 +93,16 @@ let rec keys key = function
   | slot :: rest -> Result.bind (key slot) (fun first -> Result.map (List.cons first) (keys key rest))
 ;;
 
+(* The declared slots of this lane that admission left out, in declared
+   order. *)
+let unadmitted registry =
+  Registry.rejected_slots registry
+  |> List.filter (fun (slot : Registry.rejected_slot) -> String.equal slot.lane_id lane_id)
+  |> List.sort (fun (a : Registry.rejected_slot) (b : Registry.rejected_slot) ->
+    Int.compare a.position b.position)
+  |> List.map (fun (slot : Registry.rejected_slot) -> slot.slot_id)
+;;
+
 let resolve ~prompt ~answer_schema registry =
   match Registry.declared_lane registry ~lane_id with
   | None -> Error Lane_unconfigured
@@ -112,6 +123,7 @@ let resolve ~prompt ~answer_schema registry =
               ( { question = { prompt; answer_schema; max_output_tokens = reserve; thinking = decl.thinking }
                 ; http
                 ; cli
+                ; unadmitted = unadmitted registry
                 }
               , resolved ))
            (keys cli_key cli_slots)))

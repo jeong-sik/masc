@@ -5,6 +5,8 @@ type width =
   | Units of count
   | Items of count
 
+let head_item = Items 1
+
 type offered =
   { units : int
   ; head_items : int

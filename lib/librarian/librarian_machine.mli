@@ -86,8 +86,13 @@ type asking =
       the commit that removed it, in commit order: what
       {!Librarian_plan.of_answer} takes. *)
   ; asked : Librarian_read_result.asked
-  (** The width it reads at: {!Librarian_width.next} of the narrowing when it
-      started. A refusal goes onto the level this names. *)
+  (** [Read_range]: the width it reads at, {!Librarian_width.next} of the
+      narrowing when it started; a refusal goes onto the level this names.
+      [Read_item_alone]: the head item alone, asked only on the bottom's
+      verdict. *)
+  ; bottom : Librarian_bottom.t
+  (** The head item's size facts when it started. The ask calls no slot
+      that has one under its question's id. *)
   }
 
 type state =
@@ -106,6 +111,12 @@ type state =
   | Resting of Librarian_store.t
   (** Something is unread and the last ask ended without a commit. The next
       pulse asks again unless every slot is held. *)
+  | Refused_at_bottom of Librarian_store.t
+  (** Every slot the lane declares gave a size fact to the head item's
+      question and not every one was for the input (§7.4). No slot is left
+      to ask and none says the item fits below, so nothing is asked or read
+      until an event can change the question: a direct write, another lane
+      value, or the operator. *)
   | Stopped of Librarian_store.stop
 
 (** What the writer holds in memory beside the state (§9.1). Nothing of it
@@ -118,6 +129,12 @@ type t =
   (** The ranges the lane refused. A boot starts with none; another lane
       value and an adoption empty it. A pulse, a direct write and a
       [Resume] of a rest leave it as it is. *)
+  ; bottom : Librarian_bottom.t
+  (** The head item's size facts. A boot starts with none; a commit that
+      moves reading and a [Resume] empty it. Another lane value and an
+      adoption leave it: a fact is held under one question's id and one
+      slot's key, so a fact about a question or slot not asked now is not
+      found, and the item alone is the same question under every Memory. *)
   }
 
 (** The store's boot (§8.6): open, or the reason it stopped. *)
@@ -165,9 +182,10 @@ type event =
     lane value the writer is [Idle] with that length. Otherwise the turn log
     is read from the tail ({!Librarian_unread.read} up to the first unit
     with items): something unread is [Asking] with the number after
-    [last_ask], at the width {!Librarian_width.next} gives; nothing is
-    [Idle] with the length read first, so a turn appended during the read
-    is not counted as seen.
+    [last_ask], at the width {!Librarian_width.next} gives, with the size
+    facts held; nothing is [Idle] with the length read first, so a turn
+    appended during the read is not counted as seen. The head item alone is
+    asked the same way, only on the bottom's verdict below.
 
     {b A late answer.} An [Ask_ended] whose number is not the current ask's
     is dropped in every state. One that carried an answer is counted
@@ -193,6 +211,8 @@ type event =
     Resting   Turn_closed                        Resting
     Resting   Pulse                              Resting when every slot is held; else the next ask
     Resting   Declaration_changed                held; the next ask
+    Refused_at_bottom  Turn_closed, Pulse        Refused_at_bottom
+    Refused_at_bottom  Declaration_changed       held; the next ask
     Stopped   Turn_closed, Pulse                 Stopped
     Stopped   Declaration_changed                held; Stopped
     any       Ask_ended, not the current ask     as it was: a late answer
@@ -205,12 +225,21 @@ type event =
                       committed ({!Librarian_store.commit_read}); the narrowing counts
                       what it passed; the next ask
     Nothing_to_ask    the next ask
-    No_answer         The slots the lane declares now are the ones read. One of them
-                      refused and the question carried more than one item: narrowed
-                      by what it carried; the next ask. One refused and it carried one
-                      item: Resting. None refused: Resting, or the next ask when none
-                      of them is in the result and the lane value is not the one the
-                      ask started with
+    No_answer         The slots the lane declares now are the ones read.
+                      More than one item: one of them refused, narrowed by what the
+                      question carried; the next ask. None refused: rest.
+                      One item, or the item alone: its sized refusals are learnt
+                      ({!Librarian_bottom.learn}). A question made against another
+                      snapshot than the tail's now: the next ask. Otherwise
+                      {!Librarian_bottom.fold} over the lane now:
+                        Input, with Memory     the item alone is asked at once
+                        Input, alone           Skip (Item_exceeds_window missing)
+                                               committed at reach; the narrowing counts
+                                               what it passed; the next ask
+                        All_not_input          Refused_at_bottom
+                        Not_all                rest
+                      Rest: Resting, or the next ask when none of them is in the
+                      result and the lane value is not the one the ask started with
     Nothing_readable  Skip (Content_missing missing) committed at reach; the narrowing
                       counts what it passed; the next ask
     Span_unknown      Skip (Unknown_span {before; after = reach.covered}) committed
@@ -251,6 +280,8 @@ type write_answer =
     - [Asking]: the facts the commit removed join [removed_since] with its
       [seq], so the answer cannot bring back what was removed while it was
       asked.
+    - [Refused_at_bottom]: a commit is followed by the next ask. Memory
+      changed, so the head item with Memory is another question (§9.3).
     - A commit that finds the snapshot or the log other than it left them
       stops the store, and the write is [Unavailable (Store_stopped _)].
     - A commit whose line is on disk and whose snapshot is not is answered
@@ -258,7 +289,8 @@ type write_answer =
       the next boot writes the snapshot from the line.
     - [Stopped s]: [Unavailable (Store_stopped s)]. *)
 val write
-  :  t
+  :  place
+  -> t
   -> at:float
   -> by:Librarian_effects.actor
   -> trace:string
@@ -282,7 +314,8 @@ type act_answer =
       what it returns. The writer passes the boot it ran when it started,
       which takes its lock before it opens the store. [Done] says the boot
       ran; the state says how it ended.
-    - [Resting]: the next ask.
+    - [Resting], [Refused_at_bottom]: the head item's size facts are emptied
+      and the next ask follows, which calls every slot again.
     - [Idle], [Asking]: [Not_done Nothing_to_resume], and [boot] is not
       called. *)
 val resume
@@ -293,8 +326,8 @@ val resume
   -> t * act_answer
 
 (** An operator adopts the snapshot file of a store stopped as
-    [Log_diverged] or [Log_unreadable] (§8.7); the narrowing is emptied and
-    the next ask follows. A store
+    [Log_diverged] or [Log_unreadable] (§8.7); the narrowing and the size
+    facts are emptied and the next ask follows. A store
     stopped for another reason is [Act_unavailable (Store_stopped _)]:
     booting again is its way out. A store that is not stopped is
     [Not_stopped]. A refusal leaves the value as it was. *)

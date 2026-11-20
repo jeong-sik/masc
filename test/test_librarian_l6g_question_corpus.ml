@@ -125,8 +125,9 @@ let offered_of (units : Read_unit.t list) : Masc.Librarian_width.offered =
 let make_question ?(working_state = Some "PR release blockers under review") prompt facts units =
   let lane = make_lane prompt in
   match
-    Question.make ~lane ~memory:(memory_of facts)
+    Question.make ~lane
       ~from:(from_commit ~working_state ())
+      ~shows:(With_memory (memory_of facts))
       ~reach ~trace:"trace-l6g" ~offered:(offered_of units) units
   with
   | Question.Made { question; text } -> question, text

@@ -672,7 +672,7 @@ let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
     in
     if span 0 (n - 1) <= width then
       String.concat tab_strip_gap
-        (List.mapi (fun idx entry -> draw press ~sup:sups.(idx) entry) tabs)
+        (List.mapi (fun idx entry -> draw press ~padded:true ~sup:sups.(idx) entry) tabs)
     else begin
       (* Each mark is measured with the count it would draw. Growing the
          window on one side lowers that side's count, so a window that fits

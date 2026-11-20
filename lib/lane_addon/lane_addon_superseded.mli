@@ -1,7 +1,7 @@
-(** Which retained Lane instances a newer binding of the same owner supersedes
-    (RFC-0497 section 4.1), and which instance folders no instance claims
-    (section 4.3). The caller reads the bindings and the folders and says which
-    instances this process holds; this module only decides. *)
+(** Which retained Lane instances a newer binding of the same owner supersedes,
+    and which instance folders no instance claims. The caller reads the
+    bindings and the folders and says which instances this process holds; this
+    module only decides. *)
 
 type owner = { id : string; source_path : string; revision : string }
 
@@ -31,7 +31,7 @@ type ('visibility, 'runtime) binding = {
 }
 
 type count = {
-  eligible : string list;  (** Instance ids section 4.1 would delete. *)
+  eligible : string list;  (** Instance ids to delete. *)
   protected : int;  (** Bindings kept, diverging ones included. *)
   diverging_bindings : int;
       (** Released, superseded bindings kept because their visibility or

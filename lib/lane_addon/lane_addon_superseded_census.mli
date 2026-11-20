@@ -1,9 +1,9 @@
-(** The bytes a store holds for the retained Lane instances RFC-0497 section
-    4.1 would delete, for the instances it keeps, and under [observations] as a
-    whole. The caller names the instances ({!Lane_addon_superseded.plan} decides
-    them); this module only reads file sizes.
+(** The bytes a store holds for the retained Lane instances to delete, for the
+    instances it keeps, and under [observations] as a whole. The caller names
+    the instances ({!Lane_addon_superseded.plan} decides them); this module only
+    reads file sizes.
 
-    Layer one: nothing reads the report to delete. *)
+    Nothing reads the report to delete. *)
 
 type report = {
   eligible : int;

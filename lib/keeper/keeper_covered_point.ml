@@ -46,7 +46,7 @@ let read_unread_lines ~turns_path ~line ~(within : Librarian_log.within) =
        | At_the_read_unit, Log.Closed _, (Librarian_log.Whole | Librarian_log.Item _)
        | At_the_read_unit, Log.Reset _, Librarian_log.Whole ->
          Scan.Continue After_the_read_unit
-       | At_the_read_unit, Log.Reset _, Librarian_log.Item (_ : int) ->
+       | At_the_read_unit, Log.Reset _, Librarian_log.Item (_ : Librarian_unit.item_name) ->
          Scan.Stop (Reset_at { offset = scanned.at })
        | ( At_the_read_unit
          , (Log.Log_started _ | Log.Opened _)

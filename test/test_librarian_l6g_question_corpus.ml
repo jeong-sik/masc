@@ -110,12 +110,24 @@ let opened ?(runtime = "glm") () : Read_unit.opened =
   { runtime; task = Turn_log.No_task; stimuli = [] }
 ;;
 
+let offered_of (units : Read_unit.t list) : Masc.Librarian_width.offered =
+  let item_count (u : Read_unit.t) =
+    match u.kind with
+    | Read_unit.Turn { unattributed; own; _ } -> List.length unattributed + List.length own
+    | Read_unit.Reset { items; _ } -> List.length items
+  in
+  let non_empty = List.filter (fun n -> n > 0) (List.map item_count units) in
+  { Masc.Librarian_width.units = List.length non_empty
+  ; head_items = (match non_empty with head :: _ -> head | [] -> 0)
+  }
+;;
+
 let make_question ?(working_state = Some "PR release blockers under review") prompt facts units =
   let lane = make_lane prompt in
   match
     Question.make ~lane ~memory:(memory_of facts)
       ~from:(from_commit ~working_state ())
-      ~reach ~trace:"trace-l6g" units
+      ~reach ~trace:"trace-l6g" ~offered:(offered_of units) units
   with
   | Question.Made { question; text } -> question, text
   | Question.Nothing_readable _ -> fail "expected Question.Made for non-empty units"
@@ -164,6 +176,7 @@ let test_question_envelope_and_unit_wire_shapes () =
             ; unattributed = []
             ; own =
                 [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
                   ; body =
                       Read_unit.Message
                         (Agent.make_message
@@ -172,9 +185,11 @@ let test_question_envelope_and_unit_wire_shapes () =
                            [ Agent.text_block "Recalled Memory: Do not force-push to protected main" ])
                   }
                 ; { index = 1
+                  ; name = { store = Missing.Agent_core; at = 1 }
                   ; body = Read_unit.Message (Agent.user_msg "Switch Staging smoke port to 18935 tomorrow")
                   }
                 ; { index = 2
+                  ; name = { store = Missing.Agent_core; at = 2 }
                   ; body =
                       Read_unit.Message
                         (Agent.make_message
@@ -182,6 +197,7 @@ let test_question_envelope_and_unit_wire_shapes () =
                            [ Agent.ToolUse { id = "call-9"; name = "health_probe"; input = `Null } ])
                   }
                 ; { index = 3
+                  ; name = { store = Missing.Agent_core; at = 3 }
                   ; body =
                       Read_unit.Message
                         (Agent.tool_result_msg ~tool_use_id:"call-9" ~content:"HTTP 200" ())
@@ -198,7 +214,12 @@ let test_question_envelope_and_unit_wire_shapes () =
             ; outcome = Turn_log.Close_missing
             ; opened = opened ~runtime:"claude_code" ()
             ; unattributed = []
-            ; own = [ { index = 0; body = Read_unit.Message (Agent.user_msg "process crashed") } ]
+            ; own =
+                [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
+                  ; body = Read_unit.Message (Agent.user_msg "process crashed")
+                  }
+                ]
             }
       ; missing = []
       }
@@ -207,7 +228,12 @@ let test_question_envelope_and_unit_wire_shapes () =
       ; kind =
           Read_unit.Reset
             { cause = Turn_log.Cleared
-            ; items = [ { index = 0; body = Read_unit.Message (Agent.user_msg "context cleared") } ]
+            ; items =
+                [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
+                  ; body = Read_unit.Message (Agent.user_msg "context cleared")
+                  }
+                ]
             }
       ; missing =
           [ Missing.Bundle { bundle = Digest.digest_of_bytes "b"; skip = 0; take = 2 }
@@ -264,7 +290,12 @@ let test_l6g_corpus_via_librarian_question_make () =
             ; outcome = Turn_log.Completed
             ; opened = opened ()
             ; unattributed = []
-            ; own = [ { index = 0; body = Read_unit.Message (Agent.user_msg "Pin canary metrics port to 18935") } ]
+            ; own =
+                [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
+                  ; body = Read_unit.Message (Agent.user_msg "Pin canary metrics port to 18935")
+                  }
+                ]
             }
       ; missing = []
       }
@@ -297,7 +328,12 @@ let test_l6g_corpus_via_librarian_question_make () =
             ; outcome = Turn_log.Completed
             ; opened = opened ()
             ; unattributed = []
-            ; own = [ { index = 0; body = Read_unit.Message (Agent.user_msg "Staging deploy finished green on 2026-11-18") } ]
+            ; own =
+                [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
+                  ; body = Read_unit.Message (Agent.user_msg "Staging deploy finished green on 2026-11-18")
+                  }
+                ]
             }
       ; missing = []
       }
@@ -352,6 +388,7 @@ let test_l6g_corpus_via_librarian_question_make () =
             ; unattributed = []
             ; own =
                 [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
                   ; body =
                       Read_unit.Message
                         (Agent.make_message
@@ -360,6 +397,7 @@ let test_l6g_corpus_via_librarian_question_make () =
                            [ Agent.text_block f_con.claim ])
                   }
                 ; { index = 1
+                  ; name = { store = Missing.Agent_core; at = 1 }
                   ; body = Read_unit.Message (Agent.assistant_msg "Remembered: do not force-push protected main.")
                   }
                 ]
@@ -396,9 +434,11 @@ let test_l6g_corpus_via_librarian_question_make () =
             ; unattributed = []
             ; own =
                 [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
                   ; body = Read_unit.Message (Agent.user_msg "배포 규칙이 뭐였죠?")
                   }
                 ; { index = 1
+                  ; name = { store = Missing.Agent_core; at = 1 }
                   ; body =
                       Read_unit.Message
                         (Agent.assistant_msg "제공된 정보에 배포 규칙이 없어 모릅니다.")
@@ -455,12 +495,14 @@ let test_l6g_corpus_via_librarian_question_make () =
             ; unattributed = []
             ; own =
                 [ { index = 0
+                  ; name = { store = Missing.Agent_core; at = 0 }
                   ; body =
                       Read_unit.Message
                         (Agent.user_msg
                            "운영자 공지: 두 명 리뷰 규칙(m2)은 철회하고, 격리 포트 범위는 18935~18940으로 바꾼다.")
                   }
                 ; { index = 1
+                  ; name = { store = Missing.Agent_core; at = 1 }
                   ; body = Read_unit.Message (Agent.assistant_msg "네, 격리 포트 범위 18935~18940을 확인했고 m2는 철회하겠습니다.")
                   }
                 ]

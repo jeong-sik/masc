@@ -2711,7 +2711,6 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
     @ Option.to_list
         (Option.map (warning (text "보기 설정: " "view preferences: "))
            state.keeper_list_preference_notice)
-    @ Option.to_list (local_source_pending_note state Local_keepers)
   in
   let status_slot =
     match advisories with

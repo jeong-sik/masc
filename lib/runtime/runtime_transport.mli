@@ -1,17 +1,4 @@
-(** Runtime_transport — Transport and tool-lane helpers for AGENT_CORE worker exec.
-
-    Keeps provider label resolution and per-call CLI transport construction
-    separate from the build/run orchestration in {!Runtime_agent}. *)
-
-(** Failure modes for {!resolve_provider_config_of_label}. *)
-type label_resolution_error =
-  | Invalid_model_label of string
-
-(** Resolve a model label string to a provider config via the MASC runtime
-    parser. Only a defaultless Ollama [auto] may use discovery scoped to its
-    exact endpoint. Other unresolved labels return [Error (Invalid_model_label _)]. *)
-val resolve_provider_config_of_label :
-  string -> (Llm_provider.Provider_config.t, label_resolution_error) result
+(** Runtime_transport — capability helpers for AGENT_CORE worker execution. *)
 
 (** AGENT_CORE capability snapshot for a provider config.  Alias for
     {!Provider_tool_support.agent_core_capabilities_of_config}. *)

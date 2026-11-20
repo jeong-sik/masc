@@ -1,6 +1,6 @@
 (* Server_runtime_startup_maintenance — startup pruning.
    Extracted from server_runtime_bootstrap.ml during godfile decomposition.
-   Contains JSONL and auth-archive pruning. *)
+   Contains JSONL pruning and startup maintenance tasks. *)
 
 (* ── Startup pruning ───────────────────────────────── *)
 

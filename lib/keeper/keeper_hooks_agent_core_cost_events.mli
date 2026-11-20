@@ -83,3 +83,22 @@ val emit_cost_event
 (** Append one cost row. [Ok] means the row is in the ledger file. A failure
     is also logged and counted here, so a caller only decides what a row the
     ledger does not have means for it. *)
+
+(** What a cost row records about the provider cache of its request, read back
+    from the fields {!cost_event_payload} writes. *)
+type request_cache_fields =
+  { runtime_id : string option
+      (** The runtime that answered; [None] on a turn's resolved row. *)
+  ; request_latency_ms : int option
+      (** [None] when the transport measured no latency. *)
+  ; cache_creation_tokens : int option
+  ; cache_read_tokens : int option
+  ; cache_write_lifetime : Agent_core.Types.cache_write_lifetime option
+      (** [None] on a turn's resolved row, and on a row written before rows
+          recorded the lifetime. *)
+  }
+
+val request_cache_fields_of_json :
+  Yojson.Safe.t -> (request_cache_fields, string) result
+(** [Error] names a field every row of {!cost_event_payload} carries that is
+    missing, or a value that function never writes. *)

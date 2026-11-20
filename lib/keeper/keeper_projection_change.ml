@@ -399,20 +399,55 @@ let classify_messages ~previous ~current =
           })
 ;;
 
+let compare_messages ~previous ~current =
+  classify_messages ~previous:previous.messages ~current:current.messages
+;;
+
+let tool_schemas_differ ~previous ~current =
+  not (List.equal String.equal previous.tool_schema_sha256s current.tool_schema_sha256s)
+;;
+
 let compare_requests ~previous ~current =
   match previous with
   | No_request_yet -> First_request_of_turn
   | Request_not_digested -> Previous_request_not_digested
   | Request_digested previous ->
     Follows_previous_request
-      { messages = classify_messages ~previous:previous.messages ~current:current.messages
-      ; tools_changed =
-          not
-            (List.equal
-               String.equal
-               previous.tool_schema_sha256s
-               current.tool_schema_sha256s)
+      { messages = compare_messages ~previous ~current
+      ; tools_changed = tool_schemas_differ ~previous ~current
       }
+;;
+
+(* A snapshot row lists its parts in request order, each with the byte count
+   and SHA-256 of the same canonical payload [digest_request] hashes, so the
+   digests are read from the row without opening a blob. *)
+let digests_of_parts (parts : Keeper_provider_input_snapshot.part list) =
+  let rec collect tools messages = function
+    | [] ->
+      Ok
+        { tool_schema_sha256s = List.rev tools
+        ; messages = Array.of_list (List.rev messages)
+        }
+    | (part : Keeper_provider_input_snapshot.part) :: rest ->
+      (match part.part_kind with
+       | Keeper_provider_input_snapshot.System_prompt -> collect tools messages rest
+       | Keeper_provider_input_snapshot.Tool_schema _ ->
+         collect (part.part_sha256 :: tools) messages rest
+       | Keeper_provider_input_snapshot.Message { role } ->
+         (match Agent_core.Types.role_of_string role with
+          | Some role ->
+            collect
+              tools
+              ({ role; bytes = part.part_bytes; sha256 = part.part_sha256 } :: messages)
+              rest
+          | None ->
+            Error
+              (Printf.sprintf
+                 "provider-input part %d names unknown message role %S"
+                 part.part_index
+                 role)))
+  in
+  collect [] [] parts
 ;;
 
 let message_change_to_json = function

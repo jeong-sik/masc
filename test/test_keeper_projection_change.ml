@@ -413,6 +413,86 @@ let test_long_lists () =
        })
 ;;
 
+(* The parts a snapshot row lists, built from the payloads the snapshot stores:
+   one system prompt, the messages, then the tool schemas. *)
+let snapshot_parts ?(tools = fixture_tools) messages =
+  let sized payload =
+    String.length (Snapshot.payload_bytes payload), Snapshot.payload_sha256 payload
+  in
+  let message_part (message : Agent_core.Types.message) =
+    let bytes, sha256 = sized (Snapshot.message_payload message) in
+    ( Snapshot.Message { role = Agent_core.Types.role_to_string message.role }
+    , bytes
+    , sha256 )
+  in
+  let tool_part tool =
+    let bytes, sha256 = sized (Snapshot.tool_schema_payload tool) in
+    Snapshot.Tool_schema { name = "fixture" }, bytes, sha256
+  in
+  List.mapi
+    (fun part_index (part_kind, part_bytes, part_sha256) ->
+       { Snapshot.part_index; part_kind; part_bytes; part_sha256 })
+    (((Snapshot.System_prompt, 0, "system") :: List.map message_part messages)
+     @ List.map tool_part tools)
+;;
+
+let digests_of_snapshot parts =
+  match Change.digests_of_parts parts with
+  | Ok digests -> digests
+  | Error detail -> failf "snapshot parts did not digest: %s" detail
+;;
+
+(* Two turns are compared through their snapshots: the parts must classify as
+   the requests they describe would. *)
+let test_snapshot_parts_digest_as_their_request () =
+  let previous = [ user "a"; assistant "b" ] in
+  let current = [ user "a"; assistant "b"; user "c" ] in
+  let render_messages change =
+    Yojson.Safe.to_string (Change.message_change_to_json change)
+  in
+  check
+    string
+    "parts classify as the live request"
+    (render_messages (Change.Appended { kept = 2; added = 1 }))
+    (render_messages
+       (Change.compare_messages
+          ~previous:(digests_of_snapshot (snapshot_parts previous))
+          ~current:(digest current)));
+  check
+    int
+    "the system prompt is not a message"
+    2
+    (Change.message_count (digests_of_snapshot (snapshot_parts previous)));
+  check
+    bool
+    "the tool schemas digest alike"
+    false
+    (Change.tool_schemas_differ
+       ~previous:(digests_of_snapshot (snapshot_parts previous))
+       ~current:(digest current));
+  check
+    bool
+    "a tool the snapshot did not carry differs"
+    true
+    (Change.tool_schemas_differ
+       ~previous:(digests_of_snapshot (snapshot_parts previous))
+       ~current:(digest ~tools:(fixture_tools @ [ tool "masc_board" ]) current));
+  let unknown_role =
+    List.map
+      (fun (part : Snapshot.part) ->
+         match part.part_kind with
+         | Snapshot.Message _ ->
+           { part with Snapshot.part_kind = Snapshot.Message { role = "narrator" } }
+         | Snapshot.System_prompt | Snapshot.Tool_schema _ -> part)
+      (snapshot_parts previous)
+  in
+  check
+    bool
+    "a stored role no reader knows is refused"
+    true
+    (Result.is_error (Change.digests_of_parts unknown_role))
+;;
+
 let () =
   Alcotest.run
     "keeper projection change"
@@ -440,5 +520,9 @@ let () =
         ; test_case "long lists" `Quick test_long_lists
         ] )
     ; "tool schemas", [ test_case "tools flag" `Quick test_tools_flag ]
+    ; ( "snapshots"
+      , [ test_case "snapshot parts digest as their request" `Quick
+            test_snapshot_parts_digest_as_their_request
+        ] )
     ]
 ;;

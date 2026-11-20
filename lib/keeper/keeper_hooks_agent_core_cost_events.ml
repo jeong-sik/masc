@@ -34,6 +34,14 @@ let cache_miss_input_tokens ~input_tokens ~cache_creation_input_tokens
     ~cache_read_input_tokens =
   input_tokens - cache_creation_input_tokens - cache_read_input_tokens
 
+(* The fields a request row's cache facts are written under and read back
+   from by [request_cache_fields_of_json]. *)
+let runtime_id_field = "runtime_id"
+let request_latency_ms_field = "request_latency_ms"
+let cache_creation_tokens_field = "cache_creation_tokens"
+let cache_read_tokens_field = "cache_read_tokens"
+let cache_write_lifetime_field = "cache_write_lifetime"
+
 (** Append a cost event to the dated cost ledger for per-task cost attribution.
     Schema matches bin/masc_cost.ml with an additional "source" field to
     distinguish automatic entries from manual CLI entries.  #10318 adds
@@ -144,11 +152,11 @@ let assemble_cost_event_payload
   let cost_status_reason_label = cost_status_reason cost_status in
   let cache_token_fields =
     [
-      ( "cache_creation_tokens",
+      ( cache_creation_tokens_field,
         match reported_cache_creation with
         | Some n -> `Int n
         | None -> `Null );
-      ( "cache_read_tokens",
+      ( cache_read_tokens_field,
         match reported_cache_read with
         | Some n -> `Int n
         | None -> `Null );
@@ -186,11 +194,11 @@ let assemble_cost_event_payload
     | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _),
       Some (run_id, runtime_id, index) ->
         [ "routing_run_id", `String run_id
-        ; "runtime_id", `String runtime_id
+        ; runtime_id_field, `String runtime_id
         ; "lane_attempt_index", `Int index ]
     | (Cost_ledger.Raw_observation _ | Cost_ledger.Resolved_attempt_delta _), None
     | Cost_ledger.Resolved_delta, _ ->
-        [ "routing_run_id", `Null; "runtime_id", `Null; "lane_attempt_index", `Null ]
+        [ "routing_run_id", `Null; runtime_id_field, `Null; "lane_attempt_index", `Null ]
   in
   let response_id =
     match usage_projection, response_id with
@@ -276,7 +284,7 @@ let assemble_cost_event_payload
            @ float_field "hw_decode_tokens_per_second" tm.predicted_per_second
          | None -> [])
       @ float_field "peak_memory_gb" t.peak_memory_gb
-      @ int_field "request_latency_ms"
+      @ int_field request_latency_ms_field
           (match t.request_latency_ms with
            | Some latency_ms when latency_ms > 0 -> Some latency_ms
            | _ -> None)
@@ -315,7 +323,7 @@ let assemble_cost_event_payload
     Cost_ledger.to_json
       ~extra_fields:
         ([ ("response_id", response_id)
-         ; ("cache_write_lifetime", cache_write_lifetime)
+         ; (cache_write_lifetime_field, cache_write_lifetime)
          ; ("non_cached_input_tokens", non_cached_input_tokens)
          ; (key_provider, `String runtime_lane_label)
          ; (key_cost_status, `String cost_status_label)
@@ -492,3 +500,70 @@ let emit_cost_event
    | Ok () -> Cost_ledger_row_signal.appended ~masc_root
    | Error _ -> ());
   result
+
+(* Defined after the writer so these labels never stand for the telemetry
+   fields the writer reads by the same names. *)
+type request_cache_fields =
+  { runtime_id : string option
+  ; request_latency_ms : int option
+  ; cache_creation_tokens : int option
+  ; cache_read_tokens : int option
+  ; cache_write_lifetime : Agent_core.Types.cache_write_lifetime option
+  }
+
+let request_cache_fields_of_json (json : Yojson.Safe.t) =
+  let ( let* ) = Result.bind in
+  match json with
+  | `Assoc fields ->
+    let invalid name expected =
+      Error (Printf.sprintf "cost row field %s must be %s" name expected)
+    in
+    (* Fields every row of [cost_event_payload] carries, null or not. *)
+    let written name =
+      match List.assoc_opt name fields with
+      | Some value -> Ok value
+      | None -> Error (Printf.sprintf "cost row has no %s field" name)
+    in
+    let token_count name =
+      let* value = written name in
+      match value with
+      | `Null -> Ok None
+      | `Int count when count >= 0 -> Ok (Some count)
+      | _ -> invalid name "a non-negative integer or null"
+    in
+    let* runtime_id =
+      let* value = written runtime_id_field in
+      match value with
+      | `String runtime_id -> Ok (Some runtime_id)
+      | `Null -> Ok None
+      | _ -> invalid runtime_id_field "a string or null"
+    in
+    (* Written only when the transport measured a positive latency. *)
+    let* request_latency_ms =
+      match List.assoc_opt request_latency_ms_field fields with
+      | None -> Ok None
+      | Some (`Int latency_ms) when latency_ms > 0 -> Ok (Some latency_ms)
+      | Some _ -> invalid request_latency_ms_field "a positive integer"
+    in
+    let* cache_creation_tokens = token_count cache_creation_tokens_field in
+    let* cache_read_tokens = token_count cache_read_tokens_field in
+    (* A row written before rows recorded the lifetime has no such field; it
+       says nothing more than null does. *)
+    let* cache_write_lifetime =
+      match List.assoc_opt cache_write_lifetime_field fields with
+      | None | Some `Null -> Ok None
+      | Some (`String label) ->
+        (match Agent_core.Types.cache_write_lifetime_of_string label with
+         | Some lifetime -> Ok (Some lifetime)
+         | None -> invalid cache_write_lifetime_field "a known lifetime label or null")
+      | Some _ -> invalid cache_write_lifetime_field "a string or null"
+    in
+    Ok
+      { runtime_id
+      ; request_latency_ms
+      ; cache_creation_tokens
+      ; cache_read_tokens
+      ; cache_write_lifetime
+      }
+  | _ -> Error "cost row must be a JSON object"
+;;

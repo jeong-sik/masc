@@ -727,7 +727,7 @@ let initialize_owner_state_blocking
   (* HIGH-RISK-UNREVIEWED: a CLI starts on an account only by the access the
      process published (plan D2-3), and the boot judged this one. *)
   (match Runtime_account_access.publish (Runtime_account_access.Single_user single_user) with
-   | Ok () -> ()
+   | Ok (_ : Runtime_account_access.published) -> ()
    | Error Runtime_account_access.Already_published ->
      raise (Owner_initialization_failed Account_access_already_published));
   let base_path = Authz_boot_mode_read.single_user_base_path single_user in

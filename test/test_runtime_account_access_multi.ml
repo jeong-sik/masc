@@ -394,7 +394,11 @@ let test_multi_account () =
              (Access.Multi_account
                 { zone; base_path; now = (fun () -> Float.of_int start_ms /. 1000.) })
          with
-         | Ok () -> ()
+         | Ok published ->
+           Alcotest.(check string)
+             "the published access is of the base path it was given"
+             base_path
+             (Access.published_base_path published)
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
         (* A person checks and verifies their own account. *)
         allowed "the person's own account" (own alice ()) alice_account;
@@ -970,7 +974,7 @@ let test_multi_account () =
              (Access.Multi_account { zone; base_path; now = (fun () -> 0.) })
          with
          | Error Access.Already_published -> ()
-         | Ok () -> Alcotest.fail "a second publication was taken");
+         | Ok (_ : Access.published) -> Alcotest.fail "a second publication was taken");
         (* RFC a-persons-api-key-is-their-own-provider-account 3.4: a key
            account is spent on the key of the file its records say, and on
            no other. Frank has a key account, with a Runtime and a Keeper on

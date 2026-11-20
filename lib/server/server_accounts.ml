@@ -324,7 +324,7 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
            listener
            ~withdraw_with:(Eio.Switch.on_release sw))
   in
-  let* () =
+  let* (_ : Runtime_account_access.published) =
     Result.map_error
       (fun error -> Access_not_published error)
       (Runtime_account_access.publish

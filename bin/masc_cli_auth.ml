@@ -458,7 +458,7 @@ let serve_preview ~base_path ~store ~port github =
       in
       (* A login check and a verification start an official client only on a
          home of the person who asked (plan D2-4). *)
-      let* () =
+      let* (_ : Runtime_account_access.published) =
         Result.map_error
           Runtime_account_access.publish_error_to_string
           (Runtime_account_access.publish

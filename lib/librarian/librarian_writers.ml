@@ -168,3 +168,9 @@ let statuses t =
     (fun (keeper, writer) -> keeper, Writer.status writer)
     (By_keeper.bindings (Atomic.get t.writers))
 ;;
+
+let held t =
+  List.map
+    (fun (keeper, writer) -> keeper, Writer.held writer)
+    (By_keeper.bindings (Atomic.get t.writers))
+;;

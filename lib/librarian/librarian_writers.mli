@@ -97,3 +97,7 @@ val pulse : t -> string list -> unit
 (** The writers this table holds, by Keeper, with what each one shows. A
     reading only: it makes no writer. *)
 val statuses : t -> (string * Librarian_writer.status) list
+
+(** The writers this table holds, by Keeper, with what each one holds
+    (§12). A reading only, as {!statuses}. *)
+val held : t -> (string * Librarian_writer.held) list

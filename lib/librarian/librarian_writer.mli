@@ -94,6 +94,15 @@ val run : t -> unit
 
 val status : t -> status
 
+(** What the writer holds, for the operator's row (§12): the value of its
+    state machine while it runs, which {!status} is read from. *)
+type held =
+  | Held_booting (** The lock or the store is being opened. *)
+  | Held of Librarian_machine.t
+  | Held_retired (** The fiber has ended. *)
+
+val held : t -> held
+
 (** A [Closed] or a [Reset] line was appended to the Keeper's turn log. The
     hint carries nothing: the writer reads the turn log. *)
 val turn_closed : t -> unit

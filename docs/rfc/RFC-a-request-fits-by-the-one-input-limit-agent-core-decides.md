@@ -164,12 +164,15 @@ agent-core 도 그 요청을 보내지 않는다.
   - 그때 턴은 그 앞 거절로 끝나고, 실패는 log 에 남는다. 후보를 붙여도 턴이 끝나는 이유는 지금과 같다.
   - 단계 함수가 낸 `Error e` 는 caller 가 정한 것이라 `e` 로 끝난다.
 - 받아들여진 후보의 좁힘은 run 의 다음 요청으로 이어진다.
-  - 턴 가운데 요청은 ledger 의 마지막 요청이 연 곳을 붙잡는다(`held_window`, `lib/keeper/keeper_turn_driver_try_provider.ml:1406`). ledger 는 응답 때 바뀐다(`:2741`).
-  - 표시 바꾸기는 attempt 가 들고 있는 상태다(`:2080`).
-- 후보로 front 를 옮긴 attempt 가 크기 아닌 이유로 끝나면, 옮기기 전 front 를 되돌린다.
-  - 사다리의 `restore_front` 와 같은 규칙이다(`turn_boundary_resend_sequence` 위 주석).
-  - 그러지 않으면 다음 lane 이 크기와 상관없는 실패 때문에 좁힌 범위에서 열린다.
-  - carrier 주소와 표시 바꾸기는 사다리처럼 되돌리지 않는다.
+  - 턴 가운데 요청은 ledger 의 마지막 요청이 연 곳을 붙잡는다(`held_window`, `lib/keeper/keeper_turn_driver_try_provider.ml`). ledger 는 응답 때 바뀐다(`ledger_hooks`).
+  - 표시 바꾸기는 attempt 가 들고 있는 상태다(`attempt_state.current_turn_results`).
+- 후보가 옮긴 front 는 attempt 가 크기 아닌 이유로 끝나도 그대로 둔다.
+  - 사다리는 그때 front 를 되돌린다(`resend_holding` 의 `restore_front`). 다음 lane 이 좁힌 범위에서 열리지 않게 하려는 것이다.
+  - 후보는 checkpoint 뒤에만 붙는다. 그 뒤에는 그 턴에서 다음 lane 이 열리지 않는다.
+    `allow_retry` 가 `same_run_retry_allowed` 를 묻는다(`lib/keeper/keeper_turn_driver.ml`).
+  - 붙잡은 front 는 `run_named` 안의 값이라 턴이 끝나면 사라진다.
+  - 남는 다음 요청은 max-tokens 이어 쓰기 하나다.
+    잘린 응답도 AfterTurn 에서 ledger 에 남는다. 그래서 되돌려도 그 요청은 좁힌 front 에서 열린다.
 
 agent-core 계약에 한 가지를 더한다.
 
@@ -222,7 +225,6 @@ provider 거절은 run 안에서 다시 보내지 않는다.
    - 시험: 보내기 전에 실패한 좁은 후보는 없는 후보다. 턴은 그 앞 거절로 끝나고, 다음 thunk 는 불리지 않는다.
    - 시험: checkpoint 전 요청에는 다음 후보가 없다. 사다리가 다섯 단을 지금 순서로 쓴다.
    - 시험: carrier 를 주소로 바꾼 후보가 받아들여지면, history 범위는 첫 후보와 같다.
-   - 시험: 후보로 front 를 옮긴 attempt 가 크기 아닌 이유로 끝나면 front 가 돌아온다.
 
 ## 6. 조사할 것
 

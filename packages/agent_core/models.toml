@@ -3229,6 +3229,7 @@ auth = "api-key"
 # The effort ladder is declared per grok row, not here: xAI documents it per
 # model (grok-4.3 accepts "none", grok-4.5 and later do not).
 capabilities_base = "openai_chat_extended"
+cache_session_header = "x-grok-conv-id"
 
 [[providers]]
 id = "mistral"

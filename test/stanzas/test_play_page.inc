@@ -1,4 +1,4 @@
-; RFC play-link-for-the-shared-machine §2.6 through the real router: the
+; Through the real router: the
 ; play page is public and self-contained, and the seat names the bearer,
 ; the DOS controller and whom it can be handed to.
 

@@ -620,6 +620,35 @@ let uncertain_lock_release_save () =
     (Result.is_error (Login.saved (Login.create "codex") (receipt warnings))))
     [`Null;`List [`Assoc ["code",`String "unknown"]]]
 
+(* #52278: the client prints its login address on one line, longer than the
+   pane. The rows hold all of it, none wider than the pane, and every row of
+   the address keeps the address's colour. *)
+let a_login_address_wraps_whole () =
+  let address =
+    "https://auth.example.test/oauth/authorize?client_id=app_0123456789abcdef"
+    ^ "&redirect_uri=http%3A%2F%2Flocalhost%3A1455%2Fauth%2Fcallback&state=xyz" in
+  let t = Login.create "codex" in
+  t.phase <- Login.Logging; t.login_id <- Some session;
+  t.output <- "Open this address in your browser:\n\027[94m" ^ address ^ "\027[0m";
+  let width = 32 in
+  let rows = fst (Login.visible_lines ~height:40 ~width t) in
+  let terminal = List.filter_map (function Login.Terminal line -> Some line | Login.Text _ -> None) rows in
+  List.iter (fun line ->
+    check bool "no row is wider than the pane" true
+      (Masc_tui_message_layout.display_width (Sgr_text.text line) <= width)) terminal;
+  let address_rows = List.filter (fun line -> contains address (Sgr_text.text line)) terminal in
+  check bool "the address takes more than one row" true (List.length address_rows > 1);
+  check string "its rows hold the whole address" address
+    (String.concat "" (List.map Sgr_text.text address_rows));
+  List.iter (fun line ->
+    check bool "every row of it keeps the colour" true
+      (List.for_all (fun (run : Sgr_text.run) ->
+         run.pen.foreground = Some (Sgr_text.Bright Sgr_text.Blue)) line)) address_rows;
+  check bool "the sentence before it wraps at its spaces" true
+    (List.exists (fun line -> Sgr_text.text line = "Open this address in your") terminal);
+  check (list string) "an empty line stays a row" [ "" ]
+    (List.map Sgr_text.text (Sgr_text.wrap ~max_cells:width []))
+
 let usage_limited_save () =
   let t=Login.create "codex" in ok (Login.inventory t inventory);
   let receipt ?(selected=["codex_1a2b3c4d.gpt-6-sol_1a2b3c4d"]) rows = `Assoc ["configured",`Bool true;"commit",`Assoc ["durability",`String "durable";"warnings",`List []];
@@ -1317,5 +1346,6 @@ let () = run "TUI account login" ["workflow",[
   test_case "visible cursor and recovery identity" `Quick viewport_and_receipt;
   test_case "foreign escapes never reach the terminal" `Quick foreign_escapes_never_reach_the_terminal;
   test_case "sgr text keeps what the operator reads" `Quick sgr_text_keeps_what_the_operator_reads;
+  test_case "a login address wider than the pane wraps whole" `Quick a_login_address_wraps_whole;
   test_case "removal from the list" `Quick removal_from_the_list;
   test_case "refused removal" `Quick refused_removal]]

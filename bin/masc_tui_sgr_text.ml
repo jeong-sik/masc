@@ -382,6 +382,34 @@ let parse text =
 
 let text line = String.concat "" (List.map (fun run -> run.text) line)
 
+(* The rows are the rows {!Masc_tui_message_layout.wrap_words} makes of the
+   line's text, so a long address breaks where the other panes break one;
+   each row keeps the pen of every byte it holds. *)
+let wrap ~max_cells line =
+  let placed =
+    List.rev
+      (snd
+         (List.fold_left
+            (fun (start, placed) run -> start + String.length run.text, (start, run) :: placed)
+            (0, []) line))
+  in
+  let slice (first, last) =
+    List.filter_map
+      (fun (start, run) ->
+        let from = max first start and until = min last (start + String.length run.text) in
+        if from < until then Some { pen = run.pen; text = String.sub run.text (from - start) (until - from) }
+        else None)
+      placed
+  in
+  let rec merge = function
+    | a :: b :: rest when a.pen = b.pen -> merge ({ a with text = a.text ^ b.text } :: rest)
+    | run :: rest -> run :: merge rest
+    | [] -> []
+  in
+  match Masc_tui_message_layout.wrap_words_source_ranges ~max_cells (text line) with
+  | [] -> [ line ]
+  | rows -> List.map (fun ranges -> merge (List.concat_map slice ranges)) rows
+
 (* ── Drawing ──────────────────────────────────────────────────────────── *)
 
 let palette_escape = function

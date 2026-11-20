@@ -75,6 +75,14 @@ val text : line -> string
 (** The line's characters without their pens, and the address of each link
     that closed on it. *)
 
+val wrap : max_cells:int -> line -> line list
+(** The line in rows of at most [max_cells] cells, broken where
+    {!Masc_tui_message_layout.wrap_words} breaks its text: at spaces, and
+    inside a word too wide for a row, such as a login address. Every row keeps
+    the pens of the characters it holds, so a link that goes on to the next
+    row keeps its colour, and the rows hold every character but the spaces a
+    break takes. An empty line is one empty row. *)
+
 val render : sanitize:(string -> string) -> line -> string
 (** The line drawn with {!Masc_tui_theme.Sgr}, each run's text put through
     [sanitize] first. A line that opened a style closes it, so the result can

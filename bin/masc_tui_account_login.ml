@@ -991,7 +991,9 @@ let lines ?(ko = true) t = Text t.notice :: body_rows ~ko t
 let row_text = function Text text -> text | Terminal line -> Masc_tui_sgr_text.text line
 (* The notice wraps rather than being cut at the pane's edge: a refused
    save's reason ends in the verification code and detail, the part that says
-   what to do. *)
+   what to do. The client's own output wraps in every phase: the login
+   address it prints is longer than most panes, and a cut one can be neither
+   read nor copied (#52278). *)
 let visible_lines ?(ko = true) ~height ~width t =
   if height <= 0 then [], None else
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width t.notice with
@@ -1001,12 +1003,13 @@ let visible_lines ?(ko = true) ~height ~width t =
     | Finished _ | Failed -> true
     | Loading | Providers _ | Logging | Models | Refreshing_models | Preparing_context _ | Documented_context _ | Saving | Removing
     | Removal _ -> false in
-  let body = if results then
-    List.concat_map (function
-      | Text text -> List.map (fun line -> Text line)
-          (Masc_tui_message_layout.wrap_words ~max_cells:width text)
-      | Terminal _ as row -> [row]) (body_rows ~ko t)
-    else body_rows ~ko t in
+  let body =
+    List.concat_map (fun row -> match row with
+      | Terminal line ->
+          List.map (fun line -> Terminal line) (Masc_tui_sgr_text.wrap ~max_cells:width line)
+      | Text text when results ->
+          List.map (fun line -> Text line) (Masc_tui_message_layout.wrap_words ~max_cells:width text)
+      | Text _ -> [row]) (body_rows ~ko t) in
   let rows = notice @ body in
   if results then (
     let count = List.length rows in

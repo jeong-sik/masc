@@ -377,6 +377,41 @@ let test_failed_counts_preserve_unknown_readings () =
     (P.peak_failure_count [P.Exact 0; P.Exact 2]);
   check "empty fleet is a known zero" (P.Exact 0) (P.peak_failure_count [])
 
+let test_half_hour_tallies_share_ssot_with_half_hours () =
+  let check_tally label expected actual =
+    Alcotest.(check bool) label true (expected = actual)
+  in
+  let slot back tally : Pulse.slot =
+    { Pulse.starts_at = Pulse.slot_start now - (back * Pulse.slot_seconds); tally }
+  in
+  let pulse =
+    { Pulse.known_since = now -. (2.0 *. float_of_int Pulse.slot_seconds)
+    ; slots =
+        [ slot 0 { Pulse.ok = 4; rested = 0; failed = 0 }
+        ; slot 1 { Pulse.ok = 2; rested = 1; failed = 3 }
+        ]
+    }
+  in
+  let tallies = P.half_hour_tallies ~now ~count:5 (Some pulse) in
+  check_tally "preserves raw slot tallies and pre-known_since unknown"
+    [ P.Slot_tally_unknown
+    ; P.Slot_tally_unknown
+    ; P.Slot_tally_measured { Pulse.ok = 0; rested = 0; failed = 0 }
+    ; P.Slot_tally_measured { Pulse.ok = 2; rested = 1; failed = 3 }
+    ; P.Slot_tally_measured { Pulse.ok = 4; rested = 0; failed = 0 }
+    ]
+    tallies;
+  check_tally "half_hours is an exact pure projection of half_hour_tallies"
+    (P.half_hours ~now ~count:5 (Some pulse))
+    (List.map P.half_hour_of_tally tallies);
+  check_tally "None pulse yields all Slot_tally_unknown"
+    [ P.Slot_tally_unknown; P.Slot_tally_unknown ]
+    (P.half_hour_tallies ~now ~count:2 None);
+  check_tally "non-finite now yields all Slot_tally_unknown"
+    [ P.Slot_tally_unknown; P.Slot_tally_unknown ]
+    (P.half_hour_tallies ~now:Float.nan ~count:2 (Some pulse))
+;;
+
 let () =
   Alcotest.run "tui_keeper_pulse"
     [ ( "failing"
@@ -414,6 +449,8 @@ let () =
             test_the_half_hours_draw_different_marks
         ; Alcotest.test_case "nothing read needs a keeper and no reading" `Quick
             test_nothing_read_needs_a_keeper_and_no_reading
+        ; Alcotest.test_case "half_hour_tallies shares SSOT bucketing with half_hours" `Quick
+            test_half_hour_tallies_share_ssot_with_half_hours
         ] )
     ]
 ;;

@@ -1157,6 +1157,45 @@ let test_context_cycle_reads_the_librarian_position_beside_the_cut () =
   Alcotest.(check bool) "the decoder retains why the number is absent" true
     (unreadable_reading.mcc_read_position = None
      && unreadable_reading.mcc_read_position_unreadable)
+;;
+
+let test_cache_invalidation_survives_symlinked_parent_before_runtime_dir_exists () =
+  let module P = Masc.Keeper_librarian_progress in
+  let root = fresh_dir "masc-health-symlink-root" in
+  let actual = Filename.concat root "actual" in
+  let link = Filename.concat root "workspace-link" in
+  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) @@ fun () ->
+  Unix.mkdir actual 0o755;
+  Unix.symlink actual link;
+  let config = Masc.Workspace.default_config link in
+  let keeper_name = "symlink-keeper" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:link in
+  write_keeper_config ~keepers_dir ~keeper_id:keeper_name ();
+  let runtime_keepers_dir = Masc.Workspace.keepers_runtime_dir config in
+  Alcotest.(check bool) "runtime keepers dir is absent before initial health read" false
+    (Sys.file_exists runtime_keepers_dir);
+  Health.For_testing.invalidate ~base_path:link ~keeper:keeper_name;
+  let initial_json = Health.keeper_memory_health_http_json ~base_path:link in
+  let initial_cycle = member "context_cycle" (keeper_obj keeper_name initial_json) in
+  Alcotest.(check bool) "initial health observes absent read_position" true
+    (is_null (member "read_position" initial_cycle));
+  P.write ~keepers_dir:runtime_keepers_dir ~keeper_id:keeper_name
+    { P.position =
+        { trace_id = "symlink-trace"
+        ; end_atom = 42
+        ; last_atom_digest = String.make 64 'b'
+        }
+    ; boundary_lines_seen = 7
+    }
+  |> Result.map_error P.write_error_to_string |> require_ok;
+  (* No manual invalidation: [P.write] creates [runtime_keepers_dir] and fires
+     its commit observer with the canonicalized path. *)
+  let updated_json = Health.keeper_memory_health_http_json ~base_path:link in
+  let updated_cycle = member "context_cycle" (keeper_obj keeper_name updated_json) in
+  Alcotest.(check int) "cache invalidation resolves symlinked parent even when dir was absent at registration"
+    42 (int_field "read_position" updated_cycle)
+;;
+
 (* RFC librarian-lifecycle §4.9: the durable round and the continuity round
    fall behind separately, so the screen carries both. A lag it cannot take
    reads as "cannot say" rather than as zero -- zero is what a caught-up
@@ -1964,6 +2003,8 @@ let () =
             test_context_cycle_separates_saved_and_prepared
         ; Alcotest.test_case "the Librarian position is read beside the cut" `Quick
             test_context_cycle_reads_the_librarian_position_beside_the_cut
+        ; Alcotest.test_case "cache invalidation survives symlinked parent when runtime dir is absent at registration" `Quick
+            test_cache_invalidation_survives_symlinked_parent_before_runtime_dir_exists
         ; Alcotest.test_case "the Librarian_stalled alarm is read from files" `Quick
             test_the_librarian_stalled_alarm_is_read_from_files
         ; Alcotest.test_case "continuity lag measured or unknown" `Quick

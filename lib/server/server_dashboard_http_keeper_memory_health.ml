@@ -519,8 +519,12 @@ let row_roots : (string, string) Hashtbl.t = Hashtbl.create 4
 let health_reader = ref keeper_health
 
 let health_directory_identity path =
-  try Unix.realpath path with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> path
+  let abs_path =
+    if Filename.is_relative path
+    then Filename.concat (Unix.getcwd ()) path
+    else path
+  in
+  Fs_compat.realpath_lenient abs_path
 
 let cache_entry ~keepers_dir keeper_id =
   let key = health_directory_identity keepers_dir, keeper_id in

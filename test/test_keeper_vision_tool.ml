@@ -2825,13 +2825,51 @@ let test_generated_sandbox_image_reaches_vision () =
       let bytes = Base64.decode_exn "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" in
       let source = Filename.concat root "generated.png" in
       write_file source bytes;
+      let host_root = Unix.realpath root in
+      let container_root = Masc.Keeper_sandbox.container_root meta.name in
       let docker = Filename.concat base "docker" in
       let script = Printf.sprintf
-        "#!/bin/sh\ncase \"$1\" in\ninfo|image) printf '[]\\n'; exit 0;;\nrun) ;;\n*) exit 92;;\nesac\nwhile [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:test' ]; do shift; done\nshift\nif [ \"$1\" = sh ] && [ \"$2\" = -c ] && [ \"$4\" = sh ] && [ \"$5\" = %s ] && [ \"$#\" = 6 ]; then exec /bin/sh -c \"$3\" sh %s \"$6\"; fi\n[ \"$1\" = head ] || exit 93\n[ \"$2\" = -c ] || exit 99\n[ \"$4\" = %s ] || exit 94\nexec /usr/bin/head -c \"$3\" %s\n"
-        (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
-        (Filename.quote source)
-        (Filename.quote (Filename.concat (Masc.Keeper_sandbox.container_root meta.name) "generated.png"))
-        (Filename.quote source) in
+        "#!/bin/sh\n\
+         case \"$1\" in\n\
+         \  info|image) printf '[]\\n'; exit 0;;\n\
+         \  run) ;;\n\
+         \  *) exit 92;;\n\
+         esac\n\
+         while [ \"$#\" -gt 0 ] && [ \"$1\" != 'alpine:test' ]; do shift; done\n\
+         shift\n\
+         [ \"$1\" = sh ] && [ \"$2\" = -c ] && [ \"$4\" = sh ] && [ \"$#\" = 7 ] || exit 93\n\
+         [ \"$5\" = %s ] || exit 94\n\
+         case \"$3\" in *'readlink /proc/self/fd/0'*) ;; *) exit 93;; esac\n\
+         host_root=%s\n\
+         case \"$6\" in\n\
+         \  \"$5\") target=\"$host_root\";;\n\
+         \  \"$5\"/*) target=\"$host_root/${6#\"$5\"/}\";;\n\
+         \  *) exit 6;;\n\
+         esac\n\
+         if [ -d /proc/self/fd ]; then\n\
+         \  exec /bin/sh -c \"$3\" sh \"$host_root\" \"$target\" \"$7\"\n\
+         fi\n\
+         exec python3 - \"$host_root\" \"$target\" \"$7\" <<'PY'\n\
+         import os, sys\n\
+         root, path, limit = sys.argv[1], sys.argv[2], int(sys.argv[3])\n\
+         if not os.path.exists(path):\n\
+         \    sys.exit(3)\n\
+         if not os.path.isfile(path):\n\
+         \    sys.exit(4)\n\
+         if os.path.realpath(root) != root:\n\
+         \    sys.exit(8)\n\
+         real = os.path.realpath(path)\n\
+         prefix = root if root == \"/\" else root.rstrip(\"/\") + \"/\"\n\
+         if real != root and not real.startswith(prefix):\n\
+         \    sys.exit(6)\n\
+         try:\n\
+         \    with open(real, \"rb\") as f:\n\
+         \        sys.stdout.buffer.write(f.read(limit))\n\
+         except OSError:\n\
+         \    sys.exit(5)\n\
+         PY\n"
+        (Filename.quote container_root)
+        (Filename.quote host_root) in
       write_file docker script; Unix.chmod docker 0o755;
       with_env "PATH" (base ^ ":" ^ Sys.getenv "PATH") (fun () ->
       with_env "MASC_TEST_FAKE_DOCKER_PATH" docker (fun () ->

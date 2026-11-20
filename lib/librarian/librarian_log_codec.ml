@@ -223,6 +223,10 @@ let store_token : Librarian_unit.store -> string = function
   | Internal -> "internal"
 ;;
 
+let store_of_token token =
+  List.find_opt (fun store -> String.equal (store_token store) token) Librarian_unit.stores
+;;
+
 type removal_kind =
   | Kind_dropped
   | Kind_merged_into

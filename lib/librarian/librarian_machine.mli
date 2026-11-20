@@ -362,6 +362,23 @@ val write
   -> Librarian_direct.write
   -> t * write_answer
 
+(** What an operator's [Skip_item] names (§12.4). Each carries the turn log
+    reading stands in, so a name read from another file is never taken. *)
+type skip_target =
+  | Head_item of
+      { turn_log : Keeper_turn_log.Log_id.t
+      ; line : int (** Byte offset of the head unit's line. *)
+      ; item : Librarian_unit.item_name
+      }
+  (** The first unread item. *)
+  | Unreadable_unit of
+      { turn_log : Keeper_turn_log.Log_id.t
+      ; line : int
+      }
+  (** The head unit, when a bundle it names is there and does not read now
+      ({!Librarian_unit.Content_unreadable}): no item of it can be named. *)
+[@@deriving eq]
+
 type act_refusal =
   | Nothing_to_resume
   | Not_stopped
@@ -373,6 +390,14 @@ type act_refusal =
   | Turn_log_unread
   (** The turn log could not be read now, so the act's condition was not
       read. Nothing changed. *)
+  | Not_the_head of { now : skip_target option }
+  (** The target is not what a [Skip_item] would name now. [now] is that
+      name, to send again. [None]: reading has no head item to skip.
+      Nothing is unread, the writer passes the head itself, or reading
+      stops on a line or a turn log another act passes. *)
+  | Content_unread
+  (** A byte file or the external store could not be read now, so the
+      act's condition was not read. Nothing changed. *)
   | Act_unavailable of unavailable
 
 type act_answer =
@@ -437,6 +462,37 @@ val restart_reading
   -> t
   -> at:float
   -> observed:Keeper_turn_log.Log_id.t
+  -> t * act_answer
+
+(** An operator skips the head of reading (§12.4). The condition is read
+    from the disk when the act is taken: the turn log and the unit content
+    are read from the tail the way a question of the head item alone reads
+    them, in [stores].
+
+    - [Head_item]: it is the first unread item now. The [Skip
+      (Operator_skipped { by; missing })] line passes it and names the
+      parts that question would name as missing.
+    - [Unreadable_unit]: the head unit's content does not read now. The
+      line passes the rest of that unit.
+
+    The working state and the snapshot are kept. The size facts are
+    emptied, the width memory counts the line as a commit of what it passed
+    (§7.6), an ask that is out is cancelled, and the next ask follows.
+
+    In [Idle], [Asking], [Resting] and [Refused_at_bottom]. A target that is
+    not what the read finds is [Not_done (Not_the_head { now })]. A turn log
+    that cannot be read now is [Not_done Turn_log_unread], and other files
+    are [Not_done Content_unread]. A refusal leaves the value as it was, an
+    ask that is out included. [Stopped s] is
+    [Not_done (Act_unavailable (Store_stopped s))], and so is a commit that
+    appends no line, which stops the store with [s] (§9.2). *)
+val skip_item
+  :  place
+  -> stores:Librarian_unit_content.stores
+  -> t
+  -> at:float
+  -> by:string
+  -> target:skip_target
   -> t * act_answer
 
 (** What the writer's fiber does to the ask's fiber after one step. *)

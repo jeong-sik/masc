@@ -168,8 +168,8 @@ let save_file_unix (path : string) (content : string) : unit =
   write_all_and_close fd content
 ;;
 
-(* per-path Stdlib.Mutex registry + fresh-fd open/close
-   on every append.
+(* per-path Stdlib.Mutex registry; each append writes through the
+   path's cached [Fd_cache] descriptor.
 
    Background: prior [Append_fd_cache] LRU cached an [out_channel]
    per path and reused it across calls. Cache lookup was mutex-
@@ -180,7 +180,7 @@ let save_file_unix (path : string) (content : string) : unit =
    ledger/, plus "}{"-concat in agent-core-events/ — total 243 live
    malformed lines).
 
-   PR #15936 (RFC-0108 root-fix scope #1) addressed [append_jsonl]
+   PR #15936 addressed [append_jsonl]
    with its own per-path registry but left [append_file_unix] still
    pointing at the cache. This PR extends the fix to
    [append_file_unix] (and removes the now-dead [Append_fd_cache]
@@ -193,14 +193,7 @@ let save_file_unix (path : string) (content : string) : unit =
    [append_jsonl] (single [append_path_mutex_registry]) so a
    caller mixing the two helpers on a single path remains
    race-free. Per-path granularity lets appends to *different*
-   files run concurrently.
-
-   Throughput trade-off (RFC-0108 §6 performance follow-up): the
-   removed cache folded three syscalls (open/output_string/close)
-   into one cached output_string under 64-keeper telemetry. Fresh
-   fd per call restores those three syscalls. A future domain-safe
-   cache (per-domain fd, or a single-writer workspace fiber) can
-   reinstate the optimization without giving up correctness. *)
+   files run concurrently. *)
 type append_path_mutex_entry =
   { mutex : Stdlib.Mutex.t
   ; mutable active_waiters_and_holders : int

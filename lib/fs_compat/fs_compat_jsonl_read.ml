@@ -331,10 +331,8 @@ let fold_jsonl_lines ~init ~f path =
 (* RFC-0162 §3.4: per-path fd cache (single fd per path, cross-domain
    serialized by [append_path_mutex_registry]).
 
-   RFC-0108 §3.3 declared cross-domain fd cache an explicit non-goal
-   under the assumption that fd count ≈ keeper N (≤64). Production
-   evidence (RFC-0162 §1.3) invalidated that on the open/close
-   *churn* axis: 22,440 tool calls × fresh open+close per record was
+   Production evidence (RFC-0162 §1.3) on the open/close *churn*
+   axis: 22,440 tool calls × fresh open+close per record was
    shifting host kernel filp_cachep slab pressure and contributing
    to the EMFILE/ENFILE trace.
 
@@ -344,13 +342,12 @@ let fold_jsonl_lines ~init ~f path =
      design opened up (POSIX O_APPEND+write atomicity is only
      guaranteed up to PIPE_BUF, ~4 KB, and tool-call records
      routinely exceed that).
-   - The existing [get_append_path_mutex] is already a cross-domain
-     [Stdlib.Mutex] per path. Wrapping the write
-     inside it preserves RFC-0108 §3.2's Record-interleave-0
-     guarantee verbatim.
+   - The existing [append_path_mutex_registry] already holds a
+     cross-domain [Stdlib.Mutex] per path. Wrapping the write
+     inside it keeps any two records from interleaving.
    - The cache lookup uses a separate, microsecond-scoped mutex
-     ([fd_cache_mu]) so two appends to *different* paths never
-     contend on a global fd-cache lock. *)
+     ([mu] in [Fd_cache]), released before the write, so two appends
+     to *different* paths never wait on each other's writes. *)
 let invalidate_cached_writer path =
   with_append_path_mutex path (fun () -> evict_inactive_cached_writer_for_path path)
 ;;

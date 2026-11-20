@@ -596,6 +596,8 @@ let planning_phase_korean = function
   | Goal_phase.Kind.Paused -> "일시정지"
   | Goal_phase.Kind.Blocked -> "막힘"
 
+let seconds_per_hour = 3600.
+
 let planning_summary_reading ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
@@ -640,11 +642,18 @@ let planning_summary_reading ~cols (state : state) =
                    let outcome = if Option.is_some row.pgh_closed_at
                      then text "종결 시각 기록됨" "close time recorded"
                      else text "종결 결과 보고 안 됨" "terminal outcome not reported" in
+                   (* The server reports a lifetime only for a Goal that
+                      closed, so it is a finished length (RFC
+                      tui-one-screen-grammar 6.2): 1d12h, not 36.0h. A
+                      lifetime the ladder refuses (negative, not a number)
+                      draws the read-failed mark rather than vanishing. *)
                    let lifetime = match row.pgh_lifetime_hours with
                      | None -> ""
                      | Some hours ->
-                         if hours >= 48. then Printf.sprintf " · %.1fd" (hours /. 24.)
-                         else Printf.sprintf " · %.1fh" hours in
+                         " · " ^ Option.value
+                           (Message_layout.elapsed_text (hours *. seconds_per_hour))
+                           ~default:(Masc_tui_value.Unknown.glyph
+                                       Masc_tui_value.Unknown.Read_failed) in
                    name ^ " · " ^ phase ^ " · " ^ outcome ^ lifetime) history
         in
         let rollup = p.pl_rollup in

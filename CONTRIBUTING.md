@@ -51,7 +51,7 @@ Install the [source prerequisites](README.md#from-source) first.
 ```bash
 git clone https://github.com/jeong-sik/masc.git
 cd masc
-git config core.hooksPath .githooks       # pre-commit guard
+git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
 opam init --bare                         # initialize a fresh opam installation
 opam switch create . ocaml-base-compiler.5.5.2 --no-install
@@ -77,8 +77,9 @@ once: it serializes Dune inside one worktree, defaults concurrency to
 match `dune-project`. `MASC_DUNE_DRY_RUN=1` prints the command instead of
 running it.
 
-The `pre-commit` hook refuses a commit on `main`, `master` or `develop`. It
-runs no build.
+The `pre-commit` hook refuses a commit on `main`, `master` or `develop`, and
+`pre-push` refuses pushing merge commits on ordinary feature or stack branches
+(`release/*` is exempt). Neither hook runs a build.
 
 ## Where things are
 
@@ -235,7 +236,7 @@ review the changed scope before deciding. For Release/Tag, verify the completed
 full CI run for the current head. Read current reviews and comments before
 integration. Native GitHub stacks land whole through their top PR via
 `merge-async`; non-native branch chains land parent first. For a non-stack PR,
-`gh pr merge --match-head-commit "$head"` pins the reviewed head. See
+`gh pr merge --squash --match-head-commit "$head"` pins the reviewed head. See
 [the workflow](docs/CI-REVIEW-WORKFLOW.md) and
 [native GitHub stacks](docs/guides/NATIVE-GITHUB-STACKS.md) for the review and
 integration procedure. A source approval does not claim that a build or runtime

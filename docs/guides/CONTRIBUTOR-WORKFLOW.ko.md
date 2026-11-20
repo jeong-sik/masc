@@ -29,12 +29,13 @@ flowchart LR
 
 ## 기본 저장소 전략
 
-- `gh stack`으로 만들고 유지하는 Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
-  스택 브랜치에 다른 PR이나 `main`을 merge로 끌어들이지 않습니다. PR 하나에는 구체적인 결과 하나를 담습니다.
+- `main`에 직접 뿌리를 두고 `gh stack`으로 유지하는 짧은 Stacked PR로 작업합니다. 맨 아래 PR은 `main`을, 이후 PR은 직전 브랜치를 대상으로 합니다.
+  `main`은 **squash 병합 전용**입니다(저장소 설정과 `main` ruleset 강제). 피처·스택 브랜치에 다른 PR이나 `main`을 merge로 끌어들이지 않고, 장기 피처 브랜치 위에 여러 독립 스택이나 비-네이티브 체인을 매달지 않습니다. PR 하나에는 구체적인 결과 하나를 담습니다.
 - **Native Stack은 맨 위 PR 하나로 스택 전체를 한 번에 병합합니다. 아래부터 한 층씩 병합하지 않습니다.**
   아래쪽 PR로 `merge-async`를 부르는 것도 같습니다. 한 층씩 넣으면 `main`이 움직일 때마다
   남은 층과 다른 스택이 다시 충돌합니다.
-- 스택이 `main`과 충돌하면 `gh stack rebase`로 스택 전체를 다시 올리고 모든 층을 한 번에 push합니다.
+- 스택이 `main`과 충돌하면 `gh stack rebase`로 스택 전체를 다시 올리고 모든 층을 한 번에 push합니다(`gh stack push` 또는 `--force-with-lease`).
+  자기 피처·스택 브랜치에서 rebase 후 `--force-with-lease`로 push하는 것은 표준 충돌 해소 경로이며, force-push를 피하려고 `git merge main`으로 우회하지 않습니다(`main`·`release/*` 및 타인 브랜치 보호는 유지).
   아래층만 고쳐 따로 push하지 않습니다. 충돌은 맨 아래 PR이 아니라 스택 단위로 보고합니다.
 - 동시 작업은 별도 worktree로 격리합니다. Task claim은 담당을 조율하며 파일을 잠그거나
   다른 체크아웃을 수정할 권한을 주지는 않습니다.
@@ -149,8 +150,9 @@ Keeper 메시지와 위임 요청은 운영자의 채팅 화면에도 보입니�
 그대로 보존합니다.
 
 **Commit 경계.** `.githooks`가 활성화되어 있으면 pre-commit은 `main`·`master`·`develop`에
-하는 commit을 거절하고, pre-push는 Dune 빌드 trace(`trace.csexp`, `_build-*/`)를 더하는
-push를 거절합니다. 두 hook 모두 빌드를 하지 않으므로 worktree 브랜치에서 hook을 켠 채로
+하는 commit을 거절하고, pre-push는 일반 피처·스택 브랜치에 merge 커밋을 도입하는
+push를 거절합니다(로컬은 `release/*` 예외, GitHub 필수 `changes` 검사는 동일 저장소 `release/v*`만 예외).
+두 hook 모두 빌드를 하지 않으므로 worktree 브랜치에서 hook을 켠 채로
 commit합니다. 독립 소스 리뷰는 그대로 받으세요.
 
 Keeper 레인은 도구 체인이 있으면 로컬에서 빌드·테스트할 수 있습니다. 해당 결과가 독립
@@ -233,9 +235,9 @@ Dispatch에는 저장소 권한이 필요하며 fork 기여자는 maintainer에�
 
 ## 5. 리뷰하고 통합하기
 
-main으로 들어가는 일반 PR은 [운영자가 요청한 자동 병합](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)을 적용합니다.
+main으로 들어가는 일반 PR은 squash 전용으로 [운영자가 요청한 자동 병합](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)을 적용합니다.
 Ready가 되면 기본으로 켭니다. 일반 PR은 GitHub의 Auto-merge 예약으로 표시하고, Native Stack은 전체를 함께 병합하는 작업을 실행합니다.
-단일 PR의 유효 승인은 GitHub가 판정합니다. 스택은 미병합 PR마다 서로 다른 계정 2명이 현재 커밋을 승인하면 전체를 병합합니다.
+단일 PR의 유효 승인은 GitHub가 판정합니다. 스택은 미병합 PR마다 `main` ruleset의 필수 비작성자 승인 수(현재 1계정, 고위험 변경은 서로 다른 2계정 권고)가 현재 커밋에 모이면 전체를 squash 병합합니다.
 병합을 막아야 하는 지적은 CHANGES_REQUESTED로 남깁니다. COMMENTED 본문만으로는 자동 병합을 막지 않습니다.
 리뷰어는 승인 전에 소스와 남은 지적을 확인합니다. Release/Tag는 전체 검증 후 수동으로 병합합니다.
 

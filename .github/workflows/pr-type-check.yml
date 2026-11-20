@@ -143,6 +143,40 @@ jobs:
           git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_changelog_fragments.py" > "$check"
           python3 -I "$check" --git-dir "$work" --merge "$GITHUB_SHA"
 
+      # The third thing this required job answers: does this pull request
+      # introduce merge commits into an ordinary feature or stack branch?
+      # This repository squash-merges onto main, so pulling main or another PR
+      # into a branch via `git merge` grows commit ancestry and causes recurring
+      # conflicts (2026-10-12 sweep; 2026-11-20 squash-only policy). Same-repo
+      # release branches (`release/v*`) are exempt. Uses `--shallow-exclude`
+      # over git without spending GitHub REST API quota.
+      - name: Refuse merge commits inside ordinary pull requests
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SAME_REPO: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/pr-changes"
+          auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          export GIT_CONFIG_COUNT=1
+          export GIT_CONFIG_KEY_0=http.extraheader
+          export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $auth"
+          check="$RUNNER_TEMP/pr_no_merge_commits.py"
+          git -C "$work" show "$GITHUB_SHA:scripts/ci/pr_no_merge_commits.py" > "$check"
+          python3 -I "$check" \
+            --git-dir="$work" \
+            --remote=origin \
+            --merge="$GITHUB_SHA" \
+            --head-ref="$HEAD_REF" \
+            --base-ref="$BASE_REF" \
+            --default-branch="${DEFAULT_BRANCH:-main}" \
+            --same-repo="${SAME_REPO:-false}"
+
   type-check:
     needs: [changes]
     # Skipped here rather than at the workflow level so the check context

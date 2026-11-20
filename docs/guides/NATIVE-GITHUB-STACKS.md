@@ -8,15 +8,25 @@ GitHub CLI and API capabilities change; check installed help and the official
 ## Build and maintain stacks with gh stack only
 
 Create and maintain stacks with `gh stack` (`gh stack init`, `gh stack add`,
-`gh stack submit`). Never pull another PR or main into a stack branch with a
-merge: this repository squash-merges, so a merge adds ancestry without ever
-removing it, chains grow by hundreds of commits ("Integrate current chat
-repairs through PR #NNN"), and GitHub stops computing mergeability — the
-2026-10-12 sweep found three PRs at `UNKNOWN` and five `DIRTY` from exactly
-this pattern. When a layer conflicts, fix that layer and rebase the whole
-stack (`gh stack rebase`); do not merge the moved base into the layer. A
-branch-chain PR opened against its parent's branch becomes a native stack
-only through the gh stack link; until then it merges layer by layer.
+`gh stack submit`). `main` is **squash-only** (enforced by repository merge
+settings and the `main` branch ruleset `allowed_merge_methods=["squash"]`).
+Never pull another PR or `main` into a feature or stack branch with a merge:
+in a squash-merge repository a merge adds ancestry without ever removing it,
+chains grow by hundreds of commits ("Integrate current chat repairs through
+PR #NNN"), and GitHub stops computing mergeability — the 2026-10-12 sweep
+found three PRs at `UNKNOWN` and five `DIRTY` from exactly this pattern.
+Local `.githooks/pre-push` (exempting `release/*`) and the required `changes`
+check (`scripts/ci/pr_no_merge_commits.py`, exempting same-repository
+`release/v*` branches) refuse merge commits on ordinary PR branches.
+
+Avoid hanging multiple independent stacks or non-native branch chains off a
+long-lived non-main integration branch; every merge into that intermediate
+branch dirties sibling chains immediately. Prefer short Native Stacks rooted
+directly on `main` and land each stack whole. When a layer conflicts, fix that
+layer and rebase the whole stack (`gh stack rebase`); do not merge the moved
+base into the layer. A branch-chain PR opened against its parent's branch
+becomes a native stack only through the `gh stack` link; until then it merges
+layer by layer.
 
 ## Read the merge scope
 
@@ -97,34 +107,44 @@ affected changes again. GitHub evaluates repository rules during the operation.
 
 Non-native Ready PRs targeting `main` have GitHub **Auto-merge enabled by
 default** on creation/Ready transitions and subsequent review/lifecycle events.
-The UI reservation waits for GitHub's two-approval rule; no one needs to click
-the button. Drafts arm when marked Ready. Release branches stay manual.
+The UI reservation waits for GitHub's `main` ruleset approval rule (currently
+one non-author approval, `dismiss_stale_reviews_on_push`, required `changes`
+and `type-check`, squash-only); no one needs to click the button. Drafts arm
+when marked Ready. Release branches stay manual.
 Before extending an auto-merge-enabled standalone PR into a native stack or
 retargeting its base, disable that reservation first. Native stack members use the whole-scope
 worker instead of per-layer reservations; the worker clears existing reservations
 when it observes native membership, Draft status, a non-main base or a release head.
 
-For standalone reservations, GitHub determines which **two distinct account**
-approvals remain valid, including dismissal after new reviewable changes.
+For standalone reservations, GitHub determines which **required non-author
+account** approval(s) remain valid (currently 1 per ruleset `26823705`; two
+distinct accounts remain recommended for high-risk changes), including dismissal
+after new reviewable changes.
 An unchanged-diff rebase may retain approvals; the worker does not assert that
 every retained standalone review has the new commit ID.
 
-Native stacks merge after **two distinct GitHub accounts** have submitted APPROVE
-with the exact current head as commit_id for every unmerged member. Repeated
-approvals from one account count once. Author approvals, old heads, dismissed
-reviews, outstanding change requests and ambiguous formal decisions do not
-satisfy that worker admission. Reviewers still inspect source and outstanding findings
-before approving. Record a blocking FAIL/HOLD as **CHANGES_REQUESTED**: automation
-does not interpret COMMENTED review prose or establish Keeper-session independence.
+Native stacks merge after the required number of **non-author GitHub accounts**
+(currently **1**, matching the `main` ruleset per `#52979` / operator decision
+`ask894f7f704c77e60a` c2; two distinct accounts remain recommended for high-risk
+changes) have submitted APPROVE with the exact current head as `commit_id` for
+every unmerged member. Repeated approvals from one account count once. Author
+approvals, old heads, dismissed reviews, outstanding change requests and
+ambiguous formal decisions do not satisfy that worker admission. Reviewers still
+inspect source and outstanding findings before approving. Record a blocking
+FAIL/HOLD as **CHANGES_REQUESTED**: automation does not interpret COMMENTED
+review prose or establish Keeper-session independence.
 Release branches retain manual full-CI admission.
 
 [`approval-merge-request.yml`](../../.github/workflows/approval-merge-request.yml)
 records a PR number on review and PR lifecycle events without a write token or
 PR checkout. [`approval-auto-merge.yml`](../../.github/workflows/approval-auto-merge.yml)
 runs the worker from its trusted default-branch workflow commit. It reads current
-reviews and scope again and submits only the top PR of a native stack. GitHub
-must enforce at least two approvals and stale-approval dismissal on `main`;
-repository rules continue to apply during the actual merge. These metadata-only
+reviews and scope again and submits only the top PR of a native stack. The
+worker (`require_server_reviews`) verifies that GitHub enforces at least
+`REQUIRED_APPROVALS` (currently 1) approval and stale-approval dismissal on
+`main`; ruleset `26823705` and repository settings additionally enforce
+squash-only merges and required checks (`changes`, `type-check`) server-side
+during the actual merge. These metadata-only
 workflows run no builds or tests.
 
 The request workflow skips events that cannot change what the worker does: a
@@ -139,13 +159,13 @@ during admission meets one, the run records `rate_limited` with the server's
 `retry_at`, requests no merge and exits with status 75. Nothing is lost:
 [`approval-merge-sweep.yml`](../../.github/workflows/approval-merge-sweep.yml)
 runs every 30 minutes, reads the open pull requests with one GraphQL walk and
-runs the same worker on every scope that two accounts approved at its current
-head and that is still open. The sweep decides nothing about merging; admission
-stays in the worker. It skips a pull request with an auto-merge reservation
-(GitHub merges that one itself), a conflicting one, and a native stack with a
-layer that is not yet approved. It stops at the first worker run that meets a
-quota and lists the scopes it did not reach; the next sweep takes them. Its
-summary records the REST and GraphQL quota before and after.
+runs the same worker on every scope that satisfies `REQUIRED_APPROVALS` at its
+current head and that is still open. The sweep decides nothing about merging;
+admission stays in the worker. It skips a pull request with an auto-merge
+reservation (GitHub merges that one itself), a conflicting one, and a native
+stack with a layer that is not yet approved. It stops at the first worker run
+that meets a quota and lists the scopes it did not reach; the next sweep takes
+them. Its summary records the REST and GraphQL quota before and after.
 
 The sweep also deletes branches a merge left behind. The worker deletes a head
 branch when it sees the merge, which misses the layers of a native stack: each
@@ -248,7 +268,7 @@ gh api --method PUT repos/OWNER/REPO/pulls/TOP_PR_NUMBER/merge-async \
 
 This is a write affecting **every PR in the stack**, not only the top PR. Use
 it only after the whole scope is reviewed and authorized. For non-native PRs,
-use `gh pr merge --match-head-commit SHA` under the repository's normal procedure.
+use `gh pr merge --squash --match-head-commit SHA` under the repository's normal procedure.
 Do not use `--admin` or `--auto`.
 
 The API's `sha` pins the top PR's head, not a client-supplied vector of all lower
@@ -270,11 +290,18 @@ group, as described in the official API contract.
 ## Resolve conflicts over the whole stack
 
 When a native stack conflicts with its base, run `gh stack rebase` over the whole
-stack and push every layer once (`gh stack push`, or one atomic push with a lease
-per branch). Do not rebase or push the bottom layer alone and cascade the rest
-later; collect a layer's fix as a commit or patch and restack once. Report the
-conflict per stack ("stack #N conflicts with main, whole rebase needed"), not as
-a problem of its bottom PR. See [merging native stacks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-stacked-pull-requests).
+stack and push every layer once (`gh stack push`, or one atomic push with
+`--force-with-lease` per branch). For a standalone feature branch, use
+`git fetch origin main && git rebase origin/main && git push --force-with-lease`.
+
+Rebasing and pushing **your own feature or stack branch** with
+`--force-with-lease` is the standard, authorized conflict-resolution path in this
+repository — never fall back to `git merge main` (or merging another PR) just to
+avoid force-pushing. Bare `--force` and force-pushes to `main`, `release/*`, or
+another session's branch remain forbidden. Do not rebase or push the bottom layer
+alone and cascade the rest later; collect a layer's fix as a commit or patch and
+restack once. Report the conflict per stack ("stack #N conflicts with main, whole
+rebase needed"), not as a problem of its bottom PR. See [merging native stacks](https://docs.github.com/en/pull-requests/how-tos/merge-and-close-pull-requests/merging-stacked-pull-requests).
 
 ## Agent and Keeper context
 

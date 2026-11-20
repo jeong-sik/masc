@@ -6,7 +6,7 @@
 - For MASC coding-agent work, its `<execution_protocol>` is the repository-specific workflow authority. It overrides parent or general contributor guidance, including `CONTRIBUTING.md`, only where those sources would require local Dune builds, CI watch/wait loops, or a different default for parallel review agents.
 - System, developer, and explicit user instructions still take precedence. The execution protocol does not relax safety, scope, destructive-action, or evidence-honesty rules.
 - Follow the concrete contributor procedures in `docs/guides/CONTRIBUTOR-WORKFLOW.md` after reading the constitution.
-- Before GitHub PR review or merge, read `docs/guides/NATIVE-GITHUB-STACKS.md`. Inspect REST `stack` metadata; a non-main `baseRefName` alone does not imply a parent-merge blocker.
+- Before GitHub PR review or merge, read `docs/guides/NATIVE-GITHUB-STACKS.md`. `main` is squash-only; keep stacks linear off `main` with `gh stack`, resolve conflicts with `gh stack rebase` and `--force-with-lease` (never `git merge` into a feature or stack branch), and inspect REST `stack` metadata before judging a non-main `baseRefName`.
 - Follow `docs/guides/WORKSPACE-STORAGE.md` when placing generated output. Proof goes in the PR body and CI artifacts, not in the repository.
 - Keep this file as a thin entrypoint. Do not duplicate the full constitution here.
 

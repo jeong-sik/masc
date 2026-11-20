@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Refuse pushes that introduce merge commits on ordinary feature or stack branches.
+# This repository squash-merges onto main; merging main or another PR into a branch
+# accumulates ancestry and causes recurring conflicts. Rebase instead and push with
+# `--force-with-lease` (or bypass in an emergency with `git push --no-verify`).
+
+set -euo pipefail
+
+remote="${1:-}"
+zero="0000000000000000000000000000000000000000"
+
+failed=0
+while IFS=' ' read -r local_ref local_sha remote_ref remote_sha || [[ -n "${local_ref:-}" ]]; do
+  [[ -z "${local_ref:-}" ]] && continue
+  if [[ "$local_sha" == "$zero" ]] || [[ "$local_ref" == "(delete)" ]]; then
+    continue
+  fi
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master|refs/heads/develop|refs/heads/release/*)
+      continue
+      ;;
+    refs/heads/*)
+      ;;
+    *)
+      continue
+      ;;
+  esac
+
+  branch="${remote_ref#refs/heads/}"
+
+  # Exclude only trunk refs (covers fork upstream/main, origin/main, local main,
+  # and URL remotes during --force-with-lease rebases). Sibling feature/release
+  # branches are intentionally not excluded so pre-existing merges on the branch
+  # or merges inherited from a release branch are still caught locally.
+  exclude_args=()
+  for ref in \
+    "refs/remotes/upstream/main" \
+    "refs/remotes/origin/main" \
+    "refs/heads/main" \
+    "refs/remotes/${remote}/main" \
+    "refs/remotes/${remote}/HEAD"; do
+    if git rev-parse --verify --quiet "${ref}^{commit}" >/dev/null 2>&1; then
+      exclude_args+=("$ref")
+    fi
+  done
+
+  if [[ ${#exclude_args[@]} -gt 0 ]]; then
+    merges="$(git log --merges --format='  - %h %s' "$local_sha" --not "${exclude_args[@]}")"
+  elif [[ "$remote_sha" != "$zero" ]] && git cat-file -e "${remote_sha}^{commit}" 2>/dev/null; then
+    merges="$(git log --merges --format='  - %h %s' "${remote_sha}..${local_sha}")"
+  else
+    merges="$(git log --merges --format='  - %h %s' "$local_sha")"
+  fi
+
+  if [[ -n "$merges" ]]; then
+    echo "ERROR: Merge commit(s) detected in push to '${branch}':" >&2
+    printf '%s\n' "$merges" >&2
+    echo "" >&2
+    echo "This repository uses squash merges. Do not merge main or another PR into" >&2
+    echo "a feature or stack branch; rebase instead and push with --force-with-lease:" >&2
+    echo "  gh stack rebase && gh stack push" >&2
+    echo "  # or: git fetch <upstream|origin> main && git rebase <upstream|origin>/main && git push --force-with-lease" >&2
+    failed=1
+  fi
+done
+
+exit "$failed"

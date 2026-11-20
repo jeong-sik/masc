@@ -86,7 +86,7 @@ gh api repos/OWNER/REPO/stacks/STACK_NUMBER
 병합한다. 아래부터 한 층씩 병합하지 않는다.** 스택 전체가 승인된 경우
 `PUT repos/{owner}/{repo}/pulls/{맨 위 PR 번호}/merge-async`에 맨 위 PR의 head를 `sha`로 전달한다.
 스택이 main과 충돌하면 `gh stack rebase`로 스택 전체를 다시 올려 한 번에 push하고, 아래층만 고쳐 push하지 않는다.
-일반 PR은 `gh pr merge --match-head-commit <SHA>`를 쓴다. `--auto`·`--admin`을 쓰지 않는다.
+일반 PR은 `gh pr merge --squash --match-head-commit <SHA>`를 쓴다. `--auto`·`--admin`을 쓰지 않는다.
 병합 직전에 구성과 모든 head·리뷰를 다시 읽고 비동기 접수를 완료로 보고하지 않는다.
 
 ## Release/Tag 검증

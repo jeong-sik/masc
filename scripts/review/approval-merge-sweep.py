@@ -347,7 +347,7 @@ def close_merged_issues(repo, started, dry_run):
 
 
 def ready(row):
-    """Two accounts approve the current head and nothing certainly blocks it."""
+    """Required accounts approve the current head and nothing certainly blocks it."""
     reviews = row['latestOpinionatedReviews']['nodes']
     approvers = {review['author']['login'] for review in reviews
                  if review['state'] == 'APPROVED' and review['author'] is not None and

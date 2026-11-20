@@ -11,8 +11,8 @@
     (#20682: masc_store_bytes / masc_store_files, directory walks cached
     for 60s).
 
-    RFC-0217 observable pattern: the registered source is polled on each
-    exporter tick, so every sample is present from process start — no
+    The first write happens synchronously before the store-writer fiber
+    starts, so every sample is present from process start — no
     absence-vs-zero ambiguity for these surfaces. *)
 
 (** Register the sample source with [Otel_metrics]. Idempotent; call once

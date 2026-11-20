@@ -1,5 +1,5 @@
 (** The server's latest reading of the open pull requests of the registered
-    GitHub repositories, as plain data (RFC-0465 §2-§4; RFC
+    GitHub repositories, as plain data (RFC
     keeper-world-state-shows-open-work S1).
 
     The reader that fills it stays in [masc_server]

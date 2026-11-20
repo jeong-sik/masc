@@ -135,6 +135,11 @@ masc start --base-path <base> --port <port>
   single user.
 - `GET /health/ready` answers `{"ready":true}` once the engine is ready. It
   answers 503 while the engine starts, and the login routes answer then.
+  After that it answers 503, as the signed-in routes of a person do, once
+  the authorization log or its store stops (a write failed, or another
+  process changed the file) or the two stop matching
+  (`AuthorizationUncertain`). It stays so until a restart reads the files
+  again.
 - `masc restart` replaces it as it replaces a single-user server. The new
   server takes the environment of the shell that runs `masc restart`, so
   export `MASC_HTTP_BASE_URL` and the client secrets there too.

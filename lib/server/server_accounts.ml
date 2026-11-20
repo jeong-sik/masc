@@ -60,10 +60,12 @@ let refusal_to_string = function
     Printf.sprintf "the folder of Keeper definitions %s cannot be read: %s" folder detail
   | Keeper_configuration_change_left { journal } ->
     Printf.sprintf
-      "%s records a change of a Keeper configuration that did not finish, and the engine \
-       would roll it back by writing or removing a Keeper definition the authorization log \
-       does not name. Removing the journal gives the rollback up: the Keeper definition and \
-       runtime.toml stay as the change left them"
+      "%s records a change of a Keeper configuration that did not finish. From a journal \
+       that decodes and whose Keeper name and paths fit this installation, the engine would \
+       roll the change back, writing or removing a Keeper definition the authorization log \
+       does not name. It would not start on any other journal, nor when the rollback fails, \
+       possibly after part of it. Removing the journal leaves the Keeper definition and \
+       runtime.toml as they are"
       journal
   | Keeper_configuration_journal_not_read { journal; detail } ->
     Printf.sprintf "the Keeper configuration journal %s cannot be read: %s" journal detail
@@ -130,7 +132,8 @@ let liveness (_ : Httpun.Request.t) reqd =
    ([Server_runtime_bootstrap.start_engine]), so a ready answer before it
    would name a server that may still end, and [masc restart] takes that
    answer for a replacement that serves. Without the zone every route of a
-   person is a 503 ([Login_routes.zone_uncertain]). The reason names paths
+   person that reads it is a 503 ([Login_routes.zone_uncertain]); the home
+   and invitation pages do not read it. The reason names paths
    of the server, so the probe says only that the server is not ready. *)
 let readiness ~engine zone (_ : Httpun.Request.t) reqd =
   let not_ready () =
@@ -216,11 +219,12 @@ let no_keeper_definition ~base_path =
 ;;
 
 (* The journal of a change of a Keeper configuration that did not finish.
-   The first step of the engine rolls such a change back, after this check:
-   it writes the definition the journal recorded, or removes the one the
-   change wrote ([Keeper_config_journal.recover_interrupted]). Whichever
-   process left the journal, the boot stops on it as on the definition its
-   rollback would write. *)
+   After this check, the first step of the engine rolls the change back when
+   the journal decodes and passes its target check: it writes the definition
+   the journal recorded, or removes the one the change wrote
+   ([Keeper_config_journal.recover_interrupted]). On any other journal, or
+   when the rollback fails, the engine does not start. So the boot stops on
+   a journal whichever process left it, without reading it. *)
 let no_keeper_configuration_change ~base_path =
   let journal = Keeper_config_journal.journal_path_for_base_path ~base_path in
   match Unix.lstat journal with

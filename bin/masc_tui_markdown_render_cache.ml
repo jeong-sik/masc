@@ -139,24 +139,6 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~identity
       remember cache { key; rows; blocks = Not_kept };
       rows
 
-let render_keeping_blocks cache ~theme_revision ~palette_generation ~width ~renderer
-    ~identity ~text =
-  let key : _ Completed.key =
-    { identity; text; width; theme_revision; palette_generation }
-  in
-  let kept = match Masc_tui_lru.find cache.completed identity with
-    | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
-        (match rendered.blocks with
-         | Completed.Kept _ -> Some rendered.rows
-         | Completed.Not_kept -> None)
-    | Some _ | None -> None in
-  match kept with
-  | Some rows -> rows
-  | None ->
-      let (rendered : Masc_tui_markdown.streaming_render) = renderer ~width text in
-      remember cache { key; rows = rendered.rows; blocks = Kept rendered.blocks };
-      rendered.rows
-
 let completed_blocks cache ~theme_revision ~palette_generation ~width ~identity
     ~text =
   let key : _ Completed.key =
@@ -214,6 +196,25 @@ let validate_streaming_render ~source_length
     || not (valid_blocks ~source_length ~row_count:(List.length rendered.rows)
               rendered.blocks)
   then invalid_arg "Markdown streaming renderer returned an invalid boundary"
+
+let render_keeping_blocks cache ~theme_revision ~palette_generation ~width ~renderer
+    ~identity ~text =
+  let key : _ Completed.key =
+    { identity; text; width; theme_revision; palette_generation }
+  in
+  let kept = match Masc_tui_lru.find cache.completed identity with
+    | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
+        (match rendered.blocks with
+         | Completed.Kept _ -> Some rendered.rows
+         | Completed.Not_kept -> None)
+    | Some _ | None -> None in
+  match kept with
+  | Some rows -> rows
+  | None ->
+      let (rendered : Masc_tui_markdown.streaming_render) = renderer ~width text in
+      validate_streaming_render ~source_length:(String.length text) rendered;
+      remember cache { key; rows = rendered.rows; blocks = Kept rendered.blocks };
+      rendered.rows
 
 let reset_growing cache ~(key : _ Streaming.key) ~text ~renderer =
   let rendered = renderer ~width:key.width text in

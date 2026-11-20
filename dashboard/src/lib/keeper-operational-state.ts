@@ -1,17 +1,10 @@
-// RFC-0135 §2 — Typed SSOT for keeper operational state.
+// Typed SSOT for keeper operational state.
 //
 // Every dashboard surface (roster card, detail runtime panel, alert strip,
 // action panel, lifecycle timeline) derives its display verdict from this
-// single function. Three pre-RFC sites that disagreed on the same keeper:
-//   - agent-roster.ts:rosterStateNote        (flat runtime_blocker_class read)
-//   - keeper-detail-runtime.ts:deriveKeeperLiveTruth
-//                                            (composite-aware conditioning)
-//   - keeper-predicates.ts:keeperActionVisibility
-//                                            (status/phase/paused OR-chain)
-// will all call `deriveKeeperOperationalState` instead (PR-3 ~ PR-6).
+// single function.
 //
-// Discriminant invariants (RFC-0135 §2 conditioning matrix). The
-// `execution_current` semantics are anchored at
+// Discriminant invariants. The `execution_current` semantics are anchored at
 // `composite_execution_current_for_runtime_state` in
 // `lib/server/server_dashboard_http_composite_claims.ml`:
 //
@@ -37,7 +30,7 @@
 //              Diagnostic-only classes such as `synthetic_stall` remain
 //              running unless runtime_attention.blocked attests a live block.
 //
-// catch-all `default:` is forbidden — see RFC-0135 §9 (PR-9 CI guard).
+// catch-all `default:` is forbidden.
 
 import type {
   Keeper,
@@ -59,7 +52,7 @@ import {
 export type OfflineCause = 'unbooted' | 'shutdown' | 'crashed' | 'unknown'
 export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 
-// RFC-0135 PR-14a — attention axis SSOT (Goal-2 typed-state expansion).
+// Attention axis SSOT.
 //
 // `runtime_attention.{blocked,needs_attention}` was previously OR'd
 // against `state.kind === 'stuck'` inline at
@@ -71,7 +64,7 @@ export type StuckReason = KeeperRuntimeBlockerClass | 'fiber_dead' | 'unknown'
 // after operator acknowledgement. Encoding attention as a sum next to
 // `KeeperOperationalState` keeps both signals explicit.
 //
-// Closed sum (no catch-all per RFC-0135 §9-4):
+// Closed sum (no catch-all):
 //   blocked          — backend says live execution is held
 //   needs_attention  — backend flagged operator action required
 //   clean            — neither set, no orange edge on dashboard
@@ -93,11 +86,10 @@ export interface KeeperOperationalAxes {
   readonly phase: KeeperPhase | null
 }
 
-// RFC-0135 §10 Goal-2 (audit 2026-05-19): backend `runtime_attention`
-// axis is *orthogonal* to operational kind — a running keeper can have
-// `attention='needs_attention'`, a stuck keeper can have its attention
-// cleared after operator ack. Lifting `attention` into the typed state
-// removes the audit-finding B3 pattern where callers OR-merged
+// Backend `runtime_attention` axis is *orthogonal* to operational kind — a
+// running keeper can have `attention='needs_attention'`, a stuck keeper can
+// have its attention cleared after operator ack. Lifting `attention` into the
+// typed state removes the pattern where callers OR-merged
 // `opState.kind === 'stuck'` with a separately-derived attention axis
 // (forming an external axis-pair the typed sum couldn't enforce).
 export type KeeperOperationalState =
@@ -208,12 +200,9 @@ function compositeFiberKnownDead(c: KeeperCompositeSnapshot): boolean {
  *  Callers may still combine this with `state.kind === 'stuck'` if
  *  blocker-class evidence alone should surface an alert. */
 /** Private — used only by `deriveKeeperOperationalState` to derive the
- *  per-variant `attention` axis. After RFC-0135 §10 Goal-2 the
- *  per-variant axis replaced the externally-derived attention used by
- *  `keeper-detail-runtime.ts:213` (audit B3 closure); callers now read
- *  `opState.attention` directly. Kept as a private helper to keep the
- *  derivation rule (priority: blocked > needs_attention > clean)
- *  localized to one place. */
+ *  per-variant `attention` axis; callers read `opState.attention`
+ *  directly. Kept as a private helper to keep the derivation rule
+ *  (priority: blocked > needs_attention > clean) localized to one place. */
 function computeKeeperAttention(
   composite: KeeperCompositeSnapshot | null,
 ): KeeperAttention {
@@ -244,7 +233,7 @@ function computeKeeperAttention(
  *  `types/core.ts`). Callers with a lowercase wire-format string should
  *  narrow via `toKeeperPhase` first. If TypeScript reports a missing
  *  case after adding a new variant, route it to the appropriate tone —
- *  do not add a `default:` (RFC-0135 §9-4 forbids catch-all). */
+ *  do not add a catch-all `default:`. */
 export function compositePhaseTone(phase: KeeperPhase): 'active' | 'warn' | 'err' {
   switch (phase) {
     case 'Offline':
@@ -288,7 +277,7 @@ export function isFailingAfterRuntimeExhausted(
   return snapshot.phase === 'failing' && snapshot.runtime.state === 'exhausted'
 }
 
-// RFC-0135 PR-14c — display reason SSOT (Goal-2c typed-state expansion).
+// Display reason SSOT.
 //
 // `keeper-detail-runtime.ts:257-264` inlined a 3-way fallback for the
 // "runtime reason" detail line:
@@ -310,17 +299,17 @@ export function deriveKeeperDisplayReason(
   return deriveBlockerReason({ keeper, composite }).reason
 }
 
-// RFC-0135 PR-14b — turn-phase SSOT (Goal-2b typed-state expansion).
+// Turn-phase SSOT.
 //
-// `keeper-detail-runtime.ts:194-195` (and one earlier 3-way fallback
-// removed by PR-5) read turn phase via composite-or-flat fallback:
+// `keeper-detail-runtime.ts:194-195` read turn phase via composite-or-flat
+// fallback:
 //   `compositeSnapshot?.turn_phase ?? keeper.pipeline_stage`
 // The two sources have different semantics (composite is the *live*
 // KTC turn cycle from backend; pipeline_stage is the flat-record
 // snapshot of the prior turn) but downstream consumers treat them as
 // interchangeable strings. Centralizing the fallback policy here lets
-// future consumers (Goal-2c displaySummary, Goal-2d phase) reuse the
-// same precedence without re-reading raw composite fields.
+// other consumers (displaySummary, phase) reuse the same precedence
+// without re-reading raw composite fields.
 //
 // Precedence (composite preferred):
 //   1. composite.turn_phase if composite present
@@ -342,7 +331,7 @@ export function deriveKeeperTurnPhase(
   return null
 }
 
-// RFC-0135 PR-14d — composite-preferred phase SSOT (Goal-2d).
+// Composite-preferred phase SSOT.
 //
 // Two phase sources exist on the wire:
 //   - `composite.phase` (lowercase, live KSM wire format)

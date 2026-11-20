@@ -1,4 +1,4 @@
-// Plain-words rendering of the RFC-0444 Goal store unavailable union. Every
+// Plain-words rendering of the Goal store unavailable union. Every
 // switch is exhaustive over the closed token lists in
 // types/goal-store-unavailable.ts; render at the end of a path, never
 // branch on the rendered text.

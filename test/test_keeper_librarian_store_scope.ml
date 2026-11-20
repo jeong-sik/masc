@@ -450,8 +450,7 @@ let test_operator_restarts_reading () =
   Masc_test_deps.ensure_memory_writer ~sw ~config:a keeper_name;
   let act action = Act.act ~base_path:a.base_path ~keeper:keeper_name ~actor:"operator-1" action in
   let turns_path =
-    Masc.Keeper_turn_log_store.path_for_keepers_dir
-      ~keepers_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:a.base_path)
+    Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir:(Workspace.keepers_runtime_dir a)
       ~keeper_id:keeper_name
   in
   let start =

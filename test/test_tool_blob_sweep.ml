@@ -1,5 +1,5 @@
-(** RFC-0499 layer one: the in-server sweep counts what layer two would
-    delete and records it, and deletes nothing. *)
+(** The in-server sweep counts the deletable blobs and records them, and
+    deletes nothing. *)
 
 module B = Tool_blob_store
 module O = Tool_output

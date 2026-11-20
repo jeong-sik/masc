@@ -686,9 +686,9 @@ let test_time_window_n_zero_is_bounded () =
 (* n=0 with no time window must reach the tail-bounded reader ([read_recent]),
    not the full-store [read_range] scan (1970->today) that Yojson-parsed the
    whole store and starved keeper fibers, and not the empty list the #20649
-   regression produced for fixed sources. Since RFC-0372 n=0 is not "unlimited"
-   at all — it resolves to [default_read_entries] — so with fewer entries than
-   that, all are returned. *)
+   regression produced for fixed sources. n=0 is not "unlimited" at all — it
+   resolves to [default_read_entries] — so with fewer entries than that, all
+   are returned. *)
 let test_n_zero_no_window_returns_bounded () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);

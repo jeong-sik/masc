@@ -567,7 +567,7 @@ let test_a_skip_moves_reading_only () =
     Content_missing [ { line = 200; parts = [ Chat_bytes { from = 64; until = 128 } ] } ]
   in
   match Store.commit_skip store ~at:203.0 ~hole inside with
-  | Committed { store; line } ->
+  | Ok { store; line } ->
     check int "the next commit" (read.seq + 1) line.seq;
     check string "leaves the snapshot" (hex line.basis) (hex line.after);
     check string "the file is as it was" snapshot (file_bytes (snapshot_path place));
@@ -580,7 +580,43 @@ let test_a_skip_moves_reading_only () =
     check bool "no effects" true (line.effects = Effects.empty);
     check string "the cause" "skip: content missing at 200" (cause_text line.cause);
     check (list string) "Memory" [ port ] (claims (Store.memory store))
-  | Committed_without_snapshot _ | Stopped _ | Not_a_snapshot _ -> fail "the skip was not committed"
+  | Error (_ : Store.stop) -> fail "the skip was not committed"
+;;
+
+(* §12.4: a restart names the file the operator saw and reads it from its
+   first line, as a first boot does. Memory, the snapshot and the working
+   state stay. *)
+let test_a_restart_reads_the_new_file_from_its_first_line () =
+  let place = started_place () in
+  let store, (_ : Log.commit) = committed (booted place) ~at:201.0 (remember port) in
+  let store, read =
+    read_committed store ~at:202.0
+      (answer_plan store ~at:202.0 ~working_state:(Set "checking the port") [])
+  in
+  let snapshot = file_bytes (snapshot_path place) in
+  let other =
+    match Turn_log.Log_id.of_string (String.make 32 'b') with
+    | Some id -> id
+    | None -> fail "the other log id is not 32 hexadecimal characters"
+  in
+  let start : Turn_store.start = { id = other; at = 202.5; mark = { mark with chat_bytes = 512 } } in
+  match
+    Store.commit_restart store ~at:203.0
+      ~hole:(Turn_log_replaced { from = turn_log; to_ = other })
+      ~start
+  with
+  | Ok { store; line } ->
+    check int "the next commit" (read.seq + 1) line.seq;
+    check bool "names the new file" true (Turn_log.Log_id.equal other line.turn_log);
+    check int "from its first line" 0 line.turn_log_offset;
+    check string "before its first unit" "before the first" (position_text line.covers_through);
+    check int "covered where the file starts" 512 line.covered.chat_bytes;
+    check (option string) "the working state is kept" (Some "checking the port")
+      line.working_state;
+    check string "leaves the snapshot" (hex line.basis) (hex line.after);
+    check string "the file is as it was" snapshot (file_bytes (snapshot_path place));
+    check (list string) "Memory" [ port ] (claims (Store.memory store))
+  | Error (_ : Store.stop) -> fail "the restart was not committed"
 ;;
 
 let adoption_text : (Store.t, Store.adoption_refusal) result -> string = function
@@ -732,6 +768,8 @@ let () =
       , [ test_case "an answer moves reading" `Quick test_an_answer_moves_reading
         ; test_case "an answer that changes no fact" `Quick test_an_answer_that_changes_no_fact
         ; test_case "a skip moves reading only" `Quick test_a_skip_moves_reading_only
+        ; test_case "a restart reads the new file from its first line" `Quick
+            test_a_restart_reads_the_new_file_from_its_first_line
         ] )
     ; ( "recovery"
       , [ test_case "a snapshot one line behind" `Quick test_snapshot_one_line_behind

@@ -428,8 +428,9 @@ val adopt
     of the reader is [Not_done Not_replaced]; a file that cannot be read now
     is [Not_done Turn_log_unread]. A refusal leaves the value as it was, an
     ask that is out included. [Stopped s] is
-    [Not_done (Act_unavailable (Store_stopped s))]. A commit that fails is
-    [Done] with the store's state, as for any commit. *)
+    [Not_done (Act_unavailable (Store_stopped s))]. A commit that appends no
+    line stops the store with [s] and is
+    [Not_done (Act_unavailable (Store_stopped s))] (§9.2). *)
 val restart_reading
   :  place
   -> t

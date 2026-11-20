@@ -220,10 +220,8 @@ let pass_lines fixture count =
        Store.commit_skip store ~at:61.0 ~hole:(Content_missing [])
          { line = passed.last_at; within = Whole; covered = still; turn_log_offset = passed.new_end }
      with
-     | Committed { store = (_ : Store.t); line = (_ : Log_line.commit) } -> ()
-     | Committed_without_snapshot (_ : Log_line.commit)
-     | Stopped (_ : Store.stop)
-     | Not_a_snapshot (_ : Librarian_envelope.refusal) -> fail "the fixture's lines were not passed")
+     | Ok { store = (_ : Store.t); line = (_ : Log_line.commit) } -> ()
+     | Error (_ : Store.stop) -> fail "the fixture's lines were not passed")
 ;;
 
 (* {1 The fake provider} *)

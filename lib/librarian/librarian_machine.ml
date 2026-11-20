@@ -219,6 +219,15 @@ let after_commit place t ~at store ~narrowing ?(last = Last.Committed) committed
     next_ask place { (moved t ~narrowing) with last_read = Some last } ~at store)
 ;;
 
+(* A skip changes no snapshot, so it ends with its line on disk or with no
+   line, and no line stops the store (§9.2 「건너뛰기 규칙」). [last] is what
+   the line sets once it is on disk, as for a commit. *)
+let after_skip place t ~at ~narrowing ~last : (Store.skipped, Store.stop) result -> t = function
+  | Ok { store; line = (_ : Librarian_log.commit) } ->
+    next_ask place { (moved t ~narrowing) with last_read = Some last } ~at store
+  | Error stop -> { t with state = Stopped stop }
+;;
+
 (* §7.3 「Refused_by_lane, Silent_lane」 and §7.4: only the slots the lane
    declares now are read. Above the bottom, a refusal from one of them
    narrows by what the question carried and asks again at once (§7.6). At
@@ -312,7 +321,7 @@ let no_answer place t ~at store (asking : asking) ~asked (question : Read_result
           Librarian_width.committed t.narrowing
             (Librarian_width.passed question.offered question.reach.within)
         in
-        after_commit place t ~at store ~narrowing ~last:(lane_result ~one_item:true)
+        after_skip place t ~at ~narrowing ~last:(lane_result ~one_item:true)
           (Store.commit_skip store ~at ~hole:(Item_exceeds_window question.missing) question.reach)
       | All_not_input -> { (ended ~one_item:true t) with state = Refused_at_bottom store }
       | Not_all -> rest ~one_item:true t)
@@ -367,11 +376,11 @@ let ended_read place t ~at store (asking : asking) ~(asked : Read_result.asked)
     let narrowing =
       Librarian_width.committed t.narrowing (Librarian_width.passed offered reach.within)
     in
-    after_commit place t ~at store ~narrowing
+    after_skip place t ~at ~narrowing ~last:Last.Committed
       (Store.commit_skip store ~at ~hole:(Content_missing missing) reach)
   | Span_unknown { before; reach } ->
     (* It passes no unit with items. *)
-    after_commit place t ~at store ~narrowing:t.narrowing
+    after_skip place t ~at ~narrowing:t.narrowing ~last:Last.Committed
       (Store.commit_skip store ~at ~hole:(Unknown_span { before; after = reach.covered }) reach)
   | Memory_diverged { expected; observed } ->
     { t with state = Stopped (Log_diverged { expected; observed }) }
@@ -743,10 +752,13 @@ let restart_reading place t ~at ~observed =
     (match restart_from place store ~observed with
      | Error refusal -> t, Not_done refusal
      | Ok (hole, start) ->
-       let t = { t with narrowing = Librarian_width.empty; bottom = Librarian_bottom.empty } in
-       ( settled t store (Store.commit_restart store ~at ~hole ~start) ~after:(fun store ->
-           next_ask place t ~at store)
-       , Done ))
+       (match Store.commit_restart store ~at ~hole ~start with
+        | Ok { store; line = (_ : Librarian_log.commit) } ->
+          next_ask place (moved t ~narrowing:Librarian_width.empty) ~at store, Done
+        | Error stop ->
+          (* §9.2: the line is not on disk, so the act is refused as the
+             store stops. *)
+          { t with state = Stopped stop }, Not_done (Act_unavailable (Store_stopped stop))))
 ;;
 
 type fiber_change =

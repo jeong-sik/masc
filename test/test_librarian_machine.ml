@@ -331,6 +331,20 @@ let last_commit (value : Machine.t) =
   | Started _ -> fail "nothing was committed"
 ;;
 
+(* The width of the ask that is out (§7.6). *)
+let asked_text (value : Machine.t) =
+  match value.state with
+  | Asking { asking = { asked = Read (Read_range width); _ }; _ } -> (
+    match width with
+    | All -> "all"
+    | Units count -> Printf.sprintf "%d units" (count :> int)
+    | Items count -> Printf.sprintf "%d items" (count :> int))
+  | Asking { asking = { asked = Read Read_item_alone; _ }; _ } -> "the item alone"
+  | Asking { asking = { asked = Room (_ : Masc.Librarian_room_result.asked); _ }; _ } ->
+    "making room"
+  | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> "no ask out"
+;;
+
 let late_answers () =
   Masc.Otel_metric_store.metric_value_or_zero
     Keeper_metrics.(to_string LibrarianLateAnswers)
@@ -661,18 +675,6 @@ let test_no_answer () =
    items. Silence says nothing of size, so it does not narrow: the writer
    rests. *)
 let test_a_refusal_narrows () =
-  let asked_text (value : Machine.t) =
-    match value.state with
-    | Asking { asking = { asked = Read (Read_range width); _ }; _ } -> (
-      match width with
-      | All -> "all"
-      | Units count -> Printf.sprintf "%d units" (count :> int)
-      | Items count -> Printf.sprintf "%d items" (count :> int))
-    | Asking { asking = { asked = Read Read_item_alone; _ }; _ } -> "the item alone"
-    | Asking { asking = { asked = Room (_ : Masc.Librarian_room_result.asked); _ }; _ } ->
-      "making room"
-    | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> "no ask out"
-  in
   let place, value = asking_place () in
   check string "the first ask reads every unit" "all" (asked_text value);
   let refused value ask offered =
@@ -1509,6 +1511,64 @@ let test_restart_where_the_position_is_lost () =
     (state_text restarted)
 ;;
 
+(* §9.2: a restart whose line does not reach the disk is refused, and the
+   store stops as for any commit that appends no line. *)
+let test_restart_that_appends_no_line () =
+  let place, asking = asking_place () in
+  replace_turn_log place ~id:other_log ~until:32;
+  let named = Digest.digest_of_bytes (file_bytes (snapshot_path place)) in
+  let other = other_snapshot () in
+  write_file (snapshot_path place) other;
+  let stop : Store.stop =
+    Log_diverged { expected = named; observed = Digest.digest_of_bytes other }
+  in
+  let log = file_bytes (log_path place) in
+  let stopped, answer = restart place asking ~observed:other_log in
+  check string "is refused as the store stops" ("the store is stopped: " ^ stop_text stop)
+    (act_text answer);
+  check string "stops the store" ("stopped: " ^ stop_text stop) (state_text stopped);
+  check string "appends no line" log (file_bytes (log_path place))
+;;
+
+(* §7.6 「비움」 and §7.4: an accepted restart forgets the refused widths and
+   the head item's size facts. *)
+let test_restart_forgets_widths_and_size_facts () =
+  let place, value = asking_place () in
+  let wider = { (question place value) with offered = { units = 4; head_items = 2 } } in
+  let narrowed =
+    Machine.decide place value ~at:300.0
+      (ended value 1 (No_answer { question = wider; slots = sized Input_too_large }))
+  in
+  check string "a refusal of four units narrows" "2 units" (asked_text narrowed);
+  replace_turn_log place ~id:other_log ~until:32;
+  let restarted, answer = restart place narrowed ~observed:other_log in
+  check string "the restart" "done" (act_text answer);
+  check string "reads every unit again" "all" (asked_text restarted);
+  let place, value = asking_place () in
+  let alone =
+    Machine.decide place value ~at:300.0
+      (ended value 1 (No_answer { question = question place value; slots = sized Input_too_large }))
+  in
+  check int "the item's fact is held" 1 (facts_held alone With_memory);
+  replace_turn_log place ~id:other_log ~until:32;
+  let restarted, answer = restart place alone ~observed:other_log in
+  check string "the restart at the bottom" "done" (act_text answer);
+  check int "holds no fact" 0 (facts_held restarted With_memory + facts_held restarted Alone);
+  check string "and reads every unit" "all" (asked_text restarted)
+;;
+
+(* A file that cannot be read now says nothing of the condition: the act is
+   refused for that, and the ask that is out goes on. *)
+let test_restart_on_an_unread_turn_log () =
+  let place, asking = asking_place () in
+  Sys.remove (turns_path place);
+  Unix.mkdir (turns_path place) 0o700;
+  let same, answer = restart place asking ~observed:other_log in
+  check string "is refused as unread" "turn log unread" (act_text answer);
+  check string "leaves the ask out" "keep"
+    (fiber_text (Machine.fiber_change ~before:asking ~after:same))
+;;
+
 let () =
   run "librarian_machine"
     [ "boot", [ test_case "opens or stops, and asks" `Quick test_boot ]
@@ -1586,6 +1646,10 @@ let () =
         ; test_case "restart on another turn log" `Quick test_restart_on_another_turn_log
         ; test_case "restart where the position is lost" `Quick
             test_restart_where_the_position_is_lost
+        ; test_case "a restart that appends no line" `Quick test_restart_that_appends_no_line
+        ; test_case "a restart forgets widths and size facts" `Quick
+            test_restart_forgets_widths_and_size_facts
+        ; test_case "a restart on an unread turn log" `Quick test_restart_on_an_unread_turn_log
         ] )
     ]
 ;;

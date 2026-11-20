@@ -1,5 +1,5 @@
-// MASC v2 — nav icon set (ported 1:1 from prototype shell.jsx ICON map).
-// Custom 24×24 line icons (NOT lucide) so the rail matches the design exactly.
+// MASC v2 — nav icon set.
+// Custom 24×24 line icons (NOT lucide) for the nav rail.
 
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'

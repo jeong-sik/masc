@@ -59,7 +59,7 @@ describe('NavRailV2 schedule item', () => {
     expect(badge?.getAttribute('title')).toContain(unavailable.operator_detail)
   })
 
-  // Rail order + group breaks mirror the keeper-v2 prototype (shell.jsx #29046).
+  // Rail order + group breaks.
   it('renders the prototype rail order including the 명령·Lab group', () => {
     render(html`<${NavRailV2} />`, container)
 

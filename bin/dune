@@ -1964,7 +1964,7 @@
  (name masc_tui_sgr_text)
  (wrapped false)
  (modules masc_tui_sgr_text)
- (libraries masc_tui_theme masc_tui_terminal_palette))
+ (libraries masc_tui_message_layout masc_tui_theme masc_tui_terminal_palette))
 
 (library
  (name masc_tui_voice_wizard_session)

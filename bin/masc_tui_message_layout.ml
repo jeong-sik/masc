@@ -1623,6 +1623,11 @@ let wrap_words_internal ?on_row ?first_cells ~max_cells text =
 
 let wrap_words ~max_cells text = wrap_words_internal ~max_cells text
 
+let wrap_words_source_ranges ~max_cells text =
+  let rows = ref [] in
+  ignore (wrap_words_internal ~on_row:(fun _ ranges -> rows := ranges :: !rows) ~max_cells text);
+  List.rev !rows
+
 let wrap_words_after_prefix ~prefix_cells ~max_cells text =
   wrap_words_internal ~first_cells:prefix_cells ~max_cells text
 

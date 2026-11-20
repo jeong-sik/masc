@@ -837,6 +837,12 @@ val wrap_words : max_cells:int -> string -> string list
     ends at a separator can be as little as half full, so a name can take up to
     about twice the rows a cut at the width takes. *)
 
+val wrap_words_source_ranges : max_cells:int -> string -> (int * int) list list
+(** Where each row of {!wrap_words} comes from in [text]: for every row, in
+    order, the half-open byte ranges of [text] it holds. The spaces a row
+    break takes are in no row. A caller that keeps something alongside the
+    text byte for byte, such as the colour of each run, cuts it the same way. *)
+
 val split_word : max_cells:int -> string -> string list
 (** The rows of one name wider than [max_cells], as {!wrap_words} breaks a
     word: after its last [_], [:], [/], [.] or [-] that leaves the row at

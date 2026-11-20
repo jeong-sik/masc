@@ -81,9 +81,9 @@ let stimulus_kind_to_string = function
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
    [None]. 후보 목록이 [@@deriving enumerate]로 만들어지고 [stimulus_kind_to_string]이
-   exhaustive match라서 새 variant를 더하면 컴파일러가 누락을 강제한다 — RFC-0266에서
-   [Fusion_completed]가 문자열 화이트리스트에 누락돼 정상 wake가 unsupported로 오집계된
-   회귀를 차단한다. *)
+   exhaustive match라서 새 variant를 더하면 컴파일러가 누락을 강제한다 — 문자열
+   화이트리스트에서 빠진 variant의 정상 wake가 unsupported로 오집계되는 회귀를
+   차단한다. *)
 let stimulus_kind_of_string s = List.find_opt (fun v -> String.equal (stimulus_kind_to_string v) s) all_of_stimulus_kind
 ;;
 

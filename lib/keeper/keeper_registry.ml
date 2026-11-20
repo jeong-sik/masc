@@ -13,12 +13,10 @@ include Keeper_registry_types
 include Keeper_registry_setup
 
 let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_phase) =
-  (* RFC-0072 Phase 4b + Phase 5: dispatch via [resolve_turn_phase_transition]
-     (PR #14912) instead of the [validate_turn_phase_transition] call.
-     Mirrors the runtime-side wiring (PR #14908) — idempotent self-loops no
-     longer flip [changed] or emit a broadcast, and forbidden transitions
-     raise the typed [Turn_phase_transition_violation] (Phase 5) carrying
-     the [turn_phase_transition_spec_violation] payload directly.  The
+  (* Dispatch via [resolve_turn_phase_transition]: idempotent self-loops do
+     not flip [changed] or emit a broadcast, and forbidden transitions raise
+     the typed [Turn_phase_transition_violation] carrying the
+     [turn_phase_transition_spec_violation] payload directly.  The
      violation branch stays wrapped by [Keeper_fsm_guard_runtime.wrap_unit]
      (PR #14926 pattern) so direct setter rejections keep incrementing
      [masc_fsm_guard_violation_total] — see the [Resolved_turn_violation]
@@ -38,12 +36,9 @@ let set_turn_phase ~observation_token ~base_path name (turn_phase : packed_turn_
             (* #14926: route the violation raise through [wrap_unit] so the
                guard's Otel_metric_store counter [metric_fsm_guard_violation]
                (action=turn_phase_transition, stage=guard) keeps firing for
-               forbidden transitions reached via this setter — prior to
-               RFC-0072 Phase 4b (#14918) the instrumentation was transitive
-               through [validate_turn_phase_transition], and the resolver swap
-               dropped it.  Phase 5: the inner raise is now the typed
-               [Turn_phase_transition_violation]; [wrap_unit]'s catch was
-               widened to all exceptions so it still bumps the counter.  The
+               forbidden transitions reached via this setter.  The inner raise
+               is the typed [Turn_phase_transition_violation]; [wrap_unit]
+               catches every exception, so it still bumps the counter.  The
                trailing [obs] is unreachable (a no-op transition is the
                correct fallback should [wrap_unit] ever return). *)
             Keeper_fsm_guard_runtime.wrap_unit
@@ -876,11 +871,11 @@ let rec dispatch_event_with_audit_internal
           List.iter
             (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
             tr.entry_actions;
-          (* Composite-lifecycle SSE envelope — RFC-0003 §6.
+          (* Composite-lifecycle SSE envelope.
              The body carries only the keeper name and observation timestamp;
              subscribers re-fetch [/api/v1/keepers/:name/composite] for the
-             full snapshot so the spec's "single writer, pull observers"
-             invariant is preserved. *)
+             full snapshot so the "single writer, pull observers" invariant
+             is preserved. *)
           broadcast_composite_changed ~base_path:entry.base_path ~name ~ts_unix:now;
           notify_state_change_observer ~base_path:entry.base_path Lifecycle_phase_changed;
           Ok tr)

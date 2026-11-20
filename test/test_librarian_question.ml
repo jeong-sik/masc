@@ -136,14 +136,17 @@ let units () : Read_unit.t list =
   ]
 ;;
 
-let ask held units =
+let made ~shows units =
   match
-    Question.make ~lane ~memory:(memory held) ~from ~reach ~trace:"trace-1"
-      ~offered:{ units = 1; head_items = 3 } units
+    Question.make ~lane ~from ~shows ~reach ~trace:"trace-1" ~offered:{ units = 1; head_items = 3 }
+      units
   with
   | Question.Made { question; text } -> question, text
   | Question.Nothing_readable _ -> fail "a range with items made no question"
 ;;
+
+let ask held units = made ~shows:(With_memory (memory held)) units
+
 
 let same_inputs_same_bytes () =
   let question, text = ask (facts ()) (units ()) in
@@ -188,7 +191,7 @@ let all_missing_asks_nothing () =
     ]
   in
   match
-    Question.make ~lane ~memory:(memory (facts ())) ~from ~reach ~trace:"trace-1"
+    Question.make ~lane ~from ~shows:(With_memory (memory (facts ()))) ~reach ~trace:"trace-1"
       ~offered:{ units = 2; head_items = 0 } lost
   with
   | Question.Made _ -> fail "a range with no item made a question"
@@ -204,11 +207,28 @@ let all_missing_asks_nothing () =
          ])
 ;;
 
+(* §7.4: the item alone shows neither Memory nor the working state, so its
+   id is the same under every Memory version. *)
+let the_item_alone_shows_no_memory () =
+  let alone, text = made ~shows:Item_alone (units ()) in
+  let lines = String.split_on_char '\n' text in
+  let labelled label = List.exists (String.starts_with ~prefix:label) lines in
+  check bool "no memory line" false (labelled "memory:");
+  check bool "no working state line" false (labelled "working_state:");
+  check bool "the units line" true (labelled "units:");
+  check bool "no fact is named" true (Option.is_none alone.shown.memory);
+  let with_memory, (_ : string) = ask (facts ()) (units ()) in
+  check bool "the front half is not the one with Memory" false
+    (String.equal alone.id.front with_memory.id.front);
+  check string "the back half is the units' either way" with_memory.id.back alone.id.back
+;;
+
 let () =
   run
     "librarian_question"
     [ ( "question"
       , [ test_case "the same inputs give the same bytes" `Quick same_inputs_same_bytes
+        ; test_case "the item alone shows no Memory" `Quick the_item_alone_shows_no_memory
         ; test_case
             "a change to Memory alone moves the front half"
             `Quick

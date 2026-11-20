@@ -13,7 +13,7 @@ type shown =
 type working_state =
   | Kept
   | Replaced of string
-  | Not_valid_alone
+  | Alone of Librarian_log.alone_working_state
 
 type t =
   { facts : fact list
@@ -378,8 +378,9 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
   ; effects
   ; working_state =
       (match shown.memory, answer.working_state with
-       | (None | Some _), Keep -> Kept
-       | None, Set (_ : string) -> Not_valid_alone
-       | Some _, Set text -> Replaced text)
+       | Some (_ : (string * string) list), Keep -> Kept
+       | Some (_ : (string * string) list), Set text -> Replaced text
+       | None, Keep -> Alone Untouched
+       | None, Set (_ : string) -> Alone Not_valid_alone)
   }
 ;;

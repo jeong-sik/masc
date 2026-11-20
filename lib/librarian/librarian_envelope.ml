@@ -82,7 +82,7 @@ let next ~previous ~at (cause : Log.cause) effects =
   | Read
       { trace
       ; question = (_ : Librarian_question_id.t)
-      ; shown_memory = (_ : bool)
+      ; shown = (_ : Log.shown)
       ; slot = (_ : string)
       ; missing = (_ : Librarian_unit.missing_at list)
       } ->

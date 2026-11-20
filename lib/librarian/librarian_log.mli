@@ -39,6 +39,24 @@ type hole =
       }
   (** An [Unannounced] reset with no unit holding an item before it. What lay
       between the two marks is not known. *)
+  | Item_exceeds_window of Librarian_unit.missing_at list
+  (** The head item fit no slot the lane declares, even alone: each one
+      refused the item alone for the input's size (§7.4). These parts of its
+      unit were not there. *)
+
+(** What a [Read] question showed besides its units. *)
+type shown =
+  | With_memory (** Memory and the working state. *)
+  | Item_alone of alone_working_state
+  (** Nothing: its units were the head item alone (§7.4). *)
+
+(** What the answer to a question of one item alone did with the working
+    state it was not shown. *)
+and alone_working_state =
+  | Untouched (** It left it as it was. *)
+  | Not_valid_alone
+  (** It replaced it, and the commit kept it: an answer that did not see
+      the working state cannot replace it. *)
 
 type cause =
   | Direct of
@@ -54,9 +72,7 @@ type cause =
       }
   | Read of
       { question : Librarian_question_id.t
-      ; shown_memory : bool
-      (** The question showed Memory. A question that showed one item alone
-          did not. *)
+      ; shown : shown
       ; slot : string (** The id of the slot that answered. *)
       ; trace : string
       (** The trace the question's last unit names. The new facts carry it
@@ -96,3 +112,7 @@ type line =
       }
   (** Nothing of that turn log has been read. *)
   | Committed of commit
+
+(** The snapshot a line says the file holds after it: [snapshot] of a
+    [Started], [after] of a [Committed]. *)
+val snapshot_after : line -> Digest.digest

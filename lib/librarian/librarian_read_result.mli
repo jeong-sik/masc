@@ -21,8 +21,14 @@ type reach =
       since the unit is not finished. *)
   }
 
-(** What the writer asks an ask for: the unread range at a width (§7.6). *)
-type asked = Read_range of Librarian_width.width
+(** What the writer asks an ask for. *)
+type asked =
+  | Read_range of Librarian_width.width
+  (** The unread range at a width, with Memory and the working state (§7.6). *)
+  | Read_item_alone
+  (** The head item, with no Memory and no working state (§7.4). The writer
+      asks it only after every slot it declares refused the head item with
+      Memory for the input's size. *)
 
 (** What a question read and showed, as the writer commits it (§8.1, §8.4).
     The question's text is not here: the ask sends it and the writer does
@@ -33,6 +39,11 @@ type question =
   { id : Librarian_question_id.t
   ; shown : Librarian_plan.shown
   (** [shown.memory] is [Some] exactly when the question showed Memory. *)
+  ; basis : Digest.digest
+  (** The snapshot the tail named when the question was made, whether or not
+      it showed Memory. A one-item verdict is read only while this is the
+      snapshot now: a verdict about another Memory version is not one about
+      this (§7.4 「옛 Memory 를 두고 한 판정으로 내려가지 않는다」). *)
   ; reach : reach
   ; trace : string
   (** The trace the last unit's line names: [after.trace] of a [Closed],

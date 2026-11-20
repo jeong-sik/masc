@@ -57,12 +57,13 @@ let log_path (place : Machine.place) =
 let memory (value : Machine.t) =
   match value.state with
   | Idle { store; seen_length = (_ : int option) } -> (Store.memory store).facts
-  | Asking _ | Resting _ | Stopped _ -> fail "the store of the fixture is not idle"
+  | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _ ->
+    fail "the store of the fixture is not idle"
 ;;
 
 (* A write that has to commit a line. *)
-let write state ~at w =
-  match Machine.write state ~at ~by:Effects.Keeper ~trace:"turn" w with
+let write place state ~at w =
+  match Machine.write place state ~at ~by:Effects.Keeper ~trace:"turn" w with
   | state, Written (_ : Masc.Librarian_log.commit) -> state
   | ( (_ : Machine.t)
     , (Already_held | Already_done | Already_absent | Refused _ | Not_a_snapshot _ | Unavailable _)
@@ -103,10 +104,10 @@ let after_two_removals place =
   let state =
     Machine.booted place ~at:100.0 ~lane:None ~last_ask:0 (Machine.boot place ~at:100.0)
   in
-  let state = write state ~at:201.0 (remember port) in
-  let state = write state ~at:202.0 (remember owner) in
+  let state = write place state ~at:201.0 (remember port) in
+  let state = write place state ~at:202.0 (remember owner) in
   let state =
-    write state ~at:203.0
+    write place state ~at:203.0
       (Direct.Remember
          { claim = rests
          ; category = Types.Lesson
@@ -114,9 +115,9 @@ let after_two_removals place =
          })
   in
   let state =
-    write state ~at:204.0 (Direct.Retract { id = id_of_claim port; reason = "the port moved" })
+    write place state ~at:204.0 (Direct.Retract { id = id_of_claim port; reason = "the port moved" })
   in
-  write state ~at:205.0
+  write place state ~at:205.0
     (Direct.Supersede
        { old = id_of_claim owner; claim = new_owner; category = Types.Constraint; basis = transcript })
 ;;
@@ -145,7 +146,7 @@ let test_what_left_and_why () =
 let test_a_fact_added_again_is_not_left () =
   let place = started_place () in
   let state = after_two_removals place in
-  let state = write state ~at:206.0 (remember port) in
+  let state = write place state ~at:206.0 (remember port) in
   check (pair (list string) int) "the port is held again"
     ( [ rests ^ " -> support lost: " ^ id_of_claim port
       ; owner ^ " -> superseded by " ^ id_of_claim new_owner

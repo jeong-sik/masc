@@ -667,7 +667,7 @@ let test_revise_and_alone_guardrails () =
     (alone_bad_reading.not_applied = [ Effects.Not_valid_alone ]);
   let alone_bad_plan = settle_plan "alone bad" case_read_item_alone alone_bad in
   check bool "working_state in Read_item_alone flagged Not_valid_alone" true
-    (alone_bad_plan.working_state = Plan.Not_valid_alone)
+    (alone_bad_plan.working_state = Plan.Alone Not_valid_alone)
 ;;
 
 let contains_substring ~needle haystack =
@@ -732,7 +732,8 @@ let test_progressive_merge_and_bridge () =
        (contains_substring ~needle:"at most 2 shards" bridged);
      check bool "working_state does not rely on bare m1 ref" false
        (contains_substring ~needle:"m1" bridged)
-   | Plan.Kept | Plan.Not_valid_alone -> fail "expected replaced working_state bridge");
+   | Plan.Kept | Plan.Alone (_ : Masc.Librarian_log.alone_working_state) ->
+     fail "expected replaced working_state bridge");
   check bool "user constraint dual-kept in Memory" true
     (has_claim "Require automated rollback gate before promoting Shard 4." plan.facts);
   check (list string) "both merged inputs recorded cleanly"

@@ -424,6 +424,7 @@ let reach : Read_result.reach =
 let question : Read_result.question =
   { id = question_id
   ; shown = { memory = Some []; units = [ "u1", reach.line ] }
+  ; basis = Agent_core.Checkpoint_objects.digest_of_bytes "the snapshot the question saw"
   ; reach
   ; trace = "trace-2"
   ; missing = []
@@ -457,11 +458,14 @@ let position_text : Log.position -> string = function
 let cause_text : Log.cause -> string = function
   | Direct _ -> "a direct write"
   | Adopt _ -> "an adoption"
-  | Read { question = id; shown_memory; slot; trace; missing } ->
+  | Read { question = id; shown; slot; trace; missing } ->
     Printf.sprintf "read %s by %s on %s, memory %s, %d missing"
       (if Masc.Librarian_question_id.equal id question_id then "the question" else "another")
       slot trace
-      (if shown_memory then "shown" else "not shown")
+      (match shown with
+       | With_memory -> "shown"
+       | Item_alone Untouched -> "not shown"
+       | Item_alone Not_valid_alone -> "not shown, working state kept")
       (List.length missing)
   | Skip { hole = Content_missing missing } ->
     Printf.sprintf "skip: content missing at %s"
@@ -470,6 +474,8 @@ let cause_text : Log.cause -> string = function
             (fun ({ line; _ } : Masc.Librarian_unit.missing_at) -> string_of_int line)
             missing))
   | Skip { hole = Unknown_span _ } -> "skip: an unknown span"
+  | Skip { hole = Item_exceeds_window (_ : Masc.Librarian_unit.missing_at list) } ->
+    "skip: the item fits no slot"
 ;;
 
 let source_text ({ kind; trace_id } : Current.source) =

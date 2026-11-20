@@ -109,7 +109,8 @@ let stop_text : Store.stop -> string = function
 let status_of : Machine.state -> status = function
   | Idle { store; seen_length = (_ : int option) }
   | Asking { store; asking = (_ : Machine.asking) }
-  | Resting store -> Open (Store.tail store)
+  | Resting store
+  | Refused_at_bottom store -> Open (Store.tail store)
   | Stopped stop -> Stopped stop
 ;;
 
@@ -117,10 +118,11 @@ let status_of : Machine.state -> status = function
    caller that is woken reads the status the answer is about. *)
 let publish t ~(was : Machine.t) (next : Machine.t) =
   (match was.state, next.state with
-   | (Idle _ | Asking _ | Resting _), Stopped stop ->
+   | (Idle _ | Asking _ | Resting _ | Refused_at_bottom _), Stopped stop ->
      Log.Keeper.error ~keeper_name:t.place.keeper_id "librarian memory store stopped: %s"
        (stop_text stop)
-   | (Idle _ | Asking _ | Resting _ | Stopped _), (Idle _ | Asking _ | Resting _)
+   | ( (Idle _ | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _)
+     , (Idle _ | Asking _ | Resting _ | Refused_at_bottom _) )
    | Stopped _, Stopped _ -> ());
   Atomic.set t.status (status_of next.state)
 ;;
@@ -130,7 +132,8 @@ let revision (value : Machine.t) =
   match value.state with
   | Idle { store; seen_length = (_ : int option) }
   | Asking { store; asking = (_ : Machine.asking) }
-  | Resting store -> Some (Store.memory store).revision
+  | Resting store
+  | Refused_at_bottom store -> Some (Store.memory store).revision
   | Stopped (_ : Store.stop) -> None
 ;;
 
@@ -204,6 +207,7 @@ let live t ~sw =
       ; lane = asking.lane.value
       ; resolved = asking.lane.resolved
       ; asked = asking.asked
+      ; bottom = asking.bottom
       }
     in
     Eio.Fiber.fork_daemon ~sw (fun () ->
@@ -283,7 +287,8 @@ let live t ~sw =
     | Ask_ended { ask; result } -> decided (Machine.Ask_ended { ask; result })
     | Write { by; trace; write; reply } ->
       let next, answer =
-        Eio.Cancel.protect (fun () -> Machine.write state ~at:(t.now ()) ~by ~trace write)
+        Eio.Cancel.protect (fun () ->
+          Machine.write t.place state ~at:(t.now ()) ~by ~trace write)
       in
       settle next reply answer
     | Resume reply ->

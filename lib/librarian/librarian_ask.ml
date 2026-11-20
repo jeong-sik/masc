@@ -4,6 +4,8 @@ module Backpressure = Runtime_exact_lane_backpressure
 module Oneshot = Keeper_lane_cli_oneshot
 module Read_result = Librarian_read_result
 module Visit = Librarian_slot_visit
+module Lane = Librarian_memory_lane
+module Registry = Runtime_exact_output_registry
 
 type env =
   { net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
@@ -18,6 +20,7 @@ type input =
   ; lane : Librarian_memory_lane.t
   ; resolved : Runtime_exact_output_registry.resolved_lane
   ; asked : Read_result.asked
+  ; bottom : Librarian_bottom.t
   }
 
 (* An ask that ends before its walk does: with a result of its own, or with a
@@ -29,12 +32,6 @@ type ended =
 let ( let* ) = Result.bind
 
 (* --- Memory under one tail (§7.1 steps 1 and 2) --- *)
-
-(* The snapshot a line says the file holds after it. *)
-let named : Librarian_log.line -> Digest.digest = function
-  | Started { snapshot; _ } -> snapshot
-  | Committed { after; _ } -> after
-;;
 
 let same_digest (a : Digest.digest) (b : Digest.digest) = String.equal (a :> string) (b :> string)
 
@@ -54,7 +51,7 @@ let not_open = Failed (Flow_stopped, "the writer is no longer open")
 let memory_of_bytes tail = function
   | Error fault -> Error (Ended (Snapshot_fault fault))
   | Ok bytes ->
-    let expected = named tail in
+    let expected = Librarian_log.snapshot_after tail in
     let observed = Digest.digest_of_bytes bytes in
     if not (same_digest expected observed)
     then Error (Ended (Memory_diverged { expected; observed }))
@@ -287,8 +284,8 @@ let start_flow ~requirement ~text first rest =
   | Error (Flow_id_generation_failed detail) -> Error (Failed (Flow_stopped, detail))
 ;;
 
-let walk_http env input ~asked ~requirement ~text =
-  let ordered = Backpressure.order_at ~now:(Eio.Time.now env.clock) input.resolved in
+let walk_http env ~resolved ~asked ~requirement ~text =
+  let ordered = Backpressure.order_at ~now:(Eio.Time.now env.clock) resolved in
   let held =
     List.map (fun (slot : Backpressure.held_slot) -> slot.slot_id, Visit.Held) ordered.held_http
   in
@@ -342,7 +339,7 @@ let walk_http env input ~asked ~requirement ~text =
    would fold a rejection into text. The order is read again before each
    slot; a held slot is set aside where a read finds it and is not called, as
    that walk does. *)
-let walk_cli env input ~asked ~requirement ~text =
+let walk_cli env ~cli_slots ~asked ~requirement ~text =
   let rec walk visits slots =
     let { Runtime_candidate_standing.walk = callable; held } =
       Oneshot.order_slots_at ~now:(Eio.Time.now env.clock) slots
@@ -372,43 +369,75 @@ let walk_cli env input ~asked ~requirement ~text =
           | Ok answer -> Walk_answered { slot = runtime_id; answer }
           | Error rejection -> walk ((runtime_id, Visit.Cli_answer_rejected rejection) :: visits) rest))
   in
-  walk [] input.resolved.cli_slots
+  walk [] cli_slots
 ;;
 
-(* One outcome for every slot of the lane value, in its order. A slot is
-   found among the visits by its id; one the walk did not reach has none. *)
-let outcomes (lane : Librarian_memory_lane.t) ~http ~cli =
-  let outcome visits visit (key : Librarian_memory_lane.slot_key) =
-    let found =
-      List.find_map (fun (id, seen) -> if String.equal id key.id then Some seen else None) visits
-    in
-    ( key
-    , Visit.classify_unanswered
-        (match found with
-         | Some seen -> visit seen
-         | None -> Visit.Not_visited) )
+let fact_of known (key : Lane.slot_key) =
+  List.find_map
+    (fun (held, fact) -> if Lane.equal_slot_key held key then Some fact else None)
+    known
+;;
+
+(* One outcome for every slot of the lane value, in its order. A slot with a
+   size fact under this question was not called, and its fact is its
+   outcome. Any other is found among the visits by its id; one the walk did
+   not reach has none. *)
+let outcomes (lane : Lane.t) ~known ~http ~cli =
+  let outcome visits visit (key : Lane.slot_key) =
+    match fact_of known key with
+    | Some fact -> key, Librarian_slot_outcome.Refused (Sized fact)
+    | None ->
+      let found =
+        List.find_map (fun (id, seen) -> if String.equal id key.id then Some seen else None) visits
+      in
+      ( key
+      , Visit.classify_unanswered
+          (match found with
+           | Some seen -> visit seen
+           | None -> Visit.Not_visited) )
   in
   List.map (outcome http (fun seen -> Visit.Http seen)) lane.http
   @ List.map (outcome cli (fun seen -> Visit.Cli seen)) lane.cli
 ;;
 
+(* §7.4 「묻기는 bottom 을 받는다」: the slots with a size fact under the
+   question's id are left out of the walk, HTTP and CLI alike. With none
+   left, nothing is called and the facts are the result. *)
+let to_call (lane : Lane.t) ~known (resolved : Registry.resolved_lane) : Registry.resolved_lane =
+  let unknown keys =
+    List.filter_map
+      (fun (key : Lane.slot_key) -> if Option.is_some (fact_of known key) then None else Some key.id)
+      keys
+  in
+  let http = unknown lane.http in
+  let cli = unknown lane.cli in
+  { selected_slots =
+      List.filter
+        (fun (slot : Registry.selected_slot) -> List.exists (String.equal slot.slot_id) http)
+        resolved.selected_slots
+  ; cli_slots = List.filter (fun id -> List.exists (String.equal id) cli) resolved.cli_slots
+  }
+;;
+
 (* HTTP first, CLI only when no HTTP slot answered. *)
-let walk env input (question : Read_result.question) text =
+let walk env input ~which (question : Read_result.question) text =
   let requirement =
     Exact.make_output_requirement
       ~schema:input.lane.question.answer_schema
       ~minimum_guarantee:Json_syntax
   in
+  let known = Librarian_bottom.known input.bottom which question.id in
+  let resolved = to_call input.lane ~known input.resolved in
   let asked = question.id in
   let answered slot answer : Read_result.t = Answered { question; answer; slot } in
-  let* http = walk_http env input ~asked ~requirement ~text in
+  let* http = walk_http env ~resolved ~asked ~requirement ~text in
   match http with
   | Walk_answered { slot; answer } -> Ok (answered slot answer)
   | Walk_unanswered http ->
-    (match walk_cli env input ~asked ~requirement ~text with
+    (match walk_cli env ~cli_slots:resolved.cli_slots ~asked ~requirement ~text with
      | Walk_answered { slot; answer } -> Ok (answered slot answer)
      | Walk_unanswered cli ->
-       Ok (Read_result.No_answer { question; slots = outcomes input.lane ~http ~cli }))
+       Ok (Read_result.No_answer { question; slots = outcomes input.lane ~known ~http ~cli }))
 ;;
 
 let ask env input =
@@ -420,18 +449,22 @@ let ask env input =
            ~keepers_dir:input.place.memory_dir
            ~keeper_id:input.place.keeper_id)
   in
-  let width =
+  (* The item alone is read as the head item is at the narrowest width, and
+     the snapshot is still read under the tail: the question is made against
+     it whether or not it shows it. *)
+  let width, shows, which =
     match input.asked with
-    | Read_range width -> width
+    | Read_range width -> width, Librarian_question.With_memory memory, Librarian_bottom.With_memory
+    | Read_item_alone -> Librarian_width.head_item, Librarian_question.Item_alone, Librarian_bottom.Alone
   in
   let* range = read_units input ~width tail in
   let* { units; reach; trace; offered } = read_range input ~width range in
   match
-    Librarian_question.make ~lane:input.lane.question ~memory ~from:tail ~reach ~trace ~offered units
+    Librarian_question.make ~lane:input.lane.question ~from:tail ~shows ~reach ~trace ~offered units
   with
   | Nothing_readable { reach; missing } ->
     Ok (Read_result.Nothing_readable { reach; missing; offered })
-  | Made { question; text } -> walk env input question text
+  | Made { question; text } -> walk env input ~which question text
 ;;
 
 let failed_kind : Read_result.failed -> string = function

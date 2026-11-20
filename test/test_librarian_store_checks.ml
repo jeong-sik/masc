@@ -130,7 +130,7 @@ let test_memory_log () =
   check outcome "no commit log is no line" ((0, 0), None) (checked D.Id.Memory_log ~base_path);
   let booted ~at = Machine.booted place ~at ~lane:None ~last_ask:0 (Machine.boot place ~at) in
   (match
-     Machine.write (booted ~at:100.0) ~at:201.0 ~by:Effects.Keeper ~trace:"turn"
+     Machine.write place (booted ~at:100.0) ~at:201.0 ~by:Effects.Keeper ~trace:"turn"
        (remember "the port is 8935")
    with
    | (_ : Machine.t), Written (_ : Masc.Librarian_log.commit) -> ()

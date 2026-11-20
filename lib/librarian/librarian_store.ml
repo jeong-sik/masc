@@ -223,7 +223,7 @@ let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects ~re
     ; covered = reach.covered
     ; working_state =
         (match working_state with
-         | Kept | Not_valid_alone -> kept.working_state
+         | Kept | Alone (_ : Log.alone_working_state) -> kept.working_state
          | Replaced text -> Some text)
     }
 ;;
@@ -291,10 +291,17 @@ let commit_direct t ~at ~by ~trace write effects =
 
 let commit_read t ~at ~(question : Librarian_read_result.question) ~slot (plan : Librarian_plan.t)
   =
+  (* The plan read what the question showed, and keeps a working state the
+     question did not show. *)
+  let shown : Log.shown =
+    match plan.working_state with
+    | Kept | Replaced (_ : string) -> With_memory
+    | Alone state -> Item_alone state
+  in
   let cause =
     Log.Read
       { question = question.id
-      ; shown_memory = Option.is_some question.shown.memory
+      ; shown
       ; slot
       ; trace = question.trace
       ; missing = question.missing

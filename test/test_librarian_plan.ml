@@ -316,9 +316,9 @@ let test_alone () =
   check (list string) "the add applies" (claims memory @ [ "the build is green" ])
     (claims result.facts);
   check bool "the attempt on the working state is its own case" true
-    (result.working_state = Plan.Not_valid_alone);
+    (result.working_state = Plan.Alone Not_valid_alone);
   let kept = plan ~shown [ Add (stated "the build is green") ] in
-  check bool "an answer that left it alone" true (kept.working_state = Plan.Kept)
+  check bool "an answer that left it alone" true (kept.working_state = Plan.Alone Untouched)
 ;;
 
 let test_working_state_passes_through () =

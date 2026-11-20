@@ -50,7 +50,7 @@ let f_lines = "lines"
 let f_question = "question"
 let f_front = "front"
 let f_back = "back"
-let f_memory = "memory"
+let f_shown = "shown"
 let f_slot = "slot"
 let f_hole = "hole"
 let f_before = "before"
@@ -87,27 +87,36 @@ let cause_kind_token = function
 
 let cause_kinds = [ Kind_direct; Kind_adopt; Kind_read; Kind_skip ]
 
-type memory_kind =
-  | Kind_memory_shown
-  | Kind_memory_not_shown
+type shown_kind =
+  | Kind_shown_memory
+  | Kind_shown_item_alone
 
-let memory_kind_token = function
-  | Kind_memory_shown -> "shown"
-  | Kind_memory_not_shown -> "not_shown"
+let shown_kind_token = function
+  | Kind_shown_memory -> "memory"
+  | Kind_shown_item_alone -> "item_alone"
 ;;
 
-let memory_kinds = [ Kind_memory_shown; Kind_memory_not_shown ]
+let shown_kinds = [ Kind_shown_memory; Kind_shown_item_alone ]
+
+let alone_working_state_token = function
+  | Untouched -> "untouched"
+  | Not_valid_alone -> "not_valid_alone"
+;;
+
+let alone_working_states = [ Untouched; Not_valid_alone ]
 
 type hole_kind =
   | Kind_content_missing
   | Kind_unknown_span
+  | Kind_item_exceeds_window
 
 let hole_kind_token = function
   | Kind_content_missing -> "content_missing"
   | Kind_unknown_span -> "unknown_span"
+  | Kind_item_exceeds_window -> "item_exceeds_window"
 ;;
 
-let hole_kinds = [ Kind_content_missing; Kind_unknown_span ]
+let hole_kinds = [ Kind_content_missing; Kind_unknown_span; Kind_item_exceeds_window ]
 
 type part_kind =
   | Kind_bundle
@@ -329,10 +338,17 @@ let hole_to_json = function
       ; f_before, Turn_codec.mark_to_json before
       ; f_after, Turn_codec.mark_to_json after
       ]
+  | Item_exceeds_window missing ->
+    `Assoc [ kind (hole_kind_token Kind_item_exceeds_window); f_missing, missing_to_json missing ]
 ;;
 
-let memory_kind_of shown_memory =
-  if shown_memory then Kind_memory_shown else Kind_memory_not_shown
+let shown_to_json = function
+  | With_memory -> `Assoc [ kind (shown_kind_token Kind_shown_memory) ]
+  | Item_alone working_state ->
+    `Assoc
+      [ kind (shown_kind_token Kind_shown_item_alone)
+      ; f_working_state, `String (alone_working_state_token working_state)
+      ]
 ;;
 
 let cause_to_json = function
@@ -346,11 +362,11 @@ let cause_to_json = function
   | Adopt { by; observed } ->
     `Assoc
       [ kind (cause_kind_token Kind_adopt); f_by, `String by; f_observed, digest_json observed ]
-  | Read { question; shown_memory; slot; trace; missing } ->
+  | Read { question; shown; slot; trace; missing } ->
     `Assoc
       [ kind (cause_kind_token Kind_read)
       ; f_question, question_to_json question
-      ; f_memory, `String (memory_kind_token (memory_kind_of shown_memory))
+      ; f_shown, shown_to_json shown
       ; f_slot, `String slot
       ; f_trace, `String trace
       ; f_missing, missing_to_json missing
@@ -624,6 +640,25 @@ let hole_of_json json =
     let* before = object_field f_before fields Turn_codec.mark_of_json in
     let* after = object_field f_after fields Turn_codec.mark_of_json in
     Ok (Unknown_span { before; after })
+  | Kind_item_exceeds_window ->
+    let* () = exact_field_names_result [ f_kind; f_missing ] fields in
+    let* missing = list_field f_missing fields missing_at_of_json in
+    Ok (Item_exceeds_window missing)
+;;
+
+let shown_of_json json =
+  let* fields = object_fields json in
+  let* shown = of_token ~token_of:shown_kind_token shown_kinds f_kind fields in
+  match shown with
+  | Kind_shown_memory ->
+    let* () = exact_field_names_result [ f_kind ] fields in
+    Ok With_memory
+  | Kind_shown_item_alone ->
+    let* () = exact_field_names_result [ f_kind; f_working_state ] fields in
+    let* working_state =
+      of_token ~token_of:alone_working_state_token alone_working_states f_working_state fields
+    in
+    Ok (Item_alone working_state)
 ;;
 
 let cause_of_json json =
@@ -643,19 +678,14 @@ let cause_of_json json =
     Ok (Adopt { by; observed })
   | Kind_read ->
     let* () =
-      exact_field_names_result [ f_kind; f_question; f_memory; f_slot; f_trace; f_missing ] fields
+      exact_field_names_result [ f_kind; f_question; f_shown; f_slot; f_trace; f_missing ] fields
     in
     let* question = object_field f_question fields question_of_json in
-    let* memory = of_token ~token_of:memory_kind_token memory_kinds f_memory fields in
+    let* shown = object_field f_shown fields shown_of_json in
     let* slot = wire_string_field f_slot fields in
     let* trace = wire_string_field f_trace fields in
     let* missing = list_field f_missing fields missing_at_of_json in
-    let shown_memory =
-      match memory with
-      | Kind_memory_shown -> true
-      | Kind_memory_not_shown -> false
-    in
-    Ok (Read { question; shown_memory; slot; trace; missing })
+    Ok (Read { question; shown; slot; trace; missing })
   | Kind_skip ->
     let* () = exact_field_names_result [ f_kind; f_hole ] fields in
     let* hole = object_field f_hole fields hole_of_json in

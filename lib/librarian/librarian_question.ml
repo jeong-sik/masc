@@ -357,55 +357,56 @@ let digest parts =
 let line label value = label ^ value ^ newline
 let json_line label json = line label (Yojson.Safe.to_string json)
 
-let make ~(lane : Librarian_memory_lane.question_side) ~(memory : Current.t) ~from ~reach ~trace
-      ~offered units
-  =
+type shows =
+  | With_memory of Current.t
+  | Item_alone
+
+let make ~(lane : Librarian_memory_lane.question_side) ~from ~shows ~reach ~trace ~offered units =
   let missing = missing_of units in
   if not (List.exists has_item units)
   then Nothing_readable { reach; missing }
   else (
-    let table =
-      List.mapi (fun index fact -> memory_name index, Types.memory_id fact) memory.facts
-    in
-    (* The first name of each id: [fold_right] adds the earlier names last. *)
-    let names =
-      List.fold_right (fun (name, id) names -> Names.add id name names) table Names.empty
-    in
-    let memory_line =
-      json_line label_memory (`List (List.mapi (fact_json names) memory.facts))
-    in
-    let working_state_line =
-      json_line label_working_state (text_or_null (working_state from))
+    (* A question of the item alone has neither line, so its front half is
+       the question side's alone and Memory changing leaves its id as it
+       was (§7.4). *)
+    let table, memory_lines =
+      match shows with
+      | Item_alone -> None, []
+      | With_memory (memory : Current.t) ->
+        let table =
+          List.mapi (fun index fact -> memory_name index, Types.memory_id fact) memory.facts
+        in
+        (* The first name of each id: [fold_right] adds the earlier names last. *)
+        let names =
+          List.fold_right (fun (name, id) names -> Names.add id name names) table Names.empty
+        in
+        ( Some table
+        , [ json_line label_memory (`List (List.mapi (fact_json names) memory.facts))
+          ; json_line label_working_state (text_or_null (working_state from))
+          ] )
     in
     let units_line = json_line label_units (`List (List.mapi unit_json units)) in
     (* The declaration is compact JSON, so the line break after it ends it. *)
     let id =
       Librarian_question_id.of_digests
-        ~front:
-          (digest
-             [ Yojson.Safe.to_string (declaration lane)
-             ; newline
-             ; memory_line
-             ; working_state_line
-             ])
+        ~front:(digest (Yojson.Safe.to_string (declaration lane) :: newline :: memory_lines))
         ~back:(digest [ units_line ])
     in
     let text =
       String.concat
         ""
-        [ lane.prompt
-        ; newline
-        ; line label_question id.front
-        ; memory_line
-        ; working_state_line
-        ; units_line
-        ; line label_question_end id.back
-        ]
+        ([ lane.prompt; newline; line label_question id.front ]
+         @ memory_lines
+         @ [ units_line; line label_question_end id.back ])
     in
     let shown : Librarian_plan.shown =
-      { memory = Some table
+      { memory = table
       ; units = List.mapi (fun index (read : Read_unit.t) -> unit_name index, read.line) units
       }
     in
-    Made { question = { id; shown; reach; trace; missing; offered }; text })
+    Made
+      { question =
+          { id; shown; basis = Librarian_log.snapshot_after from; reach; trace; missing; offered }
+      ; text
+      })
 ;;

@@ -166,8 +166,8 @@ let every_part : Unit.missing_part list =
 
 let missing : Unit.missing_at list = [ { line = 120; parts = every_part } ]
 
-let read ?(shown_memory = true) ?(missing = missing) () =
-  Log.Read { question; shown_memory; slot = "claude_code.fast"; trace = "trace-2"; missing }
+let read ?(shown = Log.With_memory) ?(missing = missing) () =
+  Log.Read { question; shown; slot = "claude_code.fast"; trace = "trace-2"; missing }
 ;;
 
 (* Where an unannounced reset left the stores. *)
@@ -179,6 +179,7 @@ let reset_after_text =
 
 let content_missing = Log.Skip { hole = Content_missing missing }
 let unknown_span = Log.Skip { hole = Unknown_span { before = covered; after = reset_after } }
+let item_exceeds_window = Log.Skip { hole = Item_exceeds_window missing }
 
 let every_line =
   [ started
@@ -207,9 +208,11 @@ let every_line =
       ~cause:(direct (Direct.Retract { id = id port; reason = "the port moved" }))
       ()
   ; committed ~cause:(read ()) ()
-  ; committed ~cause:(read ~shown_memory:false ~missing:[] ()) ()
+  ; committed ~cause:(read ~shown:(Item_alone Untouched) ~missing:[] ()) ()
+  ; committed ~cause:(read ~shown:(Item_alone Not_valid_alone) ()) ()
   ; committed ~cause:content_missing ()
   ; committed ~cause:unknown_span ()
+  ; committed ~cause:item_exceeds_window ()
   ]
 ;;
 
@@ -331,11 +334,16 @@ let test_pinned_text () =
     (Yojson.Safe.to_string (member "touched" effects));
   check string "an answer"
     (Printf.sprintf
-       {|{"kind":"read","question":{"front":"%s","back":"%s"},"memory":"shown","slot":"claude_code.fast","trace":"trace-2","missing":[]}|}
+       {|{"kind":"read","question":{"front":"%s","back":"%s"},"shown":{"kind":"memory"},"slot":"claude_code.fast","trace":"trace-2","missing":[]}|}
        (String.make 32 'c') (String.make 32 'd'))
     (part_text [ "cause" ] (committed ~cause:(read ~missing:[] ()) ()));
-  check string "a question that showed no Memory" {|"not_shown"|}
-    (part_text [ "cause"; "memory" ] (committed ~cause:(read ~shown_memory:false ()) ()));
+  check string "a question of the item alone, whose answer kept the working state"
+    {|{"kind":"item_alone","working_state":"untouched"}|}
+    (part_text [ "cause"; "shown" ] (committed ~cause:(read ~shown:(Item_alone Untouched) ()) ()));
+  check string "a question of the item alone, whose answer tried to replace it"
+    {|{"kind":"item_alone","working_state":"not_valid_alone"}|}
+    (part_text [ "cause"; "shown" ]
+       (committed ~cause:(read ~shown:(Item_alone Not_valid_alone) ()) ()));
   check string "every part a unit can miss"
     (Printf.sprintf
        {|[{"line":120,"parts":[{"kind":"bundle","slice":{"bundle":"%s","skip":0,"take":2}},{"kind":"history_bytes","from":0,"until":10},{"kind":"internal_bytes","from":10,"until":20},{"kind":"chat_bytes","from":0,"until":64},{"kind":"external_rows","from":1,"until":3},{"kind":"undecodable_history_line","offset":10},{"kind":"undecodable_internal_line","offset":20},{"kind":"undecodable_external_row","row":3}]}]|}
@@ -352,7 +360,18 @@ let test_pinned_text () =
   check string "a skip past a span no unit holds"
     (Printf.sprintf {|{"kind":"skip","hole":{"kind":"unknown_span","before":%s,"after":%s}}|}
        covered_text reset_after_text)
-    (part_text [ "cause" ] (committed ~cause:unknown_span ()))
+    (part_text [ "cause" ] (committed ~cause:unknown_span ()));
+  check string "a skip past an item no slot takes even alone"
+    {|{"kind":"skip","hole":{"kind":"item_exceeds_window","missing":[{"line":120,"parts":[{"kind":"chat_bytes","from":0,"until":64}]}]}}|}
+    (part_text [ "cause" ]
+       (committed
+          ~cause:
+            (Log.Skip
+               { hole =
+                   Item_exceeds_window
+                     [ { line = 120; parts = [ Chat_bytes { from = 0; until = 64 } ] } ]
+               })
+          ()))
 ;;
 
 let replace_once ~old ~by source =

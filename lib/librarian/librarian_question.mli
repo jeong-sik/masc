@@ -17,6 +17,9 @@
     question-end: <back half>
     v}
 
+    A question that shows the head item alone ({!Item_alone}) has no
+    [memory:] line and no [working_state:] line (§7.4).
+
     The value after each label is one JSON document on one line. Text a
     person, a Keeper or a store wrote is a JSON string, so a line break or a
     [question-end:] inside it cannot start a line.
@@ -54,8 +57,10 @@
     answer schema, output reserve, thinking) and the memory and working
     state lines. [back] is half the SHA-256 of the units line. A change to
     Memory alone changes [front] only, and other units under the same Memory
-    change [back] only. A slot that cuts the head or the tail of its input
-    cannot write back the half it never saw. *)
+    change [back] only. A question of the item alone has no memory line, so
+    a change to Memory leaves its id as it was: a slot's size fact about it
+    holds across Memory versions. A slot that cuts the head or the tail of
+    its input cannot write back the half it never saw. *)
 
 type made =
   | Made of
@@ -70,15 +75,23 @@ type made =
   (** No unit holds an item: each one's items are all missing, or it never
       had any. Nothing is asked. *)
 
+(** What a question shows besides its units. *)
+type shows =
+  | With_memory of Keeper_memory_os_current_types.t
+  (** Memory as the snapshot [from] names holds it, and the working state of
+      [from]. *)
+  | Item_alone (** Nothing: the units are one item ([Read_item_alone]). *)
+
 (** [units] is every unit read, those without items included. [missing]
     collects the parts each unit lacks, in unit order, so the commit records
     them whether or not a question is made. [reach], [trace] and [offered]
     are what the reader gave for the units; the question carries them
-    unchanged. *)
+    unchanged. [from] is the commit line reading starts from; the question's
+    [basis] is the snapshot it names. *)
 val make
   :  lane:Librarian_memory_lane.question_side
-  -> memory:Keeper_memory_os_current_types.t
   -> from:Librarian_log.line
+  -> shows:shows
   -> reach:Librarian_read_result.reach
   -> trace:string
   -> offered:Librarian_width.offered

@@ -127,7 +127,9 @@ let fast = slot "claude_code.fast"
 let wide = slot "claude_code.wide"
 let not_held : Registry.resolved_lane = { selected_slots = []; cli_slots = [] }
 
-let declared ?(prompt = "memory prompt") ?(resolved = not_held) cli : Machine.declared =
+let declared ?(prompt = "memory prompt") ?(resolved = not_held) ?(unadmitted = []) cli
+  : Machine.declared
+  =
   { value =
       { question =
           { prompt
@@ -137,6 +139,7 @@ let declared ?(prompt = "memory prompt") ?(resolved = not_held) cli : Machine.de
           }
       ; http = []
       ; cli
+      ; unadmitted
       }
   ; resolved
   }
@@ -212,6 +215,7 @@ let state_text (value : Machine.t) =
   | Idle { store; seen_length = (_ : int option) } -> "idle, holding: " ^ claims store
   | Asking { store; asking } -> Printf.sprintf "asking #%d, holding: %s" asking.ask (claims store)
   | Resting store -> "resting, holding: " ^ claims store
+  | Refused_at_bottom store -> "refused at the bottom, holding: " ^ claims store
   | Stopped stop -> "stopped: " ^ stop_text stop
 ;;
 
@@ -253,6 +257,7 @@ let cause_text : Log.cause -> string = function
   | Skip { hole = Content_missing _ } -> "skip: content missing"
   | Skip { hole = Unknown_span { before; after } } ->
     Printf.sprintf "skip: an unknown span from chat %d to %d" before.chat_bytes after.chat_bytes
+  | Skip { hole = Item_exceeds_window _ } -> "skip: the item fits no slot"
 ;;
 
 let not_applied_text (number, (why : Effects.why_not), (_ : Answer.new_fact option)) =
@@ -280,7 +285,9 @@ let step ?(at = 300.0) label place value event ~state ~fiber =
 
 let ended ask (result : Read_result.t) = Machine.Ask_ended { ask; result = Read_ended result }
 
-let write ?(trace = "turn") value ~at w = Machine.write value ~at ~by:Effects.Keeper ~trace w
+let write ?(trace = "turn") place value ~at w =
+  Machine.write place value ~at ~by:Effects.Keeper ~trace w
+;;
 
 let resume place value ~at =
   Machine.resume place ~boot:(fun () -> Machine.boot place ~at) value ~at
@@ -288,7 +295,7 @@ let resume place value ~at =
 
 let open_store (value : Machine.t) =
   match value.state with
-  | Idle { store; _ } | Asking { store; _ } | Resting store -> store
+  | Idle { store; _ } | Asking { store; _ } | Resting store | Refused_at_bottom store -> store
   | Stopped stop -> fail ("the store is stopped: " ^ stop_text stop)
 ;;
 
@@ -336,6 +343,7 @@ let question place (value : Machine.t) : Read_result.question =
                (Store.memory store).facts)
       ; units = [ "u1", span.line ]
       }
+  ; basis = Log.snapshot_after (Store.tail store)
   ; reach = Unread.reach span Whole
   ; trace = "trace-1"
   ; missing = []
@@ -407,7 +415,7 @@ let test_idle_pulse () =
   (match value.state with
    | Idle { seen_length; store = (_ : Store.t) } ->
      check (option int) "the length it saw" (Some (length place)) seen_length
-   | Asking _ | Resting _ | Stopped _ -> fail "the writer is not idle");
+   | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _ -> fail "the writer is not idle");
   let value =
     step "the same length" place value Pulse ~state:"idle, holding: " ~fiber:"keep"
   in
@@ -634,7 +642,8 @@ let test_a_refusal_narrows () =
       | All -> "all"
       | Units count -> Printf.sprintf "%d units" (count :> int)
       | Items count -> Printf.sprintf "%d items" (count :> int))
-    | Idle _ | Resting _ | Stopped _ -> "no ask out"
+    | Asking { asking = { asked = Read_item_alone; _ }; _ } -> "the item alone"
+    | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> "no ask out"
   in
   let place, value = asking_place () in
   check string "the first ask reads every unit" "all" (asked_text value);
@@ -652,6 +661,178 @@ let test_a_refusal_narrows () =
   let (_ : Machine.t) =
     step "a busy lane says nothing of size" place items
       (ended 4 (No_answer { question = question place items; slots = [ fast, Silent Busy ] }))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  ()
+;;
+
+(* {1 The bottom (§7.4)} *)
+
+(* The same question shown alone: the writer reads [shown.memory] for what
+   an answer may do, and the test question's id stands for either. *)
+let alone_of (question : Read_result.question) : Read_result.question =
+  { question with shown = { question.shown with memory = None } }
+;;
+
+let asked_of (value : Machine.t) =
+  match value.state with
+  | Asking { asking = { asked = Read_range (_ : Masc.Librarian_width.width); _ }; _ } ->
+    "the item with Memory"
+  | Asking { asking = { asked = Read_item_alone; _ }; _ } -> "the item alone"
+  | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> "no ask out"
+;;
+
+let facts_held (value : Machine.t) which =
+  List.length (Masc.Librarian_bottom.known value.bottom which question_id)
+;;
+
+let sized fact : (Lane.slot_key * Masc.Librarian_slot_outcome.unanswered) list =
+  [ fast, Refused (Sized fact) ]
+;;
+
+(* Every slot refused the head item with Memory for the input's size: the
+   item alone is asked at once, and its ask holds the fact, so it will not
+   call that slot for the item with Memory again. *)
+let test_the_item_with_memory_gives_way_to_the_item_alone () =
+  let place, value = asking_place () in
+  let question = question place value in
+  let alone =
+    step "every slot sized for the input" place value
+      (ended 1 (No_answer { question; slots = sized Input_too_large }))
+      ~state:"asking #2, holding: " ~fiber:"cancel, then start #2"
+  in
+  check string "what is asked" "the item alone" (asked_of alone);
+  check int "the fact is held" 1 (facts_held alone With_memory);
+  match alone.state with
+  | Asking { asking; _ } ->
+    check int "and the ask starts with it" 1
+      (List.length (Masc.Librarian_bottom.known asking.bottom With_memory question.id))
+  | Idle _ | Resting _ | Refused_at_bottom _ | Stopped _ -> fail "no ask is out"
+;;
+
+(* The item alone fits no slot either: it is skipped for its size, reading
+   moves past it and the facts about it go. *)
+let test_an_item_that_fits_no_slot_alone_is_skipped () =
+  let place, value = asking_place () in
+  let question = question place value in
+  let alone =
+    Machine.decide place value ~at:300.0
+      (ended 1 (No_answer { question; slots = sized Input_too_large }))
+  in
+  let passed =
+    step "every slot sized the item alone for the input" place alone
+      (ended 2 (No_answer { question = alone_of question; slots = sized Input_too_large }))
+      ~state:"idle, holding: " ~fiber:"cancel"
+  in
+  let line = last_commit passed in
+  check string "is passed" "skip: the item fits no slot" (cause_text line.cause);
+  check int "reading stands past it" question.reach.turn_log_offset line.turn_log_offset;
+  check int "no fact is left" 0 (facts_held passed With_memory + facts_held passed Alone)
+;;
+
+(* An item read alone adds and keeps the working state the question did not
+   show, and the line says the answer tried to replace it. *)
+let test_the_item_alone_keeps_the_working_state () =
+  let place, value = asking_place () in
+  let question = question place value in
+  let alone =
+    Machine.decide place value ~at:300.0
+      (ended 1 (No_answer { question; slots = sized Input_too_large }))
+  in
+  let read =
+    step "the item alone answered" place alone
+      (ended 2
+         (answered ~working_state:(Answer.Set "a plan it never saw") (alone_of question)
+            [ Add (stated owner) ]))
+      ~state:("idle, holding: " ^ owner) ~fiber:"cancel"
+  in
+  let line = last_commit read in
+  (match line.cause with
+   | Read { shown = Item_alone Not_valid_alone; _ } -> ()
+   | Read { shown = With_memory | Item_alone Untouched; _ } | Direct _ | Adopt _ | Skip _ ->
+     fail "the line does not say the working state was kept");
+  check (option string) "the working state is as it was" None line.working_state;
+  check int "no fact is left" 0 (facts_held read With_memory + facts_held read Alone)
+;;
+
+(* Every slot sized and not all for the input: nothing is asked or read
+   until an event can change the question. A direct write changes Memory,
+   so the item with Memory is another question. *)
+let test_a_bottom_sized_otherwise_waits_for_an_event () =
+  let place, value = asking_place () in
+  let question = question place value in
+  let waiting =
+    step "every slot sized, not all for the input" place value
+      (ended 1 (No_answer { question; slots = sized Output_over_reserve }))
+      ~state:"refused at the bottom, holding: " ~fiber:"cancel"
+  in
+  let waiting =
+    step "the pulse" place waiting Pulse ~state:"refused at the bottom, holding: " ~fiber:"keep"
+  in
+  let waiting =
+    step "a closed turn" place waiting Turn_closed ~state:"refused at the bottom, holding: "
+      ~fiber:"keep"
+  in
+  let written, answer = write place waiting ~at:301.0 (remember port) in
+  check string "a direct write" "written as commit 1" (write_text answer);
+  check string "asks again" ("asking #2, holding: " ^ port) (state_text written);
+  check string "its fiber" "start #2" (fiber_text (Machine.fiber_change ~before:waiting ~after:written))
+;;
+
+(* A [Resume] at the bottom forgets the facts, so every slot is called again. *)
+let test_resume_at_the_bottom_forgets_the_facts () =
+  let place, value = asking_place () in
+  let question = question place value in
+  let waiting =
+    Machine.decide place value ~at:300.0
+      (ended 1 (No_answer { question; slots = sized Window_reached }))
+  in
+  check int "the fact is held" 1 (facts_held waiting With_memory);
+  let resumed, answer = resume place waiting ~at:301.0 in
+  check string "the operator's resume" "done" (act_text answer);
+  check string "asks again" "asking #2, holding: " (state_text resumed);
+  check int "with no fact held" 0 (facts_held resumed With_memory)
+;;
+
+(* A verdict about a snapshot other than the one now is not used: the item
+   with Memory is asked again, and the fact stays learnt. *)
+let test_a_verdict_on_another_memory_asks_again () =
+  let place, value = asking_place () in
+  let question =
+    { (question place value) with
+      basis = Agent_core.Checkpoint_objects.digest_of_bytes "an older snapshot"
+    }
+  in
+  let again =
+    step "sized for the input, against an older snapshot" place value
+      (ended 1 (No_answer { question; slots = sized Input_too_large }))
+      ~state:"asking #2, holding: " ~fiber:"cancel, then start #2"
+  in
+  check string "what is asked" "the item with Memory" (asked_of again);
+  check int "the fact is learnt" 1 (facts_held again With_memory)
+;;
+
+(* A slot that gives no size keeps the writer above the item: a refusal
+   without one, and a declared slot admission left out. *)
+let test_a_slot_without_a_size_keeps_the_writer_above () =
+  let place = started_place () in
+  close_turn place ~from:0 ~until:64;
+  let value = booted ~lane:(declared [ fast; wide ]) place ~at:100.0 in
+  let (_ : Machine.t) =
+    step "one slot sized for the input, one refused without a size" place value
+      (ended 1
+         (No_answer
+            { question = question place value
+            ; slots = [ fast, Refused (Sized Input_too_large); wide, Refused Unsized ]
+            }))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  let place = started_place () in
+  close_turn place ~from:0 ~until:64;
+  let value = booted ~lane:(declared ~unadmitted:[ "openrouter.down" ] [ fast ]) place ~at:100.0 in
+  let (_ : Machine.t) =
+    step "every walked slot sized for the input, one declared slot not admitted" place value
+      (ended 1 (No_answer { question = question place value; slots = sized Input_too_large }))
       ~state:"resting, holding: " ~fiber:"cancel"
   in
   ()
@@ -764,7 +945,7 @@ let test_an_answer_from_before_reading_moved () =
 (* An open store that holds [port]. *)
 let holding_port () =
   let place = started_place () in
-  let value, answer = write (booted place ~at:100.0) ~at:201.0 (remember port) in
+  let value, answer = write place (booted place ~at:100.0) ~at:201.0 (remember port) in
   check string "the fixture's write" "written as commit 1" (write_text answer);
   place, value
 ;;
@@ -779,7 +960,7 @@ let diverged () =
   let stop : Store.stop =
     Log_diverged { expected = named; observed = Digest.digest_of_bytes other }
   in
-  let value, answer = write value ~at:202.0 (remember owner) in
+  let value, answer = write place value ~at:202.0 (remember owner) in
   check string "the write that finds the other snapshot"
     ("the store is stopped: " ^ stop_text stop)
     (write_text answer);
@@ -790,12 +971,12 @@ let diverged () =
 let test_write_when_idle () =
   let place, value = holding_port () in
   check string "the store holds the claim" ("idle, holding: " ^ port) (state_text value);
-  let value, again = write value ~at:202.0 (remember port) in
+  let value, again = write place value ~at:202.0 (remember port) in
   check string "the same claim again moves its last_seen, so it is a commit"
     "written as commit 2" (write_text again);
   let log = file_bytes (log_path place) in
   let unchanged label w expected =
-    let next, answer = write value ~at:203.0 w in
+    let next, answer = write place value ~at:203.0 w in
     check string label expected (write_text answer);
     check string (label ^ ": the state is as it was") (state_text value) (state_text next);
     check string (label ^ ": no line is written") log (file_bytes (log_path place))
@@ -812,7 +993,7 @@ let test_write_when_idle () =
        ; basis = transcript
        })
     "refused: unknown_fact";
-  let next, answer = write ~trace:" " value ~at:203.0 (remember owner) in
+  let next, answer = write ~trace:" " place value ~at:203.0 (remember owner) in
   check string "a write on no trace" "refused: blank_trace" (write_text answer);
   check string "leaves the state" (state_text value) (state_text next)
 ;;
@@ -827,7 +1008,7 @@ let test_write_while_asking () =
   in
   let question = question place value in
   let next, answer =
-    write value ~at:210.0 (Direct.Retract { id = Types.memory_id_of_claim port; reason = "moved" })
+    write place value ~at:210.0 (Direct.Retract { id = Types.memory_id_of_claim port; reason = "moved" })
   in
   check string "a retraction while an ask is out" "written as commit 2" (write_text answer);
   check string "is committed at once" "asking #1, holding: " (state_text next);
@@ -848,7 +1029,7 @@ let test_write_while_asking () =
 let test_write_when_stopped () =
   let place, value, stop, (_ : string) = diverged () in
   let log = file_bytes (log_path place) in
-  let next, answer = write value ~at:203.0 (remember owner) in
+  let next, answer = write place value ~at:203.0 (remember owner) in
   check string "a write to a stopped store"
     ("the store is stopped: " ^ stop_text stop)
     (write_text answer);
@@ -865,7 +1046,7 @@ let test_resume () =
   check string "a store that is open" "nothing to resume" (act_text answer);
   check string "stays as it was" (state_text idle) (state_text same);
   write_file (snapshot_path place) (other_snapshot ());
-  let stopped, (_ : Machine.write_answer) = write idle ~at:202.0 (remember owner) in
+  let stopped, (_ : Machine.write_answer) = write place idle ~at:202.0 (remember owner) in
   let still, answer = resume place stopped ~at:300.0 in
   check string "the boot ran" "done" (act_text answer);
   check string "and stopped the same way" (state_text stopped) (state_text still);
@@ -888,7 +1069,7 @@ let test_resume_keeps_the_lane_and_the_last_number () =
   let question = question place value in
   let held = file_bytes (snapshot_path place) in
   write_file (snapshot_path place) (other_snapshot ());
-  let stopped, (_ : Machine.write_answer) = write value ~at:201.0 (remember owner) in
+  let stopped, (_ : Machine.write_answer) = write place value ~at:201.0 (remember owner) in
   write_file (snapshot_path place) held;
   let resumed, answer = resume place stopped ~at:300.0 in
   check string "the boot ran" "done" (act_text answer);
@@ -917,7 +1098,7 @@ let test_adopt () =
   let again, answer = adopt opened (Digest.digest_of_bytes other) in
   check string "a store that is open" "not stopped" (act_text answer);
   check string "stays as it was" (state_text opened) (state_text again);
-  let value, answer = write opened ~at:401.0 (remember owner) in
+  let value, answer = write place opened ~at:401.0 (remember owner) in
   check string "the next write follows the adoption" "written as commit 3" (write_text answer);
   check string "and is held" ("idle, holding: " ^ owner) (state_text value)
 ;;
@@ -967,6 +1148,22 @@ let () =
         ; test_case "a failed ask" `Quick test_ask_failed
         ; test_case "an answer from before reading moved" `Quick
             test_an_answer_from_before_reading_moved
+        ] )
+    ; ( "bottom"
+      , [ test_case "the item with Memory gives way to the item alone" `Quick
+            test_the_item_with_memory_gives_way_to_the_item_alone
+        ; test_case "an item that fits no slot alone is skipped" `Quick
+            test_an_item_that_fits_no_slot_alone_is_skipped
+        ; test_case "the item alone keeps the working state" `Quick
+            test_the_item_alone_keeps_the_working_state
+        ; test_case "a bottom sized otherwise waits for an event" `Quick
+            test_a_bottom_sized_otherwise_waits_for_an_event
+        ; test_case "resume at the bottom forgets the facts" `Quick
+            test_resume_at_the_bottom_forgets_the_facts
+        ; test_case "a verdict on another Memory asks again" `Quick
+            test_a_verdict_on_another_memory_asks_again
+        ; test_case "a slot without a size keeps the writer above" `Quick
+            test_a_slot_without_a_size_keeps_the_writer_above
         ] )
     ; ( "write"
       , [ test_case "when idle" `Quick test_write_when_idle

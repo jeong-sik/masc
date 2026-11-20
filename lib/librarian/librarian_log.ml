@@ -17,6 +17,15 @@ type hole =
       { before : Keeper_turn_log.mark
       ; after : Keeper_turn_log.mark
       }
+  | Item_exceeds_window of Librarian_unit.missing_at list
+
+type shown =
+  | With_memory
+  | Item_alone of alone_working_state
+
+and alone_working_state =
+  | Untouched
+  | Not_valid_alone
 
 type cause =
   | Direct of
@@ -30,7 +39,7 @@ type cause =
       }
   | Read of
       { question : Librarian_question_id.t
-      ; shown_memory : bool
+      ; shown : shown
       ; slot : string
       ; trace : string
       ; missing : Librarian_unit.missing_at list
@@ -62,3 +71,8 @@ type line =
       ; covered : Keeper_turn_log.mark
       }
   | Committed of commit
+
+let snapshot_after = function
+  | Started { snapshot; _ } -> snapshot
+  | Committed { after; _ } -> after
+;;

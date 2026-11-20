@@ -520,7 +520,7 @@ let selected_cockpit_rows ~ko ~cols ~now ~name ~status runtime =
         let right_lines =
           dot_meter_summary_lines ~ko ~cells:right_w ~total_ok ~total_bad
             ~peak_ok ~peak_bad ~active_slots ~slot_count:count
-            ~tail_note:(Printf.sprintf "%d/24h" count)
+            ~tail_note:"24h"
         in
         let joined =
           List.mapi

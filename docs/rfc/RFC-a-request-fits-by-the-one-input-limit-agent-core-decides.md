@@ -45,10 +45,20 @@ masc 는 창을 옮길지 정할 때 「입력 ≤ 창」으로 본다.
 |---|---|---|
 | 창 옮김 신호 `past_max_context`·`held_window`(`lib/keeper/keeper_turn_driver_try_provider.ml`, 값은 2140-2144) | binding max-context | 빼지 않는다 |
 | 다음 요청 예측(`lib/keeper/keeper_next_request_forecast.ml:501`) | 같은 값을 따로 읽는다 | 빼지 않는다 |
-| 턴의 `effective_budget`(`lib/keeper/keeper_context_runtime.ml:172`) | binding max-context 와 override 가운데 작은 값 | 빼지 않는다(쓰는 곳은 §6) |
+| 턴의 `effective_budget`(`lib/keeper/keeper_context_runtime.ml:181`) | 입력과 견주지 않는다. binding max-context 와 override 가운데 작은 값이고, 턴은 lane 후보 가운데 가장 작은 값을 쓴다(`lib/keeper/keeper_unified_turn_pre_dispatch.ml:151-192`). 이벤트, OTel span, 요청·턴 기록에 실린다 | 해당 없음 |
 | Librarian 레인(`lib/keeper/librarian_memory_lane.ml:58-71`, `102-112`) | masc 에서는 견주지 않는다. 창과 레인 선언의 `max_output_tokens` 를 slot 열쇠에 싣기만 한다 | HTTP slot 은 레인 선언을 그 요청의 `max_tokens` 로 싣는다(`lib/runtime/runtime_exact_output_registry.ml:684-694`). 미리 세는 slot 은 agent-core `admit` 이 빼고, 그 밖은 provider 가 자기 창으로 거절한다. CLI slot 열쇠에는 예약이 없다 |
 
 출력 예약을 빼는 곳은 agent-core `admit` 하나다. Librarian 레인은 예약 값을 자기 선언으로 정할 뿐 빼지 않는다.
+
+### 1.3 넘친 두 요청 (11-19, 리뷰 Keeper 하나)
+
+- 19:29 KST(옛 빌드): 서버가 19:27 에 다시 떴고 턴 경계는 0 이었다.
+  - 요청은 마지막 턴 기록(seed)의 atom 2,191 부터 191 개를 실었다. 경계가 0 이라 끝난 턴이 없다고 보였고, 끝난 턴의 결과를 표시로 바꾸지 않았다(sent prefix RFC §3.1 의 마커). 입력 529,914 로 거절됐다.
+  - 그 run 은 아직 checkpoint 전이라, 거절된 요청의 tool 결과를 표시로 바꿔 한 번 더 보냈다(`current_turn_demotion_sequence`).
+  - 지금은 턴 경계를 턴 기록의 마지막 단위에서 읽는다(#53461).
+- 19:39 KST: §0 의 거절이다. 한 Keeper 턴 안에서 안쪽 요청이 40 번 넘게 받아들여지며 약 185,000 에서 269,780 token 까지 커졌다. 다음 요청 272,780 이 입력 한도 272,000 을 넘어 보내기 전에 거절됐다.
+  - 안쪽 요청마다 checkpoint 를 셋 저장했다(`after_assistant_collected`, `after_tool_results_appended`, `after_context_injection`).
+  - 그래서 같은 run 의 재시도가 닫혀 크기 거절 사다리가 돌지 않았다(§4.1). 턴은 실패했고 다음 cycle 은 그대로 돈다.
 
 ## 2. 규칙
 
@@ -106,16 +116,40 @@ agent-core 도 그 요청을 보내지 않는다.
 
 ## 4. 넘칠 때
 
-기준을 맞춰도 한 턴 안에서 커지면 넘칠 수 있다.
-지금은 checkpoint 뒤에 같은 run 의 줄이기 재시도가 막힌다(`same_run_retry_authorized`).
+### 4.1 지금
 
-이 절은 조사가 끝나면 채운다(§6).
-다른 도구는 provider 가 넘침으로 거절하면 한 번 줄여 다시 보낸다.
+- 신호는 턴 첫 요청에서, ledger 가 시작된 뒤 가장 크게 자란 턴만큼 다음 턴이 자란다고 본다. 그보다 많이 자라는 턴은 턴 가운데 넘친다(§1.3 의 19:39 KST).
+- 크기 거절 사다리는 세 단이다(`lib/keeper/keeper_turn_driver_try_provider.ml:3588-3700`).
+  - 턴 경계로 옮긴다(`turn_boundary_resend_sequence`).
+  - 거절된 요청의 tool 결과를 표시로 바꾼다(`current_turn_demotion_sequence`).
+  - 이 턴이 시작한 곳으로 옮긴다(`this_turn_start_resend_sequence`).
+- 단마다 attempt 를 처음부터 다시 돌린다. 그래서 셋 모두 `same_run_retry_authorized` 가 열려 있을 때만 돈다.
+  - agent-core 가 이 run 에서 checkpoint 단계에 닿으면 닫힌다(`same_run_retry_allowed`, `:844`).
+  - 처음부터 다시 돌리면 이미 저장된 진행 위에 이번 턴 입력을 다시 넣는다(`lib/keeper/keeper_unified_turn_execution.ml:437`).
+- 안쪽 요청은 매번 checkpoint 를 저장한다. 그래서 턴 첫 요청 뒤의 거절에는 사다리가 없다.
+
+### 4.2 규칙
+
+보내기 전 거절(agent-core `admit` 의 `Context_window_exceeded`)에서는 completion 요청이 나가지 않았다.
+그래서 run 안에서 다시 투영해 다시 견줘도 tool 을 다시 돌리지 않고, checkpoint 도 되돌리지 않는다.
+
+- agent-core pipeline 은 그 거절을 caller 의 투영(`model_input_projection`, `packages/agent_core/lib/agent/agent_types.mli:57`)에 돌려준다. 투영이 더 좁은 요청을 내면 다시 `admit` 한다.
+- masc 투영은 사다리의 단을 차례로 하나씩 쓴다. 단마다 한 번 다시 견준다.
+- 단이 다하거나 좁힐 곳이 없으면 지금처럼 보내지 않고 턴을 끝낸다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
+
+다른 도구도 넘치면 한 번 줄여 다시 보내고, 줄일 것이 없으면 끝낸다.
 
 - pi: 「one compact-and-retry recovery attempt」. 그것도 실패하면 다시 보내지 않는다.
 - OpenClaw: 줄여서 다시 보낸다. 그래도 안 들어가면 /reset, /new, 더 큰 창의 모델을 권한다.
 - Hermes: provider 가 거절한 뒤에는 「one bounded attempt」(`max_compression_attempts`)만 다시 줄인다. https://hermes-agent.nousresearch.com/docs/developer-guide/context-compression-and-caching
   - 보내기 전에 줄일 것이 없는데 창을 넘으면 보내지 않는다. 새 세션(`/new`)을 권하며 턴을 끝낸다. https://hermes-agent.nousresearch.com/docs/user-guide/configuration
+
+### 4.3 정할 것
+
+- 거절을 투영에 돌려주는 모양.
+  - (가) `model_input_projection` 이 거절을 인자로 받는다. 요청 모양을 정하는 곳이 이미 투영 하나라서, 좁히는 것도 같은 곳에서 정한다. 추천.
+  - (나) 투영 옆에 callback 을 하나 더 둔다. 투영의 타입은 그대로지만 요청 모양을 정하는 곳이 둘이 된다.
+- provider 가 받은 뒤 타입 있는 넘침으로 거절한 요청도 같은 길로 받을지. provider 가 답을 만들지 않았으니 같은 이유로 안전하다. 다만 이미 보낸 요청이라 한 번 더 비용이 든다.
 
 ## 5. 층
 
@@ -123,16 +157,15 @@ agent-core 도 그 요청을 보내지 않는다.
    - 시험: codec 마다 예약과 한도. `admit` 의 경계값.
 2. masc 창 옮김 신호와 다음 요청 예측이 입력 한도를 받는다. sent prefix RFC §4 의 비교 대상을 바꾼다.
    - 시험: 창 400,000, 예약 128,000 에서 다음 턴 예측이 272,000 을 넘으면 신호가 켜진다.
-3. 턴의 `effective_budget` 과 그 값을 쓰는 곳. §6 결과로 정한다.
+3. 턴의 `effective_budget`. 고칠 코드는 없다. 입력과 견주는 곳이 없다(§1.2).
 4. Librarian 레인. 지금 고칠 코드는 없다. Librarian RFC §6.3 의 비교를 만드는 층이 입력 한도 타입을 받는다. Librarian 담당이 한다.
-5. 넘칠 때 한 번 줄여 다시 보내기. §4 를 채운 뒤 정한다.
+5. 넘칠 때 run 안에서 다시 투영하기(§4.2). §4.3 을 정한 뒤 한다.
+   - 시험: 턴 가운데 안쪽 요청이 입력 한도를 넘으면 같은 run 에서 좁힌 요청이 받아들여진다. tool 은 다시 돌지 않고 checkpoint 수도 그대로다.
+   - 시험: 단이 다하면 턴이 끝나고, 다음 턴 첫 요청에서 신호가 창을 옮긴다.
 
 ## 6. 조사할 것
 
-- `effective_budget` 이 입력 한도로 쓰이는 곳. 투영과 `keeper_unified_turn_pre_dispatch.ml:174` 의 후보 비교가 있다.
 - exact 경로에서 admitted target 이 받는 창과 레인 slot 열쇠의 `window` 가 같은 값에서 오는지. 같아야 Librarian RFC §6.3 의 비교가 이 RFC 의 함수를 쓸 수 있다.
-- 옛 빌드에서 19:29 KST 에 거절된 입력 529,914 가 어디서 왔는지.
-- checkpoint 뒤 줄이기 재시도를 막는 조건이 지키는 것.
 
 ## 7. 모르는 것
 

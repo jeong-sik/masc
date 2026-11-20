@@ -148,7 +148,7 @@ val degrade_image_messages
     not declare [supports_audio_input]. Names the media type so the omission is
     legible to the model and, through it, the user — the degrade is not
     silent. *)
-val audio_omitted_placeholder : media_type:string -> Types.content_block
+val audio_omitted_placeholder : media_type:string -> 'source Types.content_block_with
 
 (** [degrade_audio_messages ~supports_audio_input messages] rewrites every
     [Audio] — including audio nested in ToolResult [content_blocks], where
@@ -162,8 +162,8 @@ val audio_omitted_placeholder : media_type:string -> Types.content_block
     retroactively, and the omission is named in the conversation. *)
 val degrade_audio_messages
   :  supports_audio_input:bool
-  -> Types.message list
-  -> Types.message list * int
+  -> 'source Types.message_with list
+  -> 'source Types.message_with list * int
 
 (** {2 Content block JSON conversion} *)
 

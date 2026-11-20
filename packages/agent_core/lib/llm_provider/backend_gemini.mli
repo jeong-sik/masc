@@ -18,10 +18,11 @@ val project_history
   -> Provider_config.t
   -> 'source Types.message_with list
   -> ('source Reasoning_history_projection.projection, Reasoning_history_projection.error) result
-(** The history after document admission and reasoning replay policy:
-    documents the model cannot receive are replaced with explicit omission
-    text, and reasoning blocks the codec or replay policy excludes are gone.
-    Image and audio capability projection still belongs to request building.
+(** The history after document/audio admission and reasoning replay policy:
+    documents and audio the model cannot receive are replaced with explicit
+    omission text before function-response-parts projection, and reasoning
+    blocks the codec or replay policy excludes are gone. Image capability
+    projection still belongs to request building.
 
     Exported so a caller that must size a request before building it asks the
     same function the wire does, rather than keeping a second opinion about

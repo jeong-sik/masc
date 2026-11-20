@@ -597,11 +597,36 @@ let test_canonical_owner_over_a_symlink_alias () =
           check bool "the alias exists but is not the published owner" true
             (Sys.file_exists alias && not (String.equal alias owner))))))
 
+(* Each kind of path reads as the two checks read it before they took one
+   stat each. A path removed between two checks cannot be made in a case;
+   one stat leaves no second check to fail. *)
+let test_existing_dir_and_file_read_each_kind_of_path () =
+  with_temp_dir "config-existing-kinds" @@ fun root ->
+  let directory = Filename.concat root "directory" in
+  let file = Filename.concat root "file" in
+  let missing = Filename.concat root "missing" in
+  let dangling = Filename.concat root "dangling" in
+  Unix.mkdir directory 0o755;
+  Out_channel.with_open_bin file (fun channel -> Out_channel.output_string channel "x");
+  Unix.symlink missing dangling;
+  List.iter
+    (fun (label, path, is_directory, is_file) ->
+       check bool (label ^ ": a directory") is_directory (Env_config_core.existing_dir path);
+       check bool (label ^ ": a file") is_file (Env_config_core.existing_file path))
+    [ "a directory", directory, true, false
+    ; "a file", file, false, true
+    ; "a missing path", missing, false, false
+    ; "a dangling link", dangling, false, false
+    ]
+
 let () =
   run "config_dir_resolver"
     [ ( "temp directory cleanup",
         [ test_case "rm_rf unlinks live and dangling links" `Quick
             test_rm_rf_unlinks_symlinks ] );
+      ( "existing paths",
+        [ test_case "a directory, a file, a missing path and a dangling link" `Quick
+            test_existing_dir_and_file_read_each_kind_of_path ] );
       ("canonical owner", [test_case "config follows the admitted owner, not a symlink alias" `Quick test_canonical_owner_over_a_symlink_alias]);
       ( "resolution",
         [

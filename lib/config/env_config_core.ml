@@ -272,11 +272,19 @@ let normalize_masc_base_path_input path =
   else
     normalized
 
+(* One stat answers each question. Asked as [Sys.file_exists] and then
+   [Sys.is_directory], a path removed between the two raised [Sys_error] out
+   of the caller, the resolution of a config root among them. A path that
+   does not stat, missing or a dangling link, is neither. *)
 let existing_dir path =
-  Sys.file_exists path && Sys.is_directory path
+  match Sys.is_directory path with
+  | is_directory -> is_directory
+  | exception Sys_error (_ : string) -> false
 
 let existing_file path =
-  Sys.file_exists path && not (Sys.is_directory path)
+  match Sys.is_directory path with
+  | is_directory -> not is_directory
+  | exception Sys_error (_ : string) -> false
 
 (** SSOT for MASC_HOST / MASC_HTTP_PORT env-var names (issue 8352).
     Defined here so in-process readers and out-of-process callers

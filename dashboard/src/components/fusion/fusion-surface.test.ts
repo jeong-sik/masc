@@ -381,9 +381,8 @@ describe('FusionSurface', () => {
 
   it('renders the RFC-0284 judge-node strip for a judge-of-judges run', () => {
     // Wiring pin: a board post carrying the `judges` observation array must
-    // surface the per-node topology in the detail view. Before RFC-0284 PR 2
-    // the backend emitted this array but the dashboard dropped it (collapsed to
-    // the singular judge) — this test red-guards that silent regression.
+    // surface the per-node topology in the detail view, not collapse it to
+    // the singular judge.
     fusionBoardPosts.value = [
       boardPost({
         id: 'post-joj',

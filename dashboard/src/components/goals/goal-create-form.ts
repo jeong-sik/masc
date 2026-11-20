@@ -1,6 +1,5 @@
 import { isDismissEscape } from '../../lib/keyboard'
 // Goal creation form — right-hand side panel in the Work surface.
-// Design reference: prototype NewGoalComposer (work.jsx ~line 437).
 // A new Goal declares its measure (a count, a quantity against a limit, or a
 // condition) and how it is read, alongside its title.
 

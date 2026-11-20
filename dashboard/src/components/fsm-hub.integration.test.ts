@@ -39,7 +39,7 @@ import {
 import type { CompositeObservation } from './fsm-hub-types'
 
 /** Server-shaped keeper composite snapshot matching the projected
-    RFC-0003/TLA-aligned `/api/v1/keepers/:name/composite` response.
+    TLA-aligned `/api/v1/keepers/:name/composite` response.
     If the server changes this shape, the parse should fail here,
     not silently produce undefined in the swimlane. */
 const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {

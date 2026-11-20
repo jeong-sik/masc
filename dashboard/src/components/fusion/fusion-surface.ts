@@ -734,7 +734,7 @@ function FusionPipelineStrip({ run }: { run: FusionRunView }) {
   // Judge segment is shape-derived (no hardcoded topology branch): a JoJ run
   // renders `1차 심판 ×N (k 격리)` → `meta`; a refine run renders `심판` → `재검토`;
   // a single/custom shape keeps the one judge node labelled by its decision or
-  // status (unchanged from the pre-RFC-0284 strip).
+  // status.
   const judgeSegment = shape.isJoj
     ? html`
         <span class=${`fus-pipe-node judge ${off ? 'off' : ''}`}>

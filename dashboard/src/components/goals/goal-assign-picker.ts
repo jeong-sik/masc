@@ -1,6 +1,6 @@
-// RFC-0267 Phase 2 — the control the RFC named: "The Work board's 미배정 작업
-// section gains a per-row goal에 배정 control: a picker of active goals that
-// calls masc_task_set_goal, then refreshes ['goals','execution']".
+// The Work board's backlog section gives each goalless task a goal에 배정
+// control: a picker of active goals that calls masc_task_set_goal, then
+// refreshes ['goals','execution'].
 //
 // The tool, the backend writer and assignTaskToGoal all shipped; only this was
 // missing, so a goalless task could be linked from MCP but not from the board

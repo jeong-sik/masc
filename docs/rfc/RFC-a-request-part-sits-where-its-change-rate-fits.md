@@ -178,6 +178,43 @@ binding 에 두는 까닭:
 - TUI Inspector 는 턴마다 한 줄로 적는다. 예: 「앞부분 13.9만 다시 씀 · 9분 쉼(유지 5분)」.
 - Keeper 목록은 오늘 「유지 시간 넘김으로 다시 쓴 토큰」과 「1시간이었다면 든 값」을 보인다. 둘 다 기록에서 계산한다.
 
+기록에서 읽는 것(2026-11-20 코드 기준):
+
+| 사실 | 있는 곳 |
+|---|---|
+| 요청마다 읽은·쓴 토큰, 끝난 시각, 걸린 시간, runtime | 비용 원장 요청 행: `agent`·`keeper_turn_id`·`agent_core_turn_ordinal`·`ts_unix`·`request_latency_ms`·`cache_read_tokens`·`cache_creation_tokens`·`runtime_id` |
+| 턴 마지막 요청의 system·도구·메시지 sha | `Keeper_provider_input_snapshot`(Keeper 마다 턴 한 행) |
+| 그 요청이 고른 유지 시간 | 없다. 스냅샷의 wire 관측도 본문 크기와 sha 만 적는다 |
+| provider 기본 유지 시간의 길이 | 없다 |
+
+더하는 사실 둘:
+- 요청이 고른 유지 시간.
+  - `Complete_common.patch_telemetry` 는 요청 설정의 `canonical_model_id`·`effective_context_window` 를 응답 telemetry 에 찍는다. 같은 자리에서 `cache_write_lifetime` 을 찍는다.
+  - 값은 `Provider_config` 의 함수 하나가 정한다. 가격 출처(#53780)도 그 함수를 쓴다.
+  - 비용 행이 그 값을 적는다.
+  - 이 기록이 없으면 투영이 지금 선언을 옛 턴에 덮어씌운다. 하루 중에 선언을 바꾸면 그 전 턴을 틀리게 센다.
+- provider 기본 유지 시간.
+  - catalog provider 행이 초로 선언한다. claude 는 300 이다(공식 문서).
+  - 선언이 없는 provider 는 「유지 시간 넘김」을 판정하지 않고 쉰 시간만 보인다. 지금 GLM 이 그렇다(§9).
+  - `One_hour` 는 등급 자체가 3600초라 따로 선언하지 않는다.
+- provider 응답의 등급별 쓰기 토큰(`cache_creation.ephemeral_1h_input_tokens`)은 읽지 않는다.
+  - 청구의 진실은 그 값이다. 다만 두 응답 파서(stream·non-stream)를 고쳐야 하고, Anthropic 호환 endpoint 가 그 값을 주는지는 모른다.
+  - 1시간은 catalog 계약이 있는 공식 API 만 받는다(L2). 그래서 요청이 고른 값과 쓴 등급이 갈리는 길이 없다.
+
+셈:
+- 턴 N 의 첫 요청을 본다.
+- 쉰 시간은 턴 N-1 마지막 요청의 시작부터 턴 N 첫 요청의 시작까지다. 시작은 `ts_unix - request_latency_ms` 다.
+- 처음 달라진 곳은 턴 N-1 과 턴 N 의 스냅샷을 견준다.
+  - 스냅샷은 턴의 마지막 요청만 담는다. 두 스냅샷이 `Appended` 면 턴 N 첫 요청도 덧붙이기만 했다.
+  - 턴 안에서 덧붙이기가 아닌 변화는 wire 캡처 창(§1.1)에서 2,776쌍 중 22쌍이었다.
+  - 그래서 `Appended` 로 센 유지 시간 넘김은 하한이다.
+- 갈래에 `Runtime_changed` 를 더한다. 두 요청의 `runtime_id` 가 다르면 모델이나 계정이 달라 앞 캐시를 못 읽는다.
+- 유지 시간 넘김: `Appended` 이고, 쉰 시간이 턴 N-1 마지막 요청이 고른 유지 시간보다 길다.
+- 「1시간이었다면 든 값」: 그 Keeper 의 오늘 요청을 다시 매긴다.
+  - 모든 쓰기는 `cache_write_1h_multiplier`(#53779)로 매긴다.
+  - 5분을 고른 요청 가운데, 유지 시간 넘김 턴이면서 쉰 시간이 3600초 이하인 첫 요청은 다시 쓴 토큰을 읽기 값으로 매긴다.
+- 투영을 어디서 부를지(서버 대시보드 또는 TUI)와 TUI 자리는 TUI 일관성 작업과 맞춘다.
+
 ### 3.3 Anthropic 레인은 도구를 불러올 때 배열을 바꾸지 않는다
 
 지금:
@@ -224,9 +261,54 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 - User 자리 글은 `clear_at` 이 없어 이력에 남는다. 다음 턴부터는 캐시로 읽힌다(0.05배).
 - 그래서 `Outside_text` 층은 「한 번 도착」이어야 한다. 매 턴 같은 보기를 다시 싣는 층은 이력에 같은 글이 쌓인다.
 - 층마다 둘 중 하나로 정한다.
-  - 새로 온 것만 싣는다(mention·scope 메시지는 이미 그렇다).
+  - 새로 온 것만 싣는다.
   - 바뀌었을 때만 다시 싣는다. 마지막으로 실은 바이트는 하던 일 메시지처럼 ledger 에 들고 간다.
 - 층마다 어느 쪽인지는 L5 설계에서 표로 정한다. Fleet 은 §4.2 와 같이 정한다.
+
+층별 표(2026-11-20 코드 기준, 「도착 방식」은 `Keeper_context_layers.resend_on_resume` 값):
+
+| 층 | 쓴 사람 | 바이트가 바뀌는 때 | 도착 방식 | 한도 |
+|---|---|---|---|---|
+| `Active_goals` | 섞임: Goal 제목·기준(운영자나 Keeper) | Goal 편집·단계 변화 | 바뀔 때 | 없음 |
+| `Direct_input_source` | 섞임: 바깥 사용자 이름·채널 | 작업마다 | 바뀔 때 | 1줄 |
+| `Goal_observations` | 섞임: 리뷰 메모·측정 글 | 리뷰·측정·Task claim | 바뀔 때 | 없음 |
+| `Goals_awaiting_proof` | 호스트 | Verifying 에 들고 날 때 | 도착 | 없음 |
+| `Current_task` | 섞임: Task 제목·앞 담당자 인계 | claim·상태·인계 | 바뀔 때 | 없음 |
+| `Approval_authority` | 호스트 | 승인 저장소 revision | 바뀔 때 | 없음 |
+| `Connected_surfaces` | 호스트 | 연결·살아 있음 변화 | 바뀔 때 | 없음 |
+| `Namespace_state` | 호스트(제목 없음) | backlog 쓰기·도는 fiber 수(거의 매 턴) | 바뀔 때 | claim 가능 10줄 |
+| `Workspace_memory` | 호스트(hash·개수만) | 원장 쓰기·도구 경로 | 바뀔 때 | 고정 크기 |
+| `Wiki` | 섞임: page 제목·요약 | page 쓰기 | 바뀔 때 | 색인 전체 |
+| `Lane_updates` | 호스트(id 만) | 새 lane 관측·ack | 바뀔 때 | 구독마다 1 |
+| `Autonomous_trigger` | 호스트 | 매 턴 | 도착 | 3줄 이하 |
+| `Scheduled_automation` | 호스트(깨움 글은 user 메시지로 간다) | 일정 변화 | 도착 | 5개 |
+| `Completion_authority` | 섞임: 판정 까닭(운영자나 LLM 판정자) | 그 턴만 | 도착 | 없음 |
+| `Task_cancellations` | 섞임: 취소한 이의 까닭 | 그 턴만 | 도착 | 없음 |
+| `Pending_mentions` | 바깥 | 새 메시지, 답하거나 ack 할 때까지 매 턴 | 도착 | 없음, 전문 |
+| `Scope_messages` | 그리는 곳이 없다 | — | 도착 | — |
+| `Own_board_posts` | 섞임: 이 Keeper 의 글 제목·본문 | 새 글·답글·투표 수 | 바뀔 때 | 5개, 80자 |
+| `Board_activity` | 섞임, 거의 바깥(다른 Keeper·사람·connector) | 그 턴 묶음만 | 도착 | 줄 수 없음 |
+| `Own_recent_actions` | 섞임: 거절된 호출 인자·도구 오류 글 | 도구를 부른 턴마다 | 바뀔 때, 줄 단위 | 10턴, 요약 8개 × 240B |
+| `Recent_work` | 바깥: 최근 대화 | 거의 답할 때마다 | 바뀔 때 | 메시지 8개 + 답 1 |
+| `Fleet_messages` | 바깥 | 방송이 올 때 | 바뀔 때 | 10줄 |
+
+지금 자리(Agent Core):
+- `Active_goals`·`Goals_awaiting_proof` 는 System 꼬리다(`keeper_run_prompt.ml`). 둘 중 하나가 바뀌면 그 뒤 전체를 다시 쓴다. §1.3 의 「Goal 사건 하나 131만 토큰」이 이것이다.
+- 나머지 층은 첫 요청의 턴 문맥이다. 계약을 선언한 모델(`reasoning_replay = "turn_scoped_system_context_preserve_always"`)에서는 `clear_at` system 메시지로 간다.
+- Anthropic 레인은 지난 턴 문맥을 이력에 `Historical_system_context` 로 남겨 제자리에 다시 보낸다. 앞부분이 늘기만 하게 하려는 설계다(`message_origin_lowering.ml`). `clear_at` 계약 모델에서는 API 가 그 글을 입력에서 뺀다.
+
+L5 에서 정하는 것:
+- 쓴 사람: 「호스트」 층만 `Host_state` 다. 한 바이트라도 남이 쓴 글이 섞이면 `Outside_text` 다.
+- 도착 방식은 새 표를 만들지 않고 `resend_on_resume` 을 쓴다. 공식 클라이언트 재개와 Agent Core User 자리가 같은 분류를 따른다.
+  - 「바뀔 때」 층은 창이 이미 든 바이트면 싣지 않는다. 줄 단위 층은 창이 든 줄을 뺀다(#45131 과 같은 규칙).
+  - 「도착」 층은 매번 싣는다. 그 턴에 온 것이라 이력에 같은 글이 쌓이지 않는다.
+  - 예외는 `Pending_mentions` 다. 답할 때까지 같은 mention 을 매 턴 다시 그린다. User 자리로 옮기기 전에 줄 단위로 바꾸고, 창이 든 줄을 뺀다.
+- 「창이 든 것」은 창 안 User 메시지가 실은 구획과 줄의 sha 다. 공식 클라이언트의 `held_context`(구획·줄 sha, `Keeper_official_client_session_store`)와 같은 모양이다.
+  - 창이 옮겨져 그 메시지가 빠지면 다음 턴에 다시 싣는다.
+  - 저장 자리는 접두사 RFC 의 `Keeper_model_input_ledger` 와 맞춘다.
+- `Active_goals` 는 바깥 글이다. System 꼬리에서 빼 「바뀔 때」 규칙으로 User 자리에 싣는다. 그러면 Goal 사건이 System 을 바꾸지 않는다.
+- `Goals_awaiting_proof` 는 호스트 상태지만 System 꼬리에 있다. 턴 문맥으로 옮길지 같이 정한다.
+- `Scope_messages` 는 그리는 곳이 없다. 죽은 층이라 지운다.
 
 ### 3.5 같은 규범 목록을 두 번 싣지 않는다
 
@@ -284,6 +366,10 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 - 지금은 최근 10개를 매 턴 다시 싣는다. ack 커서와 무관한 상시 보기다.
 - §3.4 로 User 자리에 옮기면 「한 번 도착」이어야 한다. 그러면 오래 쉰 Keeper 가 쌓인 방송을 한 번에 받는다.
 - 둘 중 무엇을 고를지는 L5 설계에서 같이 정한다.
+- 제안: 「바뀔 때」 분류는 그대로 두고 줄 단위로 바꾼다. 방송 하나가 줄 하나다.
+  - 창이 든 줄은 빼므로 새 방송만 실린다.
+  - 보기 한도 10줄도 그대로다. 오래 쉰 Keeper 도 가장 새 10개까지만 받는다. 지금 매 턴 보는 범위와 같다.
+  - ack 커서는 쓰지 않는다. 받은 범위를 바꾸는 결정이라 이 RFC 밖이다.
 
 ### 4.3 상주 도구 설명의 크기
 
@@ -300,6 +386,7 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 | 공식 클라이언트가 held 블록 넷을 다시 보낸다 | 넷은 이번 턴에 도착한 것이다 |
 | Connected surfaces 필터와 출력이 다르다 | 필터는 절을 낼지만 정한다. 시험이 출력을 고정한다 |
 | 승인별 Gate 판정이 접두사를 못 나눈다 | 원인은 키 정렬이다. Gate 가 always_allow 라 판정 호출이 0번이다 |
+| Anthropic 레인이 지난 턴 문맥을 이력에 쌓는다 | `clear_at` 계약 모델에서는 API 가 입력에서 뺀다. 운영 runtime 선언에 나오는 Claude 모델 이름 60번이 모두 그 다섯 모델이다(11-20). 계약이 없는 claude-fable-5·claude-sonnet-5 를 묶으면 쌓인다 |
 
 ## 6. 운영자가 정한 것 (2026-11-20)
 
@@ -317,16 +404,16 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 | L0 | 이 RFC | |
 | L1 | §3.5 규범 목록 한 번 (#53753) | |
 | L2 | §3.1 catalog 계약 (#53759), 모델 행의 1시간 값 (#53779), 가격 계산 (#53780), binding `cache-retention` 선언 (#53760) | D1 |
-| L3 | §3.2 캐시 결과 투영과 TUI | D1 |
+| L3 | §3.2 요청이 고른 유지 시간 기록(L3a), provider 기본 유지 시간 선언(L3b), 캐시 결과 투영과 TUI(L3c) | D1 |
 | L4 | §3.3 Anthropic 도구 불러오기 | D2, 운영자 실제 호출 확인 |
-| L5 | §3.4 역할 나눔과 층별 도착 방식 | D3, 층별 표 리뷰 |
+| L5 | §3.4 역할 나눔과 층별 도착 방식, `Scope_messages` 지움 | D3, §3.4 층별 표 리뷰 |
 | L6 | §4.1 회상 본문 창 머리 | 접두사 RFC 쪽 재검토 |
 
 ## 8. 검증
 
 - L1: 격리된 기록이 있는 원장에서 지금 조항으로 그린 System 에는 `<norms_current>` 가 없다. 변경분이 있는 System, native 이어가기, 다른 바이트로 덮어쓴 System 에는 현재 조항 전체가 있다.
 - L2: 설정 파서가 `"5m"`·`"1h"` 만 받는다. catalog 계약이 없는 provider 와 다른 wire 의 선언은 불러올 때 거절한다. 1시간 binding 으로 돈 턴은 응답의 `cache_creation.ephemeral_1h_input_tokens` 가 0 보다 크고, 비용 행의 캐시 쓰기 몫이 2배 값이다. 5~60분 쉰 뒤 첫 요청이 앞부분을 읽는다.
-- L3: 이 RFC §1.3 의 표를 투영으로 다시 낸다. 같은 기록이면 같은 표가 나온다.
+- L3: 이 RFC §1.3 의 표를 투영으로 다시 낸다. 같은 기록이면 같은 표가 나온다. 비용 행의 `cache_write_lifetime` 이 그 요청 binding 의 선언과 같다. 선언을 바꾼 앞뒤 턴은 각자의 값으로 센다.
 - L4: 운영자가 실제 호출로 본다. 불러오기 직후 요청이 앞 요청의 입력을 캐시에서 읽는다.
 - L5: 층마다 실린 역할을 요청 캡처로 센다. 이력에 같은 글이 두 번 쌓이지 않는다.
 - L6 전: 레인별 안쪽 요청 크기에 머리를 더한 분포, 창을 연 때의 집합과 k 턴 뒤 집합의 겹침을 잰다. 둘을 넣은 계산이 이득을 보일 때만 코드로 간다.

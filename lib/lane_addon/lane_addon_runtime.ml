@@ -14,6 +14,9 @@ exception Fleet_commit_uncertain of string
 exception Fleet_commit_pending of string
 exception Worker_detached
 exception Host_cycle_stopped
+(* Raised by [page] below when a request arrives after this pass's first page
+   was answered; [pass] catches it and restarts its listing once. *)
+exception Arrival_midwalk
 exception Action_persistence_failed of string
 type tool_export = Lane_addon_tool_export.t = private
   { owner : Lane_addon_tool_export.owner; instance_id : string; tool : Mcp_protocol.Mcp_types.tool }
@@ -1464,11 +1467,26 @@ let run_host_cycle m e (port : host_port) =
        the listing starts no request twice; an empty page ends it. *)
     let read ~after =
       check_live ();
-      port.list_requests ~after |> Result.map_error (fun detail -> Listing_failed detail) in
+      let answer = port.list_requests ~after in
+      Result.map_error (fun detail -> Listing_failed detail) answer in
     let refused result = Result.map_error (fun detail -> Listing_refused detail) result in
+    let restarted = ref false in
     let rec page ~after =
       let* answer = read ~after in
       let* requests = Lane_addon_host_request.page_of_json ~after answer |> refused in
+      (match after, requests with
+        | Some _, _ :: _ when not !restarted ->
+            (* A request no page of this walk could have paired with the first
+               page's originals just arrived: every later page lists ids above
+               the first page's last id, so it was not pending when the first
+               page was answered. Starting it from a later page ends the pass
+               before any page lists it beside them. The walk keeps this
+               non-propagating exception, lets the started requests end, and
+               hands it back; this pass then re-lists once from a fresh first
+               page, which lists it beside them before it is started. *)
+            restarted := true;
+            raise Arrival_midwalk
+        | _ -> ());
       Ok (match requests with
         | [] -> Lane_addon_host_walk.Done
         | first :: rest ->
@@ -1485,10 +1503,14 @@ let run_host_cycle m e (port : host_port) =
             | first :: rest -> Lane_addon_host_walk.Page (first, rest, fun () -> Ok Lane_addon_host_walk.Done)) in
     let delivered_before = Hashtbl.length delivered in
     (* The pass keeps the count it started with (RFC 3.2). *)
-    match Lane_addon_host_walk.walk ~max_in_flight:e.max_exact_in_flight
-        ~propagates:(function Host_cycle_stopped -> true | _ -> false) ~step listing with
-    | Some issue -> Error issue
-    | None -> if Hashtbl.length delivered > delivered_before then pass () else Ok () in
+    let walked =
+      try `Walked (Lane_addon_host_walk.walk ~max_in_flight:e.max_exact_in_flight
+            ~propagates:(function Host_cycle_stopped -> true | _ -> false) ~step listing)
+      with Arrival_midwalk -> `Restarted in
+    match walked with
+    | `Restarted -> pass ()
+    | `Walked (Some issue) -> Error issue
+    | `Walked None -> if Hashtbl.length delivered > delivered_before then pass () else Ok () in
   let outcome = try pass () with Host_cycle_stopped -> Ok () in
   let in_order = List.sort (fun (left, _) (right, _) -> Int.compare left right) !ends |> List.map snd in
   let waiting = List.filter_map (function

@@ -1,5 +1,4 @@
-(** [tool_execute], read from [config/tools/tool_execute.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+(** [tool_execute], read from [config/tools/tool_execute.toml].
 
     Decoded once at module initialization. A missing file or a declaration that
     does not decode refuses the boot rather than advertising a partial execute

@@ -1,6 +1,5 @@
 (** [masc_status], [masc_check] and [masc_heartbeat], read from
-    [config/tools/masc_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/masc_*.toml].
 
     Decoded once at module initialization; a missing or undecodable file
     refuses the boot rather than advertising a partial workspace surface.

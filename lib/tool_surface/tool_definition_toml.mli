@@ -1,6 +1,6 @@
 (** Tool_definition_toml — parse one [config/tools/<name>.toml] declaration
     into the [Masc_domain.tool_schema] that MCP clients and keeper surfaces
-    publish (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+    publish.
 
     Decoding is fail-closed: every key and every enumerated value is matched
     against a closed vocabulary, and anything unknown is an [Error] the
@@ -14,7 +14,7 @@
     migrated out of an OCaml literal can therefore be proven byte-identical
     to the literal it replaced by comparing [Yojson.Safe.to_string] output.
 
-    Definitions are read once at boot; there is no hot reload (RFC §6). *)
+    Definitions are read once at boot; there is no hot reload. *)
 
 type help =
   { short_description : string option
@@ -39,9 +39,7 @@ type help =
     Declared per tool, not per source. A tool is not deferrable because of
     where it came from — an attached service, a skill, a built-in descriptor —
     but because this particular tool is rarely enough reached for its schema to
-    be worth the bytes it costs on every request of the turn. Grouping by
-    source is what {b RFC-0389} did and what PR #31728 removed: eight of nine
-    Keepers declared every group, so the axis bought nothing. *)
+    be worth the bytes it costs on every request of the turn. *)
 type loading =
   | Always_loaded
       (** The schema rides in every request. This is the default: a tool that
@@ -172,9 +170,7 @@ val load
     emitted JSON. TOML admits [[params.params]] and [params.items] only
     after every scalar key of their parent, so [items] cannot be written
     before [description]. Object key order is not part of a JSON object's
-    meaning (RFC 8259 §4), and the acceptance criterion in RFC
-    prompts-and-tool-definitions-outside-ocaml §4 compares schemas with
-    keys sorted for exactly this reason. *)
+    meaning (RFC 8259 §4). *)
 
 val validate_embedded
   :  read:(string -> string option)

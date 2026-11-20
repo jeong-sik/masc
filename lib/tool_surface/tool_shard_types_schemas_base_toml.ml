@@ -1,5 +1,4 @@
-(** The base keeper tools, read from [config/tools/keeper_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The base keeper tools, read from [config/tools/keeper_*.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
@@ -9,7 +8,7 @@
     keeper_memory_search advertises the source vocabulary [Keeper_tool_memory_runtime]
     owns; in TOML that is a literal, because nothing there reads an OCaml
     value. The owner stays the owner and [test_enum_mirror_sync] compares the
-    advertised array against it, which is what RFC §2.2 asks for. *)
+    advertised array against it. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

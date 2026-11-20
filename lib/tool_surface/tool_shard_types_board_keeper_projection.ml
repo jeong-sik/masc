@@ -3,8 +3,7 @@
     Public Board names and schemas are owned by [Board_tool_registry]. This
     module carries only the deliberately narrower Keeper-model input shape,
     read from the [keeper_projection] tables of the binary-embedded
-    [config/tools/masc_board_*.toml] declarations (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2); it is not part of the
+    [config/tools/masc_board_*.toml] declarations; it is not part of the
     public or global schema aggregate. A missing file, a missing table, or a
     declaration that does not decode refuses the boot. *)
 

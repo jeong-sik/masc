@@ -1,4 +1,4 @@
-;; RFC-0056 Phase 2 / LANE 6 — Tool surface leaf extracted from the flat masc
+;; Tool surface leaf, kept out of the flat masc
 ;; mega-library. These are the pure tool-surface modules (schema / vocabulary /
 ;; policy / shard-type) with ZERO mega-outbound: they reference only the already
 ;; -extracted Tool spine (masc_tool_dispatch / tool_types / tool_catalog_surfaces),

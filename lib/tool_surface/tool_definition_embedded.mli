@@ -4,8 +4,7 @@
     The [config/tools/<name>.toml] files are crunched into the binary as
     {!Embedded_config} entries. Every module that publishes a tool schema
     reads its definitions through here, so the entry path and the wording of
-    a boot failure live in one place (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    a boot failure live in one place.
 
     {!Tool_definition_toml} stays source agnostic: it decodes bytes and never
     reads the tree itself. *)

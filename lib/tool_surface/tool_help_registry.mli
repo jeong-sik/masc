@@ -32,9 +32,9 @@ type help_entry = {
   alternatives : string list;
       (** RFC-0195 P0 — typed list of sibling tool names the LLM
           may try when this one rejects or is unavailable. Empty
-          list means "terminal — this is the only path". RFC-0194
-          §2 instantiation: every LLM-blocking gate names an
-          alternative via descriptor metadata, not per-error prose. *)
+          list means "terminal — this is the only path". The
+          alternatives are named here, in descriptor metadata, not
+          in per-error prose. *)
 }
 
 (** {1 Lookup} *)

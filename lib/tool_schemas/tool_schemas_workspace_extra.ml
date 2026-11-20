@@ -1,6 +1,5 @@
 (** MCP tool schemas for shared Goal planning and lifecycle operations, read
-    from the binary-embedded [config/tools/masc_goal_*.toml] declarations (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+    from the binary-embedded [config/tools/masc_goal_*.toml] declarations.
 
     One file declares one tool; [schema_of_name] decodes it through
     [Tool_definition_toml] once at module initialization. A missing file or a

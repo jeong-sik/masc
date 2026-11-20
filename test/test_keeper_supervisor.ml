@@ -485,7 +485,7 @@ let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
    [Keeper_meta_contract.runtime_id_of_meta], which falls back to
    [Runtime.get_default_runtime_id ()] for keepers without an explicit
    [[runtime.assignments]] entry.  That fallback fail-fasts until
-   [Runtime.init_default] has run (RFC-0206 §2.1, no silent fallback).
+   [Runtime.init_default] has run (no silent fallback).
    In a booted server [init_default] runs at startup
    (server_runtime_bootstrap.ml); a bare [dune exec] test binary must
    stand the default runtime up itself.  Mirrors the established pattern in

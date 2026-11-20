@@ -2951,10 +2951,10 @@ let () =
      = None)
 ;;
 
-(* RFC-0454 D1 (P1b): a fenced provider attempt names what failed it as a
-   value. The 2026-09-15 incident nested a MASC error inside a MASC error;
-   written as a string that put a JSON document inside a JSON string, and
-   every wrap added a layer of backslashes. *)
+(* A fenced provider attempt names what failed it as a value. The 2026-09-15
+   incident nested a MASC error inside a MASC error; written as a string that
+   put a JSON document inside a JSON string, and every wrap added a layer of
+   backslashes. *)
 let () =
   let module D = Keeper_terminal_effect_detail in
   let core_of message =

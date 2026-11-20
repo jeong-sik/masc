@@ -3937,7 +3937,8 @@ let handled_resource_id id =
   | Who_markdown | Who_json | Messages_markdown | Messages_json
   | Events_markdown | Events_json
   | Wiki_index_markdown | Wiki_index_json | Wiki_page_markdown _ | Wiki_page_json _
-  | World_memory_claims | World_memory_log ->
+  | World_memory_claims | World_memory_log
+  | Keeper_memory _ | Keeper_memory_health _ ->
       true
   | Unknown _ -> false
 
@@ -4123,6 +4124,282 @@ Alpha body
         (String_util.contains_substring (resource_text_exn response) expected_text))
     cases;
   cleanup_dir base_path
+
+let test_handle_request_keeper_memory_access_and_readership () =
+  let module Memory_types = Masc.Keeper_memory_os_types in
+  let module Memory_current = Masc.Keeper_memory_os_current in
+  let module Resource = Masc.Mcp_server_eio_resource in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let was_ready = Eio_guard.is_ready () in
+  Eio_guard.enable ();
+  reset_board_test_globals ();
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      reset_board_test_globals ();
+      if not was_ready then Eio_guard.disable ();
+      cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.For_testing.create_state ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      let every_name_declared =
+        Masc_board_handlers.Recipient_lookup.make (fun candidate ->
+          Ok
+            (Result.to_option
+               (Masc.Board.Agent_id.parse
+                  (Masc_board_handlers.Recipient_lookup.Candidate.to_string candidate))))
+      in
+      (match
+         Masc.Board_dispatch.init_jsonl ~base_path ~recipient_lookup:every_name_declared ()
+       with
+       | Ok () -> ()
+       | Error _ -> Alcotest.fail "Board_dispatch.init_jsonl failed");
+      let pub_post =
+        match
+          Masc.Board_dispatch.create_post ~author:"beta" ~content:"Public milestone"
+            ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Public ()
+        with
+        | Ok p -> p
+        | Error e -> Alcotest.fail (Masc.Board.Post_publication_failure.to_string e)
+      in
+      let priv_post =
+        match
+          Masc.Board_dispatch.create_post ~author:"beta" ~content:"Secret plan for @beta"
+            ~post_kind:Masc.Board.Human_post ~visibility:Masc.Board.Direct ()
+        with
+        | Ok p -> p
+        | Error e -> Alcotest.fail (Masc.Board.Post_publication_failure.to_string e)
+      in
+      let pub_ref =
+        match
+          Memory_types.board_ref_of_ids
+            ~post_id:(Masc.Board.Post_id.to_string pub_post.id)
+            ~comment_id:None
+        with
+        | Ok r -> r
+        | Error err -> Alcotest.fail (Memory_types.wire_error_to_string err)
+      in
+      let priv_ref =
+        match
+          Memory_types.board_ref_of_ids
+            ~post_id:(Masc.Board.Post_id.to_string priv_post.id)
+            ~comment_id:None
+        with
+        | Ok r -> r
+        | Error err -> Alcotest.fail (Memory_types.wire_error_to_string err)
+      in
+      Masc_test_deps.declare_fixture_keeper
+        ~sandbox_image:"base"
+        ~base_path
+        ~sandbox_profile:(Some Masc.Keeper_types_profile.Docker)
+        "alpha";
+      (match Masc.Keeper_meta_store.replace_snapshot config (make_keeper_meta "alpha") with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("replace_snapshot failed: " ^ err));
+      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+      let now = 1_700_000_000.0 in
+      let origin = { Memory_types.kind = Memory_types.Injected; trace_id = "trace-alpha" } in
+      let transcript_fact =
+        Memory_types.observed ~claim:"Alpha uses OCaml 5" ~category:Memory_types.Fact ~now ~origin
+      in
+      let public_board_fact =
+        { (Memory_types.observed ~claim:"Beta posted public milestone" ~category:Memory_types.Fact
+             ~now ~origin)
+          with
+          basis = Memory_types.Observed (Memory_types.Board pub_ref)
+        }
+      in
+      let direct_board_fact =
+        { (Memory_types.observed ~claim:"Beta secret plan" ~category:Memory_types.Fact ~now
+             ~origin)
+          with
+          basis = Memory_types.Observed (Memory_types.Board priv_ref)
+        }
+      in
+      let derived_on_direct =
+        match
+          Memory_types.derived ~claim:"Derived from Beta secret" ~category:Memory_types.Lesson
+            ~now ~origin
+            ~derivations:
+              [ { Memory_types.rule_id = "rule-secret"
+                ; premise_ids = [ Memory_types.memory_id direct_board_fact ]
+                }
+              ]
+        with
+        | Ok f -> f
+        | Error err -> Alcotest.fail err
+      in
+      let derived_on_transcript =
+        match
+          Memory_types.derived ~claim:"Derived from OCaml transcript" ~category:Memory_types.Lesson
+            ~now ~origin
+            ~derivations:
+              [ { Memory_types.rule_id = "rule-transcript"
+                ; premise_ids = [ Memory_types.memory_id transcript_fact ]
+                }
+              ]
+        with
+        | Ok f -> f
+        | Error err -> Alcotest.fail err
+      in
+      let snap =
+        match
+          Memory_current.replace ~keepers_dir ~keeper_id:"alpha" ~expected_revision:None ~now
+            ~source:{ kind = Memory_current.Librarian; trace_id = "trace-alpha" }
+            ~facts:
+              [ transcript_fact
+              ; public_board_fact
+              ; direct_board_fact
+              ; derived_on_direct
+              ; derived_on_transcript
+              ]
+            ()
+        with
+        | Ok s -> s
+        | Error err -> Alcotest.fail ("Memory_current.replace failed: " ^ err)
+      in
+      (* 1. Default omitted caller on handle_read_resource_eio fails closed (-32001). *)
+      let read_direct ?caller id_num uri =
+        Resource.handle_read_resource_eio ?caller state (`Int id_num)
+          (Some (`Assoc [ ("uri", `String uri) ]))
+      in
+      Alcotest.(check int) "default caller refused on keeper/memory" (-32001)
+        (error_code_exn (read_direct 1 "masc://keepers/alpha/memory"));
+      Alcotest.(check int) "default caller refused on keeper/memory/health" (-32001)
+        (error_code_exn (read_direct 2 "masc://keepers/alpha/memory/health"));
+      (* 2. Auth-off Unadmitted request resolves to Operator_admin and reads all 5 facts. *)
+      let read_via_protocol ~sender ?auth_token uri =
+        let req =
+          Yojson.Safe.to_string
+            (`Assoc
+              [ ("jsonrpc", `String "2.0")
+              ; ("id", `Int 10)
+              ; ("method", `String "resources/read")
+              ; ("params", `Assoc [ ("uri", `String uri) ])
+              ])
+        in
+        Mcp_eio.handle_request ~sender ?auth_token ~clock ~sw state req
+      in
+      let auth_off_json =
+        Yojson.Safe.from_string
+          (resource_text_exn
+             (read_via_protocol ~sender:Mcp_eio.Unadmitted "masc://keepers/alpha/memory"))
+      in
+      Alcotest.(check int) "auth-off sees 0 withheld facts" 0
+        Yojson.Safe.Util.(auth_off_json |> member "withheld_fact_count" |> to_int);
+      Alcotest.(check int) "auth-off sees all 5 facts" 5
+        Yojson.Safe.Util.
+          (auth_off_json |> member "ordinary" |> member "facts" |> to_list |> List.length);
+      (* 3. Enable auth and test Admin, other Worker, and matching Keeper. *)
+      ignore (Auth.enable_auth base_path ~require_token:true ~agent_name:"bootstrap-admin");
+      let mk_token agent_name role =
+        match Auth.create_token base_path ~agent_name ~role with
+        | Ok (tok, _) -> tok
+        | Error err -> Alcotest.fail (Masc_domain.masc_error_to_string err)
+      in
+      let admit raw =
+        let auth_cfg = Auth.load_auth_config base_path in
+        match
+          Auth.admit_request base_path ~auth_cfg ~token:(Some raw) ~internal_keeper_agent:None
+        with
+        | Ok principal -> Mcp_eio.Admitted principal
+        | Error _ -> Alcotest.fail "Auth.admit_request failed"
+      in
+      let admin_tok = mk_token "op-admin" Masc_domain.Admin in
+      let alpha_tok = mk_token "alpha" Masc_domain.Worker in
+      let beta_tok = mk_token "beta" Masc_domain.Worker in
+      let admin_json =
+        Yojson.Safe.from_string
+          (resource_text_exn
+             (read_via_protocol ~sender:(admit admin_tok) ~auth_token:admin_tok
+                "masc://keepers/alpha/memory"))
+      in
+      Alcotest.(check int) "admin sees 0 withheld" 0
+        Yojson.Safe.Util.(admin_json |> member "withheld_fact_count" |> to_int);
+      Alcotest.(check int) "admin sees all 5 facts" 5
+        Yojson.Safe.Util.(admin_json |> member "ordinary" |> member "facts" |> to_list |> List.length);
+      let beta_resp =
+        read_via_protocol ~sender:(admit beta_tok) ~auth_token:beta_tok
+          "masc://keepers/alpha/memory"
+      in
+      Alcotest.(check int) "non-matching worker gets Insufficient_scope (-32007)" (-32007)
+        (error_code_exn beta_resp);
+      let anon_resp =
+        read_via_protocol ~sender:Mcp_eio.Unadmitted "masc://keepers/alpha/memory"
+      in
+      Alcotest.(check int) "unadmitted gets Auth_error (-32001)" (-32001)
+        (error_code_exn anon_resp);
+      let alpha_json =
+        Yojson.Safe.from_string
+          (resource_text_exn
+             (read_via_protocol ~sender:(admit alpha_tok) ~auth_token:alpha_tok
+                "masc://keepers/alpha/memory"))
+      in
+      Alcotest.(check int) "matching keeper withholds direct + derived (2)" 2
+        Yojson.Safe.Util.(alpha_json |> member "withheld_fact_count" |> to_int);
+      let alpha_facts =
+        Yojson.Safe.Util.(alpha_json |> member "ordinary" |> member "facts" |> to_list)
+      in
+      Alcotest.(check int) "matching keeper keeps 3 readable facts" 3 (List.length alpha_facts);
+      let alpha_claims =
+        List.map (fun f -> Yojson.Safe.Util.(f |> member "claim" |> to_string)) alpha_facts
+      in
+      Alcotest.(check bool) "withheld direct claim absent" false
+        (List.mem "Beta secret plan" alpha_claims);
+      Alcotest.(check bool) "withheld derived claim absent" false
+        (List.mem "Derived from Beta secret" alpha_claims);
+      Alcotest.(check bool) "readable derived claim kept" true
+        (List.mem "Derived from OCaml transcript" alpha_claims);
+      let change_json = Yojson.Safe.Util.(alpha_json |> member "ordinary" |> member "change") in
+      let added_len = Yojson.Safe.Util.(change_json |> member "added" |> to_list |> List.length) in
+      let retained_n = Yojson.Safe.Util.(change_json |> member "retained" |> to_int) in
+      Alcotest.(check int) "change.added scrubbed to 3 readable facts" 3 added_len;
+      Alcotest.(check int) "change retained + added = facts" 3 (retained_n + added_len);
+      (* 4. For_testing delta scrub: removed/invalidated withhold unreadable Board and ungrounded Derived. *)
+      let dirty_snap : Memory_current.t =
+        { snap with
+          change =
+            { snap.change with
+              removed = [ direct_board_fact; derived_on_direct; transcript_fact ]
+            ; invalidated =
+                [ { fact = direct_board_fact; missing_premise_ids = [] }
+                ; { fact = derived_on_direct
+                  ; missing_premise_ids = [ Memory_types.memory_id direct_board_fact ]
+                  }
+                ]
+            }
+        }
+      in
+      let filtered_dirty, dirty_withheld =
+        Resource.For_testing.filter_ordinary_snapshot_for_reader ~base_path
+          ~reader:(Masc_board_handlers.Board_access.named "alpha") dirty_snap
+      in
+      Alcotest.(check int) "dirty snap withheld 2 facts" 2 dirty_withheld;
+      Alcotest.(check int) "removed keeps only readable transcript fact" 1
+        (List.length filtered_dirty.change.removed);
+      Alcotest.(check int) "invalidated drops withheld direct and derived" 0
+        (List.length filtered_dirty.change.invalidated);
+      (* 5. Memory health returns closed G16 tokens/counts and no free-text detail/rejection/rejected_path. *)
+      let health_json =
+        Yojson.Safe.from_string
+          (resource_text_exn
+             (read_via_protocol ~sender:(admit beta_tok) ~auth_token:beta_tok
+                "masc://keepers/alpha/memory/health"))
+      in
+      Alcotest.(check string) "health schema" "keeper.memory.health.v1"
+        Yojson.Safe.Util.(health_json |> member "schema" |> to_string);
+      Alcotest.(check string) "health ordinary status" "readable"
+        Yojson.Safe.Util.(health_json |> member "ordinary" |> member "status" |> to_string);
+      let health_text = Yojson.Safe.to_string health_json in
+      Alcotest.(check bool) "no detail field on health" false
+        (String_util.contains_substring health_text "\"detail\"");
+      Alcotest.(check bool) "no rejection field on health" false
+        (String_util.contains_substring health_text "\"rejection\"");
+      Alcotest.(check bool) "no rejected_path field on health" false
+        (String_util.contains_substring health_text "\"rejected_path\""))
 
 let test_handle_request_resources_subscribe_requires_session () =
   Eio_main.run @@ fun env ->
@@ -4330,6 +4607,8 @@ let eio_tests = [
     test_listed_resource_uris_have_readers;
   "handle resources/read tool-help", `Quick, test_handle_request_tool_help_resource_read;
   "handle resources/read matrix", `Quick, test_handle_request_resources_read_matrix;
+  "handle resources/read keeper memory readership and health", `Quick,
+    test_handle_request_keeper_memory_access_and_readership;
   "handle resources/templates/list rejects invalid cursor", `Quick,
     test_handle_request_resources_templates_rejects_invalid_cursor;
   "handle resources/subscribe requires session", `Quick,

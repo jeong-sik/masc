@@ -44,6 +44,14 @@ let run_blocking_resource_result f =
       Error (Mcp_error_code.Internal_error, Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message err)))
 ;;
 
+type resource_caller =
+  | Operator_admin
+  | Authenticated_reader of
+      { agent_name : string
+      ; board_reader : Masc_board_handlers.Board_access.reader
+      }
+  | Anonymous_reader
+
 type resource_target =
   | Tool_help_index
   | Tool_help of string
@@ -63,6 +71,8 @@ type resource_target =
   | Wiki_page_json of string
   | World_memory_claims
   | World_memory_log
+  | Keeper_memory of string
+  | Keeper_memory_health of string
   | Unknown of string
 
 let world_memory_claims_uri = "masc://world-memory/claims"
@@ -97,7 +107,13 @@ let parse_resource_target resource_id =
       Wiki_page_markdown rest
   | "world-memory/claims" -> World_memory_claims
   | "world-memory/log" -> World_memory_log
-  | _ -> Unknown resource_id
+  | s ->
+    (match String.split_on_char '/' s with
+     | [ "keepers"; raw_keeper; "memory" ] when raw_keeper <> "" ->
+       Keeper_memory (Uri.pct_decode raw_keeper)
+     | [ "keepers"; raw_keeper; "memory"; "health" ] when raw_keeper <> "" ->
+       Keeper_memory_health (Uri.pct_decode raw_keeper)
+     | _ -> Unknown resource_id)
 ;;
 
 let session_resource_notifier : (uri:string -> unit) option Atomic.t = Atomic.make None
@@ -123,6 +139,17 @@ let notify_resource_updated uris =
 
 let notify_world_memory_updated () =
   notify_resource_updated [ world_memory_claims_uri; world_memory_log_uri ]
+;;
+
+let validate_keeper_name keeper =
+  if String.equal (String.trim keeper) ""
+     || String.contains keeper '/'
+     || String.contains keeper '\\'
+     || String.contains keeper '\000'
+     || String.equal keeper "."
+     || String.equal keeper ".."
+  then Error (Mcp_error_code.Invalid_params, Printf.sprintf "Invalid keeper name: %S" keeper)
+  else Ok ()
 ;;
 
 let briefing_to_json = function
@@ -284,9 +311,340 @@ let read_world_memory_log_json ~since_seq ~limit ~base_path =
         ])
 ;;
 
+let keeper_exists_hint ~base_path ~keepers_dir ~keeper ~ordinary ~source_bound =
+  Option.is_some (Config_dir_resolver.keeper_toml_path_opt_for_base_path ~base_path keeper)
+  || (match ordinary with
+      | Keeper_memory_os_current.No_snapshot -> false
+      | Readable _ | Undecodable _ | Io_unreadable _ -> true)
+  || (match source_bound with
+      | Ok None -> false
+      | Ok (Some _) | Error _ -> true)
+  || Sys.file_exists (Keeper_memory_os_current.journal_path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
+  || Sys.file_exists (Keeper_memory_os_events.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper)
+;;
+
+(* Must run on an Eio fiber (not in [run_blocking_resource_io]), because
+   [Board_dispatch.read_post_for_evidence] acquires an [Eio.Mutex]. *)
+let filter_ordinary_snapshot_for_reader
+      ?base_path
+      ~(reader : Masc_board_handlers.Board_access.reader)
+      (snap : Keeper_memory_os_current.t)
+  : Keeper_memory_os_current.t * int
+  =
+  if Masc_board_handlers.Board_access.is_operator reader
+  then snap, 0
+  else (
+    let store_ready =
+      String.equal (Board_dispatch.backend_name ()) "jsonl"
+      &&
+      match base_path with
+      | None -> true
+      | Some bp ->
+        Result.is_ok (Board_dispatch.check_store_workspace ~base_path:bp (Board_dispatch.backend ()))
+    in
+    let board_cache : (string, bool) Hashtbl.t = Hashtbl.create 16 in
+    let can_read_post_id (pid : Board_types.Post_id.t) =
+      let key = Board_types.Post_id.to_string pid in
+      match Hashtbl.find_opt board_cache key with
+      | Some ok -> ok
+      | None ->
+        let ok =
+          store_ready
+          &&
+          match Board_dispatch.read_post_for_evidence ~reader ~post_id:key with
+          | Ok _ -> true
+          | Error _ -> false
+        in
+        Hashtbl.add board_cache key ok;
+        ok
+    in
+    let open Keeper_memory_os_types in
+    let fact_basis_directly_readable (fact : fact) =
+      match fact.basis with
+      | Observed Transcript -> true
+      | Observed (Board { post_id; comment_id = (_ : Board_types.Comment_id.t option) }) ->
+        can_read_post_id post_id
+      | Derived (_ : derivation list) -> true
+    in
+    let pass1_facts = List.filter fact_basis_directly_readable snap.facts in
+    let surviving_facts, _dropped_derived =
+      Keeper_memory_os_support_core.maintain_supported_facts pass1_facts
+    in
+    let surviving_ids =
+      List.fold_left
+        (fun acc fact -> Set_util.StringSet.add (memory_id fact) acc)
+        Set_util.StringSet.empty
+        surviving_facts
+    in
+    let added =
+      List.filter
+        (fun fact -> Set_util.StringSet.mem (memory_id fact) surviving_ids)
+        snap.change.added
+    in
+    let fact_history_readable (fact : fact) =
+      match fact.basis with
+      | Observed Transcript -> true
+      | Observed (Board { post_id; comment_id = (_ : Board_types.Comment_id.t option) }) ->
+        can_read_post_id post_id
+      | Derived derivations ->
+        Keeper_memory_os_support_core.derivations_supported surviving_ids derivations
+    in
+    let removed = List.filter fact_history_readable snap.change.removed in
+    let invalidated =
+      List.filter
+        (fun (inv : Keeper_memory_os_current.support_invalidation) ->
+           match inv.fact.basis with
+           | Observed Transcript -> true
+           | Observed (Board { post_id; comment_id = (_ : Board_types.Comment_id.t option) }) ->
+             can_read_post_id post_id
+           | Derived (_ : derivation list) -> false)
+        snap.change.invalidated
+    in
+    let retained = max 0 (List.length surviving_facts - List.length added) in
+    let change : Keeper_memory_os_current.change =
+      { added; removed; retained; invalidated }
+    in
+    let withheld_count = List.length snap.facts - List.length surviving_facts in
+    { snap with facts = surviving_facts; change }, withheld_count)
+;;
+
+let read_keeper_memory_inputs_blocking ~config ~caller ~keeper =
+  let base_path = config.Workspace.base_path in
+  let reader_res =
+    match caller with
+    | Operator_admin -> Ok Masc_board_handlers.Board_access.Operator
+    | Anonymous_reader ->
+      Error (Mcp_error_code.Auth_error, "Keeper memory resource requires authentication")
+    | Authenticated_reader { agent_name; board_reader } ->
+      if not (String.equal agent_name keeper)
+      then
+        Error
+          ( Mcp_error_code.Insufficient_scope
+          , "Keeper memory resource requires admin permission or matching keeper identity" )
+      else (
+        match Keeper_meta_store.read_effective_meta_presence config keeper with
+        | Ok (Keeper_meta_store.Meta_present meta) ->
+          (match board_reader with
+           | Masc_board_handlers.Board_access.Anonymous ->
+             Ok Masc_board_handlers.Board_access.Anonymous
+           | Masc_board_handlers.Board_access.Named _
+           | Masc_board_handlers.Board_access.Operator ->
+             Ok (Keeper_board_audience.reader_for_keeper meta))
+        | Ok (Keeper_meta_store.Meta_absent | Keeper_meta_store.Meta_not_current _) | Error _ ->
+          Error (Mcp_error_code.Insufficient_scope, "Keeper readership metadata unavailable"))
+  in
+  match reader_res with
+  | Error _ as err -> err
+  | Ok reader ->
+    let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+    let ordinary = Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper in
+    let source_bound =
+      Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper
+    in
+    if not (keeper_exists_hint ~base_path ~keepers_dir ~keeper ~ordinary ~source_bound)
+    then Ok None
+    else (
+      match ordinary with
+      | Keeper_memory_os_current.Undecodable { rejection } ->
+        Error (Mcp_error_code.Internal_error, "keeper ordinary memory undecodable: " ^ rejection)
+      | Keeper_memory_os_current.Io_unreadable { detail } ->
+        Error (Mcp_error_code.Internal_error, "keeper ordinary memory unreadable: " ^ detail)
+      | (No_snapshot | Readable _) as ordinary_ok ->
+        (match source_bound with
+         | Error detail ->
+           Error (Mcp_error_code.Internal_error, "keeper source memory unreadable: " ^ detail)
+         | Ok source_opt -> Ok (Some (reader, ordinary_ok, source_opt))))
+;;
+
+let read_keeper_memory_json ~config ~caller ~keeper =
+  match validate_keeper_name keeper with
+  | Error err -> Error err
+  | Ok () ->
+    (match caller with
+     | Anonymous_reader ->
+       Error (Mcp_error_code.Auth_error, "Keeper memory resource requires authentication")
+     | Authenticated_reader { agent_name; board_reader = _ }
+       when not (String.equal agent_name keeper) ->
+       Error
+         ( Mcp_error_code.Insufficient_scope
+         , "Keeper memory resource requires admin permission or matching keeper identity" )
+     | Operator_admin | Authenticated_reader _ ->
+       (match
+          run_blocking_resource_result (fun () ->
+            read_keeper_memory_inputs_blocking ~config ~caller ~keeper)
+        with
+        | Error err -> Error err
+        | Ok None -> Ok None
+        | Ok (Some (reader, ordinary_ok, source_opt)) ->
+          let ordinary_json, withheld_fact_count =
+            match ordinary_ok with
+            | Keeper_memory_os_current.Readable snap ->
+              let filtered, withheld =
+                filter_ordinary_snapshot_for_reader ~base_path:config.base_path ~reader snap
+              in
+              Keeper_memory_os_current.to_json filtered, withheld
+            | Keeper_memory_os_current.No_snapshot
+            | Keeper_memory_os_current.Undecodable _
+            | Keeper_memory_os_current.Io_unreadable _ -> `Null, 0
+          in
+          let source_json =
+            match source_opt with
+            | None -> `Null
+            | Some snap -> Keeper_memory_source_current.to_json snap
+          in
+          Ok
+            (Some
+               (`Assoc
+                  [ "keeper", `String keeper
+                  ; "ordinary", ordinary_json
+                  ; "source_bound", source_json
+                  ; "withheld_fact_count", `Int withheld_fact_count
+                  ]))))
+;;
+
+(* RFC §12.1 G16: health surface carries only closed status/outcome/kind tokens,
+   counts, revisions, timestamps, and hashes — no free-text claims, details,
+   rejections, or file paths. *)
+let journal_entry_summary = function
+  | Keeper_memory_os_current.Journal_committed { recorded_at; revision; source; change; _ } ->
+    `Assoc
+      [ "outcome", `String "committed"
+      ; "recorded_at", `Float recorded_at
+      ; "revision", `Int revision
+      ; "source_kind", `String (Keeper_memory_os_current.source_kind_to_string source.kind)
+      ; "added_count", `Int (List.length change.added)
+      ; "removed_count", `Int (List.length change.removed)
+      ; "retained_count", `Int change.retained
+      ; "invalidated_count", `Int (List.length change.invalidated)
+      ]
+  | Keeper_memory_os_current.Journal_failed { recorded_at; kind; snapshot_present; _ } ->
+    `Assoc
+      [ "outcome", `String "failed"
+      ; "recorded_at", `Float recorded_at
+      ; "kind", `String (Keeper_memory_os_current.librarian_failure_kind_to_string kind)
+      ; "snapshot_present", `Bool snapshot_present
+      ]
+  | Keeper_memory_os_current.Journal_quarantined { recorded_at; _ } ->
+    `Assoc
+      [ "outcome", `String "quarantined"
+      ; "recorded_at", `Float recorded_at
+      ]
+;;
+
+let read_keeper_memory_health_json ~base_path ~caller ~keeper =
+  match validate_keeper_name keeper with
+  | Error err -> Error err
+  | Ok () ->
+    (match caller with
+     | Anonymous_reader ->
+       Error (Mcp_error_code.Auth_error, "Keeper memory health resource requires authentication")
+     | Operator_admin | Authenticated_reader _ ->
+       run_blocking_resource_result (fun () ->
+         let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+         let ordinary = Keeper_memory_os_current.read_classified ~keepers_dir ~keeper_id:keeper in
+         let source_bound =
+           Keeper_memory_source_current.read_for_keepers_dir ~keepers_dir ~keeper_id:keeper
+         in
+         if not (keeper_exists_hint ~base_path ~keepers_dir ~keeper ~ordinary ~source_bound)
+         then Ok None
+         else
+           let ordinary_json =
+             match ordinary with
+             | Keeper_memory_os_current.No_snapshot ->
+               `Assoc [ "status", `String "missing" ]
+             | Keeper_memory_os_current.Readable snap ->
+               let path =
+                 Keeper_memory_os_current.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper
+               in
+               let bytes_opt = Fs_compat.file_size path in
+               `Assoc
+                 ([ "status", `String "readable"
+                  ; "revision", `Int snap.revision
+                  ; "updated_at", `Float snap.updated_at
+                  ; "fact_count", `Int (List.length snap.facts)
+                  ; "invalidated_count", `Int (List.length snap.change.invalidated)
+                  ; "snapshot_sha256", `String (Keeper_memory_os_current.snapshot_sha256 snap)
+                  ]
+                  @
+                  match bytes_opt with
+                  | Some n -> [ "snapshot_bytes", `Int n ]
+                  | None -> [])
+             | Keeper_memory_os_current.Undecodable _ ->
+               `Assoc [ "status", `String "undecodable" ]
+             | Keeper_memory_os_current.Io_unreadable _ ->
+               `Assoc [ "status", `String "io_unreadable" ]
+           in
+           let source_bound_json =
+             match source_bound with
+             | Ok None -> `Assoc [ "status", `String "missing" ]
+             | Ok (Some snap) ->
+               `Assoc
+                 [ "status", `String "readable"
+                 ; "revision", `Int snap.revision
+                 ; "updated_at", `Float snap.updated_at
+                 ; "fact_count", `Int (List.length snap.facts)
+                 ; "invalidation_count", `Int (List.length snap.invalidations)
+                 ]
+             | Error _ -> `Assoc [ "status", `String "unreadable" ]
+           in
+           let events_json =
+             match Keeper_memory_os_events.read ~keepers_dir ~keeper_id:keeper with
+             | Error _ -> `Assoc [ "status", `String "unreadable" ]
+             | Ok rows ->
+               let valid_count, error_count =
+                 List.fold_left
+                   (fun (ok_n, err_n) (_, item) ->
+                      match item with
+                      | Ok _ -> ok_n + 1, err_n
+                      | Error _ -> ok_n, err_n + 1)
+                   (0, 0)
+                   rows
+               in
+               `Assoc
+                 [ "status", `String "readable"
+                 ; "event_count", `Int valid_count
+                 ; "undecodable_count", `Int error_count
+                 ]
+           in
+           let journal_json =
+             match
+               Keeper_memory_os_current.read_journal_tail ~keepers_dir ~keeper_id:keeper ~limit:20
+             with
+             | Error _ -> `Assoc [ "status", `String "unreadable" ]
+             | Ok rows ->
+               let entries, undecodable_count =
+                 List.fold_left
+                   (fun (acc, bad) item ->
+                      match item with
+                      | Ok entry -> journal_entry_summary entry :: acc, bad
+                      | Error _ -> acc, bad + 1)
+                   ([], 0)
+                   rows
+               in
+               `Assoc
+                 [ "status", `String "readable"
+                 ; "undecodable_count", `Int undecodable_count
+                 ; "recent_entries", `List (List.rev entries)
+                 ]
+           in
+           Ok
+             (Some
+                (`Assoc
+                   [ "schema", `String "keeper.memory.health.v1"
+                   ; "keeper", `String keeper
+                   ; "ordinary", ordinary_json
+                   ; "source_bound", source_bound_json
+                   ; "events", events_json
+                   ; "journal", journal_json
+                   ]))))
+;;
+
 module For_testing = struct
   let blocking_io_execution_context () =
     run_blocking_resource_io Eio_guard.execution_context
+
+  let filter_ordinary_snapshot_for_reader ?base_path ~reader snap =
+    filter_ordinary_snapshot_for_reader ?base_path ~reader snap
 end
 
 (* A page's header sits at the top, so the listing reads only this many bytes
@@ -419,7 +777,7 @@ let wiki_resources ~base_path : Mcp_server.mcp_resource list =
     log @ pages)
 ;;
 
-let handle_read_resource_eio state id params =
+let handle_read_resource_eio ?(caller = Anonymous_reader) state id params =
   match params with
   | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some (`Assoc _ as p) ->
@@ -743,6 +1101,18 @@ let handle_read_resource_eio state id params =
                    read_world_memory_log_json ~since_seq ~limit ~base_path:config.base_path)
                with
                | Ok json -> Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+               | Error err -> Error err)
+          | Keeper_memory keeper ->
+              (match read_keeper_memory_json ~config ~caller ~keeper with
+               | Ok None -> Ok None
+               | Ok (Some json) ->
+                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
+               | Error err -> Error err)
+          | Keeper_memory_health keeper ->
+              (match read_keeper_memory_health_json ~base_path:config.base_path ~caller ~keeper with
+               | Ok None -> Ok None
+               | Ok (Some json) ->
+                 Ok (Some ("application/json", Yojson.Safe.pretty_to_string json))
                | Error err -> Error err)
           | Unknown _ -> Ok None
         in

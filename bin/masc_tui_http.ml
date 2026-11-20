@@ -2394,6 +2394,13 @@ let fetch_keeper_context_response ~host ~port ~keeper_name ~turn_ref =
           page.Masc_tui_keeper_chat_history.decoded.rows in
         Ok { Masc_tui_context_inspector.parts; source = Masc_tui_context_inspector.Newest_history_page })
 
+(* Why a turn's first request read or rewrote the cache. The suffix is the
+   server's route constant, so the two sides name one path. *)
+let cache_outcome_path ~encoded_keeper ~encoded_turn_ref =
+  Printf.sprintf "/api/v1/keepers/%s%s?turn_ref=%s" encoded_keeper
+    Server_dashboard_http_keeper_api_types.keeper_suffix_cache_outcome
+    encoded_turn_ref
+
 let observe_context_read read =
   try read () with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2424,14 +2431,15 @@ let fetch_keeper_context_inspector ~forecast ~previous ~tab
         | Error detail -> Inspector.Turn_read_failed { detail; forecast }
         | Ok selection -> Inspector.Turn_read
             { selection; forecast; provider_input = Inspector.Not_requested
-            ; response = Inspector.Not_requested }
+            ; response = Inspector.Not_requested; cache_outcome = Inspector.Not_requested }
   in
   let initial = Inspector.prepare_tab_read ~tab initial in
-  let turn, provider_input, response, forecast = match initial with
-    | Inspector.Turn_read { selection; provider_input; response; forecast } ->
-        Ok selection, ref provider_input, ref response, ref forecast
+  let turn, provider_input, response, forecast, cache_outcome = match initial with
+    | Inspector.Turn_read { selection; provider_input; response; forecast; cache_outcome } ->
+        Ok selection, ref provider_input, ref response, ref forecast, ref cache_outcome
     | Inspector.Turn_read_failed { detail; forecast } ->
-        Error detail, ref Inspector.Not_requested, ref Inspector.Not_requested, ref forecast
+        Error detail, ref Inspector.Not_requested, ref Inspector.Not_requested, ref forecast,
+        ref Inspector.Not_requested
     | Inspector.Request_failed _ | Inspector.Exact_read _ ->
         (* [initial] above has only the two recent variants. *)
         assert false in
@@ -2439,7 +2447,7 @@ let fetch_keeper_context_inspector ~forecast ~previous ~tab
     | Error detail -> Inspector.Turn_read_failed { detail; forecast = !forecast }
     | Ok selection -> Inspector.Turn_read
         { selection; provider_input = !provider_input
-        ; response = !response; forecast = !forecast }) in
+        ; response = !response; forecast = !forecast; cache_outcome = !cache_outcome }) in
   let selected_read read = match turn with
     | Error detail -> Error detail
     | Ok selection ->
@@ -2474,6 +2482,17 @@ let fetch_keeper_context_inspector ~forecast ~previous ~tab
               ~decode:Inspector.decode_forecast in
             forecast := Inspector.Observed result;
             emit ())
+    ; (fun () -> match !cache_outcome with
+        | Inspector.Not_requested | Inspector.Observed _ -> ()
+        | Inspector.Pending ->
+            let result = selected_read (fun turn_ref ->
+              fetch ~label:"cache-outcome"
+                ~path:(cache_outcome_path ~encoded_keeper:encoded
+                  ~encoded_turn_ref:(percent_encode_query_value (Ids.Turn_ref.to_string turn_ref)))
+                ~decode:(Inspector.decode_cache_outcome
+                  ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
+            cache_outcome := Inspector.Observed result;
+            emit ())
     ]
 
 (** Read a known immutable source without a recent-record dependency. Each
@@ -2486,7 +2505,8 @@ let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~pre
     | Some (Inspector.Exact_read _ | Inspector.Request_failed _
            | Inspector.Turn_read_failed _ | Inspector.Turn_read _) | None ->
         { Inspector.turn_ref; record = Inspector.Not_requested
-        ; provider_input = Inspector.Not_requested; response = Inspector.Not_requested } in
+        ; provider_input = Inspector.Not_requested; response = Inspector.Not_requested
+        ; cache_outcome = Inspector.Not_requested } in
   let current = ref (match Inspector.prepare_tab_read ~tab (Inspector.Exact_read initial) with
     | Inspector.Exact_read prepared -> prepared
     | Inspector.Request_failed _ | Inspector.Turn_read_failed _ | Inspector.Turn_read _ -> assert false) in
@@ -2542,6 +2562,15 @@ let fetch_keeper_exact_context_inspector ~host ~port ~keeper_name ~turn_ref ~pre
             ~decode:(Inspector.decode_exact_turn_transcript
               ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
         current := { !current with Inspector.response = Inspector.Observed result };
+        emit ())
+    ; (fun () -> match (!current).Inspector.cache_outcome with
+      | Inspector.Not_requested | Inspector.Observed _ -> ()
+      | Inspector.Pending ->
+        let result = observe_part "cache_outcome" (fun () ->
+          fetch_context_json ~host ~port ~label:"cache-outcome"
+            ~path:(cache_outcome_path ~encoded_keeper:encoded ~encoded_turn_ref:reference)
+            ~decode:(Inspector.decode_cache_outcome ~expected_keeper:keeper_name ~expected_turn_ref:turn_ref)) in
+        current := { !current with Inspector.cache_outcome = Inspector.Observed result };
         emit ())
     ]
 

@@ -400,7 +400,7 @@ let run ~env ~(person : Login.person) ~pat ~base_path ~body =
        takes the same call before it removes the key (RFC
        a-persons-api-key-is-their-own-provider-account 3.6). *)
     let* prepared_runtime_id, { model; text; conversation } =
-      Login.one_call_of
+      Runtime_account_call.one_call_of
         provider_account_id
         ~busy:(E.Account_call_running E.Runtime_account)
         (fun in_call ->

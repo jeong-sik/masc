@@ -6,7 +6,7 @@
     What a case expects is declared in the case as tokens, and a token is
     found in a claim as a substring.
 
-    Five numbers come out per slot:
+    Six numbers come out per slot:
 
     - how many answers were thrown away, by reason (an answer to another
       question is one of the reasons);
@@ -14,7 +14,9 @@
     - how many answers changed Memory at all. When "change nothing" is the
       safe answer, this number falls first;
     - how much of what the units said is in Memory afterwards;
-    - how much a merge kept of the facts it replaced. *)
+    - how much a merge kept of the facts it replaced;
+    - how much of what Memory has to go on saying it still says afterwards,
+      whether a drop, a merge or a revise removed the fact that said it. *)
 
 open Keeper_memory_os_types
 
@@ -34,6 +36,15 @@ type case =
   (** Memory id of a fact, and what a claim that replaces it by a merge has
       to keep. A fact a merge removes that is not listed here adds to neither
       merge count. *)
+  ; must_remain : string list
+  (** What Memory has to go on saying after the answer, as tokens looked for
+      as [planted] ones are. A token is kept when a claim of Memory after the
+      answer says it. Which op removed the fact that said it does not matter:
+      a drop, a merge and a revise lose it the same way, and a merge or a
+      revise that carries it into the new claim keeps it. A token is what the
+      fact states, not what it is about. A claim that nothing is known of the
+      Friday deploy policy still says ["Friday"], so that token would count a
+      fact the answer lost as kept. *)
   }
 
 (** What one answer that was read did. *)
@@ -46,6 +57,8 @@ type reading =
       it. An answer that changes nothing recovers nothing. *)
   ; merge_expected : int (** Tokens of the facts a merge removed. *)
   ; merge_kept : int
+  ; remain_expected : int (** Tokens of [must_remain]. *)
+  ; remain_kept : int (** Of those, the ones a claim of Memory says after the answer. *)
   }
 
 type scored =
@@ -65,6 +78,10 @@ type tally =
   ; recovered : int
   ; merge_expected : int
   ; merge_kept : int
+  ; remain_expected : int
+  (** Of the answers that were read. A thrown away answer left Memory as it
+      was, and is counted in [thrown_away] only. *)
+  ; remain_kept : int
   }
 
 (** Sum over the answers of one slot. Each answer comes with its case. *)

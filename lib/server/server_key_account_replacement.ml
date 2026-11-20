@@ -117,7 +117,7 @@ let replace ~(person : Login.person) ~base_path id key =
   (* Asked before the call is taken, so whether a call of another person's
      account runs is not told. *)
   let* (_ : Key_generation.t) = held person id in
-  Login.one_call_of id ~busy:Account_busy (fun (_ : Login.in_call) ->
+  Runtime_account_call.one_call_of id ~busy:Account_busy (fun (_ : Runtime_account_call.t) ->
     (* Read again inside the call, whoever holds it: the records of that
        time say whose the account is and which generation it holds. *)
     let* before = held person id in
@@ -154,7 +154,7 @@ let nothing_there = { Files.gone = 0; stayed = None }
    took the files. Files that came back after it are those of issue
    #53111. *)
 let remove_left_keys_of ~zone ~base_path id =
-  Login.one_call_of id ~busy:Call_running (fun (_ : Login.in_call) ->
+  Runtime_account_call.one_call_of id ~busy:Call_running (fun (_ : Runtime_account_call.t) ->
     match Authz_zone.read zone with
     | Error uncertain -> Error (Zone_not_trusted uncertain)
     | Ok trusted ->

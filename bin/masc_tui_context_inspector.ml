@@ -1330,12 +1330,15 @@ let client_context_tokens ~scope ~provenance ~input_tokens ~output_tokens =
 ;;
 
 let provider_usage_summary (usage : Turn_record.usage) =
-  let count = Option.fold ~none:"unreported" ~some:format_tokens usage.input_tokens in
+  (* A count the provider left out is the 6.4 unreported mark of RFC
+     tui-one-screen-grammar; the words around it say what kind of count. *)
+  let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
+  let count = Option.fold ~none:unreported ~some:format_tokens usage.input_tokens in
   match usage.scope, usage.input_provenance with
   | Runtime_usage_scope.Per_request, Some Turn_input_provenance.Context_estimate ->
       Printf.sprintf "Context estimate · %s tokens; not a dispatched request" count
   | Runtime_usage_scope.Per_request, None ->
-      Printf.sprintf "Input count · %s tokens; provenance unknown, request input not measured" count
+      Printf.sprintf "Input count · %s tokens; provenance not reported, request input not measured" count
   | Runtime_usage_scope.Per_request, Some Turn_input_provenance.Measured_request
   | (Runtime_usage_scope.Turn_total | Runtime_usage_scope.Conversation_cumulative
     | Runtime_usage_scope.Usage_scope_unavailable),
@@ -1345,11 +1348,11 @@ let provider_usage_summary (usage : Turn_record.usage) =
     | Runtime_usage_scope.Per_request -> "last reported request in this turn"
     | Runtime_usage_scope.Turn_total -> "client turn total"
     | Runtime_usage_scope.Conversation_cumulative -> "conversation cumulative"
-    | Runtime_usage_scope.Usage_scope_unavailable -> "scope unknown"
+    | Runtime_usage_scope.Usage_scope_unavailable -> "scope not reported"
   in
   let read =
     match usage.cache_read_input_tokens with
-    | None -> "cache read unreported"
+    | None -> "cache read " ^ unreported
     | Some n -> "cache read " ^ format_tokens n
   in
   let ratio =

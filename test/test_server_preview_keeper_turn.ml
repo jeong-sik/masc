@@ -1161,7 +1161,7 @@ let test_turn () =
               ~deleted:(Server_keeper_conversation_purge.deletion_began alice.person)
               ~draw:(fun () -> "conversation-elsewhere")
               ~now_ms:(fun () -> start_ms)
-              ~one_call_of:Login.one_call_of
+              ~one_call_of:Runtime_account_call.one_call_of
           with
           | Ok (conversation : Conversation.conversation) ->
             Conversation.Conversation_id.to_string conversation.conversation_id
@@ -1479,10 +1479,10 @@ let test_turn () =
             "current_conversation_id"
         in
         (match
-           Login.one_call_of
+           Runtime_account_call.one_call_of
              (get (Provider_account_id.of_string alice.account_id))
              ~busy:"the call of the test did not start"
-             (fun (_ : Login.in_call) -> Ok (renew alice (only_keeper "keeper-alice")))
+             (fun (_ : Runtime_account_call.t) -> Ok (renew alice (only_keeper "keeper-alice")))
          with
          | Ok answer ->
            check_reply
@@ -1719,10 +1719,10 @@ let test_turn () =
         (* A deletion waits for no call of the account: it is told the
            account is busy and writes nothing. *)
         (match
-           Login.one_call_of
+           Runtime_account_call.one_call_of
              (get (Provider_account_id.of_string bob.account_id))
              ~busy:"the call of the test did not start"
-             (fun (_ : Login.in_call) -> Ok (delete bob his_conversation))
+             (fun (_ : Runtime_account_call.t) -> Ok (delete bob his_conversation))
          with
          | Ok answer ->
            check_reply
@@ -1866,10 +1866,10 @@ let test_turn () =
         let resume () = Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path) in
         let asked_before = purged () in
         (match
-           Login.one_call_of
+           Runtime_account_call.one_call_of
              (get (Provider_account_id.of_string alice.account_id))
              ~busy:"the call of the test did not start"
-             (fun (_ : Login.in_call) -> Ok (resume ()))
+             (fun (_ : Runtime_account_call.t) -> Ok (resume ()))
          with
          | Ok () -> ()
          | Error busy -> Alcotest.fail busy);
@@ -1952,7 +1952,7 @@ let test_turn () =
         (* Another person names the account and is told it is not theirs,
            the answer of an account that is not there. *)
         (match
-           Login.one_call_of
+           Runtime_account_call.one_call_of
              dave_account
              ~busy:(Login.Refused (`Service_unavailable, "the call of the test did not start"))
              (fun in_call ->

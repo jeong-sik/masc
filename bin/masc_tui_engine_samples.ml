@@ -44,7 +44,7 @@ let point_of_reading = function
   | Failed _ -> blank
 
 type answer =
-  { at : float
+  { at : Masc_tui_wake.Mono.t
   ; reading : reading
   }
 
@@ -185,15 +185,16 @@ type own_answer =
 (* The samples of one opening of the view. Sample [k] is due at
    [origin + k * interval_s]. *)
 type session =
-  { origin : float
+  { origin : Masc_tui_wake.Mono.t
   ; next_slot : int
   ; ring : point Ring.t
   ; waiting : bool
         (** The due sample found no answer to take and waits for the next
             one. *)
-  ; seen_until : float
+  ; seen_until : Masc_tui_wake.Mono.t option
         (** Answers that arrived at or before this were taken, or were
-            passed over by a due sample. Neither is taken again. *)
+            passed over by a due sample. Neither is taken again. [None]
+            before the first. *)
   ; own : own_answer
   ; heap_scale : scale
   ; p95_scale : scale
@@ -211,7 +212,7 @@ let open_session ~now ~capacity =
   ; next_slot = 0
   ; ring = Ring.empty ~capacity
   ; waiting = false
-  ; seen_until = Float.neg_infinity
+  ; seen_until = None
   ; own = Own_unanswered
   ; heap_scale = Unscaled
   ; p95_scale = Unscaled
@@ -229,12 +230,20 @@ let hidden t =
   | None -> t
   | Some _ -> { t with session = None }
 
-let slot_time session slot = session.origin +. (Float.of_int slot *. interval_s)
+let slot_time session slot = Masc_tui_wake.Mono.after session.origin (Float.of_int slot *. interval_s)
 
 (* The newest sample due at [now]. *)
 let current_slot session ~now =
-  if now <= session.origin then 0
-  else Float.to_int (Float.floor ((now -. session.origin) /. interval_s))
+  let elapsed = Masc_tui_wake.Mono.seconds_since now ~since:session.origin in
+  if elapsed <= 0. then 0 else Float.to_int (Float.floor (elapsed /. interval_s))
+
+(* [answer] is new to the samples and arrived within {!interval_s} before
+   sample [slot]'s time. *)
+let can_take session ~slot answer =
+  (match session.seen_until with
+   | None -> true
+   | Some seen -> Masc_tui_wake.Mono.compare answer.at seen > 0)
+  && Masc_tui_wake.Mono.seconds_since (slot_time session slot) ~since:answer.at < interval_s
 
 (* [point] fills sample [slot]; the samples between the last one taken and
    it passed with nothing taken, and are blank. A gap longer than the ring
@@ -267,24 +276,23 @@ let tick ?(allow_read = true) t ~now ~newest =
        another answer here instead would draw the graphs once for it and
        once more when that answer is applied. *)
     if session.waiting then (t, Nothing)
-    else if not (Masc_tui_wake.reached Masc_tui_wake.Engine_sample ~now
+    else if not (Masc_tui_wake.reached_mono Masc_tui_wake.Engine_sample ~now
                    ~at:(slot_time session session.next_slot)) then (t, Nothing)
     else
       let slot = current_slot session ~now in
       match newest with
-      | Some answer
-        when answer.at > session.seen_until && answer.at > slot_time session slot -. interval_s ->
+      | Some answer when can_take session ~slot answer ->
         ( { t with
             session =
-              Some (take session ~slot ~seen_until:answer.at (point_of_reading answer.reading))
+              Some (take session ~slot ~seen_until:(Some answer.at) (point_of_reading answer.reading))
           }
         , Sampled )
       | (Some _ | None) when not allow_read && not t.read_out ->
-        ({ t with session = Some (take session ~slot ~seen_until:now blank) }, Sampled)
+        ({ t with session = Some (take session ~slot ~seen_until:(Some now) blank) }, Sampled)
       | Some _ | None ->
         (* Every answer up to now was considered for this sample and is too
            old; the read this asks for, or one already out, answers it. *)
-        let session = { session with waiting = true; seen_until = now } in
+        let session = { session with waiting = true; seen_until = Some now } in
         if t.read_out then ({ t with session = Some session }, Nothing)
         else ({ session = Some session; read_out = true }, Read)
 
@@ -309,7 +317,7 @@ let answered t ~now reading =
     in
     if session.waiting then
       let slot = Stdlib.max session.next_slot (current_slot session ~now) in
-      let session = take session ~slot ~seen_until:now (point_of_reading reading) in
+      let session = take session ~slot ~seen_until:(Some now) (point_of_reading reading) in
       ({ t with session = Some { session with own } }, Sampled, report)
     else ({ t with session = Some { session with own } }, Nothing, report)
 

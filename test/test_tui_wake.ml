@@ -281,12 +281,17 @@ let test_owed_read_retry_is_noted () =
 
 let test_refresh_retry_is_noted () =
   let module Pace = Masc_tui_refresh_pace in
-  let failing = Pace.probe_failed ~retry_s:2. ~max_retry_s:30. ~now:10. ~wall_now:5000. Pace.answering in
+  let now = Wake.Mono.now () in
+  let failing = Pace.probe_failed ~retry_s:2. ~max_retry_s:30. ~now ~wall_now:5000. Pace.answering in
   let retry_at = match failing with
     | Pace.Failing { retry_at; _ } -> retry_at
     | Pace.Answering | Pace.Recovered _ -> fail "a failed probe is not failing" in
-  check_noted_in "refresh" Wake.Refresh_retry ~remaining_s:(retry_at -. 10.5)
-    (fun () -> Pace.due ~now:10.5 failing);
+  check int64 "the retry is the wait after the failure"
+    (Int64.add (now :> int64) (seconds 2)) (retry_at :> int64);
+  Wake.Pass.begin_pass ();
+  check bool "refresh: not yet" false (Pace.due ~now:(Wake.Mono.after now 0.5) failing);
+  check (option (pair int int64)) "refresh: its retry is noted"
+    (Some (reason_number Refresh_retry, (retry_at :> int64))) (noted ());
   Wake.Pass.begin_pass ();
   check bool "due at its retry" true (Pace.due ~now:retry_at failing);
   check_nothing_noted "refresh at its retry"
@@ -308,26 +313,42 @@ let test_engine_sample_is_noted () =
   let module Samples = Masc_tui_engine_samples in
   let point = Samples.Answered
       { Samples.live_heap = Masc_tui_braille.of_count 1; scheduler_p95 = Masc_tui_braille.of_count 1 } in
-  let opened = Samples.shown Samples.stopped ~now:0. ~capacity:8 in
-  let opened, _ = Samples.tick opened ~now:0. ~newest:(Some { Samples.at = -0.5; reading = point }) in
-  let newest = Some { Samples.at = 1.5; reading = point } in
-  check_noted_in "engine sample" Wake.Engine_sample ~remaining_s:0.1
-    (fun () -> match Samples.tick opened ~now:1.9 ~newest with
-       | _, Samples.Nothing -> false
-       | _, (Samples.Sampled | Samples.Read) -> true)
+  let now = Wake.Mono.now () in
+  let opened = Samples.shown Samples.stopped ~now ~capacity:8 in
+  let opened, _ = Samples.tick opened ~now ~newest:(Some { Samples.at = now; reading = point }) in
+  let newest = Some { Samples.at = Wake.Mono.after now 1.5; reading = point } in
+  Wake.Pass.begin_pass ();
+  check bool "engine sample: not yet" false
+    (match Samples.tick opened ~now:(Wake.Mono.after now 1.9) ~newest with
+     | _, Samples.Nothing -> false
+     | _, (Samples.Sampled | Samples.Read) -> true);
+  check (option (pair int int64)) "engine sample: its slot is noted"
+    (Some (reason_number Engine_sample, Int64.add (now :> int64) (seconds 2))) (noted ());
+  Wake.Pass.begin_pass ();
+  check bool "engine sample: due at its slot" true
+    (match Samples.tick opened ~now:(Wake.Mono.after now 2.) ~newest with
+     | _, Samples.Nothing -> false
+     | _, (Samples.Sampled | Samples.Read) -> true)
 
 let test_play_room_read_is_noted () =
   let module Room = Masc_tui_play_room in
   let machine = Masc.Machine_lane.Dos in
-  let room, read = Room.poll (Room.active (Room.create ()) true) ~now:0. ~machine in
+  let now = Wake.Mono.now () in
+  let room, read = Room.poll (Room.active (Room.create ()) true) ~now ~machine in
   let read = match read with Some read -> read | None -> fail "an open room reads" in
-  let failed = Room.receive room read ~now:0. (Error "connection lost") in
-  check_noted_in "play room" Wake.Play_room_read ~remaining_s:1.
-    (fun () -> Option.is_some (snd (Room.poll failed ~now:1. ~machine)));
-  let answered = Room.receive room read ~now:0. (Ok { Masc.Play_room.messages = []; members = []; has_more = false }) in
+  let failed = Room.receive room read ~now (Error "connection lost") in
+  Wake.Pass.begin_pass ();
+  check bool "play room: not yet" false
+    (Option.is_some (snd (Room.poll failed ~now:(Wake.Mono.after now 1.) ~machine)));
+  check (option (pair int int64)) "play room: its retry is noted"
+    (Some (reason_number Play_room_read, Int64.add (now :> int64) (seconds 2))) (noted ());
+  Wake.Pass.begin_pass ();
+  check bool "play room: due at its retry" true
+    (Option.is_some (snd (Room.poll failed ~now:(Wake.Mono.after now 2.) ~machine)));
+  let answered = Room.receive room read ~now (Ok { Masc.Play_room.messages = []; members = []; has_more = false }) in
   Wake.Pass.begin_pass ();
   check bool "an answered room waits for a change" true
-    (Option.is_none (snd (Room.poll answered ~now:100. ~machine)));
+    (Option.is_none (snd (Room.poll answered ~now:(Wake.Mono.after now 100.) ~machine)));
   check_nothing_noted "a room with no next read"
 
 (* The terminal read *)

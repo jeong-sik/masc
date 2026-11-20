@@ -4855,8 +4855,8 @@ let test_invalid_surface_post_input_stays_correction_capable () =
 
 (* Memory calls share a provider batch with another tool through the real
    handlers and the batch planner. A claim commits, a retraction of a fact the
-   snapshot does not hold is refused before the store, and a store that cannot
-   take the next write and retraction leaves their commit unknown. Every
+   snapshot does not hold is refused before the store, and a store that
+   stopped refuses the next write and retraction before either commits. Every
    failure comes back to the model naming what committed, and none of them
    ends the turn. *)
 let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed () =
@@ -4975,8 +4975,10 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
          | Ok None -> fail "the claim persisted no snapshot"
          | Error detail -> fail detail
        in
-       (* A directory where the snapshot file belongs rejects the write and the
-          retraction, whatever user the test runs as. *)
+       (* A directory where the snapshot file belongs stops the Keeper's store,
+          whatever user the test runs as: the writer reads the snapshot before
+          it appends, so the write that finds the directory commits nothing,
+          and the stopped store takes no retraction either. *)
        let snapshot_path =
          Masc.Keeper_memory_os_current.path_for_keepers_dir
            ~keepers_dir
@@ -4986,23 +4988,23 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        Unix.mkdir snapshot_path 0o755;
        let second =
          run_batch
-           "store failure batch"
-           [ ( "write-unknown"
+           "stopped store batch"
+           [ ( "write-stopped"
              , "keeper_memory_write"
              , `Assoc [ "content", `String "a claim the store cannot take" ] )
-           ; ( "retract-unknown"
+           ; ( "retract-stopped"
              , "keeper_memory_retract"
              , `Assoc
                  [ "memory_id", `String kept_id
-                 ; "reason", `String "the store is not answering"
+                 ; "reason", `String "the store is stopped"
                  ] )
            ; lane_status "lane-second"
            ]
        in
-       failed_naming Tool_result.Effect_outcome_unknown "the write the store failed"
-         (second "write-unknown");
-       failed_naming Tool_result.Effect_outcome_unknown "the retraction the store failed"
-         (second "retract-unknown");
+       failed_naming Tool_result.Proven_pre_effect "the write the stopped store refused"
+         (second "write-stopped");
+       failed_naming Tool_result.Proven_pre_effect "the retraction the stopped store refused"
+         (second "retract-stopped");
        succeeded "lane status beside failed memory calls" (second "lane-second"))
 ;;
 

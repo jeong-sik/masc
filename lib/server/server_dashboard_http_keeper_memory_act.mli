@@ -35,6 +35,10 @@ val parse : string -> (action, string) result
 type store =
   | Open
   | Booting
+      (** A boot of the store is running after the action: another resume's,
+          or the first boot of a new writer when the Keeper left the registry
+          and was registered again. It reads what the action left, the line
+          an adoption appended included, so the action is not sent again. *)
   | Stopped of Librarian_store.stop
   | No_writer  (** The Keeper left the Keeper registry meanwhile. *)
 

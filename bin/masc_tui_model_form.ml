@@ -93,7 +93,7 @@ let rows ?(input_locked=false) ~width ~height t =
   in
   let field_rows = List.mapi (fun i field ->
     Printf.sprintf "%s %s %s" (if i = t.selected then "›" else " ") (pad_label (label field))
-      (value t field ^ (if i = t.selected then "_" else "")
+      (value t field ^ (if i = t.selected && not input_locked then "_" else "")
        ^ (if field=Context then (match t.context_choice with Preset _ -> " [preset]" | Custom -> " [custom]") else ""))) fields in
   let hint = if input_locked then "Input retained · Esc back · Ctrl-X closes recovery after receipt" else
     (if focused t=Context then "←/→ 272k/500k/750k/1M/custom · " else "")

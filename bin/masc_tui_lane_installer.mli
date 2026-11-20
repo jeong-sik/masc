@@ -28,5 +28,8 @@ val receive_preview : request_id:int -> path:string -> (Yojson.Safe.t,string) re
 
 type read = Read_catalog of string option | Read_preview of string
 val pending_read : t -> read option
+val text_entry_open : t -> bool
+(** Whether the installer is currently focused on a text-entry form rather
+    than browsing the package catalog or waiting on a pending read. *)
 val suspend_read : t -> t
 (** Restore the editing or browsing state preceding a retired read. *)

@@ -56,6 +56,9 @@ let pending_read = function
   | Pending (_,path,_) -> Some (Read_preview path)
   | Catalog_pending (_,directory,_,_) -> Some (Read_catalog directory)
   | Path _ | Binding _ | Catalog _ | Directory _ -> None
+let text_entry_open = function
+  | Path _ | Binding _ | Directory _ -> true
+  | Catalog _ | Pending _ | Catalog_pending _ -> false
 let suspend_read = function
   | Pending (_,_,previous) -> previous
   | Catalog_pending (_,_,browser,None) -> Catalog browser

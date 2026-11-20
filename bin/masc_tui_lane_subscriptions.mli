@@ -13,4 +13,5 @@ val add : t -> t
 val remove : t -> t
 val back : t -> t option
 val enter : keepers:string list -> targets:target list -> t -> t * request option
+val is_confirming_save : t -> bool
 val lines : t -> string list

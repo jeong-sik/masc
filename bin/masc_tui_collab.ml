@@ -66,6 +66,14 @@ let settled t mutation = match t.pending with
 let text_input_active t = match t.form with
   | Name _ | Hours _ -> true
   | Browsing | Confirm_revoke _ | Confirm_resolution _ -> false
+let progress_status t =
+  if Option.is_some t.pending then `Pending_write
+  else match t.write_access with
+    | Pending detail -> `Write_access_pending detail
+    | Writable | Uncertain _ | Read_only _ ->
+        (match t.read, t.inventory with
+         | Some _, _ | None, Fetched.Loading -> `Loading
+         | None, (Fetched.Absent | Fetched.Ready _ | Fetched.Stale _ | Fetched.Failed _) -> `Idle)
 let paste t text = match t.form with
   | Name value -> {t with form = Name (value ^ text)}
   | Hours (name, value) -> {t with form = Hours (name, value ^ text)}
@@ -101,19 +109,19 @@ let edit value key = match key with
 let key t key =
   match t.form, key with
   | (Name _ | Hours _ | Confirm_revoke _ | Confirm_resolution _), ("esc" | "cancel") -> {t with form = Browsing; message = None}, Stay
-  | Confirm_resolution request_id, ("\r" | "enter") -> {t with form = Browsing}, Resolve_unknown request_id
+  | Confirm_resolution request_id, ("\r" | "\n" | "enter") -> {t with form = Browsing}, Resolve_unknown request_id
   | Confirm_resolution _, _ -> t, Stay
-  | Name name, ("\r" | "enter") ->
+  | Name name, ("\r" | "\n" | "enter") ->
       (match Masc.Play_invite.Name.of_string name with
        | Error reason -> {t with message = Some reason}, Stay
        | Ok name -> {t with form = Hours (Masc.Play_invite.Name.to_string name, "24"); message = None}, Stay)
-  | Hours (name, value), ("\r" | "enter") ->
+  | Hours (name, value), ("\r" | "\n" | "enter") ->
       (match int_of_string_opt value with
        | Some hours when hours >= Masc_domain.min_token_expiry_hours && hours <= Masc_domain.max_token_expiry_hours ->
            let t, mutation = busy t in t, Issue (mutation, name, hours)
        | Some _ | None -> {t with message = Some (Printf.sprintf "Hours must be between %d and %d"
            Masc_domain.min_token_expiry_hours Masc_domain.max_token_expiry_hours)}, Stay)
-  | Confirm_revoke name, ("\r" | "enter") ->
+  | Confirm_revoke name, ("\r" | "\n" | "enter") ->
       let t, mutation = busy t in t, Revoke (mutation, name)
   | Name name, key -> {t with form = Name (edit name key)}, Stay
   | Hours (name, value), key -> {t with form = Hours (name, edit value key)}, Stay
@@ -139,7 +147,7 @@ let key t key =
       (match selected t with
        | None -> t, Stay
        | Some row -> {t with form = Confirm_revoke row.pi_name; message = None}, Stay)
-  | Browsing, ("\r" | "enter") ->
+  | Browsing, ("\r" | "\n" | "enter") ->
       (match selected t with None -> t, Stay | Some row -> t, Open_link row.pi_name)
   | Browsing, _ -> t, Stay
 

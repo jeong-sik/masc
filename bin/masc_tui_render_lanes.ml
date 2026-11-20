@@ -2521,18 +2521,34 @@ let render_clients (state : state) =
 ;;
 
 let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~path ~hints styled_lines =
+    ?progress_sheet ?now ~surface_key ~path ~hints styled_lines =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let total_height = max 1 (rows - Masc_tui_frame.chrome_rows) in
+  let ko = state.ui_language = Lang_ko in
+  let now = match now with Some now -> now | None -> Unix.gettimeofday () in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:total_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let height = max 1 (total_height - List.length sheet_lines) in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length styled_lines) ~height
       state.lane_run_detail_scroll
   in
   let window = Rows.of_list ~first:scroll ~height styled_lines in
   let buf = Buffer.create 4096 in
+  let readings =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ]
+  in
   box_top buf cols;
   box_line buf cols
-    (here_row ~cols state ~path ~readings:[]
+    (here_row ~cols state ~path ~readings
        ~position:
          (Masc_tui_value.Position.window ~first:scroll ~shown:height
             ~total:(List.length styled_lines)));
@@ -2542,6 +2558,7 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
     | None -> box_empty buf cols
     | Some (style, line) -> box_line_styled buf cols ~style line
   done;
+  List.iter (box_line buf cols) sheet_lines;
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ~hints);
@@ -2550,10 +2567,10 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
     ~surface_key ~rows:terminal_rows ~cols buf
 
 let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~path ~hints lines =
+    ?progress_sheet ?now ~surface_key ~path ~hints lines =
   let max_cells = max 1 (framed_inner_width cols - 2) in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
-    ~surface_key ~path ~hints (Page_reading.rows ~max_cells lines)
+    ?progress_sheet ?now ~surface_key ~path ~hints (Page_reading.rows ~max_cells lines)
 
 (* The same words as the key that opens the reading ([Space] in the list). *)
 let lane_activity_step state = ui_text state ~ko:"켜고 끄기" ~en:"activity"
@@ -2639,37 +2656,140 @@ let render_lane_inventory_detail (state : state) target =
 
 let render_machine_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let phase = Masc_tui_machine_activity.phase_status session in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"machine-activity" ~now
+      (match phase with
+       | `Idle -> None
+       | `Reading -> Some "reading"
+       | `Writing -> Some "writing")
+  in
+  let progress_sheet =
+    match phase with
+    | `Idle -> None
+    | `Reading ->
+        Some
+          { ps_title = ui_text state ~ko:"머신 설정 읽는 중" ~en:"Reading machine configuration"
+          ; ps_detail = Some (ui_text state ~ko:"현재 파일과 서버 활동 상태를 조회하고 있습니다"
+                                ~en:"Reading current file and server activity")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로" ~en:"Esc:back")
+          ; ps_blocking = true
+          }
+    | `Writing ->
+        Some
+          { ps_title = ui_text state ~ko:"머신 활동 저장 중" ~en:"Saving machine activity"
+          ; ps_detail = Some (ui_text state ~ko:"설정 검증과 저장 영수증을 기다리고 있습니다"
+                                ~en:"Waiting for configuration validation and write receipt")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로 (저장은 계속됨)" ~en:"Esc:back (save continues)")
+          ; ps_blocking = true
+          }
+  in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let hints =
+    match phase with
+    | `Idle -> Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language
+    | `Reading ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"설정 읽는 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Reading configuration  j/k:scroll  Esc:back"
+    | `Writing ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"저장 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Saving activity  j/k:scroll  Esc:back"
+  in
   render_lane_scrollable_reading state ~terminal_rows ~cols
+    ?progress_sheet ~now
     ~surface_key:"machine-activity"
     ~path:[ Masc.Machine_lane.to_wire (Masc_tui_machine_activity.owner session).machine
           ; lane_activity_step state ]
-    ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
-    (Masc_tui_machine_activity.lines ~ko:(state.ui_language = Lang_ko) session)
+    ~hints
+    (Masc_tui_machine_activity.lines ~ko session)
 
 let render_exact_activity (state : state) session =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
+  let phase = Masc_tui_exact_activity.phase_status session in
+  let lane_id = Standalone_lane.to_id (Masc_tui_exact_activity.owner session).lane in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"exact-activity" ~now
+      (match phase with
+       | `Idle -> None
+       | `Reading -> Some ("reading:" ^ lane_id)
+       | `Writing -> Some ("writing:" ^ lane_id))
+  in
+  let progress_sheet =
+    match phase with
+    | `Idle -> None
+    | `Reading ->
+        Some
+          { ps_title = ui_text state ~ko:"정확 출력 설정 읽는 중" ~en:"Reading exact lane configuration"
+          ; ps_detail = Some (ui_text state ~ko:"현재 runtime.toml 선언을 조회하고 있습니다"
+                                ~en:"Reading current runtime.toml declaration")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로" ~en:"Esc:back")
+          ; ps_blocking = true
+          }
+    | `Writing ->
+        Some
+          { ps_title = ui_text state ~ko:"정확 출력 활동 저장 중" ~en:"Saving exact lane activity"
+          ; ps_detail = Some (ui_text state ~ko:"설정 검증과 저장 영수증을 기다리고 있습니다"
+                                ~en:"Waiting for configuration validation and write receipt")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:뒤로 (저장은 계속됨)" ~en:"Esc:back (save continues)")
+          ; ps_blocking = true
+          }
+  in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let hints =
+    match phase with
+    | `Idle -> Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language
+    | `Reading ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"설정 읽는 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Reading configuration  j/k:scroll  Esc:back"
+    | `Writing ->
+        under_way ^ " "
+        ^ ui_text state ~ko:"저장 중  j/k:스크롤  Esc:뒤로"
+            ~en:"Saving activity  j/k:scroll  Esc:back"
+  in
   render_lane_scrollable_reading state ~terminal_rows ~cols
+    ?progress_sheet ~now
     ~surface_key:"exact-activity"
-    ~path:[ Standalone_lane.to_id (Masc_tui_exact_activity.owner session).lane
+    ~path:[ lane_id
           ; lane_activity_step state ]
-    ~hints:(Masc_tui_keys.footer_hints_lane_activity ~lang:state.ui_language)
-    (Masc_tui_exact_activity.lines ~ko:(state.ui_language = Lang_ko) session)
+    ~hints
+    (Masc_tui_exact_activity.lines ~ko session)
 
 let render_lanes (state : state) =
   match Masc_tui_types.shown_machine_activity state with
-  | Some session -> render_machine_activity state session
-  | None -> match Masc_tui_types.shown_exact_activity state with
-  | Some session -> render_exact_activity state session
-  (* The slot editor covers the overview or the inventory detail it was
-     opened from; [lanes_mode] keeps naming that screen for its Esc. *)
-  | None -> match state.slot_editor with
-  | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
-    render_exact_lane_provider_editor state editor
-  | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
-  match state.lanes_mode with
-  | Lanes_overview -> render_lanes_overview state
-  | Lanes_inventory_detail target -> render_lane_inventory_detail state target
-  | Lanes_run_list lane -> render_lane_run_list state ~lane
-  | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
-  | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
+  | Some session ->
+      Masc_tui_types.clear_progress_clock state ~slot:"exact-activity";
+      render_machine_activity state session
+  | None ->
+      Masc_tui_types.clear_progress_clock state ~slot:"machine-activity";
+      match Masc_tui_types.shown_exact_activity state with
+      | Some session -> render_exact_activity state session
+      | None ->
+          Masc_tui_types.clear_progress_clock state ~slot:"exact-activity";
+          (* The slot editor covers the overview or the inventory detail it was
+             opened from; [lanes_mode] keeps naming that screen for its Esc. *)
+          match state.slot_editor with
+          | Some ({ Masc_tui_types.se_target = Masc_tui_types.Exact_lane_slots _; _ } as editor) ->
+            render_exact_lane_provider_editor state editor
+          | None | Some { Masc_tui_types.se_target = Masc_tui_types.Media_failover_slots; _ } ->
+          match state.lanes_mode with
+          | Lanes_overview -> render_lanes_overview state
+          | Lanes_inventory_detail target -> render_lane_inventory_detail state target
+          | Lanes_run_list lane -> render_lane_run_list state ~lane
+          | Lanes_run_detail (_, run_id) -> render_lane_run_detail state ~run_id
+          | Lanes_measurement_detail sha256 -> render_lane_run_detail state ~run_id:sha256
 

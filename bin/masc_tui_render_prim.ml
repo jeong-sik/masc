@@ -2185,13 +2185,6 @@ type progress_sheet = {
   ps_blocking : bool;
 }
 
-let progress_started_at_of_ns ~now ~now_ns started_ns =
-  let elapsed_s =
-    Int64.to_float (Int64.max 0L (Int64.sub now_ns started_ns))
-    /. Masc_tui_types.nanoseconds_per_second
-  in
-  now -. elapsed_s
-
 let progress_inline ~ko ~now ?started_at ?detail label =
   let sanitize = Terminal_text.single_line in
   let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in

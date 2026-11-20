@@ -248,6 +248,26 @@ let test_rows_are_drawn_at_any_size () =
     [ []; entries long ]
 ;;
 
+let test_select_all_toggles_every_keeper () =
+  let form = opened probe in
+  let all_selected = edited form [ "a" ] in
+  Alcotest.(check (list string))
+    "a selects every keeper"
+    [ "a"; "b"; "c" ]
+    (sorted (excluded_of (text_of all_selected)));
+  let cleared = edited all_selected [ "\xe3\x85\x81" ] in
+  Alcotest.(check (list string))
+    "Korean IME ㅁ clears all when every keeper is selected"
+    []
+    (excluded_of (text_of cleared));
+  let partial = edited cleared [ " " ] in
+  let filled = edited partial [ "A" ] in
+  Alcotest.(check (list string))
+    "A completes selection when only some keepers are selected"
+    [ "a"; "b"; "c" ]
+    (sorted (excluded_of (text_of filled)))
+;;
+
 let () =
   Alcotest.run
     "tui_typesafeai_exclusion_form"
@@ -260,6 +280,8 @@ let () =
     ; ( "writing"
       , [ Alcotest.test_case "picking a keeper writes the list with it" `Quick
             test_picking_a_keeper_writes_the_list_with_it
+        ; Alcotest.test_case "a / A / ㅁ toggles select-all" `Quick
+            test_select_all_toggles_every_keeper
         ; Alcotest.test_case "dropping every name removes the key" `Quick
             test_dropping_every_name_removes_the_key
         ; Alcotest.test_case "the same keepers in another order is no change" `Quick

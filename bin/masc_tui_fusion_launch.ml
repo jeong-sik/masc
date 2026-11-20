@@ -120,6 +120,7 @@ let open_form ~keepers ~keeper ~(options : Masc.Tui_decode_fusion.fusion_launch_
   Ok { form; notice = None; waiting = None }
 
 let submitting launch = Option.is_some launch.waiting
+let waiting_keeper launch = Option.map (fun (request : request) -> request.keeper) launch.waiting
 
 let string_member key = function
   | `Assoc fields -> (

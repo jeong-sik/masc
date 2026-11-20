@@ -130,8 +130,9 @@ let voice_wizard_clear session =
 (* Whether Enter on Review may send the draft, and what to say when not. *)
 let voice_wizard_save_held session =
   match session.vws_save with
-  | Save_not_sent | Save_probing _ | Save_settled -> None
+  | Save_not_sent | Save_settled -> None
   | Save_sending _ -> Some "saving"
+  | Save_probing _ -> Some "checking configured endpoints"
   | Save_unanswered _ ->
     Some "reading runtime.toml again to see whether the last save was written"
   | Save_needs_reopen reason -> Some reason

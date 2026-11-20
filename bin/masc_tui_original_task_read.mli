@@ -70,6 +70,8 @@ val task_is_current : t -> task_request -> bool
 val task_observation : t ->
   (Masc.Tui_decode_task_inspection.observation, error) Masc_tui_fetched.observation
 val task_pending : t -> bool
+val any_pending : t -> bool
+(** Whether any origin, task, history, or evidence fetch is currently in flight. *)
 val complete_task : t -> task_request ->
   (task_snapshot, error) result -> t
 val back_to_origin : t -> t

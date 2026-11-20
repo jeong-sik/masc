@@ -1286,28 +1286,89 @@ let render_fusion_detail (state : state) run_id =
    reports what it clamped to the way the detail does. *)
 let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t option) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let width = framed_inner_width cols in
-  let text, hints =
+  let gen = string_of_int state.fusion_launch_generation in
+  let sheet_spec =
     match form with
     | None ->
-        [ ui_text state
-            ~ko:"runtime.toml에서 퓨전 프리셋을 불러오는 중"
-            ~en:"Reading the Fusion presets from runtime.toml" ]
-      , ui_text state ~ko:"Esc:취소" ~en:"Esc:cancel"
-    | Some form ->
-        let ko = state.ui_language = Lang_ko in
-        Masc_tui_fusion_launch.lines ~ko form, Masc_tui_fusion_launch.hints_for ~ko
+        Some
+          ( "reading-presets:" ^ gen
+          , ui_text state ~ko:"퓨전 프리셋 읽는 중" ~en:"Reading Fusion presets"
+          , Some (ui_text state ~ko:"runtime.toml에서 프리셋 목록을 확인하고 있습니다"
+                    ~en:"Reading [fusion.presets] from runtime.toml")
+          , Some (ui_text state ~ko:"Esc:취소" ~en:"Esc:cancel") )
+    | Some launch when Masc_tui_fusion_launch.submitting launch ->
+        let detail =
+          match Masc_tui_fusion_launch.waiting_keeper launch with
+          | Some keeper ->
+              if ko then keeper ^ " 키퍼에서 퓨전 실행을 시작하고 있습니다"
+              else "Starting the Fusion run for " ^ keeper
+          | None ->
+              ui_text state ~ko:"퓨전 실행 요청을 처리하고 있습니다"
+                ~en:"Starting the Fusion run"
+        in
+        Some
+          ( "submitting:" ^ gen ^ ":"
+            ^ Option.value ~default:"" (Masc_tui_fusion_launch.waiting_keeper launch)
+          , ui_text state ~ko:"퓨전 실행 시작 중" ~en:"Starting Fusion run"
+          , Some detail
+          , Some (ui_text state ~ko:"Esc:닫기 (백그라운드에서 계속)"
+                    ~en:"Esc:close (continues in background)") )
+    | Some _ -> None
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"fusion-launch" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) sheet_spec)
+  in
+  let progress_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail, ps_action_hint) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint
+        ; ps_blocking = true
+        })
+      sheet_spec
+  in
+  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let hints =
+    match form with
+    | None -> ui_text state ~ko:"Esc:취소" ~en:"Esc:cancel"
+    | Some form when Masc_tui_fusion_launch.submitting form ->
+        under_way ^ " "
+        ^ ui_text state
+            ~ko:"실행 시작 요청 중  Esc:닫기 (백그라운드 계속)"
+            ~en:"Starting run  Esc:close (background)"
+    | Some _ -> Masc_tui_fusion_launch.hints_for ~ko
   in
   let lines =
-    List.concat_map
-      (fun line ->
-        Message_layout.split_cells ~max_cells:(max 1 (width - 2))
-          (Masc.Tui_terminal_text.sanitize_terminal_text line))
-      text
-    |> List.map (fun line -> "  " ^ line)
+    match form with
+    | None ->
+        [ "  "
+          ^ progress_inline ~ko ~now ?started_at
+              (ui_text state
+                 ~ko:"runtime.toml에서 퓨전 프리셋을 불러오는 중"
+                 ~en:"Reading the Fusion presets from runtime.toml") ]
+    | Some form ->
+        List.concat_map
+          (fun line ->
+            Message_layout.split_cells ~max_cells:(max 1 (width - 2))
+              (Masc.Tui_terminal_text.sanitize_terminal_text line))
+          (Masc_tui_fusion_launch.lines ~ko form)
+        |> List.map (fun line -> "  " ^ line)
+  in
+  let title_readings =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        [ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title ]
   in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"fusion-launch"
-    ~frame:Chrome_overlay
+    ~frame:Chrome_overlay ?progress_sheet ~now
     ~overflow:
       (Scrolled
          { scroll = state.fusion_scroll
@@ -1315,6 +1376,6 @@ let render_fusion_launch (state : state) ~(form : Masc_tui_fusion_launch.t optio
     ~title:
       (here_row ~cols state
          ~path:[ fusion_step; ui_text state ~ko:"실행 시작" ~en:"launch" ]
-         ~readings:[] ~position:None)
+         ~readings:title_readings ~position:None)
     ~hints
     ~body:(fun ~budget:_ c -> List.iter c.push lines)

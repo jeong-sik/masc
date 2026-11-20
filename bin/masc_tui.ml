@@ -3725,9 +3725,13 @@ let voice_agent_voice_rows json =
 ;;
 
 let launch_voice_agent_voices state ~mailbox ~kind ~api_key_env =
+  let ready = server_authority_ready state in
   state.voice_agent_voices <- Option.map (fun session ->
-    {session with vas_lookup = Some (kind, api_key_env)}) state.voice_agent_voices;
-  if server_authority_ready state then begin
+    { session with
+      vas_lookup = Some (kind, api_key_env)
+    ; vas_loading_voices = ready
+    }) state.voice_agent_voices;
+  if ready then begin
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
@@ -3771,10 +3775,25 @@ let launch_voice_agent_voice_save state ~mailbox
   match Masc_tui_types.voice_agent_selected session with
   | None ->
     state.voice_agent_voices
-      <- Some { session with vas_status = Some "pick a keeper and a voice first" }
+      <- Some
+           { session with
+             vas_status =
+               Some
+                 (ui_text state
+                    ~ko:"먼저 키퍼와 목소리를 선택하세요"
+                    ~en:"pick a keeper and a voice first")
+           }
   | Some (agent, voice) ->
     state.voice_agent_voices
-      <- Some { session with vas_saving = true; vas_status = Some "saving the assignment" };
+      <- Some
+           { session with
+             vas_saving = true
+           ; vas_status =
+               Some
+                 (ui_text state
+                    ~ko:"키퍼 목소리 배정을 저장하고 있습니다"
+                    ~en:"saving the assignment")
+           };
     let host = server_peer_host in
     let port = state.port in
     let payload =
@@ -25491,7 +25510,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           about a screen nobody is reading. *)
        | None, (Ok _ | Error _) -> ()
        | Some session, Error message ->
-           state.voice_agent_voices <- Some { session with vas_status = Some message }
+           state.voice_agent_voices
+             <- Some { session with vas_loading_voices = false; vas_status = Some message }
        | Some session, Ok json ->
            let voices = voice_agent_voice_rows json in
            state.voice_agent_voices
@@ -25499,6 +25519,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                   { session with
                     vas_voices = voices
                   ; vas_voice_cursor = 0
+                  ; vas_loading_voices = false
                   ; vas_status =
                       (match voices with
                        | [] -> Some "the endpoint answered with no voices"
@@ -36399,12 +36420,12 @@ Use relative paths for resources already held in the package. -->
                   let rows, _ = get_terminal_size () in
                   if panel_owns_commands || Option.is_some presented_queue_input then true
                   else (match Masc_tui_render.frame_choice state ~terminal_rows:rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) with
-                   | `Queue _ | `Account_login _ -> true
+                   | `Queue _ | `Account_login _ | `Collab _
+                   | `Detail_reading _ | `Keeper_deletions | `Link -> true
+                   | `Lane_addons view -> not (Masc_tui_lane_addons.text_entry_open view)
                    | `Agenda | `Answering | `Help -> not command_reading
                    | `Too_small _ | `Play_card _ | `Account_server _ | `Palette
-                   | `Collab _ | `Lane_addons _ | `Detail_reading _ | `About
-                   | `Context | `Keeper_deletions | `Link
-                   | `Client_detail _ | `Surface -> false)
+                   | `About | `Context | `Client_detail _ | `Surface -> false)
               | Some _ | None -> false)
         in
         match queue_play_owner, key with
@@ -37908,7 +37929,8 @@ Use relative paths for resources already held in the package. -->
           instead of the pane, so a key that fell through would act on a
           surface nobody is looking at. *)
        | Some key
-         when Option.is_some state.voice_agent_voices && not state.help_open ->
+         when state.view = Config && state.config_pane = Config_voice
+              && Option.is_some state.voice_agent_voices && not state.help_open ->
            (match state.voice_agent_voices with
             | None -> ()
             | Some session ->
@@ -37921,6 +37943,7 @@ Use relative paths for resources already held in the package. -->
                 | "?" -> state.help_open <- true; state.help_scroll <- 0
                 | "esc" ->
                     state.voice_agent_voices <- None;
+                    Masc_tui_types.clear_progress_clock state ~slot:"voice-agent";
                     state.config_scroll <- 0
                 | "j" | "down" ->
                     set (Masc_tui_types.voice_agent_walk_agents session ~ahead:true)
@@ -38020,7 +38043,8 @@ Use relative paths for resources already held in the package. -->
                       | "k" | "up" -> set (Subs.move panel (-1))
                       | "a" -> set (Subs.add panel)
                       | "d" -> set (Subs.remove panel)
-                      | "r" -> launch_lane_subscriptions state ~mailbox:async_messages Subs.Inspect
+                      | "r" when not (Subs.is_confirming_save panel) ->
+                          launch_lane_subscriptions state ~mailbox:async_messages Subs.Inspect
                       | "\r" | "\n" | "enter" ->
                           let keepers=List.map (fun (keeper:keeper) -> keeper.k_name) state.keepers in
                           let panel,request=Subs.enter ~keepers ~targets:(Addons.subscription_targets view) panel in
@@ -38391,13 +38415,12 @@ Use relative paths for resources already held in the package. -->
                | "\127" | "\b" | "backspace" ->
                  (match state.preset_save_draft_source with
                   | Preset_form_local ->
-                    let length = String.length draft in
-                    if length > 0 then
-                      state.preset_save_draft <- Some (String.sub draft 0 (length - 1))
+                    state.preset_save_draft <-
+                      Some (Masc_tui_message_layout.drop_last_utf8_scalar draft)
                   | Preset_form_chat _ -> report_action state "system"
                       (ui_text state ~ko:"Esc로 닫고 채팅에서 명령을 수정하세요"
                          ~en:"Press Esc, then edit the command in chat"))
-               | s when String.length s = 1 && Char.code s.[0] >= 32 ->
+               | s when Masc_tui_message_layout.is_printable_utf8_scalar s ->
                  (match state.preset_save_draft_source with
                   | Preset_form_local -> state.preset_save_draft <- Some (draft ^ s)
                   | Preset_form_chat _ -> report_action state "system"
@@ -38486,9 +38509,8 @@ Use relative paths for resources already held in the package. -->
                          Masc_tui_http.rename_runtime_lane ~host ~port ~lane ~new_lane:name)
                  end
                | "\127" | "\b" | "backspace" ->
-                 let length = String.length draft in
-                 if length > 0 then set (String.sub draft 0 (length - 1))
-               | s when String.length s = 1 && Char.code s.[0] >= 32 -> set (draft ^ s)
+                 set (Masc_tui_message_layout.drop_last_utf8_scalar draft)
+               | s when Masc_tui_message_layout.is_printable_utf8_scalar s -> set (draft ^ s)
                | _ -> ()))
        (* Pending and unknown commits freeze their immutable submitted input.
           Esc leaves the operation running/retained; Ctrl-X deliberately ends
@@ -39261,7 +39283,7 @@ Use relative paths for resources already held in the package. -->
                   state.link_modal_url <- List.nth_opt state.link_modal_links prev_idx;
                   state.link_modal_scroll <- 0
                 end
-            | "o" | "O" | "\r" ->
+            | "o" | "O" | "\r" | "\n" | "enter" ->
                 (match state.link_modal_url with
                  | Some url -> (
                      match Masc_tui_browser.open_url url with
@@ -39353,7 +39375,7 @@ Use relative paths for resources already held in the package. -->
                      max 0 (state.repository_changes_diff_scroll - 1)
                | None -> move_list state Masc_tui_scroll.Line_up)
 
-            | ("\r" | "\n" | "right") -> (
+            | ("\r" | "\n" | "enter" | "right") -> (
               match state.repository_changes_diff_path with
               | Some _ -> ()
               | None -> (

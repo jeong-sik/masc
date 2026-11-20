@@ -22,6 +22,7 @@ let same_owner a b = a.workspace = b.workspace && Standalone_lane.equal a.lane b
 let owner (t : t) = t.owner
 let request_owner (request : request) = request.owner
 let busy t = match t.phase with Idle -> false | Reading _ | Writing _ -> true
+let phase_status t = match t.phase with Idle -> `Idle | Reading _ -> `Reading | Writing _ -> `Writing
 let create owner = {owner;draft=None;current=None;phase=Idle;message=None;receipt=None}
 let path lane = [Runtime_toml_namespace.(key Runtime);"exact_output_lanes";Standalone_lane.to_id lane]
 let table lane = String.concat "." (List.map Toml_line_editor.render_key (path lane))
@@ -201,8 +202,14 @@ let lines ~ko (t : t) =
   @ current @ draft @ conflict
   @ (match t.phase with
      | Idle -> []
-     | Reading _ -> [L.note (say "현재 설정을 읽는 중" "Reading current configuration")]
-     | Writing _ -> [L.note (say "활동 저장 중" "Saving activity")])
+     | Reading _ ->
+         [L.note ~tone:L.Info
+            (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+             ^ say "현재 설정을 읽는 중" "Reading current configuration")]
+     | Writing _ ->
+         [L.note ~tone:L.Info
+            (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+             ^ say "활동 저장 중" "Saving activity")])
   @ Option.to_list (Option.map (fun notice -> L.note (Notice.text ~ko notice)) t.message)
   @ (match t.receipt with None -> [] | Some receipt -> [L.note (Masc_tui_runtime_config_receipt.lane_summary receipt)])
   @ [L.note ~tone:L.Quiet

@@ -259,6 +259,10 @@ let part_sections ~label ~pending view sections =
     | Stale (value,error) -> sections value @ [section (label ^ " · last observation; refresh unavailable") (error_text error)] in
   if pending then section (label ^ " pending") "Any retained observation remains below." :: rows else rows
 let task_pending t = Fetched.in_flight t.task_fetched
+let any_pending t =
+  pending t || task_pending t
+  || Fetched.in_flight t.history_fetched
+  || Fetched.in_flight t.evidence_fetched
 let task_sections t =
   let rows=match task_view t with
     | Fetched.Absent -> [section "Task not read" "Press o to inspect the original linked Task."]

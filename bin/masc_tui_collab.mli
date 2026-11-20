@@ -40,6 +40,8 @@ val settled : t -> mutation -> t
 (** Release only the pending mutation whose receipt arrived. Notices and
     inventory refreshes cannot settle a mutation. *)
 val text_input_active : t -> bool
+val progress_status : t -> [ `Idle | `Pending_write | `Write_access_pending of string | `Loading ]
+(** Active blocking or refresh state for bottom-sheet progress rendering. *)
 val paste : t -> string -> t
 (** Append single-line field text without submitting. Browsing and revoke
     confirmation discard pasted text. Validation remains on Enter. *)

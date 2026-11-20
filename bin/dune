@@ -2439,7 +2439,7 @@
  (modules masc_tui_exact_activity)
  (libraries masc.runtime masc.runtime_toml_namespace otoml masc.toml_line_editor
   masc_tui_activity_notice masc_tui_page_line masc_tui_runtime_config_edit
-  masc_tui_runtime_config_receipt))
+  masc_tui_runtime_config_receipt masc_tui_value))
 
 (library
  (name masc_tui_editor_wire)
@@ -3089,7 +3089,8 @@
   masc_tui_render_prim masc_tui_rows masc_tui_runtime_account_form
   masc_tui_runtime_config_view masc_tui_scroll masc_tui_terminal_palette
   masc_tui_text_block masc_tui_theme masc_tui_theme_choice masc_tui_types
-  masc_tui_typesafeai_exclusion_form masc_tui_value masc_tui_voice_wizard_session))
+  masc_tui_typesafeai_exclusion_form masc_tui_value masc_tui_voice_wizard_session
+  unix))
 
 ;; The Work screens (Tasks, Goals, Schedules) as a library for the same
 ;; reason: a test draws the three lists and counts the rows each reports.
@@ -3662,6 +3663,7 @@
   masc_tui_graphics
   masc_tui_image_mosaic
   masc_tui_frame_timing
+  masc_tui_value
   yojson))
 
 (library
@@ -3825,7 +3827,7 @@
  (modules masc_tui_machine_activity)
  (libraries masc masc.machine_configuration masc.runtime masc.runtime_toml_namespace
   otoml masc.toml_line_editor masc_tui_activity_notice masc_tui_page_line
-  masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+  masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_value))
 
 (library
  (name masc_tui_model_form)

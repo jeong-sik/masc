@@ -344,10 +344,6 @@ type progress_sheet = {
   ps_blocking : bool;
 }
 
-val progress_started_at_of_ns : now:float -> now_ns:int64 -> int64 -> float
-(** Convert a monotonic nanosecond start stamp to wall-clock seconds relative
-    to [now] so {!Masc_tui_value.Ongoing.since} ticks on second boundaries. *)
-
 val progress_inline :
   ko:bool ->
   now:float ->

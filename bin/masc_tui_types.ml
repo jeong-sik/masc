@@ -6730,6 +6730,7 @@ type voice_agent_session =
             the way the wizard carries it. *)
   ; vas_status : string option
   ; vas_saving : bool
+  ; vas_loading_voices : bool
   ; vas_lookup : (string * string option) option
   }
 
@@ -6741,6 +6742,7 @@ let voice_agent_open ~agents ~revision =
   ; vas_revision = revision
   ; vas_status = None
   ; vas_saving = false
+  ; vas_loading_voices = false
   ; vas_lookup = None
   }
 
@@ -20937,6 +20939,13 @@ let modal_owns_keys (state : state) =
   || Option.is_some state.client_detail
   || Option.is_some state.collab
   || Option.is_some state.account_login
+  || Option.is_some state.lane_addons
+  || (state.view = Config && state.config_pane = Config_voice
+      && Option.is_some state.voice_agent_voices)
+  || (state.view = Fusion
+      && match state.fusion_launch with
+         | Some (Fusion_launch_reading_presets _) -> true
+         | Some (Fusion_launch_open _ | Fusion_launch_started _) | None -> false)
   || Option.is_some (play_card_shown state)
 
 (* Where a paste goes once no field has claimed it. A key reaches the chat
@@ -20996,7 +21005,9 @@ let close_context_inspector (state : state) =
   state.context_inspector_focus <- Left_pane;
   state.context_inspector_response_return <- Masc_tui_context_inspector.Composition;
   state.context_inspector_response_scroll <- 0;
-  state.context_inspector_target <- Masc_tui_context_inspector.Recent 0
+  state.context_inspector_target <- Masc_tui_context_inspector.Recent 0;
+  state.progress_clocks <-
+    List.filter (fun (s, _, _) -> not (String.equal s "context-inspector")) state.progress_clocks
 
 let close_agenda (state : state) =
   state.agenda_open <- false;
@@ -21040,11 +21051,22 @@ let close_key_modals (state : state) =
   state.client_detail <- None;
   state.client_detail_scroll <- 0;
   state.collab <- None;
+  state.lane_addons <- None;
+  state.voice_agent_voices <- None;
   state.exact_activity_open <- None;
   state.machine_activity_open <- None;
   if state.agenda_open then close_agenda state;
   if state.context_inspector_open then close_context_inspector state;
-  if state.repository_changes_open then close_repository_changes state
+  if state.repository_changes_open then close_repository_changes state;
+  state.progress_clocks <-
+    List.filter
+      (fun (s, _, _) ->
+        not
+          (List.mem s
+             [ "context-inspector"; "detail-reading"; "palette"; "link-preview"
+             ; "keeper-deletions"; "queue-detail"; "queue-list"; "collab"
+             ; "lane-addons"; "voice-agent"; "machine-activity"; "exact-activity" ]))
+      state.progress_clocks
 
 let begin_goal_timeline_read (state : state) ~goal_id =
   match Masc_tui_fetched.refresh ~equal:String.equal state.goal_timeline ~key:goal_id with
@@ -28965,3 +28987,8 @@ let progress_clock_option (state : state) ~slot ~now = function
       None
   | Some signature ->
       Some (progress_clock_for state ~slot ~signature ~now)
+
+let progress_started_at_of_monotonic_ns ~now started_ns =
+  let elapsed_ns = Int64.sub (Mtime_clock.elapsed_ns ()) started_ns in
+  let elapsed_s = max 0.0 (Int64.to_float elapsed_ns /. 1e9) in
+  now -. elapsed_s

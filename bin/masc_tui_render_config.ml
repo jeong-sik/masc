@@ -34,10 +34,45 @@ let binary_age_text ~ko = function
    it and it did not take" happens, so these stay two panes over one store. *)
 let render_runtime_params (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let buf = Buffer.create 4096 in
+  let rows = Option.value state.runtime_params ~default:[] in
+  let params_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"runtime-params" ~now
+      (if state.runtime_params_loading then
+         Some (if rows = [] then "loading" else "updating")
+       else None)
+  in
+  let params_sheet =
+    if not state.runtime_params_loading then None
+    else
+      Some
+        { ps_title =
+            if rows = [] then ui_text state ~ko:"파라미터 읽는 중" ~en:"Loading parameters"
+            else ui_text state ~ko:"파라미터 갱신 중" ~en:"Updating parameters"
+        ; ps_detail =
+            Some
+              (if rows = [] then
+                 ui_text state ~ko:".masc/runtime_params.json 등록부를 조회하고 있습니다"
+                   ~en:"Reading .masc/runtime_params.json registry"
+               else
+                 ui_text state ~ko:"파라미터 상태를 갱신하고 있습니다"
+                   ~en:"Refreshing parameter values")
+        ; ps_started_at = params_started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = false
+        }
+  in
   (* The list has the cursor, so its selected row is the position. *)
   box_line buf cols
-    (zone_two_title ~cols state ~title:(config_pane_title state)
+    (zone_two_title ~cols state
+       ~title:(config_pane_title
+                 ?reading:(Option.map (fun sheet ->
+                   progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+                   params_sheet)
+                 state)
        ~position:
          (match state.runtime_params with
           | None | Some [] -> None
@@ -72,7 +107,6 @@ let render_runtime_params (state : state) =
      box_line_styled buf cols ~style:(Theme.bad ())
        ("  " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                  ~request:Kept_request.Runtime_param_write refusal));
-  let rows = Option.value state.runtime_params ~default:[] in
   let selected = List.nth_opt rows state.runtime_params_cursor in
   (* The panel below draws [framed_inner_width - 4] cells a line, and a field
      is indented two of them. A field wrapped at the frame's own width has a
@@ -176,7 +210,9 @@ let render_runtime_params (state : state) =
    | None ->
      if state.runtime_params_loading && rows = []
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터를 읽는 중" ~en:"  Loading parameters" ^ Ansi.reset);
+       box_line buf cols
+         ("  " ^ progress_inline ~ko ~now ?started_at:params_started_at
+            (ui_text state ~ko:"파라미터를 읽는 중" ~en:"Loading parameters"));
        for _ = 2 to list_height do box_empty buf cols done
      end
      else if Option.is_none state.runtime_params
@@ -268,6 +304,14 @@ let render_runtime_params (state : state) =
                ~style:(if row.rpr_has_override then (Theme.accent ()) else Ansi.dim) line
        done
      end);
+  let sheet_lines =
+    match params_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:detail_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let detail_height = max 0 (detail_height - List.length sheet_lines) in
   let scroll = Masc_tui_scroll.normalize ~count:(List.length selected_lines)
       ~height:(max 1 detail_height) state.config_scroll in
   (* How many detail rows the window leaves out. It is a count, not a
@@ -298,6 +342,7 @@ let render_runtime_params (state : state) =
        box_divider buf cols;
        List.iter (box_line buf cols) visible_lines;
        box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ cut));
+  List.iter (box_line buf cols) sheet_lines;
   (match state.runtime_param_edit with
    | None -> ()
    | Some edit ->
@@ -382,7 +427,11 @@ let render_runtime_params (state : state) =
 let prompt_catalog_status_row state prompts =
   match prompts with
   | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Absent -> None
-  | Masc_tui_fetched.Loading -> Some (Theme.recede (), ui_text state ~ko:"프롬프트 목록을 읽는 중" ~en:"Loading prompt catalog")
+  | Masc_tui_fetched.Loading ->
+      Some
+        ( Theme.info ()
+        , Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+          ^ ui_text state ~ko:"프롬프트 목록을 읽는 중" ~en:"Loading prompt catalog" )
   | Masc_tui_fetched.Stale (_, detail) ->
     Some
       ( Theme.bad ()
@@ -483,7 +532,8 @@ let prepare_prompts_detail_lines (state : state) ~cols =
                        && not (Option.exists
                             (fun (key, _) -> String.equal key row.pr_key)
                             state.prompts_librarian_input) then
-                 [ui_text state ~ko:"관리자 실행 상세를 읽는 중" ~en:"Loading admin execution details"]
+                 [Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+                  ^ ui_text state ~ko:"관리자 실행 상세를 읽는 중" ~en:"Loading admin execution details"]
                else match state.prompts_librarian_input_error with
                  | Some detail -> [ui_text state ~ko:"읽기 실패: " ~en:"Read failed: " ^ Terminal_text.single_line detail]
                  | None ->
@@ -624,6 +674,8 @@ let render_prompts_detail state buf ~cols ~height ~selected =
 
 let render_prompt_registry (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
@@ -661,12 +713,58 @@ let render_prompt_registry (state : state) =
   let total = List.length prompt_rows in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt prompt_rows cursor in
+  let catalog_loading =
+    Masc_tui_fetched.in_flight state.prompts
+    || (match prompts with Masc_tui_fetched.Loading -> true
+        | Absent | Ready _ | Stale _ | Failed _ -> false)
+  in
+  let librarian_loading =
+    state.prompts_librarian_input_loading
+    && Option.exists
+         (fun (row : Tui_decode.prompt_row) -> String.equal row.pr_category "librarian")
+         selected
+  in
+  let prompt_sig =
+    if catalog_loading then Some "catalog"
+    else if librarian_loading then Some "librarian"
+    else None
+  in
+  let prompt_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"prompts-registry" ~now prompt_sig
+  in
+  let prompt_sheet =
+    if catalog_loading then
+      Some
+        { ps_title = ui_text state ~ko:"프롬프트 목록 읽는 중" ~en:"Loading prompt catalog"
+        ; ps_detail =
+            Some
+              (ui_text state ~ko:"등록된 프롬프트와 재정의 상태를 조회하고 있습니다"
+                 ~en:"Reading registered prompts and override status")
+        ; ps_started_at = prompt_started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = false
+        }
+    else if librarian_loading then
+      Some
+        { ps_title = ui_text state ~ko:"관리자 실행 상세 읽는 중" ~en:"Loading admin execution details"
+        ; ps_detail =
+            Option.map
+              (fun (row : Tui_decode.prompt_row) -> Terminal_text.single_line row.pr_key)
+              selected
+        ; ps_started_at = prompt_started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = false
+        }
+    else None
+  in
   (* A count only once the registry has answered. "0/0개" stood for a
      registry not asked yet and for one whose read failed, the same as for a
      registry with no prompts. *)
   let count_text =
-    title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts ~count:(fun _ ->
-        Printf.sprintf (if state.ui_language = Lang_ko then "%d/%d개" else "%d/%d prompts") total all_prompt_count)
+    title_count_of_view ~ko prompts ~count:(fun _ ->
+        Printf.sprintf (if ko then "%d/%d개" else "%d/%d prompts") total all_prompt_count)
   in
   (* The count the registry answered, and -- before any decoration that can
      be cut -- how many overrides it held back. The row keeps a fixed floor
@@ -679,17 +777,22 @@ let render_prompt_registry (state : state) =
     match held_back with
     | [] -> ""
     | entries ->
-      Printf.sprintf (if state.ui_language = Lang_ko then " %s적용 안 된 재정의 %d개%s" else " %s%d overrides not applied%s") (Theme.warn ())
+      Printf.sprintf (if ko then " %s적용 안 된 재정의 %d개%s" else " %s%d overrides not applied%s") (Theme.warn ())
         (List.length entries) Ansi.reset
   in
   let reading =
-    Printf.sprintf "%s%s%s%s · %s%s"
-      Ansi.dim count_text
-      held_back_note
-      Ansi.dim
-      (if state.prompts_show_fragments then ui_text state ~ko:"내부 조각 포함" ~en:"including fragments"
-       else ui_text state ~ko:"주 프롬프트" ~en:"primary prompts")
-      Ansi.reset
+    match prompt_sheet with
+    | Some sheet ->
+        progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+        ^ held_back_note
+    | None ->
+        Printf.sprintf "%s%s%s%s · %s%s"
+          Ansi.dim count_text
+          held_back_note
+          Ansi.dim
+          (if state.prompts_show_fragments then ui_text state ~ko:"내부 조각 포함" ~en:"including fragments"
+           else ui_text state ~ko:"주 프롬프트" ~en:"primary prompts")
+          Ansi.reset
   in
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
@@ -701,7 +804,15 @@ let render_prompt_registry (state : state) =
      "still reading" and "nothing here". *)
   let status_row = prompt_catalog_status_row state prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
-  let list_height, detail_height = prompts_detail_layout state ~rows ~error_rows ~list_count:total in
+  let list_height, raw_detail_height = prompts_detail_layout state ~rows ~error_rows ~list_count:total in
+  let sheet_lines =
+    match prompt_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_detail_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let detail_height = max 1 (raw_detail_height - List.length sheet_lines) in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
   (match status_row with
    | Some (style, text) ->
@@ -749,6 +860,7 @@ let render_prompt_registry (state : state) =
     ~selected:(match selected with
       | None -> ui_text state ~ko:"선택 없음" ~en:"No selection"
       | Some row -> row.Tui_decode.pr_key);
+  List.iter (box_line buf cols) sheet_lines;
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
     (footer_line ~recovery_in_slot state ~max_cells:cols
@@ -761,6 +873,8 @@ let render_prompt_registry (state : state) =
    explicit capability boundary rather than an accidental omission. *)
 let render_runtime_prompt_assets (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 8192 in
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
@@ -772,13 +886,41 @@ let render_runtime_prompt_assets (state : state) =
   let total = List.length assets in
   let cursor = max 0 (min state.prompts_cursor (total - 1)) in
   let selected = List.nth_opt assets cursor in
+  let catalog_loading =
+    Masc_tui_fetched.in_flight state.prompts
+    || (match prompts with Masc_tui_fetched.Loading -> true
+        | Absent | Ready _ | Stale _ | Failed _ -> false)
+  in
+  let assets_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"prompts-assets" ~now
+      (if catalog_loading then Some "assets" else None)
+  in
+  let assets_sheet =
+    if not catalog_loading then None
+    else
+      Some
+        { ps_title = ui_text state ~ko:"런타임 프롬프트 자산 읽는 중" ~en:"Loading runtime prompt assets"
+        ; ps_detail =
+            Some
+              (ui_text state ~ko:"배포된 .txt 지시문 목록을 조회하고 있습니다"
+                 ~en:"Reading distributed .txt instruction assets")
+        ; ps_started_at = assets_started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = false
+        }
+  in
   let count_text =
-    title_count_of_view ~ko:(state.ui_language = Lang_ko) prompts
-      ~count:(fun _ -> Printf.sprintf (if state.ui_language = Lang_ko then "%d개" else "%d assets") total)
+    title_count_of_view ~ko prompts
+      ~count:(fun _ -> Printf.sprintf (if ko then "%d개" else "%d assets") total)
   in
   let reading =
-    Printf.sprintf "%s%s · %s%s" Ansi.dim count_text
-      (ui_text state ~ko:"읽기 전용" ~en:"read only") Ansi.reset
+    match assets_sheet with
+    | Some sheet ->
+        progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+    | None ->
+        Printf.sprintf "%s%s · %s%s" Ansi.dim count_text
+          (ui_text state ~ko:"읽기 전용" ~en:"read only") Ansi.reset
   in
   box_line buf cols
     (zone_two_title ~cols state
@@ -799,7 +941,15 @@ let render_runtime_prompt_assets (state : state) =
      "still reading" and "nothing here". *)
   let status_row = prompt_catalog_status_row state prompts in
   let error_rows = if Option.is_some status_row then 1 else 0 in
-  let list_height, detail_height = prompts_detail_layout state ~rows ~error_rows ~list_count:total in
+  let list_height, raw_detail_height = prompts_detail_layout state ~rows ~error_rows ~list_count:total in
+  let sheet_lines =
+    match assets_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_detail_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let detail_height = max 1 (raw_detail_height - List.length sheet_lines) in
   let first = if cursor < list_height then 0 else cursor - list_height + 1 in
   (match status_row with
    | Some (style, text) ->
@@ -829,6 +979,7 @@ let render_runtime_prompt_assets (state : state) =
     ~selected:(match selected with
       | None -> ui_text state ~ko:"선택 없음" ~en:"No selection"
       | Some asset -> asset.Tui_decode.pra_path);
+  List.iter (box_line buf cols) sheet_lines;
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
     (footer_line ~recovery_in_slot state ~max_cells:cols
@@ -837,9 +988,13 @@ let render_runtime_prompt_assets (state : state) =
 ;;
 
 let render_prompts (state : state) =
-  if state.prompts_show_runtime_assets
-  then render_runtime_prompt_assets state
-  else render_prompt_registry state
+  if state.prompts_show_runtime_assets then begin
+    Masc_tui_types.clear_progress_clock state ~slot:"prompts-registry";
+    render_runtime_prompt_assets state
+  end else begin
+    Masc_tui_types.clear_progress_clock state ~slot:"prompts-assets";
+    render_prompt_registry state
+  end
 ;;
 
 (* The row the reader is on. A check rather than a colour, because the point
@@ -1106,6 +1261,8 @@ let presets_viewport (state : state) =
 
 let render_presets (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let presets =
@@ -1116,18 +1273,105 @@ let render_presets (state : state) =
   let total = List.length presets in
   let cursor = max 0 (min state.presets_cursor (total - 1)) in
   let selected = List.nth_opt presets cursor in
+  let pending_saves = workspace_preset_save_pending state in
+  let selected_detail_loading =
+    Option.exists
+      (fun (m : Tui_decode.preset_manifest) ->
+        match Masc_tui_fetched.view_for ~equal:String.equal state.preset_detail ~key:m.Tui_decode.pm_name with
+        | Masc_tui_fetched.Loading -> true
+        | Masc_tui_fetched.Absent | Masc_tui_fetched.Ready _
+        | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ -> false)
+      selected
+  in
+  let preset_progress_spec =
+    match pending_saves with
+    | first :: _ ->
+        let phase_sig, title, detail =
+          match Atomic.get first.psp_phase with
+          | Preset_save_preparing ->
+              ( "save-preparing:" ^ first.psp_name
+              , ui_text state ~ko:"프리셋 스냅샷 준비 중" ~en:"Preparing preset snapshot"
+              , Some (Terminal_text.single_line first.psp_name) )
+          | Preset_save_dispatching ->
+              ( "save-dispatching:" ^ first.psp_name
+              , ui_text state ~ko:"프리셋 저장 요청 전송 중" ~en:"Saving preset"
+              , Some (Terminal_text.single_line first.psp_name) )
+          | Preset_save_auth_refused ->
+              ( "save-auth:" ^ first.psp_name
+              , ui_text state ~ko:"프리셋 저장 인증 재확인 중" ~en:"Re-authenticating preset save"
+              , Some (Terminal_text.single_line first.psp_name) )
+        in
+        Some (phase_sig, title, detail, true)
+    | [] ->
+        if state.preset_busy then
+          Some
+            ( "preset-busy"
+            , ui_text state ~ko:"프리셋 작업 처리 중" ~en:"Running preset operation"
+            , Some
+                (ui_text state ~ko:"프리셋 복원·삭제 요청을 서버에서 처리하고 있습니다"
+                   ~en:"Processing preset restore or delete request on server")
+            , true )
+        else if server_authority_ready state && Option.is_none state.presets_snapshot && Option.is_none state.presets_error then
+          Some
+            ( "presets-loading"
+            , ui_text state ~ko:"프리셋 목록 읽는 중" ~en:"Loading presets"
+            , Some
+                (ui_text state ~ko:"저장된 프리셋 스냅샷 목록을 조회하고 있습니다"
+                   ~en:"Reading saved preset snapshots")
+            , false )
+        else if selected_detail_loading then
+          Some
+            ( "preset-detail:"
+              ^ Option.fold ~none:"" ~some:(fun (m : Tui_decode.preset_manifest) -> m.Tui_decode.pm_name) selected
+            , ui_text state ~ko:"프리셋 상세 읽는 중" ~en:"Loading preset details"
+            , Option.map (fun (m : Tui_decode.preset_manifest) -> Terminal_text.single_line m.Tui_decode.pm_name) selected
+            , false )
+        else None
+  in
+  let preset_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"presets" ~now
+      (Option.map (fun (sig_key, _, _, _) -> sig_key) preset_progress_spec)
+  in
+  let preset_sheet =
+    Option.map
+      (fun (_, ps_title, ps_detail, ps_blocking) ->
+        { ps_title
+        ; ps_detail
+        ; ps_started_at = preset_started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking
+        })
+      preset_progress_spec
+  in
   (* The same rule as the prompt registry's title: no count before a
      snapshot has arrived, and none after a first read that failed. *)
-  let count_text =
-    match state.presets_snapshot with
-    | Some _ -> Printf.sprintf
-        (if state.ui_language = Lang_ko then "%d개"
-         else if total = 1 then "%d preset" else "%d presets") total
-    | None -> (match state.presets_error with
-        | None -> ui_text state ~ko:"읽는 중" ~en:"reading"
-        | Some _ -> ui_text state ~ko:"읽기 실패" ~en:"read failed")
+  let reading =
+    match preset_sheet, state.presets_snapshot, state.presets_error with
+    | Some sheet, None, None ->
+        progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+    | Some sheet, Some _, _ ->
+        let count_text =
+          Printf.sprintf
+            (if ko then "%d개"
+             else if total = 1 then "%d preset" else "%d presets") total
+        in
+        Printf.sprintf "%s%s%s  %s" Ansi.dim count_text Ansi.reset
+          (progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+    | Some sheet, None, Some _ ->
+        progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+    | None, Some _, _ ->
+        let count_text =
+          Printf.sprintf
+            (if ko then "%d개"
+             else if total = 1 then "%d preset" else "%d presets") total
+        in
+        Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset
+    | None, None, None ->
+        Printf.sprintf "%s%s%s" Ansi.dim (ui_text state ~ko:"미조회" ~en:"unread") Ansi.reset
+    | None, None, Some _ ->
+        Printf.sprintf "%s%s%s" Ansi.dim (ui_text state ~ko:"읽기 실패" ~en:"read failed") Ansi.reset
   in
-  let reading = Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset in
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
        ~position:
@@ -1136,7 +1380,15 @@ let render_presets (state : state) =
   box_divider buf cols;
   let detail = preset_detail_lines state ~cols ~selected in
   let count = List.length detail in
-  let list_height, detail_height = preset_pane_heights state ~rows ~count ~presets_count:total in
+  let list_height, raw_detail_height = preset_pane_heights state ~rows ~count ~presets_count:total in
+  let sheet_lines =
+    match preset_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_detail_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let detail_height = max 1 (raw_detail_height - List.length sheet_lines) in
   let preset_rows = list_height in
   let first = if cursor < preset_rows then 0 else cursor - preset_rows + 1 in
   (match state.presets_error with
@@ -1157,8 +1409,12 @@ let render_presets (state : state) =
          (ui_text state ~ko:"  프리셋을 읽지 못했습니다" ~en:"  Could not read presets")
    | None, None ->
        incr drawn;
-       box_line_styled buf cols ~style:(Theme.recede ())
-         (ui_text state ~ko:"  프리셋을 읽는 중" ~en:"  Loading presets")
+       if server_authority_ready state then
+         box_line buf cols
+           ("  " ^ progress_inline ~ko ~now ?started_at:preset_started_at
+              (ui_text state ~ko:"프리셋을 읽는 중" ~en:"Loading presets"))
+       else
+         box_line_styled buf cols ~style:Ansi.dim (page_unread_note ~ko)
    | Some snapshot, (Some _ | None) ->
        Option.iter
          (fun line ->
@@ -1242,6 +1498,7 @@ let render_presets (state : state) =
             | Some (Restore_armed _ | Delete_armed _) | None ->
               ui_text state ~ko:"  Enter:저장  Esc:취소" ~en:"  Enter:save  Esc:cancel") ^ Ansi.reset))
    | None -> ());
+  List.iter (box_line buf cols) sheet_lines;
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf
     (footer_line ~recovery_in_slot state ~max_cells:cols
@@ -1624,12 +1881,126 @@ let config_models_projection state ~terminal_rows ~cols =
    column and not an absence.
 
    Structured edits and copies use the runtime.toml preview-checked writer. *)
+let runtime_form_progress_sheet ~now (state : state) =
+  let active_attempt =
+    match runtime_form_focused_attempt state with
+    | Some ({ rfa_status = (Form_checking | Form_previewing _ | Form_posting _); _ } as attempt) ->
+        Some attempt
+    | Some { rfa_status = Form_finished _; _ } | None ->
+        List.find_opt
+          (fun attempt ->
+            runtime_form_origin_matches state attempt.rfa_request
+            && match attempt.rfa_status with
+               | Form_checking | Form_previewing _ | Form_posting _ -> true
+               | Form_finished _ -> false)
+          (Runtime_form_saves.pending state.runtime_form_saves)
+  in
+  Option.map
+    (fun attempt ->
+      let ps_title =
+        match attempt.rfa_status with
+        | Form_checking ->
+            ui_text state ~ko:"설정 변경 검증 중" ~en:"Validating config changes"
+        | Form_previewing _ ->
+            ui_text state ~ko:"runtime.toml 변경 미리보기 확인 중"
+              ~en:"Previewing runtime.toml diff"
+        | Form_posting _ ->
+            ui_text state ~ko:"runtime.toml 저장 적용 중" ~en:"Saving runtime.toml"
+        | Form_finished _ ->
+            ui_text state ~ko:"runtime.toml 저장 중" ~en:"Saving runtime.toml"
+      in
+      let ps_detail =
+        match attempt.rfa_request.rfs_draft with
+        | Account_form_draft _ ->
+            Some
+              (ui_text state ~ko:"계정 공급자 설정을 반영하고 있습니다"
+                 ~en:"Applying account provider settings")
+        | Model_form_draft _ ->
+            Some
+              (ui_text state ~ko:"모델 바인딩 설정을 반영하고 있습니다"
+                 ~en:"Applying model binding settings")
+        | Config_document_draft _ ->
+            Some
+              (ui_text state ~ko:"설정 문서 변경 사항을 반영하고 있습니다"
+                 ~en:"Applying configuration document changes")
+      in
+      let ps_started_at =
+        Some
+          (Masc_tui_types.progress_started_at_of_monotonic_ns ~now
+             attempt.rfa_request.rfs_started_ns)
+      in
+      { ps_title
+      ; ps_detail
+      ; ps_started_at
+      ; ps_meter = None
+      ; ps_action_hint =
+          Some (ui_text state ~ko:"Esc:뒤로 (저장 계속)" ~en:"Esc:back (save continues)")
+      ; ps_blocking = true
+      })
+    active_attempt
+
 let render_config_models (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let rows_avail = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
   let projection = config_models_projection state ~terminal_rows ~cols in
   let path_note = config_path_note state in
+  let form_sheet = runtime_form_progress_sheet ~now state in
+  let config_loading =
+    match state.runtime_config_read with
+    | `Loading _ -> true
+    | `Idle -> false
+  in
+  let gen = string_of_int state.runtime_config_generation in
+  let models_clock_sig =
+    if Option.is_some form_sheet then None
+    else
+      match state.runtime_model_jump with
+      | Some target -> Some ("jump:" ^ gen ^ ":" ^ target)
+      | None ->
+          if config_loading then Some ("loading:" ^ gen)
+          else None
+  in
+  let models_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"config-models" ~now models_clock_sig
+  in
+  let progress_sheet =
+    match form_sheet with
+    | Some _ as sheet -> sheet
+    | None ->
+        (match state.runtime_model_jump with
+         | Some target ->
+             Some
+               { ps_title =
+                   ui_text state ~ko:"선택한 계정·모델 설정 읽는 중"
+                     ~en:"Loading account/model settings"
+               ; ps_detail = Some (Terminal_text.single_line target)
+               ; ps_started_at = models_started_at
+               ; ps_meter = None
+               ; ps_action_hint = Some (ui_text state ~ko:"Esc:취소" ~en:"Esc:cancel")
+               ; ps_blocking = true
+               }
+         | None ->
+             if config_loading then
+               Some
+                 { ps_title =
+                     if Option.is_none state.runtime_config_view then
+                       ui_text state ~ko:"모델 설정 읽는 중" ~en:"Loading model settings"
+                     else
+                       ui_text state ~ko:"모델 설정 갱신 중" ~en:"Refreshing model settings"
+                 ; ps_detail =
+                     Some
+                       (ui_text state ~ko:"runtime.toml 모델 바인딩 구성을 조회하고 있습니다"
+                          ~en:"Reading runtime.toml model bindings")
+                 ; ps_started_at = models_started_at
+                 ; ps_meter = None
+                 ; ps_action_hint = None
+                 ; ps_blocking = false
+                 }
+             else None)
+  in
   (* The cursor walks bindings, so the selected binding among them is the
      position whether the table or the stacked items are drawn. *)
   let position =
@@ -1643,18 +2014,34 @@ let render_config_models (state : state) =
             (Masc_tui_value.Position.row ~selected:(Some state.config_models_cursor) ~total)
     | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
   in
+  let title_reading =
+    match progress_sheet with
+    | Some sheet ->
+        progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
+    | None ->
+        if Option.is_none state.runtime_model_form
+           && Option.is_none state.runtime_model_jump
+           && Option.is_none (config_models_read_error state)
+        then projection.model_reading_hint
+        else ""
+  in
   box_line buf cols
     (zone_two_title ~cols state
        ~title:
          (config_pane_title
-            ~reading:(if Option.is_none state.runtime_model_form
-                         && Option.is_none state.runtime_model_jump
-                         && Option.is_none (config_models_read_error state)
-                      then projection.model_reading_hint else "")
+            ~reading:title_reading
             ~note:path_note state)
        ~position);
   box_divider buf cols;
-  let content_height = max 1 (rows_avail - 4) in
+  let raw_content_height = max 1 (rows_avail - 4) in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko ~now ~available:raw_content_height
+          ~width:(framed_inner_width cols) sheet
+  in
+  let content_height = max 1 (raw_content_height - List.length sheet_lines) in
   (match state.runtime_model_form with
    | Some form ->
        let lines = Masc_tui_model_form.rows ~input_locked:(runtime_form_input_locked state)
@@ -1663,11 +2050,10 @@ let render_config_models (state : state) =
        for _ = List.length lines + 1 to content_height do box_empty buf cols done
    | None when Option.is_some state.runtime_model_jump ->
        box_line buf cols
-         (Ansi.dim
-          ^ ui_text state
-              ~ko:"  선택한 계정·모델 설정을 읽는 중 · Esc:취소"
-              ~en:"  Loading selected account/model settings · Esc cancels"
-          ^ Ansi.reset);
+         ("  " ^ progress_inline ~ko ~now ?started_at:models_started_at
+            (ui_text state
+               ~ko:"선택한 계정·모델 설정을 읽는 중 · Esc:취소"
+               ~en:"Loading selected account/model settings · Esc cancels"));
        for _ = 2 to content_height do box_empty buf cols done
    | None -> match config_models_read_error state, state.runtime_config_view with
    | Some detail, _ ->
@@ -1677,17 +2063,26 @@ let render_config_models (state : state) =
          box_empty buf cols
        done
    | None, None ->
-       box_line buf cols
-         (Ansi.dim ^ ui_text state ~ko:"  (읽는 중)" ~en:"  (loading)" ^ Ansi.reset);
+       if config_loading then
+         box_line buf cols
+           ("  " ^ progress_inline ~ko ~now ?started_at:models_started_at
+              (ui_text state ~ko:"모델 설정 읽는 중" ~en:"Loading model settings"))
+       else
+         box_line_styled buf cols ~style:Ansi.dim (page_unread_note ~ko);
        for _ = 2 to content_height do
          box_empty buf cols
        done
    | None, Some _ ->
+       let prefix_limit = max 0 (content_height - 1) in
+       let prefix_rows =
+         if List.length projection.model_prefix <= prefix_limit then projection.model_prefix
+         else List.take prefix_limit projection.model_prefix
+       in
        List.iter (function
          | Model_identity line -> box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line)
          | Model_observation line -> box_line_styled buf cols ~style:(Theme.warn ()) ("  " ^ line))
-         projection.model_prefix;
-       let table_height = projection.model_height in
+         prefix_rows;
+       let table_height = max 1 (content_height - List.length prefix_rows) in
        let table = projection.model_document in
        let total = List.length table in
        (* The cursor walks bindings, not lines. In table mode line 0 is the
@@ -1738,10 +2133,20 @@ let render_config_models (state : state) =
              else box_line buf cols ("  " ^ line)
          | None -> box_empty buf cols
        done);
+  List.iter (box_line buf cols) sheet_lines;
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
+  let hints =
+    match state.runtime_model_form, state.runtime_model_jump with
+    | Some _, _ when runtime_form_input_locked state ->
+        ui_text state
+          ~ko:"Esc:뒤로 (입력 보존)  Ctrl-X:영수증 후 복구 닫기"
+          ~en:"Esc:back (input retained)  Ctrl-X:close recovery after receipt"
+    | None, Some _ -> ui_text state ~ko:"Esc:취소" ~en:"Esc:cancel"
+    | (Some _ | None), (Some _ | None) ->
+        Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:Config_models
+  in
   Buffer.add_string buf
-    (footer_line ~recovery_in_slot state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:Config_models));
+    (footer_line ~recovery_in_slot state ~max_cells:cols ~hints);
   finish_surface state ~surface_key:"config_models" ~rows:terminal_rows ~cols buf
 
 (* The models pane's scroll bound. The document is the table when it fits and
@@ -1958,14 +2363,23 @@ let render_runtime_config_status state =
    long endpoint list or probe report lost its tail and then its footer with no
    key that could bring them back. The offset is clamped here, against the
    lines actually laid out, and reported back as [Voice_scroll]. *)
-let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints =
+let finish_voice_surface ?(progress_sheet : progress_sheet option)
+    ?(now = Unix.gettimeofday ()) (state : state) ~terminal_rows ~cols ~head ~body ~hints =
   let lines = frame_lines body in
-  let height =
+  let raw_height =
     (* The rows under the head, less the box bottom and the footer. *)
     max 1
       (Masc_tui_types.surface_body_rows state ~terminal_rows
        - List.length (frame_lines head) - 2)
   in
+  let sheet_lines =
+    match progress_sheet with
+    | None -> []
+    | Some sheet ->
+        render_progress_sheet ~ko:(state.ui_language = Lang_ko) ~now
+          ~available:raw_height ~width:(framed_inner_width cols) sheet
+  in
+  let height = max 1 (raw_height - List.length sheet_lines) in
   let scroll =
     Masc_tui_scroll.normalize ~count:(List.length lines) ~height state.config_scroll
   in
@@ -1991,6 +2405,7 @@ let finish_voice_surface (state : state) ~terminal_rows ~cols ~head ~body ~hints
   for _ = drawn + 1 to height do
     box_empty buf cols
   done;
+  List.iter (box_line buf cols) sheet_lines;
   let recovery_in_slot = recovery_box_bottom state buf ~cols in
   Buffer.add_string buf (footer_line ~recovery_in_slot state ~max_cells:cols ~hints);
   finish_surface state ~clamped:(Voice_scroll scroll) ~surface_key:"voice"
@@ -2017,11 +2432,65 @@ let voice_body_line_styled buf cols ~style content =
 
 let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session.voice_wizard_session) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
   let field name value =
     voice_body_line buf cols
       (Printf.sprintf "  %s%s%s %s" Ansi.dim (fit_width name 12) Ansi.reset (Terminal_text.single_line value))
+  in
+  let save_signature =
+    match session.vws_save with
+    | Masc_tui_voice_wizard_session.Save_sending req -> Some ("sending:" ^ string_of_int req)
+    | Save_probing req -> Some ("probing:" ^ string_of_int req)
+    | Save_unanswered { request; _ } -> Some ("unanswered:" ^ string_of_int request)
+    | Save_not_sent | Save_needs_reopen _ | Save_settled -> None
+  in
+  let is_busy_save = Option.is_some save_signature in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"voice-wizard" ~now save_signature
+  in
+  let progress_sheet =
+    match session.vws_save with
+    | Masc_tui_voice_wizard_session.Save_sending _ ->
+        Some
+          { ps_title = ui_text state ~ko:"음성 설정 저장 중" ~en:"Saving voice settings"
+          ; ps_detail =
+              Some
+                (ui_text state ~ko:"runtime.toml 음성 구성을 저장하고 있습니다"
+                   ~en:"Writing voice configuration to runtime.toml")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint =
+              Some (ui_text state ~ko:"Esc:닫기 (저장 계속)" ~en:"Esc:close (save continues)")
+          ; ps_blocking = true
+          }
+    | Save_probing _ ->
+        Some
+          { ps_title = ui_text state ~ko:"엔드포인트 응답 확인 중" ~en:"Probing voice endpoints"
+          ; ps_detail =
+              Some
+                (ui_text state ~ko:"저장된 TTS/STT 엔드포인트 연결을 확인하고 있습니다"
+                   ~en:"Checking configured TTS/STT endpoints")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+          ; ps_blocking = true
+          }
+    | Save_unanswered _ ->
+        Some
+          { ps_title = ui_text state ~ko:"이전 저장 결과 확인 중" ~en:"Checking previous save"
+          ; ps_detail =
+              Some
+                (ui_text state ~ko:"서버에서 이전 저장 결과를 확인하고 있습니다"
+                   ~en:"Verifying previous save outcome on server")
+          ; ps_started_at = started_at
+          ; ps_meter = None
+          ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+          ; ps_blocking = true
+          }
+    | Save_not_sent | Save_needs_reopen _ | Save_settled -> None
   in
   let draft = session.vws_draft in
   let side =
@@ -2061,8 +2530,13 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
       | Voice_wizard.Model_is_blank -> "이 엔드포인트의 모델이 필요합니다 · 다른 엔드포인트의 모델은 유지됩니다"
       | Voice_wizard.Voice_is_blank -> "음성 출력의 기본 목소리가 필요합니다")
   in
+  let title_reading =
+    Option.map
+      (fun sheet -> progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+      progress_sheet
+  in
   box_line head cols
-    (config_pane_title ~cols
+    (config_pane_title ~cols ?reading:title_reading
        ~path:
          [ ui_text state ~ko:"음성" ~en:"voice"
          ; ui_text state ~ko:"설정" ~en:"setup" ]
@@ -2088,19 +2562,30 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    | Voice_wizard.Review ->
      (match Voice_wizard.gaps draft with
       | [] ->
-        let notice = match session.vws_save with
-          | Masc_tui_voice_wizard_session.Save_sending _ ->
-            ui_text state ~ko:"저장 요청 중 · 화면을 닫아도 요청은 계속됩니다"
-              ~en:"Save in progress · closing this screen does not cancel it"
-          | Save_unanswered _ ->
-            ui_text state ~ko:"이전 저장 결과 확인 중" ~en:"Checking the previous save result"
-          | Save_needs_reopen _ ->
-            ui_text state ~ko:"저장 결과를 확인할 수 없음 · 닫고 설정을 다시 여세요"
-              ~en:"Save result unconfirmed · close and reopen settings"
-          | Save_not_sent | Save_probing _ | Save_settled ->
-            ui_text state ~ko:"Enter로 저장" ~en:"Enter saves this"
-        in
-        voice_body_line buf cols (Printf.sprintf "    %s%s%s" Ansi.bold notice Ansi.reset)
+        (match session.vws_save with
+         | Masc_tui_voice_wizard_session.Save_sending _ ->
+           voice_body_line_styled buf cols ~style:(Theme.info ())
+             ("    " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+              ^ ui_text state ~ko:"저장 요청 중 · 화면을 닫아도 요청은 계속됩니다"
+                  ~en:"Save in progress · closing this screen does not cancel it")
+         | Save_probing _ ->
+           voice_body_line_styled buf cols ~style:(Theme.info ())
+             ("    " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+              ^ ui_text state ~ko:"저장 완료 · 엔드포인트 응답 확인 중"
+                  ~en:"Saved · checking configured endpoints")
+         | Save_unanswered _ ->
+           voice_body_line_styled buf cols ~style:(Theme.info ())
+             ("    " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+              ^ ui_text state ~ko:"이전 저장 결과 확인 중" ~en:"Checking the previous save result")
+         | Save_needs_reopen _ ->
+           voice_body_line_styled buf cols ~style:(Theme.warn ())
+             ("    "
+              ^ ui_text state ~ko:"저장 결과를 확인할 수 없음 · 닫고 설정을 다시 여세요"
+                  ~en:"Save result unconfirmed · close and reopen settings")
+         | Save_not_sent | Save_settled ->
+           voice_body_line buf cols
+             (Printf.sprintf "    %s%s%s" Ansi.bold
+                (ui_text state ~ko:"Enter로 저장" ~en:"Enter saves this") Ansi.reset))
       | gaps ->
         List.iter
           (fun gap ->
@@ -2156,7 +2641,14 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    | None -> ()
    | Some status ->
      voice_body_line buf cols "";
-     voice_body_line_styled buf cols ~style:(Theme.warn ()) (Printf.sprintf "  %s" (Terminal_text.single_line status)));
+     let prefix =
+       if is_busy_save then
+         "  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+       else "  "
+     in
+     voice_body_line_styled buf cols
+       ~style:(if is_busy_save then Theme.info () else Theme.warn ())
+       (prefix ^ Terminal_text.single_line status));
   (* Every endpoint, not just the first that answered. A chain stops at the
      first, which is why a dead fallback reads as healthy until the endpoint in
      front of it goes away. *)
@@ -2166,13 +2658,13 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
      voice_body_line buf cols "";
      voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.bold (ui_text state ~ko:"응답한 엔드포인트" ~en:"what answered") Ansi.reset);
      List.iter (fun line -> voice_body_line buf cols (Printf.sprintf "    %s" (Terminal_text.single_line line))) lines);
-  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+  finish_voice_surface ?progress_sheet ~now state ~terminal_rows ~cols ~head ~body:buf
     ~hints:(match session.vws_save, session.vws_step with
       | Masc_tui_voice_wizard_session.Save_sending _, _ ->
         ui_text state ~ko:"Esc:닫기 · 저장 요청은 계속됨" ~en:"Esc:close · save continues"
-      | (Save_unanswered _ | Save_needs_reopen _), Voice_wizard.Review ->
+      | (Save_probing _ | Save_unanswered _ | Save_needs_reopen _), Voice_wizard.Review ->
         ui_text state ~ko:"Up:이전  PgUp/PgDn:스크롤  Esc:닫기" ~en:"Up:back  PgUp/PgDn:scroll  Esc:close"
-      | (Save_not_sent | Save_probing _ | Save_settled), Voice_wizard.Review ->
+      | (Save_not_sent | Save_settled), Voice_wizard.Review ->
         ui_text state ~ko:"Enter:저장  Up:이전  PgUp/PgDn:스크롤  Esc:닫기"
           ~en:"Enter:save  Up:back  PgUp/PgDn:scroll  Esc:close"
       | (Save_not_sent | Save_probing _ | Save_settled | Save_unanswered _ | Save_needs_reopen _),
@@ -2187,8 +2679,57 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
    reader has to keep apart. *)
 let render_voice_agent (state : state) (session : voice_agent_session) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let buf = Buffer.create 2048 in
   let head = Buffer.create 256 in
+  let loading_voices = session.vas_loading_voices in
+  let signature =
+    if session.vas_saving then Some "saving"
+    else if loading_voices then Some "voices"
+    else None
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"voice-agent" ~now signature
+  in
+  let selected_agent = List.nth_opt session.vas_agents session.vas_agent_cursor in
+  let selected_voice = List.nth_opt session.vas_voices session.vas_voice_cursor in
+  let progress_sheet =
+    if session.vas_saving then
+      let detail =
+        match selected_agent, selected_voice with
+        | Some agent, Some (_, label) ->
+            Some (Terminal_text.single_line agent ^ " · " ^ Terminal_text.single_line label)
+        | Some agent, None -> Some (Terminal_text.single_line agent)
+        | None, (Some _ | None) -> None
+      in
+      Some
+        { ps_title = ui_text state ~ko:"키퍼 목소리 저장 중" ~en:"Saving Keeper voice"
+        ; ps_detail = detail
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+        ; ps_blocking = true
+        }
+    else if loading_voices then
+      Some
+        { ps_title = ui_text state ~ko:"목소리 목록 읽는 중" ~en:"Loading voice list"
+        ; ps_detail =
+            Some
+              (ui_text state ~ko:"사용 가능한 TTS 목소리를 조회하고 있습니다"
+                 ~en:"Fetching available TTS voices")
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+        ; ps_blocking = false
+        }
+    else None
+  in
+  let title_reading =
+    Option.map
+      (fun sheet -> progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+      progress_sheet
+  in
   (* Two selectors move at once, each under its own keys, so neither is the
      screen's one position; each names the choice it holds. *)
   let selector label items cursor draw =
@@ -2203,7 +2744,7 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
       (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
   in
   box_line head cols
-    (config_pane_title ~cols
+    (config_pane_title ~cols ?reading:title_reading
        ~path:
          [ ui_text state ~ko:"음성" ~en:"voice"
          ; ui_text state ~ko:"키퍼 목소리" ~en:"keeper voices" ]
@@ -2216,11 +2757,11 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   selector (ui_text state ~ko:"목소리" ~en:"voice") session.vas_voices session.vas_voice_cursor
     (fun (_, label) -> Terminal_text.single_line label);
   voice_body_line buf cols "";
-  (match List.nth_opt session.vas_agents session.vas_agent_cursor with
+  (match selected_agent with
    | None -> ()
    | Some agent ->
        voice_body_line buf cols (ui_text state ~ko:"  키퍼: " ~en:"  Keeper: " ^ Terminal_text.single_line agent));
-  (match List.nth_opt session.vas_voices session.vas_voice_cursor with
+  (match selected_voice with
    | None -> ()
    | Some (voice_id, label) ->
        voice_body_line buf cols (ui_text state ~ko:"  목소리: " ~en:"  Voice: " ^ Terminal_text.single_line label);
@@ -2229,20 +2770,67 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
    | None -> ()
    | Some status ->
      voice_body_line buf cols "";
-     voice_body_line_styled buf cols ~style:(Theme.warn ())
-       ("  " ^ Terminal_text.single_line status));
-  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+     let prefix =
+       if session.vas_saving then
+         "  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+       else "  "
+     in
+     voice_body_line_styled buf cols
+       ~style:(if session.vas_saving then Theme.info () else Theme.warn ())
+       (prefix ^ Terminal_text.single_line status));
+  finish_voice_surface ?progress_sheet ~now state ~terminal_rows ~cols ~head ~body:buf
     ~hints:(Masc_tui_keys.footer_hints_voice_agent ~lang:state.ui_language ~saving:session.vas_saving ())
 ;;
 
 let render_voice (state : state) =
   match state.voice_agent_voices, state.voice_wizard with
-  | Some session, _ -> render_voice_agent state session
-  | None, Some session -> render_voice_wizard state session
+  | Some session, _ ->
+      Masc_tui_types.clear_progress_clock state ~slot:"voice-config";
+      Masc_tui_types.clear_progress_clock state ~slot:"voice-wizard";
+      render_voice_agent state session
+  | None, Some session ->
+      Masc_tui_types.clear_progress_clock state ~slot:"voice-config";
+      Masc_tui_types.clear_progress_clock state ~slot:"voice-agent";
+      render_voice_wizard state session
   | None, None ->
+  Masc_tui_types.clear_progress_clock state ~slot:"voice-wizard";
+  Masc_tui_types.clear_progress_clock state ~slot:"voice-agent";
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let head = Buffer.create 256 in
   let buf = Buffer.create 2048 in
+  let loading_config =
+    Option.is_none state.voice_config && Option.is_none state.voice_config_error
+  in
+  let loading_setup =
+    Option.is_none state.voice_setup && Option.is_none state.voice_setup_error
+  in
+  let voice_loading = server_authority_ready state && (loading_config || loading_setup) in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"voice-config" ~now
+      (if voice_loading then Some "loading" else None)
+  in
+  let progress_sheet =
+    if not voice_loading then None
+    else
+      Some
+        { ps_title = ui_text state ~ko:"음성 설정 읽는 중" ~en:"Loading voice settings"
+        ; ps_detail =
+            Some
+              (ui_text state ~ko:"TTS/STT 엔드포인트와 입력 장치 구성을 조회하고 있습니다"
+                 ~en:"Reading TTS/STT endpoints and input device configuration")
+        ; ps_started_at = started_at
+        ; ps_meter = None
+        ; ps_action_hint = None
+        ; ps_blocking = false
+        }
+  in
+  let title_reading =
+    Option.map
+      (fun sheet -> progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+      progress_sheet
+  in
   let field name value =
     voice_body_line buf cols
       (Printf.sprintf "  %s%s%s %s" Ansi.dim (fit_width name 18) Ansi.reset (Terminal_text.single_line value))
@@ -2314,7 +2902,7 @@ let render_voice (state : state) =
     | lines -> List.iter (fun line -> voice_body_line buf cols line) lines
   in
   box_line head cols
-    (config_pane_title ~cols state);
+    (config_pane_title ~cols ?reading:title_reading state);
   box_divider head cols;
   let voice_section ?(first = false) title =
     List.iter (fun row -> voice_body_line buf cols row)
@@ -2341,7 +2929,12 @@ let render_voice (state : state) =
        voice_body_line_styled buf cols ~style:(Theme.warn ()) (ui_text state ~ko:"  음성 설정을 읽지 못했습니다" ~en:"  Voice settings did not load");
        voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset)
    | None, None ->
-       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (ui_text state ~ko:"읽는 중" ~en:"Reading") Ansi.reset)
+       if server_authority_ready state then
+         voice_body_line_styled buf cols ~style:(Theme.info ())
+           ("  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
+            ^ ui_text state ~ko:"음성 설정 읽는 중" ~en:"Reading voice settings")
+       else
+         voice_body_line_styled buf cols ~style:Ansi.dim (page_unread_note ~ko)
    | Some json, None ->
        field (ui_text state ~ko:"상태" ~en:"status")
          (Option.value (string_of [ "status" ] json)
@@ -2423,23 +3016,94 @@ let render_voice (state : state) =
      written here and left out Esc and q, which the fitter keeps only when
      the hints name them, so the voice pane was the one Config pane that
      named no way out. *)
-  finish_voice_surface state ~terminal_rows ~cols ~head ~body:buf
+  finish_voice_surface ?progress_sheet ~now state ~terminal_rows ~cols ~head ~body:buf
     ~hints:(Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:Config_voice)
 ;;
 
 let render_config (state : state) =
-  if state.runtime_config_status_open then render_runtime_config_status state else
+  if state.runtime_config_status_open then begin
+    Masc_tui_types.clear_progress_clock state ~slot:"config-toml";
+    render_runtime_config_status state
+  end else
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
+  let now = Unix.gettimeofday () in
   let path_note = config_path_note state in
+  let form_sheet = runtime_form_progress_sheet ~now state in
+  let recall_gate_loading =
+    Option.exists
+      (fun form ->
+        match Masc_tui_memory_recall_form.server form with
+        | Masc_tui_memory_recall_form.Server_unread -> true
+        | Server_unavailable _ | Server_read _ -> false)
+      state.memory_recall_form
+  in
+  let config_loading =
+    match state.runtime_config_read with
+    | `Loading _ -> true
+    | `Idle -> false
+  in
+  let gen = string_of_int state.runtime_config_generation in
+  let config_clock_sig =
+    if Option.is_some form_sheet then None
+    else if recall_gate_loading then Some ("memory-recall-gate:" ^ gen)
+    else if config_loading then Some ("loading:" ^ gen)
+    else None
+  in
+  let config_started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"config-toml" ~now config_clock_sig
+  in
+  let progress_sheet =
+    match form_sheet with
+    | Some _ as sheet -> sheet
+    | None ->
+        if recall_gate_loading then
+          Some
+            { ps_title =
+                ui_text state ~ko:"기억 회상 게이트 확인 중" ~en:"Reading memory recall gate"
+            ; ps_detail =
+                Some
+                  (ui_text state ~ko:"서버에 적용 중인 기억 회상 상태를 조회하고 있습니다"
+                     ~en:"Reading live memory recall gate from server")
+            ; ps_started_at = config_started_at
+            ; ps_meter = None
+            ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+            ; ps_blocking = false
+            }
+        else if config_loading then
+          Some
+            { ps_title =
+                if Option.is_none state.runtime_config_view then
+                  ui_text state ~ko:"runtime.toml 읽는 중" ~en:"Loading runtime.toml"
+                else
+                  ui_text state ~ko:"runtime.toml 갱신 중" ~en:"Refreshing runtime.toml"
+            ; ps_detail =
+                Some
+                  (ui_text state ~ko:"런타임 설정 파일과 계정·모델 정의를 불러오고 있습니다"
+                     ~en:"Reading runtime configuration and bindings")
+            ; ps_started_at = config_started_at
+            ; ps_meter = None
+            ; ps_action_hint = None
+            ; ps_blocking = false
+            }
+        else None
+  in
+  let title_reading =
+    Option.map
+      (fun sheet -> progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+      progress_sheet
+  in
   let title =
     config_pane_title ~cols
+      ?reading:title_reading
       ~note:path_note
       state
   in
   (* The frame, its fill and the footer are the contract's. The surface
      subtracted a literal 7 and drew six fixed rows, so the footer stood one
      row above the composer; the key handler read the same short number. *)
-  surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"config" ~title
+  surface_chrome ~overflow:Paged_by_cursor ?progress_sheet ~now state ~terminal_rows ~cols
+    ~surface_key:"config" ~title
     ~hints:
       (* Projected from the key table rather than spelled here. The literal
          named five keys and no way out -- not because the row ran out of
@@ -2449,8 +3113,8 @@ let render_config (state : state) =
       (match state.runtime_account_form with
        | Some _ when runtime_form_input_locked state ->
          ui_text state
-           ~ko:"Esc:뒤로 · 입력 보존됨 · Ctrl-X:영수증 확인 후 복구 닫기"
-           ~en:"Esc back · input retained · Ctrl-X closes recovery after receipt"
+           ~ko:"Esc:뒤로 (입력 보존)  Ctrl-X:영수증 후 복구 닫기"
+           ~en:"Esc:back (input retained)  Ctrl-X:close recovery after receipt"
        | Some form when Masc_tui_runtime_account_form.is_saved form ->
          Masc_tui_keys.footer_hints_runtime_account_saved ~lang:state.ui_language
        | Some _ -> Masc_tui_keys.footer_hints_runtime_account_form ~lang:state.ui_language
@@ -2459,7 +3123,7 @@ let render_config (state : state) =
        | None when Option.is_some state.typesafeai_exclusion_form ->
          Masc_tui_keys.footer_hints_typesafeai_exclusion_form ~lang:state.ui_language
        | None -> Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:state.config_pane)
-    ~body:(fun ~budget:_ c ->
+    ~body:(fun ~budget c ->
       List.iter (c.push_styled ~style:(Theme.recede ()))
         (config_identity_rows ~cols state);
       List.iter (fun (tone, text) ->
@@ -2468,7 +3132,8 @@ let render_config (state : state) =
       List.iter (fun line -> c.push_styled ~style:(Theme.warn ()) ("  " ^ line))
         (runtime_config_edit_lines ~cols state);
       c.push_divider ();
-      let content_height = config_content_height state in
+      let content_height = max 0 (budget - config_heading_rows ~cols state) in
+      if content_height > 0 then
       (* The account form stands where the file is drawn: it is opened on that
          file, and what it saves is that file with one provider added. *)
       let ko = state.ui_language = Lang_ko in
@@ -2476,13 +3141,15 @@ let render_config (state : state) =
       | Some form ->
           let saved = Masc_tui_runtime_account_form.is_saved form in
           let form_height =
-            if saved then max 1 (content_height - 1) else content_height
+            if saved then max 0 (content_height - 1) else content_height
           in
-          let form_rows =
-            Masc_tui_runtime_account_form.rows ~ko ~width:(framed_inner_width cols)
-              ~height:form_height form
-          in
-          List.iter c.push (if saved then List.take form_height form_rows else form_rows);
+          if form_height > 0 then begin
+            let form_rows =
+              Masc_tui_runtime_account_form.rows ~ko ~width:(framed_inner_width cols)
+                ~height:form_height form
+            in
+            List.iter c.push (if saved then List.take form_height form_rows else form_rows)
+          end;
           (* The saved form stays open for its copy key, and the footer can
              lose it: the save notice leads that row and the fitter keeps only
              the way out, so CI run 36397938379 drew "Enter / Esc:close"
@@ -2515,7 +3182,12 @@ let render_config (state : state) =
       match state.runtime_config_view with
       | None ->
           if Option.is_none state.runtime_config_view_error then
-            c.push (Ansi.dim ^ ui_text state ~ko:"  (읽는 중)" ~en:"  (loading)" ^ Ansi.reset)
+            if config_loading then
+              c.push
+                ("  " ^ progress_inline ~ko ~now ?started_at:config_started_at
+                   (ui_text state ~ko:"runtime.toml 읽는 중" ~en:"Loading runtime.toml"))
+            else
+              c.push_styled ~style:Ansi.dim (page_unread_note ~ko)
       | Some _ ->
           let rows = runtime_config_active_rows state in
           let total = List.length rows in

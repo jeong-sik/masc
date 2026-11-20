@@ -305,6 +305,11 @@ def newest_run_per_name(checks):
     the newest: only a re-run is created after the runs it replaces. A commit
     status is already one per context, and a check without a name (a kind
     this does not know) is kept as it is.
+
+    The name is the only key. Runs of different workflows or apps that share a
+    name are not told apart, and two runs of one name that started at the same
+    time keep the later entry of the listing. The worst case is one extra
+    worker run, since the worker decides admission.
     """
     newest = {}
     unnamed = []

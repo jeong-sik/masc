@@ -17914,7 +17914,9 @@ let invalidate_language_cached_views state =
 let refresh_keeper_config_view_if_open state ~mailbox =
   if state.view = Keepers Keeper_detail && state.detail_tab = Detail_instructions then
     Option.iter
-      (fun (keeper : keeper) -> launch_keeper_config_view state ~mailbox keeper.k_name)
+      (fun (keeper : keeper) ->
+        Masc_tui_surface_requests.Keeper_surface_requests.launch_keeper_config_view
+          state ~mailbox keeper.k_name)
       (selected_keeper state)
 
 let apply_ui_language state ~mailbox lang =

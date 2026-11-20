@@ -281,12 +281,17 @@ let test_owed_read_retry_is_noted () =
 
 let test_refresh_retry_is_noted () =
   let module Pace = Masc_tui_refresh_pace in
-  let failing = Pace.probe_failed ~retry_s:2. ~max_retry_s:30. ~now:10. ~wall_now:5000. Pace.answering in
+  let now = Wake.Mono.now () in
+  let failing = Pace.probe_failed ~retry_s:2. ~max_retry_s:30. ~now ~wall_now:5000. Pace.answering in
   let retry_at = match failing with
     | Pace.Failing { retry_at; _ } -> retry_at
     | Pace.Answering | Pace.Recovered _ -> fail "a failed probe is not failing" in
-  check_noted_in "refresh" Wake.Refresh_retry ~remaining_s:(retry_at -. 10.5)
-    (fun () -> Pace.due ~now:10.5 failing);
+  check int64 "the retry is the wait after the failure"
+    (Int64.add (now :> int64) (seconds 2)) (retry_at :> int64);
+  Wake.Pass.begin_pass ();
+  check bool "refresh: not yet" false (Pace.due ~now:(Wake.Mono.after now 0.5) failing);
+  check (option (pair int int64)) "refresh: its retry is noted"
+    (Some (reason_number Refresh_retry, (retry_at :> int64))) (noted ());
   Wake.Pass.begin_pass ();
   check bool "due at its retry" true (Pace.due ~now:retry_at failing);
   check_nothing_noted "refresh at its retry"

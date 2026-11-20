@@ -10490,7 +10490,8 @@ let step_engine_samples state ~mailbox ~render_schedule =
   | None -> state.engine_samples <- Masc_tui_engine_samples.hidden state.engine_samples
   | Some capacity ->
     let allow_read =
-      Masc_tui_refresh_pace.screen_read_starts ~now Owed_read_due state.refresh_pace
+      Masc_tui_refresh_pace.screen_read_starts ~now:(Masc_tui_wake.Mono.now ()) Owed_read_due
+        state.refresh_pace
     in
     let samples, step =
       Masc_tui_engine_samples.tick ~allow_read
@@ -17406,7 +17407,7 @@ let note_read state read result =
 let fail_refresh_pace state =
   state.refresh_pace <-
     Masc_tui_refresh_pace.probe_failed ~retry_s:stream_reconnect_s
-      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ())
       ~wall_now:(Unix.gettimeofday ()) state.refresh_pace
 
 (* The [/health] probe's reading: its error is the probe's own failure. It
@@ -21367,7 +21368,9 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
   (* While [/health] keeps failing, a pass the TUI asks for by itself waits
      for the one the failure owes, which revalidates everything this one
      would, side reads included (RFC tui-one-screen-grammar §2). *)
-  let paced = Masc_tui_refresh_pace.starts ~now:(monotonic_now_s ()) intent state.refresh_pace in
+  let paced =
+    Masc_tui_refresh_pace.starts ~now:(Masc_tui_wake.Mono.now ()) intent state.refresh_pace
+  in
   (* The chat pane's history comes down its own generation-guarded path, not
      in the surface bundle. A revalidation owes it a read. Owed, so a pane
      scrolled into older rows or a read in flight takes it when it can; the
@@ -22031,7 +22034,7 @@ let start_http_scoped_refresh state ~host ~port
      no start, so its debt stays owed and its launcher asks again on a later
      loop. Every caller states its [ask]; none is assumed. *)
   if Masc_tui_types.surface_needs_any needs
-     && Masc_tui_refresh_pace.screen_read_starts ~now:(monotonic_now_s ()) ask
+     && Masc_tui_refresh_pace.screen_read_starts ~now:(Masc_tui_wake.Mono.now ()) ask
           state.refresh_pace
   then begin
     let collection_inflight = !full_refresh_inflight
@@ -22268,7 +22271,7 @@ let start_scoped_refresh_followup state ~host ~port ~refresh_inflight
 let launch_owed_refresh_pass state ~refresh_inflight ~scoped_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   if not !refresh_inflight
-     && Masc_tui_refresh_pace.due ~now:(monotonic_now_s ()) state.refresh_pace
+     && Masc_tui_refresh_pace.due ~now:(Masc_tui_wake.Mono.now ()) state.refresh_pace
   then
     start_http_refresh state ~host:server_peer_host ~port:state.port ~intent:Owed_pass
       ~refresh_inflight ~scoped_refresh_inflight ~scoped_refresh_followup ~mailbox

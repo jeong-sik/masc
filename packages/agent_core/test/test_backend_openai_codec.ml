@@ -3233,6 +3233,93 @@ let test_responses_developer_carrier_and_explicit_cache_opt_out () =
     (member "input" legacy |> to_list |> List.length)
 ;;
 
+let test_openrouter_top_level_cache_control_and_1h_pricing () =
+  let messages = [ msg User [ Text "hello" ] ] in
+  let chat_json config =
+    Backend_openai_request.build_request ~config ~messages () |> Yojson.Safe.from_string
+  in
+  let or_claude_cfg =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openrouter"
+      ~model_id:"anthropic/claude-opus-5"
+      ~base_url:"https://openrouter.ai/api/v1"
+      ~cache_system_prompt:true
+      ()
+  in
+  (* 5m default emits top-level {"type":"ephemeral"} with no "ttl". *)
+  let body_5m = chat_json or_claude_cfg in
+  let cc_5m = member "cache_control" body_5m in
+  check_string "5m cache_control.type" "ephemeral" (member "type" cc_5m |> to_string);
+  check_bool "5m cache_control omits ttl" false
+    (List.mem_assoc "ttl" (Yojson.Safe.Util.to_assoc cc_5m));
+  (* 1h extended TTL emits top-level {"type":"ephemeral","ttl":"1h"}. *)
+  let or_claude_1h = { or_claude_cfg with cache_extended_ttl = true } in
+  let body_1h = chat_json or_claude_1h in
+  let cc_1h = member "cache_control" body_1h in
+  check_string "1h cache_control.type" "ephemeral" (member "type" cc_1h |> to_string);
+  check_string "1h cache_control.ttl" "1h" (member "ttl" cc_1h |> to_string);
+  (* Pricing uses cache_write_multiplier (1.25x) for 5m and cache_write_1h_multiplier (2.0x) for 1h. *)
+  let write_usage : Types.api_usage =
+    { input_tokens = 1_000_000
+    ; output_tokens = 0
+    ; cache_creation_input_tokens = 1_000_000
+    ; cache_read_input_tokens = 0
+    ; cost_usd = None
+    }
+  in
+  let priced_5m =
+    Pricing.annotate_usage_cost
+      ~source:(Provider_config.pricing_source or_claude_cfg)
+      ~model_id:"anthropic/claude-opus-5"
+      write_usage
+  in
+  let priced_1h =
+    Pricing.annotate_usage_cost
+      ~source:(Provider_config.pricing_source or_claude_1h)
+      ~model_id:"anthropic/claude-opus-5"
+      write_usage
+  in
+  Alcotest.(check (option (float 0.0001)))
+    "5m OpenRouter Claude cache write uses 1.25x ($6.25/1M)"
+    (Some 6.25)
+    priced_5m.cost_usd;
+  Alcotest.(check (option (float 0.0001)))
+    "1h OpenRouter Claude cache write uses 2.0x ($10.0/1M)"
+    (Some 10.0)
+    priced_1h.cost_usd;
+  (* cache_system_prompt = false omits cache_control even when cache_extended_ttl = true. *)
+  let body_off =
+    chat_json { or_claude_1h with cache_system_prompt = false }
+    |> Yojson.Safe.Util.to_assoc
+  in
+  check_bool "cache_system_prompt=false omits cache_control" false
+    (List.mem_assoc "cache_control" body_off);
+  (* Non-Anthropic OpenRouter models and non-OpenRouter providers omit cache_control. *)
+  List.iter
+    (fun (label, kind, provider_id, model_id, base_url) ->
+       let cfg =
+         Provider_config.make
+           ~kind
+           ?provider_id
+           ~model_id
+           ~base_url
+           ~cache_system_prompt:true
+           ~cache_extended_ttl:true
+           ()
+       in
+       let fields = chat_json cfg |> Yojson.Safe.Util.to_assoc in
+       check_bool (label ^ " omits cache_control") false
+         (List.mem_assoc "cache_control" fields))
+    [ "openrouter gpt", Provider_config.OpenAI_compat, Some "openrouter", "openai/gpt-5.6-sol", "https://openrouter.ai/api/v1"
+    ; "openrouter deepseek", Provider_config.OpenAI_compat, Some "openrouter", "deepseek/deepseek-v4.1-flash-1017", "https://openrouter.ai/api/v1"
+    ; "openrouter gemini", Provider_config.OpenAI_compat, Some "openrouter", "google/gemini-3.8-flash", "https://openrouter.ai/api/v1"
+    ; "direct openai", Provider_config.OpenAI_compat, Some "openai", "gpt-5.5", "https://api.openai.com/v1"
+    ; "direct mistral", Provider_config.OpenAI_compat, Some "mistral", "mistral-large-4", "https://api.mistral.ai/v1"
+    ; "anonymous compat", Provider_config.OpenAI_compat, None, "anthropic/claude-opus-5", "https://example.invalid/v1"
+    ]
+;;
+
 let test_responses_build_request_uses_text_format_json_schema () =
   let schema =
     `Assoc
@@ -4302,6 +4389,10 @@ let () =
             "responses developer carrier, previous_response_id guard, and explicit cache opt-out"
             `Quick
             test_responses_developer_carrier_and_explicit_cache_opt_out
+        ; Alcotest.test_case
+            "openrouter top-level cache_control and 1h write pricing"
+            `Quick
+            test_openrouter_top_level_cache_control_and_1h_pricing
         ; Alcotest.test_case
             "build request text.format json_schema"
             `Quick

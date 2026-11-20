@@ -38,6 +38,7 @@ type entry =
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
+  ; prompt_cache_wire : string option
   ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -334,6 +335,7 @@ let known_entry_keys =
   ; "supports_system_prompt"
   ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
+  ; "prompt_cache_wire"
   ; "supports_explicit_cache_opt_out"
   ; "supports_top_k"
   ; "supports_min_p"
@@ -530,6 +532,12 @@ let parse_entry json =
   let* supports_system_prompt = member_bool "supports_system_prompt" json in
   let* supports_assistant_prefill = member_bool "supports_assistant_prefill" json in
   let* supports_prompt_caching = member_bool "supports_prompt_caching" json in
+  let* prompt_cache_wire =
+    canonical_choice
+      "prompt_cache_wire"
+      ~allowed:Capability_vocab.prompt_cache_wire_values
+      json
+  in
   let* supports_explicit_cache_opt_out =
     member_bool "supports_explicit_cache_opt_out" json
   in
@@ -574,6 +582,7 @@ let parse_entry json =
     ; supports_system_prompt
     ; supports_assistant_prefill
     ; supports_prompt_caching
+    ; prompt_cache_wire
     ; supports_explicit_cache_opt_out
     ; supports_top_k
     ; supports_min_p

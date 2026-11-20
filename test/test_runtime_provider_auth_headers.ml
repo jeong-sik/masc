@@ -3582,12 +3582,37 @@ auth = "none"
          | Error _ -> not supported))
   ) [ "", false; "supports_extended_cache_ttl = false", false;
       "supports_extended_cache_ttl = true", true ];
-  match Llm_provider.Model_catalog.of_toml_string ~source:"cache-contract-type"
+  (match Llm_provider.Model_catalog.of_toml_string ~source:"cache-contract-type"
       (catalog "supports_extended_cache_ttl = \"true\"") with
-  | Error error -> check string "provider contract rejects a string"
-      "provider entry \"fixture-provider\" field \"supports_extended_cache_ttl\" expected bool"
-      error
-  | Ok _ -> fail "provider contract silently accepted a string"
+   | Error error -> check string "provider contract rejects a string"
+       "provider entry \"fixture-provider\" field \"supports_extended_cache_ttl\" expected bool"
+       error
+   | Ok _ -> fail "provider contract silently accepted a string");
+  (* OpenRouter anthropic/claude-* carries top-level cache_control and accepts
+     5m / 1h cache-retention on Chat Completions; implicit-only OpenRouter
+     models fail closed. *)
+  let or_5m_cfg, or_5m_binding = parallel_policy_runtime ~provider_id:"openrouter"
+      ~protocol:"openai-compatible-http" ~model_id:"anthropic/claude-opus-5"
+      ~policy:"cache-retention = \"5m\"" in
+  (match provider_config_for_binding or_5m_cfg or_5m_binding with
+   | Ok pc -> check bool "openrouter claude 5m keeps cache_extended_ttl false" false pc.cache_extended_ttl
+   | Error error -> fail ("openrouter claude 5m rejected unexpectedly: " ^ error));
+  let or_1h_cfg, or_1h_binding = parallel_policy_runtime ~provider_id:"openrouter"
+      ~protocol:"openai-compatible-http" ~model_id:"anthropic/claude-opus-5"
+      ~policy:"cache-retention = \"1h\"" in
+  (match provider_config_for_binding or_1h_cfg or_1h_binding with
+   | Ok pc -> check bool "openrouter claude 1h sets cache_extended_ttl true" true pc.cache_extended_ttl
+   | Error error -> fail ("openrouter claude 1h rejected unexpectedly: " ^ error));
+  List.iter (fun (model_id, retention) ->
+    let or_cfg, or_binding = parallel_policy_runtime ~provider_id:"openrouter"
+        ~protocol:"openai-compatible-http" ~model_id
+        ~policy:(Printf.sprintf "cache-retention = %S" retention) in
+    match provider_config_for_binding or_cfg or_binding with
+    | Error _ -> ()
+    | Ok _ -> failf "implicit-only openrouter model %s must reject cache-retention = %S" model_id retention)
+    [ "deepseek/deepseek-v4.1-flash-1017", "1h"
+    ; "openai/gpt-5.6-sol", "5m"
+    ]
 
 (* #37849. A config that names a provider reads bare rows only when that
    provider declares serves_bare_models. The runtime mirrors the Terminal-Bench

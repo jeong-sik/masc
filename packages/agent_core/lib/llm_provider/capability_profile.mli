@@ -73,6 +73,10 @@ type cache_session_wire = Capability_vocab.cache_session_wire =
   | Openrouter_session_id
   | Prompt_cache_key
 
+type prompt_cache_wire = Capability_vocab.prompt_cache_wire =
+  | No_prompt_cache_wire
+  | Openrouter_top_level_cache_control
+
 type tool_schema_conformance = Capability_vocab.tool_schema_conformance =
   | Rich_json_schema
   | Conformant_subset_required
@@ -234,6 +238,10 @@ type capabilities =
         Model-catalog and explicit capability declarations override the provider
         default, which preserves existing continuation behavior. *)
   ; supports_prompt_caching : bool
+  ; prompt_cache_wire : prompt_cache_wire
+    (** Explicit Chat Completions prompt-cache breakpoint wire format for this
+        model row (e.g. OpenRouter top-level [cache_control]). Defaults to
+        {!No_prompt_cache_wire}. *)
   ; supports_explicit_cache_opt_out : bool
     (** Whether the OpenAI Responses endpoint accepts
         [prompt_cache_options = {"mode": "explicit"}] (with zero breakpoints)

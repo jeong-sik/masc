@@ -810,11 +810,16 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
 ;;
 
 (* The lifetime a binding declares for the cache breakpoints its requests
-   write. Only the Messages wire writes [cache_control], and an endpoint that
-   speaks it accepts the one-hour [ttl] only when its catalog provider row
-   documents it. [Ok] carries whether requests ask for that lifetime. *)
+   write. Messages endpoints accept the one-hour [ttl] when their catalog
+   provider row documents [supports_extended_cache_ttl]. Chat Completions
+   endpoints carry top-level [cache_control] only when BOTH the provider row
+   documents [supports_extended_cache_ttl] AND the catalog model row declares
+   [Openrouter_top_level_cache_control]; implicit-only rows and other
+   OpenAI-compatible providers fail closed. [Ok] carries whether requests ask
+   for the one-hour lifetime. *)
 let validate_cache_retention (provider : Runtime_schema.provider)
     ~(model_id : string) ~supports_extended_cache_ttl
+    ~(prompt_cache_wire : Llm_provider.Capabilities.prompt_cache_wire)
     ~(cache_retention : Runtime_schema.cache_retention option) =
   match cache_retention, provider.api_format with
   | None, _ -> Ok false
@@ -830,8 +835,27 @@ let validate_cache_retention (provider : Runtime_schema.provider)
          (Printf.sprintf
             "binding %s.%s declares cache-retention = %S, but provider %S has no catalog-declared extended cache TTL contract"
             provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.id))
+  | Some retention, Runtime_schema.Chat_completions_api ->
+    (match supports_extended_cache_ttl, prompt_cache_wire with
+     | true, Llm_provider.Capabilities.Openrouter_top_level_cache_control ->
+       Ok
+         (match retention with
+          | Runtime_schema.One_hour -> true
+          | Runtime_schema.Five_minutes -> false)
+     | true, Llm_provider.Capabilities.No_prompt_cache_wire ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares cache-retention = %S, but model %S has no catalog-declared prompt-cache wire contract"
+            provider.id model_id (Runtime_schema.cache_retention_to_string retention) model_id)
+     | false,
+       ( Llm_provider.Capabilities.No_prompt_cache_wire
+       | Llm_provider.Capabilities.Openrouter_top_level_cache_control ) ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares cache-retention = %S, but protocol %s cannot carry that request policy"
+            provider.id model_id (Runtime_schema.cache_retention_to_string retention) provider.protocol))
   | Some retention,
-    ( Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api
+    ( Ollama_api | Gemini_api | Vertex_gemini_api
     | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
     | Muse_serve_runtime | Vibe_cli_runtime ) ->
     Error
@@ -869,10 +893,6 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
       ~supports_parallel_tool_suppression:(Declarations.supports_parallel_tool_suppression
         declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
       ~disable_parallel_tool_use in
-  let* cache_extended_ttl = validate_cache_retention provider ~model_id:spec.id
-      ~supports_extended_cache_ttl:(Declarations.supports_extended_cache_ttl
-        declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
-      ~cache_retention in
   let* declaration =
     Result.map_error (catalog_row_refusal_text provider) (catalog_declaration declarations provider)
   in
@@ -898,6 +918,18 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
            ~provider_id:(Runtime_schema.catalog_provider_id provider) ~model_id:spec.api_name in
        let catalog_capabilities =
          Llm_provider.Capabilities.request_policy_capabilities request_policy in
+       let prompt_cache_wire =
+         match catalog_capabilities with
+         | Some caps -> caps.Llm_provider.Capabilities.prompt_cache_wire
+         | None -> Llm_provider.Capabilities.No_prompt_cache_wire
+       in
+       let* cache_extended_ttl =
+         validate_cache_retention provider ~model_id:spec.id
+           ~supports_extended_cache_ttl:(Declarations.supports_extended_cache_ttl
+             declarations ~provider_id:(Runtime_schema.catalog_provider_id provider))
+           ~prompt_cache_wire
+           ~cache_retention
+       in
        let model_capabilities_override =
          model_capabilities_override_of_model_spec
            ~wire:kind
@@ -1419,7 +1451,9 @@ let validate_official_binding
       (* An official client writes its own cache breakpoints, so a
          declared lifetime would reach no request. *)
       validate_cache_retention provider ~model_id:binding.model_id
-        ~supports_extended_cache_ttl:false ~cache_retention:binding.cache_retention
+        ~supports_extended_cache_ttl:false
+        ~prompt_cache_wire:Llm_provider.Capabilities.No_prompt_cache_wire
+        ~cache_retention:binding.cache_retention
       |> Result.map (fun (_ : bool) -> ())
   in
   refuse_anthropic_thinking_control_on_official_client provider spec

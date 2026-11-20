@@ -547,6 +547,9 @@ let parse_capability_overrides ~base cap_json =
   let* responses_system_prompt_carrier = enum "responses_system_prompt_carrier"
     Capability_vocab.responses_system_prompt_carrier_values
     Capability_vocab.responses_system_prompt_carrier_of_string in
+  let* prompt_cache_wire = enum "prompt_cache_wire"
+    Capability_vocab.prompt_cache_wire_values
+    Capability_vocab.prompt_cache_wire_of_string in
   let* tool_schema_conformance = enum "tool_schema_conformance"
     Capability_vocab.tool_schema_conformance_values
     Capability_vocab.tool_schema_conformance_of_string in
@@ -649,6 +652,8 @@ let parse_capability_overrides ~base cap_json =
       {caps with Capability_profile.chat_output_budget_field=value})
     |> fun caps -> override responses_system_prompt_carrier caps (fun caps value ->
       {caps with Capability_profile.responses_system_prompt_carrier=value})
+    |> fun caps -> override prompt_cache_wire caps (fun caps value ->
+      {caps with Capability_profile.prompt_cache_wire=value})
     |> fun caps -> override tool_schema_conformance caps (fun caps value ->
       {caps with Capability_profile.tool_schema_conformance=value})
     |> fun caps -> override content_inline_reasoning caps (fun caps value ->

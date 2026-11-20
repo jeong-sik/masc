@@ -62,6 +62,7 @@ type model_entry =
     (** Whether Anthropic Messages accepts a final assistant continuation.
         Model-catalog declarations override the provider default. *)
   ; supports_prompt_caching : bool option
+  ; prompt_cache_wire : string option
   ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option

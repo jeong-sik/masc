@@ -48,7 +48,7 @@ query($owner: String!, $name: String!, $cursor: String) {
           contexts(first: 100) {
             nodes {
               __typename
-              ... on CheckRun { conclusion }
+              ... on CheckRun { name conclusion startedAt }
               ... on StatusContext { state }
             }
           }
@@ -288,6 +288,38 @@ def decisively_failed(check):
     return False
 
 
+def started_order(check):
+    """Sorts later runs after earlier ones; `startedAt` is UTC ISO-8601 text."""
+    started = check.get('startedAt')
+    return (started is None, started or '')
+
+
+def newest_run_per_name(checks):
+    """The checks GitHub still counts: of the runs sharing a name, the newest.
+
+    The rollup lists every run of the head commit, and a run that a newer run
+    of the same name replaced stays in it with its conclusion. A `type-check`
+    that failed on a stale merge ref and then passed on the same head is both
+    a FAILURE and a SUCCESS here, while GitHub judges the pull request by the
+    newest run. A run that has not started has no `startedAt` and counts as
+    the newest: only a re-run is created after the runs it replaces. A commit
+    status is already one per context, and a check without a name (a kind
+    this does not know) is kept as it is.
+    """
+    newest = {}
+    unnamed = []
+    for check in checks:
+        named = isinstance(check, dict) and check.get('__typename') == 'CheckRun'
+        name = check.get('name') if named else None
+        if name is None:
+            unnamed.append(check)
+            continue
+        held = newest.get(name)
+        if held is None or started_order(check) >= started_order(held):
+            newest[name] = check
+    return [*newest.values(), *unnamed]
+
+
 def merged_closers(repo, issues):
     """The merged pull requests of `repo` that open issues name as closing.
 
@@ -356,12 +388,15 @@ def ready(row):
     # decided; selecting the pull request again spends a worker run on the
     # same answer every 30 minutes (#51479 family 1). The checks are read one
     # by one because the rollup's own state also counts a cancelled run as
-    # FAILURE. Pending and expected checks stay selectable — the worker still
-    # holds on them, but a later run can see them pass without new evidence.
-    # The listing is capped at 100 checks; a failure past the cap falls
-    # through and the worker's own answer still records the case.
+    # FAILURE, and only the newest run of each name is read because a run a
+    # newer run replaced stays in the listing: #53686 was approved, CLEAN and
+    # passing on its newest `type-check` while two replaced failures kept it
+    # out of every sweep. Pending and expected checks stay selectable — the
+    # worker still holds on them, but a later run can see them pass without new
+    # evidence. The listing is capped at 100 checks; a failure past the cap
+    # falls through and the worker's own answer still records the case.
     checks = ((row.get('statusCheckRollup') or {}).get('contexts') or {}).get('nodes') or []
-    if any(decisively_failed(check) for check in checks):
+    if any(decisively_failed(check) for check in newest_run_per_name(checks)):
         return False
     # Workflow-file pull requests cannot be merged by this token at all
     # (#51452 family 3): GitHub refuses the arming itself, and only the human

@@ -724,11 +724,11 @@ let memory_committed_row (fields : (string * Yojson.Safe.t) list) =
                      read as the signs the lines below carry. *)
                   let summary =
                     Printf.sprintf
-                      "%s \xc2\xb7 revision %d \xc2\xb7 +%d \xe2\x88\x92%d \xc2\xb7 %d retained"
+                      "%s \xc2\xb7 revision %d \xc2\xb7 %s %s \xc2\xb7 %d retained"
                       (memory_source_label fields)
                       revision
-                      (List.length added)
-                      (List.length removed)
+                      (Masc_tui_value.Count.increase (List.length added))
+                      (Masc_tui_value.Count.decrease (List.length removed))
                       retained
                   in
                   let journal =

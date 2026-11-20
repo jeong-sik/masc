@@ -301,8 +301,8 @@ let overview_capacity_lines ?(cells = 48) ~mark (state : state) =
               ~label:(text "여력" "Turn")
               ~suffix:
                 (if fleet.fs_reaction_capacity_shortfall > 0 then
-                   Printf.sprintf "%d/%d -%d" avail fleet.fs_target_reaction_capacity
-                     fleet.fs_reaction_capacity_shortfall
+                   Printf.sprintf "%d/%d %s" avail fleet.fs_target_reaction_capacity
+                     (Masc_tui_value.Count.decrease fleet.fs_reaction_capacity_shortfall)
                  else Printf.sprintf "%d/%d" avail fleet.fs_target_reaction_capacity)
               (* Capacity against its target is a share; refusing work is
                  not what the target means. A shortfall is the anomaly, so

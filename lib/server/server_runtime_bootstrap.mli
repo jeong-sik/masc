@@ -176,8 +176,9 @@ type owner_initialization_error =
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
   | Account_access_already_published
-      (** The process published whether a CLI may start on an account before
-          its owner state opened ({!Runtime_account_access.publish}). *)
+      (** The process had published whether a CLI may start on an account
+          before the single-user server published it
+          ({!Runtime_account_access.publish}). *)
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of
@@ -207,7 +208,7 @@ val initialize_owner_state_blocking
   :  sw:Eio.Switch.t
   -> runtime_sw:Eio.Switch.t
   -> env:Eio_unix.Stdenv.base
-  -> single_user:Authz_boot_mode_read.single_user
+  -> access:Runtime_account_access.published
   -> ?input_base_path:string
   -> accept_store_quarantine:bool
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -218,12 +219,12 @@ val initialize_owner_state_blocking
   -> fs:Eio.Fs.dir_ty Eio.Path.t
   -> unit
   -> initialized_owner_state
-(** The owner state opens the base path of [single_user], which only
-    {!Authz_boot_mode_read.boot} makes; every runtime that opens a base path
-    passes the account mode judgment first. Before it opens anything, it
-    publishes the access of the process for that judgment
-    ({!Runtime_account_access.publish}), so an owner state opens once per
-    process.
+(** The owner state opens the base path of [access], the access the process
+    published. Only {!Runtime_account_access.publish} makes that value, so
+    the caller published the access before anything opens here, and this
+    function publishes nothing. The single-user server and the stdio runtime
+    publish the single user that {!Authz_boot_mode_read.boot} judged, so the
+    base path they open passed the account mode judgment.
     [runtime_sw] must outlive [sw], including session journal cleanup.
     Complete every transport-neutral, fallible owner-initialization step and
     return the still-unclaimed persistence preparation. A transport must

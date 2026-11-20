@@ -768,6 +768,9 @@ type cache_write_lifetime =
           [ttl = "1h"]). *)
 [@@deriving show, yojson]
 
+val cache_write_lifetime_to_string : cache_write_lifetime -> string
+(** The label a cost row writes: ["provider_default"] or ["one_hour"]. *)
+
 type inference_telemetry =
   { system_fingerprint : string option
   ; timings : inference_timings option

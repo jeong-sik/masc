@@ -372,6 +372,26 @@ let test_timings_cache_fields_land_on_payload () =
   check int "prompt_n" 26 (int_field payload "prompt_n")
 ;;
 
+(* A request row names the lifetime its request asked cache writes to keep.
+   The turn's resolved spend sums requests and names none. *)
+let test_a_request_row_names_its_cache_lifetime () =
+  let module T = Agent_core.Types in
+  let telemetry =
+    { T.default_inference_telemetry with T.cache_write_lifetime = Some T.One_hour }
+  in
+  let row ?telemetry usage_projection =
+    H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
+      ~keeper_turn_id:1 ~agent_core_turn_ordinal:0 ~model:"model"
+      ~usage_projection ~input_tokens:10 ~output_tokens:1 ~cost_usd:0.0
+      ?telemetry ()
+  in
+  let request = Cost_ledger.Raw_observation Runtime_usage_scope.Per_request in
+  check string "a request row names the hour its request asked for" "one_hour"
+    (string_field (row ~telemetry request) "cache_write_lifetime");
+  check_null_field (row request) "cache_write_lifetime";
+  check_null_field (row ~telemetry Cost_ledger.Resolved_delta) "cache_write_lifetime"
+;;
+
 let test_response_and_settlement_accounting () =
   let response id ~creation ~read ~input ~missing projection =
     H.cost_event_payload ~agent_name:"keeper" ~task_id:None ~trace_id:"trace"
@@ -897,6 +917,8 @@ let () =
             test_native_decode_rate_uses_current_field_only;
           test_case "timings cache_n/prompt_n land on payload" `Quick
             test_timings_cache_fields_land_on_payload;
+          test_case "a request row names its cache lifetime" `Quick
+            test_a_request_row_names_its_cache_lifetime;
           test_case "turn complete carries both cache counts" `Quick
             test_turn_complete_carries_both_cache_counts;
           test_case "unreported wire cache is null, not zero" `Quick

@@ -838,8 +838,7 @@ let pending_board_event_of_delegate_completion
   (* The row is already [event=... post_id=... author=... preview=...], so the
      title states the outcome and nothing else: a sentence here would repeat
      what the structured fields say, and model-facing prose belongs in the
-     config prompt files rather than in this module (RFC
-     prompts-and-tool-definitions-outside-ocaml). [Delegate_no_reply] has no
+     config prompt files rather than in this module. [Delegate_no_reply] has no
      preview because there was no text; the outcome is the whole fact. *)
   let outcome, message =
     match dc.dc_terminal with

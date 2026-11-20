@@ -10,9 +10,8 @@ type event_queue_trigger =
       (** A validated unread dynamic-tool result requests its continuation. *)
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
-      (** RFC-connector-ambient-attention-wake P1: ambient connector message
-          recorded as external attention; edge-triggered, carries an event_id
-          pointer. Dormant until a producer enqueues it (P3). *)
+      (** Ambient connector message recorded as external attention;
+          edge-triggered, carries an event_id pointer. *)
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
       (** An operator resolved a gated-tool approval this keeper

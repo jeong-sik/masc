@@ -309,8 +309,8 @@ let same_route a b =
      keyed on the channel alone").
    [user_id] is the message's author, not the conversation's location, so
    two different users posting into the same channel still share one
-   conversation coordinate — the Keeper decides per RFC-0377 §3 whether to
-   answer each individually. *)
+   conversation coordinate — the Keeper decides whether to answer each
+   individually. *)
 let same_conversation a b =
   match a, b with
   | Dashboard { thread_id = left }, Dashboard { thread_id = right } ->

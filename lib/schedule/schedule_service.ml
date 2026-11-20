@@ -81,6 +81,10 @@ let create
   ?recurrence
   ()
   =
+  let* _ =
+    Schedule_domain.valid_unix_seconds "due_at" due_at
+    |> Result.map_error (fun msg -> Invalid_request msg)
+  in
   let* () = due_not_before_now ~now ~due_at in
   let schedule_id = schedule_id provided_schedule_id in
   let* request =

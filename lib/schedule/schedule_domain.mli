@@ -151,6 +151,15 @@ val schedule_note_to_yojson : schedule_note -> Yojson.Safe.t
 
 val schedule_note_of_yojson : Yojson.Safe.t -> (schedule_note, string) result
 
+val max_unix_seconds : float
+(** Upper bound for RFC 3339 4-digit-year / [Unix.gmtime]-safe Unix timestamps
+    in seconds ([253402300799.0], [9999-12-31T23:59:59Z]). *)
+
+val valid_unix_seconds : string -> float -> (float, string) result
+(** Validate that a timestamp is finite and within [[0.0, max_unix_seconds]]
+    so callers cannot pass milliseconds, nanoseconds, or [Unix.gmtime]-overflowing
+    values. *)
+
 val create_request :
   schedule_id:string ->
   requested_by:actor ->

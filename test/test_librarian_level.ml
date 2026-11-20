@@ -145,10 +145,13 @@ let test_e3_a_fault_with_something_unread () =
 ;;
 
 (* E4 stands only on a one-item rest with no silent slot, about the snapshot
-   now: a silent slot or a write since then leaves only W1. *)
+   now: a silent slot or a write since then leaves only W1, and so does the
+   same verdict on a writer that is not resting ([E4Rule = "narrow"]). *)
 let test_e4_a_one_item_rest_about_the_snapshot_now () =
   check_alarms "every slot judged it" [ "E4"; "W1" ]
     (running (machine ~last_read:(one_item (now ())) (resting ())));
+  check_alarms "the writer is not resting" [ "W1" ]
+    (running (machine ~last_read:(one_item (now ())) (idle ())));
   check_alarms "a slot was silent" [ "W1" ]
     (running (machine ~last_read:(one_item ~silent:true (now ())) (resting ())));
   check_alarms "Memory changed since" [ "W1" ]

@@ -12445,10 +12445,11 @@ let queue_panel_items (state : state) (panel : queue_panel) =
       | [] -> ""
       | values -> "\n\nAttachments:\n" ^ String.concat "\n" (List.map
           (fun (attachment : Masc_tui_keeper_chat_projection.attachment) ->
-            Printf.sprintf "%s · %s · %d bytes · id %s"
+            Printf.sprintf "%s · %s · %s bytes · id %s"
               (Masc.Tui_terminal_text.sanitize_terminal_text attachment.name)
               (Masc.Tui_terminal_text.sanitize_terminal_text attachment.mime_type)
-              attachment.size (Masc.Tui_terminal_text.sanitize_terminal_text attachment.attachment_id)) values) in
+              (Masc_tui_value.Count.grouped attachment.size)
+              (Masc.Tui_terminal_text.sanitize_terminal_text attachment.attachment_id)) values) in
     let references = match request.references with
       | [] -> ""
       | values -> "\n\nImage references:\n" ^ String.concat "\n" (List.map (function
@@ -27231,7 +27232,8 @@ let keeper_assignment_activity keepers =
   match aggregate_keeper_stats keepers with
   | None -> " (activity not reported)"
   | Some (turns, _, cost) when turns > 0 ->
-    Printf.sprintf " (%d turns, %s)" turns (Tui_decode.keeper_cost_summary cost)
+    Printf.sprintf " (%s turns, %s)" (Masc_tui_value.Count.grouped turns)
+      (Tui_decode.keeper_cost_summary cost)
   | Some _ -> ""
 
 let runtime_cost_summary ~ko cost =
@@ -27260,8 +27262,9 @@ let runtime_fleet_summary state =
       let summary = match aggregate_keeper_stats keepers with
         | None -> if ko then "활동 합계 보고 안 됨" else "activity total not reported"
         | Some (turns, tokens, cost) ->
-            Printf.sprintf (if ko then "턴 %d · 토큰 %s · %s" else "%d turns · %s tok · %s")
-              turns (format_context_tokens tokens) (runtime_cost_summary ~ko cost)
+            Printf.sprintf (if ko then "턴 %s · 토큰 %s · %s" else "%s turns · %s tok · %s")
+              (Masc_tui_value.Count.grouped turns) (format_context_tokens tokens)
+              (runtime_cost_summary ~ko cost)
       in
       Some (Printf.sprintf (if ko then "키퍼 %d명 · %s" else "%d keepers · %s") (List.length keepers) summary)
 

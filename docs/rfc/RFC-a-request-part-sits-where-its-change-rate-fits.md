@@ -200,7 +200,9 @@ binding 에 두는 까닭:
   - `One_hour` 는 등급 자체가 3600초라 따로 선언하지 않는다.
 - provider 응답의 등급별 쓰기 토큰(`cache_creation.ephemeral_1h_input_tokens`)은 읽지 않는다.
   - 청구의 진실은 그 값이다. 다만 두 응답 파서(stream·non-stream)를 고쳐야 하고, Anthropic 호환 endpoint 가 그 값을 주는지는 모른다.
-  - 1시간은 catalog 계약이 있는 공식 API 만 받는다(L2). 그래서 요청이 고른 값과 쓴 등급이 갈리는 길이 없다.
+  - 1시간은 catalog 계약을 선언한 provider 만 받는다(L2). claude(공식 API)가 선언하고, #53970 뒤로 openrouter 도 선언한다.
+  - claude 는 요청이 고른 등급으로 쓴다. 고른 값과 쓴 등급이 갈리는 길이 없다.
+  - openrouter 는 요청을 뒤의 여러 provider 로 보낼 수 있다. masc 는 그 응답에서 쓰기 토큰의 합(`cache_write_tokens`)만 읽는다. 1시간 요청이 1시간 등급으로 쓰였는지는 모른다(§9). 투영은 요청이 고른 값으로 판정한다.
 
 셈:
 - 턴 N 의 첫 요청을 본다. 그 턴의 요청 행 가운데 가장 오래된 행이다.
@@ -464,3 +466,4 @@ L5 에서 정하는 것:
 - `tool_result` 하나에 글 블록과 `tool_reference` 블록을 섞을 수 있는지. L4 에서 실제 호출로 본다.
 - 지연 도구 정의를 더하거나 빼도 캐시가 남는지. 문서는 지연 도구를 앞부분에서 뺀다고만 적는다.
 - `tool_reference` 가 이력 창 밖으로 나간 뒤, 남은 과거 `tool_use` 를 API 가 어떻게 다루는지.
+- openrouter 로 보낸 1시간 요청이 뒤 provider 에서 1시간 등급으로 쓰였는지. 다르게 쓰였다면 그 턴의 「유지 시간 넘김」 판정이 틀린다.

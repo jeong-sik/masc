@@ -660,10 +660,11 @@ let complete_stream_http
           ~net
           ~url
           ~headers:
-            ((match config.kind with
+            (let effective_headers = Provider_config.effective_request_headers config in
+             (match config.kind with
               | Provider_config.Anthropic ->
-                Backend_anthropic.request_headers ~body:body_with_stream config.headers
-              | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> config.headers)
+                Backend_anthropic.request_headers ~body:body_with_stream effective_headers
+              | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> effective_headers)
              @ auth_headers)
           ~body:body_with_stream
           ~f:(fun ~pre_header_elapsed_s reader ->

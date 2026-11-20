@@ -311,6 +311,45 @@ let validated_cache_session_key (config : t) : string option =
     else Some trimmed
 ;;
 
+let cache_session_header (config : t) : string option =
+  let policy =
+    match matching_request_policy config with
+    | Some policy -> policy
+    | None -> resolve_request_policy config
+  in
+  Capabilities.request_policy_cache_session_header policy
+;;
+
+(* Strict HTTP header-value guard: reject CR/LF, spaces, tabs, control chars,
+   and non-ASCII bytes (visible ASCII [0x21..0x7e] only, <= 256 bytes). *)
+let validated_cache_session_header_value (config : t) : string option =
+  match validated_cache_session_key config with
+  | None -> None
+  | Some key ->
+    let len = String.length key in
+    let rec all_visible_ascii i =
+      if i >= len
+      then true
+      else (
+        let code = Char.code key.[i] in
+        code >= 0x21 && code <= 0x7e && all_visible_ascii (i + 1))
+    in
+    if all_visible_ascii 0 then Some key else None
+;;
+
+let effective_request_headers (config : t) : (string * string) list =
+  match cache_session_header config, validated_cache_session_header_value config with
+  | Some header_name, Some value ->
+    let target = String.lowercase_ascii header_name in
+    let filtered =
+      List.filter
+        (fun (k, _) -> not (String.equal (String.lowercase_ascii k) target))
+        config.headers
+    in
+    (target, value) :: filtered
+  | Some _, None | None, (Some _ | None) -> config.headers
+;;
+
 let supports_provider_routing_filter (config : t) : bool =
   let policy =
     match matching_request_policy config with

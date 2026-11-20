@@ -37,6 +37,12 @@ type entry =
     (** Wire field used by this provider to carry a caller-supplied prompt-cache
         routing session key. Missing declarations default to
         {!Capability_vocab.No_cache_session_wire}. *)
+  ; cache_session_header : string option
+    (** Optional HTTP header name used by this provider to carry a
+        caller-supplied prompt-cache session key (for example
+        ["x-opencode-session"]). Must be an RFC 7230 token and must not name an
+        auth, framing, or hop-by-hop header. Normalized to lowercase; missing
+        declarations default to [None]. *)
   ; supports_provider_routing_filter : bool
     (** The provider accepts an upstream provider routing filter object
         ([provider: { only; ignore }]) on Chat Completions requests. Missing

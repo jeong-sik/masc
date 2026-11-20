@@ -3169,6 +3169,120 @@ let test_thinking_manifest_is_anonymous_native_only () =
          Model_catalog.Anonymous_wire Provider_kind.OpenAI_compat]))
 ;;
 
+let test_cache_session_header_override_and_guards () =
+  with_repository_model_catalog (fun () ->
+    let static_headers =
+      [ "Content-Type", "application/json"
+      ; "X-Opencode-Session", "masc-keeper-fleet"
+      ]
+    in
+    let mk_opencode ?cache_session_key () =
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~provider_id:"opencode_go"
+        ~model_id:"deepseek-v4.1-flash"
+        ~base_url:"https://opencode.ai/zen/go/v1"
+        ~headers:static_headers
+        ?cache_session_key
+        ()
+    in
+    Alcotest.(check (option string))
+      "opencode_go resolves x-opencode-session"
+      (Some "x-opencode-session")
+      (Provider_config.cache_session_header (mk_opencode ()));
+    check_headers
+      "valid session key replaces static header case-insensitively"
+      [ "x-opencode-session", "keeper-trace-42"
+      ; "Content-Type", "application/json"
+      ]
+      (Provider_config.effective_request_headers
+         (mk_opencode ~cache_session_key:"keeper-trace-42" ()));
+    check_headers
+      "trimmed outer whitespace emits clean value"
+      [ "x-opencode-session", "keeper-trimmed-7"
+      ; "Content-Type", "application/json"
+      ]
+      (Provider_config.effective_request_headers
+         (mk_opencode ~cache_session_key:"  keeper-trimmed-7  " ()));
+    let max_valid_key = String.make 256 'k' in
+    check_headers
+      "256-byte visible ASCII session key is accepted"
+      [ "x-opencode-session", max_valid_key
+      ; "Content-Type", "application/json"
+      ]
+      (Provider_config.effective_request_headers
+         (mk_opencode ~cache_session_key:max_valid_key ()));
+    check_headers
+      "absent session key preserves static fleet fallback verbatim"
+      static_headers
+      (Provider_config.effective_request_headers (mk_opencode ()));
+    List.iter
+      (fun (label, bad_key) ->
+         let cfg = mk_opencode ~cache_session_key:bad_key () in
+         Alcotest.(check (option string))
+           (label ^ " rejected by header value guard")
+           None
+           (Provider_config.validated_cache_session_header_value cfg);
+         check_headers
+           (label ^ " falls back to static headers verbatim")
+           static_headers
+           (Provider_config.effective_request_headers cfg))
+      [ "empty", ""
+      ; "whitespace only", "   "
+      ; "CRLF injection", "bad\r\nX-Injected: 1"
+      ; "LF injection", "bad\nline"
+      ; "CR injection", "bad\rline"
+      ; "embedded space", "has space"
+      ; "embedded tab", "has\ttab"
+      ; "NUL control byte", "nul\x00byte"
+      ; "DEL control byte", "del\x7fchar"
+      ; "non-ASCII UTF-8", "cafe\xc3\xa9"
+      ; "overlong 257 bytes", String.make 257 'a'
+      ];
+    let snapshot = Catalog_snapshot.current () in
+    let policy =
+      Capabilities.resolve_snapshot_request_policy
+        ~snapshot
+        ~wire:Provider_kind.OpenAI_compat
+        ~provider_id:"opencode_go"
+        ~model_id:"deepseek-v4.1-flash"
+    in
+    let bound_base = Provider_config.with_request_policy policy (mk_opencode ()) in
+    let bound =
+      { bound_base with Provider_config.cache_session_key = Some "keeper-bound-99" }
+    in
+    check_headers
+      "pre-attached request policy preserves x-opencode-session override"
+      [ "x-opencode-session", "keeper-bound-99"
+      ; "Content-Type", "application/json"
+      ]
+      (Provider_config.effective_request_headers bound);
+    List.iter
+      (fun (label, provider_id, model_id) ->
+         let cfg =
+           Provider_config.make
+             ~kind:OpenAI_compat
+             ?provider_id
+             ~model_id
+             ~base_url:"https://example.invalid/v1"
+             ~headers:static_headers
+             ~cache_session_key:"keeper-trace-42"
+             ()
+         in
+         Alcotest.(check (option string))
+           (label ^ " declares no cache_session_header")
+           None
+           (Provider_config.cache_session_header cfg);
+         check_headers
+           (label ^ " returns static headers unchanged")
+           static_headers
+           (Provider_config.effective_request_headers cfg))
+      [ "openrouter", Some "openrouter", "anthropic/claude-opus-5"
+      ; "openai", Some "openai", "gpt-5.5"
+      ; "anonymous compat", None, "deepseek-v4.1-flash"
+      ])
+;;
+
 let () =
   Alcotest.run
     "provider_config"
@@ -3211,6 +3325,10 @@ let () =
             "empty secret omits headers"
             `Quick
             test_auth_headers_for_kind_and_key_omits_empty_secret
+        ; Alcotest.test_case
+            "cache_session_header override and guards"
+            `Quick
+            test_cache_session_header_override_and_guards
         ] )
     ; ( "explicit_values"
       , [ Alcotest.test_case "all options" `Quick test_make_with_all_options

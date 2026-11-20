@@ -96,7 +96,7 @@ jobs:
         with:
           ref: ${{ inputs.candidate_sha || github.sha }}
 
-      # The targeted runner and its stanza reader decide which suites the Test
+      # The targeted runner and its prebuild reader decide which suites the Test
       # step below builds and what a failed preparation means. Their boundary
       # suite stubs opam and timeout, builds nothing and takes a few seconds,
       # so it runs here, before the toolchain is set up: a run whose runner

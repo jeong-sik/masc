@@ -86,13 +86,16 @@ PY_ENUM
   log "[targeted] shard ${SHARD_INDEX}/${SHARD_COUNT}: ${shard_n} suites"
 fi
 
-suites=()
-exes=()
+# Every suite runs as a Dune alias. aliases[i] is what `dune build` runs;
+# alias_dirs[i] and alias_names[i] name the dune file and the suite the
+# prebuild reader looks up for it.
 aliases=()
+alias_dirs=()
+alias_names=()
 alias_exes=()
 alias_deps=()
 unresolved=()
-stanza_env_reader="${repo_root}/scripts/ci/stanza_env.py"
+prebuild_reader="${repo_root}/scripts/ci/alias_prebuild_deps.py"
 IFS=',' read -r -a requested <<< "${TARGET_SUITES}"
 for suite in ${requested[@]+"${requested[@]}"}; do
   suite="${suite// /}"
@@ -119,10 +122,14 @@ for suite in ${requested[@]+"${requested[@]}"}; do
   # packages/ be answered by a same-named alias under test/.
   if [ -f "test/${suite}.py" ] || [ -f "${suite}.py" ]; then
     aliases+=("@runtest-${suite##*/}")
+    alias_dirs+=("test")
+    alias_names+=("${suite##*/}")
   elif [ "${suite}" = "${suite##*/}" ] \
     && grep -Eqr "^[[:space:]]*\(alias runtest-${suite}\)[[:space:]]*$" \
          test/dune test/stanzas 2>/dev/null; then
     aliases+=("@runtest-${suite}")
+    alias_dirs+=("test")
+    alias_names+=("${suite}")
   else
     # The name used to be a path fragment under test/, so a suite
     # outside it was unreachable: every one of the 43 under
@@ -140,22 +147,18 @@ for suite in ${requested[@]+"${requested[@]}"}; do
       unresolved+=("${suite}")
       continue
     fi
-    # Dune owns custom test actions: a bare executable would lose their argv,
-    # chdir and other wrappers. Its generated per-test alias selects just this
-    # directory's action, rather than evaluating it again in the shell runner.
-    if ! action_alias=$(python3 "${stanza_env_reader}" \
-        --dir "$(dirname "${suite_path}")" \
-        --action-alias "$(basename "${suite_path}")"); then
-      unresolved+=("${suite}")
-      continue
-    fi
-    if [ -n "${action_alias}" ]; then
-      aliases+=("${action_alias}")
-      alias_exes+=("${suite_path}.exe")
-    else
-      suites+=("${suite_path}")
-      exes+=("${suite_path}.exe")
-    fi
+    # Dune runs the suite through the per-test alias it generates for every
+    # named test (Dune 3.20+, below this repository's 3.22 minimum). The
+    # stanza's (setenv ...), the directory's (env ...), its deps and the
+    # working directory are then the ones the root @runtest uses. Running
+    # the executable from the shell instead meant re-implementing each of
+    # those here, and every one that was missed produced a verdict the
+    # nightly lane did not agree with. The double @ keeps the alias to this
+    # directory.
+    aliases+=("@@$(dirname "${suite_path}")/runtest-$(basename "${suite_path}")")
+    alias_dirs+=("$(dirname "${suite_path}")")
+    alias_names+=("$(basename "${suite_path}")")
+    alias_exes+=("${suite_path}.exe")
   fi
 done
 # A name that resolves to nothing used to end the dispatch right
@@ -174,8 +177,8 @@ if [ "${#unresolved[@]}" -ne 0 ]; then
 fi
 # dune build with no target builds everything; a suite input of
 # separators only must not turn into the full build.
-if [ "${#suites[@]}" -eq 0 ] && [ "${#aliases[@]}" -eq 0 ]; then
-  log "[targeted] FAIL - the suite input names no executable: '${TARGET_SUITES}'"
+if [ "${#aliases[@]}" -eq 0 ]; then
+  log "[targeted] FAIL - the suite input names no suite: '${TARGET_SUITES}'"
   exit 2
 fi
 if command -v timeout >/dev/null 2>&1; then
@@ -189,49 +192,42 @@ fi
 log "[targeted] EIO_BACKEND=${EIO_BACKEND:-<unset>} timeout=${TARGET_SUITE_TIMEOUT_SEC}s per suite"
 status="${resolution_status}"
 # Compile selected OCaml executables before starting their alias budgets.
-# Dune still resolves additional action dependencies and owns the test action.
 if [ "${#alias_exes[@]}" -gt 0 ]; then
   log "[targeted] dune build ${alias_exes[*]} (prepare alias executables)"
   opam exec -- dune build --root . -j "${DUNE_JOBS:-2}" "${alias_exes[@]}" \
     2>&1 | tee -a "${CI_TEST_LOG_FILE}"
 fi
-# A Python suite is a (rule (alias runtest-NAME) (deps ...)), so the loop
-# below runs it by building the alias, and building the alias compiles its
-# deps inside the suite budget. Measured: run 41730441832 spent 601s of a
-# 600s budget compiling and printed no "Ran N tests" line at all. Build the
-# rule's deps here, outside the budget, as the OCaml aliases above are
-# prepared. The alias itself is not built: building it is running the suite.
-if [ "${#aliases[@]}" -gt 0 ]; then
-  for alias in "${aliases[@]}"; do
-    case "${alias}" in
-      '@runtest-'*) ;;
-      *) continue ;;
-    esac
-    alias_name="${alias#@runtest-}"
-    # The reader failing is not this dispatch's failure: the alias is still
-    # built under its own budget below, which is the behaviour before this
-    # preparation existed. Say so instead of falling back silently -- a run
-    # that quietly lost the preparation looks exactly like the 601s TIMEOUT it
-    # was meant to prevent, and nobody re-reads a log that never complained.
-    # Only the reader's stdout names build targets. What it writes to stderr
-    # is kept apart and logged, so a warning from a reader that exits 0 is not
-    # handed to dune as a target.
-    alias_dep_stderr=$(mktemp "${TMPDIR:-/tmp}/masc-targeted-alias-deps.XXXXXX")
-    if alias_dep_lines=$(python3 "${stanza_env_reader}" --dir test --alias-deps "${alias_name}" 2>"${alias_dep_stderr}"); then
-      if [ -s "${alias_dep_stderr}" ]; then
-        log "[targeted] ${alias_name}: the deps reader wrote to stderr: $(cat "${alias_dep_stderr}")"
-      fi
-    else
-      log "[targeted] ${alias_name}: could not read the rule's deps; building the alias under its own budget instead: $(cat "${alias_dep_stderr}")"
-      alias_dep_lines=""
+# The loop below runs each suite by building its alias, and building the
+# alias compiles whatever its action needs inside the suite budget: a sibling
+# binary such as ../bin/main_eio.exe, or a Python rule's Cargo and OCaml
+# binaries. Measured: run 41730441832 spent 601s of a 600s budget compiling
+# and printed no "Ran N tests" line at all. Build those here, outside the
+# budget. The alias itself is not built: building it is running the suite.
+for i in "${!aliases[@]}"; do
+  alias_name="${alias_names[$i]}"
+  # The reader failing is not this dispatch's failure: the alias is still
+  # built under its own budget below, which is the behaviour before this
+  # preparation existed. Say so instead of falling back silently -- a run
+  # that quietly lost the preparation looks exactly like the 601s TIMEOUT it
+  # was meant to prevent, and nobody re-reads a log that never complained.
+  # Only the reader's stdout names build targets. What it writes to stderr
+  # is kept apart and logged, so a warning from a reader that exits 0 is not
+  # handed to dune as a target.
+  alias_dep_stderr=$(mktemp "${TMPDIR:-/tmp}/masc-targeted-alias-deps.XXXXXX")
+  if alias_dep_lines=$(python3 "${prebuild_reader}" "${alias_dirs[$i]}" "${alias_name}" 2>"${alias_dep_stderr}"); then
+    if [ -s "${alias_dep_stderr}" ]; then
+      log "[targeted] ${alias_name}: the deps reader wrote to stderr: $(cat "${alias_dep_stderr}")"
     fi
-    rm -f "${alias_dep_stderr}"
-    while IFS= read -r alias_dep; do
-      [ -n "${alias_dep}" ] || continue
-      alias_deps+=("${alias_dep}")
-    done <<< "${alias_dep_lines}"
-  done
-fi
+  else
+    log "[targeted] ${alias_name}: could not read the alias deps; building the alias under its own budget instead: $(cat "${alias_dep_stderr}")"
+    alias_dep_lines=""
+  fi
+  rm -f "${alias_dep_stderr}"
+  while IFS= read -r alias_dep; do
+    [ -n "${alias_dep}" ] || continue
+    alias_deps+=("${alias_dep}")
+  done <<< "${alias_dep_lines}"
+done
 # This build has no timeout of its own: it is the compile the suite budget
 # must not pay for, and the job's own limit bounds it. When it fails, the run
 # is marked failed and every alias still runs under its budget, where dune
@@ -250,7 +246,7 @@ fi
 # Stream fixture records directly to tee: buffered Dune output can
 # truncate a successful suite mid-JSON. Keep actions serial so their
 # evidence records cannot interleave.
-for suite in ${aliases[@]+"${aliases[@]}"}; do
+for suite in "${aliases[@]}"; do
   log "[targeted] ${suite}: start $(date -u +%Y-%m-%dT%H:%M:%SZ) (dune alias)"
   started=$(date +%s)
   rc=0
@@ -258,78 +254,15 @@ for suite in ${aliases[@]+"${aliases[@]}"}; do
     env ALCOTEST_VERBOSE=1 opam exec -- dune build --root . --force --no-buffer --verbose -j 1 "${suite}" \
     2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
   elapsed=$(( $(date +%s) - started ))
-  case "${rc}" in
-    0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
-    124|137)
-         log "[targeted] ${suite}: TIMEOUT exit ${rc} after ${elapsed}s"
-         status=1 ;;
-    *)   log "[targeted] ${suite}: FAIL exit ${rc} in ${elapsed}s"
-         status=1 ;;
-  esac
-done
-if [ "${#exes[@]}" -eq 0 ]; then
-  exit "${status}"
-fi
-# A stanza's (setenv ...) belongs to dune's runtest action, so a run
-# of the executable does not get it, and 22 of the 346 stanzas
-# declare one. This file used to carry a case block that named
-# exactly one of them, so a dispatch naming any of the other 21 ran
-# that suite under the wrong environment and reported verdicts the
-# nightly lane would not agree with -- silently, since a missing
-# variable looks like a normal run. stanza_env.py reads the stanza.
-# Captured, not piped: a failing script inside a process
-# substitution leaves the loop's exit status at 0, and a suite that
-# runs with no environment because the reader broke is the exact
-# outcome this replaces.
-# suites hold the resolved path; the reader takes the directory and
-# the bare name, because a stanza names a suite without its path.
-stanza_deps=()
-for suite_path in "${suites[@]}"; do
-  dep_lines=$(python3 "${stanza_env_reader}" \
-    --dir "$(dirname "${suite_path}")" \
-    --deps "$(basename "${suite_path}")")
-  while IFS= read -r dep; do
-    if [ -n "${dep}" ]; then stanza_deps+=("${dep}"); fi
-  done <<< "${dep_lines}"
-done
-log "[targeted] dune build ${exes[*]} ${stanza_deps[*]+${stanza_deps[*]}}"
-opam exec -- dune build --root . -j "${DUNE_JOBS:-2}" "${exes[@]}" \
-  ${stanza_deps[@]+"${stanza_deps[@]}"} 2>&1 | tee -a "${CI_TEST_LOG_FILE}"
-# Each suite runs from its own directory under _build/default: a
-# stanza's paths are written relative to the stanza, and dune's own
-# runtest action stands there too, so anywhere else reads a
-# different tree than the nightly lane does.
-repo_root="${PWD}"
-for suite_path in "${suites[@]}"; do
-  suite_dir="$(dirname "${suite_path}")"
-  suite="$(basename "${suite_path}")"
-  cd "${repo_root}/_build/default/${suite_dir}"
-  suite_env=()
-  env_lines=$(python3 "${stanza_env_reader}" --dir "${suite_dir}" "${suite}")
-  while IFS= read -r pair; do
-    if [ -n "${pair}" ]; then suite_env+=("${pair}"); fi
-  done <<< "${env_lines}"
-  log "[targeted] ${suite_path}: stanza env ${suite_env[*]+${suite_env[*]}}"
-  log "[targeted] ${suite_path}: start $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-  started=$(date +%s)
-  rc=0
-  # ${arr[@]+"${arr[@]}"} expands an empty array to nothing under
-  # set -u on every bash, not only 4.4 and later.
-  env MASC_BASE_PATH= GRAPHQL_API_KEY= ZAI_API_KEY= \
-      MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false \
-      ALCOTEST_VERBOSE=1 ${suite_env[@]+"${suite_env[@]}"} \
-      "${timeout_command}" -s TERM -k "${TARGET_SUITE_KILL_GRACE_SEC}" "${TARGET_SUITE_TIMEOUT_SEC}" \
-      "./${suite}.exe" 2>&1 | tee -a "${CI_TEST_LOG_FILE}" || rc=$?
-  elapsed=$(( $(date +%s) - started ))
   # timeout(1) exits 124 when TERM ended the command and 137
   # when it took the KILL after the grace.
   case "${rc}" in
-    0)   log "[targeted] ${suite_path}: OK in ${elapsed}s" ;;
+    0)   log "[targeted] ${suite}: OK in ${elapsed}s" ;;
     124|137)
-         log "[targeted] ${suite_path}: TIMEOUT exit ${rc} after ${elapsed}s;" \
+         log "[targeted] ${suite}: TIMEOUT exit ${rc} after ${elapsed}s;" \
              "the hung case is the one after the last [OK] line above"
          status=1 ;;
-    *)   log "[targeted] ${suite_path}: FAIL exit ${rc} in ${elapsed}s"
+    *)   log "[targeted] ${suite}: FAIL exit ${rc} in ${elapsed}s"
          status=1 ;;
   esac
 done

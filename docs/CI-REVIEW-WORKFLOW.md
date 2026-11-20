@@ -175,32 +175,26 @@ GNU `timeout` (or `gtimeout` on macOS), Python,
 ripgrep and the OCaml test dependencies must be available. A local result records
 its platform and candidate; it does not substitute for a different platform's RC.
 
-For targeted executable runs, `scripts/ci/stanza_env.py` selects the named
-`test`/`tests` stanza's environment and dependencies, even when its include file
-also declares sibling tests or alias actions. Alias actions run only when their
-alias is selected; their settings do not belong to the named executable. A
-per-suite file with no named test retains its rule-action handling. Unresolvable
-variables in a directly evaluated environment remain errors.
-If a named test declares a custom `action`, the targeted runner selects Dune's
-nonrecursive `@@DIRECTORY/runtest-NAME` alias instead of the bare executable.
-Dune owns that action's arguments, wrappers, variables and dependencies; the
-runner does not translate them. The selected OCaml executables are built before
-starting the alias timeout. Dune still resolves any additional action dependencies
-inside the timed alias. These per-test aliases have existed since Dune
-3.20, below this repository's 3.22 minimum. See the
-[Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html).
-For a Python suite declared as
-`(rule (alias runtest-NAME) (deps ...) (action ...))`, the runner reads that
-rule's `(deps ...)` and any `%{exe:...}` or `%{dep:...}` its action names, and
-builds those before the alias timeout starts; the alias itself still runs inside
-the timeout.
+The targeted runner runs every suite through a Dune alias. An OCaml suite runs
+as the nonrecursive `@@DIRECTORY/runtest-NAME` alias that Dune generates for each
+named test since 3.20, below this repository's 3.22 minimum (see the
+[Dune test reference](https://dune.readthedocs.io/en/latest/reference/dune/test.html)).
+A script suite declared as `(rule (alias runtest-NAME) (deps ...) (action ...))`
+runs as `@runtest-NAME`. Dune owns the stanza's `setenv`, the directory's `env`,
+every dependency expression and the working directory, so a targeted run reads
+the same environment as the root `@runtest`.
+Before the per-suite timeout starts, the runner builds the selected OCaml
+executables and the targets `scripts/ci/alias_prebuild_deps.py` names: the
+literal paths in the stanza's `(deps ...)` and any `%{exe:...}` or `%{dep:...}`
+its fields name. The alias itself still runs inside the timeout.
 A suite whose body really hangs therefore still ends as `TIMEOUT`, and one whose
 body only needed compiling reaches `Ran N tests` instead of spending the whole
 budget on the build. If the reader fails, the run names the alias, prints the
 reason and falls back to building the alias inside its budget. A name that no
-rule carries is such a failure; it is not read as a rule without deps. If the
-preparation build itself fails, the run ends non-zero and every alias still
-runs inside its own budget.
+rule or test stanza carries is such a failure; it is not read as a stanza without
+deps. If the preparation build itself fails, the run ends non-zero and every
+alias still runs inside its own budget. A misread can only move compile time
+into or out of the budget, because Dune still evaluates the action.
 To check this runner boundary without an OCaml build, run
 `python3 -m unittest discover -s scripts/ci/tests -p test_targeted_stanza_isolation.py -v`.
 The Test workflow runs it after checkout, before the toolchain is set up.

@@ -1,4 +1,4 @@
-(** Turns what each fleet scan found into the events of RFC-0477.
+(** Turns what each fleet scan found into [Fleet_stream] events.
 
     The server tells the hub the outcome of every scan. The hub keeps the
     current state, numbers each event, and hands it to every subscriber. A scan

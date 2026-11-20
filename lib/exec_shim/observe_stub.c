@@ -1,4 +1,4 @@
-/* observe_stub.c — the box masc-exec-shim puts a payload in (RFC-0422).
+/* observe_stub.c — the box masc-exec-shim puts a payload in.
  *
  * ocaml_shim_observe_support : unit -> int
  *   The Landlock ABI version this kernel enforces (>= 1), or 0 when the

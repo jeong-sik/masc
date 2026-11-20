@@ -59,16 +59,7 @@ let is_within_extra_root ?workdir ~extra_roots path =
 (** Path allowlist. When workdir is set, restrict to workdir + /tmp only.
     When unset, allow /tmp, cwd subtree, and the documented sandbox workspace
     root from [Host_config.sandbox_workspace_root]. In both cases a path
-    within one of [extra_roots] is also allowed.
-
-    RFC-0084 §1.5 host-config-cleanup-E — replaces the ad-hoc
-    [home/me] literal join with the typed
-    [Host_config.sandbox_workspace_root] field introduced by PR-12.
-    Behaviour change: when [HOME] is unset, the previous code rejected
-    the fallback subtree entirely; now [Host_config.host]
-    surfaces a documented fallback ([/tmp/masc-fleet]) which is allowed.
-    This aligns the Fleet worker with the same SSOT that other keeper
-    sandbox surfaces will migrate to in later cleanup PRs. *)
+    within one of [extra_roots] is also allowed. *)
 let validate_path ?workdir ~extra_roots path =
   let resolved = resolve_path ?base_dir:workdir path in
   let within_default_boundary =

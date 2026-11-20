@@ -150,12 +150,10 @@ let test_escaped_shell_advice_is_in_what_the_model_reads () =
        | Error error ->
          Alcotest.fail (Masc.Keeper_approval_queue_result.install_error_to_string error));
       install_always_allow_gate ~base;
-      (* [;] used to be the construct this test reached for; RFC-0391 put it
-         in Shell_ir.connector, so a backtick substitution stands in ([$( )]
-         itself is inside the subset since RFC
-         shell-ir-typed-command-substitution). What is being checked is
-         unchanged: a costume the subset cannot say still runs, and the
-         caller is told what the typed call should have been. *)
+      (* [;] is in Shell_ir.connector and [$( )] is inside the subset, so a
+         backtick substitution is the costume here. What is being checked: a
+         costume the subset cannot say still runs, and the caller is told
+         what the typed call should have been. *)
       let execution =
         run_execute
           ~config

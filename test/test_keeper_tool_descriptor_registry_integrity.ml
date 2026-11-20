@@ -12,10 +12,9 @@
     - [internal_name] format drift (non-snake_case, embedded spaces,
       etc.)
 
-    These are exactly the failures a big-bang descriptor-add merge
-    (e.g., RFC-0179 #18710, 38 descriptors) is most likely to
-    introduce: typos in name fields propagate silently until a caller
-    looks them up by string. *)
+    These are exactly the failures a big-bang descriptor-add merge is
+    most likely to introduce: typos in name fields propagate silently
+    until a caller looks them up by string. *)
 
 open Alcotest
 module Descriptor = Masc.Keeper_tool_descriptor
@@ -2026,9 +2025,9 @@ let test_public_mcp_membership_matches_surface_ssot () =
    (tool_surface layer), the keeper descriptor's input schema, and the executor
    that validates the call. Nothing made them agree, and two descriptions had
    already drifted into saying a dashboard/discord target is "ignored" when the
-   executor rejects it. RFC-0056 forbids the tool_surface layer from importing
-   keeper, so the block cap exists as two constants; this pins them equal and
-   pins the parameter sets equal, which is the check that was missing. *)
+   executor rejects it. The tool_surface layer cannot import keeper, so the
+   block cap exists as two constants; this pins them equal and pins the
+   parameter sets equal, which is the check that was missing. *)
 let surface_post_schema_properties (schema : Yojson.Safe.t) =
   match schema with
   | `Assoc fields -> (

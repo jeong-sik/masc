@@ -589,12 +589,9 @@ let test_unknown_key_error_names_the_accepted_keys () =
        check bool "names the agent_core_env prefix" true
          (String_util.contains_substring detail "keeper.agent_core_env."))
 
-(* Two RFCs put a key in [keeper.tools] within days of each other, and the
-   second one's loader accepted the whole [keeper.tools.] prefix so its own
-   nested key would pass. That also accepted [tools.nativ], which is the
-   silence RFC-0390 declared its key to prevent: a typo would leave the
-   runtime on its default posture with nothing said. Both keys are declared
-   now, so the table is closed again. *)
+(* Every key of [keeper.tools] is declared, so the table is closed: a typo
+   such as [tools.nativ] fails the load instead of leaving the runtime on its
+   default posture with nothing said. *)
 let test_profile_rejects_a_typo_in_the_tools_table () =
   List.iter
     (fun (input, typo) ->

@@ -9,7 +9,7 @@ val articles : World_constitution_types.t list -> string
     renders nothing rather than an empty heading. *)
 
 (** How the articles a world holds now differ from the ones a System was
-    rendered with (RFC-0491 §3.2), by the id and text {!articles} renders. An
+    rendered with, by the id and text {!articles} renders. An
     article edited in place is both: its old line removed, its new line added.
     At least one of the two lists is non-empty. *)
 type amendments = private

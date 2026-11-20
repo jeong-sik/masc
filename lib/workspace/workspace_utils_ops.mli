@@ -26,8 +26,7 @@ val validate_task_id_r : string -> (string, masc_error) result
 (** Raised by [ensure_initialized] when the config is not initialized.
     Replaces the previous [Invalid_argument "MASC not initialized..."]
     that downstream sites recovered via [Printexc.to_string +
-    substring match] (RFC-0088 §"String/Substring 분류기" cross-module
-    form). The [Printexc] printer is registered so existing log paths
+    substring match]. The [Printexc] printer is registered so existing log paths
     that format the exception keep the same human-readable message. *)
 exception Not_initialized
 

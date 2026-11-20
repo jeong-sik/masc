@@ -39,8 +39,8 @@ let validate_task_id_r id : (string, masc_error) result =
    Before: [ensure_initialized] raised [Invalid_argument "MASC not
    initialized. Use masc_init first."], and four downstream catch
    sites recovered the case via [Printexc.to_string +
-   contains_casefold ... "masc not initialized"]. That was the
-   RFC-0088 §"String/Substring 분류기" anti-pattern in cross-module
+   contains_casefold ... "masc not initialized"]. That was a
+   string/substring classifier in cross-module
    form — a prose string round-tripped through the exception slot
    to carry semantic information.
 
@@ -608,8 +608,7 @@ let with_distributed_lock_r ?clock config key f : ('a, masc_error) result =
   | Lease_contended ->
     (* #18472 follow-up: surface as typed [LockContention] instead of
        [IoError msg], so callers dispatch on the variant instead of
-       substring-matching "transient contention" (RFC-0088
-       "String/Substring 분류기" anti-pattern removal). *)
+       substring-matching "transient contention". *)
     Error (System (System_error.LockContention { key; attempts = 50 }))
 
 type lease_commit_refusal =

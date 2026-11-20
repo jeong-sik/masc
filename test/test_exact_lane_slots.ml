@@ -4,6 +4,7 @@
    these cases cover what the walk decides before any client could run. *)
 
 open Alcotest
+open Masc
 module Slots = Exact_lane_slots
 module Walk = Exact_lane_walk
 module Exact = Agent_core.Exact_output

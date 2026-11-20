@@ -133,7 +133,7 @@
 (test
  (name test_tui_play_room)
  (modules test_tui_play_room)
- (libraries alcotest yojson masc masc_tui_play_room))
+ (libraries alcotest yojson masc masc_tui_play_room masc_tui_wake))
 
 (test
  (name test_auth_credential_optional_fields)

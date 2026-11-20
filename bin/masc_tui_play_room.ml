@@ -6,9 +6,13 @@ type request = { ticket : unit ref; client : string; machine : Masc.Machine_lane
 type anchor = { message_id : int; line : int }
 type position = Latest | Anchored of anchor
 type viewport = { anchors : anchor list; last_top : int }
+(* When the room is read next: at once, at an instant on the loop's clock,
+   or not until something changes (an answered read has no periodic
+   successor). *)
+type next_read = Now | At of Masc_tui_wake.Mono.t | Until_changed
 type t = {
   client : string; active : bool; joined : bool; focused : bool; draft : string;
-  retry : send option; pending : request option; next_read : float;
+  retry : send option; pending : request option; next_read : next_read;
   changed_since : bool;
   snapshot : Room.snapshot option; notice : string option;
   viewer : string option;
@@ -17,20 +21,20 @@ type t = {
 type intent = Repaint | Send
 type origin = Viewer | Keeper | Peer
 let create () = { client = Random_id.hex ~bytes:16; active = false; joined = false;
-  focused = false; draft = ""; retry = None; pending = None; next_read = 0.; changed_since = false;
+  focused = false; draft = ""; retry = None; pending = None; next_read = Now; changed_since = false;
   snapshot = None; notice = None; viewer = None; before = None; position = Latest; viewport = None }
 let client_id t = t.client
 let focused t = t.focused
 let focus t focused = { t with focused }
-let active t active = if t.active = active then t else {t with active; focused = false; next_read = 0.}
+let active t active = if t.active = active then t else {t with active; focused = false; next_read = Now}
 let revalidate t =
-  {t with next_read = 0.; changed_since = t.changed_since || Option.is_some t.pending}
+  {t with next_read = Now; changed_since = t.changed_since || Option.is_some t.pending}
 let suspend t =
   let joined = t.joined || match t.pending with
     | Some {operation=(Read _ | Say _); _} -> true
     | Some {operation=Leave; _} | None -> false in
   {t with pending = None; active = false; joined; changed_since = false;
-  focused = false; snapshot = None; viewer = None; next_read = 0.; before = None; position = Latest; viewport = None}
+  focused = false; snapshot = None; viewer = None; next_read = Now; before = None; position = Latest; viewport = None}
 let is_read request = match request.operation with
   | Read _ -> true
   | Say _ | Leave -> false
@@ -41,7 +45,7 @@ let request_kind request = match request.operation with
 (* Preserve the inactive Leave obligation even though Read itself does not
    create or renew membership. *)
 let retire_read t = match t.pending with
-  | Some {operation = Read _; _} -> {t with pending = None; next_read = 0.; joined = true}
+  | Some {operation = Read _; _} -> {t with pending = None; next_read = Now; joined = true}
   | Some {operation = Say _ | Leave; _} | None -> t
 let anchor_index anchors target =
   match List.find_index (fun a -> a.message_id = target.message_id) anchors with
@@ -77,9 +81,9 @@ let key t = function
   | "home" ->
     (match t.snapshot with
      | Some {messages = first :: _; has_more = true; _} when Option.is_none t.pending ->
-         {t with before = Some first.id; next_read = 0.; position = Latest; viewport = None}, Repaint
+         {t with before = Some first.id; next_read = Now; position = Latest; viewport = None}, Repaint
      | Some _ | None -> t, Repaint)
-  | "end" -> {t with before = None; next_read = 0.; position = Latest; viewport = None}, Repaint
+  | "end" -> {t with before = None; next_read = Now; position = Latest; viewport = None}, Repaint
   | text when String.length text > 0 && String.is_valid_utf_8 text
       && (String.length text = 1 || Char.code text.[0] >= 128)
       && not (String.exists (fun c -> Char.code c < 32 || Char.code c = 127) text) -> paste t text, Repaint
@@ -87,13 +91,17 @@ let key t = function
 let start t machine operation =
   let request = {ticket = ref (); client = t.client; machine; operation} in
   {t with pending = Some request}, Some request
+(* While a read waits for its instant, the instant is noted for the main
+   loop's wait. *)
+let read_due t ~now = match t.next_read with
+  | Now -> true
+  | At at -> Masc_tui_wake.reached_mono Masc_tui_wake.Play_room_read ~now ~at
+  | Until_changed -> false
 let poll t ~now ~machine =
   if Option.is_some t.pending then t, None
   else if not t.active then
-    if t.joined && Masc_tui_wake.reached Masc_tui_wake.Play_room_read ~now ~at:t.next_read
-    then start t machine Leave else t, None
-  else if Masc_tui_wake.reached Masc_tui_wake.Play_room_read ~now ~at:t.next_read
-  then start t machine (Read t.before)
+    if t.joined && read_due t ~now then start t machine Leave else t, None
+  else if read_due t ~now then start t machine (Read t.before)
   else t, None
 let send t ~machine =
   if not t.active || Option.is_some t.pending then
@@ -115,6 +123,9 @@ let request_json request =
    left, whose notice the caller has already worded. *)
 type failure = Unanswered of string | Kept_back of string
 
+(* The wait before a failed read, or an unconfirmed leave, is tried again. *)
+let retry_s = 2.
+
 let settle ?viewer t request ~now result = match t.pending with
   | None -> t
   | Some current when current.ticket != request.ticket -> t
@@ -122,17 +133,18 @@ let settle ?viewer t request ~now result = match t.pending with
     let viewer = match result, viewer with
       | Ok _, Some _ -> viewer
       | (Ok _ | Error _), None | Error _, Some _ -> t.viewer in
+    let retry = At (Masc_tui_wake.Mono.after now retry_s) in
     let next_read =
-      if t.changed_since then now
+      if t.changed_since then Now
       else if not t.active then
         match request.operation with
-        | Read _ | Say _ -> now
-        | Leave -> now +. 2.
+        | Read _ | Say _ -> Now
+        | Leave -> retry
       else
         match request.operation, result with
-        | (Read _ | Say _), Ok _ -> infinity
-        | (Read _ | Say _ | Leave), Error _ -> now +. 2.
-        | Leave, Ok _ -> now +. 2.
+        | (Read _ | Say _), Ok _ -> Until_changed
+        | (Read _ | Say _ | Leave), Error _ -> retry
+        | Leave, Ok _ -> retry
     in
     let t = {t with pending = None; viewer; next_read; changed_since = false} in
     match request.operation, result with

@@ -14129,7 +14129,9 @@ let poll_play_room state ~mailbox =
   then state.play_room <- Some (Masc_tui_play_room.create ());
   Option.iter (fun room ->
     let room = Masc_tui_play_room.active room watching in
-    let room, request = Masc_tui_play_room.poll room ~now:(Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9) ~machine:state.machine_source in
+    let room, request =
+      Masc_tui_play_room.poll room ~now:(Masc_tui_wake.Mono.now ()) ~machine:state.machine_source
+    in
     state.play_room <- Some room;
     Option.iter (launch_play_room state ~mailbox) request) state.play_room
   end
@@ -27892,7 +27894,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Drawn_changed
   | Play_msg (Play_room_received (request, result)) ->
       state.play_room <- Option.map (fun room ->
-        let now = Int64.to_float (Mtime_clock.elapsed_ns ()) /. 1e9 in
+        let now = Masc_tui_wake.Mono.now () in
         match result with
         | Ok (viewer, snapshot) -> Masc_tui_play_room.receive ~viewer room request ~now (Ok snapshot)
         | Error (Request_failed detail) -> Masc_tui_play_room.receive room request ~now (Error detail)

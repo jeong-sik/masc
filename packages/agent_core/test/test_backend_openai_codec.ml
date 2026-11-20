@@ -3707,6 +3707,7 @@ let test_openrouter_pre_ext_breakpoints_and_gpt_explicit_opt_out () =
             { tool_use_id = "call_1"
             ; content = "file_a.ml"
             ; outcome = Tool_succeeded
+            ; json = None
             ; content_blocks = None
             }
         ]

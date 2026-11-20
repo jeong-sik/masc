@@ -622,3 +622,27 @@ HTTP provider 의 자격 증명이 호스트 계정이라는 결정(계획 D4)�
 - 엔진의 실패 값에는 JSON codec 이 있다(`lib/keeper_runtime/keeper_request_failure.mli:151, 156`). 엔진은 시도마다 그 JSON 을 walk evidence 에 쓴다(`lib/keeper_runtime/keeper_runtime_walk_evidence.ml:74-90`).
 - walk evidence 와 실행 영수증을 쓰는 두 파일에는 글을 가리는 코드가 없다(`rg -i redact` 0건). 대화 기록은 줄의 글, 도구 호출, block 을 따로 가린다(`lib/keeper/keeper_chat_store_message_append.ml:30-33`).
 - 줄을 한 번만 붙이는 함수, 줄을 쓰는 것과 연산의 끝 기록을 쓰는 것 사이에 서버가 죽었을 때의 길은 읽지 않았다.
+
+## 18. 넷째 공격 리뷰 뒤에 읽은 것
+
+공격 리뷰가 §15 와 §17 의 결정을 코드와 맞춰 봤다. 아래는 그 뒤에 직접 읽은 것이다. "조사만 함"은 리뷰어만 읽은 자리다.
+
+### 18.1 값을 만드는 길이 읽는 것
+
+- §15.1 은 `materialize_config` 의 본문만 봤다. 그 함수가 부르는 길은 디스크와 프로세스를 읽는다.
+  - Claude Code 의 값은 만들 때 CLI 의 위치를 찾는다(`lib/runtime/runtime_adapter.ml:1128`). 찾는 함수는 파일의 실행 권한을 본다(`lib/runtime/runtime_official_cli_install.ml:22-25, 91-95`).
+  - 봉인에 넣을 것을 만들 때 프로세스의 environment 를 읽는다(`lib/runtime/runtime_official_account.ml:133-134, 160`, 부르는 곳 `runtime_adapter.ml:1150, 1158`). Codex 는 홈의 `config.toml` 도 읽는다(`runtime_official_account.ml:86-91`).
+  - 조사만 함: 전역 catalog snapshot 을 읽는다(`runtime_adapter.ml:23-29, 205-208`). boot 뒤에 그것과 environment 가 바뀌는지는 리뷰어도 읽지 않았다.
+- 홈과 key 파일의 경로는 주인의 membership 기록이 든 namespace 로 적는다(`lib/runtime/runtime_account_access.ml:243-248`). membership 이 없으면 적지 못한다. 그래서 값이 기대는 기록은 Runtime, 계정, membership 셋이고 거기에 설정이 붙는다.
+- 경로의 real root 는 `Unix.realpath` 로 읽는다(`lib/runtime/runtime_account_home_layout.ml:87-95`). 폴더가 없으면 실패한다. 지금 조회 쪽이 폴더를 만든다는 것은 조사만 했다(`lib/server/server_setup_account_login.ml:87-95`).
+- 계정의 상태는 계정 기록이 아니라 삭제 기록에서 계산한다(`lib/auth/authz_state.ml:62-74`). 삭제가 시작돼도 계정 기록은 같은 물건이다. 판정은 membership, 홈, key 를 다시 본다(`runtime_account_access.ml:352-357`). 판정이 삭제 중인 계정을 거절하는 줄은 조사만 했다(`lib/auth/authz_keeper_turn.ml:74`).
+- 조사만 함: zone 은 믿을 수 있을 때만 상태를 준다(`lib/auth/authz_zone.ml:207-216`). 설정을 기다리는 표는 빈 상태로 올라간다(`lib/runtime/runtime.ml:776, 824-827`). 값을 만들 때마다 inventory JSON 과 release catalog 를 읽는다(`lib/server/server_runtime_setup_actions.ml:361-384`, `lib/runtime/model_release_evidence.ml:207-256`).
+- 리뷰어가 깨뜨리지 못한 것이다. 로그 상태에 가변 칸과 제자리 수정이 없다. zone 의 읽기는 `Atomic.get` 하나다.
+
+### 18.2 실패 줄이 쓰이고 읽히는 길
+
+- 엔진이 돌린 턴의 실패는 §17.2 의 여섯 가운데 값을 들지 않는 하나로 온다. 턴을 돌리는 함수는 글과 disposition 을 돌려주고(`lib/server/server_routes_http_keeper_stream.ml:755`), 턴의 실패 값을 그 안에서 글로 바꾼다(`:793-798`). 부르는 쪽은 그 글로 실패 줄을 쓴다(`:2042-2043`). 나머지 다섯이 stream route 가 턴 밖에서 만드는 실패라는 것은 조사만 했다.
+- 위임 상태 도구는 대화 전체를 읽어 턴 ref 로 먼저 거른 뒤 연산 id 와 자리를 본다(`lib/keeper/keeper_tool_surface_ops.ml:1055-1069`, `lib/keeper/keeper_chat_projection.ml:318-337`). 실패 줄 여섯 가운데 넷에 턴 ref 가 없다는 것은 조사만 했다.
+- 줄 하나를 붙일 때 그 Keeper 의 줄 전부의 칸 이름을 본다(`lib/keeper/keeper_chat_store_provenance_index.ml:11-19`, `lib/keeper/keeper_chat_store_transcript_index.ml:50-65`, `lib/keeper/keeper_chat_store_append_once.ml:160`). 모르는 칸이 든 줄이 하나 있으면 붙이기가 거절된다. 그래서 옛 빌드는 새 칸이 든 줄이 있는 Keeper 의 대화 기록에 더 쓰지 못한다.
+- 조사만 함: 줄 없이 끝나는 길은 취소, 운영자의 멈춤, 턴 본문의 예외, 줄 쓰기 실패다(`server_routes_http_keeper_stream.ml:2099-2165`). 끝 줄의 자리는 연산마다 하나이고 먼저 쓴 줄이 남는다(`keeper_chat_store_append_once.ml:164-212`). 대화를 읽는 projection 은 줄의 글을 그대로 낸다(`keeper_chat_projection.ml:180-237`). 엔진의 실패 값 codec 은 갈래와 칸이 정확히 맞아야 풀리고 판 표시가 없다(`lib/keeper_runtime/keeper_request_failure.ml:727-742`).
+- 그래서 줄에는 실패 값 전체가 아니라 사람이 읽는 종류를 둔다. 스물일곱 갈래의 타입이 지워지지 않는 기록의 형식이 되지 않고, 글이 없어서 가릴 것도 없다. 갈래 수는 조사만 했다.

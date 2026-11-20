@@ -154,7 +154,6 @@ capture="${FAKE_CAPTURE_FILE:?}"
   printf 'MASC_CONFIG_DIR=%%s\n' "${MASC_CONFIG_DIR:-}"
   printf 'MASC_KEEPER_AUTONOMOUS_ENABLED=%%s\n' "${MASC_KEEPER_AUTONOMOUS_ENABLED:-}"
   printf 'MASC_GRPC_PORT=%%s\n' "${MASC_GRPC_PORT:-}"
-  printf 'MASC_WS_PORT=%%s\n' "${MASC_WS_PORT:-}"
   printf 'MASC_WS_ENABLED=%%s\n' "${MASC_WS_ENABLED:-}"
   printf 'ARGS=%%s\n' "$*"
 } >"$capture"
@@ -825,9 +824,7 @@ let test_explicit_http_port_derives_sidecar_ports () =
           stderr;
       let captured = read_file capture in
       check bool "grpc port derived from explicit http port" true
-        (String_util.contains_substring captured "MASC_GRPC_PORT=9952");
-      check bool "ws port derived from explicit http port" true
-        (String_util.contains_substring captured "MASC_WS_PORT=9953"))
+        (String_util.contains_substring captured "MASC_GRPC_PORT=9952"))
 
 let test_grpc_direct_banner_is_preserved_in_stderr () =
   with_temp_dir "start-masc-script" (fun dir ->

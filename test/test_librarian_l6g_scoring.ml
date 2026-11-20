@@ -146,7 +146,8 @@ let dropped_claims (plan : Plan.t) =
     (fun ((fact : Types.fact), (removal : Effects.removal)) ->
        match removal with
        | Effects.Dropped _ -> Some fact.claim
-       | Effects.Merged_into _ | Effects.Revised_into _ | Effects.Support_lost _ -> None)
+       | Effects.Merged_into _ | Effects.Revised_into _ | Effects.Support_lost _
+       | Effects.Superseded_by _ | Effects.Retracted _ -> None)
     plan.effects.removed
 ;;
 
@@ -155,7 +156,8 @@ let merged_claims (plan : Plan.t) =
     (fun ((fact : Types.fact), (removal : Effects.removal)) ->
        match removal with
        | Effects.Merged_into _ -> Some fact.claim
-       | Effects.Dropped _ | Effects.Revised_into _ | Effects.Support_lost _ -> None)
+       | Effects.Dropped _ | Effects.Revised_into _ | Effects.Support_lost _
+       | Effects.Superseded_by _ | Effects.Retracted _ -> None)
     plan.effects.removed
 ;;
 

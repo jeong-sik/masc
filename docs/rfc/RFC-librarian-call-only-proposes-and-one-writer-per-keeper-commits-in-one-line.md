@@ -379,8 +379,14 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 이 규칙이면 어느 head 가 닫은 메시지든 빠지지 않고 단위에 든다. 줄을 못 쓴 턴이 닫은 것, 늦게 들어온 저장, 꼬리 복구가 닫은 것도 같다.
 두 번 드는 것은 셋뿐이다. 지우기가 남긴 System 메시지(§5.6)가 하나다. 줄을 먼저 쓴 head 변경이 일어나지 않았을 때 그 줄의 `after` 와 `before` 사이가 둘이다. 알리지 않고 줄어든 head 가 그대로 둔 앞부분이 셋이다(§5.2). 지우기, recovering purge, session 을 지우는 정지가 줄을 먼저 쓴다(§5.2).
 
-단위 안의 것은 항목(item)으로 센다. 상대가 보낸 행이 먼저고 메시지가 그다음이다.
-보이는 순서는 `unattributed` 다음 `own` 이고, 구간 안은 chat 행, 외부 행, Agent-Core 메시지(slice 순서), official-client history 행, internal 행이다.
+단위 안의 것은 항목(item)으로 센다. 상대가 보낸 행이 먼저고 대화가 그다음이다.
+보이는 순서는 `unattributed` 다음 `own` 이고, 구간 안은 chat 행, 외부 행, 그다음 대화 기록 하나다.
+구간의 slice 가 메시지를 하나라도 가리키면 대화는 Agent-Core 메시지(slice 순서)다. 가리키지 않으면 official-client history 행과 internal 행이다.
+
+- **대화는 기록 하나에서 읽는다.** Agent Core 로 돈 턴은 닫은 메시지를 checkpoint 에 남긴다. 그 턴의 context runtime 은 같은 주고받음을 history 파일에도 쓴다. 요청을 만들 때 `Direct_user` 를, 끝낼 때 `Direct_assistant` 나 `Internal_assistant` 와 tool 관찰을 쓴다. 둘을 다 읽으면 한 단위에 같은 대화가 두 번 든다(#53607).
+- official client 로 돈 턴은 Agent Core checkpoint 를 남기지 않는다(`Runtime_execution.checkpoint_owner`). 그 턴의 기록은 history 파일뿐이다. 메시지를 닫지 못한 Agent Core 턴도 history 파일만 남긴다. 둘 다 slice 가 메시지를 가리키지 않으니 파일에서 읽는다.
+- 어느 기록인지는 줄의 slice 가 말한다. 글을 맞춰 보지 않는다.
+- 한 구간에 줄을 못 쓴 턴 둘이 겹치고 하나는 Agent Core, 하나는 official client 이면 official client 쪽 행은 읽지 않는다. 그 구간은 checkpoint 에서 읽는다. 줄을 못 쓴 턴이 둘 겹쳐야 생긴다.
 항목의 이름은 `{ line; index }` 다. `line` 은 그 단위의 줄이 시작하는 바이트 offset 이다.
 순서는 줄이 정한다. 그래서 bundle 하나가 없어지거나 돌아와도 번호가 밀리지 않는다.
 

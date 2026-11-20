@@ -5,6 +5,10 @@ module Trend = Masc_tui_usage_trend
 module Calls = Masc_tui_usage_calls
 module Series = Masc.Tui_decode_tool_series
 
+(* An instant [s] seconds after one reading of the loop's clock. *)
+let t0 = Masc_tui_wake.Mono.now ()
+let instant s = Masc_tui_wake.Mono.after t0 s
+
 let account id : Usage.provider_usage_account =
   { pua_scope="runtime-owned-" ^ id; pua_scope_id=id;
     pua_providers=[{pup_id="provider-" ^ id;pup_display_name="Same display name"}];
@@ -342,35 +346,35 @@ let drawn_calls_state () =
 let test_the_series_is_owed_once_a_period_after_its_answer () =
   let state = drawn_calls_state () in
   check bool "nothing is owed before a read answered" false
-    (take_tool_series_due state ~now:1e9);
-  note_tool_series_read state ~now:100.0;
+    (take_tool_series_due state ~now:(instant 1e9));
+  note_tool_series_read state ~now:(instant 100.0);
   check bool "not owed just before the period ends" false
-    (take_tool_series_due state ~now:(100.0 +. Calls.reread_s -. 0.001));
+    (take_tool_series_due state ~now:(instant @@ 100.0 +. Calls.reread_s -. 0.001));
   check bool "owed when the period ends" true
-    (take_tool_series_due state ~now:(100.0 +. Calls.reread_s));
+    (take_tool_series_due state ~now:(instant @@ 100.0 +. Calls.reread_s));
   check bool "owed once for that moment" false
-    (take_tool_series_due state ~now:(100.0 +. (10.0 *. Calls.reread_s)));
+    (take_tool_series_due state ~now:(instant @@ 100.0 +. (10.0 *. Calls.reread_s)));
   check bool "a longer wait than a period still owes it once" true
-    (note_tool_series_read state ~now:100.0;
-     take_tool_series_due state ~now:(100.0 +. (10.0 *. Calls.reread_s)))
+    (note_tool_series_read state ~now:(instant 100.0);
+     take_tool_series_due state ~now:(instant @@ 100.0 +. (10.0 *. Calls.reread_s)))
 
 let test_the_moment_is_dropped_while_calls_is_not_drawn () =
   let state = drawn_calls_state () in
-  note_tool_series_read state ~now:100.0;
+  note_tool_series_read state ~now:(instant 100.0);
   state.usage_section <- Usage_keepers;
   check bool "not owed while another section is up" false
-    (take_tool_series_due state ~now:1e9);
+    (take_tool_series_due state ~now:(instant 1e9));
   check bool "the moment is gone" true (state.tool_series_reread_at = None);
   state.usage_section <- Usage_calls;
   check bool "back on Calls the old moment owes no second read behind the one on arrival" false
-    (take_tool_series_due state ~now:1e9)
+    (take_tool_series_due state ~now:(instant 1e9))
 
 let test_a_period_change_and_a_withdrawn_workspace_drop_the_moment () =
   let state = drawn_calls_state () in
-  note_tool_series_read state ~now:100.0;
+  note_tool_series_read state ~now:(instant 100.0);
   ignore (cycle_usage_history_window state);
   check bool "the period key drops it" true (state.tool_series_reread_at = None);
-  note_tool_series_read state ~now:100.0;
+  note_tool_series_read state ~now:(instant 100.0);
   withdraw_usage_workspace state;
   check bool "a withdrawn workspace drops it" true (state.tool_series_reread_at = None)
 
@@ -428,24 +432,24 @@ let test_moving_between_calls_and_the_dashboard_rereads_the_other_window () =
   state.view <- Metrics;
   state.usage_section <- Usage_calls;
   state.tool_series <- Tool_series_read (fortnight_of_calls ());
-  note_tool_series_read state ~now:100.0;
+  note_tool_series_read state ~now:(instant 100.0);
   check bool "Calls owes nothing before its time" false
-    (take_tool_series_due state ~now:100.0);
+    (take_tool_series_due state ~now:(instant 100.0));
   check bool "and keeps the window it asked for" true
     (state.tool_series <> Tool_series_unread);
   state.view <- Overview;
   check bool "the Dashboard owes the series at once" true
-    (take_tool_series_due state ~now:100.0);
+    (take_tool_series_due state ~now:(instant 100.0));
   check bool "the fortnight is dropped, not drawn as the day" true
     (state.tool_series = Tool_series_unread);
-  check bool "owed once for that move" false (take_tool_series_due state ~now:100.0);
+  check bool "owed once for that move" false (take_tool_series_due state ~now:(instant 100.0));
   state.tool_series <- Tool_series_read (day_of_calls ());
-  note_tool_series_read state ~now:200.0;
+  note_tool_series_read state ~now:(instant 200.0);
   check bool "the Dashboard keeps a reading of its own window" false
-    (take_tool_series_due state ~now:200.0);
+    (take_tool_series_due state ~now:(instant 200.0));
   state.view <- Metrics;
   check bool "Calls on 14 days owes the series at once" true
-    (take_tool_series_due state ~now:200.0);
+    (take_tool_series_due state ~now:(instant 200.0));
   check bool "the day is dropped, not drawn as the fortnight" true
     (state.tool_series = Tool_series_unread)
 
@@ -456,9 +460,9 @@ let test_a_one_day_period_serves_calls_and_the_dashboard_with_one_reading () =
   state.usage_section <- Usage_calls;
   state.tool_series <- Tool_series_read (day_of_calls ());
   state.view <- Overview;
-  check bool "the Dashboard owes nothing" false (take_tool_series_due state ~now:1e9);
+  check bool "the Dashboard owes nothing" false (take_tool_series_due state ~now:(instant 1e9));
   state.view <- Metrics;
-  check bool "nor does Calls on its way back" false (take_tool_series_due state ~now:1e9);
+  check bool "nor does Calls on its way back" false (take_tool_series_due state ~now:(instant 1e9));
   check bool "the reading is kept" true (state.tool_series <> Tool_series_unread)
 
 let () = run "usage account continuity"

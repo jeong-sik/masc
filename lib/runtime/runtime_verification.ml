@@ -947,8 +947,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                         | Agent_core.Retry.InputCapacity _
                         | Agent_core.Retry.NetworkError _ | Agent_core.Retry.Connect_failed _ )
                     | Agent_core.Error.Provider
-                        ( Llm_provider.Error.MissingApiKey _
-                        | Llm_provider.Error.InvalidConfig _
+                        ( Llm_provider.Error.InvalidConfig _
                         | Llm_provider.Error.ParseError _
                         | Llm_provider.Error.ProviderWireError _
                         | Llm_provider.Error.ProviderReportedError _

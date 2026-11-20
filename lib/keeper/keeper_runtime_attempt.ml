@@ -71,8 +71,6 @@ let provider_error_to_http_error = function
       { kind = Llm_provider.Http_client.Other "protocol_error"
       ; message = detail
       }
-  | Llm_provider.Error.MissingApiKey { var_name } ->
-    http_error ~code:401 ~body:(Printf.sprintf "missing API key: %s" var_name)
   | Llm_provider.Error.InvalidConfig { field; detail } ->
     http_error ~code:400 ~body:(Printf.sprintf "%s: %s" field detail)
   | Llm_provider.Error.UnknownVariant { type_name; value } ->

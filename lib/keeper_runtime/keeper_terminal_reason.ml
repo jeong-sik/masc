@@ -126,7 +126,6 @@ let provider_timeout_suffix = function
 ;;
 
 let provider_error_code = function
-  | Llm_provider.Error.MissingApiKey _ -> "provider_error_missing_api_key"
   | Llm_provider.Error.InvalidConfig { field; _ } ->
     "provider_error_invalid_config:" ^ field
   | Llm_provider.Error.ParseError _ -> "provider_error_parse"
@@ -270,7 +269,6 @@ let failure_class_of_provider_error = function
   | Llm_provider.Error.Timeout _ -> Provider_runtime_failure Transient
   | Llm_provider.Error.NetworkError { kind; _ } | Llm_provider.Error.Connect_failed { kind; _ }
     -> Provider_runtime_failure (retry_of_network_kind kind)
-  | Llm_provider.Error.MissingApiKey _
   | Llm_provider.Error.ParseError _
   | Llm_provider.Error.ProviderWireError _
   | Llm_provider.Error.ProviderReportedError _

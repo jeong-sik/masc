@@ -29,8 +29,7 @@ let core_termination_semantics err =
   | Agent_core.Error.Agent (Agent_core.Error.TerminalToolDurabilityFailed _) ->
     Core_error_failure
   | Agent_core.Error.Provider
-      ( Llm_provider.Error.MissingApiKey _
-      | Llm_provider.Error.InvalidConfig _
+      ( Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.ParseError _
       | Llm_provider.Error.ProviderWireError _
       | Llm_provider.Error.ProviderReportedError _
@@ -131,8 +130,7 @@ let agent_core_timeout_observation :
          ; _
          })
   | Agent_core.Error.Provider
-      ( Llm_provider.Error.MissingApiKey _
-      | Llm_provider.Error.InvalidConfig _
+      ( Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.ParseError _
       | Llm_provider.Error.ProviderWireError _
       | Llm_provider.Error.ProviderReportedError _

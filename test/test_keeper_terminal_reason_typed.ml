@@ -273,8 +273,6 @@ let corpus : (string * Tr.t) list =
     , provider
         (Llm_provider.Error.ServerError
            { provider = "glm"; code = 500; transient = true; detail = "" }) )
-  ; ( "provider_error_missing_api_key"
-    , provider (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }) )
   ; ( "provider_error_hard_quota"
     , provider
         (Llm_provider.Error.HardQuota { provider = "glm"; retry_after = None; detail = "" }) )

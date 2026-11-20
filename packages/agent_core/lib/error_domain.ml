@@ -129,8 +129,6 @@ let of_provider_error (err : Llm_provider.Error.provider_error) : provider_error
   | Llm_provider.Error.InvalidRequest r ->
     `Invalid_request (Retry.Unknown_invalid_request, r.reason)
   | Llm_provider.Error.NotFound r -> `Not_found r.detail
-  | Llm_provider.Error.MissingApiKey r ->
-    `Auth_error (Printf.sprintf "missing API key: %s" r.var_name)
   | Llm_provider.Error.InvalidConfig r ->
     `Invalid_request (Retry.Unknown_invalid_request, r.detail)
   | Llm_provider.Error.ParseError r ->

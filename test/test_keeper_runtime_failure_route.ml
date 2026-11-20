@@ -315,11 +315,11 @@ let test_provider_config_judges () =
   match
     route_of_agent_core_error
       (Agent_core.Error.Provider
-         (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }))
+         (Llm_provider.Error.InvalidConfig { field = "api_key"; detail = "missing" }))
   with
   | KFR.Exhausted_visible_alive { terminal = KFR.Config_mismatch } -> ()
   | other ->
-    Alcotest.failf "missing api key should exhaust config, got %s"
+    Alcotest.failf "invalid config should exhaust config, got %s"
       (KFR.route_kind_label other)
 
 

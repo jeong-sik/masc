@@ -9,14 +9,6 @@
 open Alcotest
 open Llm_provider
 
-let test_missing_api_key () =
-  check
-    string
-    "MissingApiKey format"
-    "Missing API key env var: OPENAI_API_KEY"
-    (Error.to_string (Error.MissingApiKey { var_name = "OPENAI_API_KEY" }))
-;;
-
 let test_invalid_config () =
   check
     string
@@ -682,8 +674,7 @@ let test_is_retryable_matrix () =
    constructor with no catch-all, so a new [provider_error] constructor stops
    this file until its three answers are written down. *)
 let classification_samples : Error.provider_error list =
-  [ Error.MissingApiKey { var_name = "K" }
-  ; Error.InvalidConfig { field = "f"; detail = "d" }
+  [ Error.InvalidConfig { field = "f"; detail = "d" }
   ; Error.ParseError { detail = "d" }
   ; Error.ProviderWireError
       { provider = "p"
@@ -726,7 +717,6 @@ let expected_classification : Error.provider_error -> bool * bool * bool = funct
   | Error.AuthError _ | Error.AuthorizationError _ | Error.NotFound _ ->
     false, true, false
   | Error.EmptyCompletion _ -> false, false, true (* sample carries [EndTurn] *)
-  | Error.MissingApiKey _
   | Error.InvalidConfig _
   | Error.ParseError _
   | Error.ProviderWireError _
@@ -868,8 +858,7 @@ let () =
   run
     "llm_provider_error"
     [ ( "to_string"
-      , [ test_case "MissingApiKey" `Quick test_missing_api_key
-        ; test_case "InvalidConfig" `Quick test_invalid_config
+      , [ test_case "InvalidConfig" `Quick test_invalid_config
         ; test_case "ParseError" `Quick test_parse_error
         ; test_case "UnknownVariant" `Quick test_unknown_variant
         ; test_case "ProviderUnavailable" `Quick test_provider_unavailable

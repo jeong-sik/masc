@@ -610,9 +610,12 @@ let dispatch_keeper_msg_stream_admitted
     (match dispatch with
      | Keeper_turn.Turn_settled result ->
        Keeper_turn.Turn_settled (tool_result_with_tool_name ~tool_name:name result)
-     | Keeper_turn.Turn_failed { result; failure } ->
+     | Keeper_turn.Turn_failed { result; failure; turn_ref } ->
        Keeper_turn.Turn_failed
-         { result = tool_result_with_tool_name ~tool_name:name result; failure })
+         { result = tool_result_with_tool_name ~tool_name:name result
+         ; failure
+         ; turn_ref
+         })
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

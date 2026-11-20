@@ -400,7 +400,12 @@ let test_unrelated_writers_cannot_poison_an_autonomous_owner () =
     (match K.append_user_message_once ~base_dir ~keeper_name ~delivery_key ~content:"wrong owner" () with
      | Error _ -> () | Ok _ -> fail "user writer bypassed the autonomous binding");
     let failure : K.Settled_failure.t =
-      { delivery_key; content = "wrong failure"; route = Lazy.from_val K.Row_route.none } in
+      { delivery_key
+      ; content = "wrong failure"
+      ; failure_kind = None
+      ; turn_ref = None
+      ; route = Lazy.from_val K.Row_route.none
+      } in
     (match K.append_settled_failures_once ~base_dir ~keeper_name [ (), failure ] with
      | Ok [ (), Error _ ] -> ()
      | Error detail -> fail detail

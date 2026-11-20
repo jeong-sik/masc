@@ -19,6 +19,7 @@ type dispatch =
   | Turn_failed of
       { result : tool_result
       ; failure : Keeper_request_failure.t
+      ; turn_ref : Ids.Turn_ref.t option
       }
 
 (** Start or reconfigure a keeper agent. *)

@@ -89,6 +89,11 @@ let candidate_access_should_try_next error =
     (match error with
      | Agent_core.Error.Provider provider_error ->
        Llm_provider.Error.is_candidate_access_rejection provider_error
+     | Agent_core.Error.Internal _
+     | Agent_core.Error.Internal_carried _ ->
+       (match Keeper_provider_refusal.of_core_error error with
+        | Some (Keeper_provider_refusal.Key_refused _) -> true
+        | Some (Keeper_provider_refusal.Spawn_refused _) | None -> false)
      | Agent_core.Error.Agent _
      | Agent_core.Error.Mcp _
      | Agent_core.Error.Config _
@@ -96,8 +101,6 @@ let candidate_access_should_try_next error =
      | Agent_core.Error.Io _
      | Agent_core.Error.Orchestration _
      | Agent_core.Error.Media _
-     | Agent_core.Error.Internal _
-     | Agent_core.Error.Internal_carried _
      | Agent_core.Error.Api _ -> false)
 ;;
 

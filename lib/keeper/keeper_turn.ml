@@ -27,6 +27,7 @@ type dispatch =
   | Turn_failed of
       { result : tool_result
       ; failure : Keeper_request_failure.t
+      ; turn_ref : Ids.Turn_ref.t option
       }
 
 (* The turn answers with a tool result the caller already knows how to carry,
@@ -38,12 +39,13 @@ type dispatch =
    drops [data] anyway (RFC-0454 §2.2, last bullet). *)
 let dispatch_ok result = Turn_settled result
 
-let dispatch_failed ~class_ ?tool_name cause =
+let dispatch_failed ~class_ ?tool_name ?(turn_ref = None) cause =
   let failure = { Keeper_request_failure.cause } in
   Turn_failed
     { result =
         tool_result_error ?tool_name ~class_ (Keeper_request_failure.summary failure)
     ; failure
+    ; turn_ref
     }
 ;;
 
@@ -220,6 +222,7 @@ let turn_resources_error failure =
         { Keeper_request_failure.cause =
             Keeper_request_failure.Turn_resources_unavailable { resource; detail }
         }
+    ; turn_ref = None
     }
 ;;
 
@@ -451,6 +454,17 @@ let run_keeper_invocation_turn_admitted_inner
          in
          dispatch_failed ~class_:Tool_result.Runtime_failure cause
        | Ok (profile_defaults, meta) ->
+            (* RFC-0233 §7: mint the turn's join key ONCE — the admitted trace and
+               the number the Owner allocated before this body ran, the same pair
+               the Turn_record writer stamps ([Keeper_agent_run.run_turn] receives
+               this very number below). Minting before [native_admission] ensures
+               pre-dispatch admission failures retain [turn_ref] too. *)
+            let turn_ref =
+              Ids.Turn_ref.make
+                ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                ~absolute_turn:keeper_turn_id
+            in
+            Keeper_turn_preview_owner.note_turn_ref turn_ref;
             let dispatch_snapshot = Runtime.keeper_dispatch_snapshot ~keeper_name:meta.name in
             let base_dir = session_base_dir ctx.config in
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -499,6 +513,7 @@ let run_keeper_invocation_turn_admitted_inner
        | Error detail ->
          dispatch_failed
            ~class_:Tool_result.Runtime_failure
+           ~turn_ref:(Some turn_ref)
            (Keeper_request_failure.Turn_continuation_unpersisted
               { stage = Keeper_request_failure.Continuation_load; detail })
        | Ok (native_binding, native_resume, direct_resume, person_caller) ->
@@ -558,17 +573,6 @@ let run_keeper_invocation_turn_admitted_inner
       in
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
-      (* RFC-0233 §7: mint the turn's join key ONCE — the admitted trace and
-         the number the Owner allocated before this body ran, the same pair
-         the Turn_record writer stamps ([Keeper_agent_run.run_turn] receives
-         this very number below). Threaded into reply_json; never re-derived
-         at the reply seam (RFC §7.2 mint-once, thread down; #52839). *)
-      let turn_ref =
-        Ids.Turn_ref.make
-          ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~absolute_turn:keeper_turn_id
-      in
-      Keeper_turn_preview_owner.note_turn_ref turn_ref;
       let turn_tracker = Progress.start_tracking ~task_id:turn_task_id ~total_steps:5 () in
       Progress.Tracker.step turn_tracker ~message:"Preparing keeper turn configuration" ();
       let selected_runtime = match native_resume with
@@ -581,6 +585,7 @@ let run_keeper_invocation_turn_admitted_inner
         Progress.stop_tracking turn_task_id;
         dispatch_failed
           ~class_:Tool_result.Runtime_failure
+          ~turn_ref:(Some turn_ref)
           (Keeper_request_failure.Runtime_selection_failed { detail })
       | Ok turn_runtime_id ->
       (* start_keepalive is deferred AFTER run_turn completes.
@@ -607,7 +612,10 @@ let run_keeper_invocation_turn_admitted_inner
 	           let { Keeper_request_failure.cause } =
 	             Keeper_request_failure.of_core_error error
 	           in
-	           dispatch_failed ~class_:Tool_result.Runtime_failure cause
+	           dispatch_failed
+	             ~class_:Tool_result.Runtime_failure
+	             ~turn_ref:(Some turn_ref)
+	             cause
 	         | Ok initial_execution ->
             let live_worktree_change = None in
             (* The direct-message lane used to construct its prompt before it
@@ -928,6 +936,7 @@ let run_keeper_invocation_turn_admitted_inner
                   Progress.stop_tracking turn_task_id;
                   dispatch_failed
                     ~class_:Tool_result.Runtime_failure
+                    ~turn_ref:(Some turn_ref)
                     (Keeper_request_failure.Turn_continuation_unpersisted
                        { stage = Keeper_request_failure.Gate_suspend; detail })
                 | Ok (Some cause) ->
@@ -939,7 +948,10 @@ let run_keeper_invocation_turn_admitted_inner
                   commit_ended_turn ();
                   restart_keepalive_after_message_turn ctx meta;
                   Progress.stop_tracking turn_task_id;
-                  dispatch_failed ~class_:Tool_result.Runtime_failure cause
+                  dispatch_failed
+                    ~class_:Tool_result.Runtime_failure
+                    ~turn_ref:(Some turn_ref)
+                    cause
                 | Ok None ->
                 let source = match run_result with
                   | Ok {Keeper_agent_run.checkpoint=Some checkpoint; _} ->
@@ -965,6 +977,7 @@ let run_keeper_invocation_turn_admitted_inner
                   commit_ended_turn ();
                   dispatch_failed
                     ~class_:Tool_result.Runtime_failure
+                    ~turn_ref:(Some turn_ref)
                     (Keeper_request_failure.Turn_continuation_unpersisted
                        { stage = Keeper_request_failure.Gate_suspend; detail })
                 | Ok true ->
@@ -995,6 +1008,7 @@ let run_keeper_invocation_turn_admitted_inner
                | Error detail ->
                  dispatch_failed
                    ~class_:Tool_result.Runtime_failure
+                   ~turn_ref:(Some turn_ref)
                    (Keeper_request_failure.Turn_continuation_unpersisted
                       { stage = Keeper_request_failure.Runtime_continuation_defer; detail })
                | Ok () ->
@@ -1027,7 +1041,10 @@ let run_keeper_invocation_turn_admitted_inner
               commit_ended_turn ();
               restart_keepalive_after_message_turn ctx meta;
               Progress.stop_tracking turn_task_id;
-              dispatch_failed ~class_:Tool_result.Runtime_failure cause
+              dispatch_failed
+                ~class_:Tool_result.Runtime_failure
+                ~turn_ref:(Some turn_ref)
+                cause
             | Ok result ->
               Keeper_turn_helpers.finalize_trajectory_acc
                 ~config:ctx.config ~keeper_name:meta.name trajectory_acc
@@ -1105,6 +1122,7 @@ let run_keeper_invocation_turn_admitted_inner
                | Error detail ->
                  dispatch_failed
                    ~class_:Tool_result.Runtime_failure
+                   ~turn_ref:(Some turn_ref)
                    (Keeper_request_failure.Turn_continuation_unpersisted
                       { stage = Keeper_request_failure.Checkpoint_retain; detail })
                | Ok () ->

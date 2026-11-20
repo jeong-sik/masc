@@ -3068,6 +3068,8 @@ let test_duplicate_provenance_poisons_whole_delivery_key () =
 let settled_failure key content =
   { K.Settled_failure.delivery_key = operation_delivery_key key
   ; content
+  ; failure_kind = None
+  ; turn_ref = None
   ; route = lazy K.Row_route.none
   }
 ;;
@@ -3169,7 +3171,14 @@ let test_settled_failure_batch_writes_the_single_append_row () =
        | Ok (K.Already_present _) | Error _ -> Alcotest.fail "the single append wrote nothing");
       (match
          K.append_settled_failures_once ~base_dir ~keeper_name:"batch-keeper"
-           [ (), { K.Settled_failure.delivery_key; content; route = lazy route } ]
+           [ ( ()
+             , { K.Settled_failure.delivery_key
+               ; content
+               ; failure_kind = None
+               ; turn_ref = None
+               ; route = lazy route
+               } )
+           ]
        with
        | Ok [ (), Ok (K.Appended _) ] -> ()
        | Ok _ | Error _ -> Alcotest.fail "the batch wrote nothing");
@@ -4058,6 +4067,120 @@ let test_purge_plan_removes_chat_store () =
     (List.exists (fun entry -> entry = Shutdown.Keeper_chat_store_artifact) plan)
 ;;
 
+let test_request_failure_kind_turn_ref_and_redaction () =
+  with_eio_fs @@ fun () ->
+  let base_dir = temp_base_path "keeper-chat-failure-kind" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let keeper_name = "keeper-failure-kind" in
+    let key1 = failure_key "kmsg-failure-kind-1" in
+    let key2 = failure_key "kmsg-failure-kind-2" in
+    let tref1 = Ids.Turn_ref.make ~trace_id:"trace-fail" ~absolute_turn:1 in
+    let tref2 = Ids.Turn_ref.make ~trace_id:"trace-fail" ~absolute_turn:2 in
+    let dirty_diag =
+      "HTTP 401 reading /Users/alice/.masc/accounts/p1/key and /tmp/run.log token sk-ant-api03-verysecretvalue12345"
+    in
+    (match K.append_user_message_once ~base_dir ~keeper_name ~delivery_key:key1
+        ~content:"please check" () with
+     | Ok _ -> () | Error err -> Alcotest.fail err);
+    (match K.append_request_failure_once ~base_dir ~keeper_name ~delivery_key:key1
+        ~failure_kind:Keeper_request_failure.Failure_kind.Key_refused
+        ~turn_ref:tref1 ~content:dirty_diag () with
+     | Ok (K.Appended _) -> ()
+     | Ok (K.Already_present _) -> Alcotest.fail "unexpected duplicate"
+     | Error err -> Alcotest.fail err);
+    (match K.append_settled_failure_once ~base_dir ~keeper_name ~delivery_key:key2
+        ~failure_kind:Keeper_request_failure.Failure_kind.Not_started
+        ~turn_ref:tref2 ~route:(lazy K.Row_route.none)
+        ~content:"spawn refused at /private/var/tmp/cli.sock" () with
+     | Ok (K.Appended _) -> ()
+     | Ok (K.Already_present _) -> Alcotest.fail "unexpected duplicate settled"
+     | Error err -> Alcotest.fail err);
+    let rows =
+      match K.load_all_result ~base_dir ~keeper_name with
+      | Ok rows -> rows
+      | Error err -> Alcotest.fail (K.strict_decode_error_to_string err)
+    in
+    (match rows with
+     | [ user; req_fail; settled_fail ] ->
+       Alcotest.(check bool) "user has no failure_kind" true (user.failure_kind = None);
+       Alcotest.(check bool) "request_failure keeps Key_refused" true
+         (req_fail.failure_kind = Some Keeper_request_failure.Failure_kind.Key_refused);
+       Alcotest.(check bool) "request_failure keeps turn_ref" true
+         (Option.equal Ids.Turn_ref.equal req_fail.turn_ref (Some tref1));
+       List.iter (fun forbidden ->
+         if String_util.contains_substring req_fail.content forbidden then
+           Alcotest.failf "request_failure leaked %S in %S" forbidden req_fail.content)
+         [ "/Users/"; "/tmp/"; ".masc/"; "sk-ant-" ];
+       Alcotest.(check bool) "settled_failure keeps Not_started" true
+         (settled_fail.failure_kind = Some Keeper_request_failure.Failure_kind.Not_started);
+       Alcotest.(check bool) "settled_failure keeps turn_ref" true
+         (Option.equal Ids.Turn_ref.equal settled_fail.turn_ref (Some tref2));
+       if String_util.contains_substring settled_fail.content "/private/" then
+         Alcotest.failf "settled_failure leaked path in %S" settled_fail.content
+     | _ -> Alcotest.failf "expected 3 rows, got %d" (List.length rows));
+    let transcript = K.transcript_of_messages ~turn_ref:tref1 rows in
+    Alcotest.(check int) "tref1 matches 1 failure row" 1 (List.length transcript.assistant);
+    Alcotest.(check int) "tref1 joins its accepted user" 1 (List.length transcript.user);
+    let projected = K.to_json_array ~trace_block_by_turn_ref:(fun _ -> None) rows in
+    (match projected with
+     | `List [ _; `Assoc fields1; `Assoc fields2 ] ->
+       Alcotest.(check bool) "projected request_failure carries failure_kind" true
+         (List.assoc_opt "failure_kind" fields1 = Some (`String "key_refused"));
+       Alcotest.(check bool) "projected settled_failure carries failure_kind" true
+         (List.assoc_opt "failure_kind" fields2 = Some (`String "not_started"))
+     | _ -> Alcotest.fail "unexpected to_json_array shape");
+    let blocking_file = Filename.concat base_dir "not-a-dir" in
+    Out_channel.with_open_bin blocking_file (fun oc -> Out_channel.output_string oc "x");
+    let blocked_base = Filename.concat blocking_file "Users/alice/.masc/sub" in
+    (match K.append_request_failure_once ~base_dir:blocked_base ~keeper_name
+        ~delivery_key:key1 ~failure_kind:Keeper_request_failure.Failure_kind.Not_started
+        ~content:"ignored" () with
+     | Ok _ -> Alcotest.fail "blocked base_dir must fail append"
+     | Error persist_err ->
+       List.iter (fun forbidden ->
+         if String_util.contains_substring persist_err forbidden then
+           Alcotest.failf "report_store_failure leaked %S in %S" forbidden persist_err)
+         [ "/Users/"; "/tmp/"; "/var/"; ".masc/"; "not-a-dir" ];
+       Alcotest.(check bool) "report_store_failure redacts server paths" true
+         (String_util.contains_substring persist_err "[REDACTED_PATH]"));
+    let direct_store_err =
+      Masc.Keeper_chat_store_paths.report_store_failure
+        ~operation:Keeper_chat_store_operation.Append
+        ~keeper_name
+        ~what:"append"
+        (Sys_error "/Users/alice/repo/.masc/keeper_chat/k.jsonl: Permission denied (sk-ant-api03-secret123456)")
+    in
+    List.iter (fun forbidden ->
+      if String_util.contains_substring direct_store_err forbidden then
+        Alcotest.failf "direct report_store_failure leaked %S in %S" forbidden direct_store_err)
+      [ "/Users/"; ".masc/"; "sk-ant-" ];
+    Alcotest.(check bool) "direct report_store_failure emits [REDACTED_PATH]" true
+      (String_util.contains_substring direct_store_err "[REDACTED_PATH]"))
+;;
+
+let test_failure_kind_tolerant_decode_and_read_drops () =
+  let base_dir = temp_base_path "keeper-chat-failure-kind-drops" in
+  Fun.protect ~finally:(fun () -> remove_tree base_dir) (fun () ->
+    let keeper_name = "keeper-failure-kind-drops" in
+    let path = chat_path ~base_dir ~keeper_name in
+    let drops_before = drop_value "invalid_payload" in
+    write_file path
+      (String.concat "\n"
+         [ {|{"id":"legacy-fail","role":"request_failure","content":"legacy failure","ts":1.0}|}
+         ; {|{"id":"bad-kind","role":"request_failure","content":"bad kind","failure_kind":"invented","ts":2.0}|}
+         ; {|{"id":"wrong-role","role":"assistant","content":"hi","failure_kind":"not_started","ts":3.0}|}
+         ]
+       ^ "\n");
+    let rows = K.load ~base_dir ~keeper_name in
+    let drops_after = drop_value "invalid_payload" in
+    Alcotest.(check int) "legacy and malformed rows stay readable" 3 (List.length rows);
+    Alcotest.(check bool) "read drops recorded for bad/misplaced failure_kind" true
+      (drops_after -. drops_before >= 2.0);
+    List.iter (fun (row : K.chat_message) ->
+      Alcotest.(check bool) ("row failure_kind decoded as None: " ^ row.id) true
+        (row.failure_kind = None)) rows)
+;;
+
 let () =
   Alcotest.run "keeper_chat_store"
     [
@@ -4282,5 +4405,9 @@ let () =
             test_load_all_is_incremental_and_follows_appends;
           Alcotest.test_case "load_all reuses policy across domains" `Quick
             test_load_all_reuses_policy_across_domains;
+          Alcotest.test_case "request_failure persists typed failure_kind, turn_ref, and path redaction"
+            `Quick test_request_failure_kind_turn_ref_and_redaction;
+          Alcotest.test_case "legacy and invalid failure_kind values decode tolerantly" `Quick
+            test_failure_kind_tolerant_decode_and_read_drops;
         ] );
     ]

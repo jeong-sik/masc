@@ -86,14 +86,21 @@ let cause_group_of_failure (failure : Request_failure.t) =
   | Request_failure.Core { Core_failure.category; message = _ } ->
       group_of_core_category category
   | Request_failure.Masc error -> group_of_masc_error error
-  | Request_failure.Provider_network _ | Request_failure.Provider_connect_failed _ ->
+  | Request_failure.Provider_network _ | Request_failure.Provider_connect_failed _
+  | Request_failure.Provider_timeout _ ->
     Connection
-  | Request_failure.Provider_rate_limited _ -> Rate_limited
+  | Request_failure.Provider_rate_limited _ | Request_failure.Provider_quota_exhausted _ ->
+    Rate_limited
+  | Request_failure.Provider_auth_required _
+  | Request_failure.Provider_key_refused _
+  | Request_failure.Provider_spawn_refused _ -> Provider
   | Request_failure.Context_overflow _ | Request_failure.Input_capacity -> Input
   | Request_failure.Operator_cancelled -> Stopped
   | Request_failure.Server_not_initialized
   | Request_failure.Server_restarted
   | Request_failure.Dispatch_unavailable -> Server
+  | Request_failure.Account_refused _
+  | Request_failure.Configuration_refused _
   | Request_failure.Keeper_meta_unresolved _
   | Request_failure.Keeper_not_registered _
   | Request_failure.Invocation_rejected _

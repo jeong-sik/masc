@@ -23,6 +23,18 @@ let summary = function
     | No_queued_operation | Invalid_input | Turn_invariant | Delivery_failed) as kind ->
     Operation.public_failure_message kind
 
+let request_failure_kind_of_operation_kind = function
+  | Operation.Interrupted_by_restart ->
+    Keeper_request_failure.Failure_kind.Server_unavailable
+  | Operation.Turn_cancelled ->
+    Keeper_request_failure.Failure_kind.Cancelled
+  | Operation.Store_unavailable ->
+    Keeper_request_failure.Failure_kind.Server_unavailable
+  | Operation.Invalid_input | Operation.Turn_invariant ->
+    Keeper_request_failure.Failure_kind.Configuration_refused
+  | Operation.No_queued_operation | Operation.Delivery_failed | Operation.Turn_exception ->
+    Keeper_request_failure.Failure_kind.No_answer
+
 (* A Failed operation's projection, decided before any effect. *)
 type failed =
   { operation : Operation.Operation_id.t
@@ -31,6 +43,7 @@ type failed =
   ; created_at : float
   ; completed_at : float
   ; failure_kind : Operation.failure_kind
+  ; turn_ref : Ids.Turn_ref.t option
   ; source : (Keeper_chat_operation_payload.decoded_source, string) result Lazy.t
   ; route : Keeper_chat_store.Row_route.t Lazy.t
   ; content : string
@@ -55,9 +68,12 @@ let prepare (operation : Operation.t) =
                 ; created_at = operation.created_at
                 ; completed_at
                 ; failure_kind = failure.kind
+                ; turn_ref = Option.bind failure.outcome_ref Ids.Turn_ref.of_string
                 ; source
                 ; route
-                ; content = "Keeper request failed: " ^ summary failure.kind }))
+                ; content =
+                    Keeper_request_failure.sanitize_person_text
+                      ("Keeper request failed: " ^ summary failure.kind) }))
 
 (* The transcript answer is already in; the journal and any Keeper delegation
    failure wake are attempted either way so cancellations, exceptions, and
@@ -120,7 +136,8 @@ let persist ~base_path ~keeper_name (operation : Operation.t) =
   | Ok (Some failed) ->
     let appended = Keeper_chat_store.append_settled_failure_once
       ~base_dir:base_path ~keeper_name ~delivery_key:failed.delivery_key
-      ~route:failed.route ~content:failed.content () in
+      ~failure_kind:(request_failure_kind_of_operation_kind failed.failure_kind)
+      ?turn_ref:failed.turn_ref ~route:failed.route ~content:failed.content () in
     Ok (finish ~base_path ~keeper_name failed appended)
 
 let persist_all ~base_path ~keeper_name (operations : Operation.t list) =
@@ -134,6 +151,9 @@ let persist_all ~base_path ~keeper_name (operations : Operation.t list) =
       Some ((operation, failed),
             { Keeper_chat_store.Settled_failure.delivery_key = failed.delivery_key
             ; content = failed.content
+            ; failure_kind =
+                Some (request_failure_kind_of_operation_kind failed.failure_kind)
+            ; turn_ref = failed.turn_ref
             ; route = failed.route })
     | Error _ | Ok None -> None) prepared in
   let answered = match Keeper_chat_store.append_settled_failures_once

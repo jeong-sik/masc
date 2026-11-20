@@ -752,12 +752,14 @@ let execute_keeper_stream_tool_streaming
   let workspace_scope = Mcp_server.workspace_scope state in
   let config = workspace_scope.config in
   let start_time = Eio.Time.now clock in
-  let body, disposition =
+  let body, disposition, terminal_failure =
     (* Every failure here is a typed value first; its summary is what the
        string-shaped stream and row API still take. *)
     let failed failure_class cause =
-      ( Keeper_request_failure.summary { Keeper_request_failure.cause }
-      , Tool_result.Failed failure_class )
+      let failure = { Keeper_request_failure.cause } in
+      ( Keeper_request_failure.summary failure
+      , Tool_result.Failed failure_class
+      , Some (failure, None) )
     in
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
@@ -789,13 +791,15 @@ let execute_keeper_stream_tool_streaming
       match dispatched with
       | Some (Keeper_turn.Turn_settled result) ->
           let body = Tool_result.message result in
-          body, keeper_stream_disposition_of_result result
-      | Some (Keeper_turn.Turn_failed { result; failure }) ->
+          body, keeper_stream_disposition_of_result result, None
+      | Some (Keeper_turn.Turn_failed { result; failure; turn_ref }) ->
           (* The turn already decided why it failed, and the value crossed
              this boundary as a value. The stream renders it once here
-             instead of each producer formatting its own sentence. *)
+             instead of each producer formatting its own sentence, while
+             preserving the typed failure and turn_ref for row persistence. *)
           ( Keeper_request_failure.summary failure
-          , keeper_stream_disposition_of_result result )
+          , keeper_stream_disposition_of_result result
+          , Some (failure, turn_ref) )
       | None -> failed Tool_result.Runtime_failure Keeper_request_failure.Dispatch_unavailable
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -872,7 +876,7 @@ let execute_keeper_stream_tool_streaming
       (* Carry the full disposition, not a collapsed bool: the queued-outcome
          consumer needs the failure class to keep an operator interrupt from
          being written as a crash (#28868 review P0). *)
-      `Ran (disposition, body)
+      `Ran (disposition, body, terminal_failure)
 
 type canonical_reply_payload_error =
   | Malformed_reply_json of { parser_detail : string }
@@ -1041,11 +1045,22 @@ let reply_contract_field_of_payload_error
 
 let persisted_error_reply err =
   let detail =
-    match String.trim err with
+    match Keeper_request_failure.sanitize_person_text (String.trim err) with
     | "" -> "unknown error"
     | trimmed -> trimmed
   in
   "Keeper request failed: " ^ detail
+
+let turn_ref_of_body_opt body =
+  try
+    match Yojson.Safe.from_string body with
+    | `Assoc fields ->
+      (match List.filter (fun (key, _) -> String.equal key "turn_ref") fields with
+       | [ (_, `String raw) ] -> Ids.Turn_ref.of_string raw
+       | _ -> None)
+    | _ -> None
+  with
+  | Yojson.Json_error _ -> None
 
 (* The two answers this returns are causes, not sentences: the contract
    refused the payload, or the turn produced nothing to show. *)
@@ -1264,11 +1279,14 @@ let publish_stream_events ~redact_text ~base_dir ~publish bridge_state scoped_ev
    caller presents the typed transcript provenance and execution ownership
    selected at its persistence boundary; this function never infers either
    from a connector label or message content. *)
-let process_single_turn ~batch_binding ~user_row_origin ~submission
+let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_origin ~submission
     ~state ~clock ~thread_id ~continuation_channel ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.t) =
+  let record_turn_ref turn_ref =
+    Option.iter (fun f -> f turn_ref) on_turn_ref
+  in
   let base_path = (Mcp_server.workspace_config state).base_path in
   let redaction =
     Keeper_secret_redaction.snapshot ~base_path ~keeper_name:payload.name
@@ -1479,9 +1497,10 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       ~settlement:(Server_keeper_operation_transcript.Reply content)
       ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:completed_stream_lifecycle ()
   in
-  let append_queued_request_failure_once ?(tool_calls = []) ?blocks ?turn_ref content =
+  let append_queued_request_failure_once ?(tool_calls = []) ?blocks ?turn_ref
+      ?failure_kind content =
     persist_operation_attempt
-      ~settlement:(Server_keeper_operation_transcript.Request_failed content)
+      ~settlement:(Server_keeper_operation_transcript.Request_failed { content; failure_kind })
       ~tool_calls ?blocks ?turn_ref ~stream_lifecycle:errored_stream_lifecycle ()
   in
   let append_queued_tool_calls_once ?turn_ref tool_calls =
@@ -1666,13 +1685,14 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     List.iter (fun event -> push_worker_event (Stream_chat_event event)) events;
     Ok ()
   in
-  let persist_failure_reply ?blocks ?turn_ref err =
+  let persist_failure_reply ?failure_kind ?blocks ?turn_ref err =
     (* The failure marker is typed, not an utterance: it renders for the
        operator but does not advance the lane watermark, so the user
        message it failed to answer stays pending for the keeper's next
        turn — and the keeper never reads the error as its own words. Any
        completed media block was already delivered live, so a failure must
        retain it for reload just as a successful terminal does. *)
+    Option.iter record_turn_ref turn_ref;
     let blocks =
       match blocks with
       | Some _ -> blocks
@@ -1687,7 +1707,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       Keeper_stream_tool_accum.to_tool_calls_for_failure worker_tool_accum
     in
     let persisted =
-      append_queued_request_failure_once ~tool_calls ?blocks ?turn_ref content
+      append_queued_request_failure_once ~tool_calls ?blocks ?turn_ref ?failure_kind content
     in
     Result.bind persisted (fun () -> publish_tool_transcript_bindings tool_calls)
   in
@@ -1702,26 +1722,27 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     in
     Result.map (fun () -> tool_calls) (append_queued_tool_calls_once tool_calls)
   in
+  let persist_failed_outcome detail =
+    Failed
+      { kind = Transcript_persist_failed
+      ; detail = Keeper_request_failure.sanitize_person_text detail
+      }
+  in
   let ended_turn_outcome kind detail =
     match Result.bind (persist_ran_tool_calls ()) publish_tool_transcript_bindings with
     | Ok () -> Failed { kind; detail }
-    | Error persist_error ->
-      Failed { kind = Transcript_persist_failed; detail = persist_error }
+    | Error persist_error -> persist_failed_outcome persist_error
   in
   let run_turn request_sw =
     let start_time = Tool_timing.start () in
-        let finish_projection_failure kind (failure : Keeper_request_failure.t) =
+        let finish_projection_failure ?turn_ref kind (failure : Keeper_request_failure.t) =
           let detail = Keeper_request_failure.summary failure in
-          let persisted = persist_failure_reply detail in
+          let failure_kind = Keeper_request_failure.failure_kind failure in
+          let persisted = persist_failure_reply ~failure_kind ?turn_ref detail in
           let queued_outcome =
             match persisted with
             | Ok () -> Some (Failed { kind; detail })
-            | Error persist_error ->
-              Some
-                (Failed
-                   { kind = Transcript_persist_failed
-                   ; detail = persist_error
-                   })
+            | Error persist_error -> Some (persist_failed_outcome persist_error)
           in
           stage_completion
             (Completion_terminal
@@ -1793,7 +1814,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                 ~continuation_channel ~on_text_delta:(fun _ -> ())
                 ~operation_id ~admission_token
             in
-            match result with `Ran result -> Ok (`Ran result)
+            match result with `Ran (disposition, body, terminal_failure) ->
+              Ok (`Ran (disposition, body, terminal_failure))
           with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
@@ -1816,7 +1838,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                 })
         in
         match dispatch_result with
-        | Ok (`Ran ((Tool_result.Completed () | Tool_result.Deferred ()), body)) ->
+        | Ok (`Ran ((Tool_result.Completed () | Tool_result.Deferred ()), body, _)) ->
           (match canonical_reply_payload_of_body ~redact_text body with
            | Error error ->
              let detail = canonical_reply_payload_error_to_string error in
@@ -1836,7 +1858,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                "keeper_stream: canonical terminal projection rejected keeper=%s error=%s"
                payload.name
                internal_detail;
+             let turn_ref = turn_ref_of_body_opt body in
              finish_projection_failure
+               ?turn_ref
                Stream_projection_failed
                { Keeper_request_failure.cause =
                    Keeper_request_failure.Reply_contract_rejected
@@ -1846,6 +1870,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
             let payload_json_opt = Some canonical_reply.payload_json in
             let body = canonical_reply.poll_body in
             let turn_ref = Some canonical_reply.turn_ref in
+            Option.iter record_turn_ref turn_ref;
             let visible_reply = canonical_reply.visible_reply in
             (* Attach any generated media (accumulated from
                this turn's stream) as reload-visible chat blocks so a dashboard
@@ -1864,15 +1889,12 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
              | Some cause ->
                  let failure = { Keeper_request_failure.cause } in
                  let err = Keeper_request_failure.summary failure in
+                 let failure_kind = Keeper_request_failure.failure_kind failure in
                  let queued_outcome =
-                   match persist_failure_reply ?turn_ref err with
+                   match persist_failure_reply ~failure_kind ?turn_ref err with
                    | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
                    | Error persist_error ->
-                     Some
-                       (Failed
-                          { kind = Transcript_persist_failed
-                          ; detail = persist_error
-                          })
+                     Some (persist_failed_outcome persist_error)
                  in
                  stage_completion
                    (Completion_terminal
@@ -1979,7 +2001,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                             }
                           in
                           let detail = Keeper_request_failure.summary failure in
-                          persist_failure_reply ?turn_ref detail
+                          let failure_kind = Keeper_request_failure.failure_kind failure in
+                          persist_failure_reply ~failure_kind ?turn_ref detail
                           |> Result.map (fun () ->
                                  Some (Failed { kind = No_visible_reply; detail })))
                    | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
@@ -1988,12 +2011,11 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                  in
                  (match delivery_result with
                   | Error persist_error ->
+                      let persist_error =
+                        Keeper_request_failure.sanitize_person_text persist_error
+                      in
                       let queued_outcome =
-                        Some
-                          (Failed
-                             { kind = Transcript_persist_failed
-                             ; detail = persist_error
-                             })
+                        Some (persist_failed_outcome persist_error)
                       in
                       stage_completion
                         (Completion_terminal
@@ -2039,8 +2061,25 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                              ~tool_name:"masc_keeper_msg"
                              ~start_time
                              body)))))
-        | Ok (`Ran (Tool_result.Failed dispatch_failure_class, err)) ->
-            let persisted = persist_failure_reply err in
+        | Ok (`Ran (Tool_result.Failed dispatch_failure_class, err, terminal_failure)) ->
+            let failure_kind, turn_ref =
+              match terminal_failure with
+              | Some (failure, turn_ref) ->
+                Keeper_request_failure.failure_kind failure, turn_ref
+              | None ->
+                let fallback_kind =
+                  match dispatch_failure_class with
+                  | Tool_result.Operator_cancelled ->
+                    Keeper_request_failure.Failure_kind.Cancelled
+                  | Tool_result.Dependency_unavailable
+                  | Tool_result.Policy_rejection
+                  | Tool_result.Runtime_failure
+                  | Tool_result.Workflow_rejection ->
+                    Keeper_request_failure.Failure_kind.No_answer
+                in
+                fallback_kind, None
+            in
+            let persisted = persist_failure_reply ~failure_kind ?turn_ref err in
             let queued_outcome =
               match persisted with
               | Ok () ->
@@ -2057,11 +2096,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                 in
                 Some (Failed { kind; detail = err })
               | Error persist_error ->
-                Some
-                  (Failed
-                     { kind = Transcript_persist_failed
-                     ; detail = persist_error
-                     })
+                Some (persist_failed_outcome persist_error)
             in
             stage_completion
               (Completion_terminal
@@ -2073,16 +2108,13 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
               err
         | Error failure ->
             let err = Keeper_request_failure.summary failure in
-            let persisted = persist_failure_reply err in
+            let failure_kind = Keeper_request_failure.failure_kind failure in
+            let persisted = persist_failure_reply ~failure_kind err in
             let queued_outcome =
               match persisted with
               | Ok () -> Some (Failed { kind = Turn_failed; detail = err })
               | Error persist_error ->
-                Some
-                  (Failed
-                     { kind = Transcript_persist_failed
-                     ; detail = persist_error
-                     })
+                Some (persist_failed_outcome persist_error)
             in
             stage_completion
               (Completion_terminal
@@ -2167,24 +2199,21 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
        with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
-         let body =
-           Keeper_request_failure.summary
-             { Keeper_request_failure.cause =
-                 Keeper_request_failure.Raised
-                   { site = Keeper_request_failure.Stream_submit
-                   ; exn = Printexc.to_string exn
-                   }
-             }
+         let failure =
+           { Keeper_request_failure.cause =
+               Keeper_request_failure.Raised
+                 { site = Keeper_request_failure.Stream_submit
+                 ; exn = Printexc.to_string exn
+                 }
+           }
          in
+         let body = Keeper_request_failure.summary failure in
+         let failure_kind = Keeper_request_failure.failure_kind failure in
          let queued_outcome =
-           match persist_failure_reply body with
+           match persist_failure_reply ~failure_kind body with
            | Ok () -> Some (Failed { kind = Turn_failed; detail = body })
            | Error persist_error ->
-             Some
-               (Failed
-                  { kind = Transcript_persist_failed
-                  ; detail = persist_error
-                  })
+             Some (persist_failed_outcome persist_error)
          in
          publish_completion
            (Completion_terminal
@@ -2504,10 +2533,32 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       signal_stream_projection_done ();
       raise exn
 
+let process_single_turn ~batch_binding ~user_row_origin ~submission
+    ~state ~clock ~thread_id ~continuation_channel ~closed
+    ~client_disconnects
+    ~payload ~run_id ~message_id ~agent_name
+    ~events =
+  process_single_turn_with_outcome_ref
+    ~on_turn_ref:None
+    ~batch_binding
+    ~user_row_origin
+    ~submission
+    ~state
+    ~clock
+    ~thread_id
+    ~continuation_channel
+    ~closed
+    ~client_disconnects
+    ~payload
+    ~run_id
+    ~message_id
+    ~agent_name
+    ~events
+
 (* Durable queue state owns the yield. A display/transcript failure after a
    committed deferral cannot fail_running a Queued row; a stale binding on a
    still-Running row cannot hide a terminal checkpoint-admission failure. *)
-let operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery =
+let operation_execution_of_outcome_with_ref ~failure_outcome_ref ~operation_state ~pending_continuation ~outcome ~delivery =
   let failed ?outcome_ref kind detail =
     Keeper_owner.Operation_failed { kind; detail; outcome_ref } in
   match operation_state () with
@@ -2521,9 +2572,9 @@ let operation_execution_of_outcome ~operation_state ~pending_continuation ~outco
   | Ok (Keeper_chat_operation.Running _) ->
     (match outcome with
      | Some (Failed { kind; detail }) ->
-       failed (chat_operation_failure_kind_of_queued kind)
+       failed ?outcome_ref:failure_outcome_ref (chat_operation_failure_kind_of_queued kind)
          (queued_turn_failure_kind_to_string kind ^ ": " ^ detail)
-     | None -> failed Keeper_chat_operation.Turn_invariant
+     | None -> failed ?outcome_ref:failure_outcome_ref Keeper_chat_operation.Turn_invariant
          "Owner operation returned no terminal turn outcome"
      | Some (Delivered { outcome_ref }) ->
        match delivery with
@@ -2531,6 +2582,14 @@ let operation_execution_of_outcome ~operation_state ~pending_continuation ~outco
        | Error detail -> failed ~outcome_ref Keeper_chat_operation.Delivery_failed detail)
   | Ok (Keeper_chat_operation.Succeeded _ | Keeper_chat_operation.Failed _ | Keeper_chat_operation.Cancelled _) ->
     failed Keeper_chat_operation.Turn_invariant "claimed operation was already terminal"
+
+let operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery =
+  operation_execution_of_outcome_with_ref
+    ~failure_outcome_ref:None
+    ~operation_state
+    ~pending_continuation
+    ~outcome
+    ~delivery
 
 let persist_batch_user_rows ~base_dir ~keeper_name members =
   let open Result.Syntax in
@@ -2849,8 +2908,10 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                   ~channel_user_id:payload.channel_user_id
               else operation_payload.source.submitted_by
             in
+            let recorded_turn_ref = ref None in
             let run_turn () =
-              process_single_turn
+              process_single_turn_with_outcome_ref
+                ~on_turn_ref:(Some (fun tr -> recorded_turn_ref := Some tr))
                 ~batch_binding:(Option.map (fun (member : Keeper_chat_operation.batch_membership) ->
                   operation.operation_id, member.execution_id) operation.batch_membership)
                 ~user_row_origin:(match batch_members with
@@ -2903,7 +2964,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
               |> Result.map_error Keeper_owner_registry.command_error_to_string
               |> fun result -> Result.bind result (function Some operation -> Ok operation.Keeper_chat_operation.state
                 | None -> Error "claimed operation disappeared before settlement") in
-            operation_execution_of_outcome ~operation_state ~pending_continuation ~outcome ~delivery)))))
+            operation_execution_of_outcome_with_ref
+              ~failure_outcome_ref:(Option.map Ids.Turn_ref.to_string !recorded_turn_ref)
+              ~operation_state ~pending_continuation ~outcome ~delivery)))))
 
   in
   match

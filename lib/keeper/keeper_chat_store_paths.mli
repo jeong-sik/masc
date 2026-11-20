@@ -12,8 +12,8 @@
     [persistence_surface] name.
     [report_store_failure] counts one failed [operation] in
     [masc_keeper_chat_store_failures_total], warns that [what] failed for
-    [keeper_name], and returns the text of the exception for a writer that
-    answers [Error].
+    [keeper_name], and returns the path- and secret-sanitized text of the
+    exception for a writer that answers [Error].
     [Keeper_chat_store] includes this module. *)
 
 val sanitize_name : string -> string

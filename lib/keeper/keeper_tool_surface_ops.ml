@@ -1371,6 +1371,7 @@ let handle_keeper_msg_stream_admitted
             ~class_:Tool_result.Policy_rejection
             (Keeper_request_failure.summary failure)
       ; failure
+      ; turn_ref = None
       }
   | Ok message ->
     let event_bus = Event_bus_slots.get_keeper () in

@@ -1,7 +1,10 @@
 type settlement =
   | Runtime_deferred
   | Reply of string
-  | Request_failed of string
+  | Request_failed of
+      { content : string
+      ; failure_kind : Keeper_request_failure.Failure_kind.t option
+      }
 
 let tool_delivery_key ~operation_id ~resumed_from =
   let open Result.Syntax in
@@ -50,8 +53,9 @@ let persist ~base_dir ~keeper_name ~operation_id ~resumed_from ~settlement
     terminal (fun tool_calls ->
       Keeper_chat_store.append_assistant_message_once ~base_dir ~keeper_name ~delivery_key
         ~content ?surface ?conversation_id ~tool_calls ?blocks ?turn_ref ?stream_lifecycle ())
-  | Request_failed content ->
+  | Request_failed { content; failure_kind } ->
     terminal (fun tool_calls ->
       Keeper_chat_store.append_request_failure_once ~base_dir ~keeper_name ~delivery_key
-        ~content ~route:(Lazy.from_val { Keeper_chat_store.Row_route.surface; conversation_id })
+        ~content ?failure_kind
+        ~route:(Lazy.from_val { Keeper_chat_store.Row_route.surface; conversation_id })
         ~tool_calls ?blocks ?turn_ref ?stream_lifecycle ())

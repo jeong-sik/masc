@@ -7,6 +7,11 @@ module For_testing : sig
   val claude_error_to_core_error :
     Runtime_claude_code.error -> Agent_core.Error.t
 
+  val claude_error_to_core_error_for_account :
+    account:Runtime_claude_code.authorized_account ->
+    Runtime_claude_code.error ->
+    Agent_core.Error.t
+
   val observe_stream_native_action :
     turn_count:int ->
     observe:(official_turn:int -> identity:Runtime_native_tools.action_identity ->

@@ -671,10 +671,11 @@ let codex_error_to_core_error = function
      (antigravity); RFC-0370 §3.1. No catch-all: a new client error variant
      must decide its rotation class at compile time. *)
   | Runtime_codex_app_server.Spawn_refused refusal ->
-    Agent_core.Error.Provider
-      (Llm_provider.Error.ProviderUnavailable
+    Keeper_provider_refusal.core_error
+      (Keeper_provider_refusal.Spawn_refused
          { provider = "codex_app_server"
-         ; detail = Process_eio.spawn_refusal_to_string refusal })
+         ; detail = Process_eio.spawn_refusal_to_string refusal
+         })
   (* The client died or its stdout reached EOF. This shared the
      [ProviderUnavailable] above until the chat pane had to tell the two
      apart and could only do it by reading the rendered sentence back

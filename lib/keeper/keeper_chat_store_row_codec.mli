@@ -46,6 +46,7 @@ val encode_line :
   ?blocks:chat_block list ->
   ?mentions:Keeper_identity.Keeper_id.t list ->
   ?turn_ref:Ids.Turn_ref.t ->
+  ?failure_kind:Keeper_request_failure.Failure_kind.t ->
   ?stream_lifecycle:stream_lifecycle_event list ->
   ?approval_lifecycle:approval_lifecycle ->
   ?provenance:Keeper_chat_delivery_identity.delivery_provenance ->

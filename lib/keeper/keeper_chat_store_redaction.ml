@@ -233,8 +233,14 @@ let redact_message redaction msg =
   let approval_lifecycle =
     Option.map (redact_approval_lifecycle redaction) msg.approval_lifecycle
   in
+  let content =
+    let redacted = Keeper_secret_redaction.redact_text redaction msg.content in
+    match msg.role with
+    | Role.Request_failure -> Keeper_request_failure.sanitize_person_text redacted
+    | Role.User | Role.Assistant | Role.System | Role.Tool -> redacted
+  in
   { msg with
-    content = Keeper_secret_redaction.redact_text redaction msg.content;
+    content;
     attachments;
     blocks;
     audio;

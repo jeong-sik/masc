@@ -3249,10 +3249,10 @@ let test_spawn_failure_fences_claim () =
        with_fixture ~remove_after_auth:true [] (fun cli_path ->
          (match run_keeper_turn ~base_path ~cli_path ~goal:"SPAWN_GOAL"
              ~on_request_attribution:(fun ~runtime_id:_ ~tools:_ ~transmitted:_ -> incr reports) () with
-          | Error
-              (Agent_core.Error.Provider
-                 (Llm_provider.Error.ProviderUnavailable { provider = "claude_code"; _ })) ->
-            ()
+          | Error err when Option.is_some (Keeper_provider_refusal.of_core_error err) ->
+            (match Keeper_provider_refusal.of_core_error err with
+             | Some (Keeper_provider_refusal.Spawn_refused { provider = "claude_code"; _ }) -> ()
+             | _ -> fail (Agent_core.Error.to_string err))
           | Error error -> fail (Agent_core.Error.to_string error)
           | Ok _ -> fail "removed CLI unexpectedly completed the Keeper turn");
          check int "prepared turn with missing CLI reports no input" 0 !reports;
@@ -5359,10 +5359,10 @@ let test_turn_spawn_failure_is_pre_dispatch_with_tools () =
            ~tools:[ tool ]
            ()
          |> check_pre_dispatch_attempt "turn process spawn failure"
-              ~expected_error:(function
-                | Agent_core.Error.Provider
-                    (Llm_provider.Error.ProviderUnavailable { provider = "claude_code"; _ }) -> ()
-                | error -> fail (Agent_core.Error.to_string error))))
+              ~expected_error:(fun err ->
+                match Keeper_provider_refusal.of_core_error err with
+                | Some (Keeper_provider_refusal.Spawn_refused { provider = "claude_code"; _ }) -> ()
+                | _ -> fail (Agent_core.Error.to_string err))))
 ;;
 
 let test_unbounded_turn_keeps_subscription_probe_bounded () =
@@ -5785,11 +5785,13 @@ let test_a_closed_client_connection_is_typed () =
     Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
       (Runtime_claude_code.Spawn_refused (Process_eio.Executable_not_found "claude"))
   with
-  | Agent_core.Error.Provider (Llm_provider.Error.ProviderUnavailable _) -> ()
-  | other ->
-    failf
-      "a failed spawn must stay provider-unavailable, got %s"
-      (Agent_core.Error.to_string other)
+  | err ->
+    (match Keeper_provider_refusal.of_core_error err with
+     | Some (Keeper_provider_refusal.Spawn_refused _) -> ()
+     | _ ->
+       failf
+         "a failed spawn must carry typed provider refusal, got %s"
+         (Agent_core.Error.to_string err))
 ;;
 
 let check_disposition label (expected : Keeper_provider_attempt_effect.t)

@@ -885,7 +885,342 @@ let test_a2_2_person_turn_seams () =
               Alcotest.(check string)
                 "account call slot remains reusable after cancellation"
                 "reusable"
-                (Runtime_account_call.call_in_turn_of bob.account (fun _ -> "reusable")))))))
+                (Runtime_account_call.call_in_turn_of bob.account (fun _ -> "reusable"));
+
+              (* 8. P1 (A2-3): Agent_core Person_api HTTP 401 -> Key_refused (keeping 403 as Not_signed_in)
+                    and candidate_access_should_try_next lane rotation. *)
+              let module Krf = Keeper_request_failure in
+              let read_one_request flow =
+                let reader = Eio.Buf_read.of_flow ~max_size:65536 flow in
+                let rec headers content_length =
+                  match Eio.Buf_read.line reader with
+                  | "" | "\r" -> content_length
+                  | line ->
+                    (match String.index_opt line ':' with
+                     | Some colon
+                       when String.equal
+                              (String.lowercase_ascii (String.trim (String.sub line 0 colon)))
+                              "content-length" ->
+                       let next_len =
+                         String.sub line (colon + 1) (String.length line - colon - 1)
+                         |> String.trim
+                         |> int_of_string_opt
+                         |> Option.value ~default:content_length
+                       in
+                       headers next_len
+                     | Some _ | None -> headers content_length)
+                in
+                let content_length = headers 0 in
+                ignore (Eio.Buf_read.take content_length reader : string)
+              in
+              let start_http_status ~status_line ~body =
+                let listening =
+                  Eio.Net.listen
+                    ~sw
+                    ~backlog:8
+                    ~reuse_addr:true
+                    env#net
+                    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 0))
+                in
+                let hits = Atomic.make 0 in
+                Eio.Fiber.fork_daemon ~sw (fun () ->
+                  while true do
+                    Eio.Net.accept_fork
+                      ~sw
+                      listening
+                      ~on_error:(fun _ -> ())
+                      (fun flow _addr ->
+                        try
+                          read_one_request flow;
+                          ignore (Atomic.fetch_and_add hits 1 : int);
+                          let response =
+                            Printf.sprintf
+                              "HTTP/1.1 %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s"
+                              status_line
+                              (String.length body)
+                              body
+                          in
+                          Eio.Flow.copy_string response flow;
+                          (try Eio.Flow.shutdown flow `Send with
+                           | Eio.Io _ | Unix.Unix_error _ -> ())
+                        with
+                        | End_of_file | Eio.Io _ -> ())
+                  done);
+                let port =
+                  match Eio.Net.listening_addr listening with
+                  | `Tcp (_, port) -> port
+                  | `Unix _ -> Alcotest.fail "expected TCP listening addr"
+                in
+                port, hits
+              in
+              let port_401, hits_401 =
+                start_http_status
+                  ~status_line:"401 Unauthorized"
+                  ~body:
+                    {|{"error":{"message":"invalid x-api-key reading /Users/alice/.masc/key","type":"authentication_error"}}|}
+              in
+              let port_403, hits_403 =
+                start_http_status
+                  ~status_line:"403 Forbidden"
+                  ~body:
+                    {|{"error":{"message":"account forbidden","type":"permission_error"}}|}
+              in
+              let alice_runtime_root =
+                Runtime_account_home_layout.person_runtime_root
+                  ~base_path
+                  ~namespace:alice.namespace
+              in
+              let setup_http_key_keeper ~acct_name ~integration_name ~keeper_name_str ~engine_name =
+                let acct = get (Provider_account_id.of_string acct_name) in
+                let integ = get (Integration_id.of_string integration_name) in
+                (match
+                   Authz_provider_account.link_key
+                     zone
+                     ~user_id:alice.user_id
+                     ~provider_account_id:acct
+                     ~integration_id:integ
+                 with
+                 | Ok () -> ()
+                 | Error e -> Alcotest.fail (Authz_provider_account.error_to_string e));
+                let key =
+                  match Runtime_api_key_file.key_of_string ("sk-person-" ^ acct_name) with
+                  | Some k -> k
+                  | None -> Alcotest.fail "fixture person key refused"
+                in
+                (match
+                   Runtime_api_key_file.write
+                     ~runtime_root:alice_runtime_root
+                     ~account_id:acct
+                     ~generation:Key_generation.first
+                     key
+                 with
+                 | Ok () -> ()
+                 | Error _ -> Alcotest.fail "fixture person key write failed");
+                let rt_id = get (Runtime_id.of_string (acct_name ^ ".first")) in
+                (match
+                   Authz_runtime.make
+                     zone
+                     ~user_id:alice.user_id
+                     ~provider_account_id:acct
+                     ~runtime_id:rt_id
+                     ~self_effects:Effect.(Set.of_list [ Read_state; Invoke_model; Use_tool ])
+                     ~draw:(fun () -> "grant-" ^ acct_name)
+                 with
+                 | Ok (_ : Grant_id.t) -> ()
+                 | Error e -> Alcotest.fail (Authz_runtime.error_detail e));
+                let kp_id = get (Keeper_id.of_string keeper_name_str) in
+                (match
+                   Authz_keeper.make
+                     zone
+                     ~user_id:alice.user_id
+                     ~keeper_id:kp_id
+                     ~turn_scope:shared_scope
+                     ~draw:(fun () -> "policy-" ^ acct_name)
+                     ~draw_engine_name:(fun () -> engine_name)
+                 with
+                 | Ok () -> ()
+                 | Error e -> Alcotest.fail (Authz_keeper.error_detail e));
+                (match Authz_keeper.assign zone ~user_id:alice.user_id ~keeper_id:kp_id ~runtime_id:rt_id with
+                 | Ok () -> ()
+                 | Error e -> Alcotest.fail (Authz_keeper.error_detail e));
+                kp_id, rt_id
+              in
+              let kp_401, rt_401 =
+                setup_http_key_keeper
+                  ~acct_name:"acct-http-401"
+                  ~integration_name:"http_401"
+                  ~keeper_name_str:"keeper-http-401"
+                  ~engine_name:"kp-http-401"
+              in
+              let kp_403, rt_403 =
+                setup_http_key_keeper
+                  ~acct_name:"acct-http-403"
+                  ~integration_name:"http_403"
+                  ~keeper_name_str:"keeper-http-403"
+                  ~engine_name:"kp-http-403"
+              in
+              let http_toml_path = Filename.concat root "runtime-http.toml" in
+              let http_toml =
+                Printf.sprintf
+                  {|
+[runtime]
+default = "operator.first"
+
+[providers.operator]
+display-name = "Operator"
+protocol = "claude-code"
+command = %S
+account-home = %S
+is-non-interactive = true
+
+[providers.http_401]
+display-name = "HTTP 401"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/v1"
+
+[providers.http_401.credentials]
+type = "inline"
+value = "op-unused"
+
+[providers.http_403]
+display-name = "HTTP 403"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:%d/v1"
+
+[providers.http_403.credentials]
+type = "inline"
+value = "op-unused"
+
+[models.first]
+api-name = "first-model"
+max-context = 16384
+tools-support = true
+streaming = true
+
+[operator.first]
+[http_401.first]
+[http_403.first]
+|}
+                  cli_script
+                  operator_home
+                  port_401
+                  port_403
+              in
+              Out_channel.with_open_bin http_toml_path (fun ch -> Out_channel.output_string ch http_toml);
+              get_text (Runtime.init_default ~config_path:http_toml_path);
+              let run_http_keeper ~keeper_id ~engine_name ~runtime_id ~trace_id =
+                let walk =
+                  Driver.Person_keeper_turn
+                    { owner = alice.user_id
+                    ; keeper_id
+                    ; engine_name
+                    ; channel = Channel.Direct
+                    ; stored_scope = shared_scope
+                    ; pat = Pat_binding.Not_pat
+                    }
+                in
+                Driver.run_named
+                  ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id })
+                  ~raw_trace:None
+                  ~keeper_name:engine_name
+                  ~walk_owner:walk
+                  ~runtime_id:(Runtime_id.to_string runtime_id)
+                  ~base_path
+                  ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+                  ~goal:"ping"
+                  ~system_prompt:"sys"
+                  ~agent_core_tools:[]
+                  ()
+              in
+              let err_401 =
+                match
+                  run_http_keeper
+                    ~keeper_id:kp_401
+                    ~engine_name:"kp-http-401"
+                    ~runtime_id:rt_401
+                    ~trace_id:"trace-http-401"
+                with
+                | Ok _ -> Alcotest.fail "HTTP 401 Person_api turn must fail"
+                | Error err -> err
+              in
+              if Atomic.get hits_401 < 1
+              then
+                Alcotest.failf
+                  "HTTP 401 endpoint was not contacted (err=%s)"
+                  (Agent_core.Error.to_string err_401);
+              let failure_401 = Krf.of_core_error err_401 in
+              Alcotest.(check string)
+                "Agent_core Person_api 401 -> Key_refused"
+                "key_refused"
+                (Krf.Failure_kind.to_wire (Krf.failure_kind failure_401));
+              Alcotest.(check bool)
+                "lane_should_retry rotates past Person_api Key_refused"
+                true
+                (Driver.For_testing.lane_should_retry
+                   ~is_last:false
+                   ~allow_retry:true
+                   ~allow_accept_no_progress_retry:true
+                   err_401);
+              let err_403 =
+                match
+                  run_http_keeper
+                    ~keeper_id:kp_403
+                    ~engine_name:"kp-http-403"
+                    ~runtime_id:rt_403
+                    ~trace_id:"trace-http-403"
+                with
+                | Ok _ -> Alcotest.fail "HTTP 403 Person_api turn must fail"
+                | Error err -> err
+              in
+              if Atomic.get hits_403 < 1
+              then
+                Alcotest.failf
+                  "HTTP 403 endpoint was not contacted (err=%s)"
+                  (Agent_core.Error.to_string err_403);
+              let failure_403 = Krf.of_core_error err_403 in
+              Alcotest.(check string)
+                "Agent_core Person_api 403 stays Not_signed_in"
+                "not_signed_in"
+                (Krf.Failure_kind.to_wire (Krf.failure_kind failure_403));
+              let person_cfg_stub =
+                Llm_provider.Provider_config.make
+                  ~kind:Llm_provider.Provider_config.OpenAI_compat
+                  ~model_id:"first-model"
+                  ~base_url:(Printf.sprintf "http://127.0.0.1:%d/v1" port_401)
+                  ~api_key:"unused"
+                  ()
+              in
+              let person_sealed_stub =
+                Access.seal_person_api
+                  ~provider_account_id:(get (Provider_account_id.of_string "acct-http-401"))
+                  person_cfg_stub
+              in
+              let tried_candidates = ref [] in
+              let rotated_res =
+                Driver.For_testing.attempt_runtime_candidates
+                  ~walk_owner:
+                    (Driver.Person_keeper_turn
+                       { owner = alice.user_id
+                       ; keeper_id = kp_401
+                       ; engine_name = "kp-http-401"
+                       ; channel = Channel.Direct
+                       ; stored_scope = shared_scope
+                       ; pat = Pat_binding.Not_pat
+                       })
+                  ~runtime_id:"lane-http"
+                  ~runtime_id_of:(fun id -> id)
+                  ~emit_runtime_manifest:(fun ?status:_ ?decision:_ _ -> ())
+                  ~run_attempt:(fun ~idx:_ ~runtime_id _ ->
+                    tried_candidates := runtime_id :: !tried_candidates;
+                    if String.equal runtime_id "cand-401"
+                    then
+                      ( Driver.For_testing.translate_person_api_result
+                          ~sealed:person_sealed_stub
+                          ~provider:"http_401"
+                          (Error
+                             (Agent_core.Error.Api
+                                (Llm_provider.Retry.AuthError { message = "401 bad key" })))
+                      , None
+                      , Masc.Keeper_provider_attempt_effect.No_effect_observed
+                      , Masc.Keeper_attempt_dispatch.Dispatched )
+                    else
+                      ( Ok "cand-2-ok"
+                      , None
+                      , Masc.Keeper_provider_attempt_effect.No_effect_observed
+                      , Masc.Keeper_attempt_dispatch.Dispatched ))
+                  [ "cand-401"; "cand-2" ]
+              in
+              (match rotated_res with
+               | Ok "cand-2-ok" -> ()
+               | Ok other -> Alcotest.failf "expected cand-2-ok, got %s" other
+               | Error e ->
+                 Alcotest.failf
+                   "expected rotation past Key_refused to cand-2, got %s"
+                   (Agent_core.Error.to_string e));
+              Alcotest.(check (list string))
+                "both candidates attempted in order"
+                [ "cand-401"; "cand-2" ]
+                (List.rev !tried_candidates))))))
 ;;
 
 let () =

@@ -193,6 +193,11 @@ type chat_message = {
           on inbound user lines (no turn yet) and rows written before §7.
           A malformed persisted value is reported as a persistence read
           drop and reads as [None]; the row stays valid. *)
+  failure_kind : Keeper_request_failure.Failure_kind.t option;
+      (** Typed failure classification for [Request_failure] rows. [None] on
+          non-failure rows, legacy failure rows without this field, or rows
+          whose persisted value failed to decode (reported as a read drop, row
+          kept). *)
   stream_lifecycle : stream_lifecycle_event list option;
       (** K1f: durable server lifecycle replay for the chat stream response
           represented by this row. [None] means the row predates this field or

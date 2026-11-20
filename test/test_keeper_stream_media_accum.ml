@@ -565,7 +565,9 @@ let test_failed_request_reloads_completed_media_across_attempts () =
       let failure = "Runtime attempts failed after producing completed media." in
       Server_keeper_operation_transcript.persist ~base_dir ~keeper_name ~operation_id
         ~resumed_from:None
-        ~settlement:(Server_keeper_operation_transcript.Request_failed failure)
+        ~settlement:
+          (Server_keeper_operation_transcript.Request_failed
+             { content = failure; failure_kind = None })
         ~tool_calls:[] ~blocks ()
       |> require "failed-request transcript persistence";
       let rows =

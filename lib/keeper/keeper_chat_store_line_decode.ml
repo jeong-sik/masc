@@ -258,6 +258,33 @@ let parse_json_decoded ~file_path json : parsed_line =
                 ~detail:(Printf.sprintf "invalid turn_ref %S" s);
               None)
     in
+    let failure_kind =
+      match Json_util.assoc_member_opt "failure_kind" json with
+      | None -> None
+      | Some (`String raw) ->
+        (match Role.of_label role_label with
+         | Some Role.Request_failure ->
+           (match Keeper_request_failure.Failure_kind.of_wire raw with
+            | Some _ as kind -> kind
+            | None ->
+              report_persistence_read_drop
+                ~reason:Read_drop_reason.Invalid_payload
+                ~path:file_path
+                ~detail:(Printf.sprintf "unknown failure_kind %S" raw);
+              None)
+         | Some (Role.User | Role.Assistant | Role.System | Role.Tool) | None ->
+           report_persistence_read_drop
+             ~reason:Read_drop_reason.Invalid_payload
+             ~path:file_path
+             ~detail:"failure_kind present on non-request_failure chat row";
+           None)
+      | Some _ ->
+        report_persistence_read_drop
+          ~reason:Read_drop_reason.Invalid_payload
+          ~path:file_path
+          ~detail:"failure_kind field is not a string";
+        None
+    in
     let stream_lifecycle =
       match Json_util.assoc_member_opt "stream_lifecycle" json with
       | None -> None
@@ -325,6 +352,7 @@ let parse_json_decoded ~file_path json : parsed_line =
          here by accident; with the sentence gone the row is all typed field,
          and dropping it would delete the durable record of an external
          effect on read. *)
+      || Option.is_some failure_kind
       || Option.is_some approval_lifecycle
       || Option.exists (fun provenance ->
            Keeper_chat_delivery_identity.transcript_slot_is_internal
@@ -384,8 +412,8 @@ let parse_json_decoded ~file_path json : parsed_line =
                    { id; role; content; ts; attachments; tool_call_id; execution_id;
                      tool_call_name; surface; conversation_id;
                      external_message_id; workspace_id; speaker; audio; blocks;
-                     mentions; turn_ref; stream_lifecycle; approval_lifecycle;
-                     delivery_provenance })
+                     mentions; turn_ref; failure_kind; stream_lifecycle;
+                     approval_lifecycle; delivery_provenance })
     in
     { message; strict_decode_error }
   with Yojson.Json_error detail -> json_error_result ~file_path detail

@@ -115,6 +115,7 @@ let projected_row_line raw_line (message : chat_message) =
       ?external_message_id:message.external_message_id ?workspace_id:message.workspace_id
       ?speaker:message.speaker ?audio:message.audio ?blocks:message.blocks
       ~mentions:message.mentions ?turn_ref:message.turn_ref
+      ?failure_kind:message.failure_kind
       ?stream_lifecycle:message.stream_lifecycle ?approval_lifecycle:message.approval_lifecycle
       ?provenance:message.delivery_provenance () |> Yojson.Safe.from_string in
   match Yojson.Safe.from_string raw_line, encoded with

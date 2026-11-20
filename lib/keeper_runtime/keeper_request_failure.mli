@@ -50,6 +50,28 @@ type failure_site =
   | Stream_turn_body
   | Stream_submit
 
+module Failure_kind : sig
+  type t =
+    | Not_signed_in
+    | Key_refused
+    | Key_unusable
+    | No_quota
+    | Silent
+    | Not_started
+    | Configuration_refused
+    | Turn_refused
+    | Runtime_reassigned
+    | Server_unavailable
+    | Cancelled
+    | No_visible_reply
+    | No_answer
+
+  val all : t list
+  val equal : t -> t -> bool
+  val to_wire : t -> string
+  val of_wire : string -> t option
+end
+
 type cause =
   | Core of Keeper_request_failure_core.t
       (** An agent-core failure this module has no arm of its own for.
@@ -60,6 +82,40 @@ type cause =
   | Masc of Keeper_internal_error.masc_internal_error
       (** A MASC error that arrived on the agent-core carrier, kept as the
           value it is. *)
+  | Account_refused of Keeper_account_refusal.t
+      (** Refused by runtime account access or Keeper turn authorization. *)
+  | Provider_auth_required of
+      { provider : string option
+      ; detail : string
+      }
+      (** The account or runtime must sign in / renew authentication. *)
+  | Provider_key_refused of
+      { provider : string
+      ; detail : string
+      }
+      (** A key-backed provider account had its API key rejected by the provider. *)
+  | Provider_quota_exhausted of
+      { provider : string option
+      ; retry_after : float option
+      ; detail : string
+      }
+      (** Usage quota or billing credit is exhausted. *)
+  | Provider_spawn_refused of
+      { provider : string
+      ; detail : string
+      }
+      (** The local client process failed to spawn before any turn ran. *)
+  | Provider_timeout of
+      { provider : string option
+      ; phase : string option
+      ; detail : string
+      }
+      (** The turn or provider operation timed out without an answer. *)
+  | Configuration_refused of
+      { field : string
+      ; detail : string
+      }
+      (** Static runtime/environment configuration error. *)
   | Provider_network of
       { provider : string option
       ; kind : Llm_provider.Http_client.network_error_kind
@@ -143,9 +199,21 @@ val of_core_error : Agent_core.Error.t -> t
     {!Core}. This is the one place that decides, so no producer renders an
     agent-core error itself. *)
 
+val redact_server_paths : string -> string
+(** Replace server filesystem path tokens (such as [/Users/...], [/tmp/...],
+    [/var/...], [/home/...], [/.masc/...], [file://...]) with
+    [[REDACTED_PATH]] without distorting URLs or ordinary prose. *)
+
+val sanitize_person_text : string -> string
+(** Redact server filesystem paths and secret-shaped tokens, and collapse
+    line breaks onto one line for person-facing surfaces and failure rows. *)
+
+val failure_kind_of_cause : cause -> Failure_kind.t
+val failure_kind : t -> Failure_kind.t
+
 val summary : t -> string
-(** One line for people. Computed from the value, never stored: line breaks
-    inside leaf text become spaces. *)
+(** One line for people, scrubbed via {!sanitize_person_text}. Computed from
+    the value, never stored. *)
 
 val to_yojson : t -> Yojson.Safe.t
 (** [{"cause": {...}}], where the cause is an object tagged by ["kind"]. A

@@ -120,8 +120,9 @@ let validate_row_fields fields =
     [ "id"; "role"; "content"; "ts"; "attachments"; "mentions"; "tool_call_id"
     ; "execution_id"; "tool_call_name"; "surface"; "conversation_id"
     ; "external_message_id"; "workspace_id"; "speaker_id"; "speaker_name"
-    ; "speaker_authority"; "audio"; "blocks"; "turn_ref"; "stream_lifecycle"
-    ; "approval_lifecycle"; "delivery_key"; "transcript_slot"; "source" ] in
+    ; "speaker_authority"; "audio"; "blocks"; "turn_ref"; "failure_kind"
+    ; "stream_lifecycle"; "approval_lifecycle"; "delivery_key"
+    ; "transcript_slot"; "source" ] in
   match List.find_opt (fun (key, _) -> not (List.mem key allowed)) fields with
   | None -> Ok ()
   | Some (key, _) -> Error (Printf.sprintf "unknown chat row field %S" key)
@@ -130,7 +131,7 @@ let validate_row_fields fields =
 let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_call_id
     ?execution_id ?tool_call_name ?surface ?conversation_id ?external_message_id ?workspace_id
     ?speaker
-    ?audio ?blocks ?mentions ?turn_ref
+    ?audio ?blocks ?mentions ?turn_ref ?failure_kind
     ?stream_lifecycle ?approval_lifecycle ?provenance ()
     : string =
   let surface_field =
@@ -209,6 +210,11 @@ let encode_line ~(role : Role.t) ~content ~ts ?message_id ?attachments ?tool_cal
     @ audio_fields audio
     @ blocks_fields blocks
     @ Json_util.string_field_if_present "turn_ref" (Option.map Ids.Turn_ref.to_string turn_ref)
+    @ (match role, failure_kind with
+       | Role.Request_failure, Some kind ->
+         [ ("failure_kind", `String (Keeper_request_failure.Failure_kind.to_wire kind)) ]
+       | (Role.User | Role.Assistant | Role.System | Role.Tool), _
+       | Role.Request_failure, None -> [])
     @ stream_lifecycle_fields stream_lifecycle
     @ approval_lifecycle_fields approval_lifecycle
     @ (match provenance with

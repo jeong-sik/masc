@@ -682,6 +682,8 @@ let link_goalless_task_to_goal config ~goal_id ~task_id =
             with
             | Ok () -> Ok ()
             | Error msg -> Error (Link_write_failed msg))
+         | [ existing_goal_id ] when String.equal existing_goal_id goal_id ->
+           Ok ()
          | existing_goal_ids -> Error (Already_linked_to_goals existing_goal_ids)))
 ;;
 

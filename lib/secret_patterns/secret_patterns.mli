@@ -8,10 +8,11 @@
     by [Keeper_secret_redaction]. *)
 
 val redact_text : string -> string
-(** Replace known secret-shaped substrings (URL credentials, [Bearer]
-    values, HTTP Authorization fields, sensitive-key assignments, [sk-]/[AKIA]
-    keys, GitHub tokens, PEM private-key blocks)
-    with [\[REDACTED\]]. Never truncates or trims. *)
+(** Replace known secret-shaped substrings (a URL's [user:password@], the
+    value of an HTTP Authorization field, [sk-]/[AKIA] keys, GitHub tokens,
+    PEM private-key blocks) with [\[REDACTED\]]. Never truncates or trims.
+    A value of no known shape is not found here: an exact value is masked
+    where it is registered ([Keeper_secret_redaction]). *)
 
 type source_span = { first_byte : int; past_byte : int }
 (** Half-open byte coordinates in the original input, before any replacement. *)
@@ -44,29 +45,13 @@ val is_sensitive_key : string -> bool
     (token, api_key, password, secret_key, access_key, ...). A key that
     matches here has its whole value masked, whatever the value's shape. *)
 
-val key_suggests_secret : string -> bool
-(** Case-insensitive fragment match: [true] when the key name contains a
-    secret-bearing fragment (secret, token, passwd, credential, apikey,
-    ...). A fallback for spellings the exact list never enumerated
-    ([session_token], [api_secret], ...). Reference-shaped keys
-    ([*_env] naming an environment variable, [*_type] naming a value
-    kind, the runtime inventory's [credential_kind]/[credential_file], and
-    the collision event's exact [token_hash_prefix] correlation field)
-    answer [false] so safe metadata stays readable. {!redact_json_with} masks
-    every string value and object member name in the subtree under such a
-    key while non-string
-    scalars keep their shape, so counts and flags survive while no
-    secret-shaped string passes in clear. *)
-
 val redact_json_with : on_string:(string -> string) -> Yojson.Safe.t -> Yojson.Safe.t
 (** The structural pass behind {!redact_json_strings}; the caller supplies the
     rewrite of string values. Object keys go through {!redact_text}. The value
     of a sensitive key (judged on the key as it came) becomes [\[REDACTED\]].
-    Under a key for which {!key_suggests_secret} holds, every string value and
-    object member name becomes [\[REDACTED\]]. [on_string] sees only the string
-    values outside those two cases. Structure, member order and non-string
-    scalars are preserved; two keys that redact to the same text are both
-    kept, in order. *)
+    [on_string] sees only the string values outside a sensitive key. Structure,
+    member order and non-string scalars are preserved; two keys that redact to
+    the same text are both kept, in order. *)
 
 val redact_json_strings : Yojson.Safe.t -> Yojson.Safe.t
 (** {!redact_json_with} with {!redact_text} as the string rewrite, so string

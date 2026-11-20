@@ -1653,7 +1653,7 @@ let test_refusal_detail_keeps_the_refusal_sentence_from_its_first_word () =
    its closing sentence, says how much it left out, and is masked before it is
    cut: the credential sits in the kept head. *)
 let test_long_refusal_stderr_keeps_both_ends_and_masks_first () =
-  let first_line = "agy: 거부 직전 진단 token=opaque-fixture-value" in
+  let first_line = "agy: 거부 직전 진단 Authorization: Bearer opaque-fixture-value" in
   let middle =
     String.concat "\n" (List.init 200 (fun i -> Printf.sprintf "가운데 줄 %03d" i))
   in
@@ -1667,7 +1667,7 @@ let test_long_refusal_stderr_keeps_both_ends_and_masks_first () =
          check bool "shorter than what the CLI wrote" true
            (String.length stderr_tail < String.length stderr);
          check bool "first words kept and masked" true
-           (String.starts_with ~prefix:"agy: 거부 직전 진단 token=[REDACTED]" stderr_tail);
+           (String.starts_with ~prefix:"agy: 거부 직전 진단 Authorization: [REDACTED]" stderr_tail);
          check bool "credential value is gone" false
            (String_util.contains_substring stderr_tail "opaque-fixture-value");
          check bool "closing sentence kept whole" true
@@ -1799,10 +1799,6 @@ let test_stderr_tail_redacts_sensitive_lines () =
     "Authorization: [REDACTED]" (redacted "Authorization: Bearer ya29.aBcDeFgHi");
   check string "lowercase bearer is masked"
     "Authorization: [REDACTED]" (redacted "Authorization: bearer ya29.synthetic");
-  check string "opaque token assignment is masked"
-    "token=[REDACTED]" (redacted "token=opaque-fixture-value");
-  check string "opaque environment API key is masked"
-    "VENDOR_API_KEY=[REDACTED]" (redacted "VENDOR_API_KEY=opaque-fixture-value");
   check string "standalone GitHub token is masked"
     "failure: [REDACTED]" (redacted "failure: ghp_syntheticfixture");
   check string "standalone API key is masked"
@@ -1862,19 +1858,22 @@ let test_empty_success_detail_masks_the_stderr_line () =
        | Ok _ -> fail "a blank result was admitted")
 ;;
 
-let test_stderr_cut_inside_assignment_omits_the_diagnostic () =
+let test_stderr_cut_inside_a_header_line_omits_the_diagnostic () =
   let marker = "opaque-credential-boundary-canary" in
   let diagnostic = "ordinary diagnostic: model connection closed" in
-  (* The fixture's echo adds the last newline. The entire stream is 8198
-     bytes, so the old byte-only tail discarded exactly [token=], leaving
-     the full opaque value without the context needed to mask it. Its final
-     canary is also inside the empty-success sink's 200-byte display tail. *)
+  let header = "Authorization: " in
+  (* The fixture's echo adds the last newline. The entire stream is the
+     header's length over the 8192-byte limit, so the old byte-only tail
+     discarded exactly the header name, leaving the full opaque value without
+     the context needed to mask it. Its final canary is also inside the
+     empty-success sink's 200-byte display tail. *)
   let secret =
     String.make (8192 - String.length diagnostic - 2 - String.length marker) 'x'
     ^ marker
   in
-  let stderr_line = "token=" ^ secret ^ "\n" ^ diagnostic in
-  check int "cut is immediately after token=" 8198 (String.length stderr_line + 1);
+  let stderr_line = header ^ secret ^ "\n" ^ diagnostic in
+  check int "cut is immediately after the header name"
+    (8192 + String.length header) (String.length stderr_line + 1);
   List.iter
     (fun (exit_code, lines) ->
        with_fixture ~exit_code ~stderr_line lines (fun path ->
@@ -1902,8 +1901,8 @@ let test_stderr_chunk_boundaries_preserve_redaction_context () =
   in
   let omitted = "[stderr omitted: byte limit]" in
   let marker = "opaque-chunk-canary" in
-  let complete_line = "token=" ^ marker ^ "\nordinary diagnostic" in
-  (* Split every byte boundary, including inside the assignment key and the
+  let complete_line = "Authorization: " ^ marker ^ "\nordinary diagnostic" in
+  (* Split every byte boundary, including inside the header name and the
      opaque value. A read ending without a newline is not a complete line. *)
   for index = 0 to String.length complete_line do
     let chunks =
@@ -1912,12 +1911,12 @@ let test_stderr_chunk_boundaries_preserve_redaction_context () =
       ]
     in
     check string "chunking keeps the same masked diagnostic"
-      "token=[REDACTED]\nordinary diagnostic" (project chunks)
+      "Authorization: [REDACTED]\nordinary diagnostic" (project chunks)
   done;
   check string "oversized unterminated line is explicitly omitted" omitted
-    (project [ "token="; String.make 8192 'x'; marker ]);
+    (project [ "Authorization: "; String.make 8192 'x'; marker ]);
   check string "overflow remains omitted after the next newline" omitted
-    (project [ String.make 8193 'x'; "\ntok"; "en="; marker; "\nordinary diagnostic" ]);
+    (project [ String.make 8193 'x'; "\nAuthoriz"; "ation: "; marker; "\nordinary diagnostic" ]);
   let padding = String.make (8192 - String.length complete_line) '.' in
   check string "a later complete line cannot revive an omitted stream" omitted
     (project [ "dropped\n" ^ complete_line ^ padding ]);
@@ -2638,7 +2637,7 @@ let () =
         ; test_case
             "stderr cutoff cannot retain an opaque credential without its key"
             `Quick
-            test_stderr_cut_inside_assignment_omits_the_diagnostic
+            test_stderr_cut_inside_a_header_line_omits_the_diagnostic
         ; test_case
             "stderr read chunks preserve the masking boundary"
             `Quick

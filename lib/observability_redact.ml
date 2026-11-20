@@ -161,11 +161,11 @@ let rec shrink_json_to_budget (budget : int) (json : Yojson.Safe.t) : Yojson.Saf
    never the input text: Yojson accepts [//] and [/* */] comments and drops
    them, so a comment holding a credential never reaches the tree, and the
    input text would carry it into the log. The serialized document is never
-   scanned as one text either. [url_credential] runs
-   from [://] to the next [@], and a serialized document has no spaces, so on
-   the whole text it spans from one member's URL to another member's e-mail
-   address and replaces the quotes and commas between them — the stored value
-   stops parsing and the members in between are lost. *)
+   scanned as one text either. The Authorization field's value runs to the
+   end of its line, and a serialized document is one line, so on the whole
+   text the mask runs from that member's value through the quotes, commas and
+   braces after it — the stored value stops parsing and the members after it
+   are lost. *)
 let truncate_json_document ?(max_len = default_max_len) (s : string) : string =
   match Yojson.Safe.from_string s with
   | exception Yojson.Json_error _ -> redact_preview ~max_len s

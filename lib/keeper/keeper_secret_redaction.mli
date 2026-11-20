@@ -32,9 +32,10 @@ val snapshot_with_additional_secret_files :
   keeper_name:string ->
   t
 (** Snapshot exact secret values from the keeper's projected secret root and
-    caller-owned structured secret files. For additional files,
-    non-empty mapping scalar values are captured as well as complete lines so
-    emitting only a scalar cannot bypass redaction. Credential-shaped keys
+    caller-owned structured secret files. An additional file is read as a
+    mapping: its whole text and the scalars of its credential keys are
+    captured, and its other lines (a host name, a protocol) are not secret
+    values. Credential-shaped keys
     (token/secret/password/credential/passphrase) always mine their scalar;
     identity keys (a [user:] login) mine only when
     [~redact_identity_scalars:true] — a GitHub account name is public in

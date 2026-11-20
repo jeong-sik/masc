@@ -73,9 +73,15 @@ let add_lines value acc =
    stat that identifies their bytes, then reading them. A call always
    enumerates; it reads and compiles only when a stamp differs from the one
    memoised for the same request key on the same domain. *)
+(* [Whole_and_lines] is a file that is a secret: its text, and each of its
+   lines, is a value. [Whole_and_mapping_scalars] is a mapping that holds
+   secrets among other fields (the GitHub CLI's [hosts.yml]): its text and the
+   scalars [add_mapping_scalar_values] picks are values, and its other lines
+   are not: a host line ([github.com:]) as a value would mask that text in
+   every SSH remote ([git@github.com:owner/repo]). *)
 type extraction =
   | Whole_and_lines
-  | Whole_lines_and_mapping_scalars
+  | Whole_and_mapping_scalars
 
 type source =
   { source_path : string
@@ -194,7 +200,7 @@ let sources ~additional_secret_files ~base_path ~keeper_name =
   |> regular_file_source Whole_and_lines (ssh_remote_token_file ~base_path ~keeper_name)
   |> fun acc ->
   List.fold_left
-    (fun acc path -> regular_file_source Whole_lines_and_mapping_scalars path acc)
+    (fun acc path -> regular_file_source Whole_and_mapping_scalars path acc)
     acc
     additional_secret_files
 
@@ -202,14 +208,10 @@ let values_of_source ~(redact_identity_scalars : bool) { source_path; extraction
   match read_regular_file source_path st with
   | None -> acc
   | Some value ->
-      let acc =
-        acc
-        |> add_value (Keeper_secret_projection.strip_one_final_newline value)
-        |> add_lines value
-      in
+      let acc = add_value (Keeper_secret_projection.strip_one_final_newline value) acc in
       (match extraction with
-       | Whole_and_lines -> acc
-       | Whole_lines_and_mapping_scalars ->
+       | Whole_and_lines -> add_lines value acc
+       | Whole_and_mapping_scalars ->
            add_mapping_scalar_values ~redact_identity_scalars value acc)
 
 (* Tool-call arguments are JSON text wherever an operator reads them: a

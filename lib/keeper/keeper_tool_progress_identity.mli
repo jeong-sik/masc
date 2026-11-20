@@ -1,8 +1,7 @@
 (** Opaque tool I/O fingerprints. Typed JSON input is canonicalized by field
     order. Output identity is the tool's verified answer. Equal fingerprints
     identify equal answers; they do not prove that the application made no
-    progress or authorize stopping a turn. Cursor values retain opaque identity
-    outside secret-bearing parents while observability JSON masks them. *)
+    progress or authorize stopping a turn. *)
 
 type io_fingerprints =
   { input_fingerprint : string

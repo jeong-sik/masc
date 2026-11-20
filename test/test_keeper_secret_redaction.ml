@@ -449,6 +449,45 @@ let test_identity_key_is_visible_with_the_switch_off () =
     (String_util.contains_substring_ci rendered "octocat-operator");
   not_contains "the token does not" rendered "tok-abcdefghij"
 
+(* hosts.yml is a mapping, not a list of secrets. Its host line, its login
+   line and its protocol line are not secret values, so an SSH remote that
+   spells the host and a colon, or a pull request head that spells the login
+   and a colon, reads as it was written. *)
+let test_hosts_mapping_lines_are_not_secret_values () =
+  let base = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
+  with_env "MASC_SECRET_DIR" "" @@ fun () ->
+  let token = "hosts-mapping-fixture-token" in
+  let hosts = Filename.concat base "hosts.yml" in
+  write_file hosts
+    (String.concat "\n"
+       [ "github.com:"
+       ; "    users:"
+       ; "        octocat-operator:"
+       ; "            oauth_token: " ^ token
+       ; "    git_protocol: https"
+       ; "    oauth_token: " ^ token
+       ; "    user: octocat-operator"
+       ; "" ]);
+  let redaction =
+    R.snapshot_with_additional_secret_files
+      ~redact_identity_scalars:false
+      ~additional_secret_files:[ hosts ]
+      ~base_path:base
+      ~keeper_name:"hosts-mapping"
+  in
+  List.iter
+    (fun text ->
+      Alcotest.(check string) "a mapping line is not a secret value" text
+        (R.redact_text redaction text))
+    [ "git@github.com:owner/repo.git"
+    ; "octocat-operator:main"
+    ; "git_protocol: https"
+    ];
+  Alcotest.(check string) "the token is masked where it is printed"
+    "oauth_token: [REDACTED]"
+    (R.redact_text redaction ("oauth_token: " ^ token))
+
 let test_stream_emits_bounded_unterminated_output () =
   let input = String.make 200_000 'x' in
   let state = R.create_stream_state R.empty in
@@ -991,6 +1030,8 @@ let () =
             `Quick test_credential_markers_cover_the_common_spellings;
           Alcotest.test_case "an identity key is visible with the switch off"
             `Quick test_identity_key_is_visible_with_the_switch_off;
+          Alcotest.test_case "hosts.yml mapping lines are not secret values"
+            `Quick test_hosts_mapping_lines_are_not_secret_values;
           Alcotest.test_case "bounds unterminated stream buffering" `Quick
             test_stream_emits_bounded_unterminated_output;
           Alcotest.test_case "bounded flush keeps characters whole" `Quick

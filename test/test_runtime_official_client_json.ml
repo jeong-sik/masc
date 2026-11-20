@@ -23,8 +23,6 @@ let test_stderr_masks_across_reads_and_lines () =
       check bool (label ^ ": masking is visible") true
         (Astring.String.is_infix ~affix:"[REDACTED]" text))
     [ "bearer", [ "authentication failed: Authorization: be"; "arer fixture-secret" ], "fixture-secret"
-    ; "assignment", [ "authentication failed: VENDOR_API_"; "KEY=opaque-fixture" ], "opaque-fixture"
-    ; "quoted", [ {|authentication failed: token="prefix\"|}; {|secret-tail"|} ], "secret-tail"
     ; "PEM", [ "authentication failed\n-----BEGIN PRIVATE KEY-----\n";
                 "PRIVATE-FIXTURE-BODY\n"; "-----END PRIVATE KEY-----" ], "PRIVATE-FIXTURE-BODY"
     ]

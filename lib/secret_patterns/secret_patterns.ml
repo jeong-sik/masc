@@ -37,42 +37,25 @@ let is_sensitive_key key =
   let lower = String.lowercase_ascii key in
   List.exists (String.equal lower) sensitive_keys
 
-(* Fragments a secret-bearing key name contains ([session_token],
-   [api_secret], [client_secret_v2], ...). Checked only after the exact
-   list misses, and only string values are masked on a fragment hit, so a
-   [token_count] number keeps its shape while an unknown spelling of a
-   secret key never passes its string value in clear. *)
-let sensitive_key_fragments =
-  [ "secret"; "token"; "passwd"; "password"; "credential"; "apikey"; "api_key"; "api-key"; "passphrase"; "private_key" ]
+(** [://user:password@] in a URL.
 
-let sensitive_key_fragment_re =
-  Re.compile (Re.alt (List.map Re.str sensitive_key_fragments))
+    The user and the password sit in the URL's authority, which ends at the
+    first [/], [?] or [#], and they are written in the characters RFC 3986
+    section 3.2.1 gives userinfo. An [@] later in the path or the query is
+    therefore not a credential separator: [https://cdn.example/npm/pkg@1.2.3]
+    and [https://example.com/a?mail=me@example.com] are left as they are. A
+    user with no password ([ssh://git@host]) names an account and is left
+    too. The password may hold [:] and [@]; the match runs to the last [@] of
+    the authority, where a URL parser splits userinfo from the host. *)
+let url_credential =
+  let userinfo_char extra =
+    Re.alt
+      [ Re.rg 'a' 'z'; Re.rg 'A' 'Z'; Re.rg '0' '9'; Re.set ("-._~%!$&'()*+,;=" ^ extra) ]
+  in
+  Re.seq
+    [ Re.str "://"; Re.rep (userinfo_char ""); Re.char ':'; Re.rep1 (userinfo_char ":@")
+    ; Re.char '@' ]
 
-(* Reference-shaped keys name where a credential lives or what kind of value
-   it is, not the credential itself: [api_key_env] holds an environment
-   variable name (see [Voice_config.endpoint]), [token_type] holds an enum
-   word like [Bearer] (see [Server_oauth_service.token_pair_json]). The
-   fragment fallback leaves such keys alone so safe diagnostics stay
-   readable; the exact list above still wins wherever it matches. *)
-let secret_reference_suffixes = [ "_env"; "_type" ]
-
-(* Runtime_wizard_inventory emits a source kind and file reference.
-   Auth_credential_token.collision_log_to_yojson emits [token_hash_prefix]
-   deliberately for collision correlation, not the token. Only that exact
-   derived field is exempt; other [*_hash_prefix] keys remain secret-bearing. *)
-let secret_reference_keys = [ "credential_kind"; "credential_file"; "token_hash_prefix" ]
-
-let is_secret_reference_key key =
-  let lower = String.lowercase_ascii key in
-  List.mem lower secret_reference_keys
-  || List.exists (fun suffix -> String.ends_with ~suffix lower) secret_reference_suffixes
-
-let key_suggests_secret key =
-  (not (is_secret_reference_key key))
-  && Re.execp sensitive_key_fragment_re (String.lowercase_ascii key)
-
-(** URL credential pattern — ://user:pass@ *)
-let url_credential = Re.seq [Re.str "://"; Re.rep1 (Re.compl [Re.set "@ "]); Re.char '@']
 let url_credential_re = Re.compile url_credential
 
 (** Common secret-bearing value patterns — structural prefixes only.
@@ -92,9 +75,6 @@ let url_credential_re = Re.compile url_credential
     once at init, not rebuilt on every [redact_text] call. [Re] is thread-safe
     (see file header), so sharing compiled regexes across fibers/domains is
     safe — [url_credential_re] already does this. *)
-let bearer = Re.seq [Re.no_case (Re.str "Bearer "); Re.rep1 (Re.compl [Re.set " \t\r\n"])]
-let bearer_re = Re.compile bearer
-
 let sk = Re.seq [Re.bow; Re.str "sk-"; Re.rep1 (Re.alt [Re.alnum; Re.char '-'])]
 let sk_re = Re.compile sk
 
@@ -279,7 +259,6 @@ let mask_matches pattern pieces = replace_matches pattern pieces
     at both ends so a 17-char run is not truncated to its first 16 chars. *)
 let secret_res =
   [ url_credential_re
-  ; bearer_re
   ; sk_re
   ; awsakia_re
   ; github_token_re
@@ -288,18 +267,13 @@ let secret_res =
 (* A text matches [Re.alt] of the patterns exactly when it matches one of them,
    and a replacement pass that finds no match returns its input. So when this
    scan finds nothing, every pass in [secret_res] would leave the text as it
-   is, and [redact_text] skips them: one scan instead of five for the text that
-   carries no secret. When the scan finds a match the passes run in their
-   order. One alternation pass would not give the same text: it takes leftmost
-   matches across patterns, so a [Bearer] value holding [://user] and then a
-   tab before [@] would cover [Bearer ...://user] and leave the tab and the
-   password visible, where the ordered passes redact the URL credential
-   first. *)
-let any_secret_re = Re.compile (Re.alt [ url_credential; bearer; sk; awsakia; github_token ])
+   is, and [redact_text] skips them: one scan instead of four for the text
+   that carries no secret. When the scan finds a match the passes run in
+   their order. *)
+let any_secret_re = Re.compile (Re.alt [ url_credential; sk; awsakia; github_token ])
 
-(* Raw diagnostics also carry opaque credentials as named assignments or HTTP
-   Authorization headers. Match their syntax, using the same sensitive-key
-   vocabulary as JSON, rather than dropping lines that mention a keyword. *)
+(* An HTTP Authorization header: the field name, a colon, and the rest of the
+   line. The name and the colon stay; the value is replaced. *)
 let horizontal_space = Re.rep (Re.set " \t")
 
 let authorization_header_re =
@@ -311,51 +285,15 @@ let authorization_header_re =
        ; Re.rep1 (Re.compl [ Re.set "\r\n" ]) ])
 ;;
 
-let sensitive_assignment_re =
-  let quoted quote =
-    let content =
-      if Char.equal quote '"' then
-        Re.alt
-          [ Re.seq [ Re.char '\\'; Re.compl [ Re.set "\r\n" ] ]
-          ; Re.compl [ Re.set "\"\\\r\n" ] ]
-      else Re.compl [ Re.set (String.make 1 quote ^ "\r\n") ]
-    in
-    Re.seq [ Re.char quote; Re.rep content; Re.opt (Re.char quote) ]
-  in
-  let environment_prefix = Re.rep (Re.seq [ Re.rep1 Re.alnum; Re.char '_' ]) in
-  Re.compile
-    (Re.seq
-       [ Re.group
-           (Re.seq [ Re.bow; environment_prefix
-                   ; Re.no_case (Re.alt (List.map Re.str sensitive_keys))
-                   ; horizontal_space; Re.char '='; horizontal_space ])
-       ; Re.alt [ quoted '\''; quoted '"'; Re.rep1 (Re.compl [ Re.set " \t\r\n" ]) ] ])
-;;
-
 let redact_pieces pieces =
   let pieces = mask_matches pem_private_key_re pieces in
-  let pieces = List.fold_left (fun pieces pattern ->
-      replace_matches ~prefix_group:1 pattern pieces)
-      pieces [ authorization_header_re; sensitive_assignment_re ] in
+  let pieces = replace_matches ~prefix_group:1 authorization_header_re pieces in
   if Re.execp any_secret_re (render_pieces pieces)
   then List.fold_left (fun pieces pattern -> mask_matches pattern pieces) pieces secret_res
   else pieces
 
 let redact_text_mapped text = redact_pieces (copied_text text)
 let redact_text text = render_pieces (redact_text_mapped text)
-
-(* Under a fragment-matching key the parent already named the shape, so no
-   string leaf in its subtree can be trusted in clear
-   ([{"client_secret_v2":{"value":"opaque"}}] must not leak [opaque]).
-   Every string value and object member name becomes [[REDACTED]], including
-   opaque credentials used as map keys. Members remain in order even when
-   their masked names coincide; non-string scalars keep their shape. *)
-let rec mask_fragment_subtree = function
-  | `String _ -> `String "[REDACTED]"
-  | `Assoc fields ->
-      `Assoc (List.map (fun (_, value) -> "[REDACTED]", mask_fragment_subtree value) fields)
-  | `List items -> `List (List.map mask_fragment_subtree items)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
 
 (* A key is text too: a map keyed by URL (registry [auths], remote lists)
    carries credentials in its keys, so the key's text is redacted like any
@@ -373,8 +311,6 @@ let redact_json_with ~on_string json =
                let key' = redact_text key in
                if is_sensitive_key key
                then (key', `String "[REDACTED]")
-               else if key_suggests_secret key
-               then (key', mask_fragment_subtree value)
                else (key', redact value))
              fields)
     | `List items -> `List (List.map redact items)

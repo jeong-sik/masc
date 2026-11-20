@@ -1219,10 +1219,95 @@ let test_current_snapshot_retains_inventory_failure_and_confirmation_deadline ()
     | Partial detail -> Alcotest.failf "repaired backlog stayed partial: %s" detail)
 ;;
 
+let test_operator_snapshot_projects_effective_toml_declaration_fields () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let dir = temp_dir () in
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  let config = Workspace.default_config dir in
+  let keeper_name = "toml-overlay-keeper" in
+  Keeper_registry.For_testing.clear ();
+  Operator_control.invalidate_snapshot_cache ();
+  Dashboard_cache.invalidate_all ();
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.For_testing.clear ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_cache.invalidate_all ();
+      Runtime.For_testing.restore previous_runtime;
+      cleanup_dir dir)
+    (fun () ->
+      init_runtime_default_for_snapshot dir;
+      ignore (Workspace.init config ~agent_name:None);
+      let toml_path =
+        Keeper_sandbox_config.keeper_toml_path
+          ~base_path:config.Workspace.base_path
+          ~agent_name:keeper_name
+      in
+      Fs_compat.mkdir_p (Filename.dirname toml_path);
+      Out_channel.with_open_text toml_path (fun channel ->
+        output_string channel
+          {|[keeper]
+instructions = "TOML overlay verification"
+activation_mode = "on_demand"
+sandbox_profile = "microvm"
+microvm_backend = "microsandbox"
+sandbox_image = "base"
+network_mode = "none"
+|});
+      let stored_meta =
+        match
+          Masc_test_deps.meta_of_json_fixture
+            (`Assoc
+              [ "name", `String keeper_name
+              ; "trace_id", `String "trace-toml-overlay"
+              ])
+        with
+        | Ok meta -> meta
+        | Error err -> Alcotest.fail ("meta_of_json_fixture: " ^ err)
+      in
+      Alcotest.(check string) "fixture stored meta defaults activation_mode to autonomous"
+        "autonomous"
+        (Keeper_activation_mode.to_string stored_meta.activation_mode);
+      (match Keeper_meta_store.replace_snapshot config stored_meta with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("replace_snapshot: " ^ err));
+      Keeper_registry.For_testing.clear ();
+      Operator_control.invalidate_snapshot_cache ();
+      Dashboard_cache.invalidate_all ();
+      let json =
+        Operator_control.snapshot_json
+          ~view:"summary"
+          ~include_keepers:true
+          ~include_messages:false
+          (operator_ctx env sw config "owner")
+      in
+      let open Yojson.Safe.Util in
+      let keeper =
+        match
+          json |> member "keepers" |> member "items" |> to_list
+          |> List.find_opt (fun row -> row |> member "name" |> to_string = keeper_name)
+        with
+        | Some row -> row
+        | None -> Alcotest.fail "expected keeper in operator snapshot"
+      in
+      Alcotest.(check string) "activation_mode overlaid from TOML"
+        "on_demand"
+        (keeper |> member "activation_mode" |> to_string);
+      Alcotest.(check string) "runtime_trust execution sandbox_summary overlaid from TOML"
+        "microvm / none"
+        (keeper |> member "runtime_trust" |> member "execution" |> member "sandbox_summary" |> to_string))
+;;
+
 let () =
   Alcotest.run
     "operator_control_snapshot"
     [
+      ( "keeper declaration overlay"
+      , [ Alcotest.test_case "snapshot overlays TOML declaration defaults onto stored meta" `Quick
+            test_operator_snapshot_projects_effective_toml_declaration_fields
+        ] );
       ( "Current source reads"
       , [Alcotest.test_case "nested reads observe actual commits inside request TTL" `Quick
            test_current_nested_reads_observe_actual_commits_inside_the_request_ttl

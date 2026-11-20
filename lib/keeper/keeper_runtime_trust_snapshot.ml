@@ -807,7 +807,14 @@ let summary_json_of_raw ~(meta : keeper_meta) (raw : raw_observations) =
        ; ("latest_causal_event", latest_causal_event)
        ])
 
+let effective_meta_for_trust ~(config : Workspace.config) (meta : keeper_meta) =
+  match Keeper_meta_contract.effective_meta_result ~base_path:config.base_path meta with
+  | Ok effective -> effective
+  | Error _ -> meta
+;;
+
 let summary_observation ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let meta = effective_meta_for_trust ~config meta in
   let raw = collect_summary_raw ~config ~meta in
   let completeness = match raw.pending_approval_projection.error with
     | None -> Dashboard_projection_read.Complete
@@ -1068,6 +1075,7 @@ let snapshot_json_inner_with_pending_reader
        base_path:string ->
        (Yojson.Safe.t list, Keeper_approval_queue_result.storage_error) result)
     ~(config : Workspace.config) ~(meta : keeper_meta) =
+  let meta = effective_meta_for_trust ~config meta in
   collect_raw_snapshot_with_pending_reader ~read_pending ~config ~meta
   |> snapshot_json_of_raw ~meta
 ;;

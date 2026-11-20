@@ -1,7 +1,6 @@
 import { isDismissEscape } from '../../lib/keyboard'
-// MASC v2 — Registry surface (design: registry.jsx RegistrySurface).
-// Rebuilt onto the design's `.reg-*`/`.rk-*`/`.rp-*` vocabulary so the vendored
-// keeper-v2/registry.css skin has markup to land on.
+// MASC v2 — Registry surface. Built on the `.reg-*`/`.rk-*`/`.rp-*` vocabulary
+// so the vendored keeper-v2/registry.css skin has markup to land on.
 //
 // What is intentionally NOT built here (mark-don't-fake — no live signal):
 // - Persona (AGENT.md) library panel + editor (`reg-persona`, `rp-desc`,
@@ -11,7 +10,7 @@ import { isDismissEscape } from '../../lib/keyboard'
 //   api/keeper-lifecycle.ts (boot/shutdown/reset/clear/pause/resume/wake/purge).
 // - `rk-tps` tok/s badge: tok/s only exists as per-keeper detail telemetry
 //   (KeeperMetricPoint.wall_tokens_per_second), not as a roster-level signal.
-// - `reg-cols`: the design's two-column grid exists to lay the persona panel
+// - `reg-cols`: the two-column grid exists to lay the persona panel
 //   next to the keeper panel; with one panel it would leave an empty track.
 //
 // Update/delete are not reimplemented: the menu's "keeper 설정" opens the

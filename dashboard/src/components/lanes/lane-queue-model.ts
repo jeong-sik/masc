@@ -12,11 +12,9 @@
 //     verdict mirrors src/components/schedule/queue-drain-status.ts (SSOT for
 //     the derivation — the parity test asserts the two never disagree).
 //
-// Value labels / stage pipeline / drain presentation copy reproduce the
-// design's closed vocabularies verbatim (lanes.jsx VAL_LBL / LANE_SOURCE /
-// STAGE / DRAIN_PRESENT). Where the design hard-codes mock duration series
-// (LANE_TL), the panel derives segments from real observation timestamps and
-// clips them to the same 20-minute window instead.
+// Value labels / stage pipeline / drain presentation copy are closed
+// vocabularies. The panel derives segments from real observation timestamps
+// and clips them to a 20-minute window.
 
 import type {
   DashboardKeeperWaitingKeeper,

@@ -1,11 +1,9 @@
 // Calendar (agenda) projection + presentation for the schedule surface.
 //
-// Ported from the keeper-v2 prototype (schedule.jsx: SchCadenceSummary /
-// SchPollingStrip / SchAgenda). The prototype worked off static data and a fixed
-// "now"; this module derives everything from the live schedule projection
-// (DashboardScheduledAutomationRequest[]) instead.
+// Everything is derived from the live schedule projection
+// (DashboardScheduledAutomationRequest[]).
 //
-// Two honesty rules the prototype did not need but production does:
+// Two honesty rules:
 //   1. Placement uses the backend-computed next wake (next_due_at ?? due_at). A
 //      row without a concrete wake time cannot be placed and is dropped — future
 //      occurrences are never fabricated on the client (no cron/DST guessing).

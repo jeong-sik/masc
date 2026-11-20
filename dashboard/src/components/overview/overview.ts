@@ -81,9 +81,8 @@ function hasCriticalAttentionBlocker(blockerClass: Keeper['runtime_blocker_class
   return blockerClass != null && CRITICAL_ATTENTION_BLOCKERS.has(blockerClass)
 }
 
-/** Map a keeper's runtime/trust state to a human attention reason.
- *  Mirrors the hard-coded ATTN_REASON table from keeper-v2/overview.jsx
- *  but derives the text from live dashboard fields. */
+/** Map a keeper's runtime/trust state to a human attention reason,
+ *  derived from live dashboard fields. */
 export function deriveKeeperAttentionReason(keeper: Keeper): KeeperAttentionReason {
   const blockerClass = keeper.runtime_blocker_class ?? null
   const blockerLabel = keeperRuntimeBlockerLabel(blockerClass) ?? blockerClass?.replace(/_/g, ' ')
@@ -172,11 +171,10 @@ export function fleetCountText(value: number | null | undefined): string {
   return typeof value === 'number' ? String(value) : '—'
 }
 
-// ─── Cross-surface digest (overview.jsx:71-92) ───────────────────────────────
+// ─── Cross-surface digest ────────────────────────────────────────────────────
 //
-// The prototype reads window.GOALS / APPROVALS / CONNECTORS / FUSION_RUNS etc.
-// from a mock. The live v2 dashboard exposes goals + fusion runs as signals, and
-// surfaces operator-awaiting keepers as the approval queue.
+// Goals and fusion runs come from dashboard signals; the approval count is the
+// Gate approval queue length.
 
 export interface OverviewDigest {
   /** Exact pending requests from the Gate queue SSOT. */
@@ -534,7 +532,7 @@ export function summarizeScheduledAutomation(
 }
 
 function goalPriorityClass(priority: number): 'high' | 'normal' | 'low' {
-  // overview.jsx:166 — priority >= 7 high, >= 4 normal, else low
+  // Priority >= 7 high, >= 4 normal, else low
   if (priority >= 7) return 'high'
   if (priority >= 4) return 'normal'
   return 'low'
@@ -714,7 +712,7 @@ function OverviewHeader() {
   return html`
     <header class="ov-head v2-overview-head" data-testid="overview-head">
       <div>
-        <!-- eyebrow + display header + purpose: overview.jsx:99-101 (copy verbatim) -->
+        <!-- eyebrow + display header + purpose -->
         <span class="ov-eyebrow">운영 홈</span>
         <h1>지금, 전체</h1>
         <p class="ov-sub">fleet 전체 — 목표 · Gate · Fusion · 연결 한눈에</p>
@@ -741,7 +739,7 @@ function OverviewKpi({
   testId: string
   onClick?: () => void
 }) {
-  // overview.jsx:16-25 — clickable KPI cell gets .link + button role + keyboard handler
+  // Clickable KPI cell gets .link + button role + keyboard handler
   const onKeyDown = onClick
     ? (e: KeyboardEvent) => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -765,8 +763,7 @@ function OverviewKpi({
   `
 }
 
-// Cross-surface KPI row — overview.jsx:106-114. Seven cells, each a deep link into
-// its surface. Labels and `sub` separators are copied verbatim from the prototype.
+// Cross-surface KPI row. Seven cells, each a deep link into its surface.
 function OverviewKpiStrip({
   stats,
   fleet,
@@ -1005,11 +1002,11 @@ function OverviewTelemetry({
   `
 }
 
-// ─── Domain status section (overview.jsx:159-261) ────────────────────────────
+// ─── Domain status section ───────────────────────────────────────────────────
 //
 // "도메인 현황" header over a 7-card grid: one summary card per surface
 // (work · approvals · schedule · fusion · board · connectors · fleet), each a
-// deep link. Card chrome mirrors the prototype DomainCard (overview.jsx:42-53).
+// deep link.
 
 type DomainTone = 'ok' | 'bad' | 'warn' | 'volt'
 
@@ -1075,7 +1072,7 @@ function OverviewDomainSection({
   return html`
     <h2 class="ov-section-h v2-overview-section-h" data-testid="overview-domains-header">도메인 현황</h2>
     <div class="ov-domains v2-overview-domains" data-testid="overview-domains">
-      <!-- WORK · overview.jsx:162-179 -->
+      <!-- WORK -->
       <${DomainCard} title="작업 · 목표" linkLabel="작업" nav=${{ tab: 'workspace', params: { section: 'work' } }} testId="domain-work">
         ${digest.topGoals.length > 0
           ? digest.topGoals.map(g => {
@@ -1094,7 +1091,7 @@ function OverviewDomainSection({
           : html`<div class="ov-mini-empty ov-empty">활성 목표 없음</div>`}
       <//>
 
-      <!-- APPROVALS · overview.jsx:182-198 -->
+      <!-- APPROVALS -->
       <${DomainCard}
         title="Gate · HITL"
         count=${approvalQueueState && approvalQueueState.state !== 'ready'
@@ -1136,7 +1133,7 @@ function OverviewDomainSection({
         </div>
       <//>
 
-      <!-- SCHEDULE · overview.jsx:201-215 -->
+      <!-- SCHEDULE -->
       <${DomainCard}
         title="예약 · 자동화"
         count=${scheduleSummary.state === 'available' ? String(scheduleSummary.totalCount) : '—'}
@@ -1226,7 +1223,7 @@ function OverviewDomainSection({
             `}
       <//>
 
-      <!-- FUSION · overview.jsx:218-230 -->
+      <!-- FUSION -->
       <${DomainCard}
         title="Fusion 심의"
         count=${String(digest.fusionTotal)}
@@ -1252,7 +1249,7 @@ function OverviewDomainSection({
         </div>
       <//>
 
-      <!-- BOARD · overview.jsx:233-237
+      <!-- BOARD
            The overview route subscribes to the GLOBAL + execution slices only
            (dashboard-observer.ts) and never calls
            refreshBoard, so boardPosts is empty here on every fresh load.
@@ -1273,14 +1270,14 @@ function OverviewDomainSection({
             : html`<div class="ov-stat-row"><span class="k">불러온 포스트</span><span class="v mono">${boardPosts.value.length}</span></div>`}
       <//>
 
-      <!-- CONNECTORS · overview.jsx:240-249 (no live connector store yet) -->
+      <!-- CONNECTORS (no live connector store yet) -->
       <${DomainCard} title="커넥터" linkLabel="커넥터" nav=${{ tab: 'connectors' }} testId="domain-connectors">
         <div class="ov-mini-list">
           <div class="ov-mini-empty ov-empty">커넥터 데이터 미연결</div>
         </div>
       <//>
 
-      <!-- FLEET summary · overview.jsx:252-260 -->
+      <!-- FLEET summary -->
       <${DomainCard} title="Fleet 요약" linkLabel="Monitor" nav=${{ tab: 'monitoring' }} testId="domain-fleet">
         <div class="ov-fleet-sum">
           <div class="ov-fleet-stat" data-testid="fleet-stat-running"><span class="v ok">${fleetCountText(fleet?.running)}</span><span class="k">실행</span></div>

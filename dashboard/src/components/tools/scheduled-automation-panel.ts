@@ -164,9 +164,8 @@ export function recurrenceLabel(request: DashboardScheduledAutomationRequest): s
 }
 
 /**
- * RFC-0234 §10 "Dashboard and operator UX" — a wake-signal feed surfaces the
- * upcoming scheduler wakes ("future rows with ... due time, payload summary,
- * and payload identity") ordered soonest-first. The scheduler is a turn-start channel
+ * A wake-signal feed surfaces the upcoming scheduler wakes ordered
+ * soonest-first. The scheduler is a turn-start channel
  * (proactive turn mechanisms decide whether an agent should wake);
  * this feed answers "what wakes next" rather than auditing every row like the
  * full table below.
@@ -1066,14 +1065,14 @@ function DurableSignalItem({
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   keeper-v2 prototype surface (schedule.jsx). Emits the vendored `.sch-*` /
+   keeper-v2 schedule surface. Emits the vendored `.sch-*` /
    `.turn-*` DOM so styles/keeper-v2/schedule.css applies. Opt-in via
    `variant="v2"`; the default `diagnostics` path above is the dense FSM view
    reused by the Tools surface and must stay byte-stable.
 
-   Live data only — no fabricated operator/timestamps. Live fields absent in the
-   prototype model (relative due text "4h 12m 후", payload `body`) are rendered
-   from the real ISO timestamps / marked data-stub rather than invented. */
+   Live data only — no fabricated operator/timestamps. Due times render from
+   the real ISO timestamps, and the payload `body` the projection lacks is
+   marked data-stub rather than invented. */
 
 // Live status strings are lower_snake, matching the SCHED_STATUS keys directly
 // (residual of #23582: the prior PascalCase bridge mapped onto stale keys and
@@ -2056,7 +2055,7 @@ function scheduleAsideSummary(request: DashboardScheduledAutomationRequest): str
   return request.payload_summary?.trim() || `${schedPayloadSpec(request.payload_kind).lbl} · 상세`
 }
 
-/** Right-column operations aside for the schedule surface (schedule.jsx SchAside):
+/** Right-column operations aside for the schedule surface:
  *  a read-only pulse (예약됨/due·실행) + failed/due/recent triage
  *  derived from the same scheduled-automation projection. A row click opens the
  *  shared detail overlay via `onOpen`; there are no mutation controls, so the

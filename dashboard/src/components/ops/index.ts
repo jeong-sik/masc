@@ -34,9 +34,8 @@ import {
 import { FlowControlPanel } from '../flow-control/flow-control-panel'
 import { CmdGateLinks, CmdInterveneForm } from './cmd-intervene-form'
 
-// keeper-v2 command.jsx tones: confirmed/executed → ok, preview → warn,
-// error → bad. The design's cmd-log badge only marks ok/bad (CMD_TONE warn
-// renders with no tone class).
+// Activity tones: executed → ok, error → bad, preview → no tone class (the
+// cmd-log badge only marks ok/bad).
 type ActivityTone = 'ok' | 'bad' | ''
 
 export const ACTIVITY_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000

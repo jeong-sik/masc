@@ -139,10 +139,8 @@ const editorFocusClasses = ringFocusClasses({
   offset: 0,
 })
 
-// rt-* shell section nav. Section ids + Korean labels + glyphs are lifted 1:1
-// from the Claude-Design prototype runtime-editor.jsx:8-15 (RT_SECS). The
-// glyphs are the prototype's exact characters — do not substitute lucide icons,
-// the prototype uses these literal glyphs.
+// rt-* shell section nav: section ids, Korean labels, and glyphs. The glyphs
+// are literal characters, not lucide icons.
 
 interface RuntimeSection {
   readonly id: RuntimeSectionId
@@ -759,8 +757,7 @@ function RuntimeTomlEditorContent({ onClose, onSaved, navigationTarget, authorit
       <${LoadingState}>runtime.toml 불러오는 중...<//>
     `
     : html`
-      <!-- rt-shell: 218px section-nav + fluid content (runtime-editor.jsx:110,
-           runtime.css:6). -->
+      <!-- rt-shell: 218px section-nav + fluid content. -->
       <div class="rt-shell">
         <nav class="rt-nav" aria-label="런타임 편집기 섹션">
           <div class="rt-nav-h">

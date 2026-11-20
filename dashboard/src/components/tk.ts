@@ -1,4 +1,4 @@
-// Tk — atomic primitive ported from design-system v0.4 primitives.html
+// Tk — atomic primitive ported from design-system v0.4
 // (`<code class="tk">value</code>`). The SPEC defines an *inline mono
 // highlight* — a small mono-font chunk on a tinted background, used
 // to mark identifier-shaped tokens inside running prose: env var

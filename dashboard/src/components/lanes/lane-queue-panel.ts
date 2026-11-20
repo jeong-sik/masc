@@ -1,10 +1,10 @@
 import { setupObservationRefresh } from '../../lib/observation-refresh'
-// Lane · Queue panel — the lanes.jsx Monitor surface, wired to live data.
+// Lane · Queue panel on the Monitor surface, wired to live data.
 //
 //   · 진행 타임라인 (sw-*): composite observations accumulated from the fleet
 //     shared fleet composite read (one call for the whole
-//     roster — the same payload fleet-fsm-matrix.ts consumes), clipped to the
-//     design's 20-minute window. Buffers accumulate while the panel is
+//     roster — the same payload fleet-fsm-matrix.ts consumes), clipped to a
+//     20-minute window. Buffers accumulate while the panel is
 //     mounted, exactly like the FSM hub's SwimlaneTimeline.
 //   · 무엇을 기다리는가 (pl-*/wa-*): keeper_waiting_inventory.v3 via the
 //     shared keeper-scoped store (subscribeKeeperWaitingInventory) — one
@@ -14,7 +14,7 @@ import { setupObservationRefresh } from '../../lib/observation-refresh'
 //     keeper_queue_evidence × keeper_reaction_evidence rows; the miss count
 //     reuses countQueueDrainMisses from schedule/queue-drain-status.ts.
 //
-// "기술 상세" toggle follows the design: wire names (source / wake_producer /
+// "기술 상세" toggle: wire names (source / wake_producer /
 // next_action / evidence statuses) only appear behind it.
 
 import { html } from 'htm/preact'
@@ -93,8 +93,8 @@ import {
 } from './lane-queue-model'
 
 const MIN_BAR_PERCENT = 6
-/** Design renders the in-segment value label once the segment is ≥ 8.5% of
- *  the window (lanes.jsx `(s.d / WINDOW_S) >= 0.085`). */
+/** The in-segment value label renders once the segment is ≥ 8.5% of the
+ *  window. */
 const SEGMENT_LABEL_MIN_PCT = 8.5
 const LIFECYCLE_EVENT_LIMIT = 30
 

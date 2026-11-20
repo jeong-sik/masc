@@ -1,4 +1,4 @@
-// MASC Dashboard — Command Intervene form + Gate links (keeper-v2 command.jsx parity)
+// MASC Dashboard — Command Intervene form + Gate links
 //
 // CmdOps (cmd-form/cmd-text/cmd-actions) and the Gate/HITL link panel
 // (cmd-gatelinks).
@@ -8,7 +8,7 @@
 //     keeper_message (target_type=keeper).
 //   · target options → operatorSnapshot keepers (real snapshot rows).
 //   · Gate pending count → gateData.approval_queue length.
-// Gaps (no live signal, design option omitted): 태스크 인계 요청(handoff) — the
+// Not offered (no live signal): 태스크 인계 요청(handoff) — the
 // operator action endpoint has no handoff action type; keeper-scoped pause/resume
 // goes through the keeper directive API on Monitor → Keeper Fleet, not this form.
 

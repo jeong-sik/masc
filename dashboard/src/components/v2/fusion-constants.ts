@@ -1,6 +1,5 @@
-// MASC v2 — fusion decision display constants (ported from prototype
-// fusion-data.jsx). Judge decision → label + tone class + glyph for the
-// `.fus-dec-badge` / `.msg-fusion` prototype markup. Pure data.
+// MASC v2 — fusion decision display constants. Judge decision → label + tone
+// class + glyph for the `.fus-dec-badge` / `.msg-fusion` markup. Pure data.
 
 export interface FusionDecisionSpec {
   readonly lbl: string

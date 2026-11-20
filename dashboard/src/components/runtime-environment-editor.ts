@@ -41,11 +41,11 @@ export type RuntimeStructuredSection =
 export type RuntimeBindingEditableField = 'enabled' | 'max-concurrent' | 'keep-alive' | 'num-ctx'
 export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 
-// Basic-field-only payloads (RFC-0273 §3.2 reuse boundary). Per-model
-// [models.X.capabilities] flags (supports-tool-choice, thinking-control-format,
-// ...) are deliberately excluded — those are semantically coupled to real,
-// per-model verified behavior (see runtime.toml's own inline caveats), not
-// something a generic add form can default safely. They stay raw-TOML-only.
+// Basic-field-only payloads. Per-model [models.X.capabilities] flags
+// (supports-tool-choice, thinking-control-format, ...) are deliberately
+// excluded — those are semantically coupled to real, per-model verified
+// behavior (see runtime.toml's own inline caveats), not something a generic
+// add form can default safely. They stay raw-TOML-only.
 // Generic providers use endpoint transport. A typed official-client protocol
 // may require command transport; that exception is selected by protocol and
 // never exposed as a free-form transport switch.
@@ -229,8 +229,8 @@ function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransport
   return provider.transportKind === 'command' ? 'command' : 'endpoint'
 }
 
-// Prototype rt-model-ctx label (runtime-editor.jsx:176) — now via the shared
-// formatContextTokens SSOT so 1M-class contexts read '1M ctx', not '1000k ctx'.
+// rt-model-ctx label, formatted by the shared formatContextTokens SSOT so
+// 1M-class contexts read '1M ctx', not '1000k ctx'.
 function protoContext(value: number | null | undefined): string {
   return formatContextTokens(value) ?? '— ctx'
 }
@@ -243,8 +243,8 @@ function parseOptionalPositiveInteger(raw: string): number | null | undefined {
   return parsed > 0 ? parsed : undefined
 }
 
-// rt-cap chip — runtime-editor.jsx:17 rtCapChip. `on` toggles the ✓/· glyph
-// and the .on tone (runtime.css:64). Read-only capability readout.
+// rt-cap chip. `on` toggles the ✓/· glyph and the .on tone. Read-only
+// capability readout.
 function capChip(on: boolean, label: string) {
   return html`<span class="rt-cap ${on ? 'on' : ''}">${on ? '✓' : '·'} ${label}</span>`
 }
@@ -732,8 +732,7 @@ export function RuntimeEnvironmentEditor({
         </div>
       ` : null}
 
-      <!-- routing — runtime-editor.jsx:135-141. [runtime].default is read and
-           written back. -->
+      <!-- routing — [runtime].default is read and written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
         <div class="rt-note">
           런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
@@ -747,7 +746,7 @@ export function RuntimeEnvironmentEditor({
         )}
       </div>
 
-      <!-- providers — runtime-editor.jsx:144-165. Existing providers' endpoint/
+      <!-- providers — existing providers' endpoint/
            command and credential fields are draft-editable in place (onProvider
            TransportChange/onProviderCredentialChange) and applied through the
            validated Save path. Adding a brand-new provider uses a separate typed
@@ -1130,7 +1129,7 @@ export function RuntimeEnvironmentEditor({
         </div>
       </div>
 
-      <!-- models — runtime-editor.jsx:167-191. search + read-only chips. The
+      <!-- models — search + read-only chips. The
            model parse now reads [models.<id>.capabilities], so tool-choice /
            json / structured / multimodal chips render from the live config
            when the key is present. There is no effort/thinking-control-format
@@ -1290,7 +1289,7 @@ export function RuntimeEnvironmentEditor({
         </div>
       </div>
 
-      <!-- bindings — runtime-editor.jsx:193-214. radio sets the default runtime;
+      <!-- bindings — radio sets the default runtime;
            max-conc / keep-alive / num-ctx edit the draft runtime.toml and are
            applied through the existing validated Save path. The sub-line shows
            context and per-M price when the binding declares
@@ -1437,7 +1436,7 @@ export function RuntimeEnvironmentEditor({
         </div>
       </div>
 
-      <!-- assignments — runtime-editor.jsx:216-231. keeper -> runtime id from
+      <!-- assignments — keeper -> runtime id from
            the live keepers signal + [runtime.assignments]. Pinned entries are
            grouped ahead of default-fallback entries so a long keeper list
            doesn't force scanning every row to see who is actually pinned. -->

@@ -178,7 +178,7 @@ let post_keeper_chat_watching ~waiting_inventory ~expected_workspace ~check_requ
               List.iter (fun (item : Keeper_chat_live.observed_delta) -> match item.delta with
                 | Keeper_chat_live.Accepted {interactive=Some receipt;_} ->
                   enqueue_async mailbox (P.Keeper_msg (P.Keeper_chat_control_received
-                    (request.Keeper_chat.keeper_name, control_generation, receipt.Keeper_chat_live.chat_control_token)))
+                    (request.Keeper_chat.keeper_name, control_generation, receipt.Keeper_chat.chat_control_token)))
                 | Keeper_chat_live.Accepted { interactive = None;_} | Keeper_chat_live.Run_started
                 | Keeper_chat_live.Checkpoint | Keeper_chat_live.External_effect_completed
                 | Keeper_chat_live.Run_finished | Keeper_chat_live.Batch_bound _

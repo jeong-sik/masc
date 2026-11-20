@@ -5833,7 +5833,8 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                   | Inspector.Input_estimate n -> n
                   | Inspector.Input_invalid _ | Inspector.Input_unavailable -> minimum) inputs in
                 Chart.sparkline_marks ~min:minimum ~max:maximum scaled_inputs,
-                Printf.sprintf "scale %d–%d tokens" minimum maximum in
+                Printf.sprintf "scale %s–%s tokens"
+                  (Masc_tui_value.Count.grouped minimum) (Masc_tui_value.Count.grouped maximum) in
           (* A turn whose record carries no input count is a value read but
              not reported, and a negative count is a reading that failed:
              the 6.4 marks of RFC tui-one-screen-grammar, not [·] and [!]. *)
@@ -6765,9 +6766,9 @@ let context_inspector_content_lines ~cols state : context_pane_body =
              (runtime_quota_scope_label ~ko runtime) runtime.ro_provider
          ; say "연결 " "Connection " ^ runtime.ro_provider_id
          ; Printf.sprintf
-             (if ko then "설정 컨텍스트 %d 토큰 (%s) · 모델 %s"
-              else "Configured context %d tokens (%s) · model %s")
-             runtime.ro_effective_max_context
+             (if ko then "설정 컨텍스트 %s 토큰 (%s) · 모델 %s"
+              else "Configured context %s tokens (%s) · model %s")
+             (Masc_tui_value.Count.grouped runtime.ro_effective_max_context)
              (Tui_decode.runtime_context_source_label runtime.ro_max_context_source)
              runtime.ro_model
          ; say "마지막 관측 설정 · 위 캡처된 턴은 자체 런타임과 컨텍스트를 유지합니다"

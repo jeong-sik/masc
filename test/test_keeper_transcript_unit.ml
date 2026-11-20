@@ -531,7 +531,7 @@ let test_provider_admission_quarantines_malformed_overlap () =
        Alcotest.(check string)
          "operator receipt terminal code"
          "incomplete_tool_transcript"
-         (Masc.Keeper_agent_error.terminal_reason_code_of_core_error error)
+         (Keeper_terminal_reason.code_of_core_error error)
      | Some _ | None -> Alcotest.fail "missing typed transcript quarantine")
   | Ok () -> Alcotest.fail "poisoned transcript passed keeper admission"
 ;;

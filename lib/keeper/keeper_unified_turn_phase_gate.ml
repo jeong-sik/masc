@@ -54,9 +54,10 @@ let decide_and_record
       ~meta
       ~runtime_id:(runtime_id_of_meta meta)
       ~outcome:`Cancelled
-      ~terminal_reason_code:"supervisor_stop"
+      ~terminal_reason:Keeper_terminal_reason.Supervisor_stop
       ~activity_kind:"keeper.turn_cancelled"
-      ~trajectory_outcome:(Trajectory.Gated "supervisor_stop")
+      ~trajectory_outcome:
+        (Trajectory.Gated (Keeper_terminal_reason.to_wire Keeper_terminal_reason.Supervisor_stop))
       ~keeper_turn_id
       ();
     (* FSM: HonorStopSignal — cooperative cancel at phase_gating *)
@@ -74,17 +75,15 @@ let decide_and_record
       "%s: keeper cycle skipped in non-executable phase=%s"
       meta.name
       phase_string;
-    let terminal_reason_code =
-      Printf.sprintf "non_executable_phase:%s" phase_string
-    in
+    let terminal_reason = Keeper_terminal_reason.Phase_not_executable phase in
     Keeper_turn_helpers.record_pre_dispatch_terminal_observation
       ~config
       ~meta
       ~runtime_id:(runtime_id_of_meta meta)
       ~outcome:`Skipped
-      ~terminal_reason_code
+      ~terminal_reason
       ~activity_kind:"keeper.turn_skipped"
-      ~trajectory_outcome:(Trajectory.Gated terminal_reason_code)
+      ~trajectory_outcome:(Trajectory.Gated (Keeper_terminal_reason.to_wire terminal_reason))
       ~keeper_turn_id
       ();
     Keeper_turn_fsm.emit_transition
@@ -94,7 +93,8 @@ let decide_and_record
       Keeper_turn_fsm.Done;
     Phase_gate_skipped meta, turn_state
   | Plan.Registry_phase_missing ->
-    let terminal_reason_code = "registry_phase_missing" in
+    let terminal_reason = Keeper_terminal_reason.Registry_phase_missing in
+    let terminal_reason_code = Keeper_terminal_reason.to_wire terminal_reason in
     let error_message =
       Printf.sprintf
         "%s: keeper registry phase lookup returned None before dispatch"
@@ -110,7 +110,7 @@ let decide_and_record
       ~meta
       ~runtime_id:(runtime_id_of_meta meta)
       ~outcome:`Error
-      ~terminal_reason_code
+      ~terminal_reason
       ~activity_kind:"keeper.turn_blocked"
       ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
       ~error_kind:

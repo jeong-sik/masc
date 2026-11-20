@@ -1,48 +1,27 @@
-(* consumer-side closed sum for the keeper disposition
-   classifier's view of [receipt.terminal_reason_code]. See the [.mli]
-   for why this is a third terminal-reason type and how it relates to
-   [Keeper_turn_terminal_code] (producer side) and
-   [Keeper_turn_disposition] (operator-facing side).
+(* Why a Keeper turn ended, held as the typed value the producer had. The
+   receipt writes [to_wire] and reads [failure_class]; no reader turns the
+   spelling back into a value. See the [.mli]. *)
 
-   The whole point is to parse the wire string ONCE here and let
-   [Keeper_execution_receipt.operator_disposition] exhaustive-match,
-   replacing its chain of [String.starts_with] / [string_contains]
-   tests. Wire bytes are preserved: payload-bearing variants carry the
-   original string and [to_wire] returns it verbatim. *)
+type t =
+  | Completed
+  | Checkpoint
+  | Input_required
+  | Supervisor_stop
+  | External_cancel
+  | Phase_not_executable of Keeper_state_machine.phase
+  | Registry_phase_missing
+  | Failed of Agent_core.Error.t
 
-(* SSOT for the two retry-recoverable transient wire codes inside the
-   [api_error_*] / [Provider_runtime_failure] family. These are the wire
-   forms of exactly the [Agent_core.Error] variants that
-   [Keeper_error_classify.is_transient_network_error] reports as transient:
-   a plain (non-structural) [Api.Timeout], an [Api.NetworkError] and an
-   [Api.Connect_failed] (its own code, not folded into the network one). The
-   producer [Keeper_agent_error.api_error_terminal_reason_code] builds the
-   same strings; it references these constants so encoder and the
-   consumer-side classifier cannot drift.
-
-   Agent execution observations never enter this API-error wire family. *)
-let wire_api_error_timeout = "api_error_timeout"
-let wire_api_error_network = "api_error_network"
-let wire_api_error_connect_failed = "api_error_connect_failed"
-
-(* The [provider_error_*] family. Producer and classifier used to spell these
-   at fifteen call sites across three modules with nothing tying them
-   together, so a renamed code changed what the classifier saw without
-   changing what it matched (#26584). Only the codes both sides name are here;
-   the producer-only ones reach the classifier through
-   [wire_provider_error_prefix] and do not drift individually.
-
-   The frozen copies in test_keeper_terminal_reason_typed are deliberate: they
-   are the pre-typing reference the typed classifier is checked against, so
-   they must stay independent of these constants. *)
-let wire_provider_error_prefix = "provider_error_"
-let wire_provider_error_auth = "provider_error_auth"
-let wire_provider_error_authorization = "provider_error_authorization"
-let wire_provider_error_invalid_config_prefix = "provider_error_invalid_config:"
 let wire_provider_error_timeout = "provider_error_timeout"
-let wire_provider_error_timeout_prefix = "provider_error_timeout:"
-let wire_provider_error_network_timeout = "provider_error_network:timeout"
-let wire_provider_error_network_timeout_prefix = "provider_error_network:timeout:"
+let wire_provider_error_timeout_prefix = wire_provider_error_timeout ^ ":"
+let wire_provider_error_network_prefix = "provider_error_network:"
+
+let wire_provider_error_network_timeout =
+  wire_provider_error_network_prefix
+  ^ Llm_provider.Http_client.network_error_kind_to_string Llm_provider.Http_client.Timeout
+;;
+
+let wire_provider_error_network_timeout_prefix = wire_provider_error_network_timeout ^ ":"
 let wire_provider_error_connect_failed_prefix = "provider_error_connect_failed:"
 
 (* A provider connect failure carries no deadline phase, so its timeout code is
@@ -50,178 +29,305 @@ let wire_provider_error_connect_failed_prefix = "provider_error_connect_failed:"
 let wire_provider_error_connect_failed_timeout =
   wire_provider_error_connect_failed_prefix
   ^ Llm_provider.Http_client.network_error_kind_to_string Llm_provider.Http_client.Timeout
+;;
 
-type t =
-  | Runtime_exhausted of string
-  | Config_invalid of string
-  | Authorization_refused of string
-  | Provider_runtime_failure of string
-  | Transcript_corruption of string
-  | Official_client_recovery_required of string
+(* An [Internal] or [Internal_carried] error, read once. The spelling and the
+   failure class both follow this one chain, so they cannot read the same
+   error two ways. *)
+type internal_cause =
+  | Carried_agent of Agent_core.Error.agent_error
+  | Task_skill of Keeper_task_skill_resolution_error.t
+  | Session_refused of Keeper_official_client_session_refusal.t
+  | Masc of Keeper_internal_error.masc_internal_error
+  | Opaque_internal
+
+let internal_cause err =
+  match Keeper_internal_error.agent_error_of_carried_terminal_effect_failure err with
+  | Some agent_error -> Carried_agent agent_error
+  | None ->
+    (* A turn whose Task Skill pins could not be resolved ends with that
+       reason, not as an internal error (#31131). *)
+    (match Keeper_task_skill_resolution_error.of_core_error err with
+     | Some error -> Task_skill error
+     | None ->
+       (* An official-client session refusal ends with its own code, not as an
+          internal or configuration error (#38402). *)
+       (match Keeper_official_client_session_refusal.of_core_error err with
+        | Some refusal -> Session_refused refusal
+        | None ->
+          (match Keeper_internal_error.classify_masc_internal_error err with
+           | Some error -> Masc error
+           | None -> Opaque_internal)))
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Spelling                                                            *)
+(* ------------------------------------------------------------------ *)
+
+(* One code per [Agent_core.Error.Api] variant. Collapsing them to one
+   "api_error" put keepers stuck on a rate limit, an overload, a server fault
+   and an auth refusal behind the same dashboard chip. *)
+let api_error_code (err : Agent_core.Error.api_error) =
+  match err with
+  | Agent_core.Retry.RateLimited _ -> "api_error_rate_limited"
+  | Agent_core.Retry.Overloaded _ -> "api_error_overloaded"
+  | Agent_core.Retry.ServerError { status; _ } -> Printf.sprintf "api_error_server:%d" status
+  | Agent_core.Retry.AuthError _ -> "api_error_auth"
+  | Agent_core.Retry.AuthorizationError _ -> "api_error_authorization"
+  | Agent_core.Retry.PaymentRequired _ -> "api_error_payment_required"
+  | Agent_core.Retry.InvalidRequest _ -> "api_error_invalid_request"
+  | Agent_core.Retry.NotFound _ -> "api_error_not_found"
+  | Agent_core.Retry.ContextOverflow _ -> "api_error_context_overflow"
+  | Agent_core.Retry.InputCapacity { reason; _ } ->
+    (match reason with
+     | Agent_core.Retry.Serving_constraint_rejected _ ->
+       "api_error_input_capacity:serving_constraint_rejected"
+     | Agent_core.Retry.Token_measurement_unavailable _ ->
+       "api_error_input_capacity:measurement_unavailable")
+  | Agent_core.Retry.NetworkError _ -> "api_error_network"
+  | Agent_core.Retry.Connect_failed _ -> "api_error_connect_failed"
+  | Agent_core.Retry.Timeout _ -> "api_error_timeout"
+;;
+
+let terminal_effect_disposition_to_wire effect_disposition =
+  match Agent_core.Error.terminal_effect_disposition effect_disposition with
+  | Agent_core.Tool_contract.Proven_pre_effect -> "proven_pre_effect"
+  | Agent_core.Tool_contract.Proven_post_effect -> "proven_post_effect"
+  | Agent_core.Tool_contract.Effect_outcome_unknown -> "effect_outcome_unknown"
+;;
+
+let agent_error_code = function
+  | Agent_core.Error.UnrecognizedStopReason { reason } ->
+    Printf.sprintf "agent_error_unrecognized_stop_reason:%s" reason
+  | Agent_core.Error.ToolRoundLimitExceeded { rounds; limit } ->
+    Printf.sprintf "agent_error_tool_round_limit_exceeded:rounds=%d,limit=%d" rounds limit
+  | Agent_core.Error.HookExecutionFailed { hook_name; stage; _ } ->
+    Printf.sprintf "agent_error_hook_execution_failed:hook=%s,stage=%s" hook_name stage
+  | Agent_core.Error.TerminalToolEffectFailed
+      { tool_use_id; effect_disposition; detail = _ } ->
+    Printf.sprintf
+      "%s:tool_use_id=%s,effect_disposition=%s"
+      Keeper_internal_error.terminal_effect_failed_kind
+      tool_use_id
+      (terminal_effect_disposition_to_wire effect_disposition)
+  | Agent_core.Error.TerminalToolDurabilityFailed
+      { invocation; effect_disposition; detail = _ } ->
+    Printf.sprintf
+      "agent_error_terminal_tool_durability_failed:tool_use_id=%s,effect_disposition=%s"
+      (Agent_core.Tool_contract.Invocation.tool_use_id invocation)
+      (terminal_effect_disposition_to_wire effect_disposition)
+  | Agent_core.Error.InputRequired { request_id; question = _; _ } ->
+    Printf.sprintf "agent_error_input_required:request_id=%s" request_id
+;;
+
+let provider_timeout_suffix = function
+  | None -> ""
+  | Some phase -> ":" ^ Llm_provider.Http_client.timeout_phase_to_label phase
+;;
+
+let provider_error_code = function
+  | Llm_provider.Error.MissingApiKey _ -> "provider_error_missing_api_key"
+  | Llm_provider.Error.InvalidConfig { field; _ } ->
+    "provider_error_invalid_config:" ^ field
+  | Llm_provider.Error.ParseError _ -> "provider_error_parse"
+  | Llm_provider.Error.ProviderWireError { format; kind; _ } ->
+    Printf.sprintf
+      "provider_error_wire:%s:%s"
+      (Llm_provider.Http_client.provider_wire_format_to_string format)
+      (Llm_provider.Http_client.provider_wire_error_kind_to_string kind)
+  | Llm_provider.Error.ProviderReportedError { error_type = Some error_type; _ } ->
+    Printf.sprintf "provider_error_reported:%s" error_type
+  | Llm_provider.Error.ProviderReportedError { error_type = None; _ } ->
+    "provider_error_reported"
+  | Llm_provider.Error.UnknownVariant { type_name; _ } ->
+    Printf.sprintf "provider_error_unknown_variant:%s" type_name
+  | Llm_provider.Error.ProviderUnavailable _ -> "provider_error_unavailable"
+  | Llm_provider.Error.EmptyCompletion _ -> "provider_error_empty_completion"
+  | Llm_provider.Error.RateLimit _ -> "provider_error_rate_limited"
+  | Llm_provider.Error.HardQuota _ -> "provider_error_hard_quota"
+  | Llm_provider.Error.CapacityExhausted { scope; _ } ->
+    Printf.sprintf
+      "provider_error_provider_capacity:%s"
+      (Llm_provider.Error.capacity_scope_to_string scope)
+  | Llm_provider.Error.AuthError _ -> "provider_error_auth"
+  | Llm_provider.Error.AuthorizationError _ -> "provider_error_authorization"
+  | Llm_provider.Error.ServerError { code; _ } -> Printf.sprintf "provider_error_server:%d" code
+  | Llm_provider.Error.NetworkError { kind; timeout_phase; _ } ->
+    wire_provider_error_network_prefix
+    ^ Llm_provider.Http_client.network_error_kind_to_string kind
+    ^ provider_timeout_suffix timeout_phase
+  | Llm_provider.Error.Connect_failed { kind; _ } ->
+    wire_provider_error_connect_failed_prefix
+    ^ Llm_provider.Http_client.network_error_kind_to_string kind
+  | Llm_provider.Error.Timeout { timeout_phase; _ } ->
+    wire_provider_error_timeout ^ provider_timeout_suffix timeout_phase
+  | Llm_provider.Error.InvalidRequest _ -> "provider_error_invalid_request"
+  | Llm_provider.Error.NotFound _ -> "provider_error_not_found"
+  | Llm_provider.Error.ProviderTerminal { kind; _ } ->
+    Printf.sprintf
+      "provider_error_terminal:%s"
+      (Llm_provider.Error.provider_terminal_reason kind)
+;;
+
+let code_of_core_error = function
+  | Agent_core.Error.Agent err -> agent_error_code err
+  | Agent_core.Error.Api err -> api_error_code err
+  | Agent_core.Error.Provider err -> provider_error_code err
+  | Agent_core.Error.Mcp _ -> "mcp_error"
+  | Agent_core.Error.Config _ -> "config_error"
+  | Agent_core.Error.Serialization _ -> "serialization_error"
+  | Agent_core.Error.Io _ -> "io_error"
+  | Agent_core.Error.Orchestration _ -> "orchestration_error"
+  | Agent_core.Error.Media _ -> "media_error"
+  | (Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _) as err ->
+    (match internal_cause err with
+     | Carried_agent agent_error -> agent_error_code agent_error
+     | Task_skill error -> Keeper_task_skill_resolution_error.code error
+     | Session_refused refusal -> Keeper_official_client_session_refusal.code refusal
+     | Masc error -> Keeper_internal_error.kind_of_masc_internal_error error
+     | Opaque_internal -> "internal_error")
+;;
+
+let to_wire = function
+  | Completed -> "success"
+  | Checkpoint -> "checkpoint"
+  | Input_required -> "input_required"
+  | Supervisor_stop -> "supervisor_stop"
+  | External_cancel -> "external_cancel"
+  | Phase_not_executable phase ->
+    "non_executable_phase:" ^ Keeper_state_machine.phase_to_string phase
+  | Registry_phase_missing -> "registry_phase_missing"
+  | Failed err -> code_of_core_error err
+;;
+
+(* ------------------------------------------------------------------ *)
+(* Failure class                                                       *)
+(* ------------------------------------------------------------------ *)
+
+type provider_retry =
+  | Transient
+  | Persistent
+
+type failure_class =
+  | Runtime_exhausted
+  | Config_invalid
+  | Authorization_refused
+  | Provider_runtime_failure of provider_retry
+  | Transcript_corruption
+  | Official_client_recovery_required
   | Official_client_session_refused of Keeper_official_client_session_refusal.t
-  | Provider_attempt_effect_fenced of string
-  | Tool_correction_lost of string
-  | Accept_rejected of string
-  | Terminal_effect_failed of string
-  | Internal_error of string
-  | Pre_dispatch_success of string
-  | Unknown of string
+  | Provider_attempt_effect_fenced
+  | Tool_correction_lost
+  | Accept_rejected
+  | Terminal_effect_failed
+  | Internal_error
+  | No_failure_policy
 
-(* Two closed wire sets. They are disjoint — no config wire equals or prefixes
-   an authorization wire — so their order relative to each other cannot change
-   a classification. Both must stay ranked ahead of the [api_error_] /
-   [provider_error_] prefix tests in [of_wire], because two of the
-   authorization wires begin with [api_error_] and two with [provider_error_]
-   and would otherwise be claimed as generic provider failures. *)
-(* A turn whose Task Skill pins could not be resolved waits on the operator's
-   Skill configuration or source, the same action as an invalid runtime
-   configuration. The wire keeps which of the four reasons it was (#31131). *)
-let is_config_invalid_wire wire =
-  String.equal wire "config_error"
-  || String.starts_with ~prefix:wire_provider_error_invalid_config_prefix wire
-  || Option.is_some (Keeper_task_skill_resolution_error.kind_of_code wire)
+let failure_class_of_agent_error = function
+  | Agent_core.Error.TerminalToolEffectFailed _ -> Terminal_effect_failed
+  | Agent_core.Error.UnrecognizedStopReason _
+  | Agent_core.Error.ToolRoundLimitExceeded _
+  | Agent_core.Error.HookExecutionFailed _
+  | Agent_core.Error.TerminalToolDurabilityFailed _
+  | Agent_core.Error.InputRequired _ -> No_failure_policy
 ;;
 
-let is_authorization_refused_wire wire =
-  match wire with
-  | "api_error_auth" | "api_error_authorization" -> true
-  | _ ->
-    String.equal wire wire_provider_error_auth
-    || String.equal wire wire_provider_error_authorization
+(* A timeout, a dropped connection and a connection that did not open are
+   the transient ones; the keeper's next turn usually gets through. *)
+let failure_class_of_api_error (err : Agent_core.Error.api_error) =
+  match err with
+  | Agent_core.Retry.AuthError _ | Agent_core.Retry.AuthorizationError _ ->
+    Authorization_refused
+  | Agent_core.Retry.NetworkError _
+  | Agent_core.Retry.Connect_failed _
+  | Agent_core.Retry.Timeout _ -> Provider_runtime_failure Transient
+  | Agent_core.Retry.RateLimited _
+  | Agent_core.Retry.Overloaded _
+  | Agent_core.Retry.ServerError _
+  | Agent_core.Retry.PaymentRequired _
+  | Agent_core.Retry.InvalidRequest _
+  | Agent_core.Retry.NotFound _
+  | Agent_core.Retry.ContextOverflow _
+  | Agent_core.Retry.InputCapacity _ -> Provider_runtime_failure Persistent
 ;;
 
-(* The keeper's own internal-error family, classified from the producer's
-   typed enumeration instead of from its printed form (#29929).
+let retry_of_network_kind = function
+  | Llm_provider.Http_client.Timeout -> Transient
+  | Llm_provider.Http_client.Connection_refused
+  | Llm_provider.Http_client.Dns_failure
+  | Llm_provider.Http_client.Unreachable
+  | Llm_provider.Http_client.Tls_error
+  | Llm_provider.Http_client.Local_resource_exhaustion
+  | Llm_provider.Http_client.Connection_reset
+  | Llm_provider.Http_client.End_of_file
+  | Llm_provider.Http_client.Unknown -> Persistent
+;;
 
-   Three kinds get no policy here on purpose. [Resumable_cli_session],
-   [Receipt_persistence_failed] and [Gate_replay_repair_required] have never
-   been observed — zero rows across 189 receipt files and every August log —
-   so there is no trace to classify them from, and naming a disposition from
-   the constructor name alone would be a guess dressed as a decision. They
-   stay [Unknown]. The match names them, so the next author sees the open
-   question instead of an absent arm. *)
-let of_masc_internal_kind wire = function
-  | Keeper_internal_error.Wire_runtime_exhausted -> Runtime_exhausted wire
-  | Keeper_internal_error.Wire_incomplete_tool_transcript -> Transcript_corruption wire
+let failure_class_of_provider_error = function
+  | Llm_provider.Error.InvalidConfig _ -> Config_invalid
+  | Llm_provider.Error.AuthError _ | Llm_provider.Error.AuthorizationError _ ->
+    Authorization_refused
+  | Llm_provider.Error.Timeout _ -> Provider_runtime_failure Transient
+  | Llm_provider.Error.NetworkError { kind; _ } | Llm_provider.Error.Connect_failed { kind; _ }
+    -> Provider_runtime_failure (retry_of_network_kind kind)
+  | Llm_provider.Error.MissingApiKey _
+  | Llm_provider.Error.ParseError _
+  | Llm_provider.Error.ProviderWireError _
+  | Llm_provider.Error.ProviderReportedError _
+  | Llm_provider.Error.UnknownVariant _
+  | Llm_provider.Error.ProviderUnavailable _
+  | Llm_provider.Error.EmptyCompletion _
+  | Llm_provider.Error.RateLimit _
+  | Llm_provider.Error.HardQuota _
+  | Llm_provider.Error.CapacityExhausted _
+  | Llm_provider.Error.ServerError _
+  | Llm_provider.Error.InvalidRequest _
+  | Llm_provider.Error.NotFound _
+  | Llm_provider.Error.ProviderTerminal _ -> Provider_runtime_failure Persistent
+;;
+
+(* A host stop is an internal error, and a closed runtime connection is a
+   provider runtime failure. The three kinds that answer [No_failure_policy]
+   have never been observed — zero rows across 189 receipt files and every
+   August log — so no disposition is named for them from the constructor name
+   alone. *)
+let failure_class_of_masc_internal_error error =
+  match Keeper_internal_error.wire_kind_of_masc_internal_error error with
+  | Keeper_internal_error.Wire_runtime_exhausted -> Runtime_exhausted
+  | Keeper_internal_error.Wire_incomplete_tool_transcript -> Transcript_corruption
   | Keeper_internal_error.Wire_provider_attempt_effect_fenced ->
-    Provider_attempt_effect_fenced wire
-  | Keeper_internal_error.Wire_tool_correction_lost -> Tool_correction_lost wire
+    Provider_attempt_effect_fenced
+  | Keeper_internal_error.Wire_tool_correction_lost -> Tool_correction_lost
   | Keeper_internal_error.Wire_official_client_recovery_required ->
-    Official_client_recovery_required wire
-  (* A host stop is an internal error, and a closed runtime connection is a
-     provider runtime failure. *)
-  | Keeper_internal_error.Wire_host_stopped_turn -> Internal_error wire
+    Official_client_recovery_required
+  | Keeper_internal_error.Wire_host_stopped_turn -> Internal_error
   | Keeper_internal_error.Wire_runtime_connection_closed ->
-    Provider_runtime_failure wire
-  | Keeper_internal_error.Wire_accept_rejected -> Accept_rejected wire
-  | Keeper_internal_error.Wire_terminal_effect_failed -> Terminal_effect_failed wire
+    Provider_runtime_failure Persistent
+  | Keeper_internal_error.Wire_accept_rejected -> Accept_rejected
+  | Keeper_internal_error.Wire_terminal_effect_failed -> Terminal_effect_failed
   | Keeper_internal_error.Wire_internal_unhandled_exception
   | Keeper_internal_error.Wire_internal_bridge_exception
-  | Keeper_internal_error.Wire_internal_contract_rejected ->
-    (* One route, so one bucket. [Keeper_runtime_failure_route] answers
-       [Internal_opaque] / [Exhausted_visible_alive] for all three, the same
-       answer it gives the bare ["internal_error"] wire that an internal
-       error without an envelope produces. The wire string stays verbatim in
-       the receipt, so counting them apart never needed separate variants. *)
-    Internal_error wire
+  | Keeper_internal_error.Wire_internal_contract_rejected -> Internal_error
   | Keeper_internal_error.Wire_resumable_cli_session
   | Keeper_internal_error.Wire_receipt_persistence_failed
-  | Keeper_internal_error.Wire_gate_replay_repair_required -> Unknown wire
+  | Keeper_internal_error.Wire_gate_replay_repair_required -> No_failure_policy
 ;;
 
-(* Two stages. The keeper's own internal-error kinds are looked up in the
-   producer's enumeration first; whatever that does not claim falls to the
-   prefix tests for the agent-core and provider wire families, which are
-   priority-ranked and return the FIRST match, replicating the [if/else]
-   order of the pre-typing [operator_disposition] string predicates.
-
-   Putting the exact lookup first is not a reordering: no internal-error kind
-   equals or prefixes any config/auth or provider wire, so both stages see
-   the same inputs they saw before. Casing variants of a kind still miss the
-   lookup and stay opaque rather than inheriting its policy. The original
-   [wire] is carried in every payload-bearing variant so [to_wire] reproduces
-   it byte-for-byte; classification reads a canonical byte sequence only.
-   Spellings neither stage claims stay typed [Unknown] and take the generic
-   disposition route. *)
-let of_wire wire =
-  match Keeper_internal_error.wire_kind_of_string wire with
-  | Some kind -> of_masc_internal_kind wire kind
-  | None ->
-    (* An official-client session refusal has its own closed code list. No
-       code in it equals or prefixes a config, authorization or provider
-       wire, so looking it up first changes no other classification. *)
-    match Keeper_official_client_session_refusal.of_code wire with
-    | Some refusal -> Official_client_session_refused refusal
-    | None ->
-    if is_config_invalid_wire wire
-    then Config_invalid wire
-    else if is_authorization_refused_wire wire
-    then Authorization_refused wire
-    else if
-      String.starts_with ~prefix:"api_error_" wire
-      || String.equal wire "provider_error"
-      || String.starts_with ~prefix:wire_provider_error_prefix wire
-    then Provider_runtime_failure wire
-    else if String.equal wire "internal_error"
-    then Internal_error wire
-    else if String.equal wire "pre_dispatch_success"
-    then Pre_dispatch_success wire
-    else Unknown wire
-;;
-
-(* Byte-identical inverse: every variant carries the original wire string,
-   so [to_wire (of_wire s) = s] holds for every [s] including mixed-case
-   inputs. The exact-match variants carry a payload only for this
-   round-trip fidelity; [operator_disposition] ignores it. *)
-let to_wire = function
-  | Runtime_exhausted wire -> wire
-  | Config_invalid wire -> wire
-  | Authorization_refused wire -> wire
-  | Provider_runtime_failure wire -> wire
-  | Transcript_corruption wire -> wire
-  | Official_client_recovery_required wire -> wire
-  | Official_client_session_refused refusal ->
-    Keeper_official_client_session_refusal.code refusal
-  | Provider_attempt_effect_fenced wire -> wire
-  | Tool_correction_lost wire -> wire
-  | Accept_rejected wire -> wire
-  | Terminal_effect_failed wire -> wire
-  | Internal_error wire -> wire
-  | Pre_dispatch_success wire -> wire
-  | Unknown wire -> wire
-;;
-
-(* A [Provider_runtime_failure] whose underlying error is a retry-recoverable
-   transient (idle-chunk liveness kill wrapped as [Api.Timeout], or a
-   transient [Api.NetworkError]). The keeper's in-turn retry typically
-   self-heals these on the next attempt.
-
-   Matched by exact equality against the two transient wire constants. This
-   excludes every other [api_error_*] code (rate_limited, overloaded, server:*,
-   context_overflow, …), all of which remain generic provider failures.
-   Only [Provider_runtime_failure] is inspected; all other variants are
-   [false]. *)
-let is_transient_provider_runtime_failure = function
-  | Provider_runtime_failure wire ->
-    String.equal wire wire_api_error_timeout
-    || String.equal wire wire_api_error_network
-    || String.equal wire wire_api_error_connect_failed
-    || String.equal wire wire_provider_error_timeout
-    || String.starts_with ~prefix:wire_provider_error_timeout_prefix wire
-    || String.equal wire wire_provider_error_network_timeout
-    || String.starts_with ~prefix:wire_provider_error_network_timeout_prefix wire
-    || String.equal wire wire_provider_error_connect_failed_timeout
-  | Runtime_exhausted _
-  | Config_invalid _
-  | Authorization_refused _
-  | Transcript_corruption _
-  | Official_client_recovery_required _
-  | Official_client_session_refused _
-  | Provider_attempt_effect_fenced _
-  | Tool_correction_lost _
-  | Accept_rejected _
-  | Terminal_effect_failed _
-  | Internal_error _
-  | Pre_dispatch_success _
-  | Unknown _ -> false
+let failure_class = function
+  | Agent_core.Error.Agent err -> failure_class_of_agent_error err
+  | Agent_core.Error.Api err -> failure_class_of_api_error err
+  | Agent_core.Error.Provider err -> failure_class_of_provider_error err
+  | Agent_core.Error.Config _ -> Config_invalid
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _ -> No_failure_policy
+  | (Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _) as err ->
+    (match internal_cause err with
+     | Carried_agent agent_error -> failure_class_of_agent_error agent_error
+     | Task_skill _ -> Config_invalid
+     | Session_refused refusal -> Official_client_session_refused refusal
+     | Masc error -> failure_class_of_masc_internal_error error
+     | Opaque_internal -> Internal_error)
 ;;

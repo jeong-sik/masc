@@ -1,20 +1,17 @@
-(* Behavioural equivalence + wire round-trip test.
+(* Typed terminal reason: spelling and disposition.
 
    Two properties are pinned:
 
-   1. [to_wire (of_wire s) = s] byte-for-byte for every representative
-      producer code string (and a few adversarial ones). This proves the
-      typed parse loses no information — every payload-bearing variant
-      carries the original bytes.
+   1. Every producer value in the corpus below writes the spelling the
+      receipt row has always carried for it. Dashboards, [bin/masc-trace] and
+      the status sentences read that spelling.
 
-   2. The NEW [Keeper_execution_receipt.operator_disposition] (which now
-      parses [terminal_reason_code] once via [Keeper_terminal_reason.of_wire]
-      and exhaustive-matches) returns the same pair as the independent oracle,
-      including focused policy updates, over the cartesian product of
-      (producer-string corpus) x (the small finite field matrix the
-      classifier branches on). The oracle is intentionally NOT refactored to
-      share code with production, so a priority-order regression in production
-      is caught here. *)
+   2. [Keeper_execution_receipt.operator_disposition], which matches the
+      typed reason and [Keeper_terminal_reason.failure_class], returns the
+      same pair as an independent oracle over the spelling, across the small
+      finite field matrix the classifier branches on. The oracle shares no
+      code with production, so a priority-order regression in production is
+      caught here. *)
 
 module R = Masc.Keeper_execution_receipt
 module EC = Masc.Keeper_error_classify
@@ -85,122 +82,276 @@ let with_owner_inventory config f =
 ;;
 
 (* ------------------------------------------------------------------ *)
-(* 1. Wire round-trip corpus: built from the PRODUCER sites, not from  *)
-(*    the classifier prefixes. Includes both api_error/provider_error  *)
-(*    families, direct producer strings, and one mixed-case input.     *)
-(*    mixed-case adversarial input.                                    *)
+(* 1. Typed corpus: one value per producer site, with the spelling the *)
+(*    receipt row carries for it.                                      *)
 (* ------------------------------------------------------------------ *)
 
-let roundtrip_corpus =
-  [ (* exact-match buckets *)
-    "runtime_exhausted"
-  ; Keeper_internal_error.incomplete_tool_transcript_kind
-  ; Keeper_internal_error.official_client_recovery_required_kind
-  ; Keeper_internal_error.provider_attempt_effect_fenced_kind
-  ; Keeper_internal_error.tool_correction_lost_kind
-    (* The rest of what [kind_of_masc_internal_error] emits. The corpus used
-       to hold five of its thirteen kinds, so the eight missing ones were
-       neither recognised nor deliberately left [Unknown] — they were simply
-       never considered, and four of them reached operators as "unmapped
-       runtime state" in production (#29929). Spelled out here rather than
-       taken from [wire_kind_to_string]: this list is the oracle's, and
-       reading it from the producer would remove the check. *)
-  ; "accept_rejected"
-  ; "terminal_effect_failed"
-  ; "internal_unhandled_exception"
-  ; "internal_bridge_exception"
-  ; "internal_contract_rejected"
-  ; "internal_error"
-  ; "pre_dispatch_success"
-  ; "provider_error"
-    (* config/auth preflight (ranked above provider) *)
-  ; "config_error"
-    (* Task Skill pins that could not be resolved (#31131) *)
-  ; "task_skill_config_rejected"
-  ; "task_skill_config_unreadable"
-  ; "task_skill_source_unreadable"
-  ; "task_skill_entry_unreadable"
-  ; "api_error_auth"
-    (* The wire the fleet actually sends. Every authorization refusal in the
-       live receipts arrives as this spelling — 852 of the 2,419 turns the
-       operator-action bucket held between 08-22 and 09-21, against 0 for
-       [api_error_auth]. The corpus covered the spelling that never happens
-       and missed the one that always does, so the equivalence matrix never
-       compared the two classifiers on it. *)
-  ; "api_error_authorization"
-  ; "provider_error_auth"
-  ; "provider_error_authorization"
-  ; "provider_error_auth:legacy-payload"
-  ; "provider_error_invalid_config:field_x"
-    (* provider family *)
-  ; "api_error_rate_limited"
-  ; "api_error_overloaded"
-  ; "api_error_server:502"
-  ; "api_error_timeout"
-  ; "api_error_network"
-  ; "api_error_connect_failed"
-  ; "provider_error_connect_failed:connection_refused"
-  ; "api_error_context_overflow"
-  ; "provider_error_parse"
-  ; "provider_error_server:500"
-  ; "provider_error_missing_api_key"
-  ; "provider_error_hard_quota:openai"
-    (* Producer kinds with no policy yet, which is not the same as the
-       deliberate Unknowns below. None has ever been observed — zero rows
-       across 189 receipt files and every August log — so there is no trace
-       to classify them from. [of_wire] names them explicitly and answers
-       [Unknown], so the open question is visible in the match instead of
-       being an absent arm. *)
-  ; "resumable_cli_session"
-  ; "receipt_persistence_failed"
-  ; "gate_replay_repair_required"
-    (* genuine Unknown (preserve-don't-fix) *)
-  ; "no_capable_provider"
-  ; "mcp_error"
-  ; "serialization_error"
-  ; "io_error"
-  ; "orchestration_error"
-  ; "a2a_error"
-  ; "agent_error_idle_detected:consecutive_idle_turns=3"
-  ; "registry_phase_missing"
-  ; "supervisor_stop"
-    (* adversarial: mixed case must round-trip to the original bytes *)
-  ; "Runtime_Exhausted"
-  ; "API_ERROR_Auth"
-  ; "unrelated authentication failed"
-  ; "not_a_config_error"
-  ; ""
-  ]
+module KIE = Keeper_internal_error
+module Http = Llm_provider.Http_client
+module Task_skill = Keeper_task_skill_resolution_error
 
+let masc error = Tr.Failed (KIE.core_error_of_masc_internal_error error)
+let api error = Tr.Failed (Agent_core.Error.Api error)
+let provider error = Tr.Failed (Agent_core.Error.Provider error)
+
+let fenced_cause message =
+  KIE.Fenced_core
+    (Keeper_request_failure_core.of_core_error (Agent_core.Error.Internal message))
+;;
+
+let fenced_error =
+  KIE.Provider_attempt_effect_fenced
+    { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
+    ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+    ; cause = fenced_cause "provider response did not prove whether the tool effect settled"
+    }
+;;
+
+let lost_error =
+  KIE.Tool_correction_lost
+    { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
+    ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
+    ; reject_count = 2
+    ; cause = fenced_cause "turn died after two corrective tool rejections"
+    }
+;;
+
+(* The closing tool's own failure carries its call and effect after the kind. *)
+let terminal_effect_tool_failure =
+  Agent_core.Error.Agent
+    (Agent_core.Error.TerminalToolEffectFailed
+       { tool_use_id = "call_a633eabea3a8"
+       ; effect_disposition = Agent_core.Error.unknown_terminal_effect
+       ; detail = "artifact upload failed"
+       })
+;;
+
+let corpus : (string * Tr.t) list =
+  [ "success", Tr.Completed
+  ; "checkpoint", Tr.Checkpoint
+  ; "input_required", Tr.Input_required
+  ; "supervisor_stop", Tr.Supervisor_stop
+  ; "external_cancel", Tr.External_cancel
+  ; "non_executable_phase:paused", Tr.Phase_not_executable Keeper_state_machine.Paused
+  ; "registry_phase_missing", Tr.Registry_phase_missing
+    (* What [kind_of_masc_internal_error] emits, one per constructor. *)
+  ; ( "official_client_recovery_required"
+    , masc
+        (KIE.Official_client_recovery_required
+           { runtime_id = "claude_code"
+           ; recovery_id = "recovery-1"
+           ; reason = KIE.Bootstrap_floor_exceeded
+           }) )
+  ; ( "runtime_exhausted"
+    , masc (KIE.Runtime_exhausted { runtime_id = "lane"; reason = KIE.All_providers_failed })
+    )
+  ; ( "resumable_cli_session"
+    , masc
+        (KIE.Resumable_cli_session
+           { runtime_id = "codex"; detail = "exited"; exit_code = Some 1 }) )
+  ; ( "accept_rejected"
+    , masc
+        (KIE.Accept_rejected
+           { scope = "turn"
+           ; model = None
+           ; reason_kind = Some KIE.Accept_no_usable_progress
+           ; response_shape = Some KIE.Accept_response_empty
+           ; stop_reason = None
+           ; reason = "empty assistant turn"
+           }) )
+  ; ( "internal_unhandled_exception"
+    , masc
+        (KIE.Internal_unhandled_exception
+           { site = "runner"; exn_repr = "Failure(\"x\")"; transport_error_kind = None }) )
+  ; ( "internal_bridge_exception"
+    , masc (KIE.Internal_bridge_exception { caller = "bridge"; exn_repr = "Not_found" }) )
+  ; ( "internal_contract_rejected"
+    , masc (KIE.Internal_contract_rejected { reason = "contract" }) )
+  ; ( "incomplete_tool_transcript"
+    , masc
+        (KIE.Incomplete_tool_transcript
+           { reason = KIE.Structurally_invalid; detail = "orphan tool result"; tool_use_ids = [] })
+    )
+  ; ( "terminal_effect_failed"
+    , masc
+        (KIE.Terminal_effect_failed
+           { failure_class = Tool_result.Runtime_failure
+           ; effect_disposition = Tool_result.Effect_outcome_unknown
+           ; detail =
+               Keeper_terminal_effect_detail.Agent_core_terminal_effect
+                 { detail = "upload failed" }
+           }) )
+  ; "provider_attempt_effect_fenced", masc fenced_error
+  ; "tool_correction_lost", masc lost_error
+  ; ( "host_stopped_turn"
+    , masc (KIE.Host_stopped_turn { runtime_id = "claude_code"; stop = KIE.Host_graceful_shutdown })
+    )
+  ; ( "runtime_connection_closed"
+    , masc
+        (KIE.Runtime_connection_closed
+           { runtime_id = "claude_code"; detail = "stdout EOF"; turn_accepted = false }) )
+  ; ( "receipt_persistence_failed"
+    , masc (KIE.Receipt_persistence_failed { detail = "disk full" }) )
+  ; ( "gate_replay_repair_required"
+    , masc
+        (KIE.Gate_replay_repair_required
+           { approval_id = "approval-1"
+           ; operation = "replay"
+           ; stage = KIE.Replay_journal
+           ; detail = "journal"
+           }) )
+  ; "internal_error", Tr.Failed (Agent_core.Error.Internal "unenveloped internal failure")
+    (* Task Skill pins that could not be resolved (#31131) *)
+  ; ( "task_skill_config_rejected"
+    , Tr.Failed (Task_skill.core_error (Task_skill.Skill_config_rejected { diagnostics = [] })) )
+  ; ( "task_skill_config_unreadable"
+    , Tr.Failed
+        (Task_skill.core_error
+           (Task_skill.Skill_config_unreadable { detail = "config.toml: permission denied" })) )
+  ; ( "task_skill_source_unreadable"
+    , Tr.Failed
+        (Task_skill.core_error
+           (Task_skill.Skill_source_unreadable
+              { source_id = "local"
+              ; observation = Skill_catalog_snapshot.Source_missing { resolved_path = "/skills" }
+              })) )
+  ; ( "config_error"
+    , Tr.Failed (Agent_core.Error.Config (Agent_core.Error.MissingEnvVar { var_name = "X" })) )
+  ; ( "provider_error_invalid_config:multimodal_input"
+    , provider
+        (Llm_provider.Error.InvalidConfig { field = "multimodal_input"; detail = "unsupported" }) )
+  ; "api_error_auth", api (Agent_core.Retry.AuthError { message = "bad key" })
+    (* The spelling the fleet actually sends: every authorization refusal in
+       the live receipts between 08-22 and 09-21 (852 turns) arrived as it. *)
+  ; ( "api_error_authorization"
+    , api (Agent_core.Retry.AuthorizationError { message = "weekly limit" }) )
+  ; ( "provider_error_auth"
+    , provider (Llm_provider.Error.AuthError { provider = "glm"; detail = "bad key" }) )
+  ; ( "provider_error_authorization"
+    , provider (Llm_provider.Error.AuthorizationError { provider = "glm"; detail = "limit" }) )
+  ; ( "api_error_rate_limited"
+    , api (Agent_core.Retry.RateLimited { message = "quota"; retry_after = None }) )
+  ; "api_error_overloaded", api (Agent_core.Retry.Overloaded { message = "busy" })
+  ; ( "api_error_server:502"
+    , api (Agent_core.Retry.ServerError { status = 502; message = "" }) )
+  ; "api_error_timeout", api (Agent_core.Retry.Timeout { message = "60s"; phase = None })
+  ; ( "api_error_network"
+    , api (Agent_core.Retry.NetworkError { message = "ECONNRESET"; kind = Http.Connection_reset })
+    )
+  ; ( "api_error_connect_failed"
+    , api
+        (Agent_core.Retry.Connect_failed
+           { message = "ECONNREFUSED"; kind = Http.Connection_refused }) )
+  ; ( "api_error_context_overflow"
+    , api (Agent_core.Retry.ContextOverflow { message = "ctx"; limit = Some 8192 }) )
+  ; ( "provider_error_connect_failed:connection_refused"
+    , provider
+        (Llm_provider.Error.Connect_failed
+           { provider = "glm"; kind = Http.Connection_refused; detail = "refused" }) )
+  ; ( "provider_error_connect_failed:timeout"
+    , provider
+        (Llm_provider.Error.Connect_failed
+           { provider = "glm"; kind = Http.Timeout; detail = "connect timed out" }) )
+  ; ( "provider_error_timeout:http_operation"
+    , provider
+        (Llm_provider.Error.Timeout
+           { provider = "glm"; timeout_phase = Some Http.Http_operation; detail = "deadline" }) )
+  ; ( "provider_error_network:timeout"
+    , provider
+        (Llm_provider.Error.NetworkError
+           { provider = "glm"; kind = Http.Timeout; timeout_phase = None; detail = "timed out" }) )
+  ; ( "provider_error_network:connection_reset:first_token"
+    , provider
+        (Llm_provider.Error.NetworkError
+           { provider = "glm"
+           ; kind = Http.Connection_reset
+           ; timeout_phase = Some Http.First_token
+           ; detail = "reset"
+           }) )
+  ; "provider_error_parse", provider (Llm_provider.Error.ParseError { detail = "bad json" })
+  ; ( "provider_error_server:500"
+    , provider
+        (Llm_provider.Error.ServerError
+           { provider = "glm"; code = 500; transient = true; detail = "" }) )
+  ; ( "provider_error_missing_api_key"
+    , provider (Llm_provider.Error.MissingApiKey { var_name = "GLM_API_KEY" }) )
+  ; ( "provider_error_hard_quota"
+    , provider
+        (Llm_provider.Error.HardQuota { provider = "glm"; retry_after = None; detail = "" }) )
+    (* The provider's own error type is copied into the spelling as data. *)
+  ; ( "provider_error_reported:overloaded_error"
+    , provider
+        (Llm_provider.Error.ProviderReportedError
+           { provider = "anthropic"; error_type = Some "overloaded_error"; detail = "" }) )
+  ; ( "mcp_error"
+    , Tr.Failed (Agent_core.Error.Mcp (Agent_core.Error.InitializeFailed { detail = "boot" })) )
+  ; ( "serialization_error"
+    , Tr.Failed
+        (Agent_core.Error.Serialization (Agent_core.Error.JsonParseError { detail = "syntax" })) )
+  ; ( "io_error"
+    , Tr.Failed (Agent_core.Error.Io (Agent_core.Error.ValidationFailed { detail = "vfd" })) )
+  ; ( "orchestration_error"
+    , Tr.Failed
+        (Agent_core.Error.Orchestration (Agent_core.Error.UnknownAgent { name = "ghost" })) )
+  ; ( "agent_error_unrecognized_stop_reason:abrupt"
+    , Tr.Failed
+        (Agent_core.Error.Agent (Agent_core.Error.UnrecognizedStopReason { reason = "abrupt" })) )
+  ; ( Keeper_internal_error.terminal_effect_failed_kind
+      ^ ":tool_use_id=call_a633eabea3a8,effect_disposition=effect_outcome_unknown"
+    , Tr.Failed terminal_effect_tool_failure )
+  ]
+;;
 
 let () =
   List.iter
-    (fun s ->
-       let got = Tr.to_wire (Tr.of_wire s) in
+    (fun (expected, reason) ->
+       let got = Tr.to_wire reason in
        check
-         (Printf.sprintf "roundtrip: %S -> %S" s got)
-         (String.equal got s))
-    roundtrip_corpus
+         (Printf.sprintf "spelling: want %S got %S" expected got)
+         (String.equal got expected))
+    corpus
 ;;
 
-let authorization_wires =
-  [ "api_error_auth"
-  ; "api_error_authorization"
-  ; "provider_error_auth"
-  ; "provider_error_authorization"
-  ]
+(* The corpus entry spelled [wire] must be a failure; the tests below name
+   failures by the spelling an operator sees. *)
+let failure_of wire =
+  match List.assoc_opt wire corpus with
+  | Some (Tr.Failed err) -> err
+  | Some
+      ( Tr.Completed
+      | Tr.Checkpoint
+      | Tr.Input_required
+      | Tr.Supervisor_stop
+      | Tr.External_cancel
+      | Tr.Phase_not_executable _
+      | Tr.Registry_phase_missing )
+  | None -> failwith ("the corpus has no failure spelled " ^ wire)
 ;;
 
 let () =
   List.iter
     (fun wire ->
-       match Tr.of_wire wire with
-       | Tr.Authorization_refused carried ->
-         check
-           (Printf.sprintf "authorization priority: %S" wire)
-           (String.equal carried wire)
-       | _ -> check (Printf.sprintf "authorization priority: %S" wire) false)
-    authorization_wires
+       check
+         (Printf.sprintf "authorization refusal: %s" wire)
+         (match Tr.failure_class (failure_of wire) with
+          | Tr.Authorization_refused -> true
+          | Tr.Runtime_exhausted
+          | Tr.Config_invalid
+          | Tr.Provider_runtime_failure _
+          | Tr.Transcript_corruption
+          | Tr.Official_client_recovery_required
+          | Tr.Official_client_session_refused _
+          | Tr.Provider_attempt_effect_fenced
+          | Tr.Tool_correction_lost
+          | Tr.Accept_rejected
+          | Tr.Terminal_effect_failed
+          | Tr.Internal_error
+          | Tr.No_failure_policy -> false))
+    [ "api_error_auth"
+    ; "api_error_authorization"
+    ; "provider_error_auth"
+    ; "provider_error_authorization"
+    ]
 ;;
 
 (* ------------------------------------------------------------------ *)
@@ -208,20 +359,27 @@ let () =
 (*    oracle.                                                           *)
 (* ------------------------------------------------------------------ *)
 
-(* Independent copy of the intended canonical-wire policy. DO NOT refactor to
-   call production helpers — this is the oracle. *)
+(* Independent copy of the intended policy, read off the spelling. DO NOT
+   refactor to call production helpers — this is the oracle. *)
 
 (* RFC #52028 §2.3 added [api_error_connect_failed]: a connection that did not
-   open waits and is tried again, as a dropped one does. *)
+   open waits and is tried again, as a dropped one does. A provider timeout,
+   a provider network timeout and a provider connect timeout wait the same
+   way. *)
 let frozen_is_transient_provider_runtime_failure terminal_reason =
   String.equal terminal_reason "api_error_timeout"
   || String.equal terminal_reason "api_error_network"
   || String.equal terminal_reason "api_error_connect_failed"
+  || String.equal terminal_reason "provider_error_timeout"
+  || String.starts_with ~prefix:"provider_error_timeout:" terminal_reason
+  || String.equal terminal_reason "provider_error_network:timeout"
+  || String.starts_with ~prefix:"provider_error_network:timeout:" terminal_reason
+  || String.equal terminal_reason "provider_error_connect_failed:timeout"
 ;;
 
-(* Two predicates in the oracle, matching the two production wire sets.
-   Every wire in either set reaches [Disp_operator_action_required]; the
-   reason is what tells them apart. *)
+(* Two predicates in the oracle, matching the two production classes. Every
+   spelling in either set reaches [Disp_operator_action_required]; the reason
+   is what tells them apart. *)
 let frozen_is_config_invalid_wire = function
   | "config_error"
   | "task_skill_config_rejected"
@@ -242,15 +400,17 @@ let frozen_is_authorization_refused_wire = function
 let frozen_operator_disposition (receipt : R.t)
   : R.operator_disposition_kind * R.operator_disposition_reason
   =
-  let terminal_reason = receipt.terminal_reason_code in
+  let terminal_reason = Tr.to_wire receipt.terminal_reason in
   let provider_runtime_failure =
     String.starts_with ~prefix:"api_error_" terminal_reason
-    || String.equal terminal_reason "provider_error"
     || String.starts_with ~prefix:"provider_error_" terminal_reason
+    || String.equal terminal_reason "runtime_connection_closed"
   in
   let config_invalid = frozen_is_config_invalid_wire terminal_reason in
   let authorization_refused = frozen_is_authorization_refused_wire terminal_reason in
-  if String.equal terminal_reason "runtime_exhausted"
+  if String.equal terminal_reason "input_required"
+  then R.Disp_pass, R.Reason_input_required
+  else if String.equal terminal_reason "runtime_exhausted"
   then R.Disp_fail_open_next_runtime, R.Reason_runtime_exhausted
   else if
     String.equal terminal_reason Keeper_internal_error.incomplete_tool_transcript_kind
@@ -269,7 +429,9 @@ let frozen_operator_disposition (receipt : R.t)
   else if
     String.equal terminal_reason Keeper_internal_error.tool_correction_lost_kind
   then R.Disp_effect_review_required, R.Reason_tool_correction_lost
-  else if String.equal terminal_reason "terminal_effect_failed"
+  else if
+    String.equal terminal_reason "terminal_effect_failed"
+    || String.starts_with ~prefix:"terminal_effect_failed:" terminal_reason
   then R.Disp_effect_review_required, R.Reason_terminal_effect_failed
   else if config_invalid
   then R.Disp_operator_action_required, R.Reason_config_invalid
@@ -296,6 +458,7 @@ let frozen_operator_disposition (receipt : R.t)
     || String.equal terminal_reason "internal_unhandled_exception"
     || String.equal terminal_reason "internal_bridge_exception"
     || String.equal terminal_reason "internal_contract_rejected"
+    || String.equal terminal_reason "host_stopped_turn"
   then R.Disp_fail_open_next_runtime, R.Reason_internal_error
   else if
     Option.is_some receipt.degraded_retry_applied
@@ -305,11 +468,6 @@ let frozen_operator_disposition (receipt : R.t)
     receipt.runtime_fallback_applied
     || receipt.runtime_outcome = R.Runtime_passed_to_next_model
   then R.Disp_pass_next_model, R.Reason_runtime_fallback
-  else if
-    receipt.outcome = `Ok
-    && receipt.runtime_outcome = R.Runtime_not_dispatched
-    && String.equal terminal_reason "pre_dispatch_success"
-  then R.Disp_pass, R.Reason_healthy
   else (
     match receipt.outcome with
     | `Cancelled -> R.Disp_user_cancelled, R.Reason_cancelled
@@ -338,7 +496,7 @@ let base_receipt : R.t =
   ; agent_core_turn_count = None
   ; current_task_id = None
   ; outcome = `Error
-  ; terminal_reason_code = ""
+  ; terminal_reason = Tr.Completed
   ; response_text_present = false
   ; completion_contract_result = R.Completion_observation_unknown
   ; actionable_signal = Some C.No_actionable_signal
@@ -390,97 +548,62 @@ let () =
 
 
 let () =
-  List.iter
-    (fun wire ->
-       check
-         (Printf.sprintf "free-form terminal %S stays typed Unknown" wire)
-         (match Tr.of_wire wire with
-          | Tr.Unknown original -> String.equal original wire
-          | _ -> false);
-       check
-         (Printf.sprintf "free-form terminal %S round-trips" wire)
-         (String.equal (Tr.to_wire (Tr.of_wire wire)) wire);
-       let got =
-         R.operator_disposition
-           { base_receipt with terminal_reason_code = wire }
-       in
-       check
-         (Printf.sprintf "free-form terminal %S uses generic disposition" wire)
-         (got = (R.Disp_unknown, R.Reason_unmapped_runtime_state)))
-    [ "unrelated authentication failed"
-    ; "not_a_config_error"
-    ; "API_ERROR_Auth"
-    ];
-  let canonical =
+  let disposition_of ?(runtime_outcome = base_receipt.runtime_outcome) wire =
     R.operator_disposition
-      { base_receipt with terminal_reason_code = "config_error" }
+      { base_receipt with terminal_reason = Tr.Failed (failure_of wire); runtime_outcome }
   in
+  let canonical = disposition_of "config_error" in
   check
-    "canonical typed config wire requires operator action"
+    "a configuration error requires operator action"
     (canonical = (R.Disp_operator_action_required, R.Reason_config_invalid));
   (* The point of the pair: same disposition, different reason. If the two
-     variants are ever collapsed into one, this stops holding. *)
-  let refused =
-    R.operator_disposition
-      { base_receipt with terminal_reason_code = "api_error_authorization" }
-  in
+     classes are ever collapsed into one, this stops holding. *)
+  let refused = disposition_of "api_error_authorization" in
   check
-    "canonical authorization wire requires operator action under its own reason"
+    "an authorization refusal requires operator action under its own reason"
     (refused = (R.Disp_operator_action_required, R.Reason_authorization_refused));
   check
-    "a config wire and an authorization wire carry different reasons"
+    "a config error and an authorization refusal carry different reasons"
     (snd canonical <> snd refused);
-  (* Every wire the operator-action bucket accepts, and which half it lands
-     in. Exhaustive with no wildcard, so a variant added later has to be
+  (* Every failure the operator-action bucket accepts, and which half it lands
+     in. Exhaustive with no wildcard, so a class added later has to be
      answered here rather than silently reported as "neither". *)
   let half = function
-    | Tr.Config_invalid _ -> "config"
-    | Tr.Authorization_refused _ -> "authorization"
-    | Tr.Runtime_exhausted _
+    | Tr.Config_invalid -> "config"
+    | Tr.Authorization_refused -> "authorization"
+    | Tr.Runtime_exhausted
     | Tr.Provider_runtime_failure _
-    | Tr.Transcript_corruption _
-    | Tr.Official_client_recovery_required _
+    | Tr.Transcript_corruption
+    | Tr.Official_client_recovery_required
     | Tr.Official_client_session_refused _
-    | Tr.Provider_attempt_effect_fenced _
-    | Tr.Tool_correction_lost _
-    | Tr.Accept_rejected _
-    | Tr.Terminal_effect_failed _
-    | Tr.Internal_error _
-    | Tr.Pre_dispatch_success _
-    | Tr.Unknown _ -> "neither"
+    | Tr.Provider_attempt_effect_fenced
+    | Tr.Tool_correction_lost
+    | Tr.Accept_rejected
+    | Tr.Terminal_effect_failed
+    | Tr.Internal_error
+    | Tr.No_failure_policy -> "neither"
   in
   List.iter
     (fun (wire, expected) ->
-       let classified = Tr.of_wire wire in
        check
-         (Printf.sprintf "%S lands in the %s half" wire expected)
-         (String.equal (half classified) expected);
-       check
-         (Printf.sprintf "%S still round-trips after the split" wire)
-         (String.equal (Tr.to_wire classified) wire))
+         (Printf.sprintf "%s lands in the %s half" wire expected)
+         (String.equal (half (Tr.failure_class (failure_of wire))) expected))
     [ "config_error", "config"
     ; "provider_error_invalid_config:multimodal_input", "config"
     ; "task_skill_config_rejected", "config"
     ; "task_skill_config_unreadable", "config"
     ; "task_skill_source_unreadable", "config"
-    ; "task_skill_entry_unreadable", "config"
     ; "api_error_auth", "authorization"
     ; "api_error_authorization", "authorization"
     ; "provider_error_auth", "authorization"
     ; "provider_error_authorization", "authorization"
-    ]
-  ;
+    ];
   check
-    "canonical typed config wire emits operator broadcast"
+    "a configuration error emits an operator broadcast"
     (R.needs_operator_broadcast (fst canonical));
-  let transcript_corruption =
-    R.operator_disposition
-      { base_receipt with
-        terminal_reason_code = Keeper_internal_error.incomplete_tool_transcript_kind
-      }
-  in
   (* Nothing was dispatched, so there is no effect to review, and the broken
      history fails every later turn until an operator purges it. *)
+  let transcript_corruption = disposition_of "incomplete_tool_transcript" in
   check
     "transcript corruption asks the operator to repair the history"
     (transcript_corruption
@@ -489,12 +612,9 @@ let () =
     "transcript corruption emits operator broadcast"
     (R.needs_operator_broadcast (fst transcript_corruption));
   let official_client_recovery =
-    R.operator_disposition
-      { base_receipt with
-        terminal_reason_code =
-          Keeper_internal_error.official_client_recovery_required_kind
-      ; runtime_outcome = R.Runtime_not_dispatched
-      }
+    disposition_of
+      ~runtime_outcome:R.Runtime_not_dispatched
+      Keeper_internal_error.official_client_recovery_required_kind
   in
   check
     "official-client recovery requires operator action without a runtime claim"
@@ -505,29 +625,10 @@ let () =
     "official-client recovery emits an operator broadcast"
     (R.needs_operator_broadcast (fst official_client_recovery));
   check
-    "official-client recovery reason keeps the canonical producer wire"
+    "official-client recovery reason keeps the producer's spelling"
     (String.equal
        (R.operator_disposition_reason_to_string (snd official_client_recovery))
        Keeper_internal_error.official_client_recovery_required_kind);
-  check
-    "official-client recovery wire decodes to its closed terminal variant"
-    (match
-       Tr.of_wire Keeper_internal_error.official_client_recovery_required_kind
-     with
-     | Tr.Official_client_recovery_required wire ->
-       String.equal wire Keeper_internal_error.official_client_recovery_required_kind
-     | _ -> false);
-  let fenced_error =
-    Keeper_internal_error.Provider_attempt_effect_fenced
-      { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
-      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
-      ; cause =
-          Keeper_internal_error.Fenced_core
-            (Keeper_request_failure_core.of_core_error
-               (Agent_core.Error.Internal
-                  "provider response did not prove whether the tool effect settled"))
-      }
-  in
   let fenced_json = Keeper_internal_error.masc_internal_error_to_json fenced_error in
   check
     "provider-attempt fence codec emits the canonical kind"
@@ -538,34 +639,6 @@ let () =
     (Keeper_internal_error.parse_masc_internal_error_json fenced_json
      = Some fenced_error);
   let fenced_wire = Keeper_internal_error.provider_attempt_effect_fenced_kind in
-  let producer_wire =
-    fenced_error
-    |> Keeper_internal_error.core_error_of_masc_internal_error
-    |> Masc.Keeper_agent_error.terminal_reason_code_of_core_error
-  in
-  check
-    "provider-attempt fence producer projects the canonical terminal wire"
-    (String.equal producer_wire fenced_wire);
-  check
-    "provider-attempt fence wire decodes to the closed terminal variant"
-    (match Tr.of_wire fenced_wire with
-     | Tr.Provider_attempt_effect_fenced wire -> String.equal wire fenced_wire
-     | _ -> false);
-  check
-    "provider-attempt fence terminal wire round-trips byte-identically"
-    (String.equal (Tr.to_wire (Tr.of_wire fenced_wire)) fenced_wire);
-  let lost_error =
-    Keeper_internal_error.Tool_correction_lost
-      { runtime_id = "antigravity_subscription.gemini-3-6-flash-high"
-      ; effect_disposition = Keeper_provider_attempt_effect_core.Effect_attempted
-      ; reject_count = 2
-      ; cause =
-          Keeper_internal_error.Fenced_core
-            (Keeper_request_failure_core.of_core_error
-               (Agent_core.Error.Internal
-                  "turn died after two corrective tool rejections"))
-      }
-  in
   let lost_json = Keeper_internal_error.masc_internal_error_to_json lost_error in
   check
     "tool-correction-lost codec emits the canonical kind"
@@ -576,18 +649,10 @@ let () =
     (Keeper_internal_error.parse_masc_internal_error_json lost_json
      = Some lost_error);
   let lost_wire = Keeper_internal_error.tool_correction_lost_kind in
-  check
-    "tool-correction-lost wire decodes to the closed terminal variant"
-    (match Tr.of_wire lost_wire with
-     | Tr.Tool_correction_lost wire -> String.equal wire lost_wire
-     | _ -> false);
-  check
-    "tool-correction-lost terminal wire round-trips byte-identically"
-    (String.equal (Tr.to_wire (Tr.of_wire lost_wire)) lost_wire);
   let lost_disposition =
     R.operator_disposition
       { base_receipt with
-        terminal_reason_code = lost_wire
+        terminal_reason = Tr.Failed (failure_of lost_wire)
       ; error_kind = Some (R.error_kind_of_string "internal")
       ; outcome = `Error
       ; runtime_outcome = R.Runtime_failed
@@ -609,7 +674,7 @@ let () =
   let unmapped_before = Masc.Otel_metric_store.metric_value_or_zero unmapped_metric () in
   let fenced_receipt =
     { base_receipt with
-      terminal_reason_code = fenced_wire
+      terminal_reason = Tr.Failed (failure_of fenced_wire)
     ; error_kind = Some (R.error_kind_of_string "internal")
     ; outcome = `Error
     ; runtime_outcome = R.Runtime_failed
@@ -627,6 +692,10 @@ let () =
     "a fenced receipt row carries effect_review_required"
     (Json_util.get_string (R.to_json fenced_receipt) "operator_disposition"
      = Some "effect_review_required");
+  check
+    "a fenced receipt row carries the fence's spelling"
+    (Json_util.get_string (R.to_json fenced_receipt) "terminal_reason_code"
+     = Some fenced_wire);
   check
     "provider-attempt fence reason has the canonical dashboard wire"
     (String.equal
@@ -650,8 +719,7 @@ let () =
   let receipt =
     { base_receipt with
       outcome = `Ok
-    ; terminal_reason_code =
-        R.receipt_terminal_reason_code_of_stop_reason completed_stop
+    ; terminal_reason = R.terminal_reason_of_stop_reason completed_stop
     ; completion_contract_result = R.Completion_tool_execution_observed
     ; runtime_outcome = R.Runtime_completed
     ; stop_reason = Some completed_stop
@@ -677,9 +745,7 @@ let () =
   let input_required_receipt =
     { base_receipt with
       outcome = `Ok
-    ; terminal_reason_code =
-        Masc.Keeper_turn_disposition.to_wire
-          Masc.Keeper_turn_disposition.Input_required
+    ; terminal_reason = Tr.Input_required
     ; completion_contract_result = R.Completion_observation_unknown
     ; runtime_outcome = R.Runtime_completed
     }
@@ -692,7 +758,7 @@ let () =
 
 (* Field matrix axes. Kept small but covering the dimensions the
    classifier branches on. *)
-let codes = roundtrip_corpus
+let codes = List.map snd corpus
 
 let error_kinds =
   [ None
@@ -816,7 +882,7 @@ let () =
                                      in
                                      let receipt =
                                        { base_receipt with
-                                         terminal_reason_code = code
+                                         terminal_reason = code
                                        ; error_kind
                                        ; degraded_retry_applied
                                        ; degraded_retry_deferred
@@ -841,7 +907,7 @@ let () =
                                          check
                                            (Printf.sprintf
                                               "disp-mismatch code=%S ek=%s out=%s ro=%s tcr=%s deg=%s fb=%b want=%s got=%s"
-                                              code
+                                              (Tr.to_wire code)
                                               (match error_kind with
                                                | None -> "none"
                                                | Some k -> R.error_kind_to_string k)
@@ -892,7 +958,7 @@ let () =
                            in
                            let receipt =
                              { base_receipt with
-                               terminal_reason_code = code
+                               terminal_reason = code
                              ; outcome
                              ; runtime_outcome
                              ; degraded_retry_applied
@@ -921,7 +987,7 @@ let () =
                              disagreements
                              := Printf.sprintf
                                   "code=%S out=%s ro=%s deg=%s fb=%b got=%s counted=%b"
-                                  code
+                                  (Tr.to_wire code)
                                   (R.outcome_kind_to_string outcome)
                                   (R.runtime_outcome_to_string runtime_outcome)
                                   (degraded_lane_label degraded)
@@ -945,14 +1011,38 @@ let () =
     (disagreements = [])
 ;;
 
+(* The class of a failure, with no wildcard, so a class added later is
+   answered here. *)
+let class_label = function
+  | Tr.Provider_runtime_failure Tr.Transient -> "transient provider failure"
+  | Tr.Provider_runtime_failure Tr.Persistent -> "persistent provider failure"
+  | Tr.Runtime_exhausted -> "runtime exhausted"
+  | Tr.Config_invalid -> "config invalid"
+  | Tr.Authorization_refused -> "authorization refused"
+  | Tr.Transcript_corruption -> "transcript corruption"
+  | Tr.Official_client_recovery_required -> "official-client recovery"
+  | Tr.Official_client_session_refused _ -> "official-client session refused"
+  | Tr.Provider_attempt_effect_fenced -> "effect fenced"
+  | Tr.Tool_correction_lost -> "tool correction lost"
+  | Tr.Accept_rejected -> "accept rejected"
+  | Tr.Terminal_effect_failed -> "terminal effect failed"
+  | Tr.Internal_error -> "internal error"
+  | Tr.No_failure_policy -> "no failure policy"
+;;
+
+let check_class wire expected =
+  let got = class_label (Tr.failure_class (failure_of wire)) in
+  check
+    (Printf.sprintf "%s is a %s (got %s)" wire expected got)
+    (String.equal got expected)
+;;
+
 let () =
   let code = "provider_error_timeout:http_operation" in
-  check
-    "provider timeout marker is transient"
-    (Tr.is_transient_provider_runtime_failure (Tr.of_wire code));
+  check_class code "transient provider failure";
   let receipt =
     { base_receipt with
-      terminal_reason_code = code
+      terminal_reason = Tr.Failed (failure_of code)
     ; error_kind = Some (R.error_kind_of_string "provider")
     ; outcome = `Error
     ; runtime_outcome = R.Runtime_failed
@@ -977,15 +1067,13 @@ let () =
    that did not open stays a provider runtime failure that is not retried. *)
 let () =
   let code = "provider_error_connect_failed:timeout" in
-  check
-    "provider connect-failed timeout is transient"
-    (Tr.is_transient_provider_runtime_failure (Tr.of_wire code));
+  check_class code "transient provider failure";
   check
     "provider connect-failed timeout is the named wire"
     (String.equal code Tr.wire_provider_error_connect_failed_timeout);
   let receipt =
     { base_receipt with
-      terminal_reason_code = code
+      terminal_reason = Tr.Failed (failure_of code)
     ; error_kind = Some (R.error_kind_of_string "provider")
     ; outcome = `Error
     ; runtime_outcome = R.Runtime_failed
@@ -999,26 +1087,24 @@ let () =
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
-  check
-    "provider connect-failed dns_failure is not transient"
-    (not
-       (Tr.is_transient_provider_runtime_failure
-          (Tr.of_wire "provider_error_connect_failed:dns_failure")))
+  check_class "provider_error_connect_failed:connection_refused" "persistent provider failure";
+  check_class "provider_error_network:timeout" "transient provider failure";
+  check_class
+    "provider_error_network:connection_reset:first_token"
+    "persistent provider failure";
+  List.iter
+    (fun wire -> check_class wire "transient provider failure")
+    [ "api_error_timeout"; "api_error_network"; "api_error_connect_failed" ];
+  check_class "runtime_connection_closed" "persistent provider failure";
+  check_class "host_stopped_turn" "internal error"
 ;;
 
 let () =
   let code = "provider_error_parse" in
-  check
-    "provider parse marker is provider runtime failure"
-    (match Tr.of_wire code with
-     | Tr.Provider_runtime_failure wire -> String.equal wire code
-     | _ -> false);
-  check
-    "provider parse marker is not transient"
-    (not (Tr.is_transient_provider_runtime_failure (Tr.of_wire code)));
+  check_class code "persistent provider failure";
   let receipt =
     { base_receipt with
-      terminal_reason_code = code
+      terminal_reason = Tr.Failed (failure_of code)
     ; error_kind = Some (R.error_kind_of_string "provider")
     ; outcome = `Error
     ; runtime_outcome = R.Runtime_failed
@@ -1040,7 +1126,7 @@ let () =
 let () =
   let completed_receipt =
     { base_receipt with
-      terminal_reason_code = "success"
+      terminal_reason = Tr.Completed
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Completion_no_visible_output
@@ -1073,7 +1159,7 @@ let () =
 let () =
   let coordination_receipt ?(actionable_signal = Some C.No_actionable_signal) () =
     { base_receipt with
-      terminal_reason_code = "success"
+      terminal_reason = Tr.Completed
     ; outcome = `Ok
     ; runtime_outcome = R.Runtime_completed
     ; completion_contract_result = R.Completion_no_visible_output
@@ -1328,7 +1414,7 @@ max-concurrent = 1
               row was retained. The full stop cause remains separately visible. *)
            let receipt = { base_receipt with keeper_name = name; outcome = `Ok;
              runtime_outcome = R.Runtime_completed; stop_reason = Some stop_reason;
-             terminal_reason_code = R.receipt_terminal_reason_code_of_stop_reason stop_reason } in
+             terminal_reason = R.terminal_reason_of_stop_reason stop_reason } in
            let json = R.to_json receipt in
            check (name ^ " receipt agrees with decision classification")
              (member "terminal_reason_code" json = `String expected_code);
@@ -2525,43 +2611,32 @@ let () =
     (Yojson.Safe.Util.member "message_truncated" compact = `Bool true)
 ;;
 
-(* #29929 gave [Terminal_effect_failed] its own operator disposition, but the
-   wire it arrives on carries the call's parameters after the kind, and
-   [wire_kind_of_string] compared the whole string. The reason decoded as
-   [Unknown], so every such receipt still landed unmapped -- 178 of them on
-   2026-09-01 alone. Read the kind, keep the parameters. *)
+(* The closing tool's own failure ends the turn with the call's parameters
+   after the kind, and still takes the effect-review disposition (#29929). *)
 let () =
   let wire =
     Keeper_internal_error.terminal_effect_failed_kind
     ^ ":tool_use_id=call_a633eabea3a8,effect_disposition=effect_outcome_unknown"
   in
   check
-    "a terminal-effect wire carrying parameters decodes to the closed variant"
-    (match Tr.of_wire wire with
-     | Tr.Terminal_effect_failed decoded -> String.equal decoded wire
-     | _ -> false);
-  check
-    "that wire round-trips byte-identically"
-    (String.equal (Tr.to_wire (Tr.of_wire wire)) wire);
-  check
-    "the bare kind still decodes to the same variant"
-    (match Tr.of_wire Keeper_internal_error.terminal_effect_failed_kind with
-     | Tr.Terminal_effect_failed _ -> true
-     | _ -> false);
+    "the closing tool's failure is spelled with its call and effect"
+    (String.equal (Tr.code_of_core_error terminal_effect_tool_failure) wire);
+  check_class wire "terminal effect failed";
+  check_class Keeper_internal_error.terminal_effect_failed_kind "terminal effect failed";
   let disposition =
     R.operator_disposition
       { base_receipt with
-        terminal_reason_code = wire
+        terminal_reason = Tr.Failed terminal_effect_tool_failure
       ; error_kind = Some (R.error_kind_of_string "internal")
       ; outcome = `Error
       ; runtime_outcome = R.Runtime_failed
       }
   in
   check
-    "a receipt on that wire asks for an effect review"
+    "a receipt for that failure asks for an effect review"
     (disposition = (R.Disp_effect_review_required, R.Reason_terminal_effect_failed));
   check
-    "a receipt on that wire emits an operator broadcast"
+    "a receipt for that failure emits an operator broadcast"
     (R.needs_operator_broadcast (fst disposition))
 ;;
 
@@ -3352,10 +3427,10 @@ let () =
 ;;
 
 (* #38402: an official-client session refusal is its own terminal reason, not
-   a configuration error. Each refusal's code decodes to its own variant,
-   round-trips, and takes the receipt pair that says what follows. The
-   expected pair is written per constructor, without a wildcard, so a refusal
-   added later has to be answered here. *)
+   a configuration error. Each refusal is spelled with its own code, keeps its
+   own refusal in the failure class, and takes the receipt pair that says what
+   follows. The expected pair is written per constructor, without a wildcard,
+   so a refusal added later has to be answered here. *)
 let () =
   let module Refusal = Keeper_official_client_session_refusal in
   let expected_disposition = function
@@ -3372,28 +3447,23 @@ let () =
   List.iter
     (fun refusal ->
        let code = Refusal.code refusal in
+       let error = Refusal.core_error refusal in
        check
          (Printf.sprintf "%s is the code the turn ends with" code)
-         (String.equal
-            (Masc.Keeper_agent_error.terminal_reason_code_of_core_error
-               (Refusal.core_error refusal))
-            code);
+         (String.equal (Tr.code_of_core_error error) code);
        check
-         (Printf.sprintf "%s decodes to its own refusal" code)
-         (match Tr.of_wire code with
+         (Printf.sprintf "%s keeps its own refusal" code)
+         (match Tr.failure_class error with
           | Tr.Official_client_session_refused decoded -> decoded = refusal
-          | Tr.Runtime_exhausted _ | Tr.Config_invalid _ | Tr.Authorization_refused _
-          | Tr.Provider_runtime_failure _ | Tr.Transcript_corruption _
-          | Tr.Official_client_recovery_required _ | Tr.Provider_attempt_effect_fenced _
-          | Tr.Tool_correction_lost _ | Tr.Accept_rejected _ | Tr.Terminal_effect_failed _
-          | Tr.Internal_error _ | Tr.Pre_dispatch_success _ | Tr.Unknown _ -> false);
-       check
-         (Printf.sprintf "%s round-trips" code)
-         (String.equal (Tr.to_wire (Tr.of_wire code)) code);
+          | Tr.Runtime_exhausted | Tr.Config_invalid | Tr.Authorization_refused
+          | Tr.Provider_runtime_failure _ | Tr.Transcript_corruption
+          | Tr.Official_client_recovery_required | Tr.Provider_attempt_effect_fenced
+          | Tr.Tool_correction_lost | Tr.Accept_rejected | Tr.Terminal_effect_failed
+          | Tr.Internal_error | Tr.No_failure_policy -> false);
        let disposition =
          R.operator_disposition
            { base_receipt with
-             terminal_reason_code = code
+             terminal_reason = Tr.Failed error
            ; runtime_outcome = R.Runtime_not_dispatched
            }
        in

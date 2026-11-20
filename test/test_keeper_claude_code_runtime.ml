@@ -3125,9 +3125,8 @@ let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
             (Keeper_runtime_failure_route.route_resumes_on_same_path route);
           if status = 403 then
             check bool "receipt retains authorization refusal" true
-              (match Keeper_agent_error.terminal_reason_code_of_core_error error
-                 |> Keeper_terminal_reason.of_wire with
-               | Keeper_terminal_reason.Authorization_refused _ -> true
+              (match Keeper_terminal_reason.failure_class error with
+               | Keeper_terminal_reason.Authorization_refused -> true
                | _ -> false);
           (match (load_state base_path).phase with
            | Recovery_required { failure = Provider_rejected; _ } -> ()

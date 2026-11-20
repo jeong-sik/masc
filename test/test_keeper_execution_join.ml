@@ -426,7 +426,7 @@ let test_terminal_agent_failure_projection_redacts_detail () =
     run_error;
   check string "carried terminal reason retains call and disposition"
     "terminal_effect_failed:tool_use_id=tool-terminal-safe,effect_disposition=proven_post_effect"
-    (Masc.Keeper_agent_error.terminal_reason_code_of_core_error run_error);
+    (Keeper_terminal_reason.code_of_core_error run_error);
   (match Keeper_internal_error.classify_masc_internal_error run_error with
    | Some
        (Keeper_internal_error.Terminal_effect_failed

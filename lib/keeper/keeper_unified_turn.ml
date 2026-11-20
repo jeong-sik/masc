@@ -363,20 +363,13 @@ let run_keeper_cycle
                    (fun consume -> consume ())
                    on_deferred_runtime_consumed)
               deferred_runtime_lane;
-            (* The wire code stays exactly what the typed encoder produced.
-               [record_pre_dispatch_terminal_observation] already records that
-               the turn never dispatched, in three typed fields:
+            (* The receipt carries the error itself.
+               [record_pre_dispatch_terminal_observation] records in three
+               typed fields that the turn never dispatched:
                [completion_contract_result = Completion_not_dispatched],
                [runtime_outcome = Runtime_not_dispatched] and
-               [runtime_attempt_count = 0]. A "pre_dispatch_" prefix on top of
-               those said nothing new, and it broke the one consumer that
-               reads this field: [Keeper_terminal_reason.of_wire] compares
-               against ["config_error"] by equality, so the decorated form
-               fell through to [Unknown] and every pre-dispatch config failure
-               reached the operator as an unmapped runtime state (#29929). *)
-            let terminal_reason_code =
-              Keeper_agent_error.terminal_reason_code_of_core_error err
-            in
+               [runtime_attempt_count = 0]. *)
+            let terminal_reason = Keeper_terminal_reason.Failed err in
             let error_message = Agent_core.Error.to_string err in
             Log.Keeper.error
               ~keeper_name:meta.name
@@ -388,9 +381,10 @@ let run_keeper_cycle
               ~meta
               ~runtime_id:effective_runtime_runtime_name
               ~outcome:`Error
-              ~terminal_reason_code
+              ~terminal_reason
               ~activity_kind:"keeper.turn_blocked"
-              ~trajectory_outcome:(Trajectory.Failed terminal_reason_code)
+              ~trajectory_outcome:
+                (Trajectory.Failed (Keeper_terminal_reason.to_wire terminal_reason))
               ~error_kind:
                 (Keeper_execution_receipt.error_kind_of_string
                    Agent_core.Error.(category err |> category_label))

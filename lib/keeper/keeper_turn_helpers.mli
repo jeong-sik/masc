@@ -31,7 +31,7 @@ val record_pre_dispatch_terminal_observation :
   meta:keeper_meta ->
   runtime_id:string ->
   outcome:Keeper_execution_receipt.outcome_kind ->
-  terminal_reason_code:string ->
+  terminal_reason:Keeper_terminal_reason.t ->
   activity_kind:string ->
   trajectory_outcome:Trajectory.trajectory_outcome ->
   keeper_turn_id:int ->

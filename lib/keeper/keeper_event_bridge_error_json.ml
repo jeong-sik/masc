@@ -221,7 +221,7 @@ let core_agent_error_fields = function
     [ "variant", `String "terminal_tool_effect_failed"
     ; "tool_use_id", `String tool_use_id
     ; ( "effect_disposition"
-      , `String (Keeper_agent_error.terminal_effect_disposition_to_wire effect_disposition) )
+      , `String (Keeper_terminal_reason.terminal_effect_disposition_to_wire effect_disposition) )
     ; "detail_digest", `String (sha256_hex detail)
     ]
   | Agent_core.Error.TerminalToolDurabilityFailed
@@ -237,7 +237,7 @@ let core_agent_error_fields = function
     ; ( "execution_mode"
       , Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode )
     ; ( "effect_disposition"
-      , `String (Keeper_agent_error.terminal_effect_disposition_to_wire effect_disposition) )
+      , `String (Keeper_terminal_reason.terminal_effect_disposition_to_wire effect_disposition) )
     ; "detail_digest", `String (sha256_hex detail)
     ]
   | Agent_core.Error.InputRequired { request_id; participant_name; question; _ } ->

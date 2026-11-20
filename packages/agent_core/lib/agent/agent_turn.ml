@@ -17,10 +17,17 @@ let provider_turn_ordinal (state : agent_state) : int = state.turn_count
 
 (* ── Turn preparation ─────────────────────────────────────────── *)
 
+type turn_request =
+  { effective_messages : Llm_provider.Types.message list
+  ; context_message : (message option, Error.t) result
+  }
+
+type narrower_turn_request = Error.t -> (turn_request option, Error.t) result
+
 type turn_preparation =
   { tools_json : Yojson.Safe.t list option
-  ; effective_messages : Llm_provider.Types.message list
-  ; context_message : (message option, Error.t) result
+  ; request : turn_request
+  ; narrower : narrower_turn_request list
   ; visible_tool_names : string list
   }
 
@@ -70,22 +77,20 @@ let prepare_messages ~messages ~turn_params () =
   append_context_message ~messages ~context_message:(context_message turn_params)
 ;;
 
+(* The caller's projection and its narrower requests run caller code; an
+   exception it raises is that call's error. *)
+let caller_result f =
+  try f () with
+  | exn ->
+    Llm_provider.Reserved_exn.reraise_if_reserved exn;
+    Error (Error.Internal (Printexc.to_string exn))
+;;
+
 let prepare_turn ~media_store ~tools ~messages ~turn_params ?model_input_projection () =
   let tools_json, visible_tool_names = prepare_tools ~tools () in
   let context_message = context_message turn_params in
   let prepared = append_context_message ~messages ~context_message in
-  let effective_messages =
-    match model_input_projection with
-    | None ->
-      History.to_wire_messages media_store prepared
-      |> Result.map_error (fun error -> Error.Media error)
-    | Some project ->
-      (try project prepared with
-       | exn ->
-         Llm_provider.Reserved_exn.reraise_if_reserved exn;
-         Error (Error.Internal (Printexc.to_string exn)))
-  in
-  Result.map (fun effective_messages ->
+  let request_of effective_messages =
     let context_message =
       match context_message with
       | None -> Ok None
@@ -102,8 +107,28 @@ let prepare_turn ~media_store ~tools ~messages ~turn_params ?model_input_project
            |> Result.map_error (fun error -> Error.Media error)
          | _ -> Error (Error.Internal "model input projection returned multiple current context carriers"))
     in
-    { tools_json; effective_messages; context_message; visible_tool_names })
-    effective_messages
+    { effective_messages; context_message }
+  in
+  let candidates =
+    match model_input_projection with
+    | None ->
+      History.to_wire_messages media_store prepared
+      |> Result.map Agent_types.one_request
+      |> Result.map_error (fun error -> Error.Media error)
+    | Some project -> caller_result (fun () -> project prepared)
+  in
+  Result.map (fun (candidates : Agent_types.model_input_candidates) ->
+    let narrower =
+      List.map (fun (narrow : Agent_types.narrower_model_input) refusal ->
+          caller_result (fun () -> narrow refusal) |> Result.map (Option.map request_of))
+        candidates.Agent_types.narrower
+    in
+    { tools_json
+    ; request = request_of candidates.Agent_types.request
+    ; narrower
+    ; visible_tool_names
+    })
+    candidates
 ;;
 
 let provider_config_with_agent_config

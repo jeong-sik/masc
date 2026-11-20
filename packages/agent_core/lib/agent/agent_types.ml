@@ -34,7 +34,18 @@ type context_fit_admission =
   | Body_only
   | Require_exact_fit
 
-type model_input_projection = message list -> (Llm_provider.Types.message list, Error.t) result
+type narrower_model_input =
+  Error.t -> (Llm_provider.Types.message list option, Error.t) result
+
+type model_input_candidates =
+  { request : Llm_provider.Types.message list
+  ; narrower : narrower_model_input list
+  }
+
+type model_input_projection = message list -> (model_input_candidates, Error.t) result
+
+let one_request request = { request; narrower = [] }
+
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 
 (* Runs the serialisation of an admitted provider body. The closure reads

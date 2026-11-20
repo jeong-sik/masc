@@ -11,10 +11,9 @@
 
 (** {1 Turn preparation} *)
 
-(** Pre-processed inputs for an LLM turn. *)
-type turn_preparation =
-  { tools_json : Yojson.Safe.t list option
-  ; effective_messages : Llm_provider.Types.message list
+(** One request the turn may send. *)
+type turn_request =
+  { effective_messages : Llm_provider.Types.message list
     (** The request messages: the caller projection's output, or the
         history converted with {!History.to_wire_message}. *)
   ; context_message : (Types.message option, Error.t) result
@@ -23,6 +22,22 @@ type turn_preparation =
         selection is data, not a preparation failure: only a signed Anthropic
         response needs this result. Projected history never replaces the
         canonical transcript. *)
+  }
+
+(** A caller's narrower request ({!Agent_types.narrower_model_input}) with
+    its carrier selected as for [request]. An exception it raises is its
+    [Error]. *)
+type narrower_turn_request = Error.t -> (turn_request option, Error.t) result
+
+(** Pre-processed inputs for an LLM turn. *)
+type turn_preparation =
+  { tools_json : Yojson.Safe.t list option
+  ; request : turn_request
+    (** The request the turn sends first. *)
+  ; narrower : narrower_turn_request list
+    (** The narrower requests, in the order the route may ask them
+        ({!Agent_types.model_input_candidates}). Empty without a caller
+        projection. *)
   ; visible_tool_names : string list
     (** Names of the caller-supplied tools. This is exactly the list the LLM
         sees this turn. Useful for [Event_bus.TurnReady] subscribers and

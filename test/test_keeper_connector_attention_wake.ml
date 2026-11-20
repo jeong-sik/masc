@@ -1,5 +1,4 @@
-(* test_keeper_connector_attention_wake.ml —
-   RFC-connector-ambient-attention-wake P1.
+(* test_keeper_connector_attention_wake.ml.
 
    Pins the durable Connector event and wake-decision plumbing. Every accepted
    ambient event is queued by its producer identity before the wake hint; the

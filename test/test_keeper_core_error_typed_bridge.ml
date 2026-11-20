@@ -1,8 +1,8 @@
-(** RFC-0042 PR-2.5 invariant: the typed accessors
+(** Invariant: the typed accessors
     [Keeper_agent_error.terminal_reason_code_of_core_error_typed] and
     [Keeper_agent_error.api_error_terminal_reason_code_typed] produce
     canonical wire strings byte-for-byte identical to the historical
-    untyped output.  PR-3 retired the untyped accessors; this test
+    untyped output.  No untyped accessor remains; this test
     now guards the wire format directly so dashboards /
     [bin/masc-trace] / Otel_metric_store labels do not drift.
 
@@ -746,10 +746,10 @@ let test_the_codec_refuses_what_it_did_not_write () =
     ]
 ;;
 
-(* The chat row's only carrier for the cause is its text until RFC-0454 P3
-   gives the row a typed [failure] field, and a summary would take that text.
-   So these two answer [None] here, exactly as the two fences do, and the
-   keeper's user-facing message keeps the envelope the pane reads. *)
+(* The chat row's only carrier for the cause is its text, and a summary
+   would take that text. So these two answer [None] here, exactly as the
+   two fences do, and the keeper's user-facing message keeps the envelope
+   the pane reads. *)
 let test_runtime_stops_keep_their_envelope_in_the_row () =
   List.iter
     (fun error ->

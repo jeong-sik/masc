@@ -28661,7 +28661,7 @@ let keeper_message_evidence_layout state ~terminal_cols =
                 else [] in
               let gaps = keeper_chat_file_change_gaps observation in
               if freshness = [] && gaps = [] && Option.is_none state.msg_file_changes_error
-              then Some (Printf.sprintf "diffs %.0fh" observation.kcf_snapshot.fcs_window_hours), []
+              then Some ("diffs " ^ Masc_tui_value.Interval.of_hours observation.kcf_snapshot.fcs_window_hours), []
               else None,
                 (freshness
                  @ (if Option.is_some state.msg_file_changes_error then ["diffs refresh failed"] else [])

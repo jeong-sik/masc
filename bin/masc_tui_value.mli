@@ -209,6 +209,10 @@ module Interval : sig
   (** {!text} of a setting held in float seconds, rounded up to the whole
       second so a sub-second setting never reads [0s]. A value no int can
       hold (an infinity, a NaN, past 10^15 seconds) reads as {!Ongoing.text}. *)
+
+  val of_hours : float -> string
+  (** {!of_seconds} of a setting held in float hours, such as the window a
+      read covers: [24.] reads [1d], [1.5] reads [1h30m], [72.] reads [3d]. *)
 end
 
 module Ongoing : sig

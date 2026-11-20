@@ -27,7 +27,7 @@ let pr_number_of_subject subject =
   scan 0 None
 
 (* The codebase slug for the surface's scope, when it has one. Only a
-   repository row carries the server-minted slug (RFC-0378: the client
+   repository row carries the server-minted slug (the client
    never re-derives it); the other scopes honestly have none. *)
 (* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
    keeper / repo axes the file itself was read through, so the margin

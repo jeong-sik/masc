@@ -1,4 +1,4 @@
-(** The MSX spectator screen (RFC-0439 §3.7).
+(** The MSX spectator screen.
 
     The machine lives in the server; this screen draws the frame the server
     hands over. [state.msx_open] plays the role [state.image_open] plays for a
@@ -45,9 +45,8 @@ val render :
     the game hints while its composer owns input; an empty string preserves them.
 
     The first frame carries the observation meta (title line); the second is
-    the surface contract's picture this renderer draws (RFC
-    msx-surface-focus-mode stage 1) — the renderer reads pixels only through
-    it and never from the meta's pixel fields.
+    the surface contract's picture this renderer draws — the renderer reads
+    pixels only through it and never from the meta's pixel fields.
 
     [None] is drawn as an empty body under a title that says why it is empty,
     wrapped over at most half the rows the notice and the footer leave, so
@@ -123,7 +122,7 @@ val close : write:(string -> unit) -> Masc_tui_types.state -> unit
     workspace is withdrawn or the operator closes it. The caller must also
     invalidate the ordinary frame presenter. *)
 
-(** {1 The load menu (RFC-0439 §3.7)}
+(** {1 The load menu}
 
     The human picks a game from the cartridge inventory. It is an overlay on the
     MSX screen: while [state.msx_menu_open] the keyboard drives the picker, so a

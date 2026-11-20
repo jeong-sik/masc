@@ -1,5 +1,5 @@
 (** What the Keeper roster owes its server reading after the server
-    announced a change (RFC-0481 §3.3).
+    announced a change.
 
     [keeper_row_changed] names one Keeper, and that Keeper's row is read
     alone ([GET /api/v1/gate/keepers?name=<keeper>]).
@@ -47,8 +47,8 @@ val abandoned : t -> t
 
 val schedule_rows : (string * Masc_tui_wake.Mono.t) list -> t -> t
 (** The rows to read again at a time, as [(keeper, at)] on the loop's
-    clock, for a value that changes with time and not with a write
-    (RFC-0481 §3.6). It replaces the rows scheduled before. *)
+    clock, for a value that changes with time and not with a write.
+    It replaces the rows scheduled before. *)
 
 val release_scheduled : now:Masc_tui_wake.Mono.t -> t -> t
 (** Each scheduled row whose time has come is owed, once. *)

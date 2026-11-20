@@ -187,7 +187,7 @@ let apply_remote_keeper_rows ~before_view_change (state : T.state) =
     T.clear_keeper_logs state
 
 (* A starting Keeper's [next_action] turns from Probe once it is
-   [agent_staleness_threshold_s] old (RFC-0481 §3.6), and no write says so:
+   [agent_staleness_threshold_s] old, and no write says so:
    its row is read again at that time. A time already past schedules
    nothing. The server's clock decides the value, so a read that came early
    finds it unchanged, and the next signal or revalidation reads it again. *)
@@ -210,7 +210,7 @@ let starting_rows_due roster =
 
 (* No cadence reads the roster again, so a failed whole read is owed: it
    reads again after a wait that grows with each failure in a row, whatever
-   started it (RFC-0481 §3.3). *)
+   started it. *)
 let owe_failed_whole_roster_read (state : T.state) =
   let read = Masc_tui_roster_owed.Read_roster in
   state.T.keeper_roster_owed <-

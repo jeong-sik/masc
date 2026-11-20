@@ -1,4 +1,4 @@
-(** SSE observer recovery/stream orchestration and RFC-0477 fleet stream
+(** SSE observer recovery/stream orchestration and the fleet stream
     reconnection loop. *)
 
 val stream_reconnect_s : float

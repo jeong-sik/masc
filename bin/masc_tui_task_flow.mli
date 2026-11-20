@@ -12,10 +12,10 @@ type counts = {
 type window = { created : int; completed : int; cancelled : int }
 
 (** One row per [assignee] string exactly as the Task recorded it. Nothing is
-    folded together: [rondo] and [keeper-rondo-agent] stay two rows. RFC-0393
-    removed the loose "-agent" suffix strip, and which keeper an agent name
+    folded together: [rondo] and [keeper-rondo-agent] stay two rows. Nothing
+    strips a loose "-agent" suffix, and which keeper an agent name
     belongs to is the agent record's stored binding rather than a spelling, so
-    joining the two here would both reinstate the removed guess and hide that
+    joining the two here would both guess from the spelling and hide that
     the writers disagree about what they record. *)
 type assignee_flow = {
   af_assignee : string;

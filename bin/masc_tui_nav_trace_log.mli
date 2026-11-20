@@ -1,4 +1,4 @@
-(** The file [MASC_TUI_NAV_TRACE] names (RFC-0485).
+(** The file [MASC_TUI_NAV_TRACE] names.
 
     Off unless the variable names a file; a blank value is off, as it is for
     [MASC_TUI_FRAME_TIMING]. While off, every call below returns at once: no

@@ -177,7 +177,7 @@ let launch_memory_health_load (state : Masc_tui_types.state) ~mailbox =
     end
   end
 
-(* The oldest Keeper a push named, read as its own row (RFC-0487). It shares
+(* The oldest Keeper a push named, read as its own row. It shares
    the in-flight mark with the fleet read: one memory health read at a time.
    The Keeper leaves the list only when its read starts, so a read that
    cannot start yet keeps it owed. *)

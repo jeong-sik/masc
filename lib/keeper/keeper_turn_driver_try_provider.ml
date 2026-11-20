@@ -945,6 +945,10 @@ type sent_request =
 type attempt_state =
   { last_request : sent_request option ref
   ; request_range : Keeper_continuity_request.range option ref
+  ; request_start : Keeper_request_start.t option ref
+        (* Where the request this composition made starts in the history,
+           recorded when it goes out (RFC librarian-call-only-proposes
+           §11.3). *)
   ; ledger : Keeper_model_input_ledger.t option ref
   ; current_turn_results : current_turn_results ref
         (* Read by every composition, so every request of a resent attempt
@@ -976,6 +980,7 @@ let ledger_session (ctx : try_provider_ctx) =
 let new_attempt_state (ctx : try_provider_ctx) =
   { last_request = ref None
   ; request_range = ref None
+  ; request_start = ref None
   ; ledger = ref (match ctx.request_input with
       | Completion_review -> None
       | Keeper_history _ -> Keeper_model_input_ledger.Table.lookup
@@ -1957,6 +1962,7 @@ let bounded_model_input_projection
   let to_wire = memoize_wire_message media_store in
   fun messages ->
     state.request_range := None;
+    state.request_start := None;
     (* Discovery may widen the Agent's tools between provider rounds. The
        binding head must use this request's live, ordered tool surface. *)
     let prefix_tools =
@@ -2345,12 +2351,27 @@ let bounded_model_input_projection
          | None -> false
          | Some _ -> offload_model_input_cpu (fun () ->
              not (List.equal Agent_core.Types.Message_value.equal windowed projected)) in
+       let first_atom = composed.projection.Runtime_model_input_tail_window.dropped_atoms in
        state.request_range := Some
          { Keeper_continuity_request.origin = composed.origin
-         ; first_atom = composed.projection.Runtime_model_input_tail_window.dropped_atoms
+         ; first_atom
          ; total_atoms = history_atom_count
          ; custom_projection_changed = changed
-         }
+         };
+       (* Taken here, before the request goes out: a [Reset] the turn log
+          gains later lies past [log_end], where the comparison reads it. *)
+       state.request_start :=
+         Option.map
+           (fun trace_id ->
+              let sends_from =
+                offload_model_input_cpu (fun () ->
+                  Keeper_request_start.sends_from messages ~first_atom)
+              in
+              Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                Keeper_request_start.of_request
+                  ~config:(Workspace.default_config ctx.base_path)
+                  ~keeper_name:ctx.keeper_name ~trace_id ~sends_from))
+           (input_trace_id ctx.request_input)
      | Error _, (Ok _ | Error _) | Ok _, Error _ -> ());
     let* projected = result in
     on_resolved projected;
@@ -3005,6 +3026,12 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                 (fun observation ->
                    let range = !(state.request_range) in
                    state.request_range := None;
+                   Option.iter
+                     (Keeper_request_start.record
+                        ~config:(Workspace.default_config ctx.base_path)
+                        ~keeper_name:ctx.keeper_name)
+                     !(state.request_start);
+                   state.request_start := None;
                    let turn_ref = Option.bind ctx.runtime_manifest_context
                      (fun (context : Keeper_runtime_manifest.turn_context) ->
                        Option.map (fun absolute_turn ->

@@ -870,7 +870,7 @@ let heartbeat_event_intake
      steady arrival rate an unbounded backlog even while every Keeper remained
      alive.
 
-     Connector attention keeps RFC-0377's conversation boundary:
+     Connector attention keeps a conversation boundary:
      only the first readable ready connector conversation is eligible, while rows for
      other conversations remain pending for their own routed turn. *)
   let base_path = ctx.config.base_path in

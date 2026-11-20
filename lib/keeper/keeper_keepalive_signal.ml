@@ -279,9 +279,8 @@ let interruptible_sleep
 
     When [?stimulus] is provided, the stimulus is appended to the keeper's
     Event Layer queue ([Keeper_registry_event_queue.enqueue]) before the wakeup
-    flag flips. This is RFC-0020 Rule 1 (enqueue is independent of policy)
-    + the data-channel half of the layer split — [fiber_wakeup] remains the
-    Running-lane hint signal, the queue is the authoritative payload. *)
+    flag flips. The enqueue is independent of policy: [fiber_wakeup] remains
+    the Running-lane hint signal, the queue is the authoritative payload. *)
 let wakeup_keeper ?base_path ?stimulus name =
   let entries =
     Keeper_registry.all ?base_path ()
@@ -337,7 +336,7 @@ let wakeup_keeper ?base_path ?stimulus name =
     entries
 ;;
 
-(* RFC-0020: enqueue the board signal as a typed [stimulus_payload] (PR-1).
+(* The board signal is enqueued as a typed [stimulus_payload].
    [reason] is the typed {!Board_wake.wake_reason} that selected this keeper;
    here it only picks urgency (explicit targets and broadcasts are [Immediate]). It is not
    carried in the payload — the next prompt re-derives board context from the

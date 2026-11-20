@@ -1,4 +1,4 @@
-(* The absorb gate of a librarian pass (RFC-librarian-absorb-gate). See the
+(* The absorb gate of a librarian pass. See the
    interface for what it decides; this file is how. *)
 
 (* --- Statements --- *)
@@ -292,7 +292,7 @@ let request_bytes_limit = 32_000
 let state_bytes_limit = request_bytes_limit / 2
 
 (* Which way a question points. [Forward]: the state is a structured pair
-   of the complete source memory and proposed claim. [Reverse] (RFC-0463 section 2.8):
+   of the complete source memory and proposed claim. [Reverse]:
    the state is the memories a claim tried to absorb, read together, and the
    statement is from the claim. The model reads the question text, so each
    direction names what it is actually handed. *)
@@ -629,7 +629,7 @@ let judge ~guidance ~evaluate ~cited_observations ~facts ~new_claims ~absorbed =
       }
 ;;
 
-(* --- The reverse question (RFC-0463 section 2.8) --- *)
+(* --- The reverse question --- *)
 
 type copy_not_judged =
   | Gate_judgment_failed
@@ -1459,7 +1459,7 @@ let observation_to_yojson = function
 
 (* One line for the reverse question, then one per claim it keeps out of
    the store, with the statements the sources were found to convey, so a
-   person can read the discarded claims back (RFC-0463 section 6). *)
+   person can read the discarded claims back. *)
 let log_copy_checks ~keeper_id checks =
   match checks with
   | [] -> ()

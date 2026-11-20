@@ -4140,9 +4140,10 @@ let run_named
                  which is what every caller did before the listing existed. *)
               tools = agent_core_tools
             ; deferred_tools =
-                (if Llm_provider.Provider_config.supports_deferred_tool_loading provider_config
-                 then tools
-                 else [])
+                Keeper_agent_tool_surface.deferred_for_native
+                  ~supports:(Llm_provider.Provider_config.supports_deferred_tool_loading provider_config)
+                  ~full_tools:tools
+                  ~callable_tools:agent_core_tools
             ; initial_messages
             ; model_input_projection
             ; (* Keeper policy knobs, injected from the resolved layer like

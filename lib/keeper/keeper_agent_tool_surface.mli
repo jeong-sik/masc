@@ -46,6 +46,14 @@ type attempt_surface =
   ; loader_alive : bool
   }
 
+val deferred_for_native :
+  supports:bool ->
+  full_tools:Agent_core.Tool.t list ->
+  callable_tools:Agent_core.Tool.t list ->
+  Agent_core.Tool.t list
+(** Full catalog only when the current view has a deferred loader. An eager view
+    returns [[]] even on a capable provider, preventing an all-deferred request. *)
+
 val for_attempt :
   checkpoint_owner:Runtime_execution.checkpoint_owner option ->
   agent_cell:Agent_core.Agent.t option ref ->

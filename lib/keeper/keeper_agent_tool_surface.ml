@@ -39,6 +39,10 @@ type attempt_surface =
   ; loader_alive : bool
   }
 
+let deferred_for_native ~supports ~full_tools ~callable_tools =
+  if supports && callable_tools <> full_tools then full_tools else []
+;;
+
 let for_attempt ~checkpoint_owner ~agent_cell ~built =
   match checkpoint_owner, !agent_cell with
   | Some Runtime_execution.Masc_agent_core, Some agent ->

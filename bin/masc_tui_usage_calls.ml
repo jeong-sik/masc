@@ -583,9 +583,10 @@ let lines ?(ko = false) ~width:cells ~rows t =
     | Some drawn -> drawn
     | None -> smallest ()
 
-(* The Dashboard's row names its window in as few cells as the row can spare. *)
+(* The Dashboard's row names its window in as few cells as the row can spare.
+   A day reads 1d, not 24h (RFC tui-one-screen-grammar 6.2). *)
 let short_span ~ko = function
-  | Last_day -> if ko then "24시간" else "24h"
+  | Last_day -> if ko then "1일" else "1d"
   | Last_week -> if ko then "7일" else "7d"
   | Last_fortnight -> if ko then "14일" else "14d"
 

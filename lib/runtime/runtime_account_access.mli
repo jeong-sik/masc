@@ -24,7 +24,9 @@
     {b Multi-account.} A CLI starts only on a home of the person the request
     is for, as {!Runtime_account_home_layout} spells it under the namespace of
     their membership, and only on a home that was declared: an inherited home
-    carries the credentials of the process environment. For a Keeper turn
+    carries the credentials of the process environment. The configuration of
+    a Codex home asks the environment of the process for nothing
+    ({!Home_asks_for_environment}). For a Keeper turn
     that person is the owner of the Keeper, and the log decides the turn
     ({!Authz_keeper_turn.decide}) and names the Runtime and the account. No
     operator owns the account of a person, so an operator call is refused.
@@ -260,9 +262,19 @@ type refusal =
           variables of the environment of the process
           ({!Runtime_official_account.names_asked_by_the_home}). The
           environment is the operator's and the client the person drives
-          writes the home, so no client starts on it. It comes after the
-          check of the home, so it says nothing of an account captured from
-          another home. *)
+          writes the home, so no client is authorized on it. A name is
+          enough: whether the environment has it is not asked. It comes
+          after the check of the home, so it says nothing of an account
+          captured from another home.
+
+          Two things are outside this judgment. The client of a login gets
+          the environment of the capture without it
+          ([Runtime_setup_login_client.environment]). The server gives a
+          person only a home made for that login. A login at a terminal
+          ([masc runtime-account-login]) starts on the home it is given,
+          whoever the home is of, with the environment of whoever runs
+          it. And only these names are read: what else the configuration
+          of a home has its client do is not judged. *)
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable

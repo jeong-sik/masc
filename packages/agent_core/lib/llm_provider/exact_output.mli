@@ -1117,6 +1117,18 @@ val flow_evidence_generation_dispatch : flow_evidence -> generation_dispatch_fac
     candidates reached so far and remains queryable after cancellation. *)
 val flow_attempt_evidence : flow_attempt -> flow_evidence
 
+(** The seats of [admitted]'s endpoint, for a caller that chooses among
+    several slots before it runs a flow on one: take a seat with
+    {!Provider_admission.take_first_seat} and hand it to
+    {!execute_flow_once} as [seat]. A wait for it queues as
+    [admission_class], which should be the flow's. [Error] is the target's
+    frozen credential outcome; a flow on that target is rejected with it
+    before it takes a seat. *)
+val target_seats
+  :  admission_class:Admission_class.t
+  -> admitted_target
+  -> (Provider_admission.seat_source, target_selection_error) result
+
 (** Execute one affine declared-order flow with caller-owned pure semantic
     validation. AGENT_CORE invokes [validate] exactly once after each successful
     candidate transport. [Reject_and_advance] preserves the opaque evidence and
@@ -1131,9 +1143,17 @@ val flow_attempt_evidence : flow_attempt -> flow_evidence
     candidate gives a seat first; the flow then runs on that later
     candidate. When every remaining endpoint is full the flow waits on all
     of them with no deadline. The body deadline of each request counts
-    from its dispatch, not from the wait. *)
+    from its dispatch, not from the wait.
+
+    [seat] is a seat the caller already took for the first candidate, from
+    {!target_seats} of that candidate's target. The first candidate measures
+    and sends under it and takes no other; later candidates take theirs as
+    above. The flow returns the seat when it ends, used or not. A seat the
+    first candidate's endpoint did not give is returned and raises
+    [Invalid_argument] before any callback or request. *)
 val execute_flow_once
-  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  :  ?seat:Provider_admission.seat
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> clock:_ Eio.Time.clock
   -> before_measurement_dispatch:
        (flow_measurement_receipt -> (unit, 'callback_error) result)
@@ -1181,7 +1201,8 @@ type ('accepted, 'rejection, 'callback_error) guarded_flow_result =
   | Guarded_unresolved of 'rejection unresolved_responses
 
 val execute_flow_once_guarded
-  :  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+  :  ?seat:Provider_admission.seat
+  -> net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
   -> clock:_ Eio.Time.clock
   -> before_measurement_dispatch:
        (flow_measurement_receipt -> (unit, 'callback_error) result)
@@ -1208,4 +1229,4 @@ val execute_flow_once_guarded
     The result is in memory only: the caller must durably bind an unresolved
     result to the original request before it can safely suppress later wakes.
     No lifecycle observation alone proves remote termination. Cancellation
-    still propagates. *)
+    still propagates. [seat] is as in {!execute_flow_once}. *)

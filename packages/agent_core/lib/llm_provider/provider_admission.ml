@@ -296,18 +296,33 @@ let scheduler_of (config : Provider_config.t) =
     Some (entry_for ~key:(key_of_config config) ~allowance:(allowance_of_config config ~max))
 ;;
 
-(* Every endpoint is full, so the request waits in each queue at once. The
+type seat_source =
+  | Endpoint_seats of Provider_config.t
+  | Scheduler_seats of
+      { scheduler : Slot_scheduler.t
+      ; admission_class : Admission_class.t
+      }
+
+(* A source with every permit held: the queue to stand in, the class to
+   stand as, and the endpoint a wait reports, when it is one. *)
+type full_source =
+  { queue : Slot_scheduler.t
+  ; queue_class : Admission_class.t
+  ; reported_endpoint : Provider_config.t option
+  }
+
+(* Every source is full, so the request waits in each queue at once. The
    first wait granted keeps its seat. A wait granted after it, in the moment
    before it is cancelled, returns its seat and waits to be cancelled, so no
    fiber that holds a seat ever returns a result [Fiber.any] could drop. *)
 let wait_for_first_seat first_full rest_full =
   let won = Atomic.make None in
-  let wait (owner, (config : Provider_config.t), scheduler) () =
+  let wait (owner, full) () =
     Slot_scheduler.acquire_held
-      ?on_queue:(on_queue_for config)
-      ~admission_class:config.admission_class
-      scheduler;
-    let seat = held scheduler in
+      ?on_queue:(Option.bind full.reported_endpoint (fun config -> on_queue_for config))
+      ~admission_class:full.queue_class
+      full.queue;
+    let seat = held full.queue in
     if Atomic.compare_and_set won None (Some seat)
     then owner, seat
     else (
@@ -323,23 +338,37 @@ let wait_for_first_seat first_full rest_full =
     raise exn
 ;;
 
-(* A seat taken at once, or the full endpoint to wait on. *)
-let ask_now (owner, (config : Provider_config.t)) =
-  match scheduler_of config with
-  | None -> Ok (owner, Unadmitted)
-  | Some scheduler ->
+(* A seat taken at once, or the full source to wait on. *)
+let ask_now (owner, source) =
+  match source with
+  | Endpoint_seats (config : Provider_config.t) ->
+    (match scheduler_of config with
+     | None -> Ok (owner, Unadmitted)
+     | Some scheduler ->
+       if Slot_scheduler.try_acquire scheduler
+       then Ok (owner, held scheduler)
+       else
+         Error
+           ( owner
+           , { queue = scheduler
+             ; queue_class = config.admission_class
+             ; reported_endpoint = Some config
+             } ))
+  | Scheduler_seats { scheduler; admission_class } ->
     if Slot_scheduler.try_acquire scheduler
     then Ok (owner, held scheduler)
-    else Error (owner, config, scheduler)
+    else
+      Error
+        (owner, { queue = scheduler; queue_class = admission_class; reported_endpoint = None })
 ;;
 
 let take_first_seat first rest =
   let rec ask_rest full = function
     | [] -> Error (List.rev full)
-    | endpoint :: endpoints ->
-      (match ask_now endpoint with
+    | source :: sources ->
+      (match ask_now source with
        | Ok taken -> Ok taken
-       | Error full_endpoint -> ask_rest (full_endpoint :: full) endpoints)
+       | Error full_source -> ask_rest (full_source :: full) sources)
   in
   match ask_now first with
   | Ok taken -> taken
@@ -347,6 +376,13 @@ let take_first_seat first rest =
     (match ask_rest [] rest with
      | Ok taken -> taken
      | Error rest_full -> wait_for_first_seat first_full rest_full)
+;;
+
+let seat_is_of_endpoint seat (config : Provider_config.t) =
+  match seat, scheduler_of config with
+  | Unadmitted, None -> true
+  | Held { scheduler; returned = _ }, Some endpoint -> scheduler == endpoint
+  | Unadmitted, Some (_ : Slot_scheduler.t) | Held _, None -> false
 ;;
 
 let snapshot_for ~(config : Provider_config.t) =

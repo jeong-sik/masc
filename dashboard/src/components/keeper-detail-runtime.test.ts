@@ -716,9 +716,9 @@ describe('RuntimeLensSection', () => {
     expect(summary.rows.find(row => row.label === '런타임')?.value).toBe('fiber alive')
     expect(summary.rows.find(row => row.label === '현재 턴')?.value).toBe('no live turn')
     expect(summary.rows.find(row => row.label === '최신 증거')?.value).toBe('turn #7 finished')
-    // RFC-0046 §4.3 partial closure: the FSM lane is now rendered exclusively
-    // by FsmHub mode='detail' under this panel. Asserting the absence here
-    // prevents regressing back to dual-rendering of KSM/KTC.
+    // The FSM lane is now rendered exclusively by FsmHub mode='detail'.
+    // Asserting the absence here prevents regressing back to dual-rendering
+    // of KSM/KTC.
     expect(summary.rows.find(row => row.label === 'FSM')).toBeUndefined()
   })
 

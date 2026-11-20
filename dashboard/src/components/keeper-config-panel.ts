@@ -123,11 +123,11 @@ export {
   resetKeeperConfig,
 } from './keeper-config-state'
 
-// ── v2 prototype config modal: left rail tabs (keeper-config.css .kcf-*) ──
-// The full keeper config redesign (keeper-v2/keeper-config.jsx) presents the
-// field set as a fullscreen .kcf-overlay modal with an 8-tab left rail instead
-// of a single vertical accordion. Each tab groups the existing live fields by
-// concern; no field, save flow, or shared signal is dropped — only regrouped.
+// ── v2 config modal: left rail tabs (keeper-config.css .kcf-*) ──
+// The keeper config presents the field set as a fullscreen .kcf-overlay
+// modal with a 7-tab left rail instead of a single vertical accordion. Each
+// tab groups the existing live fields by concern; no field, save flow, or
+// shared signal is dropped — only regrouped.
 export type KcfTabId =
   | 'identity'
   | 'prompt'

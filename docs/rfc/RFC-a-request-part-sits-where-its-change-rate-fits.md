@@ -3,7 +3,7 @@ rfc: "a-request-part-sits-where-its-change-rate-fits"
 title: "요청의 각 부분은 바뀌는 빈도에 맞는 자리에 둔다"
 status: Draft
 created: 2026-11-20
-updated: 2026-11-20
+updated: 2026-11-21
 author: claude
 supersedes: []
 superseded_by: null
@@ -262,7 +262,7 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 - 그래서 `Outside_text` 층은 「한 번 도착」이어야 한다. 매 턴 같은 보기를 다시 싣는 층은 이력에 같은 글이 쌓인다.
 - 층마다 둘 중 하나로 정한다.
   - 새로 온 것만 싣는다.
-  - 바뀌었을 때만 다시 싣는다. 마지막으로 실은 바이트는 하던 일 메시지처럼 ledger 에 들고 간다.
+  - 바뀌었을 때만 다시 싣는다. 무엇을 이미 실었는지는 창 안 메시지의 `metadata` 에서 읽는다(아래 「L5 에서 정하는 것」). 실은 바이트는 이력의 그 메시지에 있어 따로 들지 않는다.
 - 층마다 어느 쪽인지는 L5 설계에서 표로 정한다. Fleet 은 §4.2 와 같이 정한다.
 
 층별 표(2026-11-20 코드 기준, 「도착 방식」은 `Keeper_context_layers.resend_on_resume` 값):
@@ -285,7 +285,6 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 | `Completion_authority` | 섞임: 판정 까닭(운영자나 LLM 판정자) | 그 턴만 | 도착 | 없음 |
 | `Task_cancellations` | 섞임: 취소한 이의 까닭 | 그 턴만 | 도착 | 없음 |
 | `Pending_mentions` | 바깥 | 새 메시지, 답하거나 ack 할 때까지 매 턴 | 도착 | 없음, 전문 |
-| `Scope_messages` | 그리는 곳이 없다 | — | 도착 | — |
 | `Own_board_posts` | 섞임: 이 Keeper 의 글 제목·본문 | 새 글·답글·투표 수 | 바뀔 때 | 5개, 80자 |
 | `Board_activity` | 섞임, 거의 바깥(다른 Keeper·사람·connector) | 그 턴 묶음만 | 도착 | 줄 수 없음 |
 | `Own_recent_actions` | 섞임: 거절된 호출 인자·도구 오류 글 | 도구를 부른 턴마다 | 바뀔 때, 줄 단위 | 10턴, 요약 8개 × 240B |
@@ -294,6 +293,9 @@ Anthropic 공식 방법(Tool search tool, Custom tool search implementation):
 
 지금 자리(Agent Core):
 - `Active_goals`·`Goals_awaiting_proof` 는 System 꼬리다(`keeper_run_prompt.ml`). 둘 중 하나가 바뀌면 그 뒤 전체를 다시 쓴다. §1.3 의 「Goal 사건 하나 131만 토큰」이 이것이다.
+  - 접두사 규칙을 배포한 뒤에도 그대로다. 2026-11-20 01:35Z~14:00Z 에 같은 서버 프로세스 안에서 이어진 881턴을 셌다(#53938 「배포 뒤 측정」, 스크립트는 그 PR 의 「다시 돌리기」).
+  - 앞 턴과 처음 달라진 곳이 system 의 Goal 절인 턴이 4.3% 다. 그 턴들은 첫 요청 입력의 40.2% 만 캐시에서 읽었다(토큰 가중).
+  - 뒤에 덧붙기만 한 턴(60.5%)은 91.2% 를 읽었다.
 - 나머지 층은 첫 요청의 턴 문맥이다. 계약을 선언한 모델(`reasoning_replay = "turn_scoped_system_context_preserve_always"`)에서는 `clear_at` system 메시지로 간다.
 - Anthropic 레인은 지난 턴 문맥을 이력에 `Historical_system_context` 로 남겨 제자리에 다시 보낸다. 앞부분이 늘기만 하게 하려는 설계다(`message_origin_lowering.ml`). `clear_at` 계약 모델에서는 API 가 그 글을 입력에서 뺀다.
 
@@ -303,12 +305,28 @@ L5 에서 정하는 것:
   - 「바뀔 때」 층은 창이 이미 든 바이트면 싣지 않는다. 줄 단위 층은 창이 든 줄을 뺀다(#45131 과 같은 규칙).
   - 「도착」 층은 매번 싣는다. 그 턴에 온 것이라 이력에 같은 글이 쌓이지 않는다.
   - 예외는 `Pending_mentions` 다. 답할 때까지 같은 mention 을 매 턴 다시 그린다. User 자리로 옮기기 전에 줄 단위로 바꾸고, 창이 든 줄을 뺀다.
+- 줄의 sha 는 줄 바이트의 sha 다. 그래서 사건을 담은 줄(mention, Fleet 방송)은 원본 id 를 줄 바이트에 넣는다.
+  - 지금 mention 줄은 화자와 본문만 그린다. ack 커서인 `pending_message.message_id` 는 줄에 없다.
+  - 그대로 줄 단위로 바꾸면, 전에 답한 mention 과 화자·글이 같은 새 mention 이 창이 든 옛 줄로 보인다. 구획이 「안 바뀜」으로 빠져 Keeper 가 새 질문을 못 본다.
+  - 공식 클라이언트 재개에서 `Pending_mentions` 를 「바뀔 때」로 바꿔도 같다. `held_context` 는 그 구획이 없는 턴에도 옛 줄을 들고 가고, `held_run` 은 든 끝 줄과 지금 첫 줄을 견준다.
+  - Fleet 줄(`fleet_message`)은 id 를 버린다. 원본 `Keeper_chat_store.chat_message` 의 `id` 를 넣는다.
+  - 상태를 담은 줄(`Own_recent_actions`)은 지금처럼 바이트가 곧 정체다.
+  - id 를 그리지 않고 견주는 key 만 id 로 바꾸는 길도 있다. 바이트는 그대로지만 같은 글의 두 mention 을 모델이 가르지 못하고, 줄 sha 규칙이 둘로 갈린다. 그래서 고르지 않는다.
+  - 대가: 사건 줄마다 id 바이트가 는다.
 - 「창이 든 것」은 창 안 User 메시지가 실은 구획과 줄의 sha 다. 공식 클라이언트의 `held_context`(구획·줄 sha, `Keeper_official_client_session_store`)와 같은 모양이다.
-  - 창이 옮겨져 그 메시지가 빠지면 다음 턴에 다시 싣는다.
-  - 저장 자리는 접두사 규칙의 `Keeper_model_input_ledger` 와 맞춘다.
+- 「창이 든 것」은 따로 저장하지 않는다. 접두사 규칙 쪽과 2026-11-20 에 맞췄다.
+  - 턴 문맥을 실은 User 메시지가 자기 구획과 줄의 sha 를 메시지 `metadata` 로 든다.
+  - 그 칸은 타입이 있는 접근 모듈 하나로만 쓰고 읽는다. 지금의 `Conversation_metadata` 와 같은 방식이다.
+  - `metadata` 는 provider 요청에 실리지 않는다. Anthropic 직렬화(`backend_anthropic.ml`)는 이 칸을 읽지 않고, OpenAI Responses 는 자기 키(`openai.responses.phase`)만 읽는다. 그래서 sha 를 들어도 캐시에 닿는 바이트는 그대로다.
+  - `metadata` 로 요청 모양이 바뀌는 곳이 하나 있다. `api_common.ml` 이 tool result 뒤 User 메시지를 합칠 때 `Conversation_metadata.is_mergeable_followup` 으로 읽는다(speaker 말고 다른 키가 있으면 안 합친다). 그 합치기는 origin 이 `Recovery_instruction`·`Tool_result_followup` 인 메시지만 본다. 턴 문맥 메시지는 그 두 origin 을 쓰지 않는다.
+  - 무엇을 실을지는 투영이 창 시작을 고른 뒤 정한다. 고른 창에 든 메시지의 `metadata` 를 읽고, 창이 든 구획과 줄을 뺀다.
+  - 판정은 투영이 창 시작을 고를 때마다 다시 한다. 턴에 한 번이 아니다.
+    - 턴 첫 요청의 크기 신호와 checkpoint 뒤 사다리(#53817)도 투영 안에서 창을 옮긴다. 사다리는 hook 없이 투영만 다시 돌린다.
+    - 판정이 턴에 한 번이면, 창을 좁힌 요청이 그 턴 끝까지 빠진 구획 없이 나간다.
+  - 창이 옮겨져 그 메시지가 빠지면, 그 창을 고른 요청부터 다시 싣는다. 창 밖에 사본이 없어서 둘이 어긋날 수 없다.
+  - `Keeper_model_input_ledger` 에는 칸을 더하지 않는다.
 - `Active_goals` 는 바깥 글이다. System 꼬리에서 빼 「바뀔 때」 규칙으로 User 자리에 싣는다. 그러면 Goal 사건이 System 을 바꾸지 않는다.
 - `Goals_awaiting_proof` 는 호스트 상태지만 System 꼬리에 있다. 턴 문맥으로 옮길지 같이 정한다.
-- `Scope_messages` 는 그리는 곳이 없다. 죽은 층이라 지운다.
 
 ### 3.5 같은 규범 목록을 두 번 싣지 않는다
 
@@ -368,6 +386,7 @@ L5 에서 정하는 것:
 - 둘 중 무엇을 고를지는 L5 설계에서 같이 정한다.
 - 제안: 「바뀔 때」 분류는 그대로 두고 줄 단위로 바꾼다. 방송 하나가 줄 하나다.
   - 창이 든 줄은 빼므로 새 방송만 실린다.
+  - 줄에는 방송의 원본 id 를 넣는다. 글이 같은 새 방송이 창이 든 옛 줄로 보이지 않는다(§3.4).
   - 보기 한도 10줄도 그대로다. 오래 쉰 Keeper 도 가장 새 10개까지만 받는다. 지금 매 턴 보는 범위와 같다.
   - ack 커서는 쓰지 않는다. 받은 범위를 바꾸는 결정이라 이 RFC 밖이다.
 
@@ -406,7 +425,7 @@ L5 에서 정하는 것:
 | L2 | §3.1 catalog 계약 (#53759), 모델 행의 1시간 값 (#53779), 가격 계산 (#53780), binding `cache-retention` 선언 (#53760) | D1 |
 | L3 | §3.2 요청이 고른 유지 시간 기록(L3a), provider 기본 유지 시간 선언(L3b), 캐시 결과 투영과 TUI(L3c) | D1 |
 | L4 | §3.3 Anthropic 도구 불러오기 | D2, 운영자 실제 호출 확인 |
-| L5 | §3.4 역할 나눔과 층별 도착 방식, `Scope_messages` 지움 | D3, §3.4 층별 표 리뷰 |
+| L5 | §3.4 역할 나눔과 층별 도착 방식, 사건 줄의 원본 id | D3, §3.4 층별 표 리뷰 |
 | L6 | §4.1 회상 본문 창 머리 | 접두사 규칙 쪽 재검토 |
 
 ## 8. 검증
@@ -416,6 +435,8 @@ L5 에서 정하는 것:
 - L3: 이 RFC §1.3 의 표를 투영으로 다시 낸다. 같은 기록이면 같은 표가 나온다. 비용 행의 `cache_write_lifetime` 이 그 요청 binding 의 선언과 같다. 선언을 바꾼 앞뒤 턴은 각자의 값으로 센다.
 - L4: 운영자가 실제 호출로 본다. 불러오기 직후 요청이 앞 요청의 입력을 캐시에서 읽는다.
 - L5: 층마다 실린 역할을 요청 캡처로 센다. 이력에 같은 글이 두 번 쌓이지 않는다.
+- L5: 답한 mention 과 화자·글이 같은 새 mention 은 새 줄로 실린다. 공식 클라이언트 재개와 Agent Core User 자리를 둘 다 본다.
+- L5 전후: #53938 의 `prefix_rows_with_hits.py` 로 「앞 턴과 처음 달라진 곳」 표를 다시 낸다. system 의 Goal 절 줄(배포 뒤 4.3%, 적중 40.2%)에 `Goals_awaiting_proof` 가 바뀐 턴만 남는지 본다. 요청 끝 문맥 줄(9.6%, 84.9%)이 덧붙기만 한 줄로 옮겨 가는지 본다.
 - L6 전: 레인별 안쪽 요청 크기에 머리를 더한 분포, 창을 연 때의 집합과 k 턴 뒤 집합의 겹침을 잰다. 둘을 넣은 계산이 이득을 보일 때만 코드로 간다.
 - L6 뒤: 회상 Keeper 의 안 닿은 입력, 창 옮김 비율, 턴 가운데 넘침을 레인별로 전후 견준다.
 

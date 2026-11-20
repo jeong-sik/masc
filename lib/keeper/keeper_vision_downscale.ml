@@ -1,5 +1,5 @@
 (** Image downscaling boundary for keeper vision calls.
-    RFC-0414 follow-up / Issue #33075. *)
+    Issue #33075. *)
 
 let max_dimension () = Env_config_keeper.KeeperVision.max_dimension ()
 

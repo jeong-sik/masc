@@ -1,5 +1,4 @@
 (** Impure shell of the [analyze_image] keeper tool.
-    RFC-keeper-vision-delegation-tool §2.6.
 
     Loads an image artifact (raw bytes) from {!Multimodal.Vision_artifact_store},
     base64-encodes it into a one-shot [text; image] message, sub-calls
@@ -7,7 +6,7 @@
     via {!Multimodal.Vision_analyze}. The image is read only inside this sub-call;
     it never enters the keeper's own
     conversation. Every failure path is a typed JSON error — never a silent empty
-    success (the failure class the RFC targets).
+    success.
 
     Uses the shared {!Keeper_provider_subcall} boundary, so the tool owns no
     wall-clock cancellation layer.
@@ -177,7 +176,7 @@ val run_vision
   -> unit
   -> vision_outcome
 (** The one-shot vision sub-call core (runtime resolution + Provider-boundary
-    call + §2.2 classification). Used by {!handle} and by eager ingestion.
+    call + reply classification). Used by {!handle} and by eager ingestion.
 
     Only [runtime.media_failover] declares standalone image candidates; exact
     output lane slots do not implicitly join that fleet. Image-capable Codex

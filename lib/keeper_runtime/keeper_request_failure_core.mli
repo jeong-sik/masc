@@ -1,4 +1,4 @@
-(** An agent-core error projected into a value MASC owns (RFC-0454 §2.2).
+(** An agent-core error projected into a value MASC owns.
 
     [category] is agent-core's own closed projection of its error type;
     [message] is [Agent_core.Error.to_string], a sentence for people. No code
@@ -8,11 +8,7 @@
 
     The module sits below [Keeper_internal_error] and carries no MASC error of
     its own, which is what lets [Keeper_terminal_effect_detail] name it
-    without the two modules forming a cycle.
-
-    RFC-0454 P2 widens this into one constructor per agent-core failure
-    (rate limited, payment required, context overflow, …). The two fields here
-    are what P1b needs and what that widening replaces. *)
+    without the two modules forming a cycle. *)
 
 type t =
   { category : Agent_core.Error.category

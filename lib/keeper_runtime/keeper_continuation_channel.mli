@@ -1,9 +1,9 @@
 (** Keeper_continuation_channel — the connector/channel a wake or approval
-    should continue the conversation on (RFC-0320).
+    should continue the conversation on.
 
-    Captured at submission time (approval create, mention intake) and, in later
-    waves, carried through the wake payload so a resumed keeper replies where
-    the conversation started instead of proceeding on its own state.
+    Captured at submission time (approval create, mention intake) and carried
+    through the wake payload so a resumed keeper replies where the
+    conversation started instead of proceeding on its own state.
 
     [Unrouted] is the fail-closed value: when the originating connector cannot
     be determined it is represented explicitly rather than defaulting to a
@@ -151,5 +151,5 @@ val to_yojson : t -> Yojson.Safe.t
     missing or unknown ["kind"], a missing or blank required field, or a
     blank/non-string connector coordinate is an [Error]. Only absent or null
     optional coordinates become [None]; there are no field aliases or
-    permissive defaults (RFC-0320 §2 fail-closed). *)
+    permissive defaults. *)
 val of_yojson : Yojson.Safe.t -> (t, string) result

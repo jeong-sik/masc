@@ -14,8 +14,8 @@ type t =
    Matched by constructor. Stripping a prefix off the rendered string would be
    one new "Internal ..." sentence away from cutting a real message.
 
-   A carried MASC error's payload is its own prefixed JSON, which is the
-   escaping RFC-0454 removes. Both producers classify before they reach here
+   A carried MASC error's payload is its own prefixed JSON, which would sit
+   escaped inside [message]. Both producers classify before they reach here
    (the header says so), and that precondition carries the same weight either
    way: [to_string] would have written the same payload behind the prefix. *)
 let message_of_core_error = function

@@ -1,9 +1,8 @@
-(* A derived read index over the keeper tool-call ledger. See the .mli and
-   RFC-0437. The SQLite settings match Tool_metrics_store, which has run this
-   shape since RFC-0398: WAL so a reader does not block the writer, NORMAL
-   because losing the index to a crash costs a rebuild rather than data, and
-   a busy timeout so two fibers racing the same advance wait instead of
-   failing. *)
+(* A derived read index over the keeper tool-call ledger. See the .mli. The
+   SQLite settings match Tool_metrics_store, which runs this shape: WAL so a
+   reader does not block the writer, NORMAL because losing the index to a
+   crash costs a rebuild rather than data, and a busy timeout so two fibers
+   racing the same advance wait instead of failing. *)
 
 open Result.Syntax
 

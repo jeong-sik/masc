@@ -638,9 +638,7 @@ let summary_of_masc_internal_error = function
      same reason for all four: a chat row's only carrier for the cause is its
      text, and [Keeper_agent_error.user_message_of_core_error] puts a summary
      there in place of the envelope the pane reads. Answering here would hand
-     the pane a sentence and take the value away, which is the exchange
-     RFC-0454 exists to undo. The row gets a typed [failure] field in P3
-     (RFC-0454 D3); these arms answer then. *)
+     the pane a sentence and take the value away. *)
   | Host_stopped_turn _
   | Runtime_connection_closed _
   | Resumable_cli_session _

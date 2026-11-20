@@ -43,7 +43,7 @@ type resources = {
       package, the namespaced observation the host retains, the model request
       and result it stores, and the record it reads back. A worker reply that
       fits may still be refused when host identity prefixes exceed the same
-      observation envelope. RFC-0471 narrows this to the worker message. *)
+      observation envelope. *)
 }
 
 (** The one definition of a resource declaration the host can run. The manifest

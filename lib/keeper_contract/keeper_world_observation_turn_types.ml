@@ -31,10 +31,9 @@ type event_queue_trigger =
   | Tool_result_ready_stimulus
   | Scheduled_automation_stimulus
   | Connector_attention_stimulus
-      (** RFC-connector-ambient-attention-wake P1: an ambient connector message
-          recorded as Keeper_external_attention. Edge-triggered (dequeued once),
-          carries an event_id pointer (not content). Dormant until a producer
-          enqueues it (P3). *)
+      (** An ambient connector message recorded as Keeper_external_attention.
+          Edge-triggered (dequeued once), carries an event_id pointer (not
+          content). *)
   | Ask_answered_stimulus
   | Hitl_resolved_stimulus
       (** An operator resolved a gated-tool approval this keeper
@@ -141,8 +140,7 @@ let skip_reason_to_string = function
 
 (* Canonical wire encoding. [Reactive] serialises as "turn" (the value the
    majority of producers + the JSON default already emit); the prior
-   "reactive" spelling is dropped (RFC-0020 Phase 1 PR-3, owner decision
-   2026-06-15). *)
+   "reactive" spelling is dropped. *)
 let channel_to_string = function
   | Reactive -> "turn"
   | Scheduled_autonomous -> "scheduled_autonomous"

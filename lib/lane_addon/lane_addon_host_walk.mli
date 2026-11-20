@@ -1,5 +1,4 @@
-(** One listing of a host cycle, walked in order (RFC
-    host-cycle-runs-exact-requests-side-by-side 3.3 and 3.5). A listing is
+(** One listing of a host cycle, walked in order. A listing is
     one page or several (RFC
     librarian-read-waits-and-shrinks-no-further-than-the-refusal-says 3.1).
 

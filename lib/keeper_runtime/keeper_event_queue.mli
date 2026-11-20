@@ -128,12 +128,11 @@ type stimulus_payload =
           targeted this keeper. The Scheduler owns timing/approval; the keeper
           receives only a typed wake with the operator-authored message. *)
   | Connector_attention of connector_attention
-      (** RFC-connector-ambient-attention-wake: an ambient connector message
-          recorded as [Keeper_external_attention]. Carries the [event_id]
-          pointer into that durable store (not the content), so the wake reads
-          content on the turn path and there is no payload duplication.
-          Edge-triggered: dequeued once, re-armed only by a new ambient
-          message. Dormant until [handle_ambient] enqueues it (P3). *)
+      (** An ambient connector message recorded as [Keeper_external_attention].
+          Carries the [event_id] pointer into that durable store (not the
+          content), so the wake reads content on the turn path and there is no
+          payload duplication. Edge-triggered: dequeued once, re-armed only by
+          a new ambient message. *)
   | Hitl_resolved of hitl_resolution
   | Ask_answered of ask_answered
       (** A question this keeper asked a human has been answered. Carries the
@@ -564,8 +563,7 @@ val urgency_of_string : string -> (urgency, string) result
 val connector_attention_channel :
   stimulus_payload -> Keeper_continuation_channel.t option
 (** [Some channel] iff the payload is [Connector_attention], carrying its
-    routed channel. [None] for every other payload kind (RFC-0377 batch
-    intake). *)
+    routed channel. [None] for every other payload kind. *)
 
 val stimulus_to_yojson : stimulus -> Yojson.Safe.t
 (** Stable JSON representation used by MASC-owned durable queue snapshots. *)

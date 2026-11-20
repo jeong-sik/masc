@@ -7,10 +7,7 @@
     those quotes.
 
     This module recognises the costume and says what the gate would have made of
-    the text underneath.  It does not change what runs.  RFC
-    execute-subset-dispositions step 1: the distribution of {!finding} over live
-    traffic is what decides which constructs the subset resolves next, and a
-    script hidden inside [argv] is currently counted as nothing at all. *)
+    the text underneath.  It does not change what runs. *)
 
 type t = private {
   shell : string;  (** [argv\[0\]] with any directory stripped, e.g. ["sh"] *)

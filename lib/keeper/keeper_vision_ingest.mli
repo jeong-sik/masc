@@ -14,9 +14,9 @@
 
     Gated by {!delegates_media} on the assigned lane, not by a stored setting:
     a lane with a candidate that takes provider content blocks and declares
-    image input keeps its images (RFC-0265 reroutes there, and seeing the pixels
+    image input keeps its images (dispatch reroutes there, and seeing the pixels
     beats any reading); a lane with no such candidate evicts instead of letting
-    RFC-0265 drop the image. Claude Code and Codex carry images; Antigravity
+    the reroute drop the image. Claude Code and Codex carry images; Antigravity
     carries text only. Per-candidate fallback projection handles a later
     text-only candidate after a native image candidate fails. Idempotent: a [Text]
     placeholder is not an [Image], so re-running is a no-op. *)
@@ -35,14 +35,14 @@ val eager_read_eviction_reason_of_outcome
 
 val delegates_media : runtime_id:string -> bool
 (** Whether the lane [runtime_id] resolves to needs its images read for it.
-    [false] as soon as one candidate takes an [Image] itself — RFC-0265 then
+    [false] as soon as one candidate takes an [Image] itself — dispatch then
     reroutes the turn to that candidate and the answering model sees the pixels.
     A candidate takes one when its transport carries images (Agent Core content
     blocks, the Claude Code stream-json array, or the Codex turn/start input
     list) AND its model declares image input; Antigravity sends prompt text
     only, so an [Image] cannot reach it whatever the model declares. [true] when no candidate qualifies,
     and for an id that resolves to no lane — evicting keeps the image, and the
-    alternative (RFC-0265 [No_capable_runtime]) drops it. *)
+    alternative (a [No_capable_runtime] reroute decision) drops it. *)
 
 val evict_blocks
   :  ?base_path:string

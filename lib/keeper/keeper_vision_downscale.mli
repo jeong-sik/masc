@@ -1,5 +1,5 @@
 (** Downscales images exceeding maximum dimensions before sending to vision models.
-    RFC-0414 follow-up / Issue #33075.
+    Issue #33075.
 
     The original artifact stored in {!Multimodal.Vision_artifact_store} is
     preserved at full resolution; only the provider request payload is scaled.

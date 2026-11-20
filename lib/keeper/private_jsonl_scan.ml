@@ -10,16 +10,10 @@ let error_to_string = function
   | Moved -> "the file was cut or replaced while it was being read"
 ;;
 
-(* The window reader also hands over the row before the window, walking back
-   until this says yes. No scan here wants that row, so it takes the first
-   one: answering no would walk back to the start of the file for every
-   window. *)
-let nearest_row (_ : string) = true
-
 let window path ~from ~rows_per_read =
   match
     Fs_compat.read_private_jsonl_window_locked_result path ~from ~max_rows:rows_per_read
-      ~previous_row_wanted:nearest_row
+      ~previous_row_wanted:No_previous_row
   with
   | Fs_compat.Private_file_failed error
   | Fs_compat.Private_file_failed_with_cleanup_failure { error; _ } ->

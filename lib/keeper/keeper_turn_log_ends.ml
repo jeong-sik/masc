@@ -41,7 +41,7 @@ let after_last_line_break store path =
   match
     settled
       (Fs_compat.read_private_jsonl_window_locked_result path ~from:0 ~max_rows:1
-         ~previous_row_wanted:(fun (_ : string) -> false))
+         ~previous_row_wanted:No_previous_row)
   with
   | Ok Fs_compat.Private_jsonl_window.Window_missing -> Ok 0
   | Ok (Window_present { rows_end; _ }) -> Ok rows_end

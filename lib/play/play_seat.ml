@@ -1,5 +1,4 @@
-(* Who sits at the shared machine (RFC play-link-for-the-shared-machine §2.6,
-   §2.8). *)
+(* Who sits at the shared machine. *)
 
 let keeper_names config =
   Result.map

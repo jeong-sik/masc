@@ -56,7 +56,9 @@ let row ?(agent = keeper) ?(runtime = runtime_a) ?latency_ms ?lifetime ~turn ~at
 
 let turn_ref turn = Ids.Turn_ref.make ~trace_id:trace ~absolute_turn:turn
 let one_hour _runtime_id = 3600.0
-let claude_default runtime_id = if String.equal runtime_id runtime_a then Some 300.0 else None
+let claude_default runtime_id =
+  if String.equal runtime_id runtime_a then Ok 300.0 else Error Outcome.Default_undeclared
+;;
 let user text = T.text_message T.User text
 
 (* A snapshot of a turn whose last request [runtime] answered: the system
@@ -257,6 +259,36 @@ let test_the_lifetime_check_allows_the_clock_second () =
   check_at 299. "within"
 ;;
 
+let test_an_inactive_runtime_leaves_its_default_unknown () =
+  let request ~at : Outcome.request =
+    { Outcome.turn_ref = turn_ref 1
+    ; runtime_id = runtime_b
+    ; scope = Runtime_usage_scope.Per_request
+    ; ended_at = t0 +. at
+    ; latency_ms = Some 1_000
+    ; cache_read_tokens = None
+    ; cache_creation_tokens = None
+    ; lifetime = Some provider_default
+    }
+  in
+  let lifetime =
+    match
+      Outcome.idle
+        ~provider_default_s:(fun _ -> Error Outcome.Runtime_inactive)
+        ~earlier:(request ~at:10.)
+        ~current:(request ~at:400.)
+    with
+    | Outcome.Start_unrecorded -> "start unrecorded"
+    | Outcome.Idle { lifetime = Outcome.Lifetime_unrecorded; _ } -> "unrecorded"
+    | Outcome.Idle { lifetime = Outcome.Provider_default_unknown Outcome.Default_undeclared; _ }
+      -> "undeclared"
+    | Outcome.Idle { lifetime = Outcome.Provider_default_unknown Outcome.Runtime_inactive; _ }
+      -> "runtime inactive"
+    | Outcome.Idle { lifetime = Outcome.Lifetime_declared _; _ } -> "declared"
+  in
+  check string "not the catalog's silence" "runtime inactive" lifetime
+;;
+
 let test_snapshots_compare_the_two_turns () =
   let request turn : Outcome.request =
     { Outcome.turn_ref = turn_ref turn
@@ -332,6 +364,8 @@ let () =
     ; ( "outcome"
       , [ test_case "the lifetime check allows the clock second" `Quick
             test_the_lifetime_check_allows_the_clock_second
+        ; test_case "an inactive runtime leaves its default unknown" `Quick
+            test_an_inactive_runtime_leaves_its_default_unknown
         ; test_case "snapshots compare the two turns" `Quick
             test_snapshots_compare_the_two_turns
         ] )

@@ -196,6 +196,7 @@ binding 에 두는 까닭:
 - provider 기본 유지 시간.
   - catalog provider 행이 초로 선언한다. claude 는 300 이다(공식 문서).
   - 선언이 없는 provider 는 「유지 시간 넘김」을 판정하지 않고 쉰 시간만 보인다. 지금 GLM 이 그렇다(§9).
+  - 지금 설정에서 빠진 runtime 도 판정하지 않는다. 어느 provider 가 답했는지 알 수 없어서다. 이 경우는 「선언 없음」과 따로 적는다. 운영자가 고칠 곳이 다르다(catalog 와 runtime 설정).
   - `One_hour` 는 등급 자체가 3600초라 따로 선언하지 않는다.
 - provider 응답의 등급별 쓰기 토큰(`cache_creation.ephemeral_1h_input_tokens`)은 읽지 않는다.
   - 청구의 진실은 그 값이다. 다만 두 응답 파서(stream·non-stream)를 고쳐야 하고, Anthropic 호환 endpoint 가 그 값을 주는지는 모른다.

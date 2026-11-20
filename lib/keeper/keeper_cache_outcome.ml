@@ -299,9 +299,13 @@ type lifetime_check =
   | Within
   | Undecided
 
+type default_unknown =
+  | Default_undeclared
+  | Runtime_inactive
+
 type lifetime =
   | Lifetime_unrecorded
-  | Provider_default_undeclared
+  | Provider_default_unknown of default_unknown
   | Lifetime_declared of
       { lifetime_s : float
       ; check : lifetime_check
@@ -385,8 +389,8 @@ let idle ~provider_default_s ~(earlier : request) ~(current : request) =
       | Some Agent_core.Types.One_hour -> declared one_hour_s
       | Some Agent_core.Types.Provider_default ->
         (match provider_default_s earlier.runtime_id with
-         | Some lifetime_s -> declared lifetime_s
-         | None -> Provider_default_undeclared)
+         | Ok lifetime_s -> declared lifetime_s
+         | Error unknown -> Provider_default_unknown unknown)
     in
     Idle { idle_s; lifetime }
   | None, (Some _ | None) | Some _, None -> Start_unrecorded
@@ -526,9 +530,17 @@ let lifetime_check_to_string = function
   | Undecided -> "undecided"
 ;;
 
+let default_unknown_to_string = function
+  | Default_undeclared -> "undeclared"
+  | Runtime_inactive -> "runtime_inactive"
+;;
+
 let lifetime_to_json = function
   | Lifetime_unrecorded -> tagged "unrecorded" []
-  | Provider_default_undeclared -> tagged "provider_default_undeclared" []
+  | Provider_default_unknown unknown ->
+    tagged
+      "provider_default_unknown"
+      [ "reason", `String (default_unknown_to_string unknown) ]
   | Lifetime_declared { lifetime_s; check } ->
     tagged
       "declared"
@@ -649,12 +661,12 @@ let walk_ledger store walk ~born_at ~until =
 ;;
 
 let read ~config ~keeper ~turn_ref ~born_at ~provider_default_s =
-  (* A runtime whose provider declares no default is searched for an hour
-     back: the longest lifetime a request can name. *)
+  (* A runtime whose default is not known is searched for an hour back: the
+     longest lifetime a request can name. *)
   let horizon_s runtime_id =
     match provider_default_s runtime_id with
-    | Some lifetime_s -> Float.max one_hour_s lifetime_s
-    | None -> one_hour_s
+    | Ok lifetime_s -> Float.max one_hour_s lifetime_s
+    | Error (Default_undeclared | Runtime_inactive) -> one_hour_s
   in
   let manifest turn_ref = Snapshot.read_manifest ~config ~keeper ~turn_ref in
   let view result =

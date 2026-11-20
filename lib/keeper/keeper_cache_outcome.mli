@@ -76,12 +76,20 @@ type lifetime_check =
       (** The rows give each start to the second, and the lifetime falls
           inside that uncertainty. *)
 
+(** Why the length of a provider's default lifetime is not known. *)
+type default_unknown =
+  | Default_undeclared
+      (** The catalog row of the runtime's provider declares no length. *)
+  | Runtime_inactive
+      (** The runtime is not active in the running configuration, so which
+          provider answered it is not known. *)
+
 type lifetime =
   | Lifetime_unrecorded
       (** The earlier row names no lifetime: rows did not record one yet. *)
-  | Provider_default_undeclared
-      (** The earlier request used the provider's default lifetime, and the
-          catalog declares no length for it. *)
+  | Provider_default_unknown of default_unknown
+      (** The earlier request used its provider's default lifetime, whose
+          length is not known. *)
   | Lifetime_declared of
       { lifetime_s : float
       ; check : lifetime_check
@@ -159,9 +167,12 @@ val snapshot_view : Keeper_provider_input_snapshot.manifest -> snapshot_view
 val lifetime_check : idle_s:float -> lifetime_s:float -> lifetime_check
 
 val idle :
-  provider_default_s:(string -> float option) -> earlier:request -> current:request -> idle
-(** [provider_default_s runtime_id] is the catalog's default lifetime for the
-    provider that answers [runtime_id]. *)
+  provider_default_s:(string -> (float, default_unknown) result) ->
+  earlier:request ->
+  current:request ->
+  idle
+(** [provider_default_s runtime_id] is the default lifetime the catalog
+    declares for the provider that answers [runtime_id]. *)
 
 val compare_prefix :
   earlier:request ->
@@ -180,7 +191,7 @@ type reading =
 
 val reading_of_walk :
   walk ->
-  provider_default_s:(string -> float option) ->
+  provider_default_s:(string -> (float, default_unknown) result) ->
   current_snapshot:(snapshot_view, string) result ->
   earlier_snapshot:(Ids.Turn_ref.t -> (snapshot_view, string) result) ->
   reading
@@ -200,7 +211,7 @@ val read :
   keeper:string ->
   turn_ref:Ids.Turn_ref.t ->
   born_at:float ->
-  provider_default_s:(string -> float option) ->
+  provider_default_s:(string -> (float, default_unknown) result) ->
   (reading, read_error) result
 (** Walks the cost ledger from the day the turn's snapshot was written, or
     from today when it has none, back at most to the day the Keeper was

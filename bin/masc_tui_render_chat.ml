@@ -283,7 +283,9 @@ let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
       | Message_layout.Markdown_streaming ->
           chat_markdown ~context ~width body)
   in
-  body_rows @ journal
+  (* A cached render's own list, uncopied when there is no journal, so the
+     layout's kept rows recognise it by identity. *)
+  match journal with [] -> body_rows | _ :: _ -> body_rows @ journal
 
 
 type mapped_chat_body = { mapped_rows : string list; runs : Search.run list; unavailable : bool }

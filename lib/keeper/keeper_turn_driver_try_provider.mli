@@ -293,8 +293,7 @@ val choose_range_start :
     a-sent-request-prefix-changes-only-when-the-window-moves §3.3). With a known
     [turn_boundary], an [accepted] past it is moved back to it (rule 7). A
     front rule 8 moved to where this turn began
-    ({!Keeper_carried_front.This_turn_start_after_seed_refusal},
-    {!Keeper_carried_front.This_turn_start_after_librarian_refusal}) is
+    ({!Keeper_carried_front.This_turn_start_after_refusal}) is
     bounded instead by the later of [turn_boundary] and where this turn
     began ([this_turn_start], {!turn_starts}), and by [turn_boundary] when
     that start is not known.
@@ -671,11 +670,10 @@ val turn_boundary_resend_sequence :
     [attempt] (RFC keeper-context-window-in-tokens §13.4; RFC
     librarian-lifecycle §4.10, rule 1). When [attempt] fails with a refusal
     {!boundary_resend_on} names, [refused_range] reports that the refused range opened on a seed
-    ({!Keeper_carried_front.Carried}), a Librarian point, or an accepted
-    start past one, at its first atom, [turn_start_front] names the turn
-    boundary strictly after that atom
-    ({!Keeper_carried_front.Turn_start_after_seed_refusal} or
-    {!Keeper_carried_front.Turn_start_after_librarian_refusal}), and
+    ({!Keeper_carried_front.Carried}), the Memory writer's read end
+    ({!Keeper_carried_front.Covered}), or an accepted start past it, at its
+    first atom, [turn_start_front] names the turn boundary strictly after
+    that atom ({!Keeper_carried_front.Turn_start_after_refusal}), and
     [same_run_retry_authorized] holds, the boundary is given to [hold_front]
     as the turn's front, [on_turn_start] is told, and [attempt] runs once
     more; its result is returned as it is. When that second attempt is
@@ -703,8 +701,7 @@ val this_turn_start_resend_sequence :
     [first] fails with a refusal {!is_size_refusal} names,
     [same_run_retry_authorized] holds, and [this_turn_front] names where this
     turn began strictly after [refused_first_atom]
-    ({!Keeper_carried_front.This_turn_start_after_seed_refusal} or
-    {!Keeper_carried_front.This_turn_start_after_librarian_refusal}), that
+    ({!Keeper_carried_front.This_turn_start_after_refusal}), that
     front goes to [hold_front], [on_this_turn_start] is told, and [attempt]
     runs once more;
     its result is returned as it is. When that attempt is refused for a reason
@@ -919,12 +916,6 @@ type request_view =
     runtime whatever reasoning each replays or deletes. *)
 
 module For_testing : sig
-  val this_turn_front_source : continuity -> Keeper_carried_front.source
-  (** The source of a front rule 8 moves to where this turn began:
-      {!Keeper_carried_front.This_turn_start_after_librarian_refusal} with a
-      Librarian point, {!Keeper_carried_front.This_turn_start_after_seed_refusal}
-      without one. *)
-
   val observe_provider_lease :
     now:(unit -> float) -> on_yield:(unit -> unit) option ->
     on_resume:(unit -> unit) option ->

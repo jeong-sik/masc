@@ -261,11 +261,11 @@ type carried_start_front =
           this turn's boundary or on the newest atom alone, and stays at the
           refused start when the history has no later atom
           (RFC-librarian-lifecycle §4.10). *)
-  | Librarian_working_state of { end_atom : int }
+  | Covered_with_working_state of { end_atom : int }
       (** The Memory writer read the history through [end_atom]; the range
           starts there and carries the working state the writer committed
           instead of the atoms before it. *)
-  | Librarian_progress of { end_atom : int }
+  | Covered of { end_atom : int }
       (** The Memory writer read the history through [end_atom]; the range
           starts there, the atoms before it are in the keeper's memory, and
           nothing stands in for them. *)
@@ -295,20 +295,20 @@ let carried_start_front_to_string = function
   (* The same word the Agent Core lane logs for a range that opens at the
      writer's read end ([Keeper_carried_front.origin_to_string]), so one
      search finds both. *)
-  | Librarian_progress _ -> "librarian_progress"
-  | Librarian_working_state _ -> "librarian_progress_with_working_state"
+  | Covered _ -> "covered"
+  | Covered_with_working_state _ -> "covered_with_working_state"
 ;;
 
 let warn_if_sent_on_unknown_start ~keeper_name = function
   | Turn_start_unknown { reason } ->
     Keeper_carried_front.warn_range_opens_on_newest_atom ~keeper_name ~reason
-  | Carried_seed _ | Lane_cut | Turn_start | Past_refused_start _ | Librarian_working_state _
-  | Librarian_progress _ -> ()
+  | Carried_seed _ | Lane_cut | Turn_start | Past_refused_start _ | Covered_with_working_state _
+  | Covered _ -> ()
 ;;
 
 let continuity_observation_input ~trace_id ~continuity front =
   match front, continuity with
-  | (Librarian_working_state { end_atom } | Librarian_progress { end_atom }), _ ->
+  | (Covered_with_working_state { end_atom } | Covered { end_atom }), _ ->
     Keeper_continuity_observation.Absorbed { trace_id; end_atom }
   | (Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _), None ->
     Keeper_continuity_observation.Not_applied
@@ -550,11 +550,11 @@ let carried_start_range_on_source
       (* The writer read through [end_atom] and committed no working state:
          the atoms before it are in the keeper's memory and nothing stands
          in for them, as on the Agent Core lane
-         ([Keeper_carried_front.Librarian_progress]). Keep the newest atom
+         ([Keeper_carried_front.Covered]). Keep the newest atom
          unless an accepted empty boundary already permits omitting it. *)
       Plain
         ( librarian_first_atom end_atom
-        , Librarian_progress { end_atom } )
+        , Covered { end_atom } )
     | ( None
       , ( Keeper_turn_driver_try_provider.Covered _
         | Keeper_turn_driver_try_provider.No_read_end ) ) ->
@@ -569,7 +569,7 @@ let carried_start_range_on_source
          [working_state_message] for what that place is on each client. *)
       ( working_state_message working_state :: messages
       , first_atom
-      , Librarian_working_state { end_atom = absorbed_through } )
+      , Covered_with_working_state { end_atom = absorbed_through } )
     | Plain (first_atom, front) -> messages, first_atom, front
   in
   (* The cut is the same for every front. The window's omission preamble
@@ -587,7 +587,7 @@ let carried_start_range_on_source
   in
   (match plan with
    | Absorbed_through { first_atom; absorbed_through = librarian_end; _ }
-   | Plain (first_atom, Librarian_progress { end_atom = librarian_end })
+   | Plain (first_atom, Covered { end_atom = librarian_end })
      when librarian_end > first_atom ->
      (* The Librarian read through the turn this request answers, with or
         without a working state to show for it. The atom is sent again, so
@@ -604,7 +604,7 @@ let carried_start_range_on_source
    | Plain
        ( _
        , ( Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
-         | Librarian_working_state _ | Librarian_progress _ ) ) -> ());
+         | Covered_with_working_state _ | Covered _ ) ) -> ());
   Log.Keeper.info
     ~keeper_name
     "model input carried range runtime=%s origin=%s first_atom=%d atoms=%d/%d \
@@ -746,9 +746,9 @@ let working_state_left_out_detail = function
 
 let carries_working_state (windowed : windowed_range) =
   match windowed.carried.front with
-  | Librarian_working_state _ -> true
+  | Covered_with_working_state _ -> true
   | Carried_seed _ | Lane_cut | Turn_start | Turn_start_unknown _ | Past_refused_start _
-  | Librarian_progress _ -> false
+  | Covered _ -> false
 ;;
 
 (* A zero-width range can already be the request the provider accepted.
@@ -772,7 +772,7 @@ let has_accepted_empty_range (carried : carried_start) =
    gap the lane's own cut exists to keep out of the range. So the range is
    composed with it first; when that window kept every atom of the range, it
    goes. Otherwise the same position is composed alone
-   ([Librarian_progress] at the read end: the atoms before it are in
+   ([Covered] at the read end: the atoms before it are in
    the keeper's memory, and nothing stands in for them), and the working
    state goes only if the window kept as many atoms with it as without it
    and at least the newest one. An explicitly accepted empty range also

@@ -4087,39 +4087,39 @@ status: reference
   그 위치를 쓴다. 완료 turn 경계로 옮긴 위치는 같은 turn의 다음 후보에도 전달한다.
   다른 History의 위치는 witness digest가 맞지 않으면 쓰지 않는다.
   → [Model_input_front.t](../../lib/types/model_input_front.mli)
-  이 위치의 출처(`Keeper_carried_front.origin`)는 여섯이다 — `Carried`(seed에서 온
-  위치: 원장, turn 기록, 시작 위치 근거나 Librarian 범위 거절 뒤 turn 경계),
-  `Librarian_snapshot`(하던 일 저장본이 대신하는 경계),
-  `Librarian_progress`(저장본이 이 History에 맞지 않을 때 Librarian의 durable Read
-  Position), `Past_librarian_point`(Librarian 지점이 뒤처져 있고 provider가 수용한
+  이 위치의 출처(`Keeper_carried_front.origin`)는 다섯이다 — `Carried`(seed에서 온
+  위치: 원장, turn 기록, 크기 거절 뒤 turn 경계),
+  `Covered`(Keeper의 Memory writer가 이 History에서 읽은 끝(read end): 그 앞 Atom은
+  Memory에 있어 다시 보내지 않고, writer가 커밋한 하던 일 상태가 있으면 그 자리에 싣는다),
+  `Past_librarian_point`(읽은 끝이 뒤처져 있고 provider가 수용한
   시작점이 앞서 있을 때 그 수용된 자리에서 시작하는 경계),
-  `Turn_start`(앞머리도 맞는 저장본도 없음: 이 History에서 마지막으로
+  `Turn_start`(읽은 끝도 맞는 seed도 없음: 이 History에서 마지막으로
   끝난 turn이 끝난 자리에서 시작한다), `Turn_start_unknown`(그 경계마저 못 읽음:
-  가장 새 Atom 하나에서 시작한다). Agent Core는 맞는 저장본 → Librarian이 읽은
-  위치 → Librarian 지점 뒤 수용된 시작점 → 이 History에 맞는 원장·시작 위치 근거 → 마지막으로
-  끝난 turn의 경계 순으로 고른다(`choose_range_start`).
-  Librarian 지점이 있으면 원장·시작 위치 근거는 읽지 않는다. Librarian 지점이 있거나 그 뒤의
+  가장 새 Atom 하나에서 시작한다). Agent Core는 읽은 끝 → 읽은 끝 뒤 수용된 시작점 →
+  이 History에 맞는 원장·시작 위치 근거 → 마지막으로 끝난 turn의 경계 순으로 고른다
+  (`choose_range_start`).
+  읽은 끝이 있으면 원장·시작 위치 근거는 읽지 않는다. 읽은 끝이나 그 뒤의
   수용된 시작점에서 열린 요청이 크기 때문에 거절되면, 도구 마커 재전송 전에 마지막으로
-  완료된 turn 경계부터 동일 후보에 한 번 더 보낸다(`Turn_start_after_librarian_refusal`,
+  완료된 turn 경계부터 동일 후보에 한 번 더 보낸다(`Turn_start_after_refusal`,
   RFC librarian-lifecycle §4.10, rule 1). 이 경계 재전송(`turn_boundary_resend_sequence`)은
   typed size 거절뿐 아니라 실시간 크기 거절 도착 형태인 `Unknown_invalid_request`에도
   동작한다(`boundary_resend_on`). 만약 재전송이 크기와 무관한 사유(도구 스키마 오류나
   미지원 파라미터 등)로 다시 거절되면 앞머리를 턴 경계로 계속 쥐고 있지 않고 직전 앞머리를
   되돌려준다 — 크기가 아닌 거절로 인해 다음 후보나 이후 턴의 앞머리가 영구히 잘려나가는 것을
   막는다(#38537). provider가 수용한 시작점(`accepted_start`)은 최신
-  응답 관측 턴 기록에서 읽혀 다음 turn의 `choose_range_start`로 전달되며, Librarian
-  지점이 뒤처져 있는 동안 요청은 그 자리에서 열리고(`Past_librarian_point`), 결코 이번
-  turn의 경계를 넘지 않는다(`within_turn_boundary`). Librarian 지점이 없는 turn에서
-  provider가 시작 위치 근거 범위를 크기 때문에 거절하면 turn 경계가 그 turn의 앞머리가 되고
-  (`Turn_start_after_seed_refusal`), 같은 후보에 한 번 더 보낸다. 다음 후보와 공식
+  응답 관측 턴 기록에서 읽혀 다음 turn의 `choose_range_start`로 전달되며, 읽은
+  끝이 뒤처져 있는 동안 요청은 그 자리에서 열리고(`Past_librarian_point`), 결코 이번
+  turn의 경계를 넘지 않는다(`within_turn_boundary`). 읽은 끝이 없는 turn에서
+  provider가 시작 위치 근거 범위를 크기 때문에 거절해도 turn 경계가 그 turn의 앞머리가 되고
+  (`Turn_start_after_refusal`), 같은 후보에 한 번 더 보낸다. 다음 후보와 공식
   클라이언트 레인도 그 경계부터 싣는다. 받아들여진 요청이 원장에 남으므로 다음
   turn의 시작 위치 근거는 그 경계가 된다. 공식 클라이언트 레인은 시작 위치 근거가
   레인 자체의 자르기와 같거나 그 뒤에 있으면 시작 위치 근거에서 시작한다(마지막으로 끝난 turn의
   경계보다 오래돼도 그렇다). 시작 위치 근거가 없으면 레인의 자르기와 turn 경계 중 뒤쪽에서
   시작한다 (`RFC-keeper-context-window-in-tokens` §13.4·§13.6).
-  `Librarian_progress`는 그 위치가 이 trace를 지목하고 그 앞 Atom이 위치가 기록한
-  Message로 열릴 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 실리고 그 앞을
-  요약하지 않는다. `Past_librarian_point`는 Librarian 지점부터 수용된 시작점
+  `Covered`는 writer의 view가 이 trace를 지목하고 이 History가 view가 센 닫힌 Message를
+  모두 가질 때만 채택하며, 그때 요청은 읽지 않은 Atom부터 싣는다.
+  `Past_librarian_point`는 읽은 끝부터 수용된 시작점
   직전까지의 Atom을 요청에 싣지 않으며, 이 중 요약도 안 되고 메모리에도 없는 Atom들의
   빠진 구간은 `librarian_gap`이 계산한다. `Turn_start`에서는 이 turn 자신의 Atom만 실리고 그 앞 Atom은
   Librarian의 다음 회차를 기다린다. `Turn_start`의 `end_atom`은 그 경계 자체를 적는다 —

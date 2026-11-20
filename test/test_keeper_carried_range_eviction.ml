@@ -117,7 +117,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
           let first_atom = Front.clamp ~atom_count boundary in
           Option.map
             (fun front_digest ->
-               { Front.first_atom; front = Model_input_front.At_atom front_digest; source = Front.Turn_start_after_seed_refusal })
+               { Front.first_atom; front = Model_input_front.At_atom front_digest; source = Front.Turn_start_after_refusal })
             (digest_at first_atom))
         ~held_front:(fun () -> !held)
         ~restore_front:(fun prior -> held := prior)
@@ -186,7 +186,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
   check int "c does not resend" 0 c_resent;
   (* [b] opens on the held boundary, not on the refused range, and answers. *)
   let b, b_sent, b_resent = run_candidate ~held ~runtime_id:"b" ~limit:10 ~boundary:8 history in
-  check bool "b answers from the turn's front" true (origin_is "turn_start_after_seed_refusal" b);
+  check bool "b answers from the turn's front" true (origin_is "turn_start_after_refusal" b);
   check (list int) "b sends one request from the boundary" [ 8 ] b_sent;
   check int "b does not resend" 0 b_resent;
   (* Turn 3 on [b]: its ledger kept that request, so the seed is 8. *)
@@ -201,7 +201,7 @@ let test_a_refused_seed_moves_the_turns_front_to_the_turn_boundary () =
   let resend, resend_sent, resend_count =
     run_candidate ~held ~runtime_id:"a" ~limit:10 ~boundary:14 (exchanges ~from:0 9)
   in
-  check bool "the resend is accepted" true (origin_is "turn_start_after_seed_refusal" resend);
+  check bool "the resend is accepted" true (origin_is "turn_start_after_refusal" resend);
   check (list int) "the seed range, then the boundary" [ 0; 14 ] resend_sent;
   check int "one resend" 1 resend_count;
   let fourth, fourth_sent, fourth_resent =
@@ -247,7 +247,7 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
         let first_atom = Front.clamp ~atom_count boundary in
         Option.map
           (fun front_digest ->
-             { Front.first_atom; front = Model_input_front.At_atom front_digest; source = Front.Turn_start_after_librarian_refusal })
+             { Front.first_atom; front = Model_input_front.At_atom front_digest; source = Front.Turn_start_after_refusal })
           (digest_at first_atom))
       ~held_front:(fun () -> !held)
       ~restore_front:(fun prior -> held := prior)
@@ -287,7 +287,7 @@ let librarian_turn ?(refusal = overflow) ?(refuses = fun ~atoms:_ -> false)
 let opened_past_the_point = function
   | Some (Front.Past_librarian_point { librarian_end_atom; _ }, _) -> Some librarian_end_atom
   | Some
-      ( ( Front.Carried _ | Front.Librarian_progress _
+      ( ( Front.Carried _ | Front.Covered _
         | Front.Turn_start _ | Front.Turn_start_unknown _ )
       , _ )
   | None -> None
@@ -451,18 +451,14 @@ let test_an_accepted_start_is_bounded_by_the_turn_boundary () =
   check (option int) "a ledger start past the boundary moves back to it" (Some 8)
     (start ~source:Front.Ledger ~this_turn_start:began_at_14 12);
   check (option int) "a rule-1 front past the boundary moves back to it" (Some 8)
-    (start ~source:Front.Turn_start_after_librarian_refusal ~this_turn_start:began_at_14 12);
-  check (option int) "a rule-1 front without a Librarian point moves back too" (Some 8)
-    (start ~source:Front.Turn_start_after_seed_refusal ~this_turn_start:began_at_14 12);
-  let this_turn = Front.This_turn_start_after_librarian_refusal in
+    (start ~source:Front.Turn_start_after_refusal ~this_turn_start:began_at_14 12);
+  let this_turn = Front.This_turn_start_after_refusal in
   check (option int) "a rule-8 front past the boundary and before this turn stays" (Some 12)
     (start ~source:this_turn ~this_turn_start:began_at_14 12);
   check (option int) "a rule-8 front where this turn began stays" (Some 14)
     (start ~source:this_turn ~this_turn_start:began_at_14 14);
   check (option int) "a rule-8 front inside this turn moves back to where it began" (Some 14)
     (start ~source:this_turn ~this_turn_start:began_at_14 16);
-  check (option int) "a rule-8 front without a seed is bounded the same way" (Some 12)
-    (start ~source:Front.This_turn_start_after_seed_refusal ~this_turn_start:began_at_14 12);
   check (option int) "with no known start the boundary bounds a rule-8 front" (Some 8)
     (start ~source:this_turn ~this_turn_start:None 12);
   check (option int) "a start state behind the boundary does not lower the bound" (Some 8)
@@ -607,7 +603,7 @@ let test_memory_receipt_failure_fences_enclosing_recovery () =
         ~attempt:(fun () -> incr attempts; Error error) () in
     let boundary_resend () = Try_provider.turn_boundary_resend_sequence
       ~same_run_retry_authorized:authorized
-      ~refused_range:(fun () -> Some (Front.Librarian_progress { end_atom = 2 }, 2))
+      ~refused_range:(fun () -> Some (Front.Covered { end_atom = 2 }, 2))
       ~turn_start_front:(fun () -> fail "receipt failure reached boundary selection")
       ~held_front:(fun () -> fail "receipt failure read a retry front")
       ~restore_front:(fun _ -> fail "receipt failure restored a retry front")
@@ -756,11 +752,11 @@ let test_the_size_signal_moves_only_a_window_that_stays () =
     (4, "past_librarian_point:turn_record#1") (start ~continuity:2 ~accepted:record_4 None);
   check at "a window that opened at the point moves past it"
     (8, "past_librarian_point:turn_start_at_max_context") (start ~continuity:4 signal);
-  check at "a point past the window moved it already" (6, "librarian_progress")
+  check at "a point past the window moved it already" (6, "covered")
     (start ~continuity:6 ~accepted:record_4 signal);
   check at "a front a refusal held past the window moved it already"
-    (10, "this_turn_start_after_seed_refusal")
-    (start ~front:(accepted_at ~source:Front.This_turn_start_after_seed_refusal history 10) signal);
+    (10, "this_turn_start_after_refusal")
+    (start ~front:(accepted_at ~source:Front.This_turn_start_after_refusal history 10) signal);
   (* A later request of the same turn reads no signal; the front the first
      request moved is held, and the point yields to it. *)
   let held = Option.map (fun (s : Try_provider.past_max_context) -> s.moved_to) signal in
@@ -802,9 +798,9 @@ let test_a_window_that_stays_holds_behind_the_librarian_point () =
   let at = pair int string in
   check at "a window held at the accepted start stays behind the point"
     (4, "past_librarian_point:turn_record#1") (start ~held_window:(held 4) ~point:6 4);
-  check at "a window not held follows the point" (6, "librarian_progress")
+  check at "a window not held follows the point" (6, "covered")
     (start ~held_window:None ~point:6 4);
-  check at "a window held elsewhere follows the point" (6, "librarian_progress")
+  check at "a window held elsewhere follows the point" (6, "covered")
     (start ~held_window:(held 2) ~point:6 4);
   check at "a start past the point opens there, held or not"
     (7, "past_librarian_point:turn_record#1") (start ~held_window:None ~point:6 7)

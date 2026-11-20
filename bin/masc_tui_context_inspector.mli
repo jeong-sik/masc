@@ -182,21 +182,14 @@ type forecast_carried_origin =
   | Carried_from_ledger  (** The pair's last observed request range. *)
   | Carried_from_turn_record of { turn : int }
       (** No ledger since the server started: the range that turn's record measured. *)
-  | Carried_turn_start_after_seed_refusal
-      (** No Librarian point, and the range a seed opened was refused as too
-          large: the turn's front moved to the turn boundary. *)
-  | Carried_turn_start_after_librarian_refusal
-      (** A Librarian point, and the range it opened -- at the point or past
-          it -- was refused as too large: the turn's front moved to the turn
-          boundary. *)
-  | Carried_this_turn_start_after_seed_refusal
-      (** No Librarian point, and the range opened at the turn boundary was
-          refused as too large too: the turn's front moved to where this turn
-          began, past atoms a failed turn saved without an end line. *)
-  | Carried_this_turn_start_after_librarian_refusal
-      (** A Librarian point, and the range opened at the turn boundary was
-          refused as too large too: the turn's front moved to where this turn
-          began, past atoms a failed turn saved without an end line. *)
+  | Carried_turn_start_after_refusal
+      (** The range opened before the turn boundary -- at a seed, at the
+          Memory writer's read end, or past it -- was refused as too large:
+          the turn's front moved to the turn boundary. *)
+  | Carried_this_turn_start_after_refusal
+      (** The range opened at the turn boundary was refused as too large
+          too: the turn's front moved to where this turn began, past atoms a
+          failed turn saved without an end line. *)
   | Carried_turn_start_at_max_context
       (** Nothing was refused: the last request's count plus the largest
           growth of one turn passed the binding's max-context, so the turn's
@@ -213,12 +206,9 @@ type forecast_carried_origin =
   | Carried_turn_start_unknown of { reason : string }
       (** No front, and the turn start could not be read: the newest atom
           alone. [reason] is what the boundary reader said. *)
-  | Carried_librarian_snapshot of { end_atom : int; boundary_line : int }
-      (** A Librarian continuity snapshot fits: its working state rides in
-          place of the atoms before [end_atom]. *)
-  | Carried_librarian_progress of { end_atom : int }
-      (** No snapshot fits and the Librarian's read position does: the atoms
-          before [end_atom] are in memory and nothing stands in for them. *)
+  | Carried_covered of { end_atom : int }
+      (** The Memory writer's read end in this history: the atoms before
+          [end_atom] are in Memory and are not sent again. *)
   | Carried_past_librarian_point of
       { librarian_end_atom : int
       ; front : forecast_carried_origin

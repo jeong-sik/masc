@@ -171,7 +171,7 @@ let test_an_old_front_does_not_drop_unread () =
     (encode (without_working_state (wire projected)));
   check int "a read-end range demotes nothing" 0 projected.composed.demote_before;
   (match projected.composed.origin with
-   | Front.Librarian_progress {end_atom = 2} -> ()
+   | Front.Covered {end_atom = 2} -> ()
    | _ -> fail "request attribution lost the exact read end")
 ;;
 
@@ -285,7 +285,7 @@ let test_a_read_end_alone_starts_there () =
   let _, atom_count = Window.annotate messages in
   let projected = read_end_view (read_end ~state:None 1) messages in
   (match projected.composed.origin with
-   | Front.Librarian_progress {end_atom = 1} -> ()
+   | Front.Covered {end_atom = 1} -> ()
    | _ -> fail "the request was not attributed to the read end");
   check int "the read atom is not sent again" 1 projected.composed.projection.dropped_atoms;
   let sent = wire projected in
@@ -330,21 +330,6 @@ let test_the_view_gives_the_continuity () =
    | _ -> fail "a turn with no read end did not start at its own boundary")
 ;;
 
-(* Rule 8 names its front after the continuity it ran on, with a label of
-   its own: rule 7 bounds that front by where this turn began, and rule 1's
-   front at the turn boundary by the boundary. A read end, with or without
-   its working state, is a Librarian point. *)
-let test_a_rule_8_front_is_named_after_the_continuity () =
-  let name continuity =
-    Front.source_to_string (Driver.For_testing.this_turn_front_source continuity) in
-  check string "a turn with a working state" "this_turn_start_after_librarian_refusal"
-    (name (read_end source_end));
-  check string "a turn at a read end alone" "this_turn_start_after_librarian_refusal"
-    (name (read_end ~state:None 1));
-  check string "a turn without a read end" "this_turn_start_after_seed_refusal"
-    (name Driver.No_read_end)
-;;
-
 (* The forecast asks the driver's own chooser, so every start the driver
    can take shows up in the forecast unchanged: the origin, the atom the
    range opens on and its bytes. The first three cases hold a seed this
@@ -370,9 +355,9 @@ let test_the_forecast_takes_the_drivers_start () =
     {first_atom = 2; front = Model_input_front.At_atom (Option.get (digest_at 2)); source = Front.Turn_record { turn = 3 }} in
   let cases =
     [ "a read end with its working state", with_state, Some held_seed, None, boundary,
-      (function Front.Librarian_progress { end_atom = 2 } -> true | _ -> false);
+      (function Front.Covered { end_atom = 2 } -> true | _ -> false);
       "a read end alone", alone, Some held_seed, None, boundary,
-      (function Front.Librarian_progress { end_atom = 1 } -> true | _ -> false);
+      (function Front.Covered { end_atom = 1 } -> true | _ -> false);
       "an accepted start past the read end", alone, Some held_seed, Some accepted, boundary,
       (function
         | Front.Past_librarian_point
@@ -639,8 +624,6 @@ let () = run "continuity request projection"
           test_without_a_read_end_a_seed_range_sends_earlier_tool_bodies_as_sent;
         test_case "a read end alone starts there" `Quick test_a_read_end_alone_starts_there;
         test_case "the view gives the continuity" `Quick test_the_view_gives_the_continuity;
-        test_case "a rule-8 front is named after the continuity" `Quick
-          test_a_rule_8_front_is_named_after_the_continuity;
         test_case "the forecast takes the driver's start" `Quick test_the_forecast_takes_the_drivers_start;
         test_case "a start past the read end keeps the working state" `Quick
           test_a_start_past_the_read_end_keeps_the_working_state;

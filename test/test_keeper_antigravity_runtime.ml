@@ -1953,37 +1953,24 @@ let test_cold_start_begins_at_the_turn_start () =
   check int "seven atoms of sixty went" 7 (List.length projected)
 ;;
 
-(* The Librarian front reaches the list this lane renders -- a read position
-   as the start -- and a list the turn's choice no longer describes refuses
-   the request, as it refuses an Agent Core request. *)
-let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
+(* The writer's read end reaches the list this lane renders, as the start. *)
+let test_the_librarian_front_reaches_the_list () =
   let messages = carried_front_history () in
   let seen_front = ref None in
   let projected =
     project_range
-      ~librarian_front:(fun _ ->
-        Ok ((Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 53 })))
+      ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 53; working_state = None })
       ~on_carried_front:(fun front ~transmitted_bytes -> seen_front := Some (front, transmitted_bytes))
       messages
   in
-  check (list string) "the range starts at the read position"
+  check (list string) "the range starts at the read end"
     (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
     (encoded_history projected);
-  (match !seen_front with
-   | Some (Keeper_official_client_host.Librarian_progress { end_atom = 53 }, bytes) ->
-     check bool "the front is reported with the range's bytes" true (bytes > 0)
-   | Some _ -> fail "the reported front is not the read position"
-   | None -> fail "the composition reported no front");
-  let refused _ =
-    Error
-      (Agent_core.Error.Config
-         (Agent_core.Error.InvalidConfig
-            { field = "librarian.continuity"; detail = "Covered conversation changed during dispatch" }))
-  in
-  let project = carried_projection ~librarian_front:refused None in
-  match project messages with
-  | Error _ -> ()
-  | Ok _ -> fail "a list the turn's choice no longer describes went out"
+  match !seen_front with
+  | Some (Keeper_official_client_host.Librarian_progress { end_atom = 53 }, bytes) ->
+    check bool "the front is reported with the range's bytes" true (bytes > 0)
+  | Some _ -> fail "the reported front is not the read end"
+  | None -> fail "the composition reported no front"
 ;;
 
 let working_state_not_carried ~reason =
@@ -1994,58 +1981,29 @@ let working_state_not_carried ~reason =
     ()
 ;;
 
-let snapshot_of ~messages ~end_atom ~working_state =
-  let covered = List.filteri (fun index _ -> index < end_atom) messages in
-  let position =
-    match Keeper_turn_boundaries.position_of_messages covered with
-    | Ok position -> position
-    | Error detail -> fail detail
-  in
-  let line =
-    ( 1
-    , Ok
-        { Keeper_turn_boundaries.recorded_at = 1.
-        ; event =
-            Keeper_turn_boundaries.Turn_ended
-              { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:1
-              ; history_at_start = Keeper_turn_boundaries.Fresh_history
-              ; position
-              }
-        } )
-  in
-  match
-    Librarian_continuity_snapshot.capture ~unread_messages:[] ~trace_id:"trace-1" ~lines:[ line ]
-      ~messages:covered ~working_state
-  with
-  | Ok snapshot -> snapshot
-  | Error error -> fail (Librarian_continuity_snapshot.error_to_string error)
-;;
-
-(* A Librarian snapshot sends its working state and the whole range it
-   leads: the summary in front, then every atom from where the Librarian
-   read. *)
-let test_a_librarian_snapshot_leads_with_its_working_state () =
+(* A read end with a working state sends it and the whole range it leads:
+   the summary in front, then every atom from where the writer read. *)
+let test_a_read_end_leads_with_its_working_state () =
   let messages = carried_front_history () in
-  let snapshot = snapshot_of ~messages ~end_atom:53 ~working_state:"Fifty asks answered so far." in
-  let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
+  let state = "Fifty asks answered so far." in
+  let working_state = Keeper_turn_driver_try_provider.working_state_text state in
   let before = working_state_not_carried ~reason:"displaces_atoms" in
   let seen_front = ref None in
   let projected =
     project_range
-      ~librarian_front:(fun _ ->
-        Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+      ~librarian_front:(Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 53; working_state = Some state })
       ~on_carried_front:(fun front ~transmitted_bytes:_ -> seen_front := Some front)
       messages
   in
   (match projected with
    | ({ role = System; content = [ Text text ]; _ } : Agent_core.Types.message) :: rest ->
      check string "the working state leads the list" working_state text;
-     check (list string) "and every atom from the Librarian's position follows"
+     check (list string) "and every atom from the read end follows"
        (encoded_history (List.filteri (fun index _ -> index >= 53) messages))
        (encoded_history rest)
    | _ -> fail "the working state did not lead the list");
   (match !seen_front with
-   | Some (Keeper_official_client_host.Librarian_snapshot _) -> ()
+   | Some (Keeper_official_client_host.Librarian_working_state { end_atom = 53 }) -> ()
    | Some _ -> fail "the reported front is not the working state"
    | None -> fail "the composition reported no front");
   check (float 0.) "and nothing is counted as left out" before
@@ -2477,8 +2435,7 @@ module Argument_start_fixture = struct
   let source ~base_path ~keeper_name seed =
     Host.create_argument_source ~base_path ~keeper_name
       ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
-  let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
-      (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})
+  let librarian_front = Keeper_turn_driver_try_provider.Covered { Keeper_turn_driver_try_provider.end_atom = 1; working_state = None }
   let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
   let reader base_path =
     let schema = Keeper_runtime_schemas_toml.artifact_read in
@@ -2957,13 +2914,13 @@ let () =
               `Quick
               test_cold_start_begins_at_the_turn_start
           ; test_case
-              "the Librarian front reaches the list and its error refuses"
+              "the Librarian front reaches the list"
               `Quick
-              test_the_librarian_front_reaches_the_list_and_its_error_refuses
+              test_the_librarian_front_reaches_the_list
         ; test_case
-            "a Librarian snapshot leads with its working state"
+            "a read end leads with its working state"
             `Quick
-            test_a_librarian_snapshot_leads_with_its_working_state
+            test_a_read_end_leads_with_its_working_state
         ; test_case
             "a preamble is not a durable atom"
             `Quick

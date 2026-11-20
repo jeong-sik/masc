@@ -109,7 +109,7 @@ let world_hierarchy_card ~ko ~width ~world ~health ~unit =
     let body ~cells =
       let world_prefix =
         mem_tint () ^ "◆ " ^ Ansi.reset
-        ^ Ansi.bold ^ say "월드·공유" "World/Shared" ^ Ansi.reset ^ "  "
+        ^ Ansi.bold ^ Theme.section_heading () ^ say "월드·공유" "World/Shared" ^ Ansi.reset ^ "  "
       in
       let prefix_w = Layout.display_width (Masc_tui_theme.strip_sgr world_prefix) in
       let clause_room = max 8 (cells - prefix_w) in
@@ -181,13 +181,17 @@ let sidebar_tree_rows ~ko ~width ~height ~world ~selected ~entries =
   let header =
     [ ( None
       , Layout.fit_width
-          (Ansi.bold ^ (if ko then "기억 계층" else "Memory tree") ^ Ansi.reset
+          (Ansi.bold ^ Theme.section_heading ()
+           ^ (if ko then "기억 계층" else "Memory tree")
+           ^ Ansi.reset
            ^ Theme.recede () ^ (if ko then "  d:접기" else "  d:hide") ^ Ansi.reset)
           width )
     ; ( None
       , Layout.fit_width
           (mem_tint () ^ "◆ " ^ Ansi.reset
-           ^ Ansi.bold ^ (if ko then "월드·공유" else "World/Shared") ^ Ansi.reset)
+           ^ Ansi.bold ^ Theme.section_heading ()
+           ^ (if ko then "월드·공유" else "World/Shared")
+           ^ Ansi.reset)
           width )
     ; ( None
       , Layout.fit_width
@@ -233,11 +237,25 @@ let sidebar_tree_rows ~ko ~width ~height ~world ~selected ~entries =
          in
          let line =
            if is_selected then
-             Theme.selection_style ()
-             ^ Layout.fit_width
+             let plain_fitted =
+               Layout.fit_width
                  (lead ^ branch ^ fitted_label ^ String.make pad_cells ' ' ^ right_str)
                  width
-             ^ Ansi.reset
+             in
+             match Theme.sidebar_selection_background () with
+             | Some bg when not (String.equal bg "") ->
+                 let styled_row =
+                   Layout.fit_width
+                     (lead
+                      ^ Theme.border_muted () ^ branch ^ Ansi.reset
+                      ^ Ansi.bold ^ badge_style ^ fitted_label ^ Ansi.reset
+                      ^ String.make pad_cells ' '
+                      ^ Theme.recede () ^ right_str ^ Ansi.reset)
+                     width
+                 in
+                 Masc_tui_theme.paint_row_background ~bg styled_row ^ Ansi.reset
+             | Some _ | None ->
+                 Theme.selection_style () ^ plain_fitted ^ Ansi.reset
            else
              Layout.fit_width
                (lead

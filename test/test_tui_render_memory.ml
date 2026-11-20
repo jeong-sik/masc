@@ -1135,6 +1135,48 @@ let test_memory_tree_hierarchy_and_safety () =
     [ false; true ]
 ;;
 
+let test_memory_facts_docked_preview_and_tree_tint () =
+  let state = three_kinds_state () in
+  let drawn = ref [] in
+  Render_memory.render_memory_facts_body ~cols:100 ~budget:22 state
+    ~report_drawn_list:(fun _ ~height:_ -> ())
+    ~hand_position:ignore
+    ~push:(fun line -> drawn := line :: !drawn)
+    ~push_styled:(fun ~style:_ line -> drawn := line :: !drawn)
+    ~push_selected:(fun line -> drawn := line :: !drawn)
+    ~push_divider:(fun () -> drawn := "---" :: !drawn)
+    ~push_empty:(fun () -> drawn := "" :: !drawn);
+  let lines = List.rev !drawn in
+  let plain_lines = List.map Masc_tui_theme.strip_sgr lines in
+  List.iter
+    (fun line ->
+      check bool "docked facts preview emits no raw control bytes" false
+        (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) line);
+      check bool "docked facts header emits no escaped SGR literal" false
+        (contains "\\x1B" line))
+    plain_lines;
+  check bool "docked preview renders selected fact header" true
+    (List.exists (contains "Selected Fact") plain_lines);
+  let tree_entries =
+    [ Types.Category_all, Some 4
+    ; Types.Category_ordinary Cat.Fact, Some 2
+    ; Types.Category_source, Some 1
+    ; Types.Category_dropped, Some 1
+    ]
+  in
+  let tree_rows =
+    Masc_tui_memory_tree.sidebar_tree_rows ~ko:false ~width:32 ~height:10
+      ~world:Masc_tui_memory_world.Not_read
+      ~selected:Types.Category_source ~entries:tree_entries
+  in
+  List.iter
+    (fun (_filt, line) ->
+      let plain = Masc_tui_theme.strip_sgr line in
+      check int "selected category tree row preserves exact width 32" 32
+        (Masc_tui_message_layout.display_width plain))
+    tree_rows
+;;
+
 let () =
   run "tui_render_memory"
     [ "input statistics",
@@ -1146,7 +1188,9 @@ let () =
       ; test_case "Librarian diagnostics escape wire controls" `Quick
           test_memory_diagnostics_escape_control_bytes
       ; test_case "Memory hierarchy tree cards and badges are safe and fixed width" `Quick
-          test_memory_tree_hierarchy_and_safety ]
+          test_memory_tree_hierarchy_and_safety
+      ; test_case "Memory facts docked preview and selected tree tint keep bounds and safety" `Quick
+          test_memory_facts_docked_preview_and_tree_tint ]
     ; "memory decisions",
       [ test_case "memory recovery does not inherit historical failure state" `Quick
           test_memory_state_tracks_current_pass_not_history

@@ -123,6 +123,8 @@ val pending_input : t -> Agent_input_request.pending option
 (** Current owned input wait. [None] means no outstanding request on this Agent
     continuation. Preserved by checkpoint/resume; not inferred from events. *)
 val tools : t -> Tool_set.t
+val eager_tools : t -> Tool_set.t
+(** Tools admitted independently of request-history references. *)
 
 val extend_tools : ?order:string list -> t -> Tool.t list -> unit
 (** Widen the callable tool set mid-turn. A deferred tool surface hands the

@@ -2337,10 +2337,10 @@ let test_anthropic_reference_projection_precedes_prefix_digest () =
   let fallback =
     make_message
       ~role:Tool
-      [ Types.ToolResult
+      [ ToolResult
           { tool_use_id = "load-1"
           ; content = "now callable:\n- masc_board_list"
-          ; outcome = Types.Tool_succeeded
+          ; outcome = Tool_succeeded
           ; json = None
           ; content_blocks = None
           }
@@ -2351,7 +2351,7 @@ let test_anthropic_reference_projection_precedes_prefix_digest () =
     "stale reference and its text fallback have the same wire body"
     (body fallback)
     (body stale);
-  let response_content = [ Types.Thinking { content = "stable"; signature = Some "signature" } ] in
+  let response_content = [ Thinking { content = "stable"; signature = Some "signature" } ] in
   let prefix messages =
     BA.transmitted_reasoning_prefix ~config ~messages ~tools ~response_content ()
   in

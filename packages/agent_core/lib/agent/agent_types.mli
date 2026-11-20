@@ -311,6 +311,7 @@ val state : t -> Types.agent_state
 val lifecycle : t -> lifecycle_snapshot option
 val pending_input : t -> Agent_input_request.pending option
 val tools : t -> Tool_set.t
+val eager_tools : t -> Tool_set.t
 
 val set_request_tools : t -> Tool_set.t -> unit
 (** Select the callable set computed for the request being dispatched. Native

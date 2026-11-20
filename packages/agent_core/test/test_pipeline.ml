@@ -6240,7 +6240,25 @@ let test_unattempted_tool_has_no_bus_execution_observation () =
   | Error error->Alcotest.fail (Agent.Execution_projection.error_to_string error)
 ;;
 
-let test_pipeline_uses_resolved_deferred_capability () =
+let prepare_deferred_agent_turn agent =
+  let options = Agent.options agent in
+  let defer_loading =
+    match options.provider_config with
+    | Some config -> Llm_provider.Provider_config.supports_deferred_tool_loading config
+    | None -> false
+  in
+  Agent_turn.prepare_turn
+    ~media_store:(Agent.media_store agent)
+    ~tools:(Agent.tools agent)
+    ~eager_tools:(Agent.eager_tools agent)
+    ~deferred_tools:options.deferred_tools
+    ~defer_loading
+    ~messages:(Agent.state agent).messages
+    ~turn_params:Hooks.default_turn_params
+    ()
+;;
+
+let test_agent_turn_uses_resolved_deferred_capability () =
   Eio_main.run
   @@ fun env ->
   let loader =
@@ -6277,19 +6295,16 @@ let test_pipeline_uses_resolved_deferred_capability () =
       ~options
       ()
   in
-  let prepare agent =
-    Internal_pipeline.stage_parse agent ~turn_params:Hooks.default_turn_params
-  in
-  (match prepare (agent_with_capability false) with
+  (match prepare_deferred_agent_turn (agent_with_capability false) with
    | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
-   | Ok (prep, _, _) ->
+   | Ok prep ->
      (match prep.tools_json with
       | Some [ _ ] -> ()
       | Some _ -> Alcotest.fail "unsupported model received a deferred catalog"
       | None -> Alcotest.fail "unsupported model lost its callable tool"));
-  match prepare (agent_with_capability true) with
+  match prepare_deferred_agent_turn (agent_with_capability true) with
   | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
-  | Ok (prep, _, _) ->
+  | Ok prep ->
     (match prep.tools_json with
      | Some [ _; deferred_json ] ->
        Alcotest.(check bool)
@@ -6338,9 +6353,9 @@ let test_create_and_resume_separate_eager_from_deferred () =
       ()
   in
   let check label agent =
-    match Internal_pipeline.stage_parse agent ~turn_params:Hooks.default_turn_params with
+    match prepare_deferred_agent_turn agent with
     | Error error -> Alcotest.fail (Agent_core.Error.to_string error)
-    | Ok (prep, _, _) ->
+    | Ok prep ->
       Alcotest.(check (list string))
         (label ^ ": deferred overlap is not eager")
         [ "keeper_tool_search" ]
@@ -6783,8 +6798,8 @@ let () =
               Parent_switch Tool_effect)
         ] )
     ; ( "deferred_tool_loading"
-      , [ Alcotest.test_case "pipeline uses resolved capability" `Quick
-            test_pipeline_uses_resolved_deferred_capability
+      , [ Alcotest.test_case "agent turn uses resolved capability" `Quick
+            test_agent_turn_uses_resolved_deferred_capability
         ; Alcotest.test_case "create and resume separate eager from deferred" `Quick
             test_create_and_resume_separate_eager_from_deferred
         ] )

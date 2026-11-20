@@ -182,6 +182,7 @@ let state t = t.state
 let lifecycle t = t.lifecycle
 let pending_input t = t.pending_input
 let tools t = t.tools
+let eager_tools t = t.eager_tools
 let context t = t.context
 let options t = t.options
 let provider_config t = t.options.provider_config

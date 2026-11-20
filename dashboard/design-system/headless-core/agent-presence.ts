@@ -223,7 +223,7 @@ function defaultDisambiguate(
     if (e.text === candidate.text) count += 1
   }
   if (count === 0) return candidate
-  // Use superscript digit per RFC 0008 §6 default.
+  // Use superscript digit as the default suffix.
   const suffix = SUPERSCRIPT_DIGITS[count] ?? `^${count + 1}`
   return Object.freeze({ text: candidate.text, suffix })
 }

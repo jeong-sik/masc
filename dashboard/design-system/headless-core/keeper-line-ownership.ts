@@ -1,5 +1,5 @@
 /**
- * KeeperLineOwnership — framework-agnostic accumulator for RFC 0019.
+ * KeeperLineOwnership — framework-agnostic line-owner accumulator.
  *
  * Consumers feed keeper edit events for one active file. The accumulator
  * derives the latest owner per 1-indexed line plus the event history for each

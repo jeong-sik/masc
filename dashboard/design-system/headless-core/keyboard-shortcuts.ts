@@ -1,12 +1,12 @@
 /**
- * KeyboardShortcutManager — global IDE shortcut registry (RFC 0012).
+ * KeyboardShortcutManager — global IDE shortcut registry.
  *
  * Replaces ad-hoc keydown bindings scattered across the dashboard
  * (Cmd+K palette, modal Escape, editor shortcuts). One registry owns
  * chord-to-action bindings, surfaces them via aria-keyshortcuts, and
  * applies the precedence policy when scopes overlap.
  *
- * MVP scope (RFC 0012 §3, §4, §5):
+ * MVP scope:
  *   - Chord matching with Mod modifier (Cmd on macOS, Ctrl elsewhere)
  *   - Scope: 'global' | { within: () => HTMLElement | null }
  *   - preserveInInputs default true (Cmd+B fires in name field;
@@ -16,8 +16,8 @@
  *   - formatAria: W3C standard tokens (Meta+B / Control+B)
  *   - subscribe for palette / settings UI
  *
- * Out of scope (RFC 0012 §10):
- *   - Chord sequences (Mod+K Z) — future RFC
+ * Out of scope:
+ *   - Chord sequences (Mod+K Z)
  *   - User-customizable keymaps — register() open for plugins
  *   - Replace Monaco editor-internal shortcuts
  */

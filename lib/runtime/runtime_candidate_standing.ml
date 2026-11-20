@@ -48,10 +48,10 @@ let exact_rate_rest_sec ~retry_after =
     ~retry_class:Keeper_runtime_failure_route.Rate_limited
     ~retry_after_hint:retry_after
 
-(* RFC-0458 §3.4 (#38174): failed attempts carry no TTL. The Keeper that
-   recorded a failed attempt retries that candidate on its next fresh walk
-   so a working fallback never permanently exiles the head; peer Keepers
-   and deferred/one-shot walks ([Every_mark_demotes]) demote it. *)
+(* Failed attempts carry no TTL (#38174). The Keeper that recorded a failed
+   attempt retries that candidate on its next fresh walk so a working fallback
+   never permanently exiles the head; peer Keepers and deferred/one-shot walks
+   ([Every_mark_demotes]) demote it. *)
 let failed_attempt_demotion ~walk = function
   | None -> Not_demoted
   | Some (Backpressure.Failed_attempt {recorded_by; _}) ->

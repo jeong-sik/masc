@@ -75,7 +75,7 @@ val endpoint : t -> endpoint
     contains the ephemeral capability and must not be logged or persisted
     after the turn.
 
-    No [tools.<name>.eager] map is emitted (RFC-0490 L4): agy 1.5.1+ keeps
+    No [tools.<name>.eager] map is emitted: agy 1.5.1+ keeps
     eager MCP tools smallest-first only up to ~62 KB and silently drops the
     rest without adding them to the lazy list, losing large core tools such
     as [Execute] and [Read]. Omitting [tools] puts every advertised tool on

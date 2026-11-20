@@ -28,11 +28,10 @@ val order :
 (** Resolve both projections from the same frozen row. Missing projections
     contribute no evidence and never remove an unresolved declared identity.
 
-    Every [failed_attempt] obeys RFC-0458 §3.4 (#38174): because failed
-    attempts carry no TTL, [Fresh_walk_by recorder] keeps marks recorded by
-    [recorder] undemoted so the next cycle retries recovery, while peer
-    Keepers and [Every_mark_demotes] walks demote the candidate behind its
-    siblings. *)
+    Because failed attempts carry no TTL (#38174), [Fresh_walk_by recorder]
+    keeps marks recorded by [recorder] undemoted so the next cycle retries
+    recovery, while peer Keepers and [Every_mark_demotes] walks demote the
+    candidate behind its siblings. *)
 
 val order_for_scoped :
   now:float -> policy:policy ->

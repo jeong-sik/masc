@@ -108,10 +108,11 @@ type reading =
   | Reading_failed
       (** The catalog, or the status of an attempt still waited on, could not be
           read, or the server says such a consent still waits although its
-          deadline [now] has passed. *)
+          deadline [wall_now] has passed. *)
   | Reading_superseded  (** A newer read, or a lost authority, owns the answer. *)
 
-let providers_loaded (state : state) request ?(settle = ignore) ~report ~now ~attempts result =
+let providers_loaded (state : state) request ?(settle = ignore) ~report ~now ~wall_now ~attempts
+    result =
   let keeper_name = request.drr_keeper in
   let current =
     Masc_tui_types.finish_detail_read state request
@@ -171,7 +172,7 @@ let providers_loaded (state : state) request ?(settle = ignore) ~report ~now ~at
               | Error _ -> true
               | Ok status ->
                 (match status with
-                 | Masc_tui_identity_model.Consent_waiting deadline -> deadline <= now
+                 | Masc_tui_identity_model.Consent_waiting deadline -> deadline <= wall_now
                  | Masc_tui_identity_model.Callback_in_progress
                  | Masc_tui_identity_model.Credentials_published _
                  | Masc_tui_identity_model.Login_exchange_failed

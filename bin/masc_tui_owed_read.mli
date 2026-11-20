@@ -7,8 +7,9 @@
     rows), or the read can fail. This value records each of those, so a read
     is owed exactly until one read that began after the change succeeds.
 
-    Nothing here performs I/O or reads a clock. The caller passes [now] and
-    asks {!due} whether to start a read. *)
+    Nothing here performs I/O or reads a clock. The caller passes [now], an
+    instant on the main loop's clock ({!Masc_tui_wake.Mono}), and asks {!due}
+    whether to start a read. *)
 
 type t =
   | Settled  (** Nothing is owed. *)
@@ -18,7 +19,7 @@ type t =
   | Reading of { failures : int; changed_since : bool }
       (** A read is in flight. [changed_since] records a change announced
           after the read began, which the read may have missed. *)
-  | Waiting of { failures : int; retry_at : float }
+  | Waiting of { failures : int; retry_at : Masc_tui_wake.Mono.t }
       (** The last read failed; the next one starts at [retry_at]. *)
 
 val settled : t
@@ -36,7 +37,7 @@ val succeeded : t -> t
 (** The read that began last succeeded. A change announced while it was in
     flight is still owed. *)
 
-val failed : retry_s:float -> max_retry_s:float -> now:float -> t -> t
+val failed : retry_s:float -> max_retry_s:float -> now:Masc_tui_wake.Mono.t -> t -> t
 (** The read that began last failed. The wait is [retry_s] after the first
     failure and doubles with each failure in a row, up to [max_retry_s]. *)
 
@@ -55,7 +56,8 @@ val answering : t -> t
     Counting a change there would make every such success read again at
     once, and the next success the same. *)
 
-val placeholder : retry_s:float -> max_retry_s:float -> now:float -> t -> t
+val placeholder :
+  retry_s:float -> max_retry_s:float -> now:Masc_tui_wake.Mono.t -> t -> t
 (** The read that began last answered with the placeholder a server sends
     until it has built the reading, and no push says when it has. It is read
     again after a wait that grows with each placeholder in a row, like
@@ -63,14 +65,15 @@ val placeholder : retry_s:float -> max_retry_s:float -> now:float -> t -> t
     the placeholder may have been answered from before it. The placeholders
     in a row are kept, so the next one still waits longer. *)
 
-val due : now:float -> t -> bool
+val due : now:Masc_tui_wake.Mono.t -> t -> bool
 (** Whether a read should start now, when the surface is able to read.
     While a failure's wait has not ended, its [retry_at] is noted for the
-    main loop's wait ({!Masc_tui_wake.reached}). *)
+    main loop's wait ({!Masc_tui_wake.reached_mono}). *)
 
-val stale_at_to_schedule : now:float -> float option -> float option
+val stale_at_to_schedule : wall_now:float -> float option -> float option
 (** The [stale_at] a server answer carries, kept only when it still lies in
-    the future.
+    the future of the wall clock [wall_now]: [stale_at] is a wall-clock
+    instant, unlike the instants above.
 
     [stale_at] names the moment the evaluator turns Stale with no push to
     read for, so a read loop that stores it re-reads once at that moment.

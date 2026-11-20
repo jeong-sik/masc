@@ -4256,12 +4256,12 @@
 (test
  (name test_tui_owed_read)
  (modules test_tui_owed_read)
- (libraries alcotest masc_tui_owed_read))
+ (libraries alcotest masc_tui_owed_read masc_tui_wake))
 
 (test
  (name test_tui_roster_owed)
  (modules test_tui_roster_owed)
- (libraries alcotest masc_tui_roster_owed))
+ (libraries alcotest masc_tui_roster_owed masc_tui_wake))
 
 (test
  (name test_tui_candle)
@@ -5266,7 +5266,7 @@
 (test
  (name test_tui_client_rows)
  (modules test_tui_client_rows)
- (libraries alcotest masc masc_tui_types masc_tui_owed_read))
+ (libraries alcotest masc masc_tui_types masc_tui_owed_read masc_tui_wake))
 
 (test
  (name test_tui_wire_age)
@@ -5876,7 +5876,7 @@
 (test
  (name test_tui_identity_tab)
  (modules test_tui_identity_tab)
- (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input masc_tui_render_identity masc_tui_owed_read))
+ (libraries masc masc_tui_identity_model masc_tui_identity_updates alcotest masc_tui_pick_list masc_tui_types masc_tui_keys masc_tui_footer masc_tui_identity_input masc_tui_render_identity masc_tui_owed_read masc_tui_wake unix))
 
 (test
  (name test_tui_chat_schedule_proximity)

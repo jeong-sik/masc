@@ -10,6 +10,11 @@ module O = Masc_tui_owed_read
 module T = Masc_tui_types
 module Tools = Masc.Tui_decode_tools
 
+(* Instants on the main loop's clock, [seconds] after this test began. The
+   checks below count in seconds and move onto the clock at each call. *)
+let start = Masc_tui_wake.Mono.now ()
+let at seconds = Masc_tui_wake.Mono.after start seconds
+
 let retry_s = 2.0
 let max_retry_s = 30.0
 
@@ -34,8 +39,8 @@ let answer ?(answered_for = Some "keeper-a") result =
 (* The loop's [failed_read] and [placeholder_read] (bin/masc_tui.ml), with
    the loop's waits. The executable is not linkable, so the same module
    calls are made here. *)
-let failed ~now owed = O.failed ~retry_s ~max_retry_s ~now (O.answering owed)
-let placeholder ~now owed = O.placeholder ~retry_s ~max_retry_s ~now (O.answering owed)
+let failed ~now owed = O.failed ~retry_s ~max_retry_s ~now:(at now) (O.answering owed)
+let placeholder ~now owed = O.placeholder ~retry_s ~max_retry_s ~now:(at now) (O.answering owed)
 
 let owed_after ~now answer owed =
   T.tools_inventory_owed ~failed:(failed ~now) ~warming:(placeholder ~now) answer owed
@@ -64,24 +69,24 @@ let test_answers () =
 
 let test_warming_in_a_row_waits_longer () =
   let owed = read_and_answer ~now:10.0 warming (O.changed O.settled) in
-  check bool "not before the first wait" false (O.due ~now:11.9 owed);
-  check bool "after the first wait" true (O.due ~now:12.0 owed);
+  check bool "not before the first wait" false (O.due ~now:(at 11.9) owed);
+  check bool "after the first wait" true (O.due ~now:(at 12.0) owed);
   let owed = read_and_answer ~now:12.0 warming owed in
-  check bool "a second placeholder waits twice as long" false (O.due ~now:15.9 owed);
-  check bool "after the second wait" true (O.due ~now:16.0 owed);
+  check bool "a second placeholder waits twice as long" false (O.due ~now:(at 15.9) owed);
+  check bool "after the second wait" true (O.due ~now:(at 16.0) owed);
   let owed = read_and_answer ~now:16.0 warming owed in
-  check bool "a third waits longer again" false (O.due ~now:23.9 owed);
+  check bool "a third waits longer again" false (O.due ~now:(at 23.9) owed);
   let owed = read_and_answer ~now:24.0 settled owed in
-  check bool "the built inventory ends the reads" false (O.due ~now:1000.0 owed)
+  check bool "the built inventory ends the reads" false (O.due ~now:(at 1000.0) owed)
 
 let test_a_failure_counts_once () =
   let owed = read_and_answer ~now:10.0 failure (O.changed O.settled) in
-  check bool "not before the first wait" false (O.due ~now:11.9 owed);
-  check bool "the first failure waits the first wait" true (O.due ~now:12.0 owed)
+  check bool "not before the first wait" false (O.due ~now:(at 11.9) owed);
+  check bool "the first failure waits the first wait" true (O.due ~now:(at 12.0) owed)
 
 let test_another_keeper_leaves_a_read_owed () =
   let owed = read_and_answer ~answered_for:(Some "keeper-b") ~now:10.0 settled (O.changed O.settled) in
-  check bool "the selected Keeper is read now" true (O.due ~now:10.0 owed)
+  check bool "the selected Keeper is read now" true (O.due ~now:(at 10.0) owed)
 
 let rec warming_in_a_row ~now ~count owed =
   if count = 0 then (now, owed)
@@ -92,26 +97,26 @@ let rec warming_in_a_row ~now ~count owed =
 let test_the_wait_stops_at_its_cap () =
   let now, owed = warming_in_a_row ~now:10.0 ~count:8 (O.changed O.settled) in
   let last = now -. max_retry_s in
-  check bool "not before the longest wait" false (O.due ~now:(last +. max_retry_s -. 0.1) owed);
-  check bool "after the longest wait" true (O.due ~now:(last +. max_retry_s) owed)
+  check bool "not before the longest wait" false (O.due ~now:(at (last +. max_retry_s -. 0.1)) owed);
+  check bool "after the longest wait" true (O.due ~now:(at (last +. max_retry_s)) owed)
 
 let test_a_built_inventory_puts_the_wait_back () =
   let now, owed = warming_in_a_row ~now:10.0 ~count:4 (O.changed O.settled) in
   let owed = read_and_answer ~now settled owed in
-  check bool "nothing owed after the built inventory" false (O.due ~now:(now +. 1000.0) owed);
+  check bool "nothing owed after the built inventory" false (O.due ~now:(at (now +. 1000.0)) owed);
   (* The server announces a change and the next read meets a placeholder
      again: the placeholders before the built inventory are not this one's. *)
   let owed = read_and_answer ~now warming (O.changed owed) in
-  check bool "not read before the first wait" false (O.due ~now:(now +. retry_s -. 0.1) owed);
-  check bool "the first wait again" true (O.due ~now:(now +. retry_s) owed)
+  check bool "not read before the first wait" false (O.due ~now:(at (now +. retry_s -. 0.1)) owed);
+  check bool "the first wait again" true (O.due ~now:(at (now +. retry_s)) owed)
 
 let test_another_keeper_drops_the_failures () =
   let now, owed = warming_in_a_row ~now:10.0 ~count:4 (O.changed O.settled) in
   let owed = read_and_answer ~answered_for:(Some "keeper-b") ~now settled owed in
-  check bool "the selected Keeper is read now" true (O.due ~now owed);
+  check bool "the selected Keeper is read now" true (O.due ~now:(at now) owed);
   let owed = read_and_answer ~now warming owed in
-  check bool "not read before the first wait" false (O.due ~now:(now +. retry_s -. 0.1) owed);
-  check bool "its placeholder waits the first wait" true (O.due ~now:(now +. retry_s) owed)
+  check bool "not read before the first wait" false (O.due ~now:(at (now +. retry_s -. 0.1)) owed);
+  check bool "its placeholder waits the first wait" true (O.due ~now:(at (now +. retry_s)) owed)
 
 (* A tools-inventory push while a placeholder read is in flight: the
    placeholder may have been answered from before the change, so the change
@@ -121,18 +126,18 @@ let test_a_change_during_a_placeholder_read_is_read_now () =
   let now, owed = warming_in_a_row ~now:10.0 ~count:4 (O.changed O.settled) in
   let reading = O.changed (O.started owed) in
   let owed = owed_after ~now (answer warming) reading in
-  check bool "the change is read now" true (O.due ~now owed);
+  check bool "the change is read now" true (O.due ~now:(at now) owed);
   let owed = read_and_answer ~now warming owed in
   check bool "the next placeholder still waits the longest wait" false
-    (O.due ~now:(now +. max_retry_s -. 0.1) owed);
-  check bool "after it" true (O.due ~now:(now +. max_retry_s) owed)
+    (O.due ~now:(at (now +. max_retry_s -. 0.1)) owed);
+  check bool "after it" true (O.due ~now:(at (now +. max_retry_s)) owed)
 
 (* A read the record did not start, such as one on entering the screen,
    still leaves its placeholder read again. *)
 let test_a_placeholder_from_an_unheard_read_is_read_again () =
   let owed = owed_after ~now:10.0 (answer warming) O.settled in
-  check bool "not before the first wait" false (O.due ~now:11.9 owed);
-  check bool "after the first wait" true (O.due ~now:12.0 owed)
+  check bool "not before the first wait" false (O.due ~now:(at 11.9) owed);
+  check bool "after the first wait" true (O.due ~now:(at 12.0) owed)
 
 let () =
   run "tui_tools_inventory_owed"

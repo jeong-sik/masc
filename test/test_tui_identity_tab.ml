@@ -107,6 +107,10 @@ let pending_urls state keeper =
 let identity_state () =
   Masc_tui_types.create_state ~workspace:"test" ~port:8935 ()
 
+(* Instants on the main loop's clock, [seconds] after this test began. *)
+let start = Masc_tui_wake.Mono.now ()
+let at seconds = Masc_tui_wake.Mono.after start seconds
+
 module Decode = Masc.Tui_decode
 
 (* A [server_identity] carrying only what workspace equality reads, built
@@ -145,7 +149,7 @@ let complete_attempt state keeper provider =
   | Some expectation ->
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
+      Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore
         ~attempts:[expectation, Ok (Masc_tui_identity_model.Credentials_published (Ok 0))]
         (reading (Ok (Masc_tui_types.identity_expectations_for_keeper state keeper
           |> List.map (fun held -> declared ~tools:[] held.Masc_tui_types.ile_provider held.ile_provider))))
@@ -263,7 +267,7 @@ let test_failed_read_forgets_the_previous_callback () =
   let load result =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-    Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
+    Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
       result
   in
   load (Ok ([], Some (Masc_tui_identity_model.Callback_url "https://example.org/cb")));
@@ -284,7 +288,7 @@ let test_removed_provider_retires_display_and_late_start () =
     ~keeper_name:"A" ~provider_id:"slack" in
   let read = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
     (reading (Ok []));
   apply_login state pending ~now:10. (login_result ());
   check (Alcotest.list Alcotest.string) "removed provider cannot restore its URL" []
@@ -348,7 +352,7 @@ let test_admitted_callback_outlives_consent_deadline () =
   let apply json =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-    Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
+    Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore
       ~attempts:[expectation, Masc_tui_identity_model.decode_identity_login_status json]
       (reading (Ok [declared "slack" "Slack"])) in
   apply (`Assoc ["kind", `String "callback_admitted"]);
@@ -373,7 +377,7 @@ let test_a_passed_consent_deadline_owes_one_read () =
   let state = identity_state () in
   hold_expectation state ~expires_at:20. ~keeper:"A" ~provider:"slack" ~base_path:"/w/a"
     ~masc_root:"/r";
-  let owed () = Masc_tui_owed_read.due ~now:0. (Masc_tui_types.identity_login_read state "A") in
+  let owed () = Masc_tui_owed_read.due ~now:(at 0.) (Masc_tui_types.identity_login_read state "A") in
   Masc_tui_types.owe_identity_deadline_reads state ~now:19.;
   check Alcotest.bool "nothing is owed before the deadline" false (owed ());
   Masc_tui_types.owe_identity_deadline_reads state ~now:20.;
@@ -409,7 +413,7 @@ let test_recovery_owes_every_waited_keeper () =
   check (Alcotest.list Alcotest.string) "both waited Keepers owe a read" [ "A"; "B" ]
     (state.identity_login_reads
      |> List.filter_map (fun (keeper, read) ->
-       if Masc_tui_owed_read.due ~now:0. read then Some keeper else None)
+       if Masc_tui_owed_read.due ~now:(at 0.) read then Some keeper else None)
      |> List.sort String.compare)
 
 (* A reading settles the read that owed it: a consent the server still calls
@@ -425,7 +429,7 @@ let test_a_reading_reports_how_it_settles () =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
     let settled = ref None in
-    Masc_tui_identity_updates.providers_loaded ~now ~settle:(fun outcome -> settled := Some outcome)
+    Masc_tui_identity_updates.providers_loaded ~now:(at now) ~wall_now:now ~settle:(fun outcome -> settled := Some outcome)
       state read ~report:ignore
       ~attempts:[ expectation, Masc_tui_identity_model.decode_identity_login_status json ]
       providers;
@@ -448,6 +452,31 @@ let test_a_reading_reports_how_it_settles () =
   check Alcotest.bool "a reading without authority is superseded" true
     (settle ~now:19. waiting = Some Masc_tui_identity_updates.Reading_superseded)
 
+(* #53581. The launcher asks whether a Keeper's login read is due on the
+   main loop's clock, so a failed reading schedules its retry on that clock
+   and judges consent deadlines on the wall clock. Handing it the wall clock
+   for the loop's no longer compiles:
+     providers_loaded ~now:(Unix.gettimeofday ()) ...
+     Error: This expression has type float but an expression was expected of
+     type Masc_tui_wake.Mono.t *)
+let test_a_failed_provider_reading_is_read_again_after_its_wait () =
+  let state = identity_state () in
+  state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
+  hold_expectation state ~keeper:"A" ~provider:"slack" ~base_path:"/w/a" ~masc_root:"/r";
+  Masc_tui_types.owe_identity_login_read state "A";
+  Masc_tui_types.update_identity_login_read state "A" Masc_tui_owed_read.started;
+  let read = Masc_tui_types.mark_detail_read_started state
+    ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
+  let loop_now = Masc_tui_wake.Mono.now () in
+  Masc_tui_identity_updates.providers_loaded ~now:loop_now ~wall_now:(Unix.gettimeofday ())
+    ~settle:ignore state read ~report:ignore ~attempts:[] (reading (Error "HTTP 503"));
+  let due_after seconds =
+    Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.after loop_now seconds)
+      (Masc_tui_types.identity_login_read state "A") in
+  check Alcotest.bool "the failed read waits" false (due_after 0.);
+  check Alcotest.bool "the failed read is read again after its wait" true
+    (due_after Masc_tui_types.identity_login_retry_s)
+
 let assert_an_offscreen_login_failure_is_reported outcome =
   let state = identity_state () in
   state.server_identity <- Some (workspace_identity ~base_path:"/w/a" ~masc_root:"/r");
@@ -462,7 +491,7 @@ let assert_an_offscreen_login_failure_is_reported outcome =
   let reported = ref [] in
   let read = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read
+  Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read
     ~report:(fun line -> reported := line :: !reported)
     ~attempts:[expectation, Ok outcome]
     (reading (Ok [declared "slack" "Slack"]));
@@ -491,7 +520,7 @@ let test_a_lost_attempt_is_read_against_the_catalog () =
     let apply catalog =
       let read = Masc_tui_types.mark_detail_read_started state
         ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:10L in
-      Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
+      Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore
         ~attempts:[expectation, Ok Masc_tui_identity_model.Attempt_unavailable]
         (reading catalog) in
     state, apply in
@@ -529,7 +558,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
       "tool_discovery", `Assoc ["kind", `String "discovered"; "count", `Int 0]]) in
   let start ns = Masc_tui_types.mark_detail_read_started state
     ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:ns in
-  let apply read providers = Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
+  let apply read providers = Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore
     ~attempts:[expectation,completed] (reading providers) in
   let stale = start 1L in
   let current = start 2L in
@@ -550,7 +579,7 @@ let test_completed_attempt_requires_current_owned_catalog () =
   check (Alcotest.list Alcotest.string) "old attempt cannot retire replacement under current read"
     ["slack"] (held_expectations state "A");
   let read = start 5L in
-  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore
+  Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore
     ~attempts:[replacement,Ok Masc_tui_identity_model.Consent_expired]
     (reading (Error "catalog unavailable"));
   check (Alcotest.list Alcotest.string) "immutable consent expiry needs no catalog"
@@ -709,7 +738,7 @@ let test_late_callback_is_observed_after_authority_recovery () =
   in
   check Alcotest.bool "pending recovery read blocks a second read" false
     (Masc_tui_types.identity_login_read_ready state ~now:10. "A");
-  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state recovery_read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state recovery_read ~report:ignore ~attempts:[]
     (reading (Ok [ declared "slack" "Slack" ]));
   check (Alcotest.list Alcotest.string)
     "incomplete provider read keeps the browser wait" [ "slack" ]
@@ -721,7 +750,7 @@ let test_late_callback_is_observed_after_authority_recovery () =
     Masc_tui_types.mark_detail_read_started state ~tab:Masc_tui_types.Detail_identity
       ~keeper:"A" ~now_ns:2L
   in
-  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state late_callback_read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state late_callback_read ~report:ignore ~attempts:[]
     (reading (Ok [ declared ~tools:[ "postMessage" ] "slack" "Slack" ]));
   check Alcotest.bool "the attached provider is visible" true
     (match state.identity_view with
@@ -1165,7 +1194,7 @@ let test_a_read_keeps_the_servers_callback () =
   let callback =
     Masc_tui_identity_model.Callback_url "http://127.0.0.1:8935/api/v1/keepers/oauth/callback"
   in
-  Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
+  Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
     (Ok ([ declared "slack" "Slack" ], Some callback));
   check Alcotest.bool "the callback the server named is held" true
     (state.Masc_tui_types.identity_callback = Some callback)
@@ -1387,7 +1416,7 @@ let test_a_reading_keeps_the_cursor_on_its_service () =
   let load providers =
     let read = Masc_tui_types.mark_detail_read_started state
       ~tab:Masc_tui_types.Detail_identity ~keeper:"A" ~now_ns:1L in
-    Masc_tui_identity_updates.providers_loaded ~now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
+    Masc_tui_identity_updates.providers_loaded ~now:(at 0.) ~wall_now:0. ~settle:ignore state read ~report:ignore ~attempts:[]
       (reading (Ok providers))
   in
   load [ declared "airtable" "Airtable"; declared "box" "Box"; declared "canva" "Canva" ];
@@ -1549,6 +1578,8 @@ let () =
             test_only_a_waited_keeper_owes_attempt_reads;
           Alcotest.test_case "a reading reports how it settles" `Quick
             test_a_reading_reports_how_it_settles;
+          Alcotest.test_case "a failed provider reading is read again after its wait" `Quick
+            test_a_failed_provider_reading_is_read_again_after_its_wait;
           Alcotest.test_case "recovery owes every waited Keeper" `Quick
             test_recovery_owes_every_waited_keeper;
           Alcotest.test_case "every waiting Keeper is read from any surface"

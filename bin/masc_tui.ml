@@ -9162,14 +9162,14 @@ let browser_pointer_press : (int * int * Browser_lane.Pointer.point) option ref 
    clock as one it started. *)
 let failed_read owed =
   Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ())
     (Masc_tui_owed_read.answering owed)
 
 (* A placeholder answer, whoever started the read, is read again on the
    failed read's clock; a change announced during it is read now. *)
 let placeholder_read owed =
   Masc_tui_owed_read.placeholder ~retry_s:stream_reconnect_s
-    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ())
     (Masc_tui_owed_read.answering owed)
 
 (* runtime.toml reads when the server says it committed a text of it, on
@@ -9204,7 +9204,7 @@ let launch_owed_machine_live state ~mailbox =
     else begin
       let owed = if Option.is_none in_flight then Masc_tui_owed_read.abandoned owed else owed in
       set_owed owed;
-      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then launch_read state ~mailbox
+      if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed then launch_read state ~mailbox
     end
   in
   launch Masc.Machine_lane.Msx (state.msx_open && not state.msx_menu_open)
@@ -9230,7 +9230,7 @@ let launch_owed_browser_observation state ~mailbox =
       in
       state.browser_observation_owed <- owed;
       if server_authority_ready state
-         && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed
+         && Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed
          && Option.is_none !browser_pointer_press then begin
         let viewport = if state.image_open then Option.map fst state.browser_viewport else None in
         match Browser_lane_view.observation_operation ?viewport view with
@@ -9246,7 +9246,7 @@ let launch_owed_lanes state ~mailbox =
   else begin
     if not state.standalone_lanes_inflight then
       state.lanes_owed <- Masc_tui_owed_read.abandoned state.lanes_owed;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.lanes_owed then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) state.lanes_owed then
       launch_lanes_load state ~mailbox
   end
 
@@ -9277,7 +9277,7 @@ let launch_owed_lane_addons state ~mailbox =
                   else begin
                     let owed = Masc_tui_owed_read.abandoned owed in
                     state.lane_addons_owed <- Some ((owner, epoch), owed);
-                    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed then
+                    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed then
                       launch_lane_addons state ~mailbox
                         ~target:(Masc_tui_lane_addons.Read_detail (owner, epoch))
                         Masc_tui_lane_addons.Inspect
@@ -9948,7 +9948,7 @@ let launch_owed_history state ~mailbox =
          || state.msg_target_keeper_name <> Some owed.kho_keeper
       then state.msg_history_owed <- None
       else if
-        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.kho_read
+        Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed.kho_read
         && state.view = Keepers Keeper_message && state.msg_scroll = 0
         && server_authority_ready state
         && keeper_available_for_new_message state owed.kho_keeper
@@ -9960,7 +9960,7 @@ let launch_owed_history state ~mailbox =
 (* Runs on every loop iteration; it reads only a visible Fusion reading whose
    failed read is due. *)
 let launch_owed_fusion state ~mailbox =
-  Masc_tui_fusion_updates.retry_due_visible state ~now:(monotonic_now_s ())
+  Masc_tui_fusion_updates.retry_due_visible state ~now:(Masc_tui_wake.Mono.now ())
     ~runs:(fun () -> launch_fusion_runs_load state ~mailbox)
     ~detail:(fun run_id -> launch_fusion_detail_load state ~mailbox ~run_id)
     ~historical:(fun reference ->
@@ -10036,7 +10036,7 @@ let launch_owed_keeper_composite state ~mailbox =
       if owed.kco_reading != state.detail_read_authority
       then state.keeper_composite_owed <- None
       else if
-        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.kco_read
+        Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed.kco_read
         && keeper_composite_on_screen state ~keeper_name:owed.kco_keeper
         && Option.is_none state.keeper_composite_inflight
       then launch_keeper_composite_load state ~mailbox ~keeper_name:owed.kco_keeper
@@ -10082,7 +10082,7 @@ let launch_owed_keeper_calls state ~mailbox =
       if owed.kclo_reading != state.detail_read_authority
       then state.keeper_calls_owed <- None
       else if
-        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.kclo_read
+        Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed.kclo_read
         && state.view = Keepers Keeper_calls
         && (match selected_keeper state with
             | Some keeper -> String.equal keeper.k_name owed.kclo_keeper
@@ -10134,7 +10134,7 @@ let launch_owed_board_post state ~mailbox =
         if reading then owed.bpo_read else Masc_tui_owed_read.abandoned owed.bpo_read
       in
       state.board_post_owed <- Some { owed with bpo_read = read };
-      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+      if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
          && server_authority_ready state
          && not reading
       then begin
@@ -10172,7 +10172,7 @@ let fail_board_list_read state = state.board_list_owed <- failed_read state.boar
    that repeats does not read back to back. *)
 let unanswered_read owed =
   Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ()) owed
+    ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ()) owed
 
 (* The Planning screen's Goals and their tree read again when
    [goal_projection_changed] or [Backlog] arrives while Planning is
@@ -10276,7 +10276,7 @@ let launch_owed_asks state ~mailbox =
     if reading then state.asks_owed else Masc_tui_owed_read.abandoned state.asks_owed
   in
   state.asks_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+  if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
      && server_authority_ready state
      && not reading
      && launch_asks_read state ~mailbox
@@ -10300,7 +10300,7 @@ let launch_owed_gate_snapshot state ~mailbox =
     else Masc_tui_owed_read.abandoned state.gate_snapshot_owed
   in
   state.gate_snapshot_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+  if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
      && server_authority_ready state
      && not reading
   then launch_gate_snapshot_load state ~mailbox
@@ -10333,7 +10333,7 @@ let launch_owed_held_calls state ~mailbox =
       else Masc_tui_owed_read.abandoned state.held_calls_owed
     in
     state.held_calls_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
        && server_authority_ready state
        && not reading
     then launch_keeper_tool_approvals_load state ~mailbox
@@ -10381,7 +10381,7 @@ let launch_owed_connectors state ~mailbox =
       else Masc_tui_owed_read.abandoned state.connectors_owed
     in
     state.connectors_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_connectors_load state ~mailbox
   end
 
@@ -10396,7 +10396,7 @@ let launch_owed_overview state ~mailbox =
     else Masc_tui_owed_read.abandoned state.overview_owed
   in
   state.overview_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not state.overview_inflight then
+  if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not state.overview_inflight then
     launch_overview_load state ~mailbox
 
 let launch_owed_runtime_surface state ~mailbox =
@@ -10408,7 +10408,7 @@ let launch_owed_runtime_surface state ~mailbox =
       else Masc_tui_owed_read.abandoned state.runtime_surface_owed
     in
     state.runtime_surface_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_runtime_surface_load state ~mailbox ~force:false
   end
 
@@ -10424,7 +10424,7 @@ let launch_owed_runtime_config state ~mailbox =
   in
   state.runtime_config_owed <- read;
   if runtime_config_on_screen state
-     && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+     && Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
      && not reading
   then launch_runtime_config_load state ~mailbox
 
@@ -10440,7 +10440,7 @@ let launch_owed_repositories state ~mailbox =
       else Masc_tui_owed_read.abandoned state.repositories_owed
     in
     state.repositories_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_repositories_load state ~mailbox
   end
 
@@ -10531,7 +10531,7 @@ let launch_owed_memory_health state ~mailbox =
     state.memory_health_owed <- read;
     match read, state.memory_health, state.memory_health_rows_owed with
     | (Masc_tui_owed_read.Owed _ | Waiting _ | Reading _), _, _ ->
-        if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read then
+        if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read then
           launch_memory_health_load state ~mailbox
     | Settled, Some held, _ :: _ ->
         (match held.Masc.Tui_decode_memory_health.mhs_refused_keepers with
@@ -10552,7 +10552,7 @@ let launch_owed_memory_world state ~mailbox =
     || (state.view = Keepers Keeper_list
         && Masc_tui_keeper_list_model.has_world state.keeper_list_view) in
   if visible && server_authority_ready state then
-    match Masc_tui_memory_world.start ~now:(monotonic_now_s ()) state.memory_world with
+    match Masc_tui_memory_world.start ~now:(Masc_tui_wake.Mono.now ()) state.memory_world with
     | None -> ()
     | Some (next, request) ->
         state.memory_world <- next;
@@ -10581,7 +10581,7 @@ let launch_owed_memory_input state ~mailbox =
     in
     state.memory_input_owed <- read;
     launch_memory_input_load state ~mailbox
-      ~refresh:((not reading) && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
+      ~refresh:((not reading) && Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read)
   end
 
 let harness_on_screen state =
@@ -10609,7 +10609,7 @@ let launch_owed_identity_logins state ~mailbox =
            Masc_tui_types.update_identity_login_read state keeper_name
              Masc_tui_owed_read.abandoned;
          let read = Masc_tui_types.identity_login_read state keeper_name in
-         if ready && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read then begin
+         if ready && Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read then begin
            Masc_tui_types.update_identity_login_read state keeper_name
              Masc_tui_owed_read.started;
            Masc_tui_identity_requests.launch_view state ~host:server_peer_host
@@ -10632,7 +10632,7 @@ let launch_owed_clients state ~mailbox =
       else Masc_tui_owed_read.abandoned state.clients_owed
     in
     state.clients_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_clients_load state ~mailbox
   end
 
@@ -10652,7 +10652,7 @@ let launch_owed_harness state ~mailbox =
       else Masc_tui_owed_read.abandoned state.harness_owed
     in
     state.harness_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_harness_load state ~mailbox
   end
 
@@ -10668,7 +10668,7 @@ let launch_owed_verification state ~mailbox =
       else Masc_tui_owed_read.abandoned state.verification_owed
     in
     state.verification_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_verification_load state ~mailbox
   end
 
@@ -10685,7 +10685,7 @@ let launch_owed_keeper_turns state ~mailbox =
     else Masc_tui_owed_read.abandoned state.keeper_turns_owed
   in
   state.keeper_turns_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading
+  if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading
      && keeper_turns_in_use state
   then launch_keeper_turns_load state ~mailbox
 
@@ -10698,7 +10698,7 @@ let launch_owed_keeper_waiting state ~mailbox =
     else Masc_tui_owed_read.abandoned state.keeper_waiting_owed
   in
   state.keeper_waiting_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading
+  if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading
      && keeper_waiting_in_use state then
     launch_keeper_waiting_load state ~mailbox
 
@@ -10709,7 +10709,7 @@ let launch_owed_tool_modes state ~mailbox =
   if not (tool_modes_on_screen state) then
     state.tool_modes_owed <- Masc_tui_owed_read.settled
   else if
-    Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.tool_modes_owed
+    Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) state.tool_modes_owed
     && server_authority_ready state
     && not (Approval.Flow.action_inflight state.approval_flow)
   then begin
@@ -10738,7 +10738,7 @@ let launch_owed_async_requests state ~mailbox =
       else Masc_tui_owed_read.abandoned state.async_requests_owed
     in
     state.async_requests_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
        && server_authority_ready state
        && not reading
     then begin
@@ -10773,7 +10773,7 @@ let launch_owed_tools_async_detail state ~mailbox =
       else Masc_tui_owed_read.abandoned state.tools_async_detail_owed
     in
     state.tools_async_detail_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_tools_async_detail state ~mailbox
   end
 
@@ -10795,7 +10795,7 @@ let launch_owed_tools_async_task state ~mailbox =
       else Masc_tui_owed_read.abandoned state.tools_async_task_owed
     in
     state.tools_async_task_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then
       launch_tools_async_task state ~mailbox
   end
 
@@ -10824,7 +10824,7 @@ let launch_owed_tools state ~mailbox =
                List.mem part request.tri_pending
            | Some _ | None -> false)
     in
-    let now = monotonic_now_s () in
+    let now = Masc_tui_wake.Mono.now () in
     let due part owed set =
       let reading = pending part in
       let read = if reading then owed else Masc_tui_owed_read.abandoned owed in
@@ -10931,7 +10931,7 @@ let launch_owed_schedules state ~mailbox =
      else if page_reading then state.schedules_page_owed
      else Masc_tui_owed_read.abandoned state.schedules_page_owed);
   if server_authority_ready state then begin
-    let now = monotonic_now_s () in
+    let now = Masc_tui_wake.Mono.now () in
     let intent = Snapshot_read.Refresh in
     if page_on_screen && not page_reading
        && not (page_carries_agenda && Snapshot_read.in_flight state.schedules_agenda_read)
@@ -11080,7 +11080,7 @@ let launch_owed_keeper_schedules state ~mailbox =
                 && not (String.equal request.drr_keeper keeper_name))
              state.detail_reads
       in
-      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+      if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
          && server_authority_ready state
          && not reading
          && not window_waits
@@ -11124,7 +11124,7 @@ let launch_owed_keeper_story_turns state ~mailbox =
       in
       if not other_keeper_reading then
         launch_keeper_story_turns_load state ~mailbox ~keeper_name
-          ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
+          ~refresh:(Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read)
 
 (* One visible demand owns each shared source. A hidden preview cannot
    replace the canonical browser's fleet or Keeper target. *)
@@ -11147,7 +11147,7 @@ let launch_owed_memory state ~mailbox =
      state.memory_facts_owed <- owed;
      if not (reading && Masc_tui_fetched.current_key state.memory_facts <> Some key)
         && (Masc_tui_fetched.current_key state.memory_facts <> Some key
-            || Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed) then
+            || Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed) then
        if String.equal key "*" then launch_all_memory_facts_load state ~mailbox
        else launch_memory_facts_load state ~mailbox ~keeper_name:key);
   let activity_key = match state.view, state.memory_page, state.memory_facts_keeper with
@@ -11164,7 +11164,7 @@ let launch_owed_memory state ~mailbox =
     state.memory_activity_owed <- owed;
     if not (reading && Masc_tui_fetched.current_key state.memory_activity <> Some keeper_name) then
       launch_memory_activity_read state ~mailbox ~keeper_name
-        ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed)
+        ~refresh:(Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed)
         state.memory_activity owed
         ~set_source:(fun source -> state.memory_activity <- source)
         ~set_owed:(fun owed -> state.memory_activity_owed <- owed)
@@ -11233,7 +11233,7 @@ let follow_chat_journal owed ~on_screen ~reading ~launch =
               cjo_read = (if busy then Masc_tui_owed_read.started read else read) }
       in
       let read = if busy then owed.cjo_read else Masc_tui_owed_read.abandoned owed.cjo_read in
-      if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && (not busy) && launch keeper
+      if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && (not busy) && launch keeper
       then Some { owed with cjo_read = Masc_tui_owed_read.started read }
       else Some { owed with cjo_read = read }
 
@@ -18037,11 +18037,12 @@ let starting_rows_due roster =
     | Keeper_control.Roster_partial { observed; _ }
     | Keeper_control.Roster_invalid { observed; _ } -> observed
   in
-  let now_wall = Unix.gettimeofday () and now = monotonic_now_s () in
+  let wall_now = Unix.gettimeofday () and now = Masc_tui_wake.Mono.now () in
   List.filter_map
     (fun (row : Tui_decode.keeper_runtime) ->
       match Keeper_control.starting_up_until row with
-      | Some until when until > now_wall -> Some (row.kr_name, now +. (until -. now_wall))
+      | Some until when until > wall_now ->
+          Some (row.kr_name, Masc_tui_wake.Mono.of_wall ~now ~wall_now until)
       | Some _ | None -> None)
     rows
 
@@ -18052,7 +18053,7 @@ let owe_failed_whole_roster_read state =
   let read = Masc_tui_roster_owed.Read_roster in
   state.keeper_roster_owed <-
     Masc_tui_roster_owed.failed ~retry_s:stream_reconnect_s
-      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ()) read
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ()) read
       (Masc_tui_roster_owed.started read
          (Masc_tui_roster_owed.roster_changed state.keeper_roster_owed))
 
@@ -18271,7 +18272,7 @@ let launch_owed_pending_confirms state ~mailbox =
     else Masc_tui_owed_read.abandoned state.pending_confirms_owed
   in
   state.pending_confirms_owed <- read;
-  if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+  if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
      && server_authority_ready state
      && not reading
      && launch_pending_confirms_read state ~mailbox
@@ -20187,7 +20188,7 @@ let launch_owed_keeper_logs state ~mailbox =
              else Masc_tui_owed_read.abandoned state.keeper_log_owed
            in
            state.keeper_log_owed <- read;
-           if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read && not reading then begin
+           if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read && not reading then begin
              state.keeper_log_owed <- Masc_tui_owed_read.started read;
              ignore (launch_current_keeper_logs state ~mailbox ~intent:Snapshot_read.Refresh)
            end
@@ -20200,7 +20201,7 @@ let launch_owed_keeper_logs state ~mailbox =
       if owed.klgo_reading != state.workspace_read_authority
       then state.keeper_logs_owed <- None
       else if
-        Masc_tui_owed_read.due ~now:(monotonic_now_s ()) owed.klgo_read
+        Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) owed.klgo_read
         && Option.is_none state.keeper_log_cancel
         && (match state.workspace_identity with
             | Workspace_identity_match -> true
@@ -20399,7 +20400,7 @@ let launch_owed_ask_followup state ~mailbox =
   | None -> state.ask_followup_owed <- Masc_tui_owed_read.settled
   | Some _ ->
       if state.view = Approvals && server_authority_ready state
-         && Masc_tui_owed_read.due ~now:(monotonic_now_s ()) state.ask_followup_owed
+         && Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) state.ask_followup_owed
       then launch_ask_followup_load state ~mailbox
 
 let launch_tick_side_reads state ~mailbox ~(needs : Masc_tui_types.surface_needs) =
@@ -20855,7 +20856,7 @@ let settle_fusion_retry state reading result =
       | Error _ ->
           Some (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
                   ~max_retry_s:keeper_execute_stream_max_reconnect_s
-                  ~now:(monotonic_now_s ())))
+                  ~now:(Masc_tui_wake.Mono.now ())))
 
 (* An MCP session that would not open may be the account server of a
    multi-account installation, which serves no MCP. Its /health says so; the
@@ -21328,7 +21329,7 @@ let owe_keeper_roster_change state = function
 let fail_keeper_roster_read state read =
   state.keeper_roster_owed <-
     Masc_tui_roster_owed.failed ~retry_s:stream_reconnect_s
-      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+      ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ())
       read state.keeper_roster_owed
 
 let launch_keeper_roster_owed_read state ~mailbox ~expected_workspace read =
@@ -21373,7 +21374,7 @@ let launch_owed_keeper_roster state ~mailbox =
     in
     if not reading then
       state.keeper_roster_owed <- Masc_tui_roster_owed.abandoned state.keeper_roster_owed;
-    let now = monotonic_now_s () in
+    let now = Masc_tui_wake.Mono.now () in
     state.keeper_roster_owed <- Masc_tui_roster_owed.release_scheduled ~now state.keeper_roster_owed;
     match
       reading,
@@ -22189,7 +22190,7 @@ let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
   if Masc_tui_types.take_tool_series_due state ~now:(monotonic_now_s ()) then
     owe_pushed_read state Surface_read_source.Tool_series;
   let wanted = Surface_read_order.sources (current_surface_needs state) in
-  let now = monotonic_now_s () in
+  let now = Masc_tui_wake.Mono.now () in
   let due =
     List.filter
       (fun source ->
@@ -22238,7 +22239,7 @@ let launch_owed_board_list state ~refresh_inflight ~full_refresh_inflight
       else unanswered_read state.board_list_owed
     in
     state.board_list_owed <- read;
-    if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
+    if Masc_tui_owed_read.due ~now:(Masc_tui_wake.Mono.now ()) read
        && server_authority_ready state
        && state.workspace_identity = Workspace_identity_match
        && not reading
@@ -22276,7 +22277,7 @@ let launch_owed_planning state ~refresh_inflight ~full_refresh_inflight
     in
     state.planning_owed <- planning;
     state.overview_goals_owed <- goals;
-    let now = monotonic_now_s () in
+    let now = Masc_tui_wake.Mono.now () in
     let planning_due = Masc_tui_owed_read.due ~now planning && not planning_reading in
     let goals_due = Masc_tui_owed_read.due ~now goals && not goals_reading in
     if (planning_due || goals_due) && server_authority_ready state
@@ -26869,7 +26870,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          | Ok _ | Error _ ->
              settle_board_post_owed state ~post_id
                (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-                  ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())));
+                  ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ())));
         launch_owed_board_post state ~mailbox
       end;
       Drawn_changed
@@ -27533,7 +27534,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         state.keeper_calls_refresh_pending <- false;
         let failed =
           Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-            ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ())
+            ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ())
         in
         (match result with
          | Ok snapshot when String.equal snapshot.kcs_keeper keeper_name ->
@@ -28580,7 +28581,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Drawn_changed
   | Identity_msg (Identity_providers_loaded (request, result, attempts)) ->
       Masc_tui_identity_updates.providers_loaded state request
-        ~report:(report_action state "error") ~now:(Unix.gettimeofday ()) ~attempts result;
+        ~report:(report_action state "error") ~now:(Masc_tui_wake.Mono.now ())
+        ~wall_now:(Unix.gettimeofday ()) ~attempts result;
       Drawn_changed
   | Identity_msg (Identity_login_started (request, result)) ->
       Masc_tui_identity_updates.login_started state request ~now:(Unix.gettimeofday ())
@@ -30234,7 +30236,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                | Some _, (Some _ | None) | None, Some _ ->
                    Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
                      ~max_retry_s:keeper_execute_stream_max_reconnect_s
-                     ~now:(monotonic_now_s ()))
+                     ~now:(Masc_tui_wake.Mono.now ()))
         end;
         (* Full-history admission can retire the optional slot above. Check
            after admission so an unneeded late reply cannot strand this read. *)
@@ -31028,7 +31030,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          [complete]; a failed refresh keeps the inventory held. *)
       let retry_s = stream_reconnect_s
       and max_retry_s = keeper_execute_stream_max_reconnect_s
-      and now = monotonic_now_s () in
+      and now = Masc_tui_wake.Mono.now () in
       state.memory_world <- (match result with
         | Ok inventory ->
             Masc_tui_memory_world.complete ~retry_s ~max_retry_s ~now state.memory_world request
@@ -31273,7 +31275,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             settle_composite_owed state ~keeper_name
               (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
                  ~max_retry_s:keeper_execute_stream_max_reconnect_s
-                 ~now:(monotonic_now_s ())));
+                 ~now:(Masc_tui_wake.Mono.now ())));
         launch_owed_keeper_composite state ~mailbox
       end;
       Drawn_changed
@@ -31318,7 +31320,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       Drawn_changed
   | Clients_loaded (generation, result) ->
       state.clients_surface_inflight <- false;
-      Masc_tui_types.settle_clients_read state ~now:(monotonic_now_s ()) result;
+      Masc_tui_types.settle_clients_read state ~now:(Masc_tui_wake.Mono.now ()) result;
       if generation = state.clients_surface_generation then (
         match result with
         | Ok snapshot ->
@@ -31408,7 +31410,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       | Ok snapshot ->
           state.harness_owed <- Masc_tui_owed_read.succeeded state.harness_owed;
           state.harness_stale_at <-
-            Masc_tui_owed_read.stale_at_to_schedule ~now:(Unix.gettimeofday ())
+            Masc_tui_owed_read.stale_at_to_schedule ~wall_now:(Unix.gettimeofday ())
               (Option.bind snapshot.Masc.Tui_decode.hs_overview (fun overview ->
                  overview.Masc.Tui_decode.hov_stale_at));
           state.harness <- Some snapshot;
@@ -31558,7 +31560,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Some _, Error _ ->
            settle_logs_owed state ~keeper_name
              (Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
-                ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(monotonic_now_s ()))
+                ~max_retry_s:keeper_execute_stream_max_reconnect_s ~now:(Masc_tui_wake.Mono.now ()))
        | None, (Ok _ | Error _) ->
            (* A newer read owns the slot and settles the debt itself. When the
               view dropped this one and none replaced it, what it was to read

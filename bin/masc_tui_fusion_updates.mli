@@ -40,7 +40,7 @@ val settle_retry :
     business: the reading's reread flag owns it. *)
 
 val retry_due_visible :
-  Masc_tui_types.state -> now:float -> runs:(unit -> unit) -> detail:(string -> unit) ->
+  Masc_tui_types.state -> now:Masc_tui_wake.Mono.t -> runs:(unit -> unit) -> detail:(string -> unit) ->
   historical:(Masc.Tui_decode_fusion.fusion_historical_evidence -> unit) -> unit
 (** Read again each visible reading whose failed read is due a retry. Fusion
     re-reads on [fusion_run_status]; nothing else reads it on a timer. *)

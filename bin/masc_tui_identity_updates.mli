@@ -28,21 +28,23 @@ type reading =
   | Reading_failed
       (** The catalog, or the status of an attempt still waited on, could not be
           read, or the server says such a consent still waits although its
-          deadline [now] has passed. *)
+          deadline [wall_now] has passed. *)
   | Reading_superseded  (** A newer read, or a lost authority, owns the answer. *)
 
 (** Apply catalog and attempt facts under one read admission. Published
     credentials retire only with the paired current successful catalog read;
     immutable failure/expiry facts need no catalog. Present only the selected Keeper.
     A successful read also holds the callback the server named. [settle] gets
-    the reading's outcome, [now] being the wall clock it judges consent
-    deadlines by. *)
+    the reading's outcome. [wall_now] is the wall clock it judges consent
+    deadlines by; [now] is the same moment on the main loop's clock, where a
+    failed reading schedules its retry (#53581). *)
 val providers_loaded
   :  Masc_tui_types.state
   -> Masc_tui_types.detail_read_request
   -> ?settle:(reading -> unit)
   -> report:(string -> unit)
-  -> now:float
+  -> now:Masc_tui_wake.Mono.t
+  -> wall_now:float
   -> attempts:(Masc_tui_types.identity_login_expectation * (Masc_tui_identity_model.identity_login_status, string) result) list
   -> ( Masc_tui_identity_model.identity_provider list
        * Masc_tui_identity_model.identity_callback option

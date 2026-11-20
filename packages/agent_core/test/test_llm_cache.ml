@@ -80,7 +80,13 @@ let test_fingerprint_separates_request_shaping_fields () =
     { base with PC.system_prompt = Some "you are terse" };
   differs
     "response_format changes the key"
-    { base with PC.response_format = JsonMode }
+    { base with PC.response_format = JsonMode };
+  differs
+    "provider_only changes the key"
+    { base with PC.provider_only = [ "alibaba/us-east-1" ] };
+  differs
+    "provider_ignore changes the key"
+    { base with PC.provider_ignore = [ "amazon-bedrock" ] }
 ;;
 
 let test_fingerprint_system_prompt_cache_prefix_normalization () =

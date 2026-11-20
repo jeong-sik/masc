@@ -1472,6 +1472,13 @@ let test_openrouter_claude_prompt_cache_wire_declarations () =
   in
   check bool "openrouter declares supports_extended_cache_ttl" true
     (Llm_provider.Catalog_snapshot.supports_extended_cache_ttl snapshot ~provider_id:"openrouter");
+  check bool "openrouter declares supports_provider_routing_filter" true
+    (Llm_provider.Catalog_snapshot.supports_provider_routing_filter snapshot ~provider_id:"openrouter");
+  List.iter
+    (fun provider_id ->
+       check bool (provider_id ^ " defaults supports_provider_routing_filter false") false
+         (Llm_provider.Catalog_snapshot.supports_provider_routing_filter snapshot ~provider_id))
+    [ "openai"; "openai-responses"; "mistral"; "claude"; "glm-coding"; "opencode_go" ];
   let resolve model_id =
     let policy =
       Llm_provider.Capabilities.resolve_snapshot_request_policy

@@ -78,6 +78,8 @@ type t =
   ; system_prompt_cache_prefix : string option
   ; cache_extended_ttl : bool
   ; cache_session_key : string option
+  ; provider_only : string list
+  ; provider_ignore : string list
   ; model_capabilities_override : Capabilities.capabilities option
   ; model_anthropic_thinking_control_override : Capabilities.anthropic_thinking_control option
   ; request_policy_snapshot : request_policy_snapshot option
@@ -124,6 +126,8 @@ let make
       ?system_prompt_cache_prefix
       ?(cache_extended_ttl = false)
       ?cache_session_key
+      ?(provider_only = [])
+      ?(provider_ignore = [])
       ?model_capabilities_override
       ?model_anthropic_thinking_control_override
       ?keep_alive
@@ -187,6 +191,8 @@ let make
   ; system_prompt_cache_prefix
   ; cache_extended_ttl
   ; cache_session_key
+  ; provider_only
+  ; provider_ignore
   ; model_capabilities_override
   ; model_anthropic_thinking_control_override
   ; request_policy_snapshot = None
@@ -303,6 +309,15 @@ let validated_cache_session_key (config : t) : string option =
     if trimmed = "" || String.length trimmed > max_cache_session_key_bytes
     then None
     else Some trimmed
+;;
+
+let supports_provider_routing_filter (config : t) : bool =
+  let policy =
+    match matching_request_policy config with
+    | Some policy -> policy
+    | None -> resolve_request_policy config
+  in
+  Capabilities.request_policy_supports_provider_routing_filter policy
 ;;
 
 let pricing_source (config : t) =

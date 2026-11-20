@@ -5,6 +5,7 @@
 // and named handlers for events with custom logic (conditional hydration,
 // async imports, signal-only updates).
 
+import { batch } from '@preact/signals'
 import {
   pauseQueuedAgentCoreRuntimeIngress,
   resumeQueuedAgentCoreRuntimeIngress,
@@ -42,6 +43,9 @@ import {
   boardHearthFilter,
   boardSearchText,
   boardOffset,
+  boardTotal,
+  boardLoading,
+  boardListCurrent,
 } from './store'
 import {
   requestNamespaceTruthNow,
@@ -563,9 +567,19 @@ async function hydrateAfterReconnect(): Promise<void> {
 // When a post_created push event carries content and the board is sorted by
 // recent, we can prepend the post directly — zero HTTP fetch. For other sort
 // modes the position is algorithm-dependent so we fall through to refreshBoard.
+//
+// The row is written without a read, so the list it joins has to be the one
+// the operator asks for now, with no first page on the wire. The filter
+// signals say what is asked now: from a change to one of them until the read
+// answers, the list on screen is still the previous query's, and a post
+// matched against the new filters would sit in a list that does not hold it.
+// A first page on the wire replaces the list when it answers, and it may have
+// been read before this post was written. In both cases the event goes on to
+// a read of the list.
 
 function handleBoardPostCreated(event: SSEEvent): boolean {
   if (boardSortMode.value !== 'recent') return false
+  if (boardLoading.value || !boardListCurrent.value) return false
   const postId = event.post_id as string | undefined
   const content = event.content as string | undefined
   if (!postId || !content) return false
@@ -590,11 +604,14 @@ function handleBoardPostCreated(event: SSEEvent): boolean {
     post_kind: boardPostKindFromEvent(event),
     hearth: eventHearth || undefined,
   }
-  boardPosts.value = [post, ...boardPosts.value]
-  // The server-side offset-based list has shifted by one because of this real
-  // persisted post, so advance the pagination cursor to avoid requesting the
-  // same posts again on the next load-more fetch.
-  boardOffset.value += 1
+  // The server's list grew by this post: the next page starts one row later,
+  // and its total, where the server gave one, counts one more. The row and
+  // the two numbers change together, as they do when a read answers.
+  batch(() => {
+    boardPosts.value = [post, ...boardPosts.value]
+    boardOffset.value += 1
+    if (boardTotal.value !== null) boardTotal.value += 1
+  })
   return true
 }
 

@@ -501,8 +501,10 @@ function BdRail({ activeSub, onSub, onMentions }: {
   const hearths = boardHearths.value
   // The count beside "전체" is the count of the list on screen. Under a
   // sub-board, a search or an author filter that list is not the Board, and
-  // nothing here counts the Board, so no number is given.
-  const countsBoard = !boardListNarrowed.value
+  // nothing here counts the Board, so no number is given. With no list on
+  // screen there is nothing to count either: a zero would say the Board holds
+  // no post, before the first read answers and after a read that failed.
+  const countsBoard = boardListOnScreen.value !== null && !boardListNarrowed.value
   const allCount = boardTotal.value ?? boardPosts.value.length
   const allCountLabel = boardTotal.value === null && boardHasMore.value ? `${allCount}+` : String(allCount)
   const mentionCount = useMemo(() => countMentionMessages(), [messages.value])

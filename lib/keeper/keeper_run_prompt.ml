@@ -41,8 +41,8 @@ let sanitize_user_message = Inference_utils.sanitize_text_utf8
 
 let assemble_extra_system_context = Keeper_context_assembly.assemble
 
-(* RFC-0491 §3.1: the Completion Authority layer is world state that comes and
-   goes between turns, so it is a context block, not a System observation.
+(* The Completion Authority layer is world state that comes and goes between
+   turns, so it is a context block, not a System observation.
    The Goal snapshot is a System suffix. The admitted operation source is one
    for an official client only. Agent Core leaves it in the end context, which
    rides the turn's first request alone, so a turn that serves an admitted
@@ -149,8 +149,8 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
      observations that change more often, so a request that follows tool
      results still ends with those results. On a turn that has them, an
      article write therefore changes the System a request sends, although
-     [system.text] stays equal (RFC-0491 §3.2). An official client keeps the
-     block: its projection sends a block the session holds again only when
+     [system.text] stays equal. An official client keeps the block: its
+     projection sends a block the session holds again only when
      the bytes change ([Prompt_block_id.resent_when_held]). A turn without
      the complete list carries its delta as the end-context block for both
      owners. A System whose [<norms>] already are the complete set
@@ -284,8 +284,8 @@ let build_turn_context
      meta.name (start_turn_count + 1) user_seg.Keeper_agent_prompt_metrics.bytes
      (pick_hash16 user_seg) dyn_seg.Keeper_agent_prompt_metrics.bytes (pick_hash16 dyn_seg));
   (* 6. Append user message and persist. *)
-  (* The same speaker entry AGENT_CORE stamps on its own copy of this input
-     (RFC-0468 §3.2), so no copy of the turn's input exists without it. *)
+  (* The same speaker entry AGENT_CORE stamps on its own copy of this input,
+     so no copy of the turn's input exists without it. *)
   let user_msg =
     Agent_core.Types.make_message ~metadata:input_metadata ~role:Agent_core.Types.User
       [ Agent_core.Types.Text user_message ]

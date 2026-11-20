@@ -10,9 +10,7 @@
     operator provisioned and starts no container, so it is not asked.
 
     Keeper up asks the same question before it has a meta, from the profile
-    it is about to write ([Keeper_turn_up_args.parse]).
-
-    RFC keeper-sandbox-images-have-versions (#38699) §2.4. *)
+    it is about to write ([Keeper_turn_up_args.parse]). *)
 
 val boot_refusal :
   base_path:string ->

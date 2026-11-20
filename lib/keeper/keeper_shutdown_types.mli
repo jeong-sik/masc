@@ -226,9 +226,7 @@ type supersession =
           exit: the fence blocks meta materialization, {!val:resolve} needs
           that meta to build a purge target, and supersession refused any
           intent but [Operator_stop_retain_meta]. A worker that died in
-          [Joining_lanes] left the Keeper permanently half-purged
-          (RFC-0000 1.2 LAW 1 "No dead-end", the same law #25491 restored for
-          [Reconciliation_required]). *)
+          [Joining_lanes] left the Keeper permanently half-purged. *)
   | Operator_metadata_update of { actor : string }
   | Operator_reconciliation_accepted of
       { actor : string

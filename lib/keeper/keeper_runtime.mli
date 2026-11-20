@@ -123,11 +123,6 @@ val autoboot_exclusion_reason_of_reads
 val autoboot_excluded_keeper_reasons : Workspace.config -> autoboot_exclusion list
 (** Configured keepers skipped by autoboot with operator-facing reason labels. *)
 
-(** (RFC-0393 removed [canonicalize_if_keeper]: credentials are stored
-    under the keeper_name, so lookups pass the name through unchanged.
-    Historical note: PR-3b1, AuthIdentityFSM
-    invariant I1 IdentityBindsToken.) *)
-
 val effective_declarative_runtime_id :
   Keeper_types_profile.keeper_profile_defaults ->
   Keeper_meta_contract.keeper_meta -> string

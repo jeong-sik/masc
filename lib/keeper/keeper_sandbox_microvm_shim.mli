@@ -1,4 +1,4 @@
-(** The shim a guest runs commands through (RFC-0400): the keeper's work root
+(** The shim a guest runs commands through: the keeper's work root
     on the host, the shim's names and paths on the host and in the guest, the
     sidecar that says whether the binary is the release's, the
     mount that hands it to a guest, its config, and the environment and

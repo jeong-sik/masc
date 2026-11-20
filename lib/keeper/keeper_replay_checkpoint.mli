@@ -49,8 +49,8 @@ val checkpoint_for_replay_persistence :
     context. Context for earlier retained responses remains intact.
     A turn that called nothing leaves replay
     unchanged: its wake cue and note both go, because neither is something the
-    next turn should read as dialogue. Direct turns pass [false] and behave
-    exactly as before (RFC-0376 4.3). The argument is labelled and required so a
+    next turn should read as dialogue. Direct turns pass [false], and none of
+    this applies to them. The argument is labelled and required so a
     new caller states which kind of turn it is finalizing. *)
 
 val select_finalization_checkpoint :

@@ -45,11 +45,10 @@ let source_to_string = function
    resolved value would be [None] and
    AGENT_CORE would apply no inter-line idle bound, letting a hung provider stream
    freeze the keeper chat lane indefinitely (#25128, measured 30+ min). This is a
-   single universal liveness ceiling — NOT a per-provider tuned default
-   (RFC-0345 §3.1) — an order of magnitude above any legitimate inter-token gap
+   single universal liveness ceiling — NOT a per-provider tuned default —
+   an order of magnitude above any legitimate inter-token gap
    (sub-second to low-seconds), so it fires only on genuine hangs. An explicit
-   runtime.toml value still overrides it verbatim. RFC-0345 §3.2 (Option A) / §3.4;
-   revisitable (a floor, not a tuning). *)
+   runtime.toml value still overrides it verbatim. *)
 let stream_idle_failsafe_floor_sec =
   Env_config_keeper.KeeperKeepalive.stream_idle_failsafe_floor_sec
 ;;

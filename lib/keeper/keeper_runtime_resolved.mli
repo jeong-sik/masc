@@ -60,8 +60,7 @@ val stream_idle_failsafe_floor_sec : float
 val stream_idle_timeout_sec : unit -> float
 (** Streaming-provider inter-line idle-gap timeout, in seconds: an explicit
     runtime.toml [turn.stream_idle_timeout_sec] honoured verbatim, or when
-    unset the
-    RFC-0345 fail-safe floor {!stream_idle_failsafe_floor_sec}, so a hung
+    unset the fail-safe floor {!stream_idle_failsafe_floor_sec}, so a hung
     stream cannot freeze the keeper chat lane indefinitely (#25128). MASC
     does not synthesize a per-provider/model tuned default and does not clamp
     an operator-provided value. Invalid configured values fail during runtime

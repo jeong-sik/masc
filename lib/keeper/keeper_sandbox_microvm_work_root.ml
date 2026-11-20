@@ -113,10 +113,9 @@ let build_link_warning plan =
 
 (** Input paths are guest argv values after the helper name and their count.
     They are not sent on stdin: each [container exec -i] leaves one pipe end
-    open in the VM runtime (RFC microvm-guest-agent-over-socket sections 3.7
-    and 4.1), and the paths are not secret. The guest checks the count and
-    that no field is empty before any effect. Python isolated mode excludes
-    the guest cwd and user Python paths; site initialization is also
+    open in the VM runtime, and the paths are not secret. The guest checks the
+    count and that no field is empty before any effect. Python isolated mode
+    excludes the guest cwd and user Python paths; site initialization is also
     disabled. An image without a working supported interpreter cannot prepare
     build links. This does not fence checkout parent paths. *)
 let checked_build_argv_script consumer =

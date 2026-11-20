@@ -1111,7 +1111,7 @@ let prepare_operator_metadata_supersession
     (* #25491: a [Reconciliation_required] fence had no release path at all —
        the worker and boot recovery deliberately refuse to assume the turn's
        effects landed, and the operator was refused too, which left the keeper
-       with no reachable state at all (RFC-0000 §1.2 LAW 1 "No dead-end").
+       with no reachable state at all.
        #25522 later taught boot recovery to settle the phase automatically
        ([settled_reconciliation_state]); this operator route remains as the
        manual release for records whose boot-settle persist failed. *)

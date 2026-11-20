@@ -121,6 +121,21 @@ let wake_summary ~ko slots =
         (if ko then Printf.sprintf "예약 %d" count else Printf.sprintf "%d wakes" count)
         (string_of_int count)
 
+let with_styled_cells ~capacity f =
+  let buf = Buffer.create capacity in
+  let open_style = ref "" in
+  let emit sgr glyph =
+    if not (String.equal sgr !open_style) then begin
+      if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
+      if not (String.equal sgr "") then Buffer.add_string buf sgr;
+      open_style := sgr
+    end;
+    Buffer.add_string buf glyph
+  in
+  f emit;
+  if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
+  Buffer.contents buf
+
 let wake_strip ~style slots =
   let cells = List.length slots in
   if cells = 0 then ""
@@ -160,26 +175,31 @@ let wake_strip ~style slots =
             if flat then tint 0.48
             else tint (0.35 +. (0.65 *. (float_of_int count /. float_of_int (max 1 peak))))
     in
-    String.concat "" (List.map (fun slot ->
-      let quiet cell = Theme.recede () ^ Grid.strip_mark cell ^ Ansi.reset in
-      match slot with
-      | Next.Wakes_unknown -> quiet Grid.Strip_unknown
-      | Next.Wakes_with_unknown count when count <= 0 -> quiet Grid.Strip_unknown
-      | Next.Wakes_with_unknown count | Wakes count ->
-          if count <= 0 then quiet Grid.Strip_empty else
-          let mark = match style with
-            | Keeper_wakes -> Grid.strip_mark Grid.Strip_wake
-            | Wake_counts -> wake_level count in
-          tone count ^ mark ^ Ansi.reset) slots)
+    let recede = Theme.recede () in
+    with_styled_cells ~capacity:(cells * 6) (fun emit ->
+      List.iter (fun slot ->
+        match slot with
+        | Next.Wakes_unknown -> emit recede (Grid.strip_mark Grid.Strip_unknown)
+        | Next.Wakes_with_unknown count when count <= 0 ->
+            emit recede (Grid.strip_mark Grid.Strip_unknown)
+        | Next.Wakes_with_unknown count | Wakes count ->
+            if count <= 0 then emit recede (Grid.strip_mark Grid.Strip_empty)
+            else
+              let mark = match style with
+                | Keeper_wakes -> Grid.strip_mark Grid.Strip_wake
+                | Wake_counts -> wake_level count in
+              emit (tone count) mark) slots)
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 
-let failed_count readings index =
+let failed_count reading_arrays index =
   List.fold_left (fun (count, unknown) slots ->
-    match List.nth slots index with
-    | Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok -> count + 1, unknown
-    | Pulse.Half_hour_unknown -> count, true
-    | Pulse.Half_hour_quiet | Pulse.Half_hour_ok -> count, unknown) (0, false) readings
+    if index < Array.length slots then
+      match slots.(index) with
+      | Pulse.Half_hour_failed | Pulse.Half_hour_failed_and_ok -> count + 1, unknown
+      | Pulse.Half_hour_unknown -> count, true
+      | Pulse.Half_hour_quiet | Pulse.Half_hour_ok -> count, unknown
+    else count, true) (0, false) reading_arrays
 
 (* A grid with no band has no cells for the two maxima to scale, and the
    maximum over no cells is not a reading: there is no row to draw. *)
@@ -189,22 +209,23 @@ let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows
   let readings = List.map (fun row ->
     let pulse = Option.bind (runtime row) (fun row -> row.Decode.kr_recent_turns) in
     Pulse.half_hours ~now ~count:grid.side_cells pulse) rows in
-  let counts = List.init grid.side_cells (failed_count readings) in
+  let reading_arrays = List.map Array.of_list readings in
+  let counts = List.init grid.side_cells (failed_count reading_arrays) in
   let peak = List.fold_left (fun p (n, _) -> max p n) 0 counts in
   let pulse =
     if Pulse.nothing_read readings then history_unknown_label ~cells:grid.side_cells
     else
       let low_tint = Theme.series_tint Masc_tui_theme.Latency 0.55 in
+      let bad = Theme.bad () and warn = Theme.warn () and recede = Theme.recede () in
       let fail_tone n =
-        if peak > 1 && n * 3 >= peak * 2 then Theme.bad ()
+        if peak > 1 && n * 3 >= peak * 2 then bad
         else if peak > 2 && n * 3 <= peak then low_tint
-        else Theme.warn ()
+        else warn
       in
-      String.concat "" (List.map (fun (n, unknown) ->
-        if n > 0 then fail_tone n ^ Grid.level_glyph ~peak n ^ Ansi.reset
-        else Theme.recede ()
-          ^ (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")
-          ^ Ansi.reset) counts) in
+      with_styled_cells ~capacity:(grid.side_cells * 6) (fun emit ->
+        List.iter (fun (n, unknown) ->
+          if n > 0 then emit (fail_tone n) (Grid.level_glyph ~peak n)
+          else emit recede (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")) counts) in
   let active = List.filter (fun row -> match runtime row with
     | Some row -> not row.Decode.kr_paused | None -> true) rows in
   let future = match active with

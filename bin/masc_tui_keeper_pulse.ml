@@ -68,29 +68,26 @@ let slots ~now pulse =
   | Some _ when not (Float.is_finite now) -> all_unknown ()
   | Some { Pulse.known_since; slots } ->
       let now_hour = hour_start (int_of_float (Float.floor now)) in
-      let hour_of (slot : Pulse.slot) =
-        max 0 ((now_hour - hour_start slot.starts_at) / seconds_per_hour)
-      in
-      let slot_of_hour hour =
-        let worst =
-          List.fold_left
-            (fun worst (slot : Pulse.slot) ->
-              if hour_of slot <> hour then worst
-              else
-                match worst, worst_of_tally slot.tally with
-                | None, outcome -> outcome
-                | Some seen, Some outcome -> Some (worse seen outcome)
-                | (Some _ as seen), None -> seen)
-            None
-            slots
-        in
-        match worst with
+      let worst_by_hour = Array.make Mark.pulse_hours None in
+      List.iter
+        (fun (slot : Pulse.slot) ->
+          let hour = max 0 ((now_hour - hour_start slot.starts_at) / seconds_per_hour) in
+          if hour < Mark.pulse_hours then
+            match worst_of_tally slot.tally with
+            | None -> ()
+            | Some outcome ->
+                worst_by_hour.(hour) <-
+                  (match worst_by_hour.(hour) with
+                   | None -> Some outcome
+                   | Some seen -> Some (worse seen outcome)))
+        slots;
+      List.init Mark.pulse_hours (fun position ->
+        let hour = Mark.pulse_hours - 1 - position in
+        match worst_by_hour.(hour) with
         | Some outcome -> Slot_turn outcome
         | None ->
             let starts = Float.of_int (now_hour - (hour * seconds_per_hour)) in
-            if starts < known_since then Slot_unknown else Slot_quiet
-      in
-      List.init Mark.pulse_hours (fun position -> slot_of_hour (Mark.pulse_hours - 1 - position))
+            if starts < known_since then Slot_unknown else Slot_quiet)
 ;;
 
 let slot_mark = function
@@ -153,25 +150,24 @@ let half_hour_of_tally = function
    after it (the two clocks disagree) belongs to it. *)
 let half_hour_tallies ~now ~count pulse =
   let count = max 0 count in
+  if count = 0 then []
+  else
   let all_unknown () = List.init count (fun _ -> Slot_tally_unknown) in
   match pulse with
   | None -> all_unknown ()
   | Some _ when not (Float.is_finite now) -> all_unknown ()
   | Some { Pulse.known_since; slots } ->
       let now_slot = Pulse.slot_start now in
-      let back_of (slot : Pulse.slot) =
-        max 0 ((now_slot - slot.starts_at) / Pulse.slot_seconds)
-      in
-      let tally_of back =
-        List.fold_left
-          (fun tally (slot : Pulse.slot) ->
-            if back_of slot = back then add_tally tally slot.tally else tally)
-          no_turns slots
-      in
+      let tallies = Array.make count no_turns in
+      List.iter
+        (fun (slot : Pulse.slot) ->
+          let back = max 0 ((now_slot - slot.starts_at) / Pulse.slot_seconds) in
+          if back < count then tallies.(back) <- add_tally tallies.(back) slot.tally)
+        slots;
       List.init count (fun position ->
           let back = count - 1 - position in
           let starts = Float.of_int (now_slot - (back * Pulse.slot_seconds)) in
-          let tally = tally_of back in
+          let tally = tallies.(back) in
           if tally.ok = 0 && tally.rested = 0 && tally.failed = 0 && starts < known_since
           then Slot_tally_unknown
           else Slot_tally_measured tally)

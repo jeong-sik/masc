@@ -409,7 +409,25 @@ let test_half_hour_tallies_share_ssot_with_half_hours () =
     (P.half_hour_tallies ~now ~count:2 None);
   check_tally "non-finite now yields all Slot_tally_unknown"
     [ P.Slot_tally_unknown; P.Slot_tally_unknown ]
-    (P.half_hour_tallies ~now:Float.nan ~count:2 (Some pulse))
+    (P.half_hour_tallies ~now:Float.nan ~count:2 (Some pulse));
+  let duplicate_and_oob =
+    { Pulse.known_since = now -. (24.0 *. hour)
+    ; slots =
+        [ slot 0 { Pulse.ok = 1; rested = 0; failed = 0 }
+        ; slot (-2) { Pulse.ok = 2; rested = 1; failed = 0 }
+        ; slot 2 { Pulse.ok = 3; rested = 0; failed = 1 }
+        ; slot 2 { Pulse.ok = 1; rested = 0; failed = 2 }
+        ; slot 10 { Pulse.ok = 9; rested = 0; failed = 9 }
+        ]
+    }
+  in
+  check_tally "single-pass bucketing merges duplicate and future slots and drops older slots"
+    [ P.Slot_tally_measured { Pulse.ok = 0; rested = 0; failed = 0 }
+    ; P.Slot_tally_measured { Pulse.ok = 4; rested = 0; failed = 3 }
+    ; P.Slot_tally_measured { Pulse.ok = 0; rested = 0; failed = 0 }
+    ; P.Slot_tally_measured { Pulse.ok = 3; rested = 1; failed = 0 }
+    ]
+    (P.half_hour_tallies ~now ~count:4 (Some duplicate_and_oob))
 ;;
 
 let () =

@@ -130,17 +130,27 @@ let tally_marks slot_tallies =
   let ok_tint = Theme.series_tint Masc_tui_theme.Completion in
   let warm_tint = Theme.warm_tint () in
   let thermal_tint = Theme.thermal_tint () in
-  let buf = Buffer.create (n * 16) in
+  let recede = Theme.recede () in
+  let warn = Theme.warn () in
+  let mixed_tone = thermal_tint 0.62 in
+  let buf = Buffer.create (n * 6) in
+  let open_style = ref "" in
+  let emit style glyph =
+    if not (String.equal style !open_style) then begin
+      if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
+      if not (String.equal style "") then Buffer.add_string buf style;
+      open_style := style
+    end;
+    Buffer.add_string buf glyph
+  in
   for i = 0 to n - 1 do
     match arr.(i) with
     | Pulse.Slot_tally_unknown ->
-        Buffer.add_string buf
-          (Theme.recede () ^ Masc_tui_keeper_mark.grid_unknown_range_mark ^ Ansi.reset)
+        emit recede Masc_tui_keeper_mark.grid_unknown_range_mark
     | Pulse.Slot_tally_measured _ -> (
         match classes.(i) with
         | Class_quiet_or_unknown ->
-            Buffer.add_string buf
-              (Theme.recede () ^ Masc_tui_keeper_mark.grid_dot_mark ^ Ansi.reset)
+            emit recede Masc_tui_keeper_mark.grid_dot_mark
         | Class_ok h ->
             let left =
               if i > 0 then
@@ -154,7 +164,7 @@ let tally_marks slot_tallies =
             in
             let glyph = Braille.braille_pair ~left ~right:h in
             let tone = ok_tint (float_of_int h /. 3.0) in
-            Buffer.add_string buf (tone ^ glyph ^ Ansi.reset)
+            emit tone glyph
         | Class_failed h ->
             let left =
               if i > 0 then
@@ -167,15 +177,15 @@ let tally_marks slot_tallies =
             in
             let glyph = Braille.braille_pair_down ~left ~right:h in
             let tone = warm_tint (float_of_int (h - 1) /. 3.0) in
-            Buffer.add_string buf (tone ^ glyph ^ Ansi.reset)
+            emit tone glyph
         | Class_mixed ok_h ->
             let glyph = Braille.braille_pair ~left:ok_h ~right:4 in
-            let tone = thermal_tint 0.62 in
-            Buffer.add_string buf (tone ^ glyph ^ Ansi.reset)
+            emit mixed_tone glyph
         | Class_rested ->
             let glyph = Braille.braille_pair ~left:1 ~right:0 in
-            Buffer.add_string buf (Theme.warn () ^ glyph ^ Ansi.reset))
+            emit warn glyph)
   done;
+  if not (String.equal !open_style "") then Buffer.add_string buf Ansi.reset;
   Buffer.contents buf
 
 (* A band nothing was read for says so once in the band's width, as the roster's
@@ -274,7 +284,17 @@ let dot_meter_summary_lines ~ko ~cells ~total_ok ~total_bad ~peak_ok ~peak_bad
   [ ok_bar; err_bar; peak_line; active_line ]
 
 let build_baseline_ok_row ~count ~up_arr ~dn_arr ~ok_base_tone ~unknown_at =
-  let base_buf = Buffer.create (count * 12) in
+  let recede = Theme.recede () in
+  let base_buf = Buffer.create (count * 6) in
+  let open_style = ref "" in
+  let emit tone glyph =
+    if not (String.equal tone !open_style) then begin
+      if not (String.equal !open_style "") then Buffer.add_string base_buf Ansi.reset;
+      if not (String.equal tone "") then Buffer.add_string base_buf tone;
+      open_style := tone
+    end;
+    Buffer.add_string base_buf glyph
+  in
   for i = 0 to count - 1 do
     let l, r = up_arr.(i) in
     let dl, dr = dn_arr.(i) in
@@ -283,26 +303,30 @@ let build_baseline_ok_row ~count ~up_arr ~dn_arr ~ok_base_tone ~unknown_at =
         if unknown_at i then Masc_tui_keeper_mark.grid_unknown_range_mark
         else Masc_tui_keeper_mark.grid_dot_mark
       in
-      Buffer.add_string base_buf (Theme.recede () ^ mark ^ Ansi.reset)
+      emit recede mark
     else
       let bl = min 4 l and br = min 4 r in
       let glyph = Braille.braille_pair ~left:bl ~right:br in
-      if bl = 0 && br = 0 then Buffer.add_string base_buf glyph
-      else Buffer.add_string base_buf (ok_base_tone ^ glyph ^ Ansi.reset)
+      if bl = 0 && br = 0 then emit "" glyph
+      else emit ok_base_tone glyph
   done;
+  if not (String.equal !open_style "") then Buffer.add_string base_buf Ansi.reset;
   Buffer.contents base_buf
 
 let fleet_rows ~ko ~cols ~now runtimes =
   let say k e = if ko then k else e in
   let name_cells, count = dimensions cols in
   let all_tallies = List.map (tallies ~now ~count) runtimes in
+  let all_tally_arrays = List.map Array.of_list all_tallies in
   let all_hours = List.map (List.map Pulse.half_hour_of_tally) all_tallies in
   let slot_agg =
     Array.init count (fun position ->
       let slot_entries =
         List.map
-          (fun entries -> Option.value ~default:Pulse.Slot_tally_unknown (List.nth_opt entries position))
-          all_tallies
+          (fun arr ->
+            if position < Array.length arr then arr.(position)
+            else Pulse.Slot_tally_unknown)
+          all_tally_arrays
       in
       let hours = List.map Pulse.half_hour_of_tally slot_entries in
       let ok_sum, bad_sum =

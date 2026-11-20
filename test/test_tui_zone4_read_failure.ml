@@ -161,7 +161,8 @@ let scheduled_wall = 1_700_000_000.
 
 (* [/health] failed once and the pass it owes waits [retry_s]. *)
 let failing_pace =
-  Pace.probe_failed ~retry_s ~max_retry_s ~now:5. ~wall_now:scheduled_wall Pace.answering
+  Pace.probe_failed ~retry_s ~max_retry_s ~now:(Masc_tui_wake.Mono.now ()) ~wall_now:scheduled_wall
+    Pace.answering
 
 let next_try_wall = scheduled_wall +. retry_s
 
@@ -253,7 +254,8 @@ let test_the_next_try_does_not_move_between_draws () =
     (String.equal (drawn_row ~pace:failing_pace health_failing)
        (drawn_row ~pace:failing_pace health_failing));
   let again =
-    Pace.probe_failed ~retry_s ~max_retry_s ~now:7. ~wall_now:(next_try_wall +. 0.5) failing_pace in
+    Pace.probe_failed ~retry_s ~max_retry_s ~now:(Masc_tui_wake.Mono.now ())
+      ~wall_now:(next_try_wall +. 0.5) failing_pace in
   check_bool "a new failure changes the row" false
     (String.equal (drawn_row ~pace:again health_failing) (drawn_row ~pace:failing_pace health_failing))
 

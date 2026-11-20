@@ -7,7 +7,7 @@ updated: 2026-11-20
 author: claude
 supersedes: []
 superseded_by: null
-related: ["a-sent-request-prefix-changes-only-when-the-window-moves", "tool-results-age-out-of-context", "keeper-context-window-in-tokens"]
+related: ["tool-results-age-out-of-context", "keeper-context-window-in-tokens"]
 ---
 
 # RFC: 요청의 각 부분은 바뀌는 빈도에 맞는 자리에 둔다
@@ -17,7 +17,7 @@ related: ["a-sent-request-prefix-changes-only-when-the-window-moves", "tool-resu
 - Keeper 요청 하나는 `[tools][system][이력 창][이번 턴 입력과 턴 문맥]` 이다.
 - provider 캐시는 앞에서부터 같은 바이트만 읽는다. 앞부분이 바뀌거나, 유지 시간이 지나면 그 뒤를 전부 다시 쓴다.
 - 2026-11-19~20 운영 기록으로 쟀다. 캐시에 안 닿은 입력의 57.9% 가 앞부분을 통째로 다시 쓴 요청에서 나왔다.
-- RFC-a-sent-request-prefix-changes-only-when-the-window-moves(이하 「접두사 RFC」)는 창이 옮겨질 때만 앞부분을 바꾸게 했다. 이 RFC 는 그 규칙이 닿지 않은 다섯 곳을 고친다.
+- 이미 보낸 요청 앞부분은 창이 옮겨질 때만 바뀐다(이하 「접두사 규칙」, `Keeper_model_input_ledger`). 이 RFC 는 그 규칙이 닿지 않은 다섯 곳을 고친다.
   1. 캐시 유지 시간을 binding 의 요청 정책으로 선언한다(§3.1).
   2. 턴마다 캐시를 얼마나 읽고 왜 다시 썼는지 화면에 보인다(§3.2).
   3. Anthropic 레인은 도구를 불러올 때 도구 배열을 바꾸지 않는다(§3.3).
@@ -305,7 +305,7 @@ L5 에서 정하는 것:
   - 예외는 `Pending_mentions` 다. 답할 때까지 같은 mention 을 매 턴 다시 그린다. User 자리로 옮기기 전에 줄 단위로 바꾸고, 창이 든 줄을 뺀다.
 - 「창이 든 것」은 창 안 User 메시지가 실은 구획과 줄의 sha 다. 공식 클라이언트의 `held_context`(구획·줄 sha, `Keeper_official_client_session_store`)와 같은 모양이다.
   - 창이 옮겨져 그 메시지가 빠지면 다음 턴에 다시 싣는다.
-  - 저장 자리는 접두사 RFC 의 `Keeper_model_input_ledger` 와 맞춘다.
+  - 저장 자리는 접두사 규칙의 `Keeper_model_input_ledger` 와 맞춘다.
 - `Active_goals` 는 바깥 글이다. System 꼬리에서 빼 「바뀔 때」 규칙으로 User 자리에 싣는다. 그러면 Goal 사건이 System 을 바꾸지 않는다.
 - `Goals_awaiting_proof` 는 호스트 상태지만 System 꼬리에 있다. 턴 문맥으로 옮길지 같이 정한다.
 - `Scope_messages` 는 그리는 곳이 없다. 죽은 층이라 지운다.
@@ -334,7 +334,7 @@ L5 에서 정하는 것:
 
 ### 4.1 회상 본문을 창 머리에 둔다
 
-접두사 RFC §3.3 의 하던 일 메시지와 같은 규칙으로 둔다. 그 RFC 를 쓴 세션과 2026-11-20 에 맞췄다.
+접두사 규칙의 하던 일 메시지(`Keeper_carried_front`)와 같은 규칙으로 둔다. 그 규칙을 쓴 세션과 2026-11-20 에 맞췄다.
 
 - 창을 열 때 고른 집합의 본문을 창 머리에 둔다. 하던 일 메시지 옆이다.
 - 붙잡는 조건은 창 시작이다. 머리 내용을 견주지 않는다.
@@ -344,7 +344,7 @@ L5 에서 정하는 것:
   - 그 revision 의 본문이 바뀌지 않고 그리기가 결정론이면 사본을 두지 않는다. 사본은 진실의 출처를 하나 더 만든다.
   - 둘 중 하나라도 안 되면 그린 바이트를 `Keeper_model_input_ledger` 의 `last` 에 둔다. 하던 일 메시지와 같은 방식이다. digest 만으로는 같은 바이트를 다시 실을 수 없다.
 - 머리에 든 본문이 purge 처럼 고쳐 쓰이면 창을 같은 자리에서 다시 연다. 지운 글을 다음 창 이동까지 보내지 않는다.
-  - 접두사 RFC 쪽과 같은 길이다. 창 앞 기록이 purge 되면 ledger 의 front·끝 digest 가 달라져 붙잡기가 풀리고, 다음 요청이 창을 다시 연다.
+  - 접두사 규칙과 같은 길이다. 창 앞 기록이 purge 되면 ledger 의 front·끝 digest 가 달라져 붙잡기가 풀리고, 다음 요청이 창을 다시 연다.
   - 그래서 「앞부분은 창이 옮겨질 때만 바뀐다」가 예외 없이 남는다. ledger 에도 창 이동으로 남아 예측과 셈이 같은 규칙을 따른다.
 - 이 값은 앞부분을 지키는 투영이다. 무엇을 허락하거나 막지 않는다.
 
@@ -407,7 +407,7 @@ L5 에서 정하는 것:
 | L3 | §3.2 요청이 고른 유지 시간 기록(L3a), provider 기본 유지 시간 선언(L3b), 캐시 결과 투영과 TUI(L3c) | D1 |
 | L4 | §3.3 Anthropic 도구 불러오기 | D2, 운영자 실제 호출 확인 |
 | L5 | §3.4 역할 나눔과 층별 도착 방식, `Scope_messages` 지움 | D3, §3.4 층별 표 리뷰 |
-| L6 | §4.1 회상 본문 창 머리 | 접두사 RFC 쪽 재검토 |
+| L6 | §4.1 회상 본문 창 머리 | 접두사 규칙 쪽 재검토 |
 
 ## 8. 검증
 

@@ -2007,7 +2007,11 @@ let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_deta
               judgment.reported_probabilities
         | Preflight_awaiting | Preflight_not_called _ | Preflight_failed _ | Preflight_invalid _ -> [] in
       let elapsed = match reading.lp_elapsed_s with
-        | None -> [] | Some seconds -> [Printf.sprintf (if ko then "JEV 소요 %.3fs" else "JEV elapsed %.3fs") seconds] in
+        | None -> []
+        | Some seconds ->
+          (* A finished call's length (RFC tui-one-screen-grammar 6.2). *)
+          [ (if ko then "JEV 소요 " else "JEV elapsed ")
+            ^ Option.value ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed) (Message_layout.elapsed_text seconds) ] in
       let model = match reading.lp_model with None -> [] | Some model -> [say "모델 " "Model " ^ model] in
       let rejection = match reading.lp_domain_rejection with
         | None -> []

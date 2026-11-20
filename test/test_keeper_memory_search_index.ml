@@ -144,7 +144,7 @@ let test_short_queries_and_pooled_close () =
     Alcotest.(check (list int)) label expected_indices hits
   in
   check_hits "two-char ASCII query matches case-insensitively" "db" [ 0; 2 ];
-  check_hits "one-char query matches exact token" "c" [ 0; 1; 2 ];
+  check_hits "one-char query matches exact token" "c" [ 2 ];
   check_hits "one-char UTF-8 Korean query matches" "가" [ 1 ];
   check_hits "wildcard characters are escaped literally" "50%" [ 1 ];
   check_hits "mixed trigram + short term query matches both" "schema db" [ 2; 0 ];
@@ -158,6 +158,42 @@ let test_short_queries_and_pooled_close () =
     |> List.map (List.map fst)
   in
   Alcotest.(check (list (list int))) "short queries honor owner filter" [ [ 2 ]; [ 1 ] ] excluded;
+  (* Short ASCII word boundaries (#53772): do not match word interiors such as
+     "astronomy" for "no", "source"/"SRC" for "RC", or "city" for "CI", while
+     preserving Korean suffixes ("RC는", "CI가") and punctuation ("RC-12"). *)
+  let boundary_texts =
+    [ "writer", "source revalidation"
+    ; "writer", "SRC policy"
+    ; "writer", "city notes"
+    ; "writer", "RC는 보류한다"
+    ; "writer", "RC-12 release"
+    ; "writer", "CI가 끝났다"
+    ; "writer", "The unrelated astronomy claim."
+    ; "writer", "Deployment valid candidate."
+    ]
+  in
+  let boundary_plain = List.map snd boundary_texts in
+  let check_boundary label query expected =
+    let hits = Index.rank ~query boundary_plain |> ok |> List.map fst in
+    Alcotest.(check (list int)) label expected hits
+  in
+  check_boundary "no matching celestial word excludes astronomy interior 'no'"
+    "no matching celestial word" [];
+  check_boundary "RC keeps Korean suffix and hyphenated token, excludes source/SRC"
+    "RC" [ 3; 4 ];
+  check_boundary "CI keeps Korean suffix, excludes city interior"
+    "CI" [ 5 ];
+  let limit_after_boundary =
+    Index.rank_many_excluding_owners
+      ~queries:[ "other", "RC" ]
+      ~texts:boundary_texts
+      ~max_results:1
+    |> ok
+    |> fst
+    |> List.map (List.map fst)
+  in
+  Alcotest.(check (list (list int)))
+    "boundary filtering precedes max_results limit" [ [ 3 ] ] limit_after_boundary;
   (* Pooled close path inside Eio_guard *)
   Eio_main.run @@ fun env ->
   Eio_guard.enable ();

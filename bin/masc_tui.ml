@@ -439,10 +439,6 @@ let machine_changes_allowed state =
   && Option.is_none (checkpoint_for_workspace state)
   && not (Option.exists (fun workspace -> Hashtbl.mem checkpoint_storage_errors (checkpoint_root workspace)) state.server_identity)
 let machine_change_refusal = "MSX control requires a verified server matching this TUI's local workspace."
-let decode_play_mutation decode = function
-  | Masc_tui_http.Post_answered json -> Play_answered (decode json)
-  | Masc_tui_http.Post_refused detail -> Play_refused detail
-  | Masc_tui_http.Post_unanswered detail -> Play_unanswered detail
 
 (* The cached identity only describes the last read. A machine mutation
    revalidates its captured endpoint immediately before dispatch, and its
@@ -5148,514 +5144,6 @@ let apply_board_hearths_load state result =
    composer row or the chat pane's input. Text goes to the keeper as it
    always did; a slash word is the TUI's to act on, and a mistyped one is
    reported rather than sent to the keeper as an instruction. *)
-(* What the pane says back to something the operator did.
-
-   A reply is a row in the conversation, drawn into the pane the operator
-   typed in: the command list, a queue snapshot, what a preset restore
-   applied and skipped. The session log lives on Metrics, and a /help
-   answered there is a /help that looks ignored. When the pane has no keeper
-   to file the row under, it goes to the footer and the session log, the way
-   a failure does.
-
-   A failure is the operator's own step that did not work -- the clipboard
-   held no image, a command was missing its argument, an image would not
-   open. The conversation with the keeper is not where that belongs: it
-   says so in the footer of the pane they are standing on for
-   [last_action_window_s], and in the event log. *)
-type notice_kind =
-  | Notice_reply
-  | Notice_failure
-
-let append_chat_local_message state ~keeper text =
-  let role = Message_local in
-  state.msg_history <-
-    state.msg_history
-    @ [ {
-          me_role = role;
-          me_identity =
-            Session_row
-              { request_id = ""
-              ; turn_phase = chat_turn_phase_of_role role
-              ; operation_seq = Masc_tui_chat_dispatch.Chat_watching.next_chat_operation_seq state ""
-              };
-          me_turn_phase = chat_turn_phase_of_role role;
-          me_turn_sequence = None;
-          me_operation_seq = Masc_tui_chat_dispatch.Chat_watching.next_chat_operation_seq state "";
-          me_text = Keeper_chat.terminal_safe_text ~preserve_newlines:true text;
-          me_images = [];
-          me_media = [];
-          me_memory_summary = None;
-          me_memory_pass = Masc_tui_message_layout.No_pass;
-          me_journal = [];
-          me_gate = None;
-          me_submitted_at = None;
-          me_tool_block = None;
-          me_skill_block = [];
-          me_keeper_name = keeper;
-          me_request_id = "";
-          me_execution_source = None;
-          me_at = Unix.gettimeofday ();
-        } ]
-
-let chat_notice state ~keeper_name ~kind text =
-  match kind, keeper_name with
-  | Notice_failure, (Some _ | None) ->
-      report_action state "error" (Terminal_text.single_line text)
-  | Notice_reply, None ->
-      report_action state "system" (Terminal_text.single_line text)
-  | Notice_reply, Some keeper ->
-      append_chat_local_message state ~keeper text
-
-let update_collab state owner update =
-  match state.collab with
-  | Some view when Masc_tui_collab.owner view == owner -> state.collab <- Some (update view)
-  | Some _ | None -> ()
-
-let collab_notice state owner ~kind text =
-  update_collab state owner (fun view -> Masc_tui_collab.notice view text);
-  report_action state (match kind with Notice_reply -> "play" | Notice_failure -> "error")
-    (Terminal_text.single_line text)
-
-let play_notice state ~sink ~kind text =
-  match sink with
-  | Play_chat keeper_name -> chat_notice state ~keeper_name ~kind text
-  | Play_collab {owner; _} -> collab_notice state owner ~kind text
-
-let settle_play_mutation state = function
-  | Play_chat _ -> ()
-  | Play_collab {owner; mutation} ->
-      update_collab state owner (fun view -> Masc_tui_collab.settled view mutation)
-
-let sync_collab_access state =
-  state.collab <- Option.map (fun view ->
-    Masc_tui_collab.write_access view (Masc_tui_types.play_change_access state)) state.collab
-
-let refresh_collab state ~mailbox owner =
-  match state.collab with
-  | Some view when Masc_tui_collab.owner view == owner ->
-      let view, read = Masc_tui_collab.loading view in
-      state.collab <- Some view;
-      let expected_workspace = state.server_identity in
-      Masc_tui_surface_requests.Prompt_preset_requests.launch_preset_call state ~mailbox
-        ~call:(Masc_tui_http.list_play_invites ~expected_workspace)
-        ~wrap:(fun result -> Play_msg (Play_invites_listed (Play_collab_list read,
-          Result.bind result (fun json ->
-            Result.map_error (fun detail -> Request_failed detail)
-              (Tui_decode.decode_play_invites json)))))
-  | Some _ | None -> ()
-
-let refresh_current_collab state ~mailbox =
-  Option.iter (fun view -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)) state.collab
-
-let open_collab state ~mailbox =
-  let view = Masc_tui_collab.write_access (Masc_tui_collab.create ())
-    (Masc_tui_types.play_change_access state) in
-  state.collab <- Some view;
-  refresh_collab state ~mailbox (Masc_tui_collab.owner view)
-
-let play_request_failure state request detail =
-  if Masc_tui_types.play_change_dispatched state request then Play_unanswered detail
-  else Play_not_dispatched detail
-
-let launch_play_issue state ~mailbox ~sink ~name ~hours =
-  match Masc_tui_types.begin_play_change state (Issue_invite name) with
-  | Error detail ->
-      settle_play_mutation state sink;
-      play_notice state ~sink ~kind:Notice_failure detail;
-      false
-  | Ok request ->
-      sync_collab_access state;
-      Masc_tui_surface_requests.Prompt_preset_requests.launch_preset_call state ~mailbox
-        ~call:(fun ~host ~port ->
-          match Masc_tui_types.workspace_change_origin state with
-          | Ok origin when origin = request.change_workspace
-              && Masc_tui_types.dispatch_play_change state request ->
-              Ok (Masc_tui_http.issue_play_invite
-                ~expected_base_path:request.change_workspace.wi_base_path
-                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name ~hours)
-          | Ok _ | Error _ -> Ok (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch"))
-        ~wrap:(fun result -> Play_msg (Play_invite_issued (request, sink,
-          match result with
-          | Ok outcome -> decode_play_mutation Tui_decode.decode_play_invite_issued outcome
-          | Error (Request_withdrawn refusal) -> Play_kept_back refusal
-          | Error (Request_failed detail) -> play_request_failure state request detail)));
-      true
-
-let launch_play_revoke state ~mailbox ~sink ~name =
-  match Masc_tui_types.begin_play_change state (Revoke_invite name) with
-  | Error detail ->
-      settle_play_mutation state sink;
-      play_notice state ~sink ~kind:Notice_failure detail;
-      false
-  | Ok request ->
-      sync_collab_access state;
-      Masc_tui_surface_requests.Prompt_preset_requests.launch_preset_call state ~mailbox
-        ~call:(fun ~host ~port ->
-          match Masc_tui_types.workspace_change_origin state with
-          | Ok origin when origin = request.change_workspace
-              && Masc_tui_types.dispatch_play_change state request ->
-              Ok (Masc_tui_http.revoke_play_invite
-                ~expected_base_path:request.change_workspace.wi_base_path
-                ~expected_masc_root:request.change_workspace.wi_masc_root ~host ~port ~name)
-          | Ok _ | Error _ -> Ok (Masc_tui_http.Revoke_other
-              (Masc_tui_http.Post_refused "Local workspace authority changed before dispatch")))
-        ~wrap:(fun result -> Play_msg (Play_invite_revoked (request, sink, name,
-          match result with
-          | Ok Masc_tui_http.Revoke_absent -> Play_revoke_absent
-          | Ok (Masc_tui_http.Revoke_release_failed detail) -> Play_revoke_release_failed detail
-          | Ok (Masc_tui_http.Revoke_other outcome) ->
-              Play_revoke_result (decode_play_mutation Tui_decode.decode_play_invite_revoked outcome)
-          | Error (Request_withdrawn refusal) -> Play_revoke_result (Play_kept_back refusal)
-          | Error (Request_failed detail) ->
-              Play_revoke_result (play_request_failure state request detail))));
-      true
-
-let settle_retired_queue_inspections state =
-  let retired, current = List.partition
-      (fun (_, reading) -> reading != state.workspace_read_authority)
-      state.keeper_queue_inspections in
-  state.keeper_queue_inspections <- current;
-  List.iter (fun (keeper_name, _) ->
-    let detail = Printf.sprintf "/queue for %s was interrupted by workspace reconnection; retry after reconnecting"
-      keeper_name in
-    match state.queue_panel with
-    | Some panel when String.equal panel.qp_keeper keeper_name ->
-      state.queue_panel <- Some {panel with qp_reading=Queue_unavailable;
-        qp_notice=Some (Queue_error detail)}
-    | Some _ | None -> chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure detail) retired
-
-let launch_keeper_queue state ~mailbox ~keeper_name action =
-  let module Inbox = Masc_tui_queue_inspection in
-  let panel_notice ~failure text =
-    match action with
-    | Inbox.Inspect_peers (token, _) ->
-      ignore (stage_keeper_peer_reading state ~keeper_name ~token (Error (Request_failed text)))
-    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-    | Cancel_event _ | Prioritize_event _ ->
-      (match state.queue_panel with
-       | Some panel when String.equal panel.qp_keeper keeper_name ->
-         let outcome = if failure then Queue_error text else Queue_info text in
-         state.queue_panel <- Some
-           (if action = Masc_tui_queue_inspection.Inspect then
-              {panel with qp_reading=Queue_unavailable; qp_notice=Some outcome}
-            else {panel with qp_reading=Queue_unavailable; qp_receipt=Some (Queue_action_receipt outcome)})
-       | Some _ | None ->
-         chat_notice state ~keeper_name:(Some keeper_name)
-           ~kind:(if failure then Notice_failure else Notice_reply) text) in
-  if not (server_authority_ready state) then
-    panel_notice ~failure:true (Masc_tui_transport.Request_notice.kept_back_until_reconnect ~ko:(state.ui_language = Lang_ko)
-      ~request:(Kept_request.Command "/queue"))
-  else begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  let authority = state.workspace_authority in
-  let reading = state.workspace_read_authority in
-  let check_authority () =
-    if authority = state.workspace_authority && server_authority_ready state
-       && (match action with
-           | Inbox.Inspect_peers (token, _) -> reading == state.workspace_read_authority
-               && keeper_peer_read_current state ~keeper_name ~token
-           | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-           | Cancel_event _ | Prioritize_event _ -> true) then Ok ()
-    else Error "Workspace changed; the remaining queue requests were not sent" in
-  let get_json ~host ~port ~path =
-    Result.bind (check_authority ()) (fun () -> Masc_tui_http.get_json ~host ~port ~path) in
-  let post_json ~host ~port ~path ~body =
-    Result.bind (check_authority ()) (fun () -> Masc_tui_http.post_json ~host ~port ~path ~body) in
-  let priority_inflight = List.exists (fun (request : Keeper_chat.request) ->
-    String.equal request.keeper_name keeper_name) state.keeper_run_next_inflight in
-  if action = Inbox.Inspect && priority_inflight then
-    (match state.queue_panel with
-     | Some panel when String.equal panel.qp_keeper keeper_name ->
-       state.queue_panel <- Some {panel with qp_reading=Queue_loading; qp_refresh_after_priority=true;
-         qp_notice=Some (Queue_info "Waiting for the priority update before reading")}
-     | Some _ | None -> ())
-  else if (match action with Inbox.Run_next _ | Inbox.Move_to_end _ -> true
-    | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel _ | Edit _ | Cancel_event _
-    | Prioritize_event _ -> false)
-    && Masc_tui_chat_dispatch.Queue_steer.run_next_busy_for state keeper_name then
-    panel_notice ~failure:false "Another message priority change is pending; wait and refresh"
-  else if (match action with Inbox.Inspect_peers _ -> false
-      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-      | Cancel_event _ | Prioritize_event _ -> List.mem keeper_name state.keeper_queue_inflight) then
-    (match state.queue_panel with
-     | Some panel when String.equal panel.qp_keeper keeper_name ->
-       state.queue_panel <- Some {panel with qp_reading=Queue_loading;
-         qp_refresh_after_priority=(panel.qp_refresh_after_priority || action = Inbox.Inspect);
-         qp_notice=Some (Queue_info "A queue request is already pending")}
-     | Some _ | None -> panel_notice ~failure:false
-         "A queue request is pending; wait for its result before the next change")
-  else begin
-  let local_resume = action = Inbox.Resume
-    && state.workspace_identity = Workspace_identity_match
-    && keeper_available_for_new_message state keeper_name
-    && can_resume_preflight_keeper_input state keeper_name in
-  let expected_workspace = state.server_identity in
-  (match action with
-   | Inbox.Inspect ->
-       state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
-       state.keeper_queue_readings <- keeper_name :: state.keeper_queue_readings;
-       state.keeper_queue_inspections <-
-         (keeper_name, state.workspace_read_authority)
-         :: List.filter (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections
-   | Inspect_peers _ -> ()
-   | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-   | Cancel_event _ | Prioritize_event _ ->
-       state.keeper_queue_inflight <- keeper_name :: state.keeper_queue_inflight;
-       state.keeper_queue_inspections <- List.filter
-         (fun (keeper, _) -> keeper <> keeper_name) state.keeper_queue_inspections);
-  let control_generation = match action with
-    | Inbox.Pause | Inbox.Resume ->
-        Some (begin_keeper_chat_control ~preserve_input_holds:local_resume
-                ~preserve_priority_requests:local_resume state keeper_name)
-    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Run_next _ | Inbox.Edit (_, _)
-    | Inbox.Cancel_event (_, _, _) | Inbox.Prioritize_event (_, _, _)
-    | Inbox.Clear -> None in
-  let resume_input_ids = match action with
-    | Inbox.Resume -> retained_keeper_input_ids state keeper_name
-    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Cancel _
-    | Inbox.Move_to_end _ | Inbox.Run_next _ | Inbox.Edit _ | Inbox.Cancel_event _
-    | Inbox.Prioritize_event _ | Inbox.Clear -> [] in
-  (* The lines /queue clear asks the server to cancel. Read here, on the fiber
-     that owns [state]; the job below only sends. No other action names any. *)
-  let clear_targets = match action with
-    | Inbox.Clear ->
-      List.filter_map (fun (request, position) ->
-        match keeper_queue_clear_treatment position with
-        | Cancel_on_server -> Some request
-        | Drop_from_local_queue | Withdraw_before_post | Leave_waiting -> None)
-        (keeper_message_waiting_positions state ~keeper_name)
-    | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Cancel _ | Inbox.Move_to_end _ | Inbox.Run_next _
-    | Inbox.Edit _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> [] in
-  let check_control () =
-    Result.bind (check_authority ()) (fun () ->
-      match control_generation with
-      | Some generation when generation <> keeper_chat_control_generation state keeper_name ->
-          Error "A newer Keeper control superseded this queue request"
-      | Some _ | None -> Ok ()) in
-  let operator_operation_id = "tui-queue-" ^ Random_id.uuid_v7 () in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-  let ko = state.ui_language = Lang_ko in
-  let root = "/api/v1/keepers/" ^ Masc_tui_http.percent_encode_path_segment keeper_name in
-  (* One queued message on the server, and the verb that cancels it. Both the
-     single cancel and /queue clear post to this address. *)
-  let operation_path id =
-    root ^ "/chat/operations/" ^ Masc_tui_http.percent_encode_path_segment id in
-  let cancel_suffix = "cancel" in
-  let perform () =
-    let open Result.Syntax in
-    let* () = check_control () in
-    let* receipt = match action with
-      | Inbox.Inspect | Inbox.Inspect_peers _ -> Ok []
-      | Inbox.Pause | Inbox.Resume ->
-        let verb = if action = Inbox.Pause then "pause" else "resume" in
-        let* expected_workspace = match expected_workspace with
-          | Some identity -> Ok identity
-          | None -> Error "Workspace identity is unavailable; input remains retained" in
-        let* owner_paused =
-          if not local_resume then Ok true else
-            (match Masc_tui_loader.load_keeper_roster ~host ~port ~expected_workspace with
-             | Error failure -> Error (Keeper_control.roster_failure_message
-                 ~credential_sent:(Masc_tui_http.operator_token_present ()) failure)
-             | Ok (roster, _) ->
-               match Keeper_control.liveness_of_roster roster keeper_name with
-               | Keeper_control.Present runtime -> Ok runtime.kr_paused
-               (* A complete roster without the Keeper: no owner is running,
-                  and the server refuses chat admission without one, so a
-                  local send could only be refused. Name the way out. *)
-               | Absent ->
-                 Error "Keeper is not running on the server; boot it, then /queue resume sends the retained input"
-               | Unobserved | Invalid _ ->
-                 Error "Keeper pause state is unavailable; input remains retained") in
-        let* () = check_control () in
-        (* The retained input leaves as soon as the owner is confirmed, ahead
-           of the informational queue reads below. *)
-        let confirm confirmation =
-          if action = Inbox.Resume then
-            Option.iter (fun generation ->
-              enqueue_async mailbox
-                (Keeper_msg (Keeper_queue_resume_confirmed
-                   (keeper_name, generation, confirmation, resume_input_ids))))
-              control_generation in
-        if not owner_paused then begin
-          confirm Owner_already_active;
-          (* This is a read, not a POST receipt. The read-scoped confirmation
-             above owns it; the operation completion must not promote it
-             across a withdrawn workspace read authority. *)
-          Ok []
-        end else
-        let* status, body = Masc_tui_http.post_keeper_directive ~host ~port ~keeper_name
-          ~action:verb ~operator_operation_id ~expected_workspace in
-        (match Keeper_control.classify_response ~status ~body with
-         | Keeper_control.Accepted _ -> confirm Owner_resumed; Ok ["Server confirmed queue " ^ verb]
-         | Keeper_control.Committed_followup_failed detail
-         | Keeper_control.Rejected {detail;_}
-         | Keeper_control.Paused_owner_conflict detail -> Error detail
-         | Keeper_control.Purge_accepted _ | Keeper_control.Unbound_purge_receipt _ ->
-             Error "Unexpected purge response to queue directive")
-      | Inbox.Cancel_event (reference, incarnation, _) | Inbox.Prioritize_event (reference, incarnation, _) ->
-        let fields = ["schema", `String "keeper_event_queue.operator.request.v2";
-          "source_ref", `String reference; "source_incarnation", `String (Int64.to_string incarnation)] in
-        let fields = match action with
-          | Inbox.Cancel_event (_, _, reason) ->
-            ("action", `String "cancel") :: ("reason", `String reason)
-            :: ("operator_operation_id", `String operator_operation_id) :: fields
-          | Inbox.Prioritize_event (_, _, urgency) ->
-            ("action", `String "reprioritize") :: ("urgency", `String (Keeper_event_queue.urgency_to_string urgency)) :: fields
-          | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _ -> assert false in
-        let* _ = post_json ~host ~port ~path:(root ^ "/events/operator")
-          ~body:(Yojson.Safe.to_string (`Assoc fields)) in
-        Ok ["Server confirmed event update: " ^ reference]
-      | Inbox.Clear ->
-        (* Each line is its own operation on the server, so one failure says
-           nothing about the next: every cancel is attempted and answered by
-           id. "Not sent" is this client declining to send. "Not confirmed"
-           is a refusal or an answer that never arrived, and the snapshot
-           read below shows which lines are still queued. *)
-        let receipts = List.map (fun (request : Keeper_chat.request) ->
-          let id = request.request_id in
-          match check_authority () with
-          | Error detail -> "Cancel not sent for " ^ id ^ ": " ^ detail
-          | Ok () ->
-            (match Masc_tui_http.post_json ~host ~port
-                     ~path:(operation_path id ^ "/" ^ cancel_suffix)
-                     ~body:(Yojson.Safe.to_string (`Assoc [])) with
-             | Ok _ -> "Server confirmed cancel: " ^ id
-             | Error detail -> "Cancel not confirmed for " ^ id ^ ": " ^ detail))
-          clear_targets in
-        Ok (match receipts with [] -> ["No server messages were selected for cancellation"] | _ -> receipts)
-      | Inbox.Run_next id ->
-        let* () = check_control () in
-        let* detail = Masc_tui_http.post_keeper_run_next ~host ~port ~keeper_name ~request_id:id () in
-        Ok [detail]
-      | Inbox.Cancel id | Inbox.Move_to_end id | Inbox.Edit (id, _) ->
-        let path = operation_path id in
-        let* suffix, body = match action with
-          | Inbox.Cancel _ -> Ok (cancel_suffix, `Assoc [])
-          | Inbox.Move_to_end _ -> Ok ("move-to-end", `Assoc [])
-          | Inbox.Edit (_, message) ->
-            let* operation = get_json ~host ~port ~path in
-            let* input = Inbox.edited_input ~message operation in
-            Ok ("edit", `Assoc ["input", input])
-          | Inbox.Inspect | Inbox.Inspect_peers _ | Inbox.Pause | Inbox.Resume | Inbox.Clear | Inbox.Run_next _ | Inbox.Cancel_event _ | Inbox.Prioritize_event _ -> assert false in
-        let* _ = post_json ~host ~port ~path:(path ^ "/" ^ suffix)
-          ~body:(Yojson.Safe.to_string body) in
-        Ok ["Server confirmed " ^ suffix ^ ": " ^ id] in
-    (* Publish the mutation receipt before the follow-up reads, so another
-       priority request does not wait on inventory pagination. *)
-    (match action with
-     | Inbox.Inspect | Inbox.Inspect_peers _ -> ()
-     | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-     | Cancel_event _ | Prioritize_event _ ->
-         enqueue_async mailbox (Keeper_msg (Keeper_queue_action_received (keeper_name, receipt))));
-    (* Keep each failed read visible beside any successful mutation receipt. *)
-    let observe () =
-    let waiting = match action with
-      | Inbox.Inspect_peers _ -> Ok []
-      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-      | Cancel_event _ | Prioritize_event _ ->
-          get_json ~host ~port ~path:(root ^ "/waiting-inventory")
-          |> fun result -> Result.bind result (Inbox.waiting_items ~ko ~now:(Unix.gettimeofday ())) in
-    let module Operation_ids = Set.Make(String) in
-    let rec read_messages after_sequence seen reversed_pages =
-      let suffix = Option.fold ~none:"" ~some:(fun value -> "&after_sequence=" ^ value) after_sequence in
-      let* page = get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix) in
-      let* next = Inbox.next_sequence page in
-      let* items = Inbox.operation_items page in
-      let* seen = List.fold_left (fun seen (item : Inbox.item) ->
-        let* seen = seen in
-        match item.id with
-        | Some (Inbox.Server_message id) ->
-          if Operation_ids.mem id seen then Error "Server queue changed while reading pages; refresh to try again"
-          else Ok (Operation_ids.add id seen)
-        | Some (Local_message _ | Running_message _ | Event _ | Schedule _) | None -> Ok seen)
-          (Ok seen) items in
-      let rows = List.filter (fun (item : Inbox.item) -> Option.is_some item.id) items in
-      match next, after_sequence with
-      | Some next, Some previous when Int64.of_string next <= Int64.of_string previous ->
-        Error "Queue pagination did not advance"
-      | Some next, _ -> read_messages (Some next) seen (rows :: reversed_pages)
-      | None, _ ->
-        let operations = List.concat (List.rev (rows :: reversed_pages)) in
-        Ok ({Inbox.id=None; text=Printf.sprintf "Server queued messages · %d" (List.length operations)} :: operations) in
-    let peer_result = match action with
-      | Inbox.Inspect_peers (_, after_sequence) ->
-          let suffix = Option.fold ~none:"" ~some:(fun value ->
-            "&after_sequence=" ^ Masc_tui_http.percent_encode_query_value value) after_sequence in
-          Some (Inbox.read_peer_page ~keeper_name ~after_sequence ~read_page:(fun () ->
-            get_json ~host ~port ~path:(root ^ "/chat/operations?state=queued" ^ suffix)))
-      | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-      | Cancel_event _ | Prioritize_event _ -> None in
-    let operations = match action, peer_result with
-      | Inbox.Inspect_peers _, Some result -> Result.map (fun _ -> []) result
-      | Inbox.Inspect_peers _, None -> Error "Keeper relationship page was not read"
-      | (Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-        | Cancel_event _ | Prioritize_event _), _ -> read_messages None Operation_ids.empty [] in
-    let peer_page = Option.bind peer_result Result.to_option in
-    Ok {Inbox.waiting; operations; peer_page} in
-    let observation = try observe () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Printexc.to_string exn) in
-    Ok (receipt, observation) in
-  let failed result = Result.map_error (fun detail -> Request_failed detail) result in
-  let read = match action with
-    | Inbox.Inspect_peers _ ->
-      let read = Masc_tui_transport.Workspace_admission.capture_json_read state perform in
-      (fun () -> match read () with
-        | Error refusal -> Error (Request_withdrawn refusal)
-        | Ok result -> failed result)
-    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-    | Cancel_event _ | Prioritize_event _ -> (fun () -> failed (perform ())) in
-  let run () =
-    let result = try read () with
-      | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | exn -> Error (Request_failed (Printexc.to_string exn)) in
-    enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, result))) in
-  (* Said here, past both refusals above. The job can still send none: it
-     checks the workspace and the control generation first and reports a
-     failure of either, and without an Eio switch it does not start. *)
-  let cancelling = match clear_targets with
-    | [] -> []
-    | _ :: _ ->
-      [Printf.sprintf "Cancelling %d in the server queue" (List.length clear_targets)] in
-  (match action with
-   | Inbox.Inspect_peers _ -> ()
-   | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
-   | Cancel_event _ | Prioritize_event _ ->
-       (match state.queue_panel with
-        | Some panel when String.equal panel.qp_keeper keeper_name ->
-          state.queue_panel <- Some {panel with qp_reading=Queue_loading;
-            qp_notice=Some (Queue_info (if action = Inbox.Inspect then "Reading queue" else "Sending queue change"))}
-        | Some _ | None ->
-          if action <> Inbox.Inspect then
-            chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-              (String.concat " · " (cancelling @ ["Sending queue change"]))));
-  match Eio_context.get_switch_opt () with
-  | Some sw -> Masc_tui_transport.Workspace_admission.fork_job state ~mailbox ~sw run
-  | None -> enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, Error (Request_failed "Eio switch is unavailable"))))
-  end
-  end
-;;
-
-let open_keeper_queue_panel state ~mailbox ~keeper_name =
-  state.queue_panel <- Some
-    { qp_keeper=keeper_name; qp_layout=Masc_tui_queue_layout.Adaptive; qp_reading=Queue_unavailable;
-      qp_observation=None; qp_notice=None; qp_receipt=None; qp_selected=None; qp_scroll=0;
-      qp_detail=None; qp_detail_scroll=0; qp_refresh_after_priority=false };
-  launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Inspect
-;;
-
-let refresh_queue_after_priority state ~mailbox ~keeper_name =
-  match state.queue_panel with
-  | Some panel when String.equal panel.qp_keeper keeper_name
-      && panel.qp_refresh_after_priority
-      && server_authority_ready state
-      && not (List.mem keeper_name state.keeper_queue_inflight)
-      && not (List.exists (fun (request : Keeper_chat.request) ->
-           String.equal request.keeper_name keeper_name) state.keeper_run_next_inflight) ->
-    state.queue_panel <- Some {panel with qp_refresh_after_priority=false};
-    launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Inspect
-  | Some _ | None -> ()
-;;
 
 let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel : queue_panel) key =
   let module Inbox = Masc_tui_queue_inspection in
@@ -5696,11 +5184,11 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
     | Some (Inbox.Server_message id) ->
       if Masc_tui_chat_dispatch.Queue_steer.run_next_busy_for state panel.qp_keeper then
         notice "Another message priority change is pending; wait and refresh"
-      else launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper
+      else Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper
           (match command with `Next -> Inbox.Run_next id | `Last -> Inbox.Move_to_end id)
     | Some (Inbox.Event (reference, incarnation)) ->
       let urgency = match command with `Next -> Keeper_event_queue.Immediate | `Last -> Low in
-      launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper
+      Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper
         (Inbox.Prioritize_event (reference, incarnation, urgency))
     | Some (Inbox.Running_message _) -> notice "This message is already running"
     | Some (Inbox.Schedule _) -> notice "Can't reorder schedule here; due work may wait" in
@@ -5756,7 +5244,7 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
         | "end" -> Masc_tui_scroll.maximum ~count ~height
         | _ -> old_scroll) in
       {panel with qp_scroll=scroll})
-  | "r" -> launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper Inbox.Inspect
+  | "r" -> Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper Inbox.Inspect
   | "n" -> act `Next
   | "l" -> act `Last
   | _ -> ()
@@ -5775,10 +5263,10 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
    and a keystroke the terminal ate look identical from the composer, and the
    operator would learn which it was only after the turn came back. *)
 let paste_clipboard_image state =
-  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match Masc_tui_clipboard.read_image () with
   | Error error ->
-    notice ~kind:Notice_failure
+    notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
       ("Ctrl-V: " ^ Masc_tui_clipboard.error_to_string error)
   | Ok bytes ->
     (* Numbered by staging order and restarting at 1 with each message, so the
@@ -5788,7 +5276,7 @@ let paste_clipboard_image state =
     let name = Printf.sprintf "image-%d.png" index in
     (match Masc_tui_attachment.of_bytes ~name bytes with
      | Error error ->
-       notice ~kind:Notice_failure
+       notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
          ("Ctrl-V: " ^ Masc_tui_attachment.error_to_string error)
      | Ok attachment ->
        Masc_tui_chat_input.Message_draft_recall.forget_recall state;
@@ -5805,7 +5293,7 @@ let paste_clipboard_image state =
        in
        if needs_separator then Masc_tui_message_input.insert_char state.msg_input ' ';
        Masc_tui_message_input.insert state.msg_input (Printf.sprintf "[Image #%d] " index);
-       notice ~kind:Notice_reply
+       notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
          (Printf.sprintf
             "pasted [Image #%d] (%s, %d bytes) \xc2\xb7 %d staged for the next message"
             index
@@ -6169,26 +5657,26 @@ let handle_collab_action state ~mailbox view action =
   | Watch Masc.Machine_lane.Msx -> open_msx_spectator state ~mailbox
   | Watch Masc.Machine_lane.Dos -> open_dos_screen state ~mailbox
   | Game_menu -> open_msx_screen state ~mailbox
-  | Refresh -> refresh_collab state ~mailbox (Masc_tui_collab.owner view)
+  | Refresh -> Masc_tui_collab_queue.Collab_play.refresh_collab state ~mailbox (Masc_tui_collab.owner view)
   | Resolve_unknown request_id ->
       (match Masc_tui_types.resolve_play_change state ~request_id with
        | Ok () ->
-           collab_notice state owner ~kind:Notice_reply
+           Masc_tui_collab_queue.Collab_play.collab_notice state owner ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              "Operator confirmed the original request finished; refreshing current invite status.";
-           sync_collab_access state;
-           refresh_current_collab state ~mailbox
-       | Error detail -> collab_notice state owner ~kind:Notice_failure detail)
+           Masc_tui_collab_queue.Collab_play.sync_collab_access state;
+           Masc_tui_collab_queue.Collab_play.refresh_current_collab state ~mailbox
+       | Error detail -> Masc_tui_collab_queue.Collab_play.collab_notice state owner ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure detail)
   | Open_link name ->
       (match Masc_tui_types.play_invite_find state name with
        | Some _ -> state.play_invite <- {state.play_invite with shown_name = Some name}; state.play_invite_scroll <- 0
-       | None -> collab_notice state owner ~kind:Notice_reply
+       | None -> Masc_tui_collab_queue.Collab_play.collab_notice state owner ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
            "The one-time link is not retained in this session. Revoke this invite and issue a new one to obtain a link.")
   | Issue (mutation, name, hours) ->
       let sink = Play_collab {owner; mutation} in
-      ignore (launch_play_issue state ~mailbox ~sink ~name ~hours)
+      ignore (Masc_tui_collab_queue.Collab_play.launch_play_issue state ~mailbox ~sink ~name ~hours)
   | Revoke (mutation, name) ->
       let sink = Play_collab {owner; mutation} in
-      ignore (launch_play_revoke state ~mailbox ~sink ~name)
+      ignore (Masc_tui_collab_queue.Collab_play.launch_play_revoke state ~mailbox ~sink ~name)
 
 (* Where a reference lands, and what it opens when it gets there.
 
@@ -7112,8 +6600,8 @@ let image_notice (state : state) ~view ~keeper_name ~kind text =
   if view = Resources then report_action state "resources" text
   else if view = Board then state.board_attachment_status <- Some text
   else if view = Tools then
-    report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system") text
-  else chat_notice state ~keeper_name ~kind text
+    report_action state (match kind with Masc_tui_collab_queue.Chat_notice.Notice_failure -> "error" | Masc_tui_collab_queue.Chat_notice.Notice_reply -> "system") text
+  else Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name ~kind text
 
 let board_image_source_reader state ~message subject =
   match subject with
@@ -7178,7 +6666,7 @@ let settle_retired_sent_image state =
       if not state.msx_open && pending.sir_generation = state.image_request_generation
          && pending.sir_view = state.view
          && image_request_keeper_is_current state pending then
-        image_notice state ~view:pending.sir_view ~keeper_name:pending.sir_keeper ~kind:Notice_failure
+        image_notice state ~view:pending.sir_view ~keeper_name:pending.sir_keeper ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           (Printf.sprintf "Image %s: source changed; reopen its preview"
              pending.sir_name)
     end
@@ -7188,7 +6676,7 @@ let announce_retired_skill_image state =
   match retired_skill_image_notice state with
   | Some pending ->
       state.sent_image_read <- None;
-      image_notice state ~view:Tools ~keeper_name:pending.sir_keeper ~kind:Notice_failure
+      image_notice state ~view:Tools ~keeper_name:pending.sir_keeper ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         "Skill image preview interrupted after the workspace reading changed; reopen it";
       true
   | None -> false
@@ -7240,7 +6728,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
   match dispatch with
   | None ->
       if Option.is_some board_subject then
-        notice ~kind:Notice_failure "Board image source or workspace is no longer available"
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Board image source or workspace is no longer available"
   | Some (enqueue_async, owner) ->
   let rows, columns = Masc_tui_ansi.get_terminal_size () in
   let display = match !active_graphics_protocol with
@@ -7253,7 +6741,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
   | None ->
       let reason = "image preview requires pixel graphics or 256-colour text" in
       if not (Option.exists (board_image_source_reader state ~message:("Image preview unavailable: " ^ reason)) board_subject) then
-        notice ~kind:Notice_failure reason
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure reason
   | Some display ->
     let board_worker = match owner with
       | Board_image_read _ -> Some board_preview_worker
@@ -7341,7 +6829,7 @@ let open_preview_image ?skill_reference ?board_subject state ~mailbox ~notice ~n
              enqueue_async mailbox (completion (load ())); `Stop_daemon)
          | None ->
              state.sent_image_read <- None;
-             notice ~kind:Notice_failure "image preview requires an active background session")
+             notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "image preview requires an active background session")
 
 (* Input changes the desired viewport; completion retires the old job and
    the next loop renders only the latest window. A non-Board vector worker
@@ -7574,14 +7062,14 @@ let open_resource_image (state : state) ~mailbox =
   | Some (_, Masc_tui_image_preview.Output_image {name;source}) ->
     open_preview_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
   | Some (_, Unavailable_image {name;reason}) ->
-    notice ~kind:Notice_failure (name ^ ": " ^ reason)
+    notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (name ^ ": " ^ reason)
   | Some (_, (Named_path _ | Staged _ | Stored_attachment _ | No_image))
-  | None -> notice ~kind:Notice_failure "No image in the current resource reading"
+  | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "No image in the current resource reading"
 
 let open_selected_image state ~mailbox preview =
   let notice = if state.view = Memory then
       image_notice state ~view:Memory ~keeper_name:state.memory_facts_keeper
-    else chat_notice state ~keeper_name:state.msg_target_keeper_name in
+    else Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name in
   match preview with
   | Masc_tui_image_preview.Named_path path -> open_image state ~mailbox ~notice path
   | Masc_tui_image_preview.Staged attachment ->
@@ -7594,10 +7082,10 @@ let open_selected_image state ~mailbox preview =
   | Masc_tui_image_preview.Output_image { name; source } ->
       open_preview_image state ~mailbox ~notice ~name (Masc_tui_image_requests.Generated source)
   | Masc_tui_image_preview.Unavailable_image { name; reason } ->
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         (Printf.sprintf "Ctrl-O %s: %s" name reason)
   | Masc_tui_image_preview.No_image ->
-      notice ~kind:Notice_reply "Ctrl-O: no image or closed Mermaid diagram in this conversation or the composer"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "Ctrl-O: no image or closed Mermaid diagram in this conversation or the composer"
 
 let open_named_image state ~mailbox =
   let sources, order = conversation_image_sources state in
@@ -7631,7 +7119,7 @@ let list_conversation_images state =
     | [] -> "/images: no image or closed diagram in the loaded conversation or composer"
     | _ -> "Images / diagrams · /images N opens · /images refreshes this list\n"
         ^ String.concat "\n" rows in
-  chat_notice state ~keeper_name:state.msg_target_keeper_name ~kind:Notice_reply text
+  Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply text
 
 let open_indexed_image state ~mailbox ~index =
   let catalog = match state.image_catalog with
@@ -7640,10 +7128,10 @@ let open_indexed_image state ~mailbox ~index =
       let catalog = capture_image_catalog state in
       state.image_catalog <- Some catalog;
       catalog in
-  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name in
   if catalog.ic_reading != state.workspace_read_authority
      || catalog.ic_keeper <> state.msg_target_keeper_name then
-    notice ~kind:Notice_failure
+    notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
       (ui_text state
          ~ko:"/images: 대화가 바뀌었습니다 · /images를 다시 실행해 현재 목록을 읽으세요"
          ~en:"/images: conversation changed; run /images to read its current list")
@@ -7653,7 +7141,7 @@ let open_indexed_image state ~mailbox ~index =
       open_selected_image state ~mailbox preview
   | None ->
       let count = List.length catalog.ic_previews in
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         (if state.ui_language = Lang_ko then
            Printf.sprintf "/images: 불러온 대화와 입력창에 이미지·다이어그램 미리보기가 %d개 있습니다" count
          else
@@ -7738,7 +7226,7 @@ let prepare_listen_media ~host ~port (media : Masc_tui_chat_media.playable) =
     |> Result.map_error Masc_tui_attachment_action.describe_outcome)
 
 let listen_newest_media ?(destination=Listen_player) state ~mailbox =
-  let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+  let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name in
   let media = match destination with
     | Listen_player -> Masc_tui_chat_media.newest_playable (conversation_media state)
     | Listen_music_editor -> Masc_tui_chat_media.newest_midi (conversation_media state) in
@@ -7746,18 +7234,18 @@ let listen_newest_media ?(destination=Listen_player) state ~mailbox =
     | Listen_player -> "/listen" | Listen_music_editor -> "/music midi" in
   match state.msg_target_keeper_name, media with
   | None, _ | Some _, None ->
-      notice ~kind:Notice_reply (command ^ ": no readable "
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (command ^ ": no readable "
         ^ (match destination with Listen_player -> "audio or MIDI" | Listen_music_editor -> "MIDI")
         ^ " attachment in this conversation")
   | Some keeper, Some media ->
       if not (server_authority_ready state) then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           (let ko = state.ui_language = Lang_ko in
            kept_back ~ko ~request:(Kept_request.Command command) (workspace_identity_unconfirmed ~ko) Nothing_kept)
       else begin
         let request = begin_chat_listen ~destination state ~keeper media in
         let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-        notice ~kind:Notice_reply (command ^ ": preparing " ^ media.name);
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (command ^ ": preparing " ^ media.name);
         Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
           ~boundary_error:(fun cause -> Request_failed cause)
           ~withdrawn:(fun refusal -> Request_withdrawn refusal)
@@ -7770,7 +7258,7 @@ let withdraw_pending_music_editor state =
   withdraw_chat_music_editor state |> Option.iter (fun request ->
     let message =
       "/music midi: opening cancelled while terminal input was pending; run /music midi again when ready" in
-    chat_notice state ~keeper_name:(Some request.lr_keeper) ~kind:Notice_reply
+    Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some request.lr_keeper) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
       message;
     report_action state "system" message)
 
@@ -7831,7 +7319,7 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
    having; and running out of older matches is a different fact from having
    none at all, because only one of the two is fixed by starting over. *)
 let apply_chat_search_result state ~target ~restart ~needle result =
-  let notice=chat_notice state ~keeper_name:target in
+  let notice=Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target in
   let ko = state.ui_language = Lang_ko in
       let partial=if result.unavailable_entries=0 then "" else
         if ko then
@@ -7843,7 +7331,7 @@ let apply_chat_search_result state ~target ~restart ~needle result =
       | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
           apply_clamped_scroll state (Message_scroll position);
-          notice ~kind:Notice_reply
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
             ((if ko then
                 Printf.sprintf "/find %s \xc2\xb7 %d줄 위로 이동 (/find 반복)" needle position.scroll
               else
@@ -7851,17 +7339,17 @@ let apply_chat_search_result state ~target ~restart ~needle result =
                   needle (Masc_tui_message_layout.count_noun position.scroll "row"))
              ^ partial)
       | None when result.unavailable_entries>0 ->
-          notice ~kind:Notice_failure ("/find" ^ partial)
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ("/find" ^ partial)
       | None ->
           if restart then
-            notice ~kind:Notice_reply
+            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
               (if ko then Printf.sprintf "/find %s \xc2\xb7 이 대화에 일치하는 내용이 없습니다" needle
                else Printf.sprintf "/find %s \xc2\xb7 nothing in this conversation" needle)
           else
             (* The walk is over, not empty. Said apart from the case above
                because starting again is what fixes this one and not that
                one. *)
-            notice ~kind:Notice_reply
+            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
               (if ko then
                  Printf.sprintf "/find %s \xc2\xb7 이전 일치 항목 없음 · /find %s 로 처음부터 다시 검색"
                    needle needle
@@ -7872,10 +7360,10 @@ let apply_chat_search_result state ~target ~restart ~needle result =
 
 
 let seek_in_chat state ~mailbox ~target ~restart =
-  let notice=chat_notice state ~keeper_name:target in
+  let notice=Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target in
   match target with
   | None ->
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         (ui_text state ~ko:"/find: 목록에서 키퍼를 먼저 선택하세요"
            ~en:"/find needs a Keeper selected on the roster")
   | Some keeper_name ->
@@ -8198,7 +7686,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
     | Some _ as named -> named
     | None -> state.msg_target_keeper_name
   in
-  let notice = chat_notice state ~keeper_name:target in
+  let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target in
   (* A large paste may replace even the slash command with a placeholder.
      Peek only to recognize preset saves; all other commands keep their
      existing spill handling. Materialize the retained input before parsing
@@ -8260,25 +7748,25 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Open_artifacts | Open_music | Open_music_midi | Music_invalid_arguments | Open_score _ | Score_invalid_index
       | Open_images _ | List_images | Images_invalid_index | Unknown _ -> true
   then
-    notice ~kind:Notice_failure
+    notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
   else
   match command with
   | Masc_tui_command.Say _ when Masc_tui_chat_input.Paste_spill.recovered_paste_send_locked_for state target ->
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         "Recovered draft protected; press Ctrl-G to enable Enter"
   | Masc_tui_command.Say _ ->
       Masc_tui_chat_dispatch.Queue_steer.start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text
   | Masc_tui_command.Task_missing_title ->
       report_action state "error" "/task needs a title on the same line"
   | Masc_tui_command.View_image_missing_path ->
-      notice ~kind:Notice_failure "/image needs a path on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/image needs a path on the same line"
   | Masc_tui_command.Measurement_missing_sha ->
-      notice ~kind:Notice_failure "/measurement needs a SHA-256 on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/measurement needs a SHA-256 on the same line"
   | Masc_tui_command.Open_measurement sha256 ->
       (match Tool_blob_store.validate_sha256 sha256 with
        | Error error ->
-           notice ~kind:Notice_failure (Tool_blob_store.invalid_sha256_to_string error)
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (Tool_blob_store.invalid_sha256_to_string error)
        | Ok () ->
            Masc_tui_message_input.clear state.msg_input;
            goto_surface state ~mailbox Lanes;
@@ -8287,9 +7775,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       open_image state ~mailbox ~notice (String.trim path)
   | Masc_tui_command.Attach_image_missing_path ->
-      notice ~kind:Notice_failure "/attach needs a path on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/attach needs a path on the same line"
   | Masc_tui_command.Attach_image_ref_missing_value ->
-      notice ~kind:Notice_failure "/ref needs a URL or file_id on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/ref needs a URL or file_id on the same line"
   | Masc_tui_command.Attach_image_ref value -> (
       Masc_tui_message_input.clear state.msg_input;
       (* A whole-token http(s) URL is a URL reference; anything else non-blank
@@ -8305,7 +7793,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       in
       match reference with
       | None ->
-          notice ~kind:Notice_failure "/ref needs a URL or file_id on the same line"
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/ref needs a URL or file_id on the same line"
       | Some reference ->
           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- state.msg_references @ [ reference ]);
           Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
@@ -8315,7 +7803,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
             | Keeper_chat.Ref_file_id _ -> "file_id"
           in
           let count = List.length state.msg_references in
-          notice ~kind:Notice_reply
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
             (if state.ui_language = Lang_ko then
                Printf.sprintf "참조 추가됨 %s (%s) · 제공자가 직접 가져옵니다 · 다음 메시지 참조 %d개 대기 중"
                  value kind count
@@ -8327,12 +7815,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       match Masc_tui_attachment.of_file ~path:(String.trim path) with
       | Error error ->
-          notice ~kind:Notice_failure
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
             (Masc_tui_attachment.error_to_string error)
       | Ok attachment ->
           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- state.msg_attachments @ [ attachment ]);
           Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
-          notice ~kind:Notice_reply
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
             (Printf.sprintf
                "attached %s (%s, %d bytes) · %d staged for the next message"
                attachment.Masc_tui_keeper_chat_projection.name
@@ -8344,7 +7832,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       if state.view <> Keepers Keeper_message
          || Option.is_none target
          || target <> state.msg_target_keeper_name then
-        notice ~kind:Notice_failure "Open a Keeper chat to inspect its loading errors"
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Open a Keeper chat to inspect its loading errors"
       else begin
         let errors =
           let ko = state.ui_language = Lang_ko in
@@ -8362,14 +7850,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         set_msg_scroll state 0;
         (* A local log entry wraps and scrolls. A failure toast would flatten
            these details back into the one-line truncation being inspected. *)
-        notice ~kind:Notice_reply
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
           (match errors with
            | [] -> "No chat loading errors recorded."
            | _ :: _ -> "Chat loading errors\n\n" ^ String.concat "\n\n" errors)
       end
   | Masc_tui_command.Help ->
       Masc_tui_message_input.clear state.msg_input;
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         (String.concat "\n"
            (Masc_tui_command.help_lines_for ~ko:(state.ui_language = Lang_ko)))
   | Masc_tui_command.Features ->
@@ -8380,7 +7868,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           Masc_tui_frame.inner_width ~cols
         else Masc_tui_help.column_width ~cols
       in
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         (String.concat "\n" (Masc_tui_features.lines_for ~ko:(state.ui_language = Lang_ko) ~width))
   | Masc_tui_command.About ->
       Masc_tui_message_input.clear state.msg_input;
@@ -8419,7 +7907,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            in
            state.link_modal_cursor <- find_idx 0 all_urls
        | None ->
-           notice ~kind:Notice_reply
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              "No web links found in this conversation to preview. Use /preview <url> to preview any link.")
   | Masc_tui_command.Open_links_list ->
       Masc_tui_message_input.clear state.msg_input;
@@ -8432,7 +7920,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            state.link_modal_scroll <- 0;
            state.link_modal_cursor <- 0
        | [] ->
-           notice ~kind:Notice_reply "No web links found in this conversation.")
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "No web links found in this conversation.")
   | Masc_tui_command.Set_embeds mode ->
       Masc_tui_message_input.clear state.msg_input;
       state.link_previews_mode <-
@@ -8440,7 +7928,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          | `On -> `Rich
          | `Compact -> `Compact
          | `Off -> `Off);
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         (Printf.sprintf "Inline link embed cards: %s"
            (match state.link_previews_mode with
             | `Rich -> "Rich (Full Cards)"
@@ -8454,11 +7942,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       (match toggle_acting_pane state with
        | Ok layout ->
-           notice ~kind:Notice_reply
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (let ko = state.ui_language = Lang_ko in
               (if ko then "활동 창 " else "Activity pane ")
               ^ Masc_tui_acting_pane.layout_label ~ko layout)
-       | Error reason -> notice ~kind:Notice_failure reason)
+       | Error reason -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure reason)
   | Masc_tui_command.Show_acting_pane_tab tab ->
       Masc_tui_message_input.clear state.msg_input;
       let tab =
@@ -8471,14 +7959,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            (match tab with
             | Masc_tui_acting_pane.Tab_changes -> refresh_acting_pane_changes state ~mailbox
             | Masc_tui_acting_pane.Tab_fleet -> ());
-           notice ~kind:Notice_reply
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (let ko = state.ui_language = Lang_ko in
               (if ko then "활동 창 탭: " else "Activity pane on ")
               ^ Masc_tui_acting_pane.tab_label ~ko tab)
-       | Error reason -> notice ~kind:Notice_failure reason)
+       | Error reason -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure reason)
   | Masc_tui_command.Acting_pane_tab_unknown word ->
       Masc_tui_message_input.clear state.msg_input;
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         (Printf.sprintf "/activity takes fleet, changes, order or scroll, not %s" word)
   | Masc_tui_command.Set_acting_pane_call_order which ->
       Masc_tui_message_input.clear state.msg_input;
@@ -8497,14 +7985,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
              | `By_tool -> Masc_tui_acting_pane.By_tool
            in
            state.acting_pane_call_order <- order;
-           notice ~kind:Notice_reply
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (let ko = state.ui_language = Lang_ko in
               (if ko then "활동 창 호출 순서: " else "Activity calls ")
               ^ Masc_tui_acting_pane.call_order_label ~ko order)
-       | Error reason -> notice ~kind:Notice_failure reason)
+       | Error reason -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure reason)
   | Masc_tui_command.Acting_pane_call_order_unknown word ->
       Masc_tui_message_input.clear state.msg_input;
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         (Printf.sprintf
            "/activity order takes newest, oldest, longest or tool, not %s" word)
   | Masc_tui_command.Scroll_acting_pane how ->
@@ -8514,12 +8002,12 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          reasons it is not drawn are said the way the toggle says them. *)
       let _rows, cols = Masc_tui_ansi.get_terminal_size () in
       if Masc_tui_render.acting_pane_suppressed state then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           "Activity pane is not drawn over this surface; nothing to scroll"
       else if
         Masc_tui_acting_pane.drawn_cols ~layout:(acting_pane_layout state) ~cols = 0
       then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           "Activity pane is not shown; Ctrl-L or /activity shows it"
       else begin
         (match how with
@@ -8527,14 +8015,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          | `Up -> scroll_acting_pane state ~delta:(-wheel_notch_rows)
          | `Down -> scroll_acting_pane state ~delta:wheel_notch_rows
          | `By rows -> scroll_acting_pane state ~delta:rows);
-        notice ~kind:Notice_reply
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
           (Printf.sprintf "Activity pane scrolled to row %d of %d"
              (state.acting_pane_scroll + 1)
              (state.acting_pane_presented.frame_scroll_max + 1))
       end
   | Masc_tui_command.Acting_pane_scroll_unknown word ->
       Masc_tui_message_input.clear state.msg_input;
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         (Printf.sprintf
            "/activity scroll takes up, down, top, +N or -N, not %s" word)
   | Masc_tui_command.Lane_addons input ->
@@ -8581,15 +8069,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       listen_newest_media state ~mailbox
   | Masc_tui_command.Score_invalid_index ->
-      notice ~kind:Notice_failure "/score [N]: N must be a positive score number, newest first"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/score [N]: N must be a positive score number, newest first"
   | Masc_tui_command.Images_invalid_index ->
-      notice ~kind:Notice_failure "/images [N]: N must be a positive image/diagram number, newest first"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/images [N]: N must be a positive image/diagram number, newest first"
   | Masc_tui_command.Open_images index ->
       open_indexed_image state ~mailbox ~index
   | Masc_tui_command.List_images ->
       list_conversation_images state
   | Masc_tui_command.Music_invalid_arguments ->
-      notice ~kind:Notice_failure "Use /music for the library, or /music midi to edit the newest MIDI attachment"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Use /music for the library, or /music midi to edit the newest MIDI attachment"
   | Masc_tui_command.Open_artifacts ->
       Masc_tui_message_input.clear state.msg_input;
       state.resource_day <- None;
@@ -8601,14 +8089,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       Masc_tui_message_input.clear state.msg_input;
       (match open_music () with
        | Ok () -> ()
-       | Error detail -> notice ~kind:Notice_failure detail)
+       | Error detail -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure detail)
   | Masc_tui_command.Open_score index ->
       let sources = Masc_tui_chat_input.Message_draft_recall.image_conversation_rows state
         |> List.concat_map (fun (entry : msg_entry) -> Masc_tui_markdown.alphatex_sources entry.me_text)
         |> List.rev in
       let count = List.length sources in
       if index > count then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           (if state.ui_language = Lang_ko then
              Printf.sprintf "/score: 불러온 대화에 닫힌 alphaTex 코드 블록이 %d개 있습니다" count
            else
@@ -8617,16 +8105,16 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       else
         (match !score_terminal_handoff with
          | None ->
-             notice ~kind:Notice_failure
+             notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
                (ui_text state ~ko:"alphaTex 악보 보기는 활성 터미널 세션이 필요합니다"
                   ~en:"alphaTex viewer requires an active terminal session")
          | Some launch ->
              Masc_tui_message_input.clear state.msg_input;
              match launch ~sources ~index with
              | Ok () -> ()
-             | Error detail -> notice ~kind:Notice_failure detail)
+             | Error detail -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure detail)
   | Masc_tui_command.Switch_keeper_missing_name ->
-      notice ~kind:Notice_failure "/keeper needs a name on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/keeper needs a name on the same line"
   | Masc_tui_command.Switch_keeper name -> (
       let names =
         List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
@@ -8639,21 +8127,21 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           state.view <- Keepers Keeper_message;
           launch_keeper_history_load state ~mailbox ~keeper_name
       | Masc_tui_command.Keeper_ambiguous candidates ->
-          notice ~kind:Notice_failure
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
             (Printf.sprintf "%S names more than one keeper: %s" name
                (String.concat ", " candidates))
       | Masc_tui_command.Keeper_unknown ->
-          notice ~kind:Notice_failure
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
             (Printf.sprintf "no keeper named %S on the roster" name))
   | Masc_tui_command.Queue input ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name, Masc_tui_queue_inspection.parse input with
-       | None, _ -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
-       | _, Error detail -> notice ~kind:Notice_failure detail
+       | None, _ -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | _, Error detail -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure detail
        | _, Ok (Masc_tui_queue_inspection.Inspect_peers _) ->
          assert false (* [parse] never creates a roster read. *)
        | Some keeper_name, Ok Masc_tui_queue_inspection.Inspect ->
-         open_keeper_queue_panel state ~mailbox ~keeper_name
+         Masc_tui_collab_queue.Keeper_queue.open_keeper_queue_panel state ~mailbox ~keeper_name
        | Some keeper_name, Ok Masc_tui_queue_inspection.Clear ->
          (* The part that needs no server. A line that exists only in this
             client is withdrawn here, so it is gone even when the queue request
@@ -8684,9 +8172,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
                   ; clause left "left waiting (being posted, being rechecked, already started, or already ended)" ] with
           | [] -> ()
           | _ :: _ as clauses ->
-            notice ~kind:Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
+            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ("/queue clear: " ^ String.concat " · " clauses));
          Masc_tui_chat_dispatch.Queue_steer.drain_queued_message state ~base_path ~mailbox;
-         launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear
+         Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox ~keeper_name Masc_tui_queue_inspection.Clear
        | Some keeper_name,
          Ok ((Masc_tui_queue_inspection.Pause | Resume | Cancel _
              | Move_to_end _ | Run_next _ | Edit _ | Cancel_event _ | Prioritize_event _) as action) ->
@@ -8695,35 +8183,35 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> None in
          match Option.bind local_id (fun id -> Chat_queue.find state.msg_queued ~request_id:id) with
          | Some item when item.request.keeper_name <> keeper_name ->
-           notice ~kind:Notice_failure "That message belongs to another Keeper"
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "That message belongs to another Keeper"
          | Some item ->
            (match action with
             | Masc_tui_queue_inspection.Cancel id ->
               if Masc_tui_chat_input.Message_draft_recall.drop_unsent_request state item.request then begin
-                notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
+                notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ("Cancelled unsent message " ^ id);
                 Masc_tui_chat_dispatch.Queue_steer.drain_queued_message state ~base_path ~mailbox
               end
-              else notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
+              else notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Local queue changed; inspect /queue again"
             | Edit (id, message) ->
               let request = {item.request with Keeper_chat.message = message} in
               let source = Chat_queue.source_for_edit item ~message in
               (match Chat_queue.replace_request ~source state.msg_queued ~request_id:id request with
-               | Error detail -> notice ~kind:Notice_failure detail
+               | Error detail -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure detail
                | Ok queue -> state.msg_queued <- queue; Masc_tui_chat_dispatch.Queue_steer.update_queued_history_text state request;
-                   notice ~kind:Notice_reply ("Updated unsent message " ^ id))
-            | Move_to_end _ -> notice ~kind:Notice_failure "Open the queue panel to reorder local input"
-            | Run_next _ -> notice ~kind:Notice_failure "Open the queue panel to prioritize local input"
+                   notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ("Updated unsent message " ^ id))
+            | Move_to_end _ -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Open the queue panel to reorder local input"
+            | Run_next _ -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Open the queue panel to prioritize local input"
             | Inspect | Inspect_peers _ | Pause | Resume | Clear | Cancel_event _ | Prioritize_event _ -> assert false)
-         | None -> launch_keeper_queue state ~mailbox ~keeper_name action)
+         | None -> Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox ~keeper_name action)
   | Masc_tui_command.Run_next
     when state.workspace_identity <> Workspace_identity_match ->
-      notice ~kind:Notice_failure
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
         (let ko = state.ui_language = Lang_ko in
          kept_back ~ko ~request:(Kept_request.Command "/run-next") (workspace_identity_unconfirmed ~ko) Queued_input_kept)
   | Masc_tui_command.Reconcile_held ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
-       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some name ->
          let held =
            List.filter (fun (entry : inflight) ->
@@ -8734,28 +8222,28 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
              state.msg_inflight
          in
          (match held with
-          | [] -> notice ~kind:Notice_failure "No request with an unverified outcome is held for this Keeper"
+          | [] -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "No request with an unverified outcome is held for this Keeper"
           | _ :: _ ->
             (* The watcher holding the request waits on this Keeper's count;
                moving it sends the next reconcile once (#36205). *)
             Masc_tui_waiting_inventory.keeper_changed state.waiting_inventory name;
-            notice ~kind:Notice_reply
+            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
               (Printf.sprintf "Checking %s again"
                  (String.concat ", "
                     (List.map (fun (entry : inflight) -> entry.sent_request.Keeper_chat.request_id) held)))))
   | Masc_tui_command.Run_next ->
       Masc_tui_message_input.clear state.msg_input;
       (match state.msg_target_keeper_name with
-       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some name ->
          if List.mem_assoc name state.keeper_chat_control_pending then
-           notice ~kind:Notice_failure "Wait for the pending stop or resume before run-next"
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Wait for the pending stop or resume before run-next"
          else if not (keeper_available_for_new_message state name) then
-           notice ~kind:Notice_failure "Keeper is unavailable; queued input retained"
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Keeper is unavailable; queued input retained"
          else if recalling_for_keeper state name then
-           notice ~kind:Notice_failure "Finish or abandon the queued edit before run-next"
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Finish or abandon the queued edit before run-next"
          else if Masc_tui_chat_dispatch.Queue_steer.run_next_busy_for state name then
-           notice ~kind:Notice_reply "A run-next request is already pending"
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "A run-next request is already pending"
          else
          match List.nth_opt (Chat_queue.waiting_for_keeper state.msg_queued ~keeper_name:name) 0 with
          | Some item when keeper_admission_pending state name ->
@@ -8764,17 +8252,17 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
               item and cancellation or editing updates that intent too. *)
            let request_id = item.request.Keeper_chat.request_id in
            (match Chat_queue.mark_run_next state.msg_queued ~request_id with
-            | Error detail -> notice ~kind:Notice_failure detail
+            | Error detail -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure detail
             | Ok queue ->
               state.msg_queued <- queue;
               state.keeper_interactive_waiting <-
                 (name, request_id, Awaiting_control {
                   generation=keeper_chat_control_generation state name; target=None }) ::
                 List.filter (fun (_, id, _) -> id <> request_id) state.keeper_interactive_waiting;
-              notice ~kind:Notice_reply "Run-next retained; waiting for the earlier admission")
+              notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "Run-next retained; waiting for the earlier admission")
          | Some item ->
            (match Chat_queue.take state.msg_queued ~request_id:item.request.request_id with
-            | None -> notice ~kind:Notice_failure "Local queue changed; inspect /queue again"
+            | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "Local queue changed; inspect /queue again"
             | Some (taken, rest) ->
               state.msg_queued <- rest;
               let promoted = match taken.intent with
@@ -8785,18 +8273,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
                     {taken with intent=Chat_queue.Run_next {automatic=false}} in
               Masc_tui_chat_dispatch.Queue_steer.queue_run_next_on_admission state promoted.request;
               Masc_tui_chat_dispatch.Queue_steer.launch_keeper_request ~promoted state ~mailbox promoted.request;
-              notice ~kind:Notice_reply "Submitting queued input; it will be prioritized once the server accepts it")
+              notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "Submitting queued input; it will be prioritized once the server accepts it")
          | None ->
          match Masc_tui_chat_dispatch.Queue_steer.inflight_for state name, live_for_keeper state name with
          | Some _, Some live when Keeper_chat_transcript.phase live.tl_transcript = Keeper_chat_transcript.Working ->
-           notice ~kind:Notice_reply "Your message has already started; no new run was created"
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "Your message has already started; no new run was created"
          | Some request, Some live ->
            (match Keeper_chat_transcript.admission live.tl_transcript with
             | Some (Keeper_chat_live.Queued, _) -> Masc_tui_chat_dispatch.Queue_steer.launch_keeper_run_next state ~mailbox request
-            | Some (Running, _) -> notice ~kind:Notice_reply "Your message has already started; no new run was created"
-            | Some (Settled, _) -> notice ~kind:Notice_reply "Your message already finished; its result is being replayed"
-            | None -> notice ~kind:Notice_reply "Waiting for server admission; /run-next is available once this message is queued")
-         | _ -> notice ~kind:Notice_reply "No submitted message is waiting; send your message with Enter first")
+            | Some (Running, _) -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "Your message has already started; no new run was created"
+            | Some (Settled, _) -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "Your message already finished; its result is being replayed"
+            | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "Waiting for server admission; /run-next is available once this message is queued")
+         | _ -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "No submitted message is waiting; send your message with Enter first")
   | Masc_tui_command.Priority opt ->
       Masc_tui_message_input.clear state.msg_input;
       let new_value =
@@ -8810,14 +8298,14 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       in
       state.user_input_priority_next <- new_value;
       note_session_key state Masc.Tui_preference.Key.User_input_priority_next;
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         (Printf.sprintf "User input auto-next priority: %s (new messages will %sbe promoted to run next)"
            (if new_value then "ON" else "OFF")
            (if new_value then "" else "NOT "))
   | Masc_tui_command.Answer_tool_approval allow ->
       Masc_tui_message_input.clear state.msg_input;
       (match target with
-       | None -> notice ~kind:Notice_reply (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some target ->
          match inflight_for_keeper state target with
          | Some entry ->
@@ -8839,10 +8327,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
                | Some shown ->
                    Masc_tui_work_requests.Approval_gate_requests.launch_keeper_approval state ~mailbox entry.sent_request
                      ~tool_call_id:shown.tool_call_id ~approval_id:shown.approval_id ~allow
-               | None -> notice ~kind:Notice_reply
+               | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                    "Approval changed; review the updated prompt before deciding")
-            | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
-         | None -> notice ~kind:Notice_reply "No tool approval is waiting for this Keeper")
+            | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "No tool approval is waiting for this Keeper")
+         | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "No tool approval is waiting for this Keeper")
   | Masc_tui_command.Interrupt_turn -> (
       Masc_tui_message_input.clear state.msg_input;
       match Option.bind state.msg_target_keeper_name (Masc_tui_chat_dispatch.Queue_steer.interrupt_observed_keeper ~explicit:true state ~mailbox) with
@@ -8855,11 +8343,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
             inflight_by_request_id state (turn_log_request_id live)
           with
           | Some request -> Masc_tui_chat_dispatch.Queue_steer.launch_keeper_interrupt state ~mailbox request
-          | None -> notice ~kind:Notice_reply "no turn of this pane's to interrupt")
+          | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "no turn of this pane's to interrupt")
       | Some _ ->
-          notice ~kind:Notice_reply
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
             "an interrupt is already outstanding for this turn"
-      | None -> notice ~kind:Notice_reply "no turn is streaming in this pane")
+      | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "no turn is streaming in this pane")
   | Masc_tui_command.Interrupt_keeper_turn name -> (
       Masc_tui_message_input.clear state.msg_input;
       (* The pane's own turn is [Interrupt_turn]'s business. This arm is for
@@ -8876,10 +8364,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | None -> match Masc_tui_types.inflight_for_keeper state name with
       | Some entry -> Masc_tui_chat_dispatch.Queue_steer.launch_keeper_interrupt state ~mailbox entry.sent_request
       | None ->
-          notice ~kind:Notice_reply
+          notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
             (Printf.sprintf "no turn of %S is in flight from this pane" name))
   | Masc_tui_command.Steer_missing_message ->
-      notice ~kind:Notice_failure "/steer needs replacement text on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/steer needs replacement text on the same line"
   | Masc_tui_command.Steer_turn message ->
       Masc_tui_chat_dispatch.Queue_steer.start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox message
   | Masc_tui_command.Set_thinking mode ->
@@ -8890,18 +8378,18 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          | `Folded -> Reasoning_folded
          | `Full -> Reasoning_full
          | `Cycle -> next_reasoning_visibility state.msg_reasoning_visibility);
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         ("reasoning "
          ^ reasoning_visibility_to_string state.msg_reasoning_visibility)
   | Masc_tui_command.Open_calls ->
       if state.view <> Keepers Keeper_message then
-        notice ~kind:Notice_failure "/calls opens original results in a Keeper chat"
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/calls opens original results in a Keeper chat"
       else (match target with
        | Some keeper_name when server_authority_ready state ->
            Masc_tui_message_input.clear state.msg_input;
            Masc_tui_work_requests.Schedule_call_requests.open_chat_call_reader state ~mailbox keeper_name
        | Some _ | None ->
-           notice ~kind:Notice_failure
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (let ko = state.ui_language = Lang_ko in
               kept_back ~ko ~request:(Kept_request.Command "/calls") (workspace_identity_unconfirmed ~ko) Nothing_kept))
   | Masc_tui_command.Set_tools mode ->
@@ -8917,26 +8405,26 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
        | Tools_compact, _ | (Tools_results | Tools_full), None -> ());
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         ("tool calls " ^ tool_visibility_to_string state.msg_tool_visibility)
   | Masc_tui_command.Cycle_memory ->
       Masc_tui_message_input.clear state.msg_input;
       state.msg_memory_visibility <-
         next_memory_visibility state.msg_memory_visibility;
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         ("Librarian/Memory timeline: "
          ^ memory_visibility_to_string state.msg_memory_visibility
          ^ " (Ctrl-N or /memory to cycle)")
   | Masc_tui_command.Memory_status ->
       (match target with
-       | None -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
+       | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
        | Some _ when not (server_authority_ready state) ->
-         notice ~kind:Notice_failure
+         notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
            (let ko = (state.ui_language = Lang_ko) in
             kept_back ~ko ~request:(Kept_request.Command "/memory status") (workspace_identity_unconfirmed ~ko) Draft_kept)
        | Some keeper ->
          Masc_tui_message_input.clear state.msg_input;
-         notice ~kind:Notice_reply
+         notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
            (keeper ^ ": " ^ ui_text state ~ko:"메모리 처리 상태 조회 중"
               ~en:"loading memory processing status");
          let ticket = ref () in
@@ -8964,21 +8452,21 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Find_next ->
       Masc_tui_message_input.clear state.msg_input;
       if String.equal state.msg_find "" then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           "/find needs text the first time; /find on its own repeats it"
       else seek_in_chat state ~mailbox ~target ~restart:false
   | Masc_tui_command.Copy_latest_reply ->
       Masc_tui_message_input.clear state.msg_input;
       (match target with
        | Some keeper_name -> Masc_tui_chat_dispatch.Chat_journals.launch_keeper_chat_copy state ~mailbox ~keeper_name
-       | None -> notice ~kind:Notice_failure "/copy needs a Keeper selected")
+       | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/copy needs a Keeper selected")
   | Masc_tui_command.Inspect_context ->
       (match target with
        | Some keeper_name ->
            Masc_tui_message_input.clear state.msg_input;
            Masc_tui_chat_dispatch.Chat_journals.open_context_inspector state ~mailbox ~keeper_name
        | None ->
-           notice ~kind:Notice_failure
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              "/context needs a Keeper selected on the roster")
   | Masc_tui_command.Preset_list ->
       Masc_tui_message_input.clear state.msg_input;
@@ -8986,22 +8474,22 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         ~call:(fun ~host ~port -> Masc_tui_loader.load_presets ~host ~port)
         ~wrap:(fun result -> Preset_msg (Presets_listed (Preset_to_chat target, result)))
   | Masc_tui_command.Preset_save_missing_name ->
-      notice ~kind:Notice_failure "/preset save needs a name on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/preset save needs a name on the same line"
   | Masc_tui_command.Preset_save { name; description } ->
       if not (server_authority_ready state) then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
       else if (state.preset_busy || workspace_preset_save_pending state <> [])
               && not (preset_save_is_pending state name) then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           (ui_text state ~ko:"진행 중인 프리셋 저장이 끝나면 다시 제출하세요 · 입력 유지"
              ~en:"Wait for the pending preset save · input retained")
       else if preset_save_is_unconfirmed state name && not (preset_save_is_pending state name) then
         (match workspace_input_identity_of_server state.server_identity with
-         | None -> notice ~kind:Notice_failure
+         | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (preset_save_needs_workspace_text ~ko:(state.ui_language = Lang_ko))
          | Some _ when state.preset_busy || Option.is_some state.preset_save_draft ->
-           notice ~kind:Notice_failure
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (ui_text state ~ko:"기존 프리셋 입력을 마친 뒤 다시 제출하세요 · 채팅 입력 유지"
                 ~en:"Finish the existing preset draft first · chat input retained")
          | Some workspace ->
@@ -9028,9 +8516,9 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           ~name ~description ~chat_input:(Some text) ~also_pane:false
       end
   | Masc_tui_command.Preset_restore_missing_name ->
-      notice ~kind:Notice_failure "/preset restore needs a name on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/preset restore needs a name on the same line"
   | Masc_tui_command.Preset_show_missing_name ->
-      notice ~kind:Notice_failure "/preset show needs a name on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/preset show needs a name on the same line"
   | Masc_tui_command.Preset_show name ->
       (* [/preset] alone lists names and counts; a count cannot be read, so
          this asks the server what that one preset actually holds. *)
@@ -9040,24 +8528,24 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         ~wrap:(fun result -> Preset_msg (Preset_contents_shown (Preset_to_chat target, result)))
   | Masc_tui_command.Preset_restore name ->
       if state.preset_busy || workspace_preset_save_pending state <> [] then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           (ui_text state ~ko:"진행 중인 프리셋 저장이 끝나면 복원하세요 · 입력 유지"
              ~en:"Wait for the pending preset save before restoring · input retained")
       else begin
       Masc_tui_message_input.clear state.msg_input;
-      notice ~kind:Notice_reply
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
         (Printf.sprintf "restoring preset %s · the live state is autosaved first" name);
       Masc_tui_surface_requests.Prompt_preset_requests.launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
         ~wrap:(fun result -> Preset_msg (Preset_restored (Preset_to_chat target, result)))
       end
   | Masc_tui_command.Preset_delete_missing_name ->
-      notice ~kind:Notice_failure "/preset delete needs a name on the same line"
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/preset delete needs a name on the same line"
   | Masc_tui_command.Preset_delete name ->
       (* Typing the name is the confirmation, as for restore. The name need
          not load: a preset listed with ! is deleted the same way. *)
       if state.preset_busy || workspace_preset_save_pending state <> [] then
-        notice ~kind:Notice_failure
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
           (ui_text state ~ko:"진행 중인 프리셋 저장이 끝나면 삭제하세요 · 입력 유지"
              ~en:"Wait for the pending preset save before deleting · input retained")
       else begin
@@ -9067,7 +8555,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         ~wrap:(fun result -> Preset_msg (Preset_deleted (Preset_to_chat target, result)))
       end
   | Masc_tui_command.Play_invalid reason ->
-      notice ~kind:Notice_failure reason
+      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure reason
   | Masc_tui_command.Play_invites ->
       Masc_tui_message_input.clear state.msg_input;
       let expected_workspace = state.server_identity in
@@ -9092,7 +8580,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
        in
        match card with
        | None ->
-           notice ~kind:Notice_reply
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (match requested_name with
               | None -> "No play link has been issued in this TUI session"
               | Some name -> "No local play link for " ^ name)
@@ -9101,10 +8589,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
              { state.play_invite with shown_name = Some (Masc_tui_play_card.name card) };
            state.play_invite_scroll <- 0)
   | Masc_tui_command.Play_invite { name; hours } ->
-      if launch_play_issue state ~mailbox ~sink:(Play_chat target) ~name ~hours then
+      if Masc_tui_collab_queue.Collab_play.launch_play_issue state ~mailbox ~sink:(Play_chat target) ~name ~hours then
         Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Play_revoke name ->
-      if launch_play_revoke state ~mailbox ~sink:(Play_chat target) ~name then
+      if Masc_tui_collab_queue.Collab_play.launch_play_revoke state ~mailbox ~sink:(Play_chat target) ~name then
         Masc_tui_message_input.clear state.msg_input
   | Masc_tui_command.Unknown word ->
       report_action state "error"
@@ -10992,7 +10480,7 @@ let apply_server_identity_reading ?(withdraw_on_error = false) state ~mailbox re
     suspend_workspace_readings state;
     settle_retired_sent_image state;
     Masc_tui_chat_dispatch.Chat_journals.settle_retired_chat_copy state;
-    settle_retired_queue_inspections state;
+    Masc_tui_collab_queue.Keeper_queue.settle_retired_queue_inspections state;
     Masc_tui_surface_requests.Prompt_preset_requests.settle_retired_chat_command_reads state
   | Workspace_identity_unread | Workspace_identity_match
   | Workspace_identity_mismatch _ as next ->
@@ -11075,7 +10563,7 @@ let resume_authorized_input_after_refresh state ~was_unavailable ~base_path ~mai
     |> List.map (fun (request : Keeper_chat.request) -> request.keeper_name)
     |> List.sort_uniq String.compare
     |> List.iter (Masc_tui_chat_dispatch.Queue_steer.dispatch_ready_run_next state ~mailbox);
-    Option.iter (fun panel -> refresh_queue_after_priority state ~mailbox ~keeper_name:panel.qp_keeper)
+    Option.iter (fun panel -> Masc_tui_collab_queue.Keeper_queue.refresh_queue_after_priority state ~mailbox ~keeper_name:panel.qp_keeper)
       state.queue_panel;
     Masc_tui_chat_dispatch.Queue_steer.drain_queued_message state ~base_path ~mailbox
   end
@@ -12615,7 +12103,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
     ~scoped_refresh_inflight ~scoped_refresh_followup ~(before : read_authority) =
   settle_retired_sent_image state;
   Masc_tui_chat_dispatch.Chat_journals.settle_retired_chat_copy state;
-  settle_retired_queue_inspections state;
+  Masc_tui_collab_queue.Keeper_queue.settle_retired_queue_inspections state;
   Masc_tui_surface_requests.Prompt_preset_requests.settle_retired_chat_command_reads state;
   resume_task_followups ~server_contact state ~mailbox ~refresh_inflight
     ~scoped_refresh_inflight ~scoped_refresh_followup;
@@ -13284,7 +12772,7 @@ let step_board_diagram state ~delta =
 let open_board_diagram state ~mailbox =
   let notice = image_notice state ~view:Board ~keeper_name:None in
   match board_diagram_selection state with
-  | None -> notice ~kind:Notice_failure "No closed Mermaid diagram in the selected post or comment"
+  | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "No closed Mermaid diagram in the selected post or comment"
   | Some (subject, diagrams, index) ->
       Option.iter (fun source ->
         open_preview_image ~board_subject:(Board_diagram subject) state ~mailbox ~notice
@@ -15085,7 +14573,7 @@ let handle_keeper_action state ~base_path ~mailbox action =
             start_keeper_action state ~base_path ~mailbox keeper.k_name action
 
 let report_voice_failure state ~keeper error =
-  chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_failure
+  Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
     ("voice failed: " ^ error);
   set_last_action state (Some ("voice failed: " ^ error, Unix.gettimeofday ()))
 
@@ -15397,7 +14885,7 @@ let handle_composer_key state ~base_path ~mailbox key =
                    ~inspect_queue:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
-                         open_keeper_queue_panel state ~mailbox ~keeper_name
+                         Masc_tui_collab_queue.Keeper_queue.open_keeper_queue_panel state ~mailbox ~keeper_name
                      | None -> ())
           ~load_preparation:(fun () -> Masc_tui_chat_dispatch.Chat_journals.launch_selected_preparation_operation_read state ~mailbox)
           ~load_tool_changes:(fun () ->
@@ -15818,7 +15306,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             | Some panel when String.equal panel.qp_keeper keeper_name ->
               state.queue_panel <- Some {panel with qp_receipt=Some (Queue_read_receipt "Keeper is active; retained input released")}
             | Some _ | None ->
-              chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
+              Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper_name) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                 "Keeper is active; retained input released"));
         release_retained_keeper_input state keeper_name ~request_ids;
         Masc_tui_chat_dispatch.Queue_steer.launch_waiting_keeper_input state ~mailbox ~keeper_name;
@@ -15837,8 +15325,8 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              qp_notice=(if server_authority_ready state then
                  Some (Queue_info "Refreshing the queue after the change") else panel.qp_notice)}
        | Some _ | None ->
-         if receipt <> [] then chat_notice state ~keeper_name:(Some keeper_name)
-           ~kind:Notice_reply (String.concat " · " receipt));
+         if receipt <> [] then Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper_name)
+           ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (String.concat " · " receipt));
       Masc_tui_chat_dispatch.Queue_steer.dispatch_ready_run_next state ~mailbox keeper_name;
       Drawn_changed
   | Keeper_msg (Keeper_queue_loaded (keeper_name, _, Masc_tui_queue_inspection.Inspect_peers (token, _), result)) ->
@@ -15911,7 +15399,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                  | Error detail -> ["Read unavailable: " ^ detail] in
                source observation.waiting @ source observation.operations in
            if lines <> [] then
-             chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_failure (String.concat "\n" lines)
+             Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper_name) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (String.concat "\n" lines)
          end);
       if List.exists (fun (request : Keeper_chat.request) ->
           String.equal request.keeper_name keeper_name) state.keeper_run_next_ready then begin
@@ -15920,7 +15408,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             qp_notice=Some (Queue_info "Another priority change may follow; refresh after it finishes")});
         Masc_tui_chat_dispatch.Queue_steer.dispatch_ready_run_next state ~mailbox keeper_name
       end;
-      refresh_queue_after_priority state ~mailbox ~keeper_name;
+      Masc_tui_collab_queue.Keeper_queue.refresh_queue_after_priority state ~mailbox ~keeper_name;
       Masc_tui_chat_dispatch.Queue_steer.drain_queued_message state ~base_path ~mailbox;
       Drawn_changed
   | Lane_msg (Lane_application_loaded (ticket,result)) ->
@@ -16289,7 +15777,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            level and the level speech had to clear, so this row answers "is
            the microphone working" rather than only reporting that it is
            not. *)
-        chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
+        Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
           ("voice: " ^ reason);
         set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())));
       Drawn_changed
@@ -16304,7 +15792,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         (* In the transcript, like a silence, and worded as what it was. An
            operator who pressed Esc mid-sentence and then read "nothing was
            heard" went looking for a microphone fault that was not there. *)
-        chat_notice state ~keeper_name:(Some keeper) ~kind:Notice_reply
+        Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
           ("voice: " ^ reason);
         set_last_action state (Some ("voice: " ^ reason, Unix.gettimeofday ())));
       Drawn_changed
@@ -17471,13 +16959,13 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         let authority,keeper,needle=keeper_message_search_identity plan in
         if authority=state.workspace_authority && keeper_message_search_owned state plan
            && String.trim state.msg_find=needle then
-          let notice=chat_notice state ~keeper_name:(Some keeper) in
+          let notice=Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper) in
           match result with
-          | Error detail -> notice ~kind:Notice_failure detail
+          | Error detail -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure detail
           | Ok (work,matched) ->
               (match admit_keeper_message_search state work matched with
                | Some result -> apply_chat_search_result state ~target:(Some keeper) ~restart ~needle result
-               | None -> notice ~kind:Notice_reply
+               | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                    "/find source changed while searching; repeat /find to search the current conversation")
       end;
       Drawn_changed
@@ -18292,11 +17780,11 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
   | Preset_msg (Presets_listed (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (String.concat "\n"
                 (Masc_tui_preset_text.listing_lines ~ko:(state.ui_language = Lang_ko) snapshot))
        | Preset_to_chat target, Error failure ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (request_failure_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Preset_list_read failure)
        | Preset_to_pane, Ok snapshot ->
@@ -18332,11 +17820,11 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
   | Preset_msg (Preset_contents_shown (sink, result)) ->
       (match sink, result with
        | Preset_to_chat target, Ok detail ->
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (String.concat "\n" (Masc_tui_preset_text.contents_lines
                 ~ko:(state.ui_language = Lang_ko) detail))
        | Preset_to_chat target, Error failure ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (request_failure_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Preset_read failure)
        (* The pane reads its own detail through [Preset_detail_loaded], keyed
@@ -18487,7 +17975,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               let saved =
                 Masc_tui_preset_text.saved_line ~ko:(state.ui_language = Lang_ko) manifest
               in
-              chat_notice state ~keeper_name:target ~kind:Notice_reply
+              Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                 ((if observation = Preset_save_shared then ui_text state
                     ~ko:"먼저 시작한 저장 결과 · 새 저장은 미전송\n"
                     ~en:"Earlier save result · no new save was sent\n" else "")
@@ -18511,7 +17999,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                     ~en:"Preset save unconfirmed · check Presets"
               in
               let shared = observation = Preset_save_shared in
-              chat_notice state ~keeper_name:target ~kind:Notice_failure
+              Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
                 ((if shared then ui_text state ~ko:"기존 저장 결과 · 새 요청 미전송 · "
                     ~en:"Earlier save · no new request sent · " else "") ^ summary);
               Option.iter (fun keeper ->
@@ -18520,7 +18008,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 let prefix = if shared then [ui_text state
                     ~ko:"먼저 시작한 저장 결과 · 새 저장은 보내지 않았습니다"
                     ~en:"Earlier save result · no new save was sent"] else [] in
-                append_chat_local_message state ~keeper (String.concat "\n" (prefix @ lines))) target)
+                Masc_tui_collab_queue.Chat_notice.append_chat_local_message state ~keeper (String.concat "\n" (prefix @ lines))) target)
         pending.psp_chat_observers;
         if current_workspace && Option.fold ~none:false
             ~some:(fun (authority, _) -> authority = state.workspace_authority)
@@ -18549,7 +18037,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               answer to the restore even when a part failed: the lines say
               which, and a footer line could not hold them. *)
            state.preset_report <- Some report;
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (String.concat "\n" (Masc_tui_preset_text.restore_lines
                 ~ko:(state.ui_language = Lang_ko) report));
            if not (Masc_tui_preset_text.restore_is_clean report) then
@@ -18557,7 +18045,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                (ui_text state ~ko:"프리셋 복원 결과에 확인할 항목이 있습니다 · 상세 보고서를 확인하세요"
                   ~en:"The restore needs attention · check the detailed report")
        | Preset_to_chat target, Error failure ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (request_failure_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Preset_restore failure)
        | Preset_to_pane, Ok report ->
@@ -18580,10 +18068,10 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
          list was stale, and an unanswered delete may have landed. *)
       (match sink, result with
        | Preset_to_chat target, Ok name ->
-           chat_notice state ~keeper_name:target ~kind:Notice_reply
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              ("deleted preset " ^ name)
        | Preset_to_chat target, Error failure ->
-           chat_notice state ~keeper_name:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (request_failure_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Preset_delete failure)
        | Preset_to_pane, Ok name ->
@@ -18632,15 +18120,15 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
          let target = Play_chat keeper in
          (match result with
        | Error (Request_failed detail) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              ("play invites: " ^ detail)
        | Error (Request_withdrawn refusal) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Play_invite_list_read refusal)
        | Ok { Tui_decode.pis_rows = []; pis_controller } ->
            let ko = state.ui_language = Lang_ko in
-           play_notice state ~sink:target ~kind:Notice_reply
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (String.concat "\n"
                 ((if ko then "공유 DOS 플레이 초대가 없습니다" else "No shared DOS play invites")
                  :: Masc_tui_collab.controller_summary ~ko pis_controller))
@@ -18657,7 +18145,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              ^ (if invite.pi_expired then (if ko then " · 만료됨" else " · expired") else "")
              ^ Masc_tui_collab.controller_note ~ko pis_controller invite.pi_name
            in
-           play_notice state ~sink:target ~kind:Notice_reply
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              (String.concat "\n"
                 (((if ko then "공유 DOS 플레이 초대:" else "Shared DOS play invites:")
                   :: Masc_tui_collab.controller_summary ~ko pis_controller)
@@ -18669,7 +18157,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             Change_confirmed
         | Play_answered (Error _) | Play_unanswered _ -> Change_unknown in
       if Masc_tui_types.finish_play_change state request outcome then begin
-      settle_play_mutation state target;
+      Masc_tui_collab_queue.Collab_play.settle_play_mutation state target;
       (match result with
        | Play_answered (Ok invite) ->
            (* The link is a credential the server will not show again. It goes
@@ -18687,34 +18175,34 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 let stored = Masc_tui_types.play_invite_store state.play_invite card in
                 state.play_invite <- stored;
                 state.play_invite_scroll <- 0;
-                play_notice state ~sink:target ~kind:Notice_reply
+                Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                   (Masc_tui_play_card.issued_notice ~ko:(state.ui_language = Lang_ko) card
                      ~retained:(Masc_tui_types.play_invite_holds_earlier stored))
             | Error reason ->
                 (* The link is the server's public base URL and a hex token,
                    so a link the card refuses names the base URL. The reason is
                    the card's own sentence and carries no part of the link. *)
-                play_notice state ~sink:target ~kind:Notice_failure
+                Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
                   ("play invite may exist, but its link cannot be shown: " ^ reason
                    ^ "; check MASC_HTTP_BASE_URL, then list and revoke it before retrying"))
        | Play_answered (Error _) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              ("Play invite response unreadable. " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_refused detail ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              ("play invite refused: " ^ detail)
        | Play_not_dispatched detail ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              ("play invite was not sent: " ^ detail)
        | Play_kept_back refusal ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Play_invite_issue refusal)
        | Play_unanswered detail ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
-      sync_collab_access state;
-      refresh_current_collab state ~mailbox
+      Masc_tui_collab_queue.Collab_play.sync_collab_access state;
+      Masc_tui_collab_queue.Collab_play.refresh_current_collab state ~mailbox
       end;
       Drawn_changed
   | Play_msg (Play_invite_revoked (request, target, requested_name, result)) ->
@@ -18724,24 +18212,24 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                               | Play_kept_back _) -> Change_confirmed
         | Play_revoke_result (Play_answered (Error _) | Play_unanswered _) -> Change_unknown in
       if Masc_tui_types.finish_play_change state request outcome then begin
-      settle_play_mutation state target;
+      Masc_tui_collab_queue.Collab_play.settle_play_mutation state target;
       let retry reason =
         Printf.sprintf "retry /play revoke %s · %s" requested_name reason
       in
       (match result with
        | Play_revoke_absent ->
            Masc_tui_surface_requests.Prompt_preset_requests.forget_play_invite state ~name:requested_name;
-           play_notice state ~sink:target ~kind:Notice_reply
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
              ("Play invite " ^ requested_name ^ " is absent (no invite has that name)")
        | Play_revoke_release_failed detail ->
            Masc_tui_surface_requests.Prompt_preset_requests.forget_play_invite state ~name:requested_name;
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (retry (detail ^ " (invite already absent; controller release failed)"))
        | Play_revoke_result (Play_answered (Ok revoked)) ->
            Masc_tui_surface_requests.Prompt_preset_requests.forget_play_invite state ~name:revoked.Tui_decode.pir_name;
            (match revoked.pir_release_error with
             | Some detail ->
-                play_notice state ~sink:target ~kind:Notice_failure
+                Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
                   (retry
                      (detail
                       ^ (if revoked.pir_revoked then
@@ -18749,29 +18237,29 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                          else
                            " (invite already absent; controller release failed)")))
             | None ->
-                play_notice state ~sink:target ~kind:Notice_reply
+                Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                   (Printf.sprintf "Play invite %s: %s%s"
                      revoked.pir_name
                      (if revoked.pir_revoked then "revoked" else "already absent")
                      (if revoked.pir_released_controller then "; controller released" else "")))
        | Play_revoke_result (Play_answered (Error detail)) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request)
        | Play_revoke_result (Play_refused detail) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              ("play revoke refused: " ^ detail)
        | Play_revoke_result (Play_not_dispatched detail) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              ("play revoke was not sent: " ^ detail)
        | Play_revoke_result (Play_kept_back refusal) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Play_invite_revoke refusal)
        | Play_revoke_result (Play_unanswered detail) ->
-           play_notice state ~sink:target ~kind:Notice_failure
+           Masc_tui_collab_queue.Collab_play.play_notice state ~sink:target ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (detail ^ ". " ^ Masc_tui_types.play_change_unknown_notice request));
-      sync_collab_access state;
-      refresh_current_collab state ~mailbox
+      Masc_tui_collab_queue.Collab_play.sync_collab_access state;
+      Masc_tui_collab_queue.Collab_play.refresh_current_collab state ~mailbox
       end;
       Drawn_changed
   | Librarian_input_loaded (prompt_key, result) ->
@@ -19957,14 +19445,14 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       if input_pending () || Option.is_some state.quit_armed then
         withdraw_pending_music_editor state;
       if take_chat_listen state request then begin
-        let notice = chat_notice state ~keeper_name:(Some request.lr_keeper) in
+        let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some request.lr_keeper) in
         let command = match request.lr_destination with
           | Listen_player -> "/listen" | Listen_music_editor -> "/music midi" in
         match result with
         | Error (Request_failed detail) ->
-            notice ~kind:Notice_failure (command ^ ": " ^ detail)
+            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (command ^ ": " ^ detail)
         | Error (Request_withdrawn refusal) ->
-            notice ~kind:Notice_failure
+            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
               (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                  ~request:(Kept_request.Command command) refusal)
         | Ok prepared ->
@@ -19972,18 +19460,18 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             | Listen_player ->
                 let outcome = Masc_tui_attachment_action.perform prepared
                   ~midi_soundfont:!boot_midi_soundfont in
-                notice ~kind:Notice_reply
+                notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                   ("/listen: " ^ Masc_tui_attachment_action.describe_outcome outcome)
             | Listen_music_editor ->
                 (match Masc_tui_attachment_action.midi_path prepared with
-                 | None -> notice ~kind:Notice_failure "/music midi: prepared source is not MIDI"
+                 | None -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/music midi: prepared source is not MIDI"
                  | Some path ->
                      if input_pending () || Option.is_some state.quit_armed then
-                       notice ~kind:Notice_failure
+                       notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
                          "/music midi: opening cancelled while terminal input was pending; run /music midi again when ready"
                      else match open_music_midi ~path with
-                       | Ok () -> notice ~kind:Notice_reply "/music midi: returned from the MIDI editor"
-                       | Error detail -> notice ~kind:Notice_failure ("/music midi: " ^ detail))
+                       | Ok () -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply "/music midi: returned from the MIDI editor"
+                       | Error detail -> notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ("/music midi: " ^ detail))
       end;
       Drawn_changed
   | Sent_image_ready { request; result } ->
@@ -20005,7 +19493,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                | Board_image_read (_, subject, _) -> board_image_source_reader state ~message:said subject
                | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> false in
              if not opened_original then
-               image_notice state ~view ~keeper_name ~kind:Notice_failure said
+               image_notice state ~view ~keeper_name ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure said
          | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ())
        | Image_prepared result -> match pending with
        | Some {sir_purpose=Inspect_image {identity;window};_}
@@ -20037,7 +19525,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 board_image_source_reader state ~message:("Image preview unavailable: " ^ reason) subject
             | Local_file_image_read _ | Remote_url_image_read _ | Draft_image_read _ | Peer_image_read _ -> false in
           if not opened_original then
-            notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" name reason)
+            notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (Printf.sprintf "image %s: %s" name reason)
         in
         match result with
         | Error reason -> refuse reason
@@ -20047,7 +19535,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            when request_was_pending && view=Tools && view=state.view && not state.msx_open
              && generation=state.image_request_generation && Option.is_some request.sir_skill_reference
              && (match request.sir_purpose with Open_image -> true | Inspect_image _ -> false) ->
-           image_notice state ~view ~keeper_name ~kind:Notice_failure
+           image_notice state ~view ~keeper_name ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              "Keeper or Skill source is unconfirmed or changed; reopen the image preview"
        | Some {sir_purpose=(Open_image | Inspect_image _);_} | None -> ());
       Drawn_changed
@@ -20088,25 +19576,25 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 | Some (Image_cells_withdrawn _) | None -> false) in
            let on_result result = if current () then match result with
              | Masc_tui_browser.Opened opener ->
-                 report ~kind:Notice_reply ~status:"Opener accepted the link"
+                 report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ~status:"Opener accepted the link"
                    (Printf.sprintf "Could not draw inline (%s). %s accepted: %s" e opener url)
-             | Rejected detail -> report ~kind:Notice_failure ~status:detail
+             | Rejected detail -> report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:detail
                  (Printf.sprintf "image %s: %s; browser: %s" title e detail)
-             | Uncertain detail -> report ~kind:Notice_failure ~status:"Opener result unknown"
+             | Uncertain detail -> report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Opener result unknown"
                  (Printf.sprintf "image %s: %s; browser outcome unknown: %s" title e detail) in
            if open_after then begin
-             report ~kind:Notice_reply ~status:"Opening requested"
+             report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ~status:"Opening requested"
                (Printf.sprintf "Could not draw inline (%s). Opening requested: %s" e url);
              match launch_image_opener ~url
                ~allow_start:(fun () -> current () && not (image_input_pending ())) ~on_result () with
              | Ok opener -> record_image_link_opener state ~path:url ~target:url opener
-             | Error detail -> report ~kind:Notice_failure ~status:detail
+             | Error detail -> report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:detail
                  (Printf.sprintf "image %s: %s; browser: %s" title e detail)
            end else
-             report ~kind:Notice_failure ~status:"Original held; s saves it"
+             report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Original held; s saves it"
                (Printf.sprintf "image %s: %s" title e) in
       let refuse reason =
-        notice ~kind:Notice_failure (Printf.sprintf "image %s: %s" title reason) in
+        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure (Printf.sprintf "image %s: %s" title reason) in
       let defer_page ~source reason =
         (* A size change can refuse a cell frame after the worker completes.
            Let pending terminal input withdraw the request before opening the
@@ -20121,7 +19609,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                ~colour:(character_images_available ()) prepared with
            | Fetch_remote ->
                state.sent_image_read <- Some request;
-               notice ~kind:Notice_reply (Printf.sprintf "Loading image: %s" image_url);
+               notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (Printf.sprintf "Loading image: %s" image_url);
                launch_remote_image_fetch state ~mailbox ~request ~title ~caption ~page_url ~image_url
                  ~bounded:(!terminal_draws_images = Some false)
            | Prepare_native_source source ->
@@ -20195,14 +19683,14 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                    let on_result result =
                      if current_copy () then match result with
                      | Masc_tui_browser.Opened opener ->
-                         report ~kind:Notice_reply ~status:"Opener accepted the request"
+                         report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ~status:"Opener accepted the request"
                            (Printf.sprintf "Saved copy: %s. %s accepted the %s"
                              path opener (if image then "image" else "original link"))
                      | Rejected detail ->
-                         report ~kind:Notice_failure ~status:"Opener could not start"
+                         report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Opener could not start"
                            (Printf.sprintf "Saved copy: %s. Opener: %s" path detail)
                      | Uncertain detail ->
-                         report ~kind:Notice_failure ~status:"Opener result unknown"
+                         report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Opener result unknown"
                            (Printf.sprintf "Saved copy: %s. Opener outcome is unknown: %s" path detail) in
                    match launch_image_opener ~url
                      ~allow_start:(fun () -> current_copy ()
@@ -20212,13 +19700,13 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                        record_image_link_opener state ~path:copy.path ~target:url opener;
                        if image then ignore (keep_pending_image_copy copy.path)
                    | Error detail ->
-                       report ~kind:Notice_failure ~status:detail
+                       report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:detail
                          (Printf.sprintf "Saved copy: %s. Opener: %s" path detail) in
                  if requested_save then begin
-                   report ~kind:Notice_reply ~status:"Original saved; y copies its path"
+                   report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ~status:"Original saved; y copies its path"
                      (Printf.sprintf "Saved copy: %s" path)
                  end else begin
-                   report ~kind:Notice_reply ~status:"Opening requested"
+                   report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ~status:"Opening requested"
                      (Printf.sprintf "Saved copy: %s. Opening requested; preview: %s" path reason);
                    let open_copy = copy.openable && String.equal page_url image_url in
                    open_target ~image:open_copy (if open_copy then copy.path else page_url)
@@ -20668,7 +20156,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             | (Run_next_untracked | Run_next_retired), _
             | Run_next_received, Ok _ -> ());
            Masc_tui_chat_dispatch.Queue_steer.dispatch_ready_run_next state ~mailbox request.Keeper_chat.keeper_name;
-           refresh_queue_after_priority state ~mailbox ~keeper_name:request.keeper_name);
+           Masc_tui_collab_queue.Keeper_queue.refresh_queue_after_priority state ~mailbox ~keeper_name:request.keeper_name);
       Drawn_changed
   | Keeper_msg (Keeper_observed_interrupt_done (keeper_name, interrupt_token, generation, result)) ->
       settle_keeper_priority_control state keeper_name ~generation ~outcome:(match result with
@@ -20747,10 +20235,10 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
   | Keeper_msg (Keeper_chat_copy_loaded (generation, _, _)) when generation <> state.msg_copy_generation -> Drawn_changed
   | Keeper_msg (Keeper_chat_copy_loaded (_, keeper_name, result)) ->
       state.msg_copy_pending <- None;
-      let notice = chat_notice state ~keeper_name:(Some keeper_name) in
+      let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper_name) in
       (match result with
        | Error detail ->
-           notice ~kind:Notice_failure ("/copy could not read chat history: " ^ detail)
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ("/copy could not read chat history: " ^ detail)
        | Ok { Keeper_chat_history.rows; dropped } ->
            (* Direct and autonomous rows arrive from separate stores. Their
               turn sequence orders two recorded turns; otherwise use the
@@ -20790,7 +20278,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
            (match newest with
             | None ->
                 let ko = state.ui_language = Lang_ko in
-                notice ~kind:Notice_failure
+                notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
                   (if dropped > 0 then
                      if ko then
                        Printf.sprintf "/copy: 완료된 응답이 없어요 (저장 기록 %d건 읽기 불가)" dropped
@@ -20828,7 +20316,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                       keeper_name assessment characters (String.length row.text)
                       (Masc_tui_clipboard.copy_outcome_text outcome) unreadable
                 in
-                notice ~kind:Notice_reply msg));
+                notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply msg));
       Drawn_changed
   | Keeper_msg (Keeper_chat_history_loaded (request, source, result)) ->
       (* The current refresh owns its slots until each has been admitted.
@@ -21635,22 +21123,22 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       (match reading with
        | Row_health_read _ | Fleet_health_read _ -> ()
        | Command_health_read _ ->
-         let notice = chat_notice state ~keeper_name:(Some keeper) in
+         let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some keeper) in
          let ko = state.ui_language = Lang_ko in
          let say korean english = if ko then korean else english in
          match result with
          | Error (Request_failed detail) ->
-           notice ~kind:Notice_failure
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (keeper ^ ": " ^ say "상태 " "status " ^ field_failed ~ko ^ " · " ^ detail)
          | Error (Request_withdrawn refusal) ->
-           notice ~kind:Notice_failure
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (workspace_refusal_text ~ko ~request:(Kept_request.Command "/memory status") refusal
               ^ " · " ^ keeper)
          | Ok {mhr_keeper = Row_absent; _} ->
-           notice ~kind:Notice_failure
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (keeper ^ ": " ^ say "메모리 관측 없음" "no memory observation")
          | Ok {mhr_keeper = Row_refused refusal; _} ->
-           notice ~kind:Notice_failure
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
              (keeper ^ ": " ^ say "상태 조회 거절" "status refused" ^ " · " ^ refusal.mkr_reason)
          | Ok {mhr_keeper = Row_present row; mhr_generated_at} ->
            let librarian = row.mkh_librarian in
@@ -21678,7 +21166,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              say "상태 조회 " "status loaded "
              ^ span_ago ~ko
                  (Masc_tui_value.Ongoing.since ~now:(Unix.gettimeofday ()) mhr_generated_at) in
-           notice ~kind:Notice_reply (String.concat " · "
+           notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (String.concat " · "
              ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it
          when the Keeper has none, and the totals are counted again
@@ -24421,7 +23909,7 @@ Use relative paths for resources already held in the package. -->
              | Error detail -> report_action state "error" detail
              | Ok source ->
                  let notice ~kind text = report_action state
-                   (match kind with Notice_failure -> "error" | Notice_reply -> "system") text in
+                   (match kind with Masc_tui_collab_queue.Chat_notice.Notice_failure -> "error" | Masc_tui_collab_queue.Chat_notice.Notice_reply -> "system") text in
                  open_preview_image ~skill_reference:profile.esp_reference state ~mailbox:async_messages
                    ~notice ~name:("Declared composition: " ^ profile.esp_name)
                    (Masc_tui_image_requests.Generated (Masc_tui_image_preview.mermaid_source source)))
@@ -26082,25 +25570,25 @@ Use relative paths for resources already held in the package. -->
                     ~workspace:view.ic_workspace view.ic_origin)
               | Some (Image_cells _ | Image_cells_withdrawn _) | None -> false in
             if not (still_current ()) || image_cell_source_unconfirmed state origin then
-              report ~kind:Notice_failure ~status:"Source unconfirmed"
+              report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Source unconfirmed"
                 "Source is unconfirmed; reopen the image to open its link"
             else if asynchronous_input_pending () then
-              report ~kind:Notice_failure ~status:"Opening cancelled"
+              report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Opening cancelled"
                 "Opening cancelled while terminal input was pending"
             else begin
               let on_result result = if still_current () then match result with
                 | Masc_tui_browser.Opened opener ->
-                    report ~kind:Notice_reply ~status:"Opener accepted the request"
+                    report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ~status:"Opener accepted the request"
                       (opener ^ " accepted the image request")
-                | Rejected detail -> report ~kind:Notice_failure ~status:"Opener could not start" ("Opener: " ^ detail)
-                | Uncertain detail -> report ~kind:Notice_failure ~status:"Opener result unknown"
+                | Rejected detail -> report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Opener could not start" ("Opener: " ^ detail)
+                | Uncertain detail -> report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:"Opener result unknown"
                     ("Opener outcome is unknown: " ^ detail) in
               let use_alternate = key = "x" || key = "X" in
               let target = if use_alternate then alternate else url in
               let after = match use_alternate, last_open with
                 | true, Some (previous_target,opener) when String.equal previous_target target -> Some opener
                 | (true | false), (Some _ | None) -> None in
-              report ~kind:Notice_reply ~status:"Opening requested" "Opening the image target was requested";
+              report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply ~status:"Opening requested" "Opening the image target was requested";
               match launch_image_opener ?after ~url:target
                 ~allow_start:(fun () -> still_current ()
                   && not (image_cell_source_unconfirmed state origin)
@@ -26108,7 +25596,7 @@ Use relative paths for resources already held in the package. -->
               | Ok opener ->
                   record_image_link_opener state ~path ~target opener;
                   if String.equal target path then ignore (keep_pending_image_copy path)
-              | Error detail -> report ~kind:Notice_failure ~status:detail ("Opener: " ^ detail)
+              | Error detail -> report ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure ~status:detail ("Opener: " ^ detail)
             end;
             true
         | (Some (Image_cells _ | Image_cells_withdrawn _) | None),
@@ -29345,7 +28833,7 @@ Use relative paths for resources already held in the package. -->
                       | "R" -> Peer_restart
                       | _ -> Peer_refresh in
                     Option.iter (fun (keeper_name, token, after_sequence) ->
-                      launch_keeper_queue state ~mailbox:async_messages ~keeper_name
+                      Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox:async_messages ~keeper_name
                         (Masc_tui_queue_inspection.Inspect_peers (token, after_sequence)))
                       (request_keeper_peer_page state move)
                   end
@@ -29524,7 +29012,7 @@ Use relative paths for resources already held in the package. -->
                 (match state.link_modal_url with
                  | Some url ->
                      let p = Masc_tui_link_preview.get_preview url in
-                     let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
+                     let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name in
                      let img_url =
                        match p.image_url with Some i -> i | None -> url
                      in
@@ -29975,7 +29463,7 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_hide_browser_lane) ->
                      leave_browser_lane state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_collab) ->
-                     open_collab state ~mailbox:async_messages
+                     Masc_tui_collab_queue.Collab_play.open_collab state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_msx) ->
                      open_msx_screen state ~mailbox:async_messages
                  | Some (_, Masc_tui_palette.Palette_dos) ->
@@ -31807,7 +31295,7 @@ Use relative paths for resources already held in the package. -->
                             original ();
                             report_action state "info" "Memory observation unavailable; original action retained")
                    | Shutdown_fenced_backlog {keepers=Some [(keeper,_)]; complete=true;_} ->
-                       open_keeper_queue_panel state ~mailbox:async_messages ~keeper_name:keeper
+                       Masc_tui_collab_queue.Keeper_queue.open_keeper_queue_panel state ~mailbox:async_messages ~keeper_name:keeper
                    | Shutdown_fenced_backlog _ | Other_reported -> original ())
             | Home_create_keeper -> handle_keeper_create ~return_to:Keeper_chat_return_home ()))
         | Some "s" when state.view = Overview ->
@@ -31940,7 +31428,7 @@ Use relative paths for resources already held in the package. -->
                    ~inspect_queue:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
-                         open_keeper_queue_panel state ~mailbox:async_messages ~keeper_name
+                         Masc_tui_collab_queue.Keeper_queue.open_keeper_queue_panel state ~mailbox:async_messages ~keeper_name
                      | None -> ())
                    ~load_preparation:(fun () -> Masc_tui_chat_dispatch.Chat_journals.launch_selected_preparation_operation_read state ~mailbox:async_messages)
                    ~load_tool_changes:(fun () ->
@@ -32015,7 +31503,7 @@ Use relative paths for resources already held in the package. -->
        | Some "?" ->
            state.help_open <- true;
            state.help_scroll <- 0
-      | Some "&" -> open_collab state ~mailbox:async_messages
+      | Some "&" -> Masc_tui_collab_queue.Collab_play.open_collab state ~mailbox:async_messages
        | Some ";" ->
            state.agenda_open <- true;
            state.agenda_scroll <- 0;
@@ -32129,7 +31617,7 @@ Use relative paths for resources already held in the package. -->
                 state.link_modal_scroll <- 0;
                 state.link_modal_cursor <- 0
             | [] ->
-                chat_notice state ~keeper_name:state.msg_target_keeper_name ~kind:Notice_reply
+                Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
                   "No web links found in this conversation to preview.")
        | Some "\023"
          when state.view = Board
@@ -32577,7 +32065,7 @@ Use relative paths for resources already held in the package. -->
             | None -> report_action state "error" "Select a Keeper to inspect its queued relationships"
             | Some keeper ->
                 let token = begin_keeper_peer_reading state ~keeper_name:keeper.k_name in
-                launch_keeper_queue state ~mailbox:async_messages ~keeper_name:keeper.k_name
+                Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox:async_messages ~keeper_name:keeper.k_name
                   (Masc_tui_queue_inspection.Inspect_peers (token, None)))
        | Some "v" when state.view = Keepers Keeper_detail && state.detail_tab = Detail_items ->
            cycle_item_browser state

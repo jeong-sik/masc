@@ -10132,6 +10132,7 @@ type drawn_reads = {
   dr_tools_inventory : tools_inventory_view;
   dr_keeper_turns : keeper_turns_view;
   dr_keeper_waiting : keeper_waiting_view;
+  dr_reading_slot : Masc_tui_reading.shown;
 }
 
 type state = {
@@ -10294,6 +10295,13 @@ type state = {
   (* The readers' views as the last built frame drew them; [None] until a
      frame is built. *)
   mutable drawn_reads: drawn_reads option;
+  (* The reads in flight, each for the screen that was open when it began,
+     and what the reading slot draws for the screen open now (RFC
+     tui-one-screen-grammar section 8). A read begins with [reading_begin].
+     The main loop settles [reading_slot] once per pass with
+     [step_reading_slot]. *)
+  mutable reading_registry: surface Masc_tui_reading.t;
+  mutable reading_slot: Masc_tui_reading.shown;
   (* [/context] opens the last observed provider-input inspector. It is an
      overlay rather than another surface because it answers "what is in this
      Keeper's current head" from whichever Keeper surface raised the question.
@@ -13254,7 +13262,7 @@ let board_census_values (state : state) =
    its phase only makes the header grow and shrink on every poll. Past the
    bar the same line is a readable symptom: the phase word is stable at that
    age and the elapsed seconds say how long it has been stuck. *)
-let pending_display_bar_ns = 1_000_000_000L
+let pending_display_bar_ns = Masc_tui_reading.display_bar_ns
 
 (* A read inside the bar draws its row when it crosses the bar, with no new
    data, so the crossing is when time next changes the frame (RFC
@@ -14558,7 +14566,8 @@ let note_drawn_reads (state : state) =
     { dr_tools_inventory = tools_inventory_view state
     ; dr_keeper_turns =
         keeper_turns_view ~age_drawn:(Domain.DLS.get turn_observation_age_drawn) state
-    ; dr_keeper_waiting = keeper_waiting_view state }
+    ; dr_keeper_waiting = keeper_waiting_view state
+    ; dr_reading_slot = state.reading_slot }
 
 (* With no frame built yet there is nothing to compare with, so the answer
    is drawn. *)
@@ -14571,6 +14580,33 @@ let either_drawn_changed a b =
   match a, b with
   | Drawn_unchanged, Drawn_unchanged -> Drawn_unchanged
   | Drawn_changed, (Drawn_changed | Drawn_unchanged) | Drawn_unchanged, Drawn_changed -> Drawn_changed
+
+(* A read begins for the screen that is open. The returned function ends it:
+   call it when the read is over, with whether it succeeded. Calling it again
+   changes nothing, so a read that reports its end on two paths counts once. *)
+let reading_begin (state : state) =
+  let reading, id =
+    Masc_tui_reading.started state.reading_registry ~scope:state.view
+      ~now:(Masc_tui_wake.Mono.now ())
+  in
+  state.reading_registry <- reading;
+  fun ~ok ->
+    state.reading_registry <-
+      Masc_tui_reading.finished state.reading_registry id
+        ~outcome:(if ok then Masc_tui_reading.Succeeded else Masc_tui_reading.Failed)
+
+(* What the reading slot draws at [now], and whether that is not what the last
+   frame drew. The slot is not part of any reader's view: an answer that
+   draws the same rows can still end the last slow read, and then the pass
+   owes the frame that turns the slot off. Called once per main loop pass,
+   after the answers are applied. *)
+let step_reading_slot (state : state) ~now =
+  let reading, shown = Masc_tui_reading.step state.reading_registry ~scope:state.view ~now in
+  state.reading_registry <- reading;
+  state.reading_slot <- shown;
+  effect_against_drawn ~equal:( = )
+    ~drawn:(Option.map (fun drawn -> drawn.dr_reading_slot) state.drawn_reads)
+    shown
 
 let tools_inventory_effect (state : state) =
   effect_against_drawn ~equal:equal_tools_inventory_view
@@ -21699,6 +21735,8 @@ let create_state
   keeper_turn_finishes = [];
   keeper_turns_observed_at = None;
   drawn_reads = None;
+  reading_registry = Masc_tui_reading.empty;
+  reading_slot = Masc_tui_reading.Hidden;
   account_login = None;
   account_login_detached = [];
   account_login_readings = [];

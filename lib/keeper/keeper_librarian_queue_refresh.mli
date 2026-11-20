@@ -86,22 +86,12 @@ val with_purge_then_catch_up
   -> keeper_name:string
   -> (unit -> 'a)
   -> ('a, Keeper_memory_lane.purge_cancel_error) result
-(** {!Keeper_memory_lane.with_librarian_purge}, then {!submit_durable} for the
-    same Keeper once the purge's exclusion is released. The submission
-    follows every exit but cancellation: a purge that ran, one refused (for
-    example for unread atoms), a lane-level error, and a raise. The purge
-    cancelled the catch-up that was running and discarded the wakes that
-    arrived meanwhile; without this the backlog waits for the Keeper's next
-    turn, and a purge retry is refused again.
-
-    On [Error Purge_already_in_progress] the submission is always discarded,
-    because the other purge still holds the exclusion; that purge submits
-    its own catch-up when it ends.
+(** {!Keeper_memory_lane.with_librarian_purge}. Nothing is submitted to the
+    lane afterwards.
 
     Call from the lane's owner domain ([Eio_context.run_on_owner_domain]),
-    as {!Keeper_memory_lane.with_librarian_purge} and
-    {!Keeper_memory_lane.submit} require. This function does not cross
-    domains itself. *)
+    as {!Keeper_memory_lane.with_librarian_purge} requires. This function
+    does not cross domains itself. *)
 
 val unlaunched_keeper_names
   :  persisted:string list
@@ -185,28 +175,4 @@ module For_testing : sig
     -> pass_end
   (** The production durable reader with a controlled Memory commit edge.
       Returns its actual phase result; measurements remain observation only. *)
-
-  val queue_input
-    :  config:Workspace.config
-    -> keeper_id:Keeper_identity.Keeper_id.t
-    -> meta:Keeper_meta_contract.keeper_meta
-    -> working_context:Keeper_librarian_context.input
-    -> Keeper_librarian.input
-  (** The input the queue pass hands the Librarian. Reads the Goal store and
-      goal-task links for [meta.current_task_id] through the IO pool. *)
-
-  val context_pass_needed
-    :  keepers_dir:string
-    -> keeper_name:string
-    -> Keeper_librarian_context.input
-    -> bool
-  (** Whether the queue pass calls the model for this capture. *)
-
-  val remember_context_pass
-    :  keepers_dir:string
-    -> keeper_name:string
-    -> Keeper_librarian_context.input
-    -> Keeper_librarian_context.version
-    -> unit
-  (** Record that a queue pass shown this capture wrote that version. *)
 end

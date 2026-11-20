@@ -340,6 +340,8 @@ let with_exec_fixture
       in
       create_keeper_meta_exn ~sw ~config meta;
       ignore (Masc.Keeper_registry.For_testing.register ~base_path:config.base_path meta.name meta);
+      (* The Memory tools write through the Keeper's Memory writer. *)
+      Masc_test_deps.ensure_memory_writer ~sw ~config meta.name;
       Fun.protect
         ~finally:(fun () ->
           Masc.Keeper_registry.For_testing.unregister ~base_path:config.base_path meta.name)
@@ -1518,11 +1520,6 @@ let test_manual_gate_does_not_defer_internal_memory_write () =
          Config_dir_resolver.keepers_dir_for_base_path
            ~base_path:config.base_path
        in
-       let memory_path =
-         Masc.Keeper_memory_os_current.path_for_keepers_dir
-           ~keepers_dir
-           ~keeper_id:meta.name
-       in
        let result =
          KET.execute_keeper_tool_call_with_outcome
            ~config
@@ -1541,15 +1538,14 @@ let test_manual_gate_does_not_defer_internal_memory_write () =
          "Manual Gate memory write outcome"
          "success"
          (outcome_label result.KTE.disposition);
-       check bool "Manual Gate pending write does not create current Memory" false
-         (Sys.file_exists memory_path);
-       (match Masc.Keeper_memory_admission_queue.read_pending ~keepers_dir ~keeper_id:meta.name with
-        | Ok (Some batch) ->
-          (match Masc.Keeper_memory_admission_queue.candidates batch with
-           | [candidate] -> check string "internal write preserves exact pending claim"
-               "**internal memory** persists without external Gate approval" candidate.fact.claim
-           | _ -> fail "expected one pending observation")
-        | Ok None -> fail "internal memory write omitted pending input"
+       (match
+          Masc.Keeper_memory_os_current.read_for_keepers_dir ~keepers_dir ~keeper_id:meta.name
+        with
+        | Ok (Some { facts = [ fact ]; _ }) ->
+          check string "internal write commits the exact claim"
+            "**internal memory** persists without external Gate approval" fact.claim
+        | Ok (Some { facts; _ }) -> failf "expected one current fact, got %d" (List.length facts)
+        | Ok None -> fail "internal memory write committed no snapshot"
         | Error detail -> fail detail);
        (match
           Masc.Keeper_approval_queue.list_pending_entries_for_workspace
@@ -4967,20 +4963,6 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        failed_naming Tool_result.Proven_pre_effect "the missing retraction"
          (first "retract-missing");
        succeeded "lane status beside memory calls" (first "lane-first");
-       let module Admission = Masc.Keeper_memory_admission_queue in
-       let module Current = Masc.Keeper_memory_os_current in
-       let pending = match Admission.read_pending ~keepers_dir ~keeper_id:meta.name with
-         | Ok (Some batch) -> batch | _ -> fail "successful write omitted pending input" in
-       check string "batch reports pending admission" "persisted_pending_admission"
-         Yojson.Safe.Util.((parse_json (first "write-kept").content) |> member "outcome" |> to_string);
-       (match Current.apply_disposition ~pass:Masc.Keeper_memory_commit_pass.Admission ~explicit_candidate_ids:(Admission.candidate_ids pending)
-          ~keepers_dir ~keeper_id:meta.name ~now:(Unix.gettimeofday ())
-          ~source:{Current.kind=Current.Librarian;trace_id="fixture-admission"}
-          ~absorbed:[] ~revisions:[]
-          ~new_claims:(List.map (fun (row : Admission.candidate) -> row.fact) (Admission.candidates pending)) () with
-        | Ok _ -> () | Error detail -> fail detail);
-       (match Admission.acknowledge_committed ~keepers_dir ~keeper_id:meta.name with
-        | Ok () -> () | Error detail -> fail detail);
        let kept_id =
          match
            Masc.Keeper_memory_os_current.read_for_keepers_dir
@@ -4993,8 +4975,8 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
          | Ok None -> fail "the claim persisted no snapshot"
          | Error detail -> fail detail
        in
-       (* Unreadable queue and current paths independently reject the pending
-          write and retraction, whatever user the test runs as. *)
+       (* A directory where the snapshot file belongs rejects the write and the
+          retraction, whatever user the test runs as. *)
        let snapshot_path =
          Masc.Keeper_memory_os_current.path_for_keepers_dir
            ~keepers_dir
@@ -5002,9 +4984,6 @@ let test_memory_calls_in_a_mixed_batch_answer_the_model_whatever_they_committed 
        in
        Unix.unlink snapshot_path;
        Unix.mkdir snapshot_path 0o755;
-       let queue_path = Admission.path ~keepers_dir ~keeper_id:meta.name in
-       Unix.unlink queue_path;
-       Unix.mkdir queue_path 0o755;
        let second =
          run_batch
            "store failure batch"
@@ -8204,24 +8183,13 @@ let test_terminal_composition_unknown_write_failure_closes_official_client_loop 
          Config_dir_resolver.keepers_dir_for_base_path
            ~base_path:config.base_path
        in
-       (* An ordinary observation is saved to the pending admission queue while
-          the Librarian runs (the default), and to the current snapshot only
-          when it is off or the write is source-bound. A directory at the
-          canonical path of either store makes that store's open for writing
-          fail whatever user the test runs as, so the writable producer
-          reports its exact unknown-effect persistence failure whichever
-          route the write takes (pending_admission_persistence_failed or
-          persistence_failed). A directory at the snapshot path alone no
-          longer fails the default route: the write succeeds into the queue. *)
-       List.iter
-         (fun path -> Fs_compat.mkdir_p path)
-         [ Masc.Keeper_memory_os_current.path_for_keepers_dir
-             ~keepers_dir
-             ~keeper_id:meta.name
-         ; Masc.Keeper_memory_admission_queue.path
-             ~keepers_dir
-             ~keeper_id:meta.name
-         ];
+       (* A directory where the snapshot file belongs makes its open for
+          writing fail whatever user the test runs as, so the writable producer
+          reports its unknown-effect persistence failure. *)
+       Fs_compat.mkdir_p
+         (Masc.Keeper_memory_os_current.path_for_keepers_dir
+            ~keepers_dir
+            ~keeper_id:meta.name);
        let skill_catalog =
          skill_catalog_of_composition ~name:"unknown-write-before-post" unknown_effect_terminal_failure_composition
        in

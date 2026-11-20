@@ -967,91 +967,6 @@ let run_continuity ?cli_runner ?has_waiting ~base_path ~keeper_name () =
   | exn -> observe ~stop_reason:O.Raised_during_pass O.Not_committed; raise exn
 ;;
 
-(* The pending inputs the last committed queue pass was shown, beside the
-   working-context version that pass wrote and how many stores it could not read.
-   A snapshot stores only the sources its pockets reference, and a pass that
-   could not read one store keeps history it cannot confirm settled, so the
-   stored references can differ from the pending ones on every capture while
-   nothing changed. Compared against this record instead, an unchanged
-   capture ends without a model call; a pass is still needed once the
-   inputs change, a pocket needs reconsideration, or a store unread at the
-   last pass can be read. The record lives in this process's memory only,
-   like [limited_reads]: another writer's version or a restart falls back
-   to the stored references, at the cost of at most one pass. *)
-type observed_inputs =
-  { version : Keeper_librarian_context.version
-  ; references : string list
-  ; unreadable_stores : int
-      (** How many stores the capture could not read. A store read again
-          may settle sources the snapshot still holds, so fewer unreadable
-          stores than last time asks for a pass. Counted, not compared by
-          their failure text. *)
-  }
-
-let observed_inputs : ((string * string), observed_inputs) Hashtbl.t = Hashtbl.create 16
-
-let context_references (sources : Keeper_librarian_context.source list) =
-  List.map (fun (s : Keeper_librarian_context.source) -> s.reference) sources
-  |> List.sort String.compare
-;;
-
-let remember_context_pass ~keepers_dir ~keeper_name
-    (working_context : Keeper_librarian_context.input) version =
-  let observed =
-    { version
-    ; references = context_references working_context.sources
-    ; unreadable_stores = List.length working_context.unavailable
-    }
-  in
-  Stdlib.Mutex.protect measurements_mu (fun () ->
-    Hashtbl.replace observed_inputs (keepers_dir, keeper_name) observed)
-;;
-
-let context_pass_needed ~keepers_dir ~keeper_name
-    (working_context : Keeper_librarian_context.input) =
-  let references = context_references working_context.sources in
-  match working_context.previous with
-  | None -> references <> []
-  | Some snapshot ->
-    let needs_reconsideration = List.exists (fun (p : Keeper_librarian_context.pocket) ->
-      p.completeness = Keeper_librarian_context.Needs_reconsideration) snapshot.pockets in
-    let observed = Stdlib.Mutex.protect measurements_mu (fun () ->
-      Hashtbl.find_opt observed_inputs (keepers_dir, keeper_name)) in
-    let changed = match observed with
-      | Some observed when observed.version = Keeper_librarian_context.version snapshot ->
-        references <> observed.references
-        || List.length working_context.unavailable < observed.unreadable_stores
-      | Some _ | None -> references <> context_references snapshot.sources in
-    changed || needs_reconsideration
-;;
-
-(* The queue pass organizes the inputs pending now, with no turn range, so
-   the Keeper's current task is the task these inputs belong to. The durable
-   and continuity passes read turns that may predate that task, so their
-   current Goal context stays [No_task]. Historical durable context is separate;
-   continuity admission provenance is not yet transported. *)
-(* The working-context pass organizes pending sources only and reads no
-   Memory, so its input carries no current selection. *)
-let queue_input ~config ~keeper_id ~(meta : Keeper_meta_contract.keeper_meta)
-    ~working_context : Keeper_librarian.input =
-  { keeper_id
-  ; turn_ref = Ids.Turn_ref.make
-      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-      ~absolute_turn:meta.runtime.last_turn_id
-  ; historical_task_contexts = []; goal_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      Keeper_librarian_input_sources.goal_context_for_task ~config meta.current_task_id)
-  ; keeper_instructions = meta.instructions
-  ; current = None
-  ; working_context
-  ; messages = []; tool_observations = []; counterpart_observations = [] }
-
-(* The queue signal hands this unit a bare name, and the queue pass reads the
-   Owner's meta, not the store read that refuses a blank name for the durable
-   and continuity passes. So the name is parsed here, once, before any pass
-   runs. A blank one names no Keeper the Librarian could be told about
-   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
-   as a failed unit. *)
-exception Blank_keeper_name
 
 let after_durable ~durable ~following =
   match durable () with
@@ -1062,31 +977,21 @@ let after_durable ~durable ~following =
   | Not_committed | Raised _ -> following ()
 ;;
 
+(* The queue signal hands this unit a bare name, and the queue pass reads the
+   Owner's meta, not the store read that refuses a blank name for the durable
+   and continuity passes. So the name is parsed here, once, before any pass
+   runs. A blank one names no Keeper the Librarian could be told about
+   (RFC-0468 §3.1): the unit raises, and the memory lane logs and counts it
+   as a failed unit. *)
 let run_with_readers ~durable ~continuity ~cleanup ~base_path ~keeper_name =
   let keeper_id =
     match Keeper_identity.Keeper_id.of_string keeper_name with
     | Some keeper_id -> keeper_id
-    | None -> raise Blank_keeper_name
+    | None -> raise Keeper_working_context_pass.Blank_keeper_name
   in
   after_durable ~durable ~following:(fun () ->
     continuity ();
-    (match Env_config.KeeperMemoryOs.librarian_config_state (),
-          Keeper_owner_projection.lookup ~base_path ~keeper_name with
-    | Enabled, Owner_projection {meta = Some meta; stopping = false} ->
-      let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-      let working_context = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-        Keeper_librarian_context_io.capture ~base_path ~keepers_dir ~keeper_name) in
-      if context_pass_needed ~keepers_dir ~keeper_name working_context then (
-        let inp = queue_input ~config:(Workspace.default_config base_path) ~keeper_id ~meta
-            ~working_context in
-        Keeper_librarian_runtime.run_best_effort
-          ~write_scope:Keeper_librarian_runtime.Context_only
-          ~on_context_committed:(remember_context_pass ~keepers_dir ~keeper_name working_context)
-          ~base_path ~keepers_dir ~keeper_id:keeper_name
-          ~expected_revision:None inp)
-    | (Disabled | Invalid), _
-    | Enabled, (Owner_absent | Owner_projection {meta = None; _}
-               | Owner_projection {stopping = true; _}) -> ());
+    Keeper_working_context_pass.run ~base_path ~keeper_name ~keeper_id;
     cleanup ())
 
 let run_memory_cleanup ~base_path ~keeper_name =
@@ -1202,22 +1107,7 @@ let submit_durable ~base_path ~keeper_name =
           run_memory_cleanup ~base_path ~keeper_name))
 ;;
 
-let with_purge_then_catch_up ~base_path ~keeper_name action =
-  (* The purge cancels the running unit and discards wakes while it holds
-     the Keeper's files, so nothing else puts the unread backlog back on the
-     lane. A stopped Keeper ends no turn, and a purge refused for unread
-     atoms would stay refused. The lane is serial and coalesces, so a
-     submission with nothing unread ends at once. *)
-  match Keeper_memory_lane.with_librarian_purge ~base_path ~keeper_name action with
-  | result ->
-    ignore (submit_durable ~base_path ~keeper_name);
-    result
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception exn ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    ignore (submit_durable ~base_path ~keeper_name);
-    Printexc.raise_with_backtrace exn backtrace
-;;
+let with_purge_then_catch_up = Keeper_memory_lane.with_librarian_purge
 
 let unlaunched_keeper_names ~persisted ~launched =
   List.filter (fun name -> not (List.mem name launched)) persisted
@@ -1251,7 +1141,4 @@ module For_testing = struct
   let run_continuity = run_continuity
   let run_with_readers = run_with_readers
   let run_durable_with_commit = run_durable_with_commit
-  let queue_input = queue_input
-  let context_pass_needed = context_pass_needed
-  let remember_context_pass = remember_context_pass
 end

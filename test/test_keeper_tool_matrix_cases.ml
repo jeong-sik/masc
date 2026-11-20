@@ -192,6 +192,8 @@ let make_fixture
   Masc.Keeper_registry.For_testing.clear ();
   ignore (Masc.Keeper_registry.For_testing.register ~base_path meta.name meta);
   ignore (Masc.Keeper_registry.For_testing.register ~base_path "tool-matrix" meta);
+  (* The Memory tools write through the Keeper's Memory writer. *)
+  Masc_test_deps.ensure_memory_writer ~sw ~config meta.name;
   (* The matrix runs the full AGENT_CORE handler path, so it must also hand
      the bundle what a real turn hands it: a turn-context cell. Without one
      the call arrives with [turn_ref = None] and shared-draft editing --

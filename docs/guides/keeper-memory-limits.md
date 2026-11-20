@@ -75,10 +75,10 @@ existed. Entries without reason-bearing removals remain best-effort observations
 
 ## Explicit memory writes
 
-`keeper_memory_write` first saves the fact to the Keeper's pending admission
-queue (`<keeper>.memory-admission.json`) and answers
-`persisted_pending_admission`. The Librarian then judges pending rows against
-current Memory and commits them. Each committed row leaves a receipt naming its
+`keeper_memory_write` commits the fact to current Memory and answers with its
+`memory_id`. No write enters the pending admission queue
+(`<keeper>.memory-admission.json`). The Librarian judges the rows that file
+already holds against current Memory and commits them. Each committed row leaves a receipt naming its
 queue generation, sequence and payload digest, and acknowledgement removes
 exactly the rows a receipt names. Nothing else removes a row, so a sequence
 that has left the queue is committed history.

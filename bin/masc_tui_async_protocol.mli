@@ -416,12 +416,6 @@ type keeper_msg =
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
-  | Keeper_memory_catch_up_done of
-      { keeper : string
-      ; workspace : Masc.Tui_decode.server_identity
-      ; authority : workspace_authority
-      ; outcome : Masc_tui_http.keeper_memory_catch_up_outcome
-      }
   | Keeper_action_done of
       Masc.Tui_decode.server_identity option
       * string

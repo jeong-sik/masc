@@ -21,7 +21,7 @@ SDK version; the MASC commit and build identity are the source of truth.
 
 ### Memory processing and recovery
 
-For Librarian waits, original-result recovery and the limits of `/memory sync`,
+For Librarian waits and original-result recovery,
 see [Keeper memory recovery](guides/KEEPER-MEMORY-RECOVERY.md).
 
 ### Checkpoints when the model changes

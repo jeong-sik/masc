@@ -519,8 +519,6 @@ let test_keeper_memory_cleanup_routes_and_closed_requests () =
   let memory_body =
     `Assoc
       [ "plan_id", `String "plan-memory-1"
-      ; "expected_revision", `Int 7
-      ; "expected_snapshot_sha256", `String (String.make 64 'b')
       ; ( "retractions"
         , `List
             [ `Assoc
@@ -536,10 +534,11 @@ let test_keeper_memory_cleanup_routes_and_closed_requests () =
    with
    | Ok parsed ->
      check string "memory plan id" "plan-memory-1" parsed.plan_id;
-     check int "memory expected revision" 7 parsed.expected_revision;
-     check string "memory expected snapshot hash" (String.make 64 'b')
-       parsed.expected_snapshot_sha256;
-     check int "one exact memory target" 1 (List.length parsed.retractions)
+     check (list (pair string string)) "one exact memory target with its reason"
+       [ memory_id, "wrong domain" ]
+       (List.map
+          (fun (retraction : Cleanup.retraction) -> retraction.memory_id, retraction.reason)
+          parsed.retractions)
    | Error detail -> fail detail);
   let with_extra =
     match memory_body with
@@ -550,18 +549,6 @@ let test_keeper_memory_cleanup_routes_and_closed_requests () =
     (Result.is_error
        (Cleanup.parse_current_memory_request
           (Yojson.Safe.to_string with_extra)));
-  let uppercase_hash =
-    match memory_body with
-    | `Assoc fields ->
-      `Assoc
-        (("expected_snapshot_sha256", `String (String.make 64 'A'))
-         :: List.remove_assoc "expected_snapshot_sha256" fields)
-    | _ -> fail "fixture must be an object"
-  in
-  check bool "memory request requires a lowercase snapshot hash" true
-    (Result.is_error
-       (Cleanup.parse_current_memory_request
-          (Yojson.Safe.to_string uppercase_hash)));
   let duplicate_target =
     match memory_body with
     | `Assoc fields ->

@@ -16376,7 +16376,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
     | Acting_pane_call_order_unknown _ | Scroll_acting_pane _ | Acting_pane_scroll_unknown _
     | Switch_keeper _ | Switch_keeper_missing_name | Queue _ | Run_next | Reconcile_held | Priority _
     | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _ | Steer_turn _
-    | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
+    | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status
     | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _ | Measurement_missing_sha
     | Inspect_context | View_image _ | View_image_missing_path | Attach_image _ | Attach_image_missing_path
     | Attach_image_ref _ | Attach_image_ref_missing_value | Preset_list | Preset_restore _
@@ -16411,7 +16411,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Set_acting_pane_call_order _ | Acting_pane_call_order_unknown _ | Scroll_acting_pane _
       | Acting_pane_scroll_unknown _ | Switch_keeper _ | Switch_keeper_missing_name | Queue _
       | Run_next | Reconcile_held | Priority _ | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _
-      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
+      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status
       | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _
       | Measurement_missing_sha | Inspect_context | View_image _ | View_image_missing_path
       | Attach_image _ | Attach_image_missing_path | Attach_image_ref _
@@ -17098,48 +17098,6 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
              (ticket, Memory_msg (Memory_loaded (Command_health_read {keeper; result}))))
            (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper
              |> Result.map_error (fun detail -> Request_failed detail)))
-  | Masc_tui_command.Memory_sync ->
-      (match target, state.server_identity with
-       | Some keeper, Some workspace
-         when server_authority_ready state ->
-           let check = capture_workspace_admission state ~mailbox in
-           let authority = state.workspace_authority in
-           let host = server_peer_host and port = state.port in
-           let posting = Atomic.make false in
-           let interrupted detail =
-             if Atomic.get posting then Masc_tui_http.Catch_up_unconfirmed detail
-             else Masc_tui_http.Catch_up_not_sent detail in
-           let message outcome =
-             Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) in
-           let changed =
-             ui_text state ~ko:"워크스페이스 연결이 바뀜" ~en:"workspace connection changed" in
-           Masc_tui_message_input.clear state.msg_input;
-           notice ~kind:Notice_reply
-             (keeper ^ ": " ^ ui_text state ~ko:"메모리 따라잡기 요청 중"
-                ~en:"requesting memory catch-up");
-           (* Keep this original operation receipt through workspace withdrawal.
-              Its delivery grants no read or retry authority in a successor. *)
-           Masc_tui_workspace_result.launch state ~results:mailbox.workspace_results
-             ~cancelled_by:(fun () -> message (interrupted changed))
-             ~boundary_error:interrupted
-             ~deliver:(fun result -> message (match result with Ok outcome | Error outcome -> outcome))
-             (fun () ->
-               match check () with
-               | Error refusal ->
-                 (* Not sent: the kept-back notice, never a POST that went
-                    unsent for a reason of its own (RFC §2). *)
-                 Ok (Masc_tui_http.Catch_up_kept_back
-                   (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
-                      ~request:(Kept_request.Command "/memory sync") refusal))
-               | Ok () ->
-                 Atomic.set posting true;
-                 Ok (Masc_tui_http.post_keeper_memory_catch_up ~expected_workspace:workspace
-                   ~host ~port ~keeper_name:keeper))
-       | None, _ -> notice ~kind:Notice_failure (select_keeper_first ~ko:(state.ui_language = Lang_ko))
-       | Some _, (None | Some _) ->
-           notice ~kind:Notice_failure
-           (let ko = (state.ui_language = Lang_ko) in
-            kept_back ~ko ~request:(Kept_request.Command "/memory sync") (workspace_identity_unconfirmed ~ko) Draft_kept))
   | Masc_tui_command.Open_fleet_memory ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Memory;
@@ -24443,12 +24401,11 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
            set_msg_scroll state 0
-       (* These answers are chat notices, including Memory status and catch-up
-          receipts. Typed from the roster they would land in a pane the
-          operator is not looking at, so the chat pane comes forward the way
-          it does for a message. *)
+       (* These answers are chat notices, including Memory status. Typed from
+          the roster they would land in a pane the operator is not looking
+          at, so the chat pane comes forward the way it does for a message. *)
        | Masc_tui_command.Queue _
-       | Masc_tui_command.Memory_status | Masc_tui_command.Memory_sync
+       | Masc_tui_command.Memory_status
        | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
@@ -25040,7 +24997,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
         | Keeper_chat_dispatch_blocked (_, _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
-        | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _)
+        | Keeper_action_done (_, _, _, _))
         | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _) | Keeper_memory_activity_loaded (_, _))
@@ -27092,41 +27049,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                report_action state "error"
                  (prefix ^ "creation outcome unconfirmed; declaration retained. Inspect the original roster before retrying: " ^ detail))
       end;
-      Drawn_changed
-  | Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) ->
-      let original_is_current = authority = state.workspace_authority
-        && same_workspace_identity (Some workspace) state.server_identity in
-      let ko = state.ui_language = Lang_ko in
-      let say korean english = if ko then korean else english in
-      let status_hint = say "처리 상태: /memory status" "status: /memory status" in
-      let kind, detail = match outcome with
-        | Masc_tui_http.Catch_up_submitted ->
-          Notice_reply, say "메모리 따라잡기 접수" "memory catch-up accepted" ^ " · " ^ status_hint
-        | Catch_up_coalesced ->
-          Notice_reply, say "대기 중인 따라잡기에 합침" "joined the pending catch-up" ^ " · " ^ status_hint
-        | Catch_up_not_sent detail -> Notice_failure, not_sent ~ko ^ ": " ^ detail
-        | Catch_up_kept_back notice -> Notice_failure, notice
-        | Catch_up_refused detail -> Notice_failure, say "서버가 거절함: " "server refused: " ^ detail
-        | Catch_up_unconfirmed detail ->
-          Notice_failure,
-          say "접수 미확인: " "acceptance unconfirmed: " ^ detail ^ " · "
-          ^ say "원래 워크스페이스에서 /memory status 로 확인하세요"
-              "check /memory status in the original workspace" in
-      (* A kept-back notice leads its line, with the Keeper after it (RFC §2). *)
-      let line = match outcome with
-        | Masc_tui_http.Catch_up_kept_back _ -> detail ^ " · " ^ keeper
-        | Catch_up_submitted | Catch_up_coalesced | Catch_up_not_sent _
-        | Catch_up_refused _ | Catch_up_unconfirmed _ -> keeper ^ ": " ^ detail in
-      if original_is_current then
-        chat_notice state ~keeper_name:(Some keeper) ~kind line
-      else
-        report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system")
-          (let path = Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path in
-           let original = say (path ^ "의 원래 요청") ("original request in " ^ path) in
-           match outcome with
-           | Masc_tui_http.Catch_up_kept_back _ -> line ^ " · " ^ original
-           | Catch_up_submitted | Catch_up_coalesced | Catch_up_not_sent _
-           | Catch_up_refused _ | Catch_up_unconfirmed _ -> original ^ " · " ^ line);
       Drawn_changed
   | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =

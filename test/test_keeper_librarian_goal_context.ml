@@ -2,7 +2,7 @@ open Alcotest
 open Masc
 
 module Sources = Keeper_librarian_input_sources
-module Queue = Keeper_librarian_queue_refresh.For_testing
+module Pass = Keeper_working_context_pass
 
 let with_workspace f =
   Eio_main.run @@ fun env ->
@@ -93,7 +93,7 @@ let meta ?current_task_id () =
   | Error detail -> failf "fixture metadata: %s" detail
 
 let queue_goal_context config meta =
-  (Queue.queue_input ~config ~keeper_id:(Masc_test_deps.keeper_id_fixture "keeper-goal") ~meta
+  (Pass.input ~config ~keeper_id:(Masc_test_deps.keeper_id_fixture "keeper-goal") ~meta
      ~working_context:Keeper_librarian_context.empty).Keeper_librarian.goal_context
 
 (* The queue pass is a production path: a Keeper holding a task hands the

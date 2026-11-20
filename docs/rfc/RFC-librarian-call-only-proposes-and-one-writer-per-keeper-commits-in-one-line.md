@@ -380,6 +380,7 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 두 번 드는 것은 셋뿐이다. 지우기가 남긴 System 메시지(§5.6)가 하나다. 줄을 먼저 쓴 head 변경이 일어나지 않았을 때 그 줄의 `after` 와 `before` 사이가 둘이다. 알리지 않고 줄어든 head 가 그대로 둔 앞부분이 셋이다(§5.2). 지우기, recovering purge, session 을 지우는 정지가 줄을 먼저 쓴다(§5.2).
 
 단위 안의 것은 항목(item)으로 센다. 상대가 보낸 행이 먼저고 메시지가 그다음이다.
+보이는 순서는 `unattributed` 다음 `own` 이고, 구간 안은 chat 행, 외부 행, Agent-Core 메시지(slice 순서), official-client history 행, internal 행이다.
 항목의 이름은 `{ line; index }` 다. `line` 은 그 단위의 줄이 시작하는 바이트 offset 이다.
 순서는 줄이 정한다. 그래서 bundle 하나가 없어지거나 돌아와도 번호가 밀리지 않는다.
 
@@ -387,8 +388,9 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 
 ### 5.4 안 읽은 것과 읽지 못하는 것
 
-쓰는 쪽은 첫 안 읽은 줄의 바이트 offset(`turn_log_offset`)을 반영 기록에 적는다(§8).
+쓰는 쪽은 다 읽지 않은 첫 줄의 바이트 offset(`turn_log_offset`)을 반영 기록에 적는다(§8). 첫 boot 의 `Started` 에서는 0, 곧 `Log_started` 줄이다. 반쯤 읽은 단위에서는 그 단위의 줄이고, `covered` 는 그 단위가 시작하는 자리다.
 읽는 쪽은 거기서부터 읽는다. 첫 줄부터 훑는 일은 없다.
+턴 안에서 읽기 시작하면 그 턴의 `Closed` 가 가리키는 `Opened` 부터 그 `Closed` 앞까지만 다시 읽는다. Task, runtime, `baseline` 과, 그 사이에 `Reset` 이 있는지를 거기서 얻는다. 그래서 같은 단위는 몇 번째 읽기든 똑같이 나뉜다.
 읽는 쪽은 해석하지 못하는 줄이나 `Unannounced` reset 을 만나면 거기서 멈춘다. 그 앞에 항목이 든 단위가 있으면 그것을 평소대로 먼저 묻는다.
 
 `Unannounced` reset 은 「그사이에 무엇이 닫혔는지 모른다」는 줄이다. 줄을 쓰는 쪽이 head 가 다른 trace 에 있거나, 마지막 끝자리보다 아래이거나, 해석되지 않는 것을 보고 쓴다. session 을 지우는 정지도 쓴다(§5.2).
@@ -398,9 +400,12 @@ Log_started · ( Reset | Opened · Reset* · Closed )*    끝은 Opened · Reset
 질문을 만들다가 내용이 없는 것을 알게 되면 있는 항목만 읽고, 없는 것은 반영 줄에 적는다.
 
 ```ocaml
-type missing_part =
-  | Bundle of Sha256.t | History_bytes | Internal_bytes | Chat_bytes | External_rows
-  | Undecodable_fragment_line                    (* 각각 자기가 대신하는 항목 번호를 같이 싣는다 *)
+type range = { from : int; until : int }      (* 두 끝자리의 값: 바이트, 외부 저장소는 행 *)
+type missing_part =                             (* 줄이 부르는 대로 부른다 *)
+  | Bundle of slice | History_bytes of range | Internal_bytes of range | Chat_bytes of range
+  | External_rows of range
+  | Undecodable_history_line of { offset : int } | Undecodable_internal_line of { offset : int }
+  | Undecodable_external_row of { row : int }
 
 type input_fault =
   | Line_unreadable of { offset : int }               (* 해석되지 않는 줄이고, 그 앞에 항목이 든 단위가 없다 *)
@@ -581,7 +586,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 ### 7.1 묻기 하나는 걷기 하나다
 
 묻는 fiber 는 쓰는 쪽이 정한 질문 하나를 만들고, slot 을 한 번 걷고, 결과를 돌려준다.
-폭을 줄이지 않는다. 상태를 갖지 않는다. 폭과 바닥의 판단은 모두 쓰는 쪽의 순수 함수다.
+폭을 줄이지 않는다. 상태를 갖지 않는다. 폭과 바닥의 판단은 모두 쓰는 쪽의, 모델을 기다리지 않는 동기 함수다.
 
 1. 쓰는 쪽이 메모리에 둔 마지막 줄의 값을 읽는다. 스냅샷 sha, 읽은 자리, 턴 기록의 offset 이다.
 2. 스냅샷 바이트를 읽고 그 값을 다시 읽는다. 값이 그대로인데 바이트의 sha 가 다르면 `Memory_diverged` 로 끝난다. 값이 달라졌으면 처음부터 다시 읽는다.
@@ -591,22 +596,20 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 6. 선언한 slot 마다 결과를 하나씩 붙여 돌려준다.
 
 ```ocaml
-type offered = { units : int; head_items : int }     (* 이 질문이 실은 단위 수와, 맨 앞 단위의 항목 수 *)
-type ask_result =
-  | Answered of { question : question; answer : answer; slot : string; offered : offered }
+type ask_result =                        (* 코드는 Librarian_read_result.t *)
+  | Answered of { question : question; answer : answer; slot : string }
   | Nothing_to_ask
-  | Refused_by_lane of lane_result       (* 답한 slot 이 없고, 질문을 거절한 slot 이 하나는 있다 *)
-  | Silent_lane of lane_result           (* 답한 slot 도, 질문을 거절한 slot 도 없다 *)
-  | Nothing_readable of { through : item_ref; missing : missing_part list }
-  | Span_unknown of { line : int; before : mark; after : mark }
+  | No_answer of { slots : (slot_key * slot_outcome) list }   (* 답한 slot 이 없다 *)
+  | Nothing_readable of { reach : reach; missing : missing_at list }
+  | Span_unknown of { before : mark; reach : reach }          (* reach 는 그 reset 줄까지 Whole *)
   | Memory_diverged of { expected : Sha256.t; observed : Sha256.t }
   | Input_fault of input_fault
   | Ask_failed of failed
-and lane_result =
-  { question : Question_id.t; basis : Sha256.t; head : item_ref; offered : offered
-  ; slots : (slot_key * slot_outcome) list }
-and failed = Raised | Flow_stopped
+and reach = { line : int; within : within; covered : mark; turn_log_offset : int }   (* 반영 줄이 그대로 적는 값 *)
+and failed = Raised | Flow_stopped | Read_failed                 (* Read_failed: 턴 기록이나 단위의 파일을 읽지 못했다 *)
 ```
+
+- `Refused_by_lane` 은 지금 선언된 slot 가운데 질문을 거절한 slot 이 하나는 있는 `No_answer` 이고, `Silent_lane` 은 그런 slot 이 없는 `No_answer` 다. 둘은 `decide` 의 조건이다(§9.3). 폭이 드는 `offered` 와 `lane_result` 의 나머지 칸(`question`, `basis`, `head`)은 L7 이 더한다.
 
 - 폭과 반영한 수는 결과의 `offered` 에서 읽는다. 쓰는 쪽이 따로 세지 않는다. fiber 가 읽은 뒤에 턴이 닫혔을 수 있다.
 - 걷기가 masc 쪽에서 멈춘 것(측정이나 시도를 시작하지 못함, callback 실패)은 slot 결과가 아니다. `Ask_failed Flow_stopped` 다.
@@ -628,6 +631,7 @@ type slot_outcome = Slot_answered | Refused of refusal | Silent of silence
 - 분류는 함수 하나다. `classify : slot_visit -> slot_outcome` 이고 결과 타입마다 와일드카드 없는 `match` 다.
 - 생성자마다 한 행인 표는 근거 폴더에 있다. 타입 16개의 생성자 163개이고 행은 168개다. 다섯 생성자는 타입 있는 칸으로 둘로 나뉜다. 스크립트가 코드에서 생성자를 뽑아 표와 맞춘다. 행이 없는 생성자, 생성자가 없는 행, 겹치는 행이 있으면 실패한다.
 - **선언한 slot 은 모두 결과가 있다.** 묻기는 선언한 slot 목록(HTTP, 그다음 CLI)을 돌면서 slot 마다 방문을 찾는다. 방문이 없으면 `Silent Not_called` 다. 그래서 「모든 slot」이라는 조건은 빠짐없는 목록 위의 fold 다.
+- registry 가 받아들이지 않은 선언 slot 은 `Silent Unavailable` 로 센다. lane 값이 그 id 를 싣는다(L7).
 - 판단이 읽는 것은 넷뿐이다. 답했다, 입력 크기로 거절했다, 다르게 거절했다, 말이 없다. 나머지 갈래는 운영자의 행에 쓴다.
 
 | 갈래 | HTTP (Agent-Core) | CLI |
@@ -678,7 +682,7 @@ Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #5
 
 ### 7.3 결과마다 쓰는 쪽이 하는 일
 
-`decide` 는 순수 함수다. 아래에서 「다시 묻는다」는 §9.2 의 「다음 묻기」다. lane 이 켜져 있고 안 읽은 것이 있으면 폭 기억이 정한 폭으로 묻고, 아니면 `Idle` 이다.
+`decide` 는 모델을 기다리지 않는 동기 함수다. 반영에 드는 저장소 I/O 는 그 안에서 한다. 아래에서 「다시 묻는다」는 §9.2 의 「다음 묻기」다. lane 이 켜져 있고 안 읽은 것이 있으면 폭 기억이 정한 폭으로 묻고, 아니면 `Idle` 이다.
 
 | 결과 | 조건 | 하는 일 |
 |---|---|---|
@@ -847,14 +851,14 @@ type effects =
 
 type hole =
   | Item_exceeds_window
-  | Content_missing of missing_part list
+  | Content_missing of missing_at list
   | Line_unreadable of { offset : int; sha : Sha256.t }
   | Unknown_span of { before : mark; after : mark }
   | Turn_log_replaced of { from : Turn_log_id.t; to_ : Turn_log_id.t }
   | Position_lost of { offset : int; length : int }
   | Operator_skipped of { by : string }
 type cause =
-  | Read of { question : Question_id.t; shown_memory : bool; slot : string; missing : missing_part list }
+  | Read of { question : Question_id.t; shown_memory : bool; slot : string; trace : string; missing : missing_at list }
   | Make_room of { question : Question_id.t; after : item_ref; slot : string }
   | Direct of { by : actor; trace : string; write : write }
   | Skip of { hole : hole }
@@ -934,7 +938,7 @@ type log_line =
 
 ### 8.4 읽은 자리가 움직이는 규칙
 
-- `Read` 반영은 질문이 시작한 자리가 `covers_through` 바로 다음일 때만 받는다. 받으면 `covers_through` 를 질문이 끝난 자리로 옮긴다.
+- `Read` 반영이 질문이 시작한 자리에서 이어지는 것은 묻기 번호와 취소 규칙이 지킨다. 읽은 자리를 옮기는 사건은 가던 묻기를 취소하고, 다른 묻기의 답은 늦은 답으로 버린다(§9.2). 받으면 `covers_through` 를 질문이 끝난 자리로 옮긴다.
 - `Skip` 은 자기가 이름 붙인 것만 지나간다.
 - `Restart_reading` 은 그 턴 기록의 처음으로 옮긴다.
 - 그 밖에는 아무것도 자리를 옮기지 않는다. `Direct`, `Make_room`, `Adopt` 반영은 자리를 그대로 둔다.
@@ -978,8 +982,21 @@ type write =
 - 같은 쓰기는 실제로 다시 온다. masc 는 답한 tool 호출의 id 를 기억하지 않고, 모델이 같은 호출을 되풀이한다. 그래서 위 표의 「이미 있다」 행이 필요하다.
 - 철회한 뒤에 같은 `Remember` 가 다시 오면 fact 가 다시 생긴다. 이 설계는 그것을 받아들인다.
 - 운영자의 수정도 같은 문을 지난다. 그래서 운영자의 수정이 `Log_diverged` 를 만들지 않는다.
+- 운영자의 철회 요청(`POST <k>/memory/retractions`)은 철회 여럿을 싣는다. 쓰는 쪽은 요청의 순서대로 하나씩 쓴다. 철회마다 줄이 하나다. 줄의 trace 는 요청의 `plan_id` 다.
+- 그 요청은 스냅샷의 revision 이나 sha 를 싣지 않는다. 철회는 fact 의 id 로 대상을 정하고, id 는 claim 에서 나온다.
+- 쓰는 쪽이 받지 않는 철회에서 요청이 끝난다. 그 앞의 철회는 반영된 채다. 같은 요청을 다시 보내면 그것들은 `Already_absent` 로 답한다.
+- 쓰는 쪽은 등록된 Keeper 에게만 있다(§9.5). 그래서 꺼진 Keeper 의 Memory 는 운영자의 철회도 받지 않는다. Keeper 를 켠 뒤에 보낸다.
 - `source_path` 가 붙은 claim 은 지금처럼 파일에 묶인 저장소로 간다(§11).
 - 「admission 을 기다리는 쓰기」라는 상태는 없어진다.
+
+Keeper 의 도구는 이 답을 영수증으로 옮긴다.
+
+- 반영된 쓰기는 `inserted` 나 `reobserved` 다. `reobserved` 영수증에는 basis 가 없다. 반영 줄이 그 fact 의 basis 를 싣지 않는다.
+- `Already_held` 는 성공으로 답하고 `already_held` 라고 적는다. `Already_done` 은 `already_superseded` 다. 둘 다 쓴 것이 없다.
+- `Refused Unknown_fact` 는 `supersedes_not_current` 다. 영수증에 지운 기록은 없다.
+- 철회의 `Already_absent` 는 지금처럼 `fact_not_found` 다.
+- Memory 가 쓰기를 받지 않은 답은 `memory_unwritable` 하나다. 선 저장소, 등록부에 없는 Keeper, 쓰는 쪽을 시작하지 않은 프로세스가 그렇다. 이유를 함께 싣는다. 쓴 것은 없다.
+- 쓰는 쪽이 답하지 못하고 예외로 끝나면 지금처럼 `persistence_failed` 다. 줄이 붙었는지 모른다.
 
 ### 8.6 boot
 
@@ -1003,6 +1020,14 @@ type write =
 - 물러난 쓰는 쪽은 표에서 빠진다. 표에 있는 것이 그 쓰는 쪽일 때만 뺀다. 그사이 다시 등록된 Keeper 의 새 쓰는 쪽은 그대로 둔다.
 - pulse 는 받은 Keeper 이름마다 `ensure` 를 부르고, 표에 있는데 등록되지 않은 Keeper 의 쓰는 쪽을 물러나게 한다. 물러남의 답을 하나씩 기다린다.
 
+쓰는 쪽은 스냅샷 파일이 새 revision 을 갖게 된 것을 알린다.
+
+- 알리는 때는 둘이다. 스냅샷을 다시 쓴 반영 뒤와 저장소가 열린 때다.
+- 신호는 지금 있는 것이다(`Keeper_memory_commit_notifications`). workspace memory curator 와 Memory 건강 화면이 이 신호로 Memory 를 다시 읽는다.
+- 신호는 깨우기만 한다. 받는 쪽은 스냅샷을 읽는다. 같은 revision 이 두 번 와도 된다.
+- 줄은 붙었는데 스냅샷을 쓰지 못한 반영은 알리지 않는다. 그 스냅샷을 쓰는 boot 가 저장소를 열면서 알린다.
+- 쓰기를 보낸 쪽이 답을 먼저 받는다.
+
 boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬리를 복구한 뒤에 돈다. Keeper 마다 fiber 하나라서, 느린 boot 는 자기 Keeper 의 Memory 만 늦춘다.
 그 전에 턴 기록에는 `Log_started` 가 있다. 프로세스가 시작할 때와 Keeper 를 만들 때 쓴다(§5.2).
 
@@ -1021,7 +1046,7 @@ boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬
 | 있다 | 스냅샷 sha 가 꼬리 줄의 `basis` 다 | 5단계를 그 줄에서 다시 한다. 결과의 sha 가 `after` 가 아니면 `Stopped (Log_diverged _)`. 그 줄에서 스냅샷이 만들어지지 않을 때도 같다. 쓰지 않는다 |
 | 있다 | 둘 다 아니다 | `Stopped (Log_diverged _)` |
 | 없다 | 턴 기록 파일이 없다 | `Stopped Store_unwritable`. `Started` 는 턴 기록의 id 를 적어야 하고, 쓰는 쪽은 그 파일을 만들지 않는다. 턴 기록의 첫 줄이 `Log_started` 가 아닐 때도 같다 |
-| – | 반영 기록을 읽는 I/O 가 실패한다 | `Stopped Store_unwritable`. 해석되지 않는 꼬리와 다르다. `Adopt` 가 아니라 `Resume` 이 다시 해 본다 |
+| – | 반영 기록이나 스냅샷을 읽는 I/O 가 실패한다 | `Stopped Store_unwritable`. 해석되지 않는 꼬리, 없는 스냅샷과 다르다. `Adopt` 나 파일 되돌리기가 아니라 `Resume` 이 다시 읽어 본다 |
 | – | 잠금을 잡지 못한다 | `Stopped Store_unwritable`. `Resume` 이 다시 해 본다 |
 | – | boot 가 하는 쓰기(빈 envelope, `Started`, 스냅샷 다시 쓰기)가 실패한다 | `Stopped Store_unwritable` |
 
@@ -1394,13 +1419,23 @@ RFC #53307(§3.3)이 이 규칙을 고친다. 운영자가 2026-11-19 에 그 RF
 
 메시지 수를 atom 번호로 바꾸는 일은 지금 있는 `first_atom_at_or_after` 가 한다. 읽은 곳의 끝과 아래 세 단계는 digest 를 견주지 않는다. purge 가 읽은 곳의 메시지를 고쳐 써도 번호는 그대로다(§5.6). seed 는 지금처럼 digest 를 견준다. purge 가 seed 의 atom 을 여는 메시지를 고쳐 쓰면 seed 가 버려지고 요청은 읽은 곳의 끝에서 열린다. 지금도 그렇다.
 
+seed 의 세대 경계도 턴 기록에서 읽는다. 지금은 `turn-boundaries.jsonl` 에서 읽는다.
+
+- 이 trace 에서 센 마지막 `Reset` 을 찾는다. `Reset` 의 trace 는 `after.trace` 다.
+- 그 줄 앞에서 닫힌 이 trace 의 마지막 턴이 경계다. 턴 번호는 그 턴 `Opened` 줄의 `turn_ref` 에서 읽는다.
+- 그 번호 이하의 턴 기록(turn record)은 seed 가 되지 않는다.
+- `Reset` 뒤에 닫힌 턴은 경계 밖이다. 도구로 이력을 지운 턴 자신이 그렇다. 지금의 경계도 그 턴을 포함하지 않는다.
+- 세는 `Reset` 은 cause 가 `Announced Cleared` 이거나 `Unannounced` 인 것이다.
+- `Announced Recovered` 는 세지 않는다. purge 는 번호를 바꾸지 않는다. purge 가 고쳐 쓴 atom 의 seed 는 위의 digest 가 버린다.
+- 센 `Reset` 이 없거나 그 앞에 닫힌 턴이 없으면 경계가 없다.
+
 head 가 그 trace 에 없거나 닫힌 메시지가 `covered.closed_messages` 보다 적으면 시작점은 `Front_unresolved` 다. 이력을 지운 뒤 Librarian 이 그 `Reset` 단위를 읽기 전까지가 그렇다.
 
 provider 가 범위를 크다고 거절하면 Keeper 쪽에서 시작점을 당긴다. 코드에 있는 세 단계이고 그대로 둔다.
 
 | 단계 | 지금 읽는 곳 | 바뀐 뒤 읽는 곳 |
 |---|---|---|
-| 턴 경계로 | `turn-boundaries.jsonl` 의 마지막 `Turn_ended` | 턴 기록의 마지막 단위 줄의 끝자리(`Closed.after` 나 `Reset.after`). 단위 줄이 없으면 `Log_started.mark` |
+| 턴 경계로 | `turn-boundaries.jsonl` 의 마지막 `Turn_ended` | 턴 기록의 마지막 단위 줄의 끝자리(`Closed.after` 나 `Reset.after`). 단위 줄이 없으면 `Log_started.mark`. 턴 기록에 줄이 없으면 시작점은 0 이다. 꼬리를 읽지 못했거나, 끝자리가 다른 trace 의 것이거나, 이력이 끝자리보다 짧으면 턴 경계는 모르는 것이다(`Turn_boundary_unknown`). 0 으로 바꾸지 않는다 |
 | 이 턴의 tool 결과를 표시로 | 바뀌지 않는다 | 바뀌지 않는다 |
 | 이 턴이 시작한 곳으로 | `history_at_start` 의 atom 번호와 digest | `Opened.baseline.closed_messages` 를 atom 번호로 바꾼 값. digest 대신 「그 trace 의 head 가 닫힌 메시지를 그만큼은 갖고 있다」를 본다 |
 
@@ -1540,7 +1575,8 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 - `Skip_line` 은 읽을 수 있는 단위를 지나치지 못한다. 읽는 쪽은 해석 못 하는 줄 앞의 항목 든 단위를 먼저 묻고 반영한다. 그 줄 앞에 항목 든 단위가 없을 때만 받는다. 앞에 놓인 항목 없는 단위는 같이 지나간다.
 - 받아들인 건너뛰기는 가던 묻기를 취소한다. 거절한 행동은 아무것도 바꾸지 않는다.
 - route 는 `Done` 이나 `Refused of reason` 으로 답하고, 화면이 그 이유를 그린다. 이유는 닫힌 타입이다: `Not_the_head`, `Not_the_faulted_line`, `Not_replaced`, `Not_stopped`, `Nothing_to_resume`, `Snapshot_mismatch`, `Snapshot_unreadable`, `Store_stopped s`, `Keeper_retired`.
-- 옛 route 인 `memory-catch-up`, 일괄 cleanup, `memory-journal`, `memory-facts` 는 지우는 층에서 저마다 지우거나 반영 기록을 읽게 고친다(§19.2).
+- `Done` 의 답은 그 뒤 저장소의 상태를 같이 싣는다. `Resume` 이 boot 를 다시 돌렸는데 같은 이유로 멈췄으면 그 이유가 답에 있다. `Log_diverged` 로 멈췄으면 반영 기록이 가리키는 sha 와 파일의 sha 를 싣는다. 파일의 sha 가 `Adopt` 에 넣을 값이다.
+- 옛 route 인 `memory-catch-up` 은 쓰는 쪽을 켜기 전에 지운다(§20 L5p). 쓰는 쪽은 턴 기록과 pulse 로 할 일을 찾으므로 운영자가 깨우는 길을 두지 않는다. 일괄 cleanup 의 Memory 철회는 쓰는 쪽으로 쓴다(§8.5). `memory-journal`, `memory-facts` 는 지우는 층에서 저마다 지우거나 반영 기록을 읽게 고친다(§19.2).
 
 ## 13. 실패마다 장치와 시험
 
@@ -1562,7 +1598,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | F11 선언을 바꾸면 읽기가 멈춘다 | 질문 id 가 선언을 담는다. 질문 쪽 선언이 바뀌면 가던 묻기를 취소한다. 늦게 온 답은 세고 버린다. 그 밖에 들고 있는 것이 없다 | 호출 중에 프롬프트를 바꾼다. 버린 답 하나가 세어지고 다음 질문이 새 선언을 담는다. slot 목록만 바꾸면 가던 묻기의 답이 반영된다 | L6 |
 | F12 처리량이 도착의 20분의 1 이다 | §15. 묻기가 턴 도착을 따라간다 | 재생 스크립트와 출력(근거 폴더). 배포 뒤 fleet 행 | L0, L9 |
 | F13 운영자가 볼 수 없다 | §12 | 상태, 원인, 경보 생성자마다 해석 시험. 재시작 뒤 안 읽은 단위가 있으면 첫 묻기가 끝날 때까지 경고가 켜져 있다 | L9 |
-| F14 두 consumer 가 같은 범위를 보낸다 | 쓰는 쪽 하나가 사는 동안 잠금을 쥔다. 묻기는 한 번에 하나다. 읽은 자리 규칙(§8.4) | 둘째 프로세스는 `<k>.memory.lock` 을 못 잡는다. 시작 자리가 읽은 자리 다음이 아닌 `Read` 는 거절된다 | L5, L6 |
+| F14 두 consumer 가 같은 범위를 보낸다 | 쓰는 쪽 하나가 사는 동안 잠금을 쥔다. 묻기는 한 번에 하나다. 읽은 자리 규칙(§8.4) | 둘째 프로세스는 `<k>.memory.lock` 을 못 잡는다. 읽은 자리를 옮기는 사건 뒤에 온 답은 늦은 답으로 버려진다 | L5, L6 |
 | F15 서버와 worker 의 버전이 어긋난다 | Librarian 에 worker 와 add-on package 가 없다 | preflight 가 `keeper-librarian` add-on 이 남은 base path 를 거절한다 | L11 |
 | F16 잠깐의 실패가 Keeper 를 세워 둔다 | 말 없음은 폭을 줄이지도 세우지도 않는다. 쉬는 Keeper 는 pulse 마다 같은 폭으로 다시 묻는다 | 모든 slot 이 N 번 시간 초과한 뒤 답한다. 운영자 행동 없이 반영되고, 질문의 폭이 처음과 같다 | L7 |
 
@@ -1599,7 +1635,7 @@ pulse 가 잠깐 만드는 `Asking` 은 답을 바꾸지 않는다. 함수가 �
 | I1 | 턴은 빠지지 않고 순서가 지켜진다. 읽지 않고 지나가는 것은 타입 있는 구멍으로만, 기록과 함께 한다 | 읽은 자리 규칙(§8.4). 내용은 끝자리의 차라 이어진다. 지나친 것은 모두 `Skip` 줄에 이름이 있다 | `LibrarianTurnLog`: `NoSilentSkip`, `EveryClosedInOneUnit`, `PassedAccounted`, `SkipRecorded`. `LibrarianWriter`: `PositionMoves`, `PositionHasLine` |
 | I2 | Memory 가 먼저고 읽은 자리가 나중이다 | 말을 고친다. Memory 변화와 읽은 자리가 한 줄에 같이 반영된다. 스냅샷은 boot 가 그 줄에서 다시 쓴다. boot 가 끝나기 전의 읽기는 한 줄 늦은 스냅샷을 볼 수 있고, 그 읽기는 「확인 전」을 같이 싣는다(§11.5). 두 파일 사이의 순서였던 것이 한 줄이 되어, 틀릴 순서가 없다 | `LibrarianWriter`: `Chain`, `SnapshotLag`. buggy 설정 `position-first` 가 깨진다 |
 | I3 | 한 범위의 fact 는 많아야 한 번 적용된다 | 범위는 이어지고 겹치지 않는다. 쓰는 쪽이 하나다. 쓰기 전에 스냅샷의 sha 를 본다(2단계). op 마다 거절하는 것은 CAS 가 지키던 것(그사이 지워진 fact 를 건드리지 않는다)을 답을 버리지 않고 지킨다 | `LibrarianWriter`: `AnswerAtMostOnce`, `NoUndoRetract`. buggy 설정 `undo-a-retract` 가 깨진다 |
-| I4 | 답은 자기가 답한 입력에만 적용된다. 받은 답을 말없이 버리지 않는다 | 말을 고친다. 답은 한 번 적용되거나 적용되지 않는다. 늦은 답은 세고 버린다. 되돌려 적은 id, 묻기 번호, 읽은 자리 규칙이 본다. 답을 받고 줄을 쓰기 전에 죽으면 그 답은 없고, 다시 묻는다 | `LibrarianWriter`: `AnswerOnlyWhenCurrent`. buggy 설정 `apply-stale-answer` 가 깨진다 |
+| I4 | 답은 자기가 답한 입력에만 적용된다. 받은 답을 말없이 버리지 않는다 | 말을 고친다. 답은 한 번 적용되거나 적용되지 않는다. 늦은 답은 세고 버린다. 되돌려 적은 id 를 보고, 시작 자리는 묻기 번호와 취소 규칙이 지킨다. 답을 받고 줄을 쓰기 전에 죽으면 그 답은 없고, 다시 묻는다 | `LibrarianWriter`: `AnswerOnlyWhenCurrent`. buggy 설정 `apply-stale-answer` 가 깨진다 |
 | I5 | 모르는 것을 없음, 실패, 기본값으로 바꿔 쓰지 않는다 | slot 결과는 와일드카드 없는 `match` 하나다(§7.2). 해석되지 않는 반영 기록은 `Log_unreadable` 이다. 없는 반영 기록은 「읽었다는 기록이 없다」로만 읽는다(§8.6). 풀리지 않는 시작점은 `Front_unresolved` 다. 알리지 않은 reset 은 `Unknown_span` 이다 | `LibrarianTurnLog`: `UnknownRecorded`. `classify` 의 생성자별 시험(L2, L6) |
 | I6 | 잃는 것은 기록과 함께만 잃는다. 답에서 빠진 fact 는 지워지지 않는다. 합쳐진 원본은 찾을 수 있다 | 지운 fact 는 줄에 통째로 남는다. 컷 뒤로 그렇다. 컷 이전 기록은 지운다(§22.1) | F4 시험(L5) |
 | I7 | Keeper 는 Librarian 을 기다리지 않는다. 진행이 굶지 않는다. Keeper 끼리 떨어져 있다 | 쓰기에 모델이 필요 없다. Keeper 경로는 쓰는 쪽의 잠금을 잡지 않는다. 턴 기록 덧붙임이 실패해도 턴을 거절하지 않는다. 쓰는 쪽이 Keeper 마다 하나다. provider 자리를 Keeper 턴과 나누는 것은 §15.3 이 다룬다 | F7 시험(L6). 덧붙임 실패 시험(L3a) |
@@ -1840,7 +1876,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 **a. 옛 Librarian 경로.** `lib/keeper/keeper_librarian_*.ml` 69개 가운데 63개를 지우고 하나는 이름을 바꾼다. 64개가 20,334줄이다.
 
 - 지운다: `durable_*`, `admission_*`, `floor_*`, `history_resolution`, `history_resolution_*`, `original_*` 전부. 그리고 `absorb_gate`, `queue_refresh`, `store_preflight`, `range`, `continuity`, `message_floor`, `refusal_frontier`, `retained_step_replacement`, `declaration_replacement`, `pending`, `progress*`, `official_progress`, `unread*`, `input_capture`, `input_sources`, `task_context`, `worker_request`, `request_*`, `queue_signal`, `addon`, `memory_plan`, `memory_program`, `history_program_settlement`.
-- 남긴다: `keeper_librarian_context`, `_context_io`, `_context_recall`, `_context_review`. `keeper_librarian_runtime` 과 `keeper_librarian` 은 working-context pass 가 쓰는 만큼만 남는다. `keeper_memory_lane` 도 남고, working-context pass 한 가지만 싣는다. `submit_durable`(`keeper_librarian_queue_refresh`)과 그것을 부르는 곳 다섯은 지운다. 예약된 pass 가 durable 만 하는 단위로 바뀌던 일(#53000)이 같이 없어진다.
+- 남긴다: `keeper_librarian_context`, `_context_io`, `_context_recall`, `_context_review`. `keeper_librarian_runtime` 과 `keeper_librarian` 은 working-context pass 가 쓰는 만큼만 남는다. `keeper_memory_lane` 도 남고, working-context pass 한 가지만 싣는다. pass 하나는 `keeper_working_context_pass` 에 있다. 이 모듈이 모델을 부를지 정하고, 질문을 만들고, 실행한다. 큐 신호를 받아 Keeper 의 memory lane 에 pass 하나를 싣는 등록도 이 모듈에 있다. `submit_durable`(`keeper_librarian_queue_refresh`)과 그것을 부르는 곳 다섯은 지운다. 예약된 pass 가 durable 만 하는 단위로 바뀌던 일(#53000)이 같이 없어진다.
 - 이름을 바꾼다: `keeper_librarian_input_refusal` → `keeper_exact_input_refusal`. 생성자 셋짜리 타입이고 Librarian 것이 아니다. Exact 걷기가 쓴다(`keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure`). 그 걷기와 그것을 쓰는 HITL 요약은 이 RFC 가 고치지 않는다. 새 Librarian 은 이 타입을 쓰지 않고 §7.2 의 slot 결과를 쓴다.
 
 **b. Memory 저장소 장치.** 5,138줄이다.
@@ -1875,9 +1911,9 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 
 **e. 반영 경로의 판정자.** `Typesafeai_librarian_preflight`, `bin/masc_librarian_preflight_eval.ml`, TUI 의 preflight 표시, `absorb_gate` 와 `librarian_preflight` 키.
 
-**f. add-on.** `addons/keeper-librarian/` 와 `addons/tests/test_keeper_librarian.py`. `addons/exact_worker.py` 는 고치지 않는다. Lane Add-on 틀의 서버 쪽에서 지우는 모듈을 직접 부르는 곳은 둘이다(아래 k). 틀이 싣는 add-on 목록에서도 Librarian 이 빠진다. `Lane_addon_carried` 의 `Keeper_librarian` 갈래, `lib/embedded_exact_addons/dune` 의 `embedded_keeper_librarian` 모듈과 규칙, 그 목록 전체를 도는 `exact_addon_setup`, `bin/main_eio.ml` 의 도움말 글, `lane_addon_store.ml` 의 history fence 와 resolution 디렉터리 이름 둘이다. 이 곳들은 지우는 모듈 이름을 부르지 않아서 k 의 목록에 나오지 않는다. 틀은 나머지 add-on 을 그대로 싣는다.
+**f. add-on.** `addons/keeper-librarian/` 와 `addons/tests/test_keeper_librarian.py`. `addons/exact_worker.py` 는 고치지 않는다. Lane Add-on 틀의 서버 쪽에서 지우는 모듈을 직접 부르는 곳은 셋이다(아래 k). 틀이 싣는 add-on 목록에서도 Librarian 이 빠진다. `Lane_addon_carried` 의 `Keeper_librarian` 갈래, `lib/embedded_exact_addons/dune` 의 `embedded_keeper_librarian` 모듈과 규칙, 그 목록 전체를 도는 `exact_addon_setup`, `bin/main_eio.ml` 의 도움말 글, `lane_addon_store.ml` 의 history fence 와 resolution 디렉터리 이름 둘이다. 이 곳들은 지우는 모듈 이름을 부르지 않아서 k 의 목록에 나오지 않는다. 틀은 나머지 add-on 을 그대로 싣는다.
 
-**g. route 와 도구.** `memory-catch-up`, 일괄 cleanup, `memory-journal`, `memory-facts` route 는 저마다 지우거나 반영 기록을 읽게 고친다. history resolution route 는 지운다(`server_routes_http_routes_keepers` 의 등록과 그 handler 단위). `bin/masc_librarian_continuity.ml`, `bin/masc_librarian_replay.ml` 은 지운다.
+**g. route 와 도구.** 일괄 cleanup route 의 Memory 철회는 쓰는 쪽으로 쓴다(§20 L5t). `memory-journal`, `memory-facts` route 는 저마다 지우거나 반영 기록을 읽게 고친다. `memory-catch-up` route 와 history resolution route 는 L5p 에서 지운다(`server_routes_http_routes_keepers` 의 등록과 그 handler). `bin/masc_librarian_continuity.ml`, `bin/masc_librarian_replay.ml` 은 지운다.
 
 **h. 시험과 release 목록.**
 
@@ -1902,7 +1938,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | 같이 지운다. 하는 일이 전부 옛 경로다. 지우는 집합에 넣었다 | `bin/masc_librarian_continuity`, `bin/masc_librarian_replay`, `bin/masc_librarian_preflight_eval`, `server_librarian_addon_validation`, `server_librarian_addon_wake`, `server_dashboard_http_keeper_memory_history_resolution` |
 | 이름만 따라 바꾼다 | `keeper_exact_walk_failure`, `keeper_exact_walk_receipt`, `exact_lane_failure` (위 a) |
 | Librarian 을 가르던 곳만 지운다. 나머지는 다른 add-on 이 쓴다 | `server_lane_addon_exact`(`authorize_request` 가 Librarian 요청이면 `Background` 와 Librarian 의 출력 검사를 골랐다), `server_unowned_exact_sweep`(`original_required` 의 Librarian 항), `server_settled_archive_sweep`(Librarian 의 gate 모듈로 기록을 가르던 갈래) |
-| 고쳐 쓴다. 부르는 코드를 지우거나 새 모듈로 바꾼다 | 나머지 53개. 턴 기록으로 옮기는 것(위 d), Memory 저장소(위 b), Keeper 와 만나는 곳(§11), 화면과 route(§12, 위 g), purge(§5.6), boot 의 등록(`server_runtime_bootstrap` 은 `queue_refresh` 와 add-on wake 설치 둘을 지운다) |
+| 고쳐 쓴다. 부르는 코드를 지우거나 새 모듈로 바꾼다 | 나머지 53개. 턴 기록으로 옮기는 것(위 d), Memory 저장소(위 b), Keeper 와 만나는 곳(§11), 화면과 route(§12, 위 g), purge(§5.6), boot 의 등록(`server_runtime_bootstrap` 은 `queue_refresh` 설치 대신 `keeper_working_context_pass` 의 설치를 부르고, add-on wake 설치를 지운다) |
 
 - 같이 지우는 단위를 집합에 넣으면 그 단위를 부르는 곳이 다음 출력에 나온다. 그렇게 다시 돌려 새로 나온 단위가 셋이다(`server_lane_addon_exact`, `server_unowned_exact_sweep`, `server_routes_http_routes_keepers`). 셋 다 통째로 지우는 단위가 아니어서 거기서 멈춘다.
 - Librarian 이 Lane Add-on 틀에서 나가면(§4) 틀의 Exact 요청은 모두 `Standard` 로 받는다. 틀 안에서 `Background` 를 고르던 곳은 Librarian 갈래 하나였다(`server_lane_addon_exact.ml:351`).
@@ -1933,6 +1969,8 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 2. 전환(L5) 뒤의 층은 모두 서버의 실제 경로가 부른다. 부르는 곳이 없는 코드 위에 시험을 쌓지 않는다.
 3. 새 파일의 store 검증, Keeper 삭제 계획, blob GC 분류는 서버가 그 파일을 처음 쓰는 층이나 그 앞의 층에 넣는다.
 4. 삭제는 마지막이다. 커밋 하나가 파일 다섯 개를 넘지 않는다.
+
+쓰는 쪽을 서버가 시작하는 층은 턴 기록을 쓰는 층(L3c) 뒤에 온다. 턴 기록이 없는 Keeper 의 저장소는 `Store_unwritable` 로 서고 쓰기는 `Unavailable` 로 답한다.
 
 앞서 끝나 있어야 하는 것은 「Exact 요청은 자리만 기다린다」 RFC(#52986)의 자리 걷기 층이다. 그 층이 병합되기 전에는 이 스택의 어느 PR 도 `exact_output.ml`, `exact_output.mli`, `retry.ml` 을 고치지 않는다.
 
@@ -1970,8 +2008,17 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5j | 반영 기록을 처음부터 읽는 것(`Librarian_log_store.fold`)과 나간 fact 의 읽기(`Librarian_archive`). 아직 부르는 곳은 없다 | 줄마다 시작 offset 과 함께 순서대로 나온다. 해석 안 되는 줄은 그렇게 표시돼 나오고, 끊긴 조각은 줄이 아니다. 한 번에 읽는 줄 수를 넘는 기록도 한 번씩 다 나온다. 철회한 fact, 근거를 잃은 fact, 대체된 fact 가 나간 순서대로 이유와 함께 나온다. 다시 더한 fact 와 지금 스냅샷에 있는 fact 는 빠진다. 해석 안 되는 줄은 수로 센다 |
 | L5k | 턴 기록과 반영 기록의 store 검증(`Keeper_durable_store` 의 `Turn_log`, `Memory_log`). 반영 기록과 쓰는 쪽 잠금의 blob GC 분류. 턴 기록을 처음부터 읽는 것(`Keeper_turn_log_store.fold`) | 턴 기록의 해석 안 되는 줄은 offset 과 함께 거절된다. 끊긴 꼬리는 줄이 아니다. 반영 기록의 해석 안 되는 마지막 줄은 거절되고, 맡긴 뒤에는 행으로 센다. 해석 안 되는 줄 뒤에 반영 줄이 오면 거절된다. 쓰는 쪽이 한 번 반영한 workspace 에서 blob sweep 이 분류 안 된 이름을 0개로 알린다 |
 | L5l | Keeper 삭제 계획이 반영 기록, 그 잠금, 쓰는 쪽 잠금을 지운다. 쓰는 쪽을 먼저 끝내는 것은 전환 층이 잇는다 | 삭제 계획에 세 파일이 든다 |
+| L5m | working-context pass 하나를 `keeper_librarian_queue_refresh` 에서 `keeper_working_context_pass` 로 옮긴다. 동작은 같다 | 옛 모듈의 pass 가 새 모듈을 부른다. 기존 시험 둘이 새 이름으로 같은 것을 단언한다 |
+| L5n | Keeper 의 `keeper_memory_write` 가 admission queue 에 넣지 않고 지금 스냅샷에 바로 쓴다. queue 에 넣는 곳은 이 도구 하나였다. 이미 든 줄은 옛 admission pass 가 비우고, 파일은 컷에서 지운다 | 평범한 관찰이 바로 지금 Memory 에 든다. 같은 claim 을 다시 쓰면 `reobserved` 다. 옛 admission 경로의 시험은 queue 를 직접 채운다 |
+| L5o | 서버가 큐 신호에 working-context pass 만 싣는다. launch, boot, checkpoint purge 가 durable catch-up 을 싣지 않는다 | launch 가 memory lane 에 아무것도 싣지 않는다. 돌고 있는 unit 뒤에 쌓이는 것이 없다 |
+| L5p | 운영자가 옛 durable pass 를 싣던 두 길을 지운다. `memory-catch-up` route 와 TUI 의 `/memory sync`, history original resolution route 다 | `/memory sync` 는 모르는 명령이다. 두 경로에 route 가 없다 |
+| L5q | workspace 마다 쓰는 쪽의 표 하나를 쥐는 모듈(`keeper_memory_writers`). 표는 서버가 시작하고, 시작한 switch 와 같이 끝난다. 이 층에서는 서버가 아직 시작하지 않는다 | 등록부에 없는 Keeper 는 쓰는 쪽이 없다. 스냅샷과 반영 기록이 Keeper config 디렉터리에 생긴다. 턴 기록이 없는 Keeper 의 저장소는 선다. 시작하지 않은 workspace 에는 표가 없다 |
+| L5r | 쓰는 쪽이 스냅샷의 새 revision 을 알린다(`Keeper_memory_commit_notifications`). 옛 쓰기 경로가 반영 뒤에 하던 일이다 | 저장소가 열릴 때와 반영마다 revision 하나가 들린다. 아무것도 쓰지 않은 답과 선 저장소는 알리지 않는다 |
+| L5s | 서버가 workspace 의 쓰는 쪽 표를 시작하고 maintenance tick 이 pulse 한다. Keeper 의 `keeper_memory_write` 와 `keeper_memory_retract` 가 쓰는 쪽으로 쓴다. 운영자 cleanup route 와 Keeper 삭제는 다음 층이다 | 도구 시험이 영수증, 스냅샷, 반영 기록을 본다. Librarian 이 넣은 fact 를 `supersedes` 한다. 없는 대상은 claim 이 이미 있으면 `already_superseded` 이고 아니면 거절이다. 쓰는 쪽이 없으면 `memory_unwritable` 이다 |
+| L5t | 운영자의 철회 route 가 철회마다 쓰는 쪽에 `Retract` 하나를 쓴다. 요청은 스냅샷의 revision 과 sha 를 싣지 않는다. Keeper 삭제가 파일을 지우기 전에 쓰는 쪽을 끝낸다 | 운영자의 철회가 반영 기록의 줄이 되고, 그 뒤에 Keeper 의 쓰기가 반영된다. 같은 요청을 다시 보내면 줄이 늘지 않는다. 등록된 Keeper 의 파일은 지우지 않는다 |
+| L5u | 운영자 route `POST <k>/memory/act` 가 `Resume` 과 `Adopt` 를 쓰는 쪽에 보낸다. 답은 `Done` 과 그 뒤 저장소의 상태이거나 거절한 이유다 | 밖에서 바뀐 스냅샷으로 멈춘 저장소를 `Resume` 하면 같은 이유로 멈춘다. 파일의 sha 로 `Adopt` 하면 열리고 줄이 하나 붙는다. 열린 저장소는 둘 다 거절한다 |
 | L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
-| L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 둘을 검사한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. 처음 Memory 가 이미 가진 token 은 채점기가 어느 수에도 세지 않는다 |
+| L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 셋을 검사하고 어긋난 case 를 거절한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. token 이 처음 Memory 의 claim 에 없다. 채점기는 처음 Memory 가 가진 token 을 어느 수에도 세지 않는다. 그래서 셋째 검사가 없으면 `planted` 가 조용히 줄어든다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |
 | L9 | 화면과 경보: health 절, `keeper-memory-health` 행, TUI 해석, 수준 함수 | 생성자마다 해석 시험. health JSON 에 자유 글이 없다 |

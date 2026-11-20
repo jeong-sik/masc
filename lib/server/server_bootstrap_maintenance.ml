@@ -860,6 +860,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     let reconcile_ask_answers () =
       Keeper_ask_answer_wake.pulse ~sw ask_answers
     in
+    (* Every registered Keeper has its Memory writer, and the writer of a
+       Keeper that left the registry is retired (RFC
+       librarian-call-only-proposes §9.5). *)
+    let pulse_memory_writers () =
+      Option.iter
+        (fun writers ->
+           Librarian_writers.pulse
+             writers
+             (List.map
+                (fun (entry : Keeper_registry.registry_entry) -> entry.name)
+                (Keeper_registry.all ~base_path:config.base_path ())))
+        (Keeper_memory_writers.find ~base_path:config.base_path)
+    in
     reconcile_goal_events ();
     reconcile_composition_completions ();
     reconcile_owned_job_completions ();
@@ -883,6 +896,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       reconcile_unread_tool_results ();
       reconcile_prepared_continuations ();
       reconcile_ask_answers ();
+      pulse_memory_writers ();
       (try
          let stale_sids = Sse.cleanup_stale () in
          List.iter Server_routes_http_common.stop_sse_session stale_sids;

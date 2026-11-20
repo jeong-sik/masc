@@ -47,6 +47,9 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
+(** One row of a history file, without its line break. *)
+val decode_line : string -> (line, read_error) result
+
 type file =
   | Main
   | Internal

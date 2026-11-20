@@ -1403,148 +1403,39 @@ let keeper_context_status_json
 include (Keeper_tool_memory_validation :
   module type of Keeper_tool_memory_validation with type fact_store := fact_store)
 
-(* An explicit write is a claim a later turn reads back; the current Memory OS
-   snapshot is the only store it reaches.
+(* An explicit write is a claim a later turn reads back. It goes to the
+   Keeper's Memory writer, which commits it in one line and answers with
+   that line (RFC librarian-call-only-proposes §8.5). No local importance,
+   recency, or echo heuristic participates.
 
-   No local importance, recency, or echo heuristic participates. The explicit
-   write upserts one exact identity; the Librarian remains responsible for
-   deciding the complete current selection on its next pass.
+   With [supersedes] the named fact leaves in the commit the claim arrives
+   in. Whose fact it was does not matter: one the Librarian put there is
+   superseded like one the Keeper wrote. A [supersedes] that names no
+   current fact is refused unless the claim is already current.
 
-   With [supersedes] the named fact leaves in the same commit the new one
-   arrives; the store refuses a target that is not this keeper's own current
-   authored fact. One exception: an authored fact of this keeper that the
-   Librarian already dropped. What the keeper asked for (the target gone, the
-   claim current) is reached by writing the claim, so it is written and the
-   receipt names the removal.
-
-   A refusal is kept only where the keeper has a better move. An explicit
-   write or retraction (the keeper's own, or the operator's dashboard
-   cleanup) stays refused with the removal named: a superseded_by reason
-   points at an authored successor the keeper can supersede instead. A
-   Librarian revision also leaves a current successor, but an injected one the
-   keeper cannot supersede; refusing there only leads to the same claim being
-   written beside it one call later. A dropped Librarian copy is refused as
-   not authored, as it was while current. *)
-type explicit_write_error =
-  | Write_unsupported_derivation of Keeper_memory_os_current.support_invalidation
-  | Write_successor_rests_on_target of Keeper_memory_os_current.support_invalidation
-  | Write_persistence_failed of string
-  | Write_supersede_refused of memory_write_error_kind
-  | Write_supersede_target_removed of Keeper_memory_os_current.removal
-
-type supersession =
-  | No_supersedes
-  | Superseded of string
-  | Target_already_dropped of
-      { memory_id : string
-      ; removal : Keeper_memory_os_current.removal
-      }
-
-let upsert_explicit_fact
-      ~(keepers_dir : string)
+   [None]: this process started no Memory writers for the workspace. *)
+let write_through_writer
+      ~(config : Workspace.config)
       ~(meta : keeper_meta)
-      ~(body : string)
-      ~(basis : Keeper_memory_os_types.basis)
-      ~(supersedes : string option)
-  : (Keeper_memory_os_current.t * supersession, explicit_write_error) result
+      (write : Librarian_direct.write)
+  : Librarian_machine.write_answer option
   =
-  let keeper_id = meta.name in
-  let now = Time_compat.now () in
-  let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-  let fact : Keeper_memory_os_types.fact =
-    { claim = body
-    ; category = Keeper_memory_os_types.Fact
-    ; first_seen = now
-    ; last_seen = now
-    ; origin = { kind = Keeper_memory_os_types.Authored; trace_id }
-    ; basis
-    }
-  in
-  let source : Keeper_memory_os_current.source =
-    { kind = Keeper_memory_os_current.Explicit_write; trace_id }
-  in
-  let upsert () =
-    Keeper_memory_os_current.upsert_fact ~pass:Keeper_memory_commit_pass.Keeper_write
-      ~keepers_dir ~keeper_id ~now ~source fact
-    |> Result.map_error (function
-      | Keeper_memory_os_current.Unsupported_derivation invalidation ->
-        Write_unsupported_derivation invalidation
-      | Keeper_memory_os_current.Upsert_persistence_failed detail ->
-        Write_persistence_failed detail)
-  in
-  let result =
-    match supersedes with
-    | None -> upsert () |> Result.map (fun snapshot -> snapshot, No_supersedes)
-    | Some superseded_memory_id ->
-      (match
-         Keeper_memory_os_current.supersede_fact
-           ~pass:Keeper_memory_commit_pass.Keeper_write
-           ~keepers_dir
-           ~keeper_id
-           ~now
-           ~source
-           ~superseded_memory_id
-           fact
-       with
-       | Ok (snapshot, Keeper_memory_os_current.Superseded_current) ->
-         Ok (snapshot, Superseded superseded_memory_id)
-       | Ok (snapshot, Keeper_memory_os_current.Target_already_dropped removal) ->
-         Ok (snapshot, Target_already_dropped { memory_id = superseded_memory_id; removal })
-       | Error (Keeper_memory_os_current.Supersede_target_not_current _) ->
-         Error (Write_supersede_refused Supersedes_not_current)
-       | Error (Keeper_memory_os_current.Supersede_target_removed removal) ->
-         Error (Write_supersede_target_removed removal)
-       | Error (Keeper_memory_os_current.Supersede_journal_unreadable detail) ->
-         Log.Keeper.warn
-           "memory journal unreadable while resolving supersedes keeper=%s: %s"
-           keeper_id detail;
-         Error (Write_persistence_failed detail)
-       | Error Keeper_memory_os_current.Supersede_memory_id_invalid ->
-         Error (Write_supersede_refused Supersedes_invalid)
-       | Error Keeper_memory_os_current.Supersede_self ->
-         Error (Write_supersede_refused Supersedes_self)
-       | Error (Keeper_memory_os_current.Supersede_target_not_authored _) ->
-         Error (Write_supersede_refused Supersedes_not_authored)
-       | Error (Keeper_memory_os_current.Supersede_successor_rests_on_target invalidation) ->
-         Error (Write_successor_rests_on_target invalidation)
-       | Error (Keeper_memory_os_current.Supersede_unsupported_derivation invalidation) ->
-         Error (Write_unsupported_derivation invalidation)
-       | Error (Keeper_memory_os_current.Supersede_persistence_failed detail) ->
-         Error (Write_persistence_failed detail))
-  in
-  (match result with
-   | Ok _ ->
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
-       ~labels:[ "keeper", keeper_id ]
-       ()
-   | Error _ -> ());
-  result
+  Keeper_memory_writers.find ~base_path:config.base_path
+  |> Option.map (fun writers ->
+    Librarian_writers.write
+      writers
+      meta.name
+      ~by:Librarian_effects.Keeper
+      ~trace:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      write)
 ;;
 
-let support_invalidation_receipt
-      (invalidation : Keeper_memory_os_current.support_invalidation)
-  =
-  `Assoc
-    [ ( "memory_id"
-      , `String (Keeper_memory_os_types.memory_id invalidation.fact) )
-    ; ( "missing_premise_ids"
-      , `List
-          (List.map
-             (fun premise_id -> `String premise_id)
-             invalidation.missing_premise_ids) )
-    ]
-;;
-
-(* What a removal took with it: the facts that left the snapshot, and the
-   derived facts among them that lost their last complete support path. A
-   retraction and a supersession report it in the same two fields. *)
 (* The keys of a [keeper_memory_write] receipt that say what the write did.
    The receipts below write them through these names and the repeat guard's
    answer ([memory_write_answer_of_output]) keeps exactly [answer], so the two
    cannot drift apart without the compiler seeing it. Snapshot stamps
-   ([revision], [recorded_at]), counts and prose ([rows_written],
-   [what_committed]) and pending request_id/sequence are not answer keys. *)
+   ([revision], [recorded_at]) and counts and prose ([rows_written],
+   [what_committed]) are not answer keys. *)
 module Write_receipt_key = struct
   let ok = "ok"
   let error_kind = "error_kind"
@@ -1557,7 +1448,7 @@ module Write_receipt_key = struct
   let basis = "basis"
   let superseded_memory_id = "superseded_memory_id"
   let supersedes = "supersedes"
-  let supersedes_already_removed = "supersedes_already_removed"
+  let unwritable = "unwritable"
   let source_path = "source_path"
   let source_sha256 = "source_sha256"
   let missing_premise_ids = "missing_premise_ids"
@@ -1576,7 +1467,7 @@ module Write_receipt_key = struct
     ; basis
     ; superseded_memory_id
     ; supersedes
-    ; supersedes_already_removed
+    ; unwritable
     ; source_path
     ; source_sha256
     ; missing_premise_ids
@@ -1586,57 +1477,62 @@ module Write_receipt_key = struct
   ;;
 end
 
-let removal_receipt (snapshot : Keeper_memory_os_current.t) =
+(* What a commit took out of Memory: every fact that left, and the derived
+   facts among them that left because a premise did. A retraction and a
+   supersession report it in the same two fields. *)
+let removal_receipt (effects : Librarian_effects.t) =
+  let lost_support
+        ((fact : Keeper_memory_os_types.fact), (removal : Librarian_effects.removal))
+    =
+    match removal with
+    | Support_lost { missing } ->
+      Some
+        (`Assoc
+            [ "memory_id", `String (Keeper_memory_os_types.memory_id fact)
+            ; ( "missing_premise_ids"
+              , `List (List.map (fun premise_id -> `String premise_id) missing) )
+            ])
+    | Dropped _ | Merged_into _ | Revised_into _ | Superseded_by _ | Retracted _ -> None
+  in
   [ ( Write_receipt_key.removed_memory_ids
     , `List
         (List.map
-           (fun fact -> `String (Keeper_memory_os_types.memory_id fact))
-           snapshot.change.removed) )
+           (fun ((fact : Keeper_memory_os_types.fact), (_ : Librarian_effects.removal)) ->
+              `String (Keeper_memory_os_types.memory_id fact))
+           effects.removed) )
   ; ( Write_receipt_key.support_invalidations
-    , `List (List.map support_invalidation_receipt snapshot.change.invalidated) )
+    , `List (List.filter_map lost_support effects.removed) )
   ]
 ;;
 
-(* The journal line that had already removed a [supersedes] target: which
-   commit, when, which writer, and the reason that writer gave. *)
-let supersedes_removal_json ~memory_id (removal : Keeper_memory_os_current.removal) =
-  `Assoc
-    ([ "memory_id", `String memory_id
-     ; ( "removed_by"
-       , `String (Keeper_memory_os_current.source_kind_to_string removal.removed_by.kind) )
-     ; "removed_at", `String (Masc_domain.iso8601_of_unix_seconds removal.removed_at)
-     ; "removed_in_revision", `Int removal.removed_in_revision
-     ]
-     @ Option.fold
-         ~none:[]
-         ~some:(fun reason -> [ "reason", `String reason ])
-         removal.drop_reason)
+type memory_write_identity_disposition =
+  | Inserted of Keeper_memory_os_types.fact
+  | Reobserved
+
+(* What the commit did with the claim it states: added it, or moved the
+   [last_seen] of the fact that already said it. [None]: the commit names
+   the claim in neither list. *)
+let memory_write_identity_disposition ~memory_id (effects : Librarian_effects.t) =
+  match
+    List.find_opt
+      (fun fact -> String.equal (Keeper_memory_os_types.memory_id fact) memory_id)
+      effects.added
+  with
+  | Some fact -> Some (Inserted fact)
+  | None -> if List.exists (String.equal memory_id) effects.touched then Some Reobserved else None
 ;;
 
-type memory_write_identity_disposition = Inserted | Reobserved
-
-let memory_write_identity_disposition
-      ~(snapshot : Keeper_memory_os_current.t)
-      ~(fact : Keeper_memory_os_types.fact)
-  =
-  let identity = Keeper_memory_os_types.memory_id fact in
-  let has_identity = List.exists (fun candidate ->
-    String.equal (Keeper_memory_os_types.memory_id candidate) identity) in
-  (* The returned delta was computed under the same lock as the commit.
-     Updating an existing identity can put its old and new payloads in both
-     lists; only an addition without a corresponding removal is insertion. *)
-  if has_identity snapshot.change.added && not (has_identity snapshot.change.removed)
-  then Inserted
-  else Reobserved
-;;
-
+(* The basis is the receipt's only for a fact the commit added. A fact seen
+   again keeps the basis it had, which the commit does not carry. *)
 let memory_write_identity_receipt = function
-  | Inserted ->
+  | Inserted fact ->
     [ Write_receipt_key.identity_disposition, `String "inserted"
-    ; "what_committed", `String "One current fact was inserted. Its memory_id identifies the exact claim bytes; writing those bytes again reuses this identity, without creating another copy." ]
+    ; "what_committed", `String "One current fact was inserted. Its memory_id identifies the exact claim bytes; writing those bytes again reuses this identity, without creating another copy."
+    ; Write_receipt_key.basis, memory_write_basis_receipt fact.basis
+    ]
   | Reobserved ->
     [ Write_receipt_key.identity_disposition, `String "reobserved"
-    ; "what_committed", `String "The existing current fact was re-observed; its observation or support was refreshed. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
+    ; "what_committed", `String "The existing current fact was seen again: only its last_seen moved. No duplicate copy was created. Retracting this memory_id would remove the current fact." ]
 ;;
 
 (* The receipt fields that say what a write did. [revision] and [recorded_at]
@@ -1700,54 +1596,6 @@ let keeper_memory_write_with_outcome
         ~base_path:config.Workspace.base_path
     in
     (match source_path, basis, supersedes with
-     (* The Librarian admission queue only moves while the Librarian runs;
-        with the switch off (or invalid) nobody drains it, and a plain
-        observation would sit pending forever behind an ok:true receipt.
-        Those writes take the direct current-snapshot path below instead. *)
-     | None, Keeper_memory_os_types.Observed _, None
-       when Env_config.KeeperMemoryOs.librarian_config_state ()
-            = Env_config.KeeperMemoryOs.Enabled ->
-       let request_id = Random_id.prefixed ~prefix:"memory-admission-" ~bytes:16 in
-       let now = Time_compat.now () in
-       let fact : Keeper_memory_os_types.fact =
-         { claim = body; category = Keeper_memory_os_types.Fact;
-           first_seen = now; last_seen = now;
-           origin = { kind = Keeper_memory_os_types.Authored;
-             trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id };
-           basis } in
-       let saved =
-         try Keeper_memory_admission_queue.append ~keepers_dir
-             ~keeper_id:meta.name ~request_id fact with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn -> Error (Keeper_memory_admission_queue.Append_failed (Printexc.to_string exn)) in
-       (match saved with
-        | Error error ->
-          let detail = Keeper_memory_admission_queue.append_error_to_string error in
-          let error_kind = match error with
-            | Capacity_exceeded _ -> Pending_admission_capacity_exceeded
-            | Append_failed _ -> Pending_admission_persistence_failed in
-          Log.Keeper.warn "pending memory admission failed keeper=%s request_id=%s: %s"
-            meta.name request_id detail;
-          respond ~ok:false ~error_kind
-            [ "request_id", `String request_id;
-              Write_receipt_key.store, `String "pending_memory_admission";
-              Write_receipt_key.detail, `String detail ]
-        | Ok candidate ->
-          (* Notification failure cannot turn the committed queue append into
-             a failed save. The signal logs recoverable failures; startup and
-             subsequent wakes can discover this same pending candidate. *)
-          Keeper_librarian_queue_signal.changed
-            ~base_path:config.Workspace.base_path ~keeper_name:meta.name;
-          respond ~ok:true ~error_kind:No_memory_write_error
-            [ Write_receipt_key.outcome, `String "persisted_pending_admission";
-              Write_receipt_key.store, `String "pending_memory_admission";
-              "request_id", `String candidate.request_id;
-              "sequence", `Int candidate.sequence;
-              "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds candidate.fact.last_seen);
-              "rows_written", `Int 1;
-              Write_receipt_key.basis, memory_write_basis_receipt candidate.fact.basis;
-              "what_committed", `String
-                "The candidate was persisted for Librarian admission. This receipt acknowledges pending input and does not confirm admission or a current Memory identity; the worker may already have processed it. This request_id is not a memory_id and cannot be a premise or supersedes target. Search current Memory for an admitted premise identity; supersedes additionally requires origin authored." ])
      | Some source_path, _, _ ->
        (match
           Result.bind
@@ -1830,124 +1678,136 @@ let keeper_memory_write_with_outcome
             meta.name
             detail;
           respond ~ok:false ~error_kind:(Persistence_failed Source_bound_current) [ Write_receipt_key.detail, `String detail ])
-     | None, _, Some _ | None, Keeper_memory_os_types.Derived _, None
-     | None, Keeper_memory_os_types.Observed _, None ->
-    (match upsert_explicit_fact ~keepers_dir ~meta ~body ~basis ~supersedes with
-     | Ok (snapshot, supersession) ->
-       let written_fact =
-         List.find_opt
-           (fun fact -> String.equal fact.Keeper_memory_os_types.claim body)
-           snapshot.facts
+     | None, _, _ ->
+       let memory_id = Keeper_memory_os_types.memory_id_of_claim body in
+       let category = Keeper_memory_os_types.Fact in
+       let write : Librarian_direct.write =
+         match supersedes with
+         | None -> Remember { claim = body; category; basis }
+         | Some old -> Supersede { old; claim = body; category; basis }
        in
-       (match written_fact with
-        | Some written_fact ->
-          let written_memory_id = Keeper_memory_os_types.memory_id written_fact in
-          respond
-            ~ok:true
-            ~error_kind:No_memory_write_error
-            (memory_write_identity_receipt
-               (memory_write_identity_disposition ~snapshot ~fact:written_fact)
-             @ [ "rows_written", `Int 1
-            ; "revision", `Int snapshot.revision
-              (* [recorded_at] echoes the persisted snapshot stamp rather than
-                 reading a second clock: the receipt and the stored fact cannot
-                 disagree, and the authoring model gets an authoritative UTC
-                 time at the exact moment it writes prose claims — hand-typed
-                 timestamps in claims have drifted by whole hours (lane-smith,
-                 2026-09-01: a 02:42Z event recorded as "03:42Z"). *)
-            ; ( "recorded_at"
-              , `String
-                  (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
-            ; Write_receipt_key.outcome, `String "persisted_current_snapshot"
+       let named_supersedes =
+         Option.fold
+           ~none:[]
+           ~some:(fun old -> [ Write_receipt_key.supersedes, `String old ])
+           supersedes
+       in
+       let unwritable reason =
+         respond
+           ~ok:false
+           ~error_kind:(Memory_unwritable reason)
+           [ Write_receipt_key.unwritable, `String (memory_unwritable_to_string reason) ]
+       in
+       (* The claim is current and this call changed nothing. *)
+       let unchanged ~outcome ~what_committed =
+         respond
+           ~ok:true
+           ~error_kind:No_memory_write_error
+           ([ "rows_written", `Int 0
+            ; Write_receipt_key.outcome, `String outcome
             ; Write_receipt_key.store, `String "current_memory_snapshot"
-            ; Write_receipt_key.memory_id, `String written_memory_id
-            ; Write_receipt_key.basis, memory_write_basis_receipt written_fact.basis
+            ; Write_receipt_key.memory_id, `String memory_id
+            ; "what_committed", `String what_committed
             ]
-             @
-             match supersession with
-             | No_supersedes -> []
-             | Superseded superseded_memory_id ->
-               (Write_receipt_key.superseded_memory_id, `String superseded_memory_id)
-               :: removal_receipt snapshot
-             | Target_already_dropped { memory_id; removal } ->
-               [ ( Write_receipt_key.supersedes_already_removed
-                 , supersedes_removal_json ~memory_id removal )
-               ])
-        | None ->
-          let detail = "committed current Memory snapshot omitted the written fact" in
+            @ named_supersedes)
+       in
+       (match write_through_writer ~config ~meta write with
+        | None -> unwritable No_writer_in_process
+        | Some (Written commit) ->
+          (match memory_write_identity_disposition ~memory_id commit.effects with
+           | Some disposition ->
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string MemoryOsExplicitFactWrite)
+               ~labels:[ "keeper", meta.name ]
+               ();
+             respond
+               ~ok:true
+               ~error_kind:No_memory_write_error
+               (memory_write_identity_receipt disposition
+                @ [ "rows_written", `Int 1
+                  ; "revision", `Int commit.revision
+                    (* [recorded_at] echoes the commit line's stamp rather than
+                       reading a second clock: the receipt and the stored fact
+                       cannot disagree, and the authoring model gets an
+                       authoritative UTC time at the exact moment it writes
+                       prose claims — hand-typed timestamps in claims have
+                       drifted by whole hours (lane-smith, 2026-09-01: a
+                       02:42Z event recorded as "03:42Z"). *)
+                  ; "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds commit.at)
+                  ; Write_receipt_key.outcome, `String "persisted_current_snapshot"
+                  ; Write_receipt_key.store, `String "current_memory_snapshot"
+                  ; Write_receipt_key.memory_id, `String memory_id
+                  ]
+                @
+                match supersedes with
+                | None -> []
+                | Some old ->
+                  (Write_receipt_key.superseded_memory_id, `String old)
+                  :: removal_receipt commit.effects)
+           | None ->
+             let detail = "the commit names the written claim in neither added nor touched" in
+             Log.Keeper.warn
+               "explicit current Memory write invariant failed keeper=%s revision=%d: %s"
+               meta.name
+               commit.revision
+               detail;
+             respond
+               ~ok:false
+               ~error_kind:Commit_receipt_inconsistent
+               [ "revision", `Int commit.revision; Write_receipt_key.detail, `String detail ])
+        | Some Already_held ->
+          unchanged
+            ~outcome:"already_held"
+            ~what_committed:
+              "Nothing was written. This claim is already a current fact with another \
+               category or basis, and that fact is as it was. To state it this way, \
+               retract its memory_id and write the claim again."
+        | Some Already_done ->
+          unchanged
+            ~outcome:"already_superseded"
+            ~what_committed:
+              "Nothing was written. The claim is current and the fact supersedes names \
+               is not."
+        | Some Already_absent -> unwritable Answer_of_another_write
+        | Some (Refused Unknown_fact) ->
+          respond ~ok:false ~error_kind:Supersedes_not_current named_supersedes
+        | Some (Refused Supersedes_itself) ->
+          respond ~ok:false ~error_kind:Supersedes_self named_supersedes
+        | Some (Refused Blank_claim) -> respond ~ok:false ~error_kind:Content_empty []
+        | Some (Refused ((Blank_trace | Malformed_derivation) as refusal)) ->
+          unwritable (Refused_past_validation refusal)
+        | Some (Refused (Premises_missing missing)) ->
+          (* A premise that is missing because this write removes it is the
+             fact [supersedes] names. *)
+          let error_kind =
+            match supersedes with
+            | Some old when List.exists (String.equal old) missing ->
+              Supersedes_premise_of_successor
+            | Some _ | None -> Unsupported_derivation
+          in
+          respond
+            ~ok:false
+            ~error_kind
+            (( Write_receipt_key.missing_premise_ids
+             , `List (List.map (fun premise_id -> `String premise_id) missing) )
+             :: named_supersedes)
+        | Some (Not_a_snapshot refusal) -> unwritable (Not_a_snapshot refusal)
+        | Some (Unavailable (Store_stopped stop)) -> unwritable (Store_stopped stop)
+        | Some (Unavailable Keeper_retired) -> unwritable Keeper_not_registered
+        | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+        | exception exn ->
+          (* The writer did not answer, so whether its line was appended is
+             not known. Presenting the claim as saved would lose it
+             silently. *)
+          let detail = Printexc.to_string exn in
           Log.Keeper.warn
-            "explicit current Memory write invariant failed keeper=%s revision=%d: %s"
+            "explicit current Memory write failed keeper=%s: %s"
             meta.name
-            snapshot.revision
             detail;
           respond
             ~ok:false
-            ~error_kind:Commit_receipt_inconsistent
-            [ "revision", `Int snapshot.revision; Write_receipt_key.detail, `String detail ])
-     | Error (Write_supersede_refused error_kind) ->
-       respond
-         ~ok:false
-         ~error_kind
-         (Option.fold
-            ~none:[]
-            ~some:(fun superseded_memory_id ->
-              [ Write_receipt_key.supersedes, `String superseded_memory_id ])
-            supersedes)
-     | Error (Write_supersede_target_removed removal) ->
-       (* Still [Supersedes_not_current]; the removal is shown so the keeper
-          can see which explicit write or retraction removed it. *)
-       respond
-         ~ok:false
-         ~error_kind:Supersedes_not_current
-         (Option.fold
-            ~none:[]
-            ~some:(fun superseded_memory_id ->
-              [ Write_receipt_key.supersedes, `String superseded_memory_id
-              ; ( "supersedes_removed"
-                , supersedes_removal_json ~memory_id:superseded_memory_id removal )
-              ])
-            supersedes)
-     | Error (Write_unsupported_derivation invalidation) ->
-       respond
-         ~ok:false
-         ~error_kind:Unsupported_derivation
-         [ ( Write_receipt_key.missing_premise_ids
-           , `List
-               (List.map
-                  (fun premise_id -> `String premise_id)
-                  invalidation.missing_premise_ids) )
-         ]
-     | Error (Write_successor_rests_on_target invalidation) ->
-       respond
-         ~ok:false
-         ~error_kind:Supersedes_premise_of_successor
-         (( Write_receipt_key.missing_premise_ids
-          , `List
-              (List.map
-                 (fun premise_id -> `String premise_id)
-                 invalidation.missing_premise_ids) )
-          :: Option.fold
-               ~none:[]
-               ~some:(fun superseded_memory_id ->
-                 [ Write_receipt_key.supersedes, `String superseded_memory_id ])
-               supersedes)
-     | Error (Write_persistence_failed detail) ->
-       Log.Keeper.warn
-         "explicit current Memory write failed keeper=%s: %s"
-         meta.name
-         detail;
-       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ Write_receipt_key.detail, `String detail ]
-     | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-     | exception exn ->
-       (* The store is the only place a long-term claim survives, so a
-          failed write is reported as failed. Presenting it as saved would
-          lose the claim silently. *)
-       let detail = Printexc.to_string exn in
-       Log.Keeper.warn
-         "explicit current Memory write failed keeper=%s: %s"
-         meta.name
-         detail;
-       respond ~ok:false ~error_kind:(Persistence_failed Ordinary_current) [ Write_receipt_key.detail, `String detail ]))
+            ~error_kind:(Persistence_failed Ordinary_current)
+            [ Write_receipt_key.detail, `String detail ]))
 ;;
 
 (* --- Explicit memory retraction surface -------------------------- *)
@@ -1985,73 +1845,42 @@ let keeper_memory_retract_with_outcome
   match validate_memory_retract_args args with
   | Memory_retract_invalid error_kind -> respond ~ok:false ~error_kind []
   | Memory_retract_ok { memory_id; reason } ->
-    let keepers_dir =
-      Config_dir_resolver.keepers_dir_for_base_path
-        ~base_path:config.Workspace.base_path
+    let unwritable why =
+      respond
+        ~ok:false
+        ~error_kind:(Retract_unwritable why)
+        [ "unwritable", `String (memory_unwritable_to_string why) ]
     in
-    let now = Time_compat.now () in
-    let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    (match
-       Keeper_memory_os_current.retract_fact
-         ~pass:Keeper_memory_commit_pass.Keeper_delete
-         ~keepers_dir
-         ~keeper_id:meta.name
-         ~now
-         ~source:
-           { kind = Keeper_memory_os_current.Explicit_retract
-           ; trace_id
-           }
-         ~memory_id
-         ~reason
-         ()
-     with
-     | Ok snapshot ->
-       (* The fact is gone from the snapshot. The commit's journal row records
-          the retraction, so it stays in the history if the same claim is
-          later stored again. *)
+    (match write_through_writer ~config ~meta (Retract { id = memory_id; reason }) with
+     | None -> unwritable No_writer_in_process
+     | Some (Written commit) ->
+       (* The fact is gone from the snapshot. The commit line keeps it with
+          the reason, so it stays in the history if the same claim is later
+          stored again. *)
        Log.Keeper.info
-         "explicit current Memory retracted keeper=%s revision=%d memory_id=%s support_invalidations=%d"
+         "explicit current Memory retracted keeper=%s revision=%d memory_id=%s removed=%d"
          meta.name
-         snapshot.revision
+         commit.revision
          memory_id
-         (List.length snapshot.change.invalidated);
+         (List.length commit.effects.removed);
        respond
          ~ok:true
          ~error_kind:No_memory_retract_error
-         ([ "revision", `Int snapshot.revision
-          ; ( "recorded_at"
-            , `String (Masc_domain.iso8601_of_unix_seconds snapshot.updated_at) )
+         ([ "revision", `Int commit.revision
+          ; "recorded_at", `String (Masc_domain.iso8601_of_unix_seconds commit.at)
           ; "outcome", `String "retracted_current_fact"
           ; "store", `String "current_memory_snapshot"
           ; "memory_id", `String memory_id
           ; "reason", `String reason
           ]
-          @ removal_receipt snapshot)
-     | Error Keeper_memory_os_current.Retract_memory_id_invalid ->
-       respond
-         ~ok:false
-         ~error_kind:Memory_id_invalid
-         []
-     | Error Keeper_memory_os_current.Retract_reason_empty ->
-       respond
-         ~ok:false
-         ~error_kind:Reason_empty
-         []
-     | Error (Keeper_memory_os_current.Retract_fact_not_found _) ->
-       respond
-         ~ok:false
-         ~error_kind:Fact_not_found
-         [ "memory_id", `String memory_id ]
-     | Error (Keeper_memory_os_current.Retract_persistence_failed detail) ->
-       Log.Keeper.warn
-         "explicit current Memory retraction failed keeper=%s memory_id=%s: %s"
-         meta.name
-         memory_id
-         detail;
-       respond
-         ~ok:false
-         ~error_kind:Retract_persistence_failed
-         [ "detail", `String detail ]
+          @ removal_receipt commit.effects)
+     | Some Already_absent ->
+       respond ~ok:false ~error_kind:Fact_not_found [ "memory_id", `String memory_id ]
+     | Some (Already_held | Already_done) -> unwritable Answer_of_another_write
+     | Some (Refused refusal) -> unwritable (Refused_past_validation refusal)
+     | Some (Not_a_snapshot refusal) -> unwritable (Not_a_snapshot refusal)
+     | Some (Unavailable (Store_stopped stop)) -> unwritable (Store_stopped stop)
+     | Some (Unavailable Keeper_retired) -> unwritable Keeper_not_registered
      | exception (Eio.Cancel.Cancelled _ as error) -> raise error
      | exception exn ->
        let detail = Printexc.to_string exn in

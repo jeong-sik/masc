@@ -19,7 +19,7 @@ Keeper 는 MASC 가 띄우고 지켜보고 기록하는 상주 에이전트입�
 
 ### 메모리 처리와 복구
 
-Librarian 대기 상태, 원 결과 복원, `/memory sync`의 범위는
+Librarian 대기 상태와 원 결과 복원은
 [Keeper 메모리 처리와 복구](guides/KEEPER-MEMORY-RECOVERY.md)를 참고하세요.
 
 ### 모델을 바꿀 때의 체크포인트

@@ -613,9 +613,12 @@
   test_librarian_machine
   test_librarian_writer
   test_librarian_writers
+  test_keeper_memory_writers
   test_librarian_archive
   test_librarian_store_checks
   test_librarian_scoring
+  test_librarian_unread
+  test_librarian_unit_content
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks
@@ -960,9 +963,12 @@
   test_librarian_machine
   test_librarian_writer
   test_librarian_writers
+  test_keeper_memory_writers
   test_librarian_archive
   test_librarian_store_checks
   test_librarian_scoring
+  test_librarian_unread
+  test_librarian_unit_content
   test_keeper_turn_log
   test_keeper_turn_log_store
   test_keeper_turn_log_marks
@@ -5484,7 +5490,6 @@
 (include stanzas/test_tui_execute_stream.inc)
 (include stanzas/test_tui_execute_stream_job.inc)
 (include stanzas/test_tui_execute_stream_http.inc)
-(include stanzas/test_tui_memory_catch_up.inc)
 (include stanzas/test_tui_sse_eof.inc)
 (include stanzas/test_tui_keeper_terminal_state.inc)
 (include stanzas/test_tui_keeper_terminal_stream_state.inc)

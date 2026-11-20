@@ -1,0 +1,191 @@
+(* The Memory writers of a workspace (RFC librarian-call-only-proposes
+   §8.6): a workspace has a table from its start to the end of the switch it
+   was started on, the Keepers that table writes for are the Keeper
+   registry's, and their files are the workspace's. *)
+
+open Alcotest
+module Host = Masc.Keeper_memory_writers
+module Writers = Masc.Librarian_writers
+module Machine = Masc.Librarian_machine
+module Direct = Masc.Librarian_direct
+module Effects = Masc.Librarian_effects
+module Types = Masc.Keeper_memory_os_types
+module Current = Masc.Keeper_memory_os_current
+module Log_store = Masc.Librarian_log_store
+module Turn_log = Masc.Keeper_turn_log
+module Turn_store = Masc.Keeper_turn_log_store
+module Registry = Masc.Keeper_registry
+
+let turn_log =
+  match Turn_log.Log_id.of_string (String.make 32 'a') with
+  | Some id -> id
+  | None -> fail "the test log id is not 32 hexadecimal characters"
+;;
+
+let mark : Turn_log.mark =
+  { trace = "trace-1"
+  ; closed_messages = 0
+  ; session = ""
+  ; history_bytes = 0
+  ; internal_bytes = 0
+  ; chat_bytes = 0
+  ; external_rows = 0
+  }
+;;
+
+(* The turn log is where the Keeper's turns write it: in the workspace's
+   Keeper runtime directory. *)
+let start_turn_log (config : Masc.Workspace.config) keeper_id =
+  match
+    Turn_store.append
+      ~path:
+        (Turn_store.path_for_keepers_dir
+           ~keepers_dir:(Masc.Workspace.keepers_runtime_dir config)
+           ~keeper_id)
+      ~at_end:0
+      (Turn_log.Log_started { id = turn_log; at = 50.0; mark }, [])
+  with
+  | Ok (_ : Turn_store.appended) -> ()
+  | Error (_ : Turn_store.append_error) -> fail "the turn log of the fixture was not written"
+;;
+
+let register (config : Masc.Workspace.config) name =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String name; "trace_id", `String ("trace-" ^ name) ])
+  with
+  | Error error -> fail ("meta fixture failed: " ^ error)
+  | Ok meta ->
+    let (_ : Masc.Keeper_registry_types.registry_entry) =
+      Registry.register_offline ~base_path:config.base_path name meta
+    in
+    ()
+;;
+
+(* A workspace in a temporary directory. The configuration directory is
+   named for the length of the case: one a shell exported would otherwise be
+   the Memory directory. The Keeper registry is the process's, so what a
+   case registers is taken out when the case ends. *)
+let with_workspace body =
+  let root = Unix.realpath (Filename.temp_dir "memory-writers" "") in
+  let config_root =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path:root) Config_dir_resolver.config_dirname
+  in
+  Masc_test_deps.with_process_env "MASC_CONFIG_DIR" (Some config_root) (fun () ->
+    Fun.protect ~finally:Registry.For_testing.clear (fun () ->
+      Eio_main.run (fun (_ : Eio_unix.Stdenv.base) ->
+        body (Masc.Workspace.default_config root))))
+;;
+
+let table (config : Masc.Workspace.config) =
+  match Host.find ~base_path:config.base_path with
+  | Some table -> table
+  | None -> fail "the workspace has no table"
+;;
+
+let remember claim =
+  Direct.Remember { claim; category = Types.Fact; basis = Types.Observed Types.Transcript }
+;;
+
+let answer_text : Machine.write_answer -> string = function
+  | Written _ -> "written"
+  | Already_held -> "already held"
+  | Already_done -> "already done"
+  | Already_absent -> "already absent"
+  | Refused (_ : Direct.refusal) -> "refused"
+  | Not_a_snapshot (_ : Masc.Librarian_envelope.refusal) -> "not a snapshot"
+  | Unavailable Keeper_retired -> "keeper retired"
+  | Unavailable (Store_stopped (_ : Masc.Librarian_store.stop)) -> "store stopped"
+;;
+
+let write config keeper claim =
+  answer_text
+    (Writers.write (table config) keeper ~by:Effects.Keeper ~trace:"turn-1" (remember claim))
+;;
+
+let test_table_lives_with_its_switch () =
+  with_workspace (fun config ->
+    check bool "no table before the start" true
+      (Option.is_none (Host.find ~base_path:config.base_path));
+    Eio.Switch.run (fun sw ->
+      Host.start ~sw ~config;
+      check bool "a table after the start" true
+        (Option.is_some (Host.find ~base_path:config.base_path));
+      check bool "another workspace has none" true
+        (Option.is_none (Host.find ~base_path:(Filename.temp_dir "memory-writers-other" ""))));
+    check bool "no table after its switch ended" true
+      (Option.is_none (Host.find ~base_path:config.base_path)))
+;;
+
+(* The first table's switch ends before the second's. *)
+let test_a_second_start_replaces_the_table () =
+  with_workspace (fun config ->
+    Eio.Switch.run (fun long ->
+      let second =
+        Eio.Switch.run (fun short ->
+          Host.start ~sw:short ~config;
+          let first = table config in
+          Host.start ~sw:long ~config;
+          let second = table config in
+          check bool "the later table is the workspace's" false (second == first);
+          second)
+      in
+      check bool "the end of the first table's switch leaves the later table" true
+        (table config == second)))
+;;
+
+let test_writers_are_the_registry_s () =
+  with_workspace (fun config ->
+    Eio.Switch.run (fun sw ->
+      Host.start ~sw ~config;
+      start_turn_log config "keeper-a";
+      check string "a Keeper that is not registered has no writer" "keeper retired"
+        (write config "keeper-a" "the port is 8935");
+      register config "keeper-a";
+      check string "a registered Keeper is written to" "written"
+        (write config "keeper-a" "the port is 8935")))
+;;
+
+let test_files_are_the_workspace_s () =
+  with_workspace (fun config ->
+    Eio.Switch.run (fun sw ->
+      Host.start ~sw ~config;
+      register config "keeper-a";
+      start_turn_log config "keeper-a";
+      check string "written" "written" (write config "keeper-a" "the port is 8935");
+      let keepers_dir =
+        Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path
+      in
+      (match Current.read_for_keepers_dir ~keepers_dir ~keeper_id:"keeper-a" with
+       | Ok (Some snapshot) ->
+         check (list string) "the snapshot the Keeper's requests read holds the claim"
+           [ "the port is 8935" ]
+           (List.map (fun (fact : Types.fact) -> fact.claim) snapshot.facts)
+       | Ok None -> fail "no snapshot in the Keeper config directory"
+       | Error detail -> fail detail);
+      check bool "the commit log is beside it" true
+        (Sys.file_exists (Log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:"keeper-a"))))
+;;
+
+let test_no_turn_log_stops_the_store () =
+  with_workspace (fun config ->
+    Eio.Switch.run (fun sw ->
+      Host.start ~sw ~config;
+      register config "keeper-a";
+      check string "a Keeper whose turns wrote no log is not written to" "store stopped"
+        (write config "keeper-a" "the port is 8935")))
+;;
+
+let () =
+  run "keeper_memory_writers"
+    [ ( "table"
+      , [ test_case "lives with its switch" `Quick test_table_lives_with_its_switch
+        ; test_case "a second start replaces it" `Quick test_a_second_start_replaces_the_table
+        ] )
+    ; ( "writers"
+      , [ test_case "are the registry's" `Quick test_writers_are_the_registry_s
+        ; test_case "write the workspace's files" `Quick test_files_are_the_workspace_s
+        ; test_case "a Keeper without a turn log" `Quick test_no_turn_log_stops_the_store
+        ] )
+    ]
+;;

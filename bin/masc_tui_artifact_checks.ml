@@ -64,27 +64,35 @@ let resolve inventory (report : Catalog.report) =
         Unknown (Gap.Unreported, "confirmation record refers to a different report body")
       | (Some _ | None) as check -> Known check
 
+(* Whether the inventory as a whole can establish absence, and the gap it
+   leaves when it cannot: the same reading [resolve] gives one report. *)
+let established inventory =
+  if Fetched.in_flight inventory then Error Gap.Unread
+  else match Fetched.view_for ~equal:Unit.equal inventory ~key:() with
+    | Ready { diagnostics = []; _ } -> Ok ()
+    | Absent | Loading | Stale (_, Read_kept_back _) | Failed (Read_kept_back _) -> Error Gap.Unread
+    | Ready { diagnostics = _ :: _; _ } | Stale (_, Read_failed _) | Failed (Read_failed _) ->
+      Error Gap.Read_failed
+
 let unchecked_on_day ~reports_complete ~day ~entries inventory =
-  if not reports_complete then None
+  (* A listing that did not carry every report is partial evidence. *)
+  if not reports_complete then Error Gap.Read_failed
   else
     (* Validate the check inventory even when today's report set is empty. *)
-    let authoritative = not (Fetched.in_flight inventory)
-      && match Fetched.view_for ~equal:Unit.equal inventory ~key:() with
-         | Ready { diagnostics = []; _ } -> true
-         | Ready { diagnostics = _ :: _; _ } | Absent | Loading | Stale _ | Failed _ -> false in
-    if not authoritative then None
-    else List.fold_left (fun count entry ->
+    let* () = established inventory in
+    List.fold_left (fun count entry ->
       match count, entry with
-      | None, (Catalog.Mcp _ | Report _) -> None
-      | Some count, Catalog.Mcp _ -> Some count
-      | Some count, Catalog.Report report ->
+      | (Error _ as gap), (Catalog.Mcp _ | Report _) -> gap
+      | Ok count, Catalog.Mcp _ -> Ok count
+      | Ok count, Catalog.Report report ->
         match resolve inventory report with
-        | Unknown _ | Kept_back _ -> None
+        | Unknown (gap, _) -> Error gap
+        | Kept_back _ -> Error Gap.Unread
         | Known check ->
           let unchecked = match check with
             | None -> true
             | Some check -> check.state = Check.Unchecked in
-          Some (if unchecked && Catalog.on_day day entry then count + 1 else count)) (Some 0) entries
+          Ok (if unchecked && Catalog.on_day day entry then count + 1 else count)) (Ok 0) entries
 
 let next_unchecked ~reports_complete ~entries ~cursor inventory =
   let* () =

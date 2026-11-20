@@ -26,8 +26,11 @@ val resolve : (unit, inventory, read_failure) Masc_tui_fetched.source ->
 val unchecked_on_day : reports_complete:bool ->
   day:Masc_tui_resource_catalog.day ->
   entries:Masc_tui_resource_catalog.t list ->
-  (unit, inventory, read_failure) Masc_tui_fetched.source -> int option
-(** [None] when either inventory cannot establish the complete count. *)
+  (unit, inventory, read_failure) Masc_tui_fetched.source -> (int, Masc_tui_value.Unknown.t) result
+(** [Error] when either inventory cannot establish the complete count, with
+    the gap it leaves: a read pending or not sent is [Unread]; a listing that
+    did not carry every report, a failed read, or records left unread is
+    [Read_failed]; a record for a different body is [Unreported]. *)
 val next_unchecked : reports_complete:bool ->
   entries:Masc_tui_resource_catalog.t list -> cursor:int ->
   (unit, inventory, read_failure) Masc_tui_fetched.source -> (int option, string) result

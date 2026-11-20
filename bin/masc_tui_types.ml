@@ -14951,11 +14951,21 @@ let resource_check_status state report =
   else if server_authority_ready state then Masc_tui_artifact_checks.resolve state.artifact_checks report
   else Masc_tui_artifact_checks.Unknown (Masc_tui_value.Unknown.Unread, "workspace identity is unconfirmed")
 
+(* Today's unchecked reports, or which gap stops the count: nothing is
+   established while the workspace is unconfirmed, a confirmation is saving
+   or a listing is in flight; a listing that failed with no rows before it
+   is a read that failed. *)
 let resource_unchecked_today state ~day =
-  if not (server_authority_ready state) || Option.is_some state.artifact_check_pending then None
-  else Option.bind state.resources_list (fun entries ->
-    Masc_tui_artifact_checks.unchecked_on_day
-      ~reports_complete:state.resources_reports_complete ~day ~entries state.artifact_checks)
+  if not (server_authority_ready state) || Option.is_some state.artifact_check_pending
+     || Option.is_some state.resources_list_owner
+  then Error Masc_tui_value.Unknown.Unread
+  else match state.resources_list with
+    | None ->
+        Error (if Option.is_some state.resources_error then Masc_tui_value.Unknown.Read_failed
+               else Masc_tui_value.Unknown.Unread)
+    | Some entries ->
+        Masc_tui_artifact_checks.unchecked_on_day
+          ~reports_complete:state.resources_reports_complete ~day ~entries state.artifact_checks
 
 let resource_split state ~cols =
   state.resource_layout = Masc_tui_resource_catalog.Side_by_side

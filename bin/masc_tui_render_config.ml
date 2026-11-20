@@ -19,16 +19,15 @@ let wrap_style style text =
 
 (* How long ago the running binary's commit landed. Coarse on purpose: the
    question is "is this the build I think it is", and minutes answer it while
-   seconds only look precise. *)
+   seconds only look precise. Past a minute the age is the shared ladder
+   (RFC tui-one-screen-grammar 6.2): [3m], [1h04m], [2d03h]. The server reads
+   the age once per /health answer, so it is a fixed span, not a clock. *)
 let binary_age_text ~ko = function
   | None -> if ko then "커밋 시각 모름" else "commit age unknown"
   | Some seconds when seconds < 60. -> if ko then "방금 커밋" else "committed just now"
-  | Some seconds when seconds < 3600. ->
-      Printf.sprintf (if ko then "커밋 %.0fm 전" else "commit %.0fm ago") (seconds /. 60.)
-  | Some seconds when seconds < 86400. ->
-      Printf.sprintf (if ko then "커밋 %.0fh 전" else "commit %.0fh ago") (seconds /. 3600.)
   | Some seconds ->
-      Printf.sprintf (if ko then "커밋 %.0fd 전" else "commit %.0fd ago") (seconds /. 86400.)
+      Printf.sprintf (if ko then "커밋 %s 전" else "commit %s ago")
+        (Masc_tui_value.Ongoing.text seconds)
 
 (* The Runtime_params registry. A view, not a second place values live:
    overrides are written by the server to .masc/runtime_params.json, and this

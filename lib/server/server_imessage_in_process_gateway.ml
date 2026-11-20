@@ -155,8 +155,7 @@ type disposition =
    A validation failure is permanent — the same row will fail the same way
    forever — so leaving the cursor on it would wedge the conversation behind
    one bad message. A dispatch or internal failure is the accept not having
-   happened, so the row is still owed and the cursor stays. RFC-0384 names
-   this choice for Telegram's offset and it is the same choice here. *)
+   happened, so the row is still owed and the cursor stays. *)
 let disposition_of_outcome = function
   | Ok (_ : Channel_gate.outbound_message) -> Consume
   | Error (Channel_gate.Validation error) ->

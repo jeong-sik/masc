@@ -238,8 +238,8 @@ let anchor_authority_of_source ~scope source =
    the same [Server_ide_scope] the REST routes use, so the two surfaces
    share one vocabulary), and the workspace tree that document paths are
    relative to, which comes from the workspace axis parameters
-   ([repo_id]/[keeper]) resolved by [resolve_workspace_base]. RFC-0378
-   §5.3b: the scope carries the slug itself. *)
+   ([repo_id]/[keeper]) resolved by [resolve_workspace_base]. The scope
+   carries the slug itself. *)
 let lsp_connection_addressing ~state ~uri =
   match Server_ide_scope.resolve_optional_ide_scope_for_query ~state ~uri with
   | Error err -> Error err
@@ -897,7 +897,7 @@ let forward_document_sync_notification cs method_ params =
    Default-deny by a typed variant, not a string-prefix classifier: only a
    listed read method forwards, so a new or unrecognized method is rejected
    rather than silently passed through, and adding a method forces an explicit
-   classification (RFC-0194 / workaround §2 — no substring allowlist). *)
+   classification. *)
 type method_disposition =
   | Forward_read_only
   | Reject_write_adjacent
@@ -906,7 +906,7 @@ type method_disposition =
 (* Methods this proxy does not answer itself, and what happens to them.
 
    The catalog above owns every method the proxy can answer; this table owns
-   the rest. The five that RFC-0378 rung E turned into plain relays —
+   the rest. The five catalog methods that are plain relays —
    definition, references, documentSymbol, documentHighlight, inlayHint — used
    to be spelled here as well as there, which is two places deciding the same
    thing about the same method. [classify_forwarded_method] now asks the

@@ -2398,6 +2398,38 @@ let test_goal_completion_requires_an_observed_binding () =
     (planning_goal_retains_arm { goal with pg_phase = Goal_phase.Verifying; pg_retry_binding = Some binding }
        ~action ~phase:Goal_phase.Executing ~retry_binding:(Some binding))
 
+(* A sent drop reason is closed by the reading that shows the goal dropped,
+   not by Enter: a drop the guard kept back, or one that failed, leaves the
+   goal taking a drop, and the sentence stays (#52967). *)
+let test_a_drop_reason_lasts_until_the_goal_is_dropped () =
+  let snapshot =
+    match (planning_state ()).planning with
+    | Some snapshot -> snapshot
+    | None -> Alcotest.fail "fixture has no snapshot"
+  in
+  let with_phase phase =
+    { snapshot with
+      pl_goals = List.map (fun goal ->
+        if String.equal goal.pg_id "g-1" then { goal with pg_phase = phase } else goal)
+        snapshot.pl_goals }
+  in
+  let kept planning pending =
+    Option.is_some (goal_action_pending_after_reading planning pending)
+  in
+  let reason = Some (Goal_drop_reason { goal_id = "g-1"; reason = "superseded by g-2" }) in
+  check Alcotest.bool "a goal that still takes a drop keeps the reason" true
+    (kept snapshot reason);
+  check Alcotest.bool "the reading that shows it dropped closes it" false
+    (kept (with_phase Goal_phase.Dropped) reason);
+  check Alcotest.bool "a goal gone from the reading closes it" false
+    (kept { snapshot with pl_goals = [] } reason);
+  let armed = Some (Goal_action_armed { goal_id = "g-1"; action = Goal_phase.Public_action.Pause;
+    phase = Goal_phase.Executing; retry_binding = None }) in
+  check Alcotest.bool "a first press survives a reading in its phase" true
+    (kept snapshot armed);
+  check Alcotest.bool "and not one in another phase" false
+    (kept (with_phase Goal_phase.Verifying) armed)
+
 let test_code_search_count_tracks_fetched_source () =
   let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Code;
@@ -2906,6 +2938,8 @@ let () =
             test_goal_action_receipts_follow_the_goal_and_latest_ticket
         ; Alcotest.test_case "Goal completion needs its observed binding" `Quick
             test_goal_completion_requires_an_observed_binding
+        ; Alcotest.test_case "a drop reason lasts until the goal is dropped" `Quick
+            test_a_drop_reason_lasts_until_the_goal_is_dropped
         ] )
     ; ( "lanes rows"
       , [ Alcotest.test_case "role grouping retains the original settings and activity target" `Quick

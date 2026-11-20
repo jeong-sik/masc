@@ -104,11 +104,13 @@ let kv_rows ~width ?(indent = 2) ?label_style ?(max_label_cells = 18) fields =
           else max acc (cells field.label))
         0 clean_fields
     in
-    let cap_label = min max_label_cells (max 4 (content_w / 3)) in
-    let col_w = min widest_label cap_label in
     let gutter = "  " in
     let gutter_w = 2 in
-    let two_col = col_w > 0 && col_w + gutter_w + 12 <= content_w in
+    let natural_col_w = min widest_label max_label_cells in
+    let two_col =
+      natural_col_w > 0 && natural_col_w + gutter_w + 12 <= content_w
+    in
+    let col_w = min natural_col_w (max 4 (content_w / 3)) in
     let wrap_clamped max_w value =
       let rows =
         match Text_block.rows ~max_cells:(max 1 max_w) value with

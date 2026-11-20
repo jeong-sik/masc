@@ -2766,8 +2766,8 @@ let keeper_list_top_headers (state : state) ~now ~cols ~inner ~selected_reading
       ~sort:state.keeper_list_sort ~density:state.keeper_list_density
       state.keeper_list_view
   ]
-  @ keeper_plain_fleet_lines state ~now ~inner
   @ errors
+  @ keeper_plain_fleet_lines state ~now ~inner
   @ status_slot
 
 let cap_keeper_headers (state : state) ~inner ~budget headers =

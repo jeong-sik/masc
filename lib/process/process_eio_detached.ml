@@ -285,7 +285,10 @@ let tree_kill ~pgid ~signal ~grace_sec =
       else if Monotonic_deadline.passed deadline then
         safe_kill Sys.sigkill
       else begin
-        Safe_ops.protect ~default:() (fun () -> ignore (Unix.select [] [] [] step));
+        (* With no descriptors and a positive timeout, a signal (EINTR) is
+           the only way [select] fails; the next turn checks the group again. *)
+        (try ignore (Unix.select [] [] [] step) with
+         | Unix.Unix_error (Unix.EINTR, _, _) -> ());
         wait_loop ()
       end
     in

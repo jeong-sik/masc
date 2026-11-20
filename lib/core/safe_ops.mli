@@ -6,10 +6,6 @@
 
 (** {1 Exception-Safe Wrappers} *)
 
-val protect : default:'a -> (unit -> 'a) -> 'a
-(** Run [f ()], re-raising [Eio.Cancel.Cancelled] with its original backtrace
-    and returning [default] for any other exception. *)
-
 val handle : (unit -> 'a) -> (exn -> 'a) -> 'a
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled]; delegates other exceptions to the handler. *)

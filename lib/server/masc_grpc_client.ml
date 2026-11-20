@@ -35,19 +35,8 @@ let heartbeat_stream t ~sw ~env =
   (* Map typed pings to raw bytes *)
   let raw_requests = Grpc_eio.Stream.create 16 in
   Eio.Fiber.fork ~sw (fun () ->
-    (* Both helpers must re-raise [Eio.Cancel.Cancelled] — they are called
-       from the [End_of_file] and generic-[exn] branches of the enclosing
-       loop (lines 177, 190-191), neither of which is a cancel handler.
-       [with _ -> ()] would swallow a cancel racing with [Stream.close],
-       leaving the fork fiber alive past the cancel boundary. *)
-    let close_request_stream () =
-      Safe_ops.protect ~default:() (fun () ->
-        Grpc_eio.Stream.close request_stream)
-    in
-    let close_raw_requests () =
-      Safe_ops.protect ~default:() (fun () ->
-        Grpc_eio.Stream.close raw_requests)
-    in
+    let close_request_stream () = Grpc_eio.Stream.close request_stream in
+    let close_raw_requests () = Grpc_eio.Stream.close raw_requests in
     let rec loop () =
       match Grpc_eio.Stream.take request_stream with
       | bytes ->

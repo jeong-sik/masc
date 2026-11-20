@@ -1,4 +1,4 @@
-// Settings — Repositories section (keeper-v2 design settings.jsx `repositories`).
+// Settings — Repositories section.
 // Live-backed: GET/POST /api/v1/repositories, DELETE /api/v1/repositories/:id.
 // Keeper-repo mapping is owned by Workspace › Repositories; this section links
 // directly to that SSOT so Settings does not look incomplete.
@@ -117,7 +117,7 @@ function openKeeperRepoMappings(): void {
   replaceRoute('workspace', { section: 'repositories', view: 'mappings' })
 }
 
-// ── Local form primitives (design settings.jsx SetRow/SetToggle/SetStepper DOM) ──
+// ── Local form primitives ────────────────────────────────
 
 function FormRow({ label, hint, children }: { label: string; hint?: string; children: ComponentChildren }) {
   return html`

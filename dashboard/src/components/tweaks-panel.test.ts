@@ -168,8 +168,8 @@ describe('TweaksPanel', () => {
   })
 
   it('falls back to a select.twk-field when segment labels exceed the design budget', async () => {
-    // Design budget (tweaks-panel.jsx): 3 options fit ~10 chars each; a longer
-    // label renders TweakSelect instead of wrapping mid-word.
+    // Segment budget: 3 options fit ~10 chars each; a longer label renders
+    // a select.twk-field instead of wrapping mid-word.
     render(html`
       <${TweakRadio}
         label="테스트"

@@ -45,11 +45,9 @@ const VOLT_OPTIONS: readonly Volt[] = ['brass', 'blood', 'ice']
 // persistent signals for all 9 preferences
 export const tweaksDensity = persistentSignal<Density>({
   key: 'dashboard:tweaks:density-v2',
-  // Prototype boots at spacious (keeper-v2/app.jsx:9 "density": "spacious"), and
   // craft.css density rules (e.g. .kp-row 11px, .ctx-card 14/15px) are authored
-  // to that baseline. Defaulting to 'regular' rendered every surface tighter than
-  // the design SSOT; align the unset default to spacious. Users keep 'regular'/
-  // 'compact' via the Tweaks panel.
+  // to the spacious baseline, so the unset default is spacious. Users keep
+  // 'regular'/'compact' via the Tweaks panel.
   defaultValue: 'spacious',
 })
 
@@ -424,9 +422,9 @@ interface TweakRadioProps<T extends string> {
 
 export function TweakRadio<T extends string>({ label, value, options, onChange }: TweakRadioProps<T>) {
   const normalizedOpts = options.map((o) => (typeof o === 'object' && o !== null ? o : { value: o, label: o }))
-  // Design's segment-width budget (tweaks-panel.jsx TweakRadio): past ~16/~10
-  // chars per label the segments wrap mid-word, so the control falls back to a
-  // dropdown. Ported verbatim; current options are short enough to never hit it.
+  // Segment-width budget: past ~16/~10 chars per label the segments wrap
+  // mid-word, so the control falls back to a dropdown. Current options are
+  // short enough to never hit it.
   const maxLen = normalizedOpts.reduce((m, o) => Math.max(m, String(o.label).length), 0)
   const fitsAsSegments = maxLen <= ({ 2: 16, 3: 10 }[normalizedOpts.length] ?? 0)
   if (!fitsAsSegments) {
@@ -444,7 +442,7 @@ export function TweakRadio<T extends string>({ label, value, options, onChange }
     `
   }
   const selectedIdx = Math.max(0, normalizedOpts.findIndex((o) => o.value === value))
-  // Design formula (tweaks-panel.jsx): left: 2px + idx * (100% - 4px) / n,
+  // Thumb geometry: left: 2px + idx * (100% - 4px) / n,
   // width: (100% - 4px) / n. Distributed into plain percentage/px terms so the
   // calc stays CSS Values 3-compatible (no `number * length` multiplication,
   // which some CSSOM implementations — happy-dom included — reject).

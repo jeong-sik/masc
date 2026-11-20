@@ -134,9 +134,8 @@ const SET_SECTIONS: [SectionId, string, string][] = [
   ['display', 'Display', '표시'],
 ]
 
-// keeper-v2 design settings.jsx SET_GROUPS의 부분 채택: lifecycle/
-// sandbox/gate 섹션은 백엔드 계약 부재로 미구현이라 그룹에서 빠져 있고,
-// 디자인이 nav에서 뺀 mcp/display는 live-backed 동작 섹션이라 유지한다.
+// nav 그룹. lifecycle/sandbox/gate 섹션은 백엔드 계약 부재로 미구현이라
+// 그룹에서 빠져 있고, mcp/display는 live-backed 동작 섹션이라 들어 있다.
 const SET_GROUPS: [string, SectionId[]][] = [
   ['계정', ['account']],
   ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion']],
@@ -322,11 +321,11 @@ export type McpToolGroup = {
 }
 
 // Group the exposed public-MCP inventory by the registry's own category so the
-// list renders the design's tool-group rows (settings.jsx:410-422, .set-tg-*)
-// from live data. The group id is the registry category; the kind tag is
-// 'masc' because every tool on the public_mcp surface is a server-side tool —
-// the design's 'local'/guard/opt-in kinds belong to tool_policy.toml groups,
-// which the runtime does not read (no live signal, not rendered).
+// list renders tool-group rows (.set-tg-*) from live data. The group id is the
+// registry category; the kind tag is 'masc' because every tool on the
+// public_mcp surface is a server-side tool — 'local'/guard/opt-in kinds belong
+// to tool_policy.toml groups, which the runtime does not read (no live signal,
+// not rendered).
 export function mcpExposedToolGroups(items: readonly DashboardToolInventoryItem[]): McpToolGroup[] {
   const byCategory = new Map<string, string[]>()
   for (const item of items) {
@@ -1645,9 +1644,8 @@ export function SettingsSurface() {
   const defaultRouteId = runtimeResolved?.default_route ?? null
   const runtimeCount = runtimeResolved?.runtimes.length ?? 0
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
-  // Declared runtime lanes with their ordered candidate chains — the live
-  // counterpart of the design's failover section (runtime-editor.jsx:191-229,
-  // .rt-fo-*). Each [runtime.lanes.<id>] is edited through the routing writer
+  // Declared runtime lanes with their ordered candidate chains (.rt-fo-*).
+  // Each [runtime.lanes.<id>] is edited through the routing writer
   // (set/create/rename/remove); the server resolves and validates every write.
   // Assignment-only routes belong to Keeper assignment truth and must not be
   // mislabeled as [runtime.lanes] declarations on this configuration surface.
@@ -1704,8 +1702,7 @@ export function SettingsSurface() {
         <nav class="set-nav" aria-label="Settings categories">
           <div class="set-nav-h">
             <div class="eyebrow">Operator</div>
-            <!-- keeper-v2 settings.jsx:244-247 — nav header is eyebrow + KO title
-                 only; the prototype does not render a sub-line here. -->
+            <!-- nav header is eyebrow + KO title only; no sub-line here. -->
             <div class="set-nav-title">설정</div>
           </div>
           ${SET_GROUPS.map(([glabel, ids]) => html`

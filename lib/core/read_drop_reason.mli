@@ -1,10 +1,7 @@
 (** Closed sum type for the [reason] label of
-    [Otel_metric_store.metric_persistence_read_drops]. See RFC-0044
-    (`docs/rfc/RFC-0044-persistence-read-drop-typed.md`) for the full
-    motivation.
+    [Otel_metric_store.metric_persistence_read_drops].
 
-    This module is introduced in PR-1 of the RFC-0044 migration and is
-    intentionally inert: no caller in the tree references it yet.
+    This module is introduced in PR-1 of the RFC-0044 migration.
     PR-2 changes [Core.Safe_ops.report_persistence_read_drop] to
     accept [t] instead of [string]; existing constants in
     [safe_ops.ml] become wire-compatible aliases. PR-3 (optional)

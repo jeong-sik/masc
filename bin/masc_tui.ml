@@ -17935,7 +17935,7 @@ let apply_tool_series_load state { tsl_days = days; tsl_result = result } =
     match result with
     | Ok calls ->
         state.tool_series <- Tool_series_read calls;
-        Masc_tui_types.note_tool_series_read state ~now:(monotonic_now_s ())
+        Masc_tui_types.note_tool_series_read state ~now:(Masc_tui_wake.Mono.now ())
     | Error reason -> state.tool_series <- Tool_series_error reason
   end else
     (* The reply is for a window the screen has left, and the read it was
@@ -22145,7 +22145,7 @@ let start_http_scoped_refresh state ~host ~port
 let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   owe_provider_history_day state ~now:(Unix.gettimeofday ());
-  if Masc_tui_types.take_tool_series_due state ~now:(monotonic_now_s ()) then
+  if Masc_tui_types.take_tool_series_due state ~now:(Masc_tui_wake.Mono.now ()) then
     owe_pushed_read state Surface_read_source.Tool_series;
   let wanted = Surface_read_order.sources (current_surface_needs state) in
   let now = Masc_tui_wake.Mono.now () in

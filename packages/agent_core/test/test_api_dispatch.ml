@@ -102,6 +102,7 @@ let test_pricing_known_models () =
          { input_per_million = 0.0
          ; output_per_million = 0.0
          ; cache_write_multiplier = None
+         ; cache_write_1h_multiplier = None
          ; cache_read_multiplier = None
          } -> true
      | Some _ | None -> false);
@@ -117,12 +118,14 @@ let test_pricing_cost_estimation () =
     { Llm_provider.Pricing.input_per_million = 3.0
     ; output_per_million = 15.0
     ; cache_write_multiplier = Some 1.25
+    ; cache_write_1h_multiplier = Some 2.0
     ; cache_read_multiplier = Some 0.1
     }
   in
   let cost =
     Llm_provider.Pricing.estimate_cost
       ~pricing
+      ~cache_writes:Llm_provider.Pricing.Provider_default
       ~input_tokens:1_000_000
       ~output_tokens:100_000
       ()
@@ -202,6 +205,7 @@ let test_cache_cost_calculation () =
   let cost =
     Llm_provider.Pricing.estimate_cost
       ~pricing
+      ~cache_writes:Llm_provider.Pricing.Provider_default
       ~input_tokens:1_000_000
       ~output_tokens:0
       ~cache_creation_input_tokens:500_000
@@ -221,6 +225,7 @@ let test_cache_cost_no_cache_tokens () =
   let cost_with =
     Llm_provider.Pricing.estimate_cost
       ~pricing
+      ~cache_writes:Llm_provider.Pricing.Provider_default
       ~input_tokens:1_000_000
       ~output_tokens:100_000
       ()
@@ -229,6 +234,7 @@ let test_cache_cost_no_cache_tokens () =
   let cost_explicit =
     Llm_provider.Pricing.estimate_cost
       ~pricing
+      ~cache_writes:Llm_provider.Pricing.Provider_default
       ~input_tokens:1_000_000
       ~output_tokens:100_000
       ~cache_creation_input_tokens:0

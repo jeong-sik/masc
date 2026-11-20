@@ -4,10 +4,15 @@
     infer provider identity from a model ID, strip namespaces, maintain a
     fallback table, or treat an unknown model as free. *)
 
+type cache_write_lifetime =
+  | Provider_default
+  | One_hour
+
 type pricing =
   { input_per_million : float
   ; output_per_million : float
   ; cache_write_multiplier : float option
+  ; cache_write_1h_multiplier : float option
   ; cache_read_multiplier : float option
   }
 
@@ -18,13 +23,18 @@ type provider_scope =
 type source =
   { catalog : Model_catalog.t option
   ; scope : provider_scope
+  ; cache_writes : cache_write_lifetime
   }
 
-let of_catalog ~catalog ~provider = {catalog; scope = Provider_reference provider}
-let of_provider_entry ~catalog ~provider = {catalog; scope = Selected_provider provider}
+let of_catalog ~catalog ~provider =
+  {catalog; scope = Provider_reference provider; cache_writes = Provider_default}
+let of_provider_entry ~catalog ~provider =
+  {catalog; scope = Selected_provider provider; cache_writes = Provider_default}
 
 let of_snapshot ~snapshot ~provider =
   of_catalog ~catalog:(Catalog_snapshot.model_catalog_for_provider snapshot provider) ~provider
+
+let with_cache_writes cache_writes source = { source with cache_writes }
 
 type cache_price_component =
   | Cache_creation
@@ -41,6 +51,7 @@ let pricing_of_catalog_entry (entry : Model_catalog.model_entry) =
       { input_per_million
       ; output_per_million
       ; cache_write_multiplier = entry.cache_write_multiplier
+      ; cache_write_1h_multiplier = entry.cache_write_1h_multiplier
       ; cache_read_multiplier = entry.cache_read_multiplier
       }
   | None, _ | _, None -> None
@@ -72,6 +83,7 @@ let pricing_for_model_opt ?provider model_id =
 
 let estimate_cost
       ~(pricing : pricing)
+      ~cache_writes
       ~input_tokens
       ~output_tokens
       ?(cache_creation_input_tokens = 0)
@@ -81,9 +93,14 @@ let estimate_cost
   let regular_input =
     max 0 (input_tokens - cache_creation_input_tokens - cache_read_input_tokens)
   in
+  let cache_write_multiplier =
+    match cache_writes with
+    | Provider_default -> pricing.cache_write_multiplier
+    | One_hour -> pricing.cache_write_1h_multiplier
+  in
   let missing_cache_components =
     let creation =
-      if cache_creation_input_tokens > 0 && Option.is_none pricing.cache_write_multiplier
+      if cache_creation_input_tokens > 0 && Option.is_none cache_write_multiplier
       then [ Cache_creation ]
       else []
     in
@@ -103,9 +120,7 @@ let estimate_cost
       | Some multiplier -> Float.of_int token_count *. rate *. multiplier
       | None -> 0.0
     in
-    let cache_write_cost =
-      cache_cost cache_creation_input_tokens pricing.cache_write_multiplier
-    in
+    let cache_write_cost = cache_cost cache_creation_input_tokens cache_write_multiplier in
     let cache_read_cost =
       cache_cost cache_read_input_tokens pricing.cache_read_multiplier
     in
@@ -125,6 +140,7 @@ let annotate_usage_cost ~source ~model_id (usage : Types.api_usage) =
        (match
           estimate_cost
             ~pricing
+            ~cache_writes:source.cache_writes
             ~input_tokens:usage.input_tokens
             ~output_tokens:usage.output_tokens
             ~cache_creation_input_tokens:usage.cache_creation_input_tokens
@@ -170,6 +186,7 @@ let[@warning "-32"] test_catalog_entry
       ?input
       ?output
       ?cache_write
+      ?cache_write_1h
       ?cache_read
       model_id
   =
@@ -181,12 +198,13 @@ let[@warning "-32"] test_catalog_entry
     | None -> ""
     | Some value -> Printf.sprintf "%s = %.17e\n" name value
   in
-  Printf.sprintf "[[models]]\nmodel_id = %S\n%s%s%s%s%s"
+  Printf.sprintf "[[models]]\nmodel_id = %S\n%s%s%s%s%s%s"
     model_id
     (string_field "provider_name" provider_name)
     (float_field "input_per_million" input)
     (float_field "output_per_million" output)
     (float_field "cache_write_multiplier" cache_write)
+    (float_field "cache_write_1h_multiplier" cache_write_1h)
     (float_field "cache_read_multiplier" cache_read)
 ;;
 
@@ -244,6 +262,7 @@ let%test "catalog pricing preserves absent cache multipliers" =
            { input_per_million = 1.0
            ; output_per_million = 2.0
            ; cache_write_multiplier = None
+           ; cache_write_1h_multiplier = None
            ; cache_read_multiplier = None
            } -> true
        | Some _ | None -> false)
@@ -324,10 +343,14 @@ let%test "estimate_cost uses declared rates" =
     { input_per_million = 3.0
     ; output_per_million = 15.0
     ; cache_write_multiplier = Some 1.25
+    ; cache_write_1h_multiplier = Some 2.0
     ; cache_read_multiplier = Some 0.1
     }
   in
-  match estimate_cost ~pricing ~input_tokens:1_000_000 ~output_tokens:100_000 () with
+  match
+    estimate_cost ~pricing ~cache_writes:Provider_default ~input_tokens:1_000_000
+      ~output_tokens:100_000 ()
+  with
   | Estimated cost -> close_enough cost 4.5
   | Incomplete _ -> false
 ;;
@@ -337,12 +360,83 @@ let%test "absent cache prices do not block a non-cache estimate" =
     { input_per_million = 3.0
     ; output_per_million = 15.0
     ; cache_write_multiplier = None
+    ; cache_write_1h_multiplier = None
     ; cache_read_multiplier = None
     }
   in
-  match estimate_cost ~pricing ~input_tokens:1_000_000 ~output_tokens:100_000 () with
+  match
+    estimate_cost ~pricing ~cache_writes:One_hour ~input_tokens:1_000_000
+      ~output_tokens:100_000 ()
+  with
   | Estimated cost -> close_enough cost 4.5
   | Incomplete _ -> false
+;;
+
+(* 1M input tokens, all of them cache writes, at $3/MTok: $3.75 at the 1.25x
+   five-minute price, $6 at the 2x one-hour price. *)
+let%test "a cache write pays the price of the lifetime it asked for" =
+  let pricing =
+    { input_per_million = 3.0
+    ; output_per_million = 15.0
+    ; cache_write_multiplier = Some 1.25
+    ; cache_write_1h_multiplier = Some 2.0
+    ; cache_read_multiplier = Some 0.1
+    }
+  in
+  let cost cache_writes =
+    estimate_cost ~pricing ~cache_writes ~input_tokens:1_000_000 ~output_tokens:0
+      ~cache_creation_input_tokens:1_000_000 ()
+  in
+  match cost Provider_default, cost One_hour with
+  | Estimated default_cost, Estimated hour_cost ->
+    close_enough default_cost 3.75 && close_enough hour_cost 6.0
+  | (Estimated _ | Incomplete _), (Estimated _ | Incomplete _) -> false
+;;
+
+let%test "a one-hour write on a row without its price stays unpriced" =
+  let pricing =
+    { input_per_million = 3.0
+    ; output_per_million = 15.0
+    ; cache_write_multiplier = Some 1.25
+    ; cache_write_1h_multiplier = None
+    ; cache_read_multiplier = Some 0.1
+    }
+  in
+  let cost cache_writes =
+    estimate_cost ~pricing ~cache_writes ~input_tokens:100 ~output_tokens:10
+      ~cache_creation_input_tokens:20 ()
+  in
+  match cost One_hour, cost Provider_default with
+  | Incomplete components, Estimated _ -> components = [ Cache_creation ]
+  | (Estimated _ | Incomplete _), (Estimated _ | Incomplete _) -> false
+;;
+
+(* The source a request config builds carries that request's lifetime, so the
+   response it annotates pays the one-hour price; a source that names none
+   pays the default one. *)
+let%test "the response cost follows the lifetime its source carries" =
+  with_catalog
+    [ test_catalog_entry ~input:3.0 ~output:15.0 ~cache_write:1.25
+        ~cache_write_1h:2.0 ~cache_read:0.1 "lifetime-model"
+    ]
+    (fun () ->
+       let source =
+         of_catalog ~catalog:(Catalog_snapshot.models (Catalog_snapshot.current ()))
+           ~provider:(Model_catalog.Anonymous_wire Provider_kind.Anthropic)
+       in
+       let usage : Types.api_usage =
+         { input_tokens = 1_000_000
+         ; output_tokens = 0
+         ; cache_creation_input_tokens = 1_000_000
+         ; cache_read_input_tokens = 0
+         ; cost_usd = None
+         }
+       in
+       let cost source =
+         (annotate_usage_cost ~source ~model_id:"lifetime-model" usage).cost_usd
+       in
+       option_close_enough 3.75 (cost source)
+       && option_close_enough 6.0 (cost (with_cache_writes One_hour source)))
 ;;
 
 let%test "observed cache tokens expose every missing cache price" =
@@ -350,12 +444,14 @@ let%test "observed cache tokens expose every missing cache price" =
     { input_per_million = 3.0
     ; output_per_million = 15.0
     ; cache_write_multiplier = None
+    ; cache_write_1h_multiplier = None
     ; cache_read_multiplier = None
     }
   in
   match
     estimate_cost
       ~pricing
+      ~cache_writes:Provider_default
       ~input_tokens:100
       ~output_tokens:10
       ~cache_creation_input_tokens:20

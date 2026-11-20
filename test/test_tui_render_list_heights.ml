@@ -1156,6 +1156,83 @@ let test_board_list_preview_modes_scroll_and_markdown () =
     Alcotest.(check int) "short terminal resets preview max_scroll"
       0 state.board_list_preview_max_scroll)
 
+let test_schedules_and_themes_keep_sticky_viewport_scroll () =
+  let rows = List.init 40 schedule in
+  with_size (24, 80) (fun () ->
+    let state = create_state ~workspace:"" ~port:0 () in
+    state.view <- Schedules;
+    state.schedules <-
+      Some
+        { scs_observed_at = 1795046400.
+        ; scs_status = "ok"
+        ; scs_read_error = None
+        ; scs_request_count = Some 40
+        ; scs_truncated = false
+        ; scs_payload_target = None
+        ; scs_paging = Schedule_paging_unavailable
+        ; scs_next_due_iso = None
+        ; scs_counts = None
+        ; scs_rows = rows
+        ; scs_runner_status =
+            Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok
+        };
+    let render_schedules () =
+      Prim.frame_lists := [];
+      let _frame, clamped = Masc_tui_render_work.render_schedules state in
+      Option.iter (apply_clamped_scroll state) clamped;
+      state.schedule_list_scroll
+    in
+    state.schedule_cursor <- 30;
+    let s1 = render_schedules () in
+    Alcotest.(check bool) "schedules scrolling to row 30 advances viewport" true (s1 > 0);
+    state.schedule_cursor <- 29;
+    let s2 = render_schedules () in
+    Alcotest.(check int) "schedules stepping up inside viewport keeps window stationary" s1 s2;
+    state.schedule_cursor <- s1 - 1;
+    let s3 = render_schedules () in
+    Alcotest.(check int) "schedules stepping above viewport top scrolls by one row" (s1 - 1) s3;
+    (* Config Themes uses the same sticky List_window_scroll contract. *)
+    let theme_state = create_state ~workspace:"" ~port:0 () in
+    theme_state.view <- Config;
+    theme_state.config_pane <- Config_themes;
+    let render_themes () =
+      Prim.frame_lists := [];
+      let _frame, clamped = Masc_tui_render_config.render_themes theme_state in
+      Option.iter (apply_clamped_scroll theme_state) clamped;
+      theme_state.theme_list_scroll
+    in
+    theme_state.theme_cursor <- 25;
+    let t1 = render_themes () in
+    Alcotest.(check bool) "themes scrolling to row 25 advances viewport" true (t1 > 0);
+    theme_state.theme_cursor <- 24;
+    let t2 = render_themes () in
+    Alcotest.(check int) "themes stepping up inside viewport keeps window stationary" t1 t2;
+    theme_state.theme_cursor <- t1 - 1;
+    let t3 = render_themes () in
+    Alcotest.(check int) "themes stepping above viewport top scrolls by one row" (t1 - 1) t3;
+    (* Mouse wheel notches must keep routing to list cursor movement, never swallowed. *)
+    List.iter
+      (fun owner ->
+        let reader = Prim.clamped_scroll_now state (List_window_scroll (owner, 0)) in
+        Alcotest.(check bool) "wheel notch passes through List_window_scroll" true
+          (Option.is_none
+             (Prim.reader_after_wheel reader Masc.Tui_mouse_protocol.Wheel_down)))
+      [ Schedule_list; Approval_list; Fusion_list_scroll; Config_themes_list
+      ; Workspace_activity_list; Code_tree_list ];
+    (* Workspace / scope / directory transitions reset their sticky list scroll cleanly. *)
+    state.fusion_list_scroll <- 14;
+    withdraw_fusion_workspace state;
+    Alcotest.(check int) "withdraw_fusion_workspace resets fusion_list_scroll" 0
+      state.fusion_list_scroll;
+    state.code_tree_scroll <- 18;
+    set_code_scope state (Code_scope_repo "repo-1");
+    Alcotest.(check int) "set_code_scope resets code_tree_scroll" 0
+      state.code_tree_scroll;
+    state.code_tree_scroll <- 12;
+    enter_keeper_code_file state ~keeper:"keeper-1" ~path:"dir/file.ml";
+    Alcotest.(check int) "enter_keeper_code_file resets code_tree_scroll" 0
+      state.code_tree_scroll)
+
 let () =
   Alcotest.run "tui render list heights"
     [ ( "reported heights"
@@ -1193,5 +1270,7 @@ let () =
             test_board_list_sticky_scroll
         ; Alcotest.test_case "Board list docked preview renders Markdown, grows across modes, scrolls, and resets on post change" `Quick
             test_board_list_preview_modes_scroll_and_markdown
+        ; Alcotest.test_case "Schedules and Config themes keep viewport stationary on in-window cursor moves" `Quick
+            test_schedules_and_themes_keep_sticky_viewport_scroll
         ] )
     ]

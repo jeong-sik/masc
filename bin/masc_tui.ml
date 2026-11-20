@@ -6775,6 +6775,11 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.board_list_preview_scroll <- 0;
   state.board_list_preview_max_scroll <- 0;
   state.board_list_preview_body_rows <- 0;
+  state.approval_list_scroll <- 0;
+  state.schedule_list_scroll <- 0;
+  state.fusion_list_scroll <- 0;
+  state.workspace_activity_list_scroll <- 0;
+  state.code_tree_scroll <- 0;
   state.board_census <- Masc_tui_fetched.Absent;
   state.board_detail <- Board_detail.clear state.board_detail;
   state.board_mode <- Board_list;
@@ -7209,6 +7214,7 @@ let apply_confirmed_server_identity_reading state ~mailbox reading =
     Masc_tui_refresh_settlement.Approvals_asks_settlement.apply_approvals_load state (Error (Request_failed reason));
     state.board_listing <- Masc_tui_fetched.Failed reason;
     state.board_list_reported_error <- None;
+    state.approval_list_scroll <- 0;
     state.board_census <- Masc_tui_fetched.Absent;
     state.board_detail <- Board_detail.clear state.board_detail;
     state.board_vote_armed <- None;
@@ -17397,7 +17403,7 @@ let main
         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
         | Preset_detail_scroll { confirmation = None; _ } | Keeper_list_scroll _
-        | Board_list_scroll _
+        | Board_list_scroll _ | List_window_scroll _
         | Context_inspector_scroll _
         | Context_inspector_response_scroll _ | Queue_panel_presented _ | Help_presented) -> false in
     let activity_authority_changed =
@@ -17509,7 +17515,8 @@ let main
          | Some (Resource_scroll _) | Some (Metrics_scroll _) | Some (Approval_detail_scroll _)
          | Some (Link_modal_scroll _)
          | Some (Play_invite_scroll _) | Some (Voice_scroll _) | Some (Preset_detail_scroll _)
-         | Some (Keeper_list_scroll _) | Some (Board_list_scroll _) | Some (Context_inspector_scroll _)
+         | Some (Keeper_list_scroll _) | Some (Board_list_scroll _)
+         | Some (List_window_scroll _) | Some (Context_inspector_scroll _)
          | Some (Context_inspector_response_scroll _) | Some (Queue_panel_presented _)
          | Some Help_presented -> ());
         (* Include picture writes in the post-output input observation. *)
@@ -19321,7 +19328,7 @@ let main
           | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
           | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _
           | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _ | Keeper_list_scroll _
-          | Board_list_scroll _
+          | Board_list_scroll _ | List_window_scroll _
           | Context_inspector_scroll _ | Context_inspector_response_scroll _
           | Queue_panel_presented _ | Help_presented) -> false in
       let key =
@@ -23850,6 +23857,7 @@ let main
                 Option.iter (fun (repo : Tui_decode.repository) ->
                   state.workspace_activity_repo <- Some repo.rp_id;
                   state.workspace_activity_cursor <- 0;
+                  state.workspace_activity_list_scroll <- 0;
                   state.workspace_activity_context_scroll <- None;
                   Masc_tui_repo_changes.Workspace_file_changes.launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
                   (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
@@ -27358,6 +27366,7 @@ let main
                       if node.Masc.Tui_decode.wt_has_children then begin
                         state.code_dir <- node.Masc.Tui_decode.wt_path;
                         state.code_cursor <- 0;
+                        state.code_tree_scroll <- 0;
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         Masc_tui_code_requests.launch_entries_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state async_messages)
                       end
@@ -27511,6 +27520,7 @@ let main
                           (Code_scope_repo repo.Masc.Tui_decode.rp_id);
                         state.code_dir <- "";
                         state.code_cursor <- 0;
+                        state.code_tree_scroll <- 0;
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_file_resume_intent <- Refresh_code_file;
@@ -27860,6 +27870,7 @@ let main
                           (if String.equal parent "." then "" else parent);
                         state.code_listing <- Masc_tui_fetched.clear state.code_listing;
                         state.code_cursor <- 0;
+                        state.code_tree_scroll <- 0;
                         state.code_file <- Masc_tui_fetched.clear state.code_file;
                         state.code_file_resume_intent <- Refresh_code_file;
                         state.code_focus_file <- Left_pane;

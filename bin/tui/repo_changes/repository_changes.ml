@@ -136,6 +136,7 @@ let open_repository_change_in_code (state : T.state) ~mailbox ~scope
   let parent = Filename.dirname change.Tui_decode.rc_path in
   state.T.code_dir <- (if String.equal parent "." then "" else parent);
   state.T.code_cursor <- 0;
+  state.T.code_tree_scroll <- 0;
   state.T.code_listing <- Masc_tui_fetched.clear state.T.code_listing;
   state.T.code_file <- Masc_tui_fetched.clear state.T.code_file;
   state.T.code_file_resume_intent <- T.Refresh_code_file;
@@ -152,6 +153,7 @@ let open_repository_change_in_code (state : T.state) ~mailbox ~scope
 let step_code_back (state : T.state) ~mailbox ~leave =
   let reload () =
     state.T.code_cursor <- 0;
+    state.T.code_tree_scroll <- 0;
     state.T.code_listing <- Masc_tui_fetched.clear state.T.code_listing;
     Masc_tui_code_requests.launch_entries_load state ~host:Admission.server_peer_host
       ~deliver:(Admission.deliver_code state mailbox)

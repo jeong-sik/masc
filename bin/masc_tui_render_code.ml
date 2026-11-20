@@ -490,6 +490,7 @@ let render_code (state : state) =
   (* The focused pane says where its reader is; the title row above both
      panes draws it, so the panes are drawn first. *)
   let position = ref None in
+  let drawn_tree_scroll = ref state.code_tree_scroll in
   let entries = code_entries state in
   let total = List.length entries in
   let cursor = max 0 (min state.code_cursor (total - 1)) in
@@ -532,8 +533,13 @@ let render_code (state : state) =
     let list_rows_budget = code_tree_list_height state in
     report_drawn_list Code_tree_entries ~height:list_rows_budget;
     let first =
-      if cursor < list_rows_budget then 0 else cursor - list_rows_budget + 1
+      if total = 0 || list_rows_budget <= 0 then 0
+      else
+        Masc_tui_scroll.normalize ~count:total ~height:list_rows_budget
+          state.code_tree_scroll
+        |> Masc_tui_scroll.ensure_visible ~cursor ~height:list_rows_budget
     in
+    drawn_tree_scroll := first;
     let entries_window = Rows.of_list ~first:first ~height:list_rows_budget entries in
     for i = 0 to list_rows_budget - 1 do
       match Rows.at entries_window (first + i) with
@@ -1268,4 +1274,6 @@ let render_code (state : state) =
     (footer_line state ~max_cells:cols
        ~hints:(if Option.is_some (current_code_hover state) then Masc_tui_keys.footer_hints_code_hover ~lang:state.ui_language
                else Masc_tui_keys.footer_hints_code ~lang:state.ui_language ~pane:code_pane));
-  finish_surface state ~surface_key:"code" ~rows:terminal_rows ~cols buf
+  finish_surface state
+    ~clamped:(List_window_scroll (Code_tree_list, !drawn_tree_scroll))
+    ~surface_key:"code" ~rows:terminal_rows ~cols buf

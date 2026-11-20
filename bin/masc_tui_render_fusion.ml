@@ -224,9 +224,11 @@ let render_fusion_list (state : state) =
   in
   let content_height = max 1 (rows - chrome_rows - summary_rows) in
   let scroll =
-    if cursor >= content_height then
-      cursor - content_height + 1
-    else 0
+    if shown = 0 then 0
+    else
+      Masc_tui_scroll.normalize ~count:shown ~height:content_height
+        state.fusion_list_scroll
+      |> Masc_tui_scroll.ensure_visible ~cursor ~height:content_height
   in
   let entries_window = Rows.of_list ~first:scroll ~height:content_height entries in
   report_drawn_list Fusion_entries ~height:content_height;
@@ -313,7 +315,9 @@ let render_fusion_list (state : state) =
        ~keys:
          (Masc_tui_keys.footer_row_of_surface ~lang:state.ui_language ~detail_open:false
             ~has_rows:(shown > 0) Fusion));
-  finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
+  finish_surface state
+    ~clamped:(List_window_scroll (Fusion_list_scroll, scroll))
+    ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 (* The panel as marks, one per model, filled where the model answered.
 

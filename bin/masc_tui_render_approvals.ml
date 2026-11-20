@@ -1207,6 +1207,7 @@ let render_approvals (state : state) =
      poll that failed after one that answered keeps its empty rows, so the
      queue is empty on screen while the server may hold Gate approvals; each
      list that was not read says so here instead. *)
+  let drawn_list_scroll = ref 0 in
   if approvals = [] then begin
     let lines =
       match Masc_tui_approvals_model.approvals_empty_queue ~ko:(state.ui_language = Lang_ko) reading with
@@ -1252,11 +1253,16 @@ let render_approvals (state : state) =
     let content_height =
       if show_header then approval_body_rows - 2 else approval_body_rows
     in
+    let approval_cursor = max 0 (min state.approval_cursor (approval_total - 1)) in
     let scroll_offset =
-      if content_height > 0 && state.approval_cursor >= content_height then
-        state.approval_cursor - content_height + 1
-      else 0
+      if content_height <= 0 then 0
+      else
+        Masc_tui_scroll.normalize ~count:approval_total ~height:content_height
+          state.approval_list_scroll
+        |> Masc_tui_scroll.ensure_visible ~cursor:approval_cursor
+             ~height:content_height
     in
+    drawn_list_scroll := scroll_offset;
     let approval_row_name = function
       | Masc_tui_approvals_model.Operator_row item -> Terminal_text.single_line item.ap_actor
       | Masc_tui_approvals_model.Keeper_tool_row held -> Terminal_text.single_line held.kta_keeper
@@ -1306,7 +1312,7 @@ let render_approvals (state : state) =
               Printf.sprintf "%s  %s" (fit_width subject subject_width)
                 (fit_width (approval_row_name row) name_width)
         in
-        let is_selected = idx = state.approval_cursor in
+        let is_selected = idx = approval_cursor in
         if is_selected then
           box_line_selected_styled buf cols ("\xe2\x80\xba " ^ line)
         else
@@ -1322,7 +1328,9 @@ let render_approvals (state : state) =
 
   Buffer.add_buffer buf footer_buf;
 
-  finish_surface state ~surface_key:"approvals" ~rows:terminal_rows
+  finish_surface state
+    ~clamped:(List_window_scroll (Approval_list, !drawn_list_scroll))
+    ~surface_key:"approvals" ~rows:terminal_rows
       ~cols buf
 
 (* Source diagnostics that cannot take space from the selected compact Ask

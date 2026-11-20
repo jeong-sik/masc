@@ -12,9 +12,6 @@ module Render_schedule = Masc_tui_render_schedule
 module Span = Masc_tui_span
 module Diff = Masc_tui_diff
 
-let clamped_cursor ~count cursor =
-  if count <= 0 then 0 else max 0 (min cursor (count - 1))
-
 (* The repositories a keeper can work in.  The server sends both the stored
    path spelling and the absolute path it actually resolves.  The latter is
    what an operator needs before opening a shell or comparing another
@@ -36,7 +33,8 @@ let repository_context_fields ~ko (repo : Masc.Tui_decode.repository) =
 let selected_repository_reading (state : state) =
   let selected = Option.bind state.repositories (fun snapshot ->
     let count = List.length snapshot.rs_repositories in
-    List.nth_opt snapshot.rs_repositories (clamped_cursor ~count state.repositories_cursor)) in
+    List.nth_opt snapshot.rs_repositories
+      (Masc_tui_scroll.cursor_normalized ~count state.repositories_cursor)) in
   let errors = match state.repositories_error with
     | None -> [] | Some reason ->
         [(if Option.is_some state.repositories then
@@ -423,7 +421,9 @@ let render_repository_list (state : state) =
              ~has_reading:(Option.is_some (selected_repository_reading state))
              state.view)
     ~body:(fun ~budget c ->
-      let repo_cursor = clamped_cursor ~count:shown state.repositories_cursor in
+      let repo_cursor =
+        Masc_tui_scroll.cursor_normalized ~count:shown state.repositories_cursor
+      in
       let geometry =
         repository_studio_geometry state ~cols ~budget ~cursor:repo_cursor in
       List.iter c.push geometry.rsg_intro;
@@ -617,7 +617,7 @@ let repository_changes_authority state ~surface_key ~terminal_rows ~cols =
     match state.repository_changes with
     | None -> 0
     | Some snapshot ->
-        clamped_cursor ~count:(List.length snapshot.rcs_changes)
+        Masc_tui_scroll.cursor_normalized ~count:(List.length snapshot.rcs_changes)
           state.repository_changes_cursor
   in
   let path =
@@ -716,7 +716,8 @@ let render_repository_changes (state : state) =
         else None
       in
       let changes_cursor =
-        clamped_cursor ~count:(List.length changes) state.repository_changes_cursor
+        Masc_tui_scroll.cursor_normalized ~count:(List.length changes)
+          state.repository_changes_cursor
       in
       let title =
         here_row ~cols state ~path:[ git_changes_step state; scope_name ]

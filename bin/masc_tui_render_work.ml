@@ -24,9 +24,6 @@ let wrap_style style text =
   then text
   else style ^ text ^ Ansi.reset
 
-let clamped_cursor ~count cursor =
-  if count <= 0 then 0 else max 0 (min cursor (count - 1))
-
 let task_status_mark (status : Masc_domain.task_status) =
   Masc_tui_value.Mark.glyph
     (match status with
@@ -995,7 +992,9 @@ let render_planning_list (state : state) =
                     ())
            end;
            let body_budget = max 0 (budget - !used) in
-           let planning_cursor = clamped_cursor ~count state.planning_cursor in
+           let planning_cursor =
+             Masc_tui_scroll.cursor_normalized ~count state.planning_cursor
+           in
            let selected_goal = List.nth_opt goals planning_cursor in
            let split =
              Masc_tui_types.docked_vertical_split ~total_rows:body_budget
@@ -2320,7 +2319,8 @@ let render_schedule_list (state : state) =
           snapshot.scs_rows <> []
           && Option.is_some
                (List.nth_opt snapshot.scs_rows
-                  (clamped_cursor ~count:(List.length snapshot.scs_rows) state.schedule_cursor))
+                  (Masc_tui_scroll.cursor_normalized
+                     ~count:(List.length snapshot.scs_rows) state.schedule_cursor))
         in
         selected, warning + cancel +
           (if snapshot.scs_rows = [] then schedule_summary_rows + 1
@@ -2503,7 +2503,9 @@ let render_schedule_list (state : state) =
            let content_height =
              max 1 (budget - List.length refusal_rows - warning_rows - schedule_rows_around_list - cancel_rows)
            in
-           let schedule_cursor = clamped_cursor ~count state.schedule_cursor in
+           let schedule_cursor =
+             Masc_tui_scroll.cursor_normalized ~count state.schedule_cursor
+           in
            let scroll_offset =
              if schedule_cursor >= content_height then
                schedule_cursor - content_height + 1
@@ -3100,7 +3102,10 @@ let render_schedule_detail (state : state) ~runner (row : schedule_row) =
         ~holding:
           (Option.bind state.schedules (fun snapshot ->
                snapshot.scs_request_count))
-        ~labels ~selected:(clamped_cursor ~count:(List.length labels) state.schedule_cursor);
+        ~labels
+        ~selected:
+          (Masc_tui_scroll.cursor_normalized ~count:(List.length labels)
+             state.schedule_cursor);
       let answer =
         schedule_detail_pane state ~rows ~cols:(cols - left_cols) row
           ~runner right_buf

@@ -17,9 +17,6 @@ let wrap_style style text =
   then text
   else style ^ text ^ Ansi.reset
 
-let clamped_cursor ~count cursor =
-  if count <= 0 then 0 else max 0 (min cursor (count - 1))
-
 let fusion_run_status_label ~ko = function
   | Fusion_running -> if ko then "실행 중" else "running"
   | Fusion_completed -> if ko then "완료" else "completed"
@@ -78,7 +75,7 @@ let render_fusion_list (state : state) =
   in
   let entries = Masc_tui_fusion_model.fusion_list_entries state in
   let shown = List.length entries in
-  let cursor = clamped_cursor ~count:shown state.fusion_cursor in
+  let cursor = Masc_tui_scroll.cursor_normalized ~count:shown state.fusion_cursor in
   let history_count = shown - List.length runs in
   let replay_warning = Option.bind snapshot
       (fun snapshot ->

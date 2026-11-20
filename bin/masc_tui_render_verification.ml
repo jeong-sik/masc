@@ -21,9 +21,6 @@ let wrap_style style text =
   then text
   else style ^ text ^ Ansi.reset
 
-let clamped_cursor ~count cursor =
-  if count <= 0 then 0 else max 0 (min cursor (count - 1))
-
 let review_mark = function
   | Review_unobserved -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
   | Review_running _ | Review_waiting_original _ ->
@@ -266,7 +263,7 @@ let render_verification_list (state : state) =
   in
   (* The selected row, and how much of the server's list is loaded when the
      page holds less than all of it. *)
-  let cursor = clamped_cursor ~count:shown state.verification_cursor in
+  let cursor = Masc_tui_scroll.cursor_normalized ~count:shown state.verification_cursor in
   let position =
     match state.verification with
     | None -> None
@@ -817,7 +814,10 @@ let render_verification_detail (state : state) request =
              (fun (snapshot : Tui_decode.verification_snapshot) ->
                snapshot.Tui_decode.vs_total)
              state.verification)
-        ~labels ~selected:(clamped_cursor ~count:(List.length labels) state.verification_cursor);
+        ~labels
+        ~selected:
+          (Masc_tui_scroll.cursor_normalized ~count:(List.length labels)
+             state.verification_cursor);
       let answer =
         verification_detail_pane state ~rows ~cols:(cols - left_cols)
           ~origin:(strip_rows, left_cols) request right_buf
@@ -1082,7 +1082,7 @@ let render_harness_list (state : state) =
           ~after:badge
         ^ badge
   in
-  let cursor = clamped_cursor ~count:shown state.harness_cursor in
+  let cursor = Masc_tui_scroll.cursor_normalized ~count:shown state.harness_cursor in
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:

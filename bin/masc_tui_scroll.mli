@@ -111,6 +111,11 @@ val cursor_last : count:int -> int
 (** The last row a cursor can name, and 0 for an empty list. What End lands
     on. *)
 
+val cursor_normalized : count:int -> int -> int
+(** A cursor held inside [[0, cursor_last ~count]], and 0 for an empty list.
+    Reading is safe on a stale cursor after a list shrinks; moving goes through
+    {!cursor_apply}. *)
+
 (** A move of a row cursor, one per move key (RFC tui-one-screen-grammar
     §3.1). A page move carries the rows its page counts, so a line or edge
     move has no page to pass and a page move cannot leave its page out. The

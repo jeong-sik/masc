@@ -243,6 +243,18 @@ let test_a_window_of_uneven_rows_shows_the_cursor_whole () =
   check window "a window of no lines" (0, 0) (window_of ~heights:[ 1; 1 ] ~cursor:1 ~rows:0 0)
 
 let test_the_cursor_stays_inside_the_list () =
+  check int "normalized keeps an in-range cursor" 2
+    (Masc_tui_scroll.cursor_normalized ~count:4 2);
+  check int "normalized clamps a negative cursor to zero" 0
+    (Masc_tui_scroll.cursor_normalized ~count:4 (-5));
+  check int "normalized clamps a stale cursor to the last row" 3
+    (Masc_tui_scroll.cursor_normalized ~count:4 9);
+  check int "normalized pins an empty list at zero" 0
+    (Masc_tui_scroll.cursor_normalized ~count:0 5);
+  check int "normalized pins a negative count at zero" 0
+    (Masc_tui_scroll.cursor_normalized ~count:(-3) 5);
+  check int "normalized pins min_int count at zero without wrap" 0
+    (Masc_tui_scroll.cursor_normalized ~count:min_int 5);
   check int "down stops at the last row" 3
     (Masc_tui_scroll.cursor_down ~count:4 3);
   check int "down from the middle" 2 (Masc_tui_scroll.cursor_down ~count:4 1);
@@ -283,6 +295,10 @@ let test_the_edges_of_a_list_are_reachable_in_one_move () =
   check int "the last row of a list" 99 (Masc_tui_scroll.cursor_last ~count:100);
   check int "an empty list has no row past zero" 0
     (Masc_tui_scroll.cursor_last ~count:0);
+  check int "a negative count has no row past zero" 0
+    (Masc_tui_scroll.cursor_last ~count:(-3));
+  check int "min_int count pins cursor_last at zero without wrap" 0
+    (Masc_tui_scroll.cursor_last ~count:min_int);
   check int "a one-row list begins and ends on the same row" 0
     (Masc_tui_scroll.cursor_last ~count:1);
   check int "End reaches the end from anywhere" 99

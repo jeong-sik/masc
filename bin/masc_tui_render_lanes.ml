@@ -20,9 +20,6 @@ let wrap_style style text =
   then text
   else style ^ text ^ Ansi.reset
 
-let clamped_cursor ~count cursor =
-  if count <= 0 then 0 else max 0 (min cursor (count - 1))
-
 let format_context_tokens = Masc_tui_types.format_context_tokens
 
 (* A refusal is bad news about the key pressed; a pending write is a warning
@@ -1383,7 +1380,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     | Some runs -> runs
   in
   let shown = List.length runs in
-  let cursor = clamped_cursor ~count:shown state.lane_runs_cursor in
+  let cursor = Masc_tui_scroll.cursor_normalized ~count:shown state.lane_runs_cursor in
   let text ko en = ui_text state ~ko ~en in
   (* How many rows were read and how many the server keeps is the position:
      [3/50] of a list read whole, [3/50 · of 8,347] of one read in part. The
@@ -2720,7 +2717,10 @@ let render_clients (state : state) =
          else
            Some
              (Masc_tui_value.Position.row
-                ~selected:(Some (clamped_cursor ~count:shown state.clients_surface_cursor))
+                ~selected:
+                  (Some
+                     (Masc_tui_scroll.cursor_normalized ~count:shown
+                        state.clients_surface_cursor))
                 ~total:shown))
   in
   box_line buf cols header;

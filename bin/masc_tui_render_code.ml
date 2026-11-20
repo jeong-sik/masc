@@ -13,6 +13,11 @@ module Rows = Masc_tui_rows
 module File_icon = Masc_tui_file_icon
 module Diff = Masc_tui_diff
 
+let wrap_style style text =
+  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
+  then text
+  else style ^ text ^ Ansi.reset
+
 (* Blame reaches further back than [Masc_tui_value.Ongoing.Narrow] reads.
    A line untouched since a repository's first year is ordinary, and
    "3684d" is not a reading anyone converts in their head. Weeks and years
@@ -144,7 +149,7 @@ let prepare_code_draft_rows ~ko ~cols draft =
     (ending_text before) (ending_text (Draft.text draft)) in
   let rows = Diff.rows ~before ~after:(Draft.text draft) |> List.concat_map (fun row ->
     let marker, style, text = match row with
-      | Diff.Context text -> "  ", Ansi.dim, text
+      | Diff.Context text -> "  ", Theme.recede (), text
       | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), text
       | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), text in
     Terminal_text.single_line
@@ -271,7 +276,7 @@ let history_change_rows ~ko ~cols (change : Masc.Tui_decode.file_change) =
   in
   let rows = Diff.rows ~before ~after |> List.concat_map (fun row ->
     let marker, style, text = match row with
-      | Diff.Context text -> "  ", Ansi.dim, text
+      | Diff.Context text -> "  ", Theme.recede (), text
       | Diff.Removed text -> "- ", Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), text
       | Diff.Added text -> "+ ", Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), text
     in
@@ -356,7 +361,7 @@ let prepare_code_history_rows (state : state) ~cols =
       in
       let scope_text = match scope with
         | Code_scope_project -> say "프로젝트" "Project"
-        | Code_scope_keeper keeper -> "Keeper " ^ keeper
+        | Code_scope_keeper keeper -> say "키퍼 " "Keeper " ^ keeper
         | Code_scope_repo repo -> say "저장소 " "Repository " ^ repo
       in
       git_failure @ entries @ empty @ wrap None (field (say "파일" "File") path)
@@ -466,9 +471,9 @@ let code_tree_status (state : state) =
          ^ progress_inline ~ko:(state.ui_language = Lang_ko) ~now ?started_at
              (ui_text state ~ko:"목록 읽는 중" ~en:"loading directory"))
   | Masc_tui_fetched.Absent ->
-      Some (Ansi.dim ^ " " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko)) ^ Ansi.reset)
+      Some (wrap_style (Theme.recede ()) (" " ^ String.trim (page_unread_note ~ko:(state.ui_language = Lang_ko))))
   | Masc_tui_fetched.Ready [] ->
-      Some (Ansi.dim ^ " " ^ empty_directory_text state ^ Ansi.reset)
+      Some (wrap_style (Theme.recede ()) (" " ^ empty_directory_text state))
   | Masc_tui_fetched.Ready (_ :: _) -> None
 
 (* The file tree's rows are the pane less its status line. The drawing cuts
@@ -517,7 +522,7 @@ let render_code (state : state) =
       | Code_scope_repo repo -> repo ^ " \xe2\x80\xba " ^ where
     in
     framed_line pane_buf pane_cols
-      ((if list_focused then Ansi.bold else Ansi.dim)
+      ((if list_focused then Ansi.bold else Theme.recede ())
        ^ (if list_focused then " \xe2\x96\xb8 " else "   ")
        ^ Terminal_text.single_line where
        ^ workspace_entries_count_label total
@@ -781,8 +786,8 @@ let render_code (state : state) =
                 | Some (Diff_commit { commit; _ }) ->
                     ui_text state ~ko:"커밋 " ~en:"commit " ^ Terminal_text.single_line commit
                 | Some (Diff_worktree { base_ref; _ }) ->
-                    "vs " ^ Terminal_text.single_line base_ref
-                | None -> "vs HEAD"
+                    ui_text state ~ko:"비교 " ~en:"vs " ^ Terminal_text.single_line base_ref
+                | None -> ui_text state ~ko:"HEAD 대비" ~en:"vs HEAD"
               in
               (if state.ui_language = Lang_ko then
                  Printf.sprintf "diff %s · %d열부터: %s" basis (state.code_diff_hscroll + 1) path
@@ -878,8 +883,10 @@ let render_code (state : state) =
              refusal and the wait ride the title. *)
           (match Masc_tui_fetched.current state.code_blame with
            | Some (_, (Masc_tui_fetched.Stale (_, detail) | Masc_tui_fetched.Failed detail)) ->
-               with_note ^ "  " ^ Theme.bad () ^ "blame: "
-               ^ Terminal_text.single_line detail ^ Ansi.reset
+               with_note ^ "  "
+               ^ wrap_style (Theme.bad ())
+                   (ui_text state ~ko:"작성자 추적: " ~en:"blame: "
+                    ^ Terminal_text.single_line detail)
            | Some (_, Masc_tui_fetched.Loading) ->
                with_note ^ "  "
                ^ progress_inline ~ko ~now ?started_at:blame_started
@@ -894,7 +901,7 @@ let render_code (state : state) =
     in
     if split then box_top pane_buf pane_cols;
     box_line pane_buf pane_cols
-      ((if state.code_focus_file = Right_pane then Ansi.bold else Ansi.dim)
+      ((if state.code_focus_file = Right_pane then Ansi.bold else Theme.recede ())
        ^ (if state.code_focus_file = Right_pane then " \xe2\x96\xb8 " else "   ")
        ^ title
        ^ Ansi.reset);
@@ -990,24 +997,22 @@ let render_code (state : state) =
        | Some (_, Masc_tui_fetched.Ready diff) -> (
            match diff.Masc.Tui_decode.gd_rows with
            | [] ->
-               box_line pane_buf pane_cols
-                 (Ansi.dim
-                 ^ (match Masc_tui_fetched.current_key state.code_diff with
-                    | Some (Diff_commit _) ->
-                        if diff.Masc.Tui_decode.gd_has_changes then
-                          ui_text state ~ko:"  (커밋에 변경이 있다는데 줄이 오지 않음)"
-                            ~en:"  (the commit reports a change and sent no lines)"
-                        else
-                          ui_text state ~ko:"  (이 커밋은 이 파일을 바꾸지 않음)"
-                            ~en:"  (this commit changed nothing in this file)"
-                    | Some (Diff_worktree _) | None ->
-                        if diff.Masc.Tui_decode.gd_has_changes then
-                          ui_text state ~ko:"  (트리에 변경이 있다는데 줄이 오지 않음)"
-                            ~en:"  (the tree reports a change and sent no lines)"
-                        else
-                          ui_text state ~ko:"  (이 파일은 마지막 커밋과 같음)"
-                            ~en:"  (this file matches its last commit)")
-                 ^ Ansi.reset);
+               box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
+                 (match Masc_tui_fetched.current_key state.code_diff with
+                  | Some (Diff_commit _) ->
+                      if diff.Masc.Tui_decode.gd_has_changes then
+                        ui_text state ~ko:"  (커밋에 변경이 있다는데 줄이 오지 않음)"
+                          ~en:"  (the commit reports a change and sent no lines)"
+                      else
+                        ui_text state ~ko:"  (이 커밋은 이 파일을 바꾸지 않음)"
+                          ~en:"  (this commit changed nothing in this file)"
+                  | Some (Diff_worktree _) | None ->
+                      if diff.Masc.Tui_decode.gd_has_changes then
+                        ui_text state ~ko:"  (트리에 변경이 있다는데 줄이 오지 않음)"
+                          ~en:"  (the tree reports a change and sent no lines)"
+                      else
+                        ui_text state ~ko:"  (이 파일은 마지막 커밋과 같음)"
+                          ~en:"  (this file matches its last commit)");
                for _ = 2 to content_height do
                  box_empty pane_buf pane_cols
                done
@@ -1047,10 +1052,10 @@ let render_code (state : state) =
                            Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg () ^ text ^ Ansi.reset
                        | Gd_added ->
                            Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg () ^ text ^ Ansi.reset
-                       | Gd_context -> Ansi.dim ^ text ^ Ansi.reset
+                       | Gd_context -> wrap_style (Theme.recede ()) text
                      in
                      box_line pane_buf pane_cols
-                       (Ansi.dim ^ gutter ^ Ansi.reset
+                       (wrap_style (Theme.recede ()) gutter
                         ^ Message_layout.drop_cells body state.code_diff_hscroll)
                  | None -> box_empty pane_buf pane_cols
                done)
@@ -1186,14 +1191,13 @@ let render_code (state : state) =
              | _ -> (
                match Masc.Tui_decode.blame_block_at blame_blocks line with
                | Some (block, true) ->
-                   Printf.sprintf "%s %s%s%s "
+                   Printf.sprintf "%s %s "
                      (Message_layout.fit_width block.bb_author
                         blame_author_cells)
-                     Ansi.dim
-                     (Message_layout.fit_width
-                        (blame_age_text ~now_s:blame_now_s block.bb_at_ms)
-                        blame_age_cells)
-                     Ansi.reset
+                     (wrap_style (Theme.recede ())
+                        (Message_layout.fit_width
+                           (blame_age_text ~now_s:blame_now_s block.bb_at_ms)
+                           blame_age_cells))
                | Some (_, false) | None -> String.make blame_margin_cells ' ')
            in
            let file_rows_window = Rows.of_array file_rows in
@@ -1206,26 +1210,36 @@ let render_code (state : state) =
                  (* The gutter stays put; only the code scrolls sideways. *)
                  let body = Message_layout.drop_cells body hscroll in
                  let row_index = scroll + i in
-                 let gutter_style =
-                   (* The cursor line carries the gutter in the adaptive
-                      selection band: a full-row band would sit on top of the
-                      lexer's own colours, and the gutter is the row's stable
-                      margin. *)
-                   if row_index = state.code_file_cursor then Theme.selection_style ()
-                   else Ansi.dim
-                 in
+                 let is_cursor = row_index = state.code_file_cursor in
                  let mark =
                    let line = row_index + 1 in
                    if covers line note_spans then
-                     (Theme.accent ())
-                     ^ "\xe2\x97\x8f" ^ Ansi.reset
-                   else if covers line keeper_spans then Ansi.dim ^ "\xc2\xb7" ^ Ansi.reset
+                     wrap_style (Theme.accent ()) "\xe2\x97\x8f"
+                   else if covers line keeper_spans then
+                     wrap_style (Theme.recede ()) "\xc2\xb7"
                    else " "
                  in
-                 box_line pane_buf pane_cols
-                   (Printf.sprintf "%s%s%s%4d%s %s"
-                      (blame_cell (row_index + 1))
-                      mark gutter_style (row_index + 1) Ansi.reset body)
+                 if is_cursor then
+                   match Theme.sidebar_selection_background () with
+                   | None | Some "" ->
+                       box_line pane_buf pane_cols
+                         (Printf.sprintf "%s%s%s%4d%s %s"
+                            (blame_cell (row_index + 1))
+                            mark (Theme.selection_style ()) (row_index + 1) Ansi.reset body)
+                   | Some _ ->
+                       let gutter =
+                         wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (row_index + 1))
+                       in
+                       box_line_selected_styled pane_buf pane_cols
+                         (Printf.sprintf "%s%s%s %s"
+                            (blame_cell (row_index + 1)) mark gutter body)
+                 else
+                   let gutter =
+                     wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (row_index + 1))
+                   in
+                   box_line pane_buf pane_cols
+                     (Printf.sprintf "%s%s%s %s"
+                        (blame_cell (row_index + 1)) mark gutter body)
              | None -> box_empty pane_buf pane_cols
            done);
     List.iter (box_line pane_buf pane_cols) code_sheet_lines;

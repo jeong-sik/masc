@@ -16,6 +16,45 @@ module Doc = Masc_tui_doc
 module Chart = Masc_tui_chart
 module Text_block = Masc_tui_text_block
 
+let wrap_style style text =
+  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
+  then text
+  else style ^ text ^ Ansi.reset
+
+let clamped_cursor ~count cursor =
+  if count <= 0 then 0 else max 0 (min cursor (count - 1))
+
+let review_mark = function
+  | Review_unobserved -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
+  | Review_running _ | Review_waiting_original _ ->
+      Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Review_stopped { cause = Review_original_repair; _ } ->
+      Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
+  | Review_stopped
+      { cause =
+          ( Review_environment | Review_no_judgment | Review_commit_failure
+          | Review_failure | Review_cancelled )
+      ; _
+      } ->
+      Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Paused
+  | Review_approved _ -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  | Review_rejected _ -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
+  | Review_superseded _ -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
+
+let review_style = function
+  | Review_unobserved | Review_superseded _ -> Theme.recede ()
+  | Review_running _ | Review_waiting_original _ -> Theme.info ()
+  | Review_stopped { cause = Review_original_repair; _ } -> Theme.warn ()
+  | Review_stopped
+      { cause =
+          ( Review_environment | Review_no_judgment | Review_commit_failure
+          | Review_failure | Review_cancelled )
+      ; _
+      } ->
+      Theme.recede ()
+  | Review_approved _ -> Theme.ok ()
+  | Review_rejected _ -> Theme.bad ()
+
 let review_label state = function
   | Review_unobserved -> ui_text state ~ko:"보고 안 됨" ~en:"not reported"
   | Review_running _ -> ui_text state ~ko:"검증 중" ~en:"reviewing"
@@ -50,10 +89,10 @@ let judgement_list_columns state ~cols ~status_header ~statuses =
       (Message_layout.display_width status_header) statuses
     |> min (max 1 (inner_width - 3)) in
   let title_width = max 1 (inner_width - status_width - 2) in
-  let row ?(selected = false) title status =
+  let row ?(selected = false) ?(status_style = "") title status =
     (if selected then "\xe2\x80\xba " else "  ")
     ^ fit_width (Terminal_text.single_line title) title_width
-    ^ "  " ^ fit_width status status_width in
+    ^ "  " ^ wrap_style status_style (fit_width status status_width) in
   row (ui_text state ~ko:"작업" ~en:"Task") status_header, row
 
 (* What the notice above a retained reading says went wrong: the last read
@@ -130,11 +169,21 @@ let reading_notice_lines state ~width ~inflight ~error =
       |> List.map (fun line -> style, "  " ^ line)
 
 let verification_status state (request : Tui_decode.verification_request) =
-  let label = match request.vr_evidence_error with
-    | Some _ -> ui_text state ~ko:"증거 읽기 실패" ~en:"evidence error"
-    | None -> review_label state request.vr_review in
-  previous_reading_label state ~inflight:state.verification_inflight
-    ~error:state.verification_error label
+  let mark, label =
+    match request.vr_evidence_error with
+    | Some _ ->
+        Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed,
+        ui_text state ~ko:"증거 읽기 실패" ~en:"evidence error"
+    | None -> review_mark request.vr_review, review_label state request.vr_review
+  in
+  mark ^ " "
+  ^ previous_reading_label state ~inflight:state.verification_inflight
+      ~error:state.verification_error label
+
+let verification_status_style (request : Tui_decode.verification_request) =
+  match request.vr_evidence_error with
+  | Some _ -> Theme.bad ()
+  | None -> review_style request.vr_review
 
 let review_detail ~ko review =
   let text korean english = if ko then korean else english in
@@ -217,6 +266,7 @@ let render_verification_list (state : state) =
   in
   (* The selected row, and how much of the server's list is loaded when the
      page holds less than all of it. *)
+  let cursor = clamped_cursor ~count:shown state.verification_cursor in
   let position =
     match state.verification with
     | None -> None
@@ -225,7 +275,7 @@ let render_verification_list (state : state) =
         (* Counted in the server's list, not the page: on a later page the
            selected row and the rows read run on from the rows before it. *)
         let offset = max 0 snapshot.Masc.Tui_decode.vs_offset in
-        let selected = Some (offset + state.verification_cursor) in
+        let selected = Some (offset + cursor) in
         let total = snapshot.Masc.Tui_decode.vs_total in
         if total > offset + shown then
           Some (Masc_tui_value.Position.partial ~selected ~loaded:(offset + shown) ~total)
@@ -267,7 +317,7 @@ let render_verification_list (state : state) =
           ~width:(framed_inner_width cols) sheet
   in
   let content_height = max 0 (raw_content_height - List.length sheet_lines) in
-  let scroll = Masc_tui_scroll.ensure_visible ~cursor:state.verification_cursor
+  let scroll = Masc_tui_scroll.ensure_visible ~cursor
       ~height:content_height state.verification_scroll
     |> Masc_tui_scroll.normalize ~count:shown ~height:content_height in
   let requests_window = Rows.of_list ~first:scroll ~height:content_height requests in
@@ -301,15 +351,14 @@ let render_verification_list (state : state) =
       | None -> box_empty buf cols
       | Some r ->
           let open Masc.Tui_decode in
-          let is_selected = idx = state.verification_cursor in
-          let line = request_row ~selected:is_selected r.vr_task_title (verification_status state r) in
-          let style =
-            match r.vr_evidence_error with
-            | Some _ -> (Theme.bad ())
-            | None -> Ansi.reset
+          let is_selected = idx = cursor in
+          let status_style = verification_status_style r in
+          let line =
+            request_row ~selected:is_selected ~status_style
+              r.vr_task_title (verification_status state r)
           in
-          if is_selected then box_line_selected buf cols line
-          else box_line_styled buf cols ~style line
+          if is_selected then box_line_selected_styled buf cols line
+          else box_line buf cols line
     done;
   (* Which list this is, and where in it -- drawn on every read rather than
      only on a cut page. The same row count means "nothing else is waiting" in
@@ -546,10 +595,13 @@ let verification_evidence_index state request ~width observation =
     let count = List.length items in
     let index = max 0 (min (count - 1) state.verification_evidence_cursor) in
     let rows = List.mapi (fun i item ->
-      (if i = index then Theme.category Theme.Slot_1 else Theme.recede ()),
-      Printf.sprintf "  %s %d. %s" (if i = index then "\xe2\x80\xba" else " ") (i + 1)
-        (fit_width (Terminal_text.single_line (evidence_name ~ko:(state.ui_language = Lang_ko) item))
-           (max 1 (width - 9)))) items in
+      let row_text =
+        Printf.sprintf "  %s %d. %s" (if i = index then "\xe2\x80\xba" else " ") (i + 1)
+          (fit_width (Terminal_text.single_line (evidence_name ~ko:(state.ui_language = Lang_ko) item))
+             (max 1 (width - 9)))
+      in
+      if i = index then ("", selection_row_styled ~cells:(max 1 width) row_text)
+      else (Theme.recede (), row_text)) items in
     let rows = if state.verification_evidence_index_open then rows
       else Option.to_list (List.nth_opt rows index) in
     let location =
@@ -564,7 +616,7 @@ let verification_evidence_index state request ~width observation =
     let say korean english = if ko then korean else english in
     (* The selected item carries its own number below; this row counts the
        items, it does not say which is read. *)
-    judgement_detail_rows ~width ([Ansi.dim, ""; Ansi.bold, Printf.sprintf
+    judgement_detail_rows ~width ([Theme.recede (), ""; Ansi.bold, Printf.sprintf
         (if ko then "  증거 %s  e/E:다음/이전  i:목록  o:열기  s:저장"
          else "  Evidence %s  e/E:next/prev  i:list  o:open  s:save")
         (Masc_tui_value.Count.grouped count)]
@@ -765,7 +817,7 @@ let render_verification_detail (state : state) request =
              (fun (snapshot : Tui_decode.verification_snapshot) ->
                snapshot.Tui_decode.vs_total)
              state.verification)
-        ~labels ~selected:state.verification_cursor;
+        ~labels ~selected:(clamped_cursor ~count:(List.length labels) state.verification_cursor);
       let answer =
         verification_detail_pane state ~rows ~cols:(cols - left_cols)
           ~origin:(strip_rows, left_cols) request right_buf
@@ -797,7 +849,7 @@ let render_verification (state : state) =
 (* Workspace-wide calibration is separate from the recent verdict page and
    the selected Task. Preserve its original denominator and unknown labels
    in the selected detail document. *)
-let harness_ledger_lines ?(ko = false) ~cols snapshot =
+let harness_ledger_lines ~ko ~cols snapshot =
   match snapshot with
   | None -> []
   | Some snapshot -> (
@@ -811,18 +863,63 @@ let harness_ledger_lines ?(ko = false) ~cols snapshot =
             let share count =
               100. *. float_of_int count /. float_of_int calibration.hcal_total
             in
-            let gates =
+            let top_gates =
               Magnitude.of_counts calibration.hcal_gates
               |> List.filteri (fun index _ -> index < 4)
-              |> List.map (fun (gate, count, _band) ->
-                     Printf.sprintf "%s %d (%.0f%%)"
-                       (Masc.Tui_terminal_text.sanitize_terminal_text gate) count (share count))
-              |> String.concat " · "
             in
             let remaining = max 0 (List.length calibration.hcal_gates - 4) in
-            let gates =
-              if remaining = 0 then gates
-              else gates ^ " · " ^ Masc_tui_value.Count.more ~ko remaining
+            let gate_bar_rows =
+              if top_gates = [] then []
+              else
+                let top_with_readout =
+                  List.map
+                    (fun (gate, count, _band) ->
+                      let safe_gate = Masc.Tui_terminal_text.sanitize_terminal_text gate in
+                      let readout = Printf.sprintf "%d (%.0f%%)" count (share count) in
+                      safe_gate, count, readout)
+                    top_gates
+                in
+                let name_w =
+                  List.fold_left
+                    (fun widest (safe_gate, _, _) ->
+                      max widest (Message_layout.display_width safe_gate))
+                    8 top_with_readout
+                  |> min (max 8 (min 20 (doc_width / 3)))
+                in
+                let max_readout_w =
+                  List.fold_left
+                    (fun widest (_, _, readout) ->
+                      max widest (Message_layout.display_width readout))
+                    0 top_with_readout
+                in
+                let avail_bar = doc_width - 8 - name_w - max_readout_w in
+                if doc_width >= 40 && avail_bar >= 6 then
+                  let max_gate_count =
+                    List.fold_left (fun acc (_, count, _) -> max acc count) 1 top_with_readout
+                  in
+                  let bar_w = min 20 avail_bar in
+                  let rows =
+                    List.map
+                      (fun (safe_gate, count, readout) ->
+                        let bar =
+                          Chart.meter_bar ~width:bar_w ~value:count
+                            ~max_value:max_gate_count
+                            ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Calls })
+                            ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+                        in
+                        Printf.sprintf "    %s  %s  %s"
+                          (fit_width safe_gate name_w)
+                          bar
+                          (wrap_style (Theme.recede ()) readout))
+                      top_with_readout
+                  in
+                  let more_row =
+                    if remaining = 0 then []
+                    else [ "    " ^ wrap_style (Theme.recede ()) (Masc_tui_value.Count.more ~ko remaining) ]
+                  in
+                  ("  " ^ wrap_style (Theme.recede ()) (if ko then "게이트" else "Gates"))
+                  :: rows @ more_row
+                else []
             in
             let evaluator =
               match snapshot.hs_overview with
@@ -847,24 +944,77 @@ let harness_ledger_lines ?(ko = false) ~cols snapshot =
                 else "none · no ground truth for agreement/error counts"
             in
             let meter_row =
-              let m_width = max 16 (min 52 (doc_width - 4)) in
-              let bar =
-                Chart.meter ~width:m_width ~value:calibration.hcal_approve
-                  ~max_value:calibration.hcal_total
-                  ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
-                  ~label:(if ko then "승인율" else "Approved")
-                  ~label_style:(Theme.recede ())
-                  ~track_style:(Theme.border_muted ())
-                  ~reset:Ansi.reset ()
-              in
-              [ "  " ^ bar ]
+              let m_width = min 52 (doc_width - 4) in
+              if m_width < 18 then []
+              else
+                let suffix =
+                  if m_width >= 32 then
+                    Some (Printf.sprintf "%.0f%% (%d/%d)"
+                            (share calibration.hcal_approve)
+                            calibration.hcal_approve calibration.hcal_total)
+                  else None
+                in
+                let bar =
+                  Chart.meter ~width:m_width ~value:calibration.hcal_approve
+                    ~max_value:calibration.hcal_total
+                    ~scale:(Chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
+                    ~label:(if ko then "승인율" else "Approved")
+                    ~label_style:(Theme.recede ())
+                    ?suffix
+                    ~track_style:(Theme.border_muted ())
+                    ~reset:Ansi.reset ()
+                in
+                [ "  " ^ bar ]
             in
-            meter_row
-            @ Doc.kv_rows ~width:doc_width ~indent:2 ~max_label_cells:12
+            let kv_fields =
+              if gate_bar_rows <> [] then
+                [ Doc.kv (if ko then "누적" else "Ledger") ledger_value
+                ; Doc.kv ~tone:(Theme.recede ()) (if ko then "라벨" else "Labelled") label_value
+                ]
+              else
+                let gates =
+                  let base =
+                    top_gates
+                    |> List.map (fun (gate, count, _band) ->
+                           Printf.sprintf "%s %d (%.0f%%)"
+                             (Masc.Tui_terminal_text.sanitize_terminal_text gate) count (share count))
+                    |> String.concat " · "
+                  in
+                  if remaining = 0 then base
+                  else base ^ " · " ^ Masc_tui_value.Count.more ~ko remaining
+                in
                 [ Doc.kv (if ko then "누적" else "Ledger") ledger_value
                 ; Doc.kv (if ko then "게이트" else "Gates") gates
                 ; Doc.kv ~tone:(Theme.recede ()) (if ko then "라벨" else "Labelled") label_value
-                ])
+                ]
+            in
+            meter_row
+            @ Doc.kv_rows ~width:doc_width ~indent:2 ~max_label_cells:12 kv_fields
+            @ gate_bar_rows)
+
+let harness_ruling_presentation ~ko ~has_fallback raw_ruling =
+  let normalized = String.lowercase_ascii (String.trim raw_ruling) in
+  let mark, base_style, label =
+    match normalized with
+    | "approve" | "approved" | "pass" | "passed" ->
+        Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled,
+        Theme.ok (),
+        if ko then "승인" else raw_ruling
+    | "reject" | "rejected" | "fail" | "failed" | "deny" | "denied" ->
+        Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed,
+        Theme.bad (),
+        if ko then "반려" else raw_ruling
+    | "warn" | "warning" | "caution" | "fallback" ->
+        Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution,
+        Theme.warn (),
+        if ko then "주의" else raw_ruling
+    | _ ->
+        Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting,
+        semantic_status_color raw_ruling,
+        raw_ruling
+  in
+  let style = if has_fallback then Theme.warn () else base_style in
+  mark, style, label
 
 let split_verdict_ruling (verdict : Masc.Tui_decode.harness_verdict) =
   let whole = verdict.hv_verdict in
@@ -932,28 +1082,38 @@ let render_harness_list (state : state) =
           ~after:badge
         ^ badge
   in
+  let cursor = clamped_cursor ~count:shown state.harness_cursor in
   box_line buf cols
     (zone_two_title ~cols state ~title:header
        ~position:
          (if shown = 0 then None
           else
             Some
-              (Masc_tui_value.Position.row ~selected:(Some state.harness_cursor)
+              (Masc_tui_value.Position.row ~selected:(Some cursor)
                  ~total:shown)));
   box_divider buf cols;
-  let verdict_status (verdict : Tui_decode.harness_verdict) =
+  let ko = state.ui_language = Lang_ko in
+  let verdict_status_and_style (verdict : Tui_decode.harness_verdict) =
     let text = Terminal_text.single_line verdict.hv_verdict in
-    let ruling = match String.index_opt text ':' with
+    let raw_ruling = match String.index_opt text ':' with
       | None -> text
       | Some index -> String.sub text 0 index in
-    let label = match verdict.hv_fallback_reason with
-      | None -> ruling
-      | Some _ -> ui_text state ~ko:"대체 · " ~en:"fallback · " ^ ruling in
-    previous_reading_label state ~inflight:state.harness_inflight
-      ~error:state.harness_error label in
+    let has_fallback = Option.is_some verdict.hv_fallback_reason in
+    let mark, style, ruling =
+      harness_ruling_presentation ~ko ~has_fallback raw_ruling
+    in
+    let label =
+      if has_fallback then ui_text state ~ko:"대체 · " ~en:"fallback · " ^ ruling
+      else ruling
+    in
+    mark ^ " "
+    ^ previous_reading_label state ~inflight:state.harness_inflight
+        ~error:state.harness_error label,
+    style
+  in
   let col_hdr, verdict_row = judgement_list_columns state ~cols
       ~status_header:(ui_text state ~ko:"판정" ~en:"Verdict")
-      ~statuses:(List.map verdict_status verdicts) in
+      ~statuses:(List.map (fun v -> fst (verdict_status_and_style v)) verdicts) in
   (* This is the newest record in the returned page, not evidence that the
      judge is running or has stopped. A retained page keeps its qualification
      while a new read is outstanding or failed. *)
@@ -1002,10 +1162,7 @@ let render_harness_list (state : state) =
           ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
     | None -> max 1 (rows - harness_listing_chrome ~error:state.harness_error)
   in
-  let clamped_cursor =
-    if shown <= 0 then 0 else max 0 (min (shown - 1) state.harness_cursor)
-  in
-  let selected_verdict = List.nth_opt verdicts clamped_cursor in
+  let selected_verdict = List.nth_opt verdicts cursor in
   let split =
     Masc_tui_types.docked_vertical_split ~total_rows:total_body
       ~mode:state.harness_preview_mode
@@ -1014,14 +1171,13 @@ let render_harness_list (state : state) =
   let content_height = max 1 split.list_rows in
   let preview_rows = max 0 (total_body - content_height) in
   let scroll =
-    Masc_tui_scroll.ensure_visible ~cursor:clamped_cursor ~height:content_height
+    Masc_tui_scroll.ensure_visible ~cursor ~height:content_height
       state.harness_scroll
     |> Masc_tui_scroll.normalize ~count:shown ~height:content_height
   in
   let verdicts_window = Rows.of_list ~first:scroll ~height:content_height verdicts in
   report_drawn_list Harness_rows ~height:content_height;
   if shown = 0 then begin
-    let ko = state.ui_language = Lang_ko in
     let style, empty =
       match empty_page_of ~snapshot:state.harness ~error:state.harness_error with
       | Page_failed -> Theme.recede (), page_failed_note ~ko
@@ -1043,15 +1199,14 @@ let render_harness_list (state : state) =
       | None -> box_empty buf cols
       | Some v ->
           let open Masc.Tui_decode in
-          let is_selected = idx = clamped_cursor in
-          let line = verdict_row ~selected:is_selected v.hv_task_title (verdict_status v) in
-          let style =
-            match v.hv_fallback_reason with
-            | Some _ -> (Theme.warn ())
-            | None -> Ansi.reset
+          let is_selected = idx = cursor in
+          let status_text, status_style = verdict_status_and_style v in
+          let line =
+            verdict_row ~selected:is_selected ~status_style
+              v.hv_task_title status_text
           in
-          if is_selected then box_line_selected buf cols line
-          else box_line_styled buf cols ~style line
+          if is_selected then box_line_selected_styled buf cols line
+          else box_line buf cols line
     done;
   (if preview_rows > 0 then
      match selected_verdict with
@@ -1165,8 +1320,13 @@ let harness_goal_lines ~width (state : state) (verdict : Masc.Tui_decode.harness
 let harness_detail_lines ~ko ~width ~now (verdict : Masc.Tui_decode.harness_verdict) =
   let t korean english = if ko then korean else english in
   let pre = List.map (fun s -> "", s) in
-  let ruling, reason = split_verdict_ruling verdict in
-  let verdict_tone = semantic_status_color ruling in
+  let raw_ruling, reason = split_verdict_ruling verdict in
+  let ruling_mark, ruling_style, ruling_label =
+    harness_ruling_presentation ~ko
+      ~has_fallback:(Option.is_some verdict.hv_fallback_reason)
+      raw_ruling
+  in
+  let ruling_badge = ruling_mark ^ " " ^ ruling_label in
   let title =
     Text_block.rows ~max_cells:(max 1 (width - 4)) verdict.hv_task_title
     |> List.map (fun line -> Ansi.bold, "  " ^ line)
@@ -1185,12 +1345,12 @@ let harness_detail_lines ~ko ~width ~now (verdict : Masc.Tui_decode.harness_verd
   in
   title
   @ [ "", "" ]
-  @ pre [ Doc.section_rule ~width ~indent:2 ~badge:ruling ~badge_tone:verdict_tone
+  @ pre [ Doc.section_rule ~width ~indent:2 ~badge:ruling_badge ~badge_tone:ruling_style
             (t "1. 판정 결과 · 사유" "1. Decision & Verdict") ]
   @ pre
       (Doc.kv_rows ~width ~indent:2 ~max_label_cells:12
-         [ Doc.kv ~tone:(verdict_tone ^ Ansi.bold) (t "판정" "Verdict") ruling
-         ; Doc.kv "Gate" verdict.hv_gate
+         [ Doc.kv ~tone:(ruling_style ^ Ansi.bold) (t "판정" "Verdict") ruling_badge
+         ; Doc.kv (t "게이트" "Gate") verdict.hv_gate
          ; Doc.kv (t "평가자" "Evaluator") verdict.hv_evaluator
          ; Doc.kv ~tone:(Theme.recede ()) (t "기록 시각" "Recorded")
              (if Float.equal verdict.hv_at 0.0 then t "시각 보고 안 됨" "time not reported"
@@ -1202,7 +1362,7 @@ let harness_detail_lines ~ko ~width ~now (verdict : Masc.Tui_decode.harness_verd
        ; (Ansi.bold, "  " ^ t "사유" "Reason")
        ]
        @ pre (Doc.prose_block ~width ~indent:2
-                ~guide_style:(if verdict_tone = "" then Theme.border_muted () else verdict_tone)
+                ~guide_style:(if ruling_style = "" then Theme.border_muted () else ruling_style)
                 ~break_numbered:true reason))
   @ (if fallback = [] then [] else [ "", "" ] @ fallback)
   @ [ "", "" ]

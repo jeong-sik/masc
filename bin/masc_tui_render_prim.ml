@@ -2206,6 +2206,7 @@ type chrome_body = {
   push : string -> unit;
   push_styled : style:string -> string -> unit;
   push_selected : string -> unit;
+  push_selected_styled : string -> unit;
   push_divider : unit -> unit;
   push_empty : unit -> unit;
   next_origin : unit -> int * int;
@@ -2596,6 +2597,7 @@ let surface_chrome_position ?(frame = Chrome_screen) ~overflow ?progress_sheet (
     { push = (fun _ -> pushed ())
     ; push_styled = (fun ~style:_ _ -> pushed ())
     ; push_selected = (fun _ -> pushed ())
+    ; push_selected_styled = (fun _ -> pushed ())
     ; push_divider = pushed
     ; push_empty = pushed
     ; next_origin = (fun () -> (0, 0))
@@ -2622,17 +2624,18 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
       | Chrome_screen -> framed_inner_width cols in
     recovery_slot state ~max_cells in
   let buf = Buffer.create 4096 in
-  let top, line, line_styled, line_selected, divider, empty, bottom =
+  let top, line, line_styled, line_selected, line_selected_styled, divider, empty, bottom =
     match frame with
     | Chrome_screen ->
-        ( box_top, box_line, box_line_styled, box_line_selected, box_divider
-        , box_empty, box_bottom )
+        ( box_top, box_line, box_line_styled, box_line_selected, box_line_selected_styled
+        , box_divider, box_empty, box_bottom )
     | Chrome_overlay ->
         ( framed_top
         , framed_line
         , framed_line_styled
         , (fun buf cols content ->
             framed_line_styled buf cols ~style:(Theme.selection_style ()) content)
+        , framed_line_selected_styled
         , framed_divider
         , framed_empty
         , framed_bottom )
@@ -2674,6 +2677,8 @@ let surface_chrome_keys ~overflow ?help_door ?(frame = Chrome_screen) ?status ?s
     ; push_styled =
         (fun ~style text -> hold (fun () -> line_styled buf cols ~style text))
     ; push_selected = (fun text -> hold (fun () -> line_selected buf cols text))
+    ; push_selected_styled =
+        (fun text -> hold (fun () -> line_selected_styled buf cols text))
     ; push_divider = (fun () -> hold (fun () -> divider buf cols))
     ; push_empty = (fun () -> hold (fun () -> empty buf cols))
     ; next_origin =
@@ -8093,6 +8098,21 @@ let runtime_substrate_tabs (state : state)
    when it does not fit, which leaves a clock as "1…". A reading time is no
    use cut, so an empty piece goes first: every real piece is then whole or
    left out. *)
+let completion_meter
+    ?(series = Masc_tui_theme.Completion)
+    ?track_style
+    ~width
+    ~label
+    ~value
+    ~max_value
+    ~suffix
+    () =
+  let track_style = Option.value track_style ~default:(Theme.recede ()) in
+  Masc_tui_chart.meter ~width ~value ~max_value:(max 1 max_value)
+    ~label ~label_style:(Theme.recede ()) ~suffix
+    ~scale:(Masc_tui_chart.Series { paint = Theme.paint (); series })
+    ~track_style ~reset:Ansi.reset ()
+
 let runtime_substrate_heading (state : state) ~cols ~title ~current ~after =
   let tabs = runtime_substrate_tabs state ~current in
   let cells text =

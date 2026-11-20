@@ -12,6 +12,14 @@ module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Theme_choice = Masc_tui_theme_choice
 
+let wrap_style style text =
+  if String.equal style "" || String.equal style Ansi.reset || String.equal text ""
+  then text
+  else style ^ text ^ Ansi.reset
+
+let clamped_cursor ~count cursor =
+  if count <= 0 then 0 else max 0 (min cursor (count - 1))
+
 (* How long ago the running binary's commit landed. Coarse on purpose: the
    question is "is this the build I think it is", and minutes answer it while
    seconds only look precise. *)
@@ -77,10 +85,11 @@ let render_runtime_params (state : state) =
          (match state.runtime_params with
           | None | Some [] -> None
           | Some rows ->
+              let count = List.length rows in
               Some
                 (Masc_tui_value.Position.row
-                   ~selected:(Some state.runtime_params_cursor)
-                   ~total:(List.length rows))));
+                   ~selected:(Some (clamped_cursor ~count state.runtime_params_cursor))
+                   ~total:count)));
   (* Where the overrides live leads, because it is the only thing on this row
      the reader cannot get anywhere else, and it was what the row cut first:
      at eighty columns it read "overrides persist in .masc/run\xe2\x80\xa6" and at
@@ -107,7 +116,10 @@ let render_runtime_params (state : state) =
      box_line_styled buf cols ~style:(Theme.bad ())
        ("  " ^ workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                  ~request:Kept_request.Runtime_param_write refusal));
-  let selected = List.nth_opt rows state.runtime_params_cursor in
+  let selected =
+    List.nth_opt rows
+      (clamped_cursor ~count:(List.length rows) state.runtime_params_cursor)
+  in
   (* The panel below draws [framed_inner_width - 4] cells a line, and a field
      is indented two of them. A field wrapped at the frame's own width has a
      row the panel cannot draw whole once it takes a second row, and the check
@@ -217,13 +229,15 @@ let render_runtime_params (state : state) =
      end
      else if Option.is_none state.runtime_params
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  파라미터 미조회 · 워크스페이스 접근을 확인하고 새로고침하세요"
-         ~en:"  Parameters not read · confirm workspace access and refresh" ^ Ansi.reset);
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (ui_text state ~ko:"  파라미터 미조회 · 워크스페이스 접근을 확인하고 새로고침하세요"
+            ~en:"  Parameters not read · confirm workspace access and refresh");
        for _ = 2 to list_height do box_empty buf cols done
      end
      else if rows = []
      then begin
-       box_line buf cols (Ansi.dim ^ ui_text state ~ko:"  등록된 설정 없음" ~en:"  No settings registered" ^ Ansi.reset);
+       box_line_styled buf cols ~style:(Theme.recede ())
+         (ui_text state ~ko:"  등록된 설정 없음" ~en:"  No settings registered");
        for _ = 2 to list_height do box_empty buf cols done
      end else begin
        (* Rows arrive in registry-group order (Tui_decode sorts them by
@@ -278,30 +292,39 @@ let render_runtime_params (state : state) =
          | None -> box_empty buf cols
          | Some (`Header (id, description)) ->
            let label = if String.equal id "" then ui_text state ~ko:"(그룹 없음)" ~en:"(unfiled)" else id in
-           box_line_styled buf cols
-             ~style:(Theme.accent ())
+           box_line buf cols
              (Printf.sprintf "  %s %s"
-                (Terminal_text.single_line label)
-                (Ansi.dim ^ Terminal_text.single_line description ^ Ansi.reset))
+                (wrap_style (Theme.accent ()) (Terminal_text.single_line label))
+                (wrap_style (Theme.recede ()) (Terminal_text.single_line description)))
          | Some (`Row (row_index, row)) ->
            let open Tui_decode in
            let value_width = max 4 (min 16 ((framed_inner_width cols - 7) / 3)) in
            let key_width = max 1 (framed_inner_width cols - 7 - value_width) in
+           let glyph =
+             Masc_tui_config_mark.param_glyph ~has_override:row.rpr_has_override
+           in
+           let key_text =
+             Message_layout.fit_middle key_width (Terminal_text.single_line row.rpr_key)
+             |> fun key -> fit_width key key_width
+           in
+           let val_text =
+             fit_width
+               (Terminal_text.single_line
+                  (runtime_param_value_text ~value_type:row.rpr_value_type
+                     row.rpr_current_json))
+               value_width
+           in
+           let key_style = if row.rpr_has_override then Theme.accent () else "" in
+           let val_style = if row.rpr_has_override then Theme.accent () else Theme.recede () in
            let line =
              Printf.sprintf "%s  %s %s %s"
                (if row_index = cursor then "\xe2\x80\xba " else "  ")
-               (Masc_tui_config_mark.param_glyph
-                  ~has_override:row.rpr_has_override)
-               (Message_layout.fit_middle key_width (Terminal_text.single_line row.rpr_key)
-                |> fun key -> fit_width key key_width)
-               (fit_width (Terminal_text.single_line
-                  (runtime_param_value_text ~value_type:row.rpr_value_type
-                     row.rpr_current_json)) value_width)
+               (wrap_style key_style glyph)
+               (wrap_style key_style key_text)
+               (wrap_style val_style val_text)
            in
-           if row_index = cursor then box_line_selected buf cols line
-           else
-             box_line_styled buf cols
-               ~style:(if row.rpr_has_override then (Theme.accent ()) else Ansi.dim) line
+           if row_index = cursor then box_line_selected_styled buf cols line
+           else box_line buf cols line
        done
      end);
   let sheet_lines =
@@ -787,13 +810,12 @@ let render_prompt_registry (state : state) =
         progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
         ^ held_back_note
     | None ->
-        Printf.sprintf "%s%s%s%s · %s%s"
-          Ansi.dim count_text
-          held_back_note
-          Ansi.dim
-          (if state.prompts_show_fragments then ui_text state ~ko:"내부 조각 포함" ~en:"including fragments"
-           else ui_text state ~ko:"주 프롬프트" ~en:"primary prompts")
-          Ansi.reset
+        wrap_style (Theme.recede ()) count_text
+        ^ held_back_note
+        ^ wrap_style (Theme.recede ())
+            (" · "
+             ^ if state.prompts_show_fragments then ui_text state ~ko:"내부 조각 포함" ~en:"including fragments"
+               else ui_text state ~ko:"주 프롬프트" ~en:"primary prompts")
   in
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
@@ -849,7 +871,7 @@ let render_prompt_registry (state : state) =
                 (max 1 (framed_inner_width cols - 4 - authoring_cells))
                 (Terminal_text.single_line row.Tui_decode.pr_key) in
         if index = cursor then
-          box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr label)
+          box_line_selected_styled buf cols ("\xe2\x80\xba " ^ label)
         else box_line buf cols ("  " ^ label)
       end)
     prompt_rows;
@@ -920,8 +942,9 @@ let render_runtime_prompt_assets (state : state) =
     | Some sheet ->
         progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
     | None ->
-        Printf.sprintf "%s%s · %s%s" Ansi.dim count_text
-          (ui_text state ~ko:"읽기 전용" ~en:"read only") Ansi.reset
+        wrap_style (Theme.recede ())
+          (Printf.sprintf "%s · %s" count_text
+             (ui_text state ~ko:"읽기 전용" ~en:"read only"))
   in
   box_line buf cols
     (zone_two_title ~cols state
@@ -968,7 +991,7 @@ let render_runtime_prompt_assets (state : state) =
              ^ Message_layout.fit_middle (max 1 (framed_inner_width cols - 4))
                  (Terminal_text.single_line asset.pra_path) in
          if selected then
-           box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+           box_line_selected_styled buf cols ("\xe2\x80\xba " ^ line)
          else box_line buf cols ("  " ^ line)
        end)
     assets;
@@ -1357,8 +1380,8 @@ let render_presets (state : state) =
             (if ko then "%d개"
              else if total = 1 then "%d preset" else "%d presets") total
         in
-        Printf.sprintf "%s%s%s  %s" Ansi.dim count_text Ansi.reset
-          (progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title)
+        wrap_style (Theme.recede ()) count_text ^ "  "
+        ^ progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
     | Some sheet, None, Some _ ->
         progress_inline ~ko ~now ?started_at:sheet.ps_started_at sheet.ps_title
     | None, Some _, _ ->
@@ -1367,11 +1390,11 @@ let render_presets (state : state) =
             (if ko then "%d개"
              else if total = 1 then "%d preset" else "%d presets") total
         in
-        Printf.sprintf "%s%s%s" Ansi.dim count_text Ansi.reset
+        wrap_style (Theme.recede ()) count_text
     | None, None, None ->
-        Printf.sprintf "%s%s%s" Ansi.dim (ui_text state ~ko:"미조회" ~en:"unread") Ansi.reset
+        wrap_style (Theme.recede ()) (ui_text state ~ko:"미조회" ~en:"unread")
     | None, None, Some _ ->
-        Printf.sprintf "%s%s%s" Ansi.dim (ui_text state ~ko:"읽기 실패" ~en:"read failed") Ansi.reset
+        wrap_style (Theme.recede ()) (ui_text state ~ko:"읽기 실패" ~en:"read failed")
   in
   box_line buf cols
     (zone_two_title ~cols state ~title:(config_pane_title ~reading state)
@@ -1415,7 +1438,7 @@ let render_presets (state : state) =
            ("  " ^ progress_inline ~ko ~now ?started_at:preset_started_at
               (ui_text state ~ko:"프리셋을 읽는 중" ~en:"Loading presets"))
        else
-         box_line_styled buf cols ~style:Ansi.dim (page_unread_note ~ko)
+         box_line_styled buf cols ~style:(Theme.recede ()) (page_unread_note ~ko)
    | Some snapshot, (Some _ | None) ->
        Option.iter
          (fun line ->
@@ -1441,7 +1464,7 @@ let render_presets (state : state) =
                       ~max_cells:(max 1 (framed_inner_width cols - 4)) manifest)
             ~tail:""
         in
-        if index = cursor then box_line_selected buf cols (Masc_tui_theme.strip_sgr label)
+        if index = cursor then box_line_selected_styled buf cols label
         else box_line buf cols label
       end)
     presets;
@@ -1483,7 +1506,7 @@ let render_presets (state : state) =
        (row_with_field ~cols
           ~lead:(Theme.info () ^ ui_text state ~ko:"  이름: " ~en:"  Name: " ^ Ansi.reset)
           ~field:(Terminal_text.single_line draft)
-          ~tail:(Ansi.dim ^ (match state.preset_armed with
+          ~tail:(Theme.recede () ^ (match state.preset_armed with
             | Some (Save_armed _) ->
               if preset_confirmation_ready state then
                 ui_text state ~ko:"  Enter:덮어쓰기  Esc:취소"
@@ -1562,8 +1585,11 @@ let render_themes (state : state) =
        ~title:
          (config_pane_title
             ~reading:
-              (Printf.sprintf (if state.ui_language = Lang_ko then "%s테마 %d개 · 원래 대비 통과 %d개%s" else "%s%d themes · %d native-pass%s") Ansi.dim
-                 (List.length entries) native_count Ansi.reset)
+              (wrap_style (Theme.recede ())
+                 (Printf.sprintf
+                    (if state.ui_language = Lang_ko then "테마 %d개 · 원래 대비 통과 %d개"
+                     else "%d themes · %d native-pass")
+                    (List.length entries) native_count))
             state)
        ~position:
          (if entries = [] then None
@@ -1583,7 +1609,7 @@ let render_themes (state : state) =
     let chip label filter count =
       (label ^ " " ^ string_of_int count, state.theme_filter = filter, filter)
     in
-    Ansi.dim ^ ui_text state ~ko:"f:필터  " ~en:"f:filter  " ^ Ansi.reset
+    wrap_style (Theme.recede ()) (ui_text state ~ko:"f:필터  " ~en:"f:filter  ")
     ^ tab_strip
         ~width:
           (tab_strip_width ~cols ~before:(ui_text state ~ko:"  f:필터  " ~en:"  f:filter  ") ~after:explanation)
@@ -1593,7 +1619,7 @@ let render_themes (state : state) =
         ; chip (ui_text state ~ko:"밝게" ~en:"Light") `Light light_count
         ]
   in
-  box_line buf cols ("  " ^ filter_tag ^ Ansi.dim ^ explanation ^ Ansi.reset);
+  box_line buf cols ("  " ^ filter_tag ^ wrap_style (Theme.recede ()) explanation);
   box_line_styled buf cols ~style:(Theme.recede ())
     ("    " ^ fit_width (ui_text state ~ko:"테마" ~en:"theme") name_width ^ " "
      ^ fit_width (ui_text state ~ko:"색상" ~en:"colours") 16 ^ "  "
@@ -1619,15 +1645,24 @@ let render_themes (state : state) =
             (if picked then chosen_mark else " ")
             (fit_width (Terminal_text.single_line entry.name) name_width)
         in
-        let suffix =
+        let polarity_text =
           "  "
           ^ fit_width (if entry.light then ui_text state ~ko:"밝음" ~en:"light"
                        else ui_text state ~ko:"어두움" ~en:"dark") 9
           ^ " "
-          ^ fit_width
-              (if state.ui_language = Lang_en then Theme_choice.contrast_status entry
-               else if entry.lifted = 0 then Printf.sprintf "원래 %d/%d" entry.measured entry.measured
-               else Printf.sprintf "부족 %d/%d" entry.lifted entry.measured) 12
+        in
+        let contrast_text =
+          fit_width
+            (if state.ui_language = Lang_en then Theme_choice.contrast_status entry
+             else if entry.lifted = 0 then Printf.sprintf "원래 %d/%d" entry.measured entry.measured
+             else Printf.sprintf "부족 %d/%d" entry.lifted entry.measured) 12
+        in
+        let suffix = polarity_text ^ contrast_text in
+        let contrast_style =
+          if entry.lifted = 0 then Theme.ok () else Theme.warn ()
+        in
+        let suffix_styled =
+          polarity_text ^ wrap_style contrast_style contrast_text
         in
         if is_selected then begin
           if String.equal (Theme.ok ()) "" then
@@ -1660,7 +1695,7 @@ let render_themes (state : state) =
             add_row buf
               [ sel; frame_margin; Ansi.reset; body; Ansi.reset; sel; frame_margin; Ansi.reset ]
         end else
-          box_line buf cols (prefix ^ swatch ^ suffix)
+          box_line buf cols (prefix ^ swatch ^ suffix_styled)
       end)
     entries;
   let drawn = min content_height (List.length entries) in
@@ -1669,26 +1704,27 @@ let render_themes (state : state) =
   done;
   if show_sample then begin
     box_divider buf cols;
+    let ko = state.ui_language = Lang_ko in
     box_line buf cols
-      (Printf.sprintf (if state.ui_language = Lang_ko then "  예시: %s● 정상%s  %s▲ 주의%s  %s× 오류%s  %s◆ 정보%s  %s@keeper%s  %s⚡ 도구%s"
-                       else "  Sample: %s● Ok%s  %s▲ Warn%s  %s× Bad%s  %s◆ Info%s  %s@keeper%s  %s⚡ tool%s")
-         (Theme.ok ()) Ansi.reset
-         (Theme.warn ()) Ansi.reset
-         (Theme.bad ()) Ansi.reset
-         (Theme.info ()) Ansi.reset
-         (Theme.keeper_origin ()) Ansi.reset
-         (Theme.tool_origin ()) Ansi.reset);
+      (Printf.sprintf "  %s %s  %s  %s  %s  %s  %s"
+         (if ko then "예시:" else "Sample:")
+         (wrap_style (Theme.ok ()) (if ko then "\xe2\x97\x8f 정상" else "\xe2\x97\x8f Ok"))
+         (wrap_style (Theme.warn ()) (if ko then "\xe2\x96\xb2 주의" else "\xe2\x96\xb2 Warn"))
+         (wrap_style (Theme.bad ()) (if ko then "\xe2\x9c\x95 오류" else "\xe2\x9c\x95 Bad"))
+         (wrap_style (Theme.info ()) (if ko then "\xe2\x97\x90 진행" else "\xe2\x97\x90 Active"))
+         (wrap_style (Theme.keeper_origin ()) "@keeper")
+         (wrap_style (Theme.tool_origin ()) (if ko then "도구" else "tool")));
     box_line buf cols
       (Printf.sprintf
-         (if state.ui_language = Lang_ko then
-            "  구문: %slet%s x = %s\"val\"%s in %s123%s  %s(+증가)%s  %s(-감소)%s"
+         (if ko then
+            "  구문: %s x = %s in %s  %s  %s"
           else
-            "  Syntax: %slet%s x = %s\"val\"%s in %s123%s  %s(+gain)%s  %s(-loss)%s")
-         (Theme.Syntax.keyword ()) Ansi.reset
-         (Theme.Syntax.string ()) Ansi.reset
-         (Theme.Syntax.code_number ()) Ansi.reset
-         (Theme.Syntax.diff_added ()) Ansi.reset
-         (Theme.Syntax.diff_removed ()) Ansi.reset);
+            "  Syntax: %s x = %s in %s  %s  %s")
+         (wrap_style (Theme.Syntax.keyword ()) "let")
+         (wrap_style (Theme.Syntax.string ()) "\"val\"")
+         (wrap_style (Theme.Syntax.code_number ()) "123")
+         (wrap_style (Theme.Syntax.diff_added ()) (if ko then "(+증가)" else "(+gain)"))
+         (wrap_style (Theme.Syntax.diff_removed ()) (if ko then "(\xe2\x88\x92감소)" else "(\xe2\x88\x92loss)")));
   end;
   let lang_toggle =
     pressable Press_ui_language
@@ -1696,7 +1732,7 @@ let render_themes (state : state) =
          ~ko:("[UI 언어: " ^ ui_language_label state.ui_language ^ " · 클릭 또는 :language 전환]")
          ~en:("[UI Language: " ^ ui_language_label state.ui_language ^ " · click or :language]"))
   in
-  box_line_styled buf cols ~style:Ansi.dim
+  box_line_styled buf cols ~style:(Theme.recede ())
     (* What is in force, then its keys in the footer's spelling. [f] is on
        the filter row above, so it is not said twice. *)
     (match chosen with
@@ -1727,10 +1763,10 @@ let config_path_note (state : state) =
             path_from_root ~root:(Canonical_path.to_string identity.Tui_decode.sid_masc_root) path
         | None -> path
       in
-      Ansi.dim ^ shown ^ Ansi.reset
+      wrap_style (Theme.recede ()) shown
   | None, Some _ -> ""
   | None, None ->
-      Ansi.dim ^ here_missing_reading state ~error:None ^ Ansi.reset
+      wrap_style (Theme.recede ()) (here_missing_reading state ~error:None)
 
 (* A provider id such as [codex_727e6d05] does not say which account it is,
    and one account can sit under several ids. The Models pane names the
@@ -1777,7 +1813,10 @@ let config_models_detail (state : state) (row : Masc_tui_model_runtime_table.row
   account_notes @ Masc_tui_model_runtime_table.detail_lines ~ko ?account_email ?keepers row
 
 let selected_model_reading (state : state) =
-  Option.bind (List.nth_opt state.config_models_rows state.config_models_cursor)
+  let cursor =
+    clamped_cursor ~count:(List.length state.config_models_rows) state.config_models_cursor
+  in
+  Option.bind (List.nth_opt state.config_models_rows cursor)
     (fun (row : Masc_tui_model_runtime_table.row) ->
       let sections =
         (match state.runtime_config_view_error with
@@ -1840,7 +1879,8 @@ let config_models_projection state ~terminal_rows ~cols =
         List.map (fun line -> Model_observation line) (wrap note)) notes
     @ List.map (fun line -> Model_identity line) (wrap identity)
   in
-  let notes, prefix = match List.nth_opt rows state.config_models_cursor with
+  let notes, prefix =
+    match List.nth_opt rows (clamped_cursor ~count:(List.length rows) state.config_models_cursor) with
     | None -> [], []
     | Some row -> account row
   in
@@ -2013,7 +2053,8 @@ let render_config_models (state : state) =
         if total = 0 then None
         else
           Some
-            (Masc_tui_value.Position.row ~selected:(Some state.config_models_cursor) ~total)
+            (Masc_tui_value.Position.row
+               ~selected:(Some (clamped_cursor ~count:total state.config_models_cursor)) ~total)
     | Some _, _, _, _ | None, Some _, _, _ | None, None, Some _, _ | None, None, None, None -> None
   in
   let title_reading =
@@ -2074,7 +2115,7 @@ let render_config_models (state : state) =
            ("  " ^ progress_inline ~ko ~now ?started_at:models_started_at
               (ui_text state ~ko:"모델 설정 읽는 중" ~en:"Loading model settings"))
        else
-         box_line_styled buf cols ~style:Ansi.dim (page_unread_note ~ko);
+         box_line_styled buf cols ~style:(Theme.recede ()) (page_unread_note ~ko);
        for _ = 2 to content_height do
          box_empty buf cols
        done
@@ -2098,9 +2139,12 @@ let render_config_models (state : state) =
           resize, which is the whole point of the transition. *)
        let table_mode = projection.model_table in
        let starts = projection.model_starts in
+       let model_cursor =
+         clamped_cursor ~count:(List.length state.config_models_rows) state.config_models_cursor
+       in
        let cursor_line, _ =
          Masc_tui_model_runtime_table.selected_lines ~table:table_mode ~starts ~total
-           state.config_models_cursor
+           model_cursor
        in
        (* The window follows the selected item rather than the other way
           round: an item the frame does not draw at all is a selection the
@@ -2111,7 +2155,7 @@ let render_config_models (state : state) =
           ([config_models_list]), so this only corrects a stale scroll. *)
        let scroll =
          Masc_tui_model_runtime_table.window ~table:table_mode ~starts ~total
-           ~height:table_height ~cursor:state.config_models_cursor state.config_scroll
+           ~height:table_height ~cursor:model_cursor state.config_scroll
        in
        (* The mark rides the first line of the item that is on screen. *)
        let marked_line = max cursor_line scroll in
@@ -2135,7 +2179,7 @@ let render_config_models (state : state) =
              if table_mode && index = 0 then
                box_line_styled buf cols ~style:(Theme.recede ()) ("  " ^ line)
              else if index = marked_line then
-               box_line_selected buf cols ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+               box_line_selected_styled buf cols ("\xe2\x80\xba " ^ line)
              else box_line buf cols ("  " ^ line)
          | None -> box_empty buf cols
        done);
@@ -2347,7 +2391,7 @@ let render_runtime_config_status state =
     ~body:(fun ~budget c ->
       let lines = runtime_config_status_rows state ~cols in
       let total = List.length lines in
-      let scroll = min state.runtime_config_status_scroll (max 0 (total - budget)) in
+      let scroll = max 0 (min state.runtime_config_status_scroll (max 0 (total - budget))) in
       Option.iter c.position
         (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total);
       lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + budget)
@@ -2445,7 +2489,7 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   let buf = Buffer.create 2048 in
   let field name value =
     voice_body_line buf cols
-      (Printf.sprintf "  %s%s%s %s" Ansi.dim (fit_width name 12) Ansi.reset (Terminal_text.single_line value))
+      (Printf.sprintf "  %s %s" (wrap_style (Theme.recede ()) (fit_width name 12)) (Terminal_text.single_line value))
   in
   let save_signature =
     match session.vws_save with
@@ -2551,7 +2595,9 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   box_divider head cols;
   voice_body_line buf cols "";
   voice_body_line buf cols
-    (Printf.sprintf "  %s%s %s%s  %s" Ansi.dim (ui_text state ~ko:"단계" ~en:"step") position Ansi.reset step_prompt);
+    (Printf.sprintf "  %s  %s"
+       (wrap_style (Theme.recede ()) (ui_text state ~ko:"단계" ~en:"step" ^ " " ^ position))
+       step_prompt);
   voice_body_line buf cols "";
   (* The answer being given. A closed set shows its current value and the keys
      that walk it; a text field shows what has been typed, with a cursor so an
@@ -2559,13 +2605,13 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   (match session.vws_step with
    | Voice_wizard.Section ->
      box_line head cols
-       (Printf.sprintf "    %s%s%s   %s%s%s" Ansi.bold side
-          Ansi.reset Ansi.dim (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch") Ansi.reset)
+       (Printf.sprintf "    %s   %s" (wrap_style Ansi.bold side)
+          (wrap_style (Theme.recede ()) (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch")))
    | Voice_wizard.Provider ->
      box_line head cols
-       (Printf.sprintf "    %s%s%s   %s%s%s" Ansi.bold
-          (Voice_wizard.provider_label draft.Voice_wizard.provider)
-          Ansi.reset Ansi.dim (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch") Ansi.reset)
+       (Printf.sprintf "    %s   %s"
+          (wrap_style Ansi.bold (Voice_wizard.provider_label draft.Voice_wizard.provider))
+          (wrap_style (Theme.recede ()) (ui_text state ~ko:"←/→ 또는 Space로 전환" ~en:"←/→ or space to switch")))
    | Voice_wizard.Review ->
      (match Voice_wizard.gaps draft with
       | [] ->
@@ -2623,13 +2669,14 @@ let render_voice_wizard (state : state) (session : Masc_tui_voice_wizard_session
   (match session.vws_step with
    | Voice_wizard.Credential when String.trim session.vws_input = "" ->
      voice_body_line buf cols
-       (Printf.sprintf "    %s%s%s" Ansi.dim
-          (ui_text state ~ko:"비워 두면 Authorization 헤더를 보내지 않습니다" ~en:"blank sends no Authorization header") Ansi.reset)
+       ("    " ^ wrap_style (Theme.recede ())
+          (ui_text state ~ko:"비워 두면 Authorization 헤더를 보내지 않습니다" ~en:"blank sends no Authorization header"))
    | Voice_wizard.Address when String.trim session.vws_input = "" ->
      List.iter
        (fun (what, address) ->
          voice_body_line buf cols
-           (Printf.sprintf "    %s%s %s: %s%s" Ansi.dim (ui_text state ~ko:"예시" ~en:"try") what address Ansi.reset))
+           ("    " ^ wrap_style (Theme.recede ())
+              (Printf.sprintf "%s %s: %s" (ui_text state ~ko:"예시" ~en:"try") what address)))
        (Voice_wizard.suggested_addresses draft.Voice_wizard.section)
    | Voice_wizard.Section | Voice_wizard.Provider | Voice_wizard.Name | Voice_wizard.Model
    | Voice_wizard.Voice | Voice_wizard.Review | (Address|Credential) -> ());
@@ -2699,8 +2746,14 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   let started_at =
     Masc_tui_types.progress_clock_option state ~slot:"voice-agent" ~now signature
   in
-  let selected_agent = List.nth_opt session.vas_agents session.vas_agent_cursor in
-  let selected_voice = List.nth_opt session.vas_voices session.vas_voice_cursor in
+  let agent_cursor =
+    clamped_cursor ~count:(List.length session.vas_agents) session.vas_agent_cursor
+  in
+  let voice_cursor =
+    clamped_cursor ~count:(List.length session.vas_voices) session.vas_voice_cursor
+  in
+  let selected_agent = List.nth_opt session.vas_agents agent_cursor in
+  let selected_voice = List.nth_opt session.vas_voices voice_cursor in
   let progress_sheet =
     if session.vas_saving then
       let detail =
@@ -2740,15 +2793,16 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   (* Two selectors move at once, each under its own keys, so neither is the
      screen's one position; each names the choice it holds. *)
   let selector label items cursor draw =
-    let prefix = Printf.sprintf "  %s: " label in
+    let prefix = Printf.sprintf "  %s %s: " (wrap_style (Theme.accent ()) "\xe2\x80\xba") label in
+    let prefix_cells = Message_layout.display_width (Masc_tui_theme.strip_sgr prefix) in
     let value =
       match List.nth_opt items cursor with
       | None -> Masc_tui_theme.Glyph.no_value
       | Some item -> draw item
     in
-    let room = max 1 (framed_inner_width cols - Message_layout.display_width prefix) in
+    let room = max 1 (framed_inner_width cols - prefix_cells) in
     box_line head cols
-      (prefix ^ Ansi.bold ^ Message_layout.fit_middle room value ^ Ansi.reset)
+      (prefix ^ wrap_style Ansi.bold (Message_layout.fit_middle room value))
   in
   box_line head cols
     (config_pane_title ~cols ?reading:title_reading
@@ -2759,9 +2813,9 @@ let render_voice_agent (state : state) (session : voice_agent_session) =
   box_divider head cols;
   (* Both selected owners stay above the scrolling document. Enter therefore
      acts on the displayed pair even after paging through long metadata. *)
-  selector (ui_text state ~ko:"키퍼" ~en:"keeper") session.vas_agents session.vas_agent_cursor
+  selector (ui_text state ~ko:"키퍼" ~en:"keeper") session.vas_agents agent_cursor
     Terminal_text.single_line;
-  selector (ui_text state ~ko:"목소리" ~en:"voice") session.vas_voices session.vas_voice_cursor
+  selector (ui_text state ~ko:"목소리" ~en:"voice") session.vas_voices voice_cursor
     (fun (_, label) -> Terminal_text.single_line label);
   voice_body_line buf cols "";
   (match selected_agent with
@@ -2840,7 +2894,7 @@ let render_voice (state : state) =
   in
   let field name value =
     voice_body_line buf cols
-      (Printf.sprintf "  %s%s%s %s" Ansi.dim (fit_width name 18) Ansi.reset (Terminal_text.single_line value))
+      (Printf.sprintf "  %s %s" (wrap_style (Theme.recede ()) (fit_width name 18)) (Terminal_text.single_line value))
   in
   let member path json =
     List.fold_left
@@ -2879,27 +2933,33 @@ let render_voice (state : state) =
                     let address =
                       Option.value (string_of [ "address" ] item) ~default:Masc_tui_theme.Glyph.no_value
                     in
-                    let off =
+                    let enabled, off =
                       match member [ "enabled" ] item with
-                      | Some (`Bool false) -> ui_text state ~ko:"  (사용 안 함)" ~en:"  (disabled)"
-                      | Some _ | None -> ""
+                      | Some (`Bool false) ->
+                          false,
+                          wrap_style (Theme.recede ())
+                            (ui_text state ~ko:"  (사용 안 함)" ~en:"  (disabled)")
+                      | Some _ | None -> true, ""
+                    in
+                    let dot =
+                      if enabled then
+                        wrap_style (Theme.ok ())
+                          (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled)
+                      else
+                        wrap_style (Theme.recede ())
+                          (Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting)
                     in
                     (* runtime.toml is an operator's file, not this pane's
                        output. box_line's fit_width keeps ANSI, so an id, kind
                        or address carrying control bytes rewrote the screen the
                        moment the voice pane opened. The probe rows below
                        already pass through the same filter. *)
-                    let pad_cells cells text =
-                      text
-                      ^ String.make
-                          (max 0 (cells - Message_layout.display_width text))
-                          ' '
-                    in
                     Some
-                      (Printf.sprintf "    %s %s%s%s %s%s"
-                         (pad_cells 20 (Terminal_text.single_line id)) Ansi.dim
-                         (pad_cells 18 (Terminal_text.single_line kind))
-                         Ansi.reset (Terminal_text.single_line address) off))
+                      (Printf.sprintf "    %s %s %s %s%s"
+                         dot
+                         (fit_width (Terminal_text.single_line id) 20)
+                         (wrap_style (Theme.recede ()) (fit_width (Terminal_text.single_line kind) 18))
+                         (Terminal_text.single_line address) off))
               items
         | Some _ | None -> [])
   in
@@ -2934,14 +2994,14 @@ let render_voice (state : state) =
        (* The distinction the pane exists for, said in words rather than drawn
           as an empty section. *)
        voice_body_line_styled buf cols ~style:(Theme.warn ()) (ui_text state ~ko:"  음성 설정을 읽지 못했습니다" ~en:"  Voice settings did not load");
-       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset)
+       voice_body_line buf cols ("  " ^ wrap_style (Theme.recede ()) (Terminal_text.single_line message))
    | None, None ->
        if server_authority_ready state then
          voice_body_line_styled buf cols ~style:(Theme.info ())
            ("  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " "
             ^ ui_text state ~ko:"음성 설정 읽는 중" ~en:"Reading voice settings")
        else
-         voice_body_line_styled buf cols ~style:Ansi.dim (page_unread_note ~ko)
+         voice_body_line_styled buf cols ~style:(Theme.recede ()) (page_unread_note ~ko)
    | Some json, None ->
        field (ui_text state ~ko:"상태" ~en:"status")
          (Option.value (string_of [ "status" ] json)
@@ -2976,7 +3036,7 @@ let render_voice (state : state) =
        voice_body_line buf cols "";
        voice_body_line_styled buf cols ~style:(Theme.warn ())
          (ui_text state ~ko:"  엔드포인트 목록을 읽지 못했습니다" ~en:"  The endpoint list could not be read");
-       voice_body_line buf cols (Printf.sprintf "  %s%s%s" Ansi.dim (Terminal_text.single_line message) Ansi.reset));
+       voice_body_line buf cols ("  " ^ wrap_style (Theme.recede ()) (Terminal_text.single_line message)));
   voice_section
     (ui_text state ~ko:"입력 장치와 설정 출처" ~en:"Input device and config source");
   let device_missing =
@@ -3017,8 +3077,8 @@ let render_voice (state : state) =
     | `Unreported -> ui_text state ~ko:"보고 안 됨" ~en:"Not reported"
   in
   voice_body_line buf cols
-    (Printf.sprintf "  %s%s: %s%s" Ansi.dim
-       (ui_text state ~ko:"설정 출처" ~en:"Config source") source_line Ansi.reset);
+    ("  " ^ wrap_style (Theme.recede ())
+       (Printf.sprintf "%s: %s" (ui_text state ~ko:"설정 출처" ~en:"Config source") source_line));
   (* The keys are the table's, as on every other Config pane. The row was
      written here and left out Esc and q, which the fitter keeps only when
      the hints name them, so the voice pane was the one Config pane that
@@ -3197,17 +3257,18 @@ let render_config (state : state) =
                 ("  " ^ progress_inline ~ko ~now ?started_at:config_started_at
                    (ui_text state ~ko:"runtime.toml 읽는 중" ~en:"Loading runtime.toml"))
             else
-              c.push_styled ~style:Ansi.dim (page_unread_note ~ko)
+              c.push_styled ~style:(Theme.recede ()) (page_unread_note ~ko)
       | Some _ ->
           let rows = runtime_config_active_rows state in
           report_drawn_list Config_runtime_rows ~height:content_height;
           let total = List.length rows in
+          let cursor = clamped_cursor ~count:total state.runtime_config_cursor in
           let max_scroll = max 0 (total - content_height) in
           let scroll = max 0 (min state.config_scroll max_scroll) in
           (* The file has a cursor line, so the selected line is the
              position, as in any list. *)
           c.position
-            (Masc_tui_value.Position.row ~selected:(Some state.runtime_config_cursor) ~total);
+            (Masc_tui_value.Position.row ~selected:(Some cursor) ~total);
           let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
           for i = 0 to content_height - 1 do
             match Rows.at rows_window (scroll + i) with
@@ -3216,14 +3277,15 @@ let render_config (state : state) =
                    reads. The runtime config is TOML and the lexer already
                    answers for it; what was missing was anyone asking. *)
                 let line = String.concat "" (List.map lexed_span segments) in
-                let is_selected = scroll + i = state.runtime_config_cursor in
+                let is_selected = scroll + i = cursor in
                 let line =
-                  Printf.sprintf "%s%s%4d%s  %s"
+                  Printf.sprintf "%s%s  %s"
                     (if is_selected then "\xe2\x80\xba " else "  ")
-                    Ansi.dim (scroll + i + 1) Ansi.reset line
+                    (wrap_style (Theme.recede ()) (Printf.sprintf "%4d" (scroll + i + 1)))
+                    line
                 in
                 if is_selected then
-                  c.push_selected (Masc_tui_theme.strip_sgr line)
+                  c.push_selected_styled line
                 else c.push line
             | None -> ()
           done)

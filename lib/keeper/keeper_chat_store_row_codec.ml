@@ -102,12 +102,11 @@ let mint_message_id ~ts =
   Printf.sprintf "msg-%016.0f-%d" (ts *. 1_000_000.) n
 
 let validate_row_fields fields =
-  (* RFC-0232 retired the label-only [source] field long before this list
-     existed (#20976). Rows written before that still carry it, so the strict
-     reader must tolerate it: a retired label never restores a typed surface,
-     but it must not delete the row either — [surface] reads as [None] and the
-     row stays (test/test_surface_ref.ml, "source-only row does not restore
-     surface").
+  (* [encode_line] does not write the label-only [source] field, but older
+     rows still carry it, so the strict reader must tolerate it: a retired
+     label never restores a typed surface, but it must not delete the row
+     either — [surface] reads as [None] and the row stays
+     (test/test_surface_ref.ml, "source-only row does not restore surface").
 
      The retired row-level [kind] label is absent from this list on purpose,
      and unlike [source] it stays refused.  The row shape is closed with no

@@ -138,8 +138,8 @@ type chat_message = {
   execution_id : Ids.Execution_id.t option;
   tool_call_name : string option;
   surface : Surface_ref.t option;
-      (* RFC-0232 P5: the typed surface, persisted as a structured
-         [surface] field.  [None] on rows written before P5. *)
+      (* The typed surface, persisted as a structured
+         [surface] field.  [None] on rows written before this field. *)
   conversation_id : string option;
   external_message_id : string option;
   workspace_id : string option;
@@ -150,17 +150,16 @@ type chat_message = {
          has a default text projection; server failure records retain only
          explicitly completed output. None means no persisted blocks. *)
   mentions : Keeper_identity.Keeper_id.t list;
-      (* RFC-0232 §3.3: parsed once at append from the persisted content
+      (* Parsed once at append from the persisted content
          (plus connector-provided explicit mentions); [] = none.  Rows
-         written before P4 lack the field and read as []; the offline
-         backfill tool stamps them. *)
+         written before this field lack it and read as []. *)
   turn_ref : Ids.Turn_ref.t option;
-      (* RFC-0233 §7: "<trace_id>#<absolute_turn>" join key for the turn
+      (* "<trace_id>#<absolute_turn>" join key for the turn
          that produced this row.  Stamped by [append_turn] /
          [append_assistant_message] when the caller supplies it; [None] on
-         inbound user lines (no turn yet) and rows written before §7.  A
-         malformed persisted value is reported as a persistence read drop
-         and reads as [None]; the row stays valid. *)
+         inbound user lines (no turn yet) and rows written before this
+         field.  A malformed persisted value is reported as a persistence
+         read drop and reads as [None]; the row stays valid. *)
   failure_kind : Keeper_request_failure.Failure_kind.t option;
       (* Closed typed failure classification persisted on [Request_failure]
          rows. [None] on other rows, legacy rows, or rows whose persisted

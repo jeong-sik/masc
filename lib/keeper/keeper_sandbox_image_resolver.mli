@@ -7,9 +7,7 @@
     the next caller that asks. A caller that starts and later stops a
     container resolves once for that decision and keeps the answer, so the
     two never look at different builds. A catalog that cannot be read is a
-    refusal: there is no image to fall back to that anyone chose.
-
-    RFC keeper-sandbox-images-have-versions (#38699) §2.4. *)
+    refusal: there is no image to fall back to that anyone chose. *)
 
 type error =
   | Not_declared  (** The Keeper's [sandbox_image] is absent or blank. *)

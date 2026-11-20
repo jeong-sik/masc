@@ -1,13 +1,12 @@
 (** The keeper runtime tools whose declarations moved to
-    [config/tools/*.toml] (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2), read from the binary-embedded config tree.
+    [config/tools/*.toml], read from the binary-embedded config tree.
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
     partial runtime surface, so a reader of these values never has to ask
     whether a schema loaded.
 
-    All four now load from TOML, including the two whose numbers an OCaml
+    All of them now load from TOML, including the two whose numbers an OCaml
     module owns: keeper_artifact_read's max_bytes bounds belong to
     [Keeper_artifact_read] and keeper_analyze_image's media-type enum to
     [Keeper_vision_tool]. Moving them cut those derivations, and the pin that
@@ -16,13 +15,9 @@
     65536, so a model reading the schema could ask for four times what the
     handler accepts. [test_keeper_runtime_schemas_toml_parity] now pins both
     files against their owner modules, which is what makes the literals safe.
-    masc_fusion_status emits an empty ["required"] list, which the loader omits
-    because nothing declares itself required -- moving it would change the
-    bytes, and the empty list is a no-op that five tools carry and twenty-six
-    already omit. That inconsistency is its own change.
 
-    [test_keeper_runtime_schemas_toml_parity] pins all four against what the
-    list published before any of this moved. *)
+    [test_keeper_runtime_schemas_toml_parity] also pins the order [schemas]
+    publishes them in. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

@@ -1,7 +1,6 @@
 (** The spectator's read of a workspace machine's screen through
-    [GET /api/v1/lane-addons/live] (RFC machine-spectating-goes-through-lanes
-    §2.1). One route serves every machine that has a screen; the source kind
-    names which one.
+    [GET /api/v1/lane-addons/live]. One route serves every machine that has a
+    screen; the source kind names which one.
 
     The server answers one of three states, and {!decode} turns each into its
     own constructor or refuses the body. Nothing here does I/O: the executable

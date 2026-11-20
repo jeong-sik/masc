@@ -435,7 +435,6 @@ let fleet_rows ~ko ~cols ~now runtimes =
 let selected_cockpit_rows ~ko ~cols ~now ~name ~status runtime =
   if cols < 44 then []
   else
-    let say k e = if ko then k else e in
     let fit_row line = Layout.truncate_end (max 0 cols) line ^ Ansi.reset in
     let _, count = dimensions cols in
     let keeper_tallies = tallies ~now ~count runtime in

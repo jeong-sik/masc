@@ -3332,17 +3332,21 @@ let render_keeper_axes (state : state) =
     | None -> 0
   in
   let wall_cockpit_rows =
-    match matrix, shape, state.keeper_story, portrait, selected_row with
-    | None, Axis_row.Wall_columns, None, None, Some row
-      when available_rows >= 9 ->
-        let status = keeper_selected_summary state ~now:now_unix row in
-        let cockpit =
-          Masc_tui_keeper_wall.selected_cockpit_rows ~ko ~cols:inner ~now:now_unix
-            ~name:row.Keeper_list_model.keeper.Tui_decode.k_name
-            ~status (keeper_row_runtime row)
-        in
-        if available_rows - List.length cockpit >= 4 then cockpit else []
-    | (Some _ | None), _, _, _, _ -> []
+    match shape with
+    | Axis_row.Wall_columns -> (
+        match matrix, state.keeper_story, portrait, selected_row with
+        | None, None, None, Some row when available_rows >= 9 ->
+            let status = keeper_selected_summary state ~now:now_unix row in
+            let cockpit =
+              Masc_tui_keeper_wall.selected_cockpit_rows ~ko ~cols:inner
+                ~now:now_unix
+                ~name:row.Keeper_list_model.keeper.Tui_decode.k_name
+                ~status (keeper_row_runtime row)
+            in
+            if available_rows - List.length cockpit >= 4 then cockpit else []
+        | (Some _ | None), (Some _ | None), (Some _ | None), (Some _ | None) ->
+            [])
+    | Axis_row.List_columns | Axis_row.Grid _ -> []
   in
   let selected_summary =
     if wall_cockpit_rows <> [] then None

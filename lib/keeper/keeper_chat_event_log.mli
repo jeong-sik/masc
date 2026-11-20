@@ -12,7 +12,7 @@ type journaled_event =
 
 val page_default_limit : int
 (** How many lines one read of the journal returns when the reader names no
-    count (RFC-0412 §3.2, the v2 events endpoint). *)
+    count (the v2 events endpoint). *)
 
 val page_max_limit : int
 (** The most lines one read may ask for. Defined once, here, for both sides

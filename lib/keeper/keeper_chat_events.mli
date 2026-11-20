@@ -288,8 +288,8 @@ val bus_capacity : int
 (** Events the bus buffers before [publish] suspends the publisher. *)
 
 type t
-(** Bounded per-turn event stream plus its optional journal hook (RFC-0412
-    stage 1). One publisher fiber writes it; one adapter fiber reads it.
+(** Bounded per-turn event stream plus its optional journal hook. One
+    publisher fiber writes it; one adapter fiber reads it.
 
     The publisher ends the turn with {!close}. The reader keeps reading until
     it takes {!Closed}; terminal events ([Run_finished], [Event_error]) tell

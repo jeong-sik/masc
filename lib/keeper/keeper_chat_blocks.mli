@@ -111,8 +111,8 @@ val status_kind_connector_text : status_kind -> string
     not assistant output, and must not be persisted as assistant content. *)
 
 val status_kind_to_label : status_kind -> string
-(** Stable persistence label shared by the chat store and the RFC-0412
-    canonical event journal. *)
+(** Stable persistence label shared by the chat store and the canonical
+    event journal. *)
 
 val status_kind_of_label : string -> status_kind option
 (** Inverse of {!status_kind_to_label}; [None] on any other label. *)
@@ -144,7 +144,7 @@ type trace_step =
     }
       (** [content_withheld = true] states that the step happened and its
           content is not carried on this surface — the public autonomous
-          projection of RFC-0358 §2, which admits the step's existence and
+          projection, which admits the step's existence and
           timestamp but no reasoning text. [trace_step_to_yojson] and the
           decoder both force [text = ""] in that case, so a caller building
           [Trace_think { text = <real reasoning>; content_withheld = true }]

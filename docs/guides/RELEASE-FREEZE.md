@@ -70,9 +70,9 @@ separate change rather than deleting useful coverage during an RC failure.
 The current `release-candidate.yml` workflow runs full compile/type checks,
 four-platform installation checks, and the explicit essential behavior
 selection declared in `config/release-behavior.json` (`release-behavior.yml`).
-Full root `@runtest` (`test.yml`) remains a separate manual/scheduled
-regression lane recorded in the candidate ledger (`미실행` if not run on that
-candidate). Scoped checks help diagnose repairs but do not replace a complete
+Full root `@runtest` (`test.yml`) remains a separate manual regression lane.
+The candidate ledger records its latest run id, or `미실행` if it did not run
+on that candidate. Scoped checks help diagnose repairs but do not replace a complete
 successful same-SHA RC. Failed-job reruns for unchanged source may reuse
 successful same-run assets under the existing workflow.
 

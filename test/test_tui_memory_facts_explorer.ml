@@ -228,7 +228,7 @@ let test_sorting_orders () =
     (labels_from Types.Sort_recency 6)
 ;;
 
-(* RFC-0418: the two use-based orders read the record. A fact never retrieved
+(* The two use-based orders read the record. A fact never retrieved
    sorts after the retrieved ones, and source and dropped rows, which have no
    record, stay last in their own recency order. *)
 let test_use_based_sorting () =

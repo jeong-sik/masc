@@ -1,4 +1,4 @@
-(* Memory use events (RFC-0418): the retrieval sidecar codec, append and read,
+(* Memory use events: the retrieval sidecar codec, append and read,
    and the projection a consumer builds from it and the journal lineage. No
    strength or score is stored, so every number here is recomputed from the
    events and lineage the test supplies. *)

@@ -1,5 +1,4 @@
-(** Says that a file one Keeper's memory health row reads was written
-    (RFC-0487).
+(** Says that a file one Keeper's memory health row reads was written.
 
     The stores that keep those files call {!written} once a write succeeded:
     the memory journal for the lines written outside a publication (an

@@ -10,7 +10,7 @@
 include Llm_provider.Types
 
 (* ================================================================ *)
-(* History content (RFC-0476 D5)                                    *)
+(* History content                                                  *)
 (* ================================================================ *)
 
 type media_source = History.media_source =

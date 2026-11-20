@@ -1,4 +1,4 @@
-(* RFC-0166: the previous body of [inference_model_bucket] was a
+(* The previous body of [inference_model_bucket] was a
    substring classifier over upstream LLM provider names. The
    server-side enumeration is removed: histogram label cardinality
    becomes 1 ("upstream") rather than a closed enum of providers.

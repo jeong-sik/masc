@@ -1,4 +1,4 @@
-(** Single-binding → [Provider_config.t] materialization (RFC-0206 §5).
+(** Single-binding → [Provider_config.t] materialization.
 
     Covers only the binding materialization path:
 

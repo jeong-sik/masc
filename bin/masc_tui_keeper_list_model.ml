@@ -103,12 +103,13 @@ type row = {
 let next_view = function
   | Plain -> By_state
   | By_state -> By_cause
-  | By_cause -> By_time
-  | By_time -> By_memory
-  | By_memory -> By_age
-  | By_age -> By_runtime
-  | By_runtime -> Day_wall
+  | By_cause -> By_memory
+  | By_memory -> Day_wall
   | Day_wall -> Plain
+  (* Retired views step back into the five-view cycle if ever held. *)
+  | By_time -> By_memory
+  | By_age -> Day_wall
+  | By_runtime -> Day_wall
 
 (* Read off the walk itself, so a list of the views cannot name one [v]
    skips. *)
@@ -144,20 +145,26 @@ let view_title ~ko view =
     | By_runtime -> "런타임"
     | Day_wall -> "24시간"
 
+(* Saved legacy view names map to the closest active view so startup never
+   lands on a tab absent from [views]. *)
 let view_of_string = function
   | "list" -> Some Plain
   | "state" -> Some By_state
   | "cause" -> Some By_cause
-  | "time" -> Some By_time
+  | "time" -> Some By_state
   | "memory" -> Some By_memory
-  | "age" -> Some By_age
-  | "runtime" -> Some By_runtime
+  | "age" -> Some By_memory
+  | "runtime" -> Some By_cause
   | "24h" -> Some Day_wall
   | _ -> None
 
 let next_density = function
   | One_line -> Two_lines
   | Two_lines -> One_line
+
+let supports_density = function
+  | Plain | By_state | By_cause -> true
+  | By_time | By_memory | By_age | By_runtime | Day_wall -> false
 
 let shows_portrait view density =
   match view, density with
@@ -760,14 +767,35 @@ let initially_folded ~count = function
   | Group_age (Age_within_3h | Age_within_3d | Age_older) -> false
 
 let first_folds ~seen ~folded groups =
-  List.fold_left (fun (seen, folded) -> function
-    | None -> seen, folded
-    | Some group ->
-        if List.mem group seen then seen, folded
-        else
-          let count = List.length (List.filter (( = ) (Some group)) groups) in
-          group :: seen, (if initially_folded ~count group then refold Fold group folded else folded))
-    (seen, folded) groups
+  let present =
+    List.fold_left
+      (fun acc -> function
+        | None -> acc
+        | Some g -> if List.mem g acc then acc else g :: acc)
+      [] groups
+    |> List.rev
+  in
+  let orig_seen = seen in
+  let seen, folded =
+    List.fold_left (fun (seen, folded) -> function
+      | None -> seen, folded
+      | Some group ->
+          if List.mem group seen then seen, folded
+          else
+            let count = List.length (List.filter (( = ) (Some group)) groups) in
+            group :: seen, (if initially_folded ~count group then refold Fold group folded else folded))
+      (seen, folded) groups
+  in
+  (* Never auto-collapse every present group on first visit, or a view like
+     By_cause with zero active failures opens as folded headings over an empty
+     viewport. Keep the primary group expanded when freshly seen and all
+     present groups would otherwise fold. *)
+  match present with
+  | first :: _
+    when List.for_all (fun g -> List.mem g folded) present
+      && not (List.mem first orig_seen) ->
+      seen, refold Unfold first folded
+  | [] | _ :: _ -> seen, folded
 
 type group_counts = {
   attention_rows : int;

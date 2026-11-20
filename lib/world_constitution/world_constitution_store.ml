@@ -149,7 +149,7 @@ let without_ids held ids =
    one that was removed puts it at the end, because the world changed its mind
    and that is when it did. A replacement retires its bundle first and then
    follows the same add rule, so its article lands at the end under its own
-   id (RFC-0504). *)
+   id. *)
 let rec apply held = function
   | World_constitution_types.Added article ->
     if List.exists (same_id article.id) held then

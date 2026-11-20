@@ -58,7 +58,7 @@ val provider_connection_cache_json : unit -> Yojson.Safe.t
     connections in all and on the origin holding the most, reuses, new
     connections, and connections closed by reason, in all and for reused
     connections alone. [`Null] when no cache is installed. Origins are not named: health is an aggregate surface, which
-    does not carry provider identity (RFC-0132). *)
+    does not carry provider identity. *)
 
 val runtime_truth_json :
   build:Build_identity.t ->

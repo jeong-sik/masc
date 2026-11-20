@@ -63,7 +63,7 @@ let build_request_artifact
   in
   let output_token_receipt =
     Backend_openai_request.output_token_receipt
-      ~envelope:Types.Ollama_options_num_predict
+      ~envelope:(Provider_http_codec.output_token_envelope Provider_http_codec.ollama_chat)
       config
   in
   (* The chat-template token injection is shared with the OpenAI-compat request

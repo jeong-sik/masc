@@ -208,8 +208,8 @@ let flow_of_plan plan =
 
 (* The same shape the Available line draws, so the gauge and the surface cannot
    drift: identity, ": ", description. It counted the whole reference while the
-   line printed the whole reference; both dropped the content_revision together
-   (RFC-0411 §4.1). A gauge left on the old shape would keep reporting bytes
+   line printed the whole reference; both dropped the content_revision together.
+   A gauge left on the old shape would keep reporting bytes
    nobody spends. *)
 let instruction_discovery_bytes reference description =
   String.length

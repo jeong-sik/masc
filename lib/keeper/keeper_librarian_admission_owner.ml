@@ -13,7 +13,7 @@ module Runtime = Lane_addon_runtime
 module Current = Keeper_memory_os_current
 module Queue = Keeper_memory_admission_queue
 open Result.Syntax
-(* RFC-0474 L4·L4c. Each submit declares its work where it is written and is
+(* Each submit declares its work where it is written and is
    named by the function that writes it. A submit inside another pool job
    runs in place, so only the outermost one sets the weight. Work that reads
    and checks every record of a scope (discovery, a gate chain, a journal
@@ -281,7 +281,7 @@ let answered ~store ~config ~reserved ~owner ~inventory part original =
   match parsed with
   | Keeper_librarian_runtime.Deferred -> Ok (Terminal (source original part,false))
   | Accepted accepted -> gate_result ~store ~config ~reserved ~owner ~inventory part original proposal accepted
-(* RFC-0500. The process that started this execution's attempt stopped
+(* The process that started this execution's attempt stopped
    before it ended, so no judgment reached the host. The execution settles
    and the walk evaluates its part again, which captures a fresh execution.
    No other record names it. A gate intent follows only [Judged], which a

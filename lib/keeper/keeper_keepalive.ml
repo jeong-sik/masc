@@ -403,7 +403,7 @@ let start_keeper_grpc_heartbeat
    candidates were recorded and never judged, with no failure anywhere to
    read.
 
-   RFC-0341 (Accepted): tool, persistence and resource failures are
+   Tool, persistence and resource failures are
    observations and never produce an implicit lifecycle transition. A worker
    fatal therefore stops the worker and is recorded; the lane continues. *)
 let fork_board_attention_worker

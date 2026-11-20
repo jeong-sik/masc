@@ -1,4 +1,4 @@
-(** One server-sent-events response (RFC-0493 §3.1) on a {!Http_reqd.t}.
+(** One server-sent-events response on a {!Http_reqd.t}.
 
     A frame is written only by {!send}. [send] returns once the transport has
     handed the frame to the socket, once the response has closed, or once the
@@ -9,7 +9,7 @@
     and the reset closes the response. A client that stops reading therefore
     holds each sending fiber at its send, and the bytes the server keeps for
     that client are at most one send per sending fiber. A pump's send carries
-    the frames it batched (RFC-0493 §7 5b). The writer itself is not reachable
+    the frames it batched. The writer itself is not reachable
     from outside this module, so no caller can write a frame without waiting
     for it.
 

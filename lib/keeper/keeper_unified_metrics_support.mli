@@ -88,7 +88,7 @@ val select_proactive_preview :
   response_text:string ->
   validated_evidence_preview:string option ->
   string
-(** RFC-0232 scheduled-autonomous work preview, by precedence: visible model
+(** scheduled-autonomous work preview, by precedence: visible model
     text (only when [is_visible_reply], so a no-output turn-limit observation
     is not shown as output) -> substantive tool calls ->
     validated evidence -> [previous]. Pure for unit testing. *)

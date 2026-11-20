@@ -1,5 +1,5 @@
 (** Keeper_model_input_demotion — replace aged tool-result bodies and verified
-    completed arguments with blob references in the provider-bound copy (RFC-0363).
+    completed arguments with blob references in the provider-bound copy.
 
     A tool result is externalized at creation only when it exceeds the inline
     ceiling of the projection it crosses ({!Tool_output.inline_ceiling_bytes}):

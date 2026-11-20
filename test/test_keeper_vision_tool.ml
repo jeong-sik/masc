@@ -10,7 +10,7 @@ let stored_source ~media_type raw =
 
 let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled))
 
-(* Keeper_vision_tool pure-core tests — RFC-keeper-vision-delegation-tool §2.6.
+(* Keeper_vision_tool pure-core tests.
 
    Locks the two contract-critical pure pieces:
    - stop_reason -> truncated mapping (the 2026-06-25 gemma4 finding: MaxTokens
@@ -1035,7 +1035,7 @@ let test_candidate_policy_error_tries_next_runtime () =
         before_ok
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
-(* RFC-0440 §3: a candidate whose account answered a hard quota rejection moves
+(* A candidate whose account answered a hard quota rejection moves
    behind the live ones; a success on that account clears the observation. *)
 let test_vision_candidates_follow_quota_window () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
@@ -1053,7 +1053,7 @@ let test_vision_candidates_follow_quota_window () =
       Runtime_quota_window.note_succeeded ~scope:(scope "p1.vision-a");
       assert (Vt.vision_runtime_ids ~now = [ "p1.vision-a"; "p2.vision-b" ])))
 
-(* RFC-0440 §3: a 402 from the read walk is recorded on that account, the walk
+(* A 402 from the read walk is recorded on that account, the walk
    moves on at once, and the answering account is recorded as live. *)
 let vision_standing_runtime id =
   match Runtime.get_runtime_by_id id with
@@ -2073,7 +2073,7 @@ let test_delegate_eviction_rejects_oversize_before_store () =
         assert (String_util.contains_substring placeholder "image too large")
       | _ -> failwith "oversize image must surface as a text placeholder"))
 
-(* RFC-0430 / #33682: a URL or Files-API id is a reference, not a payload. The
+(* #33682: a URL or Files-API id is a reference, not a payload. The
    serializers put both on the wire natively (#33669), so eviction — which
    exists to trade heavy inline pixels for a local artifact handle — must hand
    the block through unchanged instead of swapping it for a store-failure

@@ -205,7 +205,7 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
     render(null, container)
   })
 
-  // RFC-0457: an assignment may name a declared lane. The select lists lanes
+  // An assignment may name a declared lane. The select lists lanes
   // in their own group and shows a lane-assigned keeper's lane, not the first
   // runtime id.
   it('offers declared lanes as assignment targets and shows a lane assignment as its value', () => {

@@ -472,7 +472,7 @@ module Ring = struct
   let try_open_channel dir =
     protect ~default:None (fun () -> Some (open_channel dir))
 
-  (* RFC-0079: typed encoder. Exhaustive match on [level] / [source] means
+  (* Typed encoder. Exhaustive match on [level] / [source] means
      adding a new variant fails to compile here until the wire format is
      extended deliberately. The wire shape (field set + key order) is the
      [LogEntryRawSchema] contract in [dashboard/src/api/schemas/logs.ts]. *)
@@ -711,7 +711,7 @@ module Ring = struct
 
   exception Entry_decode_error of string
 
-  (* RFC-0079: explicit source decoder. New source variants must be added
+  (* Explicit source decoder. New source variants must be added
      here AND in [source_to_string] — adjacent functions are colocated so a
      drift between encoder and decoder is visible to the reviewer. *)
   let source_of_string = function
@@ -721,7 +721,7 @@ module Ring = struct
     | "client_tool_host" -> Client_tool_host
     | s -> raise (Entry_decode_error (Printf.sprintf "unknown source: %S" s))
 
-  (* RFC-0079: total decoder. Missing required fields or unknown variants
+  (* Total decoder. Missing required fields or unknown variants
      raise [Entry_decode_error] instead of returning [None]. Callers that
      reload historical JSONL ([load_from_file]) decide whether to skip a
      bad line at the file-fold boundary; the decoder itself never silently
@@ -1020,7 +1020,7 @@ module Ring = struct
     | `List items -> `List (List.map sanitize_json_strings items)
     | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as leaf -> leaf
 
-  (* RFC-0079: typed [push]. [~level] and [?source] are typed values, not
+  (* Typed [push]. [~level] and [?source] are typed values, not
      strings. Legacy options [?raw_level] / [~normalized_level] /
      [?legacy_classified] are gone — they only existed to carry the
      pre-typed mirror state through the wire. *)
@@ -1278,7 +1278,7 @@ let details_with_event_class event_class details =
 
 let info ?ctx ?category fmt = log Info ?ctx ?category fmt
 let warn ?ctx ?category fmt = log Warn ?ctx ?category fmt
-(* RFC-0079: [~level] is now required for the mirror functions. The old
+(* [~level] is now required for the mirror functions. The old
    [?level] option backed [infer_legacy_level], a string-prefix classifier
    over the message body — every existing caller already passed
    [~level:Log.Error/Warn/Debug] explicitly, so the option was dead code
@@ -1433,7 +1433,7 @@ module Telemetry = Make(struct let name = "Telemetry" end)
 module Gate = Make(struct let name = "Gate" end)
 module Transport = Make(struct let name = "Transport" end)
 module Keeper = Make(struct let name = "Keeper" end)
-(* RFC-0058 Phase 8.1.5: dedicated runtime namespace so partial-catalog
+(* Dedicated runtime namespace so partial-catalog
    warnings and other runtime-domain events route through a stable
    channel that alerting/dashboard filters can target without false
    positives from the Keeper namespace. *)

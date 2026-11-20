@@ -1,9 +1,9 @@
-(* Channel_gate_slack_state — Slack in-process connector state (RFC-0317).
+(* Channel_gate_slack_state — Slack in-process connector state.
 
    Implements {!Channel_gate_connector.S} so it can be registered at server
    startup via [Channel_gate_connector.register (module Channel_gate_slack_state)].
 
-   The in-process Slack gateway ({!Slack_socket_client}, RFC-0317) is the
+   The in-process Slack gateway ({!Slack_socket_client}) is the
    only Slack transport. Mirrors
    {!Channel_gate_discord_state} but is simpler — no threads (Slack threads
    share the parent channel id; a [thread_ts] is not a separate channel), no
@@ -302,12 +302,12 @@ let resolve_keeper_for_channel_result ~channel_id =
              ; via_parent = false })
       | None -> Ok None)
 
-(* RFC-0223 P2 presence surface. Recomputed per call — no cached state. *)
+(* Presence surface. Recomputed per call — no cached state. *)
 let bound_channels ~keeper_name =
   Store.bound_channels_result binding_store ~keeper_name
 
 let connected () =
-  (* The in-process gateway (RFC-0317) is the only Slack transport; its run
+  (* The in-process gateway is the only Slack transport; its run
      loop publishes the typed connection state. Same definition [status_json]
      reports — see [gateway_connected]. *)
   gateway_connected (Slack_socket_client.connection_state ())

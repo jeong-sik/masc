@@ -394,7 +394,9 @@ let mode_label = function
 ;;
 
 let hint_lead = "  "
-let refusal_lead = "  ! "
+(* A refusal is the failed mark of RFC tui-one-screen-grammar 7.2 (실패·반려);
+   [!] is not a status mark. *)
+let refusal_lead = "  " ^ Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed ^ " "
 
 (* [text] after [lead], on as many rows of [width] cells as it takes. The pane
    cuts a row at its edge, so a sentence longer than the pane is wrapped here
@@ -572,7 +574,7 @@ let window ~room ~cursor rows =
 ;;
 
 let rows ~width ~height t =
-  let mark index = if t.cursor = index then ">" else " " in
+  let mark index = if t.cursor = index then "›" else " " in
   let intro_rows = wrapped ~width ~lead:hint_lead intro in
   let server_rows =
     capped ~limit:server_rows_limit (wrapped ~width ~lead:hint_lead (server_line t.server))

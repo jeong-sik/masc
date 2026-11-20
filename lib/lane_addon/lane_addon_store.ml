@@ -15,7 +15,7 @@ let name_in_masc_dir = "lane-addons"
 let directory ~masc_dir = Filename.concat masc_dir name_in_masc_dir
 let of_config config = create ~root:(directory ~masc_dir:(Workspace.masc_dir config))
 (* Agent_core_sha256 feeds bounded slices, so hashing a large original request
-   answers stop-the-world requests between slices (RFC-0474 L2). *)
+   answers stop-the-world requests between slices. *)
 let digest bytes = Agent_core_sha256.(to_hex (digest_string bytes))
 let protect f =
   try f () with
@@ -1291,7 +1291,7 @@ let decode_record bytes =
     | _ -> Error "invalid retained observation")
 (* The records a binding names. Sequences are dense from 1 and a binding names
    only committed ones, so they are read by name without listing the
-   directory (RFC lane-addon-observation-commits-at-the-binding). *)
+   directory. *)
 let observations t ~instance_id ~through =
   let rec loop acc seq =
     if seq > through then Ok (List.rev acc)

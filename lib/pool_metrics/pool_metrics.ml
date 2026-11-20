@@ -1,4 +1,4 @@
-(** RFC-0107 Phase D.4 — Otel_metric_store exporter for [Masc_http_client.Pool].
+(** Otel_metric_store exporter for [Masc_http_client.Pool].
 
     Read-only adapter: exposes a snapshot accessor over
     [Masc_http_client.all_domain_pools].  The metric name constants and

@@ -126,7 +126,7 @@ let lines t =
   @ match t.phase with
   | Browse index -> ["a:add  d:remove  r:refresh  j/k:select  Esc:back"] @
       (match t.snapshot with
-       | None -> [match t.error with None->"Reading subscription configuration…"
+       | None -> [match t.error with None->"Reading subscription configuration"
            | Some _ -> "No readable subscription configuration."]
        | Some _ -> (match at (entries t) index with
          | None -> ["No subscriptions configured."]

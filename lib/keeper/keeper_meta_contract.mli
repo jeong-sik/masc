@@ -68,7 +68,7 @@ val with_last_reported_usage :
 type runtime_exhaustion_reason = Keeper_internal_error.runtime_exhaustion_reason =
   | Connection_refused
   | Dns_failure
-      (** RFC-0142 PR-2: typed surface for hostname-resolution failure.
+      (** Typed surface for hostname-resolution failure.
           Closes the dominant Other_detail share (50% live on 5/21,
           "failed to resolve hostname: ...") by mapping the existing
           [Llm_provider.Http_client.network_error_kind.Dns_failure] kind

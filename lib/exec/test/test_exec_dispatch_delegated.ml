@@ -1,6 +1,6 @@
 (* A delegated stage answers through the caller, not a process.
 
-   RFC tools-as-shell-commands PR-1a: [Sandbox_target.Delegated] routes
+   [Sandbox_target.Delegated] routes
    a stage's execution to an injected [caller] closure with the same
    shape the guest/SSH runners already use. These tests lock the
    round trip — argv travels in, a process-shaped answer travels back —

@@ -2,7 +2,7 @@
     (recall, board, conversation).
     Returns [Some (Tool_result.result)] if handled, [None] otherwise.
 
-    RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly
+    Handlers now return [Tool_result.result] directly
     instead of [(bool * string)]. *)
 
 (* Board content reaches SSE subscribers as JSON. A byte-based cut lands

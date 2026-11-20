@@ -2285,7 +2285,7 @@ let run_named
     ?required_native_posture
     ?(initial_messages = [])
     ?argument_demotion_seed
-    ?(history_at_start = Keeper_turn_boundaries.Continued_history)
+    ?(this_turn_opening = Keeper_turn_driver_try_provider.Opened_after_its_input)
     ?model_input_projection
     ?temperature
     ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
@@ -2391,16 +2391,23 @@ let run_named
          The checkpoint remains the source of every atom index. *)
       (* The end of the last completed turn on this history: where a request
          with no absorbed point starts (RFC keeper-context-window-in-tokens
-         §13.4) and the boundary before which completed arguments bind. Read
+         §13.4) and the boundary before which completed arguments bind. With
+         it, where this turn began, which rules 7 and 8 read (RFC
+         librarian-lifecycle §4.10). Both come from one read of the turn log,
          once per turn for every lane. *)
-      let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+      let turn_starts = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         match session_id with
         | Some trace_id ->
           Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-            Keeper_turn_driver_try_provider.turn_start
+            Keeper_turn_driver_try_provider.turn_starts
               ~config:(Workspace.default_config base_path) ~keeper_name ~trace_id
               ~messages:initial_messages)
-        | None -> Keeper_carried_front.Turn_boundary { end_atom = 0 }) in
+        | None ->
+          { Keeper_turn_driver_try_provider.boundary = Keeper_carried_front.Turn_boundary { end_atom = 0 }
+          ; this_turn = None
+          }) in
+      let turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
+        (Eio.Lazy.force turn_starts).Keeper_turn_driver_try_provider.boundary) in
       let official_client_turn_boundary = Eio.Lazy.from_fun ~cancel:`Restart (fun () ->
         official_client_turn_start ~session_id
           ~read_boundary:(fun () -> Eio.Lazy.force turn_boundary)) in
@@ -3703,11 +3710,6 @@ let run_named
               pending_result_receipts=None;settled_session=None;
               effect_disposition=Keeper_provider_attempt_effect.No_effect_observed}
           | Ok account ->
-          match on_guidance_prepared () with
-          | Error error -> {Keeper_claude_code_runtime.result=Error error;
-              pending_result_receipts=None;settled_session=None;
-              effect_disposition=Keeper_provider_attempt_effect.No_effect_observed}
-          | Ok () ->
           reset_model_input_observation ();
           let tools = if runtime.model.tools_support then tools else [] in
           let on_transmitted_model_input transmitted =
@@ -3719,7 +3721,7 @@ let run_named
           in
           let native_attempt : Runtime_native_tasks.attempt =
             { routing_run_id; runtime_id = attempt_runtime_id; lane_attempt_index = idx } in
-          Keeper_claude_code_runtime.run ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
+          Keeper_claude_code_runtime.run ~on_guidance_prepared ~input_source ~media_store ?on_native_tool_progress ?on_native_tool_completion
             ~configured_reasoning_effort:runtime.model.reasoning_effort
             ~turn_timeout_s:runtime.model.turn_timeout_s
             ?argument_source:official_argument_source
@@ -3842,10 +3844,11 @@ let run_named
           ~pending_result_receipts:claude_attempt.pending_result_receipts claude_result in
         let claude_result = observe_official_result
           ~execution_result:claude_attempt.result claude_result in
+        let claude_result = guidance_result claude_result in
         ( selected_runtime_result ?official_client_settlement:claude_attempt.settled_session runtime ~lane_attempt_index:idx claude_result
         , None
         , claude_attempt.effect_disposition
-        , official_client_dispatch ~provider_config_transform claude_attempt.result )
+        , official_client_dispatch ~provider_config_transform claude_result )
       | Runtime_execution.Agent_core sealed ->
        (* Held to this candidate's own rendering of the history, for the
           reason [official_client_librarian_front] states. *)
@@ -3917,7 +3920,11 @@ let run_named
             ; input_runtime = Some runtime
             ; error_runtime_id
             ; turn_boundary = Eio.Lazy.force turn_boundary
-            ; history_at_start
+            ; this_turn_start =
+                (match this_turn_opening with
+                 | Keeper_turn_driver_try_provider.Opened_before_its_input ->
+                   (Eio.Lazy.force turn_starts).Keeper_turn_driver_try_provider.this_turn
+                 | Keeper_turn_driver_try_provider.Opened_after_its_input -> None)
             ; argument_demotion_seed
             ; argument_replay_prefix = replay_prefix_projection
             ; prepare_request_media =

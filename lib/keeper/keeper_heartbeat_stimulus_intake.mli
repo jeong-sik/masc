@@ -132,7 +132,7 @@ type heartbeat_event_intake = {
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]
     increments Otel_metric_store and logs only after consumption is known.
 
-    [?connector_attention_items] (RFC-0377 P1-1): for a [Connector_attention]
+    [?connector_attention_items]: for a [Connector_attention]
     stimulus, a preloaded (event_id, item) association to resolve [stim]'s
     recorded item from, preserving a typed read failure instead of admitting
     an empty source. Otherwise it uses a fresh
@@ -171,7 +171,7 @@ val stimulus_ready_for_intake
 (** [ready_hitl_resolution_peek ~base_path ~keeper_name] returns the first
     queued [Hitl_resolved] whose approval has left the pending map, without
     consuming the queue entry (#28809). A turn woken by a different stimulus
-    projects this durable resolution as cycle context so the RFC-0356 host
+    projects this durable resolution as cycle context so the host
     replay is not starved behind the queue position; the untouched entry is
     later retired by [reconcile_spent_selection] once its grant is spent. An
     approved resolution with no durable record behind it is not projected;

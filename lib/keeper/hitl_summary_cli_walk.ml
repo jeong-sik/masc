@@ -13,7 +13,7 @@ let log_cli_slot_failure (entry : pending_approval) failure =
     (Keeper_lane_cli_oneshot.failure_to_string failure)
 ;;
 
-(* ── CLI lane-slot fallback (RFC cli-runtimes-as-lane-slots) ─────────
+(* ── CLI lane-slot fallback ──────────────────────────────────────────
    Walked only after the HTTP flow reports candidate exhaustion. Every queue
    transition stays inside the exact-attempt contract proven above:
    [release -> bind(new identity)] is the same rebind the HTTP walk uses, a

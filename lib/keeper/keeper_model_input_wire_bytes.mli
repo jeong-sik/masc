@@ -1,6 +1,5 @@
 (** Keeper_model_input_wire_bytes — how many bytes one provider's encoder
-    sends for a message, to compare two forms of the same tool results
-    (RFC-0363 §3.1.2).
+    sends for a message, to compare two forms of the same tool results.
 
     Providers send different bodies of one structured tool result, and some
     escape them twice:

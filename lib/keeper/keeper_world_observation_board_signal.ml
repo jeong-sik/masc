@@ -483,7 +483,7 @@ let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
 ;;
 
 (** Why a keeper woke for a board signal. Closed set replacing the prior
-    [string option] producer/consumer contract (RFC-0020): the matchers in
+    [string option] producer/consumer contract: the matchers in
     {!wake_reason} are the only producers, so a reason no matcher emits — e.g.
     the previously dead ["board_activity"] generic bucket the consumer used to
     match — is now unrepresentable rather than a string the consumer guesses

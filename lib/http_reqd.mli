@@ -205,7 +205,7 @@ val read_body
 (** Reads the whole request body, at most [max_bytes]. A declared or streamed
     excess stops the read and reports [Too_large]; [on_body] runs once with
     the complete body. On HTTP/2 both callbacks run in a fiber of the stream
-    switch after a yield (RFC-0350), and completion is checked again there, so
+    switch after a yield, and completion is checked again there, so
     a stream reset after EOF delivers nothing.
 
     A body cut short delivers nothing, and the request has its answer or its
@@ -217,7 +217,7 @@ val read_body
 
 (** {1 A handler on another domain}
 
-    RFC http-transport-runs-on-its-own-domain §3.3. httpun and h2 writers are
+    httpun and h2 writers are
     not safe across domains, so a handler that runs on another domain than
     its connection gets a handle that touches neither. *)
 

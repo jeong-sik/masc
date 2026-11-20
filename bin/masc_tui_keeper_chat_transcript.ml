@@ -934,7 +934,8 @@ let model_phase_text ~ko ~show_timing ~now t =
   | Some (Model_started_at since) -> observed ~since (say "모델 시작됨" "model started")
   | Some (Reasoning_at since) -> observed ~since reasoning
   | Some (Answering_at since) -> observed ~since answering
-  | Some (Tool_returned_at (tool_name, since)) -> observed ~since (tool_name ^ say " 반환됨" " returned")
+  | Some (Tool_returned_at (tool_name, since)) ->
+      observed ~since (tool_name ^ say " 완료 · 응답 대기" " returned · waiting for model")
 ;;
 
 (* The progress row is built as facts and joined into a line only where a

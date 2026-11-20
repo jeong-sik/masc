@@ -20,10 +20,9 @@ installation, BIOS/media paths, checkpoint restore and state identity.
 Native amd64/arm64 image verification includes stdio execution, PNG output and
 checkpoint restoration in a replacement worker using synthetic state; the
 [state guide](../../docs/guides/machine-addon-state.md) records the exact source
-and run. Actual games and installed-host reconciliation remain separate checks. See
-[tool ownership](../../docs/design/lane-addon-tool-exports.md) for integration
-status and SDK metadata limits. Public MCP version negotiation belongs to the
-host; the private worker negotiates the version supported by its installed SDK.
+and run. Actual games and installed-host reconciliation remain separate checks.
+Public MCP version negotiation belongs to the host; the private worker
+negotiates the version supported by its installed SDK.
 
 
 Guest floppy writes remain in the machine until checkpointed or exported.

@@ -255,7 +255,7 @@ end
     row and takes no part in the request's identity.
 
     [observation] is what the executor's box refused when the Gate ran the
-    request boxed before deferring it (RFC-0422): stored on the row, shown
+    request boxed before deferring it: stored on the row, shown
     to the judge, no part of the identity either. *)
 val submit_pending :
   keeper_name:string ->

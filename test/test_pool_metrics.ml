@@ -1,4 +1,4 @@
-(** RFC-0107 Phase D.4 — Pool_metrics registry regression test.
+(** Pool_metrics registry regression test.
 
     Verifies:
 
@@ -32,7 +32,7 @@ let test_current_snapshot_none_when_pool_uninit () =
    [current_snapshot] at each exporter tick (so they only exist while a
    pool exists, with values that are always fresh).  The registry-based
    assertions that used to live here tested a registration sweep that was
-   removed with the retired scrape backend (RFC-0217) and had been failing
+   removed with the retired scrape backend and had been failing
    ever since. *)
 let observable_pool_names samples =
   List.filter

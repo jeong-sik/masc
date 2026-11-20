@@ -106,8 +106,8 @@ let decide_transition ~phase ~(action : action) =
   let invalid = Error (Printf.sprintf "invalid goal transition: %s -> %s"
                         (to_string phase) (action_to_string action)) in
   match phase, action with
-  (* Executing: the only phase that can request completion. RFC-0387 stage 2:
-     the request no longer completes the goal — it enters [Verifying], and
+  (* Executing: the only phase that can request completion.
+     The request no longer completes the goal — it enters [Verifying], and
      the verifier's [Record_proof_proven] reaches [Awaiting_confirmation]. Reopen
      targets Executing, which is where the goal already is. *)
   | Executing, Request_complete -> Ok (Move_to Verifying)

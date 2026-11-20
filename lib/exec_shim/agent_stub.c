@@ -1,5 +1,5 @@
 /* agent_stub.c -- the privileged start of the masc-exec-shim guest agent
- * (RFC microvm-guest-agent-over-socket, section 3.2) and the facts its hello
+ * and the facts its hello
  * reports.
  *
  * ocaml_shim_agent_remount_root_read_only : unit -> unit

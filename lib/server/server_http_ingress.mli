@@ -1,5 +1,5 @@
 (** The request entries a transport runs after it has classified the
-    request's authority (RFC-0512 D2).
+    request's authority.
 
     {!serve} is the entry of the single-user server: client and agent rate
     limits, the MCP origin and protocol-version checks, the workspace

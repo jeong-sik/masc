@@ -53,7 +53,7 @@ facts live in `details`. The message is a readable summary. Consumers select the
 structured event field and preserve missing/unfinished outcomes; they do not
 parse the console summary. Ring JSONL, dashboard export and TUI log decoding
 already preserve this field. This does not add an Ask cohort report or prove a
-runtime speedup. See [the source boundary audit](audits/tui-ask-followup-structured-20261021.md).
+runtime speedup.
 
 ## Runtime execution and host acceptance
 
@@ -128,7 +128,7 @@ it does not scan previous sessions' files. The server dashboard does not read th
 client directory automatically. Source integration is not visible UI or server
 export proof. Logging levels can omit rows, a crash can interrupt a write, and normal
 sink flush is not fsync. These are process-owned retained log directories; this
-change adds no automatic deletion policy. See [the storage source audit](audits/tui-observation-store-20261021.md).
+change adds no automatic deletion policy.
 
 ## Absent fields
 
@@ -194,7 +194,6 @@ cannot, and that site is the `Agent_core_event` module.
 
 Each private TUI session also keeps `admissions/ask-followup.jsonl`. It records
 original admitted follow-up identities before dispatch independently of log level.
-Copy it separately from daily logs for the [comparison packet](guides/TUI-ASK-FOLLOWUP-COMPARISON.md).
 Missing event logs remain unobserved attempts. Journal writes add synchronous
 preparation/flush work; capture failures are best-effort warnings and can leave
 unknown attempts. Retained bytes do not prove exhaustive capture or execution.

@@ -13,7 +13,7 @@ open Dashboard_goals_types_accessor
 let json_to_string_opt = function | `String s -> Some s | _ -> None
 let goal_phase_color = function
   | Goal_phase.Executing -> "#4ade80"
-  (* RFC-0387 stage 2: the proof-pending hue matches the Task domain's
+  (* The proof-pending hue matches the Task domain's
      [AwaitingVerification] so the gate reads as the same shape of wait. *)
   | Goal_phase.Verifying -> "#a78bfa"
   | Goal_phase.Awaiting_confirmation -> "#f59e0b"

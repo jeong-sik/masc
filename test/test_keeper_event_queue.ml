@@ -406,7 +406,7 @@ let () =
       }
   in
 
-  (* --- typed payload kind labels (RFC-0020): the stimulus kind is a
+  (* --- typed payload kind labels: the stimulus kind is a
          closed variant, not classified from a JSON-prefixed string --- *)
   assert (String.equal (payload_kind_label (board_payload ())) "board_signal");
   assert (String.equal (payload_kind_label Bootstrap) "bootstrap");
@@ -640,7 +640,7 @@ let () =
           } )
     ];
 
-  (* RFC-0266: Fusion_completed is a non-board stimulus with its own label. *)
+  (* Fusion_completed is a non-board stimulus with its own label. *)
   let fusion_payload () =
     Fusion_completed
       { run_id = "fus-1"

@@ -33,7 +33,7 @@ let microvm_backend_of (t : t) = microvm_backend_of_meta t.meta
 (* The Docker exec prefix: [docker exec [-i] --user u:g -w cwd [env...]].
    Only the Docker lane execs into a mounted tree. A microvm guest owns its
    tree on the work volume and is reached through the shim over the remote
-   lane (RFC-0400), so every exec entrypoint below refuses it first. *)
+   lane, so every exec entrypoint below refuses it first. *)
 let exec_prefix (t : t) ~container_cwd ~stdin =
   Keeper_sandbox_runtime.docker_command_argv ()
   @ [ "exec" ]

@@ -1,4 +1,4 @@
-(* RFC-0203 Phase 3 — unit tests for the in-process gateway helpers
+(* Unit tests for the in-process gateway helpers
    added to [Channel_gate_discord_state]:
    - [keeper_for_channel] (binding lookup)
    - [send_error] / [pp_send_error] (typed REST error wrapper)

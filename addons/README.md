@@ -68,9 +68,8 @@ a known port with no matching rows is an empty supplied output. Original row
 identities and whole-producer coverage remain attached to the selected evidence.
 
 The [package image workflow](../.github/workflows/lane-addon-images.yml) discovers
-package Dockerfiles. The [DOS workflow](../.github/workflows/lane-dos-package.yml)
-also exercises the guest and retains its measured artifacts. These are example
-image build commands for CI, using the repository root and `addons` build context:
+package Dockerfiles. These are example image build commands for CI, using the
+repository root and `addons` build context:
 
 ```sh
 docker build -f addons/web-project/Dockerfile -t masc-lane-web-project:0.1.0 addons
@@ -86,8 +85,7 @@ leave room for the host's instance/sequence identity prefixes. A reply that
 fits the worker wire limit can therefore be explicitly refused before storage
 if namespacing exceeds that observation envelope; relation counts do not
 grant extra host storage capacity. Raising it raises every one of those
-limits together. [RFC-0471](../docs/rfc/RFC-0471-max-reply-bytes-bounds-one-thing.md)
-proposes narrowing it to the worker message.
+limits together.
 
 Each manifest specifies its worker's resource envelope. The Web, MSX, statistics,
 frame-progress and value-difference examples use half a CPU, 128 MiB memory,

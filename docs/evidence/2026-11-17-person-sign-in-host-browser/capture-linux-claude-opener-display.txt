@@ -1,9 +1,0 @@
-claude: 2.1.326 (Claude Code) | kernel: Linux arm64
-[default] BROWSER=(unset)
-    opener on PATH   : started xdg-open: argc 1, link host claude.com, redirect_uri http://localhost:41379/callback
-    BROWSER recorder : not started
-    still waiting: true; prints a link: true; asks for a code: true
-[fix] BROWSER=/usr/bin/true
-    opener on PATH   : not started
-    BROWSER recorder : not started
-    still waiting: true; prints a link: true; asks for a code: true

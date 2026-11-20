@@ -1,4 +1,4 @@
-(* RFC play-link-for-the-shared-machine §2.9: pad buttons, layout files and
+(* Pad buttons, layout files and
    where a layout comes from. *)
 
 open Alcotest

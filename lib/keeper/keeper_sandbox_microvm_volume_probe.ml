@@ -337,7 +337,7 @@ let ensure_work_volume_for backend ~volume_name ~size ~timeout_sec =
   | Backend.Nerdctl_kata -> ensure_nerdctl_work_volume ~volume_name ~size ~timeout_sec
 ;;
 
-(* ── The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)
+(* ── The build volume
    Apple_container only: msb's named volume is a host directory ([--kind
    dir]), and nerdctl's managed volume is also a host directory with
    `capacity_enforced=false` (see ensure_msb_work_volume,

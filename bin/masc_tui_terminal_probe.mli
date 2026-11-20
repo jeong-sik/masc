@@ -70,6 +70,14 @@ val return_replay : decoder -> unit
     bytes before asking [next_raw] for a suffix. [return_replay] puts back the
     one byte [next] most recently served, for UTF-8 validation pushback. *)
 
+val pending : decoder -> Masc_tui_input_decoder.pending option
+(** What this probe holds in front of the input decoder, in the decoder's own
+    terms, so the reader waits for the next byte by one rule whichever of the
+    two holds it. [Some Prefix] is a lone [ESC]: the next byte decides it and a
+    quiet read makes it the Escape key ({!next}). [Some Sequence] is a head
+    that may still become a reply or a paste start, held across quiet reads
+    ({!holds_incomplete_sequence}). [None] holds nothing. *)
+
 val holds_incomplete_sequence : decoder -> bool
 (** [true] while the decoder keeps bytes of a sequence it has not finished and
     returns nothing for them, such as an [ESC \[ 2 0 0] head that may be a paste

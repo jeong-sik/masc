@@ -581,7 +581,7 @@ let parse
                | Some preflight ->
                  Keeper_sandbox_runtime.docker_preflight_rejection preflight))
          (* No microvm preflight exists yet; the guest is created on the first
-            sandboxed call (RFC-0406). Its image is still judged here, in the
+            sandboxed call. Its image is still judged here, in the
             store of the runtime the guest would boot on, for the same reason
             as Docker's above. *)
          | Some Micro_vm, None ->

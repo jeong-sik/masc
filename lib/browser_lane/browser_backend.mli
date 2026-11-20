@@ -1,5 +1,5 @@
 (** Who owns the browser a connection reaches: the unit one browser worker
-    serves (RFC browser-backends-end-alone, invariant 1). A failure stays
+    serves. A failure stays
     with the one who owns the browser, so the worker boundary follows it.
 
     The transport stays on the client. A new source is a new constructor,

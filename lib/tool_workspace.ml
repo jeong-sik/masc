@@ -41,9 +41,9 @@ let credential_state (ctx : context) ~actual_name =
     unique_trimmed_nonblank [ ctx.agent_name; actual_name ]
   in
   let internal_keeper_credential_available name =
-    (* Typed in-process read (RFC-0371 B11): this used to getenv the token
+    (* Typed in-process read: this used to getenv the token
        the process itself had putenv'd at boot — its own environment as an
-       in-memory channel, re-read per tool call. RFC-0393: whether [name]
+       in-memory channel, re-read per tool call. Whether [name]
        is a keeper is a registry lookup, not a name-shape parse. *)
     match
       ( (Atomic.get Workspace_hooks.keeper_registered_fn)
@@ -532,7 +532,7 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
   match outcome with
   | Workspace.Heartbeat_updated _ -> Tool_result.ok ~tool_name ~start_time message
   | Workspace.Agent_not_found _ | Workspace.Agent_file_invalid _ ->
-    (* RFC-0189: heartbeat failure stems from agent-state issues
+    (* Heartbeat failure stems from agent-state issues
        ("agent not found", "invalid file") that the caller can
        resolve (bind the session, refresh credentials).
        [Workflow_rejection]. *)

@@ -31,7 +31,7 @@ type parsed_args =
   ; remote_endpoint_present : bool
   ; network_mode_opt : network_mode option
   ; egress_allow_opt : string list option
-        (** What this keeper may reach in the policy lane (RFC-0415), or
+        (** What this keeper may reach in the policy lane, or
             [None] when the call did not say. Refused at parse time unless
             the keeper's effective mode is ["policy"]: an allowlist outside
             the lane is never consulted, and storing one is how an operator

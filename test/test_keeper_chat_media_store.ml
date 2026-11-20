@@ -1,4 +1,4 @@
-(* RFC-0301: unit tests for the content-addressed generated-media store. *)
+(* Unit tests for the content-addressed generated-media store. *)
 
 module M = Masc.Keeper_chat_media_store
 

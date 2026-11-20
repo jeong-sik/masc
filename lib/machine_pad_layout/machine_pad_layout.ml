@@ -1,4 +1,4 @@
-(* The masc pad (RFC play-link-for-the-shared-machine §2.9). *)
+(* The masc pad. *)
 
 type button =
   | South

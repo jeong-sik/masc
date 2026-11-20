@@ -359,7 +359,7 @@ let test_dispatch_structured_unknown () =
   | Ok _ -> Alcotest.fail "mint_token should return Error for unknown tool"
 ;;
 
-(* ─── RFC-0189 — typed result variant ──────────────────────────────────── *)
+(* ─── Typed result variant ─────────────────────────────────────────────── *)
 
 let test_make_ok_roundtrip () =
   let r =

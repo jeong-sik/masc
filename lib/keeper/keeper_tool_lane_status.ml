@@ -1,4 +1,4 @@
-(* keeper_lane_status (RFC-0427 D-1): the execution lane's own account of
+(* keeper_lane_status: the execution lane's own account of
    itself, read from what this process already knows. Nothing here probes,
    dispatches, or stores; the report is [Keeper_sandbox_remote.report], and
    the operator action is an exhaustive match on its variants. *)
@@ -49,7 +49,7 @@ let probe_failed_action =
    changes them."
 ;;
 
-(* RFC-0427 B-3. The lane answered, so the keeper's own work is fine; this
+(* The lane answered, so the keeper's own work is fine; this
    tells it not to read a later transport failure as its own doing. *)
 let outdated_shim_action =
   "The endpoint answers, but its shim came from a different release than this \

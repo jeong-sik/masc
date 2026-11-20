@@ -101,7 +101,7 @@ let requested_tool_execute_cwd ~config ~meta ~write_enabled ~args =
   | None -> root
 
 (* Existence is asked of the filesystem that holds the tree
-   ([cwd_existence], RFC-0427 A-1). On a shared mount the allowed-root
+   ([cwd_existence]). On a shared mount the allowed-root
    identity is verified here as well. A tree the endpoint owns is still
    confined lexically above, the remote lane maps it lexically
    ([Keeper_remote_path.host_to_remote]), and the endpoint's shim chdirs

@@ -14,7 +14,7 @@
 
 (** {1 Types} *)
 
-(** RFC-0189: [tool_result] aliases the typed [Tool_result.result]
+(** [tool_result] aliases the typed [Tool_result.result]
     variant. *)
 type tool_result = Tool_result.result
 

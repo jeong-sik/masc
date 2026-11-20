@@ -24,7 +24,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
      | Ok keeper_name_id ->
     let keeper_name = Keeper_id.Keeper_name.to_string keeper_name_id in
     (* One admission deadline per submit, shared by the submission-lane and
-       persistence-lane acquisitions below (RFC-0348 PR-1, #25398). *)
+       persistence-lane acquisitions below (#25398). *)
     let wait_budget_sec =
       Env_config_keeper.KeeperLaneGate.admission_wait_budget_sec ()
     in

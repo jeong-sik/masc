@@ -136,7 +136,7 @@ let sample_rule =
   }
 ;;
 
-(* ── what the box refused (RFC-0422) ─────────────────────────────────── *)
+(* ── what the box refused ────────────────────────────────────────────── *)
 
 let refusal_testable =
   testable

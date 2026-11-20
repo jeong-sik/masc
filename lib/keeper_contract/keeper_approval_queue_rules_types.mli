@@ -113,7 +113,7 @@ val phase_of_disposition_and_summary :
   summary_status:summary_status ->
   approval_queue_phase
 
-(** How the attempt to run a request boxed ended (RFC-0422): the exit status
+(** How the attempt to run a request boxed ended: the exit status
     the shim reported for a box it could not build. It is never the
     requested program's own status, because that program never started. *)
 type observed_status =
@@ -184,7 +184,7 @@ val observed_refusal_of_yojson : Yojson.Safe.t -> (observed_refusal, string) res
 (** A pending request never owns or suspends a Keeper lane. [sequence] is the
     durable queue-issued order identity; [requested_at] is observation only.
     [observation] is present when the Gate ran the request boxed before
-    deferring it (RFC-0422) and carries why the box could not be built. *)
+    deferring it and carries why the box could not be built. *)
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -239,8 +239,8 @@ type authorization_source =
           a speak plays on the operator's speakers and is appended to the
           keeper's own chat. [Auto_judge] allowed it without a judge. *)
   | Observed_in_box
-      (** The request ran once inside the executor's box and exited 0
-          (RFC-0422); the kernel, not a table, said it had no effect. *)
+      (** The request ran once inside the executor's box and exited 0;
+          the kernel, not a table, said it had no effect. *)
 
 (** An immutable exact Always Allowed rule. Its identity is the workspace-local
     Keeper, opaque operation identity, and complete normalized effect input;

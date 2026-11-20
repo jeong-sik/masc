@@ -89,7 +89,7 @@ let pending_work_same_goal left right = String.equal left.goal_id right.goal_id
    a missing or inconsistent record does not authorize a new request. *)
 
 (* Why a scan produced no work: a store this build cannot read. It is
-   recorded as a durable row and one WARN line (RFC-0444 §2.3 row 7). *)
+   recorded as a durable row and one WARN line. *)
 type scan_failure = Scan_skipped of Goal_store.unavailable
 
 let scan_failure_to_string = function
@@ -623,7 +623,7 @@ let drain_once ?(sw : Eio.Switch.t option = None) config : (unit, scan_failure) 
     publish_unreconciled config unreconciled;
     List.iter
       (fun item ->
-         (* RFC-0387: per-row outcomes are logged at the point of decision
+         (* per-row outcomes are logged at the point of decision
             (commit/defer); the synchronous drain discards them. *)
          ignore (process_pending_work ~sw config item))
       (retained_recovery_work config collected);

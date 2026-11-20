@@ -112,7 +112,7 @@ let forget_written path =
   loop ()
 ;;
 
-(* RFC-0499 §4.2: the addresses this process wrote or read since the sweep
+(* The addresses this process wrote or read since the sweep
    recorded the scan before its last one. Both generations sit in one value
    so a sweep rotates them with a single compare-and-set; two separate cells would lose
    a mark recorded between moving one and clearing the other. Every reader and
@@ -988,7 +988,7 @@ let delete t ~sha256 =
             }
         | Sys_error reason -> Error { sha256; path; reason }))
 
-(* RFC-0499 §4.2. Once a scan has written its record, the sweep drops the
+(* Once a scan has written its record, the sweep drops the
    older generation and starts a new one in one compare-and-set. *)
 let rotate_touches () =
   let rec loop () =

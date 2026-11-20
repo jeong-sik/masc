@@ -20,7 +20,6 @@ let authors =
   ; "local operator", Author.Local_operator
   ; "system cron", Author.System_cron
   ; "system maintenance", Author.System_maintenance
-  ; "system migration", Author.System_migration
   ]
 ;;
 
@@ -36,7 +35,6 @@ let writers_of =
     ; Trigger_evidence, [ "system cron" ]
     ; Lease_terminal_evidence, [ "system maintenance" ]
     ; Preauthorized_expiry, [ "system maintenance" ]
-    ; Migration_diagnostic, [ "system migration" ]
     ; Local_recovery, [ "local operator" ]
     ; Mode_event, [ "local operator" ]
     ; Invite, "local operator" :: authenticated
@@ -75,20 +73,19 @@ let ordinal = function
   | R.Kind.Trigger_evidence -> 5
   | R.Kind.Lease_terminal_evidence -> 6
   | R.Kind.Preauthorized_expiry -> 7
-  | R.Kind.Migration_diagnostic -> 8
-  | R.Kind.Local_recovery -> 9
-  | R.Kind.Mode_event -> 10
-  | R.Kind.Invite -> 11
-  | R.Kind.Admission -> 12
-  | R.Kind.Admin_assignment -> 13
-  | R.Kind.Revocation_cancel -> 14
-  | R.Kind.Registration -> 15
-  | R.Kind.Session -> 16
-  | R.Kind.Pat -> 17
-  | R.Kind.Provider_account -> 18
-  | R.Kind.Runtime -> 19
-  | R.Kind.Keeper -> 20
-  | R.Kind.Purge -> 21
+  | R.Kind.Local_recovery -> 8
+  | R.Kind.Mode_event -> 9
+  | R.Kind.Invite -> 10
+  | R.Kind.Admission -> 11
+  | R.Kind.Admin_assignment -> 12
+  | R.Kind.Revocation_cancel -> 13
+  | R.Kind.Registration -> 14
+  | R.Kind.Session -> 15
+  | R.Kind.Pat -> 16
+  | R.Kind.Provider_account -> 17
+  | R.Kind.Runtime -> 18
+  | R.Kind.Keeper -> 19
+  | R.Kind.Purge -> 20
 ;;
 
 let kinds_are_all_listed () =
@@ -407,7 +404,6 @@ let kind_labels_are_the_names_on_disk () =
     ; "trigger_evidence"
     ; "lease_terminal_evidence"
     ; "preauthorized_expiry"
-    ; "migration_diagnostic"
     ; "local_recovery"
     ; "mode_event"
     ; "invite"
@@ -435,7 +431,6 @@ let author_words =
   ; Author.Local_operator, R.Kind.Local_recovery, {|{"type":"local_operator"}|}
   ; Author.System_cron, R.Kind.Trigger_evidence, {|{"type":"system_cron"}|}
   ; Author.System_maintenance, R.Kind.Lease_terminal_evidence, {|{"type":"system_maintenance"}|}
-  ; Author.System_migration, R.Kind.Migration_diagnostic, {|{"type":"system_migration"}|}
   ]
 ;;
 

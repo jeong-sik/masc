@@ -265,7 +265,7 @@ let test_codec_empty_payload () =
   let decoded_tc = Audit_log.string_to_action "tool_call:" in
   check string "empty ToolCall payload" "tool_call:" (Audit_log.action_to_string decoded_tc)
 
-(* RFC-0273 §3.3 — the dashboard runtime.toml write logs a RuntimeConfigWrite
+(* The dashboard runtime.toml write logs a RuntimeConfigWrite
    action. Lock the operator-facing event projection: kind/summary/target must
    surface the config path (not the body, which can carry provider secrets).
    Severity must be "warn" even on success: a runtime.toml write rewrites global

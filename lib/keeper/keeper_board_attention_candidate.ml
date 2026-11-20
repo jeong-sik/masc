@@ -39,7 +39,7 @@ type delivery = Keeper_board_attention_candidate_wire.delivery =
 
 (* A candidate persists the current typed Board signal only. Historical post/comment
    snapshots are neither identity nor judgment input, so retaining them would
-   make stale context look authoritative. RFC-0424. *)
+   make stale context look authoritative. *)
 type pending_state = Keeper_board_attention_candidate_wire.pending_state = { last_delivery_failure : delivery_failure option }
 
 type judged_state = Keeper_board_attention_candidate_wire.judged_state =

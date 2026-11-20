@@ -23,7 +23,7 @@ type context = {
 (* Handlers (retained in facade)                                    *)
 (* ================================================================ *)
 
-(* RFC-0189 PR-1b.10 — facade handlers return typed [Tool_result.result].
+(* Facade handlers return typed [Tool_result.result].
    Failure-class mapping (caller-input violations only in this cluster):
    - [Workflow_rejection] : undeclared dashboard argument; missing
                             tool_name; unknown tool.

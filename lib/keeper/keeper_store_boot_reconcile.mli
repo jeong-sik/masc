@@ -10,7 +10,7 @@
     the whole event.
 
     Moving a store aside changes what its keeper remembers, so the operator
-    decides (RFC-0420). [examine] reads and renames nothing; [admit] says
+    decides. [examine] reads and renames nothing; [admit] says
     whether boot may go on; [quarantine] moves aside what [examine] found,
     only after the operator accepted it with [--accept-store-quarantine]. On
     2026-09-05 a build started from a shell, outside the deploy preflight,
@@ -93,7 +93,7 @@ val examine : Workspace.config -> examination
     [Unavailable], [examine] logs one INFO line
     ([Goal_store.unavailable_to_string]); otherwise it logs nothing about
     it. Every call logs that line again, so boot calls [examine] once and
-    the line count equals the boot count (RFC-0444 criterion 3). *)
+    the line count equals the boot count. *)
 
 val recover_memory_publications : Workspace.config -> refusal list
 (** The explicit boot recovery stage for the existing snapshot-owner scope.

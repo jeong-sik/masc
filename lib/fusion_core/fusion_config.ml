@@ -15,8 +15,8 @@ type config_error =
       (** (preset 이름, 데드라인): 유한 양수가 아닌 panel_timeout_s/judge_timeout_s/
           1차 심판 timeout_s *)
   | Missing_default_preset of string
-  | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
-  | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
+  | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 *)
+  | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) *)
   | Invalid_min_answered of string * int
       (** (preset 이름, min_answered): policy 허용 범위 밖 *)
   | Toml_type_error of string
@@ -74,7 +74,7 @@ let find_timeout_s tbl path = Otoml.find_opt tbl (Otoml.get_float ~strict:false)
    자체(legacy flat 문법의 desugar)에도 동일하게 적용된다 — 두 문법이 같은 키
    이름(panel/label/panel_system_prompt/web_tools)을
    쓰므로 코드 재사용. 누락 필드는 명시적 default. label 기본 ""(정체성=model 그대로)
-   → legacy flat은 label 키가 없으므로 byte-identical (RFC-0278). *)
+   → legacy flat은 label 키가 없으므로 byte-identical. *)
 let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   { models =
       Otoml.find_or ~default:[] tbl (Otoml.get_array Otoml.get_string) [ "panel" ]
@@ -87,7 +87,7 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   ; timeout_s = find_timeout_s tbl [ "panel_timeout_s" ]
   }
 
-(* JOJ 1차 심판 한 명 파싱 (RFC-0283). [[fusion.presets.NAME.judges]] sub-table의
+(* JOJ 1차 심판 한 명 파싱. [[fusion.presets.NAME.judges]] sub-table의
    키 model/label/system_prompt/web_tools를 읽는다. sub-table
    이름(judges)이 scope를 주므로 키는 비-접두. parse_group과 동형. 누락 system_prompt는
    ""로 읽혀 Validated_preset 검증에서 Judge_panel_prompt_missing으로 fail-fast된다. *)
@@ -132,7 +132,7 @@ let read_preset name tbl (panels : Fusion_policy.panel_group list) : Fusion_poli
 let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   : (Fusion_policy.Validated_preset.t, config_error) result =
   let p = read_preset name tbl panels in
-  (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
+  (* 검증 SSOT는 Validated_preset.of_preset. config는 그 [invalid]에 preset
    이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
    [open] 안 함 — invalid와 config_error가 Missing_prompt 등 동명 변형을 가져 LHS만
    full-qualify해 shadow를 피한다. *)

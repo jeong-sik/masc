@@ -639,7 +639,7 @@ let owner_job_names ()=
         after_module (String.split_on_char '.' (to_string (member "name" entry))))
         (to_list (member "by_name" lane_json))) ["read";"background"]
   |> List.sort_uniq String.compare
-(* RFC-0474 L4·L4c (#48912). With one worker, as on a busy server, the owner's
+(* (#48912) With one worker, as on a busy server, the owner's
    jobs carry the name of the function that submits them, and closing a
    finished forest, which reads and checks every record, holds the whole
    worker instead of sharing it as I/O work. *)
@@ -1302,7 +1302,7 @@ let test_purge_joins_provider_after_memory_unit_returned ()=with_fixture (fun ~s
           ~declaration_id:"librarian" ~schema exact |> get) with
        | Lane_addon_exact.No_completed_latest -> true | Completed_latest _ -> false)))
 
-(* RFC-0500. One original whose provider call is open, cut by a purge.
+(* One original whose provider call is open, cut by a purge.
    [before_cut] sees the retained host attempt fields before the cut, so no
    host pass can recover the attempt in between. Later provider calls answer. *)
 let with_cut_original fixture ~before_cut k =

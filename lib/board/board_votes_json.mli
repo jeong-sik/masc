@@ -11,21 +11,6 @@ val post_of_yojson : Yojson.Safe.t -> post option
 val comment_of_yojson : Yojson.Safe.t -> comment option
 (** Accepts only the exact current {!comment_to_yojson} wire shape. *)
 
-val load_source_rows :
-  string ->
-  decode:(Yojson.Safe.t -> 'a option) ->
-  accept:('a -> unit) ->
-  (unit, string * exn) result
-(** Read every nonempty JSONL line, retaining the first invalid JSON or schema
-    error with its line number instead of silently dropping that row. When
-    more than one row is rejected the detail also carries the reject count. *)
-
-val record_load_result :
-  ((unit, string) result -> unit) ->
-  ('a, string * exn) result ->
-  ('a, string * exn) result
-(** Store the last full-load outcome while returning the caller's count. *)
-
 val log_loaded :
   noun:string ->
   loaded:int ->
@@ -63,8 +48,3 @@ val load_persisted_comments : store -> (int, string * exn) result
     remain display-only. Plain reload cannot settle unknown writes, acknowledge
     recovery receipts or finish model publication. The pending-deletion model
     restriction is the same as {!load_persisted_posts}. *)
-
-val propagate_workspace_check :
-  (unit, Board_workspace_binding.rejection) result -> unit
-(** After recording an auxiliary family's load refusal, propagate any original
-    reserved cause outside its broad file-read catch and Board locks. *)

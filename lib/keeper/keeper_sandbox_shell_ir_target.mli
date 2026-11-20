@@ -6,7 +6,7 @@ type target_error =
   ; class_ : Tool_result.tool_failure_class
   }
 
-(** Where a request can be run boxed before the judge is asked (RFC-0422).
+(** Where a request can be run boxed before the judge is asked.
     [Boxed] carries a target whose runner asks the endpoint's shim for the
     observe box; [No_box] says why there is none, in the operator's words —
     an endpoint may have no shim, a shim may advertise no box, the endpoint
@@ -72,7 +72,7 @@ val profile_contract_mismatch
 (** Build the Shell IR target from the factory's immutable runtime binding.
     A Docker guest runs stages by [docker exec] into its mounted tree; a
     microvm guest runs them over the remote lane into the tree on its work
-    volume (RFC-0400), with no pipeline runner. The volume name alone does
+    volume, with no pipeline runner. The volume name alone does
     not establish exclusive workspace ownership. Neither starts its
     container here: the first stage does, and each runtime owns its
     creation-time image check. A caller meta that disagrees with the factory

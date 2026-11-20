@@ -37,7 +37,7 @@ type config =
         and resume. [None] preserves the selected account's Codex setting. *)
   ; developer_instructions : string option
   ; native : Runtime_native_tools.posture
-    (** Built-in tool posture (RFC-0390): [Native_read] maps to the
+    (** Built-in tool posture: [Native_read] maps to the
         [:read-only] named permissions profile, [Native_full] to
         [:workspace]. These are app-server profile ids sent as
         [thread/start]'s [permissions], not values of the CLI's [SandboxMode]
@@ -89,7 +89,7 @@ type thread =
   | Ephemeral
   (** [thread/start] with [ephemeral: true]. Codex writes no rollout file, no
       [threads] row and no turn history for it, so no later call can resume
-      it. For a caller that never continues the conversation (RFC-0501 2.3). *)
+      it. For a caller that never continues the conversation. *)
   | Persistent of thread_mode
   (** A thread on disk: [Start] opens one that a later [Resume] continues. *)
 
@@ -479,8 +479,7 @@ val delete_threads :
 (** [initialize] followed by one [thread/delete] per id, in order, without
     account/read. The app-server removes the thread's rollout and state rows.
     [Error] means the client did not start or the handshake failed; otherwise
-    each id carries its own answer, the app-server's refusal kept whole
-    (RFC-0501 §2.2). *)
+    each id carries its own answer, the app-server's refusal kept whole. *)
 
 type context_submission_method =
   | Thread_start

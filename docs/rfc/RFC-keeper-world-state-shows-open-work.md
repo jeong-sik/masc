@@ -138,7 +138,7 @@ B 의 60초 지연은 문제가 아니다.
 - [사실] Keeper 의 자율 턴 주기가 600초다.
 - [사실] PR 의 CI(`PR check` workflow)는 생성부터 끝까지 중앙값 14분이다. 2026-09-27 17:4xZ 에 최근 완료된 pull_request run 36개를 쟀고, 6분에서 60분까지 퍼져 있다.
 
-Lane add-on(`Lane_addon_subscription`, `docs/design/lane-addon-v0.md`)으로 넣는 방법도 봤다.
+Lane add-on(`Lane_addon_subscription`)으로 넣는 방법도 봤다.
 Lane add-on 은 기계 lane 의 사건을 구독하는 틀이다. PR 은 lane 이 아니라 저장소의 사실이라, 그 틀에 끼우면 facade 가 하나 더 생긴다.
 쓰지 않는다.
 

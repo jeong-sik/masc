@@ -246,7 +246,7 @@ let optional_meta fields =
   | Some _ -> Error ()
 ;;
 
-(* RFC-0233 §7: an emitted origin is a current typed value, not a repairable
+(* An emitted origin is a current typed value, not a repairable
    hint. Absent [origin] remains valid; a present malformed object rejects its
    row at the caller. *)
 let post_origin_of_yojson (json : Yojson.Safe.t) : post_origin decoded =

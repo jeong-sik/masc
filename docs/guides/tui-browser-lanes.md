@@ -97,10 +97,8 @@ Ego's native cursor label still identifies pointer actions. This activity list
 does not add a native Ego label for reads or waits; that browser-side visibility
 remains a separate gap.
 
-A live browser is reached over an ego lite task space, and the connection
-serves the work in
-[the table](../design/browser-lane.md#what-each-live-connection-serves). The
-TUI reads that table in four places:
+A live browser is reached over an ego lite task space. The TUI shows what each
+connection serves in four places:
 
 - The selected connection row names the actual browser and client identity.
   Transport names and capability differences belong to advanced details.
@@ -166,8 +164,7 @@ than closed. It uses Ego's native snapshots, selectors and input, including hove
 double-click, drag and option selection. Snapshot refs also address iframe
 content; touch input is not supported. Keeper workflows
 can focus an editor, type or insert text, paste text/HTML through Ego's native
-clipboard restoration, and wait for the result before returning a final snapshot
-([what it serves](../design/browser-lane.md#what-each-live-connection-serves)).
+clipboard restoration, and wait for the result before returning a final snapshot.
 Native workflows also expose app-state waits, Page expressions with a JSON
 argument, and browser-context fetch. Page source runs only in the observed Ego
 Page, and these calls count as possible effects. A Fetch step can set
@@ -204,8 +201,6 @@ and refresh remain usable. Inputs retain the captured document identity, viewpor
 size, scroll position and URL. A changed observation requires a fresh screenshot
 before another pointer action can execute.
 
-See [setup and Keeper usage](../design/browser-lane-examples.md).
-
 All Lanes shows each Browser row from its browser Add-on alone: the clients the
 live worker last published. With no observation the row says why: no browser Add-on serves the
 lane (not set up), every one that serves it is switched off (off), one is
@@ -215,8 +210,7 @@ apply at server startup.
 
 A source is switched on or off from its `browser-<source>` package row in All
 Lanes: `Enter` opens its declaration, `Space` changes `enabled`, and `s` saves.
-`Space` on a Browser row points there. See
-[per-source setup](../design/browser-lane-examples.md#출처별-설정과-켜고-끄기).
+`Space` on a Browser row points there.
 
 ## Verification
 

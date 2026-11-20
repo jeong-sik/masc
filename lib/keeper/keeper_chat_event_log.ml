@@ -1,5 +1,5 @@
 (** Versioned JSON codec and per-operation JSONL journal for
-    [Keeper_chat_events.keeper_chat_event] (RFC-0412 §4.1).
+    [Keeper_chat_events.keeper_chat_event].
 
     Persisted codec v2 is a hard boundary. Earlier epochs remain on disk but
     cannot be decoded, resumed, or appended by this codec. *)
@@ -8,7 +8,7 @@ open Keeper_chat_events
 
 let codec_version = 2
 
-(* One page of the journal over the wire (RFC-0412 §3.2): what a read
+(* One page of the journal over the wire: what a read
    returns when it names no count, and the most it may ask for. The server
    admits [1..page_max_limit]; the TUI pages at [page_max_limit]. One
    definition so the two cannot drift into a 400. *)
@@ -1678,7 +1678,7 @@ let read_row_window ~path ~from ~max_rows =
       path
       ~from
       ~max_rows
-      ~previous_row_wanted:row_holds_content
+      ~previous_row_wanted:(Nearest_accepted row_holds_content)
   with
   | Fs_compat.Private_file_succeeded window -> of_window window
   | Fs_compat.Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->

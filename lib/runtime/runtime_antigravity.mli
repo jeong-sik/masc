@@ -60,7 +60,7 @@ val official_client_environment : ?home_dir:string -> unit -> string array
     excludes API-key/provider-routing variables and user tool configuration,
     and carries [AGY_CLI_DISABLE_AUTO_UPDATE=true] exactly once, so the agy
     started for a Keeper turn, a probe, a model, context or usage read, or a
-    login does not update itself (RFC-0490 §2.4). The prerequisite installer's
+    login does not update itself. The prerequisite installer's
     version check is an operator action and runs with the operator's
     environment. *)
 

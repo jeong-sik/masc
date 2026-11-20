@@ -1,4 +1,4 @@
-(** Who said a User message in a Keeper's conversation (RFC-0468 §3.2).
+(** Who said a User message in a Keeper's conversation.
 
     The speaker is decided where the message is created and travels as
     AGENT_CORE message metadata under {!Agent_core.Types.Input_speaker.key}.
@@ -22,7 +22,7 @@ type external_speaker =
 
 (** A person or agent outside the host. [Keeper] is only for a sender that
     was matched exactly against the Keeper registry where the message was
-    created; the shape of an id proves nothing (RFC-0468 §3.2). [Owner] is
+    created; the shape of an id proves nothing. [Owner] is
     what a request without a connector speaker or a sender Keeper is, not an
     authentication fact. *)
 type person =

@@ -84,7 +84,7 @@ let kind_label ~ko = function
   | Activity.Retracted -> if ko then "× 삭제" else "Retracted"
   | Activity.Removed -> if ko then "− 제외" else "Removed"
   | Activity.Invalidated -> if ko then "! 무효화" else "Invalidated"
-  | Activity.Relation_unavailable -> if ko then "? 관계 미확인" else "? Unresolved relation"
+  | Activity.Relation_unavailable -> if ko then "? 관계 보고 안 됨" else "? Relation not reported"
 
 let hex_of_rgb rgb =
   let module Palette = Masc_tui_terminal_palette in
@@ -96,7 +96,7 @@ let fact_claim_text ~ko (chart : t) (fact : Activity.fact) =
   match Option.bind observed (fun (known : Activity.fact) -> known.claim) with
   | Some claim when String.trim claim <> "" -> claim
   | Some _ | None ->
-      if ko then "? 본문 미확인" else "? Claim not observed"
+      if ko then "? 본문 보고 안 됨" else "? Claim not reported"
 
 let fact_status ~ko (chart : t) (fact : Activity.fact) =
   let touches =
@@ -109,9 +109,9 @@ let fact_status ~ko (chart : t) (fact : Activity.fact) =
       chart.events in
   let last_touch = List.fold_left (fun _ x -> Some x) None touches in
   match fact.claim, last_touch with
-  | None, _ -> ("unconfirmed", if ko then "본문 미확인" else "Unconfirmed")
+  | None, _ -> ("unconfirmed", if ko then "본문 보고 안 됨" else "Claim not reported")
   | Some _, (Some (`After event | `Before event)) when event.kind = Activity.Relation_unavailable ->
-      ("unconfirmed", if ko then "관계 미확인" else "Unconfirmed")
+      ("unconfirmed", if ko then "관계 보고 안 됨" else "Relation not reported")
   | Some _, Some (`After _) ->
       ("retained", if ko then "유지됨" else "Retained")
   | Some _, Some (`Before event) ->
@@ -123,7 +123,7 @@ let fact_status ~ko (chart : t) (fact : Activity.fact) =
             if ko then "이전 기억" else "Prior" in
       ("consumed", badge)
   | Some _, None ->
-      ("unconfirmed", if ko then "미확인" else "Unconfirmed")
+      ("unconfirmed", if ko then "변화 보고 안 됨" else "Change not reported")
 
 let event_tone_name = function
   | Activity.Created -> "ok"
@@ -267,7 +267,7 @@ let transition_svg ~ko ~now ~palette (chart : t) =
    | [] -> empty ~x:32 (text "이전 본문이 기록되지 않았습니다" "No prior claim in this record")
    | _ :: _ -> ());
   (match after_placed, event.kind with
-   | [], Activity.Relation_unavailable -> empty ~x:824 (text "? 후속 관계 미확인" "? Successor relation unconfirmed")
+   | [], Activity.Relation_unavailable -> empty ~x:824 (text "? 후속 관계 보고 안 됨" "? Successor relation not reported")
    | [], (Activity.Created | Reobserved | Revised | Absorbed | Retracted | Removed | Invalidated) ->
        empty ~x:824 (text "후속 기억이 없는 변화입니다" "No successor in this change")
    | _ :: _, _ -> ());
@@ -398,9 +398,9 @@ let lineage_graph ~ko ~now ?palette ~keeper_name (chart : t) =
     "legend", `Assoc [
       "retained", `String (text "유지됨" "Retained");
       "consumed", `String (text "이전 기억" "Prior");
-      "unconfirmed", `String (text "미확인" "Unconfirmed");
+      "unconfirmed", `String (text "보고 안 됨" "Not reported");
       "solid", `String (text "확인된 전이" "Confirmed transition");
-      "dashed", `String (text "관계 미확인" "Unresolved relation");
+      "dashed", `String (text "관계 보고 안 됨" "Relation not reported");
       "footer", `String (text "+/- 확대·축소 · 방향키/hjkl 이동 · 0 맞춤 · Esc 목록으로"
                            "+/- zoom · arrows/hjkl pan · 0 fit · Esc back");
     ];

@@ -27,4 +27,4 @@ type drawn =
 
 (** Preserve provider numbering, notices, filtered-empty readings and login URL
     wrapping. Styling uses the current terminal theme; no UI state is mutated. *)
-val draw : cols:int -> view -> drawn
+val draw : ?ko:bool -> cols:int -> view -> drawn

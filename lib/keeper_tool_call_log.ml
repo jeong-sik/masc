@@ -962,7 +962,7 @@ let log_call
       record_unavailable_coverage_gap ~keeper_name ~tool_name ?trace_id ();
       if requires_commit then raise Commit_required_but_store_unavailable
     | Some (store, canonical_masc_root, base_path) ->
-      (* RFC-0225 §3.3: no ambient turn-context fallback. Both production
+      (* No ambient turn-context fallback. Both production
          callers (keeper_hooks_agent_core, mcp_server_eio_call_tool) pass their
          run identity explicitly; filling [None] from a keeper-name-keyed
          global could attach an unrelated concurrent run's identity. A
@@ -1057,7 +1057,7 @@ let log_call
         | Some value -> [ "trace_id", `String value ]
         | None -> []
       in
-      (* RFC-0233 PR-1: canonical per-execution join key, minted once at
+      (* Canonical per-execution join key, minted once at
          the dispatch boundary and shared with the trajectory row. *)
       let execution_id_field =
         match execution_id with
@@ -1070,7 +1070,7 @@ let log_call
         | Some value -> [ "physical_execution_id", Ids.Execution_id.to_yojson value ]
         | None -> []
       in
-      (* RFC-0233 PR-2: provider call id — the key the agent_core-event rows
+      (* Provider call id — the key the agent_core-event rows
          carry, joining this store to agent_core:tool_called/agent_core:tool_completed. *)
       let tool_use_id_field =
         match tool_use_id with
@@ -1435,7 +1435,7 @@ let read_addressed ~base_path ~codebase ?keeper_name ~limit ~offset () =
   | Unix.Unix_error (error, operation, _) ->
     Error (Index_unavailable (operation ^ ": " ^ Unix.error_message error))
 
-(* The read index answers a keeper's latest rows exactly (RFC-0437). It
+(* The read index answers a keeper's latest rows exactly. It
    advances itself to the ledger's current end before the query, and it holds
    only where each row lives plus the fields these reads filter on. The ledger
    stays the authority: the rows returned here are read back out of it.

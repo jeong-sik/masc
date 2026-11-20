@@ -83,7 +83,7 @@ let deferred_runtime_lane = function
 (* Body of [run_keeper_cycle], runnable only while holding the keeper's
    Keeper Owner child. The post-failure meta re-reads stay
    inside the slot for the same reason as the chat lane: a concurrent turn
-   must not interleave with this lane's meta writes (RFC-0225 §1). *)
+   must not interleave with this lane's meta writes. *)
 let run_keeper_cycle_admitted
       ~before_dispatch_authority
       ?deferred_runtime_lane
@@ -112,7 +112,7 @@ let run_keeper_cycle_admitted
         ~observation:obs
         ~turn_input
         ?hitl_resolutions
-        (* RFC-0315: pass the whole decision, not just its channel — the
+        (* Pass the whole decision, not just its channel — the
            prompt renders the verdict reasons so the turn knows why it woke. *)
         ~turn_decision
         ~shared_context

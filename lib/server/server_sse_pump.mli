@@ -1,4 +1,4 @@
-(** One client's side of an SSE stream fed by a producer (RFC-0493 §3.2),
+(** One client's side of an SSE stream fed by a producer,
     without the socket.
 
     [run] is the connection's one sending fiber: it takes events from a
@@ -12,8 +12,8 @@
     put events in a bounded {!Queue} and return at once. Its source stops once
     the client let the queue fill up. The pile-up ends the stream and drops
     what was queued. Each stream says how its client catches up after
-    reconnecting: the fleet stream sends a [Snapshot] (RFC-0477), and the
-    Keeper chat stream replays the journal after [since_seq] (RFC-0412). The
+    reconnecting: the fleet stream sends a [Snapshot], and the
+    Keeper chat stream replays the journal after [since_seq]. The
     MCP GET, AG-UI and presence streams take from their [Sse] queue instead,
     and their source stops when the connection is stopped.
 

@@ -1084,7 +1084,7 @@ let test_workspace_memory_observation_distinguishes_briefing_states () =
       (contains ~needle:"briefing-sha" rendered
        && contains ~needle:"keeper_workspace_memory_read" rendered)) [pending; unavailable]
 
-(* RFC keepers-see-the-wiki-table-of-contents. These check what reaches the
+(* These check what reaches the
    request and which route was chosen, not the wording: the route is compared
    against whatever the named prompt renders today. *)
 let wiki_reader ~offered ~deferred ~loader_alive =

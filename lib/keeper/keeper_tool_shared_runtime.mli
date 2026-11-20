@@ -57,7 +57,7 @@ val safe_file_exists : string -> bool
 val safe_is_dir : string -> bool
 
 (** Whether a resolved cwd exists, asked of the filesystem that holds the
-    Keeper's tree (RFC-0427 A-1). [Endpoint_decides] for a tree the endpoint
+    Keeper's tree. [Endpoint_decides] for a tree the endpoint
     owns: the host path is bookkeeping, so the host is not asked and the
     endpoint reports a missing directory when the tool runs there. The other
     three are the host's answer for a shared-mount tree. The Keeper cwd

@@ -6,7 +6,7 @@
     - decoding accepts only the exact current writer shape; malformed origins,
       missing current fields, legacy keys, coercions, duplicates, and unknown
       fields reject the row.
-    - {!Board_core.find_post_by_turn_ref} / {!find_post_by_run_id} are exact
+    - {!Masc_board_handlers.Board_core.find_post_by_turn_ref} / {!find_post_by_run_id} are exact
       O(1) index lookups (RFC §7.6 guard #2/#3, no meta_json scan, no window),
       and the indexes are rebuilt on load.
     - reactions and sub-boards accept only their current writer shapes. *)
@@ -46,7 +46,7 @@ let make_origin ?turn_ref ?source ?fusion_run_id ?fusion_producer () : Board.pos
 
 let create store ~origin ~content =
   match
-    Board_core.create_post store ~lookup:nobody_declared ~author:"origin-test" ~content
+    Masc_board_handlers.Board_core.create_post store ~lookup:nobody_declared ~author:"origin-test" ~content
       ~post_kind:Board.Human_post ~origin ()
   with
   | Ok post -> post
@@ -55,7 +55,7 @@ let create store ~origin ~content =
 
 let create_no_origin store ~content =
   match
-    Board_core.create_post store ~lookup:nobody_declared ~author:"origin-test" ~content
+    Masc_board_handlers.Board_core.create_post store ~lookup:nobody_declared ~author:"origin-test" ~content
       ~post_kind:Board.Human_post ()
   with
   | Ok post -> post
@@ -106,10 +106,10 @@ let load_sources store =
 ;;
 
 let test_post_decoder_retains_nested_rejections () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
-  let canonical = Board_core.post_to_yojson
+  let canonical = Masc_board_handlers.Board_core.post_to_yojson
       (create_no_origin store ~content:"nested validation stages") in
   let row = replace_key canonical "audience"
       (`Assoc ["kind", `String "targets";
@@ -132,10 +132,10 @@ let test_post_decoder_retains_nested_rejections () =
 ;;
 
 let test_closed_decoder_validates_only_a_complete_close_shape () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
-  let canonical = Board_core.post_to_yojson
+  let canonical = Masc_board_handlers.Board_core.post_to_yojson
       (create_no_origin store ~content:"closed validation stages") in
   let row = prepend_field canonical ("closed",
       `Assoc ["closed_by", `String "bad/closer"; "closed_at", `Float 1.;
@@ -147,16 +147,16 @@ let test_closed_decoder_validates_only_a_complete_close_shape () =
 ;;
 
 let test_comment_decoder_retains_nested_rejections () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post = create_no_origin store ~content:"comment validation stages" in
-  let comment = match Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:nobody_declared
+  let comment = match Masc_board_handlers.Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator store ~lookup:nobody_declared
       ~post_id:(Board.Post_id.to_string post.id) ~author:"reader"
       ~content:"canonical comment" () with
     | Ok comment -> comment
     | Error error -> Alcotest.fail (Board.show_board_error error) in
-  let canonical = Board_core.comment_to_yojson comment in
+  let canonical = Masc_board_handlers.Board_core.comment_to_yojson comment in
   let row = replace_key canonical "audience"
       (`Assoc ["kind", `String "targets";
                "targets", `List [`String "bad/target"; `String "another/target"]]) in
@@ -221,13 +221,13 @@ let check_origin_producer_codec canonical =
 ;;
 
 let test_codec_round_trip () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let tr = Ids.Turn_ref.make ~trace_id:"trace-abc" ~absolute_turn:42 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~source:"fusion" ~fusion_run_id:"fus-7" () in
   let post = create store ~origin ~content:"round trip" in
-  let canonical = Board_core.post_to_yojson post in
+  let canonical = Masc_board_handlers.Board_core.post_to_yojson post in
   check_origin_producer_codec canonical;
   let decoded =
     match decode canonical with
@@ -246,13 +246,13 @@ let test_codec_round_trip () =
 ;;
 
 let test_codec_absent_origin () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post = create_no_origin store ~content:"no origin" in
   Alcotest.(check bool) "post created without origin" true (Option.is_none post.origin);
   let decoded =
-    match decode (Board_core.post_to_yojson post) with
+    match decode (Masc_board_handlers.Board_core.post_to_yojson post) with
     | Some p -> p
     | None -> Alcotest.fail "round trip dropped origin-less post"
   in
@@ -260,12 +260,12 @@ let test_codec_absent_origin () =
 ;;
 
 let test_malformed_origin_rejected () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let tr = Ids.Turn_ref.make ~trace_id:"t" ~absolute_turn:1 in
   let post = create store ~origin:(make_origin ~turn_ref:tr ()) ~content:"malformed origin" in
-  let json = Board_core.post_to_yojson post in
+  let json = Masc_board_handlers.Board_core.post_to_yojson post in
   Alcotest.(check bool)
     "non-object origin rejected"
     true
@@ -284,11 +284,11 @@ let test_malformed_origin_rejected () =
 ;;
 
 let test_current_post_schema_is_exact () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post = create_no_origin store ~content:"current schema" in
-  let json = Board_core.post_to_yojson post in
+  let json = Masc_board_handlers.Board_core.post_to_yojson post in
   List.iter
     (fun field ->
        Alcotest.(check bool)
@@ -337,13 +337,13 @@ let test_current_post_schema_is_exact () =
 ;;
 
 let test_current_comment_schema_is_exact () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post = create_no_origin store ~content:"comment parent" in
   let comment =
     match
-      Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator
+      Masc_board_handlers.Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator
         store
         ~lookup:nobody_declared
         ~post_id:(Board.Post_id.to_string post.id)
@@ -354,7 +354,7 @@ let test_current_comment_schema_is_exact () =
     | Ok comment -> comment
     | Error error -> Alcotest.failf "add_comment failed: %s" (Board.show_board_error error)
   in
-  let json = Board_core.comment_to_yojson comment in
+  let json = Masc_board_handlers.Board_core.comment_to_yojson comment in
   let decode_comment = Masc_board_handlers.Board_votes_json.comment_of_yojson in
   Alcotest.(check bool)
     "canonical comment round trip"
@@ -395,7 +395,7 @@ let test_current_comment_schema_is_exact () =
 ;;
 
 let test_current_reaction_schema_is_exact () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post = create_no_origin store ~content:"reaction parent" in
@@ -412,8 +412,8 @@ let test_current_reaction_schema_is_exact () =
     ; created_at = Time_compat.now ()
     }
   in
-  let json = Board_core.reaction_to_yojson reaction in
-  let decode_reaction = Board_core.reaction_of_yojson in
+  let json = Masc_board_handlers.Board_core.reaction_to_yojson reaction in
+  let decode_reaction = Masc_board_handlers.Board_core.reaction_of_yojson in
   Alcotest.(check bool)
     "canonical reaction round trip"
     true
@@ -449,14 +449,14 @@ let test_current_reaction_schema_is_exact () =
 ;;
 
 let test_current_sub_board_schema_is_exact () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  (match Board_core.reload_sub_boards store with
+  (match Masc_board_handlers.Board_core.reload_sub_boards store with
    | Ok _ -> ()
    | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error));
   let sub_board =
     match
-      Board_core.create_sub_board
+      Masc_board_handlers.Board_core.create_sub_board
         store
         ~slug:"current-space"
         ~name:"Current"
@@ -468,8 +468,8 @@ let test_current_sub_board_schema_is_exact () =
     | Ok sub_board -> sub_board
     | Error error -> Alcotest.fail (Board.show_board_error error)
   in
-  let json = Board_core.sub_board_to_yojson sub_board in
-  let decode_sub_board = Board_core.sub_board_of_yojson in
+  let json = Masc_board_handlers.Board_core.sub_board_to_yojson sub_board in
+  let decode_sub_board = Masc_board_handlers.Board_core.sub_board_of_yojson in
   Alcotest.(check bool)
     "canonical sub-board round trip"
     true
@@ -523,14 +523,14 @@ let test_current_sub_board_schema_is_exact () =
 ;;
 
 let test_sub_board_update_rejects_invalid_members () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
-  (match Board_core.reload_sub_boards store with
+  (match Masc_board_handlers.Board_core.reload_sub_boards store with
    | Ok _ -> ()
    | Error (path, error) -> Alcotest.failf "load %s: %s" path (Printexc.to_string error));
   let sub_board =
     match
-      Board_core.create_sub_board
+      Masc_board_handlers.Board_core.create_sub_board
         store
         ~slug:"update-space"
         ~name:"Before"
@@ -544,7 +544,7 @@ let test_sub_board_update_rejects_invalid_members () =
   in
   let sub_board_id = Board.Sub_board_id.to_string sub_board.id in
   (match
-     Board_core.update_sub_board
+     Masc_board_handlers.Board_core.update_sub_board
        store
        ~sub_board_id
        ~members:[ "replacement"; "not valid" ]
@@ -552,7 +552,7 @@ let test_sub_board_update_rejects_invalid_members () =
    with
    | Error _ -> ()
    | Ok _ -> Alcotest.fail "invalid member update must fail");
-  match Board_core.get_sub_board store ~sub_board_id with
+  match Masc_board_handlers.Board_core.get_sub_board store ~sub_board_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok current ->
     Alcotest.(check (list string))
@@ -561,7 +561,7 @@ let test_sub_board_update_rejects_invalid_members () =
       (List.map Board.Agent_id.to_string current.members)
 ;;
 
-(* Producer side (RFC-0233 §7): the keeper-authored origin constructor used by
+(* Producer side: the keeper-authored origin constructor used by
    keeper_speech (request-help posts) and keeper_alert. Pins that a keeper post
    carries [origin.turn_ref = Some _] and a typed [source], with
    [fusion_run_id = None] (fusion has its own constructor at the sink). *)
@@ -575,12 +575,12 @@ let test_keeper_authored_origin_with_turn_ref () =
   Alcotest.(check bool) "fusion_run_id None" true (Option.is_none origin.fusion_run_id);
   (* End-to-end: the post created with this origin carries turn_ref through the
      board codec (create -> encode -> decode). *)
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post = create store ~origin ~content:"keeper speech request-help" in
   let decoded =
-    match decode (Board_core.post_to_yojson post) with
+    match decode (Masc_board_handlers.Board_core.post_to_yojson post) with
     | Some p -> p
     | None -> Alcotest.fail "encode/decode dropped the keeper post"
   in
@@ -603,34 +603,34 @@ let test_keeper_authored_origin_without_turn_ref () =
 ;;
 
 let test_index_lookup_hit_and_miss () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let tr = Ids.Turn_ref.make ~trace_id:"idx-trace" ~absolute_turn:9 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"run-xyz" () in
   let post = create store ~origin ~content:"indexed" in
   let pid = Board.Post_id.to_string post.id in
-  (match Board_core.find_post_by_turn_ref store ~turn_ref:(Ids.Turn_ref.to_string tr) with
+  (match Masc_board_handlers.Board_core.find_post_by_turn_ref store ~turn_ref:(Ids.Turn_ref.to_string tr) with
    | Some p -> Alcotest.(check string) "turn_ref index hit" pid (Board.Post_id.to_string p.id)
    | None -> Alcotest.fail "turn_ref index miss");
-  (match Board_core.find_post_by_run_id store ~run_id:"run-xyz" with
+  (match Masc_board_handlers.Board_core.find_post_by_run_id store ~run_id:"run-xyz" with
    | Some p -> Alcotest.(check string) "run_id index hit" pid (Board.Post_id.to_string p.id)
    | None -> Alcotest.fail "run_id index miss");
   Alcotest.(check bool) "absent turn_ref -> None (no scan)" true
-    (Option.is_none (Board_core.find_post_by_turn_ref store ~turn_ref:"absent#0"));
+    (Option.is_none (Masc_board_handlers.Board_core.find_post_by_turn_ref store ~turn_ref:"absent#0"));
   Alcotest.(check bool) "absent run_id -> None (no scan)" true
-    (Option.is_none (Board_core.find_post_by_run_id store ~run_id:"nope"))
+    (Option.is_none (Masc_board_handlers.Board_core.find_post_by_run_id store ~run_id:"nope"))
 ;;
 
 let test_index_rebuilt_on_load () =
-  let store1 = Board_core.create_store
+  let store1 = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store1;
   let tr = Ids.Turn_ref.make ~trace_id:"load-trace" ~absolute_turn:3 in
   let origin = make_origin ~fusion_producer:"origin-test" ~turn_ref:tr ~fusion_run_id:"load-run" () in
   let _ = create store1 ~origin ~content:"persisted with origin" in
   (* Fresh store loads from the same MASC_BASE_PATH persist file. *)
-  let store2 = Board_core.create_store
+  let store2 = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   (match Masc_board_handlers.Board_votes_json.load_persisted_posts store2 with
    | Ok n when n >= 1 -> ()
@@ -638,13 +638,13 @@ let test_index_rebuilt_on_load () =
    | Error (p, e) -> Alcotest.failf "load failed: %s (%s)" p (Printexc.to_string e));
   Alcotest.(check bool) "turn_ref index rebuilt on load" true
     (Option.is_some
-       (Board_core.find_post_by_turn_ref store2 ~turn_ref:(Ids.Turn_ref.to_string tr)));
+       (Masc_board_handlers.Board_core.find_post_by_turn_ref store2 ~turn_ref:(Ids.Turn_ref.to_string tr)));
   Alcotest.(check bool) "run_id index rebuilt on load" true
-    (Option.is_some (Board_core.find_post_by_run_id store2 ~run_id:"load-run"))
+    (Option.is_some (Masc_board_handlers.Board_core.find_post_by_run_id store2 ~run_id:"load-run"))
 ;;
 
 let test_index_pruned_on_sweep () =
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   ignore (Result.get_ok (Board.reload_votes store));
@@ -658,9 +658,9 @@ let test_index_pruned_on_sweep () =
   (* Force-expire the post in place (epoch + 1s is < now), then sweep. *)
   let expired = { post with expires_at = 1.0 } in
   Stdlib.Hashtbl.replace store.posts (Board.Post_id.to_string post.id) expired;
-  let _ : int * int = Board_core.sweep store in
+  let _ : int * int = Masc_board_handlers.Board_core.sweep store in
   Alcotest.(check bool) "post removed by sweep" true
-    (Option.is_none (Board_core.find_post_by_turn_ref store ~turn_ref:key));
+    (Option.is_none (Masc_board_handlers.Board_core.find_post_by_turn_ref store ~turn_ref:key));
   (* Direct index check: [find_post_by_*] would return None even with a stale
      key (double-lookup), so prove the prune against the index table itself. *)
   Alcotest.(check bool) "turn_ref index pruned" false

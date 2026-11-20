@@ -36,7 +36,7 @@ let test_unreachable_target_keeps_its_name_and_reason () =
              reason = Composer.Keeper_unavailable "no longer in the roster" })
       ()
   in
-  Alcotest.(check string) "name and reason" "beta — no longer in the roster"
+  Alcotest.(check string) "name and reason" "beta · no longer in the roster"
     (Composer.prompt ~ko:false composer);
   check_key ~label:"enter cannot send"
     { composer with Composer.focus = Composer.Focused; draft = "hi" }

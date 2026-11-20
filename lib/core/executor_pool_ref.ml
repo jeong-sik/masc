@@ -38,7 +38,7 @@ let get () = Atomic.get pool
 
 let set p = Atomic.set pool (Some p)
 
-(* RFC-0204 L3: reads get their own pool, so a read never waits in the FIFO
+(* Reads get their own pool, so a read never waits in the FIFO
    queue behind background jobs or runs as a fiber beside them. *)
 let read_pool : Eio.Executor_pool.t option Atomic.t = Atomic.make None
 

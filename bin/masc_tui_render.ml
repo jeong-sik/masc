@@ -147,11 +147,11 @@ let operator_actions_reading (state : state) =
   let text ko en = ui_text state ~ko ~en in
   let sections = match operator_action_observation state with
     | None ->
-        [{ Masc_tui_detail_reading.heading = text "조치 원인 미확인" "Reasons unavailable"
-         ; body = text "서버의 구조화된 조치 관측을 아직 확인하지 못했습니다."
-             "The server's structured action observation has not been confirmed." }]
+        [{ Masc_tui_detail_reading.heading = text "조치 원인 미조회" "Reasons not read"
+         ; body = text "서버의 구조화된 조치 관측을 아직 읽지 않았습니다."
+             "The server's structured action observation has not been read yet." }]
     | Some (Tui_decode.Operator_actions_unavailable {diagnostics;error}) ->
-        [{ Masc_tui_detail_reading.heading = text "원래 서버 진단 · 이동 대상 미확인" "Original server diagnostics · targets unknown"
+        [{ Masc_tui_detail_reading.heading = text "원래 서버 진단 · 이동 대상 조회 실패" "Original server diagnostics · targets unreadable"
          ; body = String.concat "\n" diagnostics ^ "\n\n"
              ^ text "구조화된 관측을 읽지 못함: " "Structured observation unavailable: " ^ error }]
     | Some (Tui_decode.Operator_actions_observed []) ->
@@ -372,10 +372,11 @@ let overview_telemetry_snapshot (state : state) : Masc_tui_overview_bands.teleme
     | Some _ | None -> (None, None)
   in
   let tool_calls_summary =
+    let ko = state.ui_language = Lang_ko in
     match state.tool_series with
     | Tool_series_read calls
       when calls.Masc_tui_usage_calls.window = Masc_tui_usage_calls.Last_day ->
-        Some (Masc_tui_usage_calls.summary_line ~cells:32 calls)
+        Some (Masc_tui_usage_calls.summary_line ~ko ~cells:32 calls)
     | Tool_series_read _ | Tool_series_unread | Tool_series_error _ -> None
   in
   { Masc_tui_overview_bands.fleet_running
@@ -452,7 +453,15 @@ let overview_keeper_entries (state : state) : Masc_tui_overview_bands.keeper_ent
       match k.k_activity with
       | Some act ->
           (match act.k_current_task_id with
-           | Some tid when not (String.equal tid "") -> Terminal_text.single_line tid
+           | Some tid when not (String.equal tid "") ->
+               (match
+                  List.find_opt
+                    (fun (t : Tui_decode.task) -> String.equal t.id tid)
+                    state.tasks
+                with
+                | Some task when not (String.equal (String.trim task.title) "") ->
+                    Terminal_text.single_line task.title
+                | Some _ | None -> Terminal_text.single_line tid)
            | Some _ | None -> "")
       | None -> ""
     in
@@ -489,7 +498,7 @@ let render_overview (state : state) home =
   let sidebar =
     if state.keeper_navigation_open then
       Some (keeper_roster_pane_cols,
-        fun ~rows buf -> keeper_roster_pane ~focused:true state
+        fun ~rows buf -> keeper_roster_pane ~focused:true ~top_spacer:false state
           ~rows:(rows + 1) ~cols:keeper_roster_pane_cols buf)
     else None
   in
@@ -504,16 +513,19 @@ let render_overview (state : state) home =
      ([tool_series_days]). A reading that is missing says so in words, never as
      a count of zero. A press on the line opens Usage on its Calls section. *)
   let tool_calls_line ~cells =
+    let ko = state.ui_language = Lang_ko in
     let window = Masc_tui_usage_calls.Last_day in
     pressable Press_usage_calls
       (match state.tool_series with
        | Tool_series_read calls when calls.Masc_tui_usage_calls.window = window ->
-           Masc_tui_usage_calls.summary_line ~cells calls
+           Masc_tui_usage_calls.summary_line ~ko ~cells calls
        | Tool_series_read _ | Tool_series_unread ->
-           Masc_tui_usage_calls.summary_note ~cells window "reading…"
+           Masc_tui_usage_calls.summary_note ~ko ~cells window
+             (ui_text state ~ko:"불러오는 중" ~en:"reading")
        | Tool_series_error reason ->
-           Masc_tui_usage_calls.summary_note ~cells window
-             ("unavailable: " ^ Terminal_text.single_line reason))
+           Masc_tui_usage_calls.summary_note ~ko ~cells window
+             (ui_text state ~ko:"조회 불가: " ~en:"unavailable: "
+              ^ Terminal_text.single_line reason))
   in
   surface_chrome ~overflow:Fits ?sidebar state ~terminal_rows ~cols:full_cols ~surface_key:"overview"
     ~title:(overview_header state ~cols)
@@ -528,7 +540,7 @@ let render_overview (state : state) home =
       if body.hb_help then
         c.push (" " ^ Theme.recede ()
           ^ Masc_tui_footer.help_hint ~ko:(state.ui_language = Lang_ko)
-          ^ ui_text state ~ko:" — 화면별 조작" ~en:" — every screen's keys" ^ Ansi.reset);
+          ^ ui_text state ~ko:" · 화면별 조작" ~en:" · every screen's keys" ^ Ansi.reset);
       if body.hb_shortcuts then begin
         let shortcut key label =
           Ansi.bold ^ Theme.accent () ^ key ^ Ansi.reset
@@ -546,8 +558,9 @@ let render_overview (state : state) home =
           (ui_text state ~ko:" 선택한 관측이 바뀌었습니다 · j/k:다시 선택"
              ~en:" Selected observation changed · j/k to choose again");
       let draw_row (action,label) =
-        let line = "  " ^ label in
-        if Option.equal equal_home_action (Some action) selected then c.push_selected line
+        let is_selected = Option.equal equal_home_action (Some action) selected in
+        let line = (if is_selected then "› " else "  ") ^ label in
+        if is_selected then c.push_selected line
         else c.push line in
       let available = List.length body.hb_rows + body.hb_spare in
       let card_rows =
@@ -946,7 +959,7 @@ let render_surface ~home (state : state) =
                             c.push_styled ~style:(Theme.bad ())
                               ("  " ^ Terminal_text.single_line detail)
                         | Board_detail.Absent -> c.push (ui_text state ~ko:"  글을 아직 읽지 못했습니다. r로 다시 읽습니다." ~en:"  Board post has not been loaded. Press r to retry.")
-                        | Board_detail.Loading -> c.push (ui_text state ~ko:"  글을 읽는 중…" ~en:"  Loading Board post…")
+                        | Board_detail.Loading -> c.push (ui_text state ~ko:"  글을 읽는 중" ~en:"  Loading Board post")
                         | Board_detail.Ready _ -> ())))
   | Planning -> Masc_tui_render_work.render_planning state
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->

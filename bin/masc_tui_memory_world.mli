@@ -35,13 +35,13 @@ val changed : t -> t
 (** An inventory change or revalidation owes a read, including one follow-up
     after a read already in flight. *)
 
-val start : now:float -> t -> (t * request) option
+val start : now:Masc_tui_wake.Mono.t -> t -> (t * request) option
 (** The owed read to launch now. [None] when settled, while a read is in flight,
     or before a failed read's retry is due. The value already held stays in
     view while the new read runs. *)
 
 val complete :
-  retry_s:float -> max_retry_s:float -> now:float ->
+  retry_s:float -> max_retry_s:float -> now:Masc_tui_wake.Mono.t ->
   t -> request -> (inventory, string) result -> t
 (** An answer for a request this state has moved past is dropped whole. Any
     current success settles the read, preserving a change that arrived in
@@ -49,7 +49,7 @@ val complete :
     last inventory if any, and carries its text as [Request_failed]. *)
 
 val withdraw :
-  retry_s:float -> max_retry_s:float -> now:float ->
+  retry_s:float -> max_retry_s:float -> now:Masc_tui_wake.Mono.t ->
   t -> request -> string -> t
 (** Settle the current read the workspace guard did not send, as [complete]
     settles a failure, carrying the notice as [Kept_back]. *)

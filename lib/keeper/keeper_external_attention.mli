@@ -10,7 +10,7 @@
 
 (** {1 Coordinates} *)
 
-(** Re-export of the shared surface vocabulary (RFC-0232 P5); see
+(** Re-export of the shared surface vocabulary; see
     {!Surface_ref}. *)
 type surface_ref = Surface_ref.t =
   | Dashboard of { session_id : string option }

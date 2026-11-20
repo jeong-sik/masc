@@ -1,6 +1,6 @@
 (** The workspace curator's durable result: which facts share a claim, which
     conflict, and which the curator excluded. One fact is one row of one
-    Keeper's memory store (RFC-workspace-curator-curates-changed-facts §2.1).
+    Keeper's memory store.
 
     The ledger is the curator's interpretation. It never changes Keeper memory
     and never checks meaning. Members are stored once, as each fact's

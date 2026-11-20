@@ -4755,7 +4755,7 @@ let test_live_subscription () =
 ;;
 
 
-(* RFC-0390: the argv is the contract with the installed CLI. These pin how
+(* The argv is the contract with the installed CLI. These pin how
    [config.native] selects [--tools] and what [--allowedTools] pre-approves. *)
 let flag_value argv flag =
   let rec walk = function

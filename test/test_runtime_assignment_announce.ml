@@ -1,4 +1,4 @@
-(* RFC-0481 §3.2: every runtime catalogue publication tells the workspace's
+(* Every runtime catalogue publication tells the workspace's
    roster readers that every row may have moved. The fiber starts before any
    runtime is loaded, as the server bootstrap installs it. *)
 

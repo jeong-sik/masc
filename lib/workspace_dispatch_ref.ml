@@ -1,4 +1,4 @@
-(** RFC-0182 §3.1 — workspace dispatch dependency inversion ref.
+(** Workspace dispatch dependency inversion ref.
 
     [Keeper_tool_in_process_runtime] is compiled very early in module
     order (transitively imported by [Keeper_tool_dispatch_runtime]). [Tool_workspace]

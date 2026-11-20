@@ -54,7 +54,7 @@ Keeper operation, production readiness, installation, or human action timing.
 
 ## Verification policy
 
-Follow `docs/AGENTIC-WORKFLOW.md`: feature and CI improvement stacks stay
+Feature and CI improvement stacks stay
 separate. Only the bottom of a stack receives a minimal Core build; upper PRs
 receive source review. No automatic CI or repeated long dispatches are requested.
 Full integration and runtime verification belong to the Release/Tag candidate.
@@ -68,11 +68,9 @@ timing separate. A passing viewport suite closes only its own row.
 
 ## Current viewport evidence
 
-[CI fixture frame evidence](../../evidence/tui-home-journey-20260930/README.md)
-records twelve raw frames and their Chromium/xterm replay screenshots from
-source/test head `45c065b875c550e7109e59d86d3d2c31de9422da`. This includes the
+Source/test head `45c065b875c550e7109e59d86d3d2c31de9422da` includes the
 reviewed Home source above with the viewport assertions added. The passing
-targeted run establishes the two fixture states at the three specified sizes
+targeted run at that head establishes the two fixture states at the three specified sizes
 in normal and NO_COLOR modes. The remaining checklist rows stay open.
 
 Run 36664548724 at `5924e6846516bb9bc97bbdf96b5a2abdd3a39294` passed
@@ -119,8 +117,6 @@ fixture suite, `test_tui_home_queue_identity_pty`, covering unread settlement,
 rejected `/steer` and `/run-next`, and explicit recovery with the saved request ID.
 Its executable result remains pending.
 
-Installed baseline identity and three isolated fixture frames are retained in
-[baseline evidence](../../evidence/tui-home-installed-baseline-20260930/README.md).
 The installed macOS arm64 binary is 0.49.0 at c112b203, before integration.
 It is not a current-head runtime proof. A native manual probe is being prepared
 for candidate verification without local builds or replacing active sessions.

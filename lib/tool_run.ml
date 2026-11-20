@@ -14,7 +14,7 @@ open Tool_args
 
 (** {1 Individual Handlers} *)
 
-(* RFC-0189 PR-1b.6 — handlers in this module return typed
+(* Handlers in this module return typed
    [Tool_result.result]. Missing run initialization is a workflow precondition;
    damaged records and storage errors remain Runtime_failure. The
    "task_id is required" caller-input rejections are Workflow_rejection.

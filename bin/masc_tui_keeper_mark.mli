@@ -88,7 +88,7 @@ val age_header : string
     them and {!column_legend} names them from these two values. *)
 
 val operator_disposition_word :
-  Masc.Keeper_execution_receipt.operator_disposition_kind -> string
+  ko:bool -> Masc.Keeper_execution_receipt.operator_disposition_kind -> string
 (** The human disposition word displayed in the activity column for a turn
     requiring operator attention. *)
 
@@ -189,8 +189,7 @@ val grid_wait_glyph : string
     failure line. *)
 
 val grid_full_mark : string
-(** [█]: a filled cell of the lag bar, and a pulse half hour of failed turns
-    only. *)
+(** [▆]: a filled cell of a pulse half hour of failed turns only. *)
 
 val grid_chain_link : string
 val grid_more_mark : string

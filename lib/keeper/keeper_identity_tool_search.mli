@@ -5,7 +5,7 @@
     large. A Keeper attached to a work service is handed that service's entire
     tool list: one Keeper's was 145 tools and 142,257 bytes against 57 KB of
     built-ins, 20% of it was called at all, and context overflow ended 412
-    turns that day (RFC-attached-service-tool-scoping §1.5-1.6). And the
+    turns that day. And the
     built-ins themselves accumulate: of 89 on one Keeper, 33 went a whole day
     without being called, 21,601 bytes of every request.
 

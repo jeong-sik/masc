@@ -1,4 +1,4 @@
-(** See [keeper_model_input_demotion.mli] for the contract (RFC-0363). *)
+(** See [keeper_model_input_demotion.mli] for the contract. *)
 
 type occurrence = int * int
 
@@ -127,7 +127,7 @@ let bind_completed_arguments ~completed_before ~seed ~replay_prefix messages =
 (* Where one stored body sits in its block. A [ToolResult] has its [content],
    and one whose [content_blocks] is [Some] also has each [Text] block, named
    by its index among the blocks. Which of them reaches the wire depends on the
-   provider encoder, so every one is a body of its own (RFC-0363 §3.1.2). *)
+   provider encoder, so every one is a body of its own. *)
 type payload_kind =
   | Result_body
   | Result_text_block of int

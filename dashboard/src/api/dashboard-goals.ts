@@ -40,7 +40,7 @@ import type {
 } from '../types'
 import { decodeGoalMeasure } from './goal-measure'
 
-// ── Goal source unavailable envelopes (RFC-0444 §2.3 row 4) ─────────────────
+// ── Goal source unavailable envelopes ───────────────────────────────────────
 
 /** The envelope named a Goal source failure but its members do not parse. */
 export class GoalStoreEnvelopeError extends Error {

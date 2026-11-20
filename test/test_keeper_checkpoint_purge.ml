@@ -1,4 +1,4 @@
-(* RFC-0351 S1: deterministic offline checkpoint purge. These tests pin the
+(* Deterministic offline checkpoint purge. These tests pin the
    rule contract, and above all that a purge keeps every atom and the last one
    byte-exact: four stores count in atoms, and a purge that renumbered them
    left goo-yang-bong sending its whole 16 MB history on every turn

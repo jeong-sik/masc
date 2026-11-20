@@ -67,7 +67,7 @@ val weight_cpu : float
 val submit_io : name:string -> t -> (unit -> 'a) -> 'a
 (** Blocking submit for IO-bound work (HTTP calls, disk I/O, network
     syscalls). [name] names the work in {!Pool_wait} and the trace
-    (callers pass [__FUNCTION__]; RFC-0474 L4c).
+    (callers pass [__FUNCTION__]).
 
     Uses [~weight:0.05], so each worker domain admits ~20
     concurrently-running IO-bound jobs before queueing. Re-raises exceptions

@@ -320,12 +320,18 @@ val list_posts : reader:Board_access.reader ->
   ?author_filter:string ->
   ?exclude_author_filter:string ->
   ?post_kind_filter:Board.post_kind ->
+  ?text_query:string ->
   ?sort_by:sort_order ->
   ?exclude_system:bool ->
   ?exclude_automation:bool ->
   ?limit:int ->
   unit ->
   Board.post list
+(** [text_query] keeps the posts whose title, body, author id or hearth
+    contains it, ignoring ASCII case, the same match as {!search}. It is
+    trimmed first, and a blank one filters nothing. A text query reads every
+    post rather than the Hot window, and it filters only posts the reader may
+    read, before [limit] cuts the list. *)
 
 val list_recent_posts_matching_author_unchecked :
   author_matches:(Board.Agent_id.t -> bool) ->
@@ -604,8 +610,6 @@ val get_comment_parent_for_evidence_unchecked :
 (** Internal projection lookup. Resolves the actual comment parent and applies
     the primary posts-source gate before returning it. *)
 
-val get_post_unchecked : post_id:string -> (Board.post, Board.board_error) Result.t
-
 val list_posts_by_run_origin_unchecked : unit -> Board.post list
 
 val find_post_by_run_id_unchecked : run_id:string -> Board.post option
@@ -627,19 +631,8 @@ val read_comments_unchecked :
   post_id:string ->
   (Board.comment list, Board.board_read_error) Result.t
 
-val get_comments_unchecked :
-  post_id:string ->
-  (Board.comment list, Board.board_error) Result.t
-
 val get_post_and_comments_unchecked :
   post_id:string ->
   (Board.post * Board.comment list, Board.board_error) Result.t
-
-val list_comments_unchecked : ?limit:int -> unit -> Board.comment list
-
-val search_unchecked :
-  query:string ->
-  limit:int ->
-  Board.post list
 
 val require_readable_target : reader:Board_access.reader -> target_type:Board.reaction_target_type -> target_id:string -> (unit, Board.board_error) result

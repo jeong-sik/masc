@@ -1,6 +1,5 @@
 (** The filesystem tools MCP clients receive, read from
-    [config/tools/tool_*.toml] and [config/tools/keeper_ide_annotate.toml]
-    (RFC prompts-and-tool-definitions-outside-ocaml §2.2).
+    [config/tools/tool_*.toml] and [config/tools/keeper_ide_annotate.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
@@ -9,9 +8,7 @@
     These are not the model's Read / Edit / Write. Those are separate tools
     with separate schemas, and their declarations carried these names until the
     files were renamed to what they publish -- which is what freed the names
-    here. [test_filesystem_shard_toml_parity] keeps the publication order;
-    the descriptions and schemas it also pinned were copies of these
-    values. *)
+    here. *)
 
 let schema_of_name = Tool_definition_embedded.schema
 

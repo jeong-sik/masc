@@ -3,7 +3,7 @@
     Command construction only: nothing here starts a VM. Dispatch does --
     [Keeper_turn_sandbox_runtime] boots and adopts the guest, and the remote
     lane ([Keeper_sandbox_remote]) drives its shim over the guest's exec.
-    The guest's working tree is on a Keeper-named volume (RFC-0400); that
+    The guest's working tree is on a Keeper-named volume; that
     name does not establish exclusive workspace ownership. The host
     playground is never mounted into it.
 
@@ -323,7 +323,7 @@ val logs_tail_argv_for :
 (** The last [tail] lines of a guest's stdio. [container] takes [-n]; [msb]
     rejects [-n] and takes [--tail], and [nerdctl] documents both. *)
 
-(** {2 The work volume and the shim (RFC-0400)}
+(** {2 The work volume and the shim}
 
     The keeper's working tree lives on a persistent Keeper-named volume mounted
     at {!work_volume_guest_root}; that path is the remote lane's [remote_root].
@@ -475,8 +475,7 @@ val volume_repair_script : string
 (** Unmount {!volume_repair_guest_root}, stop if it is still mounted, then
     [e2fsck -f -y] and [e2fsck -f -n] on its device, printing both exit
     codes. The script exits 0 once e2fsck has run, whatever it found: the
-    caller reads the host superblock to decide the outcome
-    (RFC keeper-volume-filesystem-repair §3.3). *)
+    caller reads the host superblock to decide the outcome. *)
 
 val apple_volume_repair_argv :
   keeper_name:string -> volume_name:string -> image:string -> string list
@@ -532,7 +531,7 @@ val shim_sidecar_name : string
     it placed: the sha256 the release's SHA256SUMS gave for that asset, in
     [sha256sum] format (digest, two spaces, asset name). *)
 
-(** RFC-0427 B-2: what the boot knows about the shim it is about to run. *)
+(** What the boot knows about the shim it is about to run. *)
 type shim_provenance =
   | Shim_verified of { sha256 : string }
       (** the binary's digest equals the sidecar's *)
@@ -617,7 +616,7 @@ val ensure_work_volume_for
   -> timeout_sec:float
   -> ([ `Created | `Already_present | `Ensured ], string) result
 
-(** {2 The build volume (RFC-keeper-build-output-returns-to-a-disposable-volume)}
+(** {2 The build volume}
 
     [Apple_container] only. Msb's and nerdctl's named work volumes are host
     directories -- deleting a file inside either returns host disk
@@ -854,8 +853,8 @@ val recreate_apple_build_volume
 (** Delete the volume if present, then create it with
     {!apple_volume_create_argv}. [container volume create] is not idempotent,
     so existence is settled by a [container volume] probe rather than by
-    reading its "already exists" message. Called once per fresh guest boot
-    (RFC-keeper-build-output-returns-to-a-disposable-volume): [_build] is
+    reading its "already exists" message. Called once per fresh guest boot:
+    [_build] is
     entirely derived, so
     starting the volume empty every time costs one cold build and returns
     the host disk the previous life's volume had grown to, since a keeper
@@ -1032,7 +1031,7 @@ val work_volume_mounted_probe_argv_for
   :  Keeper_microvm_backend.t
   -> container_name:string
   -> string list
-(** Boot invariant (RFC-0052): read [/proc/mounts] as root inside the guest.
+(** Boot invariant: read [/proc/mounts] as root inside the guest.
     A successful command emits an explicit mounted or not-mounted observation.
     A failed command or an unrecognised response is not evidence of absence;
     use {!work_volume_mount_probe_of_result} to interpret it.

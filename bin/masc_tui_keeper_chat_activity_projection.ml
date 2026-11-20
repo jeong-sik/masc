@@ -127,17 +127,39 @@ let native_report_says_failed (completion : Runtime_native_tools.completion opti
 let tool_block ?(omitted_steps = 0) activities : tool_block =
   { activities; omitted_steps }
 
-let finished_marker = "✓"
+(* The wait a provider asked for before its next attempt, in the duration
+   spellings of RFC tui-one-screen-grammar 6.2: a whole number of seconds is a
+   setting ([30s], [2m]), anything finer keeps its reading ([500ms], [1.5s]).
+   A negative delay is a reading that failed. *)
+let milliseconds_per_second = 1000
+
+let retry_delay_text ms =
+  if ms > 0 && ms mod milliseconds_per_second = 0 then
+    Masc_tui_value.Interval.text (ms / milliseconds_per_second)
+  else
+    Option.value
+      ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+      (Masc_tui_message_layout.elapsed_text
+         (float_of_int ms /. float_of_int milliseconds_per_second))
+
+(* The status marks of RFC tui-one-screen-grammar 7.2 (5.4 asks them of the
+   chat). Arguments still arriving and a native step running are under way;
+   a call sent and waiting on its result waits, the 도구 대기 7.2 names; a
+   result back or a native step ended is settled; a failure failed. A result
+   never seen before the attempt ended is a caution -- it does not establish
+   a failure. An outcome the record does not carry stays the unreported [?]
+   of 6.4. [◌] belongs to a value not read yet and no longer marks a call. *)
+let finished_marker = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
 
 let marker_of_outcome = function
-  | Started -> "◌"
-  | Awaiting_result -> "▶"
+  | Started -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Awaiting_result -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
   | Returned -> finished_marker
-  | Native_running -> "◌"
-  | Native_ended -> "■"
-  | Native_failed | Failed -> "\xe2\x9c\x97"
-  | Never_returned -> "○"
-  | Outcome_unrecorded -> "?"
+  | Native_running -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Native_ended -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  | Native_failed | Failed -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
+  | Never_returned -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
+  | Outcome_unrecorded -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported
 
 let pad_to width text =
   let length = String.length text in
@@ -324,9 +346,9 @@ let native_progress_text (key : native_progress_key) =
     | Runtime_native_tools.Retry_cleared agent ->
         "provider retry notice cleared · " ^ safe_line agent.subagent_type
     | Runtime_native_tools.Retry_reported note ->
-        Printf.sprintf "%sprovider retry %d/%d · delay %dms · %s · %s%s"
+        Printf.sprintf "%sprovider retry %d/%d · delay %s · %s · %s%s"
           (if key.running then "" else "last observed ")
-          note.attempt note.max_retries note.retry_delay_ms
+          note.attempt note.max_retries (retry_delay_text note.retry_delay_ms)
           (safe_line note.agent.subagent_type) (safe_line note.error_category)
           (Option.fold ~none:"" ~some:(fun code -> Printf.sprintf " · status %d" code) note.error_status))
     key.retry in
@@ -529,7 +551,9 @@ let outcome_label = function
   | Never_returned -> "result not seen"
   | Outcome_unrecorded -> "outcome unrecorded"
 
-let received_marker = "↩"
+(* A durable output came back: settled, like a returned call. [↩] is not a
+   status mark (7.2). *)
+let received_marker = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
 
 (* Every outcome, in the order the rollup lists them: what is still moving
    first, then what finished, then what nothing can be said about. *)
@@ -537,7 +561,17 @@ let all_outcomes =
   [ Started; Awaiting_result; Returned; Native_running; Native_ended; Native_failed; Failed
   ; Never_returned; Outcome_unrecorded ]
 
-let compact_outcome_parts (activities : tool_activity list) =
+let native_completion_is_benign (completion : Runtime_native_tools.completion) =
+  let open Runtime_native_tools in
+  match completion.outcome, completion.exit_code with
+  | (End_observed | Completion_unrecorded | Completion_reported
+     | Result_received { is_error = None | Some false }), (None | Some 0) -> true
+  | (Error_reported | Decline_reported | Unrecognized_status _
+     | Result_received { is_error = Some true }), _
+  | (End_observed | Completion_unrecorded | Completion_reported
+     | Result_received { is_error = None | Some false }), Some _ -> false
+
+let compact_outcome_parts ?(include_benign_native = true) (activities : tool_activity list) =
   let count outcome =
     List.fold_left
       (fun total activity ->
@@ -557,7 +591,13 @@ let compact_outcome_parts (activities : tool_activity list) =
              | [] -> Some counted
              | names -> Some (counted ^ ": " ^ String.concat ", " names)))
   in
-  ordinary @ List.map native_status_clause (group_native_statuses activities)
+  let native_statuses =
+    group_native_statuses activities
+    |> List.filter (fun group ->
+           include_benign_native
+           || not (native_completion_is_benign group.status_completion))
+  in
+  ordinary @ List.map native_status_clause native_statuses
   @ List.map native_progress_clause (group_native_progress activities)
 ;;
 
@@ -1170,7 +1210,7 @@ let project_tool_block mode (block : tool_block) =
         in
         ( Some
             (inventory_row
-               ~outcomes:(compact_outcome_parts inventory_activities)
+               ~outcomes:(compact_outcome_parts ~include_benign_native:false inventory_activities)
                activities)
         , trouble_rows
         , hidden_activity_rows

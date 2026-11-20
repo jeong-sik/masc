@@ -1,4 +1,4 @@
-(** Resolving one keeper's egress allowlist from runtime.toml (RFC-0415).
+(** Resolving one keeper's egress allowlist from runtime.toml.
 
     The same resolution {!Keeper_sandbox_ssh} does for an endpoint name, for
     the other half of the policy lane: a keeper names [network_mode =

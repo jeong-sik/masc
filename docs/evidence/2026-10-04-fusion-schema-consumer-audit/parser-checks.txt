@@ -1,2 +1,0 @@
-PASS ocamlc -stop-after parsing test/test_keeper_structured_output_schema.ml
-No typecheck, native test or Dune build executed.

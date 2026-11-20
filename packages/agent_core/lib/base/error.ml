@@ -148,7 +148,7 @@ type orchestration_error =
   | UnknownAgent of { name : string }
   | TaskTimeout of { task_id : string }
 
-(** Open extension point for host-typed internal payloads (RFC-0371 B12).
+(** Open extension point for host-typed internal payloads.
     agent-core never constructs or inspects extensions: a host (e.g. MASC)
     extends this type with its own constructor, carries its typed error
     through {!Internal_carried}, and downcasts by matching its own

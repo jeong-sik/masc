@@ -107,7 +107,7 @@ capabilities = ["kvm"]
    between encoder and decoder fails here instead of letting every fixture
    silently feed a dead table. *)
 
-(* RFC-0422 §3.4: the operator's declaration that the account home is the
+(* The operator's declaration that the account home is the
    keeper's alone. Absent is false, so a shared account keeps the judge for
    every write; anything but a boolean is a load error, not a guess. *)
 let test_private_home_is_declared_or_false () =

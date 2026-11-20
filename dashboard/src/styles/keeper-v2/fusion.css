@@ -199,7 +199,7 @@
 
 .fus-judge-wait { display: flex; align-items: center; gap: 9px; font-size: var(--fs-12); color: var(--text-dim); padding: 14px 16px; background: var(--bg-panel); border: 1px dashed var(--border-main); border-radius: var(--radius-md); }
 
-/* ── RFC-0284 PR 2: observed judge-node strip (1차/메타 토폴로지 가시화) ── */
+/* ── Observed judge-node strip (1차/메타 토폴로지 가시화) ── */
 .fus-judges { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .fus-judge-node { display: flex; align-items: center; gap: 10px; padding: 7px 11px; background: var(--bg-card); border: 1px solid var(--border-main); border-radius: var(--radius-sm); font-size: 11.5px; }
 .fus-judge-node.failed { border-color: color-mix(in oklab, var(--status-bad) 45%, transparent); background: color-mix(in oklab, var(--status-bad) 7%, transparent); }
@@ -332,7 +332,7 @@
 .fus-jnode-tok { margin-left: auto; font-size: var(--fs-10); color: var(--text-dim); }
 .fus-dec-badge.sm { font-size: var(--fs-9); padding: 1px 6px; }
 
-/* failed first-tier judge — isolated, excluded from meta (RFC-0283 §2.3) */
+/* failed first-tier judge — isolated, excluded from meta */
 .fus-jnode.failed { border-left-color: color-mix(in oklab, var(--status-bad) 50%, transparent); background: color-mix(in oklab, var(--status-bad) 6%, var(--bg-panel)); opacity: 0.92; }
 .fus-jnode-fail { margin-left: auto; font-family: var(--font-mono); font-size: 9.5px; color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 40%, transparent); border-radius: var(--radius-xs); padding: 1px 6px; }
 .fus-jnode-isolated { margin: 0; font-size: 11.5px; color: var(--text-dim); font-style: italic; line-height: 1.5; }

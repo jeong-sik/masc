@@ -258,7 +258,7 @@ let format_goal_summaries (summaries : goal_summary list) : string =
           String.concat "\n" (base :: details))
        summaries)
 
-(* RFC-0491 §3.3: the System lists the Goals by (priority, created_at, id). A
+(* The System lists the Goals by (priority, created_at, id). A
    completion request, a refuted proof and a reopen each write [updated_at],
    the store's second sort key, and leave these three as they were. The
    System rows show no priority, so this order is where it still shows. *)
@@ -286,7 +286,7 @@ let is_awaiting_proof summary =
     requested and the proof is being judged out-of-band, so the keeper keeps
     working the linked tasks instead of re-requesting completion. [None] when
     no Goal is. These rows ride the turn's trailing context, which every round
-    of the turn carries (RFC-0491 §3.3). *)
+    of the turn carries. *)
 let format_goals_awaiting_proof (summaries : goal_summary list) : string option =
   match List.filter is_awaiting_proof (in_system_order summaries) with
   | [] -> None
@@ -307,8 +307,7 @@ let format_goals_awaiting_proof (summaries : goal_summary list) : string option 
 (** Each Active Goal's latest review and measurement and this keeper's
     held-Task link, one row per Goal named by its id. A measurement is recorded,
     a review lands or a Task is claimed without any Goal event, so these rows
-    ride the turn's trailing context instead of the System prompt
-    (docs/rfc/RFC-goal-observations-leave-the-system-prompt.md). *)
+    ride the turn's trailing context instead of the System prompt. *)
 let format_goal_observations (summaries : goal_summary list) : string =
   String.concat "\n"
     (List.map
@@ -441,7 +440,7 @@ let format_held_task_skills
     Some (String.concat "\n" ((if String.equal heading "" then [] else [ heading ]) @ lines) ^ "\n\n")
 ;;
 
-(** Render the keeper's own claimed task as standing context (RFC-0315).
+(** Render the keeper's own claimed task as standing context.
     The scheduled cycle always runs when proactive lifecycle is enabled, and
     the model must see the work it is holding: id, title, status, and the prior
     owner's handoff summary when one exists. *)
@@ -1096,7 +1095,7 @@ let autonomous_trigger_lines
     in
     List.filter_map Fun.id lines
   | Keeper_world_observation.Reactive, true ->
-      (* RFC-0315: when the scheduler's real decision is threaded in, a
+      (* When the scheduler's real decision is threaded in, a
          stimulus-driven turn states its wake reasons instead of rendering
          nothing. Reactive payloads (mentions, board events, scope messages)
          still render in their own layers; event-queue stimuli (bootstrap,
@@ -1119,7 +1118,7 @@ let effective_instructions
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ()
   =
-  (* DET-OK: total default between two known sources (RFC-0282). *)
+  (* DET-OK: total default between two known sources. *)
   match profile_defaults with
   | Some d -> Option.value d.instructions ~default:meta.instructions
   | None -> meta.instructions
@@ -1206,7 +1205,7 @@ let active_goal_summaries ~(config : Workspace.config) ~(keeper_name : string) =
     (Goal_store.list_goals_result config ())
 ;;
 
-(* RFC-0444 §2.3 row 6: the one projection of an unreadable goal store onto
+(* The one projection of an unreadable goal store onto
    the prompt. Each variable is the exhaustive renderer masc_types keeps
    beside the type, so a new reason, mirror state or reset step is a compile
    error there and never a silent blank here. The prompt is where the value
@@ -1275,7 +1274,7 @@ let build_system_prompt ~workspace_root ~(meta : Keeper_meta_contract.keeper_met
     ?(profile_defaults : Keeper_types_profile.keeper_profile_defaults option)
     ()
   =
-  (* The world's own articles (RFC-0442). A missing ledger is a world that has
+  (* The world's own articles. A missing ledger is a world that has
      written no norms yet, and [load_articles] answers it as no articles. A
      ledger that exists but cannot be read is not that world: rendering it as
      no articles ran the turn without its norms and changed the prompt the
@@ -1572,7 +1571,7 @@ let prepare_prompt_internal
   let content_of : Keeper_context_layers.layer_id -> string option = function
     | Keeper_context_layers.Direct_input_source -> None
     (* 1. Active goals — stable turn context. Titles render when the caller
-       resolved them (RFC-0315). The count and the list are read off the same
+       resolved them. The count and the list are read off the same
        list, so the heading can never claim goals the body does not show. *)
     | Keeper_context_layers.Active_goals ->
       (match observation.active_goals, active_goal_summaries with
@@ -1593,13 +1592,13 @@ let prepare_prompt_internal
        | Ok _, None -> None)
     (* 1a'. The Goals in [Verifying]. A completion request, a refuted proof and
        a reopen move a Goal in or out, so this is its own layer and request
-       assembly turns it into the Goals_awaiting_proof block (RFC-0491 §3.3).
+       assembly turns it into the Goals_awaiting_proof block.
        An unreadable store is stated by the Active Goals layer. *)
     | Keeper_context_layers.Goals_awaiting_proof ->
       (match observation.active_goals, active_goal_summaries with
        | Ok _, Some summaries -> format_goals_awaiting_proof_summaries summaries
        | Error (_ : Goal_store.unavailable), _ | Ok _, None -> None)
-    (* 1b. Current task — the claim that admitted this turn (RFC-0315).
+    (* 1b. Current task — the claim that admitted this turn.
        Standing context: changes on claim/release, not per cycle. *)
     | Keeper_context_layers.Current_task ->
       let current_task_skill_surfaces =
@@ -1631,7 +1630,7 @@ let prepare_prompt_internal
       Some
         (format_approval_authority_observation observation.approval_authority)
     (* 2. Connected surfaces — connector presence, changes only on bind/unbind
-       or transport flaps (RFC-0223 P2). Omitted when only the implicit
+       or transport flaps. Omitted when only the implicit
        dashboard is attached: every keeper has the dashboard, so dashboard-only
        presence carries no signal. *)
     | Keeper_context_layers.Connected_surfaces ->

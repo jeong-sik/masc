@@ -205,7 +205,7 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
   // requiring a new backend field — derivation is plan-approved trade-off.
   const [phaseEnteredAtSec, setPhaseEnteredAtSec] = useState<number | null>(null)
   const pendingConfigKeeperRef = useRef<string | null>(null)
-  // RFC-0046 §7 #1: single composite snapshot shared with the two
+  // Single composite snapshot shared with the two
   // derived state-diagram panel.
   const compositeEvidence = useKeeperCompositeEvidence(keeper.name)
   const runtimeTraceEvidence = useKeeperRuntimeTraceEvidence(keeper.name)

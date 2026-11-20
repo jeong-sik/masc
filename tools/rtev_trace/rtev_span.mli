@@ -1,5 +1,5 @@
 (** Traced sections ([Eio.Private.Trace.with_span]) and the time their fibers
-    run and wait. masc names every pool job this way (RFC-0474 L4c).
+    run and wait. masc names every pool job this way.
 
     A section counts the time of every fiber that runs inside it, including
     fibers created inside it. Sections nest: the time spent in a section is

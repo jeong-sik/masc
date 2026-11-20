@@ -1,4 +1,4 @@
-(** Fusion deliberation OTel metrics (RFC-0284). *)
+(** Fusion deliberation OTel metrics. *)
 
 val metric_fusion_invocations_total : string
 val metric_fusion_judge_executions_total : string

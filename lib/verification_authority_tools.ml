@@ -206,8 +206,8 @@ let create_goal_proof ~(config : Workspace.config) ~submitted_evidence =
    they come from [Keeper_playground_checkouts], which finds a checkout by its
    [.git] entry wherever the keeper put it. This module must not scan for them
    itself: that module exists because three separate scans each hardcoded a
-   [repos/] segment and each disagreed about what counted as a checkout
-   (RFC-keeper-workspace-root-only §1.2). [repos/masc] is one keeper's own
+   [repos/] segment and each disagreed about what counted as a checkout.
+   [repos/masc] is one keeper's own
    convention, written in its config, not a layout the system imposes — a
    keeper with a checkout at the top level or under another name is equally
    valid, and a fourth hardcoded scan here would miss it. *)

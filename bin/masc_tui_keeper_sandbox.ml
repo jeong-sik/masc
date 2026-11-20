@@ -593,18 +593,18 @@ let legacy_status_lines ~ko ~width reading =
   match reading.container_error, reading.containers with
   | Some detail, Some (_ :: _ as containers) ->
     header
-    @ [ "  " ^ styled (status_code `Warn) (tr "● 일부 조회 실패" "● PARTIAL INSPECTION") ]
+    @ [ "  " ^ styled (status_code `Warn) (tr "▲ 일부 조회 실패" "▲ PARTIAL INSPECTION") ]
     @ wrapped_rows ~width ~label:(tr "인스턴스" "Instances") ~tone:`Warn
         (if ko then Printf.sprintf "%d개 관측 · 일부 조회 실패" (List.length containers)
          else Printf.sprintf "%d observed · inspection incomplete" (List.length containers))
     @ inventory_error_rows ~ko ~width ~label:(tr "조회 오류" "Inspection error") ~tone:`Bad reading detail
   | Some detail, _ ->
     header
-    @ [ "  " ^ styled (status_code `Bad) (tr "● 조회 실패" "● INSPECTION FAILED") ]
+    @ [ "  " ^ styled (status_code `Bad) (tr "✕ 조회 실패" "✕ INSPECTION FAILED") ]
     @ inventory_error_rows ~ko ~width ~label:(tr "조회 오류" "Inspection error") ~tone:`Bad reading detail
   | None, None ->
     header
-    @ [ "  " ^ styled (status_code `Warn) (tr "? 상태 미확인" "? UNKNOWN") ]
+    @ [ "  " ^ styled (status_code `Warn) (tr "? 목록 보고 안 됨" "? INVENTORY NOT REPORTED") ]
     @ wrapped_rows ~width ~label:(tr "목록" "Inventory") ~tone:`Warn
         (tr "인스턴스 목록이 보고되지 않았습니다." "Instance inventory was not reported.")
   | None, Some containers ->
@@ -619,10 +619,10 @@ let legacy_status_lines ~ko ~width reading =
       count + if container.running = None then 1 else 0) 0 containers in
     if unknown > 0 then
       header
-      @ [ "  " ^ styled (status_code `Warn) (tr "? 상태 일부 미확인" "? STATE INCOMPLETE") ]
+      @ [ "  " ^ styled (status_code `Warn) (tr "▲ 실행 상태 일부 보고 안 됨" "▲ RUN STATE PARTLY REPORTED") ]
       @ wrapped_rows ~width ~label:(tr "인스턴스" "Instances") ~tone:`Warn
-          (if ko then Printf.sprintf "실행 %d · 미확인 %d · 전체 %d" running unknown (List.length containers)
-           else Printf.sprintf "%d running · %d unknown · %d total" running unknown (List.length containers))
+          (if ko then Printf.sprintf "실행 %d · 보고 안 됨 %d · 전체 %d" running unknown (List.length containers)
+           else Printf.sprintf "%d running · %d not reported · %d total" running unknown (List.length containers))
     else if running > 0 then
       header
       @ [ "  " ^ styled (status_code `Ok) (tr "● 실행 중" "● RUNNING") ]
@@ -633,7 +633,7 @@ let legacy_status_lines ~ko ~width reading =
       match containers with
       | _ :: _ ->
         header
-        @ [ "  " ^ styled (status_code `Warn) (tr "● 중지됨" "● STOPPED") ]
+        @ [ "  " ^ styled (status_code `Warn) (tr "‖ 중지됨" "‖ STOPPED") ]
         @ wrapped_rows ~width ~label:(tr "인스턴스" "Instances") ~tone:`Warn
             (if ko then Printf.sprintf "%d개 존재 · 실행 0" (List.length containers)
              else Printf.sprintf "%d present · 0 running" (List.length containers))
@@ -672,7 +672,7 @@ let status_lines ~ko ~width reading =
   in
   let separate_readings =
     wrapped_rows ~width ~label:(text "관측" "Observation") ~tone:`Info
-      (text "인스턴스 목록과 별도 시점 · 소유권 미확인"
+      (text "인스턴스 목록과 별도 시점 · 소유권 보고 안 됨"
          "Separate from the instance listing; ownership unverified.") in
   let inventory_error = match reading.container_error with
     | None -> []
@@ -683,27 +683,27 @@ let status_lines ~ko ~width reading =
   | Kata_not_observed ->
     (match reading.sandbox_profile with
      | Some Micro_vm ->
-       name_row `Warn (text "? 이름 미조회" "? NAME NOT OBSERVED")
+       name_row `Warn (text "◌ 이름 미조회" "◌ NAME NOT READ")
          (text "이름 점유 여부를 확인하지 못했습니다." "Name occupancy was not observed.")
        @ inventory_error
      | Some (Docker | Remote_ssh) | None -> legacy_status_lines ~ko ~width reading)
   | Kata_scoped_name_seen ->
-    name_row `Warn (text "? 동일 인스턴스 미확인" "? INSTANCE MATCH UNCONFIRMED")
+    name_row `Warn (text "▲ 같은 인스턴스인지 알 수 없음" "▲ INSTANCE MATCH UNDETERMINED")
       (text "두 조회에서 같은 이름이 보였지만 동일 인스턴스인지 확인되지 않았습니다."
          "Both readings reported the name; they may describe different instances.")
     @ separate_readings @ inventory_error
   | Kata_unscoped_expected_runtime ->
-    name_row `Warn (text "● 이름 사용 중" "● NAME PRESENT")
+    name_row `Warn (text "▲ 이름 사용 중" "▲ NAME PRESENT")
       (text "예상 런타임이 보고됐지만 소유권은 확인되지 않았습니다."
          "The expected runtime was reported; ownership is unverified.")
     @ separate_readings @ inventory_error
   | Kata_other_runtime ->
-    name_row `Warn (text "● 이름 사용 중" "● NAME PRESENT")
+    name_row `Warn (text "▲ 이름 사용 중" "▲ NAME PRESENT")
       (text "같은 이름에 다른 런타임이 보고됐습니다. 소유권은 확인되지 않았습니다."
          "Another runtime was reported for this name; ownership is unverified.")
     @ separate_readings @ inventory_error
   | Kata_unreported_runtime ->
-    name_row `Warn (text "● 이름 사용 중" "● NAME PRESENT")
+    name_row `Warn (text "▲ 이름 사용 중" "▲ NAME PRESENT")
       (text "같은 이름이 있지만 런타임과 소유권은 확인되지 않았습니다."
          "The name is present, but runtime and ownership are unverified.")
     @ separate_readings @ inventory_error
@@ -718,7 +718,7 @@ let status_lines ~ko ~width reading =
        | Some false | None -> [])
     @ separate_readings @ inventory_error
   | Kata_unavailable ->
-    name_row `Warn (text "? 이름 조회 실패" "? NAME LOOKUP FAILED")
+    name_row `Bad (text "✕ 이름 조회 실패" "✕ NAME LOOKUP FAILED")
       (text "런타임 목록에서 이름 점유 여부를 확인하지 못했습니다."
          "Name occupancy could not be determined from the runtime listing.")
     @ separate_readings @ inventory_error
@@ -745,7 +745,7 @@ let container_lines ~ko ~width reading =
         match container.running with
         | Some true -> tr "실행 관측" "observed running"
         | Some false -> tr "중지 관측" "observed stopped"
-        | None -> tr "상태 미확인" "state unknown"
+        | None -> tr "실행 상태 보고 안 됨" "run state not reported"
       in
       let compute =
         joined_opt
@@ -966,13 +966,13 @@ let partial_view_lines ~sanitize ~ko ~width partial =
         | Inventory_unreported -> wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Warn
             (tr "목록이 보고되지 않음" "Inventory not reported")
         | Remote_execution_unobserved -> wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Info
-            (tr "로컬 인스턴스 없음 · 원격 실행 상태 미관측"
-               "No local instance; remote execution state not observed")
+            (tr "로컬 인스턴스 없음 · 원격 실행 상태 보고 안 됨"
+               "No local instance; remote execution state not reported")
         | Remote_inventory_inconsistent -> wrapped_rows ~width ~label:(tr "상태" "State") ~tone:`Warn
             (tr "원격 프로필과 로컬 목록이 일치하지 않음" "Remote profile and local inventory disagree")
         | Inventory_observed {total; running; unknown} ->
-          let detail = if ko then Printf.sprintf "관측 %d · 실행 %d · 미확인 %d" total running unknown
-            else Printf.sprintf "%d observed · %d running · %d unknown" total running unknown in
+          let detail = if ko then Printf.sprintf "관측 %d · 실행 %d · 보고 안 됨 %d" total running unknown
+            else Printf.sprintf "%d observed · %d running · %d not reported" total running unknown in
           wrapped_rows ~width ~label:(tr "목록" "Inventory") ~tone:`Info detail in
       inventory_header @ summary @ context_rows reading.kata_host_alignment
       @ detail_sections ~ko ~width { reading with kata_name_observation = None; kata_scoped_name_seen = None }
@@ -1201,7 +1201,7 @@ let logs_view_lines ~ko ~width logs =
             match instance.log_instance_running with
             | Some true -> tr "실행 관측" "observed running"
             | Some false -> tr "중지 관측" "observed stopped"
-            | None -> tr "상태 미확인" "state unknown"
+            | None -> tr "실행 상태 보고 안 됨" "run state not reported"
           in
           [ ""
           ; Printf.sprintf "  %s%s%s · %s · %s" Masc_tui_theme.Sgr.bold

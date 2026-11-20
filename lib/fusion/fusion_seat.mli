@@ -4,9 +4,7 @@
     Keeper 배정과 같은 규칙으로 푼다: [\[runtime.lanes.<이름>\]] 이 있으면 그 lane 의
     후보, 없고 런타임 id 이면 그 런타임 하나. 한 자리는 후보를 적힌 순서로 시도하고
     처음 쓸 수 있는 답에서 멈춘다. 실패는 종류와 상관없이 다음 후보로 넘어간다 —
-    Fusion 자리는 답만 내고 밖에 효과를 남기지 않는다.
-
-    설계: docs/rfc/RFC-fusion-seat-routes.md §2.1-2.3 *)
+    Fusion 자리는 답만 내고 밖에 효과를 남기지 않는다. *)
 
 type route_failure =
   | Unknown_route of string  (** 적힌 이름이 로드된 lane 도 런타임도 아니다. *)

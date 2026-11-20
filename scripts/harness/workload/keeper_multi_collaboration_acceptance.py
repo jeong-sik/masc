@@ -665,7 +665,7 @@ class McpClient:
                 and self.session_id is not None
                 and method != "initialize"
             ):
-                # RFC-0100 Q3: the server answers a POST that echoes a
+                # The server answers a POST that echoes a
                 # session id it has no state for with 404 so the client
                 # re-handshakes — and it reaps sessions whose grace period
                 # (MASC_SESSION_SSE_GRACE_PERIOD_SEC, default 300s) elapses
@@ -3706,7 +3706,7 @@ class MissionRun:
                 for role in ("builder-a", "builder-b")
             ),
             "Comment": len(comment_author_hits) >= 3,
-            # masc_fusion_status is keeper-internal (RFC-0266 §7 Phase 3); the
+            # masc_fusion_status is keeper-internal; the
             # operator session cannot poll it (masc#28963/#28960), so Fusion
             # progress is observed only through the researcher keeper's own
             # durable masc_fusion tool-call event.

@@ -34,7 +34,7 @@ let pp_spawn_error fmt = function
    keyed by string left the others silently answering "unknown". The
    commands are each server's documented stdio invocation; on the host this
    was written on, ocamllsp, rust-analyzer, clangd and sourcekit-lsp were
-   present and answered, the rest were not installed (RFC-0429 §1.6, §3.2).
+   present and answered, the rest were not installed.
    An operator who runs a different server for a language points at it in
    runtime.toml; this table is what stands when nothing is said. *)
 type reference_index =

@@ -1,4 +1,4 @@
-// RFC-0050 PR-1 — extracted from cost-dashboard.ts.
+// Extracted from cost-dashboard.ts.
 // Pure data types + guards + route helpers. No render dependencies.
 
 export type ViewMode = 'model' | 'keeper'

@@ -2,9 +2,7 @@
 
     runtime_id → AGENT_CORE [Agent.t] 빌드, [api_response] → 텍스트/usage 추출.
     MASC의 기존 runtime→agent 빌더([Runtime_agent_core_runner] → [Runtime_agent])만
-    감싼다; "fusion" 개념은 AGENT_CORE에 노출하지 않는다.
-
-    설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7 *)
+    감싼다; "fusion" 개념은 AGENT_CORE에 노출하지 않는다. *)
 
 (** The Eio clock AGENT_CORE needs to enforce a requested deadline. Supplying
     [body_timeout_s] without it makes the provider reject the request before
@@ -20,7 +18,7 @@ val deadline_clock : unit -> float Eio.Time.clock_ty Eio.Resource.t option
     Fusion은 transport/body/wall-clock timeout을 합성하지 않고 resolved runtime의
     liveness 계약을 그대로 보존한다.
     [name]은 에이전트 카드명 — [Async_agent.all]이 결과 키로 반환하는 패널 정체성이다
-    (RFC-0278: 같은 model을 다른 라벨로 구분). 미지정이면 카드명=[model]. provider
+    (같은 model을 다른 라벨로 구분). 미지정이면 카드명=[model]. provider
     라우팅은 카드명과 무관하게 [model]로 한다.
     [provider_config_transform]은 panel/judge처럼 provider-native structured-output
     설정이 필요한 호출자가 resolved provider config를 agent build 전에 보강하는
@@ -79,7 +77,7 @@ val panel_failure_detail : runtime_id:string -> Fusion_types.panel_failure -> st
 
 (** 이미 attribution된 실패를 재-attribution 없이 렌더 (sink 표시용). Provider_error는
     detail 그대로(실패 시점에 raw model로 정규화됨), Timeout/Bridge/Empty는 사람용 문자열.
-    panelist 정체성을 [Provider '...'] 슬롯에 다시 입히지 않는다 (RFC-0278). *)
+    panelist 정체성을 [Provider '...'] 슬롯에 다시 입히지 않는다. *)
 val panel_failure_text : Fusion_types.panel_failure -> string
 
 (** Empty text response diagnostics. This records stop_reason, token usage, and

@@ -242,8 +242,7 @@ let with_execution_workspace f =
         ignore (Workspace.init config ~agent_name:None);
         Dashboard_projection_cache.register_operator_snapshot_json
           {snapshot = Operator_control.snapshot_read};
-        Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURES_ENABLED" (Some "false") (fun () ->
-          Masc_test_deps.with_process_env "MASC_DASHBOARD_FIXTURE" None (fun () -> f env state))))
+        f env state))
 ;;
 
 let subscribe_execution_frames ~state ~sw ~id consume =

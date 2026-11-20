@@ -113,7 +113,7 @@ let with_env key value f =
 
 let translate_agent_core_stream ?base_dir events =
   let redact_text text = text in
-  (* RFC-0301: [translate] persists model-generated media under [base_dir]; the
+  (* [translate] persists model-generated media under [base_dir]; the
      unique temp dir keeps generated media from leaking across test runs. *)
   let cleanup, base_dir =
     match base_dir with
@@ -2627,7 +2627,7 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_core.Types in
   let raw_media = "raw image bytes" in
   let encoded_media = Base64.encode_string raw_media in
-  (* RFC-0301: media chunks are accumulated and surfaced as a single
+  (* Media chunks are accumulated and surfaced as a single
      [Agent_core_media_delta] carrying the persisted media URL at the block stop, not a
      per-chunk byte count. A lone [MediaDelta] therefore emits nothing until its
      [ContentBlockStop] closes the block. *)
@@ -3801,7 +3801,7 @@ let test_direct_reply_terminal_error_rejects_no_visible_reply () =
     Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
       (Some payload_json) ""
   in
-  (* The answer is the constructor, not a sentence (RFC-0454 D2). *)
+  (* The answer is the constructor, not a sentence. *)
   match err with
   | Some
       (Keeper_request_failure.No_visible_reply
@@ -4229,7 +4229,7 @@ let test_chat_speaker_of_request_connector_is_external () =
   check bool "connector speaker authority is external" true
     (speaker.speaker_authority = Keeper_chat_store.External)
 
-(* RFC-0468 §3.2: another Keeper's masc_keeper_msg arrives on the agent
+(* Another Keeper's masc_keeper_msg arrives on the agent
    channel with no connector speaker. The typed sender is what keeps it from
    reading as the operator. *)
 let test_chat_speaker_of_request_sender_keeper_is_keeper () =
@@ -4256,7 +4256,7 @@ let test_chat_speaker_of_request_agent_channel_without_sender_is_owner () =
   check bool "agent channel without sender stays owner" true
     (speaker.speaker_authority = Keeper_chat_store.Owner)
 
-(* RFC-0468 §3.2: the speaker the turn stamps on its User message comes from
+(* The speaker the turn stamps on its User message comes from
    the same typed request as the chat row's speaker, case for case. *)
 let test_input_speaker_of_request_matches_chat_speaker () =
   let keeper_id =

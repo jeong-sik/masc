@@ -11,6 +11,17 @@ type t = private
   | Gemini_generate_content
   | Glm_chat
 
+val anthropic_messages : t
+val openai_chat : t
+val openai_responses : t
+val ollama_chat : t
+val gemini_generate_content : t
+val glm_chat : t
+
+(** Single mapping from wire codec to the {!Types.output_token_envelope}
+    carried in request bodies and {!Input_budget} calculations. *)
+val output_token_envelope : t -> Types.output_token_envelope
+
 type json_schema_wire =
   | Raw_schema
   | Openai_named_schema

@@ -230,26 +230,38 @@ let mixed_block () =
   @ [ ended ~completion:result_not_error "Read"; ended ~completion:result_not_error "Read"
     ; ended ~completion:result_without_flag "Search" ]
 
-(* Both projections draw the header through the same clause function, so
-   neither can keep drawing a clause per call while the other groups. *)
+(* Full keeps every grouped native status clause in its header; Compact keeps
+   the inline header free of benign native completion trailers so only errors
+   or expanded views draw verbose wire-protocol status text. *)
 let test_compact_and_full_headers_draw_the_shared_clauses () =
   let activities = mixed_block () in
   let groups = Transcript.group_native_statuses activities in
   check int "three groups for sixteen calls" 3 (List.length groups);
+  let full_projection =
+    Transcript.project_tool_block Transcript.Full (Transcript.tool_block activities)
+  in
+  let full_header =
+    match full_projection.Transcript.header with Some header -> header | None -> fail "no header"
+  in
   List.iter
-    (fun mode ->
-      let projection =
-        Transcript.project_tool_block mode (Transcript.tool_block activities)
-      in
-      let header = match projection.Transcript.header with Some header -> header | None -> fail "no header" in
-      List.iter
-        (fun group ->
-          let clause = Transcript.native_status_clause group in
-          check int "each clause appears once in the header" 1 (count_occurrences ~needle:clause header))
-        groups;
-      check int "the status wording is drawn once per distinct report, not per call" 2
-        (count_occurrences ~needle:(Transcript.native_completion_status result_without_flag) header))
-    [ Transcript.Compact; Transcript.Full ]
+    (fun group ->
+      let clause = Transcript.native_status_clause group in
+      check int "each clause appears once in the Full header" 1 (count_occurrences ~needle:clause full_header))
+    groups;
+  check int "the status wording is drawn once per distinct report in Full, not per call" 2
+    (count_occurrences ~needle:(Transcript.native_completion_status result_without_flag) full_header);
+  let compact_projection =
+    Transcript.project_tool_block Transcript.Compact (Transcript.tool_block activities)
+  in
+  let compact_header =
+    match compact_projection.Transcript.header with Some header -> header | None -> fail "no header"
+  in
+  List.iter
+    (fun group ->
+      let clause = Transcript.native_status_clause group in
+      check int "benign native status clause is omitted from Compact header" 0
+        (count_occurrences ~needle:clause compact_header))
+    groups
 
 (* A compact block of trouble calls gets a line of its own; that line goes
    through the same function. *)

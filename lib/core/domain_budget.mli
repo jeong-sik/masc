@@ -1,4 +1,4 @@
-(** How many domains each executor pool of the server gets (RFC-0474 L1).
+(** How many domains each executor pool of the server gets.
 
     OCaml 5 collects minor heaps with a stop-the-world barrier that every
     domain joins, so one descheduled or sleeping domain delays every
@@ -12,7 +12,7 @@
     {!Systhread_host} domain, the Keeper snapshot codec and, when enabled, the
     serving domain. What is left goes to three pools: Agent Core's execution
     codec runtime gets {!execution_codec_domains}, the HTTP read pool
-    (RFC-0204 L3) gets {!read_pool_domains}, the shared masc pool gets the
+    gets {!read_pool_domains}, the shared masc pool gets the
     rest. *)
 
 type plan = private

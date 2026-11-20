@@ -187,7 +187,6 @@ let test_a_cancelled_queued_submission_is_abandoned () =
     check int "one abandoned submission" 1 (abandoned_after - abandoned_before))
 ;;
 
-(* RFC-0474 L4a. *)
 let in_flight_wait_counts lane_name =
   member [ lane_name; "wait_by_in_flight_workers" ] (Pool_wait.to_json ())
   |> Yojson.Safe.Util.to_list
@@ -246,7 +245,6 @@ let test_a_job_that_raises_leaves_no_weight_in_flight () =
     check (float 0.) "the weight left with the job" before (in_flight_workers "read"))
 ;;
 
-(* RFC-0474 L4c. *)
 let named lane_name name =
   member [ lane_name; "by_name" ] (Pool_wait.to_json ())
   |> Yojson.Safe.Util.to_list

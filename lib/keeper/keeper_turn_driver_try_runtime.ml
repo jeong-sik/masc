@@ -43,7 +43,7 @@ let api_error_of_error = function
    declared candidate can serve the request. This is not a retry of the same
    credential: the driver still requires its caller and effect-disposition
    authorities before advancing to the next candidate. A 402 is the same
-   kind of fact about the binding's account (RFC-0440 §3): it cannot pay, so
+   kind of fact about the binding's account: it cannot pay, so
    the walk moves on; [Error_domain.is_retryable] still refuses a retry of the
    same candidate, and the quota window records the exhaustion. A 404 is the
    same kind of fact about the binding's model: this candidate cannot serve a

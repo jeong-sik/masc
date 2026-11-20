@@ -967,7 +967,7 @@ let test_binding_source_change_respects_active_replay () =
       ~replay:Llm_provider.Capabilities.Force_preserve_with_request_tools "https://target.example" in
   rejected (validate request_tools (base @ [Types.user_msg "next query"]));
   (* Anthropic selects every assistant but requires thinking back only in
-     the exchange the latest caller query opened (RFC-0507). *)
+     the exchange the latest caller query opened. *)
   let anthropic = anthropic_target () in
   rejected (validate anthropic base);
   (* The refusal keeps the producer and the target apart, in that order. *)
@@ -1129,8 +1129,7 @@ let test_binding_source_change_rejects_invalid_provenance () = with_net (fun net
 (* The 11-06 lane move: Keepers moved onto Claude carried finished turns that
    qwen, deepseek and glm produced, and every turn was refused before any
    request left. Those turns now go out without the foreign reasoning and with
-   their text, tool calls and results; Claude's own thinking is not invented
-   (RFC-0507). *)
+   their text, tool calls and results; Claude's own thinking is not invented. *)
 let test_binding_anthropic_sends_finished_foreign_turns () = with_net (fun net ->
   Eio.Switch.run (fun sw ->
     let producers =
@@ -1205,8 +1204,8 @@ let test_binding_anthropic_sends_finished_foreign_turns () = with_net (fun net -
 ;;
 
 (* A caller query after an answered foreign tool call, with no assistant reply
-   in between, closes that exchange by the same rule selection uses
-   (RFC-0507 §3.2). The request goes out with the call and its result and
+   in between, closes that exchange by the same rule selection uses.
+   The request goes out with the call and its result and
    without the foreign reasoning. *)
 let test_binding_anthropic_sends_answered_foreign_tool_call () = with_net (fun net ->
   Eio.Switch.run (fun sw ->

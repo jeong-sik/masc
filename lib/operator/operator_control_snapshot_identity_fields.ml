@@ -16,7 +16,7 @@ let keeper_runtime_identity_fields (meta : Keeper_meta_contract.keeper_meta) =
   let runtime_id_json =
     Json_util.string_opt_to_json (non_empty_trimmed_string_opt runtime_id)
   in
-  (* RFC-0149 §3.3 — use the Result-returning resolver so an unresolved
+  (* Use the Result-returning resolver so an unresolved
      runtime surfaces as the original input on the canonical fields
      (matching the degraded-fallback shape below) instead of the silent
      [Keeper_turn] default the legacy [resolve_live] would have written. *)

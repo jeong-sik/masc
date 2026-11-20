@@ -137,7 +137,6 @@ let who_may_write_what () =
     ; "the local operator", Author.Local_operator, "not a registration author"
     ; "system cron", Author.System_cron, "not a registration author"
     ; "system maintenance", Author.System_maintenance, "not a registration author"
-    ; "system migration", Author.System_migration, "not a registration author"
     ];
   let t = apply_ok ~author:carol open_one (removed ()) in
   check_status "an Admin removes what another registered" t first "removed"

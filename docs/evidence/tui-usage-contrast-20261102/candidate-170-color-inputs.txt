@@ -1,7 +1,0 @@
-colon
-go_usage
-enter
-x
-snapshot plan170shown
-q
-q

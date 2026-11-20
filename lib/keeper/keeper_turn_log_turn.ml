@@ -89,7 +89,7 @@ let stimulus (queued : Keeper_event_queue.stimulus) : Turn_log.stimulus =
   | Schedule_due { schedule_id; occurrence_id; _ } ->
     Schedule { schedule = schedule_id; occurrence = occurrence_id }
   | Connector_attention { event_id; channel = (_ : Keeper_continuation_channel.t) } ->
-    Connector { event = event_id }
+    Connector { attention = event_id }
   | Hitl_resolved { approval_id; _ } -> Hitl { approval = approval_id }
   | Ask_answered { ask_id; channel = (_ : Keeper_continuation_channel.t) } -> Ask { ask = ask_id }
   | Completion_authority_rejected { car_task_id; car_verification_id; car_authority; _ } ->

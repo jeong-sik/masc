@@ -1,7 +1,0 @@
-{
-  "status": 409,
-  "body": {
-    "ok": false,
-    "error": "goal_measurement: success criterion changed"
-  }
-}

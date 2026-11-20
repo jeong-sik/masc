@@ -21,7 +21,7 @@ let head_of_bytes_off_scheduler (content : string) =
   offload_checkpoint_cpu (fun () -> Objects.head_of_string content)
 
 (* The objects a head names are read and decoded in the same pool job as the
-   head (RFC-0476 §3.5). [memo] then holds the loaded messages. *)
+   head. [memo] then holds the loaded messages. *)
 let decode_head_off_scheduler ~session_dir ~memo (content : string) :
     (Objects.head * Agent_core.Checkpoint.t, Objects.load_error) result =
   offload_checkpoint_cpu (fun () ->

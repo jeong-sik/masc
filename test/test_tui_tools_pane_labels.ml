@@ -135,7 +135,7 @@ let usage_state () =
 let ready rows = Ok (Masc.Tui_decode_tools.Keeper_usage_ready rows)
 
 (* The Usage pane joins each Keeper's own usage answer to the catalog by
-   exact reference (RFC-0483) and counts the ledgers it read. *)
+   exact reference and counts the ledgers it read. *)
 let test_usage_pane_joins_each_keepers_answer () =
   let state = usage_state () in
   record_keeper_skill_usage state ~keeper:"bravo" (ready [ usage_row 3 ]);
@@ -207,7 +207,8 @@ let test_readings_and_failures_belong_to_their_keeper () =
   Alcotest.(check bool) "a no-Keeper reading once one is selected" true
     (held ~selected:(Some "a") (Some Activations_no_keeper) None);
   Alcotest.(check bool) "nothing held yet" false (held ~selected:(Some "a") None None);
-  let waiting = Masc_tui_owed_read.Waiting { failures = 3; retry_at = 100. } in
+  let waiting = Masc_tui_owed_read.Waiting
+      { failures = 3; retry_at = Masc_tui_wake.Mono.after (Masc_tui_wake.Mono.now ()) 100. } in
   let failures = function
     | Masc_tui_owed_read.Reading { failures; _ } -> failures
     | Masc_tui_owed_read.(Settled | Owed _ | Waiting _) -> Alcotest.fail "the read did not start"

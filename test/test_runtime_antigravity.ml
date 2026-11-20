@@ -1093,7 +1093,7 @@ let test_isolated_home_replaces_inherited_directory_roots () =
           | Ok _ -> ()))
 ;;
 
-(* RFC-0490 §2.4: every agy masc launches gets the one value that stops its
+(* Every agy masc launches gets the one value that stops its
    self-update, even when the operator's shell sets another. *)
 let test_environment_turns_off_agy_auto_update_once () =
   let key = "AGY_CLI_DISABLE_AUTO_UPDATE" in
@@ -1620,7 +1620,7 @@ let test_unstreamed_text_before_a_refusal_is_not_replayed () =
 ;;
 
 (* agy's closing stderr sentence for a refused read. Its opening is the
-   sentence docs/evidence/2026-11-05-antigravity-mcp-tool-budget recorded and
+   sentence recorded on 2026-11-05 and
    its last 200 bytes are the tail #50291 quoted from a Keeper turn on
    2026-11-09; the two overlap at "for, so it was auto-denied". *)
 let refused_read_stderr =

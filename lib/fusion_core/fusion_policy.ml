@@ -2,13 +2,13 @@
    계약/문서: fusion_policy.mli, docs/rfc/RFC-0252 §6 *)
 
 (* 한 패널 그룹 — 공통 system_prompt/web_tools 설정으로 실행되는
-   모델 묶음. 한 preset이 이종(heterogeneous) 그룹 여럿을 가질 수 있다(RFC-0252-A).
+   모델 묶음. 한 preset이 이종(heterogeneous) 그룹 여럿을 가질 수 있다.
    닫힌 record (option-dual 없음); preset이 [panel_group list]를 deriving하므로
    nested deriving 필수. *)
 type panel_group =
   { models : string list  (** provider.model ids *)
   ; label : string
-      (** 패널 정체성 라벨 (RFC-0278). 같은 model을 다른 system_prompt로 여러 그룹에
+      (** 패널 정체성 라벨. 같은 model을 다른 system_prompt로 여러 그룹에
           둘 때(identity ensemble) 패널을 구분한다. ""(기본)이면 정체성=model 그대로
           → legacy/단일-occurrence는 byte-identical. 정체성 derive는 [panelist_id]. *)
   ; system_prompt : string  (** 그룹 패널 모델 system prompt (config 필수) *)
@@ -20,7 +20,7 @@ type panel_group =
   }
 [@@deriving show, eq]
 
-(* JOJ(judge-of-judges, RFC-0283)의 1차 심판 한 명. panel_group과 동형이되 model이
+(* JOJ(judge-of-judges)의 1차 심판 한 명. panel_group과 동형이되 model이
    복수가 아니라 단수다 (심판은 한 모델이 한 종합을 낸다). [label]로 같은 model을 다른
    lens(system_prompt)로 여러 1차 심판에 둘 수 있다 (judge_id로 정체성 derive). *)
 type judge_spec =
@@ -38,14 +38,14 @@ type preset =
   { name : string
   ; panels : panel_group list
   ; judge : string
-      (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). (RFC-0283) *)
+      (** simple/refine/conditional 심판이자 JOJ의 meta-judge(reducer). *)
   ; judge_system_prompt : string
   ; judge_max_output_tokens : int option
   ; judge_timeout_s : float option
       (** 심판(single/refine/meta/stage-meta 및 [jtimeout_s] 없는 1차 심판)의 응답
           데드라인(초). [None]이면 런타임/provider 설정. *)
   ; judges : judge_spec list
-      (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
+      (** JOJ 1차 심판들. 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
   ; min_answered : int
       (** 심판 실행에 필요한 응답 패널 최소 수 (런타임 quorum). 기본 1. *)
@@ -105,7 +105,7 @@ let map_seat_routes f (p : preset) =
    관측하며, 다른 provider와 heterogeneous panel 구성은 계속 실행된다. *)
 let preset_has_models (p : preset) = preset_models p <> []
 
-(* 패널 정체성 (RFC-0278). label이 비면 model 그대로(legacy byte-identity), 있으면
+(* 패널 정체성. label이 비면 model 그대로(legacy byte-identity), 있으면
    "label (model)". 이 문자열이 패널의 유일 식별자다: agent 카드명(Async_agent.all
    반환 키) · 심판이 보는 패널 태그 · panel_answer.model 값. label은 model을 압축하지
    않고 포함하므로 정보 손실이 없다 — provider 라우팅은 group.models의 원 model로
@@ -126,7 +126,7 @@ let preset_panelist_ids (p : preset) =
    세 경우를 모두 흡수한다: (a) 한 그룹 내 같은 model (label 동일 → 같은 id),
    (b) 라벨 없는 두 그룹의 같은 model (둘 다 id=model), (c) 같은 라벨+같은 model.
    서로 다른 라벨이면 같은 model이라도 정체성이 달라 통과(same-model-different-prompt).
-   (RFC-0278: parse-time 거부.)
+   (parse-time 거부.)
 
    dedup은 (label, model) 튜플이 아니라 *렌더된 정체성 문자열*에 건다. 이게 옳은 이유:
    심판/sink/dashboard가 보는 namespace가 정확히 이 정체성 문자열이기 때문이다. panelist_id
@@ -157,7 +157,7 @@ let preset_prompts_present (p : preset) =
    load 단계에서 fail-fast (Unknown→Permissive 회피). *)
 let preset_judge_present (p : preset) = String.length (String.trim p.judge) > 0
 
-(* JOJ 1차 심판들의 정체성 (RFC-0283). 정체성 포맷은 [panelist_id]를 그대로 쓴다
+(* JOJ 1차 심판들의 정체성. 정체성 포맷은 [panelist_id]를 그대로 쓴다
    (label+model → 식별 문자열, SSOT 한 곳). 입력순 보존 = meta 프롬프트 attribution 순서. *)
 let preset_judge_ids (p : preset) =
   List.map
@@ -256,7 +256,7 @@ let staged_judge_groups ~group_size judges =
 let judge_web_tools_of ~req_web_tools (groups : panel_group list) =
   req_web_tools || List.exists (fun (g : panel_group) -> g.web_tools) groups
 
-(* RFC-0280: 검증된 preset을 타입으로 증명한다 (Parse, don't validate).
+(* 검증된 preset을 타입으로 증명한다 (Parse, don't validate).
    [Validated_preset.t = private preset]이라 외부는 필드를 읽되([preset]/coercion)
    검증 없이 생성할 수 없다 → invalid preset이 게이트·orchestrator로 흐를 수 없다.
    검증 SSOT는 [of_preset] 한 곳 — 호출처(게이트)가 재검증하지 않는다. *)
@@ -274,15 +274,15 @@ module Validated_preset = struct
         (** 그룹/심판 출력 토큰 예산 override가 양수가 아님 *)
     | Bad_timeout_s of float
         (** 그룹/심판 응답 데드라인이 유한 양수가 아님 *)
-    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 (RFC-0283) *)
-    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) (RFC-0283) *)
+    | Judge_panel_prompt_missing  (** JOJ 1차 심판 system prompt 비어있음 *)
+    | Duplicate_judge of string  (** 두 JOJ 1차 심판이 같은 정체성(judge_id) *)
     | Min_answered_below_min of int
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
 
   (* 검증 순서는 config 로드 시점과 동일: model presence → 패널 prompt →
-     judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 → (RFC-0283)
+     judge model → 패널 정체성 중복 → 패널 max_output_tokens 범위 →
      1차 심판 prompt → 1차 심판 정체성 중복 → 심판 max_output_tokens 범위 → min_answered.
      judges=[]면 1차 심판 관련 셋은 통과(simple/refine/conditional preset은 기존과 동일
      결과 = byte-identity). *)
@@ -406,7 +406,7 @@ let effective_preset ~(policy : t) ~preset ~roster =
 
 (* decide는 enabled/preset/depth의 구조적 판정만 담당한다 — "이 턴이 심의할 가치가
    있나"는 게이트가 score 비교나 문자열 매칭으로 판정하지 않고, 키퍼(이미 LLM)가
-   판단해 masc_fusion을 호출하는 것으로 표현한다(RFC-0252 §6). 따라서 [req.trigger]는
+   판단해 masc_fusion을 호출하는 것으로 표현한다. 따라서 [req.trigger]는
    발동 이유 라벨일 뿐 적격성 판정에 쓰이지 않는다.
    size 재검증은 없다 — [find_preset]이 [Validated_preset.t]를 돌려주므로 size는
    타입으로 증명됨 (RFC-0280, 기존 dead 재검증 제거). *)

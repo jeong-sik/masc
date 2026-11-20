@@ -4,10 +4,10 @@ status: live
 
 # Product Operating Plan
 
-> Current package version: v0.73.1
-> Latest changelog entry: v0.73.1 (2026-11-18)
+> Current package version: v0.74.0
+> Latest changelog entry: v0.74.0 (2026-11-19)
 > Latest published GitHub release: v0.73.1 (2026-11-18)
-> Updated: 2026-11-18
+> Updated: 2026-11-19
 > Release line: pre-1.0 (`0.y.z`)
 
 ## Product Scope
@@ -33,12 +33,12 @@ The front-door promise is level 1. Levels 2-3 are supported surfaces.
 | Workspace and task hygiene | Done | Front door | `README.md`, `docs/spec/01-system-overview.md` | docs were too spread out | keep as default entry path |
 | Worktree and collision control | Done | Front door | README, workspace/tool coverage, live usage | onboarding clarity | keep in front-door docs |
 | Supervised execution + Supervisor | Working | Advanced | `docs/SUPERVISOR-MODE.md` | still not the safest starting path | present as advanced flow |
-| Keeper continuity | Working | Advanced | `docs/KEEPER-STATE-OWNERSHIP.md`, `docs/KEEPER-CONTINUITY-VALIDATION.md` | live restore and independent-lane evidence must remain observable | validate typed checkpoint restore and domain receipts with the runbook |
+| Keeper continuity | Working | Advanced | `docs/KEEPER-STATE-OWNERSHIP.md` | live restore and independent-lane evidence must remain observable | validate typed checkpoint restore and domain receipts |
 | Terminal UI | Working | Front door | `README.md`, `docs/TUI-GUIDE.md` | surfaces and keys still change on `main` | keep every operator action reachable from the TUI |
 | Dashboard core read models | Working | Maintained | `docs/DASHBOARD-INTEGRATION.md` | transport truth and config visibility gaps | keep it building, type-checked, and truthful; new operator features land in the TUI first |
 | Remote-safe operator | Working | Supporting | `docs/spec/09-server-transport.md`, `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` | auth and release posture still need tightening | keep surface reduced and explicit |
 | Multi-transport matrix | Working but not front-door | Experimental | implementation status appendix, live transport issues | reachable state and reported state can diverge | fix health truth before promotion |
-| Auth and API contract posture | Not done for product promise | Advanced / supporting | `docs/PRODUCT-REVIEW.md` | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
+| Auth and API contract posture | Not done for product promise | Advanced / supporting | — | non-local default is still too weak, REST contract is not crisp | design + narrow hardening slices |
 | Config introspection | Working | Supporting | `masc_config`, `/api/v1/runtime/resolved`, `/api/v1/runtime/config/raw` | dashboard and MCP config read surfaces coexist | keep runtime config read/write contracts consistent |
 | Release evidence and local proof | Working | Front door | `docs/RELEASE-EVIDENCE.md`, `scripts/release-evidence.sh`, release workflow artifact | deployment-specific proof is still env-gated | keep release/main evidence bundle attached to artifacts |
 | Release and doc truth | Working | Front door | doc truth lane + version truth + agent core pin doc sync | release/doc changes previously bypassed runtime gates | keep build/lint/health tied to release/doc/version changes |

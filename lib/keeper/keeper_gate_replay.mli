@@ -1,4 +1,4 @@
-(** RFC-0356: an approval owns its effect.
+(** An approval owns its effect.
 
     A Gate approval authorizes one exact operation identity and canonical
     complete input. Before this module, the only way that authorization

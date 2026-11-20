@@ -79,7 +79,7 @@ let render_judge (j : Fusion_types.judge_synthesis) : string =
   add (Printf.sprintf "**Decision**: %s\n" (render_decision decision));
   Buffer.contents buf
 
-(* RFC-0252 §7/§8 — board meta_json의 judge 원소에서 구조화 종합(5섹션 + recommend/
+(* Board meta_json의 judge 원소에서 구조화 종합(5섹션 + recommend/
    missing)을 보존한다. 프론트(FusionJudgeEvidence, keeper-v2 fusion.jsx)가
    consensus/contradictions/partial_coverage/unique_insights/blind_spots 섹션을
    렌더하려면 이 필드들이 JSON에 있어야 한다 — synthesis markdown만 내보내면
@@ -153,7 +153,7 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
     let reason_code = Fusion_agent_core.panel_failure_code reason in
     (* reason detail은 실패 시점에 raw model로 이미 attribution됐다. 여기서
        ~runtime_id:failed_model(=panelist)로 재-attribution하면 "skeptic (claude)"
-       같은 정체성이 provider 슬롯에 새거나 중복 prefix가 붙는다 (RFC-0278). *)
+       같은 정체성이 provider 슬롯에 새거나 중복 prefix가 붙는다. *)
     let reason_detail = Fusion_agent_core.panel_failure_text reason in
     `Assoc
       [ ("model", `String failed_model)
@@ -166,7 +166,7 @@ let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
 
 (* judge_synthesis → board meta_json 필드 리스트 (status/decision/resolved_answer/
    synthesis + 구조화 5섹션 + decision-variant 최상위 recommend|missing). judge_meta
-   (canonical [judge] 키)와 judge_node_meta(관측 [judges] 배열, RFC-0284)가 공유한다 —
+   (canonical [judge] 키)와 judge_node_meta(관측 [judges] 배열)가 공유한다 —
    같은 5섹션 직렬화(키 매핑 gap_topic→topic 등)를 두 번 짜면 한쪽만 회귀하므로 추출
    (N-of-M 회피). test_fusion_sink_meta.ml이 이 매핑을 핀한다. *)
 let judge_synthesis_fields (j : Fusion_types.judge_synthesis) :
@@ -215,7 +215,7 @@ let judge_meta (judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failur
       ; ("failure_code", `String (Fusion_types.judge_failure_tag f))
       ]
 
-(* 심판 노드의 위상 역할/정체성 → board meta_json 필드 (RFC-0284). [role]은 위상 의미
+(* 심판 노드의 위상 역할/정체성 → board meta_json 필드. [role]은 위상 의미
    (single/refine/first/meta/stage_meta/final_meta), [identity]는 [First]면 panelist_id(panel
    model과 대칭), [Stage_meta n]이면 stage-n. 프론트는 role로 노드 종류를, identity로 1차
    심판·stage를 구분해 위상 이름 없이 배열 shape만으로 구조를 렌더한다. *)
@@ -359,7 +359,7 @@ let seat_route_meta (route : Fusion_types.seat_route) : Yojson.Safe.t =
                 route.failed_attempts) )
        ])
 
-(* 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로 (RFC-0284). panel_meta와
+(* 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로. panel_meta와
    동형: [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별 실측 usage,
    [Judge_failed] → role/identity + status="failed" + error + 노드별 실측 usage(RFC-0284 E:
    실패한 심판도 토큰을 태웠으면 관측 record에 비용을 남긴다). *)
@@ -445,14 +445,14 @@ let terminal_of_delivery_failure failure ~content =
   | Evidence_unreadable _ ->
     Keeper_event_queue.Fusion_failed content
 
-(* RFC-0266: 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
+(* 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.
    board post + chat append(영속)와 별개로, 잠든(Running) 키퍼를 즉시 깨워
    resolved_answer가 다음 턴의 actionable 입력으로 도착하게 하는 hint+payload 경로다.
    예외 안전: registry 문제로 sink 결과/실패 알림이 오염되면 안 되므로 자체 흡수하되
    Eio 구조적 취소(Cancelled)는 재전파한다(record_recovery_stimulus_turn_started 패턴).
    Paused 키퍼는 강제 재개하지 않는다(board wake와 동일 보수적 기본값, wakeup_keeper가
    Running 항목만 깨움) — 결과는 board/chat 영속으로 남는다. *)
-(* RFC-0266 §7 Phase 4: push the registry delta to the dashboard fusion-runs
+(* Push the registry delta to the dashboard fusion-runs
    panel so a [Running] card flips to completed/failed live (no polling). Reads
    the canonical run back from the registry and serializes it through the shared
    [Fusion_run_registry.run_to_yojson] so the SSE payload matches the HTTP list
@@ -641,7 +641,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
            ; ("started_at", `Float started_at)
            ; ("panel", `List (List.map panel_meta panel))
            ; ("judge", judge_meta judge)
-             (* RFC-0284: 실행된 심판 노드 관측 배열 (panel과 동형). 기존 단일 [judge]
+             (* 실행된 심판 노드 관측 배열 (panel과 동형). 기존 단일 [judge]
                 키는 canonical로 ADDITIVE 유지(구 프론트/디스크 reader 호환) — 제거는
                 후속 마이그레이션. 대시보드는 이 배열 shape로 위상 구조를 렌더한다. *)
            ; ("judges", `List (List.map judge_node_meta judges))
@@ -656,7 +656,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
     in
     (* board post를 *먼저* 만들어 post id를 확보한다 — 이 id가 키퍼 chat의 fusion block
        lazy-fetch 키이기 때문이다(대시보드가 board meta_json에서 패널/심판을 펼친다). *)
-    (* RFC-0233 §7: typed origin. [fusion_run_id] is the sole run identity and
+    (* Typed origin. [fusion_run_id] is the sole run identity and
        indexes [posts_by_run_id]. The optional source context carries the
        actual originating turn across the server-root-switch fork. Unattributed
        requests keep [None]; no turn is reconstructed at publication time. *)
@@ -740,7 +740,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
         ~keeper_name:keeper ~delivery_key ~content ?blocks ()
       |> Result.map (fun (_ : Keeper_chat_store.append_once_result) -> ())
     in
-    (* RFC-0266 (개정, board best-effort): completion 여부는 *키퍼가 결론을 받았는가*
+    (* Completion 여부는 *키퍼가 결론을 받았는가*
        (chat lane)로 판정한다. board post는 증거 카드일 뿐이므로 그 생성 실패는 fatal이
        아니다. chat lane append가 성공하면 board 결과와 무관하게 여기서 한 번
        mark_completed/broadcast/wake 한다: board Ok면 카드 post id를, board Error면
@@ -762,7 +762,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
              (Board.Post_publication_failure.to_string e);
            ""
        in
-       (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake 직전 무조건 호출.
+       (* registry를 Completed로 갱신(가시성). wake 직전 무조건 호출.
           실패 시 사유/태그를 함께 기록해 masc_fusion_status·SSE가 opaque
           "failed"가 되지 않게 한다. *)
        let wake_result =

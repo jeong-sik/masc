@@ -19,7 +19,7 @@ let system_prompt_body () : string =
       "keeper_prompt: observed an empty shared [keeper] body; empty primary prompts are refused");
   render_instruction Prompt_names.keeper []
 
-(* RFC-0491 §3.2: a System rendered with older articles travels with this
+(* A System rendered with older articles travels with this
    block, which says how the articles held now differ from its [<norms>]. A
    section is rendered only when it has lines. *)
 let constitution_amendments_block (amendments : World_constitution_render.amendments) =
@@ -68,7 +68,7 @@ let build_keeper_system_prompt
   let worldview_block =
     String.trim (render_instruction Prompt_names.keeper_worldview []) ^ "\n\n"
   in
-  (* The world's own articles (RFC-0442). Every keeper in a world reads the
+  (* The world's own articles. Every keeper in a world reads the
      same ones, so this sits ahead of the keeper-specific blocks and the shared
      prefix stays maximal. A world that has written none renders nothing, which
      is why adding this moved no bytes for worlds that do not use it. *)

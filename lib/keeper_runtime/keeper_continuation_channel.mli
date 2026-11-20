@@ -135,7 +135,7 @@ val describe : t -> string
 val same_route : t -> t -> bool
 
 (** [same_conversation a b] is [true] when two channels identify the same
-    connector conversation for stimulus-batching purposes (RFC-0377): same
+    connector conversation for stimulus-batching purposes: same
     channel/thread location, regardless of which specific message a reply
     would target. This is deliberately looser than {!same_route}: Discord's
     [reply_to_message_id] and Slack's [thread_ts] are stamped per inbound

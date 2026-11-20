@@ -418,7 +418,7 @@ let handle_read_file_with_preparation
         }
     in
     let run_read () =
-      (* RFC-0006 Phase B-1: Docker keepers are always contained to their
+      (* Docker keepers are always contained to their
          playground bundle on the host before any read-side I/O proceeds.
          The resolver-level sandbox_roots check is augmented by this
          strict containment so host FS cannot leak through Read

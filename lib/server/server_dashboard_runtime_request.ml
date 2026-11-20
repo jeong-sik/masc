@@ -5,8 +5,8 @@ type runtime_route_lane =
   | Runtime_media_failover
   | Runtime_named_lane of string
       (** A name {!Runtime.resolve_assignment} knows: a declared
-          [\[runtime.lanes."<id>"\]] lane, whose name is the operator's own
-          (RFC-0457), or a configured runtime id, whose order a [set] writes as
+          [\[runtime.lanes."<id>"\]] lane, whose name is the operator's own,
+          or a configured runtime id, whose order a [set] writes as
           a lane of that id. *)
   | Runtime_exact_lane of Runtime.exact_lane
       (** A [\[runtime.exact_output_lanes.<id>\]] walk order, one of the

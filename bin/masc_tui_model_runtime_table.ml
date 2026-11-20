@@ -96,32 +96,44 @@ let toml_key name =
 
 let section head model = Printf.sprintf "[%s.%s]" head (toml_key model)
 
-let detail_lines ?account_email ?keepers row =
+let detail_lines ?(ko = false) ?account_email ?keepers row =
   let api_name, api_note =
     match row.api_name with
-    | Some api when not (String.equal api row.model) -> api, " (api-name override)"
-    | Some api -> api, " (same as binding)"
-    | None -> row.model, " (default; api-name key absent)"
+    | Some api when not (String.equal api row.model) ->
+        api, if ko then " (api-name 재정의)" else " (api-name override)"
+    | Some api ->
+        api, if ko then " (바인딩과 동일)" else " (same as binding)"
+    | None ->
+        row.model, if ko then " (기본값 · api-name 미지정)" else " (default; api-name key absent)"
   in
   let account =
     (match account_email with
-     | Some email -> [ Printf.sprintf "Account: %s" email ]
+     | Some email ->
+         [ Printf.sprintf (if ko then "계정: %s" else "Account: %s") email ]
      | None -> [])
     @ (match row.same_login with
        | [] -> []
        | others ->
-         [ Printf.sprintf "Same login as %s (shared account-home)"
+         [ Printf.sprintf
+             (if ko then "같은 로그인 공유: %s (공유 account-home)"
+              else "Same login as %s (shared account-home)")
              (String.concat ", " others) ])
     @ (match keepers with
        | None -> []
-       | Some [] -> [ "Keepers assigned directly (lanes not counted): none" ]
+       | Some [] ->
+           [ if ko then "직접 배정된 키퍼(레인 제외): 없음"
+             else "Keepers assigned directly (lanes not counted): none" ]
        | Some names ->
-         [ Printf.sprintf "Keepers assigned directly (lanes not counted): %d - %s"
+         [ Printf.sprintf
+             (if ko then "직접 배정된 키퍼(레인 제외): %d명 - %s"
+              else "Keepers assigned directly (lanes not counted): %d - %s")
              (List.length names) (String.concat ", " names) ])
   in
-  [ Printf.sprintf "Binding: provider=%s  model=%s" row.provider row.model ]
+  [ Printf.sprintf
+      (if ko then "바인딩: provider=%s  model=%s" else "Binding: provider=%s  model=%s")
+      row.provider row.model ]
   @ account
-  @ [ Printf.sprintf "API model: %s%s" api_name api_note
+  @ [ Printf.sprintf (if ko then "API 모델: %s%s" else "API model: %s%s") api_name api_note
     ; Printf.sprintf
         "%s  reasoning-effort=%s  temperature=%s"
         (section models_table row.model)
@@ -131,9 +143,17 @@ let detail_lines ?account_email ?keepers row =
         "%s  max-tokens=%s"
         (section row.provider row.model)
         (tokens_text row.max_tokens)
-    ; (match row.context with None -> "Context: undeclared; Runtime shows the resolved catalog value"
-       | Some (source, n) -> Printf.sprintf "Context: %d tokens (%s); model specification: %s" n source (tokens_text row.model_context))
-    ; "- means that key is absent; add or edit it in the section shown above."
+    ; (match row.context with
+       | None ->
+           if ko then "컨텍스트: 미선언 · 런타임 화면에서 카탈로그 해석값 표시"
+           else "Context: undeclared; Runtime shows the resolved catalog value"
+       | Some (source, n) ->
+           Printf.sprintf
+             (if ko then "컨텍스트: %d 토큰 (%s) · 모델 사양: %s"
+              else "Context: %d tokens (%s); model specification: %s")
+             n source (tokens_text row.model_context))
+    ; (if ko then "- 는 해당 키가 설정되지 않았음을 뜻합니다. 위 섹션에서 추가하거나 수정할 수 있습니다."
+       else "- means that key is absent; add or edit it in the section shown above.")
     ]
 
 let pad s n =
@@ -199,12 +219,19 @@ let row_qualifier rows =
     | Some n when n > 1 -> Some (provider_text row)
     | Some _ | None -> None
 
-let provider_width_of ~qualifier rows =
+let provider_header ~ko = if ko then "제공자" else "provider"
+let model_header ~ko = if ko then "모델" else "model"
+let effort_header ~ko = if ko then "추론" else "effort"
+let temperature_header ~ko = if ko then "온도" else "temperature"
+let max_tokens_header ~ko = if ko then "최대 토큰" else "max-tokens"
+
+let provider_width_of ~ko ~qualifier rows =
   let width = List.fold_left (fun width row ->
     match qualifier row with
     | None -> width
     | Some owner -> max width (Masc_tui_message_layout.display_width owner)) 0 rows in
-  if width = 0 then 0 else max width (String.length "provider")
+  if width = 0 then 0
+  else max width (Masc_tui_message_layout.display_width (provider_header ~ko))
 
 (* The exact binding name is the selection identity. The full API-name
    alias remains in the explicit detail reading rather than repeating beside
@@ -241,43 +268,46 @@ let fixed_cells ~provider_width =
 let model_column ~width ~provider_width =
   max 8 (width - fixed_cells ~provider_width)
 
-let header_cells ~provider_width ~model_width =
+let header_cells ~ko ~provider_width ~model_width =
   model_width + gutter + effort_width + gutter + temperature_width + gutter
-  + (if provider_width = 0 then String.length "max-tokens"
+  + (if provider_width = 0 then
+       Masc_tui_message_layout.display_width (max_tokens_header ~ko)
      else tokens_width + gutter + provider_width)
 
-let model_width_of rows =
+let model_width_of ~ko rows =
   max 8
     (List.fold_left
        (fun acc r -> max acc (Masc_tui_message_layout.display_width (model_text r)))
-       (Masc_tui_message_layout.display_width "model") rows)
+       (Masc_tui_message_layout.display_width (model_header ~ko)) rows)
 
-let fits_rows ~width ~qualifier rows =
+let fits_rows ~ko ~width ~qualifier rows =
   match rows with
   | [] -> true
   | _ ->
-    let provider_width = provider_width_of ~qualifier rows in
+    let provider_width = provider_width_of ~ko ~qualifier rows in
     let model_width = model_column ~width ~provider_width in
-    model_width_of rows <= model_width
-    && header_cells ~provider_width ~model_width <= width
+    model_width_of ~ko rows <= model_width
+    && header_cells ~ko ~provider_width ~model_width <= width
     && List.for_all
          (fun r -> row_cells ~provider_width ~model_width r <= width)
          rows
 
-let fits ~width rows = fits_rows ~width ~qualifier:(row_qualifier rows) rows
+let fits ?(ko = false) ~width rows =
+  fits_rows ~ko ~width ~qualifier:(row_qualifier rows) rows
 
 (* One binding as named, wrapped lines. A label wider than the pane goes on
    its own line and wraps; a value keeps its complete characters because
    [wrap_words] splits at cell boundaries. No number is shortened into a
    different number on the way through. *)
-let stacked_items ~pane rows =
+let stacked_items ~ko ~pane rows =
   let wrap text = Masc_tui_message_layout.wrap_words ~max_cells:pane text in
   let qualifier = row_qualifier rows in
   let item r =
     wrap (model_text r)
     @ wrap
         (Printf.sprintf
-           "effort %s · temperature %s · max-tokens %s"
+           (if ko then "추론 %s · 온도 %s · 최대 토큰 %s"
+            else "effort %s · temperature %s · max-tokens %s")
            (effort_text r.reasoning_effort)
            (value_or_absent r.temperature)
            (tokens_text r.max_tokens))
@@ -285,14 +315,16 @@ let stacked_items ~pane rows =
   in
   List.map item rows
 
-let stacked_lines ~pane rows =
+let stacked_lines ~ko ~pane rows =
   match rows with
-  | [] -> [ "no model bindings in runtime.toml" ]
+  | [] ->
+      [ if ko then "runtime.toml에 모델 바인딩이 없습니다"
+        else "no model bindings in runtime.toml" ]
   | _ ->
     (* Items are separated by a blank line: on a pane this narrow the reader
        is scanning one binding at a time, and unseparated wrapped runs read
        as one record. *)
-    List.concat_map (fun item -> item @ [ "" ]) (stacked_items ~pane rows)
+    List.concat_map (fun item -> item @ [ "" ]) (stacked_items ~ko ~pane rows)
     |> fun lines ->
     (match List.rev lines with
      | _ :: rest -> List.rev rest  (* drop the trailing separator *)
@@ -300,12 +332,12 @@ let stacked_lines ~pane rows =
 
 (* Where each binding's item starts in the stacked document -- the line the
    pane marks when its cursor (a binding index) is on that row. *)
-let stacked_item_starts ~pane rows =
+let stacked_item_starts ?(ko = false) ~pane rows =
   let rec starts acc at = function
     | [] -> List.rev acc
     | item :: rest -> starts (at :: acc) (at + List.length item + 1) rest
   in
-  starts [] 0 (stacked_items ~pane rows)
+  starts [] 0 (stacked_items ~ko ~pane rows)
 
 let selected_lines ~table ~starts ~total cursor =
   if table then (cursor + 1, cursor + 1)
@@ -356,21 +388,21 @@ let reads_selected ~table ~starts ~total ~height cursor =
   let start, stop = selected_lines ~table ~starts ~total cursor in
   (not table) && stop - start + 1 > height
 
-let render ~width ?pane rows =
+let render ?(ko = false) ~width ?pane rows =
   let qualifier = row_qualifier rows in
-  let provider_width = provider_width_of ~qualifier rows in
+  let provider_width = provider_width_of ~ko ~qualifier rows in
   let model_width = model_column ~width ~provider_width in
   let owner text = if provider_width = 0 then ""
     else String.make gutter ' ' ^ pad text provider_width in
   let tokens text = if provider_width = 0 then text else pad text tokens_width in
   let header =
-    pad "model" model_width
+    pad (model_header ~ko) model_width
     ^ String.make gutter ' '
-    ^ pad "effort" effort_width
+    ^ pad (effort_header ~ko) effort_width
     ^ String.make gutter ' '
-    ^ pad "temperature" temperature_width
+    ^ pad (temperature_header ~ko) temperature_width
     ^ String.make gutter ' '
-    ^ tokens "max-tokens" ^ owner "provider"
+    ^ tokens (max_tokens_header ~ko) ^ owner (provider_header ~ko)
   in
   let line r =
     pad (clip (model_text r) model_width) model_width
@@ -382,14 +414,17 @@ let render ~width ?pane rows =
     ^ tokens (tokens_text r.max_tokens) ^ owner (Option.value ~default:"" (qualifier r))
   in
   match rows with
-  | [] -> [ "no model bindings in runtime.toml" ]
+  | [] ->
+      [ if ko then "runtime.toml에 모델 바인딩이 없습니다"
+        else "no model bindings in runtime.toml" ]
   | _ ->
     (* The frame's cut is a last resort, not this table's layout policy. When
        the pane offers fewer cells than the complete mandatory readings need,
        draw one named, wrapped item per binding instead: every reading stays
        reachable, and no number is shortened into a different number. *)
     (match pane with
-     | Some pane when not (fits_rows ~width:pane ~qualifier rows) -> stacked_lines ~pane rows
+     | Some pane when not (fits_rows ~ko ~width:pane ~qualifier rows) ->
+         stacked_lines ~ko ~pane rows
      | _ -> header :: List.map line rows)
 
 let find_runtime ~runtime_id rows =

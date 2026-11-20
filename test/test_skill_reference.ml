@@ -48,7 +48,7 @@ let identity_json ?(source = "workspace") ?(package = "review") ?(name = "review
    into one -- an absent revision standing for some default -- the caller that
    spelled a revision out and the caller that left it open would arrive at the
    resolver as the same value, and only one of them may be answered with a
-   revision it did not name. RFC-0411 §4.2. *)
+   revision it did not name. *)
 let test_a_request_says_whether_it_pinned () =
   let pinned = reference ~revision:(String.make 64 'b') () in
   (match Reference.request_of_yojson (Reference.to_yojson pinned) with

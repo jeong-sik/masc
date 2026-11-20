@@ -64,7 +64,7 @@ let test_load_persisted_posts_missing_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   Alcotest.(check bool) "a first load of absent posts starts empty" true
     (Masc_board_handlers.Board_votes_json.load_persisted_posts store = Ok 0);
@@ -78,7 +78,7 @@ let test_load_persisted_comments_missing_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   match Masc_board_handlers.Board_votes_json.load_persisted_comments store with
   | Ok 0 -> ()
@@ -118,12 +118,12 @@ let test_loader_keeps_only_current_rows () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  let source_store = Board_core.create_store
+  let source_store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources source_store;
   let post =
     match
-      Board_core.create_post
+      Masc_board_handlers.Board_core.create_post
         source_store
         ~lookup:nobody_declared
         ~author:"current-writer"
@@ -138,12 +138,12 @@ let test_loader_keeps_only_current_rows () =
   (* The comment is written while [source_store]'s cursor still matches the
      posts file. The rows appended and the truncation below change that file
      behind the store, after which its next write is refused. *)
-  let comment = match Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared
+  let comment = match Masc_board_handlers.Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared
       ~post_id:(Board.Post_id.to_string post.id) ~author:"fixture-author"
       ~content:"retained partial comment" ~ttl_hours:0 () with
-    | Ok comment -> Board_core.comment_to_yojson comment
+    | Ok comment -> Masc_board_handlers.Board_core.comment_to_yojson comment
     | Error error -> Alcotest.failf "create_comment failed: %s" (Board.show_board_error error) in
-  let canonical = Board_core.post_to_yojson post in
+  let canonical = Masc_board_handlers.Board_core.post_to_yojson post in
   let path = Board.persist_path source_store in
   let append json =
     Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n")
@@ -151,7 +151,7 @@ let test_loader_keeps_only_current_rows () =
   append (remove_key canonical "pinned");
   append (prepend_field canonical ("meta_json", `String "{}"));
   append (replace_key canonical "votes_up" (`String "0"));
-  let loaded_store = Board_core.create_store
+  let loaded_store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   (match Masc_board_handlers.Board_votes_json.load_persisted_posts loaded_store with
    | Error _ -> ()
@@ -162,7 +162,7 @@ let test_loader_keeps_only_current_rows () =
     "canonical post is present"
     true
     (Result.is_ok
-       (Board_core.read_post
+       (Masc_board_handlers.Board_core.read_post
           loaded_store
           ~post_id:(Board.Post_id.to_string post.id)));
   Out_channel.with_open_bin path (fun _ -> ());
@@ -191,7 +191,7 @@ let test_loader_keeps_only_current_rows () =
     [-1.; Float.nan; Float.infinity; Float.neg_infinity];
   Out_channel.with_open_bin path (fun out ->
     output_string out (Yojson.Safe.to_string (replace_key canonical "expires_at" (`Float 1.)) ^ "\n"));
-  let expired_store = Board_core.create_store
+  let expired_store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   Alcotest.(check bool) "valid expired posts remain available for cascade cleanup" true
     (Masc_board_handlers.Board_votes_json.load_persisted_posts expired_store = Ok 1);
@@ -206,7 +206,7 @@ let test_loader_keeps_only_current_rows () =
   ignore (Result.get_ok (Board.reload_votes expired_store));
   load_reactions expired_store;
   Alcotest.(check (pair int int)) "sweeper owns expiry after reload" (1, 1)
-    (Board_core.sweep expired_store)
+    (Masc_board_handlers.Board_core.sweep expired_store)
 ;;
 
 let test_source_failure_clears_only_after_successful_reload () =
@@ -217,7 +217,7 @@ let test_source_failure_clears_only_after_successful_reload () =
   Fun.protect ~finally:(fun () ->
     Unix.putenv "MASC_BASE_PATH" (Option.value ~default:"" previous);
     if Sys.file_exists dir then Fs_compat.remove_tree dir) (fun () ->
-    let store = Board_core.create_store
+    let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
     let loaders = [
       (Board.persist_path store, Masc_board_handlers.Board_votes_json.load_persisted_posts,
@@ -257,12 +257,12 @@ let test_partial_load_never_rewrites_the_file () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  let source_store = Board_core.create_store
+  let source_store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   load_sources source_store;
   let make_post content =
     match
-      Board_core.create_post source_store ~lookup:nobody_declared ~author:"partial-writer" ~content
+      Masc_board_handlers.Board_core.create_post source_store ~lookup:nobody_declared ~author:"partial-writer" ~content
         ~post_kind:Board.Human_post ()
     with
     | Ok post -> post
@@ -270,7 +270,7 @@ let test_partial_load_never_rewrites_the_file () =
   in
   let make_comment ~post_id content =
     match
-      Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared ~post_id ~author:"partial-writer" ~content
+      Masc_board_handlers.Board_core.add_comment ~reader:Masc_board_handlers.Board_access.Operator source_store ~lookup:nobody_declared ~post_id ~author:"partial-writer" ~content
         ~ttl_hours:0 ()
     with
     | Ok comment -> comment
@@ -293,14 +293,14 @@ let test_partial_load_never_rewrites_the_file () =
   let posts_path = Board.persist_path source_store in
   let comments_path = Board.comments_path source_store in
   let posts_on_disk =
-    damage posts_path (json Board_core.post_to_yojson before)
-      (json Board_core.post_to_yojson after)
+    damage posts_path (json Masc_board_handlers.Board_core.post_to_yojson before)
+      (json Masc_board_handlers.Board_core.post_to_yojson after)
   in
   let comments_on_disk =
-    damage comments_path (json Board_core.comment_to_yojson c_before)
-      (json Board_core.comment_to_yojson c_after)
+    damage comments_path (json Masc_board_handlers.Board_core.comment_to_yojson c_before)
+      (json Masc_board_handlers.Board_core.comment_to_yojson c_after)
   in
-  let store = Board_core.create_store
+  let store = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   Alcotest.(check bool) "posts load reports the damage" true
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_posts store));
@@ -309,8 +309,8 @@ let test_partial_load_never_rewrites_the_file () =
   ignore (Result.get_ok (Board.reload_votes store));
   load_reactions store;
   Alcotest.(check bool) "posts after the damaged line are still served" true
-    (Result.is_ok (Board_core.read_post store ~post_id:(Board.Post_id.to_string after.id)));
-  let observed = match Board_core.observe_comments store
+    (Result.is_ok (Masc_board_handlers.Board_core.read_post store ~post_id:(Board.Post_id.to_string after.id)));
+  let observed = match Masc_board_handlers.Board_core.observe_comments store
       ~post_id:(Board.Post_id.to_string c_after.post_id) with
     | Ok observed -> observed
     | Error error -> Alcotest.fail (Board.show_board_read_error error) in
@@ -328,7 +328,7 @@ let test_partial_load_never_rewrites_the_file () =
   store.Board.dirty_posts <- true;
   store.Board.dirty_comments <- true;
   Alcotest.(check (pair int int)) "partial sources cannot authorize expiry"
-    (0, 0) (Board_core.sweep store);
+    (0, 0) (Masc_board_handlers.Board_core.sweep store);
   Alcotest.(check int) "sweep retains both best-effort posts" 2
     (Hashtbl.length store.posts);
   Alcotest.(check int) "sweep retains both best-effort comments" 2
@@ -353,7 +353,7 @@ let test_partial_load_never_rewrites_the_file () =
   Alcotest.(check bool) "delete is refused before it touches memory" true
     (Result.is_error (Board.delete_post store ~authorization:Board.Operator_deletion ~post_id:before_id));
   Alcotest.(check bool) "the post is still in memory" true
-    (Result.is_ok (Board_core.read_post store ~post_id:before_id));
+    (Result.is_ok (Masc_board_handlers.Board_core.read_post store ~post_id:before_id));
   unchanged "delete";
   (* Only repairing and successfully re-reading both sources restores expiry
      authority; a file edit alone does not erase the recorded load failure. *)
@@ -362,21 +362,21 @@ let test_partial_load_never_rewrites_the_file () =
       List.iter (fun row -> output_string out (row ^ "\n")) rows)
   in
   repair posts_path
-    [json Board_core.post_to_yojson before; json Board_core.post_to_yojson after];
+    [json Masc_board_handlers.Board_core.post_to_yojson before; json Masc_board_handlers.Board_core.post_to_yojson after];
   repair comments_path
-    [json Board_core.comment_to_yojson c_before; json Board_core.comment_to_yojson c_after];
+    [json Masc_board_handlers.Board_core.comment_to_yojson c_before; json Masc_board_handlers.Board_core.comment_to_yojson c_after];
   Alcotest.(check (pair int int)) "repair without reload is not authority"
-    (0, 0) (Board_core.sweep store);
+    (0, 0) (Masc_board_handlers.Board_core.sweep store);
   Alcotest.(check bool) "healthy posts reload succeeds" true
     (Masc_board_handlers.Board_votes_json.load_persisted_posts store = Ok 2);
   Alcotest.(check (pair int int)) "partial comments still block a cascade"
-    (0, 0) (Board_core.sweep store);
+    (0, 0) (Masc_board_handlers.Board_core.sweep store);
   Alcotest.(check bool) "healthy comments reload succeeds" true
     (Masc_board_handlers.Board_votes_json.load_persisted_comments store = Ok 2);
   Alcotest.(check (pair int int)) "complete reload allows expiry and cascade"
-    (1, 2) (Board_core.sweep store);
+    (1, 2) (Masc_board_handlers.Board_core.sweep store);
   Board.flush_dirty store;
-  let reloaded = Board_core.create_store
+  let reloaded = Masc_board_handlers.Board_core.create_store
       ~base_path:(Env_config_core.base_path ()) () in
   Alcotest.(check bool) "unexpired post remains after cleanup flush" true
     (Masc_board_handlers.Board_votes_json.load_persisted_posts reloaded = Ok 1);
@@ -575,11 +575,11 @@ let test_a_vote_does_not_move_updated_at_back () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let _dir = fresh_test_base_path () in
-  let store = Board_core.create_store ~base_path:(Env_config_core.base_path ()) () in
+  let store = Masc_board_handlers.Board_core.create_store ~base_path:(Env_config_core.base_path ()) () in
   load_sources store;
   let post =
     match
-      Board_core.create_post store ~lookup:nobody_declared ~author:"fixture-author"
+      Masc_board_handlers.Board_core.create_post store ~lookup:nobody_declared ~author:"fixture-author"
         ~content:"edited while a vote was in flight" ~post_kind:Board.Human_post ()
     with
     | Ok post -> post

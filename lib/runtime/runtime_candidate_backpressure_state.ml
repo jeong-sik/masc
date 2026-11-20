@@ -8,6 +8,14 @@ type attempt_failure =
   | Provider_timeout
 [@@deriving enumerate]
 
+type failure_scope =
+  | Keeper_scoped
+  | Provider_wide
+
+let failure_scope = function
+  | Server_error | Provider_capacity -> Provider_wide
+  | Network_transient | Provider_timeout -> Keeper_scoped
+
 let attempt_failure_to_wire_name = function
   | Server_error -> "server_error"
   | Provider_capacity -> "provider_capacity"
@@ -59,3 +67,95 @@ let observe ~now current =
       (match retry_after with
        | Some seconds when now -. noted_at >= seconds -> { current with rate_limit = None }
        | Some _ | None -> current)
+
+let clear_keeper_failure ~recorded_by current =
+  match current.failed_attempt with
+  | None -> current
+  | Some (Failed_attempt { failure; recorded_by = owner; _ }) ->
+      (match failure_scope failure with
+       | Keeper_scoped when same_recorder owner recorded_by ->
+           { current with failed_attempt = None }
+       | Keeper_scoped | Provider_wide -> current)
+
+let failed_attempt_for_keeper ?keeper_name current =
+  match current.failed_attempt with
+  | None -> None
+  | Some (Failed_attempt { failure; recorded_by; _ }) as mark ->
+      (match failure_scope failure with
+       | Provider_wide -> mark
+       | Keeper_scoped ->
+           (match keeper_name with
+            | Some name when same_recorder recorded_by (keeper_recorder ~keeper_name:name) ->
+                mark
+            | Some _ | None -> None))
+
+let for_keeper ?keeper_name current =
+  { current with failed_attempt = failed_attempt_for_keeper ?keeper_name current }
+
+module Recorder_map = Map.Make (struct
+  type t = recorder
+
+  let compare (Keeper_recorder left) (Keeper_recorder right) =
+    String.compare left.keeper_name right.keeper_name
+end)
+
+type scoped_state =
+  { shared : candidate_backpressure
+  ; keeper_failures : failed_attempt Recorder_map.t
+  }
+
+let empty_scoped =
+  { shared = empty
+  ; keeper_failures = Recorder_map.empty
+  }
+
+let is_scoped_empty state =
+  is_empty state.shared && Recorder_map.is_empty state.keeper_failures
+
+let note_scoped_rate_limit ~noted_at ~retry_after state =
+  { state with shared = note_rate_limit ~noted_at ~retry_after state.shared }
+
+let note_scoped_failed_attempt ~noted_at ~failure ~recorded_by state =
+  match failure_scope failure with
+  | Provider_wide ->
+      { state with
+        shared = note_failed_attempt ~noted_at ~failure ~recorded_by state.shared
+      }
+  | Keeper_scoped ->
+      let updated =
+        Recorder_map.update recorded_by
+          (function
+            | Some (Failed_attempt existing) as keep when existing.noted_at > noted_at ->
+                keep
+            | Some (Failed_attempt _) | None ->
+                Some (Failed_attempt { noted_at; failure; recorded_by }))
+          state.keeper_failures
+      in
+      { state with keeper_failures = updated }
+
+let clear_scoped_keeper_failure ~recorded_by state =
+  { shared = clear_keeper_failure ~recorded_by state.shared
+  ; keeper_failures = Recorder_map.remove recorded_by state.keeper_failures
+  }
+
+let clear_scoped_provider_failure state =
+  { state with shared = empty }
+
+let observe_scoped ~now state =
+  { state with shared = observe ~now state.shared }
+
+let scoped_failed_attempt_for_keeper ?keeper_name state =
+  let keeper_mark =
+    match keeper_name with
+    | None -> None
+    | Some name ->
+        Recorder_map.find_opt (keeper_recorder ~keeper_name:name) state.keeper_failures
+  in
+  match keeper_mark with
+  | Some _ -> keeper_mark
+  | None -> failed_attempt_for_keeper ?keeper_name state.shared
+
+let scoped_for_keeper ?keeper_name state =
+  { rate_limit = state.shared.rate_limit
+  ; failed_attempt = scoped_failed_attempt_for_keeper ?keeper_name state
+  }

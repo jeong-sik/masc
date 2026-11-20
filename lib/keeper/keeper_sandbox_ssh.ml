@@ -11,7 +11,7 @@ let resolve_path ~base_path path =
 ;;
 
 let runtime_config_path ~base_path =
-  (* Resolver SSOT (RFC-0121). The previous inline concat probed
+  (* Resolver SSOT. The previous inline concat probed
      <base>/.masc/runtime.toml — a path the live layout has never used
      (runtime.toml lives under .masc/config/), so the probe always fell
      through to [Runtime.config_path]. The resolver names the real file. *)

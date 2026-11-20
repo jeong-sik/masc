@@ -63,7 +63,7 @@ let prompt ~ko composer =
   match composer.target with
   | No_target -> if ko then "고른 키퍼 없음" else "no keeper selected"
   | Unreachable { keeper; reason } ->
-      Printf.sprintf "%s — %s" keeper (unreachable_text ~ko reason)
+      Printf.sprintf "%s · %s" keeper (unreachable_text ~ko reason)
   | Ready keeper ->
     let recipient = if ko then keeper ^ " 에게" else "to " ^ keeper in
     if composer.staged_images = 0

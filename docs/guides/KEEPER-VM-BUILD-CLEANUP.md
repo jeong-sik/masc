@@ -129,11 +129,6 @@ is recreated at a fresh boot and the baseline does not give it that discard
 default. Existing mounts do not change because source is merged. Cleanup never
 mounts a live volume in another VM or stops a Keeper to force host recovery.
 
-See the [volume lifecycle investigation](../research/2026-10-26-keeper-volume-lifecycle.md)
-for usage cases, observed evidence and the separate incarnation-bound retirement
-plan. The helper's own lifecycle and external Apple API contention are tracked
-in [the boot-helper RFC](../rfc/RFC-keeper-boot-runs-no-one-shot-container.md).
-
 ## Deployment boundary
 
 Before activating this binary on a workspace with an independently running

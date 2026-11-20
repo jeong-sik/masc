@@ -184,7 +184,7 @@ module For_testing : sig
     :  queue_ops:exact_queue_ops
     -> ?cli_runner:Keeper_lane_cli_oneshot.runner
          (** Injectable effect edge for the cli lane-slot fallback walked
-             after HTTP candidate exhaustion (RFC cli-runtimes-as-lane-slots);
+             after HTTP candidate exhaustion;
              [None] spawns the real official client. *)
     -> sw:Eio.Switch.t
     -> entry:Keeper_approval_queue_rules_types.pending_approval

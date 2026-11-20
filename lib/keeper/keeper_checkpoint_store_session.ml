@@ -3,7 +3,7 @@ open Keeper_checkpoint_store_history_files
 open Keeper_checkpoint_store_decode
 open Keeper_checkpoint_store_summary
 
-(* ── RFC-0225 §3.2: disk-SSOT monotonic checkpoint transaction ──────
+(* ── disk-SSOT monotonic checkpoint transaction ──────
    One stable per-session lock covers canonical disk load, comparison,
    durable publication, and history capture. The canonical file is the only
    admission watermark; no process-local checkpoint truth is retained. *)

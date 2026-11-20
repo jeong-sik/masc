@@ -1,19 +1,24 @@
 // Dedicated Schedule surface.
 //
-// Two views over one schedule projection, read from the shared schedule
-// resource (GET /api/v1/dashboard/scheduled-automation):
+// Two views over the schedule projection, read from the shared schedule
+// resources (GET /api/v1/dashboard/scheduled-automation):
 //   · 캘린더 — the always-on polling strip (interval) above a day agenda
 //     (scheduled + oneshot). Ported from the keeper-v2 prototype (schedule.jsx).
+//     It draws the active-only page: every schedule still going to run.
 //   · 목록   — the mature diagnostic list/cards/signal feed in
 //     tools/scheduled-automation-panel.ts (variant "v2"), reused verbatim so the
-//     route does not fork the backed schedule semantics.
+//     route does not fork the backed schedule semantics. It draws the fleet
+//     page, as the KPI strip and the aside do.
 // A cadence filter (정기 · 폴링 · 1회) narrows both views. Both share one detail
 // overlay (SchDetail) and one selection state, so a row opens the same drawer
 // regardless of view.
 
 import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
-import type { DashboardScheduledAutomation } from '../../api'
+import type {
+  DashboardScheduledAutomation,
+  DashboardScheduledAutomationRequest,
+} from '../../api'
 import {
   fetchDashboardScheduledAutomationLookup,
   type DashboardScheduledAutomationLookup,
@@ -38,10 +43,13 @@ import {
   toolsData,
 } from '../tools/tool-state'
 import {
+  activeSchedulesError,
+  activeSchedulesProjection,
   loadScheduledAutomation,
   scheduledAutomationError,
   scheduledAutomationLoading,
   scheduledAutomationProjection,
+  subscribeActiveSchedulesRefresh,
   subscribeScheduledAutomationRefresh,
 } from './schedule-state'
 import { pruneSchedules } from '../../api/dashboard-schedule'
@@ -91,6 +99,7 @@ function countByStatus(
 
 export function ScheduleSurface() {
   const data = toolsData.value
+  const [view, setView] = useState<ScheduleView>('calendar')
   // Schedule rows come from the schedule projection; the keeper diagnostics
   // panels below still read the tool inventory, which is why both are loaded.
   const projection = scheduledAutomationProjection.value
@@ -108,12 +117,26 @@ export function ScheduleSurface() {
     ? null
     : dueCount + runningCount
   const requests = automation?.requests ?? []
+  // The calendar draws its own page (#52961). The fleet page above stops at
+  // the 20 soonest schedules, and polling schedules alone can take all of
+  // them; this one is every schedule still going to run, up to the server's
+  // selected-page limit.
+  const calendarProjection = activeSchedulesProjection.value
+  const calendarAutomation = calendarProjection?.state === 'available' ? calendarProjection.data : null
+  const calendarError = activeSchedulesError.value
+    ?? (calendarProjection?.state === 'unavailable' ? calendarProjection.reason : null)
+  // What the open view draws its rows from.
+  const viewAutomation = view === 'calendar' ? calendarAutomation : automation
   const routeScheduleId = route.value.params.schedule_id ?? null
+  const rowOf = (rows: readonly DashboardScheduledAutomationRequest[]) =>
+    rows.find(request => request.schedule_id === routeScheduleId) ?? null
+  // The calendar page is only kept current while the calendar is open, so its
+  // rows answer a selection only there.
   const inPageRequest = routeScheduleId === null
     ? null
-    : requests.find(request => request.schedule_id === routeScheduleId) ?? null
+    : (view === 'calendar' ? rowOf(calendarAutomation?.requests ?? []) : null) ?? rowOf(requests)
   const totalCount = page?.totalCount ?? null
-  const cadCounts = cadenceCounts(requests)
+  const cadCounts = cadenceCounts(viewAutomation?.requests ?? [])
   // Scheduled keeper wakes that were dispatched but are in neither queue AND
   // never recorded as reacted — the drain-miss the calendar surfaces per row.
   const queueMisses = automation ? countQueueDrainMisses(requests) : null
@@ -124,7 +147,6 @@ export function ScheduleSurface() {
   // page: a burst of failures a later tick retried is still counted here.
   const wakeCounts = automation?.wake_counts ?? null
 
-  const [view, setView] = useState<ScheduleView>('calendar')
   const [cadenceFilter, setCadenceFilter] = useState<Cadence | null>(null)
   const [pruning, setPruning] = useState(false)
   const selectedScheduleId = routeScheduleId
@@ -141,6 +163,12 @@ export function ScheduleSurface() {
     if (!toolsData.value) void loadTools()
     return stopScheduleRefresh
   }, [])
+
+  // Only an open calendar reads the active-only page.
+  useEffect(() => {
+    if (view !== 'calendar') return undefined
+    return subscribeActiveSchedulesRefresh()
+  }, [view])
 
   useEffect(() => {
     if (
@@ -318,7 +346,9 @@ export function ScheduleSurface() {
           </div>
         </section>
 
-        ${page
+        ${'' /* The fleet page's own numbers. The calendar draws another
+              page and says at its top what that one leaves out. */}
+        ${page && view === 'list'
           ? html`
               <div class="mb-3 text-2xs text-[var(--color-fg-muted)]" data-testid="schedule-page-metadata">
                 ${`표시 ${page.visibleCount.toLocaleString()} / 전체 ${page.totalCount.toLocaleString()} · 최대 ${page.limit.toLocaleString()}${page.truncated ? ' · 일부만 표시' : ''}`}
@@ -359,7 +389,7 @@ export function ScheduleSurface() {
               onClick=${() => switchView('list')}
             >≡ 목록</button>
           </div>
-          ${automation
+          ${viewAutomation
             ? html`<${CadenceSummary} counts=${cadCounts} active=${cadenceFilter} onFilter=${setCadenceFilter} />`
             : null}
           <${ActionButton}
@@ -381,15 +411,30 @@ export function ScheduleSurface() {
           // Without a projection nothing was read. A calendar drawn from no
           // rows would call the coming days empty (as the cadence counts above
           // would read zero), so that case goes to the panel, which says there
-          // is no projection.
+          // is no projection. The same holds for the calendar's own page: until
+          // it is read the calendar is not drawn, and a failed read says so
+          // above the last page that was read, if there is one.
           : view === 'calendar' && automation
-            ? html`<${ScheduleCalendar}
-                requests=${requests}
-                activeCount=${automation.fsm.active_count}
-                nowMs=${Date.now()}
-                cadenceFilter=${cadenceFilter}
-                onOpen=${selectSchedule}
-              />`
+            ? html`
+                ${calendarError
+                  ? html`
+                      <div data-testid="schedule-calendar-unavailable">
+                        <${ErrorState} message=${`캘린더에 쓸 예약을 읽지 못했습니다 · ${calendarError}`} class="mb-4" />
+                      </div>
+                    `
+                  : null}
+                ${calendarAutomation
+                  ? html`<${ScheduleCalendar}
+                      requests=${calendarAutomation.requests}
+                      activeCount=${calendarAutomation.fsm.active_count}
+                      nowMs=${Date.now()}
+                      cadenceFilter=${cadenceFilter}
+                      onOpen=${selectSchedule}
+                    />`
+                  : calendarError
+                    ? null
+                    : html`<${LoadingState}>캘린더에 쓸 예약 불러오는 중...<//>`}
+              `
             : html`<${ScheduledAutomationPanel}
                 automation=${automation ? filterAutomationByCadence(automation, cadenceFilter) : automation}
                 variant="v2"

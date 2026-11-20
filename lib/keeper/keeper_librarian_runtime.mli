@@ -276,7 +276,7 @@ val infer_memory_step
     whole step unaccepted. Cancellation propagates. *)
 
 val fit_continuity :
-  capacity:Keeper_lane_cli_oneshot.input_capacity -> base_path:string -> keeper_id:string ->
+  capacity:Keeper_lane_cli_oneshot.input_capacity ->
   source_lines:string list ->
   input_for:(Keeper_librarian_continuity.prepared -> (Keeper_librarian.input, string) result) ->
   Keeper_librarian_continuity.prepared ->
@@ -329,7 +329,7 @@ val run_best_effort
   -> ?official_range_id:Keeper_memory_os_current.official_range_id
   -> ?cli_runner:Keeper_lane_cli_oneshot.runner
        (** Injectable effect edge for the cli lane-slot fallback walked after
-           catalog exhaustion (RFC cli-runtimes-as-lane-slots); [None] spawns
+           catalog exhaustion; [None] spawns
            the real official client. *)
   -> base_path:string
   -> keepers_dir:string

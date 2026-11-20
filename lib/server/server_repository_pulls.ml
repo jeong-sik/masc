@@ -26,8 +26,8 @@ let default_graphql_url = "https://api.github.com/graphql"
    repository with fewer than 100 open pull requests at one request. *)
 let page_size = 100
 
-(* How many of a pull request's newest commits are searched for its author
-   (RFC-0465 §2.1). Merge commits are skipped, so the window has to reach past
+(* How many of a pull request's newest commits are searched for its author.
+   Merge commits are skipped, so the window has to reach past
    a run of them. Measured 2026-09-23 over the open pull requests of
    jeong-sik/masc: the longest run of merge commits ending at the head was 1,
    the longest anywhere in the last 30 commits was 4. The measured GraphQL
@@ -268,7 +268,7 @@ let decode_authored_commit node =
   | Some parents, Some author -> Some (parents, author)
   | _ -> None
 
-(* The author of the newest commit with one parent (RFC-0465 §2.1). A merge
+(* The author of the newest commit with one parent. A merge
    commit's author is whoever brought the base in -- GitHub's Update branch,
    an updater Keeper, a local [git merge] -- not who wrote the pull request.
    [Some None] is no such commit in the window, or GitHub giving that
@@ -819,7 +819,7 @@ let refresh ~now ~http_post ~(config : Workspace.config) ~previous =
     ; rejected_token
     }
 
-(* RFC-0465 §3: pull request state changes at the pace a person reads it, and
+(* Pull request state changes at the pace a person reads it, and
    three repositories every 60 s spend about 4% of the reader account's
    5000 GraphQL points an hour. *)
 (* The previous rows stay, but not as a current reading: a refresh that

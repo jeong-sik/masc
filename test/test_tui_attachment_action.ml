@@ -354,7 +354,7 @@ let test_partial_input_retires_midi_editor () =
       let request = begin_chat_listen ~destination:Listen_music_editor state ~keeper:"music" midi in
       write prefix;
       Alcotest.(check bool) "partial source has no complete event" true
-        (Reader.read_input ~timeout:0. reader () = None);
+        (Reader.read_input ~wait:(Masc_tui_wake.within 0.) reader () = None);
       if recover then ignore (Reader.recover_paste reader);
       Alcotest.(check bool) "next chunk has not arrived" false
         (Reader.input_reader_has_ready_input reader);
@@ -363,7 +363,7 @@ let test_partial_input_retires_midi_editor () =
       Alcotest.(check bool) "late completion cannot take the terminal" false
         (take_chat_listen state request);
       write suffix;
-      ignore (Reader.read_input ~timeout:0. reader ());
+      ignore (Reader.read_input ~wait:(Masc_tui_wake.within 0.) reader ());
       Alcotest.(check bool) "finishing input cannot revive the old open" false
         (take_chat_listen state request))
       ["\027[200~draft", " tail\027[201~", false, false;

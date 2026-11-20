@@ -1,8 +1,8 @@
 /**
- * RFC-0012 dashboard root shortcut host: single module-level
+ * Dashboard root shortcut host: single module-level
  * KeyboardShortcutManager instance shared across the dashboard.
  *
- * Wire-in policy (RFC-0012 §8):
+ * Wire-in policy:
  *   - `App` (src/app.ts) calls `useKeyboardShortcutHost(globalShortcutManager)`
  *     once at mount, binding a single document-level keydown listener that
  *     dispatches every event through the manager.

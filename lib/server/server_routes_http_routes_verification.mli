@@ -23,7 +23,7 @@ type operator_verdict_request =
 
 (** [GET|POST /api/v1/goals/confirmation] failures. [Confirmation_rejected]
     is the caller's 400 ([{ok:false, error}]); [Goal_store_unavailable] is
-    503 with the RFC-0444 envelope ({!Goal_unavailable_envelope.to_yojson}).
+    503 with the envelope ({!Goal_unavailable_envelope.to_yojson}).
     [Proof_backend_unavailable] is a separate 503 with an error message. *)
 type confirmation_error =
   | Confirmation_rejected of string

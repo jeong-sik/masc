@@ -1390,7 +1390,7 @@ let run_keepalive_unified_turn
           record_event_queue_failure
             ("approval continuation projection failed approval=" ^ resolution.approval_id ^ ": " ^ detail))
         projections;
-      (* RFC-0377: every entry admitted into this turn (the primary plus any
+      (* Every entry admitted into this turn (the primary plus any
          Connector_attention batch companions) shares the turn's outcome. A
          completed turn acknowledges delivered members; each HITL member
          additionally needs its own continuation receipt. Failed turns retain
@@ -1852,7 +1852,7 @@ let run_heartbeat_loop
                  ~base_path:ctx.config.base_path
                  m.name
              in
-             (* RFC-0002: dispatch turn status event *)
+             (* Dispatch turn status event *)
              Keeper_keepalive_signal.dispatch_keepalive_event
                ~ctx
                ~keeper_name:m.name

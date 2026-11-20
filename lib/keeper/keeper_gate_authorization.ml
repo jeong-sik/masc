@@ -198,8 +198,8 @@ let submit ?observation request =
     ()
 ;;
 
-(* What the box refused, in the shape the row stores and the judge reads
-   (RFC-0422). The stderr tail is bounded here, once, by the operator's knob,
+(* What the box refused, in the shape the row stores and the judge reads.
+   The stderr tail is bounded here, once, by the operator's knob,
    so the durable row and the keeper's own deferred receipt carry the same
    bytes. *)
 let observed_refusal ~refusal_kind ~status ~stderr =

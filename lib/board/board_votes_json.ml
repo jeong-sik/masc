@@ -7,32 +7,6 @@ let visibility_of_string = Board_core_classify.visibility_of_string
 let post_of_yojson = Board_core_json.post_of_yojson
 let comment_of_yojson = Board_core_json.comment_of_yojson
 
-(* Keep valid rows for the Board's best-effort UI, but retain failure of any
-   nonempty line so evidence readers cannot infer absence from partial data. *)
-let load_source_rows path ~decode ~accept =
-  let first_error = ref None in
-  let rejected = ref 0 in
-  let reject line reason =
-    incr rejected;
-    if Option.is_none !first_error then
-      first_error := Some (Printf.sprintf "%s: line %d: %s" path line reason) in
-  Fs_compat.load_file path |> String.split_on_char '\n'
-  |> List.iteri (fun index text ->
-    if String.trim text <> "" then
-      match Yojson.Safe.from_string text with
-      | json -> (match decode json with
-        | Some row -> accept row
-        | None -> reject (index + 1) "invalid persisted row schema")
-      | exception Yojson.Json_error _ -> reject (index + 1) "invalid JSON");
-  match !first_error with
-  | None -> Ok ()
-  | Some detail ->
-    let detail =
-      if !rejected > 1
-      then Printf.sprintf "%s (%d rows rejected)" detail !rejected
-      else detail in
-    Error (path, Failure detail)
-
 (* One owner for every "loaded N <noun>" line. A parse failure keeps the
    rows accepted so far, so the Error arm says partial load at warn: the
    old info line read as a clean load. *)
@@ -46,11 +20,6 @@ let log_loaded ~noun ~loaded ~path ~elapsed = function
       match cause with Failure detail -> detail | _ -> Printexc.to_string cause in
     Log.BoardLog.warn "partial load: kept %d %s from %s in %.3fs: %s"
       loaded noun path elapsed reason
-
-let record_load_result set result =
-  set (match result with Ok _ -> Ok ()
-    | Error (path, cause) -> Error (path ^ ": " ^ Printexc.to_string cause));
-  result
 
 let replace_loaded_posts store posts =
   Hashtbl.clear store.posts;
@@ -134,13 +103,6 @@ let load_persisted_posts store =
       Board_posts_source.finish_read outcome;
       error failure)
 ;;
-
-let propagate_workspace_check = function
-  | Ok () -> ()
-  | Error rejection ->
-    Option.iter (fun (exception_, backtrace) ->
-      Board_posts_source.propagate_reserved exception_ backtrace)
-      (Board_workspace_binding.raised rejection)
 
 let load_persisted_comments store =
   let module Source = Board_comments_source in

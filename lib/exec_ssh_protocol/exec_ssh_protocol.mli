@@ -56,7 +56,7 @@ val protocol_version : int
 (** [int_of_major newest = 3]: the shim's own version major and the number
     the operator-facing skew messages name. v3 added [mode]. *)
 
-(** {1 Execution mode (RFC-0422)}
+(** {1 Execution mode}
 
     How the shim boxes the payload. [Effect] is unrestricted. [Observe]
     denies filesystem writes outside the shim's per-run scratch directory
@@ -406,7 +406,7 @@ type probe =
           existed, which is itself a skew signal. Unknown keys are ignored
           on the way in and an absent key is [None], so a v3 shim and a v3
           server disagree about this field without either refusing the
-          other (RFC-0427 B-3). *)
+          other. *)
   ; boot_id : string option
       (** Canonical kernel boot UUID when the shim can read one. This names a
           kernel boot, not a physical host or a durable workspace. An old shim
@@ -441,7 +441,7 @@ val supports_interactive_stdin : probe -> bool
 (** {1 Guest agent relay}
 
     The connection between masc and a microVM guest agent reached through
-    [container run --publish-socket] (RFC microvm-guest-agent-over-socket).
+    [container run --publish-socket].
     One connection carries one request. masc writes a {!Relay.request_kind}
     byte and then, for a run, an ordinary request frame ({!encode_request}).
     The agent answers with chunks: a [Hello] first, then the shim child's

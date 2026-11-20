@@ -48,12 +48,12 @@ cli_slots = ["claude_code.claude-sonnet-5"]   # 공식 클라이언트
 
 ## 2. 왜 두 목록이 되었나
 
-CLI 슬롯을 들인 RFC(`RFC-cli-runtimes-as-lane-slots.md`, 2026-08-29)는 목록을 나누자고 하지 않았다.
+CLI 슬롯을 들인 RFC(2026-08-29)는 목록을 나누자고 하지 않았다.
 
 - §3: 슬롯 목록 하나에 runtime id 를 HTTP target 과 **나란히** 적는다.
 - §5: 구독 한도 때문에 "CLI 슬롯 **뒤에** HTTP fallback 을 두라" 고 권한다. CLI 가 앞에 올 수 있다는 전제다.
 
-`RFC-fusion-seat-routes.md` §2.1 이 나눈 까닭을 적었다. "exact lane 은 HTTP 요청 본문을 만드는 경로와 CLI 경로가 달라서 나눴다." 실행 경로가 다르다는 사실이 설정 형식으로 새어 나온 것이다. 같은 저장소의 Fusion 은 HTTP 와 CLI runtime 을 한 후보 목록에 섞어 적고, 자리마다 같은 방식으로 실행한다.
+Fusion 자리를 정한 RFC 는 §2.1 에 나눈 까닭을 적었다. "exact lane 은 HTTP 요청 본문을 만드는 경로와 CLI 경로가 달라서 나눴다." 실행 경로가 다르다는 사실이 설정 형식으로 새어 나온 것이다. 같은 저장소의 Fusion 은 HTTP 와 CLI runtime 을 한 후보 목록에 섞어 적고, 자리마다 같은 방식으로 실행한다.
 
 verifier 도 실행할 때는 이미 목록 하나를 쓴다. HTTP id 뒤에 CLI id 를 붙인 목록을 슬롯마다 차례로 부른다 (`runtime.ml:2510-2523`, `anti_rationalization.ml:617-735`).
 
@@ -279,7 +279,7 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 - **Q2. preset 14개는?** — 정함 (운영자, 2026-09-28)
   - 배포 때 운영자가 한 번 다시 쓴다. `cli_slots` 항목을 `slots` 끝에 붙여 지금 순서를 유지한다. 저장소에 변환 코드는 넣지 않는다.
 - **Q3. 첫 설정이 쓰는 기본 순서는?** — 정함 (운영자, 2026-09-28)
-  - HTTP 를 앞에, CLI 를 뒤에 쓴다. CLI 한 번은 프로세스를 띄우느라 몇 초 걸리고 구독 한도도 쓴다 (`RFC-cli-runtimes-as-lane-slots.md` §5).
+  - HTTP 를 앞에, CLI 를 뒤에 쓴다. CLI 한 번은 프로세스를 띄우느라 몇 초 걸리고 구독 한도도 쓴다.
   - 파일에 적히는 기본값일 뿐이다. 운영자는 TUI 나 파일에서 언제든 바꾼다.
 - **Q4. `slots` 의 모르는 id 도 로드를 막는가?** (3.2) — 정함 (운영자, 2026-09-28)
   - 막는다. 막지 않으면 CLI id 오타가 조용히 사라진다.
@@ -316,5 +316,5 @@ verifier 는 agent_core flow 가 아니라 도구 호출(`report_review_verdict`
 
 - LiteLLM Router: 서로 다른 provider 의 deployment 를 `order` 하나로 줄 세운다. cooldown 중인 deployment 는 잠시 후보에서 빠진다 (https://docs.litellm.ai/docs/routing, 2026-09-28 확인).
 - OpenRouter provider routing: `provider.order` 로 순서를 적고, `allow_fallbacks` 로 목록 밖으로 넘어갈지 정한다 (https://openrouter.ai/docs/guides/routing/model-fallbacks).
-- masc Fusion 자리 (`RFC-fusion-seat-routes.md` §2.1): HTTP 와 CLI runtime 을 한 후보 목록에 섞어 적는다.
+- masc Fusion 자리: HTTP 와 CLI runtime 을 한 후보 목록에 섞어 적는다.
 - `RFC-one-slot-fault-judgment-for-every-walk.md`: 실패가 누구의 사정인지 판정 하나. 이 RFC 는 exact 걸음에서 "결과 모름" 을 넘김으로 바꾼다 (6장 Q1).

@@ -5,13 +5,18 @@
     router and the H2 gateway. No other module renders this projection, and it
     is not embedded in any other response. *)
 
-val schedule_projection_target_request_limit : int
-(** Row ceiling for a target-scoped page. Its own number, larger than the fleet
-    cap, because a request already narrowed to one target does not need the
-    bound that exists to keep a whole-store scan small. *)
+val schedule_projection_selected_request_limit : int
+(** Row ceiling for a page narrowed by a selector. Its own number, larger than
+    the fleet cap, because a request already narrowed to one target or to the
+    live schedules does not need the bound that exists to keep a whole-store
+    scan small. *)
 
 val scheduled_automation_dashboard_json :
-  ?payload_target:string -> ?cursor:string -> Workspace.config -> Yojson.Safe.t
+  ?payload_target:string ->
+  ?active_only:bool ->
+  ?cursor:string ->
+  Workspace.config ->
+  Yojson.Safe.t
 (** Renders the read-only dashboard projection for scheduled internal
     automation. This summarizes the schedule store as a small FSM envelope
     plus recent request rows; it does not refresh due state or run work.
@@ -19,15 +24,21 @@ val scheduled_automation_dashboard_json :
     [payload_target] narrows every part of the response about schedules --
     rows, counts, FSM envelope, and signals -- to the schedules aimed at that
     target, and the response echoes it in [payload_target_selector] so a
-    scoped page cannot be read as the fleet's. The fleet page caps at 20 rows
-    with active ones first; target-scoped pages use their own limit.
-    [next_cursor], when present, continues the same target's ordering. A cursor
-    from another target or a malformed cursor yields [status=invalid_cursor]
-    rather than an empty page. Pages are independent store observations, not
-    a snapshot: a schedule changed or created between reads can move across
-    the boundary. [page_cursor] echoes the accepted cursor, or null on the
-    first page. [truncated] says the page does not contain the whole selection,
-    not that a next page exists; use [next_cursor] for that decision.
+    scoped page cannot be read as the fleet's. [active_only] (default [false])
+    narrows the same parts to the schedules that are not terminal, and the
+    response echoes it in [active_only_selector]; the two selectors combine.
+    The Dashboard calendar reads the active-only page: the fleet page holds the
+    20 soonest schedules, and polling schedules alone can take all of them. The
+    fleet page caps at 20 rows with active ones first; narrowed pages use their
+    own limit.
+    [next_cursor], when present, continues the same selection's ordering. A
+    cursor from another selection or a malformed cursor yields
+    [status=invalid_cursor] rather than an empty page. Pages are independent
+    store observations, not a snapshot: a schedule changed or created between
+    reads can move across the boundary. [page_cursor] echoes the accepted
+    cursor, or null on the first page. [truncated] says the page does not
+    contain the whole selection, not that a next page exists; use
+    [next_cursor] for that decision.
 
     Reads the schedule ledger from disk, so callers on an Eio fiber wrap this
     in [Domain_pool_ref.submit_io_or_inline].

@@ -27,7 +27,7 @@ val goal_criterion_review_system : string
 val goal_criterion_review_criterion : string
 (** The read-only surface the Goal proof judge holds, described to it. A
     surface the judge is never told about is a surface it never uses. *)
-(** Goal completion proof review (RFC-0387 B3): did the value read by the
+(** Goal completion proof review: did the value read by the
     goal's declared procedure reach its declared measure? *)
 
 val verification_lookup_producer_tree : string
@@ -46,12 +46,12 @@ val verification_evidence_posture_note_only : string
 (** Rendered into a completion question whose fixed snapshot holds zero
     artifacts the judge can open — every item a note or an unusable
     reference. The clause that keeps note-only silence from reading as
-    assent (task-785, RFC-0417 §4.3). *)
+    assent (task-785). *)
 val verification_evidence_posture_usable : string
 (** Rendered into a completion question whose snapshot holds [n] readable,
     untruncated artifacts. Variable: [usable_artifact_count]. *)
 val verification_image_evidence : string
-(** RFC-0436: rendered into a completion question whose goal blocks carry
+(** Rendered into a completion question whose goal blocks carry
     binary image artifacts. Variable: [image_evidence_lines]. The lines are
     data assembled in code; the header prose lives in the template. *)
 val keeper_observation_recovered_current_task : string
@@ -72,7 +72,7 @@ val keeper_observation_rejected_digest_unstated_input_row : string
 val keeper_observation_rejected_digest_row : string
 (** The instruction attached to the skills named by the current task. *)
 
-(** Goal success-criterion viability review (RFC-0387 B2): is the declared
+(** Goal success-criterion viability review: is the declared
     measure reachable in principle by its procedure? *)
 
 val librarian : string
@@ -169,12 +169,12 @@ val keeper_worldview : string
     is set and that each keeper's role decides. *)
 
 val keeper_constitution : string
-(** The norms this world's keepers wrote for themselves (RFC-0442). Variable:
+(** The norms this world's keepers wrote for themselves. Variable:
     [articles]. *)
 
 val keeper_constitution_amendments : string
 (** The end-context block that names the articles added and removed since
-    the System's [<norms>] were rendered (RFC-0491 §3.2). Variable: [changes],
+    the System's [<norms>] were rendered. Variable: [changes],
     the two sections below that have lines. *)
 
 val keeper_constitution_amendments_added : string
@@ -450,7 +450,7 @@ val tool_help_index_header : string
 
 (** {1 Tool-result guidance keys}
 
-    RFC prompts-and-tool-definitions-outside-ocaml §3.11: each closed variant
+    Each closed variant
     arm maps to exactly one key; the prose lives in the group file and the
     execution path only picks the variant and supplies the data. *)
 

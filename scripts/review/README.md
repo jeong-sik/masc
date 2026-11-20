@@ -101,8 +101,8 @@ still requires current reviews and scope checks. Missing Git objects are fetched
 from the named repository. On a failed candidate publication, its incomplete
 receipt and only a candidate ref still pointing to its own commit are removed.
 
-Offline focused checks include `python3 -m unittest -v scripts/review/test_github_reviews.py`,
-`test_review_worklist.py`, `test_queue_ledger.py` and `test_stack_scope.py`.
+Offline focused checks include `python3 -m unittest -v scripts/review/test_github_reviews.py`
+and `test_review_worklist.py`.
 
 ## The `merge` check on main
 

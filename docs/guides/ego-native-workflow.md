@@ -206,8 +206,7 @@ typing the same text again, because its effect is unknown. Input readiness
 lives with one connection; a new connection starts `command_settled`, which
 says nothing about an older connection's input.
 The separate native window does not change the SDK's void contract or repair
-historical receipt-less failures. The retained
-[normal one-key experiment](../evidence/ego-native-window-foundation-20261102/README.md)
+historical receipt-less failures. The normal one-key experiment
 establishes a native experimental tail only. Current producer/Host checks use
 owned SDK stand-ins; installed MASC raw typing, interrupted-input recovery and
 full native parity remain unverified. Observed action receipts still report
@@ -471,7 +470,7 @@ checks. The new Page observations, event drain, timeout and step-snapshot
 options have no real SDK or installed Keeper execution proof yet. An earlier
 owned real Ego fixture in replacement Space 32 executed 22 input/navigation option
 and selection steps plus five mouse/state-wait steps. Its
-[receipts](../evidence/2026-10-26-ego-options/README.md) are SDK evidence with
+receipts are SDK evidence with
 explicit routing and UI limits. Installed MASC, Keeper dispatch and visible UI
 behavior for this extension remain unverified. See
 [the SDK inventory](ego-sdk-coverage.md) for evidence and remaining capabilities.

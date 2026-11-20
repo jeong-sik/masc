@@ -5,8 +5,7 @@
     identity, authentication, admission or routing input.
 
     Sources, confirmed on 2026-09-28 by reading key names and value types of
-    the installed clients' files (see
-    docs/evidence/2026-09-28-login-account-email-sources.md):
+    the installed clients' files:
     - Codex: [auth.json] [tokens.id_token], OpenID claim [email]
     - Claude Code: [.claude.json] [oauthAccount.emailAddress]
     - Muse Code: [.config/muse/auth.json] [providers.meta.user_email]

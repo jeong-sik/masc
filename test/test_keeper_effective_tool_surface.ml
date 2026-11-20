@@ -358,7 +358,7 @@ let test_projection_names_equal_turn_surface_authority () =
        (* The line carries what a call needs and stops there. The revision is
           the larger half of a reference and is no longer asked for, so a line
           still printing it would be spending the surface's bytes on a value
-          the tool ignores. RFC-0411 §4.1. *)
+          the tool ignores. *)
        let contains needle text =
          let needle_length = String.length needle in
          let rec search index =
@@ -394,7 +394,7 @@ let test_projection_names_equal_turn_surface_authority () =
           Available list hands them, and 0 of 292 recorded Tasks ever named a
           Skill. Omitted, the turn's frozen list decides — the same list a
           spelled-out revision is matched against, so dropping it reaches
-          nothing new. RFC-0411 §4.2. *)
+          nothing new. *)
        check (list string) "identity is required, the revision is not"
          [ "identity" ] required;
        check bool "the revision is still an accepted field" true

@@ -387,7 +387,7 @@ let classify_argv argv =
 
 (* ── Gate request decoding ───────────────────────────────────────────── *)
 
-(* ── Script classification through the shell IR (RFC-0421) ─────────── *)
+(* ── Script classification through the shell IR ────────────────────── *)
 
 module Shell_gate = Masc_exec_command_gate.Shell_command_gate
 module Ir = Masc_exec.Shell_ir

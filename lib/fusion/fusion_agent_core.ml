@@ -243,7 +243,7 @@ let panel_failure_detail ~runtime_id (failure : Fusion_types.panel_failure) : st
    실패 시점(panel attempt_of_result / build_agent)에 provider_error_detail
    ~runtime_id:model(raw)로 정규화돼 있으므로, sink가 다시 runtime_id를 입히면
    panelist(정체성, 예 "skeptic (claude)")가 "Provider '...'" 슬롯에 새거나 중복
-   prefix가 붙는다 (RFC-0278). panelist는 panel_answer.model/failed_model에만 두고
+   prefix가 붙는다. panelist는 panel_answer.model/failed_model에만 두고
    provider attribution은 detail 안에 이미 박혀 있는 raw model을 쓴다. *)
 let panel_failure_text (failure : Fusion_types.panel_failure) : string =
   match failure with
@@ -328,7 +328,7 @@ let build_agent
   =
   (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
      provider 라우팅·에러 귀속은 원 [model]로 따로 한다 — 정체성과 routable model을 한
-     문자열에 압축하지 않는다 (RFC-0278). [name] 미지정(judge·label 없는 panel)이면 카드명=model.
+     문자열에 압축하지 않는다. [name] 미지정(judge·label 없는 panel)이면 카드명=model.
      default=[model]은 외부 파싱된 unknown 입력의 편의적 추측이 아니라 byte-identity
      계약(label 없으면 정체성=model)인 total mapping이라 sound-partial. DET-OK *)
   let card_name = Option.value name ~default:model in

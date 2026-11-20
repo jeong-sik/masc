@@ -1,5 +1,4 @@
-(** The certificate chain and private key the HTTPS listener serves
-    (RFC-0512 D6).
+(** The certificate chain and private key the HTTPS listener serves.
 
     Both files configured: that pair, as is. Neither configured: a self-signed
     pair under [<base-path>/.masc/tls/], generated when missing, unreadable or

@@ -573,7 +573,7 @@ let test_docker_other_container_root_stays_blocked () =
 
 (* A remote_ssh keeper's tree is on the endpoint, so its omitted cwd resolves
    to the root in host form without the host being asked whether that
-   directory exists, and without creating it (RFC-0427 A-1). *)
+   directory exists, and without creating it. *)
 let test_readonly_execute_omitted_cwd_does_not_create_write_root () =
   setup ~keeper_name:"readonly-exec" ~sandbox:Keeper_types_profile_sandbox.Remote_ssh
   @@ fun ~base:_ ~config ~meta ~playground ->

@@ -95,7 +95,7 @@ val read_unified :
     Truncation always applies. There is no "return everything" form: a limit
     is a positive bound by construction ({!read_limit}), and a caller asking
     for more than [max_read_entries] receives that ceiling with
-    [truncated = true] rather than a full-store scan (RFC-0372).
+    [truncated = true] rather than a full-store scan.
 
     [masc_root] is the workspace's .masc directory (use
     [Workspace.masc_dir config] to obtain it).

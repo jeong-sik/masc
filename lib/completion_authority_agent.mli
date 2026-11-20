@@ -71,7 +71,7 @@ module For_testing : sig
       Production is fixed to those real effects; no global hook is installed. *)
 
   val authority_actor : string
-  (** The fixed authority identity (RFC-0361 D7(b)): the [verifier_exact]
+  (** The fixed authority identity: the [verifier_exact]
       lane id, shared by every judgement so verdicts aggregate by actor. *)
 
   val retry_delay_of_paths :
@@ -90,7 +90,7 @@ module For_testing : sig
   val completion_verdict_of_review :
     Task.Anti_rationalization.verdict -> Masc_domain.completion_verdict
 
-  (** RFC-0436 §4.3/§4.4: what the judge receives of the binary image
+  (** What the judge receives of the binary image
       artifacts in one snapshot. [images] were attached as image blocks;
       [unread] are the image-format artifacts whose filed body did not come
       back, each with the store's typed reason. A non-image binary is in

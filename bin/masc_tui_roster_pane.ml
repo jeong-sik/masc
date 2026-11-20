@@ -78,5 +78,5 @@ let hides_roster = function
 
 let zoom_label ~ko = function
   | Normal -> if ko then "화면 분할: 기본 (Normal)" else "Pane zoom: normal"
-  | Half -> if ko then "화면 분할: 넓게 (Half — 우측 패널 접음)" else "Pane zoom: half (Activity hidden)"
-  | Full -> if ko then "화면 분할: 전체 (Full — 좌우 패널 접음)" else "Pane zoom: full (side panes hidden)"
+  | Half -> if ko then "화면 분할: 넓게 (Half · 우측 패널 접음)" else "Pane zoom: half (Activity hidden)"
+  | Full -> if ko then "화면 분할: 전체 (Full · 좌우 패널 접음)" else "Pane zoom: full (side panes hidden)"

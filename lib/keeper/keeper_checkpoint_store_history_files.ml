@@ -37,7 +37,7 @@ let list_agent_core_history_files ~(session_dir : string) : string list =
       |> List.filter (is_agent_core_history_file ~session_dir)
       |> List.sort (fun a b -> String.compare b a))
 
-(* Each entry is a copy of the head the canonical held (RFC-0476 §3.2), so it
+(* Each entry is a copy of the head the canonical held, so it
    costs the head's bytes; the objects are shared. The only reader is the
    dashboard checkpoint list, which decodes every retained entry to describe
    it, so the count is also what that request costs.

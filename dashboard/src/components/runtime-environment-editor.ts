@@ -643,7 +643,7 @@ export function RuntimeEnvironmentEditor({
   const pinnedAssignments = assignmentRows.filter(row => row.isPinned)
   const fallbackAssignments = assignmentRows.filter(row => !row.isPinned)
 
-  // A keeper may be assigned a declared lane or a runtime id (RFC-0457); the
+  // A keeper may be assigned a declared lane or a runtime id; the
   // server resolves a lane first when both share a name, so a lane of the same
   // id is listed only once, under lanes. A current value that is neither is
   // kept as its own option instead of the select silently showing another id.

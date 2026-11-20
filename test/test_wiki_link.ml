@@ -1,5 +1,5 @@
 (* Wiki_link: the link parser is total and names the shapes it does not
-   interpret (RFC-wiki-lint-and-page-contracts §5). *)
+   interpret. *)
 
 open Alcotest
 module L = Masc.Wiki_link

@@ -20,14 +20,14 @@ type network_mode =
   | Network_policy [@tla.symbol "Network_policy"]
       (** Outbound traffic reaches a proxy the MASC server owns and nothing
           else; the proxy judges each destination against the keeper's
-          allowlist (RFC-0415). The enforcement point is the backend's own
+          allowlist. The enforcement point is the backend's own
           network boundary rather than an environment variable, because
           [HTTPS_PROXY] is advice and a subprocess carrying its own socket
           ignores advice. *)
 [@@deriving tla]
 
 (** Which box the executor builds around a [tool_execute] the observation
-    tables did not answer, before the judge is asked (RFC-0422 §3.4).
+    tables did not answer, before the judge is asked.
 
     [Observe] refuses every write outside a scratch and every socket, so a
     run that exits 0 is proven effect-free. [Guest_local] refuses sockets
@@ -76,7 +76,7 @@ val network_mode_rejection : sandbox_profile -> network_mode -> string option
     network ([Network_none]) nor route it through a proxy masc owns
     ([Network_policy]), and it says so rather than accepting the setting and
     ignoring it. [Docker] refuses [Network_policy] because the Docker egress
-    boundary is unmeasured (RFC-0415). Every other pair is accepted.
+    boundary is unmeasured. Every other pair is accepted.
 
     Both the keeper TOML loader and the keeper_up argument resolver call this,
     so a declaration is refused before it is written as well as when it is

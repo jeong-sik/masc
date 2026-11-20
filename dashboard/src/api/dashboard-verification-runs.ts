@@ -1,6 +1,6 @@
 // MASC Dashboard — completion-authority review registry fetcher + decoder.
 //
-// Backend: lib/verification_run_registry.ml (RFC-0361 D4)
+// Backend: lib/verification_run_registry.ml
 // Route:   GET /api/v1/dashboard/verification-runs
 //
 // Sibling of dashboard-fusion.ts and deliberately shaped the same way. Distinct

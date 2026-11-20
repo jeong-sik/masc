@@ -48,7 +48,7 @@ type history_cleared =
 (** Delete every AGENT_CORE history archive entry of [session_dir]. A purge
     calls it once the purged checkpoint is installed: the entries are heads
     of the checkpoint before it, so while one is there the object sweep keeps
-    the content the purge removed (RFC-0476 §3.3). The next save archives
+    the content the purge removed. The next save archives
     again. [Error] when [session_dir] cannot be listed. *)
 val delete_all_agent_core_history_files :
   session_dir:string -> (history_cleared, string) result
@@ -88,14 +88,14 @@ type save_agent_core_outcome =
     and passes it in. The store never reads the setting itself: a failing
     read there would stop the best-effort history prune without saying so.
 
-    RFC-0225 §3.2 checkpoint watermark: returns [Ok Stale_noop] when
+    Checkpoint watermark: returns [Ok Stale_noop] when
     [ckpt.turn_count] is older than the canonical checkpoint currently on disk.
     A stale writer must not clobber a conversation the newer writer already
     persisted, but this is not a keeper lifecycle failure. Equal turn_count
     re-saves pass. A corrupt or unreadable existing checkpoint fails closed and
     is never treated as a cold store.
 
-    The canonical file is a head (RFC-0476 §3.2): the save writes the message
+    The canonical file is a head: the save writes the message
     objects and turn bundles the head names that the previous head did not,
     then the head. [boundary] says whether this save ends a Keeper turn
     ([Turn_closes] writes the turn's messages as one bundle). A failed object
@@ -182,7 +182,7 @@ val checkpoint_load_error_to_string : checkpoint_load_error -> string
 
 (** Project an [Agent_core.Error.t] to [checkpoint_load_error].
 
-    RFC-0089 G4: this no longer classifies [Not_found] from string-matched
+    This no longer classifies [Not_found] from string-matched
     [FileOpFailed.detail]. Cold-start "checkpoint absent" is detected at
     the OS boundary via a typed [Fs_compat.file_exists] check *before* any
     load, so any [core_error] reaching this function is a real
@@ -306,8 +306,7 @@ val canonical_message_count :
     it takes: the header's creation time, the message count, the system
     prompt from its header object, and [latest] of the last message it gives
     [Some] for ({!Agent_core.Checkpoint_objects.find_last}). It is for
-    showing a checkpoint: the chains are not checked, as a load checks them
-    (RFC-0476 §3.5). *)
+    showing a checkpoint: the chains are not checked, as a load checks them. *)
 type 'a checkpoint_summary =
   { created_at : float
   ; message_count : int
@@ -335,7 +334,7 @@ val summarize_agent_core_history_file :
 (** Byte length of the canonical head for [session_id]: the summary's
     identity while the file on disk is the one this process last parsed or
     wrote, otherwise one [stat]. [Ok None] when there is no checkpoint. The
-    messages are in objects (RFC-0476 §3.2), so this is the head's size, not
+    messages are in objects, so this is the head's size, not
     the history's, and not a token estimate or a provider request size. *)
 val canonical_byte_count :
   session_dir:string ->
@@ -781,7 +780,7 @@ val persist_error_to_string : persist_error -> string
 (** Head bytes for [snapshot] that another store can keep, with the objects
     they name durable in [session_dir] first, under the session lock.
     {!exact_snapshot_of_head_bytes} loads them back. The objects are kept as
-    long as a sweep root names them (RFC-0476 §3.6). *)
+    long as a sweep root names them. *)
 val persist_exact_snapshot :
   session_dir:string ->
   exact_checkpoint_snapshot ->

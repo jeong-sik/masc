@@ -195,7 +195,7 @@ let test_an_unknown_backend_is_refused_by_name () =
     check bool "names what it would have taken" true (contains "microsandbox" msg)
 ;;
 
-(* ── observation_run (RFC-0422 §3.4) ─────────────────────────────────── *)
+(* ── observation_run ─────────────────────────────────────────────────── *)
 
 let defaults_of pairs =
   Masc.Keeper_types_profile_toml_parser.profile_defaults_of_toml

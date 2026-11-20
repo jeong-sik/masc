@@ -1,6 +1,6 @@
 open Alcotest
 
-(** RFC-0085: [Host_config.host ()] reads the data-location env vars
+(** [Host_config.host ()] reads the data-location env vars
     [MASC_BASE_PATH], [MASC_CONFIG_DIR] and [MASC_BASE_PATH_LEASE_DIR], and
     reads an empty [MASC_BASE_PATH] as unset. *)
 

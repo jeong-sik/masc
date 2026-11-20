@@ -2307,7 +2307,7 @@ let test_projection_adoption_preserves_durable_projection_fields () =
 ;;
 
 (* A skill serves its body as a tool result. When the body is large enough to
-   externalize (RFC-0363), the model reads a [masc:blob] marker whose sha256 and
+   externalize, the model reads a [masc:blob] marker whose sha256 and
    bytes are the served body's own, so a receipt taken from the marker still
    equals what the skill served -- which is what lets the ledger record the
    delivery instead of leaving it SERVED ONLY forever. *)

@@ -17,7 +17,7 @@
 
 ### Performance choice
 
-[2026-10-22 측정](evidence/transport-performance-20261022/README.md)에서 같은
+2026-10-22 측정에서 같은
 MCP `ping`의 중앙값은 WS 0.38ms, HTTP JSON 0.75ms, finite POST SSE 0.68ms였다.
 약 81KB인 `tools/list`에서는 각각 2.05ms, 2.15ms, 2.31ms로 차이가 줄었다.
 한 바이너리·격리 workspace·인증 비활성 조건에서 각 30회 측정한 값이다.

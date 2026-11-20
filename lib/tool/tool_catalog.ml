@@ -159,7 +159,7 @@ let masc_workspace_tool =
 
 let read_state_tool = readonly_tool
 
-(* The shared machine's seat (RFC-play-link-for-the-shared-machine §2.3): an
+(* The shared machine's seat: an
    invited Player holds only CanPlayMachine. Loading, ejecting, restoring and
    saving change the game itself, and peek reads what the screen hides, so
    those keep the permissions above. *)
@@ -324,7 +324,7 @@ let explicit_metadata : (string * metadata) list =
          over a Lane instance's resources."
         admin_tool );
     (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
-       RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
+       7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
        masc_admin_reset, masc_gc_force, masc_workspace_delete, masc_force_unbind,
        masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",

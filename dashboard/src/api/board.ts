@@ -594,7 +594,7 @@ function normalizeBoardVoteDirection(raw: unknown): BoardVoteDirection | null | 
   return direction === 'up' || direction === 'down' ? direction : undefined
 }
 
-// RFC-0233 §7: parse the typed origin object (post_to_yojson_with_karma emits
+// Parse the typed origin object (post_to_yojson_with_karma emits
 // turn_ref / source / fusion_run_id). Parse, don't repair: a non-object or an
 // all-absent origin -> null (no empty record); each sub-field degrades
 // independently. Never throws, never drops the post.
@@ -1120,7 +1120,7 @@ export async function fetchBoardReactionsBatch(
     not be opened at all (#33562).
 
     The server keeps an exact index from the run id to its post
-    (`posts_by_run_id`, RFC-0233 §7) and answers this route from it, so the
+    (`posts_by_run_id`) and answers this route from it, so the
     lookup costs the same whatever the board has done since.
 
     Preserve the server's evidence status independently of run lifecycle.

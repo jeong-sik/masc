@@ -4,7 +4,7 @@
     The two official-client files and the chat file end just after their
     last line break, not at their length: a row caught half written is on
     neither side of a mark. The external store ends at the number of whole
-    rows it holds.
+    rows it holds, blank rows included, the way the store numbers its rows.
 
     Each file is read under the lock its own store writes under. A file
     that is not there yet ends at 0. *)

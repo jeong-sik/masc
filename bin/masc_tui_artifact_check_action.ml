@@ -6,7 +6,7 @@ type request = { report : Catalog.report; checked : bool;
   expected_change_id : string option; owner : unit ref }
 
 let prepare inventory report = match Checks.resolve inventory report with
-  | Unknown detail -> Error ("Refresh confirmations before changing this revision: " ^ detail)
+  | Unknown (_, detail) -> Error ("Refresh confirmations before changing this revision: " ^ detail)
   | Kept_back notice -> Error notice
   | Known previous ->
     let checked, expected_change_id = match previous with

@@ -252,7 +252,7 @@ let preflight_keeper_invocation ctx request =
 
 (* The message path resolves the keeper one call earlier and carries the
    effective meta here, so this preflight validates without a second disk
-   read (RFC-0371 B6). The delegate path below still reads: it has no
+   read. The delegate path below still reads: it has no
    resolution step of its own. *)
 let preflight_keeper_msg_resolved ~base_path ~(meta : keeper_meta) message =
   Result.bind
@@ -351,7 +351,7 @@ let run_direct_turn_with_fsm ~(keeper_name : string) ~(turn_id : int) f =
    Keeper Owner child. Covers [Keeper_agent_run.run_turn]
    AND the post-turn meta/lifecycle writes — both must stay inside the child
    or a concurrent turn can clobber the checkpoint and regress
-   [total_turns] (2026-06-10 RCA, RFC-0225 §1).
+   [total_turns] (2026-06-10 RCA).
 
    Precondition: the caller runs in the Keeper Owner child. The public
    direct-message entrypoint constructs a valid invocation request before
@@ -690,8 +690,7 @@ let run_keeper_invocation_turn_admitted_inner
               (* === SOFT CONTEXT (injected via extra_system_context) === *)
               (* Durable memory arrives from Memory OS facts recall
                  (keeper_run_tools_hooks.render_if_enabled, default-ON); the
-                 legacy memory-bank "Long-term memory:" block is gone
-                 (RFC keeper-memory-consolidation Stage 4). *)
+                 legacy memory-bank "Long-term memory:" block is gone. *)
               let recent_direct_conversation_text =
                 direct_owner_conversation_context
                   ~config:ctx.config ~meta ~direct_reply
@@ -772,7 +771,7 @@ let run_keeper_invocation_turn_admitted_inner
             in
             Progress.Tracker.step turn_tracker
               ~message:(Printf.sprintf "Executing Agent.run for %s" name) ();
-            (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
+            (* per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let settlement, latency_ms =
 	              Keeper_direct_native_continuation.reconcile_after_dispatch native_binding @@ fun () ->
@@ -1158,7 +1157,7 @@ let run_keeper_invocation_turn_admitted_inner
                       ~none:`Null
                       ~some:Keeper_usage_resolution.to_json
                       updated_meta.runtime.last_usage_resolution );
-                  (* RFC-0233 §7: the turn's join key, minted once from the
+                  (* The turn's join key, minted once from the
                      pre-turn snapshot above. The server persists it on the
                      chat row via append_turn ?turn_ref. *)
                   ( Keeper_turn_outcome.turn_ref_wire_key,

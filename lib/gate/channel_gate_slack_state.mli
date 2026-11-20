@@ -1,8 +1,8 @@
-(** Channel_gate_slack_state — Slack in-process connector state (RFC-0317).
+(** Channel_gate_slack_state — Slack in-process connector state.
 
     Implements {!Channel_gate_connector.S} so it can be registered at server
     startup via [Channel_gate_connector.register (module Channel_gate_slack_state)].
-    The in-process Slack gateway ({!Slack_socket_client}, RFC-0317) is the
+    The in-process Slack gateway ({!Slack_socket_client}) is the
     only transport. Internal helpers are hidden — only the
     {!Channel_gate_connector.S} surface plus the in-process gateway support is
     public. Status captures the effective runtime trigger policy on each read,

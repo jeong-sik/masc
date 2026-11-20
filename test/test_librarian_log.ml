@@ -80,7 +80,7 @@ let started =
 let committed
       ?(cause = Log.Adopt { by = "operator-1"; observed = digest 'b' })
       ?(effects = Effects.empty)
-      ?(covers_through = Log.Through { line = 256; within = Item 3 })
+      ?(covers_through = Log.Through { line = 256; within = Item { store = Agent_core; at = 3 } })
       ?(working_state = Some "checking the port")
       ()
   =
@@ -241,7 +241,7 @@ let started_text =
 
 let committed_text =
   Printf.sprintf
-    {|{"line":"committed","seq":2,"at":200.0,"basis":"%s","after":"%s","revision":4,"cause":{"kind":"adopt","by":"operator-1","observed":"%s"},"effects":{"added":[],"touched":[],"removed":[],"not_applied":[],"sources":[]},"turn_log":"%s","turn_log_offset":512,"covers_through":{"kind":"through","line":256,"within":{"kind":"item","index":3}},"covered":%s,"working_state":"checking the port"}|}
+    {|{"line":"committed","seq":2,"at":200.0,"basis":"%s","after":"%s","revision":4,"cause":{"kind":"adopt","by":"operator-1","observed":"%s"},"effects":{"added":[],"touched":[],"removed":[],"not_applied":[],"sources":[]},"turn_log":"%s","turn_log_offset":512,"covers_through":{"kind":"through","line":256,"within":{"kind":"item","store":"agent_core","at":3}},"covered":%s,"working_state":"checking the port"}|}
     (String.make 64 'a') (String.make 64 'b') (String.make 64 'b') (String.make 32 'a')
     covered_text
 ;;
@@ -416,9 +416,9 @@ let test_rejections () =
     ~reason:(Field_set_mismatch { missing = []; unexpected = [ "write" ] })
     (replace_once ~old:{|"kind":"adopt",|} ~by:{|"kind":"adopt","write":null,|} committed_text);
   expect_rejected "an item before the first"
-    ~path:[ Wire_field "covers_through"; Wire_field "within"; Wire_field "index" ]
+    ~path:[ Wire_field "covers_through"; Wire_field "within"; Wire_field "at" ]
     ~reason:Negative
-    (replace_once ~old:{|"index":3|} ~by:{|"index":-1|} committed_text);
+    (replace_once ~old:{|"at":3|} ~by:{|"at":-1|} committed_text);
   expect_rejected "a working state that is not text" ~path:[ Wire_field "working_state" ]
     ~reason:Expected_string
     (replace_once ~old:{|"working_state":"checking the port"|} ~by:{|"working_state":7|}

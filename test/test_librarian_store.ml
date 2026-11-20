@@ -427,6 +427,7 @@ let question : Read_result.question =
   ; reach
   ; trace = "trace-2"
   ; missing = []
+  ; offered = { units = 1; head_items = 1 }
   }
 ;;
 
@@ -449,7 +450,8 @@ let read_committed store ~at plan =
 let position_text : Log.position -> string = function
   | Before_first -> "before the first"
   | Through { line; within = Whole } -> Printf.sprintf "through %d, whole" line
-  | Through { line; within = Item index } -> Printf.sprintf "through %d, item %d" line index
+  | Through { line; within = Item { at; store = (_ : Masc.Librarian_unit.store) } } ->
+    Printf.sprintf "through %d, item at %d" line at
 ;;
 
 let cause_text : Log.cause -> string = function
@@ -541,7 +543,11 @@ let test_a_skip_moves_reading_only () =
   in
   let snapshot = file_bytes (snapshot_path place) in
   let inside : Read_result.reach =
-    { line = 200; within = Item 0; covered = { mark with chat_bytes = 64 }; turn_log_offset = 200 }
+    { line = 200
+    ; within = Item { store = Chat; at = 64 }
+    ; covered = { mark with chat_bytes = 64 }
+    ; turn_log_offset = 200
+    }
   in
   let hole : Log.hole =
     Content_missing [ { line = 200; parts = [ Chat_bytes { from = 64; until = 128 } ] } ]
@@ -552,7 +558,7 @@ let test_a_skip_moves_reading_only () =
     check string "leaves the snapshot" (hex line.basis) (hex line.after);
     check string "the file is as it was" snapshot (file_bytes (snapshot_path place));
     check int "the next read starts on the unit's line" 200 line.turn_log_offset;
-    check string "reading stands inside the unit" "through 200, item 0"
+    check string "reading stands inside the unit" "through 200, item at 64"
       (position_text line.covers_through);
     check int "covered where the unit starts" 64 line.covered.chat_bytes;
     check (option string) "the working state is kept" (Some "checking the port")

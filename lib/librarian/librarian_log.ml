@@ -2,7 +2,7 @@ module Digest = Agent_core.Checkpoint_objects
 
 type within =
   | Whole
-  | Item of int
+  | Item of Librarian_unit.item_name
 
 type position =
   | Before_first

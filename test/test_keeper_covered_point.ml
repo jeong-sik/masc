@@ -30,6 +30,7 @@ let mark ~trace closed_messages : Keeper_turn_log.mark =
 ;;
 
 let whole_unit = Librarian_log.Through { line = 0; within = Librarian_log.Whole }
+let sample_item at : Librarian_unit.item_name = { store = Librarian_unit.Agent_core; at }
 
 let view ?(trace = trace_id) ?working_state ?(through = whole_unit) closed_messages
   : Librarian_writer.view
@@ -81,7 +82,7 @@ let test_a_rewritten_closed_message_keeps_the_place () =
 ;;
 
 let test_a_part_of_a_unit_ends_where_its_mark_says () =
-  let through = Librarian_log.Through { line = 120; within = Librarian_log.Item 0 } in
+  let through = Librarian_log.Through { line = 120; within = Librarian_log.Item (sample_item 0) } in
   check string "an item of a unit is placed by the mark it ends at" (covered_to read_turn)
     (placed history (view ~through (List.length read_turn)))
 ;;
@@ -167,7 +168,7 @@ let test_the_turn_log_is_asked_at_the_views_position () =
     asked := (line, within) :: !asked;
     Point.No_reset
   in
-  let through = Librarian_log.Through { line = 120; within = Librarian_log.Item 2 } in
+  let through = Librarian_log.Through { line = 120; within = Librarian_log.Item (sample_item 2) } in
   ignore (placed ~unread_lines history (view ~through (List.length read_turn)) : string);
   check (list (pair int int)) "once, at the unit line and the item the view names"
     [ 120, 2 ]
@@ -176,7 +177,7 @@ let test_the_turn_log_is_asked_at_the_views_position () =
           ( line
           , match within with
             | Librarian_log.Whole -> -1
-            | Librarian_log.Item item -> item ))
+            | Librarian_log.Item { Librarian_unit.store = _; at } -> at ))
        !asked)
 ;;
 
@@ -279,7 +280,7 @@ let test_a_reset_that_was_read_is_behind_the_position () =
     (scanned turns_path (nth offsets 2));
   check string "read in part, it is not behind yet"
     (Printf.sprintf "reset at %d" (nth offsets 2))
-    (scanned ~within:(Librarian_log.Item 0) turns_path (nth offsets 2))
+    (scanned ~within:(Librarian_log.Item (sample_item 0)) turns_path (nth offsets 2))
 ;;
 
 let test_a_position_that_is_no_unit_line_is_not_scanned () =

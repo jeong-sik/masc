@@ -107,9 +107,11 @@ let units () : Read_unit.t list =
           ; unattributed = []
           ; own =
               [ { index = 0
+                ; name = { store = Agent_core; at = 0 }
                 ; body = Read_unit.Message (Agent.user_msg "ship the fix before Friday")
                 }
               ; { index = 1
+                ; name = { store = Agent_core; at = 1 }
                 ; body =
                     Read_unit.Message
                       (Agent.make_message
@@ -117,6 +119,7 @@ let units () : Read_unit.t list =
                          [ Agent.ToolUse { id = "call-1"; name = "board_read"; input = `Null } ])
                 }
               ; { index = 2
+                ; name = { store = Agent_core; at = 2 }
                 ; body =
                     Read_unit.Message
                       (Agent.tool_result_msg ~tool_use_id:"call-1" ~content:"two posts" ())
@@ -134,7 +137,10 @@ let units () : Read_unit.t list =
 ;;
 
 let ask held units =
-  match Question.make ~lane ~memory:(memory held) ~from ~reach ~trace:"trace-1" units with
+  match
+    Question.make ~lane ~memory:(memory held) ~from ~reach ~trace:"trace-1"
+      ~offered:{ units = 1; head_items = 3 } units
+  with
   | Question.Made { question; text } -> question, text
   | Question.Nothing_readable _ -> fail "a range with items made no question"
 ;;
@@ -181,7 +187,10 @@ let all_missing_asks_nothing () =
       }
     ]
   in
-  match Question.make ~lane ~memory:(memory (facts ())) ~from ~reach ~trace:"trace-1" lost with
+  match
+    Question.make ~lane ~memory:(memory (facts ())) ~from ~reach ~trace:"trace-1"
+      ~offered:{ units = 2; head_items = 0 } lost
+  with
   | Question.Made _ -> fail "a range with no item made a question"
   | Question.Nothing_readable { reach = through; missing } ->
     check bool "the reader's reach" true (through = reach);

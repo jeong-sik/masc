@@ -19,6 +19,29 @@
     These types are written to the commit log, so they hold no type another
     store owns. The unit as a question shows it is {!Librarian_read_unit}. *)
 
+(** A store a unit's items come from, in the order a segment shows them. *)
+type store =
+  | Chat
+  | External
+  | Agent_core
+  | History (** The official client's history file. *)
+  | Internal (** The official client's internal file. *)
+[@@deriving eq]
+
+(** Every store, in that order. *)
+val stores : store list
+
+(** One item of a unit, by the coordinate its store's mark counts in: the
+    byte offset where the row starts for [Chat], [History] and [Internal],
+    the row number from 0 for [External], the closed message's number for
+    [Agent_core]. A store that loses rows changes no other store's names.
+    Which segment the item is in follows from the turn's [Opened] baseline,
+    so the name does not carry it. *)
+type item_name =
+  { store : store
+  ; at : int
+  }
+
 (** From [from] to [until]: bytes for a file a mark measures in bytes, rows
     for the external store. [until] is the later mark's value. *)
 type range =

@@ -210,6 +210,7 @@ let input fixture tail : Ask.input =
   ; tail
   ; lane = fixture.lane
   ; resolved = fixture.resolved
+  ; asked = Read_range All
   }
 ;;
 
@@ -306,7 +307,7 @@ let result_text : Read_result.t -> string = function
   | Answered { slot; answer; question = _ } ->
     Printf.sprintf "answered by %s with %d ops" slot (List.length answer.ops)
   | Nothing_to_ask -> "nothing to ask"
-  | No_answer { slots } ->
+  | No_answer { slots; question = _ } ->
     "no answer: "
     ^ String.concat "; "
         (List.map

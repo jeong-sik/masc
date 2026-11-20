@@ -184,7 +184,17 @@ let through : Masc.Keeper_turn_log.mark =
   }
 ;;
 
-let span source : Unread.span = { line = 100; past_line = 200; at = 5.0; through; next = through; source }
+let span source : Unread.span =
+  { line = 100
+  ; past_line = 200
+  ; at = 5.0
+  ; from = { through with closed_messages = 0 }
+  ; through
+  ; next = through
+  ; source
+  ; resume = None
+  }
+;;
 
 let fragment_text : Fragments.fragment -> string = function
   | Message { message; _ } -> Types.text_of_content message.content
@@ -215,12 +225,12 @@ let missing_text : Unit.missing_part -> string = function
 ;;
 
 let read_text stores span =
-  match Content.read stores span with
+  match Content.read stores span ~take:Rest_of_unit with
   | Error (Fault (Content_unreadable { line })) -> [ Printf.sprintf "content of %d unreadable" line ]
   | Error (Fault (Line_unreadable _ | Turn_log_replaced _ | Position_lost _)) -> [ "another fault" ]
   | Error (Unread { detail }) -> [ "unread: " ^ detail ]
-  | Ok unit_ ->
-    let item segment ({ index; body } : Read_unit.item) =
+  | Ok { unit = unit_; ends = (_ : Masc.Librarian_log.within) } ->
+    let item segment ({ index; body; name = (_ : Unit.item_name) } : Read_unit.item) =
       Printf.sprintf "%s %d %s" segment index (body_text body)
     in
     (match unit_.kind with

@@ -336,9 +336,10 @@ let question place (value : Machine.t) : Read_result.question =
                (Store.memory store).facts)
       ; units = [ "u1", span.line ]
       }
-  ; reach = Unread.reach_whole span
+  ; reach = Unread.reach span Whole
   ; trace = "trace-1"
   ; missing = []
+  ; offered = { units = 1; head_items = 1 }
   }
 ;;
 
@@ -596,9 +597,10 @@ let test_nothing_to_ask () =
 
 let test_no_answer () =
   let place, value = asking_place () in
+  let question = question place value in
   let (_ : Machine.t) =
     step "the lane the ask started with" place value
-      (ended 1 (No_answer { slots = [ fast, Refused Unsized ] }))
+      (ended 1 (No_answer { question; slots = [ fast, Refused Unsized ] }))
       ~state:"resting, holding: " ~fiber:"cancel"
   in
   let moved =
@@ -606,7 +608,7 @@ let test_no_answer () =
   in
   let (_ : Machine.t) =
     step "a new lane value with no slot in the result" place moved
-      (ended 1 (No_answer { slots = [ fast, Silent Busy ] }))
+      (ended 1 (No_answer { question; slots = [ fast, Silent Busy ] }))
       ~state:"asking #2, holding: " ~fiber:"cancel, then start #2"
   in
   let grown =
@@ -614,7 +616,42 @@ let test_no_answer () =
   in
   let (_ : Machine.t) =
     step "a new lane value with a slot in the result" place grown
-      (ended 1 (No_answer { slots = [ fast, Silent Busy ] }))
+      (ended 1 (No_answer { question; slots = [ fast, Silent Busy ] }))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  ()
+;;
+
+(* §7.6: a refusal of a question wider than one item narrows by what it
+   carried and asks again at once, units first and then the head unit's
+   items. Silence says nothing of size, so it does not narrow: the writer
+   rests. *)
+let test_a_refusal_narrows () =
+  let asked_text (value : Machine.t) =
+    match value.state with
+    | Asking { asking = { asked = Read_range width; _ }; _ } -> (
+      match width with
+      | All -> "all"
+      | Units count -> Printf.sprintf "%d units" (count :> int)
+      | Items count -> Printf.sprintf "%d items" (count :> int))
+    | Idle _ | Resting _ | Stopped _ -> "no ask out"
+  in
+  let place, value = asking_place () in
+  check string "the first ask reads every unit" "all" (asked_text value);
+  let refused value ask offered =
+    let question = { (question place value) with offered } in
+    Machine.decide place value ~at:300.0
+      (ended ask (No_answer { question; slots = [ fast, Refused (Sized Input_too_large) ] }))
+  in
+  let units = refused value 1 { units = 4; head_items = 2 } in
+  check string "four units refused: two" "2 units" (asked_text units);
+  let fewer = refused units 2 { units = 2; head_items = 2 } in
+  check string "two refused: one" "1 units" (asked_text fewer);
+  let items = refused fewer 3 { units = 1; head_items = 6 } in
+  check string "one unit refused: half its items" "3 items" (asked_text items);
+  let (_ : Machine.t) =
+    step "a busy lane says nothing of size" place items
+      (ended 4 (No_answer { question = question place items; slots = [ fast, Silent Busy ] }))
       ~state:"resting, holding: " ~fiber:"cancel"
   in
   ()
@@ -622,13 +659,14 @@ let test_no_answer () =
 
 let test_nothing_readable () =
   let place, value = asking_place () in
-  let reach = (question place value).reach in
+  let ({ reach; offered; _ } : Read_result.question) = question place value in
   let value =
     step "a unit with nothing to read" place value
       (ended 1
          (Nothing_readable
             { reach
             ; missing = [ { line = reach.line; parts = [ Chat_bytes { from = 0; until = 64 } ] } ]
+            ; offered
             }))
       ~state:"idle, holding: " ~fiber:"cancel"
   in
@@ -708,7 +746,7 @@ let test_an_answer_from_before_reading_moved () =
   let first = question place value in
   let value =
     Machine.decide place value ~at:200.0
-      (ended 1 (Nothing_readable { reach = first.reach; missing = [] }))
+      (ended 1 (Nothing_readable { reach = first.reach; missing = []; offered = first.offered }))
   in
   let log = file_bytes (log_path place) in
   let counted = late_answers () in
@@ -920,6 +958,7 @@ let () =
       , [ test_case "an answer" `Quick test_an_answer
         ; test_case "nothing to ask" `Quick test_nothing_to_ask
         ; test_case "no answer" `Quick test_no_answer
+        ; test_case "a refusal narrows" `Quick test_a_refusal_narrows
         ; test_case "nothing readable" `Quick test_nothing_readable
         ; test_case "a span unknown" `Quick test_span_unknown
         ; test_case "Memory diverged" `Quick test_memory_diverged

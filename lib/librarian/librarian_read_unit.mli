@@ -29,6 +29,8 @@ type item =
   { index : int
   (** Its place in the unit as this question shows it, counted from 0. It
       is not written to the commit log. *)
+  ; name : Librarian_unit.item_name
+  (** The name a commit that reads through this item writes. *)
   ; body : body
   }
 

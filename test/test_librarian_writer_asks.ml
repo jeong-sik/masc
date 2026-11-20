@@ -431,7 +431,8 @@ let causes fixture = List.map (fun (commit : Log_line.commit) -> cause_text comm
 let position_text : Log_line.position -> string = function
   | Before_first -> "before the first unit"
   | Through { line; within = Whole } -> Printf.sprintf "through the unit at %d" line
-  | Through { line; within = Item item } -> Printf.sprintf "through item %d of the unit at %d" item line
+  | Through { line; within = Item { at; store = (_ : Librarian_unit.store) } } ->
+    Printf.sprintf "through the item at %d of the unit at %d" at line
 ;;
 
 let snapshot_bytes fixture =
@@ -617,7 +618,8 @@ let test_an_ask_reads_the_tail_between_events () =
     Eio.Promise.await may_read;
     Eio.Promise.resolve now_reading ();
     Eio.Promise.resolve now_read (input.tail ());
-    No_answer { slots = [] }
+    (* A result that leaves the writer resting, so it asks no more. *)
+    Ask_failed Flow_stopped
   in
   let writer =
     Writer.create ~now:Unix.gettimeofday ~registered:(fun () -> true) ~declared:declaration

@@ -278,7 +278,7 @@ let body_fields : Read_unit.body -> (string * Yojson.Safe.t) list = function
   | Fragment { file = _; line } -> fragment_fields line
 ;;
 
-let item_json ({ index; body } : Read_unit.item) =
+let item_json ({ index; body; name = (_ : Librarian_unit.item_name) } : Read_unit.item) =
   `Assoc ((f_index, `Int index) :: body_fields body)
 ;;
 
@@ -358,7 +358,7 @@ let line label value = label ^ value ^ newline
 let json_line label json = line label (Yojson.Safe.to_string json)
 
 let make ~(lane : Librarian_memory_lane.question_side) ~(memory : Current.t) ~from ~reach ~trace
-      units
+      ~offered units
   =
   let missing = missing_of units in
   if not (List.exists has_item units)
@@ -407,5 +407,5 @@ let make ~(lane : Librarian_memory_lane.question_side) ~(memory : Current.t) ~fr
       ; units = List.mapi (fun index (read : Read_unit.t) -> unit_name index, read.line) units
       }
     in
-    Made { question = { id; shown; reach; trace; missing }; text })
+    Made { question = { id; shown; reach; trace; missing; offered }; text })
 ;;

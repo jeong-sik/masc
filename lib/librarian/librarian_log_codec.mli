@@ -34,6 +34,13 @@
     { "kind": "skip", "hole": { "kind": "unknown_span", "before": { … }, "after": { … } } }
     v}
 
+    A position is [{ "kind": "before_first" }] or
+    [{ "kind": "through", "line": 120, "within": … }]. Within a unit read
+    whole is [{ "kind": "whole" }], and one read through an item is
+    [{ "kind": "item", "store": "history", "at": 1234 }]: [store] is [chat],
+    [external], [agent_core], [history] or [internal], and [at] is the
+    item's coordinate in that store ({!Librarian_unit.item_name}).
+
     ["memory"] is ["not_shown"] for a question that showed one item alone.
     A byte or row part is [history_bytes], [internal_bytes], [chat_bytes] or
     [external_rows] with [from] and [until]; an undecodable line of the

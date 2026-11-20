@@ -21,6 +21,9 @@ type reach =
       since the unit is not finished. *)
   }
 
+(** What the writer asks an ask for: the unread range at a width (§7.6). *)
+type asked = Read_range of Librarian_width.width
+
 (** What a question read and showed, as the writer commits it (§8.1, §8.4).
     The question's text is not here: the ask sends it and the writer does
     not read it. Where reading started and which turn log it read are the
@@ -36,6 +39,9 @@ type question =
       [before.trace] of a [Reset]. New facts carry it as their origin, and
       the snapshot the commit leaves names it. *)
   ; missing : Librarian_unit.missing_at list
+  ; offered : Librarian_width.offered
+  (** What the question carried. The writer narrows by it when the lane
+      refuses the question, and counts what a commit passed by it. *)
   }
 
 (** The walk or the read stopped on masc's side. Not a slot's outcome. Its
@@ -57,7 +63,8 @@ type t =
       }
   | Nothing_to_ask
   | No_answer of
-      { slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list
+      { question : question (** The question no slot answered. *)
+      ; slots : (Librarian_memory_lane.slot_key * Librarian_slot_outcome.unanswered) list
       (** Every slot of the lane value the walk started with: the admitted
           HTTP slots, then the declared CLI slots, each in declared order.
           The writer reads only the slots the lane declares now; whether
@@ -68,6 +75,8 @@ type t =
   | Nothing_readable of
       { reach : reach
       ; missing : Librarian_unit.missing_at list
+      ; offered : Librarian_width.offered
+      (** What the range would have carried. The skip passes it. *)
       }
   (** The range holds no item that can be read. *)
   | Span_unknown of

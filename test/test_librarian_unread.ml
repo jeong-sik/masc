@@ -129,7 +129,7 @@ let committed ?(turn_log = log_id) ~offset ~covered ~through () : Commit_log.lin
 (* The tail a commit leaves that read [span] whole. *)
 let committed_through span =
   let ({ line; within; covered; turn_log_offset } : Masc.Librarian_read_result.reach) =
-    Unread.reach_whole span
+    Unread.reach span Whole
   in
   committed ~offset:turn_log_offset ~covered ~through:(Through { line; within }) ()
 ;;
@@ -138,7 +138,11 @@ let committed_through span =
    and not the rest: reading stands on the unit's line, covered where the
    unit starts. *)
 let committed_inside ~starts_at (span : Unread.span) =
-  committed ~offset:span.line ~covered:starts_at ~through:(Through { line = span.line; within = Item 0 }) ()
+  committed ~offset:span.line ~covered:starts_at
+    ~through:
+      (Through
+         { line = span.line; within = Item { store = Agent_core; at = starts_at.closed_messages } })
+    ()
 ;;
 
 let last_span (reading : Unread.reading) =

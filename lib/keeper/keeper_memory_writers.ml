@@ -34,7 +34,8 @@ let start ~sw ~ask ~(config : Workspace.config) =
     update (fun tables ->
       match By_workspace.find_opt key tables with
       | Some current when current == table -> By_workspace.remove key tables
-      | Some _ | None -> tables))
+      | Some _ | None -> tables));
+  table
 ;;
 
 let find ~base_path = By_workspace.find_opt (workspace_key ~base_path) (Atomic.get tables)

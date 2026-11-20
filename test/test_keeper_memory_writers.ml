@@ -111,7 +111,7 @@ let test_table_lives_with_its_switch () =
     check bool "no table before the start" true
       (Option.is_none (Host.find ~base_path:config.base_path));
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
+      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~config in
       check bool "a table after the start" true
         (Option.is_some (Host.find ~base_path:config.base_path));
       check bool "another workspace has none" true
@@ -126,9 +126,9 @@ let test_a_second_start_replaces_the_table () =
     Eio.Switch.run (fun long ->
       let second =
         Eio.Switch.run (fun short ->
-          Host.start ~sw:short ~ask:Masc_test_deps.never_asks ~config;
+          let (_ : Writers.t) = Host.start ~sw:short ~ask:Masc_test_deps.never_asks ~config in
           let first = table config in
-          Host.start ~sw:long ~ask:Masc_test_deps.never_asks ~config;
+          let (_ : Writers.t) = Host.start ~sw:long ~ask:Masc_test_deps.never_asks ~config in
           let second = table config in
           check bool "the later table is the workspace's" false (second == first);
           second)
@@ -140,7 +140,7 @@ let test_a_second_start_replaces_the_table () =
 let test_writers_are_the_registry_s () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
+      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~config in
       start_turn_log config "keeper-a";
       check string "a Keeper that is not registered has no writer" "keeper retired"
         (write config "keeper-a" "the port is 8935");
@@ -152,7 +152,7 @@ let test_writers_are_the_registry_s () =
 let test_files_are_the_workspace_s () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
+      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~config in
       register config "keeper-a";
       start_turn_log config "keeper-a";
       check string "written" "written" (write config "keeper-a" "the port is 8935");
@@ -173,7 +173,7 @@ let test_files_are_the_workspace_s () =
 let test_no_turn_log_stops_the_store () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
+      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~config in
       register config "keeper-a";
       check string "a Keeper whose turns wrote no log is not written to" "store stopped"
         (write config "keeper-a" "the port is 8935")))
@@ -185,7 +185,7 @@ let test_no_turn_log_stops_the_store () =
 let test_a_closed_turn_is_told_to_the_writer () =
   with_workspace (fun config ->
     Eio.Switch.run (fun sw ->
-      Host.start ~sw ~ask:Masc_test_deps.never_asks ~config;
+      let (_ : Writers.t) = Host.start ~sw ~ask:Masc_test_deps.never_asks ~config in
       register config "keeper-a";
       let place : Recorder.place =
         { keepers_dir = Masc.Workspace.keepers_runtime_dir config

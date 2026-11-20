@@ -469,22 +469,30 @@ let growing_corpus = String.concat "" [
   "1. first\n2. second\n\n";
   "Closing paragraph without a newline at the end" ]
 
-let growing_entry body : Layout.entry =
+let entry_with_source markdown_source body : Layout.entry =
   { delivery_state = None; style = Layout.Keeper; heading_boundary = Layout.Inherit_heading;
     body_presentation = Layout.Source_body; timestamp = "12:00:00"; timeline_bucket = None;
     diagnostics = []; speaker = "alpha"; role_label = "alpha";
     role_label_mark_cells = Layout.role_label_mark_cells ~style:Layout.Keeper ();
-    request_label = ""; body; journal = [];
-    markdown_source = Layout.Markdown_growing {keeper_name = "alpha"; request_id = "grow"; entry_index = 0};
+    request_label = ""; body; journal = []; markdown_source;
     turn_rail = Layout.Rail_none; action = Layout.Action_none }
 
-let test_growing_suffix_reads_the_rows_the_whole_body_reads () =
+let growing_entry = entry_with_source
+  (Layout.Markdown_growing {keeper_name = "alpha"; request_id = "grow"; entry_index = 0})
+
+(* Each prefix is its own finished reply: one observation per length, so no
+   two lengths share a cached render. *)
+let finished_entry body = entry_with_source
+  (Layout.Markdown_stable {keeper_name = "alpha"; request_id = "done";
+    observed_at = float_of_int (String.length body); entry_index = 0}) body
+
+let suffix_reads_the_rows_the_whole_body_reads entry_of () =
   List.iter (fun width ->
     let steps = [| 1; 5; 13; 29 |] in
     let rec grow length step read_from_suffix =
       if length > String.length growing_corpus then read_from_suffix else
       let body = String.sub growing_corpus 0 length in
-      let whole, suffix = Render.For_testing.growing_row_end_sources ~width (growing_entry body) in
+      let whole, suffix = Render.For_testing.row_end_sources ~width (entry_of body) in
       match suffix with
       | None -> grow (length + steps.(step mod 4)) (step + 1) read_from_suffix
       | Some (row_start, suffix_rows) ->
@@ -495,6 +503,12 @@ let test_growing_suffix_reads_the_rows_the_whole_body_reads () =
     let read_from_suffix = grow 1 0 0 in
     check bool (Printf.sprintf "width %d: the suffix is read at most growth points" width)
       true (read_from_suffix * 2 > String.length growing_corpus / 12)) [60; 24]
+
+let test_growing_suffix_reads_the_rows_the_whole_body_reads =
+  suffix_reads_the_rows_the_whole_body_reads growing_entry
+
+let test_finished_suffix_reads_the_rows_the_whole_body_reads =
+  suffix_reads_the_rows_the_whole_body_reads finished_entry
 
 let test_streaming_frames_leave_the_whole_reply_unread () =
   let state = state Layout.Origin_inline in
@@ -516,6 +530,27 @@ let test_streaming_frames_leave_the_whole_reply_unread () =
       check bool "the live edge still holds a source byte for the next scroll key" true
         (List.exists (fun (point : T.chat_scroll_point) -> Option.is_some point.source_position) pin_points)
   | Some {T.pin_mode=(T.Hold_scroll | T.Hold_search); _} | None -> fail "the live edge left no pin"
+
+(* Opening a finished reply follows its live edge too. Reading that edge
+   through the whole body's index drew a 1MB reply again with spans, about
+   0.9s on the frame that opened it; the open suffix draws the same rows. *)
+let test_opening_a_finished_reply_leaves_the_whole_reply_unread () =
+  List.iter (fun journal ->
+    let state = state Layout.Origin_inline in
+    let text = long_answer "DONE_" in
+    if journal then ignore (log state ~id:"done" ~at:1.
+      [Live.Run_started; Live.Text {text=text; response=Unobserved_scope (None)}; reply text; Live.Run_finished])
+    else state.msg_loaded <- [row ~id:"done" ~request_id:"done" ~role:T.Message_keeper ~text 1.];
+    let before = Render.For_testing.source_index_build_count () in
+    ignore (frame_lines state);
+    check int (Printf.sprintf "journal %b: the opening frame reads no whole-reply index" journal)
+      before (Render.For_testing.source_index_build_count ());
+    match state.msg_scroll_pin with
+    | Some {T.pin_mode=T.Follow_live; pin_points; _} ->
+        check bool "the live edge holds a source byte" true
+          (List.exists (fun (point : T.chat_scroll_point) -> Option.is_some point.source_position) pin_points)
+    | Some {T.pin_mode=(T.Hold_scroll | T.Hold_search); _} | None -> fail "the live edge left no pin")
+    [false; true]
 
 let visible_line lines needle =
   match List.find_mapi (fun index line ->
@@ -1789,6 +1824,8 @@ let () = run "chat search projection" [
     test_case "byte rows wait for a pin" `Quick test_byte_rows_wait_for_a_pin;
     test_case "growing suffix reads the whole body's rows" `Quick test_growing_suffix_reads_the_rows_the_whole_body_reads;
     test_case "streaming frames leave the whole reply unread" `Quick test_streaming_frames_leave_the_whole_reply_unread;
+    test_case "finished suffix reads the whole body's rows" `Quick test_finished_suffix_reads_the_rows_the_whole_body_reads;
+    test_case "opening a finished reply leaves the whole reply unread" `Quick test_opening_a_finished_reply_leaves_the_whole_reply_unread;
     test_case "a held turn's tool blocks follow the tool stance" `Quick
       test_held_turn_tool_blocks_follow_the_tool_stance;
     test_case "repeated matches within one entry are newest first" `Quick

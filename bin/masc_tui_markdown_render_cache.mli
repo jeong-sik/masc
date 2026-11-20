@@ -36,6 +36,33 @@ val render :
 (** Render the completed entry [identity] with source [text], or return its
     retained rows when every key field matches. *)
 
+val render_with_suffix :
+  'identity t ->
+  theme_revision:int ->
+  palette_generation:int ->
+  width:int ->
+  renderer:(width:int -> string -> Masc_tui_markdown.streaming_render) ->
+  identity:'identity ->
+  text:string ->
+  string list
+(** {!render} through a streaming renderer, which also retains where the
+    render's open suffix starts, for {!completed_boundary}. Rows retained by
+    {!render} for the same key are rendered again once to learn it. *)
+
+val completed_boundary :
+  'identity t ->
+  theme_revision:int ->
+  palette_generation:int ->
+  width:int ->
+  identity:'identity ->
+  text:string ->
+  (int * int) option
+(** [Some (source_bytes, rows)] when {!render_with_suffix} retained exactly
+    [text] for [identity] with these visual fields: the bytes before the
+    render's open suffix and the rows they draw. The rows after that are what
+    the suffix bytes render to on their own, numbered from [rows]. [None]
+    when nothing for [text] is retained, or {!render} retained it. *)
+
 val render_growing :
   'identity t ->
   theme_revision:int ->

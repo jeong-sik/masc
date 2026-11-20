@@ -10,6 +10,9 @@ module Completed = struct
   type 'identity rendered = {
     key : 'identity key;
     rows : string list;
+    suffix : (int * int) option;
+        (* The open suffix's first byte and row, when a streaming render
+           produced [rows]; a renderer of rows alone leaves it unknown. *)
   }
 end
 
@@ -118,8 +121,34 @@ let render cache ~theme_revision ~palette_generation ~width ~renderer ~identity
       rendered.rows
   | Some _ | None ->
       let rows = renderer ~width text in
-      remember cache { key; rows };
+      remember cache { key; rows; suffix = None };
       rows
+
+let render_with_suffix cache ~theme_revision ~palette_generation ~width ~renderer
+    ~identity ~text =
+  let key : _ Completed.key =
+    { identity; text; width; theme_revision; palette_generation }
+  in
+  match Masc_tui_lru.find cache.completed identity with
+  | Some ({ suffix = Some _; _ } as rendered : _ Completed.rendered)
+    when same_rest key rendered.key ->
+      rendered.rows
+  | Some _ | None ->
+      let (rendered : Masc_tui_markdown.streaming_render) = renderer ~width text in
+      remember cache
+        { key; rows = rendered.rows
+        ; suffix = Some (rendered.mutable_source_start, rendered.mutable_row_start) };
+      rendered.rows
+
+let completed_boundary cache ~theme_revision ~palette_generation ~width ~identity
+    ~text =
+  let key : _ Completed.key =
+    { identity; text; width; theme_revision; palette_generation }
+  in
+  match Masc_tui_lru.find cache.completed identity with
+  | Some (rendered : _ Completed.rendered) when same_rest key rendered.key ->
+      rendered.suffix
+  | Some _ | None -> None
 
 let same_visual_rest (left : _ Streaming.key) (right : _ Streaming.key) =
   left.width = right.width

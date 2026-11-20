@@ -302,6 +302,11 @@ let body_with_previews ~previews ~mode ~palette_generation ~(entry : Message_lay
               composed_palette = palette_generation; composed };
           composed)
 
+let stable_markdown_identity (entry : Message_layout.entry) ~keeper_name ~request_id
+    ~observed_at ~entry_index =
+  { cmi_style = entry.style; cmi_keeper_name = keeper_name; cmi_request_id = request_id;
+    cmi_observed_at = Some observed_at; cmi_entry_index = entry_index }
+
 let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
   fun ~(entry : Message_layout.entry) ~width ->
   let context = Chat_theme.body_context theme entry.style in
@@ -322,16 +327,11 @@ let cached_chat_markdown_with_preview ~previews ~link_previews_mode ~theme =
       match entry.markdown_source with
       | Message_layout.Markdown_stable
           { keeper_name; request_id; observed_at; entry_index } ->
-          Markdown_cache.render chat_markdown_cache
+          Markdown_cache.render_with_suffix chat_markdown_cache
             ~theme_revision:chat_markdown_theme_revision
-            ~palette_generation ~width ~renderer:(chat_markdown ~context)
-            ~identity:
-              { cmi_style = entry.style;
-                cmi_keeper_name = keeper_name;
-                cmi_request_id = request_id;
-                cmi_observed_at = Some observed_at;
-                cmi_entry_index = entry_index;
-              }
+            ~palette_generation ~width ~renderer:(chat_markdown_streaming ~context)
+            ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
+              ~observed_at ~entry_index)
             ~text:body
       | Message_layout.Markdown_growing
           { keeper_name; request_id; entry_index } ->
@@ -4400,30 +4400,40 @@ let body_row_of_point ~source_body entry_index (point : chat_scroll_point) =
   | Some position -> Option.bind (source_body entry_index) (fun body ->
       Hashtbl.find_opt (Lazy.force body.source_rows) position)
 
-(* The open suffix's rows of a growing entry the chat drew this frame, with the
-   row the suffix starts at. [None] when the growing render cache holds no
-   closed prefix for exactly this body and width. *)
-let growing_suffix_index ~theme ~width (entry : Message_layout.entry) =
-  match entry.markdown_source with
-  | Message_layout.Markdown_growing {keeper_name; request_id; entry_index} ->
-      let context = Chat_theme.body_context theme entry.style in
-      Option.map (fun (source_start, row_start) ->
-        let body_rows, runs =
-          search_chat_markdown_suffix ~theme ~entry ~width ~source_start ~row_start in
-        row_start, source_body_index_of_runs
-          ~convert:(fun position -> Some (Durable_position position)) ~body_rows runs)
-        (Markdown_cache.growing_boundary chat_markdown_cache
-           ~theme_revision:chat_markdown_theme_revision
-           ~palette_generation:context.palette_generation ~width
-           ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
-           ~text:entry.body)
-  | Message_layout.Markdown_stable _ | Markdown_streaming -> None
+(* The open suffix's rows of an entry the chat drew this frame, with the row
+   the suffix starts at. [None] when the render cache holds no boundary for
+   exactly this body and width: a body drawn with link cards after it is
+   another text, and a streaming entry keeps no render. *)
+let suffix_index ~theme ~width (entry : Message_layout.entry) =
+  let context = Chat_theme.body_context theme entry.style in
+  let boundary = match entry.markdown_source with
+    | Message_layout.Markdown_growing {keeper_name; request_id; entry_index} ->
+        Markdown_cache.growing_boundary chat_markdown_cache
+          ~theme_revision:chat_markdown_theme_revision
+          ~palette_generation:context.palette_generation ~width
+          ~identity:(growing_markdown_identity entry ~keeper_name ~request_id ~entry_index)
+          ~text:entry.body
+    | Message_layout.Markdown_stable {keeper_name; request_id; observed_at; entry_index} ->
+        Markdown_cache.completed_boundary chat_markdown_cache
+          ~theme_revision:chat_markdown_theme_revision
+          ~palette_generation:context.palette_generation ~width
+          ~identity:(stable_markdown_identity entry ~keeper_name ~request_id
+            ~observed_at ~entry_index)
+          ~text:entry.body
+    | Message_layout.Markdown_streaming -> None in
+  Option.map (fun (source_start, row_start) ->
+    let body_rows, runs =
+      search_chat_markdown_suffix ~theme ~entry ~width ~source_start ~row_start in
+    row_start, source_body_index_of_runs
+      ~convert:(fun position -> Some (Durable_position position)) ~body_rows runs)
+    boundary
 
 (* The live edge reads one row's last source byte. A growing entry is a new
    entry on every arrival, so reading it through [source_body] drew the whole
-   reply again with spans on every streaming frame. The closed prefix the
-   growing render cache holds draws none of the open suffix's rows, so a row
-   the suffix draws is read from the suffix alone. *)
+   reply again with spans on every streaming frame, and a finished reply drew
+   it once more on the frame that opened it. The closed prefix the render
+   cache holds draws none of the open suffix's rows, so a row the suffix draws
+   is read from the suffix alone. *)
 let live_row_end_source state ~keeper_name projection ~inner_width ~theme ~source_body =
   let entries = (scroll_anchor_index projection).indexed_entries in
   let suffixes = Hashtbl.create 2 in
@@ -4433,14 +4443,14 @@ let live_row_end_source state ~keeper_name projection ~inner_width ~theme ~sourc
     | None ->
         let entry = entries.(entry_index) in
         let value = match entry.Message_layout.markdown_source, entry.journal with
-          | Message_layout.Markdown_growing _, [] ->
+          | (Message_layout.Markdown_growing _ | Markdown_stable _), [] ->
               (match fst (source_mapping_owner state ~keeper_name projection entry_index) with
                | Durable_source ->
-                   growing_suffix_index ~theme entry ~width:(Message_layout.entry_body_cells
+                   suffix_index ~theme entry ~width:(Message_layout.entry_body_cells
                      ~origin:state.msg_origin_display ~inner_width entry)
                | Unknown_polled_source | Polled_source _ -> None)
-          | Message_layout.Markdown_growing _, _ :: _
-          | (Message_layout.Markdown_stable _ | Markdown_streaming), _ -> None in
+          | (Message_layout.Markdown_growing _ | Markdown_stable _), _ :: _
+          | Message_layout.Markdown_streaming, _ -> None in
         Hashtbl.add suffixes entry_index value;
         value in
   fun entry_index body_row ->
@@ -6132,7 +6142,7 @@ module For_testing = struct
   let search_candidate_build_count () = Atomic.get search_candidate_builds
   let search_candidate_ui_build_count () = Atomic.get search_candidate_ui_builds
   let search_job_bytes = search_job_bytes
-  let growing_row_end_sources ~width (entry : Message_layout.entry) =
+  let row_end_sources ~width (entry : Message_layout.entry) =
     let theme = Chat_theme.snapshot () in
     let previews = shared_previews () in
     let preview = preview_lookup previews in
@@ -6148,5 +6158,5 @@ module For_testing = struct
       ~body_rows:(List.length whole.mapped_rows) whole.runs in
     sorted whole_index.row_end_sources,
     Option.map (fun (row_start, (index : source_body_index)) ->
-      row_start, sorted index.row_end_sources) (growing_suffix_index ~theme ~width entry)
+      row_start, sorted index.row_end_sources) (suffix_index ~theme ~width entry)
 end

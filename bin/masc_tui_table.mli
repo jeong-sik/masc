@@ -98,8 +98,8 @@ val header_row : cell list -> string
 
 val dropped_columns_badge : ko:bool -> int -> string option
 (** The right-aligned overflow badge written on a header row when {!fit}
-    dropped columns ([외 N열] / [+N cols]), or [None] when [dropped <= 0]
-    (RFC tui-one-screen-grammar section 5.1). *)
+    dropped columns ([외 N열] / [N more cols]), or [None] when [dropped <= 0]
+    (RFC tui-one-screen-grammar sections 5.1 and 6.3). *)
 
 val header_row_with_dropped :
   ko:bool -> inner_width:int -> dropped:int -> cell list -> string

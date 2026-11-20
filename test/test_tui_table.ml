@@ -51,9 +51,9 @@ let test_dropped_columns_badge_and_header_width () =
     (Table.dropped_columns_badge ~ko:true 0);
   check (option string) "korean badge" (Some "외 2열")
     (Table.dropped_columns_badge ~ko:true 2);
-  check (option string) "english singular badge" (Some "+1 col")
+  check (option string) "english singular badge" (Some "1 more col")
     (Table.dropped_columns_badge ~ko:false 1);
-  check (option string) "english plural badge" (Some "+2 cols")
+  check (option string) "english plural badge" (Some "2 more cols")
     (Table.dropped_columns_badge ~ko:false 2);
   let cells =
     [ Table.cell ~header:"이름" ~width:12 ""

@@ -322,33 +322,38 @@ let union_lines form =
   match form.union with
   | None -> []
   | Some (Fixed {count;index;alternative}) ->
-      ["  Alternative: " ^ chosen index count alternative ^ " · locked"]
+      [false, "  Alternative: " ^ chosen index count alternative ^ " · locked"]
   | Some (Choosable {alternatives;chosen=choice}) ->
       let count = List.length alternatives in
       let label = match choice with
         | Some (index,alternative) -> chosen index count alternative
         | None -> Printf.sprintf "none of %d chosen" count in
-      [(if focus form=Some Choice then "› " else "  ") ^ "Alternative: " ^ label]
-let rec lines ?(show_description=false) form =
+      let selected = focus form = Some Choice in
+      [selected, (if selected then "› " else "  ") ^ "Alternative: " ^ label]
+let plain lines = List.map (fun line -> false, line) lines
+let rec lines_with_selection ?(show_description=false) form =
   match form.array_editor with
   | Some editor ->
       let name = match selected_field form with
         | Some field -> String.concat "." field.path | None -> "Array" in
       (match editor.child with
        | Some (index,child) ->
-           (name ^ (match index with None -> " · New item" | Some index -> Printf.sprintf " · Edit item %d" (index+1)))
-           :: "Item review saves into this local array; it does not submit an action." :: lines ~show_description child
+           plain
+             [ name ^ (match index with None -> " · New item" | Some index -> Printf.sprintf " · Edit item %d" (index+1))
+             ; "Item review saves into this local array; it does not submit an action." ]
+           @ lines_with_selection ~show_description child
        | None ->
-           [name ^ " · Array items";"a:add  e/Enter:edit  d:remove  j/k:select  Ctrl-S:apply array  Esc:discard array edits";
-            Printf.sprintf "%d items · applying validates minItems/maxItems" (List.length editor.items)] @
-           (match List.nth_opt editor.items editor.item_cursor with
-            | None -> ["No items. a adds an explicit item."]
-            | Some value -> Printf.sprintf "Selected item %d/%d" (editor.item_cursor+1) (List.length editor.items)
-                :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string value)))
+           plain
+             ([name ^ " · Array items";"a:add  e/Enter:edit  d:remove  j/k:select  Ctrl-S:apply array  Esc:discard array edits";
+               Printf.sprintf "%d items · applying validates minItems/maxItems" (List.length editor.items)] @
+              (match List.nth_opt editor.items editor.item_cursor with
+               | None -> ["No items. a adds an explicit item."]
+               | Some value -> Printf.sprintf "Selected item %d/%d" (editor.item_cursor+1) (List.length editor.items)
+                   :: String.split_on_char '\n' (Yojson.Safe.pretty_to_string value))))
   | None ->
   if form.reviewing then
-    ["Review input · Enter:submit once · Esc:edit · PageUp/PageDown:scroll"] @
-      (match value form with Ok value -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string value) | Error error -> [error])
+    plain (["Review input · Enter:submit once · Esc:edit · PageUp/PageDown:scroll"] @
+      (match value form with Ok value -> String.split_on_char '\n' (Yojson.Safe.pretty_to_string value) | Error error -> [error]))
   else
     let selected = selected_field form in
     let array_hint = match selected with
@@ -363,15 +368,17 @@ let rec lines ?(show_description=false) form =
       | Some (Input index) -> Printf.sprintf "Field %d/%d" (index+1) (List.length form.fields)
       | Some Choice -> "Alternative"
       | None -> "No field to fill" in
-    ["Tab/Up/Down:field · Left/Right:choice" ^ array_hint ^ " · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
-        position ^ " · PageUp/PageDown:scroll"] @ locked_lines form @ union_lines form @
+    plain ["Tab/Up/Down:field · Left/Right:choice" ^ array_hint ^ " · Ctrl-U:unset · Ctrl-S:review · Esc:cancel";
+        position ^ " · PageUp/PageDown:scroll"] @ plain (locked_lines form) @ union_lines form @
     (match selected with
      | None -> []
      | Some field ->
          let name = match member "title" field.schema with Some (`String title) -> title
            | _ -> String.concat "." field.path in
-         ["› " ^ name ^ (if field.required then " *" else "") ^ ": " ^
+         [true, "› " ^ name ^ (if field.required then " *" else "") ^ ": " ^
           (match form.draft with
            | Some draft -> display_draft field draft
            | None -> Option.fold ~none:"(unset)" ~some:Yojson.Safe.to_string field.value)])
-    @ description
+    @ plain description
+let lines ?(show_description=false) form =
+  List.map snd (lines_with_selection ~show_description form)

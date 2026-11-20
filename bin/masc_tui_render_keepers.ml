@@ -274,7 +274,7 @@ let keeper_badge_text ~ko (badge : Keeper_list_model.badge) =
 (* Between two pieces of DETAIL. *)
 let detail_separator = " · "
 
-let keeper_task_detail ?tasks ~ko (row : Keeper_list_model.row) =
+let keeper_task_detail ?(tasks = []) ~ko (row : Keeper_list_model.row) =
   let task_word = if ko then "작업 " else "task " in
   match row.task with
   | Some task ->
@@ -285,81 +285,15 @@ let keeper_task_detail ?tasks ~ko (row : Keeper_list_model.row) =
       match row.keeper.Tui_decode.k_activity with
       | Some activity ->
           Option.map
-            (fun id ->
-              let label =
-                match tasks with
-                | Some list ->
-                    (match
-                       List.find_opt
-                         (fun (t : Tui_decode.task) -> String.equal t.id id)
-                         list
-                     with
-                     | Some t when not (String.equal (String.trim t.title) "") ->
-                         Terminal_text.single_line t.title
-                     | Some _ | None -> Terminal_text.single_line id)
-                | None -> Terminal_text.single_line id
-              in
-              task_word ^ label)
+            (fun id -> task_word ^ resolve_task_title_in ~tasks id)
             activity.Tui_decode.k_current_task_id
       | None -> Some (if ko then "작업 보고 없음" else "task not reported"))
 
-let schedule_title_for_id (schedules : schedule_snapshot option) schedule_id =
-  match schedules with
-  | None -> None
-  | Some snapshot ->
-      let found =
-        List.find_opt
-          (fun (row : schedule_row) -> String.equal row.sch_schedule_id schedule_id)
-          snapshot.scs_rows
-      in
-      Option.bind found (fun (row : schedule_row) ->
-          match row.sch_payload_summary with
-          | Some summary when not (String.equal (String.trim summary) "") ->
-              Some (Terminal_text.single_line summary)
-          | Some _ | None ->
-              if not (String.equal (String.trim row.sch_recurrence_summary) "") then
-                Some (Terminal_text.single_line row.sch_recurrence_summary)
-              else None)
-
-let clean_schedule_wait_text ?schedules ?now ~ko (item : Tui_decode.waiting_item) text =
-  let prefix_sep = " · sched-" in
-  let sep_len = String.length prefix_sep in
-  let find_sched_sep s =
-    let len = String.length s in
-    let rec scan i =
-      if i + sep_len > len then None
-      else if String.sub s i sep_len = prefix_sep then Some i
-      else scan (i + 1)
-    in
-    scan 0
-  in
-  match find_sched_sep text with
-  | None -> text
-  | Some idx ->
-      let head = String.sub text 0 idx in
-      let sched_id = String.sub text (idx + 4) (String.length text - idx - 4) in
-      (match schedule_title_for_id schedules sched_id with
-       | Some title -> head ^ " · " ^ title
-       | None ->
-           (match item.kwi_due_at with
-            | Some at when Float.is_finite at ->
-                let now_val = match now with Some t -> t | None -> Unix.gettimeofday () in
-                head ^ " · "
-                ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
-                    ~now:now_val at
-            | Some _ | None ->
-                if String.equal (String.trim head) "" then
-                  if ko then "예약 실행" else "scheduled wake"
-                else head))
-
-let keeper_waiting_item_text ?schedules ?now ?(ko = false) (item : Tui_decode.waiting_item) =
-  let raw =
-    Terminal_text.single_line
-      (if not (String.equal (String.trim item.kwi_what) "") then item.kwi_what
-       else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
-       else item.kwi_waiting_on)
-  in
-  clean_schedule_wait_text ?schedules ?now ~ko item raw
+let keeper_waiting_item_text (item : Tui_decode.waiting_item) =
+  Terminal_text.single_line
+    (if not (String.equal (String.trim item.kwi_what) "") then item.kwi_what
+     else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
+     else item.kwi_waiting_on)
 
 (* The reasons the server gave for each source the fleet waiting read could
    not observe. The Plain header and the axis views say the same thing. *)
@@ -372,7 +306,7 @@ let keeper_waiting_failure_reasons ~ko errors =
       | Keeper_list_model.Failure_unstated -> if ko then "원인 미기록" else "reason not stated")
     (Keeper_list_model.waiting_failure_reasons errors)
 
-let keeper_waiting_detail ?schedules ?now ~ko (row : Keeper_list_model.row) =
+let keeper_waiting_detail ~ko (row : Keeper_list_model.row) =
   match row.waiting with
   | Keeper_list_model.Waiting_observed
       { Tui_decode.kwr_waiting_heads = (first :: _ as items); kwr_waiting_count; _ } ->
@@ -386,7 +320,7 @@ let keeper_waiting_detail ?schedules ?now ~ko (row : Keeper_list_model.row) =
         | None -> first
       in
       let others = kwr_waiting_count - 1 in
-      Some (keeper_waiting_item_text ?schedules ?now ~ko item
+      Some (keeper_waiting_item_text item
         ^ (if others > 0 then " (" ^ Masc_tui_value.Count.more ~ko others ^ ")"
            else ""))
   | Keeper_list_model.Waiting_observed { kwr_waiting_heads = []; _ }
@@ -460,7 +394,7 @@ let keeper_questions_text ~ko count =
   if ko then Printf.sprintf "답을 기다리는 질문 %d건" count
   else Masc_tui_message_layout.count_noun count "question" ^ " awaiting you"
 
-let keeper_detail_text ?schedules ?tasks ~ko ?now (row : Keeper_list_model.row) =
+let keeper_detail_text ?tasks ~ko ?now (row : Keeper_list_model.row) =
   let health =
     Option.map
       (fun word -> (if ko then "상태 " else "health ") ^ word)
@@ -470,7 +404,7 @@ let keeper_detail_text ?schedules ?tasks ~ko ?now (row : Keeper_list_model.row) 
   @ List.filter_map Fun.id
       [ Option.map (keeper_approval_text ~ko) row.approval
       ; (if row.open_questions > 0 then Some (keeper_questions_text ~ko row.open_questions) else None)
-      ; keeper_waiting_detail ?schedules ?now ~ko row; keeper_task_detail ?tasks ~ko row; health
+      ; keeper_waiting_detail ~ko row; keeper_task_detail ?tasks ~ko row; health
       ; keeper_next_text ~ko ?now row ]
   |> String.concat detail_separator
 
@@ -503,8 +437,8 @@ let keeper_row_context_chip (state : state) (row : Keeper_list_model.row) =
        | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
        | Masc_tui_fetched.Failed _ -> None)
 
-let keeper_detail_cell ?schedules ?tasks ~ko ?now ?context_chip ~width ~failure_context row =
-  let rest = keeper_detail_text ?schedules ?tasks ~ko ?now row in
+let keeper_detail_cell ?tasks ~ko ?now ?context_chip ~width ~failure_context row =
+  let rest = keeper_detail_text ?tasks ~ko ?now row in
   match failure_context with
   | None ->
       (match context_chip with
@@ -603,7 +537,7 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
   ^ Ansi.reset
 
-let keeper_row_content ?schedules ?tasks ~ko ?context_chip ~(columns : Render_schedule.keeper_columns)
+let keeper_row_content ?tasks ~ko ?context_chip ~(columns : Render_schedule.keeper_columns)
     ~now ~yolo ~selected (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let failure_context =
@@ -632,7 +566,7 @@ let keeper_row_content ?schedules ?tasks ~ko ?context_chip ~(columns : Render_sc
        else "")
     ; (if columns.kcol_show_detail then
          " "
-         ^ keeper_detail_cell ?schedules ?tasks ~ko ~now ?context_chip ~width:columns.kcol_task
+         ^ keeper_detail_cell ?tasks ~ko ~now ?context_chip ~width:columns.kcol_task
              ~failure_context:
                (Render_schedule.keeper_failure_context_for_detail
                   ~show_runtime:columns.kcol_show_runtime failure_context)
@@ -703,12 +637,12 @@ let style_axis_cell (cell : Masc_tui_keeper_axis_cell.t) =
 let secondary_indent_cells = Render_schedule.keeper_marker_width
 let secondary_separator = "  ·  "
 
-let keeper_secondary_row_content ?schedules ?tasks ~ko ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
+let keeper_secondary_row_content ?tasks ~ko ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
   let indent_cells = secondary_indent_cells in
   let available = max 0 (inner - indent_cells) in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime (keeper_row_runtime row) in
   let detail =
-    match keeper_detail_text ?schedules ?tasks ~ko ?now row with
+    match keeper_detail_text ?tasks ~ko ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
@@ -1979,10 +1913,7 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
         Option.value (Message_layout.age_text ~now ~since) ~default:Masc_tui_theme.Glyph.no_value
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let schedules =
-    if Option.is_some state.schedules_agenda_error then None else state.schedules_agenda
-  in
-  let detail = keeper_detail_text ?schedules ~tasks:state.tasks ~ko ~now row in
+  let detail = keeper_detail_text ~tasks:state.tasks ~ko ~now row in
   let telemetry_row =
     let parts =
       List.filter_map Fun.id
@@ -2234,7 +2165,7 @@ let keeper_observation_status_rows state ~now ~failure =
 
 (* The operator roster uses the same row readings as the axis views. These
    sentences do not turn missing observations into idle work or no requests. *)
-let keeper_plain_work ?now (state : state) (row : Keeper_list_model.row) =
+let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
   let text ko en = ui_text state ~ko ~en in
   match row.task with
   | Some task ->
@@ -2263,11 +2194,7 @@ let keeper_plain_work ?now (state : state) (row : Keeper_list_model.row) =
       (if row.reading.Keeper_control.paused then text "저장된 일시정지 · " "stored pause · " else "")
       ^ keeper_source ^ task_source ^ title
   | None ->
-      let schedules =
-        if Option.is_some state.schedules_agenda_error then None else state.schedules_agenda
-      in
-      (match keeper_waiting_detail ?schedules ?now
-          ~ko:(state.ui_language = Lang_ko) row with
+      (match keeper_waiting_detail ~ko:(state.ui_language = Lang_ko) row with
        | Some reason ->
            (if Option.is_some state.keeper_waiting_error || Option.is_some state.keeper_waiting_failure
                || Option.is_some state.keeper_turns_error then
@@ -2302,13 +2229,10 @@ let keeper_plain_work ?now (state : state) (row : Keeper_list_model.row) =
                observed "실행 중인 턴 없음" "no running turn"
            | None -> text "현재 작업 미조회" "current work not read")
 
-let keeper_plain_help ?now (state : state) (row : Keeper_list_model.row) =
+let keeper_plain_help (state : state) (row : Keeper_list_model.row) =
   let text ko en = ui_text state ~ko ~en in
   match Keeper_list_model.person_wait row with
   | Some request ->
-      let schedules =
-        if Option.is_some state.schedules_agenda_error then None else state.schedules_agenda
-      in
       let detail, retained = match request with
         | Keeper_list_model.Held_tool approval ->
             ( (let question = Terminal_text.single_line approval.Tui_decode.kta_question in
@@ -2320,8 +2244,7 @@ let keeper_plain_help ?now (state : state) (row : Keeper_list_model.row) =
             (text (Printf.sprintf "답하지 않은 질문 %d개" count)
                (Printf.sprintf "%d unanswered questions" count), Option.is_some state.asks_error)
         | Keeper_list_model.Held_item item | Keeper_list_model.Confirmation_item item ->
-            keeper_waiting_item_text ?schedules ?now
-              ~ko:(state.ui_language = Lang_ko) item,
+            keeper_waiting_item_text item,
             (Option.is_some state.keeper_waiting_error || Option.is_some state.keeper_waiting_failure
              || Option.is_some state.keeper_turns_error)
       in
@@ -2396,7 +2319,7 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
   match row with
   | None -> [ Theme.recede () ^ fit (text "선택한 키퍼 없음" "no Keeper selected") ^ Ansi.reset ]
   | Some (row : Keeper_list_model.row) ->
-      let help = match keeper_plain_help ~now state row with
+      let help = match keeper_plain_help state row with
         | Some request -> Theme.warn () ^ request ^ Ansi.reset
         | None ->
             let waiting_observed = match row.waiting with
@@ -2416,7 +2339,7 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
             else text "승인에서 확인"
                 "human waits: inspect Approvals") ^ Ansi.reset
       in
-      let current = keeper_plain_work ~now state row in
+      let current = keeper_plain_work state row in
       let result = keeper_plain_result state row in
       let name = Terminal_text.single_line row.keeper.Tui_decode.k_name in
       let route key label =
@@ -3012,7 +2935,7 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary
   ; kpp_sheet_lines = sheet_lines }
 
-let keeper_plain_list_lines (state : state) ~now projection =
+let keeper_plain_list_lines (state : state) projection =
   let width = projection.kpp_list_width in
   let text ko en = ui_text state ~ko ~en in
   let stop = keeper_list_stop state in
@@ -3051,9 +2974,9 @@ let keeper_plain_list_lines (state : state) ~now projection =
         match projection.kpp_density with
         | Keeper_list_model.One_line -> [primary]
         | Keeper_list_model.Two_lines ->
-            let detail = match keeper_plain_help ~now state row with
+            let detail = match keeper_plain_help state row with
               | Some request -> Theme.warn () ^ request ^ Ansi.reset
-              | None -> Theme.recede () ^ keeper_plain_work ~now state row ^ Ansi.reset
+              | None -> Theme.recede () ^ keeper_plain_work state row ^ Ansi.reset
             in
             [primary; emit ("  " ^ Message_layout.fit_width detail (max 0 (width - 2)))]
   in
@@ -3090,7 +3013,7 @@ let render_keeper_plain (state : state) =
   let buf = Buffer.create 4096 in
   List.iter (box_line buf cols) projection.kpp_headers;
   box_divider buf cols;
-  let roster = keeper_plain_list_lines state ~now projection in
+  let roster = keeper_plain_list_lines state projection in
   (match projection.kpp_detail_width with
    | None ->
        List.iter (box_line buf cols) roster;
@@ -3444,11 +3367,7 @@ let render_keeper_axes (state : state) =
                   ~cols:inner ~now:now_unix
                   ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
             | None, Axis_row.List_columns ->
-                let schedules =
-                  if Option.is_some state.schedules_agenda_error then None
-                  else state.schedules_agenda
-                in
-                keeper_row_content ?schedules ~tasks:state.tasks
+                keeper_row_content ~tasks:state.tasks
                   ~ko:(state.ui_language = Lang_ko)
                   ?context_chip:(keeper_row_context_chip state row) ~columns ~now:now_unix ~yolo
                   ~selected row
@@ -3475,12 +3394,8 @@ let render_keeper_axes (state : state) =
                    ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name
                    ~runtime:(keeper_row_runtime row)
                in
-               let schedules =
-                 if Option.is_some state.schedules_agenda_error then None
-                 else state.schedules_agenda
-               in
                emit
-                 (keeper_secondary_row_content ?schedules ~tasks:state.tasks ~ko ~now:now_unix
+                 (keeper_secondary_row_content ~tasks:state.tasks ~ko ~now:now_unix
                     ~inner ~cells row)
            | Axis_row.Failure_chain -> emit (grid_failure_line ~ko:(state.ui_language = Lang_ko) grid ~now:now_unix row)))
     entries_window;
@@ -5187,10 +5102,7 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
                      ; krow_by = Terminal_text.single_line row.sch_requested_by
                      ; krow_requested =
                          Terminal_text.column_timestamp row.sch_requested_at_iso
-                     ; krow_what =
-                         Terminal_text.single_line
-                           (Option.value ~default:row.sch_schedule_id
-                              row.sch_payload_summary)
+                     ; krow_what = schedule_row_label row
                      }
                in
                (* The page's live rows, then its closed ones under a labelled

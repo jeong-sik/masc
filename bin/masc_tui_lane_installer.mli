@@ -18,6 +18,7 @@ val accept_preview : Yojson.Safe.t -> (t option,string) result
 val handle : key:string -> t -> (event,string) result
 val paste : text:string -> t -> t
 val lines : ?height:int -> ?render:(string -> string list) -> t -> string list
+val lines_with_selection : ?height:int -> ?render:(string -> string list) -> t -> (bool * string) list
 val hints : t -> string
 
 val begin_catalog : request_id:int -> directory:string option -> t -> (t,string) result

@@ -1311,13 +1311,14 @@ let model_rows ~ko t =
         None, []
   in
   List.mapi (fun i (m:model) ->
-    let cursor = if i = t.cursor then "› " else "  " in
+    let selected = i = t.cursor in
+    let cursor = if selected then "› " else "  " in
     let connected = is_connected t m in
     if active_prepare_id = Some m.id then
-      Progress (cursor ^ "[" ^ under_way_mark ^ "] " ^ m.label
+      selected, Progress (cursor ^ "[" ^ under_way_mark ^ "] " ^ m.label
                 ^ say " · 입력 한도 확인 중" " · checking context")
     else if List.mem m.id queued_ids then
-      Text (cursor ^ "[" ^ waiting_mark ^ "] " ^ m.label
+      selected, Text (cursor ^ "[" ^ waiting_mark ^ "] " ^ m.label
             ^ say " · 확인 대기" " · queued")
     else
       let mark =
@@ -1331,75 +1332,81 @@ let model_rows ~ko t =
         else if Option.is_none m.context then say " · context 확인 필요" " · context limit required"
         else ""
       in
-      Text (cursor ^ mark ^ m.label ^ reason)) t.models
-(* Everything under the notice. *)
+      selected, Text (cursor ^ mark ^ m.label ^ reason)) t.models
+(* Everything under the notice, paired with whether the row is cursor-selected. *)
+let plain_row text = false, Text text
 let body_rows ~ko ~now t =
   let say korean english = if ko then korean else english in
   match t.phase with
   | Providers Clients -> List.mapi (fun i client ->
       let count = List.length (accounts t client) in
-      Text ((if i=t.cursor then "› " else "  ") ^ client_label client
+      let selected = i = t.cursor in
+      selected, Text ((if selected then "› " else "  ") ^ client_label client
             ^ (if count = 0 then ""
                else if ko then Printf.sprintf " · 계정 %d" count
                else Printf.sprintf " · %d %s" count (if count = 1 then "account" else "accounts")))) (clients t)
   | Providers (Accounts client) -> List.mapi (fun i row ->
-      Text ((if i=t.cursor then "› " else "  ")
+      let selected = i = t.cursor in
+      selected, Text ((if selected then "› " else "  ")
             ^ (match row with New_account _ -> say "+ 새 계정" "+ New account" | Account p -> account_label ~ko t p))) (account_rows t client)
   | Providers (Account_providers (_, ids)) -> List.mapi (fun i (p:provider) ->
-      Text ((if i=t.cursor then "› " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
+      let selected = i = t.cursor in
+      selected, Text ((if selected then "› " else "  ") ^ p.id ^ " · " ^ p.label)) (member_rows t ids)
   | Models | Refreshing_models | Preparing_context _ | Preparing_context_batch _ -> model_rows ~ko t
   | Failed when t.recovery=Refresh_model_inventory -> model_rows ~ko t
-  | Logging -> List.map (fun line -> Terminal line) (Masc_tui_sgr_text.parse t.output)
-    @ [ Text ((say "로그인 코드: " "Login code: ") ^ String.make (min 40 (String.length t.draft)) '*')
+  | Logging -> List.map (fun line -> false, Terminal line) (Masc_tui_sgr_text.parse t.output)
+    @ [ plain_row ((say "로그인 코드: " "Login code: ") ^ String.make (min 40 (String.length t.draft)) '*')
       ; (if t.input_pending then
-           Progress (under_way_mark ^ " " ^ say "입력 전달 중" "Sending input" ^ elapsed_suffix ~ko ~now t)
+           false, Progress (under_way_mark ^ " " ^ say "입력 전달 중" "Sending input" ^ elapsed_suffix ~ko ~now t)
          else if Option.is_none t.login_id then
-           Progress (under_way_mark ^ " " ^ say "로그인 세션 준비 중" "Preparing login session" ^ elapsed_suffix ~ko ~now t)
-         else Text (say "코드 입력 대기" "Waiting for code")) ]
-  | Documented_context _ -> [Text ((say "문서 또는 설정의 context 한도(tokens): " "Documented context limit (tokens): ") ^ t.draft)]
+           false, Progress (under_way_mark ^ " " ^ say "로그인 세션 준비 중" "Preparing login session" ^ elapsed_suffix ~ko ~now t)
+         else plain_row (say "코드 입력 대기" "Waiting for code")) ]
+  | Documented_context _ -> [plain_row ((say "문서 또는 설정의 context 한도(tokens): " "Documented context limit (tokens): ") ^ t.draft)]
   | Removal {provider; removal; _} ->
-    Text ((say "지울 공급자 연결: " "Provider link to remove: ") ^ provider.id ^ " · " ^ provider.label ^ account_suffix ~ko t provider) ::
+    plain_row ((say "지울 공급자 연결: " "Provider link to remove: ") ^ provider.id ^ " · " ^ provider.label ^ account_suffix ~ko t provider) ::
     (match removal with
      | Removable {changes; login_store} ->
-       Text (say "지우거나 고치는 것:" "Changes:") :: List.map (fun change -> Text ("  " ^ describe_change ~ko change)) changes
-       @ (match login_store with Some path -> [Text ((say "로그인 정보는 지우지 않습니다: " "Login credentials are kept: ") ^ path)] | None -> [])
-     | Unremovable reason -> [Text ((say "지울 수 없습니다: " "Cannot remove: ") ^ reason)])
+       plain_row (say "지우거나 고치는 것:" "Changes:") :: List.map (fun change -> plain_row ("  " ^ describe_change ~ko change)) changes
+       @ (match login_store with Some path -> [plain_row ((say "로그인 정보는 지우지 않습니다: " "Login credentials are kept: ") ^ path)] | None -> [])
+     | Unremovable reason -> [plain_row ((say "지울 수 없습니다: " "Cannot remove: ") ^ reason)])
   | Finished {saved; activation; refresh_failed} ->
     (match activation with
      | Activating ->
        let suffix = elapsed_suffix ~ko ~now t in
        let base = say "저장 완료 · 런타임 활성화 중입니다." "Saved · activating runtime." in
        let base = if suffix <> "" then strip_trailing_period base else base in
-       [Progress (under_way_mark ^ " " ^ base ^ suffix)]
+       [false, Progress (under_way_mark ^ " " ^ base ^ suffix)]
      | Activation_failed detail ->
-       [ Text (say "저장 완료 · 런타임 활성화 미확인" "Saved · runtime activation unconfirmed"); Text detail
-       ; Text (say "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다." "r/Enter: retry activation without saving or re-logging in.") ]
+       [ plain_row (say "저장 완료 · 런타임 활성화 미확인" "Saved · runtime activation unconfirmed"); plain_row detail
+       ; plain_row (say "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다." "r/Enter: retry activation without saving or re-logging in.") ]
      (* The activation was not sent: the kept-back notice, alone. *)
      | Activation_kept_back notice ->
-       [ Text (say "저장 완료" "Saved"); Text notice
-       ; Text (say "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다." "r/Enter: retry activation without saving or re-logging in.") ]
+       [ plain_row (say "저장 완료" "Saved"); plain_row notice
+       ; plain_row (say "r/Enter: 저장이나 로그인 없이 활성화만 다시 시도합니다." "r/Enter: retry activation without saving or re-logging in.") ]
      | Active {exact_output_available} ->
-       Text (say "저장한 설정을 런타임에 활성화했습니다." "Saved settings activated in runtime.") ::
+       plain_row (say "저장한 설정을 런타임에 활성화했습니다." "Saved settings activated in runtime.") ::
        (if exact_output_available then []
-        else [Text (say "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."
-                      "Standalone exact-output verification Lane is not available yet.")]))
-    @ List.map (fun row -> Text row) (saved_rows saved)
+        else [plain_row (say "Standalone 정확한 출력 검증 Lane은 아직 사용할 수 없습니다."
+                       "Standalone exact-output verification Lane is not available yet.")]))
+    @ List.map plain_row (saved_rows saved)
     @ (if refresh_failed then
-         [Text (say "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." "Could not refresh inventory. Press r to check again.")]
+         [plain_row (say "목록을 새로 읽지 못했습니다. r로 다시 확인하세요." "Could not refresh inventory. Press r to check again.")]
        else [])
   | Loading | Saving | Removing | Failed -> []
 let lines ?(ko = true) ?now t =
   let head = notice_text ~ko ~now t in
-  (if notice_in_progress t then Progress head else Text head) :: body_rows ~ko ~now t
+  (if notice_in_progress t then Progress head else Text head) :: List.map snd (body_rows ~ko ~now t)
 let row_text = function Text text | Progress text -> text | Terminal line -> Masc_tui_sgr_text.text line
 (* The notice wraps rather than being cut at the pane's edge: a refused
    save's reason ends in the verification code and detail, the part that says
    what to do. The client's own output wraps in every phase: the login
    address it prints is longer than most panes, and a cut one can be neither
    read nor copied (#52278). *)
-let visible_lines ?(ko = true) ?now ~height ~width t =
+let visible_lines_with_selection ?(ko = true) ?now ~height ~width t =
   if height <= 0 then [], None else
-  let wrap_notice_row line = if notice_in_progress t then Progress line else Text line in
+  let wrap_notice_row line =
+    false, (if notice_in_progress t then Progress line else Text line)
+  in
   let notice = match Masc_tui_message_layout.wrap_words ~max_cells:width (notice_text ~ko ~now t) with
     | [] -> [wrap_notice_row ""]
     | wrapped -> List.map wrap_notice_row wrapped in
@@ -1410,13 +1417,13 @@ let visible_lines ?(ko = true) ?now ~height ~width t =
     | Removal _ -> false in
   let body =
     List.concat_map (fun row -> match row with
-      | Terminal line ->
-          List.map (fun line -> Terminal line) (Masc_tui_sgr_text.wrap ~max_cells:width line)
-      | Text text when results ->
-          List.map (fun line -> Text line) (Masc_tui_message_layout.wrap_words ~max_cells:width text)
-      | Progress text when results ->
-          List.map (fun line -> Progress line) (Masc_tui_message_layout.wrap_words ~max_cells:width text)
-      | Text _ | Progress _ -> [row]) (body_rows ~ko ~now t) in
+      | selected, Terminal line ->
+          List.map (fun line -> selected, Terminal line) (Masc_tui_sgr_text.wrap ~max_cells:width line)
+      | selected, Text text when results ->
+          List.map (fun line -> selected, Text line) (Masc_tui_message_layout.wrap_words ~max_cells:width text)
+      | selected, Progress text when results ->
+          List.map (fun line -> selected, Progress line) (Masc_tui_message_layout.wrap_words ~max_cells:width text)
+      | _, (Text _ | Progress _) -> [row]) (body_rows ~ko ~now t) in
   let rows = notice @ body in
   if results then (
     let count = List.length rows in
@@ -1442,6 +1449,9 @@ let visible_lines ?(ko = true) ?now ~height ~width t =
           let skip = max 0 (List.length rows - height) in
           skip, window skip in
     List.filteri (fun index _ -> index >= skip && index < skip + height) rows, position
+let visible_lines ?(ko = true) ?now ~height ~width t =
+  let rows, position = visible_lines_with_selection ~ko ?now ~height ~width t in
+  List.map snd rows, position
 
 let decoder ~integration_id on_event =
   let line=Buffer.create 256 and data=Buffer.create 256 in

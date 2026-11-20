@@ -381,19 +381,25 @@ let describe record =
     | _ -> "unknown kind" in
   record.source_id ^ " · " ^ record.kind ^ " · " ^ specific
 
-let lines overlay =
-  let header = ["Record grants · " ^ overlay.title;
+let lines_with_selection overlay =
+  let plain lines = List.map (fun line -> false, line) lines in
+  let header = plain ["Record grants · " ^ overlay.title;
     "New grant fields checked only; the host requires an operator-owned declaration."; ""] in
   let rows =
     match overlay.form, overlay.records with
     | Some _, _ ->
-        ["Board posts in granted visibilities can reach the configured providers.";
+        plain ["Board posts in granted visibilities can reach the configured providers.";
          "Before granting internal or direct, confirm those providers may receive them."]
-    | None, [] -> ["No record grants yet · a adds one"]
+    | None, [] -> plain ["No record grants yet · a adds one"]
     | None, records ->
         (match List.nth_opt records overlay.cursor with
-         | Some record -> [Printf.sprintf "> %d/%d · %s" (overlay.cursor + 1) (List.length records) (describe record)]
-         | None -> ["No selected record"]) in
-  let message = match overlay.message with None -> [] | Some text -> [""; text] in
-  let form = match overlay.form with None -> [] | Some form -> "" :: Masc_tui_schema_form.lines ~show_description:true form in
-  header @ rows @ message @ form @ [""; "a:add  d:remove  j/k:move  PageUp/Down:scroll  Esc:back · then s saves"]
+         | Some record -> [true, Printf.sprintf "› %d/%d · %s" (overlay.cursor + 1) (List.length records) (describe record)]
+         | None -> plain ["No selected record"]) in
+  let message = match overlay.message with None -> [] | Some text -> plain [""; text] in
+  let form =
+    match overlay.form with
+    | None -> []
+    | Some form -> (false, "") :: Masc_tui_schema_form.lines_with_selection ~show_description:true form in
+  header @ rows @ message @ form @ plain [""; "a:add  d:remove  j/k:move  PageUp/Down:scroll  Esc:back · then s saves"]
+
+let lines overlay = List.map snd (lines_with_selection overlay)

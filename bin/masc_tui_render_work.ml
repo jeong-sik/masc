@@ -2230,7 +2230,7 @@ let render_schedule_list (state : state) =
               c.push
                 ((Theme.warn ()) ^ "  "
                 ^ schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko)
-                    (Terminal_text.single_line schedule_id)
+                    (resolve_schedule_title_in ~rows:snapshot.scs_rows schedule_id)
                 ^ Ansi.reset)
           | None -> ());
          (match state.schedule_cancel_error with
@@ -2239,7 +2239,8 @@ let render_schedule_list (state : state) =
                 ((Theme.bad ()) ^ "  "
                 ^ fit_width
                     (Terminal_text.single_line
-                       (schedule_id ^ ": "
+                       (resolve_schedule_title_in ~rows:snapshot.scs_rows schedule_id
+                        ^ ": "
                         ^ request_failure_text ~ko:(state.ui_language = Lang_ko)
                             ~request:Kept_request.Schedule_cancel err))
                     (framed_inner_width cols - 4)
@@ -2626,8 +2627,16 @@ let schedule_detail_content (state : state) ~cols ~runner (row : schedule_row) =
     @ (match state.schedule_cancel_armed with
        | None -> []
        | Some id ->
+           let label =
+             if String.equal id row.sch_schedule_id then schedule_row_label row
+             else
+               let rows =
+                 Option.fold ~none:[] ~some:(fun (s : schedule_snapshot) -> s.scs_rows) state.schedules
+               in
+               resolve_schedule_title_in ~rows id
+           in
            [ Theme.warn ()
-           , schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko) (wire id) ]) in
+           , schedule_cancel_armed_text ~ko:(state.ui_language = Lang_ko) label ]) in
   let fields = schedule_detail_lines ~ko:(state.ui_language = Lang_ko) ~width
       ~freshness:(schedule_list_freshness state) ~runner row
       ~wake_history:state.schedule_wake_history

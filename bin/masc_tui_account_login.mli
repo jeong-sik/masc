@@ -273,5 +273,9 @@ val visible_lines :
     and where the reader stands for the title
     row: the selected row of a provider or model list, or the window over
     any other phase's rows when it hides some. *)
+val visible_lines_with_selection :
+  ?ko:bool -> ?now:float -> height:int -> width:int -> t -> (bool * row) list * Masc_tui_value.Position.t option
+(** Same as {!visible_lines}, pairing each row with whether it is the cursor's
+    selected list row so renderers do not infer selection from text prefixes. *)
 val hints : ?ko:bool -> t -> string
 val decoder : integration_id:string -> (event -> unit) -> (string -> unit) * (unit -> bool)

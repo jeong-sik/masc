@@ -964,8 +964,8 @@ let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
          else "  turn %s  task %s  %s")
         (Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:string_of_int
            change.Masc.Tui_decode.fc_turn)
-        (Terminal_text.single_line
-           (Option.value ~default:Masc_tui_theme.Glyph.no_value change.Masc.Tui_decode.fc_task_id))
+        (Option.fold ~none:Masc_tui_theme.Glyph.no_value
+           ~some:(resolve_task_title state) change.Masc.Tui_decode.fc_task_id)
         (if change.Masc.Tui_decode.fc_succeeded then ui_text state ~ko:"적용됨" ~en:"applied"
          else
            ui_text state ~ko:"호출 실패 · 아래는 쓰려던 내용"

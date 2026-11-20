@@ -573,9 +573,21 @@ val quiet_connection_tail : Masc_tui_types.state -> string
 (** Two-space-prefixed {!reading_connection_notice} for Zone 2 headers; returns
     [""] when healthy so Zone 2 does not churn on ordinary background reads. *)
 
+val resolve_task_title_in : tasks:Masc.Tui_decode.task list -> string -> string
+(** Resolve a task ID against [tasks], falling back to the sanitized ID when
+    absent or blank. *)
+
 val resolve_task_title : Masc_tui_types.state -> string -> string
 (** Resolve a task ID to its human-readable title from [state.tasks], falling
     back to the sanitized ID when absent or blank. *)
+
+val schedule_row_label : Masc_tui_types.schedule_row -> string
+(** Human-readable label for a schedule row: non-blank [sch_payload_summary],
+    falling back to sanitized [sch_schedule_id]. *)
+
+val resolve_schedule_title_in : rows:Masc_tui_types.schedule_row list -> string -> string
+(** Resolve a schedule ID against [rows], falling back to the sanitized ID when
+    absent or its summary is blank. *)
 
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)

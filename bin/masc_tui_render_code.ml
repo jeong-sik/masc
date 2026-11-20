@@ -326,14 +326,14 @@ let prepare_code_history_rows (state : state) ~cols =
                 let anchor = match file_change_evidence_label ~ko change.fc_line_evidence with
                   | Some label -> label | None -> "L?"
                 in
-                [field "Keeper" change.fc_keeper; field (say "날짜" "Date") (date change.fc_at);
+                [field (say "키퍼" "Keeper") change.fc_keeper; field (say "날짜" "Date") (date change.fc_at);
                  field (say "종류" "Kind") kind; field (say "줄" "Lines") anchor;
                  field (say "결과" "Result")
                    (if change.fc_succeeded then say "적용됨" "applied" else say "실패" "failed")]
                 @ List.filter_map Fun.id
-                    [Option.map (field "Task") change.fc_task_id;
+                    [Option.map (fun id -> field (say "작업" "Task") (resolve_task_title state id)) change.fc_task_id;
                      Option.map (fun turn -> field (say "턴" "Turn") (string_of_int turn)) change.fc_turn;
-                     Option.map (field "Execution") change.fc_execution_id]
+                     Option.map (field (say "실행" "Execution")) change.fc_execution_id]
           in
           let owner = Some (index, entry) in
           let metadata = List.concat_map (wrap owner) lines in

@@ -387,7 +387,20 @@ let render_verification_list (state : state) =
      the schedule cancel carries them on. *)
   (match state.verification_verdict_armed with
    | Some (task_id, request_id) ->
-       (* No width padding on the id: padding to a reserved column pushes the
+       let armed_label =
+         match
+           Option.bind state.verification (fun snapshot ->
+             List.find_opt
+               (fun (r : Masc.Tui_decode.verification_request) ->
+                 String.equal r.vr_task_id task_id
+                 && String.equal r.vr_request_id request_id)
+               snapshot.Masc.Tui_decode.vs_requests)
+         with
+         | Some r when not (String.equal (String.trim r.vr_task_title) "") ->
+             Terminal_text.single_line r.vr_task_title
+         | Some _ | None -> resolve_task_title state task_id
+       in
+       (* No width padding on the label: padding to a reserved column pushes the
           "same key again" tail past the box on a narrow terminal, and the
           tail is the half that instructs. *)
        box_line buf cols
@@ -395,7 +408,7 @@ let render_verification_list (state : state) =
          ^ Printf.sprintf
              (if state.ui_language = Lang_ko then "  승인 대기: %s · 같은 키를 한 번 더 누르면 전송 [%s]"
               else "  armed: approve %s · same key again to send [%s]")
-             (Terminal_text.single_line task_id)
+             armed_label
              (Terminal_text.single_line request_id)
          ^ Ansi.reset)
    | None -> ());
@@ -551,9 +564,14 @@ let verification_detail_pane (state : state) ~rows ~cols
     | Some (task_id, request_id)
       when String.equal task_id request.Masc.Tui_decode.vr_task_id
            && String.equal request_id request.vr_request_id ->
+        let armed_label =
+          if not (String.equal (String.trim request.vr_task_title) "") then
+            Terminal_text.single_line request.vr_task_title
+          else resolve_task_title state task_id
+        in
         Some (Printf.sprintf
           (if ko then "  확인 대기: a를 다시 누르면 %s [%s] 승인" else "  ARMED: a again to approve %s [%s]")
-          (Terminal_text.single_line task_id)
+          armed_label
           (Terminal_text.single_line request_id))
     | Some _ | None -> None
   in

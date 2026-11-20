@@ -1760,6 +1760,34 @@ let recent_chunk_projection (state : state) =
     ~previous:state.acting_chunk_projection ~traces state.acting
 
 
+let resolve_task_title_in ~tasks task_id =
+  match
+    List.find_opt
+      (fun (t : Tui_decode.task) -> String.equal t.id task_id)
+      tasks
+  with
+  | Some t when not (String.equal (String.trim t.title) "") ->
+      Terminal_text.single_line t.title
+  | Some _ | None -> Terminal_text.single_line task_id
+
+let resolve_task_title (state : state) task_id =
+  resolve_task_title_in ~tasks:state.tasks task_id
+
+let schedule_row_label (row : schedule_row) =
+  match row.sch_payload_summary with
+  | Some summary when not (String.equal (String.trim summary) "") ->
+      Terminal_text.single_line summary
+  | Some _ | None -> Terminal_text.single_line row.sch_schedule_id
+
+let resolve_schedule_title_in ~rows schedule_id =
+  match
+    List.find_opt
+      (fun (row : schedule_row) -> String.equal row.sch_schedule_id schedule_id)
+      rows
+  with
+  | Some row -> schedule_row_label row
+  | None -> Terminal_text.single_line schedule_id
+
 let acting_pane_input (state : state) =
   let module Pane = Masc_tui_acting_pane in
   let selected = selected_keeper state in
@@ -1830,7 +1858,8 @@ let acting_pane_input (state : state) =
           | Local_workspace_failed _ -> Pane.Task_source_failed in
         let task = Pane.summarize_keeper_task ~workspace_ready ~source:task_source
           ~metadata_failed:(Option.is_some state.keepers_error)
-          ~task_id:(Option.bind keeper.k_activity (fun activity -> activity.k_current_task_id)) in
+          ~task_id:(Option.bind keeper.k_activity (fun activity ->
+            Option.map (resolve_task_title state) activity.k_current_task_id)) in
         Some Pane.{ keeper_name = keeper.k_name; task;
           waiting; waiting_stale = Option.is_some state.keeper_turns_error;
           waiting_revalidating = List.mem keeper.k_name state.keeper_waiting_unverified;
@@ -5133,16 +5162,6 @@ let quiet_connection_tail (state : state) =
   match reading_connection_notice state with
   | None -> ""
   | Some badge -> "  " ^ badge
-
-let resolve_task_title (state : state) task_id =
-  match
-    List.find_opt
-      (fun (t : Tui_decode.task) -> String.equal t.id task_id)
-      state.tasks
-  with
-  | Some t when not (String.equal (String.trim t.title) "") ->
-      Terminal_text.single_line t.title
-  | Some _ | None -> Terminal_text.single_line task_id
 
 let config_pane_title ~cols ?(path = []) ?(reading = "") ?(note = "") (state : state) =
   let name = here_path state ~path in

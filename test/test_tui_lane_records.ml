@@ -267,6 +267,19 @@ let overlay_string_array_guidance_and_input () =
   let repository = repository |> Records.insert_text ~text:{|["src/", "README.md"]|} |> submit in
   check (list string) "repository example is accepted" ["src/"; "README.md"] repository.paths
 
+let typed_selection_marks_record_and_open_form () =
+  let overlay = match Records.open_ ~title:"operator-quiz.toml" ~text:quiz_toml with
+    | Ok value -> value | Error e -> fail e in
+  let selected_list = List.filter fst (Records.lines_with_selection overlay) in
+  check int "record list marks one selected row" 1 (List.length selected_list);
+  check_contains (snd (List.hd selected_list)) "› 1/1 · wkbl";
+  let form_overlay = match Records.handle ~key:"a" overlay with
+    | Ok (Records.Updated next) -> next
+    | Ok (Apply _ | Cancel) | Error _ -> fail "form did not open" in
+  let selected_form = List.filter fst (Records.lines_with_selection form_overlay) in
+  check int "open add form marks active field row" 1 (List.length selected_form);
+  check_contains (snd (List.hd selected_form)) "source_id"
+
 let () =
   run "tui lane records"
     [
@@ -290,5 +303,6 @@ let () =
           test_case "form and large list" `Quick overlay_form_and_large_list;
           test_case "add through form" `Quick overlay_add_form_applies_to_draft;
           test_case "string array guidance and input" `Quick overlay_string_array_guidance_and_input;
+          test_case "typed selection marks record and open form" `Quick typed_selection_marks_record_and_open_form;
         ] );
     ]

@@ -210,10 +210,10 @@ let split_words (words : string list) : (string * string list) option =
   in
   try_path paths
 
-(* A masc stage cannot run inside a pipeline in PR-1: dispatch would fall
-   back to per-stage chaining — PR-2's native-chain semantics — before
-   those semantics were settled.  Nested shapes are visited too, because
-   the grammar never builds them but the type allows them. *)
+(* A masc stage cannot run inside a pipeline: dispatch would fall back
+   to per-stage chaining, whose semantics are not settled.  Nested shapes
+   are visited too, because the grammar never builds them but the type
+   allows them. *)
 let rec contains_masc (ir : Shell_ir.t) =
   match ir with
   | Shell_ir.Simple simple ->

@@ -1017,7 +1017,7 @@ let render_planning_list (state : state) =
            let list_header =
              if list_rows >= 3 then
                [ Doc.section_header ~width:inner ~indent:1
-                   ~subtitle:(Printf.sprintf (if ko then "%d건" else "%d goals") count)
+                   ~subtitle:(Printf.sprintf (if ko then "%s건" else "%s goals") (Masc_tui_value.Count.grouped count))
                    (text "목표" "Goals")
                ]
              else []
@@ -1438,10 +1438,10 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
     let complete = links_complete && work_task_rows_complete state in
     let count = List.length linked_tasks in
     let count_text =
-      if complete then Printf.sprintf (if ko then "%d건" else "%d") count
+      if complete then Printf.sprintf (if ko then "%s건" else "%s") (Masc_tui_value.Count.grouped count)
       else if count = 0 then ui_text state ~ko:"일부 관측" ~en:"partial"
-      else if ko then Printf.sprintf "%d건 (일부)" count
-      else Printf.sprintf "%d (partial)" count
+      else if ko then Printf.sprintf "%s건 (일부)" (Masc_tui_value.Count.grouped count)
+      else Printf.sprintf "%s (partial)" (Masc_tui_value.Count.grouped count)
     in
     let task_rows =
       List.concat_map (fun (task : Tui_decode.task) ->
@@ -2385,18 +2385,18 @@ let render_schedule_list (state : state) =
            match snapshot.scs_request_count, snapshot.scs_paging with
            | Some total, Schedule_paging_unavailable when snapshot.scs_truncated ->
                Printf.sprintf
-                 (if ko then "  일정 요청: %d건  (앞 %d건 · 서버가 페이지를 주지 않음)"
-                  else "  Requests: %d  (first %d; server paging unavailable)")
-                 total (List.length snapshot.scs_rows)
+                 (if ko then "  일정 요청: %s건  (앞 %s건 · 서버가 페이지를 주지 않음)"
+                  else "  Requests: %s  (first %s; server paging unavailable)")
+                 (Masc_tui_value.Count.grouped total) (Masc_tui_value.Count.grouped (List.length snapshot.scs_rows))
            | Some total, Schedule_paging _
              when snapshot.scs_truncated || Option.is_some state.schedules_page.sp_cursor ->
                Printf.sprintf
-                 (if ko then "  일정 요청: %d건  · %d쪽 (%d건 표시 · 쪽 구성은 바뀔 수 있음)"
-                  else "  Requests: %d  · page %d (%d shown; pages may change)")
-                 total (List.length state.schedules_page.sp_previous + 1)
-                 (List.length snapshot.scs_rows)
+                 (if ko then "  일정 요청: %s건  · %d쪽 (%s건 표시 · 쪽 구성은 바뀔 수 있음)"
+                  else "  Requests: %s  · page %d (%s shown; pages may change)")
+                 (Masc_tui_value.Count.grouped total) (List.length state.schedules_page.sp_previous + 1)
+                 (Masc_tui_value.Count.grouped (List.length snapshot.scs_rows))
            | Some total, (Schedule_paging_unavailable | Schedule_paging _) ->
-               Printf.sprintf (if ko then "  일정 요청: %d건" else "  Requests: %d") total
+               Printf.sprintf (if ko then "  일정 요청: %s건" else "  Requests: %s") (Masc_tui_value.Count.grouped total)
            | None, (Schedule_paging_unavailable | Schedule_paging _) ->
                (if ko then "  일정 요청: " else "  Requests: ")
                ^ Masc_tui_theme.Glyph.no_value
@@ -2785,9 +2785,9 @@ let schedule_wake_lines ~ko
       in
         (Ansi.bold
         , Printf.sprintf
-            (if ko then "  실행 (%d건 보관, 일정당 최대 %d건)"
-             else "  Wakes (%d retained, ceiling %d per schedule)")
-            count retention )
+            (if ko then "  실행 (%s건 보관, 일정당 최대 %s건)"
+             else "  Wakes (%s retained, ceiling %s per schedule)")
+            (Masc_tui_value.Count.grouped count) (Masc_tui_value.Count.grouped retention) )
         :: List.concat_map
              (fun (wake : schedule_wake) ->
                 let started = timestamp wake.swk_started_at_iso in

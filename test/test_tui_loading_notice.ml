@@ -243,7 +243,7 @@ let test_schedule_responses_follow_keeper_and_generation () =
     { scs_status = "ok"; scs_read_error = None; scs_request_count = Some count
     ; scs_truncated = false; scs_payload_target = None
     ; scs_paging = Schedule_paging_unavailable; scs_next_due_iso = None; scs_counts = None
-    ; scs_rows = []; scs_observed_at_iso = "2026-10-26T08:59:00Z"
+    ; scs_rows = []; scs_observed_at = 1793005140.
          ; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok }
   in
   let state = fresh () in

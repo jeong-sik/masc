@@ -2923,6 +2923,7 @@
   masc.skill_config
   masc.sse_wire
   masc.runtime
+  masc.time_codec
   masc_goal
   browser_lane
   masc_workspace

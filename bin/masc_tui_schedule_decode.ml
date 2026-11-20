@@ -319,7 +319,13 @@ let snapshot_of_json json =
              Error "schedule page cursor was refused")
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _ -> Ok ()
   in
-  let* scs_observed_at_iso = Masc.Tui_decode_fields.required_string_field json "generated_at" in
+  (* The page's own observation time is read once here, so a screen draws
+     a moment and never parses the server's text again. *)
+  let* generated_at = Masc.Tui_decode_fields.required_string_field json "generated_at" in
+  let* scs_observed_at =
+    Option.to_result ~none:"schedule page generated_at is not an RFC 3339 time"
+      (Time_codec.parse_rfc3339_opt generated_at)
+  in
   let* scs_status = Masc.Tui_decode_fields.required_string_field json "status" in
   let* scs_payload_target =
     Masc.Tui_decode_fields.optional_string_field json "payload_target_selector"
@@ -417,7 +423,7 @@ let snapshot_of_json json =
   let* scs_rows = decode_schedule_rows rows in
   let* scs_runner_status = Tui_decode.decode_schedule_runner_status json in
   Ok
-    { scs_observed_at_iso
+    { scs_observed_at
     ; scs_status
     ; scs_read_error
     ; scs_request_count

@@ -223,7 +223,7 @@ let test_failed_schedule_snapshot_uses_the_same_display_boundary () =
          ; scs_request_count = None; scs_truncated = false
          ; scs_payload_target = None; scs_paging = Schedule_paging_unavailable
          ; scs_next_due_iso = None; scs_counts = None; scs_rows = []
-         ; scs_observed_at_iso = "2026-10-26T08:59:00Z"
+         ; scs_observed_at = 1793005140.
          ; scs_runner_status = Masc.Tui_decode.Runner_unrecognised "unknown"
          };
        state.schedules_agenda_error <- Some "older transport failure";

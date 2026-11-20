@@ -352,6 +352,10 @@ let refusal_label : Server_accounts.refusal -> string = function
     "Keeper definitions not named: " ^ String.concat ", " (first :: rest)
   | Server_accounts.Keeper_definitions_not_read { folder = _; detail = _ } ->
     "Keeper definitions not read"
+  | Server_accounts.Keeper_configuration_change_left { journal = _ } ->
+    "Keeper configuration change left"
+  | Server_accounts.Keeper_configuration_journal_not_read { journal = _; detail = _ } ->
+    "Keeper configuration journal not read"
   | Server_accounts.Login_client_refused
       (Server_account_login.Github_client_refused (Login_client.Secret_variable_unset name)) ->
     "github client refused: the variable " ^ name ^ " is not set"
@@ -513,6 +517,33 @@ let test_stops_when_the_folder_holds_a_keeper_definition () =
     Alcotest.(check string)
       "the boot over a folder that holds a definition"
       "Keeper definitions not named: made-up.toml"
+      (boot_outcome env ~port:(free_port ()) multi_account))
+;;
+
+(* A folder of definitions in a state the boot cannot read stops it, where
+   the listing alone reads it as absent. The folder is a symbolic link to
+   itself, which cannot be stat-ed (ELOOP) whoever runs the case. *)
+let test_stops_when_the_folder_of_definitions_cannot_be_read () =
+  with_installation (fun env { base; config = _; store = _; multi_account } ->
+    let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+    Fs_compat.mkdir_p (Filename.dirname folder);
+    Unix.symlink (Filename.basename folder) folder;
+    Alcotest.(check string)
+      "the boot over a folder of definitions in an unknown state"
+      "Keeper definitions not read"
+      (boot_outcome env ~port:(free_port ()) multi_account))
+;;
+
+(* A journal of a change of a Keeper configuration that did not finish stops
+   the boot, with no definition in the folder: the first step of the engine
+   would roll the change back by writing one after the folder was looked in.
+   The journal is the one the engine resolves for the base. *)
+let test_stops_on_a_keeper_configuration_journal () =
+  with_installation (fun env { base; config = _; store = _; multi_account } ->
+    write_file (Keeper_config_journal.journal_path_for_base_path ~base_path:base) "{}";
+    Alcotest.(check string)
+      "the boot over a journal of a Keeper configuration change"
+      "Keeper configuration change left"
       (boot_outcome env ~port:(free_port ()) multi_account))
 ;;
 
@@ -1385,6 +1416,14 @@ let () =
             "the boot stops when the folder holds a Keeper definition"
             `Quick
             test_stops_when_the_folder_holds_a_keeper_definition
+        ; Alcotest.test_case
+            "the boot stops when the folder of definitions cannot be read"
+            `Quick
+            test_stops_when_the_folder_of_definitions_cannot_be_read
+        ; Alcotest.test_case
+            "the boot stops on a Keeper configuration journal"
+            `Quick
+            test_stops_on_a_keeper_configuration_journal
         ; Alcotest.test_case
             "the boot stops when a login client is refused"
             `Quick

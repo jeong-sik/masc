@@ -117,7 +117,20 @@ type refusal =
       { folder : string
       ; detail : string
       }
-      (** That folder could not be listed. *)
+      (** That folder could not be stat-ed or listed, so whether it holds a
+          definition is not known. *)
+  | Keeper_configuration_change_left of { journal : string }
+      (** A change of a Keeper configuration did not finish, and [journal]
+          ([Keeper_config_journal.journal_path_for_base_path]) records it.
+          The first step of the engine would roll it back by writing or
+          removing a Keeper definition, after the folder was looked in. A
+          multi-account installation makes no such change, so a single-user
+          boot left the journal. *)
+  | Keeper_configuration_journal_not_read of
+      { journal : string
+      ; detail : string
+      }
+      (** Whether that journal is there could not be read. *)
   | Login_client_refused of Server_account_login.refusal
       (** A login client that [config.json] names was refused: the
           environment variable of its secret is not set or holds the empty
@@ -164,7 +177,8 @@ val health_version : string -> string option
     ({!Server_startup_takeover.account_server_port_holder}). *)
 
 (** Reads the HTTP mode, opens the zone and reads it again, looks in the
-    folder of Keeper definitions, builds the login clients, makes the table, binds [address]:[port], binds the HTTPS listener of the environment,
+    folder of Keeper definitions and for a Keeper configuration journal,
+    builds the login clients, makes the table, binds [address]:[port], binds the HTTPS listener of the environment,
     makes the trust policy, announces the port to the host under [lease]
     ({!Server_startup_takeover.announce_account_server}), publishes the
     access, gives the environment and [sw] to the transport of a login
@@ -182,7 +196,10 @@ val health_version : string -> string option
 
     An [Error] comes before a connection is accepted and before the port is
     recorded, and the refusals come in the order of the constructors of
-    {!refusal}. {!Trust_policy_refused}, {!Port_not_announced} and
+    {!refusal} but one: a redirect of a login client that is not the
+    callback of its provider is a {!Login_client_refused} that comes after
+    {!Trust_policy_refused}, since the base URL it is compared with comes
+    from the trust policy. {!Trust_policy_refused}, {!Port_not_announced} and
     {!Access_not_published} come with the port bound: the trust policy names
     the HTTPS port that bound.
 

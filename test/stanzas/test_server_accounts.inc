@@ -23,6 +23,7 @@
   masc
   masc.auth
   masc.config_dir_resolver
+  masc.config_journal
   masc.fs_compat
   masc.masc_eio_context
   masc.masc_types

@@ -20,6 +20,11 @@ type refusal =
       { folder : string
       ; detail : string
       }
+  | Keeper_configuration_change_left of { journal : string }
+  | Keeper_configuration_journal_not_read of
+      { journal : string
+      ; detail : string
+      }
   | Login_client_refused of Server_account_login.refusal
   | Route_of_another_kind of Table.refusal
   | Https_listener_refused of string
@@ -47,11 +52,21 @@ let refusal_to_string = function
   | Keeper_definitions_not_named { folder; files = first, rest } ->
     Printf.sprintf
       "%s holds Keeper definitions the authorization log does not name: %s. A multi-account \
-       installation runs only the Keepers of its log"
+       installation runs only the Keepers of its log, and boots once these files are out of \
+       the folder"
       folder
       (String.concat ", " (first :: rest))
   | Keeper_definitions_not_read { folder; detail } ->
-    Printf.sprintf "the folder of Keeper definitions %s cannot be listed: %s" folder detail
+    Printf.sprintf "the folder of Keeper definitions %s cannot be read: %s" folder detail
+  | Keeper_configuration_change_left { journal } ->
+    Printf.sprintf
+      "%s records a change of a Keeper configuration that did not finish, and the engine \
+       would roll it back by writing or removing a Keeper definition the authorization log \
+       does not name. A single-user boot rolls it back; a multi-account installation boots \
+       once the journal is gone"
+      journal
+  | Keeper_configuration_journal_not_read { journal; detail } ->
+    Printf.sprintf "the Keeper configuration journal %s cannot be read: %s" journal detail
   | Login_client_refused refusal -> Server_account_login.refusal_to_string refusal
   | Route_of_another_kind refusal -> Table.refusal_to_string refusal
   | Https_listener_refused reason -> "HTTPS listener: " ^ reason
@@ -166,16 +181,41 @@ let judged_again zone =
    names, and the log names none by the name of a definition yet: the engine
    name of a Keeper comes in S2 (RFC a-persons-keeper-runs-on-the-engine). So
    a definition in the folder the engine reads is one the log does not name.
-   The listing is the engine's own ([Keeper_types_profile_toml_io]). *)
+   The listing is the engine's own ([Keeper_types_profile_toml_io]). Only an
+   absent folder holds none: the listing reads a folder it cannot stat as
+   absent, so the stat comes first and a folder in an unknown state stops the
+   boot. *)
 let no_keeper_definition ~base_path =
   let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  match Keeper_types_profile_toml_io.keeper_toml_files folder with
-  | exception Sys_error detail -> Error (Keeper_definitions_not_read { folder; detail })
-  | None | Some [] -> Ok ()
-  | Some (first :: rest) ->
-    Error
-      (Keeper_definitions_not_named
-         { folder; files = Filename.basename first, List.map Filename.basename rest })
+  let not_read detail = Error (Keeper_definitions_not_read { folder; detail }) in
+  match Unix.stat folder with
+  | exception Unix.Unix_error (Unix.ENOENT, (_ : string), (_ : string)) -> Ok ()
+  | exception Unix.Unix_error (error, (_ : string), (_ : string)) ->
+    not_read (Unix.error_message error)
+  | (_ : Unix.stats) ->
+    (match Keeper_types_profile_toml_io.keeper_toml_files folder with
+     | exception Sys_error detail -> not_read detail
+     | None | Some [] -> Ok ()
+     | Some (first :: rest) ->
+       Error
+         (Keeper_definitions_not_named
+            { folder; files = Filename.basename first, List.map Filename.basename rest }))
+;;
+
+(* The journal of a change of a Keeper configuration that did not finish.
+   The first step of the engine rolls such a change back, after this check:
+   it writes the definition the journal recorded, or removes the one the
+   change wrote ([Keeper_config_journal.recover_interrupted]). A
+   multi-account installation makes no such change, so a journal is one a
+   single-user boot left, and the boot stops on it as on the definition its
+   rollback would write. *)
+let no_keeper_configuration_change ~base_path =
+  let journal = Keeper_config_journal.journal_path_for_base_path ~base_path in
+  match Unix.lstat journal with
+  | exception Unix.Unix_error (Unix.ENOENT, (_ : string), (_ : string)) -> Ok ()
+  | exception Unix.Unix_error (error, (_ : string), (_ : string)) ->
+    Error (Keeper_configuration_journal_not_read { journal; detail = Unix.error_message error })
+  | (_ : Unix.stats) -> Error (Keeper_configuration_change_left { journal })
 ;;
 
 (* The port the CLI of the workspace reads when none is given
@@ -238,6 +278,7 @@ let run ~sw ~env ~address ~port ~lease ?on_ready ~start_engine multi_account =
   in
   let* () = judged_again zone in
   let* () = no_keeper_definition ~base_path in
+  let* () = no_keeper_configuration_change ~base_path in
   let* login_clients =
     Result.map_error
       (fun refusal -> Login_client_refused refusal)

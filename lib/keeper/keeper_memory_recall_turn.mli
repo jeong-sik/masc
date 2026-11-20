@@ -60,7 +60,9 @@ val judge_with :
     Every judgment is counted once it is complete:
     [masc_keeper_memory_recall_total] by keeper and outcome (the status token),
     [masc_keeper_memory_recall_selected_total] by keeper for the candidates it
-    carried, and [masc_keeper_memory_recall_judgment_seconds] by keeper from
+    carried, [masc_keeper_memory_recall_turn_contradicted_total] by keeper when
+    question (b) answered no-knowledge while question (a) carried at least one
+    candidate, and [masc_keeper_memory_recall_judgment_seconds] by keeper from
     the first request to the saved outcome, using a monotonic elapsed-time
     counter. Calendar-clock adjustments do not change that duration; the
     evaluation journal keeps Unix timestamps for its event times. *)

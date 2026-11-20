@@ -21,6 +21,10 @@ val prompt_blocks : t -> (Prompt_block_id.t * string) list
     {!Prompt_block_id.Recalled_memory_status}, then the body, when there is
     one, as {!Prompt_block_id.Recalled_memory}. *)
 
+val rendered_body_bytes : t -> int
+(** UTF-8 byte length of {!t.body} ([0] when {!t.body} is [None]). Pure
+    observation; imposes no cap. *)
+
 type delivery
 (** One runtime attempt's recall delivery, separate from the turn's judgment
     memo. Only a body in the latest completed issuer assembly may be deferred.
@@ -102,7 +106,9 @@ val prepare_with :
 
     The facts are read once per call and the judgment may be one the turn
     kept from an earlier call, so the body is made from the facts of this call
-    ({!Keeper_memory_recall_render.body} names an id whose fact is gone). *)
+    ({!Keeper_memory_recall_render.body} names an id whose fact is gone).
+    Each judged preparation records {!rendered_body_bytes} in
+    [masc_keeper_memory_recall_rendered_body_bytes] by keeper. *)
 
 val prepare :
   memo:Keeper_memory_recall_turn.memo ->

@@ -80,12 +80,20 @@ let append_raw path text =
     Out_channel.output_string channel text)
 ;;
 
-let external_item preview : Masc.Keeper_external_attention.item =
+let req_id value =
+  match Keeper_chat_delivery_identity.Request_id.of_string value with
+  | Ok id -> id
+  | Error detail -> failf "invalid request id %S: %s" value detail
+;;
+
+let external_item ?(conversation_id = "agent:unit") ?external_message preview :
+    Masc.Keeper_external_attention.item
+  =
   { event_id = Masc.Keeper_external_attention.event_id_of_dedupe_key preview
   ; dedupe_key = preview
   ; keeper_name
-  ; conversation = { conversation_id = "agent:unit"; surface = Agent }
-  ; external_message = None
+  ; conversation = { conversation_id; surface = Agent }
+  ; external_message
   ; source_label = "agent"
   ; actor = { actor_id = Some "external"; display_name = Some "External"; authority = External }
   ; urgency = Ambient
@@ -202,6 +210,8 @@ let fragment_text : Fragments.fragment -> string = function
 ;;
 
 let body_text : Read_unit.body -> string = function
+  | Chat_row { message = Some { role = Tool; tool_call_name = Some name; _ }; _ } -> "chat tool " ^ name
+  | Chat_row { message = Some { role = Request_failure; content; _ }; _ } -> "chat failure " ^ content
   | Chat_row { message = Some chat; _ } -> "chat " ^ chat.content
   | Chat_row { message = None; _ } -> "chat row the reader dropped"
   | External_row item -> "external " ^ item.content_preview
@@ -377,6 +387,247 @@ let test_each_record_reads_what_only_it_holds () =
     (read (every ~history ~internal slices))
 ;;
 
+let with_empty_stores f =
+  Eio_main.run
+  @@ fun env ->
+  if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = Filename.temp_dir "unit-content-layer2" "" in
+  Fun.protect
+    ~finally:(fun () -> Fs_compat.remove_tree base_dir)
+    (fun () ->
+       let session = Masc.Keeper_context_core.create_session ~session_id ~base_dir in
+       let session_dir = session.Keeper_types.session_dir in
+       let stores : Content.stores =
+         { session_dir =
+             (fun ~session ->
+               if String.equal session session_id then session_dir else failf "no session %s" session)
+         ; base_path = base_dir
+         ; keeper_name
+         }
+       in
+       f base_dir session session_dir stores)
+;;
+
+let test_layer2_witness_dedup_chat_mirrors () =
+  with_empty_stores
+  @@ fun base_dir session session_dir stores ->
+  let chat_path = Masc.Keeper_chat_store.chat_path ~base_dir ~keeper_name in
+  let speaker : Masc.Keeper_chat_store.speaker =
+    { speaker_id = Some "owner"; speaker_name = Some "Owner"; speaker_authority = Owner }
+  in
+  let tool_calls : Masc.Keeper_chat_store.tool_call list =
+    [ { call_id = "tc-1"; execution_id = None; call_name = "read_file"; args = "{}" } ]
+  in
+  Masc.Keeper_chat_store.append_turn ~base_dir ~keeper_name ~user_content:"u-mirror" ~user_attachments:[]
+    ~tool_calls ~speaker ~turn_ref ~assistant_content:"a-mirror" ();
+  Masc.Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name ~content:"extra assistant" ~turn_ref ();
+  let chat_end = size chat_path in
+  (* No transcript witness: fail-safe retention keeps all 4 chat rows. *)
+  check (list string) "without transcript witness, mirror chat rows stay"
+    [ "reset 0 chat u-mirror"; "reset 1 chat tool read_file"; "reset 2 chat a-mirror"; "reset 3 chat extra assistant" ]
+    (read_text stores (span (Announced_reset { cause = Cleared; segment = segment ~chat:(range 0 chat_end) () })));
+  (* Internal assistant witness only: drops Assistant mirrors while keeping User + Tool. *)
+  History.persist_message ~keeper_name ~turn_ref ~source:Masc.Keeper_types_support.Internal_assistant session
+    (message ~role:Assistant "internal reply");
+  let internal_end = size (Fragments.path ~session_dir Internal) in
+  check (list string) "internal assistant witness drops assistant chat mirrors only"
+    [ "reset 0 chat u-mirror"; "reset 1 chat tool read_file"; "reset 2 internal internal reply" ]
+    (read_text stores
+       (span
+          (Announced_reset
+             { cause = Cleared
+             ; segment = segment ~record:(files ~internal:(range 0 internal_end) ()) ~chat:(range 0 chat_end) ()
+             })));
+  (* Checkpoint witness with User + ToolUse + Assistant: drops all 3 mirror classes. *)
+  let tool_msg : Types.message =
+    { origin = Llm_provider.Types.Conversation
+    ; role = Types.Assistant
+    ; content =
+        [ Types.Text "reply text"
+        ; Types.ToolUse { id = "tc-1"; name = "read_file"; input = `Null }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let bundle = stored_bundle ~session_dir [ message ~role:User "ckpt prompt"; tool_msg ] in
+  let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
+  check (list string) "full transcript witnesses deduplicate user, tool, and assistant chat mirrors"
+    [ "own 0 message ckpt prompt"; "own 1 message reply text" ]
+    (read_text stores
+       (span
+          (Turn
+             { turn = 20
+             ; outcome = Completed
+             ; opened
+             ; unattributed = segment ~chat:(range 0 chat_end) ()
+             ; own = segment ~record:(checkpoint [ slice bundle 0 2 ]) ()
+             })))
+;;
+
+let test_layer2_preserves_concurrent_op_and_request_failure_drops_external_dupe () =
+  with_empty_stores
+  @@ fun base_dir _session session_dir stores ->
+  let chat_path = Masc.Keeper_chat_store.chat_path ~base_dir ~keeper_name in
+  let peer : Masc.Keeper_chat_store.speaker =
+    { speaker_id = Some "peer"; speaker_name = Some "Peer"; speaker_authority = External }
+  in
+  let owner : Masc.Keeper_chat_store.speaker =
+    { speaker_id = Some "owner"; speaker_name = Some "Owner"; speaker_authority = Owner }
+  in
+  let ext_matched = external_item ~conversation_id:"slack:C1" "slack hello" in
+  let external_path = Masc.Keeper_external_attention.attention_path ~base_path:base_dir ~keeper_name in
+  append_raw external_path
+    (Yojson.Safe.to_string (Masc.Keeper_external_attention.event_to_json (Recorded ext_matched)) ^ "\n");
+  let require = function Ok _ -> () | Error detail -> fail detail in
+  Masc.Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Operation (req_id "op-concurrent"))
+    ~content:"concurrent request B" ~speaker:owner () |> require;
+  Masc.Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Connector_message (req_id ext_matched.event_id))
+    ~content:"slack hello mirror" ~speaker:peer () |> require;
+  Masc.Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Connector_message (req_id "ext-other-unit"))
+    ~content:"unmatched connector" ~speaker:peer () |> require;
+  Masc.Keeper_chat_store.append_request_failure_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Operation (req_id "op-fail"))
+    ~content:"model timeout" () |> require;
+  append_raw chat_path "not json\n";
+  let chat_end = size chat_path in
+  let bundle =
+    stored_bundle ~session_dir [ message ~role:User "turn prompt"; message ~role:Assistant "turn reply" ]
+  in
+  let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
+  check (list string) "keeps unlinked Operation, unmatched connector, failure, corrupt; drops matched connector mirror"
+    [ "unattributed 0 chat concurrent request B"
+    ; "unattributed 1 chat unmatched connector"
+    ; "unattributed 2 chat failure model timeout"
+    ; "unattributed 3 chat row the reader dropped"
+    ; "unattributed 4 external slack hello"
+    ; "own 5 message turn prompt"
+    ; "own 6 message turn reply"
+    ]
+    (read_text stores
+       (span
+          (Turn
+             { turn = 30
+             ; outcome = Completed
+             ; opened
+             ; unattributed = segment ~chat:(range 0 chat_end) ~external_rows:(range 0 1) ()
+             ; own = segment ~record:(checkpoint [ slice bundle 0 2 ]) ()
+             })))
+;;
+
+let test_layer2_dedup_invariant_under_first_items_and_resume () =
+  with_empty_stores
+  @@ fun base_dir _session session_dir stores ->
+  let chat_path = Masc.Keeper_chat_store.chat_path ~base_dir ~keeper_name in
+  let peer : Masc.Keeper_chat_store.speaker =
+    { speaker_id = Some "peer"; speaker_name = Some "Peer"; speaker_authority = External }
+  in
+  let owner : Masc.Keeper_chat_store.speaker =
+    { speaker_id = Some "owner"; speaker_name = Some "Owner"; speaker_authority = Owner }
+  in
+  let ext_matched = external_item ~conversation_id:"slack:C2" "slack hello step" in
+  let external_path = Masc.Keeper_external_attention.attention_path ~base_path:base_dir ~keeper_name in
+  append_raw external_path
+    (Yojson.Safe.to_string (Masc.Keeper_external_attention.event_to_json (Recorded ext_matched)) ^ "\n");
+  let require = function Ok _ -> () | Error detail -> fail detail in
+  let tool_calls : Masc.Keeper_chat_store.tool_call list =
+    [ { call_id = "tc-step"; execution_id = None; call_name = "read_file"; args = "{}" } ]
+  in
+  Masc.Keeper_chat_store.append_turn ~base_dir ~keeper_name ~user_content:"turn_ref user mirror" ~user_attachments:[]
+    ~tool_calls ~speaker:owner ~turn_ref ~assistant_content:"assistant mirror" ();
+  Masc.Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Operation (req_id "op-step-keep"))
+    ~content:"unlinked concurrent op" ~speaker:owner () |> require;
+  Masc.Keeper_chat_store.append_user_message_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Connector_message (req_id ext_matched.event_id))
+    ~content:"connector mirror" ~speaker:peer () |> require;
+  Masc.Keeper_chat_store.append_request_failure_once ~base_dir ~keeper_name
+    ~delivery_key:(Keeper_chat_delivery_identity.Operation (req_id "op-step-fail"))
+    ~content:"provider timeout" () |> require;
+  append_raw chat_path "not json\n";
+  let chat_end = size chat_path in
+  let tool_msg : Types.message =
+    { origin = Llm_provider.Types.Conversation
+    ; role = Types.Assistant
+    ; content =
+        [ Types.Text "ckpt reply"
+        ; Types.ToolUse { id = "tc-step"; name = "read_file"; input = `Null }
+        ]
+    ; name = None
+    ; tool_call_id = None
+    ; metadata = []
+    }
+  in
+  let bundle = stored_bundle ~session_dir [ message ~role:User "ckpt user"; tool_msg ] in
+  let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
+  let base_span =
+    span
+      (Turn
+         { turn = 40
+         ; outcome = Completed
+         ; opened
+         ; unattributed = segment ~chat:(range 0 chat_end) ~external_rows:(range 0 1) ()
+         ; own =
+             segment ~record:(checkpoint [ slice bundle 0 2 ]) ~chat:(range chat_end chat_end)
+               ~external_rows:(range 1 1) ()
+         })
+  in
+  let flatten_items (unit_ : Read_unit.t) =
+    let project segment ({ name = { store; at }; body; _ } : Read_unit.item) =
+      let store_name =
+        match store with
+        | Unit.Chat -> "chat"
+        | Unit.External -> "external"
+        | Unit.Agent_core -> "agent_core"
+        | Unit.History -> "history"
+        | Unit.Internal -> "internal"
+      in
+      Printf.sprintf "%s %s:%d %s" segment store_name at (body_text body)
+    in
+    match unit_.kind with
+    | Read_unit.Turn { unattributed; own; _ } ->
+      List.map (project "unattributed") unattributed @ List.map (project "own") own
+    | Read_unit.Reset { items; _ } -> List.map (project "reset") items
+  in
+  let full_read =
+    match Content.read stores base_span ~take:Rest_of_unit with
+    | Ok { unit = u; ends = Whole } -> flatten_items u
+    | Ok { ends = Item _; _ } -> fail "Rest_of_unit must terminate with Whole"
+    | Error _ -> fail "Rest_of_unit read failed"
+  in
+  check int "full deduplicated read keeps 6 items (op, failure, corrupt, external, 2 ckpt)" 6
+    (List.length full_read);
+  let one_item_count : Masc.Librarian_width.count =
+    let module W = Masc.Librarian_width in
+    match W.breadth { units = 1; head_items = 2 } with
+    | W.One_item -> fail "expected wider"
+    | W.Wider wider -> (
+      match W.next (W.refused W.empty ~asked:W.All wider) with
+      | W.Items count -> count
+      | W.All | W.Units _ -> fail "expected Items count")
+  in
+  let rec walk_steps current_span acc left =
+    if left <= 0 then fail "First_items walk exceeded expected item count";
+    match Content.read stores current_span ~take:(First_items one_item_count) with
+    | Error _ -> fail "stepped First_items read failed"
+    | Ok { unit = u; ends } ->
+      let step_items = flatten_items u in
+      check bool "every First_items step yields at least one item" true (step_items <> []);
+      let acc = acc @ step_items in
+      (match ends with
+       | Masc.Librarian_log.Whole -> acc
+       | Masc.Librarian_log.Item name ->
+         walk_steps { current_span with resume = Some name } acc (left - 1))
+  in
+  let stepped = walk_steps base_span [] (List.length full_read + 1) in
+  check (list string) "First_items + resume yields identical item names and bodies as Rest_of_unit" full_read
+    stepped
+;;
+
 let () =
   run "librarian_unit_content"
     [ ( "content"
@@ -384,6 +635,12 @@ let () =
         ; test_case "what a store does not hold" `Quick test_what_a_store_does_not_hold
         ; test_case "a bundle that does not read" `Quick test_a_bundle_that_does_not_read
         ; test_case "each record reads what only it holds" `Quick test_each_record_reads_what_only_it_holds
+        ; test_case "layer-2 witness dedup hides redundant chat mirrors cleanly" `Quick
+            test_layer2_witness_dedup_chat_mirrors
+        ; test_case "layer-2 keeps concurrent operation/failure/corrupt rows and drops external dupe" `Quick
+            test_layer2_preserves_concurrent_op_and_request_failure_drops_external_dupe
+        ; test_case "layer-2 dedup invariant under First_items and resume" `Quick
+            test_layer2_dedup_invariant_under_first_items_and_resume
         ] )
     ]
 ;;

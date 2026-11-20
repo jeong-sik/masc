@@ -7,7 +7,23 @@
     ({!Librarian_unread.record}): the Agent-Core messages its slices name
     with the internal file's replies beside them, the rows of the
     official-client files in its ranges, or all of these for a stretch that
-    can hold several turns. Each item is the value its store holds, in the order
+    can hold several turns.
+
+    To avoid repeating identical user/assistant/tool lines across overlapping
+    stores in one unit, exact-witness chat deduplication omits:
+    - [Role.Assistant] and [Role.Tool] chat mirror rows only when the unit's
+      conversation witness holds a matching assistant message or tool block
+      (keeping the chat row if the transcript witness is absent);
+    - [Role.User] chat rows matching an [External_row] in the same unit (by
+      connector event id or [(conversation_id, external_message_id)]);
+    - [turn_ref]-stamped [Role.User] chat rows only when the unit's
+      conversation carries a conversation user message.
+    Corrupt rows, [Role.System], [Role.Request_failure], and unlinked
+    [Operation*] accepted-user rows (whose operation id is absent from
+    [Opened]) always stay, so deduplication never leaves a previously readable
+    unit empty. Witnesses are derived from the unit's full non-chat ranges so
+    item selection and coordinates are invariant across {!First_items} slices
+    and [span.resume]. Each kept item is the value its store holds, in the order
     {!Librarian_unit} gives. Nothing is reduced here: the question reduces
     the items as §5.5 says when it writes them out.
 

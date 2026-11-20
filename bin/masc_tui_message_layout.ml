@@ -2600,17 +2600,71 @@ type body_row_position = {
   rows_below : int;
 }
 
+(* The rows of the entries a window last touched, for one immutable list of
+   entries at one width and origin shape -- the same key {!row_counts_for}
+   trusts for a count, since an entry has no mutable field and the list is
+   rebuilt when what the markdown renderer reads changes. A huge reply at
+   the bottom of a conversation was laid out again on every frame, all of
+   its rows, to cut a screenful out of it: about 90 ms for 4 MB, most of it
+   the collector (#53937). A window touches a few entries, so a few are
+   kept. Entries are numbered from the newest. *)
+type kept_rows = {
+  kr_entries : entry list;
+  kr_inner_width : int;
+  kr_origin : origin_display;
+  kr_has_markdown : bool;
+  mutable kr_rows : (int * row list) list;
+      (** Most recently laid out first, at most {!rows_kept}. *)
+}
+
+let rows_kept = 8
+let kept_rows_memo : kept_rows option ref = ref None
+
+let kept_rows_for ?markdown entries ~inner_width ~origin =
+  let has_markdown = Option.is_some markdown in
+  match !kept_rows_memo with
+  | Some held
+    when held.kr_entries == entries
+         && held.kr_inner_width = inner_width
+         && held.kr_origin = origin
+         && held.kr_has_markdown = has_markdown ->
+      held
+  | Some _ | None ->
+      let held =
+        { kr_entries = entries; kr_inner_width = inner_width; kr_origin = origin;
+          kr_has_markdown = has_markdown; kr_rows = [] }
+      in
+      kept_rows_memo := Some held;
+      held
+
+let kept_rows_of_entry held ?markdown ~newest_index ~previous entry =
+  match List.assoc_opt newest_index held.kr_rows with
+  | Some rows -> rows
+  | None ->
+      let rows =
+        rows_of_entry ?markdown ~origin:held.kr_origin ~inner_width:held.kr_inner_width
+          ~previous entry
+      in
+      held.kr_rows <-
+        (newest_index, rows) :: List.filteri (fun i _ -> i < rows_kept - 1) held.kr_rows;
+      rows
+
 (* Positions belong to the actual immutable rows selected by this producer.
    Generated gaps and rows synthesized by repeat collapse have no original
    row owner and cannot acquire a body position by matching their text. *)
 let visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries =
   let inner_width = Int.max 1 inner_width in
   let height = Int.max 0 height in
+  let held =
+    kept_rows_for ?markdown entries ~inner_width
+      ~origin:(Option.value origin ~default:Origin_row)
+  in
+  let newest = List.length entries - 1 in
   let rec collect entry_index remaining selected positions = function
     | [] -> selected, positions
     | _ when remaining = 0 -> selected, positions
     | entry :: older ->
-        let rows = rows_of_entry ?markdown ?origin ~inner_width
+        let rows = kept_rows_of_entry held ?markdown ~newest_index:(newest - entry_index)
           ~previous:(List.nth_opt older 0) entry in
         let chosen =
           if List.length rows <= remaining then rows
@@ -2756,8 +2810,12 @@ let entry_rows_at held ?markdown index =
   let previous =
     if index + 1 < count then Some held.rc_newest_first.(index + 1) else None
   in
-  rows_of_entry ?markdown ~origin:held.rc_origin ~inner_width:held.rc_inner_width
-    ~previous held.rc_newest_first.(index)
+  let kept =
+    kept_rows_for ?markdown held.rc_entries ~inner_width:held.rc_inner_width
+      ~origin:held.rc_origin
+  in
+  kept_rows_of_entry kept ?markdown ~newest_index:index ~previous
+    held.rc_newest_first.(index)
 
 (* Extend the known counts from the newest until they cover [wanted] rows, or
    until the conversation runs out. Answers how many rows and how many entries

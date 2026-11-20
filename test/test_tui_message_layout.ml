@@ -188,6 +188,34 @@ let test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity () =
    long. The row counts of the entries behind the window do not change while
    the entries and the width do not, so the second walk pays for what it
    newly reaches and for what it draws, not for the whole distance. *)
+(* The same window of the same entries lays nothing out again, at the bottom
+   of the conversation and scrolled back. A huge reply at the bottom used to
+   be laid out whole on every frame to cut a screenful out of it (#53937). *)
+let test_the_same_window_lays_out_nothing_again () =
+  let inner_width = 30 in
+  let height = 8 in
+  let laid_out = ref 0 in
+  let markdown ~(entry : Layout.entry) ~width =
+    incr laid_out;
+    Layout.wrap_words ~max_cells:width entry.body
+  in
+  let cost ?(inner_width = inner_width) ~requested entries =
+    laid_out := 0;
+    ignore
+      (Layout.clamped_scrolled_rows ~markdown ~inner_width ~height ~requested entries
+        : Layout.scroll_window);
+    !laid_out
+  in
+  let entries = transcript 60 in
+  check bool "the bottom window lays out its entries" true (cost ~requested:0 entries > 0);
+  check int "the same bottom window lays out nothing again" 0 (cost ~requested:0 entries);
+  check bool "a scrolled window lays out what it reaches" true (cost ~requested:40 entries > 0);
+  check int "the same scrolled window lays out nothing again" 0 (cost ~requested:40 entries);
+  check bool "another width lays out again" true
+    (cost ~inner_width:(inner_width + 6) ~requested:0 entries > 0);
+  check bool "another list of entries lays out again" true
+    (cost ~requested:0 (transcript 60) > 0)
+
 let test_a_second_walk_pays_for_what_it_newly_reaches () =
   let entries = transcript 60 in
   let inner_width = 30 in
@@ -207,7 +235,9 @@ let test_a_second_walk_pays_for_what_it_newly_reaches () =
   in
   let _, first_rows, first_cost = walk 90 in
   let _, second_rows, second_cost = walk 93 in
-  check bool "the first walk reaches far back" true (first_cost > 20);
+  (* Each entry the walk counts back through is laid out once; the window it
+     draws is among them. *)
+  check bool "the first walk reaches far back" true (first_cost >= 20);
   check bool
     (Printf.sprintf "the second walk costs %d against the first's %d"
        second_cost first_cost)
@@ -836,6 +866,8 @@ let () =
             test_an_output_keeps_its_indentation
         ; test_case "a second walk pays for what it newly reaches" `Quick
             test_a_second_walk_pays_for_what_it_newly_reaches
+        ; test_case "the same window lays out nothing again" `Quick
+            test_the_same_window_lays_out_nothing_again
         ; test_case "one frame renders capacity + 1 markdown entries once" `Quick
             test_one_frame_renders_each_completed_entry_once_beyond_cache_capacity
         ; test_case "bare sender row marks arrived reasoning only" `Quick

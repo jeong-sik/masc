@@ -2961,10 +2961,166 @@ let test_cancel_ledger_write_failure_retains_withdrawal () =
     (Tool_result.is_success (f1_cancel config schedule_id))
 ;;
 
+let test_create_and_update_reject_out_of_range_unix_timestamps () =
+  with_config
+  @@ fun config ->
+  let open Yojson.Safe.Util in
+  let create_with args_extra =
+    dispatch_exn config Tool_schemas_schedule.Create_request
+      (`Assoc
+        ([ "keeper_name", `String "schedule-keeper"
+         ; "message", `String "unix bounds check"
+         ]
+         @ args_extra))
+  in
+  let check_listed_count label expected =
+    let list_result =
+      dispatch_exn config Tool_schemas_schedule.List_requests
+        (`Assoc [ "owner", `String "all"; "limit", `Int 10 ])
+    in
+    check bool (label ^ ": list succeeds") true (Tool_result.is_success list_result);
+    check int (label ^ ": listed count") expected
+      (Tool_result.data list_result |> member "schedules" |> to_list |> List.length)
+  in
+  let ms_due =
+    create_with
+      [ "schedule_id", `String "sched-ms-due"
+      ; "due_at_unix", `Float 1_763_452_800_000.0
+      ]
+  in
+  check bool "create rejects millisecond due_at_unix" false (Tool_result.is_success ms_due);
+  check bool "millisecond refusal hints seconds vs milliseconds" true
+    (String_util.contains_substring (Tool_result.message ms_due) "milliseconds");
+  check_listed_count "after ms due refusal" 0;
+  let ns_due =
+    create_with
+      [ "schedule_id", `String "sched-ns-due"
+      ; "due_at_unix", `Float 1_763_452_800_000_000_000.0
+      ]
+  in
+  check bool "create rejects nanosecond due_at_unix" false (Tool_result.is_success ns_due);
+  check bool "nanosecond refusal hints nanoseconds" true
+    (String_util.contains_substring (Tool_result.message ns_due) "nanoseconds");
+  check_listed_count "after ns due refusal" 0;
+  let neg_due =
+    create_with
+      [ "schedule_id", `String "sched-neg-due"
+      ; "due_at_unix", `Float (-1.0)
+      ]
+  in
+  check bool "create rejects negative due_at_unix" false (Tool_result.is_success neg_due);
+  let extreme_neg_due =
+    create_with
+      [ "schedule_id", `String "sched-extreme-neg-due"
+      ; "due_at_unix", `Float (-1e20)
+      ]
+  in
+  check bool "create rejects extreme negative due_at_unix without EOVERFLOW" false
+    (Tool_result.is_success extreme_neg_due);
+  let ms_expires =
+    create_with
+      [ "schedule_id", `String "sched-ms-expires"
+      ; "due_at_unix", `Float future_due_at
+      ; "expires_at_unix", `Float 1_763_452_800_000.0
+      ]
+  in
+  check bool "create rejects millisecond expires_at_unix" false
+    (Tool_result.is_success ms_expires);
+  check_listed_count "after ms expires refusal" 0;
+  let valid_create =
+    create_with
+      [ "schedule_id", `String "sched-bounds-valid"
+      ; "due_at_unix", `Float future_due_at
+      ]
+  in
+  check bool "valid create succeeds" true (Tool_result.is_success valid_create);
+  let update_ms_due =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (`Assoc
+        [ "schedule_id", `String "sched-bounds-valid"
+        ; "due_at_unix", `Float 1_763_452_800_000.0
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "bad update due"
+        ])
+  in
+  check bool "update rejects millisecond due_at_unix" false
+    (Tool_result.is_success update_ms_due);
+  let update_ns_expires =
+    dispatch_exn config Tool_schemas_schedule.Update_request
+      (`Assoc
+        [ "schedule_id", `String "sched-bounds-valid"
+        ; "due_at_unix", `Float (future_due_at +. 60.0)
+        ; "expires_at_unix", `Float 1_763_452_800_000_000_000.0
+        ; "keeper_name", `String "schedule-keeper"
+        ; "message", `String "bad update expires"
+        ])
+  in
+  check bool "update rejects nanosecond expires_at_unix" false
+    (Tool_result.is_success update_ns_expires);
+  let get_result =
+    dispatch_exn config Tool_schemas_schedule.Get_request
+      (`Assoc [ "schedule_id", `String "sched-bounds-valid" ])
+  in
+  check bool "get succeeds after rejected updates" true (Tool_result.is_success get_result);
+  check (float 0.0) "valid due_at preserved" future_due_at
+    (Tool_result.data get_result |> member "due_at" |> to_float);
+  check_listed_count "valid schedule intact" 1
+;;
+
+let test_create_request_validates_unix_seconds_bounds () =
+  let make ~requested_at ~due_at ?expires_at () =
+    Schedule_domain.create_request
+      ~schedule_id:"sched-boundary"
+      ~requested_by:(human "operator")
+      ~scheduled_by:(automated "scheduler-agent")
+      ~requested_at
+      ~due_at
+      ?expires_at
+      ~payload:(keeper_wake_payload "boundary wake")
+      ~source:Schedule_domain.Operator_request
+      ()
+  in
+  let boundary_request =
+    match
+      make ~requested_at:0.0 ~due_at:Schedule_domain.max_unix_seconds
+        ~expires_at:Schedule_domain.max_unix_seconds ()
+    with
+    | Ok req -> req
+    | Error msg -> fail ("boundary create_request failed: " ^ msg)
+  in
+  check string "max_unix_seconds formats cleanly as 9999-12-31T23:59:59Z"
+    "9999-12-31T23:59:59Z"
+    (Masc_domain.iso8601_of_unix_seconds Schedule_domain.max_unix_seconds);
+  let boundary_json = Schedule_domain.schedule_request_to_yojson boundary_request in
+  (match Schedule_domain.schedule_request_of_yojson boundary_json with
+   | Ok decoded ->
+     check (float 0.0) "boundary requested_at decoded" 0.0 decoded.requested_at;
+     check (float 0.0) "boundary due_at decoded"
+       Schedule_domain.max_unix_seconds decoded.due_at
+   | Error msg -> fail ("boundary schedule_request_of_yojson failed: " ^ msg));
+  List.iter
+    (fun (label, attempt) ->
+       match attempt with
+       | Ok _ -> fail (label ^ ": expected rejection")
+       | Error _ -> ())
+    [ "millisecond due_at", make ~requested_at:0.0 ~due_at:1_763_452_800_000.0 ()
+    ; "nanosecond due_at", make ~requested_at:0.0 ~due_at:1_763_452_800_000_000_000.0 ()
+    ; "negative requested_at", make ~requested_at:(-1.0) ~due_at:future_due_at ()
+    ; ( "millisecond expires_at"
+      , make ~requested_at:0.0 ~due_at:future_due_at ~expires_at:1_763_452_800_000.0 () )
+    ; "nan due_at", make ~requested_at:0.0 ~due_at:Float.nan ()
+    ; "infinite due_at", make ~requested_at:0.0 ~due_at:Float.infinity ()
+    ]
+;;
+
 let () =
   run "Schedule_tool_wiring"
     [ ( "wiring"
-      , [ test_case "cancel ledger write failure retains withdrawal" `Quick test_cancel_ledger_write_failure_retains_withdrawal
+      , [ test_case "create and update reject out-of-range unix timestamps" `Quick
+            test_create_and_update_reject_out_of_range_unix_timestamps
+        ; test_case "create_request validates unix seconds bounds" `Quick
+            test_create_request_validates_unix_seconds_bounds
+        ; test_case "cancel ledger write failure retains withdrawal" `Quick test_cancel_ledger_write_failure_retains_withdrawal
         ; test_case "cancel finds old target and all instances" `Quick test_cancel_finds_old_target_and_all_instances
         ; test_case "Keeper-to-Lane cancellation withdraws old wakes" `Quick test_cancel_keeper_to_lane_still_withdraws
         ; test_case "unfinished transfer refuses cancel then recovers multi-hop" `Quick test_cancel_refuses_outbox_then_recovers_multihop

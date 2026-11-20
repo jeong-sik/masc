@@ -111,10 +111,23 @@ let nonempty field value =
 ;;
 
 (* The ledger is written as compact JSON, which has no spelling for NaN or an
-   infinity: a time that is not finite could be accepted here and then fail
-   every later write of the whole ledger. *)
-let finite_time field value =
-  if Float.is_finite value then Ok value else Error (field ^ " must be a finite time")
+   infinity, and timestamps are formatted through [Unix.gmtime] / RFC 3339
+   4-digit years. Bound Unix seconds to [0.0, 253_402_300_799.0]
+   (1970-01-01T00:00:00Z..9999-12-31T23:59:59Z) so millisecond/nanosecond
+   inputs and [EOVERFLOW]-triggering values fail cleanly before entering state. *)
+let max_unix_seconds = 253_402_300_799.0
+
+let valid_unix_seconds field value =
+  if not (Float.is_finite value) then
+    Error (field ^ " must be a finite Unix timestamp in seconds")
+  else if value < 0.0 || value > max_unix_seconds then
+    Error
+      (Printf.sprintf
+         "%s must be a Unix timestamp in seconds between 0 and %.0f \
+          (1970-01-01T00:00:00Z..9999-12-31T23:59:59Z, not milliseconds or nanoseconds)"
+         field max_unix_seconds)
+  else
+    Ok value
 ;;
 
 let decode_error_to_string = Schedule_contract_values.decode_error_to_string
@@ -974,12 +987,12 @@ let create_request
   let* schedule_id = nonempty "schedule_id" schedule_id in
   let* _ = nonempty "requested_by.id" requested_by.id in
   let* _ = nonempty "scheduled_by.id" scheduled_by.id in
-  let* requested_at = finite_time "requested_at" requested_at in
-  let* due_at = finite_time "due_at" due_at in
+  let* requested_at = valid_unix_seconds "requested_at" requested_at in
+  let* due_at = valid_unix_seconds "due_at" due_at in
   let* expires_at =
     match expires_at with
     | None -> Ok None
-    | Some expires_at -> Result.map Option.some (finite_time "expires_at" expires_at)
+    | Some expires_at -> Result.map Option.some (valid_unix_seconds "expires_at" expires_at)
   in
   let* payload = payload_of_yojson payload in
   let* recurrence = validate_recurrence recurrence in

@@ -2373,6 +2373,378 @@ let bounded_model_input_projection
     |> Result.map_error (fun error -> Agent_core.Error.Media error)
 ;;
 
+(* The refusals that say the request outgrew what carries it: the provider's
+   context overflow and the provider's refusal of the request body.
+   Each is answered by moving the carried front, never by rotating first: a
+   shorter range of the SAME conversation can still answer the same turn.
+   Enumerated so a new variant forces a decision here instead of a silent
+   [false]. *)
+let is_size_refusal = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
+  (* A refusal whose cause agent core does not model names no size. Tool
+     schema errors, unsupported parameters and unreadable images arrive
+     here too, and a shorter range answers none of them: every retry would
+     be another billed request, and the one that passed would hold its cut
+     front for every later turn although nothing was too large
+     (Retry.invalid_request_reason documents the same contract). The
+     refusal stays in hand for the declared-lane walk, which may ask
+     another candidate with the same range. A provider whose size refusal
+     is prose only reaches here as well: reading the sentence would be a
+     string classifier, so its size needs a typed reason at the parse
+     boundary before this ladder answers it. *)
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason =
+              ( Unknown_invalid_request
+              | Unclassified_status _
+              | Json_parse_error
+              | Attempt_rejected
+              | Refusal_body_not_received )
+          ; _
+          }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _ | Connect_failed _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
+(* The refusals the turn boundary resend answers (RFC librarian-lifecycle
+   §4.10, rule 1). A typed size refusal, and also a refusal whose reason
+   agent core does not model: every live size refusal measured so far
+   arrives that way -- a 400 whose only size signal is its sentence, with
+   no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
+   and reading the sentence
+   would be a string classifier. [is_size_refusal] names only the two typed
+   size refusals (#38286); this check keeps the third.
+   - A refusal that was not about size draws the same refusal from the
+     boundary. The held front is then given back ([turn_boundary_resend_sequence]),
+     so a later candidate that the declared-lane walk asks opens on the
+     original range and no accepted start at the boundary is recorded.
+   - A refusal that was about size leaves a gap the Librarian still reads.
+     Once it reaches the accepted start the request starts at its point
+     again (rule 5), so no context is lost for good.
+   - The cost: one more request for each 400 or 422 whose reason is
+     unknown, and for each status no classifier arm names.
+   Enumerated so a new variant forces a decision here. *)
+let boundary_resend_on = function
+  | Agent_core.Error.Api (ContextOverflow _)
+  | Agent_core.Error.Api
+      (InvalidRequest
+         { reason =
+             ( Request_body_refused_by_provider _
+             | Unknown_invalid_request
+             | Unclassified_status _ )
+         ; _
+         }) ->
+    true
+  | Agent_core.Error.Api
+      ( InvalidRequest
+          { reason = (Json_parse_error | Attempt_rejected | Refusal_body_not_received); _ }
+      | InputCapacity _
+      | RateLimited _
+      | Overloaded _
+      | ServerError _
+      | AuthError _
+      | AuthorizationError _
+      | PaymentRequired _
+      | NotFound _
+      | NetworkError _ | Connect_failed _
+      | Timeout _ )
+  | Agent_core.Error.Provider _
+  | Agent_core.Error.Agent _
+  | Agent_core.Error.Config _
+  | Agent_core.Error.Mcp _
+  | Agent_core.Error.Serialization _
+  | Agent_core.Error.Io _
+  | Agent_core.Error.Orchestration _
+  | Agent_core.Error.Media _
+  | Agent_core.Error.Internal _
+  | Agent_core.Error.Internal_carried _ -> false
+;;
+
+(* A memory answer that changes nothing: the answer when the caller has no
+   memory to defer, and the in-run candidates' answer, since a request after
+   the checkpoint stage runs no hook that draws memory again (RFC
+   a-request-fits-by-the-one-input-limit-agent-core-decides §4.2). *)
+let memory_unchanged : Keeper_memory_delivery_reprojection.t =
+  fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged
+;;
+
+(* The three history rungs of a size refusal, each as the step that reads the
+   refusal and moves what the next composition of this candidate carries.
+   The ladder sends the attempt again after a step moves something
+   ([turn_boundary_resend_sequence], [current_turn_demotion_sequence],
+   [this_turn_start_resend_sequence]). A request after the run's checkpoint
+   stage composes again in the same run instead ([in_run_narrower]). Both
+   call these steps over the same [history_rungs], so a rung answers a
+   refusal the same way on either path (RFC
+   a-request-fits-by-the-one-input-limit-agent-core-decides §5, layer 5).
+   [authorized] is the ladder's same-run authority, asked where the ladder
+   always asked it. *)
+
+(* What a step that moves the turn's front did. [before] is the front held
+   until then, which a later failure that is not about size gives back. *)
+type front_move =
+  | Front_held of { before : Keeper_carried_front.seed option }
+  | Front_kept
+
+type demotion_move =
+  | Results_demoted
+  | Nothing_to_demote
+
+(* Rule 1 of RFC librarian-lifecycle §4.10. *)
+let turn_boundary_step
+      ~(authorized : unit -> bool)
+      ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
+      ~(turn_start_front : unit -> Keeper_carried_front.seed option)
+      ~(held_front : unit -> Keeper_carried_front.seed option)
+      ~(hold_front : Keeper_carried_front.seed -> unit)
+      ~(on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      error
+  =
+  match refused_range () with
+  | Some
+      ( ( Keeper_carried_front.Carried _
+        | Keeper_carried_front.Librarian_progress _
+        | Keeper_carried_front.Past_librarian_point _ )
+      , refused_first_atom )
+    when boundary_resend_on error && authorized () ->
+    (match turn_start_front () with
+     | Some (front : Keeper_carried_front.seed) when front.first_atom > refused_first_atom ->
+       let before = held_front () in
+       hold_front front;
+       on_turn_start error front;
+       Front_held { before }
+     | Some (_ : Keeper_carried_front.seed) | None -> Front_kept)
+  | Some
+      ( ( Keeper_carried_front.Carried _
+        | Keeper_carried_front.Librarian_progress _
+        | Keeper_carried_front.Past_librarian_point _
+        | Keeper_carried_front.Turn_start _
+        | Keeper_carried_front.Turn_start_unknown _ )
+      , _ )
+  | None -> Front_kept
+;;
+
+(* #28845. *)
+let current_turn_demotion_step
+      ~(authorized : unit -> bool)
+      ~(demotable : unit -> int option)
+      ~(demote : Agent_core.Error.t -> refused_atom_count:int -> unit)
+      error
+  =
+  if is_size_refusal error && authorized ()
+  then (
+    match demotable () with
+    | Some refused_atom_count ->
+      demote error ~refused_atom_count;
+      Results_demoted
+    | None -> Nothing_to_demote)
+  else Nothing_to_demote
+;;
+
+(* Rule 8 of RFC librarian-lifecycle §4.10. *)
+let this_turn_start_step
+      ~(authorized : unit -> bool)
+      ~(refused_first_atom : unit -> int option)
+      ~(this_turn_front : unit -> Keeper_carried_front.seed option)
+      ~(held_front : unit -> Keeper_carried_front.seed option)
+      ~(hold_front : Keeper_carried_front.seed -> unit)
+      ~(on_this_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      error
+  =
+  if not (is_size_refusal error && authorized ())
+  then Front_kept
+  else (
+    match refused_first_atom (), this_turn_front () with
+    | Some refused, Some (front : Keeper_carried_front.seed) when front.first_atom > refused ->
+      let before = held_front () in
+      hold_front front;
+      on_this_turn_start error front;
+      Front_held { before }
+    | Some (_ : int), (Some (_ : Keeper_carried_front.seed) | None) | None, (Some _ | None) ->
+      Front_kept)
+;;
+
+(* What the steps read and move on one candidate's state: the range the last
+   composition carried, the fronts a refusal can move to, and the demotion a
+   composition offers. *)
+type history_rungs =
+  { refused_range : unit -> (Keeper_carried_front.origin * int) option
+  ; turn_start_front : unit -> Keeper_carried_front.seed option
+  ; on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit
+  ; demotable : unit -> int option
+  ; demote : Agent_core.Error.t -> refused_atom_count:int -> unit
+  ; refused_first_atom : unit -> int option
+  ; this_turn_front : unit -> Keeper_carried_front.seed option
+  ; on_this_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit
+  }
+
+let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity : continuity) =
+  (* A refused Librarian point gives way to the turn start under its own
+     source. A refused seed gives way to it too; an unknown boundary puts the
+     front on the newest atom alone for the rest of the turn. *)
+  let boundary_source, on_boundary_front =
+    match continuity with
+    | Covered _ ->
+      ( Keeper_carried_front.Turn_start_after_librarian_refusal
+      , fun (_ : Keeper_carried_front.seed) -> () )
+    | No_read_end ->
+      ( Keeper_carried_front.Turn_start_after_seed_refusal
+      , fun (_ : Keeper_carried_front.seed) ->
+          match ctx.turn_boundary with
+          | Keeper_carried_front.Turn_boundary_unknown { reason } ->
+            Keeper_carried_front.warn_range_opens_on_newest_atom
+              ~keeper_name:ctx.keeper_name ~reason
+          | Keeper_carried_front.Turn_boundary _ -> () )
+  in
+  { refused_range =
+      (fun () ->
+        Option.map
+          (fun (sent : sent_request) ->
+             sent.origin, sent.request.Keeper_model_input_ledger.first_atom)
+          !(state.last_request))
+  ; turn_start_front =
+      (fun () ->
+        Option.bind !(state.last_request) (fun (sent : sent_request) ->
+          let atom_count = sent.request.Keeper_model_input_ledger.atom_count in
+          let first_atom =
+            match ctx.turn_boundary with
+            | Keeper_carried_front.Turn_boundary { end_atom } ->
+              Keeper_carried_front.clamp ~atom_count end_atom
+            | Keeper_carried_front.Turn_boundary_unknown _ ->
+              Keeper_carried_front.newest_atom ~atom_count
+          in
+          Option.map
+            (fun front_digest ->
+               { Keeper_carried_front.first_atom
+               ; front = Model_input_front.At_atom front_digest
+               ; source = boundary_source
+               })
+            (sent.digest_at first_atom)))
+  ; on_turn_start =
+      (fun error front ->
+        on_boundary_front front;
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input carried range refused runtime=%s: the turn's front moves to \
+           the turn boundary and the same candidate is asked again front=%s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
+          (Agent_core.Error.to_string error))
+  ; demotable =
+      (fun () -> Option.bind !(state.current_turn_demotion) (fun demotion -> demotion ()))
+  ; demote =
+      (fun error ~refused_atom_count ->
+        let step = Current_turn_demoted { refused_atom_count } in
+        state.current_turn_results := step;
+        let decision =
+          [ "kind", `String "demoted_current_turn"
+          ; "refused_atom_count", `Int refused_atom_count
+          ]
+        in
+        emit_carried_range_retry_manifest ctx ~retry:1 decision;
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input current turn demoted runtime=%s: the refused request's tool \
+           results leave as markers and the same candidate is asked once more %s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (`Assoc decision))
+          (Agent_core.Error.to_string error))
+  ; refused_first_atom =
+      (fun () ->
+        Option.map
+          (fun (sent : sent_request) -> sent.request.Keeper_model_input_ledger.first_atom)
+          !(state.last_request))
+  ; this_turn_front =
+      (fun () ->
+        Option.bind !(state.last_request) (fun (sent : sent_request) ->
+          Option.bind ctx.this_turn_start (fun start_atom ->
+            let first_atom =
+              Keeper_carried_front.clamp
+                ~atom_count:sent.request.Keeper_model_input_ledger.atom_count start_atom
+            in
+            Option.map
+              (fun front_digest ->
+                 { Keeper_carried_front.first_atom
+                 ; front = Model_input_front.At_atom front_digest
+                 ; source = this_turn_front_source continuity
+                 })
+              (sent.digest_at first_atom))))
+  ; on_this_turn_start =
+      (fun error front ->
+        Log.Keeper.info
+          ~keeper_name:ctx.keeper_name
+          "model input carried range refused runtime=%s: the turn's front moves to \
+           where this turn began and the same candidate is asked again front=%s error=%s"
+          ctx.runtime_id
+          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
+          (Agent_core.Error.to_string error))
+  }
+;;
+
+(* Where the turn's front stood before an attempt's first in-run candidate
+   moved it. *)
+type candidate_front =
+  | Front_not_moved
+  | Front_moved_from of Keeper_carried_front.seed option
+
+(* RFC a-request-fits-by-the-one-input-limit-agent-core-decides §4.2: the next
+   candidates of a request after the run's checkpoint stage, the ladder's
+   rungs in its order without memory: the carrier, the turn boundary, the
+   demotion and where this turn began. Agent Core asks each only after the
+   one before it was refused for size before it was sent, so each composes
+   over what the rungs before it moved. A step that moves nothing gives no
+   candidate. A carrier that cannot switch gives none and closes the rest,
+   as the ladder's [on_projection_failure] closes its rungs, so the turn
+   ends with the refusal. [on_front_held] gets the front each hold
+   replaced. *)
+let in_run_narrower ~carrier ~boundary ~demotion ~this_turn ~on_front_held ~compose =
+  let closed = ref false in
+  let composed () = Result.map Option.some (compose ()) in
+  let holding step refusal =
+    match step refusal with
+    | Front_held { before } ->
+      on_front_held before;
+      composed ()
+    | Front_kept -> Ok None
+  in
+  List.map
+    (fun candidate refusal -> if !closed then Ok None else candidate refusal)
+    [ (fun refusal ->
+        match carrier refusal with
+        | Ok Keeper_memory_delivery_reprojection.Reprojected -> composed ()
+        | Ok Keeper_memory_delivery_reprojection.Unchanged -> Ok None
+        | Error (_ : string) ->
+          closed := true;
+          Ok None)
+    ; holding boundary
+    ; (fun refusal ->
+        match demotion refusal with
+        | Results_demoted -> composed ()
+        | Nothing_to_demote -> Ok None)
+    ; holding this_turn
+    ]
+;;
+
 (* #52969: what the attempt can say about its own execution. A failure the
    runtime classified as undispatched is the only one without a capture. *)
 type attempt_execution =
@@ -2392,6 +2764,7 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
   let saved_provider_turn_ordinal = ref None in
   let retained_results_projected = ref false in
   let final_projected_messages = ref None in
+  let candidate_front = ref Front_not_moved in
   let capture_provider_ordinal (config : Runtime_agent.config) =
     let capture = { Agent_core.Hooks.empty with after_turn = Some (function
       | Agent_core.Hooks.AfterTurn { turn; _ } ->
@@ -2743,54 +3116,129 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         ~on_resolved:(fun history -> resolved_history := Some history)
         ~agent_cell:attempt_agent_ref ~media_store
         ~provider_config:config.Runtime_agent.provider_cfg in
-    let retained_message =
-      Option.bind retained (fun (_, carrier) -> Keeper_client_tool_outbox.carrier_message carrier) in
-    let retained_bytes = match retained_message with
-      | None -> 0
-      | Some message -> offload_model_input_cpu (fun () ->
-          let measure = Keeper_context_core.message_measurer () in
-          measure message) in
+    (* Read on every composition: an in-run candidate can switch the carrier
+       to its address form between two compositions of one request. Each form
+       is measured once. *)
+    let retained_carrier =
+      match retained with
+      | None -> fun () -> None
+      | Some (_, carrier) ->
+        let measured () =
+          Option.map
+            (fun message ->
+               ( message
+               , offload_model_input_cpu (fun () ->
+                   let measure = Keeper_context_core.message_measurer () in
+                   measure message) ))
+            (Keeper_client_tool_outbox.carrier_message carrier)
+        in
+        let inline = lazy (measured ()) and by_address = lazy (measured ()) in
+        fun () ->
+          match Keeper_client_tool_outbox.carrier_form carrier with
+          | Keeper_client_tool_outbox.Inline -> Lazy.force inline
+          | Keeper_client_tool_outbox.By_address -> Lazy.force by_address
+    in
+    let compose messages =
+      final_projected_messages := None;
+      resolved_history := None;
+      let open Result.Syntax in
+      let retained_message = retained_carrier () in
+      let* retained_wire =
+        match retained_message with
+        | None -> Ok None
+        | Some (message, retained_bytes) ->
+          Agent_core.History.to_wire_message media_store message
+          |> Result.map (fun wire -> Some (wire, retained_bytes))
+          |> Result.map_error (fun error -> Agent_core.Error.Media error)
+      in
+      Result.map (fun messages ->
+        let messages = match retained_wire with
+          | None -> messages
+          | Some (message, retained_bytes) ->
+            retained_results_projected := true;
+            (* This is mandatory per-request data, not another history
+               atom. Keep the ledger's tail and attribution honest even
+               when the caller supplied no custom projection. The bounded
+               projection resets both observations on every request. *)
+            state.last_request := Option.map (fun request ->
+              {request with request={request.request with
+                tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
+            state.request_range := Option.map (fun range ->
+              {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
+            Keeper_client_tool_outbox.place_carrier message messages in
+        (* The recorded input is the history this request was resolved
+           from, with the retained-result carrier where the wire puts
+           it, so its media stay [Stored] references. *)
+        final_projected_messages := Option.map (fun history ->
+          match retained_message with
+          | None -> history
+          | Some (retained, (_ : int)) ->
+            Keeper_client_tool_outbox.place_carrier retained history) !resolved_history;
+        messages) (project messages)
+    in
+    let rungs =
+      match ctx.request_input with
+      | Keeper_history { continuity; _ } -> Some (history_rungs ctx ~state ~continuity)
+      | Completion_review -> None
+    in
+    (* RFC a-request-fits-by-the-one-input-limit-agent-core-decides §4.2. A
+       request before the run's checkpoint stage has no next candidate: the
+       ladder answers its refusal by sending the attempt again. A request
+       after it cannot be sent again from the start, so the rungs answer in
+       the run. An in-run candidate sends nothing again, so the ladder's
+       same-run authority does not gate its steps. *)
+    let in_run_authorized () = true in
+    let candidates rungs messages request =
+      if same_run_retry_allowed ctx.checkpoint_progress
+      then Agent_core.Agent.one_request request
+      else
+        { Agent_core.Agent.request
+        ; narrower =
+            in_run_narrower
+              ~carrier:(fun refusal ->
+                let reduction =
+                  Keeper_client_tool_outbox.run_carrier_reprojection state.retained_results
+                    ~then_:memory_unchanged ~refusal
+                in
+                (match reduction with
+                 | Error detail ->
+                   Log.Keeper.warn ~keeper_name:ctx.keeper_name
+                     "model input retained results stay inline runtime=%s: %s"
+                     ctx.runtime_id detail
+                 | Ok (Keeper_memory_delivery_reprojection.Reprojected | Unchanged) -> ());
+                reduction)
+              ~boundary:
+                (turn_boundary_step ~authorized:in_run_authorized
+                   ~refused_range:rungs.refused_range ~turn_start_front:rungs.turn_start_front
+                   ~held_front:ctx.carried_front_after_refusal ~hold_front:ctx.hold_carried_front
+                   ~on_turn_start:rungs.on_turn_start)
+              ~demotion:
+                (current_turn_demotion_step ~authorized:in_run_authorized
+                   ~demotable:rungs.demotable ~demote:rungs.demote)
+              ~this_turn:
+                (this_turn_start_step ~authorized:in_run_authorized
+                   ~refused_first_atom:rungs.refused_first_atom
+                   ~this_turn_front:rungs.this_turn_front
+                   ~held_front:ctx.carried_front_after_refusal ~hold_front:ctx.hold_carried_front
+                   ~on_this_turn_start:rungs.on_this_turn_start)
+              ~on_front_held:(fun before ->
+                match !candidate_front with
+                | Front_not_moved -> candidate_front := Front_moved_from before
+                | Front_moved_from (_ : Keeper_carried_front.seed option) -> ())
+              ~compose:(fun () -> compose messages)
+        }
+    in
     let config =
       { config with
         model_input_projection =
           Some
             (fun messages ->
-               final_projected_messages := None;
-               resolved_history := None;
-               let open Result.Syntax in
-               let* retained_wire =
-                 match retained_message with
-                 | None -> Ok None
-                 | Some message ->
-                   Agent_core.History.to_wire_message media_store message
-                   |> Result.map Option.some
-                   |> Result.map_error (fun error -> Agent_core.Error.Media error)
-               in
-               Result.map (fun messages ->
-               let messages = match retained_wire with
-               | None -> messages
-               | Some message ->
-                 retained_results_projected := true;
-                 (* This is mandatory per-request data, not another history
-                    atom. Keep the ledger's tail and attribution honest even
-                    when the caller supplied no custom projection. The bounded
-                    projection resets both observations on every request. *)
-                 state.last_request := Option.map (fun request ->
-                   {request with request={request.request with
-                     tail_bytes=request.request.tail_bytes + retained_bytes}}) !(state.last_request);
-                 state.request_range := Option.map (fun range ->
-                   {range with Keeper_continuity_request.custom_projection_changed=true}) !(state.request_range);
-                 Keeper_client_tool_outbox.place_carrier message messages in
-               (* The recorded input is the history this request was resolved
-                  from, with the retained-result carrier where the wire puts
-                  it, so its media stay [Stored] references. *)
-               final_projected_messages := Option.map (fun history ->
-                 match retained_message with
-                 | None -> history
-                 | Some retained ->
-                   Keeper_client_tool_outbox.place_carrier retained history) !resolved_history;
-               messages) (project messages)
-               |> Result.map Agent_core.Agent.one_request)
+               Result.map
+                 (fun request ->
+                    match rungs with
+                    | Some rungs -> candidates rungs messages request
+                    | None -> Agent_core.Agent.one_request request)
+                 (compose messages))
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's
@@ -3107,6 +3555,17 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         |> Result.map (fun () -> run_result)
         |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
       | Some _ | None -> Ok run_result) in
+    (* An attempt whose in-run candidate moved the turn's front and that ended
+       for a reason not about size gives back the front held before the first
+       move, as the ladder's resend does: a later attempt of the turn would
+       otherwise open on a range narrowed for a failure that was not about
+       size. The carrier's form and the demotion stay (RFC
+       a-request-fits-by-the-one-input-limit-agent-core-decides §4.2). *)
+    (match !candidate_front, result with
+     | Front_moved_from before, Error error when not (is_size_refusal error) ->
+       ctx.restore_carried_front before
+     | Front_moved_from (_ : Keeper_carried_front.seed option), (Ok _ | Error _)
+     | Front_not_moved, (Ok _ | Error _) -> ());
     result, checkpoint_after, None
 ;;
 
@@ -3129,59 +3588,6 @@ let context_overflow_shrink_divisor = 2
 
 let default_context_overflow_shrink_capacity ~capacity =
   capacity / context_overflow_shrink_divisor
-;;
-
-(* The refusals that say the request outgrew what carries it: the provider's
-   context overflow and the provider's refusal of the request body.
-   Each is answered by moving the carried front, never by rotating first: a
-   shorter range of the SAME conversation can still answer the same turn.
-   Enumerated so a new variant forces a decision here instead of a silent
-   [false]. *)
-let is_size_refusal = function
-  | Agent_core.Error.Api (ContextOverflow _)
-  | Agent_core.Error.Api
-      (InvalidRequest { reason = Request_body_refused_by_provider _; _ }) -> true
-  (* A refusal whose cause agent core does not model names no size. Tool
-     schema errors, unsupported parameters and unreadable images arrive
-     here too, and a shorter range answers none of them: every retry would
-     be another billed request, and the one that passed would hold its cut
-     front for every later turn although nothing was too large
-     (Retry.invalid_request_reason documents the same contract). The
-     refusal stays in hand for the declared-lane walk, which may ask
-     another candidate with the same range. A provider whose size refusal
-     is prose only reaches here as well: reading the sentence would be a
-     string classifier, so its size needs a typed reason at the parse
-     boundary before this ladder answers it. *)
-  | Agent_core.Error.Api
-      ( InvalidRequest
-          { reason =
-              ( Unknown_invalid_request
-              | Unclassified_status _
-              | Json_parse_error
-              | Attempt_rejected
-              | Refusal_body_not_received )
-          ; _
-          }
-      | InputCapacity _
-      | RateLimited _
-      | Overloaded _
-      | ServerError _
-      | AuthError _
-      | AuthorizationError _
-      | PaymentRequired _
-      | NotFound _
-      | NetworkError _ | Connect_failed _
-      | Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Media _
-  | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried _ -> false
 ;;
 
 (* The shrink-retry policy is expressed over an injected [attempt] callback
@@ -3272,58 +3678,14 @@ let context_overflow_shrink_sequence
   go ~capacity:starting_capacity ~shrink_attempt:0
 ;;
 
-(* The refusals the turn boundary resend answers (RFC librarian-lifecycle
-   §4.10, rule 1). A typed size refusal, and also a refusal whose reason
-   agent core does not model: every live size refusal measured so far
-   arrives that way -- a 400 whose only size signal is its sentence, with
-   no typed code (RFC librarian-lifecycle §4.10 lists the measured wires) --
-   and reading the sentence
-   would be a string classifier. [is_size_refusal] names only the two typed
-   size refusals (#38286); this check keeps the third.
-   - A refusal that was not about size draws the same refusal from the
-     boundary. The held front is then given back ([turn_boundary_resend_sequence]),
-     so a later candidate that the declared-lane walk asks opens on the
-     original range and no accepted start at the boundary is recorded.
-   - A refusal that was about size leaves a gap the Librarian still reads.
-     Once it reaches the accepted start the request starts at its point
-     again (rule 5), so no context is lost for good.
-   - The cost: one more request for each 400 or 422 whose reason is
-     unknown, and for each status no classifier arm names.
-   Enumerated so a new variant forces a decision here. *)
-let boundary_resend_on = function
-  | Agent_core.Error.Api (ContextOverflow _)
-  | Agent_core.Error.Api
-      (InvalidRequest
-         { reason =
-             ( Request_body_refused_by_provider _
-             | Unknown_invalid_request
-             | Unclassified_status _ )
-         ; _
-         }) ->
-    true
-  | Agent_core.Error.Api
-      ( InvalidRequest
-          { reason = (Json_parse_error | Attempt_rejected | Refusal_body_not_received); _ }
-      | InputCapacity _
-      | RateLimited _
-      | Overloaded _
-      | ServerError _
-      | AuthError _
-      | AuthorizationError _
-      | PaymentRequired _
-      | NotFound _
-      | NetworkError _ | Connect_failed _
-      | Timeout _ )
-  | Agent_core.Error.Provider _
-  | Agent_core.Error.Agent _
-  | Agent_core.Error.Config _
-  | Agent_core.Error.Mcp _
-  | Agent_core.Error.Serialization _
-  | Agent_core.Error.Io _
-  | Agent_core.Error.Orchestration _
-  | Agent_core.Error.Media _
-  | Agent_core.Error.Internal _
-  | Agent_core.Error.Internal_carried _ -> false
+(* The ladder's resend after a step held a front: a failure of it that is
+   not about size gives the front back. *)
+let resend_holding ~restore_front ~before attempt =
+  match attempt () with
+  | Ok _ as ok -> ok
+  | Error resent as refused ->
+    if not (is_size_refusal resent) then restore_front before;
+    refused
 ;;
 
 (* The lane's answer to a size refusal of a range that opened before this
@@ -3351,12 +3713,12 @@ let boundary_resend_on = function
    a refusal that was never about size. *)
 let turn_boundary_resend_sequence
       ~same_run_retry_authorized
-      ~(refused_range : unit -> (Keeper_carried_front.origin * int) option)
-      ~(turn_start_front : unit -> Keeper_carried_front.seed option)
-      ~(held_front : unit -> Keeper_carried_front.seed option)
-      ~(restore_front : Keeper_carried_front.seed option -> unit)
-      ~(hold_front : Keeper_carried_front.seed -> unit)
-      ~(on_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      ~refused_range
+      ~turn_start_front
+      ~held_front
+      ~restore_front
+      ~hold_front
+      ~on_turn_start
       ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
       ()
   : ('ok, Agent_core.Error.t) result
@@ -3364,33 +3726,12 @@ let turn_boundary_resend_sequence
   match attempt () with
   | Ok _ as ok -> ok
   | Error error as failed ->
-    (match refused_range () with
-     | Some
-         ( ( Keeper_carried_front.Carried _
-           | Keeper_carried_front.Librarian_progress _
-           | Keeper_carried_front.Past_librarian_point _ )
-         , refused_first_atom )
-       when boundary_resend_on error && same_run_retry_authorized () ->
-       (match turn_start_front () with
-        | Some (front : Keeper_carried_front.seed)
-          when front.first_atom > refused_first_atom ->
-          let before = held_front () in
-          hold_front front;
-          on_turn_start error front;
-          (match attempt () with
-           | Ok _ as ok -> ok
-           | Error resent as refused ->
-             if not (is_size_refusal resent) then restore_front before;
-             refused)
-        | Some (_ : Keeper_carried_front.seed) | None -> failed)
-     | Some
-         ( ( Keeper_carried_front.Carried _
-           | Keeper_carried_front.Librarian_progress _
-           | Keeper_carried_front.Past_librarian_point _
-           | Keeper_carried_front.Turn_start _
-           | Keeper_carried_front.Turn_start_unknown _ )
-         , _ )
-     | None -> failed)
+    (match
+       turn_boundary_step ~authorized:same_run_retry_authorized ~refused_range
+         ~turn_start_front ~held_front ~hold_front ~on_turn_start error
+     with
+     | Front_held { before } -> resend_holding ~restore_front ~before attempt
+     | Front_kept -> failed)
 ;;
 
 (* #28845's step, an answer to a size refusal on every continuity (RFC
@@ -3408,8 +3749,8 @@ let turn_boundary_resend_sequence
    refused again. *)
 let current_turn_demotion_sequence
       ~same_run_retry_authorized
-      ~(demotable : unit -> int option)
-      ~(demote : Agent_core.Error.t -> refused_atom_count:int -> unit)
+      ~demotable
+      ~demote
       ~(first : unit -> ('ok, Agent_core.Error.t) result)
       ~(resend : unit -> ('ok, Agent_core.Error.t) result)
       ()
@@ -3418,14 +3759,12 @@ let current_turn_demotion_sequence
   match first () with
   | Ok _ as ok -> ok
   | Error error as failed ->
-    if is_size_refusal error && same_run_retry_authorized ()
-    then (
-      match demotable () with
-      | Some refused_atom_count ->
-        demote error ~refused_atom_count;
-        resend ()
-      | None -> failed)
-    else failed
+    (match
+       current_turn_demotion_step ~authorized:same_run_retry_authorized ~demotable ~demote
+         error
+     with
+     | Results_demoted -> resend ()
+     | Nothing_to_demote -> failed)
 ;;
 
 (* Rule 8 of RFC librarian-lifecycle §4.10: the last rung, after
@@ -3444,12 +3783,12 @@ let current_turn_demotion_sequence
    every atom from its position to its cut point ({!Keeper_librarian_range}). *)
 let this_turn_start_resend_sequence
       ~same_run_retry_authorized
-      ~(refused_first_atom : unit -> int option)
-      ~(this_turn_front : unit -> Keeper_carried_front.seed option)
-      ~(held_front : unit -> Keeper_carried_front.seed option)
-      ~(restore_front : Keeper_carried_front.seed option -> unit)
-      ~(hold_front : Keeper_carried_front.seed -> unit)
-      ~(on_this_turn_start : Agent_core.Error.t -> Keeper_carried_front.seed -> unit)
+      ~refused_first_atom
+      ~this_turn_front
+      ~held_front
+      ~restore_front
+      ~hold_front
+      ~on_this_turn_start
       ~(first : unit -> ('ok, Agent_core.Error.t) result)
       ~(attempt : unit -> ('ok, Agent_core.Error.t) result)
       ()
@@ -3458,21 +3797,12 @@ let this_turn_start_resend_sequence
   match first () with
   | Ok _ as ok -> ok
   | Error error as failed ->
-    if not (is_size_refusal error && same_run_retry_authorized ())
-    then failed
-    else (
-      match refused_first_atom (), this_turn_front () with
-      | Some refused, Some (front : Keeper_carried_front.seed) when front.first_atom > refused ->
-        let before = held_front () in
-        hold_front front;
-        on_this_turn_start error front;
-        (match attempt () with
-         | Ok _ as ok -> ok
-         | Error resent as refused ->
-           if not (is_size_refusal resent) then restore_front before;
-           refused)
-      | Some (_ : int), (Some (_ : Keeper_carried_front.seed) | None) | None, (Some _ | None) ->
-        failed)
+    (match
+       this_turn_start_step ~authorized:same_run_retry_authorized ~refused_first_atom
+         ~this_turn_front ~held_front ~hold_front ~on_this_turn_start error
+     with
+     | Front_held { before } -> resend_holding ~restore_front ~before attempt
+     | Front_kept -> failed)
 ;;
 
 let native_retry_allowed (ctx : try_provider_ctx) =
@@ -3498,8 +3828,7 @@ let memory_capacity_retry_sequence ~same_run_retry_authorized
 
 let run_try_provider_with_history_recovery
       ~(state : attempt_state)
-      ?(on_memory_capacity_refusal = fun ~refusal:_ ->
-        Ok Keeper_memory_delivery_reprojection.Unchanged)
+      ?(on_memory_capacity_refusal = memory_unchanged)
       ?continuation_checkpoint
       (ctx : try_provider_ctx)
       candidate
@@ -3530,99 +3859,26 @@ let run_try_provider_with_history_recovery
     ~same_run_retry_authorized ~on_memory_capacity_refusal
     ~on_projection_failure:(fun () -> projection_failed := true)
     ~attempt:attempt_once () in
+  let rungs = history_rungs ctx ~state ~continuity in
   (* The lane's own answer to a size refusal, which depends on where the
      range started; what is left after it is the current turn's demotion. *)
-  let boundary_resend ?(on_turn_start_extra = fun (_ : Keeper_carried_front.seed) -> ()) ~source () =
+  let range_answer () =
     turn_boundary_resend_sequence
       ~same_run_retry_authorized
-      ~refused_range:(fun () ->
-        Option.map
-          (fun (sent : sent_request) ->
-             sent.origin, sent.request.Keeper_model_input_ledger.first_atom)
-          !(state.last_request))
-      ~turn_start_front:(fun () ->
-        Option.bind !(state.last_request) (fun (sent : sent_request) ->
-          let atom_count = sent.request.Keeper_model_input_ledger.atom_count in
-          let first_atom =
-            match ctx.turn_boundary with
-            | Keeper_carried_front.Turn_boundary { end_atom } ->
-              Keeper_carried_front.clamp ~atom_count end_atom
-            | Keeper_carried_front.Turn_boundary_unknown _ ->
-              Keeper_carried_front.newest_atom ~atom_count
-          in
-          Option.map
-            (fun front_digest ->
-               { Keeper_carried_front.first_atom; front = Model_input_front.At_atom front_digest; source })
-            (sent.digest_at first_atom)))
+      ~refused_range:rungs.refused_range
+      ~turn_start_front:rungs.turn_start_front
       ~held_front:ctx.carried_front_after_refusal
       ~restore_front:ctx.restore_carried_front
       ~hold_front:ctx.hold_carried_front
-      ~on_turn_start:(fun error front ->
-        on_turn_start_extra front;
-        Log.Keeper.info
-          ~keeper_name:ctx.keeper_name
-          "model input carried range refused runtime=%s: the turn's front moves to \
-           the turn boundary and the same candidate is asked again front=%s error=%s"
-          ctx.runtime_id
-          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
-          (Agent_core.Error.to_string error))
+      ~on_turn_start:rungs.on_turn_start
       ~attempt
       ()
-  in
-  let range_answer () =
-    match continuity with
-    | Covered _ ->
-      boundary_resend ~source:Keeper_carried_front.Turn_start_after_librarian_refusal ()
-    | No_read_end ->
-      boundary_resend
-        ~on_turn_start_extra:(fun (_ : Keeper_carried_front.seed) ->
-          (* The refused seed gives way to the turn start; an unknown one puts
-             the front on the newest atom alone for the rest of the turn. *)
-          match ctx.turn_boundary with
-          | Keeper_carried_front.Turn_boundary_unknown { reason } ->
-            Keeper_carried_front.warn_range_opens_on_newest_atom
-              ~keeper_name:ctx.keeper_name ~reason
-          | Keeper_carried_front.Turn_boundary _ -> ())
-        ~source:Keeper_carried_front.Turn_start_after_seed_refusal
-        ()
-  in
-  let this_turn_front () =
-    Option.bind !(state.last_request) (fun (sent : sent_request) ->
-      Option.bind ctx.this_turn_start
-        (fun start_atom ->
-           let first_atom =
-             Keeper_carried_front.clamp
-               ~atom_count:sent.request.Keeper_model_input_ledger.atom_count start_atom
-           in
-           Option.map
-             (fun front_digest ->
-                { Keeper_carried_front.first_atom
-                ; front = Model_input_front.At_atom front_digest
-                ; source = this_turn_front_source continuity
-                })
-             (sent.digest_at first_atom)))
   in
   let demotion_ladder () =
     current_turn_demotion_sequence
       ~same_run_retry_authorized
-      ~demotable:(fun () ->
-        Option.bind !(state.current_turn_demotion) (fun demotion -> demotion ()))
-      ~demote:(fun error ~refused_atom_count ->
-        let step = Current_turn_demoted { refused_atom_count } in
-        state.current_turn_results := step;
-        let decision =
-          [ "kind", `String "demoted_current_turn"
-          ; "refused_atom_count", `Int refused_atom_count
-          ]
-        in
-        emit_carried_range_retry_manifest ctx ~retry:1 decision;
-        Log.Keeper.info
-          ~keeper_name:ctx.keeper_name
-          "model input current turn demoted runtime=%s: the refused request's tool \
-           results leave as markers and the same candidate is asked once more %s error=%s"
-          ctx.runtime_id
-          (Yojson.Safe.to_string (`Assoc decision))
-          (Agent_core.Error.to_string error))
+      ~demotable:rungs.demotable
+      ~demote:rungs.demote
       ~first:range_answer
       ~resend:attempt
       ()
@@ -3630,22 +3886,12 @@ let run_try_provider_with_history_recovery
   let result =
     this_turn_start_resend_sequence
       ~same_run_retry_authorized
-      ~refused_first_atom:(fun () ->
-        Option.map
-          (fun (sent : sent_request) -> sent.request.Keeper_model_input_ledger.first_atom)
-          !(state.last_request))
-      ~this_turn_front
+      ~refused_first_atom:rungs.refused_first_atom
+      ~this_turn_front:rungs.this_turn_front
       ~held_front:ctx.carried_front_after_refusal
       ~restore_front:ctx.restore_carried_front
       ~hold_front:ctx.hold_carried_front
-      ~on_this_turn_start:(fun error front ->
-        Log.Keeper.info
-          ~keeper_name:ctx.keeper_name
-          "model input carried range refused runtime=%s: the turn's front moves to \
-           where this turn began and the same candidate is asked again front=%s error=%s"
-          ctx.runtime_id
-          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json front))
-          (Agent_core.Error.to_string error))
+      ~on_this_turn_start:rungs.on_this_turn_start
       ~first:demotion_ladder
       ~attempt
       ()

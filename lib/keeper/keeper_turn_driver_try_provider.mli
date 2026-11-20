@@ -820,6 +820,14 @@ val run_try_provider_with_truncation_recovery :
     retry authority; on a typed size refusal
     the retained-result carrier is offered before [on_memory_capacity_refusal]
     ({!Keeper_client_tool_outbox.run_carrier_reprojection}).
+    Those rungs send the attempt again, so they answer only a request before
+    the run's checkpoint stage. A Keeper request after it carries every rung
+    but memory as its next candidates, which Agent Core measures in the same
+    run after the size check refuses the request before it is sent: the
+    carrier, the turn boundary, the demotion and where this turn began, in
+    that order. An attempt whose candidate moved the turn's front gives that
+    front back when it ends for a reason not about size (RFC
+    a-request-fits-by-the-one-input-limit-agent-core-decides §4.2).
 
     A materialized Agent Core HTTP lane whose connection closes before any
     stream event or checkpoint/effect progress reconnects with an uncached

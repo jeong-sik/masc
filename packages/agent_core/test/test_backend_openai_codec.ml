@@ -3648,6 +3648,248 @@ let test_openrouter_provider_routing_filter_serialization () =
     ]
 ;;
 
+let test_openrouter_pre_ext_breakpoints_and_gpt_explicit_opt_out () =
+  let sys_ctx text =
+    { (msg User [ Text text ]) with Types.origin = Types.System_context }
+  in
+  let chat_json ~config ~messages =
+    Backend_openai_request.build_request ~config ~messages () |> Yojson.Safe.from_string
+  in
+  let msg_part_field field msg_json =
+    match member "content" msg_json with
+    | `List parts ->
+      List.find_map
+        (function
+          | `Assoc kv -> List.assoc_opt field kv
+          | _ -> None)
+        parts
+    | _ -> None
+  in
+  let or_claude =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openrouter"
+      ~model_id:"anthropic/claude-opus-5"
+      ~base_url:"https://openrouter.ai/api/v1"
+      ~cache_system_prompt:true
+      ()
+  in
+  (* Part A.1: Claude pre-ext on user message (5m) omits top-level cache_control. *)
+  let claude_user =
+    chat_json ~config:or_claude ~messages:[ msg User [ Text "hi" ]; sys_ctx "ephemeral" ]
+  in
+  check_bool "Claude pre-ext omits top-level cache_control" false
+    (List.mem_assoc "cache_control" (Yojson.Safe.Util.to_assoc claude_user));
+  let cu_msgs = member "messages" claude_user |> to_list in
+  check_int "Claude pre-ext preserves message count" 2 (List.length cu_msgs);
+  check_bool "Claude pre-ext marks user text part" true
+    (msg_part_field "cache_control" (List.nth cu_msgs 0)
+     = Some (`Assoc [ "type", `String "ephemeral" ]));
+  check_bool "Claude trailing ext carries no cache_control" true
+    (msg_part_field "cache_control" (List.nth cu_msgs 1) = None);
+  (* Part A.2: Claude 1h TTL on pre-ext block breakpoint. *)
+  let claude_1h =
+    chat_json
+      ~config:{ or_claude with cache_extended_ttl = true }
+      ~messages:[ msg User [ Text "hi" ]; sys_ctx "ephemeral" ]
+  in
+  check_bool "Claude 1h pre-ext omits top-level cache_control" false
+    (List.mem_assoc "cache_control" (Yojson.Safe.Util.to_assoc claude_1h));
+  check_bool "Claude 1h pre-ext sets ttl=1h on block" true
+    (msg_part_field "cache_control" (List.nth (member "messages" claude_1h |> to_list) 0)
+     = Some (`Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]));
+  (* Part A.3: Claude pre-ext on tool role message. *)
+  let tool_msgs =
+    [ msg User [ Text "check" ]
+    ; msg Assistant [ ToolUse { id = "call_1"; name = "ls"; input = `Assoc [] } ]
+    ; msg Tool
+        [ ToolResult
+            { tool_use_id = "call_1"
+            ; content = "file_a.ml"
+            ; outcome = Tool_succeeded
+            ; json = None
+            ; content_blocks = None
+            }
+        ]
+    ; sys_ctx "ephemeral"
+    ]
+  in
+  let claude_tool = chat_json ~config:or_claude ~messages:tool_msgs in
+  let ct_msgs = member "messages" claude_tool |> to_list in
+  check_bool "Claude tool pre-ext omits top-level cache_control" false
+    (List.mem_assoc "cache_control" (Yojson.Safe.Util.to_assoc claude_tool));
+  check_string "tool message stays role=tool" "tool"
+    (List.nth ct_msgs 2 |> member "role" |> to_string);
+  check_bool "Claude tool pre-ext marks tool message" true
+    (msg_part_field "cache_control" (List.nth ct_msgs 2)
+     = Some (`Assoc [ "type", `String "ephemeral" ]));
+  (* Part A.4: Claude pre-ext on non-blank assistant message. *)
+  let claude_asst =
+    chat_json
+      ~config:or_claude
+      ~messages:[ msg User [ Text "q" ]; msg Assistant [ Text "reply" ]; sys_ctx "ext" ]
+  in
+  let ca_msgs = member "messages" claude_asst |> to_list in
+  check_bool "Claude marks non-blank assistant" true
+    (msg_part_field "cache_control" (List.nth ca_msgs 1)
+     = Some (`Assoc [ "type", `String "ephemeral" ]));
+  (* Part A.5: Claude walks backward past content:null assistant, blank assistant,
+     and image-only user to mark earlier non-blank user text. *)
+  let claude_skip =
+    chat_json
+      ~config:or_claude
+      ~messages:
+        [ msg User [ Text "stable user" ]
+        ; msg Assistant [ ToolUse { id = "call_2"; name = "noop"; input = `Assoc [] } ]
+        ; msg Assistant [ Text "   " ]
+        ; msg User [ Image { media_type = "image/png"; source = Types.Base64 "png" } ]
+        ; sys_ctx "ext"
+        ]
+  in
+  let cs_msgs = member "messages" claude_skip |> to_list in
+  check_bool "Claude skip omits top-level cache_control" false
+    (List.mem_assoc "cache_control" (Yojson.Safe.Util.to_assoc claude_skip));
+  check_bool "Claude skip marks stable user message" true
+    (msg_part_field "cache_control" (List.nth cs_msgs 0)
+     = Some (`Assoc [ "type", `String "ephemeral" ]));
+  (* Part A.6: Claude system-only prefix before trailing System_context. *)
+  let claude_sys_only =
+    chat_json
+      ~config:{ or_claude with system_prompt = Some "System rules." }
+      ~messages:[ sys_ctx "ext" ]
+  in
+  let cso_msgs = member "messages" claude_sys_only |> to_list in
+  check_bool "Claude system-only pre-ext omits top-level cache_control" false
+    (List.mem_assoc "cache_control" (Yojson.Safe.Util.to_assoc claude_sys_only));
+  check_string "first message is system" "system"
+    (List.nth cso_msgs 0 |> member "role" |> to_string);
+  check_bool "Claude system-only marks system message" true
+    (msg_part_field "cache_control" (List.nth cso_msgs 0)
+     = Some (`Assoc [ "type", `String "ephemeral" ]));
+  (* Part A.7: Claude mid-history System_context falls back to top-level cache_control. *)
+  let claude_mid =
+    chat_json
+      ~config:or_claude
+      ~messages:
+        [ msg User [ Text "u1" ]
+        ; sys_ctx "mid"
+        ; msg User [ Text "u2" ]
+        ; sys_ctx "tail"
+        ]
+  in
+  check_bool "Claude mid-history falls back to top-level cache_control" true
+    (member "cache_control" claude_mid = `Assoc [ "type", `String "ephemeral" ]);
+  List.iter
+    (fun m ->
+       check_bool "Claude mid-history adds no block cache_control" true
+         (msg_part_field "cache_control" m = None))
+    (member "messages" claude_mid |> to_list);
+  (* Part A.8: Claude empty prefix before ext falls back to top-level cache_control. *)
+  let claude_empty_prefix = chat_json ~config:or_claude ~messages:[ sys_ctx "only ext" ] in
+  check_bool "Claude empty prefix falls back to top-level cache_control" true
+    (member "cache_control" claude_empty_prefix = `Assoc [ "type", `String "ephemeral" ]);
+  (* Part B: OpenRouter GPT-5.6 / GPT-6 rows. *)
+  let or_gpt =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~provider_id:"openrouter"
+      ~model_id:"openai/gpt-5.6-sol"
+      ~base_url:"https://openrouter.ai/api/v1"
+      ~cache_system_prompt:true
+      ()
+  in
+  let explicit_mode = `Assoc [ "mode", `String "explicit" ] in
+  (* Part B.1: 1-shot opt-out (cache_system_prompt = false) emits 0-bp explicit mode. *)
+  let gpt_opt_out =
+    chat_json
+      ~config:{ or_gpt with cache_system_prompt = false }
+      ~messages:[ msg User [ Text "one-shot" ] ]
+  in
+  check_bool "OpenRouter GPT 1-shot opt-out emits prompt_cache_options explicit" true
+    (member "prompt_cache_options" gpt_opt_out = explicit_mode);
+  check_bool "OpenRouter GPT 1-shot opt-out omits cache_control" false
+    (List.mem_assoc "cache_control" (Yojson.Safe.Util.to_assoc gpt_opt_out));
+  (* Part B.2: Multi-turn pre-ext skips assistant to avoid ResponseOutputText 400. *)
+  let gpt_skip_asst =
+    chat_json
+      ~config:or_gpt
+      ~messages:[ msg User [ Text "q1" ]; msg Assistant [ Text "answer" ]; sys_ctx "ext" ]
+  in
+  let ga_msgs = member "messages" gpt_skip_asst |> to_list in
+  check_bool "OpenRouter GPT pre-ext emits prompt_cache_options explicit" true
+    (member "prompt_cache_options" gpt_skip_asst = explicit_mode);
+  check_bool "OpenRouter GPT pre-ext skips assistant" true
+    (msg_part_field "prompt_cache_breakpoint" (List.nth ga_msgs 1) = None);
+  check_bool "OpenRouter GPT pre-ext marks preceding user" true
+    (msg_part_field "prompt_cache_breakpoint" (List.nth ga_msgs 0) = Some explicit_mode);
+  check_bool "OpenRouter GPT trailing ext has no breakpoint" true
+    (msg_part_field "prompt_cache_breakpoint" (List.nth ga_msgs 2) = None);
+  (* Part B.3: Multi-turn pre-ext on tool role message. *)
+  let gpt_tool = chat_json ~config:or_gpt ~messages:tool_msgs in
+  let gt_msgs = member "messages" gpt_tool |> to_list in
+  check_bool "OpenRouter GPT tool pre-ext emits prompt_cache_options explicit" true
+    (member "prompt_cache_options" gpt_tool = explicit_mode);
+  check_bool "OpenRouter GPT tool pre-ext marks tool message" true
+    (msg_part_field "prompt_cache_breakpoint" (List.nth gt_msgs 2) = Some explicit_mode);
+  (* Part B.4: Assistant-only prefix with caching enabled stays implicit (never 0-bp explicit). *)
+  let gpt_asst_only =
+    chat_json
+      ~config:or_gpt
+      ~messages:[ msg Assistant [ Text "only assistant" ]; sys_ctx "ext" ]
+  in
+  check_bool "OpenRouter GPT assistant-only prefix omits prompt_cache_options" false
+    (List.mem_assoc "prompt_cache_options" (Yojson.Safe.Util.to_assoc gpt_asst_only));
+  (* Part B.5: Mid-history System_context stays implicit. *)
+  let gpt_mid =
+    chat_json
+      ~config:or_gpt
+      ~messages:
+        [ msg User [ Text "u1" ]
+        ; sys_ctx "mid"
+        ; msg User [ Text "u2" ]
+        ; sys_ctx "tail"
+        ]
+  in
+  check_bool "OpenRouter GPT mid-history stays implicit" false
+    (List.mem_assoc "prompt_cache_options" (Yojson.Safe.Util.to_assoc gpt_mid));
+  (* Negative isolation: implicit-only OpenRouter rows and non-OpenRouter providers
+     never emit cache_control, prompt_cache_options, or prompt_cache_breakpoint. *)
+  List.iter
+    (fun (label, provider_id, model_id, base_url) ->
+       List.iter
+         (fun cache_system_prompt ->
+            let cfg =
+              Provider_config.make
+                ~kind:OpenAI_compat
+                ?provider_id
+                ~model_id
+                ~base_url
+                ~cache_system_prompt
+                ()
+            in
+            let body =
+              chat_json ~config:cfg ~messages:[ msg User [ Text "q" ]; sys_ctx "ext" ]
+            in
+            let fields = Yojson.Safe.Util.to_assoc body in
+            check_bool (label ^ " omits cache_control") false
+              (List.mem_assoc "cache_control" fields);
+            check_bool (label ^ " omits prompt_cache_options") false
+              (List.mem_assoc "prompt_cache_options" fields);
+            List.iter
+              (fun m ->
+                 check_bool (label ^ " omits block cache_control") true
+                   (msg_part_field "cache_control" m = None);
+                 check_bool (label ^ " omits block prompt_cache_breakpoint") true
+                   (msg_part_field "prompt_cache_breakpoint" m = None))
+              (member "messages" body |> to_list))
+         [ true; false ])
+    [ "openrouter deepseek", Some "openrouter", "deepseek/deepseek-v4.1-flash-1017", "https://openrouter.ai/api/v1"
+    ; "openrouter gemini", Some "openrouter", "google/gemini-3.8-flash", "https://openrouter.ai/api/v1"
+    ; "direct openai gpt-5.5", Some "openai", "gpt-5.5", "https://api.openai.com/v1"
+    ; "anonymous compat", None, "openai/gpt-5.6-sol", "https://example.invalid/v1"
+    ]
+;;
+
 let test_responses_build_request_uses_text_format_json_schema () =
   let schema =
     `Assoc
@@ -4729,6 +4971,10 @@ let () =
             "openrouter provider routing filter serialization"
             `Quick
             test_openrouter_provider_routing_filter_serialization
+        ; Alcotest.test_case
+            "openrouter pre-System_context breakpoints and gpt explicit opt-out"
+            `Quick
+            test_openrouter_pre_ext_breakpoints_and_gpt_explicit_opt_out
         ; Alcotest.test_case
             "build request text.format json_schema"
             `Quick

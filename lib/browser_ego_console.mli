@@ -1,6 +1,5 @@
 (** What an ego Page's document wrote to its console and the errors it did not
-    catch, read in one step that turns ego's console hiding off and back on
-    (RFC-browser-ego-cdp-capabilities §3.3 read_console). *)
+    catch, read in one step that turns ego's console hiding off and back on. *)
 
 val entries_limit : int
 val text_bytes_limit : int

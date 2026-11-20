@@ -2,20 +2,19 @@ open Result.Syntax
 
 module Action = Browser_lane.Action
 
-(* Cookie writes go through the Page's CDP session
-   (RFC-browser-ego-cdp-capabilities §3.3 write_storage) and change the
+(* Cookie writes go through the Page's CDP session and change the
    operator's ego profile: the operator's own tabs and every task space on
-   that profile see them, and they stay after the ego SDK process ends (L11
-   evidence b1). The cookie is host-only for the tab's top document: setCookie
-   takes the page's address, never a domain. Both steps read the cookies the
+   that profile see them, and they stay after the ego SDK process ends. The
+   cookie is host-only for the tab's top document: setCookie takes the
+   page's address, never a domain. Both steps read the cookies the
    page sees with getCookies before and after, so the answer is what the
    browser holds and never a value.
 
    A delete names each cookie by its name, domain and path as getCookies
    listed it: deleteCookies with a url and no path also deletes cookies of
-   another path that the page does not see (L11 evidence a5), and one with a
-   name alone is refused. A CDP call that threw may or may not have taken
-   effect, unless a read afterwards shows nothing changed. *)
+   another path that the page does not see, and one with a name alone is
+   refused. A CDP call that threw may or may not have taken effect, unless a
+   read afterwards shows nothing changed. *)
 let script = {js|async function(page, args, reason) {
   let href, address;
   try { href = await page.evaluate(() => location.href); address = new URL(href); }

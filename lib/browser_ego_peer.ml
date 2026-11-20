@@ -1068,7 +1068,7 @@ let emulate t id emulation =
   | Ok value -> emulation_receipt ~id ~action ~kind value
 
 (* Request blocking goes through the Page's CDP session with
-   Network.setBlockedURLs urlPatterns (RFC-browser-ego-cdp-capabilities §3.3).
+   Network.setBlockedURLs urlPatterns.
    Each call replaces the Page's list (ego lite 0.6.2.7), so the SDK process
    keeps the hosts it blocked for each Page label and every block_requests
    sends their union: blocks add up, and they end with the SDK process, as
@@ -1076,9 +1076,9 @@ let emulate t id emulation =
    the default one included, and no other host; the deprecated urls globs
    also matched a URL that carried the host in its query. Only subresource
    requests are blocked: a navigation of the tab or of a frame still loads,
-   and a cross-site frame, which runs in its own process, is not covered
-   (L6 evidence). A CDP call that threw may or may not have taken effect, so
-   the list kept for the Page changes only when the call answered. *)
+   and a cross-site frame, which runs in its own process, is not covered.
+   A CDP call that threw may or may not have taken effect, so the list kept
+   for the Page changes only when the call answered. *)
 let request_block_script = {js|async function(page, args, reason) {
   const registry = globalThis.mascBlockedHosts ??= new Map();
   const before = registry.get(args.label) ?? [];
@@ -1146,12 +1146,12 @@ let block_requests t id hosts =
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value -> request_block_receipt ~id ~action ~kind ~unknown value
 
-(* Cookie and storage names (RFC-browser-ego-cdp-capabilities §3.3
-   read_storage). The page reads its web storage keys and IndexedDB database
-   names and answers its URL; the Page's CDP session then lists the cookies
-   for that URL. Network.getCookies without a URL also lists the cookies of
-   every frame's URL, a cross-site frame's own cookies included, which that
-   frame cannot see (L7 evidence), so the step names the top document's URL.
+(* Cookie and storage names. The page reads its web storage keys and
+   IndexedDB database names and answers its URL; the Page's CDP session then
+   lists the cookies for that URL. Network.getCookies without a URL also
+   lists the cookies of every frame's URL, a cross-site frame's own cookies
+   included, which that frame cannot see, so the step names the top
+   document's URL.
    A cookie value is a credential: the script drops it inside the SDK
    process, and the answer keeps the name and the attributes that scope the
    cookie. Web storage values are never read. A page that does not answer
@@ -1342,7 +1342,7 @@ let network_log t args =
          "    emit(log.failed === undefined ? {ok: true, value: log} : {ok: false, error: log.failed});" ])) in
   Page_events.receipt ~tab value
 
-(* The tab's console (RFC-browser-ego-cdp-capabilities §3.3 read_console).
+(* The tab's console.
    The step turns ego's console hiding off, replays what the browser kept of
    the document's console and turns the hiding back on (Browser_ego_console).
    A failure after the hiding came back on changed nothing; one that may have
@@ -2168,11 +2168,10 @@ let interact ?actor t args =
   (* The page viewport through the Page's CDP session. The override stays
      while the SDK process that set it runs, across commands that reopen the
      task space, moves and reloads; a new process starts without it, which
-     the answer's sdkProcessStartedAt tells (RFC-browser-ego-cdp-capabilities
-     §3.2). ego says raw CDP invalidates snapshot refs. A set size is the
-     page's size when the command returns; a cleared one is not always, so
-     the receipt waits until the size moves off the override, up to
-     [viewport_restore_wait_ms]. *)
+     the answer's sdkProcessStartedAt tells. ego says raw CDP invalidates
+     snapshot refs. A set size is the page's size when the command returns;
+     a cleared one is not always, so the receipt waits until the size moves
+     off the override, up to [viewport_restore_wait_ms]. *)
   let viewport size =
     let metrics, lifetime = match size with
       | Browser_lane.Fit {width;height} -> obj ["width",`Int width;"height",`Int height], ["lifetime",str "ego_sdk_process"]

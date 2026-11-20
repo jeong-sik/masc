@@ -1,5 +1,4 @@
-(** Cookie writes on an ego Page through its CDP session
-    (RFC-browser-ego-cdp-capabilities §3.3 write_storage). They change the
+(** Cookie writes on an ego Page through its CDP session. They change the
     operator's ego profile, and an answer never carries a cookie value. *)
 
 val script : string

@@ -13,13 +13,14 @@ type error =
       }
   | Moved
   (** The offset the scan had reached no longer starts a row: the file was
-      cut or replaced while it was being read. *)
+      cut, replaced or removed while it was being read. *)
 
 val error_to_string : error -> string
 
 (** [f] gets each row without its line break, with the byte offset it starts
     at. [rows_per_read] is how many rows one locked read takes. No file is
-    no row. *)
+    no row. A file that goes away after the first read is [Moved], not a
+    scan that ended. *)
 val fold
   :  string
   -> rows_per_read:int

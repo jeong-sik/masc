@@ -17,4 +17,8 @@ val half_length : int
     hexadecimal characters. *)
 val of_halves : front:string -> back:string -> t option
 
+(** The first {!half_length} characters of each digest's lowercase
+    hexadecimal form. A question makes its id this way, so it cannot fail. *)
+val of_digests : front:Agent_core_sha256.t -> back:Agent_core_sha256.t -> t
+
 val equal : t -> t -> bool

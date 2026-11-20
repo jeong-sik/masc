@@ -619,6 +619,7 @@
   test_librarian_scoring
   test_librarian_unread
   test_librarian_unit_content
+  test_librarian_question
   test_librarian_l6g_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store
@@ -970,6 +971,7 @@
   test_librarian_scoring
   test_librarian_unread
   test_librarian_unit_content
+  test_librarian_question
   test_librarian_l6g_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store

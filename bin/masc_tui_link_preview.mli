@@ -34,16 +34,24 @@ val has_informative_preview : og_preview -> bool
 
 (** Changes when cached preview metadata changes, for layout invalidation:
     a stored card that differs from the one held, and {!clear_cache}. A card
-    the store evicts moves nothing; whatever was drawn from it holds until
-    that URL is stored again, which moves the generation. *)
+    the store evicts moves nothing, and its URL is not asked for again: a
+    body drawn from it holds until the generation moves for another card. *)
 val cache_generation : unit -> int
 
 val cache_lookup : string -> og_preview option
+(** A fetched card, if the cache still holds it. *)
+
 val cache_store : og_preview -> unit
+
 val get_preview : string -> og_preview
+(** The fetched card, or the card synthesized from the URL. The first time a
+    URL is drawn its page is asked for through {!set_background_fetch}; a URL
+    is asked for once until {!clear_cache}, even after the cache forgets its
+    fetched card. *)
+
 val clear_cache : unit -> unit
-(** Empty the stores and move {!cache_generation}, so a body drawn from the
-    cards they held is drawn again. *)
+(** Forget the fetched cards and which URLs were asked for, and move
+    {!cache_generation}, so a body drawn from those cards is drawn again. *)
 
 type mosaic_refusal =
   | Fetch_failed of { detail : string }

@@ -88,17 +88,40 @@ let test_cache_operations_and_bounding () =
   clear_cache ();
   let url = "https://arxiv.org/abs/2401.00001" in
   check bool "initially not in cache" true (Option.is_none (cache_lookup url));
-  let p1 = get_preview url in
-  check bool "now in cache" true (Option.is_some (cache_lookup url));
-  let p2 = get_preview url in
-  check string "same url from cache" p1.url p2.url;
-  (* Verify bounded capacity: insert 300 entries, no exceptions, cache stays bounded *)
+  let synthesized = get_preview url in
+  check bool "a synthesized card is not cached" true (Option.is_none (cache_lookup url));
+  let fetched = { synthesized with title = Some "fetched title"; has_metadata = true } in
+  cache_store fetched;
+  check (option string) "a fetched card is drawn" (Some "fetched title") (get_preview url).title;
   for i = 1 to 300 do
-    let test_url = Printf.sprintf "https://arxiv.org/abs/2401.%05d" i in
-    ignore (get_preview test_url)
+    cache_store { fetched with url = Printf.sprintf "https://arxiv.org/abs/2401.%05d" (i + 1) }
   done;
+  check bool "the cache forgets the oldest fetched card past its capacity" true
+    (Option.is_none (cache_lookup url));
+  check (option string) "which draws the synthesized card again" synthesized.title
+    (get_preview url).title;
   clear_cache ();
   check bool "empty after clear" true (Option.is_none (cache_lookup url))
+
+(* A URL's page is asked for once, and drawing a synthesized card changes no
+   generation. A reply with more links than the cache holds used to forget
+   each card within a frame, ask every site again on the next frame, and bump
+   the generation that invalidates the chat layout on each ask. *)
+let test_each_page_is_asked_for_once () =
+  clear_cache ();
+  let asked = ref 0 in
+  set_background_fetch (fun _ -> incr asked);
+  Fun.protect ~finally:(fun () -> set_background_fetch (fun _ -> ()); clear_cache ()) (fun () ->
+    let urls = List.init 300 (fun i -> Printf.sprintf "https://arxiv.org/abs/2401.%05d" i) in
+    let generation = cache_generation () in
+    for _ = 1 to 2 do List.iter (fun url -> ignore (get_preview url)) urls done;
+    check int "every page is asked for once" 300 !asked;
+    check int "drawing synthesized cards bumps no generation" generation (cache_generation ());
+    ignore (get_preview "https://example.com/photo.png");
+    check int "an image URL has no page to ask for" 300 !asked;
+    clear_cache ();
+    ignore (get_preview (List.hd urls));
+    check int "a cleared cache asks again" 301 !asked)
 
 let test_compact_badge_source_spans () =
   let base=synthesize_preview "https://github.com/owner/repository" in
@@ -319,7 +342,8 @@ let () =
         ; test_case "silence contract" `Quick test_silence_contract
         ] )
     ; ( "cache"
-      , [ test_case "cache lifecycle and bounding" `Quick test_cache_operations_and_bounding ] )
+      , [ test_case "cache lifecycle and bounding" `Quick test_cache_operations_and_bounding
+        ; test_case "each page is asked for once" `Quick test_each_page_is_asked_for_once ] )
     ; ( "render"
       , [ test_case "compact badge source spans" `Quick test_compact_badge_source_spans
         ; test_case "formatter-owned card source spans" `Quick test_card_source_spans

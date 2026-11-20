@@ -373,20 +373,30 @@ open Masc_tui_async_protocol
    then, so a preview fetched during early init simply carries no mosaic. *)
 let compute_and_store_mosaic : (string -> unit) ref = ref (fun _ -> ())
 
+(* Pages are read a few at a time. A reply with hundreds of links asks each
+   site once ([Masc_tui_link_preview.get_preview]); the asks past these wait
+   their turn instead of opening a socket each at the same moment, which a
+   256-descriptor limit would not hold. *)
+let link_preview_fetches_at_once = 4
+let link_preview_fetch_slots = Eio.Semaphore.make link_preview_fetches_at_once
+
 let () =
   Masc_tui_link_preview.set_background_fetch (fun url ->
       match Eio_context.get_switch_opt () with
       | None -> ()
       | Some sw ->
           Eio.Fiber.fork_daemon ~sw (fun () ->
-              (match Masc_tui_http.fetch_link_preview_body ~url with
-               | Ok body ->
-                   let preview = Masc_tui_link_preview.parse_og_html ~url ~body in
-                   Masc_tui_link_preview.cache_store preview;
-                   (match preview.Masc_tui_link_preview.image_url with
-                    | Some img -> !compute_and_store_mosaic img
-                    | None -> ())
-               | Error _ -> ());
+              Eio.Semaphore.acquire link_preview_fetch_slots;
+              Fun.protect ~finally:(fun () -> Eio.Semaphore.release link_preview_fetch_slots)
+                (fun () ->
+                  match Masc_tui_http.fetch_link_preview_body ~url with
+                  | Ok body ->
+                      let preview = Masc_tui_link_preview.parse_og_html ~url ~body in
+                      Masc_tui_link_preview.cache_store preview;
+                      (match preview.Masc_tui_link_preview.image_url with
+                       | Some img -> !compute_and_store_mosaic img
+                       | None -> ())
+                  | Error _ -> ());
               `Stop_daemon))
 
 

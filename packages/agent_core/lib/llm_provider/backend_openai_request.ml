@@ -502,6 +502,18 @@ let build_request_assoc_artifact
     | Capabilities.Openrouter_session_id, Some key -> ("session_id", `String key) :: body
     | Capabilities.Prompt_cache_key, Some key -> ("prompt_cache_key", `String key) :: body
   in
+  let body =
+    match caps.Capabilities.prompt_cache_wire, config.cache_system_prompt with
+    | Capabilities.No_prompt_cache_wire, (true | false)
+    | Capabilities.Openrouter_top_level_cache_control, false -> body
+    | Capabilities.Openrouter_top_level_cache_control, true ->
+      let cache_control =
+        if config.cache_extended_ttl
+        then `Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]
+        else `Assoc [ "type", `String "ephemeral" ]
+      in
+      ("cache_control", cache_control) :: body
+  in
   Request_artifact_internal.create ~payload:(`Assoc body) ~output_token_receipt
 ;;
 

@@ -97,6 +97,13 @@ type cache_session_wire =
   | Openrouter_session_id
   | Prompt_cache_key
 
+(** Wire field used by a Chat Completions model/provider row to emit explicit
+    prompt-cache breakpoints. Declared per model row in [models.toml]; defaults
+    to {!No_prompt_cache_wire} so implicit-only endpoints stay unchanged. *)
+type prompt_cache_wire =
+  | No_prompt_cache_wire
+  | Openrouter_top_level_cache_control
+
 type json_schema_dialect =
   | Openai_json_schema
   | Json_object_schema
@@ -239,3 +246,7 @@ val json_schema_dialect_to_string : json_schema_dialect -> string
 val cache_session_wire_values : string list
 val cache_session_wire_of_string : string -> cache_session_wire option
 val cache_session_wire_to_string : cache_session_wire -> string
+
+val prompt_cache_wire_values : string list
+val prompt_cache_wire_of_string : string -> prompt_cache_wire option
+val prompt_cache_wire_to_string : prompt_cache_wire -> string

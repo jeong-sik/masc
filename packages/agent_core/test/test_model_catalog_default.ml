@@ -1307,6 +1307,7 @@ let test_empty_capability_vocab_value_is_rejected () =
   rejects
     "responses_system_prompt_carrier"
     Capability_vocab.responses_system_prompt_carrier_of_string;
+  rejects "prompt_cache_wire" Capability_vocab.prompt_cache_wire_of_string;
   rejects "tool_schema_conformance" Capability_vocab.tool_schema_conformance_of_string;
   rejects "reasoning_output_format" Capability_vocab.reasoning_output_format_of_string;
   rejects "content_inline_reasoning" Capability_vocab.content_inline_reasoning_of_string;
@@ -1460,6 +1461,53 @@ let test_openai_responses_developer_carrier_and_opt_out_declarations () =
     [ "openai", "gpt-5.5"; "openrouter", "openai/gpt-5.6-sol" ]
 ;;
 
+let test_openrouter_claude_prompt_cache_wire_declarations () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog ~suite:"openrouter prompt_cache_wire"
+  in
+  let snapshot =
+    match Llm_provider.Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers:None with
+    | Ok s -> s
+    | Error err -> Alcotest.fail (Llm_provider.Catalog_snapshot.error_to_string err)
+  in
+  check bool "openrouter declares supports_extended_cache_ttl" true
+    (Llm_provider.Catalog_snapshot.supports_extended_cache_ttl snapshot ~provider_id:"openrouter");
+  let resolve model_id =
+    let policy =
+      Llm_provider.Capabilities.resolve_snapshot_request_policy
+        ~snapshot
+        ~wire:Llm_provider.Provider_kind.OpenAI_compat
+        ~provider_id:"openrouter"
+        ~model_id
+    in
+    match Llm_provider.Capabilities.request_policy_capabilities policy with
+    | Some caps -> caps
+    | None -> Alcotest.failf "missing capabilities for openrouter/%s" model_id
+  in
+  List.iter
+    (fun model_id ->
+       let caps = resolve model_id in
+       check bool (model_id ^ " prompt_cache_wire") true
+         (caps.prompt_cache_wire
+          = Llm_provider.Capabilities.Openrouter_top_level_cache_control);
+       check bool (model_id ^ " supports_prompt_caching") true caps.supports_prompt_caching)
+    [ "anthropic/claude-opus-5"
+    ; "anthropic/claude-sonnet-5"
+    ; "anthropic/claude-fable-5.1"
+    ; "anthropic/claude-haiku-4.5"
+    ];
+  List.iter
+    (fun model_id ->
+       let caps = resolve model_id in
+       check bool (model_id ^ " stays No_prompt_cache_wire") true
+         (caps.prompt_cache_wire = Llm_provider.Capabilities.No_prompt_cache_wire))
+    [ "openai/gpt-5.6-sol"
+    ; "deepseek/deepseek-v4.1-flash-1017"
+    ; "google/gemini-3.8-flash"
+    ; "qwen/qwen3.8-max-0902"
+    ]
+;;
+
 let () =
   run
     "model catalog default"
@@ -1574,6 +1622,10 @@ let () =
             "openai-responses developer carrier and explicit opt-out declarations"
             `Quick
             test_openai_responses_developer_carrier_and_opt_out_declarations
+        ; test_case
+            "openrouter claude prompt_cache_wire declarations"
+            `Quick
+            test_openrouter_claude_prompt_cache_wire_declarations
         ; test_case
             "empty capability vocab value is rejected"
             `Quick

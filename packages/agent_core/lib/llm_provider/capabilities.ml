@@ -73,6 +73,9 @@ let chat_output_budget_field_of_catalog_string raw =
 let responses_system_prompt_carrier_of_catalog_string raw =
   Capability_vocab.responses_system_prompt_carrier_of_string raw
 
+let prompt_cache_wire_of_catalog_string raw =
+  Capability_vocab.prompt_cache_wire_of_string raw
+
 let tool_schema_conformance_of_catalog_string raw =
   Capability_vocab.tool_schema_conformance_of_string raw
 ;;
@@ -155,6 +158,7 @@ type declarative_capability_overrides =
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
+  ; prompt_cache_wire : string option
   ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -317,6 +321,15 @@ let apply_declarative_capability_overrides ?(base=default_capabilities) override
       override_bool base.supports_assistant_prefill overrides.supports_assistant_prefill
   ; supports_prompt_caching =
       override_bool base.supports_prompt_caching overrides.supports_prompt_caching
+  ; prompt_cache_wire =
+      (match overrides.prompt_cache_wire with
+       | Some s ->
+         (match prompt_cache_wire_of_catalog_string s with
+          | Some wire -> wire
+          | None ->
+            warn_unknown_capability_value ~field:"prompt_cache_wire" s;
+            base.prompt_cache_wire)
+       | None -> base.prompt_cache_wire)
   ; supports_explicit_cache_opt_out =
       override_bool
         base.supports_explicit_cache_opt_out
@@ -431,6 +444,7 @@ let overrides_of_catalog_entry (entry : Model_catalog.model_entry) =
   ; supports_system_prompt = entry.supports_system_prompt
   ; supports_assistant_prefill = entry.supports_assistant_prefill
   ; supports_prompt_caching = entry.supports_prompt_caching
+  ; prompt_cache_wire = entry.prompt_cache_wire
   ; supports_explicit_cache_opt_out = entry.supports_explicit_cache_opt_out
   ; supports_top_k = entry.supports_top_k
   ; supports_min_p = entry.supports_min_p

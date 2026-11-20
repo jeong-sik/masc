@@ -44,6 +44,7 @@ type model_entry =
   ; supports_system_prompt : bool option
   ; supports_assistant_prefill : bool option
   ; supports_prompt_caching : bool option
+  ; prompt_cache_wire : string option
   ; supports_explicit_cache_opt_out : bool option
   ; supports_top_k : bool option
   ; supports_min_p : bool option
@@ -171,6 +172,7 @@ let with_model_overrides catalog declarations =
     ; supports_system_prompt = entry.supports_system_prompt
     ; supports_assistant_prefill = entry.supports_assistant_prefill
     ; supports_prompt_caching = entry.supports_prompt_caching
+    ; prompt_cache_wire = entry.prompt_cache_wire
     ; supports_explicit_cache_opt_out = entry.supports_explicit_cache_opt_out
     ; supports_top_k = entry.supports_top_k
     ; supports_min_p = entry.supports_min_p
@@ -471,6 +473,7 @@ let known_entry_keys =
   ; "supports_system_prompt"
   ; "supports_assistant_prefill"
   ; "supports_prompt_caching"
+  ; "prompt_cache_wire"
   ; "supports_explicit_cache_opt_out"
   ; "supports_top_k"
   ; "supports_min_p"
@@ -668,6 +671,13 @@ let parse_entry entry_toml =
   let* supports_prompt_caching =
     bool_field ~entry_id "supports_prompt_caching" entry_toml
   in
+  let* prompt_cache_wire =
+    canonical_string_opt
+      ~entry_id
+      "prompt_cache_wire"
+      ~allowed:Capability_vocab.prompt_cache_wire_values
+      entry_toml
+  in
   let* supports_explicit_cache_opt_out =
     bool_field ~entry_id "supports_explicit_cache_opt_out" entry_toml
   in
@@ -784,6 +794,7 @@ let parse_entry entry_toml =
     ; supports_system_prompt
     ; supports_assistant_prefill
     ; supports_prompt_caching
+    ; prompt_cache_wire
     ; supports_explicit_cache_opt_out
     ; supports_top_k
     ; supports_min_p

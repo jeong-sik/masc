@@ -61,6 +61,10 @@ type cache_session_wire = Capability_vocab.cache_session_wire =
   | Openrouter_session_id
   | Prompt_cache_key
 
+type prompt_cache_wire = Capability_vocab.prompt_cache_wire =
+  | No_prompt_cache_wire
+  | Openrouter_top_level_cache_control
+
 type reasoning_replay_override = Capability_vocab.reasoning_replay_override =
   | Default_reasoning_replay
   | Force_no_replay
@@ -247,6 +251,7 @@ type capabilities =
   ; supports_system_prompt : bool
   ; supports_assistant_prefill : bool
   ; supports_prompt_caching : bool
+  ; prompt_cache_wire : prompt_cache_wire
   ; supports_explicit_cache_opt_out : bool
   ; (* ── Sampling parameters ───────────────────────────── *)
     supports_top_k : bool
@@ -307,6 +312,7 @@ let default_capabilities =
   ; supports_system_prompt = true
   ; supports_assistant_prefill = true
   ; supports_prompt_caching = false
+  ; prompt_cache_wire = No_prompt_cache_wire
   ; supports_explicit_cache_opt_out = false
   ; supports_top_k = false
   ; supports_min_p = false

@@ -126,8 +126,11 @@ val materialize_provider_binding
     Native Ollama and Gemini cannot carry it and refuse [true].
 
     The binding's [cache_retention] is request policy too. A Messages runtime
-    whose catalog provider row declares [supports_extended_cache_ttl] carries
-    it as [Provider_config.cache_extended_ttl]; every other runtime refuses a
+    whose catalog provider row declares [supports_extended_cache_ttl], or a
+    Chat Completions runtime whose catalog provider row declares
+    [supports_extended_cache_ttl] and whose catalog model row declares
+    [prompt_cache_wire = Openrouter_top_level_cache_control], carries it as
+    [Provider_config.cache_extended_ttl]; every other runtime refuses a
     declared value.
 
     Returns [Error reason] (no silent fallback) when the provider or model id

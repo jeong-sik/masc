@@ -422,11 +422,9 @@ let async_request_detail_lines ~cols state target =
   let safe value = Say.as_received (Terminal_text.single_line value) in
   let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " in
   let reading = match pending,view with
-    | true,(Masc_tui_fetched.Ready _ | Stale _) ->
-      [Theme.info (), Say.code (" " ^ under_way) ++ Say.both ~ko:"재조회 중 · 이전 관측 유지" ~en:"Reading again · previous observation kept"]
-    | true,(Absent | Loading | Failed _) ->
+    | true,(Masc_tui_fetched.Absent | Loading | Failed _) ->
       [Theme.info (), Say.code (" " ^ under_way) ++ Say.both ~ko:"원본 요청 조회 중" ~en:"Reading the original request"]
-    | false,_ -> [] in
+    | true,(Ready _ | Stale _) | false,_ -> [] in
   let failures = match view with
     | Masc_tui_fetched.Absent -> [Theme.recede (), Say.both ~ko:" 미조회" ~en:" Not read"]
     | Loading -> []
@@ -3058,25 +3056,20 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           let d = Masc_tui_value.Ongoing.since ~now at in
           Say.both ~ko:(" · " ^ d ^ " 경과") ~en:(" · " ^ d)
   in
+  (* Only a first read has a line of its own. A read over a held reading says
+     nothing here, and a retry over a failure keeps the line the failure has:
+     the reading slot says the read (RFC tui-one-screen-grammar section 8). *)
   let reading_lines = if hide_reading then [] else match pending, observed, error with
-    | true, _, Some _ ->
-        [ Theme.info (), Say.code (" " ^ under_way) ++ source
-                         ++ Say.both ~ko:" 다시 읽는 중 · 앞선 실패 유지" ~en:" · retrying, previous failure retained"
-                         ++ elapsed_suffix ]
-    | true, true, None ->
-        [ Theme.info (), Say.code (" " ^ under_way) ++ source
-                         ++ Say.both ~ko:" 새로 읽는 중 · 마지막 조회 유지" ~en:" · refreshing, last reading retained"
-                         ++ elapsed_suffix ]
     | true, false, None ->
         [ Theme.info (), Say.code (" " ^ under_way) ++ source
                          ++ Say.both ~ko:" 읽는 중" ~en:" · reading"
                          ++ elapsed_suffix ]
-    | false, true, Some _ ->
+    | (true | false), true, Some _ ->
         [ Theme.warn (), Say.code " " ++ source
                          ++ Say.both ~ko:" 마지막 조회 유지 · r:새로 읽기" ~en:" · last reading retained · r:refresh" ]
     | false, false, None ->
         [ (Theme.recede ()), Say.code " " ++ source ++ Say.both ~ko:" 안 읽음 · r:새로 읽기" ~en:" not read · r:refresh" ]
-    | false, true, None | false, false, Some _ -> []
+    | (true | false), true, None | (true | false), false, Some _ -> []
   in
   let error_lines = match (selected_tools_error state) with
     | None -> []

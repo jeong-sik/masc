@@ -79,7 +79,7 @@ let test_the_files_list_starts_picked_and_unknown_names_come_last () =
   (match F.change form with
    | F.Unchanged -> ()
    | F.Changed _ -> Alcotest.fail "an untouched form is a change");
-  let rows = F.rows ~width:120 ~height:40 form in
+  let rows = F.rows ~ko:true ~width:120 ~height:40 form in
   let index_of name =
     let rec find index = function
       | [] -> Alcotest.failf "no row for %s" name
@@ -179,20 +179,20 @@ let test_esc_abandons_and_enter_submits () =
 let test_other_keys_change_nothing () =
   let form = opened (excluding [ "c" ]) in
   let after = edited form [ "q"; "x"; "e"; "r"; "left"; "right" ] in
-  Alcotest.(check (list string)) "the same rows" (F.rows ~width:80 ~height:30 form)
-    (F.rows ~width:80 ~height:30 after)
+  Alcotest.(check (list string)) "the same rows" (F.rows ~ko:true ~width:80 ~height:30 form)
+    (F.rows ~ko:true ~width:80 ~height:30 after)
 ;;
 
 let test_a_refusal_is_drawn_and_a_pick_clears_it () =
   let form = F.refused (opened (excluding [ "c" ])) "저장하지 않았어요" in
-  let drawn form = String.concat "\n" (F.rows ~width:80 ~height:30 form) in
+  let drawn form = String.concat "\n" (F.rows ~ko:true ~width:80 ~height:30 form) in
   Alcotest.(check bool) "the reason is drawn" true (contains ~sub:"저장하지 않았어요" (drawn form));
   Alcotest.(check bool) "a pick clears it" false
     (contains ~sub:"저장하지 않았어요" (drawn (edited form [ " " ])))
 ;;
 
 let test_the_rows_say_the_board_judgment_still_runs () =
-  let rows = String.concat "\n" (F.rows ~width:200 ~height:30 (opened (excluding [ "c" ]))) in
+  let rows = String.concat "\n" (F.rows ~ko:true ~width:200 ~height:30 (opened (excluding [ "c" ]))) in
   Alcotest.(check bool) "the exact lane is named" true (contains ~sub:"board_attention_exact" rows);
   Alcotest.(check bool) "the destination is named" true
     (contains ~sub:"https://api.typesafe.ai/v1/systemone" rows)
@@ -203,11 +203,11 @@ let test_a_keeper_name_cannot_colour_the_pane () =
   List.iter
     (fun row ->
        Alcotest.(check bool) "no escape byte in a row" false (String.contains row '\027'))
-    (F.rows ~width:80 ~height:20 form)
+    (F.rows ~ko:true ~width:80 ~height:20 form)
 ;;
 
 let test_a_stopped_keeper_is_drawn_apart_from_a_running_one () =
-  let rows_with presence = F.rows ~width:80 ~height:30 (opened ~keepers:[ { F.name = "a"; presence } ] probe) in
+  let rows_with presence = F.rows ~ko:true ~width:80 ~height:30 (opened ~keepers:[ { F.name = "a"; presence } ] probe) in
   Alcotest.(check bool) "stopped is not drawn as running" true
     (rows_with F.Stopped <> rows_with F.Running);
   Alcotest.(check (list string)) "unknown is drawn as running" (rows_with F.Running)
@@ -224,7 +224,7 @@ let test_the_rows_fit_the_height_they_are_given () =
          (fun height ->
             List.iter
               (fun width ->
-                 let rows = F.rows ~width ~height form in
+                 let rows = F.rows ~ko:true ~width ~height form in
                  Alcotest.(check bool)
                    (Printf.sprintf "%d rows in a pane of %d x %d" (List.length rows) width height)
                    true
@@ -242,7 +242,7 @@ let test_rows_are_drawn_at_any_size () =
          (fun height ->
             List.iter
               (fun width ->
-                 Alcotest.(check bool) "something is drawn" true (F.rows ~width ~height form <> []))
+                 Alcotest.(check bool) "something is drawn" true (F.rows ~ko:true ~width ~height form <> []))
               [ 1; 20; 80; 200 ])
          [ 0; 1; 2; 5; 50 ])
     [ []; entries long ]

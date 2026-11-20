@@ -408,18 +408,22 @@ type identity_app_form =
     key handler counts the same preamble the renderer draws. The secret is
     shown as asterisks: a terminal scrolls back, and a credential on screen is a
     credential in the scrollback. *)
-let identity_app_form_rows ?(ko = true) form =
+let identity_app_form_rows ~ko form =
   match form with
   | None -> []
   | Some f ->
     let mark field = if f.iaf_field = field then "›" else " " in
     [ Printf.sprintf (if ko then "  %s \xec\x95\xb1" else "  %s app") f.iaf_label
-    ; Printf.sprintf "  %s client id      %s" (mark App_client_id) f.iaf_client_id
     ; Printf.sprintf
-        "  %s client secret  %s"
+        (if ko then "  %s 클라이언트 ID     %s" else "  %s client id      %s")
+        (mark App_client_id) f.iaf_client_id
+    ; Printf.sprintf
+        (if ko then "  %s 클라이언트 시크릿 %s" else "  %s client secret  %s")
         (mark App_client_secret)
         (String.concat "" (List.init (String.length f.iaf_client_secret) (fun _ -> "*")))
-    ; Printf.sprintf "  %s scopes         %s" (mark App_scopes) f.iaf_scopes
+    ; Printf.sprintf
+        (if ko then "  %s 권한 범위         %s" else "  %s scopes         %s")
+        (mark App_scopes) f.iaf_scopes
     ; (if ko then "  Enter 다음 칸 · 마지막 칸에서 Enter 저장 · Esc 취소"
        else "  Enter:next field · Enter on last field:save · Esc:cancel")
     ; ""

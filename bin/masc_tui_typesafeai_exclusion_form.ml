@@ -298,7 +298,7 @@ let window ~room ~cursor rows =
     visible, start, total - start - shown)
 ;;
 
-let rows ?(ko = true) ~width ~height t =
+let rows ~ko ~width ~height t =
   let mark index = if t.cursor = index then "›" else " " in
   let intro_rows = wrapped ~width ~lead:hint_lead (intro ~ko) in
   let destination_rows = wrapped ~width ~lead:hint_lead (destinations_text ~ko t) in

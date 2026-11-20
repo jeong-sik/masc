@@ -513,7 +513,7 @@ let mark t name =
      | None -> if picked then No_declaration else No_mark)
 ;;
 
-let mark_text ?(ko = true) = function
+let mark_text ~ko = function
   | No_mark -> ""
   | Reached -> if ko then "  (판정 대상)" else "  (judged)"
   | Not_reached reason ->
@@ -597,7 +597,7 @@ let window ~room ~cursor rows =
     visible, start, total - start - shown)
 ;;
 
-let rows ?(ko = true) ~width ~height t =
+let rows ~ko ~width ~height t =
   let mark index = if t.cursor = index then "›" else " " in
   let intro_rows = wrapped ~width ~lead:hint_lead (intro ~ko) in
   let server_rows =

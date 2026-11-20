@@ -9,15 +9,9 @@ val lifecycle_line_for :
   tool:string option ->
   summary:string option ->
   string
-(** Localized {!lifecycle_line} for [ko:true] (Korean) or [ko:false] (English). *)
-
-val lifecycle_line :
-  phase:Keeper_approval_lifecycle.approval_lifecycle_phase ->
-  tool:string option ->
-  summary:string option ->
-  string
-(** [summary] names what the gated call asked for; without it the line names
-    only the tool. *)
+(** One durable approval step localized for [ko:true] (Korean) or [ko:false]
+    (English). [summary] names what the gated call asked for; without it the
+    line names only the tool. *)
 
 val fold_line_for :
   ko:bool ->
@@ -25,20 +19,14 @@ val fold_line_for :
   tool:string option ->
   summary:string option ->
   string option
-(** Localized {!fold_line} for [ko:true] (Korean) or [ko:false] (English). *)
-
-val fold_line :
-  phases:Keeper_approval_lifecycle.approval_lifecycle_phase list ->
-  tool:string option ->
-  summary:string option ->
-  string option
-(** One line for a run of steps belonging to the same approval. The run
-    collapses to the furthest stage it reached -- replay outcome, else Gate
-    resolution, else still waiting -- and within a stage the latest step wins,
-    so a replay correction supersedes the row it corrects. A continuation
-    phase ([Approval_continuation_recorded] or
-    [Approval_continuation_failed]) rides as a suffix because it says
-    something no outcome says. [None] for an empty run. *)
+(** One line for a run of steps belonging to the same approval, localized for
+    [ko:true] (Korean) or [ko:false] (English). The run collapses to the
+    furthest stage it reached -- replay outcome, else Gate resolution, else
+    still waiting -- and within a stage the latest step wins, so a replay
+    correction supersedes the row it corrects. A continuation phase
+    ([Approval_continuation_recorded] or [Approval_continuation_failed]) rides
+    as a suffix because it says something no outcome says. [None] for an empty
+    run. *)
 
 type folded_argument =
   { fa_text : string  (** The line as drawn, folded or not. *)
@@ -49,7 +37,7 @@ type folded_argument =
             flattening as a fold. *)
   }
 
-val fold_argument : ?ko:bool -> cap:int -> string -> folded_argument
+val fold_argument : ko:bool -> cap:int -> string -> folded_argument
 (** One Gate line held to [cap] terminal cells, with what it is holding named
     in cells rather than rows.
 

@@ -483,7 +483,7 @@ let test_a_keeper_name_cannot_colour_the_pane () =
   List.iter
     (fun row ->
        Alcotest.(check bool) "no escape byte in a row" false (String.contains row '\027'))
-    (F.rows ~width:80 ~height:20 form)
+    (F.rows ~ko:true ~width:80 ~height:20 form)
 ;;
 
 (* Which words mark a stopped Keeper is the pane's to choose. That it is drawn
@@ -492,7 +492,7 @@ let test_a_keeper_name_cannot_colour_the_pane () =
 let test_a_stopped_keeper_is_drawn_apart_from_a_running_one () =
   let rows_with presence =
     let form = edited (opened ~keepers:[ { F.name = "a"; presence } ] probe) [ "right" ] in
-    F.rows ~width:80 ~height:30 form
+    F.rows ~ko:true ~width:80 ~height:30 form
   in
   Alcotest.(check bool)
     "stopped is not drawn as running"
@@ -515,7 +515,7 @@ let test_the_rows_fit_the_height_they_are_given () =
          (fun height ->
             List.iter
               (fun width ->
-                 let rows = F.rows ~width ~height form in
+                 let rows = F.rows ~ko:true ~width ~height form in
                  Alcotest.(check bool)
                    (Printf.sprintf "%d rows in a pane of %d x %d" (List.length rows) width height)
                    true
@@ -539,7 +539,7 @@ let test_rows_are_drawn_at_any_size () =
                  Alcotest.(check bool)
                    "something is drawn"
                    true
-                   (F.rows ~width ~height form <> []))
+                   (F.rows ~ko:true ~width ~height form <> []))
               [ 1; 20; 80; 200 ])
          [ 0; 1; 2; 5; 50 ])
     [ []; [ "right" ]; [ "right"; "right" ]; [ "right"; "down"; "down"; "down"; " " ] ]
@@ -567,7 +567,7 @@ let test_the_server_reading_is_display_only () =
          (F.change bare = F.change form))
     [ "judged", judged_a; "not judged", refused_a ];
   Alcotest.(check bool) "the two readings are drawn apart" true
-    (F.rows ~width:100 ~height:30 judged_a <> F.rows ~width:100 ~height:30 refused_a)
+    (F.rows ~ko:true ~width:100 ~height:30 judged_a <> F.rows ~ko:true ~width:100 ~height:30 refused_a)
 ;;
 
 (* A Keeper the file lists and the server does not reach is the sign of a file
@@ -616,13 +616,16 @@ let test_every_kind_of_mark_has_words_of_its_own () =
     [ F.Reached; F.No_declaration ]
     @ List.map (fun reason -> F.Not_reached reason) Standing.all_reasons
   in
-  let texts = List.map F.mark_text kinds in
-  Alcotest.(check bool) "none is empty" true (List.for_all (fun text -> text <> "") texts);
-  Alcotest.(check int)
-    "no two are alike"
-    (List.length texts)
-    (List.length (List.sort_uniq String.compare texts));
-  Alcotest.(check string) "no mark draws nothing" "" (F.mark_text F.No_mark)
+  List.iter
+    (fun ko ->
+      let texts = List.map (F.mark_text ~ko) kinds in
+      Alcotest.(check bool) "none is empty" true (List.for_all (fun text -> text <> "") texts);
+      Alcotest.(check int)
+        "no two are alike"
+        (List.length texts)
+        (List.length (List.sort_uniq String.compare texts));
+      Alcotest.(check string) "no mark draws nothing" "" (F.mark_text ~ko F.No_mark))
+    [ true; false ]
 ;;
 
 (* The environment switch is asked before the gate, so one Keeper that names it
@@ -632,6 +635,7 @@ let test_every_kind_of_mark_has_words_of_its_own () =
 let test_the_environment_switch_is_told_on_the_server_line () =
   let rows_with reason =
     F.rows
+      ~ko:true
       ~width:100
       ~height:30
       (F.with_server
@@ -649,6 +653,7 @@ let test_the_environment_switch_is_told_on_the_server_line () =
 let test_a_judged_keeper_is_marked_on_its_own_row () =
   let rows_with names =
     F.rows
+      ~ko:true
       ~width:100
       ~height:30
       (F.with_server
@@ -663,7 +668,7 @@ let test_a_judged_keeper_is_marked_on_its_own_row () =
 
 let test_each_state_of_the_server_reading_is_drawn_apart () =
   let rows_with server =
-    F.rows ~width:100 ~height:30 (F.with_server (listed_a_form ()) server)
+    F.rows ~ko:true ~width:100 ~height:30 (F.with_server (listed_a_form ()) server)
   in
   let states =
     [ "unread", F.Server_unread
@@ -700,7 +705,7 @@ let test_the_server_reading_cannot_colour_the_pane_or_overflow () =
     (fun width ->
        List.iter
          (fun height ->
-            let rows = F.rows ~width ~height form in
+            let rows = F.rows ~ko:true ~width ~height form in
             List.iter
               (fun row ->
                  Alcotest.(check bool) "no escape byte in a row" false (String.contains row '\027'))
@@ -718,6 +723,7 @@ let test_the_server_reading_cannot_colour_the_pane_or_overflow () =
 let test_a_reading_that_names_other_keepers_draws_nothing_of_its_own () =
   let rows_with name =
     F.rows
+      ~ko:true
       ~width:100
       ~height:30
       (F.with_server (listed_a_form ()) (F.Server_read (reading [ name, Standing.Judged ])))

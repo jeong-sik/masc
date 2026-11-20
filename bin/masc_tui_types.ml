@@ -1685,7 +1685,7 @@ let librarian_failing_text ?(ko = false) ~since failing =
    lifecycle steps cannot make the same approval occupy several status rows.
    All non-Gate rows keep their original position and text. Problems and
    unresolved operations remain complete; Full restores every original step. *)
-let project_gate_history ?(ko = true) ~visibility entries =
+let project_gate_history ~ko ~visibility entries =
   match visibility with
   | Tools_full -> entries
   | Tools_compact | Tools_results ->

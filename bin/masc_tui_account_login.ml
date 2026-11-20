@@ -946,7 +946,7 @@ let body_rows ~ko t =
       Text ((if i=t.cursor then "› " else "  ") ^ client_label client
             ^ (if count = 0 then ""
                else if ko then Printf.sprintf " · 계정 %d" count
-               else Printf.sprintf " · %d %s" count (if count = 1 then "account" else "accounts"))) (clients t)
+               else Printf.sprintf " · %d %s" count (if count = 1 then "account" else "accounts")))) (clients t)
   | Providers (Accounts client) -> List.mapi (fun i row ->
       Text ((if i=t.cursor then "› " else "  ")
             ^ (match row with New_account _ -> say "+ 새 계정" "+ New account" | Account p -> account_label ~ko t p))) (account_rows t client)

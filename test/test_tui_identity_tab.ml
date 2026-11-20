@@ -1213,15 +1213,21 @@ let form field secret =
 let test_the_secret_is_never_drawn () =
   (* A terminal scrolls back. A credential on screen is a credential in the
      scrollback, and in whatever recorded the session. *)
-  let rows =
-    Masc_tui_identity_model.identity_app_form_rows
-      (Some (form Masc_tui_identity_model.App_client_secret "hunter2"))
-  in
-  let joined = String.concat "\n" rows in
-  check Alcotest.bool "the value is nowhere" false
-    (Masc_tui_pick_list.lowercase_contains ~needle:"hunter2" joined);
-  check Alcotest.bool "its length still shows" true
-    (Masc_tui_pick_list.lowercase_contains ~needle:"*******" joined)
+  List.iter
+    (fun (ko, expected_label) ->
+      let rows =
+        Masc_tui_identity_model.identity_app_form_rows
+          ~ko
+          (Some (form Masc_tui_identity_model.App_client_secret "hunter2"))
+      in
+      let joined = String.concat "\n" rows in
+      check Alcotest.bool "the value is nowhere" false
+        (Masc_tui_pick_list.lowercase_contains ~needle:"hunter2" joined);
+      check Alcotest.bool "its length still shows" true
+        (Masc_tui_pick_list.lowercase_contains ~needle:"*******" joined);
+      check Alcotest.bool "field label matches language" true
+        (Masc_tui_pick_list.lowercase_contains ~needle:expected_label joined))
+    [ true, "클라이언트 시크릿"; false, "client secret" ]
 
 let test_a_pasted_list_loses_its_newlines () =
   (* A scope list copied out of a browser arrives one per line. The

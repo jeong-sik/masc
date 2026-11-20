@@ -83,10 +83,6 @@ let lifecycle_line_for ~ko ~(phase : approval_lifecycle_phase) ~tool ~summary =
   line ~ko ~news:[ news_of_phase ~ko phase ] ~tool ~summary
 ;;
 
-let lifecycle_line ~(phase : approval_lifecycle_phase) ~tool ~summary =
-  lifecycle_line_for ~ko:true ~phase ~tool ~summary
-;;
-
 (* One approval's steps as one line.
 
    The store records a step per phase, which is right: each is a durable fact
@@ -179,10 +175,6 @@ let fold_line_for ~ko ~phases ~tool ~summary =
     Some (line ~ko ~news:[ news_of_phase ~ko phase; wording ] ~tool ~summary)
 ;;
 
-let fold_line ~phases ~tool ~summary =
-  fold_line_for ~ko:true ~phases ~tool ~summary
-;;
-
 (* A Gate row's text carries the argument of the call it gated, and nothing
    caps it: one base64 argument took eight rows of the pane. Compact keeps
    what fits on a line and says how much it is holding.
@@ -200,7 +192,7 @@ type folded_argument =
   ; fa_held_cells : int
   }
 
-let fold_argument ?(ko = true) ~cap text =
+let fold_argument ~ko ~cap text =
   let cap = Int.max 0 cap in
   let flat =
     String.concat " " (String.split_on_char '\n' (String.trim text))

@@ -76,7 +76,7 @@ type mark =
 val mark : t -> string -> mark
 (** The mark of the Keeper by that name. *)
 
-val mark_text : ?ko:bool -> mark -> string
+val mark_text : ko:bool -> mark -> string
 (** The words the list draws for a mark; empty for {!No_mark}. *)
 
 val source_revision : t -> string option
@@ -151,7 +151,7 @@ val text_on : t -> (string, t) result
     Keepers, like {!change}: a list the file keeps in another order, or with a
     name twice, is the chosen list. *)
 
-val rows : ?ko:bool -> width:int -> height:int -> t -> string list
+val rows : ko:bool -> width:int -> height:int -> t -> string list
 (** The form as rows of a pane [width] cells wide. The Keeper list gets the
     rows left under [height] after the others, and a list longer than that is
     cut to a window that follows the cursor, with a row saying how many are

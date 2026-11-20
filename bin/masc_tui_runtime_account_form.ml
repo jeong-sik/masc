@@ -481,7 +481,7 @@ let saved_rows ~ko ~width ~id sign_in =
   @ [ "" ]
 ;;
 
-let rows ?(ko = true) ~width ~height t =
+let rows ~ko ~width ~height t =
   match t.phase with
   | Filling -> filling_rows ~ko ~width ~height t
   | Saved { saved_id; saved_sign_in } -> saved_rows ~ko ~width ~id:saved_id saved_sign_in

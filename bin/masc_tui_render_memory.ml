@@ -469,7 +469,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       | reasons ->
         String.concat ", "
           (List.map
-             (fun (reason, count) -> Printf.sprintf "%s x%d" reason count)
+             (fun (reason, count) -> reason ^ " " ^ Masc_tui_value.Count.times count)
              reasons)
     in
     Printf.sprintf (if ko then "  이미지 수집 오류 %d건 · 사유 %s" else "  vision ingest errors %d · reasons %s")

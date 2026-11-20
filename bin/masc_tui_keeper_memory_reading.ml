@@ -159,7 +159,7 @@ let gap_cells = function
 
 let stale_cells source_invalidations =
   if source_invalidations > 0 then
-    [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "stale ×%d" source_invalidations
+    [ { Masc_tui_keeper_axis_cell.text = "stale " ^ Masc_tui_value.Count.times source_invalidations
       ; tone = Attention
       } ]
   else []

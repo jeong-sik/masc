@@ -4216,9 +4216,8 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
             | tools ->
               tools
               |> List.map (fun (tool : Keeper_activity.tool_use) ->
-                     Printf.sprintf "%s x%d"
-                       (Terminal_text.single_line tool.Keeper_activity.tu_name)
-                       tool.Keeper_activity.tu_calls)
+                     Terminal_text.single_line tool.Keeper_activity.tu_name
+                     ^ " " ^ Masc_tui_value.Count.times tool.Keeper_activity.tu_calls)
               |> String.concat "  "));
 
       (* This Keeper's month beside the fleet's per-turn figures: the same

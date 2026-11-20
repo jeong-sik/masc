@@ -130,19 +130,38 @@ let op_schema kind =
      :: op_properties kind)
 ;;
 
-let answer_properties =
+(* The decoder takes every op and both working states whatever the question
+   was. A schema names only what the question's answer can use: the ops that
+   point at something it showed, and a working state only when it showed
+   one. A slot that keeps to its schema then never writes what the plan
+   would leave out. *)
+let answer_properties ~ops ~working_state =
   [ field_question, string_schema
   ; field_question_end, string_schema
-  ; field_working_state, `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+  ; field_working_state, `Assoc [ "type", working_state ]
   ; ( field_ops
     , `Assoc
-        [ "type", `String "array"
-        ; "items", `Assoc [ "anyOf", `List (List.map op_schema op_kinds) ]
-        ] )
+        [ "type", `String "array"; "items", `Assoc [ "anyOf", `List (List.map op_schema ops) ] ]
+    )
   ]
 ;;
 
-let schema = closed_schema answer_properties
+let answer_schema ~ops ~working_state = closed_schema (answer_properties ~ops ~working_state)
+let string_or_null = `List [ `String "string"; `String "null" ]
+
+(* The fields every answer has, whatever its question. *)
+let answer_fields = field_names (answer_properties ~ops:op_kinds ~working_state:string_or_null)
+
+(* Memory and units shown: every op. One item alone: only what it says anew,
+   and Keep. Memory with no unit: the ops that name a fact without a unit,
+   and either working state. *)
+let schemas : Librarian_memory_lane.answer_schemas =
+  { range = answer_schema ~ops:op_kinds ~working_state:string_or_null
+  ; item_alone = answer_schema ~ops:[ Kind_add ] ~working_state:(`String "null")
+  ; room =
+      answer_schema ~ops:[ Kind_drop; Kind_merge; Kind_revise ] ~working_state:string_or_null
+  }
+;;
 let new_fact_fields = field_names new_fact_properties
 let units_json names = `List (List.map (fun unit_name -> `String unit_name) names)
 
@@ -315,7 +334,7 @@ let of_json ~(asked : Librarian_question_id.t) json =
   match json with
   | `Assoc fields ->
     let* () =
-      schema (exact_field_names_result (field_names answer_properties) fields)
+      schema (exact_field_names_result answer_fields fields)
     in
     let* front = schema (wire_string_field field_question fields) in
     let* back = schema (wire_string_field field_question_end fields) in

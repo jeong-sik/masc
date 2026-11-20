@@ -7,8 +7,10 @@
     that holds is recorded and the op is left out. The list below is that
     order, so an op with two flaws is recorded under the earlier one:
 
-    - {!Librarian_effects.Not_valid_alone}: the question showed no Memory and
-      the op is not an [Add].
+    - {!Librarian_effects.Not_valid_alone}: the question showed one item and
+      no Memory, and the op is not an [Add].
+    - {!Librarian_effects.Not_valid_in_room}: the question showed Memory and
+      no unit, and the op is an [Add] or a [Seen]: both need a unit.
     - [Unknown_ref]: a fact name the question did not give.
     - [Removed_during_flight]: a fact the op names, or the claim it states, was
       removed by a direct write after the question was made. An answer cannot
@@ -55,19 +57,28 @@
 
 open Keeper_memory_os_types
 
-(** What the question showed, in the short names it gave. *)
+(** What a reading question showed, in the short names it gave. [memory] is
+    the short name and Memory id of every fact shown; [units] the short name
+    of every unit shown and the offset of its line in the turn log. *)
+type read =
+  | Range of
+      { memory : (string * string) list
+      ; units : (string * int) list
+      } (** [Read_range]: Memory, the working state and units. *)
+  | Item_alone of { units : (string * int) list }
+  (** [Read_item_alone]: the head item, with no Memory and no working
+      state. *)
+
+(** What a question showed, one constructor for each kind of question (RFC
+    §6.1). *)
 type shown =
-  { memory : (string * string) list option
-  (** Short name and Memory id of every fact shown. [None] for a question that
-      showed one item and no Memory. *)
-  ; units : (string * int) list
-  (** Short name of every unit shown and the offset of its line in the turn
-      log. *)
-  }
+  | Read of read
+  | Room of { memory : (string * string) list }
+  (** [Make_room]: Memory and the working state, with no unit. *)
 
 (** What becomes of the Keeper's working state. *)
 type working_state =
-  | Kept (** The question showed it, and the answer kept it. *)
+  | Kept (** The question showed it ([Range], [Room]), and the answer kept it. *)
   | Replaced of string
   (** The question showed it, and the answer replaced it. [Replaced ""]
       clears it. *)

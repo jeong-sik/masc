@@ -1,5 +1,6 @@
-(** The text of one reading question, and what the writer commits of it
-    (RFC librarian-call-only-proposes §5.5, §6.1, §6.2).
+(** The text of one question, and what the writer commits of it (RFC
+    librarian-call-only-proposes §5.5, §6.1, §6.2): a reading question
+    ({!make}) or the question that makes room ({!make_room}).
 
     A question is a function of the lane's question side, Memory, the commit
     line reading starts from, and the units read. It carries no clock and no
@@ -18,7 +19,10 @@
     v}
 
     A question that shows the head item alone ({!Item_alone}) has no
-    [memory:] line and no [working_state:] line (§7.4).
+    [memory:] line and no [working_state:] line (§7.4). The question that
+    makes room has a [make_room:] line in place of [units:]: one JSON string
+    that says the item just read did not fit any slot with this Memory and
+    was read alone. It names no target, neither a count nor a size.
 
     The value after each label is one JSON document on one line. Text a
     person, a Keeper or a store wrote is a JSON string, so a line break or a
@@ -54,8 +58,9 @@
     Times are ISO 8601 UTC to the second.
 
     {b The id.} [front] is half the SHA-256 of the question side (prompt,
-    answer schema, output reserve, thinking) and the memory and working
-    state lines. [back] is half the SHA-256 of the units line. A change to
+    the answer schema of the question's kind, output reserve, thinking) and
+    the memory and working state lines. [back] is half the SHA-256 of the
+    units line, or of the [make_room:] line. A change to
     Memory alone changes [front] only, and other units under the same Memory
     change [back] only. A question of the item alone has no memory line, so
     a change to Memory leaves its id as it was: a slot's size fact about it
@@ -67,6 +72,10 @@ type made =
       { question : Librarian_read_result.question
       (** [shown] names every fact and every unit the text gave. *)
       ; text : string (** The whole request: the prompt, then the question. *)
+      ; schema : Yojson.Safe.t
+      (** The answer schema of the question's kind: [range] for
+          {!With_memory}, [item_alone] for {!Item_alone}. The id covers it,
+          and the walk asks every slot to match it. *)
       }
   | Nothing_readable of
       { reach : Librarian_read_result.reach
@@ -97,3 +106,22 @@ val make
   -> offered:Librarian_width.offered
   -> Librarian_read_unit.t list
   -> made
+
+type room =
+  { question : Librarian_room_result.question
+  (** [memory] names every fact the text gave. *)
+  ; text : string (** The whole request: the prompt, then the question. *)
+  ; schema : Yojson.Safe.t (** The [room] answer schema. *)
+  }
+
+(** The question that makes room (§7.4): Memory as the snapshot [from] names
+    holds it and the working state of [from], then the [make_room:] line. It
+    reads no unit. [trace] is the trace of the item read alone just before;
+    the question carries it unchanged. Like a reading question, it is a
+    function of its inputs and carries no clock. *)
+val make_room
+  :  lane:Librarian_memory_lane.question_side
+  -> from:Librarian_log.line
+  -> memory:Keeper_memory_os_current_types.t
+  -> trace:string
+  -> room

@@ -5,10 +5,21 @@ module Ids = Set_util.StringSet
 module By_id = Set_util.StringMap
 module Op_numbers = Set.Make (Int)
 
+type read =
+  | Range of
+      { memory : (string * string) list
+      ; units : (string * int) list
+      }
+  | Item_alone of { units : (string * int) list }
+
 type shown =
-  { memory : (string * string) list option
-  ; units : (string * int) list
-  }
+  | Read of read
+  | Room of { memory : (string * string) list }
+
+let units_of = function
+  | Read (Range { units; _ } | Item_alone { units }) -> units
+  | Room _ -> []
+;;
 
 type working_state =
   | Kept
@@ -78,10 +89,13 @@ let replaced ids ~by removal =
 
 let screen ~shown ~current ~removed_since ~named_before number op =
   let* table =
-    match shown.memory, op with
-    | None, (Answer.Drop _ | Merge _ | Revise _ | Seen _) -> Error Effects.Not_valid_alone
-    | None, Add _ -> Ok []
-    | Some table, (Add _ | Drop _ | Merge _ | Revise _ | Seen _) -> Ok table
+    match shown, op with
+    | Read (Item_alone _), (Answer.Drop _ | Merge _ | Revise _ | Seen _) ->
+      Error Effects.Not_valid_alone
+    | Read (Item_alone _), Add _ -> Ok []
+    | Room _, (Add _ | Seen _) -> Error Effects.Not_valid_in_room
+    | Room { memory }, (Drop _ | Merge _ | Revise _)
+    | Read (Range { memory; _ }), (Add _ | Drop _ | Merge _ | Revise _ | Seen _) -> Ok memory
   in
   let* named = resolve_all table (named_facts op) ~missing:Effects.Unknown_ref in
   let stated =
@@ -109,7 +123,7 @@ let screen ~shown ~current ~removed_since ~named_before number op =
     else Ok ()
   in
   let units names =
-    resolve_all shown.units names ~missing:Effects.Source_outside_question
+    resolve_all (units_of shown) names ~missing:Effects.Source_outside_question
   in
   let* states =
     match op, stated with
@@ -377,10 +391,10 @@ let of_answer ~shown ~facts ~removed_since ~at ~trace_id (answer : Answer.t) =
   { facts = Effects.apply ~at facts effects
   ; effects
   ; working_state =
-      (match shown.memory, answer.working_state with
-       | Some (_ : (string * string) list), Keep -> Kept
-       | Some (_ : (string * string) list), Set text -> Replaced text
-       | None, Keep -> Alone Untouched
-       | None, Set (_ : string) -> Alone Not_valid_alone)
+      (match shown, answer.working_state with
+       | (Read (Range _) | Room _), Keep -> Kept
+       | (Read (Range _) | Room _), Set text -> Replaced text
+       | Read (Item_alone _), Keep -> Alone Untouched
+       | Read (Item_alone _), Set (_ : string) -> Alone Not_valid_alone)
   }
 ;;

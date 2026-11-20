@@ -37,8 +37,7 @@ type asked =
     [Ask_ended] of another ask is dropped. *)
 type question =
   { id : Librarian_question_id.t
-  ; shown : Librarian_plan.shown
-  (** [shown.memory] is [Some] exactly when the question showed Memory. *)
+  ; shown : Librarian_plan.read
   ; basis : Digest.digest
   (** The snapshot the tail named when the question was made, whether or not
       it showed Memory. A one-item verdict is read only while this is the

@@ -13,7 +13,7 @@ type asked =
 
 type question =
   { id : Librarian_question_id.t
-  ; shown : Librarian_plan.shown
+  ; shown : Librarian_plan.read
   ; basis : Digest.digest
   ; reach : reach
   ; trace : string

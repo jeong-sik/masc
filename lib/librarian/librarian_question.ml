@@ -10,6 +10,7 @@ type made =
   | Made of
       { question : Librarian_read_result.question
       ; text : string
+      ; schema : Yojson.Safe.t
       }
   | Nothing_readable of
       { reach : Librarian_read_result.reach
@@ -21,7 +22,15 @@ let label_question = "question: "
 let label_memory = "memory: "
 let label_working_state = "working_state: "
 let label_units = "units: "
+let label_make_room = "make_room: "
 let label_question_end = "question-end: "
+
+(* The one sentence a question that makes room shows where a reading
+   question shows its units (§6.1). It states what happened and sets no
+   target: no count, no size. *)
+let make_room_sentence =
+  "방금 읽은 항목 하나는 이 Memory 와 함께 묻는 질문으로는 선언한 어느 slot 에도 들어가지 \
+   않아서, Memory 와 하던 일 없이 그 항목만 읽었습니다."
 let newline = "\n"
 
 (* A fact shows the snapshot's field names, so an answer writes what it read. *)
@@ -339,12 +348,13 @@ let missing_of units =
 (* {1 The id} *)
 
 let declaration
-      ({ prompt; answer_schema; max_output_tokens; thinking } :
+      ~schema
+      ({ prompt; answer_schemas = (_ : Librarian_memory_lane.answer_schemas); max_output_tokens; thinking } :
         Librarian_memory_lane.question_side)
   =
   `Assoc
     [ f_prompt, `String prompt
-    ; f_answer_schema, answer_schema
+    ; f_answer_schema, schema
     ; f_max_output_tokens, `Int max_output_tokens
     ; f_thinking, Option.fold ~none:`Null ~some:(fun on -> `Bool on) thinking
     ]
@@ -357,6 +367,33 @@ let digest parts =
 let line label value = label ^ value ^ newline
 let json_line label json = line label (Yojson.Safe.to_string json)
 
+(* The declaration is compact JSON, so the line break after it ends it. *)
+let front ~lane ~schema memory_lines =
+  digest (Yojson.Safe.to_string (declaration ~schema lane) :: newline :: memory_lines)
+;;
+
+(* Memory as [from] holds it, each fact under its short name, and the
+   working state of [from]. *)
+let memory_and_working_state ~from (memory : Current.t) =
+  let table = List.mapi (fun index fact -> memory_name index, Types.memory_id fact) memory.facts in
+  (* The first name of each id: [fold_right] adds the earlier names last. *)
+  let names =
+    List.fold_right (fun (name, id) names -> Names.add id name names) table Names.empty
+  in
+  ( table
+  , [ json_line label_memory (`List (List.mapi (fact_json names) memory.facts))
+    ; json_line label_working_state (text_or_null (working_state from))
+    ] )
+;;
+
+let text ~(lane : Librarian_memory_lane.question_side) (id : Librarian_question_id.t) body =
+  String.concat
+    ""
+    ([ lane.prompt; newline; line label_question id.front ]
+     @ body
+     @ [ line label_question_end id.back ])
+;;
+
 type shows =
   | With_memory of Current.t
   | Item_alone
@@ -366,47 +403,48 @@ let make ~(lane : Librarian_memory_lane.question_side) ~from ~shows ~reach ~trac
   if not (List.exists has_item units)
   then Nothing_readable { reach; missing }
   else (
-    (* A question of the item alone has neither line, so its front half is
-       the question side's alone and Memory changing leaves its id as it
-       was (§7.4). *)
-    let table, memory_lines =
-      match shows with
-      | Item_alone -> None, []
-      | With_memory (memory : Current.t) ->
-        let table =
-          List.mapi (fun index fact -> memory_name index, Types.memory_id fact) memory.facts
-        in
-        (* The first name of each id: [fold_right] adds the earlier names last. *)
-        let names =
-          List.fold_right (fun (name, id) names -> Names.add id name names) table Names.empty
-        in
-        ( Some table
-        , [ json_line label_memory (`List (List.mapi (fact_json names) memory.facts))
-          ; json_line label_working_state (text_or_null (working_state from))
-          ] )
-    in
     let units_line = json_line label_units (`List (List.mapi unit_json units)) in
-    (* The declaration is compact JSON, so the line break after it ends it. *)
+    let names = List.mapi (fun index (read : Read_unit.t) -> unit_name index, read.line) units in
+    (* A question of the item alone has neither Memory line, so its front
+       half is the question side's alone and Memory changing leaves its id
+       as it was (§7.4). *)
+    let schema, memory_lines, (shown : Librarian_plan.read) =
+      match shows with
+      | Item_alone -> lane.answer_schemas.item_alone, [], Item_alone { units = names }
+      | With_memory memory ->
+        let table, lines = memory_and_working_state ~from memory in
+        lane.answer_schemas.range, lines, Range { memory = table; units = names }
+    in
     let id =
       Librarian_question_id.of_digests
-        ~front:(digest (Yojson.Safe.to_string (declaration lane) :: newline :: memory_lines))
+        ~front:(front ~lane ~schema memory_lines)
         ~back:(digest [ units_line ])
-    in
-    let text =
-      String.concat
-        ""
-        ([ lane.prompt; newline; line label_question id.front ]
-         @ memory_lines
-         @ [ units_line; line label_question_end id.back ])
-    in
-    let shown : Librarian_plan.shown =
-      { memory = table
-      ; units = List.mapi (fun index (read : Read_unit.t) -> unit_name index, read.line) units
-      }
     in
     Made
       { question =
           { id; shown; basis = Librarian_log.snapshot_after from; reach; trace; missing; offered }
-      ; text
+      ; text = text ~lane id (memory_lines @ [ units_line ])
+      ; schema
       })
+;;
+
+type room =
+  { question : Librarian_room_result.question
+  ; text : string
+  ; schema : Yojson.Safe.t
+  }
+
+let make_room ~(lane : Librarian_memory_lane.question_side) ~from ~memory ~trace =
+  let schema = lane.answer_schemas.room in
+  let table, memory_lines = memory_and_working_state ~from memory in
+  let sentence_line = json_line label_make_room (`String make_room_sentence) in
+  let id =
+    Librarian_question_id.of_digests
+      ~front:(front ~lane ~schema memory_lines)
+      ~back:(digest [ sentence_line ])
+  in
+  { question = { id; memory = table; basis = Librarian_log.snapshot_after from; trace }
+  ; text = text ~lane id (memory_lines @ [ sentence_line ])
+  ; schema
+  }
 ;;

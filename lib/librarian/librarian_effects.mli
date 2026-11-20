@@ -40,6 +40,9 @@ type why_not =
       the commit that removed it. *)
   | Not_valid_alone
   (** The answer saw one item and no Memory, and tried to remove a fact. *)
+  | Not_valid_in_room
+  (** The answer saw Memory and no unit, and tried to add a fact or to see
+      one again: both need a unit, and making room is not reading. *)
   | Successor_unsupported
   (** The fact the op stated or saw again is not in Memory after the answer: it is a
       derived fact, and its premises are not there. Usually the same answer

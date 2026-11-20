@@ -427,20 +427,23 @@ let document_json ~width text =
    is computed from the prompt's width, does not have to know about it. *)
 let voice_meter_text (state : state) =
   let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
+  let ko = state.ui_language = Lang_ko in
+  let tag korean english = if ko then korean else english in
+  let active korean english = Printf.sprintf "[%s %s] " under_way (tag korean english) in
   match state.voice_capture, state.voice_capture_phase, state.voice_level_db with
   (* The old capture still occupies the slot until its terminal reply; a
      retargeted draft must not advertise that it is recording new speech. *)
   | Some _, _, _ when state.voice_capture_withdrawn ->
-    Printf.sprintf "[%s 이전 음성 종료 대기] " under_way
+      active "이전 음성 종료 대기" "stopping prior voice"
   (* Continuous mode between utterances: no capture is running, but the row is
      still listening and the operator needs to know before speaking. *)
-  | None, _, _ when state.voice_continuous <> None -> "[대기] "
+  | None, _, _ when state.voice_continuous <> None -> tag "[대기] " "[listening] "
   | None, _, _ -> ""
-  | Some _, Voice_calibrating, _ -> Printf.sprintf "[%s 마이크 보정 중] " under_way
-  | Some _, Voice_starting, _ -> Printf.sprintf "[%s 음성 시작 중] " under_way
-  | Some _, Voice_stopping, _ -> Printf.sprintf "[%s 음성 종료 대기] " under_way
-  | Some _, Voice_processing, _ -> Printf.sprintf "[%s 음성 처리 중] " under_way
-  | Some _, Voice_recording, None -> Printf.sprintf "[%s 입력 관측 대기] " under_way
+  | Some _, Voice_calibrating, _ -> active "마이크 보정 중" "calibrating mic"
+  | Some _, Voice_starting, _ -> active "음성 시작 중" "starting voice"
+  | Some _, Voice_stopping, _ -> active "음성 종료 대기" "stopping voice"
+  | Some _, Voice_processing, _ -> active "음성 처리 중" "processing voice"
+  | Some _, Voice_recording, None -> active "입력 관측 대기" "awaiting audio"
   | Some _, Voice_recording, Some db ->
     let width = 12 in
     let filled =

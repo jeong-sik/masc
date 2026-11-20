@@ -129,4 +129,4 @@ val server_report_line :
 val lines : server_report:(tone * Masc_tui_say.t) option -> t -> (tone * Masc_tui_say.t) list
 
 (** The footer line after an answer. *)
-val status_line : t -> string
+val status_line : ?ko:bool -> t -> string

@@ -2088,6 +2088,7 @@ let compute_keeper_message_layout_entries (state : state) ~keeper_name ~request_
                  them, the resting pane stays one line per skill. *)
               | activities ->
                   (Keeper_chat_transcript.skill_rows
+                     ~ko:(state.ui_language = Lang_ko)
                      ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
                      activities
                    |> String.concat "\n"),
@@ -3444,6 +3445,7 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                           per skill; each invocation's state, actions,
                           proof line and detail ride the tool toggle. *)
                        (Keeper_chat_transcript.skill_rows
+                          ~ko:(state.ui_language = Lang_ko)
                           ~full:(state.msg_tool_visibility = Masc_tui_types.Tools_full)
                           skills))
               | Keeper_chat_transcript.Drawn_media media ->
@@ -3464,15 +3466,29 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                   entry ~speaker:(label speaker) ~heading_boundary Message_layout.Keeper
                     (label role) text
               | Keeper_chat_transcript.Drawn_status text ->
+                  let ko = state.ui_language = Lang_ko in
                   (match item.origin with
                    | Keeper_chat_transcript.Admission_of_request _ ->
                        (* This is the receipt's snapshot, retained even after
                           execution starts. It does not report the current
                           queue or control state. Keep that distinction in
                           the body too, where narrow gutters cannot hide it. *)
-                       entry Message_layout.Status "RECEIPT" ("접수 당시: " ^ text)
+                       entry Message_layout.Status "RECEIPT"
+                         ((if ko then "접수 당시: " else "At receipt: ") ^ text)
+                   | Reply_of_segment _ ->
+                       let body =
+                         match Keeper_chat_transcript.reply turn_log.tl_transcript with
+                         | Some reply ->
+                             Keeper_chat_transcript.turn_status_text_for ~ko
+                               ~reply:reply.reply_text
+                               ~turn_ref:reply.reply_turn_ref
+                               reply.reply_outcome
+                             |> Keeper_chat.terminal_safe_text ~preserve_newlines:true
+                         | None -> text
+                       in
+                       entry Message_layout.Status (label "STATUS") body
                    | Text_stretch _ | Media_stretch _ | Thinking_stretch _ | Tool_stretch _
-                   | Unstreamed_skills | Reply_of_segment _ | Error_of_segment _
+                   | Unstreamed_skills | Error_of_segment _
                    | Retry_observation_of_source ->
                        entry Message_layout.Status (label "STATUS") text)
               | Keeper_chat_transcript.Drawn_error _
@@ -3669,7 +3685,11 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
                             ~column:role_label_column ~style "STATUS";
                           role_label_mark_cells = Message_layout.role_label_mark_cells
                             ~column:role_label_column ~style ();
-                          body = "저널 갱신 불가 · 받은 기록 유지";
+                          body =
+                            if state.ui_language = Lang_ko then
+                              "저널 갱신 불가 · 받은 기록 유지"
+                            else
+                              "Journal refresh unavailable · keeping received entries";
                           markdown_source = Message_layout.Markdown_streaming } }] }
                  in
                  Hashtbl.replace unavailable_block_memo key (block, with_status);

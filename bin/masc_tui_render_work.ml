@@ -1879,7 +1879,8 @@ let schedule_source_warning (state : state) =
   |> Option.map (fun err ->
          match state.schedules with
          | None -> err
-         | Some _ -> "이전 조회 유지 · " ^ err)
+         | Some _ ->
+             ui_text state ~ko:"이전 조회 유지 · " ~en:"Keeping prior read · " ^ err)
 
 (* The list on screen is the newest answer only while its last load
    succeeded. A failed reload keeps the previous list on screen, and a hold on

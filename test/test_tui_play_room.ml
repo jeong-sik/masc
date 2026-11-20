@@ -223,7 +223,32 @@ let test_unusable_width_retains_room_state () =
   let _, sent = View.send t ~machine:Masc.Machine_lane.Dos in
   check bool "draft survives unsupported width" true (has (body (request sent)) "한글 message")
 
+let test_english_notices_contain_no_hangul () =
+  let has_hangul s =
+    let len = String.length s in
+    let rec loop i =
+      if i >= len then false
+      else
+        let dec = String.get_utf_8_uchar s i in
+        let cp = Uchar.to_int (Uchar.utf_decode_uchar dec) in
+        let step = Uchar.utf_decode_length dec in
+        if cp >= 0xAC00 && cp <= 0xD7A3 then true else loop (i + max 1 step)
+    in
+    loop 0
+  in
+  let t = View.paste ~ko:false (idle ()) (String.make 4097 'a') in
+  let _, lines_overflow = View.layout ~ko:false t ~width:80 ~height:10 in
+  check bool "english overflow notice has no Hangul" false
+    (List.exists has_hangul lines_overflow);
+  let t = View.focus (idle ()) true |> fun r -> View.paste ~ko:false r "hello" in
+  let t, req = View.send ~ko:false t ~machine:Masc.Machine_lane.Dos in
+  let t = View.receive ~ko:false t (request req) ~now:(at 1.) (Error "timeout") in
+  let _, lines_err = View.layout ~ko:false t ~width:80 ~height:10 in
+  check bool "english send error notice has no Hangul" false
+    (List.exists has_hangul lines_err)
+
 let () = run "TUI public room" ["room", [
+  test_case "english notices contain no Hangul" `Quick test_english_notices_contain_no_hangul;
   test_case "unusable width preserves room state" `Quick test_unusable_width_retains_room_state;
   test_case "the authenticated viewer owns only its messages" `Quick test_authenticated_viewer_origin;
   test_case "unknown send, reopen and edited draft" `Quick test_retry_and_edit;

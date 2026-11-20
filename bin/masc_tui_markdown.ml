@@ -860,7 +860,7 @@ let is_alphatex_tag tag =
 
 let fence_header_label tag =
   if is_alphatex_tag tag then
-    if alphatex_rhythm_word tag then "alphaTex 악보 (리듬)" else "alphaTex 악보"
+    if alphatex_rhythm_word tag then "alphaTex (rhythm)" else "alphaTex"
   else tag
 
 (* The tag was previously consumed only to choose a lexer, so [```bash] and an

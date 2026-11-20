@@ -4847,7 +4847,10 @@ let remember_account_login state (view : Masc_tui_account_login.t) =
       Auth.save_private_text_file (account_login_resume_path state)
         (Yojson.Safe.to_string (`Assoc ["host",`String server_peer_host;"port",`Int state.port;
           "integration_id",`String provider.id;"login_id",`String login_id]))
-     with Unix.Unix_error _ | Sys_error _ -> view.notice <- "로그인 복구 위치를 저장하지 못했습니다. 창을 닫기 전에 완료 상태를 확인하세요.")
+     with Unix.Unix_error _ | Sys_error _ ->
+       view.notice <- ui_text state
+         ~ko:"로그인 복구 위치를 저장하지 못했습니다. 창을 닫기 전에 완료 상태를 확인하세요."
+         ~en:"Could not save login recovery state. Verify completion before closing this dialog.")
   | Some _, None | None, _ -> ()
 
 let restore_account_login state (view : Masc_tui_account_login.t) =
@@ -4861,12 +4864,15 @@ let restore_account_login state (view : Masc_tui_account_login.t) =
       | Some provider when Auth.is_generated_token_shape login_id &&
           Masc_tui_account_login.requested_matches view provider ->
         view.provider<-Some provider; view.login_id<-Some login_id;
-        view.notice<-"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 n으로 새 계정을 추가하세요."
+        view.notice <- ui_text state
+          ~ko:"이전 로그인 기록이 있습니다. r로 상태를 확인하거나 n으로 새 계정을 추가하세요."
+          ~en:"Found a previous login session. Press r to check status or n to add a new account."
       | Some _ | None -> ())
   with Unix.Unix_error _ | Sys_error _ | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ()
 
 let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t) action =
   let module Login = Masc_tui_account_login in
+  view.ko <- state.ui_language = Lang_ko;
   let needs_identity = match action with
     | Login.Nothing | Close | Cancel | Cancel_prepare -> false
     | Login.Inventory | Activate_saved _ | Refresh_saved _ | Refresh_retry | Select_existing _
@@ -4974,11 +4980,17 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     state.account_login <- None
   | Cancel ->
     Option.iter (fun stop -> stop ()) view.cancel_stream; view.cancel_stream<-None;
-    view.draft<-""; view.phase<-Login.Failed; view.activity_started_at<-None; view.notice<-"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
+    view.draft<-""; view.phase<-Login.Failed; view.activity_started_at<-None;
+    view.notice <- ui_text state
+      ~ko:"로그인을 취소했습니다. r로 저장된 상태를 확인하세요."
+      ~en:"Login cancelled. Press r to check saved status."
   | Cancel_prepare ->
     Login.cancel_prepare view
   | Select_existing provider ->
-    view.phase<-Login.Loading; Login.note_activity_started ~at:now view; view.notice<-"저장된 계정의 모델을 읽고 있습니다.";
+    view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
+    view.notice <- ui_text state
+      ~ko:"저장된 계정의 모델을 읽고 있습니다."
+      ~en:"Loading models for saved account.";
     let path = if provider.client=Login.Antigravity then "/api/v1/setup/accounts/antigravity" else "/api/v1/setup/accounts/select" in
     start_job (fun () -> enqueue (post path (`Assoc ["integration_id",`String provider.id])))
   | Start {provider; existing} ->
@@ -5005,7 +5017,10 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
              | Ok () when complete () -> ()
              (* The login was not sent; it is kept back, not unanswered. *)
              | Error (Request_withdrawn _ as failure) -> enqueue (Error failure)
-             | Ok () | Error (Request_failed _) -> enqueue (Error (Request_failed "로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요."))))
+             | Ok () | Error (Request_failed _) ->
+                 enqueue (Error (Request_failed (ui_text state
+                   ~ko:"로그인 결과를 받지 못했습니다. r로 상태를 다시 확인하세요."
+                   ~en:"Did not receive login result. Press r to check status again.")))))
   | Input (_, json) ->
     (match view.login_id with None -> view.input_pending<-false; view.activity_started_at<-None
      | Some id -> Login.note_activity_started ~at:now view; start_job (fun () -> enqueue (post (login_path id ^ "/input") json)))
@@ -5013,18 +5028,27 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
     (match action with
       | Inventory | Refresh_list _ ->
         view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
-        view.notice<-"계정 목록을 읽고 있습니다."
+        view.notice <- ui_text state
+          ~ko:"계정 목록을 읽고 있습니다."
+          ~en:"Loading account list."
       | Refresh_retry ->
         view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
-        view.notice<-"최신 설정을 읽고 있습니다."
+        view.notice <- ui_text state
+          ~ko:"최신 설정을 읽고 있습니다."
+          ~en:"Loading latest settings."
       | Activate_saved _ | Refresh_saved _ | Select_existing _ | Start _ | Input _ | Cancel | Cancel_prepare
       | Recover | Discover | Refresh_models | Prepare _ | Prepare_batch _ | Save _ | Close | Nothing | Preview_removal _ | Remove _
       | Refresh_removed _ -> ()); start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:"/api/v1/setup/inventory")))
   | Recover -> (match view.login_id with
-      | None -> view.notice<-"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
+      | None ->
+          view.notice <- ui_text state
+            ~ko:"조회할 로그인 세션이 없습니다. n으로 새 로그인을 시작하세요."
+            ~en:"No login session to check. Press n to start a new login."
       | Some id ->
         view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
-        view.notice<-"로그인 상태를 확인하고 있습니다.";
+        view.notice <- ui_text state
+          ~ko:"로그인 상태를 확인하고 있습니다."
+          ~en:"Checking login status.";
         start_job (fun () -> enqueue (failed (Masc_tui_http.get_json ~host ~port ~path:(login_path id)))))
   | Discover | Refresh_models ->
     (match action with
@@ -5054,7 +5078,11 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
   | Save models ->
     view.phase<-Login.Saving;
     Login.note_activity_started ~at:now view;
-    view.notice<-Printf.sprintf "모델 %d개 검증 중 · 응답과 도구 호출을 확인합니다." (List.length models);
+    let count = List.length models in
+    view.notice <- ui_text state
+      ~ko:(Printf.sprintf "모델 %d개 검증 중 · 응답과 도구 호출을 확인합니다." count)
+      ~en:(Printf.sprintf "Verifying %s · checking responses and tool calling."
+             (Masc_tui_message_layout.count_noun count "model"));
     let body=Login.save_body view models in
     start_job (fun () -> enqueue (post_setup "/api/v1/setup/connections" body))
   | Activate_saved saved ->
@@ -5066,10 +5094,12 @@ let launch_account_login_action state ~mailbox (view : Masc_tui_account_login.t)
         | Ok () -> post_setup "/api/v1/runtime/setup/resume" (`Assoc []) in
       enqueue result)
   | Preview_removal {provider; _} ->
-    view.phase<-Login.Loading; Login.note_activity_started ~at:now view; view.notice<-"지울 내용을 읽고 있습니다.";
+    view.phase<-Login.Loading; Login.note_activity_started ~at:now view;
+    view.notice <- ui_text state ~ko:"지울 내용을 읽고 있습니다." ~en:"Loading removal preview.";
     start_job (fun () -> enqueue (post "/api/v1/setup/accounts/removal" (`Assoc ["integration_id",`String provider.id])))
   | Remove {provider; revision; login_store} ->
-    view.phase<-Login.Removing; Login.note_activity_started ~at:now view; view.notice<-"선택한 공급자 연결을 지우고 있습니다.";
+    view.phase<-Login.Removing; Login.note_activity_started ~at:now view;
+    view.notice <- ui_text state ~ko:"선택한 공급자 연결을 지우고 있습니다." ~en:"Removing selected provider link.";
     let body=`Assoc ["integration_id",`String provider.id;"revision",`String revision] |> Yojson.Safe.to_string in
     start_job (fun () ->
       let outcome=Masc_tui_http.post_json_outcome ~host ~port ~path:"/api/v1/setup/accounts/remove" ~body in
@@ -5541,10 +5571,11 @@ let launch_keeper_config_view state ~mailbox keeper_name =
   let request = mark_detail_read_started state ~tab:Detail_instructions ~keeper:keeper_name in
   let host = server_peer_host in
   let port = state.port in
+  let ko = state.ui_language = Lang_ko in
   launch_workspace_async_read state ~mailbox
     ~deliver:(fun result ->
       enqueue_async mailbox (Keeper_msg (Keeper_config_view_loaded (request, result))))
-    (fun () -> Masc_tui_loader.load_keeper_config_view ~host ~port ~keeper_name)
+    (fun () -> Masc_tui_loader.load_keeper_config_view ~ko ~host ~port ~keeper_name)
 
 let withdraw_keeper_items state =
   state.item_account <- None;
@@ -6170,7 +6201,8 @@ let settle_volume_gc state request result =
     | Ok (Masc_tui_volume_gc.Report _) -> "system"
     | Ok (Masc_tui_volume_gc.Refused _ | Masc_tui_volume_gc.Unreadable _) | Error _ -> "error"
   in
-  report_action state kind (Masc_tui_volume_gc.status_line state.volume_gc)
+  report_action state kind
+    (Masc_tui_volume_gc.status_line ~ko:(state.ui_language = Lang_ko) state.volume_gc)
 
 let map_lane_addons state f =
   match state.lane_addons with
@@ -7560,7 +7592,7 @@ let launch_memory_recall_standing_load state ~mailbox =
   end
   else
     Masc_tui_types.stop_waiting_for_memory_recall_standing state
-      "서버 신원을 아직 확인하지 못했어요"
+      (ui_text state ~ko:"서버 신원을 아직 확인하지 못했어요" ~en:"Server identity not verified yet")
 
 (* The two requests behind the launch form. Neither is inflight-guarded by
    a field of its own: the form's state says which request it waits on, and
@@ -11494,7 +11526,8 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         ( Message_skill (Keeper_chat_transcript.skill_block_state activities)
         , Turn_progress
         , String.concat "\n"
-            (Keeper_chat_transcript.skill_rows ~full:false activities)
+            (Keeper_chat_transcript.skill_rows
+               ~ko:(state.ui_language = Lang_ko) ~full:false activities)
         , None
         , activities )
     | Keeper_chat_history.Reasoning lines ->
@@ -13776,7 +13809,8 @@ let poll_play_room state ~mailbox =
 let send_play_room state ~mailbox =
   if room_workspace_ready state then
   Option.iter (fun room ->
-    let room, request = Masc_tui_play_room.send room ~machine:state.machine_source in
+    let room, request =
+      Masc_tui_play_room.send ~ko:(state.ui_language = Lang_ko) room ~machine:state.machine_source in
     state.play_room <- Some room;
     Option.iter (launch_play_room state ~mailbox) request) state.play_room
 
@@ -16351,8 +16385,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       let restored, retained = Login.take_saved ~requested state.account_login_detached in
       state.account_login_detached <- retained;
       let view = match restored with
-        | Some view -> view
-        | None -> Login.create requested in
+        | Some view -> view.ko <- state.ui_language = Lang_ko; view
+        | None -> Login.create ~ko:(state.ui_language = Lang_ko) requested in
       state.account_login <- Some view;
       (match restored, view.phase with
        | Some _, (Login.Saving | Login.Failed) -> ()
@@ -20327,8 +20361,29 @@ let open_lane_inventory_selection state ~mailbox =
    from, so the choice survives a restart. Said in the language just picked,
    including the failure: the new language is already on the screen by then,
    so silence would let the screen stand as proof it was kept. *)
-let apply_ui_language state lang =
+let invalidate_language_cached_views state =
+  state.keeper_config_view <- None;
+  state.keeper_config_view_error <- None;
+  state.detail_reads <-
+    List.filter (fun request -> request.drr_tab <> Detail_instructions) state.detail_reads;
+  let ko = state.ui_language = Lang_ko in
+  List.iter
+    (fun (view : Masc_tui_account_login.t) -> view.ko <- ko)
+    (Option.to_list state.account_login @ state.account_login_detached)
+
+let refresh_keeper_config_view_if_open state ~mailbox =
+  if state.view = Keepers Keeper_detail && state.detail_tab = Detail_instructions then
+    Option.iter
+      (fun (keeper : keeper) -> launch_keeper_config_view state ~mailbox keeper.k_name)
+      (selected_keeper state)
+
+let apply_ui_language state ~mailbox lang =
+  let changed = state.ui_language <> lang in
   state.ui_language <- lang;
+  if changed then begin
+    invalidate_language_cached_views state;
+    refresh_keeper_config_view_if_open state ~mailbox
+  end;
   report_action state "info"
     (ui_text state
        ~ko:("UI 언어: " ^ ui_language_label lang)
@@ -20364,7 +20419,7 @@ let press_marked_target state ~mailbox (target : press_target) =
   | Press_theme_filter filter ->
       if filter <> state.theme_filter then enter_theme_filter state filter
   | Press_ui_language ->
-      apply_ui_language state (next_ui_language state.ui_language)
+      apply_ui_language state ~mailbox (next_ui_language state.ui_language)
   | Press_runtime_mode mode ->
       if (state.view <> Runtime || Option.is_none (Masc_tui_types.runtime_parent state))
          && (mode <> state.runtime_mode || state.view <> Runtime) then
@@ -22072,7 +22127,8 @@ let open_board_attachment state ~mailbox ~digit ~host ~port =
            (match Masc_tui_board_attachments.attachment_at_index post.bp_attachments digit with
             | None -> ()
             | Some (Error reason) ->
-                state.board_attachment_status <- Some ("깨진 첨부: " ^ reason)
+                state.board_attachment_status <-
+                  Some (ui_text state ~ko:"깨진 첨부: " ~en:"Broken attachment: " ^ reason)
             | Some (Ok ({ba_kind=Ak_image;ba_source=As_artifact {sha256;bytes};ba_name} as attachment)) ->
                 let notice = image_notice state ~view:Board ~keeper_name:None in
                 let key = {Masc_tui_board_reader.post_id;sha256;bytes;name=ba_name} in
@@ -23337,7 +23393,11 @@ let selected_verification_evidence state =
 
 let step_verification_evidence state delta =
   match selected_verification_evidence state with
-  | None -> report_action state "system" "증거 내용을 먼저 불러와야 합니다. r로 다시 읽을 수 있습니다."
+  | None ->
+      report_action state "system"
+        (ui_text state
+           ~ko:"증거 내용을 먼저 불러와야 합니다. r로 다시 읽을 수 있습니다."
+           ~en:"Load evidence content first. Press r to reload.")
   | Some (_, index, count, _) ->
     state.verification_evidence_cursor <- max 0 (min (count - 1) (index + delta));
     state.verification_evidence_index_open <- false;
@@ -23345,8 +23405,12 @@ let step_verification_evidence state delta =
 
 let export_verification_evidence state ~mailbox ~open_file =
   match selected_verification_evidence state, Eio_context.get_env_opt () with
-  | None, _ -> report_action state "error" "현재 제출의 증거를 먼저 불러오세요."
-  | Some _, None -> report_action state "error" "이 기기의 파일 시스템을 사용할 수 없습니다."
+  | None, _ ->
+      report_action state "error"
+        (ui_text state ~ko:"현재 제출의 증거를 먼저 불러오세요." ~en:"Load evidence for the current submission first.")
+  | Some _, None ->
+      report_action state "error"
+        (ui_text state ~ko:"이 기기의 파일 시스템을 사용할 수 없습니다." ~en:"File system access is unavailable on this device.")
   | Some (key, index, _, _), Some env ->
     let request = {vex_key=key;vex_index=index;vex_authority=state.workspace_authority;
       vex_reading=state.workspace_read_authority;vex_progress=Atomic.make Masc_tui_evidence_file.Not_started} in
@@ -26532,10 +26596,14 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             (match outcome, prepared with
              | Form_saved _, Some {rfp_account=Some declaration;_} ->
                  Option.iter (fun sign_in ->
-                   add_event state "info" (declaration.id ^ origin ^ " 로그인: "
-                     ^ Masc_tui_runtime_account_form.command sign_in);
+                   add_event state "info"
+                     (declaration.id ^ origin
+                      ^ ui_text state ~ko:" 로그인: " ~en:" sign-in: "
+                      ^ Masc_tui_runtime_account_form.command sign_in);
                    Option.iter (fun typed -> add_event state "info"
-                     (declaration.id ^ origin ^ " 그다음 client 안에서: " ^ typed))
+                     (declaration.id ^ origin
+                      ^ ui_text state ~ko:" 그다음 client 안에서: " ~en:" then inside client: "
+                      ^ typed))
                      (Masc_tui_runtime_account_form.then_type sign_in)) declaration.sign_in
              | (Form_saved _ | Form_not_sent _ | Form_kept_back _ | Form_invalid_account _ | Form_refused _
                  | Form_conflict _ | Form_unconfirmed _), (None | Some _) -> ())
@@ -26823,9 +26891,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let progress = Atomic.get request.vex_progress in
       let location = match progress with
         | Masc_tui_evidence_file.Not_started -> ""
-        | Writing path -> " · 저장 시도 경로(완료 미확인): " ^ path
-        | Saved path -> " · 저장한 사본: " ^ path
-        | Aborted path -> " · 저장하지 못한 목적지: " ^ path in
+        | Writing path ->
+            ui_text state ~ko:" · 저장 시도 경로(완료 미확인): " ~en:" · write attempted (unconfirmed): " ^ path
+        | Saved path ->
+            ui_text state ~ko:" · 저장한 사본: " ~en:" · saved copy: " ^ path
+        | Aborted path ->
+            ui_text state ~ko:" · 저장하지 못한 목적지: " ~en:" · unsaved destination: " ^ path in
       if request.vex_authority = state.workspace_authority
          && request.vex_reading == state.workspace_read_authority then
         (match progress with
@@ -26838,7 +26909,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            report_action state "error"
              (workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
                 ~request:Kept_request.Evidence_export refusal)
-       | Ok path -> report_action state "system" ("증거 사본 저장: " ^ path));
+       | Ok path ->
+           report_action state "system"
+             (ui_text state ~ko:"증거 사본 저장: " ~en:"Saved evidence copy: " ^ path));
       Drawn_changed
   | Verification_msg (Verification_evidence_loaded (request, result)) ->
       let key = Masc_tui_fetched.request_key request.ver_ticket in
@@ -27142,7 +27215,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match sink, result with
        | Preset_to_chat target, Ok snapshot ->
            chat_notice state ~keeper_name:target ~kind:Notice_reply
-             (String.concat "\n" (Masc_tui_preset_text.listing_lines snapshot))
+             (String.concat "\n"
+                (Masc_tui_preset_text.listing_lines ~ko:(state.ui_language = Lang_ko) snapshot))
        | Preset_to_chat target, Error failure ->
            chat_notice state ~keeper_name:target ~kind:Notice_failure
              (request_failure_text ~ko:(state.ui_language = Lang_ko)
@@ -27332,11 +27406,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           if current_workspace && authority = state.workspace_authority then
             match result with
             | Ok manifest ->
-              let saved = if state.ui_language = Lang_ko then
-                  Printf.sprintf "%s 프리셋 저장됨 · 프롬프트 %d · 키퍼 %d · 배정 %d · 레인 %d"
-                    manifest.Tui_decode.pm_name manifest.pm_override_count
-                    (List.length manifest.pm_keepers) manifest.pm_assignment_count manifest.pm_lane_count
-                else Masc_tui_preset_text.saved_line manifest in
+              let saved =
+                Masc_tui_preset_text.saved_line ~ko:(state.ui_language = Lang_ko) manifest
+              in
               chat_notice state ~keeper_name:target ~kind:Notice_reply
                 ((if observation = Preset_save_shared then ui_text state
                     ~ko:"먼저 시작한 저장 결과 · 새 저장은 미전송\n"
@@ -27452,9 +27524,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Play_msg (Play_room_received (request, result)) ->
       state.play_room <- Option.map (fun room ->
         let now = Masc_tui_wake.Mono.now () in
+        let ko = state.ui_language = Lang_ko in
         match result with
-        | Ok (viewer, snapshot) -> Masc_tui_play_room.receive ~viewer room request ~now (Ok snapshot)
-        | Error (Request_failed detail) -> Masc_tui_play_room.receive room request ~now (Error detail)
+        | Ok (viewer, snapshot) -> Masc_tui_play_room.receive ~ko ~viewer room request ~now (Ok snapshot)
+        | Error (Request_failed detail) -> Masc_tui_play_room.receive ~ko room request ~now (Error detail)
         | Error (Request_withdrawn refusal) ->
             (* A read or a message keeps the draft, as the room's own
                failure notice says; leaving has nothing to keep. *)
@@ -28089,6 +28162,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
   | Account_msg (Account_login_event (view, generation, event)) ->
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
+         view.Masc_tui_account_login.ko <- state.ui_language = Lang_ko;
          let action = Masc_tui_account_login.event ~generation view event in
          (match event with
            | Masc_tui_account_login.Started _ | Login_failed _ -> remember_account_login state view
@@ -28101,6 +28175,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Option.to_list state.account_login @ state.account_login_detached) with
        | Some current when current == view && view.generation = generation ->
          let module Login = Masc_tui_account_login in
+         view.ko <- state.ui_language = Lang_ko;
          (match outcome with
           | Error refusal ->
             let notice = workspace_refusal_text ~ko:(state.ui_language = Lang_ko)
@@ -28135,6 +28210,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           (Option.to_list state.account_login @ state.account_login_detached) with
        | Some current when current == view && view.generation = generation ->
          let module Login = Masc_tui_account_login in
+         view.ko <- state.ui_language = Lang_ko;
          (match (match result with
                  | Ok json -> Either.Right (Ok json)
                  | Error (Request_failed detail) -> Either.Right (Error detail)
@@ -28192,7 +28268,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | (Login.Close, Error detail)
            | (Login.Nothing, Error detail) | (Login.Preview_removal _, Error detail)
            | (Login.Remove _, Error detail) | (Login.Refresh_removed _, Error detail)
-           | (Login.Refresh_list _, Error detail) -> Error (detail ^ " · r로 다시 확인하세요.")
+           | (Login.Refresh_list _, Error detail) ->
+               Error (detail ^ ui_text state ~ko:" · r로 다시 확인하세요." ~en:" · Press r to check again.")
            | (Login.Inventory, Ok json) | (Login.Select_existing _, Ok json)
            | (Login.Start _, Ok json) | (Login.Cancel, Ok json) | (Login.Cancel_prepare, Ok json) | (Login.Recover, Ok json)
            | (Login.Discover, Ok json) | (Login.Refresh_models, Ok json) | (Login.Prepare _, Ok json) | (Login.Save _, Ok json)
@@ -28248,10 +28325,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (match state.account_login with
        | Some current when current == view && view.generation = generation ->
          let module Login = Masc_tui_account_login in
+         let ko = state.ui_language = Lang_ko in
+         view.ko <- ko;
          (match outcome with
           | Masc_tui_http.Post_answered _ ->
             launch_account_login_action state ~mailbox view
-              (Login.Refresh_removed {client = provider.client; notice = Login.removed_notice provider login_store})
+              (Login.Refresh_removed {client = provider.client; notice = Login.removed_notice ~ko provider login_store})
           (* The server's refusal is about the file as it is now -- it moved,
              or the account can no longer go -- so the preview is read again
              under it rather than left standing. *)
@@ -28259,7 +28338,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             launch_account_login_action state ~mailbox view (Login.Preview_removal {provider; refused = Some message})
           | Masc_tui_http.Post_unanswered detail ->
             view.recovery<-Login.Login_status; view.phase<-Login.Failed; view.activity_started_at<-None;
-            view.notice<-"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. " ^ detail)
+            view.notice <-
+              ui_text state
+                ~ko:"계정을 지웠는지 확인하지 못했습니다. r로 목록을 다시 읽으세요. "
+                ~en:"Could not confirm account removal. Press r to reload the list. "
+              ^ detail)
        | Some _ | None -> ());
       Drawn_changed
   | Github_msg (Github_login_lines (keeper_name, lines)) ->
@@ -29497,7 +29580,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            (match completion, result with
             | Run_next_received, Error (Request_failed detail) ->
                 append_chat_history state request Message_error
-                  ("다음 순서 확인 불가: " ^ detail)
+                  (ui_text state ~ko:"다음 순서 확인 불가: " ~en:"Could not confirm next turn: " ^ detail)
             | Run_next_received, Error (Request_withdrawn refusal) ->
                 (* Not sent: the kept-back notice alone (RFC §2). *)
                 append_chat_history state request Message_error
@@ -29627,27 +29710,46 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            in
            (match newest with
             | None ->
+                let ko = state.ui_language = Lang_ko in
                 notice ~kind:Notice_failure
                   (if dropped > 0 then
-                     Printf.sprintf
-                       "/copy found no completed reply (%d saved row(s) could not be read)"
-                       dropped
-                   else "/copy found no completed reply")
+                     if ko then
+                       Printf.sprintf "/copy: 완료된 응답이 없어요 (저장 기록 %d건 읽기 불가)" dropped
+                     else
+                       Printf.sprintf "/copy found no completed reply (%s could not be read)"
+                         (Masc_tui_message_layout.count_noun dropped "saved row")
+                   else
+                     if ko then "/copy: 완료된 응답이 없어요"
+                     else "/copy found no completed reply")
             | Some row ->
+                let ko = state.ui_language = Lang_ko in
                 let characters = Masc_tui_message_layout.grapheme_count row.text in
-                let assessment =
-                  if dropped > 0 then "latest readable reply" else "latest reply"
-                in
-                let unreadable =
-                  if dropped > 0 then
-                    Printf.sprintf "; %d saved row(s) could not be read" dropped
-                  else ""
-                in
                 let outcome = copy_text_out row.text in
-                notice ~kind:Notice_reply
-                  (Printf.sprintf "%s's %s (%d characters, %d bytes): %s%s"
-                     keeper_name assessment characters (String.length row.text)
-                     (Masc_tui_clipboard.copy_outcome_text outcome) unreadable)));
+                let msg =
+                  if ko then
+                    let assessment = if dropped > 0 then "최근 읽힌 응답" else "최근 응답" in
+                    let unreadable =
+                      if dropped > 0 then Printf.sprintf "; 저장 기록 %d건 읽기 불가" dropped
+                      else ""
+                    in
+                    Printf.sprintf "%s의 %s (%d자, %d바이트)을 %s%s"
+                      keeper_name assessment characters (String.length row.text)
+                      (Masc_tui_clipboard.copy_outcome_text_korean outcome) unreadable
+                  else
+                    let assessment =
+                      if dropped > 0 then "latest readable reply" else "latest reply"
+                    in
+                    let unreadable =
+                      if dropped > 0 then
+                        Printf.sprintf "; %s could not be read"
+                          (Masc_tui_message_layout.count_noun dropped "saved row")
+                      else ""
+                    in
+                    Printf.sprintf "%s's %s (%d characters, %d bytes): %s%s"
+                      keeper_name assessment characters (String.length row.text)
+                      (Masc_tui_clipboard.copy_outcome_text outcome) unreadable
+                in
+                notice ~kind:Notice_reply msg));
       Drawn_changed
   | Keeper_msg (Keeper_chat_history_loaded (request, source, result)) ->
       (* The current refresh owns its slots until each has been admitted.
@@ -31241,6 +31343,7 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
              (match outcome with
               | Ok (Ok settings) ->
                   let board_sort_before = state.board_sort in
+                  let language_before = state.ui_language in
                   Masc_tui_shell.Preferences.apply_stored_picks
                     ~on_midi_soundfont:(fun v -> boot_midi_soundfont := v)
                     ~on_audio_input_device:(fun v -> boot_audio_input_device := v)
@@ -31248,6 +31351,10 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
                   (* The start-up apply runs before the terminal is taken,
                      and main sends the page then; here it is sent now. *)
                   sync_theme_page state;
+                  if state.ui_language <> language_before then begin
+                    invalidate_language_cached_views state;
+                    refresh_keeper_config_view_if_open state ~mailbox
+                  end;
                   (* The server sorts the Board, so an order read here is
                      asked for the way a pick asks for it. *)
                   if state.board_sort <> board_sort_before then
@@ -31420,8 +31527,11 @@ let drain_async_messages ?deadline_ns ?(input_pending = fun () -> false) ?(share
       let outcome = copy_text_out copy.public_copy_url in
       Terminal_write_repair.request_repaint render_schedule;
       report_action state "system"
-        ("Public link " ^ Masc_tui_clipboard.copy_outcome_text outcome
-         ^ "; origin reachability unconfirmed");
+        (if state.ui_language = Lang_ko then
+           "공개 링크를 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome ^ " · 원본 연결은 미확인"
+         else
+           "Public link " ^ Masc_tui_clipboard.copy_outcome_text outcome
+           ^ "; origin reachability unconfirmed");
       true
     end
   | Some _ | None -> changed
@@ -32730,7 +32840,10 @@ let main
   let handle_runtime_config_edit () =
     let module Edit = Masc_tui_runtime_config_edit in
     match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
+    | None, _ | _, None ->
+        report_action state "error"
+          (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
+             ~en:"config identity not loaded yet; r to reload")
     | Some workspace, Some reading ->
       let session = runtime_config_working_session reading in
       (match Masc_tui_editor.roundtrip ~restore:(fun () -> Masc_tui_shell.Terminal_session.hand_off terminal_session)
@@ -32818,7 +32931,10 @@ let main
      Enter reaches it, and the choice stays as a retained draft. *)
   let handle_memory_recall_form_open () =
     match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
+    | None, _ | _, None ->
+        report_action state "error"
+          (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
+             ~en:"config identity not loaded yet; r to reload")
     | Some _, Some reading ->
       let session = runtime_config_working_session reading in
       let module Form = Masc_tui_memory_recall_form in
@@ -32837,7 +32953,8 @@ let main
                | None -> Form.Unknown) }
       in
       (match
-         Form.open_on ~source_revision:session.base.source_revision
+         Form.open_on ~ko:(state.ui_language = Lang_ko)
+           ~source_revision:session.base.source_revision
            ~keepers:(List.map roster_entry state.keepers)
            session.text
        with
@@ -32853,29 +32970,39 @@ let main
      and conflict handling as [e]. *)
   let submit_memory_recall_form form =
     let module Edit = Masc_tui_runtime_config_edit in
+    let ko = state.ui_language = Lang_ko in
     let refuse reason =
       state.memory_recall_form <- Some (Masc_tui_memory_recall_form.refused form reason) in
     match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None -> refuse "config identity not loaded yet; r to reload"
+    | None, _ | _, None ->
+        refuse (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
+                  ~en:"config identity not loaded yet; r to reload")
     | Some workspace, Some reading ->
       let session = runtime_config_working_session reading in
       if not (Option.equal String.equal (Masc_tui_memory_recall_form.source_revision form)
                 (Some session.base.source_revision))
-      then refuse "runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 m 으로 다시 열어 주세요"
+      then refuse
+        (ui_text state
+           ~ko:"runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 m 으로 다시 열어 주세요"
+           ~en:"runtime.toml changed after this form opened. Press Esc to close and m to reopen.")
       else (
-        match Masc_tui_memory_recall_form.text_on form with
+        match Masc_tui_memory_recall_form.text_on ~ko form with
         | Error form -> state.memory_recall_form <- Some form
         | Ok text ->
           state.memory_recall_form <- None;
           if String.equal text session.text
-          then report_action state "system" "바뀐 게 없어요. 파일에 쓰지 않았어요"
+          then report_action state "system"
+            (ui_text state ~ko:"바뀐 게 없어요. 파일에 쓰지 않았어요" ~en:"No changes made; file was not written.")
           else save_runtime_config_edit_session ~workspace (Edit.edit text session))
   in
   (* [x] on the runtime.toml pane: the exclusion form, opened on the file the
      pane shows, with a stopped Keeper marked the way the recall form marks it. *)
   let handle_typesafeai_exclusion_form_open () =
     match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None -> report_action state "error" "config identity not loaded yet; r to reload"
+    | None, _ | _, None ->
+        report_action state "error"
+          (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
+             ~en:"config identity not loaded yet; r to reload")
     | Some _, Some reading ->
       let session = runtime_config_working_session reading in
       let module Form = Masc_tui_typesafeai_exclusion_form in
@@ -32891,7 +33018,8 @@ let main
                | None -> Form.Unknown) }
       in
       (match
-         Form.open_on ~source_revision:session.base.source_revision
+         Form.open_on ~ko:(state.ui_language = Lang_ko)
+           ~source_revision:session.base.source_revision
            ~keepers:(List.map roster_entry state.keepers)
            session.text
        with
@@ -32904,21 +33032,28 @@ let main
   let submit_typesafeai_exclusion_form form =
     let module Edit = Masc_tui_runtime_config_edit in
     let module Form = Masc_tui_typesafeai_exclusion_form in
+    let ko = state.ui_language = Lang_ko in
     let refuse reason = state.typesafeai_exclusion_form <- Some (Form.refused form reason) in
     match Masc_tui_types.runtime_config_workspace state, state.runtime_config_view with
-    | None, _ | _, None -> refuse "config identity not loaded yet; r to reload"
+    | None, _ | _, None ->
+        refuse (ui_text state ~ko:"설정 신원을 아직 불러오지 못했어요 · r로 다시 읽기"
+                  ~en:"config identity not loaded yet; r to reload")
     | Some workspace, Some reading ->
       let session = runtime_config_working_session reading in
       if not (Option.equal String.equal (Form.source_revision form)
                 (Some session.base.source_revision))
-      then refuse "runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 x 로 다시 열어 주세요"
+      then refuse
+        (ui_text state
+           ~ko:"runtime.toml 이 폼을 연 뒤에 바뀌었어요. Esc 로 닫고 x 로 다시 열어 주세요"
+           ~en:"runtime.toml changed after this form opened. Press Esc to close and x to reopen.")
       else (
-        match Form.text_on form with
+        match Form.text_on ~ko form with
         | Error form -> state.typesafeai_exclusion_form <- Some form
         | Ok text ->
           state.typesafeai_exclusion_form <- None;
           if String.equal text session.text
-          then report_action state "system" "바뀐 게 없어요. 파일에 쓰지 않았어요"
+          then report_action state "system"
+            (ui_text state ~ko:"바뀐 게 없어요. 파일에 쓰지 않았어요" ~en:"No changes made; file was not written.")
           else save_runtime_config_edit_session ~workspace (Edit.edit text session))
   in
   let open_runtime_model_settings runtime_id =
@@ -34829,9 +34964,12 @@ Use relative paths for resources already held in the package. -->
         | Some (Image_cells {ic_copy_path=Some path;_}), Some (Key ("y" | "Y"))
             when state.image_open && not state.msx_open ->
             if keep_pending_image_copy path then
+              let outcome = copy_reference render_schedule path in
               report_action state "system"
-                ("Saved image path "
-                 ^ Masc_tui_clipboard.copy_outcome_text (copy_reference render_schedule path))
+                (if state.ui_language = Lang_ko then
+                   "저장한 이미지 경로를 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
+                 else
+                   "Saved image path " ^ Masc_tui_clipboard.copy_outcome_text outcome)
             else update_image_link_card state ~path "The saved copy is no longer available";
             true
         | Some (Image_cells ({ic_copy_path=Some path;ic_copy_page=Some url;
@@ -34955,12 +35093,13 @@ Use relative paths for resources already held in the package. -->
            | Masc.Machine_lane.Dos -> open_msx_spectator state ~mailbox:async_messages)
       | Some name when room_focused ->
           Option.iter (fun room ->
+            let ko = state.ui_language = Lang_ko in
             let room, intent =
               if not room_visible && not (List.mem name ["esc"; "tab"; "\t"]) then room, Masc_tui_play_room.Repaint
               else match input with
-                | Some (Pasted paste) -> Masc_tui_play_room.paste room paste.Masc_tui_paste.text, Masc_tui_play_room.Repaint
+                | Some (Pasted paste) -> Masc_tui_play_room.paste ~ko room paste.Masc_tui_paste.text, Masc_tui_play_room.Repaint
                 | Some (Key _ | (Graphics_reply _ | (Mouse_left_press (_, _) | (Mouse_left_drag (_, _) | (Mouse_left_release (_, _) | Mouse_wheel (_, _, _))))))
-                | None -> Masc_tui_play_room.key room name in
+                | None -> Masc_tui_play_room.key ~ko room name in
             state.play_room <- Some room;
             (match intent with Repaint -> () | Send -> send_play_room state ~mailbox:async_messages)) state.play_room;
           render_spectator state
@@ -35226,12 +35365,15 @@ Use relative paths for resources already held in the package. -->
            with
            | Some text ->
                let outcome = copy_reference render_schedule text in
+               let line_count = List.length (Masc_tui_pane_selection.spans selection) in
                report_action state "system"
-                 (Printf.sprintf "Selection of %s %s"
-                    (Masc_tui_message_layout.count_noun
-                       (List.length (Masc_tui_pane_selection.spans selection))
-                       "line")
-                    (Masc_tui_clipboard.copy_outcome_text outcome))
+                 (if state.ui_language = Lang_ko then
+                    Printf.sprintf "선택한 %d줄을 %s" line_count
+                      (Masc_tui_clipboard.copy_outcome_text_korean outcome)
+                  else
+                    Printf.sprintf "Selection of %s %s"
+                      (Masc_tui_message_layout.count_noun line_count "line")
+                      (Masc_tui_clipboard.copy_outcome_text outcome))
            | None -> ())
        | Masc_tui_pane_selection.Click _ | Masc_tui_pane_selection.Nothing -> ());
       let presented_play = play_card_of_reader (!presented).reader in
@@ -35538,8 +35680,12 @@ Use relative paths for resources already held in the package. -->
        | Some (Pasted paste) when Option.is_some state.account_login ->
            if text_target = Some Text_account_login then
              Option.iter (fun view ->
+               view.Masc_tui_account_login.ko <- state.ui_language = Lang_ko;
                if paste.Masc_tui_paste.dropped > 0 then
-                 view.Masc_tui_account_login.notice <- "붙여넣기 크기를 초과했습니다. 입력을 나눠 다시 전달하세요."
+                 view.Masc_tui_account_login.notice <-
+                   ui_text state
+                     ~ko:"붙여넣기 크기를 초과했습니다. 입력을 나눠 다시 전달하세요."
+                     ~en:"Paste exceeded size limit. Split the input and send it again."
                else Masc_tui_account_login.paste view paste.Masc_tui_paste.text)
                state.account_login
        | Some (Pasted paste) when Option.is_some text_target ->
@@ -36819,7 +36965,10 @@ Use relative paths for resources already held in the package. -->
                 let outcome =
                   copy_reference render_schedule (Masc_tui_play_card.link card) in
                 report_action state "system"
-                  ("Invite link " ^ Masc_tui_clipboard.copy_outcome_text outcome)
+                  (if state.ui_language = Lang_ko then
+                     "초대 링크를 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
+                   else
+                     "Invite link " ^ Masc_tui_clipboard.copy_outcome_text outcome)
             | ("j" | "down"), Some _ ->
                 state.play_invite_scroll <- Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:1
             | ("k" | "up"), Some _ ->
@@ -36838,6 +36987,7 @@ Use relative paths for resources already held in the package. -->
        | Some key when Option.is_some state.account_login ->
            (match state.account_login with
             | Some view ->
+              view.Masc_tui_account_login.ko <- state.ui_language = Lang_ko;
               if not compact_viewport || key="esc" then
                 launch_account_login_action state ~mailbox:async_messages view (Masc_tui_account_login.key view key)
             | None -> ())
@@ -37533,10 +37683,12 @@ Use relative paths for resources already held in the package. -->
                   state.runtime_account_form <- None; state.runtime_form_save_focus <- None
               | Masc_tui_runtime_account_form.Copy (form, command) ->
                   state.runtime_account_form <- Some form;
+                  let outcome = copy_reference render_schedule command in
                   report_action state "system"
-                    ("로그인 명령을 "
-                     ^ Masc_tui_clipboard.copy_outcome_text_korean
-                         (copy_reference render_schedule command))
+                    (if state.ui_language = Lang_ko then
+                       "로그인 명령을 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
+                     else
+                       "Login command " ^ Masc_tui_clipboard.copy_outcome_text outcome)
               | Masc_tui_runtime_account_form.Submitted form ->
                   (match begin_runtime_form_save state ~draft:(Account_form_draft form)
                       ~started_ns:(Mtime_clock.elapsed_ns ()) with
@@ -37962,7 +38114,11 @@ Use relative paths for resources already held in the package. -->
             | "y" -> (match Masc_tui_board_reader.source reader with
                 | Ok source ->
                     let outcome = copy_reference render_schedule source in
-                    report_action state "system" ("Original attachment " ^ Masc_tui_clipboard.copy_outcome_text outcome)
+                    report_action state "system"
+                      (if state.ui_language = Lang_ko then
+                         "첨부 원본을 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
+                       else
+                         "Original attachment " ^ Masc_tui_clipboard.copy_outcome_text outcome)
                 | Error error -> report_action state "error" error)
             | "s" -> use_board_read state ~mailbox:async_messages ~action:Save_board_original
             | "o" ->
@@ -38257,7 +38413,11 @@ Use relative paths for resources already held in the package. -->
                 (match state.link_modal_url with
                  | Some url ->
                      let outcome = copy_reference render_schedule url in
-                     report_action state "system" ("URL " ^ Masc_tui_clipboard.copy_outcome_text outcome ^ ": " ^ url)
+                     report_action state "system"
+                       (if state.ui_language = Lang_ko then
+                          "URL을 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome ^ ": " ^ url
+                        else
+                          "URL " ^ Masc_tui_clipboard.copy_outcome_text outcome ^ ": " ^ url)
                  | None -> ())
             | "r" | "R" ->
                 (match state.link_modal_url with
@@ -38768,7 +38928,7 @@ Use relative paths for resources already held in the package. -->
                      state.runtime_params_notice <- None;
                      goto_surface state ~mailbox:async_messages Config
                  | Some (_, Masc_tui_palette.Palette_ui_language lang) ->
-                     apply_ui_language state lang
+                     apply_ui_language state ~mailbox:async_messages lang
                  | Some (_, Masc_tui_palette.Palette_chat keeper_name) ->
                      enter_keeper_chat ~return_to:Keeper_chat_return_list state ~mailbox:async_messages
                        ~keeper_name ~drain_queue:(fun () ->
@@ -39305,7 +39465,11 @@ Use relative paths for resources already held in the package. -->
                      Option.iter
                        (fun context ->
                          let outcome = copy_reference render_schedule context in
-                         report_action state "system" ("Browser history context " ^ Masc_tui_clipboard.copy_outcome_text outcome))
+                         report_action state "system"
+                           (if state.ui_language = Lang_ko then
+                              "브라우저 기록 맥락을 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
+                            else
+                              "Browser history context " ^ Masc_tui_clipboard.copy_outcome_text outcome))
                        (Browser_history.context history)
                  | "j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" ->
                      let terminal_rows, cols = get_terminal_size () in
@@ -39448,7 +39612,11 @@ Use relative paths for resources already held in the package. -->
                      (match scene_context view with
                       | Some context ->
                           let outcome = copy_reference render_schedule context in
-                          report_action state "system" ("Browser element context " ^ Masc_tui_clipboard.copy_outcome_text outcome)
+                          report_action state "system"
+                            (if state.ui_language = Lang_ko then
+                               "브라우저 요소 맥락을 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
+                             else
+                               "Browser element context " ^ Masc_tui_clipboard.copy_outcome_text outcome)
                       | None -> ())
                  | "\r" | "\n" | "enter" when not (busy view) ->
                      (match view.scene, selected_scene_target view with
@@ -41448,10 +41616,16 @@ Use relative paths for resources already held in the package. -->
            (match presented_surface_reference () with
             | Some reference ->
                 let outcome = copy_reference render_schedule reference in
-                report_action state "system" (reference ^ " " ^ Masc_tui_clipboard.copy_outcome_text outcome)
+                report_action state "system"
+                  (if state.ui_language = Lang_ko then
+                     reference ^ " · " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
+                   else
+                     reference ^ " " ^ Masc_tui_clipboard.copy_outcome_text outcome)
             | None when state.view = Approvals ->
                 answer_presented_approval Confirm
-            | None -> report_action state "system" "nothing on this surface has a link")
+            | None ->
+                report_action state "system"
+                  (ui_text state ~ko:"이 화면에는 복사할 링크가 없습니다" ~en:"nothing on this surface has a link"))
        | Some "y" ->
            (match state.view with
             | Approvals -> answer_presented_approval Confirm
@@ -41462,16 +41636,28 @@ Use relative paths for resources already held in the package. -->
                  | Ok (label, source) ->
                      let outcome = copy_reference render_schedule source in
                      report_action state "system"
-                       (Printf.sprintf "%s source (%d bytes) %s"
-                          label (String.length source) (Masc_tui_clipboard.copy_outcome_text outcome)))
+                       (if state.ui_language = Lang_ko then
+                          Printf.sprintf "%s 원본 (%d바이트)을 %s"
+                            label (String.length source)
+                            (Masc_tui_clipboard.copy_outcome_text_korean outcome)
+                        else
+                          Printf.sprintf "%s source (%d bytes) %s"
+                            label (String.length source)
+                            (Masc_tui_clipboard.copy_outcome_text outcome)))
             | Code ->
                 (match Masc_tui_code_results.copy_file_source state with
                  | Error detail -> report_action state "error" detail
                  | Ok (path, source) ->
                      let outcome = copy_reference render_schedule source in
                      report_action state "system"
-                       (Printf.sprintf "%s source (%d bytes) %s"
-                          path (String.length source) (Masc_tui_clipboard.copy_outcome_text outcome)))
+                       (if state.ui_language = Lang_ko then
+                          Printf.sprintf "%s 원본 (%d바이트)을 %s"
+                            path (String.length source)
+                            (Masc_tui_clipboard.copy_outcome_text_korean outcome)
+                        else
+                          Printf.sprintf "%s source (%d bytes) %s"
+                            path (String.length source)
+                            (Masc_tui_clipboard.copy_outcome_text outcome)))
             | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Planning | Schedules
             | Verification | Fusion | Repositories | Changes | Connectors | Runtime | Config
             | Tools | System_logs | Keepers _ -> ())
@@ -43781,7 +43967,11 @@ Use relative paths for resources already held in the package. -->
        | Some "i" | Some "I"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets
-           then report_action state "system" "런타임 프롬프트 자산에는 기록된 모델 입력이 없습니다"
+           then
+             report_action state "system"
+               (ui_text state
+                  ~ko:"런타임 프롬프트 자산에는 기록된 모델 입력이 없습니다"
+                  ~en:"Runtime prompt assets have no recorded model input")
            else handle_librarian_input_read ()
        | Some "p" | Some "P"
          when state.view = Runtime
@@ -44036,7 +44226,9 @@ Use relative paths for resources already held in the package. -->
                 (match state.config_pane with
                  | Config_prompts ->
                    if state.prompts_show_runtime_assets
-                   then report_action state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
+                   then
+                     report_action state "system"
+                       (ui_text state ~ko:"런타임 프롬프트 자산은 읽기 전용입니다" ~en:"Runtime prompt assets are read-only")
                    else handle_prompt_edit ()
                  | Config_runtime -> handle_runtime_config_edit ()
                  | Config_params ->
@@ -44101,7 +44293,9 @@ Use relative paths for resources already held in the package. -->
        | Some "x" | Some "X"
          when state.view = Config && state.config_pane = Config_prompts ->
            if state.prompts_show_runtime_assets
-           then report_action state "system" "런타임 프롬프트 자산은 읽기 전용입니다"
+           then
+             report_action state "system"
+               (ui_text state ~ko:"런타임 프롬프트 자산은 읽기 전용입니다" ~en:"Runtime prompt assets are read-only")
            else handle_prompt_clear ()
        (* [a] on the runtime.toml pane: one more account of a Claude Code,
           Codex, Antigravity or Muse provider the file already declares. The status
@@ -44161,8 +44355,9 @@ Use relative paths for resources already held in the package. -->
            state.prompts_librarian_input_loading <- false;
            report_action state "system"
              (if state.prompts_show_fragments then
-                "Prompt 목록에 내부 조각을 표시합니다"
-             else "Prompt 목록에 주 프롬프트만 표시합니다")
+                ui_text state ~ko:"프롬프트 목록에 내부 조각을 표시합니다" ~en:"Showing internal fragments in Prompts"
+              else
+                ui_text state ~ko:"프롬프트 목록에 주 프롬프트만 표시합니다" ~en:"Showing primary prompts only in Prompts")
        | Some "o" | Some "O"
          when state.view = Config && state.config_pane = Config_prompts ->
            state.prompts_show_runtime_assets <- not state.prompts_show_runtime_assets;
@@ -44173,8 +44368,9 @@ Use relative paths for resources already held in the package. -->
            state.prompts_librarian_input_loading <- false;
            report_action state "system"
              (if state.prompts_show_runtime_assets then
-                "읽기 전용 런타임 프롬프트 자산을 표시합니다"
-              else "재정의 가능한 프롬프트 레지스트리를 표시합니다")
+                ui_text state ~ko:"읽기 전용 런타임 프롬프트 자산을 표시합니다" ~en:"Showing read-only runtime prompt assets"
+              else
+                ui_text state ~ko:"재정의 가능한 프롬프트 레지스트리를 표시합니다" ~en:"Showing overridable prompt registry")
        | Some "b"
          when state.view = Connectors
                || (state.view = Keepers Keeper_detail

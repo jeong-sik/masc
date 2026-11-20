@@ -29,8 +29,8 @@ val retire_read : t -> t
 (** Release a pending [Read] whose reply will be discarded because the
     workspace reading that issued it was retired; the next poll reads again.
     A pending [Say] or [Leave] keeps its receipt. *)
-val key : t -> string -> t * intent
-val paste : t -> string -> t
+val key : ?ko:bool -> t -> string -> t * intent
+val paste : ?ko:bool -> t -> string -> t
 (** [now] is an instant on the loop's clock, the clock [receive] takes. *)
 val poll : t -> now:Masc_tui_wake.Mono.t -> machine:Masc.Machine_lane.t -> t * request option
 (** A successful active Read or Say has no periodic successor. A failed Read
@@ -38,7 +38,7 @@ val poll : t -> now:Masc_tui_wake.Mono.t -> machine:Masc.Machine_lane.t -> t * r
     trailing Read. An inactive view retries an unconfirmed leave at the normal
     polling cadence until a successful response confirms that presence has been
     removed. *)
-val send : t -> machine:Masc.Machine_lane.t -> t * request option
+val send : ?ko:bool -> t -> machine:Masc.Machine_lane.t -> t * request option
 (** A new send transfers the composer to a separate pending receipt and clears
     the composer for the next message. An unconfirmed send keeps its client,
     id, machine and text even
@@ -48,7 +48,7 @@ val send : t -> machine:Masc.Machine_lane.t -> t * request option
     remains uncertain and cannot discard the receipt. *)
 val request_json : request -> Yojson.Safe.t
 val receive :
-  ?viewer:string -> t -> request -> now:Masc_tui_wake.Mono.t ->
+  ?ko:bool -> ?viewer:string -> t -> request -> now:Masc_tui_wake.Mono.t ->
   (Masc.Play_room.snapshot, string) result -> t
 (** [viewer] is the authenticated response principal, committed only with a
     successful response owned by this request. It identifies local messages. *)

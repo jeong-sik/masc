@@ -66,12 +66,14 @@ let scroll t delta = match t.viewport with
       let position = if next = viewport.last_top then Latest else
         match List.nth_opt viewport.anchors next with Some anchor -> Anchored anchor | None -> Latest in
       {t with position}
-let paste t text =
+let paste ?(ko = true) t text =
   let text = Masc.Tui_terminal_text.sanitize_terminal_text text in
   if String.length t.draft + String.length text > 4096 then
-    {t with notice = Some "대화는 UTF-8 4096바이트까지 보낼 수 있어요."}
+    {t with notice = Some
+       (if ko then "대화는 UTF-8 4096바이트까지 보낼 수 있어요."
+        else "Chat messages are limited to 4096 UTF-8 bytes.")}
   else {t with draft = t.draft ^ text}
-let key t = function
+let key ?(ko = true) t = function
   | "\r" | "\n" | "enter" -> t, Send
   | "esc" | "\t" | "tab" -> {t with focused = false}, Repaint
   | "\127" | "\b" | "backspace" -> {t with draft = Layout.drop_last_utf8_scalar t.draft}, Repaint
@@ -86,7 +88,7 @@ let key t = function
   | "end" -> {t with before = None; next_read = Now; position = Latest; viewport = None}, Repaint
   | text when String.length text > 0 && String.is_valid_utf_8 text
       && (String.length text = 1 || Char.code text.[0] >= 128)
-      && not (String.exists (fun c -> Char.code c < 32 || Char.code c = 127) text) -> paste t text, Repaint
+      && not (String.exists (fun c -> Char.code c < 32 || Char.code c = 127) text) -> paste ~ko t text, Repaint
   | _ -> t, Repaint
 let start t machine operation =
   let request = {ticket = ref (); client = t.client; machine; operation} in
@@ -103,14 +105,21 @@ let poll t ~now ~machine =
     if t.joined && read_due t ~now then start t machine Leave else t, None
   else if read_due t ~now then start t machine (Read t.before)
   else t, None
-let send t ~machine =
+let send ?(ko = true) t ~machine =
   if not t.active || Option.is_some t.pending then
-    {t with notice = Some "읽거나 보내는 중이에요. 초안은 남겨 두었어요."}, None
+    {t with notice = Some
+       (if ko then "읽거나 보내는 중이에요. 초안은 남겨 두었어요."
+        else "Reading or sending in progress; your draft is kept.")}, None
   else if Option.is_none t.retry && String.trim t.draft = "" then t, None
   else
     let sending, draft, notice = match t.retry with
-      | Some sending -> sending, t.draft, "이전 전송을 확인하는 중이에요. 새 초안은 남겨 두어요."
-      | None -> {id = Random_id.hex ~bytes:16; machine; text = t.draft}, "", "보내는 중" in
+      | Some sending ->
+          sending, t.draft,
+          (if ko then "이전 전송을 확인하는 중이에요. 새 초안은 남겨 두어요."
+           else "Confirming previous send; your new draft is kept.")
+      | None ->
+          {id = Random_id.hex ~bytes:16; machine; text = t.draft}, "",
+          (if ko then "보내는 중" else "Sending") in
     start {t with draft; retry = Some sending; notice = Some notice} sending.machine (Say sending)
 let request_json request =
   let machine = match request.machine with Masc.Machine_lane.Msx -> "msx" | Dos -> "dos" in
@@ -126,7 +135,7 @@ type failure = Unanswered of string | Kept_back of string
 (* The wait before a failed read, or an unconfirmed leave, is tried again. *)
 let retry_s = 2.
 
-let settle ?viewer t request ~now result = match t.pending with
+let settle ?(ko = true) ?viewer t request ~now result = match t.pending with
   | None -> t
   | Some current when current.ticket != request.ticket -> t
   | Some _ ->
@@ -150,22 +159,28 @@ let settle ?viewer t request ~now result = match t.pending with
     match request.operation, result with
     | Leave, Ok _ -> {t with joined = false}
     | Leave, Error (Unanswered detail) ->
-        {t with notice = Some ("공용 대화 나가기 확인 실패: " ^ detail)}
+        {t with notice = Some
+           ((if ko then "공용 대화 나가기 확인 실패: " else "Failed to confirm leaving room chat: ")
+            ^ detail)}
     | Leave, Error (Kept_back notice) -> {t with notice = Some notice}
     | (Read _ | Say _), Error (Unanswered detail) ->
-        {t with joined = true; notice = Some ("공용 대화 확인 실패: " ^ detail ^ " · 초안을 유지합니다.")}
+        {t with joined = true; notice = Some
+           (if ko then "공용 대화 확인 실패: " ^ detail ^ " · 초안을 유지합니다."
+            else "Room chat check failed: " ^ detail ^ " · draft kept.")}
     | (Read _ | Say _), Error (Kept_back notice) -> {t with joined = true; notice = Some notice}
     | Read before, Ok snapshot ->
         {t with joined = true; snapshot = (if before = t.before then Some snapshot else t.snapshot);
           notice = (if Option.is_none t.retry then None else t.notice)}
     | Say _, Ok snapshot ->
         let notice = if String.trim t.draft <> "" then
-            Some "전송을 확인했어요. 새 초안은 Enter로 보낼 수 있어요." else None in
+            Some (if ko then "전송을 확인했어요. 새 초안은 Enter로 보낼 수 있어요."
+                  else "Send confirmed. Press Enter to send your new draft.")
+          else None in
         {t with joined = true; snapshot = Some snapshot; retry = None; notice;
           before = None;
           position = Latest; viewport = None}
-let receive ?viewer t request ~now result =
-  settle ?viewer t request ~now (Result.map_error (fun detail -> Unanswered detail) result)
+let receive ?(ko = true) ?viewer t request ~now result =
+  settle ~ko ?viewer t request ~now (Result.map_error (fun detail -> Unanswered detail) result)
 let kept_back t request ~now notice = settle t request ~now (Error (Kept_back notice))
 let clean = Masc.Tui_terminal_text.sanitize_terminal_text
 let origin t (m : Room.message) =

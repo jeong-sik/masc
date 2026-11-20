@@ -1458,6 +1458,39 @@ let typed_selection_ignores_prefix_in_notice () =
   check int "finished phase marks zero selected rows" 0
     (List.length (List.filter fst finished_rows))
 
+let english_notices_contain_no_hangul () =
+  let has_hangul s =
+    let len = String.length s in
+    let rec loop i =
+      if i >= len then false
+      else
+        let dec = String.get_utf_8_uchar s i in
+        let cp = Uchar.to_int (Uchar.utf_decode_uchar dec) in
+        let step = Uchar.utf_decode_length dec in
+        if cp >= 0xAC00 && cp <= 0xD7A3 then true else loop (i + max 1 step)
+    in
+    loop 0
+  in
+  let t = Login.create ~ko:false "" in
+  check bool "loading notice is English" false (has_hangul t.notice);
+  ok (Login.inventory t inventory);
+  check bool "clients notice is English" false (has_hangul t.notice);
+  check bool "hints are English" false (has_hangul (Login.hints t));
+  Login.save_failed t "HTTP 502";
+  check bool "save_failed notice is English" false (has_hangul t.notice);
+  t.phase <- Login.Models;
+  t.models <- [ { (model 0) with context = Some 32768; tools = Some true } ];
+  t.selected_models <- [];
+  ignore (Login.key t "a");
+  check bool "select-all notice is English" false (has_hangul t.notice);
+  ignore (Login.key t "a");
+  check bool "deselect-all notice is English" false (has_hangul t.notice);
+  match t.providers with
+  | provider :: _ ->
+      check bool "removed_notice ~ko:false is English" false
+        (has_hangul (Login.removed_notice ~ko:false provider (Some "/tmp/store")))
+  | [] -> fail "expected at least one provider"
+
 let () = run "TUI account login" ["workflow",[
   test_case "select-all on Antigravity batches unknown contexts cleanly" `Quick select_all_antigravity_batch;
   test_case "non-Antigravity select-all and in-progress indicator clock" `Quick select_all_non_antigravity_and_progress_clock;
@@ -1509,4 +1542,5 @@ let () = run "TUI account login" ["workflow",[
   test_case "a login address wider than the pane wraps whole" `Quick a_login_address_wraps_whole;
   test_case "removal from the list" `Quick removal_from_the_list;
   test_case "refused removal" `Quick refused_removal;
-  test_case "typed selection ignores chevron prefix in notice" `Quick typed_selection_ignores_prefix_in_notice]]
+  test_case "typed selection ignores chevron prefix in notice" `Quick typed_selection_ignores_prefix_in_notice;
+  test_case "english login notices contain no Hangul" `Quick english_notices_contain_no_hangul]]

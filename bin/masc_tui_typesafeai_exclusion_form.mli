@@ -24,7 +24,7 @@ type roster_entry =
 
 type t
 
-val open_on : ?source_revision:string -> keepers:roster_entry list -> string -> (t, string) result
+val open_on : ?ko:bool -> ?source_revision:string -> keepers:roster_entry list -> string -> (t, string) result
 (** The form on runtime.toml [text]. [keepers] are the Keepers the TUI knows,
     drawn in name order; names the file excludes that are not among them stay
     in the list after them, marked, so a name that excludes nobody can be
@@ -65,7 +65,7 @@ val change : t -> change
 (** The decision {!text_on} makes about the choice, without writing. A list
     that names the same Keepers in another order is {!Unchanged}. *)
 
-val text_on : t -> (string, t) result
+val text_on : ?ko:bool -> t -> (string, t) result
 (** The text the form was opened on, with the choice written into
     [\[typesafeai\]]. Every line outside [excluded_keepers] stays as it was.
 

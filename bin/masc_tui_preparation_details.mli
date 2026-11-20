@@ -3,6 +3,10 @@ type target
 val target :
   journal:Masc_tui_keeper_chat_log.t -> execution_id:string -> reply_turn_ref:string option ->
   (target, string) result
+val target_for :
+  ko:bool ->
+  journal:Masc_tui_keeper_chat_log.t -> execution_id:string -> reply_turn_ref:string option ->
+  (target, string) result
 (** Autonomous journals supply their exact Turn_ref. Direct journals require a
     reply or exact terminal operation outcome reference and the actual execution
     ID, including batch binding. Two recorded references must agree.

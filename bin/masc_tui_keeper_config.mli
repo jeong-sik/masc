@@ -135,7 +135,7 @@ val sandbox_patch : profile:Keeper_sandbox_config.sandbox_profile -> Yojson.Safe
     other profiles clear the endpoint in the same CAS patch. [None] means the
     observed combination already matches. Invalid observations stay errors. *)
 
-val view_lines : sanitize:(string -> string) -> Yojson.Safe.t -> string list
+val view_lines : ?ko:bool -> sanitize:(string -> string) -> Yojson.Safe.t -> string list
 (** The whole Settings pane, styled. Every row carries a glyph saying whether
     [e] reaches it, and the field count in the heading comes from
     [editable_snapshot] so it matches what the editor actually opens.

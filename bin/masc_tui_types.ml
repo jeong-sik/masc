@@ -16087,7 +16087,8 @@ let suspend_workspace_readings state =
       state.identity_login_reads;
   retire_keeper_message_search state;
   stop_waiting_for_memory_recall_standing state
-    "서버 신원 확인이 끊겨서 읽지 못했어요";
+    (if state.ui_language = Lang_ko then "서버 신원 확인이 끊겨서 읽지 못했어요"
+     else "Could not read: server identity check was interrupted");
   state.workspace_read_authority <- ref ();
   state.queue_panel <- Option.map (fun panel ->
     {panel with qp_reading=Queue_unavailable; qp_observation=None;
@@ -18276,7 +18277,9 @@ let completed_turn_row state (request : Masc_tui_keeper_chat_projection.request)
     in
     Some
       ( role
-      , Masc_tui_keeper_chat_transcript.turn_status_text ~reply:completed.reply
+      , Masc_tui_keeper_chat_transcript.turn_status_text_for
+          ~ko:(state.ui_language = Lang_ko)
+          ~reply:completed.reply
           ~turn_ref:completed.turn_ref completed.turn_outcome )
 ;;
 
@@ -27735,7 +27738,8 @@ let keeper_message_preparation_selection (state : state) =
       | Waiting | Working -> None
       | Stream_ended | Stream_failed _ ->
         if Option.is_some (keeper_message_preparation_owner state transcript) then None
-        else Some (transcript, Masc_tui_preparation_details.target ~journal:log.tl_log
+        else Some (transcript, Masc_tui_preparation_details.target_for
+          ~ko:(state.ui_language = Lang_ko) ~journal:log.tl_log
           ~execution_id:(Transcript.execution_id transcript)
           ~reply_turn_ref:(Option.map (fun reply -> reply.Transcript.reply_turn_ref) (Transcript.reply transcript)))
 ;;

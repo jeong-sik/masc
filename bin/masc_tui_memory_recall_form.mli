@@ -42,7 +42,7 @@ type server =
 
 type t
 
-val open_on : ?source_revision:string -> keepers:roster_entry list -> string -> (t, string) result
+val open_on : ?ko:bool -> ?source_revision:string -> keepers:roster_entry list -> string -> (t, string) result
 (** The form on runtime.toml [text]. [keepers] are the Keepers the TUI knows;
     names the file lists that are not among them stay in the list, marked.
     A file that switched recall off by hand keeps its list of Keepers, and
@@ -126,7 +126,7 @@ val change : t -> change
     try the write: for a [\[typesafeai\]] the line editor cannot change,
     {!text_on} still refuses a choice this calls {!Changed}. *)
 
-val text_on : t -> (string, t) result
+val text_on : ?ko:bool -> t -> (string, t) result
 (** The text the form was opened on, with the form's choice written into
     [\[typesafeai\]]. Every line outside the three keys stays as it was.
 

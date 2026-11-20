@@ -803,23 +803,39 @@ let skill_activity_of_tool (activity : tool_activity) =
    and the old word, 증거 없음, read as a verdict on the skill when it was a
    fact about the pane. [Skill_evidence_unavailable] is a skill record the
    server sent in a shape this build cannot read. *)
-let skill_state_label ?invocation state =
+let skill_state_label ?(ko = true) ?invocation state =
   (* An instruction skill is read; a composition is run. The three states
      before delivery say which, and the rest are the same for both. *)
-  let read, done_ =
-    match invocation with
-    | Some (Composition_run _) -> "실행 중", "실행됨"
-    | Some Instruction_read | None -> "읽는 중", "읽음"
-  in
-  match state with
-  | Skill_calling -> read
-  | Skill_served_pending -> done_ ^ ", 전달 확인 중"
-  | Skill_served_only -> done_ ^ ", 전달 기록 없음"
-  | Skill_delivered -> "전달됨, 도구 안 씀"
-  | Skill_used -> "전달됨, 도구 씀"
-  | Skill_failed -> "실패"
-  | Skill_evidence_missing -> "결과 못 봄"
-  | Skill_evidence_unavailable -> "기록 형식 안 맞음"
+  if ko then
+    let read, done_ =
+      match invocation with
+      | Some (Composition_run _) -> "실행 중", "실행됨"
+      | Some Instruction_read | None -> "읽는 중", "읽음"
+    in
+    match state with
+    | Skill_calling -> read
+    | Skill_served_pending -> done_ ^ ", 전달 확인 중"
+    | Skill_served_only -> done_ ^ ", 전달 기록 없음"
+    | Skill_delivered -> "전달됨, 도구 안 씀"
+    | Skill_used -> "전달됨, 도구 씀"
+    | Skill_failed -> "실패"
+    | Skill_evidence_missing -> "결과 못 봄"
+    | Skill_evidence_unavailable -> "기록 형식 안 맞음"
+  else
+    let read, done_ =
+      match invocation with
+      | Some (Composition_run _) -> "running", "ran"
+      | Some Instruction_read | None -> "reading", "read"
+    in
+    match state with
+    | Skill_calling -> read
+    | Skill_served_pending -> done_ ^ ", checking delivery"
+    | Skill_served_only -> done_ ^ ", delivery unrecorded"
+    | Skill_delivered -> "delivered, no tool used"
+    | Skill_used -> "delivered, tool used"
+    | Skill_failed -> "failed"
+    | Skill_evidence_missing -> "result not seen"
+    | Skill_evidence_unavailable -> "record format unreadable"
 
 (* Every state, in the order of the skill's life, then the three that are
    not steps of it. *)
@@ -883,26 +899,7 @@ let legend_for ~ko =
           "the stored record has no outcome field; a gap in the record, not \
            a failure"
   in
-  let skill_label_en ?invocation state =
-    let read, done_ =
-      match invocation with
-      | Some (Composition_run _) -> "running", "ran"
-      | Some Instruction_read | None -> "reading", "read"
-    in
-    match state with
-    | Skill_calling -> read
-    | Skill_served_pending -> done_ ^ ", checking delivery"
-    | Skill_served_only -> done_ ^ ", delivery unrecorded"
-    | Skill_delivered -> "delivered, no tool used"
-    | Skill_used -> "delivered, tool used"
-    | Skill_failed -> "failed"
-    | Skill_evidence_missing -> "result not seen"
-    | Skill_evidence_unavailable -> "record format unreadable"
-  in
-  let skill_label ?invocation state =
-    if ko then skill_state_label ?invocation state
-    else skill_label_en ?invocation state
-  in
+  let skill_label ?invocation state = skill_state_label ~ko ?invocation state in
   let skill_meaning =
     if ko then function
       | Skill_calling -> "모델이 스킬 읽기를 요청함 · 아직 응답 전"
@@ -979,17 +976,19 @@ let short_proof value =
    skill, then what came of it -- the Gate row's order, because the pane
    should not read left to right one way on one kind of row and the other
    way on the next. *)
-let skill_execution_label (activity : skill_activity) =
+let skill_execution_label ~ko (activity : skill_activity) =
   let module Execution = Masc.Keeper_skill_execution_projection in
   match activity.execution with
   | None -> None
   | Some (Execution.Recorded { disposition; _ }) ->
     Some (match disposition with
-      | Tool_result.Completed () -> "실행 완료"
-      | Tool_result.Deferred () -> "실행 보류"
-      | Tool_result.Failed () -> "실행 실패")
-  | Some Execution.Unrecorded -> Some "실행 결과 기록 없음"
-  | Some (Execution.Unavailable _) -> Some "실행 결과 확인 불가"
+      | Tool_result.Completed () -> if ko then "실행 완료" else "executed"
+      | Tool_result.Deferred () -> if ko then "실행 보류" else "deferred"
+      | Tool_result.Failed () -> if ko then "실행 실패" else "execution failed")
+  | Some Execution.Unrecorded ->
+    Some (if ko then "실행 결과 기록 없음" else "execution unrecorded")
+  | Some (Execution.Unavailable _) ->
+    Some (if ko then "실행 결과 확인 불가" else "execution unavailable")
 
 let skill_execution_problem (activity : skill_activity) =
   let module Execution = Masc.Keeper_skill_execution_projection in
@@ -998,18 +997,20 @@ let skill_execution_problem (activity : skill_activity) =
   | Some (Execution.Recorded { disposition = (Tool_result.Deferred () | Tool_result.Failed ()); _ })
   | Some Execution.Unrecorded | Some (Execution.Unavailable _) -> true
 
-let skill_activity_label activity =
-  let delivery = skill_state_label ?invocation:activity.invocation activity.state in
-  let lifecycle = match skill_execution_label activity with
+let skill_activity_label ?(ko = true) activity =
+  let delivery = skill_state_label ~ko ?invocation:activity.invocation activity.state in
+  let lifecycle = match skill_execution_label ~ko activity with
     | None -> delivery
     | Some execution -> execution ^ ", " ^ delivery in
-  if activity.call_failed then "호출 실패, " ^ lifecycle else lifecycle
+  if activity.call_failed then
+    (if ko then "호출 실패, " else "call failed, ") ^ lifecycle
+  else lifecycle
 
-let skill_full_rows (activity : skill_activity) =
+let skill_full_rows ?(ko = true) (activity : skill_activity) =
   let action_count = List.length activity.actions in
   let summary =
     Printf.sprintf "**%s** \xc2\xb7 **%s**%s"
-      (skill_activity_label activity)
+      (skill_activity_label ~ko activity)
       activity.skill_name
       (if action_count = 0 then ""
        else Printf.sprintf " \xc2\xb7 %s" (Masc_tui_message_layout.count_noun action_count "action"))
@@ -1067,7 +1068,7 @@ let skill_trigger_problem (activity : skill_activity) =
    tool followed is bookkeeping a reader of the chat does not act on, and
    [full] keeps it. A trigger that failed, or evidence the pane could not
    read, is said with the state's own words. *)
-let skill_compact_rows (activities : skill_activity list) =
+let skill_compact_rows ?(ko = true) (activities : skill_activity list) =
   let names =
     List.fold_left
       (fun names activity ->
@@ -1086,18 +1087,18 @@ let skill_compact_rows (activities : skill_activity list) =
         match problems with
         | [] -> ""
         | [ one ] when count = 1 ->
-            Printf.sprintf " \xc2\xb7 %s" (skill_activity_label one)
+            Printf.sprintf " \xc2\xb7 %s" (skill_activity_label ~ko one)
         | first :: _ ->
             Printf.sprintf " \xc2\xb7 %s %d"
-              (skill_activity_label first)
+              (skill_activity_label ~ko first)
               (List.length problems)
       in
       Printf.sprintf "**%s**%s%s" name times problem)
     names
 
-let skill_rows ~full (activities : skill_activity list) =
-  if full then List.concat_map skill_full_rows activities
-  else skill_compact_rows activities
+let skill_rows ?(ko = true) ~full (activities : skill_activity list) =
+  if full then List.concat_map (skill_full_rows ~ko) activities
+  else skill_compact_rows ~ko activities
 
 (* The state one row of several invocations answers to: the worst of them,
    so a block with one failed trigger among seven draws in the failure's

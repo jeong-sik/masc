@@ -433,6 +433,122 @@ let response_text_config_of_config (config : Provider_config.t) =
 
 let capabilities_of_config = Backend_openai_request.capabilities_of_config
 
+(* OpenAI Responses explicit prompt-cache breakpoint marker (GPT-5.6 / 6 / 6.2).
+   Always emit ["mode": "explicit"] (never empty [{}]) and omit ["ttl"] so the
+   breakpoint inherits the default 30m lifetime rather than triggering 2.5x 12h
+   cache writes. *)
+let explicit_cache_breakpoint = `Assoc [ "mode", `String "explicit" ]
+
+let is_breakpoint_eligible_content_type = function
+  | "input_text" | "input_image" | "input_file" -> true
+  | _ -> false
+;;
+
+let attach_breakpoint_to_part = function
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields with
+     | Some (`String part_type) when is_breakpoint_eligible_content_type part_type ->
+       Some
+         (`Assoc
+            (assoc_remove [ "prompt_cache_breakpoint" ] fields
+             @ [ "prompt_cache_breakpoint", explicit_cache_breakpoint ]))
+     | Some _ | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+let attach_breakpoint_to_last_eligible_part (parts : Yojson.Safe.t list) =
+  let rec loop acc = function
+    | [] -> None
+    | part :: rest ->
+      (match attach_breakpoint_to_part part with
+       | Some marked -> Some (List.rev rest @ (marked :: acc))
+       | None -> loop (part :: acc) rest)
+  in
+  loop [] (List.rev parts)
+;;
+
+let attach_breakpoint_to_field ~field fields =
+  match List.assoc_opt field fields with
+  | Some (`String s) ->
+    let marked_list =
+      `List
+        [ `Assoc
+            [ "type", `String "input_text"
+            ; "text", `String s
+            ; "prompt_cache_breakpoint", explicit_cache_breakpoint
+            ]
+        ]
+    in
+    let updated =
+      List.map (fun (k, v) -> if String.equal k field then k, marked_list else k, v) fields
+    in
+    Some (`Assoc updated)
+  | Some (`List parts) ->
+    Option.map
+      (fun marked_parts ->
+         let updated =
+           List.map
+             (fun (k, v) -> if String.equal k field then k, `List marked_parts else k, v)
+             fields
+         in
+         `Assoc updated)
+      (attach_breakpoint_to_last_eligible_part parts)
+  | Some (`Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None -> None
+;;
+
+(* Attach a breakpoint ONLY to schema-eligible Responses input items:
+   - [EasyInputMessage] with role [developer | system | user] (array parts of
+     [input_text | input_image | input_file], converting plain-string [content])
+   - [FunctionCallOutput] ([type = "function_call_output"], array parts of
+     [input_text | input_image | input_file], converting plain-string [output])
+   Never mark [assistant] [ResponseOutputMessage]/[output_text], [function_call],
+   [reasoning], or [input_audio] (OpenAI rejects [prompt_cache_breakpoint] on
+   [ResponseOutputText] with HTTP 400). *)
+let attach_breakpoint_to_item = function
+  | `Assoc fields ->
+    (match List.assoc_opt "type" fields, List.assoc_opt "role" fields with
+     | Some (`String "function_call_output"), _ ->
+       attach_breakpoint_to_field ~field:"output" fields
+     | (None | Some (`String "message")), Some (`String ("developer" | "system" | "user")) ->
+       attach_breakpoint_to_field ~field:"content" fields
+     | _, _ -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
+;;
+
+let attach_breakpoint_to_last_eligible_item (items : Yojson.Safe.t list) =
+  let rec loop acc = function
+    | [] -> None
+    | item :: rest ->
+      (match attach_breakpoint_to_item item with
+       | Some marked -> Some (List.rev rest @ (marked :: acc))
+       | None -> loop (item :: acc) rest)
+  in
+  loop [] (List.rev items)
+;;
+
+(* Split [messages] into [(prefix, trailing_system_context)] ONLY when
+   [messages] ends with a non-empty contiguous suffix of [System_context]
+   messages AND zero [System_context] messages appear earlier in [prefix]. *)
+let split_trailing_system_context (messages : message list) =
+  let is_system_context (m : message) =
+    match m.origin with
+    | System_context -> true
+    | Conversation
+    | Historical_system_context
+    | Recovery_instruction
+    | Tool_result_followup
+    | Agent_instruction -> false
+  in
+  let rec take_rev suffix = function
+    | m :: rest when is_system_context m -> take_rev (m :: suffix) rest
+    | rest -> List.rev rest, suffix
+  in
+  let prefix, trailing = take_rev [] (List.rev messages) in
+  match trailing with
+  | [] -> None
+  | _ :: _ -> if List.exists is_system_context prefix then None else Some (prefix, trailing)
+;;
+
 (* Output-token budget (clamp WARN included) and sampling-drop policy
    (dialect WARN included) are single-sourced with the Chat Completions
    builder; Responses only renames the budget wire field to
@@ -529,12 +645,32 @@ let build_request_artifact
       message_item ~role:"developer" [ Text s ]
     | true, (Some _ | None) | false, (Some _ | None) -> []
   in
+  let input_items, explicit_pre_ext_breakpoint_attached =
+    if
+      caps.Capabilities.supports_explicit_cache_opt_out
+      && config.cache_system_prompt
+      && not has_previous_response_id
+    then (
+      match split_trailing_system_context projected_messages with
+      | None ->
+        developer_system_items @ List.concat_map input_items_of_message projected_messages, false
+      | Some (prefix_messages, trailing_system_context) ->
+        let prefix_items =
+          developer_system_items @ List.concat_map input_items_of_message prefix_messages
+        in
+        let suffix_items = List.concat_map input_items_of_message trailing_system_context in
+        (match suffix_items with
+         | [] -> prefix_items, false
+         | _ :: _ ->
+           (match attach_breakpoint_to_last_eligible_item prefix_items with
+            | Some marked_prefix -> marked_prefix @ suffix_items, true
+            | None -> prefix_items @ suffix_items, false)))
+    else
+      developer_system_items @ List.concat_map input_items_of_message projected_messages, false
+  in
   let body =
     [ "model", `String config.model_id
-    ; ( "input"
-      , `List
-          (developer_system_items
-           @ List.concat_map input_items_of_message projected_messages) )
+    ; "input", `List input_items
     ]
   in
   let body =
@@ -555,7 +691,11 @@ let build_request_artifact
     | true, (Some _ | None) | false, (Some _ | None) -> body
   in
   let body =
-    if caps.Capabilities.supports_explicit_cache_opt_out && not config.cache_system_prompt
+    let emit_explicit_cache_mode =
+      (caps.Capabilities.supports_explicit_cache_opt_out && not config.cache_system_prompt)
+      || explicit_pre_ext_breakpoint_attached
+    in
+    if emit_explicit_cache_mode
     then ("prompt_cache_options", `Assoc [ "mode", `String "explicit" ]) :: body
     else body
   in

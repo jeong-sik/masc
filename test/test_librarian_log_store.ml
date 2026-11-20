@@ -215,6 +215,62 @@ let test_replaced_by_a_file_that_ends_in_a_fragment () =
   check string "the file is as it was" replacement (file_bytes path)
 ;;
 
+(* Every line of the file as text: where it starts and which line it is. *)
+let scan_text path =
+  match
+    Store.fold path ~init:[] ~f:(fun seen ({ at; line } : Store.scanned) ->
+      Printf.sprintf "%d: %s" at
+        (match line with
+         | Ok (Started _) -> "started"
+         | Ok (Committed { seq; _ }) -> Printf.sprintf "commit %d" seq
+         | Error Not_json -> "not JSON"
+         | Error (Malformed (_ : Masc.Keeper_memory_os_types.wire_error)) -> "malformed")
+      :: seen)
+  with
+  | Ok seen -> List.rev seen
+  | Error error -> [ Masc.Private_jsonl_scan.error_to_string error ]
+;;
+
+let test_every_line_from_the_first () =
+  let path = new_path () in
+  check (list string) "no file is no line" [] (scan_text path);
+  let first = appended path ~at_end:0 started in
+  let second = appended path ~at_end:first.new_end (committed 1) in
+  write_raw path "not json\n";
+  let after_garbage = second.new_end + String.length "not json\n" in
+  let (_ : Store.appended) = appended path ~at_end:after_garbage (committed 2) in
+  write_raw path {|{"line":"committed","seq":3|};
+  check (list string)
+    "each line with where it starts; one that does not decode is given as such; a fragment is \
+     not a line"
+    [ "0: started"
+    ; Printf.sprintf "%d: commit 1" first.new_end
+    ; Printf.sprintf "%d: not JSON" second.new_end
+    ; Printf.sprintf "%d: commit 2" after_garbage
+    ]
+    (scan_text path)
+;;
+
+(* More lines than one locked read takes. *)
+let test_scan_goes_on_past_one_read () =
+  let path = new_path () in
+  let lines = 70 in
+  let rec append_from seq at_end =
+    if seq <= lines then append_from (seq + 1) (appended path ~at_end (committed seq)).new_end
+  in
+  append_from 1 (appended path ~at_end:0 started).new_end;
+  let seen = scan_text path in
+  check int "every line is seen once" (lines + 1) (List.length seen);
+  check string "the first" "0: started" (List.hd seen);
+  let last_at =
+    List.fold_left
+      (fun total seq -> total + length_of (committed seq))
+      (length_of started)
+      (List.init (lines - 1) (fun before -> before + 1))
+  in
+  check string "the last" (Printf.sprintf "%d: commit %d" last_at lines) (List.nth seen lines)
+;;
+
 let test_path () =
   check string "beside the snapshot" "/keepers/keeper-a.memory-log.jsonl"
     (Store.path_for_keepers_dir ~keepers_dir:"/keepers" ~keeper_id:"keeper-a")
@@ -232,6 +288,10 @@ let () =
       , [ test_case "a stale end writes nothing" `Quick test_stale_end_writes_nothing
         ; test_case "a file replaced by one that ends in a fragment" `Quick
             test_replaced_by_a_file_that_ends_in_a_fragment
+        ] )
+    ; ( "scan"
+      , [ test_case "every line from the first" `Quick test_every_line_from_the_first
+        ; test_case "goes on past one read" `Quick test_scan_goes_on_past_one_read
         ] )
     ; "path", [ test_case "beside the snapshot" `Quick test_path ]
     ]

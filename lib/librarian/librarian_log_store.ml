@@ -73,6 +73,20 @@ let read_tail path =
          | Error reason -> Error (Tail_undecodable { offset; rows_end; reason })))
 ;;
 
+type scanned =
+  { at : int
+  ; line : (Log.line, undecodable) result
+  }
+
+(* A line is 8 to 10 KB (RFC §10), so one locked read holds well under a
+   megabyte. *)
+let scan_window_rows = 64
+
+let fold path ~init ~f =
+  Private_jsonl_scan.fold path ~rows_per_read:scan_window_rows ~init ~f:(fun acc ~at row ->
+    f acc { at; line = decode row })
+;;
+
 type append_error =
   | End_moved of
       { expected : int

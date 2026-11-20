@@ -351,1052 +351,6 @@ let keeper_log_row_count (state : state) =
   let _, cols = get_terminal_size () in
   List.length (Masc_tui_types.keeper_log_rows state ~cols)
 
-let recovered_paste_send_locked_for state keeper_name =
-  match keeper_name with
-  | Some target ->
-      List.exists (String.equal target) state.msg_recovered_paste_keepers
-  | None -> false
-
-let recovered_paste_send_locked state =
-  recovered_paste_send_locked_for state state.msg_target_keeper_name
-
-let discard_recovered_paste_lock state =
-  match state.msg_target_keeper_name with
-  | Some target ->
-      state.msg_recovered_paste_keepers <-
-        List.filter (fun name -> not (String.equal name target))
-          state.msg_recovered_paste_keepers
-  | None -> ()
-
-let protect_recovered_paste_for_current_keeper state =
-  match state.msg_target_keeper_name with
-  | Some target when not (recovered_paste_send_locked state) ->
-      state.msg_recovered_paste_keepers <-
-        target :: state.msg_recovered_paste_keepers
-  | Some _ | None -> ()
-
-(* Put the pasted text back into the draft where its placeholder stands.
-
-   The spill is dropped whether or not its line was still there. An operator
-   who deleted the placeholder meant to drop the paste, and a spill that
-   outlived the draft would attach itself to the next message. *)
-let inline_spilled_paste spill text =
-  expand_message_draft_spill spill text
-
-let materialise_spilled_paste state snapshot =
-  let text = inline_spilled_paste (message_spill_in_snapshot state snapshot)
-      (Masc_tui_message_input.snapshot_text snapshot) in
-  state.msg_spill <- None;
-  text
-
-(* Where this process stages a spilled paste for the keeper.
-
-   [Keeper_sandbox_config] is the same answer the server gives: it reads the
-   keeper's own TOML for the sandbox profile and returns the backend-scoped
-   root -- [.masc/playground/docker/<name>/] for a Docker keeper and
-   [.masc/playground/<name>/] for the endpoint-owned profiles (microvm,
-   remote_ssh). Working the path out here instead would be this process
-   copying a layout the server owns, and the two roots differ by a directory
-   that is easy to get right once and wrong afterwards.
-
-   "Staging" is the honest word. For Docker the root is bind-mounted into
-   the container, so the staged file is already where the keeper reads it.
-   For an endpoint-owned tree the root is only the host bookkeeping bundle
-   and the keeper cannot see it; [Keeper_paste_delivery] carries the file to
-   the endpoint's workspace root at the next turn setup, the first moment a
-   turn-owned endpoint exists. Writing here at paste time is still right:
-   the paste is durable from the moment the operator sends it, and no
-   endpoint has to be up for this process to receive it.
-
-   [None] when the root cannot be named or does not exist. A keeper that has
-   never run has no playground, and creating one from outside would be this
-   process deciding something about the keeper's own space. *)
-let keeper_staging_dir ~base_path ~keeper_name =
-  match
-    Keeper_sandbox_config.sandbox_profile_of_agent ~base_path
-      ~agent_name:keeper_name
-  with
-  (* [sandbox_profile_of_agent] raises on a keeper TOML it cannot read, and
-     [Sys.is_directory] raises on a path that went away between the two
-     calls. Neither is a reason to lose the paste -- the caller falls back to
-     sending the text. *)
-  | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-  | exception _ -> None
-  | profile -> (
-      let dir =
-        Filename.concat base_path
-          (Keeper_sandbox_config.host_root_rel_of_profile profile keeper_name)
-      in
-      match Sys.file_exists dir && Sys.is_directory dir with
-      | true -> Some (dir, profile)
-      | false -> None
-      | exception Sys_error _ -> None)
-
-(* Publish a completed temporary file without replacing an earlier paste.
-   Keeper paste delivery enumerates only [Keeper_paste_naming] names, so it
-   cannot pick up the temporary file while it is being written. *)
-let write_file path contents =
-  let drop_tmp tmp_path = try Sys.remove tmp_path with Sys_error _ -> () in
-  match
-    Filename.temp_file ~temp_dir:(Filename.dirname path) "spill-write-" ".tmp"
-  with
-  | exception Sys_error detail -> Error detail
-  | tmp_path ->
-      Fun.protect ~finally:(fun () -> drop_tmp tmp_path) (fun () ->
-        let written = match open_out_bin tmp_path with
-          | exception Sys_error detail -> Error detail
-          | channel ->
-              (match Fun.protect ~finally:(fun () -> close_out_noerr channel)
-                  (fun () -> output_string channel contents; close_out channel) with
-               | () -> Ok ()
-               | exception Sys_error detail -> Error detail) in
-        match written with
-        | Error _ as error -> error
-        | Ok () ->
-            (match Unix.link tmp_path path with
-             | () -> Ok ()
-             | exception Unix.Unix_error (error, _, _) ->
-                 Error (Unix.error_message error)))
-
-(* Stage a spilled paste as a file the keeper will be able to read, and put
-   a line naming that file where the placeholder stands.
-
-   Measured before it was built: a keeper reads paths relative to its own
-   sandbox root and refuses anything outside it, so [/tmp] comes back as
-   [path_outside_sandbox] and a workspace-relative path is simply not found.
-   The file goes into the root the server names for this keeper and the
-   message names it bare.
-
-   For Docker that root is the bind-mounted workspace itself, so the file is
-   already where the keeper reads it. For the endpoint-owned profiles it is
-   the host bookkeeping bundle -- staging, not the destination -- and
-   [Keeper_paste_delivery] writes it through the remote lane at the next
-   turn setup. The keeper-facing line ("It is in your working directory")
-   becomes true before that turn's first Read.
-
-   Every failure falls back to sending the text itself. A paste that reached
-   the keeper as a large message is worse than one it can read off disk; a
-   paste that reached it as neither is the thing this must not do. *)
-let place_spilled_paste state ~keeper_name ~staging_dir saved =
-  let spill = saved.sms_paste in
-  let inline () =
-    Masc_tui_message_input.replace_owned saved.sms_view ~replacement:spill.text
-  in
-  let pointed = Masc_tui_message_input.replace_owned saved.sms_view
-      ~replacement:(Masc_tui_paste_spill.message_line spill) in
-    match staging_dir with
-    | None ->
-        report_action state "system"
-          (Printf.sprintf
-             "%s has no workspace on disk; sending the pasted text in \
-              the message instead"
-             (Keeper_chat.terminal_safe_text keeper_name));
-        inline ()
-    | Some (dir, profile) -> (
-        let path =
-          Filename.concat dir spill.Masc_tui_paste_spill.file_name
-        in
-        match write_file path spill.Masc_tui_paste_spill.text with
-        | Error detail ->
-            report_action state "error"
-              (Printf.sprintf
-                 "Could not write the pasted text for %s (%s); sending \
-                  it in the message instead"
-                 (Keeper_chat.terminal_safe_text keeper_name) detail);
-            inline ()
-        | Ok () ->
-            (match profile with
-             | Keeper_sandbox_config.Docker ->
-                 (* The staged directory is the bind-mounted workspace
-                    itself: written is delivered. *)
-                 report_action state "system"
-                   (Printf.sprintf
-                      "Wrote %s (%d bytes) into %s's workspace"
-                      spill.Masc_tui_paste_spill.file_name
-                      spill.Masc_tui_paste_spill.bytes
-                      (Keeper_chat.terminal_safe_text keeper_name))
-             | Keeper_sandbox_config.Micro_vm
-             | Keeper_sandbox_config.Remote_ssh ->
-                 report_action state "system"
-                   (Printf.sprintf
-                      "Staged %s (%d bytes) for %s; it lands in the \
-                       workspace when the next turn starts"
-                      spill.Masc_tui_paste_spill.file_name
-                      spill.Masc_tui_paste_spill.bytes
-                      (Keeper_chat.terminal_safe_text keeper_name)));
-            pointed)
-
-type prepared_spill = {
-  ps_spill : message_spill;
-  ps_source : saved_message_spill;
-  ps_directory : (string * Keeper_sandbox_config.sandbox_profile) option;
-}
-
-(* Resolving a Keeper's sandbox may yield. Keep the composer and queue intact
-   until the original owner and edit are still current after that read. *)
-let prepare_spilled_paste state ~base_path ~keeper_name ~still_allowed saved =
-  match saved, state.msg_spill with
-  | None, _ -> Ok None
-  | Some _, None -> Error "Input changed while preparing the paste; current draft retained"
-  | Some saved, Some spill ->
-      let authority = state.workspace_authority in
-      let workspace = chat_input_workspace state in
-      let target = state.msg_target_keeper_name in
-      let revision = Masc_tui_message_input.revision state.msg_input in
-      let edit = current_recall_edit state in
-      let control = keeper_chat_control_generation state keeper_name in
-      if not (Masc_tui_message_input.owned_is_current state.msg_input saved.sms_view)
-      then Error "Input changed while preparing the paste; current draft retained"
-      else
-      let directory = keeper_staging_dir ~base_path ~keeper_name in
-      if state.workspace_authority <> authority
-         || chat_input_workspace state <> workspace
-         || state.msg_target_keeper_name <> target
-         || not (Masc_tui_message_input.has_revision state.msg_input revision)
-         || not (Option.exists (fun current -> current == spill) state.msg_spill)
-         || current_recall_edit state <> edit
-         || keeper_chat_control_generation state keeper_name <> control
-         || not (still_allowed ()) then
-        Error "Input changed while preparing the paste; current draft retained"
-      else Ok (Some {ps_spill = spill; ps_source = saved; ps_directory = directory})
-
-let reset_message_file_changes state keeper_name =
-  (* A late alpha response must not populate alpha after alpha -> beta ->
-     alpha. Identity plus this generation is the cache authority. *)
-  state.msg_file_changes_generation <- state.msg_file_changes_generation + 1;
-  state.msg_file_changes <- None;
-  state.msg_file_changes_keeper <- keeper_name;
-  state.msg_file_changes_loading <- false;
-  state.msg_file_changes_refresh_pending <- false;
-  state.msg_file_changes_error <- None
-
-(* [drain_queue] runs once the composer is aimed at [keeper_name]: a line the
-   previous target's compose was holding ([composing_for_keeper]) is released
-   by the retarget, and this is when it goes. Passed in because the drain is
-   defined with the dispatch path, after this. *)
-let forget_recall (state : state) =
-  state.msg_command_menu <- Masc_tui_command.Menu_idle;
-  state.msg_recall_walk <- None
-
-let clear_keeper_history_projection state =
-  retire_keeper_message_search state;
-  state.msg_find_at <- None;
-  state.msg_history_load_generation <- state.msg_history_load_generation + 1;
-  state.msg_history_inflight <- None;
-  state.msg_history_owed <- None;
-  state.msg_copy_generation <- state.msg_copy_generation + 1;
-    (* These readings belong to one conversation. Clear them at the shared
-       target boundary before its replacement request can finish. *)
-    set_keeper_chat_sources state empty_keeper_chat_sources;
-    state.msg_loaded_keeper <- None;
-    state.msg_loaded_error <- None;
-    state.msg_loaded_dropped <- 0;
-    state.msg_memory_error <- None;
-    state.msg_memory_dropped <- 0;
-    state.msg_older_cursor <- None;
-    state.msg_older_exist <- false;
-    state.msg_older_loading <- false;
-    state.msg_older_error <- None
-
-let open_message_for_keeper ?(return_to = Keeper_chat_return_detail)
-    ?(remember_home_chat = true) state
-    keeper_name ~drain_queue =
-  retire_keeper_message_search state;
-  state.keeper_navigation_open <- false;
-  (* Save the placeholder and its spill together under this draft's owner. *)
-  save_message_draft state;
-  (* Re-entering the same Keeper is a fresh reading too: another process may
-     have written files while this pane was elsewhere. Compact mode still
-     performs no GET; it only invalidates this presentation cache. *)
-  reset_message_file_changes state (Some keeper_name);
-  (* Recall is a walk through one Keeper's messages. A Down on the new
-     Keeper must not restore the previous Keeper's draft or image payload. *)
-  forget_recall state;
-  if state.msg_target_keeper_name <> Some keeper_name then begin
-    state.msg_copy_generation <- state.msg_copy_generation + 1;
-    (* A failed refresh after revisiting must retain the pages already read
-       for this Keeper, including their exact paging cursor. *)
-    restore_keeper_chat_page state keeper_name;
-  end;
-  retarget_message state (Some keeper_name);
-  if state.workspace_identity <> Workspace_identity_unread then
-    state.msg_unconfirmed_workspace <- None;
-  state.opening_notice <- None;
-  (* Transfer draft ownership before starting the chat-visit effect, which can
-     observe cancellation. The old Keeper's spill must never follow target. *)
-  restore_message_draft state keeper_name;
-  (if remember_home_chat then
-       (match Keeper_id.Keeper_name.of_string keeper_name with
-        | Error reason ->
-            add_event state "error" ("Could not remember chat target: " ^ reason)
-        | Ok target ->
-            if not (remember_local_chat_visit state
-                ~sw:(Eio_context.get_switch_opt ()) target) then
-              report_action state "system"
-                "Chat visit not saved to local Home: workspace is different or unverified"));
-  state.msg_live <- live_for_keeper state keeper_name;
-  state.msg_return <- return_to;
-  state.keeper_message_focus <- Right_pane;
-  select_keeper_name_with state.keepers state keeper_name;
-  drain_queue ()
-
-(* Leaving puts the draft away, and a line held only for that compose
-   ([composing_for_keeper]) goes once the pane is gone: an idle keeper has no
-   settle coming to send it, and the operator who left is not about to fold
-   another line onto it. *)
-let leave_keeper_message state ~drain_queue =
-  state.keeper_navigation_open <- false;
-  save_message_draft state;
-  state.msg_history_inflight <- None;
-  state.msg_history_owed <- None;
-  let target_registered =
-    match state.msg_target_keeper_name with
-    | Some keeper_name -> keeper_available_for_new_message state keeper_name
-    | None -> false
-  in
-  state.view <-
-    (match state.msg_return, target_registered with
-     | Keeper_chat_return_home, _ -> Overview
-     | Keeper_chat_return_detail, true -> Keepers Keeper_detail
-     | Keeper_chat_return_list, _ | Keeper_chat_return_detail, false ->
-         Keepers Keeper_list);
-  Option.iter (select_keeper_name state) state.msg_target_keeper_name;
-  state.detail_scroll <- 0;
-  if not target_registered then state.log_scroll <- 0;
-  drain_queue ()
-
-let clear_current_message_draft state =
-  state.msg_command_menu <- Masc_tui_command.Menu_idle;
-  Masc_tui_message_input.clear state.msg_input;
-  discard_recovered_paste_lock state;
-  save_message_draft state
-
-(** Handle local editing keys for message mode. Network submission is injected
-    so the input path never owns a blocking HTTP effect. *)
-(* One page of the transcript. Measured from the terminal rather than fixed,
-   so the jump is a screenful on every window; a page smaller than the pane
-   would leave rows the reader has to catch with the arrow keys anyway. *)
-let keeper_message_page_rows state =
-  let rows, cols = get_terminal_size () in
-  (* The pane's fixed chrome is shared with [render_keeper_message];
-     composer growth is already inside [keeper_message_status_rows]. Adding
-     composer_max_rows here counted it twice, and every PgUp jumped four
-     rows short of the screenful the comment promises. *)
-  let status_frame = keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
-      ~terminal_rows:rows ~terminal_cols:cols in
-  let status_rows = keeper_message_status_rows ~status_frame state in
-  (* PgUp creates the reading-back notice and PgDn removes it. Reserve that
-     possible row on both sides of the transition: using only the rows drawn
-     right now made a 46-row pane move 38 up, then only 37 down, leaving the
-     operator one row behind the live edge. One stable reserved budget also
-     leaves a single context row overlapping adjacent pages. *)
-  let page_status_rows =
-    keeper_message_support_status_rows state ~status_rows
-  in
-  max 1
-    (Masc_tui_message_layout.message_history_height ~terminal_rows:rows
-       ~status_rows:page_status_rows)
-
-(* What this pane has of the operator's own lines for the keeper on screen,
-   oldest first. The arrows walk it the way a shell walks its own history.
-   That is why the wheel no longer arrives as the same key: one of the two had
-   to be wrong while they shared it, and scrolling has the wheel and the page
-   keys.
-
-   Sent lines come from [msg_history], which is written when a line is
-   dispatched. A line typed during a turn has not been dispatched, so it is
-   not there -- it is in the queue, and it is the newest thing the operator
-   typed. Walking only the sent ones stepped straight past it, which is how a
-   queued line could be neither read back nor edited. *)
-let own_typed_messages (state : state) =
-  let target = Option.value ~default:"" state.msg_target_keeper_name in
-  let sent =
-    state.msg_history
-    |> List.filter (fun entry ->
-           (match entry.me_role with
-            (* Asked of the type, not of the label. [String.equal label "you"]
-               was false for the operator's own lines that came in on any
-               surface but the dashboard -- those read "you \xc2\xb7 agent" --
-               so the up-arrow recall silently skipped them. *)
-            | Message_user (Sent_by_operator _) -> true
-            | Message_user (Sent_by_other _) -> false
-            | Message_keeper | Message_autonomous | Message_status
-            | Message_local | Message_error | Message_tool | Message_skill _
-            | Message_thinking | Message_memory ->
-                false)
-           && String.equal entry.me_keeper_name target
-           &&
-           match
-             Chat_queue.find state.msg_queued ~request_id:entry.me_request_id
-           with
-           | Some item when item.Chat_queue.intent = Chat_queue.Steer_after_interrupt
-                            || item.intent = Chat_queue.Steer_without_priority ->
-               (* A steer is command intent, not ordinary chat text. Ctrl-P
-                  edits the queued request; arrow recall skips its session row. *)
-               false
-           | Some _ | None -> true)
-  in
-  (* The queue is not walked here any more. A queued line enters the history
-     when it is typed, not when it is dispatched, so it is already in [sent] --
-     concatenating the queue would put the newest line in the walk twice. *)
-  sent
-
-let set_composer_text (state : state) text =
-  state.msg_command_menu <- Masc_tui_command.Menu_idle;
-  Masc_tui_message_input.clear state.msg_input;
-  Masc_tui_message_input.insert state.msg_input text
-
-let image_session_rows (state : state) =
-  match state.msg_target_keeper_name with
-  | None -> state.msg_history
-  | Some keeper_name ->
-      List.filter
-        (fun entry -> String.equal entry.me_keeper_name keeper_name)
-        state.msg_history
-
-(* Image discovery includes queued messages and rows drawn by held turn logs.
-   Those presentation filters must not remove an attachment from Ctrl-O. *)
-let image_conversation_rows (state : state) =
-  let loaded =
-    match state.msg_target_keeper_name, state.msg_loaded_keeper with
-    | Some keeper_name, Some loaded_keeper
-      when String.equal keeper_name loaded_keeper -> state.msg_loaded
-    | Some _, Some _ | Some _, None | None, _ -> []
-  in
-  chat_timeline ~loaded ~session:(image_session_rows state)
-    ~queued_request_ids:[] |> chat_timeline_rows
-
-(* Read the same selected execution sources as the renderer. Capture every
-   current speech stretch, including ones with no preview yet: closing a fence
-   can change a stretch in place. Thinking and superseded attempts never own
-   the current conversation's preview. *)
-let image_log_observations (state : state) =
-  match state.msg_target_keeper_name with
-  | None -> []
-  | Some keeper_name ->
-      selected_source_logs_for_keeper state keeper_name
-      |> List.map (fun log ->
-           let items = Keeper_chat_transcript.drawn log.tl_transcript
-             |> List.filter_map (fun (item : Keeper_chat_transcript.drawn_item) ->
-                  match item.superseded, item.drawn with
-                  | None, (Drawn_text text | Drawn_reply text) ->
-                      Some (item.origin,
-                        Masc_tui_image_preview.in_message_previews ~text ~attachments:[])
-                  | None, Drawn_media media ->
-                      Some (item.origin, Masc_tui_chat_media.images
-                        [Masc_tui_chat_media.of_generated media])
-                  | Some _, _
-                  | None, (Drawn_thinking _ | Drawn_skill _ | Drawn_tools _
-                    | Drawn_status _ | Drawn_error _) -> None) in
-           turn_log_execution_source log, items)
-
-(* Source previews follow the pane's causal merge order, including held logs.
-   The renderer's structural anchors recover the original producer data;
-   labels, normalized bodies and rendered row positions are never identities. *)
-let image_preview_candidates (state : state) logs =
-  let rows = image_conversation_rows state in
-  match state.msg_target_keeper_name with
-  | None -> []
-  | Some keeper_name ->
-      let _, cols = get_terminal_size () in
-      let projection = keeper_message_projection state ~keeper_name ~chat_cols:cols in
-      let projected = projection.tagged_entries
-        |> List.filter_map (fun (tag, _) ->
-             match search_anchor_of_tag tag with
-             | Some (Search_history _ as anchor) ->
-                 (* The tagged row is the source-owned media remainder the
-                    pane actually draws. Recovering the unfiltered history
-                    row would put covered diagrams back into this catalog. *)
-                 (match message_of_tag tag with
-                  | Some row ->
-                      (match row.me_role with
-                      | Message_thinking -> None
-                      | Message_user _ | Message_keeper | Message_autonomous
-                      | Message_status | Message_local | Message_error | Message_tool
-                      | Message_skill _ | Message_memory -> Some (anchor, row.me_images))
-                  | None -> None)
-             | Some (Search_journal { source; origin; _ } as anchor) ->
-                 Option.bind (List.assoc_opt source logs) (fun items ->
-                   Option.map (fun preview -> anchor, preview) (List.assoc_opt origin items))
-             | Some (Search_child _ | Search_admission _) | None -> None) in
-      (* Queued inputs are visible in the pending tail, outside tagged_entries.
-         Keep their attachment actions while avoiding duplicate projected rows. *)
-      let queued = rows |> List.filter_map (fun row ->
-        match Chat_queue.find state.msg_queued ~request_id:row.me_request_id,
-              row.me_role with
-        | Some _, Message_user _ ->
-            let anchor = msg_anchor row in
-            if List.exists (fun (shown, _) -> match shown with
-              | Search_history {row_anchor; _} -> row_anchor = anchor
-              | Search_child _ | Search_admission _ | Search_journal _ -> false) projected
-            then None
-            else Some (Search_history {row_anchor=anchor; reply_source=None}, row.me_images)
-        | Some _, (Message_keeper | Message_autonomous | Message_status | Message_local
-          | Message_error | Message_tool | Message_skill _ | Message_thinking | Message_memory)
-        | None, _ -> None) in
-      projected @ queued
-
-(* History loading alone is not a new arrival. The staging observation travels
-   with the draft and is invalidated by a workspace reconnect. *)
-let note_attachment_staged (state : state) =
-  state.msg_attachments_since <- Some {
-    io_reading = state.workspace_read_authority;
-    io_keeper = state.msg_target_keeper_name;
-    io_history = (match List.rev (image_session_rows state) with
-      | newest :: _ -> Some (msg_anchor newest)
-      | [] -> None);
-    io_logs = image_log_observations state;
-  }
-;;
-
-(* The draft is put aside on the first step back and handed over on the way
-   forward past the newest, so a walk through the history never costs what was
-   already typed. *)
-(* Land the walk on one line: its text into the composer, and whether that
-   line is still waiting.
-
-   Stepping onto a waiting line makes this an edit of it. The arrows copy, and
-   a copy of a line that has not been sent yet would be sent twice -- the
-   original from the queue and the copy from the composer. Recorded here and
-   acted on at Enter, so the step itself stays what it always was: reversible,
-   and costing nothing if the operator walks on past. *)
-let recall_land (state : state) ~original entries at =
-  let count = List.length entries in
-  let entry = List.nth entries (count - 1 - at) in
-  state.msg_recall_walk <- Some {krw_anchor=msg_anchor entry; krw_original=original};
-  set_composer_text state entry.me_text;
-  (match Chat_queue.find state.msg_queued ~request_id:entry.me_request_id with
-   | Some item -> set_recall_edit state item
-   | None -> clear_current_recall_edit state);
-  (* A queued edit owns the complete request, not just its text. Never attach
-     the draft's images to a different recalled line. *)
-  let attachments, references =
-    match current_recall_edit state with
-    | Some item -> item.request.attachments, item.request.references
-    | None -> [], []
-  in
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- attachments);
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
-  if attachments = [] then state.msg_attachments_since <- None
-  else note_attachment_staged state
-
-let recall_older (state : state) =
-  let sent = own_typed_messages state in
-  let count = List.length sent in
-  if count = 0 then ()
-  else begin
-    let at, original =
-      match state.msg_recall_walk with
-      | None ->
-          (* A spill belongs to the draft being set aside, not to the
-             recalled line that is about to replace the composer. *)
-          let text = materialise_spilled_paste state
-               (Masc_tui_message_input.snapshot state.msg_input) in
-          0, (text, state.msg_attachments,
-              state.msg_references, state.msg_attachments_since)
-      | Some walk ->
-          (match recall_history_offset sent walk.krw_anchor with
-           | Some at -> min (at + 1) (count - 1)
-           | None -> 0), walk.krw_original
-    in
-    recall_land state ~original sent at
-  end
-
-let recall_newer (state : state) =
-  match state.msg_recall_walk with
-  | None -> ()
-  | Some walk ->
-      let sent = own_typed_messages state in
-      (match recall_history_offset sent walk.krw_anchor with
-       | Some at when at > 0 ->
-           recall_land state ~original:walk.krw_original sent (at - 1)
-       | Some _ | None ->
-           (* Back at the operator's own draft: it is not an edit of anything. *)
-           clear_current_recall_edit state;
-           let text, attachments, references, since = walk.krw_original in
-           forget_recall state;
-           set_composer_text state text;
-           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- attachments);
-           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- references);
-           state.msg_attachments_since <- since)
-
-let queued_edit_is_unchanged state item =
-  match Chat_queue.find state.msg_queued ~request_id:item.Chat_queue.request.request_id with
-  | Some current -> current.request = item.request && current.source = item.source
-  | None -> false
-
-let composer_empty_for_queue_edit state =
-  Option.is_none state.msg_recall_walk
-  && Masc_tui_message_input.length state.msg_input = 0
-  && state.msg_attachments = [] && state.msg_references = []
-  && Option.is_none state.msg_spill
-
-let explain_queued_edit state =
-  match current_recall_edit state with
-  | Some item ->
-      report_action state "system"
-        (if Option.is_some state.msg_recall_walk then
-           "Queued edit kept while browsing history."
-         else if not (queued_edit_is_unchanged state item) then
-           "Queued message changed or is gone · Ctrl-U: abandon (may send)"
-         else if composer_empty_for_queue_edit state then
-           "Ctrl-P: restore · Ctrl-U: abandon (may send)"
-         else "Enter: replace · Ctrl-U: abandon (may send)")
-  | None -> ()
-
-(* A queued line is drawn in the conversation, so cancelling one or pulling it
-   back into the composer has to take its row with it. The row is found by the
-   request's own id and not by its text: two identical lines to one keeper are
-   two requests, and dropping "the row that reads like this" would take
-   whichever came first. *)
-let forget_queued_history (state : state) (request : Keeper_chat.request) =
-  state.keeper_interactive_waiting <- List.filter (fun (_, id, _) ->
-    id <> request.Keeper_chat.request_id) state.keeper_interactive_waiting;
-  state.msg_history <-
-    List.filter
-      (fun entry ->
-        not
-          (String.equal entry.me_request_id request.Keeper_chat.request_id
-           && match entry.me_role with
-             | Message_user _ -> true
-             | Message_keeper | Message_autonomous | Message_status | Message_local | Message_error
-             | Message_tool | Message_skill _ | Message_thinking | Message_memory -> false))
-      state.msg_history
-;;
-
-let clear_staged_attachments (state : state) =
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- []);
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- []);
-  state.msg_attachments_since <- None
-;;
-
-(* One unsent line leaves the local queue: its place there, the edit that was
-   replacing it, and its row. Nothing was dispatched, so this is the whole
-   cancel. [false] when the queue no longer holds it. Ctrl-K, /queue cancel ID
-   and /queue clear all drop a line through here. *)
-let drop_unsent_request (state : state) (request : Keeper_chat.request) =
-  match Chat_queue.take state.msg_queued ~request_id:request.Keeper_chat.request_id with
-  | None -> false
-  | Some (_, rest) ->
-    state.msg_queued <- rest;
-    (match recall_edit_for_keeper state request.Keeper_chat.keeper_name with
-     | Some editing
-       when String.equal editing.Chat_queue.request.request_id
-              request.Keeper_chat.request_id ->
-         clear_recall_edit_for_keeper state request.Keeper_chat.keeper_name;
-         if state.msg_target_keeper_name = Some request.Keeper_chat.keeper_name then
-           clear_staged_attachments state
-     | Some _ | None -> ());
-    forget_queued_history state request;
-    true
-;;
-
-let load_queued_edit (state : state) item =
-  forget_recall state;
-  let request = item.Chat_queue.request in
-  set_recall_edit state item;
-  clear_staged_attachments state;
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- request.Keeper_chat.attachments);
-  (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- request.Keeper_chat.references);
-  (* Recall makes this batch the current staged-image observation. *)
-  if request.Keeper_chat.attachments <> [] then note_attachment_staged state;
-  Masc_tui_message_input.clear state.msg_input;
-  Masc_tui_message_input.insert state.msg_input request.Keeper_chat.message
-
-(* Ctrl-P can restore an empty editor from its unchanged queued request. It
-   cannot overwrite an edit or a draft saved beneath an active recall walk. *)
-let edit_latest_queued_input (state : state) =
-  match current_recall_edit state with
-  | Some item ->
-      if queued_edit_is_unchanged state item && composer_empty_for_queue_edit state
-      then load_queued_edit state item
-      else explain_queued_edit state
-  | None ->
-      (match Option.bind state.msg_target_keeper_name (fun keeper_name ->
-          Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name) with
-       | None -> ()
-       | Some (item, _) ->
-           if composer_empty_for_queue_edit state then load_queued_edit state item
-           else report_action state "info"
-             (if Option.is_some state.msg_recall_walk then
-                "Draft kept · leaving history may send queued input."
-              else "Draft kept · sending or clearing it may send queued input."))
-
-let move_recall state ~drain_queue move =
-  if recall_navigation_blocked state then
-    match current_recall_edit state with
-    | Some item when queued_edit_is_unchanged state item
-                     && composer_empty_for_queue_edit state ->
-        load_queued_edit state item
-    | Some _ | None -> explain_queued_edit state
-  else begin
-    let was_editing = Option.is_some (current_recall_edit state) in
-    move state;
-    if was_editing && Option.is_none (current_recall_edit state) then drain_queue ()
-  end
-
-(* The chat pane's Enter: the draft goes to the keeper, the pane returns to
-   the newest row, and a line held while the operator was composing may go
-   too. Named because two things end a draft this way -- the Enter key on this
-   surface, and a voice capture that ends the sentence itself
-   ([voice.stt].send_on_stop) -- and they have to be the same answer. *)
-let submit_chat_draft (state : state) ~(submit_message : Masc_tui_message_input.snapshot -> unit)
-    ~(drain_queue : unit -> unit) =
-  let snapshot = Masc_tui_message_input.snapshot state.msg_input in
-  let text = Masc_tui_message_input.snapshot_text snapshot in
-  if recovered_paste_send_locked state then
-    report_action state "system"
-      "Recovered draft protected; press Ctrl-G to enable Enter"
-  else if String.trim text <> "" then begin
-    (* Back to the newest row: the turn that is about to start is drawn
-       there, and staying scrolled back would hide the send. *)
-    set_msg_scroll state 0;
-    forget_recall state;
-    submit_message snapshot;
-    (* The composer is empty after a submit, so a line held only because the
-       operator was mid-compose ([composing_for_keeper]) can dispatch now. When
-       the submit folded onto that held line, this is what sends the merge. *)
-    drain_queue ()
-  end
-
-let keeper_message_input_supported state =
-  let rows, cols = get_terminal_size () in
-  let status_frame = keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
-      ~terminal_rows:rows ~terminal_cols:cols in
-  let status_rows = keeper_message_status_rows ~status_frame state in
-  Masc_tui_message_layout.message_viewport_supported ~terminal_rows:rows
-    ~terminal_cols:(Masc_tui_roster_pane.content_cols
-      ~hidden:(roster_pane_hidden state) ~cols)
-    ~status_rows:(keeper_message_support_status_rows state ~status_rows)
-
-let handle_message_key (state : state) ~(submit_message : Masc_tui_message_input.snapshot -> unit)
-    ~(load_older : cursor:string option -> unit) ~(paste_image : unit -> unit)
-    ~(open_named_image : unit -> unit) ~(inspect_context : unit -> unit)
-    ~(inspect_queue : unit -> unit)
-    ~(load_tool_changes : unit -> unit) ~(load_preparation : unit -> unit) ~(drain_queue : unit -> unit)
-    ~(start_voice : unit -> unit) ~(toggle_voice_continuous : unit -> unit)
-    (key : string) : bool =
-  (* y and n answer a held call, and only while one is held -- otherwise they
-     are letters someone is typing. The prompt on screen is what makes them
-     mean anything, so it is also what decides whether they are taken. *)
-  (* Moving back and asking for what is behind it are the same act. They were
-     three separate copies of the same four lines and [pageup] was missing its
-     copy, so a page-at-a-time reader stopped at whatever the first load
-     happened to bring in (#31089). Going back through here means the request
-     cannot be forgotten again. *)
-  let scroll_back rows =
-    set_msg_scroll state (state.msg_scroll + rows);
-    if state.msg_older_exist && not state.msg_older_loading
-    then load_older ~cursor:state.msg_older_cursor
-  in
-  let apply_autocomplete direction =
-    let text = Masc_tui_message_input.contents state.msg_input in
-    let keeper_names =
-      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
-    in
-    match Masc_tui_command.autocomplete ~direction ~keeper_names text with
-    | Some completed ->
-        forget_recall state;
-        Masc_tui_message_input.clear state.msg_input;
-        Masc_tui_message_input.insert state.msg_input completed;
-        true
-    | None -> true
-  in
-  let slash_navigable () =
-    let keeper_names =
-      List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers
-    in
-    Masc_tui_command.is_slash_navigable ~keeper_names
-      (Masc_tui_message_input.contents state.msg_input)
-  in
-  let command_menu =
-    let rows, cols = get_terminal_size () in
-    let status_frame = lazy (keeper_message_viewport_frame state ~now:(Unix.gettimeofday ())
-        ~terminal_rows:rows ~terminal_cols:cols) in
-    keeper_message_command_window ~status_frame state ~terminal_rows:rows ~terminal_cols:cols
-    |> Option.map fst in
-  let accept_command_menu menu =
-    let completed = Masc_tui_command.menu_accept menu in
-    forget_recall state;
-    Masc_tui_message_input.clear state.msg_input;
-    Masc_tui_message_input.insert state.msg_input completed;
-    state.msg_command_menu <- Masc_tui_command.Menu_dismissed completed;
-    true in
-  match key with
-  (* Esc cancels the innermost thing, and a running capture is inside
-     everything else here: the operator is mid-utterance, not mid-turn. ^Y
-     stops one and keeps what was said, which is the common case; this is the
-     other one, and without it there is no way to abandon a recording that
-     picked up something the operator did not mean to send. *)
-  | "esc" when Option.is_some state.voice_capture ->
-    request_voice_stop state Masc.Voice_bridge.Discard;
-    set_last_action state (Some ("voice: discarding", Unix.gettimeofday ()));
-    true
-  | "esc" when Option.is_some (current_recall_edit state) ->
-    forget_recall state;
-    clear_current_recall_edit state;
-    clear_staged_attachments state;
-    Masc_tui_message_input.clear state.msg_input;
-    discard_recovered_paste_lock state;
-    drain_queue ();
-    true
-  | "down" when state.view = Keepers Keeper_message
-                && not (keeper_message_input_supported state) ->
-    if state.msg_scroll > 0 then set_msg_scroll state (state.msg_scroll - 1);
-    true
-  | ("up" | "down" | "shift-tab") when Option.is_some command_menu ->
-    Option.iter (fun menu ->
-      let direction = if String.equal key "down" then Masc_tui_command.Next else Masc_tui_command.Prev in
-      state.msg_command_menu <- Masc_tui_command.menu_step ~direction
-        ~draft:(Masc_tui_message_input.contents state.msg_input) menu) command_menu;
-    true
-  | ("\t" | "\r") when Option.is_some command_menu ->
-    (match command_menu with Some menu -> accept_command_menu menu | None -> false)
-  (* A visible menu consumes Esc before interrupting a turn or leaving chat. *)
-  | "esc" when Option.is_some command_menu ->
-    state.msg_command_menu <- Masc_tui_command.Menu_dismissed (Masc_tui_message_input.contents state.msg_input);
-    true
-  | key when String.equal key Masc_tui_keys.chat_schedules_key
-             && state.view = Keepers Keeper_message ->
-    state.msg_schedules_expanded <- not state.msg_schedules_expanded;
-    true
-  | "\t" -> apply_autocomplete Masc_tui_command.Next
-  | "shift-tab" -> apply_autocomplete Masc_tui_command.Prev
-  (* Esc follows RFC §3.1/§3.4 everywhere: close the innermost UI (command menu,
-     voice capture) or leave chat without interrupting a running turn. Active
-     turn interruption is separated onto Ctrl-C in the event loop. *)
-  | "esc" ->
-    leave_keeper_message state ~drain_queue;
-    true
-  (* Q / Ctrl-Q is the leave half of Esc with the interrupt half taken out.
-     Esc's first press on a live turn spends itself stopping the turn, so an
-     operator who wants to walk away and let the turn run needs a quiet exit.
-     Visible Q leaves an active turn only with a wholly empty draft. In a
-     transcript-only viewport it leaves without editing hidden input. Ctrl-Q
-     (byte 17) leaves regardless of the draft or turn state. *)
-  | k
-    when state.view = Keepers Keeper_message
-         && state.keeper_message_focus = Right_pane
-         && Option.is_none (current_recall_edit state)
-         && Option.is_none state.voice_capture
-         && Masc_tui_keys.chat_quiet_leave
-              ~input_supported:(keeper_message_input_supported state)
-              ~turn_active:(keeper_message_turn_active state)
-              ~draft_empty:(keeper_message_draft_empty state) k ->
-    (* The surface guard is the point of this arm, not decoration.
-       [handle_message_key] has a second caller -- the composer row on every
-       other surface -- and this arm leaves the chat pane by changing
-       [state.view]. Without the guard, Ctrl-Q typed into the composer row on
-       Overview moved the reader to the Keeper detail it would have returned
-       to; measured on a pty against the merged binary. Esc settles the
-       innermost thing first, so a recall being replaced or a capture in
-       flight keeps the key too. *)
-    leave_keeper_message state ~drain_queue;
-    true
-  | "\r" ->
-    submit_chat_draft state ~submit_message ~drain_queue;
-    true
-  (* The same two keys the composer row binds, because this surface has its own
-     editor and never reaches that row: [handle_composer_key] is skipped
-     outright while the view is Keeper_message. An operator who learned ^Y on
-     one surface would otherwise find it dead on the one they type into most. *)
-  | k when String.equal k Composer.listen_key ->
-    start_voice ();
-    true
-  | k when String.equal k Composer.continuous_key ->
-    toggle_voice_continuous ();
-    true
-  | "\n" | "shift-enter" ->
-    (* Ctrl-J, Shift+Enter with enhanced keys, or Return on a terminal that
-       still translates it. A composer that cannot hold two lines makes an
-       operator send two messages for one thought. *)
-    forget_recall state;
-    Masc_tui_message_input.insert_char state.msg_input '\n';
-    true
-  | "up" when state.msg_scroll > 0 ->
-    scroll_back 1;
-    true
-  | "down" when state.msg_scroll > 0 ->
-    set_msg_scroll state (state.msg_scroll - 1);
-    true
-  | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
-  | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
-  | "up" ->
-    move_recall state ~drain_queue recall_older;
-    true
-  | "down" ->
-    move_recall state ~drain_queue recall_newer;
-    true
-  | "wheel-up" ->
-    (* A notch is worth more than a row. The wheel used to arrive as the arrow
-       key and moved one row with it, so reading back through a keeper turn --
-       hundreds of rows -- took hundreds of notches. Three is what a terminal
-       reports per detent, so a notch here covers what a notch covers
-       everywhere else. *)
-    scroll_back wheel_notch_rows;
-    true
-  | "wheel-down" ->
-    set_msg_scroll state (state.msg_scroll - wheel_notch_rows);
-    true
-  | "pageup" ->
-    (* A keeper's turn is many rows, so one row per press walks back through a
-       single message. A page is the unit the reader actually moves in. *)
-    scroll_back (keeper_message_page_rows state);
-    true
-  | "pagedown" ->
-    set_msg_scroll state (state.msg_scroll - keeper_message_page_rows state);
-    true
-  | "end" ->
-    set_msg_scroll state 0;
-    true
-  | "left" ->
-    Masc_tui_message_input.move_left state.msg_input;
-    true
-  | "right" ->
-    Masc_tui_message_input.move_right state.msg_input;
-    true
-  | "\127" | "\b" ->
-    forget_recall state;
-    Masc_tui_message_input.backspace state.msg_input;
-    if Masc_tui_message_input.length state.msg_input = 0 then drain_queue ();
-    true
-  | "\x17" | "alt-backspace" ->
-    forget_recall state;
-    Masc_tui_message_input.delete_word state.msg_input;
-    if Masc_tui_message_input.length state.msg_input = 0 then drain_queue ();
-    true
-  | s ->
-    let c = if String.length s = 1 then Some (Char.code s.[0]) else None in
-    (* Both of these keys say what they did. The same two stances reached
-       through [/reasoning] and [/tools] answer with a notice, and reached
-       through the key they answered with nothing -- so on a turn that holds
-       no reasoning block and no tool call, the press changed a stance and
-       moved not one cell. That reads as a dead key, and pressing it again to
-       check puts the stance back where it started. The header names a stance
-       only when it is away from its default ([chat_visibility_summary]), so
-       it cannot stand in for this: returning to the default is exactly the
-       press that clears the label. *)
-    if c = Some 18 then begin
-      (* Ctrl-R cycles the presentation only; transcript bytes stay intact. *)
-      let visibility = next_reasoning_visibility state.msg_reasoning_visibility in
-      state.msg_reasoning_visibility <- visibility;
-      set_last_action state (Some ( "reasoning " ^ reasoning_visibility_to_string visibility
-          , Unix.gettimeofday () ));
-      true
-    end else if c = Some 4 then begin
-      (* Ctrl-D walks summary, results, and full per-call detail without
-         changing the typed calls. *)
-      let visibility = toggle_tool_visibility state.msg_tool_visibility in
-      state.msg_tool_visibility <- visibility;
-      if visibility <> Tools_compact then load_tool_changes ();
-      set_last_action state (Some ( "tool calls " ^ tool_visibility_to_string visibility
-          , Unix.gettimeofday () ));
-      true
-    end else if c = Some (Char.code Masc_tui_keys.expand_turn_key.[0]) then begin
-      (* Ctrl-S folds the turn dashboard back to its progress line. Folded is
-         where it starts; this is the key that asks for the rest. Saying what
-         it did matters more here than elsewhere -- the fold changes how many
-         rows the block below the conversation takes, and a reader who does
-         not see a row appear has no other way to tell the key landed. *)
-      state.msg_turn_folded <- not state.msg_turn_folded;
-      if not state.msg_turn_folded then load_preparation ();
-      set_last_action state (Some ( (if state.msg_turn_folded then "turn folded" else "turn expanded")
-          , Unix.gettimeofday () ));
-      true
-    end else if c = Some 6 then begin
-      (* Ctrl-F starts with the clock-free gutter, then adds an inline clock,
-         then gives full timestamp/request metadata a row of its own. *)
-      state.msg_origin_display <- next_origin_display state.msg_origin_display;
-      true
-    end else if c = Some 21 then begin
-      (* Ctrl-U: clear the composer. The pasted text goes with it -- clearing
-         is the operator saying they do not want what is there, and a spill
-         that outlived it would attach to the next message. An edit of a
-         waiting line is abandoned the same way: the line stays queued and the
-         next Enter is a new line, not a replacement. *)
-      state.msg_spill <- None;
-      forget_recall state;
-      clear_staged_attachments state;
-      if Option.is_some (current_recall_edit state)
-      then begin
-        clear_current_recall_edit state;
-        drain_queue ()
-      end;
-      Masc_tui_message_input.clear state.msg_input;
-      discard_recovered_paste_lock state;
-      (* Cleared composer: release any line held only for this keeper's compose
-         ([composing_for_keeper]). *)
-      drain_queue ();
-      true
-    end else if c = Some 5 then begin
-      (* Ctrl-E: back to the newest row. Scrolling down one row at a time from
-         far back is worse than a key that ends the trip. *)
-      set_msg_scroll state 0;
-      true
-    end else if c = Some 14 then begin
-      (* Ctrl-N walks the Librarian/Memory journal lane through summary,
-         full, and hidden, same as /memory. Ctrl-M would read better for
-         memory, but that byte is the carriage return. *)
-      state.msg_memory_visibility <-
-        next_memory_visibility state.msg_memory_visibility;
-      true
-    end else if c = Some 11 then begin
-      (* Ctrl-K: drop the newest waiting line without sending it. The queue
-         shows what waits in the order it will go; the newest is the one a
-         mis-send just hit, and dropping it is local — nothing was
-         dispatched. *)
-      (match
-         Option.bind state.msg_target_keeper_name (fun keeper_name ->
-           Chat_queue.take_newest_for_keeper state.msg_queued ~keeper_name)
-       with
-       | None -> () (* nothing waits; consume quietly like Ctrl-U on empty *)
-       | Some (item, _) ->
-         let request = item.Chat_queue.request in
-         if drop_unsent_request state request then begin
-           report_action state "info"
-             (Printf.sprintf "Cancelled queued message to %s"
-                (Keeper_chat.terminal_safe_text request.Keeper_chat.keeper_name));
-           drain_queue ()
-         end);
-      true
-    end else if c = Some 16 then begin
-      (* Ctrl-P: pull the newest waiting line back into the composer. That is
-         the edit: fix it and Enter queues it again. *)
-      edit_latest_queued_input state;
-      true
-    end else if c = Some 22 then begin
-      (* Ctrl-V: the clipboard's image, staged for the next message. The key
-         reaches here only because [Masc_tui_termios.reclaim]
-         turned off VLNEXT -- with the terminal's default the tty layer eats
-         this byte and passes the next one through raw, so the composer would
-         see the letter after Ctrl-V and never Ctrl-V itself. *)
-      paste_image ();
-      true
-    end else if c = Some (Char.code Masc_tui_keys.context_inspector_key.[0]) then begin
-      (* Ctrl-X: the breakdown behind the figure in the header. The header
-         names this key beside the number, so the place that shows how full
-         the context is is also the place that opens what filled it. *)
-      inspect_context ();
-      true
-    end else if c = Some 15 then begin
-      (* Ctrl-O: look at the picture this conversation last named -- or, when
-         it named none, the newest image staged for the next message, drawn
-         from the bytes the composer is already holding. The path is already
-         on screen -- the point is not having to retype it into /image, which
-         on a nested evidence path is most of the work. *)
-      open_named_image ();
-      true
-    end else if c = Some 20 then begin
-      (* Ctrl-T: inspect full queue modal without having to type /queue *)
-      inspect_queue ();
-      true
-    end else if Masc_tui_message_layout.is_printable_utf8_scalar s then begin
-      forget_recall state;
-      Masc_tui_message_input.insert state.msg_input s;
-      true
-    end else
-      true  (* Consume but ignore other control chars *)
-
 let approval_decision_key = function
   | Confirm -> "y"
   | Deny -> "n"
@@ -3043,7 +1997,7 @@ let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
       not
         (Option.equal String.equal state.msg_file_changes_keeper
            (Some keeper_name))
-    then reset_message_file_changes state (Some keeper_name);
+    then Masc_tui_chat_input.Message_draft_recall.reset_message_file_changes state (Some keeper_name);
     if state.msg_file_changes_loading then
       if force then state.msg_file_changes_refresh_pending <- true else ()
     else if
@@ -6620,7 +5574,7 @@ let apply_board_hearths_load state result =
 let enter_keeper_chat ?(return_to = Keeper_chat_return_detail) state
     ~mailbox ~keeper_name ~drain_queue =
   if keeper_available_for_new_message state keeper_name then begin
-    open_message_for_keeper ~return_to state keeper_name ~drain_queue;
+    Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to state keeper_name ~drain_queue;
     state.view <- Keepers Keeper_message;
     launch_keeper_history_load state ~mailbox ~keeper_name
   end else
@@ -6643,7 +5597,7 @@ let prepare_item_request state ~mailbox ~drain_queue =
            if Option.is_some (current_recall_edit state) then
              report_action state "info" "Item request not prepared; queued edit retained."
            else if keeper_message_draft_empty state then
-             set_composer_text state (Masc_tui_keeper_items.request_draft request)
+             Masc_tui_chat_input.Message_draft_recall.set_composer_text state (Masc_tui_keeper_items.request_draft request)
            else report_action state "info"
              "Your existing chat draft is preserved. Send or save it before preparing an Item request."
        end)
@@ -7023,7 +5977,7 @@ let switch_to_next_keeper_message state ~mailbox ~drain_queue =
   match next_keeper_message_target state with
   | Masc_tui_keeper_selection.No_alternative -> ()
   | Masc_tui_keeper_selection.Switch_to { keeper_name; cursor } ->
-      open_message_for_keeper ~return_to:state.msg_return state keeper_name
+      Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to:state.msg_return state keeper_name
         ~drain_queue;
       state.keeper_cursor <- cursor;
       set_msg_scroll state 0;
@@ -8101,9 +7055,9 @@ let stage_accepted_spill state ~keeper_name ~prefix ~prepared
     (accepted : Chat_queue.item) =
   match prepared with
   | None -> Ok accepted
-  | Some {ps_spill = spill; ps_source = saved; ps_directory = staging_dir} ->
+  | Some { Masc_tui_chat_input.Paste_spill.ps_spill = spill; ps_source = saved; ps_directory = staging_dir} ->
       state.msg_spill <- None;
-      let staged = place_spilled_paste state ~keeper_name ~staging_dir saved in
+      let staged = Masc_tui_chat_input.Paste_spill.place_spilled_paste state ~keeper_name ~staging_dir saved in
       let message = match prefix with None -> staged | Some prior -> prior ^ "\n" ^ staged in
       let request = {accepted.request with Keeper_chat.message} in
       let source = Chat_queue.source_for_staging accepted ~message in
@@ -8210,7 +7164,7 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
           report_action state "error"
             "/steer needs a turn currently streaming for this Keeper"
       | Some active_request, Some _live ->
-          (match prepare_spilled_paste state ~base_path ~keeper_name
+          (match Masc_tui_chat_input.Paste_spill.prepare_spilled_paste state ~base_path ~keeper_name
               ~still_allowed:(fun () ->
                 state.workspace_identity = Workspace_identity_match
                 && keeper_available_for_new_message state keeper_name
@@ -8220,7 +7174,7 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
                  && Option.is_some (live_for_keeper state keeper_name)) spill with
            | Error detail -> report_action state "error" detail
            | Ok prepared ->
-          let text = inline_spilled_paste spill text in
+          let text = Masc_tui_chat_input.Paste_spill.inline_spilled_paste spill text in
           let request =
             let attachments, references = pending_attachments state in
             Keeper_chat.create_request ~attachments ~references
@@ -8243,13 +7197,13 @@ let start_keeper_steer ?keeper_name ?spill state ~base_path ~mailbox text =
                     | Some current when current.request = accepted.request ->
                         append_user_history_once ~submitted_at state current.request
                     | Some _ | None -> ());
-                   protect_recovered_paste_for_current_keeper state;
+                   Masc_tui_chat_input.Paste_spill.protect_recovered_paste_for_current_keeper state;
                    report_action state "error"
                      ("Steer was accepted but changed while staging; inspect the queue before retrying: " ^ detail)
                | Ok staged ->
                append_user_history_once ~submitted_at state staged.request;
-               clear_staged_attachments state;
-               clear_current_message_draft state;
+               Masc_tui_chat_input.Message_draft_recall.clear_staged_attachments state;
+               Masc_tui_chat_input.Message_draft_recall.clear_current_message_draft state;
                report_action state "message"
                  (Printf.sprintf
                     "Steer staged for %s (related request %s; %d waiting); priority requested if queued"
@@ -8300,13 +7254,13 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
   | Some target -> (
       (* Admission borrows the whole paste inline. Its file is staged only
          after this Keeper's queue accepts the request. *)
-      match prepare_spilled_paste state ~base_path ~keeper_name:target
+      match Masc_tui_chat_input.Paste_spill.prepare_spilled_paste state ~base_path ~keeper_name:target
           ~still_allowed:(fun () ->
             state.workspace_identity = Workspace_identity_match
              && keeper_available_for_new_message state target) spill with
       | Error detail -> report_action state "error" detail
       | Ok prepared ->
-       let text = inline_spilled_paste spill text in
+       let text = Masc_tui_chat_input.Paste_spill.inline_spilled_paste spill text in
       match current_recall_edit state with
       | Some editing
         when String.equal editing.Chat_queue.request.Keeper_chat.keeper_name
@@ -8338,13 +7292,13 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
                       | Some current when current.request = accepted.request ->
                           update_queued_history_text state current.request
                       | Some _ | None -> ());
-                     protect_recovered_paste_for_current_keeper state;
+                     Masc_tui_chat_input.Paste_spill.protect_recovered_paste_for_current_keeper state;
                      report_action state "error"
                        ("Edit was accepted but changed while staging; inspect the queue before retrying: " ^ detail)
                  | Ok staged ->
                let request = staged.Chat_queue.request in
                let text = request.Keeper_chat.message in
-               clear_staged_attachments state;
+               Masc_tui_chat_input.Message_draft_recall.clear_staged_attachments state;
                clear_current_recall_edit state;
                let safe_text =
                  Keeper_chat.terminal_safe_text ~preserve_newlines:true text
@@ -8367,7 +7321,7 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
                          ~attachments:(List.map (fun a -> Masc_tui_image_preview.Staged a) request.attachments) }
                      else entry)
                    state.msg_history;
-               clear_current_message_draft state;
+               Masc_tui_chat_input.Message_draft_recall.clear_current_message_draft state;
                report_action state "message"
                  (Printf.sprintf "Updated queued %s for %s"
                     (match staged.Chat_queue.intent with
@@ -8426,19 +7380,19 @@ let start_keeper_message ?keeper_name ?spill state ~base_path ~mailbox text =
                   | Some current when current.request = accepted.request ->
                       publish_queued_message_history state receipt current.request
                   | Some _ | None -> ());
-                 protect_recovered_paste_for_current_keeper state;
+                 Masc_tui_chat_input.Paste_spill.protect_recovered_paste_for_current_keeper state;
                  report_action state "error"
                    ("Input was accepted but changed while staging; inspect the queue before retrying: " ^ detail)
              | Ok item ->
               publish_queued_message_history state receipt item.request;
-              clear_staged_attachments state;
+              Masc_tui_chat_input.Message_draft_recall.clear_staged_attachments state;
               state.keeper_observed_interrupts <- List.filter (fun observed -> observed.oi_keeper <> target)
                 state.keeper_observed_interrupts;
               let request_id = item.Chat_queue.request.request_id in
               state.keeper_interactive_waiting <-
                 (target, request_id, Awaiting_control {generation = keeper_chat_control_generation state target; target = observed_target}) ::
                 List.filter (fun (_, id, _) -> id <> request_id) state.keeper_interactive_waiting;
-              clear_current_message_draft state;
+              Masc_tui_chat_input.Message_draft_recall.clear_current_message_draft state;
               (match List.assoc_opt target state.keeper_chat_control_tokens with
                | Some _ ->
                  launch_waiting_keeper_input state ~mailbox ~keeper_name:target;
@@ -9342,9 +8296,9 @@ let paste_clipboard_image state =
        notice ~kind:Notice_failure
          ("Ctrl-V: " ^ Masc_tui_attachment.error_to_string error)
      | Ok attachment ->
-       forget_recall state;
+       Masc_tui_chat_input.Message_draft_recall.forget_recall state;
        (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- state.msg_attachments @ [ attachment ]);
-       note_attachment_staged state;
+       Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
        (* A marker run into the word before it changes that word. Only a draft
           that does not already end in whitespace needs the separator. *)
        let before = Masc_tui_message_input.before_cursor state.msg_input in
@@ -10583,9 +9537,9 @@ let image_request_is_active state entry =
    preview from a source this pane already held at staging. A newly loaded
    journal without such provenance conservatively leaves the draft first. *)
 let conversation_image_sources state =
-  let session = image_session_rows state in
-  let logs = image_log_observations state in
-  let candidates = image_preview_candidates state logs in
+  let session = Masc_tui_chat_input.Message_draft_recall.image_session_rows state in
+  let logs = Masc_tui_chat_input.Message_draft_recall.image_log_observations state in
+  let candidates = Masc_tui_chat_input.Message_draft_recall.image_preview_candidates ~terminal_size:Masc_tui_render_prim.get_terminal_size state logs in
   let staged = state.msg_attachments <> [] in
   let observation = match state.msg_attachments_since with
     | Some observed when observed.io_reading == state.workspace_read_authority
@@ -11245,7 +10199,7 @@ let conversation_media state =
                    | Drawn_skill _ | Drawn_tools _ | Drawn_text _ | Drawn_reply _
                    | Drawn_status _ | Drawn_error _) -> None))
         | Some (Search_child _ | Search_admission _) | None -> []) in
-      let queued = image_session_rows state |> List.concat_map (fun row ->
+      let queued = Masc_tui_chat_input.Message_draft_recall.image_session_rows state |> List.concat_map (fun row ->
         match Chat_queue.find state.msg_queued ~request_id:row.me_request_id, row.me_role with
         | Some _, Message_user _ ->
             if List.exists (fun (tag, _) -> match message_of_tag tag with
@@ -11635,7 +10589,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
       match select_activity_keeper state keeper_name with
       | Activity_keeper_missing | Activity_keeper_selected -> ()
       | Activity_keeper_already_selected ->
-          open_message_for_keeper ~return_to:state.msg_return state keeper_name
+          Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to:state.msg_return state keeper_name
             ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
           state.view <- Keepers Keeper_message;
           launch_keeper_history_load state ~mailbox ~keeper_name)
@@ -11754,7 +10708,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
      Peek only to recognize preset saves; all other commands keep their
      existing spill handling. Materialize the retained input before parsing
      or clearing it so the exact description survives a failed dispatch. *)
-  let candidate = inline_spilled_paste spill text in
+  let candidate = Masc_tui_chat_input.Paste_spill.inline_spilled_paste spill text in
   let is_preset_save = match Masc_tui_command.parse candidate with
     | Masc_tui_command.Preset_save _ | Preset_save_missing_name -> true
     | Say _ | Task_for_keeper _ | Task_recover | Task_inspect | Task_missing_title | Help | Features
@@ -11775,7 +10729,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
     | Music_invalid_arguments | Open_score _ | Score_invalid_index | Open_images _ | List_images
     | Images_invalid_index | Unknown _ -> false in
   let text = if is_preset_save then begin
-    let materialized = materialise_spilled_paste state snapshot in
+    let materialized = Masc_tui_chat_input.Paste_spill.materialise_spilled_paste state snapshot in
     if not (String.equal materialized text)
        && String.equal (Masc_tui_message_input.contents state.msg_input) text then begin
       Masc_tui_message_input.clear state.msg_input;
@@ -11815,7 +10769,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       "A queued edit is active; press Enter for its text or Ctrl-U to abandon it"
   else
   match command with
-  | Masc_tui_command.Say _ when recovered_paste_send_locked_for state target ->
+  | Masc_tui_command.Say _ when Masc_tui_chat_input.Paste_spill.recovered_paste_send_locked_for state target ->
       notice ~kind:Notice_failure
         "Recovered draft protected; press Ctrl-G to enable Enter"
   | Masc_tui_command.Say _ ->
@@ -11859,7 +10813,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           notice ~kind:Notice_failure "/ref needs a URL or file_id on the same line"
       | Some reference ->
           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- state.msg_references @ [ reference ]);
-          note_attachment_staged state;
+          Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
           let kind =
             match reference with
             | Keeper_chat.Ref_url _ -> "url"
@@ -11882,7 +10836,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
             (Masc_tui_attachment.error_to_string error)
       | Ok attachment ->
           (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- state.msg_attachments @ [ attachment ]);
-          note_attachment_staged state;
+          Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
           notice ~kind:Notice_reply
             (Printf.sprintf
                "attached %s (%s, %d bytes) · %d staged for the next message"
@@ -12154,7 +11108,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
        | Ok () -> ()
        | Error detail -> notice ~kind:Notice_failure detail)
   | Masc_tui_command.Open_score index ->
-      let sources = image_conversation_rows state
+      let sources = Masc_tui_chat_input.Message_draft_recall.image_conversation_rows state
         |> List.concat_map (fun (entry : msg_entry) -> Masc_tui_markdown.alphatex_sources entry.me_text)
         |> List.rev in
       let count = List.length sources in
@@ -12185,7 +11139,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       match Masc_tui_command.resolve_keeper_name ~names name with
       | Masc_tui_command.Keeper_found keeper_name ->
           Masc_tui_message_input.clear state.msg_input;
-          open_message_for_keeper ~return_to:state.msg_return state keeper_name
+          Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to:state.msg_return state keeper_name
             ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
           state.view <- Keepers Keeper_message;
           launch_keeper_history_load state ~mailbox ~keeper_name
@@ -12218,11 +11172,11 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
            List.fold_left (fun (withdrawn, on_server, left) (request, position) ->
              match keeper_queue_clear_treatment position with
              | Drop_from_local_queue ->
-               if drop_unsent_request state request then (withdrawn + 1, on_server, left)
+               if Masc_tui_chat_input.Message_draft_recall.drop_unsent_request state request then (withdrawn + 1, on_server, left)
                else (withdrawn, on_server, left + 1)
              | Withdraw_before_post ->
                withdraw_undispatched_request state request;
-               forget_queued_history state request;
+               Masc_tui_chat_input.Message_draft_recall.forget_queued_history state request;
                withdrawn + 1, on_server, left
              | Cancel_on_server -> withdrawn, on_server + 1, left
              | Leave_waiting -> withdrawn, on_server, left + 1)
@@ -12250,7 +11204,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          | Some item ->
            (match action with
             | Masc_tui_queue_inspection.Cancel id ->
-              if drop_unsent_request state item.request then begin
+              if Masc_tui_chat_input.Message_draft_recall.drop_unsent_request state item.request then begin
                 notice ~kind:Notice_reply ("Cancelled unsent message " ^ id);
                 drain_queued_message state ~base_path ~mailbox
               end
@@ -13979,9 +12933,9 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- []);
   (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_references <- []);
   state.msg_attachments_since <- None;
-  forget_recall state;
-  clear_keeper_history_projection state;
-  reset_message_file_changes state None;
+  Masc_tui_chat_input.Message_draft_recall.forget_recall state;
+  Masc_tui_chat_input.Message_draft_recall.clear_keeper_history_projection state;
+  Masc_tui_chat_input.Message_draft_recall.reset_message_file_changes state None;
   (* Submitted server work is not undone here. Unsent admissions and automatic
      continuations lose authorization at this boundary. *)
   if not (Chat_queue.is_empty state.msg_queued) then begin
@@ -15694,7 +14648,7 @@ let resolve_opening_chat state ~base_path ~mailbox =
                ^ " (Keeper not found). Showing Dashboard.")
           else begin
             retire_remote_image_for_navigation state;
-            open_message_for_keeper ~remember_home_chat:false
+            Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~remember_home_chat:false
               ~return_to:Keeper_chat_return_list state keeper_name
               ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox);
             state.view <- Keepers Keeper_message;
@@ -16049,7 +15003,7 @@ let resume_task_followups ~server_contact state ~mailbox ~refresh_inflight
                set_msg_scroll state 0;
                state.view <- Keepers Keeper_message;
                if state.msg_target_keeper_name = None then
-                 open_message_for_keeper state keeper ~drain_queue:(fun () -> ())
+                 Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper state keeper ~drain_queue:(fun () -> ())
              end;
              launch_waiting_keeper_input state ~mailbox ~keeper_name:keeper)
     | Task_cancel_refresh { task_id; certainty = _ } ->
@@ -18761,7 +17715,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       state.msg_return <- Keeper_chat_return_detail;
       state.composer_focused <- true;
       (if state.msg_target_keeper_name <> Some keeper_name then begin
-         open_message_for_keeper state keeper_name ~drain_queue:(fun () ->
+         Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper state keeper_name ~drain_queue:(fun () ->
            drain_queued_message state ~base_path ~mailbox);
          (* Chat visits use the stored roster order; this surface may draw
             a sorted/grouped roster and keeps its selection by name. *)
@@ -18832,7 +17786,7 @@ let handle_composer_key state ~base_path ~mailbox key =
       true
   | Composer.Send keeper_name ->
       withdraw_resource_diagram_pending state;
-      if recovered_paste_send_locked state then begin
+      if Masc_tui_chat_input.Paste_spill.recovered_paste_send_locked state then begin
         report_action state "system"
           "Recovered draft protected; press Ctrl-G to enable Enter";
         true
@@ -18846,7 +17800,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
              | Some keeper_name ->
-                 reset_message_file_changes state (Some keeper_name);
+                 Masc_tui_chat_input.Message_draft_recall.reset_message_file_changes state (Some keeper_name);
                  launch_keeper_history_load state ~mailbox ~keeper_name
              | None -> ()
            end;
@@ -18877,7 +17831,7 @@ let handle_composer_key state ~base_path ~mailbox key =
            if state.view <> Keepers Keeper_message then begin
              match state.msg_target_keeper_name with
              | Some keeper_name ->
-                 reset_message_file_changes state (Some keeper_name);
+                 Masc_tui_chat_input.Message_draft_recall.reset_message_file_changes state (Some keeper_name);
                  launch_keeper_history_load state ~mailbox ~keeper_name
              | None -> ()
            end;
@@ -18935,7 +17889,7 @@ let handle_composer_key state ~base_path ~mailbox key =
          without a word. Saying the type here turns that into a build
          failure. *)
       let (_handled : bool) =
-        handle_message_key state
+        Masc_tui_chat_input.Message_keymap.handle_message_key ~terminal_size:Masc_tui_render_prim.get_terminal_size ~wheel_notch_rows state
           ~submit_message:(fun _ -> ())
           ~load_older:(fun ~cursor:_ -> ())
           ~paste_image:(fun () -> paste_clipboard_image state)
@@ -19004,9 +17958,9 @@ let attach_dropped_image ?(protect_recovered = false) state ~base_path ~mailbox
       (Printf.sprintf "Dropped %s with no Keeper to send it to"
          attachment.Masc_tui_keeper_chat_projection.name)
   else begin
-    if protect_recovered then protect_recovered_paste_for_current_keeper state;
+    if protect_recovered then Masc_tui_chat_input.Paste_spill.protect_recovered_paste_for_current_keeper state;
     (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- state.msg_attachments @ [ attachment ]);
-    note_attachment_staged state;
+    Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
     report_action state "system"
       (Printf.sprintf "Attached %s (%s, %d bytes) · %d staged for the next message"
          attachment.Masc_tui_keeper_chat_projection.name
@@ -19037,7 +17991,7 @@ let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
            (Masc_tui_message_layout.count_noun count "character")
            (if count = 1 then "it" else "them"))
   else begin
-    forget_recall state;
+    Masc_tui_chat_input.Message_draft_recall.forget_recall state;
     let text =
       Keeper_chat.terminal_safe_text ~preserve_newlines:true
         paste.Masc_tui_paste.text
@@ -19046,7 +18000,7 @@ let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
        && (String.trim (Masc_tui_message_input.contents state.msg_input ^ text) <> ""
            || state.msg_attachments <> [] || state.msg_references <> [])
     then
-      protect_recovered_paste_for_current_keeper state;
+      Masc_tui_chat_input.Paste_spill.protect_recovered_paste_for_current_keeper state;
     (match state.msg_spill with
      | Some _ ->
          (* The draft still owns its first spill. Keep later paste bytes in
@@ -19817,7 +18771,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         then (
           if state.view = Keepers Keeper_message
           then
-            submit_chat_draft state
+            Masc_tui_chat_input.Message_draft_recall.submit_chat_draft state
               ~submit_message:(send_operator_text state ~base_path ~mailbox)
               ~drain_queue:(fun () -> drain_queued_message state ~base_path ~mailbox)
           else (
@@ -21273,7 +20227,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                  if focus && cleared && not (input_pending ()) then begin
                    withdraw_resource_diagram_pending state;
                    retire_remote_image_for_navigation state;
-                   open_message_for_keeper ~return_to:request.kcr_return state
+                   Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to:request.kcr_return state
                      request.kcr_keeper ~drain_queue:(fun () -> ());
                    set_msg_scroll state 0;
                    state.view <- Keepers Keeper_message;
@@ -29231,12 +28185,12 @@ Use relative paths for resources already held in the package. -->
            state.code_navigation <- None
        | Some (Graphics_reply _) | None -> ());
       let input =
-        if not panel_owns_input && recovered_paste_send_locked state then
+        if not panel_owns_input && Masc_tui_chat_input.Paste_spill.recovered_paste_send_locked state then
           match input with
           | Some (Key "\007")
             when paste_phase input_reader = No_paste
                  && (state.view = Keepers Keeper_message || state.composer_focused) ->
-              discard_recovered_paste_lock state;
+              Masc_tui_chat_input.Paste_spill.discard_recovered_paste_lock state;
               report_action state "system" "Recovered draft confirmed; Enter may send";
               (* The key is consumed here, so the [Input] request that follows
                  every other key never fires. Without this the lock is gone
@@ -30486,7 +29440,7 @@ Use relative paths for resources already held in the package. -->
            else report_input_rejection state Masc_tui_action_notice.Paste_rejected "Paste was not applied on this screen; retry in a text field"
        | Some (Pasted _)
          when state.view = Keepers Keeper_message
-              && not (keeper_message_input_supported state) ->
+              && not (Masc_tui_chat_input.Message_keymap.keeper_message_input_supported ~terminal_size:Masc_tui_render_prim.get_terminal_size state) ->
            (* The chat resize notice hides its composer without marking the
               entire frame compact. Match ordinary typing admission before
               classifying a dropped file or changing the hidden draft. *)
@@ -35231,7 +34185,7 @@ Use relative paths for resources already held in the package. -->
                  | Some keeper ->
                      let return_to = if state.view = Overview then
                        Keeper_chat_return_home else state.msg_return in
-                     open_message_for_keeper ~return_to state keeper.k_name
+                     Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to state keeper.k_name
                        ~drain_queue:(fun () -> drain_queued_message state
                          ~base_path ~mailbox:async_messages);
                      set_msg_scroll state 0;
@@ -35320,13 +34274,13 @@ Use relative paths for resources already held in the package. -->
                 state.agenda_navigation <- Agenda_read_rows;
                 state.agenda_selected <- Masc_tui_agenda.Nowhere
             | Home_resume keeper_name ->
-                open_message_for_keeper ~return_to:Keeper_chat_return_home state
+                Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to:Keeper_chat_return_home state
                   keeper_name ~drain_queue:(fun () ->
                     drain_queued_message state ~base_path ~mailbox:async_messages);
                 state.view <- Keepers Keeper_message;
                 launch_keeper_history_load state ~mailbox:async_messages ~keeper_name
             | Home_read_last keeper_name ->
-                open_message_for_keeper ~remember_home_chat:false
+                Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~remember_home_chat:false
                   ~return_to:Keeper_chat_return_home state keeper_name
                   ~drain_queue:(fun () -> ());
                 state.view <- Keepers Keeper_message;
@@ -35444,14 +34398,14 @@ Use relative paths for resources already held in the package. -->
              || String.equal k "end"
            in
            if
-             keeper_message_input_supported state
+             Masc_tui_chat_input.Message_keymap.keeper_message_input_supported ~terminal_size:Masc_tui_render_prim.get_terminal_size state
              || String.equal k "esc"
              (* Q reaches the composer handler for the same reason Esc does:
                 the quiet leave must not disappear exactly when the terminal
                 is too small to draw the composer -- a transcript-only
                 viewport is when an operator most needs to step away from a
                 running turn. Hidden drafts are preserved, never edited. *)
-             || (String.equal k "Q" && not (keeper_message_input_supported state))
+             || (String.equal k "Q" && not (Masc_tui_chat_input.Message_keymap.keeper_message_input_supported ~terminal_size:Masc_tui_render_prim.get_terminal_size state))
              || display_toggle_key
              || switch_key
              || queue_management_key
@@ -35464,7 +34418,7 @@ Use relative paths for resources already held in the package. -->
                      ~mailbox:async_messages)
              end else
                let (_handled : bool) =
-                 handle_message_key state
+                 Masc_tui_chat_input.Message_keymap.handle_message_key ~terminal_size:Masc_tui_render_prim.get_terminal_size ~wheel_notch_rows state
                    ~submit_message:
                      (send_operator_text state ~base_path
                         ~mailbox:async_messages)
@@ -38565,7 +37519,7 @@ Use relative paths for resources already held in the package. -->
                      (selected_keeper state) ->
                 (match selected_keeper state with
                  | Some keeper ->
-                     open_message_for_keeper ~return_to:Keeper_chat_return_list state
+                     Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to:Keeper_chat_return_list state
                        keeper.k_name ~drain_queue:(fun () ->
                          drain_queued_message state ~base_path
                            ~mailbox:async_messages);
@@ -38580,7 +37534,7 @@ Use relative paths for resources already held in the package. -->
                      (selected_keeper state) ->
                 (match selected_keeper state with
                  | Some keeper ->
-                     open_message_for_keeper ~return_to:Keeper_chat_return_detail
+                     Masc_tui_chat_input.Message_draft_recall.open_message_for_keeper ~return_to:Keeper_chat_return_detail
                        state keeper.k_name ~drain_queue:(fun () ->
                          drain_queued_message state ~base_path
                            ~mailbox:async_messages);

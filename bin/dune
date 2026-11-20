@@ -3279,6 +3279,7 @@
   masc_tui_transport
   masc_tui_surface_requests
   masc_tui_work_requests
+  masc_tui_chat_input
   masc_tui_keys
   masc_tui_key_ime
   masc_tui_file_icon

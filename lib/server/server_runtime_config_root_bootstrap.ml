@@ -91,7 +91,7 @@ let rec copy_missing_tree_count ~src ~dst =
 let rec copy_missing_tree ~src ~dst =
   if Sys.is_directory src
   then (
-    if Sys.file_exists dst && not (Sys.is_directory dst)
+    if Env_config_core.existing_file dst
     then
       Log.Server.warn
         "config bootstrap: refusing to replace file with directory (%s -> %s)"

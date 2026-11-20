@@ -8,11 +8,23 @@ val append_file : string -> string -> unit
 val append_lines : string -> string -> unit
 
 val file_exists : string -> bool
+(** Check if [path] exists, following symlinks via [Eio.Path.stat] when Eio fs
+    is installed and falling back to [Stdlib.Sys.file_exists]. *)
+
 val is_directory : string -> bool
 (** Single-stat directory check. Follows symbolic links like
     [Stdlib.Sys.is_directory] and returns [false] when missing, not a
-    directory, or unreadable ([Sys_error] / [Eio.Io]). Avoids the TOCTOU second
-    stat of [file_exists p && Sys.is_directory p]. *)
+    directory, or unreadable ([Sys_error] / [Eio.Io]). Unlike {!path_kind} and
+    {!exact_path_kind}, non-missing I/O errors are folded into [false]. Avoids
+    the TOCTOU second stat of [file_exists p && Sys.is_directory p]. *)
+
+val is_file : string -> bool
+(** Single-stat existing non-directory check. Follows symbolic links and
+    returns [true] iff [path] exists and is not a directory, folding missing
+    or unreadable ([Sys_error] / [Eio.Io]) paths into [false]. Unlike
+    {!path_kind} and {!exact_path_kind}, non-missing I/O errors are folded into
+    [false]. Avoids the TOCTOU second stat of
+    [file_exists p && not (Sys.is_directory p)]. *)
 
 type path_kind =
   | Missing

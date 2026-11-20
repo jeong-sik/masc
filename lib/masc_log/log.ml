@@ -950,10 +950,9 @@ module Ring = struct
       file_base_dir := "";
       file_current_date := "";
       let not_a_directory =
-        Sys.file_exists dir
-        && (match Sys.is_directory dir with
-            | is_dir -> not is_dir
-            | exception Sys_error _ -> false)
+        match Sys.is_directory dir with
+        | is_dir -> not is_dir
+        | exception Sys_error _ -> false
       in
       let restored =
         if not_a_directory then Ok (Ok 0)

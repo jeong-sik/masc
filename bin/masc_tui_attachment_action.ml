@@ -71,7 +71,7 @@ let find_executable_in_path ?path_value executable =
   in
   split_path path_value
   |> List.map (fun dir -> Filename.concat dir executable)
-  |> List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path))
+  |> List.find_opt Fs_compat.is_file
 
 let player_commands =
   [

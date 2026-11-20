@@ -151,7 +151,7 @@ let find_executable_in_path ?path_value executable =
     split_path_env path_value
     |> List.map (fun dir -> Filename.concat dir executable)
   in
-  List.find_opt (fun path -> Sys.file_exists path && not (Sys.is_directory path)) candidates
+  List.find_opt Fs_compat.is_file candidates
 
 (* `open` is intentionally last and reported as `Opened`, not `Played`: it hands
    the file to a GUI app and returns immediately. It still matters on macOS

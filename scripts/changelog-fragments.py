@@ -11,6 +11,12 @@ A fragment is one or more `### <Section>` headings, each followed by bullets.
 A bullet starts with `- ` and may continue on following non-blank lines. Every
 bullet cites the fragment's own pull request as `#<number>`.
 
+Pull requests that change nothing a user can see (documentation, tests,
+comments, compile repairs, or changelog-only work) write `### Exempt` instead
+of a release section, with a bullet stating the reason and citing `#<number>`.
+Exempt fragments satisfy `missing --strict` without touching a shared file, and
+`assemble` deletes them at release without adding anything to `CHANGELOG.md`.
+
 Modes:
   check [--dir D]                      refuse a malformed fragment
   assemble [--dir D] [--changelog C]   fold fragments into [Unreleased], delete them
@@ -62,6 +68,13 @@ SECTIONS = (
     "Internal",
 )
 
+# Section for pull requests that change nothing a user can see (docs, tests,
+# comments, compile repairs, or changelog-only work). Validated like any other
+# fragment, satisfies `missing --strict`, and is deleted by `assemble` without
+# being folded into CHANGELOG.md.
+EXEMPT_SECTION = "Exempt"
+VALID_SECTIONS = (*SECTIONS, EXEMPT_SECTION)
+
 FRAGMENT_NAME = re.compile(r"^([1-9][0-9]*)\.md$")
 VERSION_LINE = re.compile(r"(?m)^\(version ([^)]+)\)$")
 
@@ -72,6 +85,16 @@ Sections = dict[str, list[str]]
 
 class FragmentError(Exception):
     pass
+
+
+def _has_exemption_reason(text: str, cite: re.Pattern[str]) -> bool:
+    """Return True when an exempt bullet states a reason beyond citing #<PR>."""
+    return any(ch.isalnum() for ch in cite.sub("", text))
+
+
+def is_exempt(sections: Sections) -> bool:
+    """Return True when a parsed fragment declares an exemption."""
+    return len(sections) == 1 and EXEMPT_SECTION in sections
 
 
 def parse_fragment(path: pathlib.Path) -> Sections:
@@ -97,6 +120,12 @@ def parse_fragment(path: pathlib.Path) -> Sections:
             raise FragmentError(
                 f"{path}{where}: bullet does not cite #{number}: {bullet[0]}"
             )
+        if section == EXEMPT_SECTION and not _has_exemption_reason(text, cite):
+            where = f":{first_lineno}" if first_lineno is not None else ""
+            raise FragmentError(
+                f"{path}{where}: exempt bullet must state a reason alongside "
+                f"#{number}: {bullet[0]}"
+            )
         sections[section].append(text)
 
     for lineno, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
@@ -106,14 +135,19 @@ def parse_fragment(path: pathlib.Path) -> Sections:
             bullet = None
             first_lineno = None
             heading = re.match(r"^### (.+)$", line)
-            if heading is None or heading.group(1) not in SECTIONS:
+            if heading is None or heading.group(1) not in VALID_SECTIONS:
                 raise FragmentError(
                     f"{path}:{lineno}: expected '### <Section>' with Section one of "
-                    f"{', '.join(SECTIONS)}; got {line!r}"
+                    f"{', '.join(VALID_SECTIONS)}; got {line!r}"
                 )
             name: str = heading.group(1)
             if name in sections:
                 raise FragmentError(f"{path}:{lineno}: section {name!r} appears twice")
+            if (name == EXEMPT_SECTION and sections) or EXEMPT_SECTION in sections:
+                raise FragmentError(
+                    f"{path}:{lineno}: section {EXEMPT_SECTION!r} cannot be combined "
+                    f"with release sections"
+                )
             sections[name] = []
             section = name
         elif line.startswith("- "):
@@ -222,6 +256,16 @@ def assemble(directory: pathlib.Path, changelog: pathlib.Path) -> int:
         return 0
     lines = changelog.read_text(encoding="utf-8").splitlines()
     before, body, after = split_unreleased(lines)
+    release_fragments = [(path, sections) for path, sections in fragments if not is_exempt(sections)]
+    exempt_fragments = [path for path, sections in fragments if is_exempt(sections)]
+    if not release_fragments:
+        for path in exempt_fragments:
+            path.unlink()
+        print(
+            f"removed {len(exempt_fragments)} exempt fragment(s); "
+            f"{changelog} unchanged"
+        )
+        return 0
     preamble, existing = parse_body(body)
 
     merged: Sections = {}
@@ -229,7 +273,7 @@ def assemble(directory: pathlib.Path, changelog: pathlib.Path) -> int:
     seen: dict[str, set[str]] = {}
     # A heading repeated in [Unreleased] merges into its first occurrence.
     sources: list[Sections] = [{name: bullets} for name, bullets in existing]
-    sources += [sections for _, sections in fragments]
+    sources += [sections for _, sections in release_fragments]
     for sections in sources:
         for name, bullets in sections.items():
             if name not in merged:
@@ -256,7 +300,11 @@ def assemble(directory: pathlib.Path, changelog: pathlib.Path) -> int:
     changelog.write_text(text, encoding="utf-8")
     for path, _ in fragments:
         path.unlink()
-    print(f"folded {len(fragments)} fragment(s) into {UNRELEASED} of {changelog}")
+    suffix = f" ({len(exempt_fragments)} exempt removed)" if exempt_fragments else ""
+    print(
+        f"folded {len(release_fragments)} fragment(s) into {UNRELEASED} "
+        f"of {changelog}{suffix}"
+    )
     return 0
 
 
@@ -329,13 +377,12 @@ def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
 
 
 def _exempt_numbers() -> set[int]:
-    """PR numbers the strict gate may not count as blocking findings.
+    """Legacy PR numbers the strict gate may not count as blocking findings.
 
-    Numbers live in changelog-fragments-exempt.txt beside this script, one
-    per line, for pull requests whose own content is changelog work (a
-    backfill PR carries another PR's fragment as its payload) and, since
-    v0.71.0, for merges that change nothing a user can see (documentation,
-    tests, comments, compile repairs). Each entry carries its reason.
+    Read-only compatibility list in changelog-fragments-exempt.txt beside this
+    script for pull requests merged before per-PR `### Exempt` fragments. New
+    exempt pull requests write `changelog.d/<PR>.md` with a `### Exempt`
+    section instead of appending to the shared file.
     """
     path = pathlib.Path(__file__).resolve().parent / "changelog-fragments-exempt.txt"
     if not path.exists():
@@ -390,8 +437,8 @@ def missing(base: str, head: str, directory: pathlib.Path, strict: bool = False)
         print(f"  #{number} {subject}{marker}")
     print(
         "Write the entries to "
-        f"{FRAGMENT_DIR}/<PR number>.md before folding, or note here why a "
-        "release omits one."
+        f"{FRAGMENT_DIR}/<PR number>.md before folding (or use '### {EXEMPT_SECTION}' "
+        "for non-user-facing PRs), or note here why a release omits one."
     )
     if strict and blocking:
         # Exit 3, not 1: a Python crash also exits 1, and callers must tell

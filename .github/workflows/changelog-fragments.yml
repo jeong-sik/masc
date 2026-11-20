@@ -4,13 +4,16 @@ name: Changelog fragments
 # scripts/bump-version.sh runs the same check before it assembles a release.
 # The fragments a pull request changes are checked by the required `changes`
 # job of pr-type-check.yml, where a failure blocks the merge. A pull request
-# that touches the release bump script runs only that script's test here.
+# that touches the fragment script or release bump script runs their unit tests
+# here.
 on:
   workflow_dispatch: {}
   pull_request:
     paths:
       - "scripts/bump-version.sh"
+      - "scripts/changelog-fragments.py"
       - "scripts/tests/test_bump_version_fold_base.py"
+      - "scripts/tests/test_changelog_fragments.py"
 
 permissions:
   contents: read
@@ -25,5 +28,7 @@ jobs:
       - name: Check every fragment cites its own pull request
         if: github.event_name == 'workflow_dispatch'
         run: python3 scripts/changelog-fragments.py check --dir changelog.d
+      - name: Check changelog fragment parsing, exemptions, and assembly
+        run: python3 -m unittest scripts.tests.test_changelog_fragments
       - name: Check the release bump scans from the last release's fold
         run: python3 -m unittest scripts.tests.test_bump_version_fold_base

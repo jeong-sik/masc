@@ -1331,11 +1331,20 @@ type candidate_seat =
   | Seated of Provider_admission.seat
   | Passed_over
 
+let target_seats ~admission_class admitted =
+  Result.map
+    (fun target ->
+       Provider_admission.Endpoint_seats
+         (selected_target_with_admission_class target admission_class).config)
+    (resolve_target admitted)
+;;
+
 (* The seat a step runs under. Between steps a walk holds at most one seat:
-   one a later candidate gave while this one was full. Every candidate before
-   that one is passed over, and a walk never comes back to a candidate it
-   passed, so a held seat belongs to this step or a later one. Only a
-   candidate whose target resolves can give a seat. *)
+   the caller's seat for the first candidate, or one a later candidate gave
+   while this one was full. Every candidate before that one is passed over,
+   and a walk never comes back to a candidate it passed, so a held seat
+   belongs to this step or a later one. Only a candidate whose target
+   resolves can give a seat. *)
 let seat_for_candidate
       (flow : flow_attempt)
       held
@@ -1355,20 +1364,41 @@ let seat_for_candidate
     let later =
       List.filter_map
         (fun (step : flow_candidate_step) ->
-           match resolve_target step.admitted_target with
-           | Ok later_target ->
-             Some
-               ( Some step
-               , (selected_target_with_admission_class later_target flow.admission_class)
-                   .config )
-           | Error _ -> None)
+           match target_seats ~admission_class:flow.admission_class step.admitted_target with
+           | Ok source -> Some (Some step, source)
+           | Error (_ : target_selection_error) -> None)
         (after flow.candidates)
     in
-    (match Provider_admission.take_first_seat (None, target.config) later with
+    (match
+       Provider_admission.take_first_seat
+         (None, Provider_admission.Endpoint_seats target.config)
+         later
+     with
      | None, seat -> Seated seat
      | Some owner, seat ->
        held := Some (owner, seat);
        Passed_over)
+;;
+
+(* The caller's seat for the first candidate, checked before any callback or
+   request: a seat of another endpoint never carries a request, and a seat
+   that fails the check goes back to its source. Targets resolve from frozen
+   bindings, so the first candidate resolves here as it does when the walk
+   reaches it. *)
+let first_candidate_seat (flow : flow_attempt) seat =
+  let refuse () =
+    Provider_admission.release_seat seat;
+    invalid_arg
+      "Exact_output.execute_flow_once: the seat was not given by the first \
+       candidate's endpoint"
+  in
+  match flow.candidates with
+  | [] -> refuse ()
+  | first :: (_ : flow_candidate_step list) ->
+    (match resolve_target first.admitted_target with
+     | Ok target when Provider_admission.seat_is_of_endpoint seat target.config ->
+       first, seat
+     | Ok (_ : selected_target) | Error (_ : target_selection_error) -> refuse ())
 ;;
 
 let execute_flow_candidate
@@ -1458,6 +1488,7 @@ let advanceable_flow_failure = function
 ;;
 
 let execute_flow_once_internal
+      ?seat
       ~net
       ~clock
       ~classify_uncertainty
@@ -1468,9 +1499,10 @@ let execute_flow_once_internal
       ~validate
       flow
   =
-  (* A seat a later candidate gave is held until the walk reaches it. A walk
-     that ends before then returns it here. *)
-  let held = ref None in
+  (* The caller's seat, or a seat a later candidate gave, is held until the
+     walk reaches its candidate. A walk that ends before then returns it
+     here. *)
+  let held = ref (Option.map (first_candidate_seat flow) seat) in
   let outcome =
     Fun.protect
       ~finally:(fun () ->
@@ -1549,17 +1581,17 @@ let execute_flow_once_internal
 
 let no_uncertainty _ _ : no_uncertainty option = None
 
-let execute_flow_once ~net ~clock ~before_measurement_dispatch ~on_measurement_terminal
+let execute_flow_once ?seat ~net ~clock ~before_measurement_dispatch ~on_measurement_terminal
     ~before_dispatch ~before_advance ~validate flow =
-  match execute_flow_once_internal ~net ~clock ~classify_uncertainty:no_uncertainty
+  match execute_flow_once_internal ?seat ~net ~clock ~classify_uncertainty:no_uncertainty
       ~before_measurement_dispatch ~on_measurement_terminal ~before_dispatch ~before_advance ~validate flow with
   | Internal_finished result -> result
   | Internal_unresolved _ -> .
 ;;
 
-let execute_flow_once_guarded ~net ~clock ~before_measurement_dispatch ~on_measurement_terminal
+let execute_flow_once_guarded ?seat ~net ~clock ~before_measurement_dispatch ~on_measurement_terminal
     ~before_dispatch ~before_advance ~validate flow =
-  match execute_flow_once_internal ~net ~clock ~classify_uncertainty:responses_uncertainty
+  match execute_flow_once_internal ?seat ~net ~clock ~classify_uncertainty:responses_uncertainty
       ~before_measurement_dispatch ~on_measurement_terminal ~before_dispatch ~before_advance ~validate flow with
   | Internal_finished result -> Guarded_finished result
   | Internal_unresolved

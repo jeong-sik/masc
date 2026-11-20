@@ -6090,6 +6090,118 @@ let test_a_full_primary_is_passed_for_a_free_successor () =
   | Error _ -> fail "the successor should answer while the primary is full"
 ;;
 
+let held_permits config =
+  match Provider_admission.snapshot_for ~config with
+  | Some snapshot -> snapshot.Slot_scheduler.active
+  | None -> 0
+;;
+
+let primary_seat_source snapshot =
+  match
+    EO.target_seats
+      ~admission_class:Admission_class.Standard
+      (admitted_target snapshot "bound-primary")
+  with
+  | Ok source -> source
+  | Error _ -> fail "the bound primary should give seats"
+;;
+
+(* A caller that chose the slot before the flow holds its seat already: the
+   first candidate sends under that seat and takes no second permit, and the
+   flow returns the seat when it ends. *)
+let test_a_flow_sends_under_the_seat_its_caller_took () =
+  let (result, held_while_sending, held_after), posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot config ->
+    let flow =
+      start_flow
+        (frozen_candidates
+           [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary" ])
+    in
+    let (), seat = Provider_admission.take_first_seat ((), primary_seat_source snapshot) [] in
+    let held_while_sending = ref None in
+    let result =
+      EO.execute_flow_once
+        ~seat
+        ~net
+        ~clock
+        ~before_measurement_dispatch:(fun _ -> Ok ())
+        ~on_measurement_terminal:(fun _ -> Ok ())
+        ~before_dispatch:(fun _ ->
+          held_while_sending := Some (held_permits config);
+          Ok ())
+        ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+        ~validate:accepting_test_validator
+        flow
+      |> transport_test_result
+    in
+    result, !held_while_sending, held_permits config
+  in
+  check int "one POST" 1 posts;
+  check (option int) "one permit held while it sends" (Some 1) held_while_sending;
+  check int "the flow returned the caller's seat" 0 held_after;
+  match result with
+  | Ok success ->
+    check
+      string
+      "the primary answered"
+      "bound-primary"
+      (candidate_id (EO.flow_success_candidate success))
+  | Error _ -> fail "the flow should answer under its caller's seat"
+;;
+
+(* A seat another endpoint gave never carries the first candidate's request:
+   the flow returns it and refuses before any callback or request. *)
+let test_a_seat_of_another_endpoint_is_refused_before_any_request () =
+  let (refused, callbacks, held_after), posts =
+    with_server ~response:(openai_response {|{"name":"accepted"}|})
+    @@ fun ~sw:_ ~net ~clock ~base_url ->
+    with_bound_targets ~base_url ~body_timeout_s:2.0
+    @@ fun snapshot config ->
+    let successor_config =
+      { config with api_key = Secret.of_string "successor-test-key" }
+    in
+    let flow =
+      start_flow
+        (frozen_candidates
+           [ flow_candidate_as snapshot ~id:"bound-primary" ~target_ref:"bound-primary" ])
+    in
+    let (), seat =
+      Provider_admission.take_first_seat
+        ((), Provider_admission.Endpoint_seats successor_config)
+        []
+    in
+    let callbacks = ref 0 in
+    let counted _ =
+      incr callbacks;
+      Ok ()
+    in
+    let refused =
+      match
+        EO.execute_flow_once
+          ~seat
+          ~net
+          ~clock
+          ~before_measurement_dispatch:counted
+          ~on_measurement_terminal:counted
+          ~before_dispatch:counted
+          ~before_advance:(fun ~failed:_ ~next:_ -> Ok ())
+          ~validate:accepting_test_validator
+          flow
+      with
+      | exception Invalid_argument _ -> true
+      | Ok _ | Error _ -> false
+    in
+    refused, !callbacks, held_permits successor_config
+  in
+  check bool "the flow refused the seat" true refused;
+  check int "no callback ran" 0 callbacks;
+  check int "no POST" 0 posts;
+  check int "the seat went back to its endpoint" 0 held_after
+;;
+
 (* When every slot is full the walk queues on all of them and runs on the
    first seat to free, passing the slots in front of it. *)
 let test_a_full_walk_runs_on_the_first_seat_to_free () =
@@ -6825,6 +6937,14 @@ let () =
             "a full walk runs on the first seat to free"
             `Quick
             test_a_full_walk_runs_on_the_first_seat_to_free
+        ; test_case
+            "a flow sends under the seat its caller took"
+            `Quick
+            test_a_flow_sends_under_the_seat_its_caller_took
+        ; test_case
+            "a seat of another endpoint is refused before any request"
+            `Quick
+            test_a_seat_of_another_endpoint_is_refused_before_any_request
         ; test_case
             "the body deadline counts from the dispatch, not the wait"
             `Quick

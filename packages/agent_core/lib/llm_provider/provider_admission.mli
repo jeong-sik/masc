@@ -173,35 +173,59 @@ val with_admission_and_work_until
 
 (** {2 A seat taken before the work}
 
-    A caller with several endpoints to choose from takes a seat first and
-    then runs its work on the endpoint that gave it. *)
+    A caller with several places to run its work takes a seat first and
+    then runs the work where the seat came from. *)
 
-(** One endpoint's permit, held until {!release_seat}. A config that
-    declares no [max_concurrent_requests] gives a seat that holds nothing. *)
+(** One permit, held until {!release_seat}. A seat of an endpoint that
+    declares no [max_concurrent_requests] holds nothing. *)
 type seat
 
-(** [take_first_seat first rest] takes a seat on one of the endpoints of
+(** Where a seat comes from.
+
+    [Endpoint_seats config] is the permits of [config]'s endpoint identity,
+    counted as {!with_admission} counts them. Its wait queues as
+    [config.admission_class] and reports to the wait observer.
+
+    [Scheduler_seats] is the permits of a scheduler the caller owns, for
+    work that is not a provider request, such as an official client process.
+    Its wait queues as [admission_class] and reports nothing: the observer
+    speaks of provider endpoints. *)
+type seat_source =
+  | Endpoint_seats of Provider_config.t
+  | Scheduler_seats of
+      { scheduler : Slot_scheduler.t
+      ; admission_class : Admission_class.t
+      }
+
+(** [take_first_seat first rest] takes a seat from one of the sources of
     [first :: rest] and returns the seat with the value the caller paired
-    with that endpoint's config.
+    with that source.
 
-    It asks each endpoint in order and takes the first seat it can take
-    without waiting: an endpoint with no declaration, or one with a permit
-    free and no request queued. When every endpoint is full, the request
-    queues on all of them at once, each as its config's [admission_class],
-    and keeps the first permit granted. A permit granted to it after that one
-    goes straight back to its endpoint. The wait has no deadline: it ends
-    with a seat or with cancellation, and a cancelled wait leaves no permit
-    held and no request queued.
+    It asks each source in order and takes the first seat it can take
+    without waiting: an endpoint with no declaration, or a source with a
+    permit free and no request queued. When every source is full, the
+    request queues on all of them at once and keeps the first permit
+    granted. A permit granted to it after that one goes straight back to its
+    source. The wait has no deadline: it ends with a seat or with
+    cancellation, and a cancelled wait leaves no permit held and no request
+    queued.
 
-    The allowance and conflict rules are those of {!with_admission}. *)
+    The allowance and conflict rules of an endpoint are those of
+    {!with_admission}. *)
 val take_first_seat
-  :  'owner * Provider_config.t
-  -> ('owner * Provider_config.t) list
+  :  'owner * seat_source
+  -> ('owner * seat_source) list
   -> 'owner * seat
 
-(** Return the seat's permit to its endpoint. Returning a seat twice returns
+(** Return the seat's permit to its source. Returning a seat twice returns
     it once. *)
 val release_seat : seat -> unit
+
+(** Whether [seat] came from [config]'s endpoint: a permit of that
+    endpoint, or the seat that holds nothing when [config] declares no
+    [max_concurrent_requests]. A seat of a {!Scheduler_seats} source is never
+    an endpoint's seat. *)
+val seat_is_of_endpoint : seat -> Provider_config.t -> bool
 
 (** Point-in-time scheduler snapshot for [config]'s endpoint identity, or
     [None] when no dispatch has declared admission for it yet.

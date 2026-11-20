@@ -1,0 +1,26 @@
+(library
+ (name masc_tui_collab_queue)
+ (wrapped true)
+ (libraries
+  masc
+  masc.keeper_runtime
+  masc.masc_random_id
+  masc_eio_context
+  masc_tui_types
+  masc_tui_ansi
+  masc_tui_loader
+  masc_tui_words
+  masc_tui_async_protocol
+  masc_tui_transport
+  masc_tui_surface_requests
+  masc_tui_chat_dispatch
+  masc_tui_collab
+  masc_tui_play_pending
+  masc_tui_keeper_control
+  masc_tui_keeper_chat_projection
+  masc_tui_message_layout
+  masc_tui_queue_inspection
+  masc_tui_queue_layout
+  eio
+  yojson
+  unix))

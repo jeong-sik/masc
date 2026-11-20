@@ -196,9 +196,22 @@ let log_toml_discovery_error_once ~file ~error =
 
 let logged_missing_keepers_dir : (string, unit) Hashtbl.t = Hashtbl.create 4
 
-let keeper_toml_paths (dir : string) : string list =
+let keeper_toml_files (dir : string) : string list option =
   if not (Fs_compat.file_exists dir && Sys.is_directory dir)
-  then (
+  then None
+  else
+    Some
+      (dir
+       |> Sys.readdir
+       |> Array.to_list
+       |> List.filter (fun f -> Filename.check_suffix f ".toml")
+       |> List.sort String.compare
+       |> List.map (Filename.concat dir))
+
+let keeper_toml_paths (dir : string) : string list =
+  match keeper_toml_files dir with
+  | Some paths -> paths
+  | None ->
     (* A missing keepers directory is a misconfiguration, not an empty
        roster: say so once per process instead of returning silence that
        downstream reports as zero keepers and missing declarations. *)
@@ -214,14 +227,7 @@ let keeper_toml_paths (dir : string) : string list =
         "toml_loader: keepers directory %s is missing or not a directory: \
          fleet scan finds zero keepers"
         dir;
-    [])
-  else
-    dir
-    |> Sys.readdir
-    |> Array.to_list
-    |> List.filter (fun f -> Filename.check_suffix f ".toml")
-    |> List.sort String.compare
-    |> List.map (Filename.concat dir)
+    []
 
 let discover_keeper_toml_read ~(path : string) contents : keeper_toml_discovery =
   let file = Filename.basename path in

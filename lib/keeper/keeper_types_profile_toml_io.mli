@@ -55,6 +55,11 @@ val keeper_toml_discovery_name : keeper_toml_discovery -> string
     nothing and warns once per process. *)
 val keeper_toml_paths : string -> string list
 
+(** The paths {!keeper_toml_paths} lists, or [None] when [dir] is missing or
+    not a directory. It warns of nothing. A directory that cannot be listed
+    raises [Sys_error], as it does in {!keeper_toml_paths}. *)
+val keeper_toml_files : string -> string list option
+
 (** Parse one listed declaration. A file that fails to read, parse, or
     validate is [Invalid] under its file stem. *)
 val discover_keeper_toml_path : string -> keeper_toml_discovery

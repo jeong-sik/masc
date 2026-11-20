@@ -12,6 +12,14 @@ type refusal =
   | Zone_not_opened of Authz_zone.open_error
   | Zone_not_trusted of Authz_zone.uncertain
   | Zone_not_multi_account of Authz_mode_state.t
+  | Keeper_definitions_not_named of
+      { folder : string
+      ; files : string * string list
+      }
+  | Keeper_definitions_not_read of
+      { folder : string
+      ; detail : string
+      }
   | Login_client_refused of Server_account_login.refusal
   | Route_of_another_kind of Table.refusal
   | Https_listener_refused of string
@@ -36,6 +44,14 @@ let refusal_to_string = function
     Printf.sprintf
       "the authorization log changed since the boot judged it Multi_account: its mode is now %s"
       (Authz_mode_state.to_string mode)
+  | Keeper_definitions_not_named { folder; files = first, rest } ->
+    Printf.sprintf
+      "%s holds Keeper definitions the authorization log does not name: %s. A multi-account \
+       installation runs only the Keepers of its log"
+      folder
+      (String.concat ", " (first :: rest))
+  | Keeper_definitions_not_read { folder; detail } ->
+    Printf.sprintf "the folder of Keeper definitions %s cannot be listed: %s" folder detail
   | Login_client_refused refusal -> Server_account_login.refusal_to_string refusal
   | Route_of_another_kind refusal -> Table.refusal_to_string refusal
   | Https_listener_refused reason -> "HTTPS listener: " ^ reason
@@ -146,6 +162,22 @@ let judged_again zone =
        as mode -> Error (Zone_not_multi_account mode))
 ;;
 
+(* A multi-account installation runs only the Keepers its authorization log
+   names, and the log names none by the name of a definition yet: the engine
+   name of a Keeper comes in S2 (RFC a-persons-keeper-runs-on-the-engine). So
+   a definition in the folder the engine reads is one the log does not name.
+   The listing is the engine's own ([Keeper_types_profile_toml_io]). *)
+let no_keeper_definition ~base_path =
+  let folder = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  match Keeper_types_profile_toml_io.keeper_toml_files folder with
+  | exception Sys_error detail -> Error (Keeper_definitions_not_read { folder; detail })
+  | None | Some [] -> Ok ()
+  | Some (first :: rest) ->
+    Error
+      (Keeper_definitions_not_named
+         { folder; files = Filename.basename first, List.map Filename.basename rest })
+;;
+
 (* The port the CLI of the workspace reads when none is given
    ([Workspace_connection.resolve]): what was asked for, not a readiness. *)
 let record_port ~base_path (config : Http.config) =
@@ -205,6 +237,7 @@ let run ~sw ~env ~address ~port ~lease ?on_ready multi_account =
          ~store_path:(M.multi_account_external_store multi_account))
   in
   let* () = judged_again zone in
+  let* () = no_keeper_definition ~base_path in
   let* login_clients =
     Result.map_error
       (fun refusal -> Login_client_refused refusal)

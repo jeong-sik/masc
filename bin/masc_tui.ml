@@ -512,326 +512,10 @@ let use_board_read state ~mailbox ~action =
    opens its own session: a human-cadence browser does not earn a held
    connection, and a stale session id would be a second failure mode. *)
 
-let tree_diff_base_ref = "HEAD"
-
-let pr_number_of_subject subject =
-  let n = String.length subject in
-  let rec scan i best =
-    if i >= n then best
-    else if
-      subject.[i] = '(' && i + 2 < n && subject.[i + 1] = '#'
-    then begin
-      let rec digits j acc =
-        if j < n && subject.[j] >= '0' && subject.[j] <= '9' then
-          digits (j + 1) ((acc * 10) + (Char.code subject.[j] - 48))
-        else (j, acc)
-      in
-      let stop, value = digits (i + 2) 0 in
-      if value > 0 && stop < n && subject.[stop] = ')' then
-        scan (stop + 1) (Some value)
-      else scan (i + 1) best
-    end
-    else scan (i + 1) best
-  in
-  scan 0 None
-
-(* The codebase slug for the surface's scope, when it has one. Only a
-   repository row carries the server-minted slug (RFC-0378: the client
-   never re-derives it); the other scopes honestly have none. *)
-(* Same fiber-and-mailbox shape as the notes read below. Scoped by the same
-   keeper / repo axes the file itself was read through, so the margin
-   describes the checkout on screen rather than whichever one the server
-   would default to. *)
-let repository_change_scope_equal left right =
-  match left, right with
-  | Tui_decode.Repository_change_project, Tui_decode.Repository_change_project ->
-      true
-  | ( Tui_decode.Repository_change_repository left_id
-    , Tui_decode.Repository_change_repository right_id ) ->
-      String.equal left_id right_id
-  | Tui_decode.Repository_change_project, Tui_decode.Repository_change_repository _
-  | Tui_decode.Repository_change_repository _, Tui_decode.Repository_change_project ->
-      false
-
-let launch_repository_changes_load state ~mailbox ~scope =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Repository_msg (Repository_changes_loaded (scope, result))))
-    (fun () ->
-      match scope with
-      | Tui_decode.Repository_change_project ->
-          Masc_tui_loader.load_project_changes ~host ~port
-      | Tui_decode.Repository_change_repository repository_id ->
-          Masc_tui_loader.load_repository_changes ~host ~port ~repository_id)
-  end
-
-let launch_repository_changes_diff_load state ~mailbox ~scope ~path =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  state.repository_changes_diff_generation <- state.repository_changes_diff_generation + 1;
-  let request =
-    { rdr_scope = scope; rdr_path = path
-    ; rdr_generation = state.repository_changes_diff_generation }
-  in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  let repo =
-    match scope with
-    | Tui_decode.Repository_change_repository repository_id -> Some repository_id
-    | Tui_decode.Repository_change_project -> None
-  in
-  Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Repository_msg (Repository_changes_diff_loaded (request, result))))
-    (fun () ->
-      Masc_tui_loader.load_git_diff ~host ~port ?repo ~keeper:None ~path
-        ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
-  end
-
-let diff_text_max_width text =
-  String.split_on_char '\n' text
-  |> List.fold_left (fun widest line ->
-       max widest (Message_layout.display_width (Terminal_text.single_line line))) 0
-
-let git_diff_body_max_width (diff : Tui_decode.git_diff) =
-  List.fold_left (fun widest (row : Tui_decode.git_diff_row) ->
-    max widest (Message_layout.display_width
-      (Terminal_text.single_line row.gdr_text))) 0 diff.gd_rows
-
-let refresh_recorded_diff_bounds state ~reset =
-  let width = match opened_file_change state with
-    | None -> 0
-    | Some change ->
-        (match change.Tui_decode.fc_kind with
-         | Tui_decode.Fc_edited { before; after; _ } ->
-             max (diff_text_max_width before) (diff_text_max_width after)
-         | Tui_decode.Fc_inserted { text; _ } -> diff_text_max_width text
-         | Tui_decode.Fc_written { content } -> diff_text_max_width content
-         | Tui_decode.Fc_materialized _ -> 0) in
-  state.changes_diff_max_width <- width;
-  state.changes_diff_hscroll <-
-    if reset then 0
-    else min state.changes_diff_hscroll (max 0 (width - 1))
-
-let open_repository_change_diff state ~mailbox ~scope
-    (change : Tui_decode.repository_change) =
-  state.repository_changes_diff <- None;
-  state.repository_changes_diff_error <- None;
-  state.repository_changes_diff_path <- Some change.rc_path;
-  state.repository_changes_diff_hscroll <- 0;
-  state.repository_changes_diff_max_width <- 0;
-  state.repository_changes_diff_scroll <- 0;
-  launch_repository_changes_diff_load state ~mailbox ~scope ~path:change.rc_path
-
-let close_repository_changes_diff state =
-  state.repository_changes_diff <- None;
-  state.repository_changes_diff_error <- None;
-  state.repository_changes_diff_path <- None;
-  state.repository_changes_diff_hscroll <- 0;
-  state.repository_changes_diff_max_width <- 0;
-  state.repository_changes_diff_scroll <- 0
-
-let open_repository_changes state ~mailbox ~scope =
-  state.repository_changes_open <- true;
-  state.repository_changes_scope <- Some scope;
-  state.repository_changes <- None;
-  state.repository_changes_error <- None;
-  state.repository_changes_cursor <- 0;
-  state.repository_changes_scroll <- 0;
-  state.repository_changes_diff <- None;
-  state.repository_changes_diff_error <- None;
-  state.repository_changes_diff_path <- None;
-  state.repository_changes_diff_hscroll <- 0;
-  state.repository_changes_diff_max_width <- 0;
-  state.repository_changes_diff_scroll <- 0;
-  launch_repository_changes_load state ~mailbox ~scope
-
-let refresh_repository_changes state ~mailbox =
-  match state.repository_changes_scope with
-  | None -> ()
-  | Some scope ->
-      (match state.repository_changes_diff_path with
-       | Some path ->
-           launch_repository_changes_diff_load state ~mailbox ~scope ~path
-       | None ->
-           launch_repository_changes_load state ~mailbox ~scope)
-
-let open_repository_change_in_code state ~mailbox ~scope
-    (change : Tui_decode.repository_change) =
-  set_code_scope state
-    (match scope with
-     | Tui_decode.Repository_change_project -> Code_scope_project
-     | Tui_decode.Repository_change_repository repository_id ->
-         Code_scope_repo repository_id);
-  let parent = Filename.dirname change.rc_path in
-  state.code_dir <- (if String.equal parent "." then "" else parent);
-  state.code_cursor <- 0;
-  state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-  state.code_file <- Masc_tui_fetched.clear state.code_file;
-  state.code_file_resume_intent <- Refresh_code_file;
-  state.code_focus_file <- Left_pane;
-  close_repository_changes state;
-  state.view <- Code;
-  Masc_tui_code_requests.launch_entries_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state mailbox);
-  Masc_tui_code_requests.launch_file_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state mailbox) ~path:change.rc_path
-
-(* One step back on the Code surface, for Esc and for Left. Both take the step
-   [Masc_tui_keys.code_back_step] names; when none is left, [leave] runs. Esc
-   passes the way out to the ring parent and Left passes nothing, so Left
-   stays on the surface. *)
-let step_code_back state ~mailbox ~leave =
-  let reload () =
-    state.code_cursor <- 0;
-    state.code_listing <- Masc_tui_fetched.clear state.code_listing;
-    Masc_tui_code_requests.launch_entries_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host
-      ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state mailbox)
-  in
-  match Masc_tui_keys.code_back_step state with
-  | Close_code_notes -> state.code_notes_open <- false
-  | Close_code_diff -> close_code_diff state
-  | Close_code_history -> state.code_history_open <- false
-  | Return_to_code_tree -> state.code_focus_file <- Left_pane
-  | Climb_code_directory ->
-      (* Up one directory; "." from Filename.dirname means the root, which
-         this surface spells "". *)
-      let parent = Filename.dirname state.code_dir in
-      state.code_dir <- (if String.equal parent "." then "" else parent);
-      reload ()
-  | Climb_to_code_project ->
-      (* Above a keeper's or a repository's root sits the project tree the
-         surface started on. *)
-      set_code_scope state Code_scope_project;
-      reload ()
-  | Leave_code_for_workspace -> leave ()
-
-(* Where the change is on this machine.
-
-   All three shapes resolve inside the keeper's own bundle, because that is
-   where the write happened. An operator's checkout of the same repository is
-   a different tree and this surface does not know where it is; naming the
-   keeper's copy is the answer that is true.
-
-   A Docker keeper's bundle is not on this filesystem at all, so the path may
-   not exist. The caller checks before handing it to an editor rather than
-   opening an empty buffer under a real file's name. *)
-let change_absolute_path ~base_path (change : Masc.Tui_decode.file_change) =
-  let bundle =
-    Filename.concat base_path
-      (Playground_paths.bundle_root change.Masc.Tui_decode.fc_keeper)
-  in
-  match change.Masc.Tui_decode.fc_location with
-  | Masc.Tui_decode.Fc_at_absolute_path { path } -> path
-  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> Filename.concat bundle bundle_path
-  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
-      Filename.concat bundle
-        (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
-
-(* The address the git-diff read wants: relative to the keeper's playground,
-   because that is the root the server resolves ?keeper= against. Absolute
-   writes have no such address -- a worktree beside the clones is not under
-   the playground -- so they have no tree reading either, and the caller is
-   told rather than sent a path the server would resolve somewhere else. *)
-let change_bundle_relative_path (change : Masc.Tui_decode.file_change) =
-  match change.Masc.Tui_decode.fc_location with
-  | Masc.Tui_decode.Fc_in_bundle { bundle_path } -> Some bundle_path
-  | Masc.Tui_decode.Fc_in_repo { repo_id; relative_path } ->
-      Some (Playground_paths.bundle_relative_repo_path ~repo_id relative_path)
-  | Masc.Tui_decode.Fc_at_absolute_path _ -> None
-
-(* The window the Changes surface asks for. A day is what an operator means
-   by "what has this keeper been doing"; the server's own ceiling is what the
-   read costs, and it clamps anything wider. *)
-let changes_window_hours = 24.0
-
-let launch_workspace_activity state ~mailbox ~repo_id =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  match Masc_tui_fetched.start ~equal:String.equal state.workspace_activity ~key:repo_id with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (next, request) ->
-      state.workspace_activity <- next;
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-      let run () =
-        let result = try Masc_tui_http.fetch_repository_activity ~host ~port
-            ~repo_id ~window_hours:changes_window_hours
-          with Eio.Cancel.Cancelled _ as exn -> raise exn
-             | exn -> Error (Printexc.to_string exn) in
-        let result = Result.bind result (fun snapshot ->
-          if String.equal snapshot.Tui_decode.ras_repo_id repo_id then Ok snapshot
-          else Error "repository activity response names another repository") in
-        enqueue_async mailbox (Workspace_msg (Workspace_activity_loaded (request, result)))
-      in
-      match Eio_context.get_switch_opt () with
-      | Some sw -> Eio.Fiber.fork_daemon ~sw (fun () -> run (); `Stop_daemon)
-      | None -> enqueue_async mailbox (Workspace_msg (Workspace_activity_loaded (request, Error "Eio switch is unavailable")))
-  end
-
-let launch_file_changes_load state ~mailbox ~keeper_name =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  state.changes_inflight <- true;
-  Masc_tui_transport.Workspace_admission.launch_guarded_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (File_changes_loaded (keeper_name, result)))
-    (Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-      Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-        ~window_hours:changes_window_hours))
-
-  end
-
-(* The pane's Changes tab asks for the selected keeper's changes through
-   the fetch helper, so a request already in flight is not repeated and an
-   answer for another keeper is dropped on arrival. *)
-
-let launch_acting_pane_changes_load ?(force = false) state ~mailbox ~keeper_name =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  let key = { apk_keeper = keeper_name
-            ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
-  let start =
-    match force, Masc_tui_fetched.current_key state.acting_pane_changes with
-    | true, _ -> Masc_tui_fetched.refresh
-    | false, Some current when Masc_tui_fetched.in_flight state.acting_pane_changes
-                        && not (same_acting_pane_key current key) -> Masc_tui_fetched.refresh
-    | false, (Some _ | None) -> Masc_tui_fetched.start
-  in
-  match
-    start ~equal:(if force then same_acting_pane_key else same_acting_pane_keeper)
-      state.acting_pane_changes ~key
-  with
-  | Masc_tui_fetched.Already_loading -> ()
-  | Masc_tui_fetched.Started (next, request) -> (
-      state.acting_pane_changes_loss_followup <- None;
-      state.acting_pane_changes <- next;
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-      let port = state.port in
-      Masc_tui_transport.Workspace_admission.launch_guarded_async_read state ~mailbox
-        ~deliver:(fun result ->
-          enqueue_async mailbox (Acting_pane_changes_loaded (request, result)))
-        (Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-          Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-            ~window_hours:changes_window_hours)))
-
-  end
-
 (* The Changes tab is live only while it is on screen: the pane drawn, the
    tab up, a keeper under the cursor. [refresh] asks again whatever is
    known; [ensure] asks only for a keeper never asked about, so the loop
    can call it after every input without repeating a settled fetch. *)
-
-let acting_pane_source_current (state : state) =
-  match state.acting_pane_presented.frame_source with
-  | Some source when same_acting_pane_scope source.aps_scope
-                       (state.workspace_authority, state.workspace_read_authority)
-                     && server_authority_ready state ->
-      true
-  | Some _ | None -> false
 
 let acting_pane_changes_keeper (state : state) =
   let _, cols = Masc_tui_ansi.get_terminal_size () in
@@ -845,7 +529,7 @@ let acting_pane_changes_keeper (state : state) =
 let refresh_acting_pane_changes ?(force = false) state ~mailbox =
   match acting_pane_changes_keeper state with
   | None -> ()
-  | Some keeper_name -> launch_acting_pane_changes_load ~force state ~mailbox ~keeper_name
+  | Some keeper_name -> Masc_tui_repo_changes.Workspace_file_changes.launch_acting_pane_changes_load ~force state ~mailbox ~keeper_name
 
 let ensure_acting_pane_changes state ~mailbox =
   match acting_pane_changes_keeper state with
@@ -854,129 +538,7 @@ let ensure_acting_pane_changes state ~mailbox =
       let key = { apk_keeper = keeper_name
                 ; apk_scope = state.workspace_authority, state.workspace_read_authority } in
       if acting_pane_read_needed ~key state.acting_pane_changes then
-        launch_acting_pane_changes_load state ~mailbox ~keeper_name
-
-let launch_keeper_chat_file_changes_load ?(force = false) state ~mailbox
-    ~keeper_name =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  if state.msg_tool_visibility <> Tools_full then ()
-  else begin
-    if
-      not
-        (Option.equal String.equal state.msg_file_changes_keeper
-           (Some keeper_name))
-    then Masc_tui_chat_input.Message_draft_recall.reset_message_file_changes state (Some keeper_name);
-    if state.msg_file_changes_loading then
-      if force then state.msg_file_changes_refresh_pending <- true else ()
-    else if
-      (Option.is_some state.msg_file_changes
-       || Option.is_some state.msg_file_changes_error)
-      && not force
-    then ()
-    else begin
-      state.msg_file_changes_generation <- state.msg_file_changes_generation + 1;
-      let generation = state.msg_file_changes_generation in
-      state.msg_file_changes_loading <- true;
-      state.msg_file_changes_refresh_pending <- false;
-      let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-      let port = state.port in
-      let read = Masc_tui_transport.Workspace_admission.capture_json_read state (fun () ->
-        Masc_tui_loader.load_keeper_file_changes ~host ~port ~keeper_name
-          ~window_hours:changes_window_hours) in
-      let run () =
-        let result =
-          try (match read () with
-            | Error refusal -> Error (Request_withdrawn refusal)
-            | Ok result -> Result.map_error (fun detail -> Request_failed detail) result)
-          with
-          | Eio.Cancel.Cancelled _ as exn -> raise exn
-          | exn -> Error (Request_failed (Printexc.to_string exn))
-        in
-        enqueue_async mailbox
-          (Keeper_msg (Keeper_chat_file_changes_loaded (generation, keeper_name, result)))
-      in
-      match Eio_context.get_switch_opt () with
-      | Some sw ->
-          Eio.Fiber.fork_daemon ~sw (fun () ->
-              run ();
-              `Stop_daemon)
-      | None ->
-          enqueue_async mailbox
-            (Keeper_msg (Keeper_chat_file_changes_loaded
-               ( generation
-               , keeper_name
-               , Error (Request_failed "Eio switch is unavailable") )))
-    end
-  end
-  end
-
-let launch_keeper_chat_tool_details_load ?(force = false) state ~mailbox
-    ~keeper_name =
-  if server_authority_ready state then begin
-  if state.msg_tool_visibility = Tools_compact then ()
-  else begin
-    launch_keeper_chat_file_changes_load ~force state ~mailbox ~keeper_name;
-    Masc_tui_work_requests.Schedule_call_requests.launch_keeper_calls_load ~force state ~mailbox keeper_name
-  end
-
-  end
-
-(* Changes follows the selected Keeper, but the surface is useful precisely
-   when comparing more than one Keeper. Brackets move that shared selection
-   and invalidate every row whose identity belonged to the previous Keeper;
-   the stamped async response below already rejects a late answer. *)
-
-let cycle_changes_keeper state ~mailbox ~delta =
-  let count = List.length state.keepers in
-  if count > 0 then begin
-    let current =
-      match state.changes_keeper with
-      | Some keeper_name ->
-          let rec find index = function
-            | [] -> min state.keeper_cursor (count - 1)
-            | (keeper : keeper) :: rest ->
-                if String.equal keeper.k_name keeper_name
-                then index
-                else find (index + 1) rest
-          in
-          find 0 state.keepers
-      | None -> min state.keeper_cursor (count - 1)
-    in
-    let next = (current + delta + count) mod count in
-    match List.nth_opt state.keepers next with
-    | None -> ()
-    | Some keeper ->
-        state.keeper_cursor <- next;
-        state.changes_keeper <- Some keeper.k_name;
-        state.changes <- None;
-        state.changes_error <- None;
-        state.changes_inflight <- false;
-        state.changes_cursor <- 0;
-        state.changes_scroll <- 0;
-        state.changes_diff_row <- None;
-        state.changes_diff_scroll <- 0;
-        state.changes_tree_diff <- None;
-        state.changes_tree_diff_error <- None;
-        state.changes_tree_diff_path <- None;
-        launch_file_changes_load state ~mailbox ~keeper_name:keeper.k_name
-  end
-
-(* What the tree holds for one file, against its last commit. HEAD rather
-   than a branch point: the question the surface answers is "did this survive
-   into the tree", and a merge base would answer a different one. *)
-let launch_git_diff_load state ~mailbox ~keeper ~path =
-  if server_authority_ready state then begin
-  let enqueue_async = Masc_tui_transport.Workspace_admission.workspace_enqueue state in
-  let host = Masc_tui_transport.Workspace_admission.server_peer_host in
-  let port = state.port in
-  Masc_tui_transport.Workspace_admission.launch_async_read state ~mailbox
-    ~deliver:(fun result ->
-      enqueue_async mailbox (Git_diff_loaded (path, result)))
-    (fun () ->
-      Masc_tui_loader.load_git_diff ~host ~port ~keeper ~path
-        ~against:(Masc_tui_http.Working_tree_against tree_diff_base_ref) ())
-  end
+        Masc_tui_repo_changes.Workspace_file_changes.launch_acting_pane_changes_load state ~mailbox ~keeper_name
 
 (* Back from a run's detail to the list it was opened from. [ and ] move the
    list cursor while the detail covers the list, so the window is brought to
@@ -2172,7 +1734,7 @@ let launch_surface_reads state ~mailbox (surface : surface) =
       Masc_tui_ops_requests.Overview_harness_requests.launch_harness_load state ~mailbox
   | Changes -> (
       match state.changes_keeper with
-      | Some keeper_name -> launch_file_changes_load state ~mailbox ~keeper_name
+      | Some keeper_name -> Masc_tui_repo_changes.Workspace_file_changes.launch_file_changes_load state ~mailbox ~keeper_name
       | None -> ())
   | Connectors -> (
       match browser_lane_on_screen state with
@@ -2626,7 +2188,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     (* Full tool detail owns the only lazy read. Compact chat remains byte- and
        network-compatible; repeated history refreshes reuse this separate cache. *)
     if load_file_changes then
-      launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
+      Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load state ~mailbox ~keeper_name
   end
   end
   end
@@ -6266,7 +5828,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
       state.acting_pane_tab <- Masc_tui_acting_pane.next_tab state.acting_pane_tab;
       state.acting_pane_scroll <- 0
   | Masc_tui_acting_pane.Target_more -> scroll_acting_pane state ~delta:1
-  | Masc_tui_acting_pane.Target_file _ when acting_pane_source_current state -> (
+  | Masc_tui_acting_pane.Target_file _ when Masc_tui_repo_changes.Workspace_file_changes.acting_pane_source_current state -> (
       (* The row indexes the snapshot the pane drew. The Changes surface
          opens on that same snapshot with the row's diff up, then asks for
          a fresh one the way [/changes] does; the loaded handler keeps the
@@ -6285,7 +5847,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
               state.changes_cursor <- index;
               state.changes_scroll <- 0;
               state.changes_diff_row <- Some index;
-              refresh_recorded_diff_bounds state ~reset:true;
+              Masc_tui_repo_changes.Diff_geometry.refresh_recorded_diff_bounds state ~reset:true;
               state.changes_diff_scroll <- 0;
               state.changes_tree_diff <- None;
               state.changes_tree_diff_error <- None;
@@ -6294,7 +5856,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
   | Masc_tui_acting_pane.Target_call_order ->
       state.acting_pane_call_order
       <- Masc_tui_acting_pane.next_call_order state.acting_pane_call_order
-  | Masc_tui_acting_pane.Target_call (keeper_name, key) when acting_pane_source_current state ->
+  | Masc_tui_acting_pane.Target_call (keeper_name, key) when Masc_tui_repo_changes.Workspace_file_changes.acting_pane_source_current state ->
       (* A press on a call opens it: its detail rows draw under it until a
          press on the call or its detail closes it again. What stays open is
          only what the feed still holds -- a key for a call that has left
@@ -6323,7 +5885,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
       <- (if held (keeper_name, key) && not (List.exists same state.acting_pane_expanded)
           then (keeper_name, key) :: others
           else others)
-  | Masc_tui_acting_pane.Target_calls keeper_name when acting_pane_source_current state -> (
+  | Masc_tui_acting_pane.Target_calls keeper_name when Masc_tui_repo_changes.Workspace_file_changes.acting_pane_source_current state -> (
       (* An earlier turn's row is the keeper's calls surface by another hand,
          the way [t] opens it from the roster: the cursor lands on that
          keeper so the surface names the right one, and the snapshot is asked
@@ -6336,7 +5898,7 @@ let handle_acting_pane_click (state : state) ~base_path ~mailbox ~line =
           state.keeper_calls_scroll <- 0;
           transition_keeper_view state (Keepers Keeper_calls);
           owe_keeper_calls_read state ~mailbox ~keeper_name)
-  | Masc_tui_acting_pane.Target_keeper keeper_name when acting_pane_source_current state -> (
+  | Masc_tui_acting_pane.Target_keeper keeper_name when Masc_tui_repo_changes.Workspace_file_changes.acting_pane_source_current state -> (
       match select_activity_keeper state keeper_name with
       | Activity_keeper_missing | Activity_keeper_selected -> ()
       | Activity_keeper_already_selected ->
@@ -6362,7 +5924,7 @@ let acting_pane_drawn (state : state) =
 let acting_pane_frame_targets state =
   let targets = state.acting_pane_presented.frame_targets in
   let targets =
-    if acting_pane_source_current state then targets
+    if Masc_tui_repo_changes.Workspace_file_changes.acting_pane_source_current state then targets
     else List.map (function
       | Masc_tui_acting_pane.Target_none -> Masc_tui_acting_pane.Target_none
       | Target_next_tab -> Target_next_tab
@@ -6688,7 +6250,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Open_diff ->
       Masc_tui_message_input.clear state.msg_input;
       state.repository_changes_return_chat <- true;
-      open_repository_changes state ~mailbox
+      Masc_tui_repo_changes.Repository_changes.open_repository_changes state ~mailbox
         ~scope:Tui_decode.Repository_change_project
   | Masc_tui_command.Open_usage ->
       Masc_tui_message_input.clear state.msg_input;
@@ -7212,7 +6774,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
          | `Toggle -> toggle_tool_visibility state.msg_tool_visibility);
       (match state.msg_tool_visibility, target with
        | (Tools_results | Tools_full), Some keeper_name ->
-           launch_keeper_chat_tool_details_load ~force:true state ~mailbox
+           Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state ~mailbox
              ~keeper_name
        | Tools_compact, _ | (Tools_results | Tools_full), None -> ());
       notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
@@ -9883,7 +9445,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
     (match state.view with
      | Changes ->
          Option.iter (fun path ->
-           launch_git_diff_load state ~mailbox ~keeper:state.changes_keeper ~path)
+           Masc_tui_repo_changes.Diff_geometry.launch_git_diff_load state ~mailbox ~keeper:state.changes_keeper ~path)
            state.changes_tree_diff_path
      | Fusion ->
          (match state.fusion_launch with
@@ -9895,7 +9457,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
            (board_post_on_screen state)
      | Keepers Keeper_message ->
          Option.iter (fun keeper_name ->
-           launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name;
+           Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_file_changes_load ~force:true state ~mailbox ~keeper_name;
            if state.msg_tool_visibility <> Tools_compact then
              Masc_tui_work_requests.Schedule_call_requests.launch_keeper_calls_load ~force:true state ~mailbox keeper_name)
            state.msg_target_keeper_name;
@@ -9942,7 +9504,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
          if state.code_diff_open then Option.iter (fun path ->
            Masc_tui_code_requests.launch_diff_load state ~host ~deliver
              ~target:(diff_target_for_refresh state
-                        ~base_ref:tree_diff_base_ref ~path))
+                        ~base_ref:Masc_tui_repo_changes.Repository_changes.tree_diff_base_ref ~path))
            selected_file;
          Option.iter (fun path -> Masc_tui_code_requests.launch_blame_load state ~host ~deliver ~path)
            (Masc_tui_fetched.current_key state.code_blame);
@@ -9989,7 +9551,7 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
      | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
      | Runtime | Tools | System_logs | Keepers _ | Config -> ());
     Option.iter (Masc_tui_work_requests.Tools_task_requests.launch_task_history_load ~terminal_size:Masc_tui_render_prim.get_terminal_size state ~mailbox) state.task_detail_id;
-    Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox ~repo_id)
+    Option.iter (fun repo_id -> Masc_tui_repo_changes.Workspace_file_changes.launch_workspace_activity state ~mailbox ~repo_id)
       state.workspace_activity_repo;
     Option.iter (Masc_tui_ops_requests.Lanes_activity_requests.launch_exact_activity_read state ~mailbox) state.exact_activity_open;
     Option.iter (Masc_tui_ops_requests.Lanes_activity_requests.launch_machine_activity_read state ~mailbox) state.machine_activity_open;
@@ -10024,8 +9586,8 @@ let resume_reads_after_authority_change ~server_contact state ~mailbox ~refresh_
     if state.repository_changes_open then
       (match state.repository_changes_scope, state.repository_changes_diff_path with
        | Some scope, Some path ->
-           launch_repository_changes_diff_load state ~mailbox ~scope ~path
-       | Some scope, None -> launch_repository_changes_load state ~mailbox ~scope
+           Masc_tui_repo_changes.Repository_changes.launch_repository_changes_diff_load state ~mailbox ~scope ~path
+       | Some scope, None -> Masc_tui_repo_changes.Repository_changes.launch_repository_changes_load state ~mailbox ~scope
        | None, _ -> ());
     if state.keeper_deletions_open then Masc_tui_surface_requests.Keeper_surface_requests.launch_keeper_deletions state ~mailbox ();
     (match state.browser_history with
@@ -11398,7 +10960,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 ~send_operator_text:(fun ~keeper_name snapshot -> send_operator_text ~keeper_name state ~base_path ~mailbox snapshot)
                 ~paste_clipboard_image:(fun () -> paste_clipboard_image state)
                 ~open_named_image:(fun () -> open_named_image state ~mailbox)
-                ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name)
+                ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name)
                 state ~base_path ~mailbox Composer.send_key
             in
             ())));
@@ -12172,7 +11734,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                                   && Masc_tui_fetched.in_flight state.acting_pane_changes ->
                   state.acting_pane_changes_loss_followup <- Some key
               | Some _ | None ->
-                  launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name)
+                  Masc_tui_repo_changes.Workspace_file_changes.launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name)
          | Some _ | None ->
              (* A hidden pane must owe a read when it is next shown. Clearing
                 also retires any response that was in flight before the loss. *)
@@ -12186,7 +11748,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              update_history_owed ~audit:true state ~keeper_name Masc_tui_owed_read.changed;
              launch_owed_history state ~mailbox;
              if state.view = Keepers Keeper_message then
-               launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name
+               Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name
          | None -> ());
         Option.iter
           (fun (keeper : keeper) -> owe_keeper_calls_read state ~mailbox ~keeper_name:keeper.k_name)
@@ -14819,7 +14381,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
           launch_keeper_history_load ~load_file_changes:false state ~mailbox
             ~keeper_name:request.Keeper_chat.keeper_name;
           if state.view = Keepers Keeper_message then
-            launch_keeper_chat_tool_details_load ~force:true state ~mailbox
+            Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state ~mailbox
               ~keeper_name:request.Keeper_chat.keeper_name
         end;
         Masc_tui_transport.Local_sources.launch_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh base_path;
@@ -16892,11 +16454,11 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
   | Repository_msg (Repository_changes_loaded (scope, result)) ->
       if
         state.repository_changes_open
-        && Option.equal repository_change_scope_equal
+        && Option.equal Masc_tui_repo_changes.Repository_changes.repository_change_scope_equal
              state.repository_changes_scope (Some scope)
       then
         (match result with
-         | Ok snapshot when repository_change_scope_equal snapshot.rcs_scope scope ->
+         | Ok snapshot when Masc_tui_repo_changes.Repository_changes.repository_change_scope_equal snapshot.rcs_scope scope ->
              (* A re-read can shorten or reorder the list under the cursor.
                 The cursor follows the path it was on; when that path is gone
                 it stays inside the rows read, so the selected row and the
@@ -16925,7 +16487,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
          pane that happens to name the same relative path. *)
       if state.repository_changes_open
          && request.rdr_generation = state.repository_changes_diff_generation
-         && Option.equal repository_change_scope_equal
+         && Option.equal Masc_tui_repo_changes.Repository_changes.repository_change_scope_equal
               state.repository_changes_scope (Some request.rdr_scope)
          && Option.equal String.equal state.repository_changes_diff_path
               (Some request.rdr_path)
@@ -16933,7 +16495,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         (match result with
          | Ok diff ->
              state.repository_changes_diff <- Some (request.rdr_path, diff);
-             state.repository_changes_diff_max_width <- git_diff_body_max_width diff;
+             state.repository_changes_diff_max_width <- Masc_tui_repo_changes.Diff_geometry.git_diff_body_max_width diff;
              state.repository_changes_diff_hscroll <-
                min state.repository_changes_diff_hscroll
                  (max 0 (state.repository_changes_diff_max_width - 1));
@@ -16974,7 +16536,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                   snapshot.Masc.Tui_decode.fcs_keeper keeper_name)
         | Error detail -> store_error detail);
         if refresh_pending && state.view = Keepers Keeper_message then
-          launch_keeper_chat_file_changes_load ~force:true state ~mailbox
+          Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_file_changes_load ~force:true state ~mailbox
             ~keeper_name
       end;
       Drawn_changed
@@ -17021,7 +16583,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
               state.acting_pane_changes <-
                 Masc_tui_fetched.invalidate ~reason:(Request_failed "Observer events were lost")
                   state.acting_pane_changes;
-              launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name
+              Masc_tui_repo_changes.Workspace_file_changes.launch_acting_pane_changes_load ~force:true state ~mailbox ~keeper_name
           | Some _ | None ->
               state.acting_pane_changes <- Masc_tui_fetched.clear state.acting_pane_changes;
               state.acting_pane_changes_at <- None
@@ -17076,7 +16638,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
             (* The tree diff owns its path independently of recorded rows.
                A refreshed list cannot close or reset that retained reader. *)
             if Option.is_none state.changes_tree_diff_path then
-              refresh_recorded_diff_bounds state ~reset:(Option.is_none kept_row)
+              Masc_tui_repo_changes.Diff_geometry.refresh_recorded_diff_bounds state ~reset:(Option.is_none kept_row)
         | Error detail -> state.changes_error <- Some detail);
       Drawn_changed
   | Git_diff_loaded (path, result) ->
@@ -17087,7 +16649,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
         match result with
         | Ok diff ->
             state.changes_tree_diff <- Some diff;
-            state.changes_diff_max_width <- git_diff_body_max_width diff;
+            state.changes_diff_max_width <- Masc_tui_repo_changes.Diff_geometry.git_diff_body_max_width diff;
             state.changes_diff_hscroll <-
               min state.changes_diff_hscroll (max 0 (state.changes_diff_max_width - 1));
             state.changes_tree_diff_error <- None
@@ -20643,7 +20205,7 @@ let main
            state.msg_tool_visibility <- Tools_full;
            Option.iter
              (fun keeper_name ->
-               launch_keeper_chat_tool_details_load ~force:true state
+               Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state
                  ~mailbox:async_messages ~keeper_name)
              state.msg_target_keeper_name
        (* A graphics reply is read and dropped. Nothing asks for one outside
@@ -20984,7 +20546,7 @@ let main
               ~send_operator_text:(fun ~keeper_name snapshot -> send_operator_text ~keeper_name state ~base_path ~mailbox:async_messages snapshot)
               ~paste_clipboard_image:(fun () -> paste_clipboard_image state)
               ~open_named_image:(fun () -> open_named_image state ~mailbox:async_messages)
-              ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> launch_keeper_chat_tool_details_load ~force:true state ~mailbox:async_messages ~keeper_name)
+              ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state ~mailbox:async_messages ~keeper_name)
               state ~base_path ~mailbox:async_messages k
         | None -> false
       in
@@ -23305,7 +22867,7 @@ let main
 
             | "esc" ->
               if Option.is_some state.repository_changes_diff_path then
-                close_repository_changes_diff state
+                Masc_tui_repo_changes.Repository_changes.close_repository_changes_diff state
               else begin
                 let return_chat = state.repository_changes_return_chat in
                 close_repository_changes state;
@@ -23316,7 +22878,7 @@ let main
 
             | "left" ->
               if Option.is_some state.repository_changes_diff_path then
-                close_repository_changes_diff state
+                Masc_tui_repo_changes.Repository_changes.close_repository_changes_diff state
               else begin
                 let return_chat = state.repository_changes_return_chat in
                 close_repository_changes state;
@@ -23351,7 +22913,7 @@ let main
                       with
                       | None -> ()
                       | Some change ->
-                          open_repository_change_diff state
+                          Masc_tui_repo_changes.Repository_changes.open_repository_change_diff state
                             ~mailbox:async_messages ~scope change)
                   | _ -> ()))
 
@@ -23415,7 +22977,7 @@ let main
                       with
                       | None -> ()
                       | Some change ->
-                          open_repository_change_diff state
+                          Masc_tui_repo_changes.Repository_changes.open_repository_change_diff state
                             ~mailbox:async_messages ~scope change)
                   | _ -> ()))
 
@@ -23473,7 +23035,7 @@ let main
                   match change_opt with
                   | None -> report_action state "error" "no change under the cursor"
                   | Some change ->
-                      open_repository_change_in_code state
+                      Masc_tui_repo_changes.Repository_changes.open_repository_change_in_code state
                         ~mailbox:async_messages ~scope change)
               | _ -> ())
 
@@ -23567,7 +23129,7 @@ let main
                      (if direction > 0 then Masc_tui_scroll.Page_down else Masc_tui_scroll.Page_up))
             | "r" | "R" ->
               refresh_shared_sources ();
-              refresh_repository_changes state ~mailbox:async_messages;
+              Masc_tui_repo_changes.Repository_changes.refresh_repository_changes state ~mailbox:async_messages;
               add_event state "system" "Manual refresh"
             | _ -> ())
        (* The palette is the same kind of modal, but typed: printable keys
@@ -24637,7 +24199,7 @@ let main
                   state.workspace_activity_repo <- Some repo.rp_id;
                   state.workspace_activity_cursor <- 0;
                   state.workspace_activity_context_scroll <- None;
-                  launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
+                  Masc_tui_repo_changes.Workspace_file_changes.launch_workspace_activity state ~mailbox:async_messages ~repo_id:repo.rp_id)
                   (List.nth_opt snapshot.rs_repositories state.repositories_cursor))
        | Some ("v" | "V") when state.view = Repositories && Option.is_some state.workspace_activity_repo && Option.is_none state.workspace_activity_context_scroll ->
            let _, _, selected = workspace_activity_selection state in
@@ -24662,7 +24224,7 @@ let main
            state.workspace_activity_repo <- None;
            state.workspace_activity_context_scroll <- None
        | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
-           Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
+           Option.iter (fun repo_id -> Masc_tui_repo_changes.Workspace_file_changes.launch_workspace_activity state ~mailbox:async_messages ~repo_id)
              state.workspace_activity_repo
        | Some key
          when state.view = Repositories && Option.is_some state.workspace_activity_repo
@@ -24919,7 +24481,7 @@ let main
            step_board_read state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
        | Some (("[" | "]") as bracket) when state.view = Changes ->
-           cycle_changes_keeper state ~mailbox:async_messages
+           Masc_tui_repo_changes.Workspace_file_changes.cycle_changes_keeper state ~mailbox:async_messages
              ~delta:(if bracket = "]" then 1 else -1)
        | Some "f" when state.view = Resources ->
            Masc_tui_resources_updates.select_scope state
@@ -25759,7 +25321,7 @@ let main
                    ~load_tool_changes:(fun () ->
                      match state.msg_target_keeper_name with
                      | Some keeper_name ->
-                         launch_keeper_chat_tool_details_load ~force:true state
+                         Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state
                            ~mailbox:async_messages ~keeper_name
                      | None -> ())
                    ~drain_queue:(fun () ->
@@ -26222,7 +25784,7 @@ let main
                   state.code_diff_open <- true;
                   state.code_history_open <- false;
                   state.code_notes_open <- false;
-                  let target = Diff_worktree { path; base_ref = tree_diff_base_ref } in
+                  let target = Diff_worktree { path; base_ref = Masc_tui_repo_changes.Repository_changes.tree_diff_base_ref } in
                   (match Masc_tui_fetched.current state.code_diff with
                    | Some (loaded, _) when code_diff_target_equal loaded target -> ()
                    | Some _ | None ->
@@ -27120,7 +26682,7 @@ let main
                  | Some keeper_name ->
                      launch_keeper_history_load ~force:true ~load_file_changes:false state
                        ~mailbox:async_messages ~keeper_name;
-                     launch_keeper_chat_tool_details_load ~force:true state
+                     Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state
                        ~mailbox:async_messages ~keeper_name
                  | None -> ())
             | Verification ->
@@ -27176,7 +26738,7 @@ let main
             | Changes -> (
                 match state.changes_keeper with
                 | Some keeper_name ->
-                    launch_file_changes_load state ~mailbox:async_messages
+                    Masc_tui_repo_changes.Workspace_file_changes.launch_file_changes_load state ~mailbox:async_messages
                       ~keeper_name
                 | None -> ())
             | Connectors ->
@@ -27265,7 +26827,7 @@ let main
                    && state.theme_before_preview <> None ->
                 cancel_theme_preview state
             | Code ->
-                step_code_back state ~mailbox:async_messages
+                Masc_tui_repo_changes.Repository_changes.step_code_back state ~mailbox:async_messages
                   ~leave:(fun () ->
                     (* Off-ring child: the way out of the project root is the
                        ring parent, loaded, same as Connectors and Lanes. *)
@@ -27484,7 +27046,7 @@ let main
               matching Right key can open. *)
            (match state.view with
             | Code ->
-                step_code_back state ~mailbox:async_messages
+                Masc_tui_repo_changes.Repository_changes.step_code_back state ~mailbox:async_messages
                   ~leave:(fun () -> ())
             | Keepers Keeper_detail ->
                 state.detail_focus_recovery <- None;
@@ -28096,7 +27658,7 @@ let main
                           let open Masc.Tui_decode in
                           state.code_lsp_note <-
                             Some
-                              (match pr_number_of_subject row.gl_subject with
+                              (match Masc_tui_repo_changes.Repository_changes.pr_number_of_subject row.gl_subject with
                                | None ->
                                    Code_note_no_pr_number row.gl_hash
                                | Some number -> (
@@ -28241,7 +27803,7 @@ let main
                         report_action state "error" "no change under the cursor"
                     | Some _ ->
                         state.changes_diff_row <- Some state.changes_cursor;
-                        refresh_recorded_diff_bounds state ~reset:true;
+                        Masc_tui_repo_changes.Diff_geometry.refresh_recorded_diff_bounds state ~reset:true;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
@@ -28442,13 +28004,13 @@ let main
                | Overview | Acting | Metrics | Memory | Lanes | Clients | Board | Approvals
                | Planning | Schedules | Verification | Harness | Fusion | Repositories | Code
                | Changes | Connectors | Runtime | Config | Resources | Tools | System_logs -> false) ->
-           open_repository_changes state ~mailbox:async_messages
+           Masc_tui_repo_changes.Repository_changes.open_repository_changes state ~mailbox:async_messages
              ~scope:Tui_decode.Repository_change_project
        | Some "d"
          when state.view = Code
               && (Masc_tui_keys.code_tree_opens_changes state.code_scope
                   && state.code_focus_file = Left_pane) ->
-           open_repository_changes state ~mailbox:async_messages
+           Masc_tui_repo_changes.Repository_changes.open_repository_changes state ~mailbox:async_messages
              ~scope:Tui_decode.Repository_change_project
        | Some "d" when state.view = Repositories ->
              (match state.repositories with
@@ -28461,7 +28023,7 @@ let main
                    | None -> report_action state "error" "no repository under the cursor"
                    | Some repo ->
                        let repository_id = repo.Masc.Tui_decode.rp_id in
-                       open_repository_changes state ~mailbox:async_messages
+                       Masc_tui_repo_changes.Repository_changes.open_repository_changes state ~mailbox:async_messages
                          ~scope:
                            (Tui_decode.Repository_change_repository
                               repository_id)))
@@ -28515,20 +28077,20 @@ let main
                 with
                 | None -> report_action state "error" "no change under the cursor"
                 | Some change -> (
-                    match change_bundle_relative_path change with
+                    match Masc_tui_repo_changes.Diff_geometry.change_bundle_relative_path change with
                     | None ->
                         report_action state "error"
                           "this write is outside the playground; the tree \
                            reading needs a path under it"
                     | Some path ->
                         state.changes_diff_row <- Some state.changes_cursor;
-                        refresh_recorded_diff_bounds state ~reset:true;
+                        Masc_tui_repo_changes.Diff_geometry.refresh_recorded_diff_bounds state ~reset:true;
                         state.changes_diff_scroll <- 0;
                         state.changes_tree_diff <- None;
                         state.changes_tree_diff_error <- None;
                         state.changes_tree_diff_path <- Some path;
                         state.changes_diff_max_width <- 0;
-                        launch_git_diff_load state ~mailbox:async_messages
+                        Masc_tui_repo_changes.Diff_geometry.launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
        | Some " "
          when ((state.view = Planning && state.planning_mode = Planning_list
@@ -28586,7 +28148,7 @@ let main
                 with
                 | None -> report_action state "error" "no change under the cursor"
                 | Some change -> (
-                    match change_bundle_relative_path change with
+                    match Masc_tui_repo_changes.Diff_geometry.change_bundle_relative_path change with
                     | None ->
                         report_action state "error"
                           "an absolute-path write has no address in the \
@@ -28623,7 +28185,7 @@ let main
                 with
                 | None -> report_action state "error" "no change under the cursor"
                 | Some change -> (
-                    let path = change_absolute_path ~base_path change in
+                    let path = Masc_tui_repo_changes.Diff_geometry.change_absolute_path ~base_path change in
                     if not (Sys.file_exists path) then
                       (* A Docker keeper's bundle is not on this filesystem.
                          Saying so beats opening an empty buffer named after a

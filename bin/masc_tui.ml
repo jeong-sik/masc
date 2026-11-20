@@ -4756,17 +4756,15 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
     let count, height = Masc_tui_render_overlays.queue_panel_detail_viewport state panel in
     (match key with
      | "esc" | "\r" | "\n" | "enter" -> update (fun panel -> {panel with qp_detail=None})
-     | "j" | "down" -> update (fun panel -> {panel with qp_detail_scroll=
-         Masc_tui_scroll.down ~count ~height panel.qp_detail_scroll})
-     | "k" | "up" -> update (fun panel -> {panel with qp_detail_scroll=
-         Masc_tui_scroll.up ~count ~height panel.qp_detail_scroll})
-     | "pagedown" -> update (fun panel -> {panel with qp_detail_scroll=
-         Masc_tui_scroll.page_down ~count ~height panel.qp_detail_scroll})
-     | "pageup" -> update (fun panel -> {panel with qp_detail_scroll=
-         Masc_tui_scroll.page_up ~count ~height panel.qp_detail_scroll})
-     | "home" -> update (fun panel -> {panel with qp_detail_scroll=0})
-     | "end" -> update (fun panel -> {panel with qp_detail_scroll=Masc_tui_scroll.maximum ~count ~height})
-     | _ -> ())
+     | _ ->
+         Option.iter
+           (fun move ->
+             update (fun panel ->
+               { panel with
+                 qp_detail_scroll =
+                   Masc_tui_scroll.apply_move ~count ~height move panel.qp_detail_scroll
+               }))
+           (Masc_tui_scroll.wheel_or_key_move key))
   else match key with
   | "esc" -> state.queue_panel <- None
   | "f" -> update (fun panel -> {panel with qp_layout=Masc_tui_queue_layout.toggle panel.qp_layout})
@@ -4780,27 +4778,15 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
                 (resolve_queue_selection ~require_action_ready:false ~state ~panel ~items:(items ())) with
         | Some id -> update (fun panel -> {panel with qp_detail=Some id; qp_detail_scroll=0})
         | None -> notice ~failure:true "Queue selection changed or has not been shown; review the selected row and retry"))
-  | "pageup" | "pagedown" | "home" | "end" ->
-    let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
+  | "pageup" | "pagedown" | "home" | "end" | "g" | "G" | "wheel-up" | "wheel-down" ->
     let rows = items () in
-    let count = List.length rows in
-    update (fun panel ->
-      let old_height = queue_panel_list_height ~items:rows ~budget panel in
-      let old_scroll = queue_panel_scroll ~items:rows ~height:old_height panel in
-      let panel = {panel with qp_selected=None} in
-      let budget = Masc_tui_render_overlays.queue_panel_list_budget state panel in
-      let height = queue_panel_list_height ~items:rows ~budget panel in
-      let scroll = (match key with
-        | "pageup" ->
-          Masc_tui_scroll.page_up ~count ~height:old_height old_scroll
-          |> Masc_tui_scroll.normalize ~count ~height
-        | "pagedown" ->
-          Masc_tui_scroll.page_down ~count ~height:old_height old_scroll
-          |> Masc_tui_scroll.normalize ~count ~height
-        | "home" -> 0
-        | "end" -> Masc_tui_scroll.maximum ~count ~height
-        | _ -> old_scroll) in
-      {panel with qp_scroll=scroll})
+    Option.iter
+      (fun move ->
+        update
+          (queue_panel_page ~items:rows
+             ~budget_for:(Masc_tui_render_overlays.queue_panel_list_budget state)
+             ~move))
+      (Masc_tui_scroll.wheel_or_key_move key)
   | "r" -> Masc_tui_collab_queue.Keeper_queue.launch_keeper_queue state ~mailbox ~keeper_name:panel.qp_keeper Inbox.Inspect
   | "n" -> act `Next
   | "l" -> act `Last
@@ -22215,17 +22201,33 @@ let main
             | "?" ->
                 state.help_open <- true;
                 state.help_scroll <- 0
-            | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
-                let count, height = Masc_tui_render.agenda_viewport state in
-                let scroll = Masc_tui_render.agenda_scroll_position state in
-                state.agenda_navigation <- Agenda_read_rows;
-                state.agenda_scroll <-
-                  (match k with
-                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height scroll
-                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height scroll
-                   | "home" | "g" -> 0
-                   | "end" | "G" -> Masc_tui_scroll.maximum ~count ~height
-                   | _ -> scroll)
+            | "pageup" | "pagedown" | "home" | "end" | "g" | "G" | "wheel-up" | "wheel-down" ->
+                Option.iter
+                  (fun move ->
+                    let lines = Masc_tui_render.agenda_lines state in
+                    let count, height = Masc_tui_render.agenda_viewport state in
+                    let scroll = Masc_tui_render.agenda_scroll_position state in
+                    let next_scroll =
+                      Masc_tui_scroll.apply_move ~count ~height move scroll
+                    in
+                    state.agenda_navigation <- Agenda_read_rows;
+                    state.agenda_scroll <- next_scroll;
+                    let targets = Masc_tui_agenda.target_indexes lines in
+                    let current =
+                      Masc_tui_agenda.selected_index lines
+                        ~selected:state.agenda_selected
+                    in
+                    state.agenda_selected <-
+                      (match
+                         Masc_tui_scroll.visible_target_for_scroll ~targets
+                           ~scroll:next_scroll ~height ~current move
+                       with
+                       | Some idx ->
+                           (match List.nth_opt lines idx with
+                            | Some line -> line.Masc_tui_agenda.goes_to
+                            | None -> Masc_tui_agenda.Nowhere)
+                       | None -> Masc_tui_agenda.Nowhere))
+                  (Masc_tui_scroll.wheel_or_key_move k)
             | "j" | "down" | "k" | "up" ->
                 let lines = Masc_tui_render.agenda_lines state in
                 (match Masc_tui_agenda.target_indexes lines with
@@ -22242,22 +22244,48 @@ let main
                      in
                      state.agenda_scroll <-
                        move ~count ~height state.agenda_scroll
-                 | _ :: _ ->
+                 | _ :: _ as targets ->
                      state.agenda_navigation <- Agenda_follow_selection;
-                     let direction =
-                       match k with
-                       | "j" | "down" -> Masc_tui_agenda.Next
-                       | _ -> Masc_tui_agenda.Previous
-                     in
-                     state.agenda_selected <-
-                       Masc_tui_agenda.step lines
-                         ~selected:state.agenda_selected direction;
                      let _, height = Masc_tui_render.agenda_viewport state in
+                     let forward = k = "j" || k = "down" in
+                     let scroll = Masc_tui_render.agenda_scroll_position state in
+                     (match Masc_tui_agenda.selected_index lines ~selected:state.agenda_selected with
+                      | Some _ ->
+                          let direction =
+                            if forward then Masc_tui_agenda.Next
+                            else Masc_tui_agenda.Previous
+                          in
+                          state.agenda_selected <-
+                            Masc_tui_agenda.step lines
+                              ~selected:state.agenda_selected direction
+                      | None ->
+                          let visible =
+                            List.filter
+                              (fun index -> index >= scroll && index - scroll < height)
+                              targets
+                          in
+                          let picked =
+                            match if forward then visible else List.rev visible with
+                            | index :: _ -> Some index
+                            | [] ->
+                                if forward then
+                                  match List.find_opt (fun index -> index >= scroll) targets with
+                                  | Some _ as hit -> hit
+                                  | None -> List.nth_opt targets 0
+                                else
+                                  match List.find_opt (fun index -> index < scroll + height) (List.rev targets) with
+                                  | Some _ as hit -> hit
+                                  | None -> List.nth_opt (List.rev targets) 0
+                          in
+                          state.agenda_selected <-
+                            (match Option.bind picked (List.nth_opt lines) with
+                             | Some line -> line.Masc_tui_agenda.goes_to
+                             | None -> Masc_tui_agenda.Nowhere));
                      Option.iter
                        (fun cursor ->
                           state.agenda_scroll <-
                             Masc_tui_scroll.ensure_visible ~cursor ~height
-                              state.agenda_scroll)
+                              scroll)
                        (Masc_tui_agenda.selected_index lines
                           ~selected:state.agenda_selected))
             | "\r" ->
@@ -22379,40 +22407,71 @@ let main
                      in
                      state.answering_scroll <- move ~count ~height state.answering_scroll
                  | _ ->
-                     let position =
-                       let rec find i = function
-                         | [] -> 0
-                         | index :: rest ->
-                             if index = state.answering_cursor then i
-                             else find (i + 1) rest
-                       in
-                       find 0 targets
-                     in
-                     let next_position =
-                       match k with
-                       | "j" | "down" ->
-                           min (List.length targets - 1) (position + 1)
-                       | _ -> max 0 (position - 1)
-                     in
-                     let cursor = List.nth targets next_position in
-                     state.answering_cursor <- cursor;
-                     let _, height =
+                     let count, height =
                        Masc_tui_render.answering_viewport state
                      in
+                     let scroll =
+                       Masc_tui_scroll.normalize ~count ~height state.answering_scroll
+                     in
+                     let forward = k = "j" || k = "down" in
+                     let cursor =
+                       match
+                         List.find_index (fun index -> index = state.answering_cursor) targets
+                       with
+                       | Some position ->
+                           let next_position =
+                             if forward then
+                               min (List.length targets - 1) (position + 1)
+                             else max 0 (position - 1)
+                           in
+                           List.nth targets next_position
+                       | None ->
+                           let visible =
+                             List.filter
+                               (fun index ->
+                                 index >= scroll && index - scroll < height)
+                               targets
+                           in
+                           (match if forward then visible else List.rev visible with
+                            | index :: _ -> index
+                            | [] ->
+                                if forward then
+                                  Option.value
+                                    (List.find_opt (fun index -> index >= scroll) targets)
+                                    ~default:(List.hd targets)
+                                else
+                                  Option.value
+                                    (List.find_opt (fun index -> index < scroll + height) (List.rev targets))
+                                    ~default:(List.hd (List.rev targets)))
+                     in
+                     state.answering_cursor <- cursor;
                      (* Keep the cursor row on screen: scroll only as far as
                         needed, in either direction. *)
-                     if cursor < state.answering_scroll then
-                       state.answering_scroll <- cursor
-                     else if cursor >= state.answering_scroll + height then
-                       state.answering_scroll <- cursor - height + 1)
-            | "pageup" | "pagedown" | "home" | "end" ->
-                let count, height = Masc_tui_render.answering_viewport state in
-                state.answering_scroll <-
-                  (match k with
-                   | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.answering_scroll
-                   | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.answering_scroll
-                   | "home" -> 0
-                   | _ -> Masc_tui_scroll.maximum ~count ~height)
+                     state.answering_scroll <-
+                       Masc_tui_scroll.ensure_visible ~cursor ~height scroll)
+            | "pageup" | "pagedown" | "home" | "end" | "g" | "G" | "wheel-up" | "wheel-down" ->
+                Option.iter
+                  (fun move ->
+                    let lines = Masc_tui_render_prim.answering_lines state in
+                    let count, height = Masc_tui_render.answering_viewport state in
+                    let next_scroll =
+                      Masc_tui_scroll.apply_move ~count ~height move state.answering_scroll
+                    in
+                    state.answering_scroll <- next_scroll;
+                    let targets = Masc_tui_answering.target_indexes lines in
+                    let current =
+                      if List.mem state.answering_cursor targets then
+                        Some state.answering_cursor
+                      else None
+                    in
+                    state.answering_cursor <-
+                      (match
+                         Masc_tui_scroll.visible_target_for_scroll ~targets
+                           ~scroll:next_scroll ~height ~current move
+                       with
+                       | Some idx -> idx
+                       | None -> -1))
+                  (Masc_tui_scroll.wheel_or_key_move k)
             | "\r" ->
                 let lines = Masc_tui_render_prim.answering_lines state in
                 (match Masc_tui_render.answering_selected_target state ~lines with
@@ -22457,13 +22516,24 @@ let main
                      "초대 링크를 " ^ Masc_tui_clipboard.copy_outcome_text_korean outcome
                    else
                      "Invite link " ^ Masc_tui_clipboard.copy_outcome_text outcome)
-            | ("j" | "down"), Some _ ->
-                state.play_invite_scroll <- Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:1
-            | ("k" | "up"), Some _ ->
-                state.play_invite_scroll <- max 0 (state.play_invite_scroll - 1)
-            | "g", Some _ -> state.play_invite_scroll <- 0
-            | "G", Some _ -> state.play_invite_scroll <- Masc_tui_types.clamped_scroll_end
-            | _, _ -> ())
+            | key, Some _ ->
+                Option.iter
+                  (fun move ->
+                    let page = Masc_tui_render_overlays.play_card_page_rows state in
+                    state.play_invite_scroll <-
+                      (match move with
+                       | Masc_tui_scroll.Line_down ->
+                           Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:1
+                       | Masc_tui_scroll.Line_up ->
+                           max 0 (state.play_invite_scroll - 1)
+                       | Masc_tui_scroll.Page_down ->
+                           Masc_tui_types.scroll_down_from state.play_invite_scroll ~by:page
+                       | Masc_tui_scroll.Page_up ->
+                           max 0 (state.play_invite_scroll - page)
+                       | Masc_tui_scroll.To_top -> 0
+                       | Masc_tui_scroll.To_end -> Masc_tui_types.clamped_scroll_end))
+                  (Masc_tui_scroll.wheel_or_key_move key)
+            | _, None -> ())
        | Some key when Option.is_some state.collab ->
            (match state.collab with
             | Some view when not compact_viewport || key = "esc" ->
@@ -23573,8 +23643,8 @@ let main
                would be worse than nothing, moving the approvals cursor under
                a reader that is drawing something else. The question's own
                ends, against the same limit the page keys clamp to. *)
-            | "home" -> state.ask_question_scroll <- 0
-            | "end" ->
+            | "home" | "g" -> state.ask_question_scroll <- 0
+            | "end" | "G" ->
                 state.ask_question_scroll <-
                   Masc_tui_render_approvals.ask_question_scroll_limit state
             | "[" -> state.home_opened_request <- None; Masc_tui_operator_actions.Ask_actions.move_ask_cursor state (-1)
@@ -23863,12 +23933,19 @@ let main
               let delta = if k = "j" || k = "down" then 1 else -1 in
               state.keeper_deletions_cursor <- max 0 (min (count - 1) (state.keeper_deletions_cursor + delta));
               state.keeper_deletions_scroll <- 0
-            | "J" | "K" | "pageup" | "pagedown" | "wheel-up" | "wheel-down" ->
+            | "J" | "K" | "pageup" | "pagedown" | "home" | "end" | "g" | "G" | "wheel-up" | "wheel-down" ->
               let count, height = Masc_tui_render.keeper_deletions_viewport state in
-              let delta = match k with "J" | "wheel-down" -> 1 | "K" | "wheel-up" -> -1
-                | "pagedown" -> height | _ -> -height in
-              state.keeper_deletions_scroll <- Masc_tui_scroll.normalize ~count ~height
-                (state.keeper_deletions_scroll + delta)
+              let move =
+                match k with
+                | "J" | "wheel-down" -> Masc_tui_scroll.Line_down
+                | "K" | "wheel-up" -> Masc_tui_scroll.Line_up
+                | "pagedown" -> Masc_tui_scroll.Page_down
+                | "pageup" -> Masc_tui_scroll.Page_up
+                | "home" | "g" -> Masc_tui_scroll.To_top
+                | _ -> Masc_tui_scroll.To_end
+              in
+              state.keeper_deletions_scroll <-
+                Masc_tui_scroll.apply_move ~count ~height move state.keeper_deletions_scroll
             | "t" ->
               (match state.keeper_deletions with
                | Some (Ok inventory) ->
@@ -25322,35 +25399,40 @@ let main
            if Option.is_some selected then state.workspace_activity_context_scroll <- Some 0
        | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_context_scroll ->
            state.workspace_activity_context_scroll <- None
-       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" | "end" | "g" | "G" as move)
+       | Some key
          when state.view = Repositories && Option.is_some state.workspace_activity_repo
-              && Option.is_some state.workspace_activity_context_scroll ->
-           let terminal_rows, cols = get_terminal_size () in
-           let count = List.length (workspace_activity_context_lines state ~cols) in
-           let height = workspace_activity_context_height state
-             ~budget:(Masc_tui_render_prim.surface_chrome_budget ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
-           let maximum = max 0 (count - height) in
-           let old = match state.workspace_activity_context_scroll with Some scroll -> max 0 (min maximum scroll) | None -> 0 in
-           let next = match move with
-             | "home" | "g" -> 0 | "end" | "G" -> maximum
-             | "j" | "down" -> old + 1 | "k" | "up" -> old - 1
-             | "pageup" -> old - Masc_tui_scroll.page_step ~height
-             | _ -> old + Masc_tui_scroll.page_step ~height in
-           state.workspace_activity_context_scroll <- Some (max 0 (min maximum next))
+              && Option.is_some state.workspace_activity_context_scroll
+              && Option.is_some (Masc_tui_scroll.wheel_or_key_move key) ->
+           Option.iter
+             (fun move ->
+               let terminal_rows, cols = get_terminal_size () in
+               let count = List.length (workspace_activity_context_lines state ~cols) in
+               let height = workspace_activity_context_height state
+                 ~budget:(Masc_tui_render_prim.surface_chrome_budget ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows) in
+               let old = Option.value ~default:0 state.workspace_activity_context_scroll in
+               state.workspace_activity_context_scroll <-
+                 Some (Masc_tui_scroll.apply_move ~count ~height move old))
+             (Masc_tui_scroll.wheel_or_key_move key)
        | Some ("esc" | "left") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            state.workspace_activity_repo <- None;
            state.workspace_activity_context_scroll <- None
        | Some ("r" | "R") when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            Option.iter (fun repo_id -> launch_workspace_activity state ~mailbox:async_messages ~repo_id)
              state.workspace_activity_repo
-       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
-         when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
-           let terminal_rows, _ = get_terminal_size () in
-           let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
-           let delta = match move with "j" | "down" -> 1 | "k" | "up" -> -1 | "pageup" -> -page | _ -> page in
-           state.workspace_activity_cursor <- max 0 (min (List.length (workspace_activity_rows state) - 1)
-             (state.workspace_activity_cursor + delta));
-           state.workspace_activity_context_scroll <- None
+       | Some key
+         when state.view = Repositories && Option.is_some state.workspace_activity_repo
+              && Option.is_some (Masc_tui_scroll.wheel_or_key_move key) ->
+           Option.iter
+             (fun move ->
+               let terminal_rows, _ = get_terminal_size () in
+               let page = workspace_activity_page_rows ~surface_rows:(surface_body_rows state ~terminal_rows) in
+               let count = List.length (workspace_activity_rows state) in
+               state.workspace_activity_cursor <-
+                 Masc_tui_scroll.cursor_apply ~count
+                   (Masc_tui_scroll.cursor_move_of_key_move ~page move)
+                   state.workspace_activity_cursor;
+               state.workspace_activity_context_scroll <- None)
+             (Masc_tui_scroll.wheel_or_key_move key)
        | Some ("\r" | "\n" | "right")
          when state.view = Repositories && Option.is_some state.workspace_activity_repo ->
            let _, _, selected = workspace_activity_selection state in
@@ -25377,27 +25459,26 @@ let main
            (* This pane reads metadata. A source cursor retained behind it
               cannot authorize an edit or a search of that hidden source. *)
            ()
-       | Some (("esc" | "left" | "j" | "k" | "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "g" | "G") as key)
+       | Some key
          when state.view = Config && state.config_pane = Config_runtime
-              && state.runtime_config_status_open ->
+              && state.runtime_config_status_open
+              && (key = "esc" || key = "left"
+                  || Option.is_some (Masc_tui_scroll.wheel_or_key_move key)) ->
            (match key with
             | "esc" | "left" -> state.runtime_config_status_open <- false
-            | "home" | "g" -> state.runtime_config_status_scroll <- 0
             | _ ->
-                let terminal_rows, cols = get_terminal_size () in
-                let limit = Masc_tui_render.runtime_config_status_scroll_limit state ~terminal_rows ~cols in
-                (match key with
-                 | "end" | "G" -> state.runtime_config_status_scroll <- limit
-                 | _ ->
-                     let step = match key with
-                       | "pageup" | "pagedown" ->
-                           Masc_tui_render_prim.surface_chrome_budget
-                             ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows
-                       | _ -> 1
-                     in
-                     let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
-                     state.runtime_config_status_scroll <-
-                       max 0 (min limit (min limit state.runtime_config_status_scroll + delta))))
+                Option.iter
+                  (fun move ->
+                    let terminal_rows, cols = get_terminal_size () in
+                    let limit = Masc_tui_render.runtime_config_status_scroll_limit state ~terminal_rows ~cols in
+                    let height =
+                      Masc_tui_render_prim.surface_chrome_budget
+                        ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows
+                    in
+                    let count = limit + height in
+                    state.runtime_config_status_scroll <-
+                      Masc_tui_scroll.apply_move ~count ~height move state.runtime_config_status_scroll)
+                  (Masc_tui_scroll.wheel_or_key_move key))
        | Some "!"
          when state.view = Keepers Keeper_list && not state.composer_focused
               && Option.is_none (text_input_target state ~compact_viewport)
@@ -26053,22 +26134,36 @@ let main
        | Some ("esc" | "left") when state.view = Memory && state.memory_fact_detail_open ->
            state.memory_fact_detail_open <- false;
            state.memory_fact_detail_scroll <- 0
-       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
-         when state.view = Memory && state.memory_fact_detail_open ->
-           let terminal_rows, _ = get_terminal_size () in
-           let page = max 1 (surface_body_rows state ~terminal_rows) in
-           (match move with
-            | "g" -> state.memory_fact_detail_scroll <- 0
-            | "G" ->
-                (* Rendering clamps this to the claim's final wrapped page, the
-                   way the acting reading clamps its own. *)
-                state.memory_fact_detail_scroll <- max_int
-            | _ ->
-                let delta = match move with
-                  | "j" | "down" -> 1 | "k" | "up" -> -1
-                  | "pageup" -> -page | _ -> page in
-                state.memory_fact_detail_scroll <-
-                  Masc_tui_scroll.step_uncounted ~delta state.memory_fact_detail_scroll)
+       | Some key
+         when state.view = Memory && state.memory_fact_detail_open
+              && Option.is_some (Masc_tui_scroll.wheel_or_key_move key) ->
+           Option.iter
+             (fun move ->
+               let terminal_rows, _ = get_terminal_size () in
+               let height =
+                 Masc_tui_render_prim.surface_chrome_budget
+                   ~frame:Masc_tui_render_prim.Chrome_overlay state ~terminal_rows
+               in
+               let page = Masc_tui_scroll.page_step ~height in
+               match move with
+               | Masc_tui_scroll.To_top -> state.memory_fact_detail_scroll <- 0
+               | Masc_tui_scroll.To_end ->
+                   (* Rendering clamps this to the claim's final wrapped page, the
+                      way the acting reading clamps its own. *)
+                   state.memory_fact_detail_scroll <- max_int
+               | Masc_tui_scroll.Line_down ->
+                   state.memory_fact_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:1 state.memory_fact_detail_scroll
+               | Masc_tui_scroll.Line_up ->
+                   state.memory_fact_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:(-1) state.memory_fact_detail_scroll
+               | Masc_tui_scroll.Page_down ->
+                   state.memory_fact_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:page state.memory_fact_detail_scroll
+               | Masc_tui_scroll.Page_up ->
+                   state.memory_fact_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:(-page) state.memory_fact_detail_scroll)
+             (Masc_tui_scroll.wheel_or_key_move key)
        | Some ("\r" | "\n" | "enter")
          when state.view = Memory && state.memory_page = Memory_facts && Option.is_some state.memory_facts_keeper ->
            (* A browser with no fact has no reading to open. *)
@@ -26080,24 +26175,31 @@ let main
          when state.view = Acting && Option.is_some state.acting_detail ->
            state.acting_detail <- None;
            state.acting_detail_scroll <- 0
-       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "g" | "G" as move)
-         when state.view = Acting && Option.is_some state.acting_detail ->
-           let terminal_rows, _ = get_terminal_size () in
-           let page = Masc_tui_render_activity.acting_evidence_page_rows state ~terminal_rows in
-           (match move with
-            | "g" -> state.acting_detail_scroll <- 0
-            | "G" ->
-                (* Rendering clamps this to the final wrapped evidence page. *)
-                state.acting_detail_scroll <- max_int
-            | _ ->
-                let delta = match move with
-                  | "j" | "down" -> 1 | "k" | "up" -> -1
-                  | "pageup" -> -page | _ -> page in
-                (* G above leaves the sentinel here, and a frame that drew no
-                   evidence pane reports no clamp to replace it, so a step
-                   down in between would carry it into [+]. *)
-                state.acting_detail_scroll <-
-                  Masc_tui_scroll.step_uncounted ~delta state.acting_detail_scroll)
+       | Some key
+         when state.view = Acting && Option.is_some state.acting_detail
+              && Option.is_some (Masc_tui_scroll.wheel_or_key_move key) ->
+           Option.iter
+             (fun move ->
+               let terminal_rows, _ = get_terminal_size () in
+               let page = Masc_tui_render_activity.acting_evidence_page_rows state ~terminal_rows in
+               match move with
+               | Masc_tui_scroll.To_top -> state.acting_detail_scroll <- 0
+               | Masc_tui_scroll.To_end ->
+                   (* Rendering clamps this to the final wrapped evidence page. *)
+                   state.acting_detail_scroll <- max_int
+               | Masc_tui_scroll.Line_down ->
+                   state.acting_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:1 state.acting_detail_scroll
+               | Masc_tui_scroll.Line_up ->
+                   state.acting_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:(-1) state.acting_detail_scroll
+               | Masc_tui_scroll.Page_down ->
+                   state.acting_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:page state.acting_detail_scroll
+               | Masc_tui_scroll.Page_up ->
+                   state.acting_detail_scroll <-
+                     Masc_tui_scroll.step_uncounted ~delta:(-page) state.acting_detail_scroll)
+             (Masc_tui_scroll.wheel_or_key_move key)
        (* The flat event list is a row list ([list_on_screen]): its page is
           the rows the list drew. *)
        | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" as move)
@@ -26120,12 +26222,6 @@ let main
             | "right" | "esc" | "\t" | "tab" ->
                 state.keeper_navigation_open <- false;
                 state.keeper_message_focus <- Right_pane
-            | "down" | "j" ->
-                state.keeper_cursor <- Masc_tui_scroll.cursor_down
-                  ~count:(List.length state.keepers) state.keeper_cursor
-            | "up" | "k" ->
-                state.keeper_cursor <- Masc_tui_scroll.cursor_up
-                  ~count:(List.length state.keepers) state.keeper_cursor
             | "\r" | "\n" | "enter" ->
                 (match selected_keeper state with
                  | None -> ()
@@ -26146,7 +26242,19 @@ let main
             | "?" ->
                 state.help_open <- true;
                 state.help_scroll <- 0
-            | _ -> ())
+            | _ ->
+                Option.iter
+                  (fun move ->
+                    let page =
+                      match Masc_tui_list_moves.page_height state Keeper_roster_entries with
+                      | Some height -> Masc_tui_scroll.page_step ~height
+                      | None -> 1
+                    in
+                    state.keeper_cursor <-
+                      Masc_tui_scroll.cursor_apply ~count:(List.length state.keepers)
+                        (Masc_tui_scroll.cursor_move_of_key_move ~page move)
+                        state.keeper_cursor)
+                  (Masc_tui_scroll.wheel_or_key_move key))
        | Some "left"
          when state.view = Overview
               || (message_mode
@@ -26353,6 +26461,7 @@ let main
            let scroll_recovery_key =
              String.equal k "down" || String.equal k "pagedown"
              || String.equal k "end"
+             || (String.equal k "wheel-down" && state.msg_scroll > 0)
            in
            if
              Masc_tui_chat_input.Message_keymap.keeper_message_input_supported ~terminal_size:Masc_tui_render_prim.get_terminal_size state
@@ -26626,14 +26735,23 @@ let main
                (state.changes_diff_hscroll + direction))
        | Some ("esc" | "left" | "K") when Option.is_some (current_code_hover state) ->
            state.code_hover <- None
-       | Some ("j" | "down" | "k" | "up" | "pageup" | "pagedown" | "home" | "end" as key)
-           when Option.is_some (current_code_hover state) ->
-           let count, height = Masc_tui_render_code.code_hover_viewport state in
-           let move = match key with
-             | "j" | "down" -> `Down | "k" | "up" -> `Up
-             | "pageup" -> `Page_up | "pagedown" -> `Page_down
-             | "home" -> `First | "end" -> `Last | _ -> `First in
-           Code_results.scroll_hover state ~count ~height move
+       | Some key
+           when Option.is_some (current_code_hover state)
+                && Option.is_some (Masc_tui_scroll.wheel_or_key_move key) ->
+           Option.iter
+             (fun move ->
+               let count, height = Masc_tui_render_code.code_hover_viewport state in
+               let hover_move =
+                 match move with
+                 | Masc_tui_scroll.Line_down -> `Down
+                 | Masc_tui_scroll.Line_up -> `Up
+                 | Masc_tui_scroll.Page_up -> `Page_up
+                 | Masc_tui_scroll.Page_down -> `Page_down
+                 | Masc_tui_scroll.To_top -> `First
+                 | Masc_tui_scroll.To_end -> `Last
+               in
+               Code_results.scroll_hover state ~count ~height hover_move)
+             (Masc_tui_scroll.wheel_or_key_move key)
        | Some key when Option.is_some (current_code_hover state)
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "e" when state.view = Code && code_edit_focus state -> edit_code_draft ()
@@ -26664,18 +26782,21 @@ let main
             | Ok () -> () | Error detail -> report_action state "error" detail)
        | Some ("esc" | "left") when state.view = Code && state.code_draft_open ->
            state.code_draft_open <- false
-       | Some ("j" | "k" | "up" | "down" | "pageup" | "pagedown" | "home" | "end" as key)
-           when state.view = Code && state.code_draft_open ->
-           let _, cols = get_terminal_size () in
-           let pane_cols = if cols >= keeper_split_threshold_cols then cols - keeper_roster_pane_cols else cols in
-           let height = Masc_tui_render_code.code_pane_content_height state in
-           let maximum = max 0 (List.length (Masc_tui_render_code.code_draft_rows state ~cols:pane_cols) - height) in
-           let step = match key with "pageup" | "pagedown" -> Masc_tui_scroll.page_step ~height | _ -> 1 in
-           let next = match key with
-             | "home" -> 0 | "end" -> maximum
-             | "k" | "up" | "pageup" -> state.code_draft_scroll - step
-             | _ -> state.code_draft_scroll + step in
-           state.code_draft_scroll <- max 0 (min maximum next)
+       | Some key
+           when state.view = Code && state.code_draft_open
+                && Option.is_some (Masc_tui_scroll.wheel_or_key_move key) ->
+           Option.iter
+             (fun move ->
+               let _, cols = get_terminal_size () in
+               let pane_cols =
+                 if cols >= keeper_split_threshold_cols then cols - keeper_roster_pane_cols
+                 else cols
+               in
+               let height = Masc_tui_render_code.code_pane_content_height state in
+               let count = List.length (Masc_tui_render_code.code_draft_rows state ~cols:pane_cols) in
+               state.code_draft_scroll <-
+                 Masc_tui_scroll.apply_move ~count ~height move state.code_draft_scroll)
+             (Masc_tui_scroll.wheel_or_key_move key)
        | Some key when state.view = Code && state.code_draft_open
            && not (List.mem key ["tab"; "shift-tab"; "\t"; "q"; "?"; ":"]) -> ()
        | Some "shift-left"
@@ -26751,19 +26872,15 @@ let main
                 if Option.is_some (Masc_tui_fetched.current state.code_blame)
                 then state.code_blame <- Masc_tui_fetched.clear state.code_blame
                 else Masc_tui_code_requests.launch_blame_load state ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~deliver:(Masc_tui_transport.Workspace_admission.deliver_code state async_messages) ~path)
-       | Some ("pageup" | "pagedown" | "home" | "end" as move)
+       | Some ("pageup" | "pagedown" | "home" | "end" | "g" | "G" | "wheel-up" | "wheel-down" as key)
          when state.view = Code && state.code_focus_file = Right_pane
               && state.code_notes_open ->
-           let count, height = Masc_tui_render_code.code_notes_viewport state in
-           let maximum = max 0 (count - height) in
-           let current = max 0 (min state.code_notes_scroll maximum) in
-           let page = Masc_tui_scroll.page_step ~height in
-           state.code_notes_scroll <-
-             (match move with
-              | "home" -> 0 | "end" -> maximum
-              | "pageup" -> max 0 (current - page)
-              | "pagedown" -> min maximum (current + page)
-              | _ -> current)
+           Option.iter
+             (fun move ->
+               let count, height = Masc_tui_render_code.code_notes_viewport state in
+               state.code_notes_scroll <-
+                 Masc_tui_scroll.apply_move ~count ~height move state.code_notes_scroll)
+             (Masc_tui_scroll.wheel_or_key_move key)
        | Some "t" when state.view = Code && state.code_focus_file = Right_pane
                        && state.code_history_open ->
            (match Masc_tui_render_code.code_history_selected state with

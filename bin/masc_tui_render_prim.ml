@@ -3320,6 +3320,7 @@ let keeper_roster_pane ?(focused = false) ?(top_spacer = true) (state : state) ~
          | _ -> details, [])
   in
   let capacity = available - List.length details - List.length action in
+  report_drawn_list Keeper_roster_entries ~height:capacity;
   let first = max 0 (min (state.keeper_cursor - capacity + 1) (count - capacity)) in
   let window = Rows.of_list ~first ~height:capacity state.keepers in
   (* The heading counts the roster and, when the rows hide some of it, how

@@ -63,7 +63,7 @@ let handle_message_key ~terminal_size ~wheel_notch_rows (state : T.state)
      happened to bring in (#31089). Going back through here means the request
      cannot be forgotten again. *)
   let scroll_back rows =
-    T.set_msg_scroll state (state.msg_scroll + rows);
+    T.step_msg_scroll_up state rows;
     if state.msg_older_exist && not state.msg_older_loading then
       load_older ~cursor:state.msg_older_cursor
   in
@@ -133,7 +133,7 @@ let handle_message_key ~terminal_size ~wheel_notch_rows (state : T.state)
   | "down"
     when state.view = T.Keepers T.Keeper_message
          && not (keeper_message_input_supported ~terminal_size state) ->
-      if state.msg_scroll > 0 then T.set_msg_scroll state (state.msg_scroll - 1);
+      if state.msg_scroll > 0 then T.step_msg_scroll_down state 1;
       true
   | ("up" | "down" | "shift-tab") when Option.is_some command_menu ->
       Option.iter
@@ -222,7 +222,7 @@ let handle_message_key ~terminal_size ~wheel_notch_rows (state : T.state)
       scroll_back 1;
       true
   | "down" when state.msg_scroll > 0 ->
-      T.set_msg_scroll state (state.msg_scroll - 1);
+      T.step_msg_scroll_down state 1;
       true
   | "down" when slash_navigable () -> apply_autocomplete Masc_tui_command.Next
   | "up" when slash_navigable () -> apply_autocomplete Masc_tui_command.Prev
@@ -243,7 +243,7 @@ let handle_message_key ~terminal_size ~wheel_notch_rows (state : T.state)
       scroll_back wheel_notch_rows;
       true
   | "wheel-down" ->
-      T.set_msg_scroll state (state.msg_scroll - wheel_notch_rows);
+      T.step_msg_scroll_down state wheel_notch_rows;
       true
   | "pageup" ->
       (* A keeper's turn is many rows, so one row per press walks back through a
@@ -251,8 +251,12 @@ let handle_message_key ~terminal_size ~wheel_notch_rows (state : T.state)
       scroll_back (keeper_message_page_rows ~terminal_size state);
       true
   | "pagedown" ->
-      T.set_msg_scroll state
-        (state.msg_scroll - keeper_message_page_rows ~terminal_size state);
+      T.step_msg_scroll_down state (keeper_message_page_rows ~terminal_size state);
+      true
+  | "home" when state.view = T.Keepers T.Keeper_message ->
+      T.jump_msg_scroll_oldest state;
+      if state.msg_older_exist && not state.msg_older_loading then
+        load_older ~cursor:state.msg_older_cursor;
       true
   | "end" ->
       T.set_msg_scroll state 0;

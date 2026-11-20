@@ -21,6 +21,7 @@
   masc_tui_keeper_chat_transcript
   masc_tui_composer
   masc_tui_roster_pane
+  masc_tui_scroll
   masc_tui_keys
   eio
   unix))

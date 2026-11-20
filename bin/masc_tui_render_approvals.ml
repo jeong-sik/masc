@@ -1357,7 +1357,8 @@ let question_reader_viewport state =
   let sheet_rows = question_reader_sheet_rows ~cols ~room state in
   lines @ notice_lines, max 0 (room - sheet_rows)
 
-let ask_question_page_size state = snd (question_reader_viewport state)
+let ask_question_page_size state =
+  Masc_tui_scroll.page_step ~height:(snd (question_reader_viewport state))
 
 let ask_question_scroll_limit state =
   let lines, room = question_reader_viewport state in

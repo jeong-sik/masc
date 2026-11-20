@@ -2808,20 +2808,33 @@ type scroll_window = {
   body_positions : body_row_position list;
 }
 
-let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entries =
-  if requested <= 0 then
-    let rows, body_positions = visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries in
-    { scroll = requested; rows; body_positions }
-  else begin
+let clamped_scrolled_rows ?markdown ?origin ?from_oldest ~inner_width ~height ~requested entries =
+  match from_oldest with
+  | None when requested <= 0 ->
+      let rows, body_positions = visible_rows_with_positions ?markdown ?origin ~inner_width ~height entries in
+      { scroll = requested; rows; body_positions }
+  | Some _ | None ->
     let inner_width = Int.max 1 inner_width in
     let origin = Option.value origin ~default:Origin_row in
     let window_height = Int.max 0 height in
     let bound_height = Int.max 1 height in
     let held = row_counts_for ?markdown entries ~inner_width ~origin in
-    let visited, total =
-      count_rows_until held ?markdown ~wanted:(requested + bound_height) ()
+    let wanted =
+      match from_oldest with
+      | Some _ -> max_int
+      | None ->
+          if requested > max_int - bound_height then max_int
+          else requested + bound_height
     in
-    let from_bottom = Int.min requested (Int.max 0 (total - bound_height)) in
+    let visited, total =
+      count_rows_until held ?markdown ~wanted ()
+    in
+    let max_from_bottom = Int.max 0 (total - bound_height) in
+    let from_bottom =
+      match from_oldest with
+      | Some offset -> Int.max 0 (max_from_bottom - Int.max 0 offset)
+      | None -> Int.min requested max_from_bottom
+    in
     let bottom = Int.max 0 (total - from_bottom) in
     let first = Int.max 0 (bottom - window_height) in
     let rec gather index before (selected, positions) =
@@ -2862,7 +2875,6 @@ let clamped_scrolled_rows ?markdown ?origin ~inner_width ~height ~requested entr
     let before = if first_entry = 0 then 0 else held.rc_row_ends.(first_entry - 1) in
     let rows, body_positions = gather first_entry before ([], []) in
     { scroll = from_bottom; rows; body_positions }
-  end
 
 (* Resolve a physical body row against this exact layout, measuring only its
    newer suffix. This is shared by search and by the next frame's origin pin. *)

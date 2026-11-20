@@ -1942,6 +1942,10 @@ type held_polled_excerpt = {
   held_entry : Masc_tui_message_layout.entry;
 }
 
+type chat_scroll_origin =
+  | Chat_scroll_from_bottom
+  | Chat_scroll_from_oldest of int
+
 type chat_scroll_pin = {
   pin_workspace : workspace_authority;
   pin_keeper : string;
@@ -6025,6 +6029,7 @@ type paged_list =
   | Overview_destinations
   | Model_bindings
   | Palette_entries
+  | Keeper_roster_entries
 
 (* One list a frame drew: which, and the rows of it the frame drew. *)
 type drawn_list = { dl_list : paged_list; dl_height : int }
@@ -12078,6 +12083,10 @@ type state = {
      operator reading back should stay where they are while the keeper keeps
      talking. *)
   mutable msg_scroll: int;
+  (* Whether [msg_scroll] counts back from the live bottom or represents a
+     pending [Home] jump to the oldest loaded row (optionally stepped down by
+     PgDn/Down/wheel-down before the next frame clamps it). *)
+  mutable msg_scroll_anchor: chat_scroll_origin;
   (* Where the next older page starts, and whether one exists. Both come from
      the server rather than being derived here: it owns the rule for what
      a file prefix means independently of display timestamps. None with
@@ -12607,6 +12616,74 @@ let queue_panel_move ~items ~budget ~direction panel =
         | `Down -> Masc_tui_scroll.down ~count ~height scroll
         | `Up -> Masc_tui_scroll.up ~count ~height scroll in
       {panel with qp_selected=None; qp_scroll=next_scroll}
+
+let queue_panel_page ~items ~budget_for ~(move : Masc_tui_scroll.key_move) panel =
+  let count = List.length items in
+  let old_height = queue_panel_list_height ~items ~budget:(budget_for panel) panel in
+  if old_height = 0 then panel
+  else
+    let old_scroll = queue_panel_scroll ~items ~height:old_height panel in
+    let current = queue_panel_selected_index ~items panel in
+    let next_scroll =
+      Masc_tui_scroll.apply_move ~count ~height:old_height move old_scroll
+    in
+    let targets =
+      items
+      |> List.mapi (fun index (item : Masc_tui_queue_inspection.item) ->
+             Option.map (fun _ -> index) item.id)
+      |> List.filter_map Fun.id
+    in
+    let item_id_at idx =
+      Option.bind (List.nth_opt items idx)
+        (fun (item : Masc_tui_queue_inspection.item) -> item.id)
+    in
+    let snapped =
+      Masc_tui_scroll.visible_target_for_scroll ~targets ~scroll:next_scroll
+        ~height:old_height ~current move
+    in
+    let candidate =
+      { panel with
+        qp_selected = Option.bind snapped item_id_at
+      ; qp_scroll = next_scroll
+      }
+    in
+    let new_height =
+      queue_panel_list_height ~items ~budget:(budget_for candidate) candidate
+    in
+    if new_height = 0 then
+      { candidate with
+        qp_selected = None
+      ; qp_scroll = Masc_tui_scroll.normalize ~count ~height:0 next_scroll
+      }
+    else
+      let final_scroll =
+        match move with
+        | Masc_tui_scroll.To_end ->
+            Masc_tui_scroll.maximum ~count ~height:new_height
+        | Masc_tui_scroll.To_top | Line_down | Line_up | Page_down | Page_up ->
+            Masc_tui_scroll.normalize ~count ~height:new_height next_scroll
+      in
+      match snapped with
+      | Some idx when idx >= final_scroll && idx < final_scroll + new_height ->
+          { candidate with qp_scroll = final_scroll }
+      | Some _ ->
+          let resnapped =
+            Masc_tui_scroll.visible_target_for_scroll ~targets ~scroll:final_scroll
+              ~height:new_height ~current move
+          in
+          let adjusted =
+            { candidate with
+              qp_selected = Option.bind resnapped item_id_at
+            ; qp_scroll = final_scroll
+            }
+          in
+          let adjusted_height =
+            queue_panel_list_height ~items ~budget:(budget_for adjusted) adjusted
+          in
+          { adjusted with
+            qp_scroll = queue_panel_scroll ~items ~height:adjusted_height adjusted
+          }
+      | None -> { candidate with qp_scroll = final_scroll }
 
 (* An unconfirmed chat retains the owner of its draft; a different server
    cannot acquire an edit merely by reusing a Keeper name. *)
@@ -22497,6 +22574,7 @@ let create_state
   msg_copy_pending = None;
   chat_command_reads = [];
   msg_scroll = 0;
+  msg_scroll_anchor = Chat_scroll_from_bottom;
   msg_scroll_pin = None;
   msg_older_cursor = None;
   msg_older_exist = false;
@@ -23497,12 +23575,43 @@ let set_msg_scroll (state : state) rows =
     | Some {pin_mode=Follow_live;pin_points=[];_} -> 0
     | Some {pin_mode=(Follow_live | Hold_scroll | Hold_search);_} | None -> rows in
   state.msg_scroll <- rows;
+  state.msg_scroll_anchor <- Chat_scroll_from_bottom;
   state.msg_scroll_pin <- Option.map (fun pin ->
     if rows = 0 then
       {pin with pin_mode=Follow_live; pin_scroll=0; held_transients=[];
         pin_points=List.map (fun point ->
           {point with rows_below=point.rows_below + pin.pin_scroll}) pin.pin_points}
     else {pin with pin_mode=Hold_scroll}) state.msg_scroll_pin
+
+let jump_msg_scroll_oldest (state : state) =
+  retire_keeper_message_search state;
+  match state.msg_scroll_pin with
+  | Some { pin_mode = Follow_live; pin_points = []; _ } ->
+      state.msg_scroll <- 0;
+      state.msg_scroll_anchor <- Chat_scroll_from_bottom
+  | Some { pin_mode = (Follow_live | Hold_scroll | Hold_search); _ } | None ->
+      state.msg_scroll <- max_int;
+      state.msg_scroll_anchor <- Chat_scroll_from_oldest 0;
+      state.msg_scroll_pin <- None
+
+let step_msg_scroll_up (state : state) rows =
+  let rows = max 0 rows in
+  match state.msg_scroll_anchor with
+  | Chat_scroll_from_oldest offset ->
+      retire_keeper_message_search state;
+      state.msg_scroll_anchor <- Chat_scroll_from_oldest (max 0 (offset - rows))
+  | Chat_scroll_from_bottom ->
+      set_msg_scroll state (Masc_tui_scroll.step_uncounted ~delta:rows state.msg_scroll)
+
+let step_msg_scroll_down (state : state) rows =
+  let rows = max 0 rows in
+  match state.msg_scroll_anchor with
+  | Chat_scroll_from_oldest offset ->
+      retire_keeper_message_search state;
+      state.msg_scroll_anchor <-
+        Chat_scroll_from_oldest (Masc_tui_scroll.step_uncounted ~delta:rows offset)
+  | Chat_scroll_from_bottom ->
+      set_msg_scroll state (state.msg_scroll - rows)
 
 (* Rows the composer needs beyond its first. Folded into the status-row count
    because that one number already sets both the history height and the cursor
@@ -23739,6 +23848,7 @@ let apply_clamped_scroll (state : state) = function
       state.board_comment_follow <- false
   | Message_scroll { scroll; pin } ->
       state.msg_scroll <- max 0 scroll;
+      state.msg_scroll_anchor <- Chat_scroll_from_bottom;
       state.msg_scroll_pin <- pin
   | Schedule_detail_scroll value -> state.schedule_scroll <- value
   | Keeper_detail value -> state.detail_scroll <- value

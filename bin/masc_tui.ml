@@ -3578,58 +3578,6 @@ let handle_queue_panel_key state ~base_path ~mailbox ~presented_presses (panel :
   | _ -> ()
 ;;
 
-(* Ctrl-V. A terminal never delivers a pasted image: bracketed paste carries
-   text, and a clipboard holding a screenshot has no text form to send. So the
-   bytes are fetched from the clipboard itself and staged the way a dropped
-   file is -- same size limit, same media-type sniff, same staging list.
-
-   The answer goes to the chat pane rather than the event log because that is
-   the surface the operator is looking at when they press this key; with no
-   keeper selected [chat_notice] falls back to the log on its own.
-
-   The draft gets a marker where the image went. Without one, a staged image
-   and a keystroke the terminal ate look identical from the composer, and the
-   operator would learn which it was only after the turn came back. *)
-let paste_clipboard_image state =
-  let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  match Masc_tui_clipboard.read_image () with
-  | Error error ->
-    notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
-      ("Ctrl-V: " ^ Masc_tui_clipboard.error_to_string error)
-  | Ok bytes ->
-    (* Numbered by staging order and restarting at 1 with each message, so the
-       marker in the draft and the attachment beside it carry the same number:
-       the keeper reads "[Image #2]" and has an image-2.png to look at. *)
-    let index = List.length state.msg_attachments + 1 in
-    let name = Printf.sprintf "image-%d.png" index in
-    (match Masc_tui_attachment.of_bytes ~name bytes with
-     | Error error ->
-       notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
-         ("Ctrl-V: " ^ Masc_tui_attachment.error_to_string error)
-     | Ok attachment ->
-       Masc_tui_chat_input.Message_draft_recall.forget_recall state;
-       (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- state.msg_attachments @ [ attachment ]);
-       Masc_tui_chat_input.Message_draft_recall.note_attachment_staged state;
-       (* A marker run into the word before it changes that word. Only a draft
-          that does not already end in whitespace needs the separator. *)
-       let before = Masc_tui_message_input.before_cursor state.msg_input in
-       let needs_separator =
-         String.length before > 0
-         && (match before.[String.length before - 1] with
-             | ' ' | '\n' | '\t' -> false
-             | _ -> true)
-       in
-       if needs_separator then Masc_tui_message_input.insert_char state.msg_input ' ';
-       Masc_tui_message_input.insert state.msg_input (Printf.sprintf "[Image #%d] " index);
-       notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
-         (Printf.sprintf
-            "pasted [Image #%d] (%s, %d bytes) \xc2\xb7 %d staged for the next message"
-            index
-            attachment.Masc_tui_keeper_chat_projection.mime_type
-            attachment.Masc_tui_keeper_chat_projection.size
-            (List.length state.msg_attachments)))
-;;
-
 (* Whether this terminal draws pictures. Asked once, before the first frame,
    and remembered: the answer cannot change while the process runs, and asking
    again would put another reply on the key stream. [None] until asked. *)
@@ -3726,106 +3674,6 @@ let render_spectator (state : Masc_tui_types.state) =
   state.play_room <- !next_room
 ;;
 
-let room_workspace_ready state =
-  match state.workspace_identity, workspace_input_identity_of_server state.server_identity with
-  | Workspace_identity_match, Some _ -> true
-  | (Workspace_identity_unread | Workspace_identity_match_unconfirmed _ | Workspace_identity_mismatch _), _
-  | Workspace_identity_match, None -> false
-
-let launch_play_room state ~mailbox request =
-  if room_workspace_ready state then begin
-  let credential = Masc_tui_http.bind_credential () in
-  Option.iter (fun expected_workspace ->
-  Masc_tui_surface_requests.Prompt_preset_requests.launch_preset_call state ~mailbox
-    ~call:(fun ~host ~port ->
-      let fields = match Masc_tui_play_room.request_json request with
-        | `Assoc fields -> fields | _ -> assert false in
-      let body = `Assoc (Masc_tui_http.expected_workspace_field expected_workspace :: fields) in
-      Masc_tui_http.post_json_bound ~credential ~host ~port ~path:"/api/v1/play/room"
-        ~body:(Yojson.Safe.to_string body)
-      |> fun result -> Result.bind result Masc.Play_room.view_of_json)
-    ~wrap:(fun result -> Play_msg (Play_room_received (request, result)))) state.server_identity
-  end
-
-let poll_play_room state ~mailbox =
-  if room_workspace_ready state then begin
-  let watching = state.msx_open && not state.msx_menu_open in
-  if watching && Option.is_some (workspace_input_identity_of_server state.server_identity)
-    && Option.is_none state.play_room
-  then state.play_room <- Some (Masc_tui_play_room.create ());
-  Option.iter (fun room ->
-    let room = Masc_tui_play_room.active room watching in
-    let room, request =
-      Masc_tui_play_room.poll room ~now:(Masc_tui_wake.Mono.now ()) ~machine:state.machine_source
-    in
-    state.play_room <- Some room;
-    Option.iter (launch_play_room state ~mailbox) request) state.play_room
-  end
-
-let send_play_room state ~mailbox =
-  if room_workspace_ready state then
-  Option.iter (fun room ->
-    let room, request =
-      Masc_tui_play_room.send ~ko:(state.ui_language = Lang_ko) room ~machine:state.machine_source in
-    state.play_room <- Some room;
-    Option.iter (launch_play_room state ~mailbox) request) state.play_room
-
-(* A live read names no mode, media or players. Keep the last tick metadata
-   only within the same incarnation, so a keypress does not briefly erase the
-   title while a replacement machine never inherits its predecessor's name. *)
-let msx_frame_of_live ~previous_live ~previous_frame
-    (view : Masc_tui_machine_live.view) =
-  match view with
-  | Masc_tui_machine_live.Showing ({ time = Masc_tui_machine_live.Frame number; _ } as p) ->
-      let meta =
-        match previous_live, previous_frame with
-        | Masc_tui_machine_live.Showing old, Some frame
-          when String.equal old.mark.incarnation p.mark.incarnation -> frame.msx_meta
-        | ( ( Masc_tui_machine_live.Showing _ | Masc_tui_machine_live.Unread
-            | Masc_tui_machine_live.Not_loaded | Masc_tui_machine_live.Failed _
-            | Masc_tui_machine_live.Kept_back _ ),
-            _ ) -> None
-      in
-      (view, Some { Masc_tui_types.msx_number = number; msx_width = p.width;
-                    msx_height = p.height; msx_rgb = p.rgb; msx_meta = meta })
-  | Masc_tui_machine_live.Showing { time = Masc_tui_machine_live.Untimed; _ } ->
-      (Masc_tui_machine_live.Failed "an MSX answer carried no frame number", None)
-  | Masc_tui_machine_live.Unread | Masc_tui_machine_live.Not_loaded
-  | Masc_tui_machine_live.Failed _ | Masc_tui_machine_live.Kept_back _ -> (view, None)
-;;
-
-(* A live read the workspace guard stopped was never sent, so the screen
-   says it was kept back and not that the machine could not be read (RFC §2). *)
-let advance_machine_live state ~request view = function
-  | Ok answer -> Masc_tui_machine_live.advance view (Ok answer)
-  | Error (Request_failed detail) -> Masc_tui_machine_live.advance view (Error detail)
-  | Error (Request_withdrawn refusal) ->
-      Some (Masc_tui_machine_live.Kept_back
-        (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal))
-
-(* A read of the MSX screen through the live route, asked with the counter
-   of the picture drawn from the last one. An unchanged answer leaves the
-   frame alone. Admission before the read and rejection after its attempt
-   preserve different facts. *)
-let with_msx_observation state ~mailbox ~request read apply =
-  let check = Masc_tui_transport.Workspace_admission.capture_admission state ~mailbox in
-  let kept_back refusal =
-    state.msx_notice <-
-      Some (workspace_refusal_text ~ko:(state.ui_language = Lang_ko) ~request refusal) in
-  match check () with
-  | Error refusal -> kept_back refusal
-  | Ok () ->
-      let result = read () in
-      (match check () with
-       | Error refusal ->
-           state.msx_notice <- Some (Masc_tui_transport.Request_notice.workspace_response_refusal_text state ~request refusal)
-       | Ok () -> apply result)
-
-let observe_msx_carts state ~mailbox =
-  with_msx_observation state ~mailbox ~request:Kept_request.Msx_carts_read
-    (fun () -> Masc_tui_http.fetch_msx_carts ~host:Masc_tui_transport.Workspace_admission.server_peer_host ~port:state.port)
-    (fun carts -> state.msx_carts <- carts)
-
 let observe_msx_frame ?expected_workspace
     ?(current = fun () -> true) (state : Masc_tui_types.state) ~mailbox =
   if Option.is_some (Masc_tui_msx_control.Checkpoint_control.checkpoint_for_workspace state) then () else
@@ -3834,7 +3682,7 @@ let observe_msx_frame ?expected_workspace
      carries that workspace, and the server that answers it compares it with
      its own. A server swapped in at any point, including A -> B -> A, answers
      409 and its picture never reaches this view. *)
-  with_msx_observation state ~mailbox ~request:Kept_request.Msx_screen_read (fun () ->
+  Masc_tui_media_surface_actions.Play_room_control.with_msx_observation state ~mailbox ~request:Kept_request.Msx_screen_read (fun () ->
     (* The decoder has checked that MSX has no activity feed. Only its
        picture answer is needed by the MSX view. *)
     Result.map fst
@@ -3848,7 +3696,7 @@ let observe_msx_frame ?expected_workspace
    | None -> ()
    | Some view ->
        let view, frame =
-         msx_frame_of_live ~previous_live:state.msx_live
+         Masc_tui_media_surface_actions.Play_room_control.msx_frame_of_live ~previous_live:state.msx_live
            ~previous_frame:state.msx_frame view
        in
        state.msx_live <- view;
@@ -3889,7 +3737,7 @@ let inspect_pending_msx_checkpoint (state : Masc_tui_types.state) pending =
              (* Only valid receipt-bound pixels replace cached pixels. No old
                 tick token can survive admission across this checkpoint. *)
              Option.iter (fun live ->
-               let live,frame = msx_frame_of_live ~previous_live:state.msx_live
+               let live,frame = Masc_tui_media_surface_actions.Play_room_control.msx_frame_of_live ~previous_live:state.msx_live
                  ~previous_frame:state.msx_frame live in
                state.msx_live <- live; state.msx_frame <- frame; msx_surface_frame := frame)
                (Masc_tui_machine_live.advance state.msx_live (Ok answer));
@@ -3922,7 +3770,7 @@ let open_msx_screen (state : Masc_tui_types.state) ~mailbox =
     state.image_cell_view <- None
   end;
   observe_msx_frame state ~mailbox;
-  observe_msx_carts state ~mailbox;
+  Masc_tui_media_surface_actions.Play_room_control.observe_msx_carts state ~mailbox;
   Masc_tui_msx.open_menu ~write:write_to_terminal state;
   (* A first DOS read may carry a full screen. Let the menu accept keys while
      the read is in flight, and redraw its watch row when it arrives. *)
@@ -4005,149 +3853,6 @@ let handle_collab_action state ~mailbox view action =
   | Revoke (mutation, name) ->
       let sink = Play_collab {owner; mutation} in
       ignore (Masc_tui_collab_queue.Collab_play.launch_play_revoke state ~mailbox ~sink ~name)
-
-(* Where a reference lands, and what it opens when it gets there.
-
-   The surfaces already print [masc://] references beside what they name and
-   [Y] already copies the one under the cursor. Reading that same reference
-   back is the other half: without it the screen knows where the answer is and
-   the operator still walks over by hand.
-
-   Tasks and Goals live under Work. A Task reference opens Work's Tasks detail. *)
-let follow_target (kind : Link.kind) (id : string) =
-  match kind with
-  | Link.Task -> Some (Planning, Some id)
-  | Link.Goal -> Some (Planning, Some id)
-  | Link.Board_post -> Some (Board, Some id)
-  | Link.Schedule -> Some (Schedules, Some id)
-  | Link.Fusion_run -> Some (Fusion, Some id)
-  | Link.Keeper -> Some (Keepers Keeper_list, Some id)
-;;
-
-let approval_row_reference = function
-  | Masc_tui_approvals_model.Keeper_tool_row ask -> Some (Link.reference Keeper ask.kta_keeper)
-  | Masc_tui_approvals_model.Gate_row pending -> Some (Link.reference Keeper pending.Tui_decode.gp_keeper)
-  | Masc_tui_approvals_model.Operator_row item ->
-      Option.bind item.ap_target_id (fun target_id ->
-          match
-            Masc.Operator_action_constants.target_type_of_string
-              item.ap_target_type
-          with
-          | Some Masc.Operator_action_constants.Keeper ->
-              Some (Link.reference Keeper target_id)
-          | Some Goal -> Some (Link.reference Goal target_id)
-          | Some Workspace | None -> None)
-
-let selected_surface_reference state =
-  let board () =
-    match state.board_mode with
-    | Board_read post_id -> Some (Link.reference Board_post post_id)
-    | Board_list ->
-        Option.map
-          (fun post -> Link.reference Board_post post.bp_id)
-          (List.nth_opt (board_posts state) state.board_cursor)
-    | Board_compose -> None
-  in
-  let planning () =
-    match state.planning_mode with
-    | Planning_detail goal_id -> Some (Link.reference Goal goal_id)
-    | Planning_list when Masc_tui_overview_tasks.is_focused state.task_focus ->
-        (match state.task_detail_id with
-         | Some task_id -> Some (Link.reference Task task_id)
-         | None ->
-             Option.map
-               (fun (task : Tui_decode.task) -> Link.reference Task task.id)
-               (Masc_tui_overview_tasks.work_selected_task state.tasks
-                  ~selected:(Masc_tui_overview_tasks.selection state.task_focus)))
-    | Planning_list ->
-        Option.bind state.planning (fun snapshot ->
-            planning_visible_goals ~filter:state.planning_filter
-              ~sort:state.planning_sort snapshot.pl_goals
-            |> Fun.flip List.nth_opt state.planning_cursor
-            |> Option.map (fun goal -> Link.reference Goal goal.pg_id))
-  in
-  match state.view with
-  | Board -> board ()
-  | Planning -> planning ()
-  | Schedules ->
-      (match Masc_tui_work_actions.Board_schedule_actions.schedule_detail_on_screen state with
-       | Some row -> Some (Link.reference Schedule row.sch_schedule_id)
-       | None ->
-           Option.bind state.schedules (fun snapshot ->
-             Option.map (fun row -> Link.reference Schedule row.sch_schedule_id)
-               (List.nth_opt snapshot.scs_rows state.schedule_cursor)))
-  | Harness ->
-      (match state.harness_detail with
-       | Some (task_id, _) -> Some (Link.reference Task task_id)
-       | None ->
-           Option.bind state.harness (fun snapshot ->
-               Option.map
-                 (fun verdict ->
-                    Link.reference Task verdict.Tui_decode.hv_task_id)
-                 (List.nth_opt snapshot.Tui_decode.hs_verdicts
-                    state.harness_cursor)))
-  | Fusion ->
-      (match state.fusion_mode, Masc_tui_fusion_model.fusion_snapshot state with
-       | Fusion_historical_detail reference, _ -> Some (Link.reference Board_post reference.fhe_post_id)
-       | Fusion_detail run_id, _ -> Some (Link.reference Fusion_run run_id)
-       | Fusion_list, Some _ ->
-           Option.map
-             (function
-               | Masc.Tui_decode_fusion.Fusion_retained_run run -> Link.reference Fusion_run run.fur_run_id
-               | Masc.Tui_decode_fusion.Fusion_historical_evidence evidence ->
-                   Link.reference Board_post evidence.fhe_post_id)
-             (Masc_tui_fusion_model.selected_fusion_entry state)
-       | Fusion_list, None -> None)
-  (* Dashboard has no row cursor. Task references belong to Work. *)
-  | Overview -> None
-  | Keepers _ ->
-      Option.map
-        (fun (keeper : Tui_decode.keeper) -> Link.reference Keeper keeper.k_name)
-        (selected_keeper state)
-  | Lanes -> None
-  | Clients -> None
-  | Verification ->
-      (* The task, not the request: a verification request is a question about
-         a task, and the task is the thing another surface can open. *)
-      Option.bind state.verification (fun snapshot ->
-          Option.map
-            (fun (request : Tui_decode.verification_request) ->
-               Link.reference Task request.vr_task_id)
-            (List.nth_opt snapshot.Tui_decode.vs_requests
-               state.verification_cursor))
-  | Approvals ->
-      (* An ask names what it is asking about. A keeper's tool ask names the
-         keeper; an operator ask carries a typed target, so the kind is read
-         through [target_type_of_string] rather than matched as text. A
-         Workspace target, or one this build does not know, points at no
-         surface and gets no reference. *)
-      Option.bind
-        (List.nth_opt (Masc_tui_approvals_model.approval_items state) state.approval_cursor)
-        approval_row_reference
-  | Acting | Metrics
-  | Memory | Repositories | Changes | Connectors | Runtime | Config | Resources | Tools
-  | Code | System_logs -> None
-
-let next_board_sort = function
-  | Board_hot -> Board_trending
-  | Board_trending -> Board_recent
-  | Board_recent -> Board_updated
-  | Board_updated -> Board_discussed
-  | Board_discussed -> Board_hot
-
-(* A filter or sort change can leave the cursor past the end of the new
-   list; clamp it so the next j/k has somewhere to move from. *)
-let clamp_planning_cursor state =
-  let count =
-    match state.planning with
-    | None -> 0
-    | Some planning ->
-        List.length
-          (planning_visible_goals ~filter:state.planning_filter
-             ~sort:state.planning_sort planning.pl_goals)
-  in
-  if state.planning_cursor >= count then
-    state.planning_cursor <- max 0 (count - 1)
 
 (* Put a picture's bytes on the terminal, or say why not. Both doors a
    picture comes through -- a path the conversation named and an attachment
@@ -5521,75 +5226,6 @@ let conversation_media state =
           | Message_error | Message_memory) -> []) in
       projected @ queued
 
-let prepare_listen_media ~host ~port (media : Masc_tui_chat_media.playable) =
-  let open Result.Syntax in
-  let* bytes = match media.source with
-    | `Server_path path ->
-        Masc_tui_http.get_workspace_bytes
-          ~max_body_bytes:Tool_blob_store.max_served_bytes ~host ~port ~path
-    | `Data payload ->
-        Eio_guard.run_in_systhread ~label:"tui-listen-decode" (fun () ->
-          Masc_tui_image_payload.decode_wire payload)
-    | `Local_path path ->
-        Eio_guard.run_in_systhread ~label:"tui-listen-file" (fun () ->
-          try
-            let descriptor = Unix.openfile path [Unix.O_RDONLY; Unix.O_NONBLOCK] 0 in
-            let channel = Unix.in_channel_of_descr descriptor in
-            Fun.protect ~finally:(fun () -> close_in_noerr channel) (fun () ->
-              let stats = Unix.fstat (Unix.descr_of_in_channel channel) in
-              if stats.Unix.st_kind <> Unix.S_REG then Error "audio source is not a regular file"
-              else if stats.Unix.st_size > Tool_blob_store.max_served_bytes then
-                Error "file is larger than the attachment limit"
-              else Ok (really_input_string channel stats.Unix.st_size))
-          with
-          | Sys_error detail -> Error detail
-          | End_of_file -> Error "audio source changed while reading"
-          | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)) in
-  Eio_guard.run_in_systhread ~label:"tui-listen-prepare" (fun () ->
-    let sha256 = Agent_core_sha256.(to_hex (digest_string bytes)) in
-    let attachment : board_attachment =
-      { ba_kind=(match media.kind with `Audio -> Ak_audio | `Midi -> Ak_midi);
-        ba_source=As_artifact {sha256; bytes=String.length bytes}; ba_name=Some media.name } in
-    Masc_tui_attachment_action.prepare ~fetch:(fun ~sha256:_ -> Ok bytes) attachment
-    |> Result.map_error Masc_tui_attachment_action.describe_outcome)
-
-let listen_newest_media ?(destination=Listen_player) state ~mailbox =
-  let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:state.msg_target_keeper_name in
-  let media = match destination with
-    | Listen_player -> Masc_tui_chat_media.newest_playable (conversation_media state)
-    | Listen_music_editor -> Masc_tui_chat_media.newest_midi (conversation_media state) in
-  let command = match destination with
-    | Listen_player -> "/listen" | Listen_music_editor -> "/music midi" in
-  match state.msg_target_keeper_name, media with
-  | None, _ | Some _, None ->
-      notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (command ^ ": no readable "
-        ^ (match destination with Listen_player -> "audio or MIDI" | Listen_music_editor -> "MIDI")
-        ^ " attachment in this conversation")
-  | Some keeper, Some media ->
-      if not (server_authority_ready state) then
-        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure
-          (let ko = state.ui_language = Lang_ko in
-           kept_back ~ko ~request:(Kept_request.Command command) (workspace_identity_unconfirmed ~ko) Nothing_kept)
-      else begin
-        let request = begin_chat_listen ~destination state ~keeper media in
-        let host = Masc_tui_transport.Workspace_admission.server_peer_host and port = state.port in
-        notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply (command ^ ": preparing " ^ media.name);
-        Masc_tui_transport.Workspace_admission.launch_json_read state ~mailbox
-          ~boundary_error:(fun cause -> Request_failed cause)
-          ~withdrawn:(fun refusal -> Request_withdrawn refusal)
-          ~deliver:(fun result -> Listen_prepared (request, result))
-          (fun () -> Result.map_error (fun cause -> Request_failed cause)
-            (prepare_listen_media ~host ~port request.lr_media))
-      end
-
-let withdraw_pending_music_editor state =
-  withdraw_chat_music_editor state |> Option.iter (fun request ->
-    let message =
-      "/music midi: opening cancelled while terminal input was pending; run /music midi again when ready" in
-    Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some request.lr_keeper) ~kind:Masc_tui_collab_queue.Chat_notice.Notice_reply
-      message;
-    report_action state "system" message)
-
 (* Take the picture away and give the frame back. The terminal holds images in
    its own layer, so clearing the screen is not enough to remove one. *)
 let close_image state =
@@ -6436,10 +6072,10 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       goto_surface state ~mailbox Config
   | Masc_tui_command.Open_music_midi ->
       Masc_tui_message_input.clear state.msg_input;
-      listen_newest_media ~destination:Listen_music_editor state ~mailbox
+      Masc_tui_media_surface_actions.Media_listen.listen_newest_media ~destination:Listen_music_editor state ~mailbox ~media:(conversation_media state)
   | Masc_tui_command.Listen ->
       Masc_tui_message_input.clear state.msg_input;
-      listen_newest_media state ~mailbox
+      Masc_tui_media_surface_actions.Media_listen.listen_newest_media state ~mailbox ~media:(conversation_media state)
   | Masc_tui_command.Score_invalid_index ->
       notice ~kind:Masc_tui_collab_queue.Chat_notice.Notice_failure "/score [N]: N must be a positive score number, newest first"
   | Masc_tui_command.Images_invalid_index ->
@@ -10958,7 +10594,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 ~withdraw_resource_diagram_pending:(fun () -> withdraw_resource_diagram_pending state)
                 ~launch_keeper_history_load:(fun ~keeper_name -> launch_keeper_history_load state ~mailbox ~keeper_name)
                 ~send_operator_text:(fun ~keeper_name snapshot -> send_operator_text ~keeper_name state ~base_path ~mailbox snapshot)
-                ~paste_clipboard_image:(fun () -> paste_clipboard_image state)
+                ~paste_clipboard_image:(fun () -> Masc_tui_media_surface_actions.Clipboard_paste.paste_clipboard_image state)
                 ~open_named_image:(fun () -> open_named_image state ~mailbox)
                 ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state ~mailbox ~keeper_name)
                 state ~base_path ~mailbox Composer.send_key
@@ -14645,7 +14281,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
       Drawn_changed
   | Listen_prepared (request, result) ->
       if input_pending () || Option.is_some state.quit_armed then
-        withdraw_pending_music_editor state;
+        Masc_tui_media_surface_actions.Media_listen.withdraw_pending_music_editor state;
       if take_chat_listen state request then begin
         let notice = Masc_tui_collab_queue.Chat_notice.chat_notice state ~keeper_name:(Some request.lr_keeper) in
         let command = match request.lr_destination with
@@ -14939,11 +14575,11 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 already reads it that way. Owed-read bookkeeping still runs:
                 liveness is not paint. *)
              let picture_changed =
-               match advance_machine_live state ~request:Kept_request.Msx_screen_read
+               match Masc_tui_media_surface_actions.Play_room_control.advance_machine_live state ~request:Kept_request.Msx_screen_read
                        state.msx_live (Result.map fst result) with
                | None -> false
                | Some live ->
-                   let live, frame = msx_frame_of_live ~previous_live:state.msx_live
+                   let live, frame = Masc_tui_media_surface_actions.Play_room_control.msx_frame_of_live ~previous_live:state.msx_live
                      ~previous_frame:state.msx_frame live in
                    state.msx_live <- live;
                    state.msx_frame <- frame;
@@ -14989,7 +14625,7 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
                 feed still repaints the spectator sidebar; an identical feed
                 remains silent. The read also discovers the DOS watch row
                 while the menu is open. *)
-             (match advance_machine_live state ~request:Kept_request.Dos_screen_read
+             (match Masc_tui_media_surface_actions.Play_room_control.advance_machine_live state ~request:Kept_request.Dos_screen_read
                       state.dos_live (Result.map fst result) with
               | None ->
                   if activity_changed && not state.msx_menu_open then
@@ -17518,12 +17154,12 @@ let main
   let drain_deadline_ns = ref (Int64.add !pass_started_ns async_drain_budget_ns) in
   let presented_surface_reference () =
     match state.view with
-    | Approvals -> Option.bind (!presented).approval approval_row_reference
+    | Approvals -> Option.bind (!presented).approval Masc_tui_media_surface_actions.Surface_references.approval_row_reference
     | Overview | Acting | Metrics | Keepers _ | Lanes | Clients | Board | Planning
     | Schedules
     | Memory | Verification | Harness | Fusion | Repositories | Changes | Connectors
     | Runtime | Config | Resources | Code | Tools | System_logs ->
-        selected_surface_reference state
+        Masc_tui_media_surface_actions.Surface_references.selected_surface_reference state
   in
   let edit_code_draft () =
     match Code_results.prepare_draft state with
@@ -18199,7 +17835,7 @@ let main
          | Masc_tui_exit_signals.Interrupt_again) as interrupt ->
            (* A pending MIDI handoff yields to this gesture before the quit
               notice is armed: its cancellation reports its own notice. *)
-           withdraw_pending_music_editor state;
+           Masc_tui_media_surface_actions.Media_listen.withdraw_pending_music_editor state;
            withdraw_pending_image_open state;
            state.board_reader <- Masc_tui_board_reader.withdraw_original_open state.board_reader;
            share_interrupt_barrier := true;
@@ -18371,7 +18007,7 @@ let main
       let retire_music_editor_for_input () =
         if Option.is_some state.quit_armed || Masc_tui_exit_signals.pending_signal exit_signals
            || Option.is_some interrupted_paste || input_reader_has_started_input input_reader then
-          withdraw_pending_music_editor state
+          Masc_tui_media_surface_actions.Media_listen.withdraw_pending_music_editor state
       in
       let asynchronous_input_pending () =
         Masc_tui_exit_signals.pending_signal exit_signals
@@ -18466,7 +18102,7 @@ let main
           else
             render_spectator state
       end;
-      poll_play_room state ~mailbox:async_messages;
+      Masc_tui_media_surface_actions.Play_room_control.poll_play_room state ~mailbox:async_messages;
       (* Check for input. The read sleeps until a byte arrives, a writer
          rings the loop's bell, or the earliest moment this pass's decisions
          noted (RFC tui-idle-wait §3). *)
@@ -18820,7 +18456,7 @@ let main
         Masc_tui_exit_signals.withdraw_interrupt exit_signals;
         (* The read may have consumed its final byte, so neither the pre- nor
            post-drain readiness check can witness this rejected gesture. *)
-        withdraw_pending_music_editor state
+        Masc_tui_media_surface_actions.Media_listen.withdraw_pending_music_editor state
       end;
       let input = match input with
         | Some (Mouse_wheel (direction, _, _))
@@ -18903,7 +18539,7 @@ let main
       (match input with
        | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
            state.keeper_creation_focus <- None;
-           withdraw_pending_music_editor state
+           Masc_tui_media_surface_actions.Media_listen.withdraw_pending_music_editor state
        | Some (Graphics_reply _) | None -> ());
       (match input with
        | Some (Key _ | Pasted _ | Mouse_left_press _ | Mouse_left_drag _ | Mouse_left_release _ | Mouse_wheel _) ->
@@ -19357,7 +18993,7 @@ let main
                 | Some (Key _ | (Graphics_reply _ | (Mouse_left_press (_, _) | (Mouse_left_drag (_, _) | (Mouse_left_release (_, _) | Mouse_wheel (_, _, _))))))
                 | None -> Masc_tui_play_room.key ~ko room name in
             state.play_room <- Some room;
-            (match intent with Repaint -> () | Send -> send_play_room state ~mailbox:async_messages)) state.play_room;
+            (match intent with Repaint -> () | Send -> Masc_tui_media_surface_actions.Play_room_control.send_play_room state ~mailbox:async_messages)) state.play_room;
           render_spectator state
       | Some ("tab" | "\t") when not state.msx_menu_open ->
           if room_visible then state.play_room <- Option.map (fun room -> Masc_tui_play_room.focus room true) state.play_room;
@@ -19466,7 +19102,7 @@ let main
                    render_spectator state)
                  (fun ~port:_ ~expected_workspace:_ -> Ok ()))
       | Some "f8" ->
-          observe_msx_carts state ~mailbox:async_messages;
+          Masc_tui_media_surface_actions.Play_room_control.observe_msx_carts state ~mailbox:async_messages;
           Masc_tui_msx.open_menu ~write:write_to_terminal ~mode:Masc_tui_types.Change_disk state
       | Some (("f6" | "f7") as name) ->
           state.machine_interaction <- Observe_machine;
@@ -20544,7 +20180,7 @@ let main
               ~withdraw_resource_diagram_pending:(fun () -> withdraw_resource_diagram_pending state)
               ~launch_keeper_history_load:(fun ~keeper_name -> launch_keeper_history_load state ~mailbox:async_messages ~keeper_name)
               ~send_operator_text:(fun ~keeper_name snapshot -> send_operator_text ~keeper_name state ~base_path ~mailbox:async_messages snapshot)
-              ~paste_clipboard_image:(fun () -> paste_clipboard_image state)
+              ~paste_clipboard_image:(fun () -> Masc_tui_media_surface_actions.Clipboard_paste.paste_clipboard_image state)
               ~open_named_image:(fun () -> open_named_image state ~mailbox:async_messages)
               ~launch_keeper_chat_tool_details_load:(fun ~keeper_name -> Masc_tui_repo_changes.Workspace_file_changes.launch_keeper_chat_tool_details_load ~force:true state ~mailbox:async_messages ~keeper_name)
               state ~base_path ~mailbox:async_messages k
@@ -22960,7 +22596,7 @@ let main
                           (planning_visible_goals ~filter:state.planning_filter
                              ~sort:state.planning_sort snap.pl_goals)
                     | None -> ());
-                   clamp_planning_cursor state
+                   Masc_tui_media_surface_actions.Surface_references.clamp_planning_cursor state
                | None ->
                    state.planning_cursor <- 0)
               end
@@ -25304,7 +24940,7 @@ let main
                          launch_keeper_older_page state
                            ~mailbox:async_messages ~keeper_name ~cursor
                      | None -> ())
-                   ~paste_image:(fun () -> paste_clipboard_image state)
+                   ~paste_image:(fun () -> Masc_tui_media_surface_actions.Clipboard_paste.paste_clipboard_image state)
                    ~open_named_image:(fun () -> open_named_image state ~mailbox:async_messages)
                    ~inspect_context:(fun () ->
                      match state.msg_target_keeper_name with
@@ -26035,7 +25671,7 @@ let main
               Option.bind (presented_surface_reference ()) (fun reference ->
                 Option.bind (Link.parse reference) (fun (kind, id) ->
                   Option.map (fun target -> (reference, kind, target))
-                    (follow_target kind id)))
+                    (Masc_tui_media_surface_actions.Surface_references.follow_target kind id)))
             with
             | None -> ()
             | Some (reference, kind, (destination, opened)) ->
@@ -27917,7 +27553,7 @@ let main
         | Some "f" | Some "F" when state.view = Planning ->
             (* Client-side over the loaded goals: no refetch. *)
             state.planning_filter <- next_planning_filter state.planning_filter;
-            clamp_planning_cursor state
+            Masc_tui_media_surface_actions.Surface_references.clamp_planning_cursor state
         | Some "g" when state.view = Approvals && state.ask_answer_mode = Ask_browsing ->
            open_answered_installation_results state ~mailbox:async_messages
         | Some "g" when state.view = Acting ->
@@ -28611,7 +28247,7 @@ let main
                 (match state.board_mode with
                  | Board_compose -> ()
                  | Board_list | Board_read _ ->
-                     state.board_sort <- next_board_sort state.board_sort;
+                     state.board_sort <- Masc_tui_media_surface_actions.Surface_references.next_board_sort state.board_sort;
                      Masc_tui_shell.Preferences.store state
                        (Masc.Tui_preference.Board_sort_chosen (board_sort_order state.board_sort));
                      (* The session log row is read away from Board, so it
@@ -28629,7 +28265,7 @@ let main
             | Planning ->
                 (* Client-side re-order of the loaded goals: no refetch. *)
                 state.planning_sort <- next_planning_sort state.planning_sort;
-                clamp_planning_cursor state
+                Masc_tui_media_surface_actions.Surface_references.clamp_planning_cursor state
             | Overview | Acting | Metrics | Keepers Keeper_logs | Keepers Keeper_calls
             | Keepers Keeper_message | Lanes
             | Approvals | Schedules | Verification | Harness

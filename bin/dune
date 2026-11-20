@@ -3363,6 +3363,7 @@
   masc_tui_domain_requests
   masc_tui_resources_control
   masc_tui_repo_changes
+  masc_tui_media_surface_actions
   masc_tui_keys
   masc_tui_key_ime
   masc_tui_file_icon

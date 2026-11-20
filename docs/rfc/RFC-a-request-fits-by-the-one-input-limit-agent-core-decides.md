@@ -1,7 +1,7 @@
 ---
 rfc: "a-request-fits-by-the-one-input-limit-agent-core-decides"
 title: "요청이 들어가는지는 agent-core 가 정한 입력 한도 하나로 본다"
-status: Draft
+status: Implemented
 created: 2026-11-19
 updated: 2026-11-20
 author: claude
@@ -226,10 +226,44 @@ provider 거절은 run 안에서 다시 보내지 않는다.
    - 시험: checkpoint 전 요청에는 다음 후보가 없다. 사다리가 다섯 단을 지금 순서로 쓴다.
    - 시험: carrier 를 주소로 바꾼 후보가 받아들여지면, history 범위는 첫 후보와 같다.
 
-## 6. 조사할 것
+## 6. 조사한 것
 
-- exact 경로에서 admitted target 이 받는 창과 레인 slot 열쇠의 `window` 가 같은 값에서 오는지. 같아야 Librarian RFC §6.3 의 비교가 이 RFC 의 함수를 쓸 수 있다.
+- exact 경로에서 admitted target 이 받는 창과 레인 slot 열쇠의 `window` 는 같은 값이다(2026-11-20 확인).
+  - exact 요청은 그 runtime 의 sealed config 로 나간다(`exact_output_targets`, `lib/runtime/runtime.ml`).
+  - agent-core 는 그 config 의 `Provider_config.context_window` 로 견준다(`Input_budget`).
+  - slot 열쇠의 `window` 는 같은 publish 에서 얼린 `resolve_max_context_of_runtime` 값이다(`exact_output_runtime_observations`).
+  - 두 값 모두 binding → provider → model 선언을 고르고, 같은 catalog cap 으로 줄인다.
+    adapter 는 줄일 때 쓴 request policy 를 config 에 붙인다(`with_request_policy`). slot 열쇠는 그 config 의 `capabilities_for_config_model` 로 줄인다.
+  - `Replacement_catalog_targets` 에서는 registry 가 창을 얼리지 않는다. 그 slot 은 `Window_unknown` 이라 요청이 나가지 않는다.
+- 같은 창을 두 함수가 따로 계산한다. slot 열쇠가 config 의 `context_window` 를 바로 읽게 할지는 4층 담당이 정한다.
 
 ## 7. 모르는 것
 
 - 예약을 보내지 않는 provider 가 서버에서 따로 잡는 출력 몫. agent-core 가 모르니 한도는 창 그대로다. 그 provider 의 거절은 지금처럼 provider 가 한다.
+
+## 8. 구현 (Implementation summary, 2026-11-20)
+
+| 층 | 들어간 곳 |
+|---|---|
+| 1. agent-core 입력 한도 타입과 envelope | #53574 |
+| 2. masc 창 옮김 신호와 다음 요청 예측 | #53574 |
+| 3. 턴의 `effective_budget` | 고칠 코드가 없다(§1.2) |
+| 4. Librarian 레인 | 고칠 코드가 없다. Librarian RFC §6.3 의 비교를 만드는 층이 `Input_budget` 으로 견준다. 창은 §6 의 slot 열쇠 값이다 |
+| 5. run 안 후보로 좁히기 | agent-core 계약 #53791, masc #53817, front 되돌리기 삭제 #53844 |
+
+RFC 본문은 #53743 이다. 규칙 (c)(checkpoint 뒤 요청에만 후보)는 #53758 이다.
+
+§5 의 5층 시험과 실제 시험의 짝이다. agent-core 시험은 `packages/agent_core/test/test_anthropic_input_token_count.ml` 에, masc 시험은 `test/test_keeper_in_run_narrowing.ml` 에 있다.
+
+| §5 시험 | 시험 |
+|---|---|
+| 같은 run 에서 다음 후보가 받아들여진다. tool 은 다시 돌지 않는다 | `test_a_request_after_the_checkpoint_narrows_in_the_same_run` |
+| 좁힌 뒤의 안쪽 요청은 첫 후보로 들어간다 | 같은 시험. 다음 요청은 한 번 재고 나간다 |
+| 받아들여진 후보 뒤의 thunk 는 불리지 않는다 | `test_the_first_request_that_fits_is_the_one_sent` |
+| 셋째가 받아들여지면 provider 시도는 ordinal 0 하나다 | `test_the_one_provider_attempt_records_the_request_sent` |
+| provider 가 넘침으로 거절하면 다음 후보를 보내지 않는다 | `test_a_provider_refusal_asks_no_narrower_request` |
+| 후보가 다하면 턴이 끝난다 | `test_the_last_refusal_ends_the_turn_when_requests_run_out`, `test_a_turn_whose_candidates_run_out_ends_with_the_refusal` |
+| 보내기 전에 실패한 후보는 없는 후보다 | `test_an_unmeasurable_narrower_request_leaves_the_refusal_before_it` |
+| carrier 후보는 history 범위를 지킨다 | `test_the_carrier_candidate_keeps_the_history_range` |
+| 거절된 후보는 ledger 를 바꾸지 않는다 | 구조가 정한다. ledger 는 모은 응답에만 쓴다(`ledger_hooks`, AfterTurn). 보내지 않은 후보에는 응답이 없다 |
+| checkpoint 전 요청에는 다음 후보가 없다 | 구조가 정한다. 후보는 `same_run_retry_allowed` 가 false 일 때만 붙는다(`run_try_provider_attempt`). 사다리 시험(retained carrier, carried range eviction)은 기대를 바꾸지 않았다 |

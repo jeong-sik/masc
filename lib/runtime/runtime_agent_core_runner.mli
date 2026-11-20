@@ -65,5 +65,5 @@ module For_testing : sig
 
       An empty [runtime_id] resolves the default runtime; a non-empty id that
       is not a configured runtime returns [Error] — never the default runtime
-      (no Unknown→Permissive substitution, RFC-0206 §2.1; audit F8). *)
+      (no Unknown→Permissive substitution; audit F8). *)
 end

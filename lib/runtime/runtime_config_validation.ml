@@ -149,7 +149,7 @@ let lanes_of_decls
 (* Every materialized runtime must resolve a positive context window from the
    runtime.toml override or the AGENT_CORE capability catalog. A binding that leaves
    both unset is a config error rejected here, not a runtime defaulted to a
-   fallback window (RFC-0206 §2.1 no silent fallback). *)
+   fallback window. *)
 let validate_runtime_max_context (runtimes : t list)
   : (unit, load_failure) result
   =

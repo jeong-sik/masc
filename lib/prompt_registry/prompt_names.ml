@@ -229,9 +229,8 @@ let keeper_recall_turn_yes = "keeper.memory.recall.turn.yes"
 let keeper_recall_turn_no = "keeper.memory.recall.turn.no"
 let keeper_recall_turn_unsure = "keeper.memory.recall.turn.unsure"
 
-(* The two blocks of the recall judgment (RFC-keeper-recall-reaches-the-turn
-   section 4.4): the status line a judged turn always carries, and the body of
-   the memories the judgment carried. *)
+(* The two blocks of the recall judgment: the status line a judged turn always
+   carries, and the body of the memories the judgment carried. *)
 let keeper_recall_status_selected = "keeper.recall.status.selected"
 let keeper_recall_status_selected_ids = "keeper.recall.status.selected_ids"
 let keeper_recall_status_capacity_deferred = "keeper.recall.status.capacity_deferred"

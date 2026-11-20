@@ -42,7 +42,7 @@ val attempt_failure_of_wire_name : string -> attempt_failure option
 type recorder
 (** The Keeper whose walk recorded a failed attempt. Compared only for
     identity: the recorder's next cycle walks the head again, every other
-    walk keeps it behind (RFC-0458 §3.4, 2026-09-23). *)
+    walk keeps it behind. *)
 
 val keeper_recorder : keeper_name:string -> recorder
 

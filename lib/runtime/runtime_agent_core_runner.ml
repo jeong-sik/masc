@@ -72,13 +72,13 @@ let runtime_catalog_error_to_core_error detail =
 (** Resolve runtime provider configs via [Runtime].
     Returns Provider_config.t list for the downstream AGENT_CORE runtime. *)
 let resolve_runtime_providers ~runtime_id () =
-  (* Audit F8: honor the *requested* runtime id (RFC-0207 catalog lookup).
-     The previous RFC-0206 single-binding stub discarded [runtime_id] and
+  (* Audit F8: honor the *requested* runtime id (runtime catalog lookup).
+     The previous single-binding stub discarded [runtime_id] and
      always returned the default runtime, silently substituting an
      operator-selected runtime id — an
      Unknown→Permissive fallback. An empty id means the default runtime; a
      non-empty id that is not a configured runtime is an [Error] (no silent
-     substitution — RFC-0206 §2.1). The former [?provider_filter] parameter
+     substitution). The former [?provider_filter] parameter
      was ignored here and is deleted;
      each resolved runtime carries exactly one provider_config. *)
   let runtime_id = String.trim runtime_id in

@@ -1,6 +1,5 @@
 (** Runtime_model_input_tail_window — bounded transmission view over
-    provider-bound conversation history (RFC-0351 §3 L5, #26534 PR-C, #26544,
-    #26551).
+    provider-bound conversation history (#26544, #26551).
 
     [project] keeps only the most recent atoms of the message list that AGENT_CORE
     is about to send to a provider. One atom is either an organic [User]

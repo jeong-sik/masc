@@ -78,8 +78,7 @@ val max_context_of_runtime : t -> int
     the runtime id. Derived from {!resolve_max_context_of_runtime}.
     @raise Failure if that resolves to [None] — unreachable for any [t]
     loaded by {!Runtime.load_list}, which rejects a runtime whose max
-    context cannot be resolved at load time (no silent default —
-    RFC-0206 §2.1). *)
+    context cannot be resolved at load time (no silent default). *)
 
 val id_of_binding : binding -> string
 

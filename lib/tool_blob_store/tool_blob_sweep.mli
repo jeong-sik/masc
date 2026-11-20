@@ -1,5 +1,5 @@
-(** The in-server sweep of the shared {!Tool_blob_store} (RFC-0499), layer
-    one: it counts and records, and deletes nothing.
+(** The in-server sweep of the shared {!Tool_blob_store}: it counts and
+    records, and deletes nothing.
 
     A scan writes a marker file and takes the marker's mtime as the scan's
     start, so later comparisons with blob mtimes read one filesystem clock.
@@ -11,14 +11,15 @@
     names the unclassified entries. A record that names one has no deletable
     blob: the scan does not read that entry.
 
-    Against the previous record it computes what layer two would delete: the
-    blobs that were candidates then and are candidates now, that this process
-    has not marked in {!Tool_blob_store}'s touch ledger, and whose file has not
-    been written since the previous scan opened. It also classifies the
-    previous record's deletable blobs that a durable consumer references now:
-    layer two would have deleted them, so each one shows whether a [put]
-    would have written the file again, a [fetch] would have failed visibly,
-    or a reference would have been left without its file.
+    Against the previous record it computes what a deleting sweep would
+    delete: the blobs that were candidates then and are candidates now, that
+    this process has not marked in {!Tool_blob_store}'s touch ledger, and
+    whose file has not been written since the previous scan opened. It also
+    classifies the previous record's deletable blobs that a durable consumer
+    references now: a deleting sweep would have deleted them, so each one
+    shows whether a [put] would have written the file again, a [fetch] would
+    have failed visibly, or a reference would have been left without its
+    file.
 
     The touch ledger rotates only after a record is written. A failed scan
     rotates nothing, so the two generations together always reach back past
@@ -29,8 +30,9 @@ type previous_now_live =
       (** A [put] mark, or a file written after the previous scan opened. *)
   ; read_only : int  (** Only a read mark. *)
   ; untouched : int
-      (** No mark and an older file: a reference layer two would have left
-          without its file. Their digests are the [u] lines of the record. *)
+      (** No mark and an older file: a reference that a deleting sweep would
+          have left without its file. Their digests are the [u] lines of the
+          record. *)
   }
 
 type previous_comparison =

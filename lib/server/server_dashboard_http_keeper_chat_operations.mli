@@ -7,9 +7,9 @@ type get_route =
       ; raw_operation_id : string
       }
   | Chat_events of { keeper_name : string }
-      (** [GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&since_offset=&limit=]
-          (RFC-0412 §3.2, v2): one operation's journal as written, paged over
-          seq and byte offset, reasoning included. *)
+      (** [GET /api/v1/keepers/:name/chat/events?operation_id=&since_seq=&since_offset=&limit=]:
+          one operation's journal as written, paged over seq and byte
+          offset, reasoning included. *)
   | Turn_events of { keeper_name : string; raw_turn_ref : string }
       (** [GET /api/v1/keepers/:name/turns/:turn_ref/events], same cursors,
           keyed by the durable autonomous turn reference. *)

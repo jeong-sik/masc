@@ -249,6 +249,163 @@ let should_emit_tool_choice (config : Provider_config.t) =
   | Some (Auto | None_) | None -> (capabilities_of_config config).supports_tool_choice
 ;;
 
+(* ── Pre-System_context explicit prompt-cache breakpoints ── *)
+
+type pre_ext_breakpoint_mode =
+  | Anthropic_cache_control of Yojson.Safe.t
+  | Openai_explicit_breakpoint
+
+let is_system_context_origin = function
+  | System_context -> true
+  | Conversation
+  | Historical_system_context
+  | Recovery_instruction
+  | Tool_result_followup
+  | Agent_instruction -> false
+;;
+
+(* Split [messages] into [(prefix, trailing)] iff [messages] ends with a
+   non-empty contiguous suffix of [System_context] messages AND no
+   [System_context] message appears anywhere in [prefix]. *)
+let split_strictly_trailing_system_context (messages : message list) =
+  let rec peel_trailing acc = function
+    | msg :: rest when is_system_context_origin msg.origin ->
+      peel_trailing (msg :: acc) rest
+    | rev_prefix -> List.rev rev_prefix, acc
+  in
+  let prefix, trailing = peel_trailing [] (List.rev messages) in
+  match trailing with
+  | [] -> None
+  | _ :: _ ->
+    if List.exists (fun msg -> is_system_context_origin msg.origin) prefix
+    then None
+    else Some (prefix, trailing)
+;;
+
+let split_serialized_tail ~provider_messages ~suffix_json =
+  let total_len = List.length provider_messages in
+  let suffix_len = List.length suffix_json in
+  if suffix_len <= 0 || suffix_len > total_len
+  then None
+  else (
+    let prefix_len = total_len - suffix_len in
+    let rec take n acc = function
+      | rest when n = 0 -> List.rev acc, rest
+      | [] -> List.rev acc, []
+      | x :: xs -> take (n - 1) (x :: acc) xs
+    in
+    let prefix_json, actual_tail = take prefix_len [] provider_messages in
+    let json_equal a b =
+      String.equal (Yojson.Safe.to_string a) (Yojson.Safe.to_string b)
+    in
+    if List.equal json_equal actual_tail suffix_json
+    then Some (prefix_json, actual_tail)
+    else None)
+;;
+
+let is_non_blank_text s = String.length (String.trim s) > 0
+
+let role_is_breakpoint_eligible mode role =
+  match mode, role with
+  | Anthropic_cache_control _, ("system" | "developer" | "user" | "tool" | "assistant") ->
+    true
+  | Openai_explicit_breakpoint, ("system" | "developer" | "user" | "tool") -> true
+  | (Anthropic_cache_control _ | Openai_explicit_breakpoint), _ -> false
+;;
+
+let breakpoint_field_of_mode = function
+  | Anthropic_cache_control cc -> "cache_control", cc
+  | Openai_explicit_breakpoint ->
+    "prompt_cache_breakpoint", `Assoc [ "mode", `String "explicit" ]
+;;
+
+let replace_assoc_field key value fields =
+  let rec loop acc = function
+    | [] -> List.rev acc
+    | (k, _) :: rest when String.equal k key ->
+      List.rev_append acc ((key, value) :: rest)
+    | pair :: rest -> loop (pair :: acc) rest
+  in
+  loop [] fields
+;;
+
+let attach_breakpoint_to_text_part ~bp_key ~bp_value = function
+  | `Assoc part_fields ->
+    (match List.assoc_opt "type" part_fields, List.assoc_opt "text" part_fields with
+     | Some (`String "text"), Some (`String text) when is_non_blank_text text ->
+       let cleaned =
+         List.filter (fun (k, _) -> not (String.equal k bp_key)) part_fields
+       in
+       Some (`Assoc (cleaned @ [ bp_key, bp_value ]))
+     | (Some _ | None), (Some _ | None) -> None)
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let attach_breakpoint_to_content_parts ~bp_key ~bp_value parts =
+  let rec loop acc = function
+    | [] -> None
+    | part :: rest ->
+      (match attach_breakpoint_to_text_part ~bp_key ~bp_value part with
+       | Some updated -> Some (List.rev_append rest (updated :: acc))
+       | None -> loop (part :: acc) rest)
+  in
+  loop [] (List.rev parts)
+;;
+
+let attach_breakpoint_to_message mode = function
+  | `Assoc fields ->
+    (match List.assoc_opt "role" fields with
+     | Some (`String role) when role_is_breakpoint_eligible mode role ->
+       let bp_key, bp_value = breakpoint_field_of_mode mode in
+       (match List.assoc_opt "content" fields with
+        | Some (`String text) when is_non_blank_text text ->
+          let wrapped =
+            `List
+              [ `Assoc
+                  [ "type", `String "text"
+                  ; "text", `String text
+                  ; bp_key, bp_value
+                  ]
+              ]
+          in
+          Some (`Assoc (replace_assoc_field "content" wrapped fields))
+        | Some (`List parts) ->
+          (match attach_breakpoint_to_content_parts ~bp_key ~bp_value parts with
+           | Some updated_parts ->
+             Some (`Assoc (replace_assoc_field "content" (`List updated_parts) fields))
+           | None -> None)
+        | Some (`String _ | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _)
+        | None -> None)
+     | Some _ | None -> None)
+  | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let attach_breakpoint_to_prefix mode prefix_json =
+  let rec loop acc = function
+    | [] -> None
+    | msg :: rest ->
+      (match attach_breakpoint_to_message mode msg with
+       | Some updated -> Some (List.rev_append rest (updated :: acc))
+       | None -> loop (msg :: acc) rest)
+  in
+  loop [] (List.rev prefix_json)
+;;
+
+let try_attach_pre_ext_breakpoint mode ~messages ~provider_messages ~serialize_suffix =
+  match split_strictly_trailing_system_context messages with
+  | None -> None
+  | Some (_prefix_msgs, trailing_sys_ctx) ->
+    (match serialize_suffix trailing_sys_ctx with
+     | Error _ -> None
+     | Ok suffix_json ->
+       (match split_serialized_tail ~provider_messages ~suffix_json with
+        | None -> None
+        | Some (prefix_json, actual_tail) ->
+          (match attach_breakpoint_to_prefix mode prefix_json with
+           | None -> None
+           | Some updated_prefix -> Some (updated_prefix @ actual_tail))))
+;;
+
 (** Build Openai Chat Completions request body from {!Provider_config.t}.
     Returns a JSON string ready for HTTP POST. *)
 let build_request_assoc_artifact
@@ -314,18 +471,19 @@ let build_request_assoc_artifact
       ~supports_audio_input:caps.Capabilities.supports_audio_input
       messages
   in
+  let serialize_history msgs =
+    Backend_openai_serialize.dialect_messages_of_history
+      ~content_inline_reasoning:caps.Capabilities.content_inline_reasoning
+      ~control_lowering
+      ~assistant_tool_content_format
+      ~replay_capability
+      ~stream
+      dialect
+      msgs
+  in
   let provider_messages =
     let history =
-      match
-        Backend_openai_serialize.dialect_messages_of_history
-          ~content_inline_reasoning:caps.Capabilities.content_inline_reasoning
-          ~control_lowering
-          ~assistant_tool_content_format
-          ~replay_capability
-          ~stream
-          dialect
-          messages
-      with
+      match serialize_history messages with
       | Ok history -> history
       | Error error ->
         invalid_arg
@@ -349,6 +507,55 @@ let build_request_assoc_artifact
     match Message_origin_lowering.prepend_system_prompt control_lowering ~system_prompt history with
     | Ok messages -> messages
     | Error error -> invalid_arg ("Backend_openai_request: " ^ Message_origin_lowering.error_to_string error)
+  in
+  let provider_messages, cache_top_level_fields =
+    match caps.Capabilities.prompt_cache_wire, caps.Capabilities.supports_explicit_cache_opt_out with
+    | Capabilities.Openrouter_top_level_cache_control, _ ->
+      if not config.cache_system_prompt
+      then provider_messages, []
+      else (
+        let cc =
+          if config.cache_extended_ttl
+          then `Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]
+          else `Assoc [ "type", `String "ephemeral" ]
+        in
+        match
+          try_attach_pre_ext_breakpoint
+            (Anthropic_cache_control cc)
+            ~messages
+            ~provider_messages
+            ~serialize_suffix:serialize_history
+        with
+        | Some updated_messages ->
+          (* Breakpoint sits immediately before strictly trailing System_context:
+             omit top-level cache_control so trailing System_context bills at
+             1.0x plain input rather than 1.25x/2.0x cache write. *)
+          updated_messages, []
+        | None ->
+          (* No strictly trailing System_context or no eligible non-blank prefix
+             text block: fall back cleanly to top-level cache_control. *)
+          provider_messages, [ "cache_control", cc ])
+    | Capabilities.No_prompt_cache_wire, true ->
+      if not config.cache_system_prompt
+      then
+        (* 1-shot explicit opt-out (0 breakpoints): disables automatic 1.25x
+           cache write on declared OpenRouter GPT-5.6 / GPT-6 rows. *)
+        provider_messages, [ "prompt_cache_options", `Assoc [ "mode", `String "explicit" ] ]
+      else (
+        match
+          try_attach_pre_ext_breakpoint
+            Openai_explicit_breakpoint
+            ~messages
+            ~provider_messages
+            ~serialize_suffix:serialize_history
+        with
+        | Some updated_messages ->
+          ( updated_messages
+          , [ "prompt_cache_options", `Assoc [ "mode", `String "explicit" ] ] )
+        | None ->
+          (* Never emit 0-breakpoint explicit mode when caching is enabled. *)
+          provider_messages, [])
+    | Capabilities.No_prompt_cache_wire, false -> provider_messages, []
   in
   (* Per-model capabilities ([caps] above) drive the [top_k] / [min_p]
      sampling-field gates further down; the output-token budget (clamp
@@ -502,18 +709,7 @@ let build_request_assoc_artifact
     | Capabilities.Openrouter_session_id, Some key -> ("session_id", `String key) :: body
     | Capabilities.Prompt_cache_key, Some key -> ("prompt_cache_key", `String key) :: body
   in
-  let body =
-    match caps.Capabilities.prompt_cache_wire, config.cache_system_prompt with
-    | Capabilities.No_prompt_cache_wire, (true | false)
-    | Capabilities.Openrouter_top_level_cache_control, false -> body
-    | Capabilities.Openrouter_top_level_cache_control, true ->
-      let cache_control =
-        if config.cache_extended_ttl
-        then `Assoc [ "type", `String "ephemeral"; "ttl", `String "1h" ]
-        else `Assoc [ "type", `String "ephemeral" ]
-      in
-      ("cache_control", cache_control) :: body
-  in
+  let body = cache_top_level_fields @ body in
   let body =
     if Provider_config.supports_provider_routing_filter config
     then (

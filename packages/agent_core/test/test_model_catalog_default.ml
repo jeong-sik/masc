@@ -1449,7 +1449,22 @@ let test_openai_responses_developer_carrier_and_opt_out_declarations () =
     ; "gpt-6.2-sol"
     ; "gpt-6.2-astra"
     ];
-  (* Pre-5.6 OpenAI Chat and OpenRouter rows keep defaults. *)
+  (* OpenRouter GPT-5.6/6 Chat Completions rows declare supports_explicit_cache_opt_out
+     while keeping Responses_instructions (Chat Completions wire). *)
+  List.iter
+    (fun model_id ->
+       let caps = resolve "openrouter" model_id in
+       check bool ("openrouter/" ^ model_id ^ " keeps instructions carrier") true
+         (caps.responses_system_prompt_carrier
+          = Llm_provider.Capabilities.Responses_instructions);
+       check bool ("openrouter/" ^ model_id ^ " declares explicit cache opt-out") true
+         caps.supports_explicit_cache_opt_out)
+    [ "openai/gpt-5.6-sol"
+    ; "openai/gpt-5.6-terra"
+    ; "openai/gpt-5.6-luna"
+    ; "openai/gpt-6-astra"
+    ];
+  (* Pre-5.6 OpenAI Chat and implicit-only OpenRouter rows keep defaults. *)
   List.iter
     (fun (provider_id, model_id) ->
        let caps = resolve provider_id model_id in
@@ -1458,7 +1473,10 @@ let test_openai_responses_developer_carrier_and_opt_out_declarations () =
           = Llm_provider.Capabilities.Responses_instructions);
        check bool (provider_id ^ "/" ^ model_id ^ " keeps opt-out false") false
          caps.supports_explicit_cache_opt_out)
-    [ "openai", "gpt-5.5"; "openrouter", "openai/gpt-5.6-sol" ]
+    [ "openai", "gpt-5.5"
+    ; "openrouter", "deepseek/deepseek-v4.1-flash-1017"
+    ; "openrouter", "google/gemini-3.8-flash"
+    ]
 ;;
 
 let test_openrouter_claude_prompt_cache_wire_declarations () =

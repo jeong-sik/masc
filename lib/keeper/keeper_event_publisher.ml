@@ -73,14 +73,13 @@ let publish_keeper_lifecycle
 
 (** Publish a typed event when a keeper's declared [keeper.tools.native]
     posture could not be honored at lane admission and the lane degraded
-    to a safer posture instead of failing the turn (RFC-0390 admission
-    review: [full] under a non-yolo approval mode or [none] on a client
-    that cannot disable built-ins). Wire event name:
+    to a safer posture instead of failing the turn ([full] under a
+    non-yolo approval mode or [none] on a client that cannot disable
+    built-ins). Wire event name:
     [masc.keeper.native_posture_degraded].
 
-    This is the record the reviewer asked for: the downgrade is not
-    silent — operators can subscribe to the wire name or watch the
-    dashboard stream for it. *)
+    The downgrade is not silent — operators can subscribe to the wire
+    name or watch the dashboard stream for it. *)
 let publish_native_posture_degraded
     ~keeper_name
     ~client_label

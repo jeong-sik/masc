@@ -11,7 +11,7 @@
     fix is moving that file aside; boot does not read them.
 
     {!reader} is the one table. It sends each store to one of three policies
-    (RFC every-durable-store-has-one-boot-policy, RFC-0420, RFC-0444 §2.4):
+    (RFC every-durable-store-has-one-boot-policy):
     - [Refuse_boot]: boot decodes every file before any keeper loop starts
       and refuses to start while one is undecodable, unless the operator
       passes [--accept-store-quarantine]. Keeper meta and memory current are

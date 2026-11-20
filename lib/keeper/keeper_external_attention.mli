@@ -189,7 +189,7 @@ val recorded_items_by_event_ids :
     the result; the returned pairs preserve [event_ids]' order. Calling
     [load_events] once per id here is the same O(file)-per-call trap the
     [dedup_window_bytes] comment above documents for [record]'s dedup
-    scan — this is the read-side counterpart, for RFC-0377's turn-batched
+    scan — this is the read-side counterpart, for the turn-batched
     Connector_attention intake (N companions must not cost N full-file
     reads). *)
 

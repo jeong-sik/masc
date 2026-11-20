@@ -1352,7 +1352,7 @@ let draw_cards ~ko ~show_limit_exhausted ~width groups =
   List.map (clip width) (separated (List.map draw_group groups))
 
 type exhausted_count =
-  | Exhausted_unknown
+  | Exhausted_unknown of Masc_tui_value.Unknown.t
   | Exhausted_accounts of int
 
 type counts = {
@@ -1386,7 +1386,8 @@ let counts ~runtimes (accounts : Masc.Tui_decode_usage.provider_usage_account li
            Exhausted_accounts
              (count (fun account ->
                   is_observed_exhausted (observed_exhaustion ~runtimes account.pua_scope)))
-       | Types.Quota_unread | Types.Quota_failed _ -> Exhausted_unknown)
+       | Types.Quota_unread -> Exhausted_unknown Masc_tui_value.Unknown.Unread
+       | Types.Quota_failed _ -> Exhausted_unknown Masc_tui_value.Unknown.Read_failed)
   }
 
 (* Find the formerly visible prefix without segmenting a potentially huge
@@ -1461,7 +1462,7 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
       let counts = counts ~runtimes puws_accounts in
       let exhausted =
         match counts.exhausted with
-        | Exhausted_unknown -> "unknown"
+        | Exhausted_unknown gap -> Masc_tui_value.Unknown.glyph gap
         | Exhausted_accounts count -> string_of_int count
       in
       (* Metrics lead and the legend recedes. A row that is too wide still ends
@@ -1480,7 +1481,10 @@ let section_with ~draw ~bound ~(providers : Types.overview_providers_reading) ~r
               "At limit (reported)" (string_of_int counts.at_limit)
           ; metric
               ~tone:(match counts.exhausted with
-                | Exhausted_unknown -> Theme.text_status Masc_tui_theme.Warn
+                | Exhausted_unknown Masc_tui_value.Unknown.Read_failed ->
+                    Theme.text_status Masc_tui_theme.Warn
+                | Exhausted_unknown
+                    (Masc_tui_value.Unknown.Unread | Masc_tui_value.Unknown.Unreported) -> ""
                 | Exhausted_accounts count when count > 0 -> Theme.text_status Masc_tui_theme.Bad
                 | Exhausted_accounts _ -> "")
               "Exhausted (observed)" exhausted

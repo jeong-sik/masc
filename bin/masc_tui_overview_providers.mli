@@ -109,9 +109,11 @@ val drawn_observation : plan_section -> observed -> observed
     The other sections draw [Not_observed_exhausted]. *)
 
 (** The header's [Exhausted (observed)] value. A catalogue that was not read or
-    failed does not make the count zero. *)
+    failed does not make the count zero: it is a gap, and which gap
+    ({!Masc_tui_value.Unknown.Unread} or [Read_failed]) is what the header
+    draws in the number's place. *)
 type exhausted_count =
-  | Exhausted_unknown
+  | Exhausted_unknown of Masc_tui_value.Unknown.t
   | Exhausted_accounts of int
 
 (** The header's numbers. *)

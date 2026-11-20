@@ -7741,6 +7741,7 @@
 (include stanzas/test_server_key_account_purge.inc)
 (include stanzas/test_server_key_account_registration.inc)
 (include stanzas/test_runtime_claude_key_environment.inc)
+(include stanzas/test_person_child_environment.inc)
 (include stanzas/test_keeper_account_home_reach.inc)
 (include stanzas/test_server_preview_keeper_turn.inc)
 (include stanzas/test_server_accounts.inc)

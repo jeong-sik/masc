@@ -79,7 +79,8 @@
       while a decision can rest on the authorization zone
       ({!Authz_zone.read}), and a 503 with [{"ready": false}] otherwise.
       While the engine starts the routes of a person answer; while the zone
-      cannot be trusted each of them is a 503 too.
+      cannot be trusted each of them that reads it is a 503 too, and the
+      home and invitation pages, which do not read it, answer.
 
     {b The zone.} {!run} opens the authorization zone over the log of the base
     path and the external store that the boot judgment read, and reads it
@@ -123,19 +124,21 @@ type refusal =
   | Keeper_configuration_change_left of { journal : string }
       (** A change of a Keeper configuration did not finish, and [journal]
           ([Keeper_config_journal.journal_path_for_base_path]) records it.
-          The first step of the engine would roll it back by writing or
-          removing a Keeper definition, after the folder was looked in.
-          Removing the journal gives the rollback up. *)
+          The boot does not read it. The first step of the engine, after the
+          folder was looked in, would roll the change back by writing or
+          removing a Keeper definition if the journal decodes and names this
+          configuration root, and would not start if it does not. Removing
+          the journal leaves the definition and runtime.toml as the change
+          left them. *)
   | Keeper_configuration_journal_not_read of
       { journal : string
       ; detail : string
       }
       (** Whether that journal is there could not be read. *)
   | Login_client_refused of Server_account_login.refusal
-      (** A login client that [config.json] names was refused: the
-          environment variable of its secret is not set or holds the empty
-          string, its redirect is no [https] URL, or the path of its
-          redirect is not the callback of its provider. *)
+      (** A login client that [config.json] names was refused. The refusal
+          names the provider and what was refused
+          ({!Server_account_login.refusal}). *)
   | Route_of_another_kind of Server_account_table.refusal
       (** The table holds a route that is neither [Always_public] nor
           [Self_authenticated] with [Browser_session] or [Person_mcp]. *)
@@ -196,9 +199,10 @@ val health_version : string -> string option
 
     The routes serve while the engine initializes. The readiness probe
     ({!Server_health_paths.readiness}) answers 503 until the promise that
-    [start_engine] returned is resolved, and then while the zone can be
-    trusted: an engine that fails before it is ready ends the process, so
-    [masc restart] takes the server for ready only once its engine is.
+    [start_engine] returned is resolved, and after it whenever the zone
+    cannot be trusted: an engine that fails before it is ready ends the
+    process, so [masc restart] takes the server for ready only once its
+    engine is.
 
     An [Error] comes before a connection is accepted and before the port is
     recorded, and the refusals come in the order of the constructors of

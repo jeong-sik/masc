@@ -60,10 +60,11 @@ let refusal_to_string = function
     Printf.sprintf "the folder of Keeper definitions %s cannot be read: %s" folder detail
   | Keeper_configuration_change_left { journal } ->
     Printf.sprintf
-      "%s records a change of a Keeper configuration that did not finish, and the engine \
-       would roll it back by writing or removing a Keeper definition the authorization log \
-       does not name. Removing the journal gives the rollback up: the Keeper definition and \
-       runtime.toml stay as the change left them"
+      "%s records a change of a Keeper configuration that did not finish. The engine would \
+       roll the change back if it accepts the journal, writing or removing a Keeper \
+       definition the authorization log does not name, and would not start if it does not. \
+       Removing the journal leaves the Keeper definition and runtime.toml as the change left \
+       them"
       journal
   | Keeper_configuration_journal_not_read { journal; detail } ->
     Printf.sprintf "the Keeper configuration journal %s cannot be read: %s" journal detail
@@ -130,7 +131,8 @@ let liveness (_ : Httpun.Request.t) reqd =
    ([Server_runtime_bootstrap.start_engine]), so a ready answer before it
    would name a server that may still end, and [masc restart] takes that
    answer for a replacement that serves. Without the zone every route of a
-   person is a 503 ([Login_routes.zone_uncertain]). The reason names paths
+   person that reads it is a 503 ([Login_routes.zone_uncertain]); the home
+   and invitation pages do not read it. The reason names paths
    of the server, so the probe says only that the server is not ready. *)
 let readiness ~engine zone (_ : Httpun.Request.t) reqd =
   let not_ready () =

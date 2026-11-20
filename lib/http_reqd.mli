@@ -1,5 +1,5 @@
 (** The response handle of one HTTP request, the same for every transport
-    that carries requests into the server (RFC-0512 D1, D2).
+    that carries requests into the server.
 
     A route handler receives a {!t} and answers through it. The handle knows
     which transport the request came on; the handler does not. HTTP/1.1
@@ -21,9 +21,9 @@
 
 type t
 
-(** The protocol-upgrade capability of an httpun-eio connection (RFC-0281,
-    RFC-0287). Only an HTTP/1.1 handle from {!of_gluten} carries one: HTTP/2
-    has no 101 and no connection to hand over. *)
+(** The protocol-upgrade capability of an httpun-eio connection. Only an
+    HTTP/1.1 handle from {!of_gluten} carries one: HTTP/2 has no 101 and no
+    connection to hand over. *)
 type upgrade =
   { switch_protocols : Httpun.Headers.t -> (unit -> unit) -> unit
     (** Sends the 101 with these headers and calls the continuation once it is

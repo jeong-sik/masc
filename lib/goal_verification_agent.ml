@@ -1,10 +1,10 @@
-(** Goal_verification_agent — the RFC-0387 stage-2 verifier caller.
+(** Goal_verification_agent — the goal verifier caller.
 
     The goal-side analogue of {!Completion_authority_agent}: an
     application-owned LLM agent, not a Keeper, with no Keeper identity, task
     action, or lifecycle. It drains the durable [Proof_pending] rows the gate
     persists BEFORE any model call, written before the phase enters
-    [Verifying] (B3), asks one question of each — did the value read by the
+    [Verifying], asks one question of each — did the value read by the
     goal's declared procedure reach its declared measure — through
     {!Goal_verifier_worker.run} (so provider selection is the
     [verifier_exact] exact-output lane with frozen-order failover), and
@@ -14,7 +14,7 @@
     logic is duplicated here and no public MCP action can name a verdict.
 
     Authority is the fixed identity
-    [System_llm_agent { agent_run_id = "verifier_exact" }] (RFC-0361 D7(b)):
+    [System_llm_agent { agent_run_id = "verifier_exact" }]:
     the handler binds [ctx.agent_name] into the verdict, and this lane's
     context names the lane. Evidence is the model's stated reason, which the
     verdict itself now carries on either outcome, and
@@ -138,11 +138,11 @@ let collect_pending config : (scan, scan_failure) result =
     Ok { collected = List.rev collected; unreconciled = List.rev unreconciled }
 ;;
 
-(* RFC-0444 §2.3 row 7 and criterion 3: one WARN line per skipped scan, and
-   one durable row in the verification-runs store carrying the value the scan
-   saw. The line is written first because it is the evidence the criterion
-   counts; a row append that fails is then reported by the scan's own
-   exception path, not by a missing line. *)
+(* One WARN line per skipped scan, and one durable row in the
+   verification-runs store carrying the value the scan saw. The line is
+   written first because the line count is the skipped scan count; a row
+   append that fails is then reported by the scan's own exception path, not
+   by a missing line. *)
 let scan_skipped_log_prefix = "goal verifier scan skipped"
 
 let skip_scan (unavailable : Goal_store.unavailable) =

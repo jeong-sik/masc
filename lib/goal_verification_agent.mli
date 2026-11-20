@@ -1,13 +1,11 @@
-(** Goal_verification_agent — the RFC-0387 stage-2 verifier caller.
+(** Goal_verification_agent — the goal verifier caller.
 
     Application-owned LLM agent (not a Keeper) that drains the goal
-    verification ledger's durable [Proof_pending] requests (B3), judges each
-    through
+    verification ledger's durable [Proof_pending] requests, judges each through
     the durable {!Goal_verifier_worker} on the [verifier_exact] lane, and
     commits the verdict through {!Workspace_goals.commit_verifier_decision},
     the typed internal FSM+ledger+phase+event boundary, under the fixed
-    identity [System_llm_agent { agent_run_id = "verifier_exact" }]
-    (RFC-0361 D7(b)).
+    identity [System_llm_agent { agent_run_id = "verifier_exact" }].
 
     Typed non-verdicts (evaluator unavailable, malformed reply after all
     slots failed, verdict without a stated reason, refused commit) leave the
@@ -39,9 +37,9 @@ val start :
 
 val scan_skipped_log_prefix : string
 (** [goal verifier scan skipped] — the first words of the one WARN line each
-    scan the goal store refused writes (RFC-0444 §2.3 row 7, criterion 3:
-    line count = skipped scan count). The same scan appends one
-    {!Goal_verification_run_registry.Scan_skipped} row. *)
+    scan the goal store refused writes (line count = skipped scan count).
+    The same scan appends one {!Goal_verification_run_registry.Scan_skipped}
+    row. *)
 
 type observation_snapshot
 (** Immutable in-process verifier observations. This is not a durable receipt

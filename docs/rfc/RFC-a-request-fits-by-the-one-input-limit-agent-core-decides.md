@@ -235,7 +235,7 @@ provider 거절은 run 안에서 다시 보내지 않는다.
   - 두 값 모두 binding → provider → model 선언을 고르고, 같은 catalog cap 으로 줄인다.
     adapter 는 줄일 때 쓴 request policy 를 config 에 붙인다(`with_request_policy`). slot 열쇠는 그 config 의 `capabilities_for_config_model` 로 줄인다.
   - `Replacement_catalog_targets` 에서는 registry 가 창을 얼리지 않는다. 그 slot 은 `Window_unknown` 이라 요청이 나가지 않는다.
-- 같은 창을 두 함수가 따로 계산한다. slot 열쇠가 config 의 `context_window` 를 바로 읽게 할지는 4층 담당이 정한다.
+- 같은 창을 두 함수가 따로 계산한다. 4층 담당이 #53944 에서 slot 열쇠가 config 의 `context_window` 를 바로 읽게 바꾼다.
 
 ## 7. 모르는 것
 

@@ -530,10 +530,80 @@ module For_testing : sig
     -> string * string
   (** Pure capability/environment fixture returning [(bg, fg)] SGR escapes for
       a diff row. *)
+
+  type entity_hue =
+    | Lavender
+    | Sky
+    | Mint
+    | Peach
+
+  val section_heading
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:section_heading}. *)
+
+  val entity_accent
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
+    -> Masc_tui_terminal_palette.t option
+    -> entity_hue
+    -> string
+  (** Pure capability/environment fixture for {!val:entity_accent}. *)
+
+  val active_tab_pill
+    :  colors_enabled:bool
+    -> project:
+         (Masc_tui_terminal_palette.rgb
+          -> Masc_tui_terminal_palette.projected_color option)
+    -> surface:surface
+    -> Masc_tui_terminal_palette.t option
+    -> string
+  (** Pure capability/environment fixture for {!val:active_tab_pill}. *)
+
+  val footer_key_style : colors_enabled:bool -> string
+  (** Pure capability/environment fixture for {!val:footer_key_style}. *)
 end
 
 val selection : string
 (** [Sgr.reverse]; survives NO_COLOR by contract. *)
+
+(** Categorical pastel structural accents inspired by agy Swarm Board: each hue
+    is mixed in Oklab and lifted to clear 4.5:1 contrast without claiming
+    [status.info]. *)
+type entity_hue = For_testing.entity_hue =
+  | Lavender
+  | Sky
+  | Mint
+  | Peach
+
+val section_heading : surface:surface -> Masc_tui_terminal_palette.t option -> string
+(** Calm lavender/periwinkle structural section header foreground lifted in Oklab
+    to clear 4.5:1 against [surface] ([""] under NO_COLOR). *)
+
+val entity_accent
+  :  surface:surface
+  -> Masc_tui_terminal_palette.t option
+  -> entity_hue
+  -> string
+(** Pastel categorical accent foreground lifted in Oklab to clear 4.5:1 against
+    [surface] ([""] under NO_COLOR). *)
+
+val active_tab_pill : surface:surface -> Masc_tui_terminal_palette.t option -> string
+(** Subtle accent-tinted background + WCAG 4.5:1 foreground for active tab and
+    surface pills ([""] under NO_COLOR; falls back to {!val:selection_style}
+    without palette RGB). *)
+
+val footer_key_style : unit -> string
+(** Calm crisp bold default-foreground style for zone 5 keycaps without neon
+    cyan glare ([""] under NO_COLOR). *)
 
 (** Content colours that stay constant: "this word is green" is a diff or a
     code literal, not a reading of state, so it stays out of [status]. The

@@ -150,6 +150,12 @@ module Theme = struct
        hues above, because a quiet row on a side pane sits on that pane. *)
     ; recede : string
     ; border_muted : string
+    ; section_heading : string
+    ; entity_lavender : string
+    ; entity_sky : string
+    ; entity_mint : string
+    ; entity_peach : string
+    ; active_tab_pill : string
     ; diff_added_bg : string
     ; diff_removed_bg : string
     ; diff_added_fg : string
@@ -252,6 +258,16 @@ module Theme = struct
         ; slot_2 = of_colour (category_colour Slot_2)
         ; recede = Masc_tui_theme.recede ~surface palette
         ; border_muted = Masc_tui_theme.border_muted ~surface palette
+        ; section_heading = Masc_tui_theme.section_heading ~surface palette
+        ; entity_lavender =
+            Masc_tui_theme.entity_accent ~surface palette Masc_tui_theme.Lavender
+        ; entity_sky =
+            Masc_tui_theme.entity_accent ~surface palette Masc_tui_theme.Sky
+        ; entity_mint =
+            Masc_tui_theme.entity_accent ~surface palette Masc_tui_theme.Mint
+        ; entity_peach =
+            Masc_tui_theme.entity_accent ~surface palette Masc_tui_theme.Peach
+        ; active_tab_pill = Masc_tui_theme.active_tab_pill ~surface palette
         ; diff_added_bg
         ; diff_removed_bg
         ; diff_added_fg
@@ -343,6 +359,16 @@ module Theme = struct
   let border_muted () = (resolved ()).border_muted
 
   let recede () = (resolved ()).recede
+  let section_heading () = (resolved ()).section_heading
+
+  let entity_accent = function
+    | Masc_tui_theme.Lavender -> (resolved ()).entity_lavender
+    | Masc_tui_theme.Sky -> (resolved ()).entity_sky
+    | Masc_tui_theme.Mint -> (resolved ()).entity_mint
+    | Masc_tui_theme.Peach -> (resolved ()).entity_peach
+
+  let active_tab_pill () = (resolved ()).active_tab_pill
+  let footer_key_style () = Masc_tui_theme.footer_key_style ()
 
   (* The colour of each status mark (RFC tui-one-screen-grammar §7.2), so a
      screen that draws a mark takes its colour from the mark and not from a
@@ -557,6 +583,9 @@ let current_tab entries =
    the active entry down to [tab_strip_compact_floor]) before drawing nothing
    below that floor. A row that draws a strip still asks for this before it
    spends width on optional chrome that can give way. *)
+let tab_pill_pad = " "
+let tab_pill_pad_cells = 2
+
 let tab_strip_sup ~numbered idx =
   if not numbered then ""
   else Option.value ~default:"" (Masc_tui_theme.Glyph.superscript_digit (idx + 1))
@@ -574,6 +603,7 @@ let tab_strip_min_width ?(numbered = false) (tabs : (string * bool * 'target) li
        so the counts the marks would carry are exactly the entries on either
        side of it. *)
     cells Masc_tui_theme.Glyph.current_entry
+    + tab_pill_pad_cells
     + cells sup
     + cells label
     + (if current > 0 then
@@ -603,11 +633,16 @@ let strip_tab_count label =
 
 let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
     (tabs : (string * bool * 'target) list) =
-  let draw press ~sup (label, current, target) =
+  let draw press ~padded ~sup (label, current, target) =
     press target
       (if current then
-         Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry
-         ^ sup ^ label ^ Ansi.reset
+         let inner = Masc_tui_theme.Glyph.current_entry ^ sup ^ label in
+         let body =
+           if padded then tab_pill_pad ^ inner ^ tab_pill_pad else inner
+         in
+         let pill = Theme.active_tab_pill () in
+         if String.equal pill "" && String.equal Ansi.bold "" then body
+         else pill ^ Ansi.bold ^ body ^ Ansi.reset
        else Theme.recede () ^ sup ^ label ^ Ansi.reset)
   in
   let target_of (_, _, target) = target in
@@ -620,7 +655,9 @@ let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
     let widths =
       Array.mapi
         (fun idx (label, current, _) ->
-          (if current then cells Masc_tui_theme.Glyph.current_entry else 0)
+          (if current then
+             cells Masc_tui_theme.Glyph.current_entry + tab_pill_pad_cells
+           else 0)
           + cells sups.(idx)
           + cells label)
         entries
@@ -635,7 +672,7 @@ let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
     in
     if span 0 (n - 1) <= width then
       String.concat tab_strip_gap
-        (List.mapi (fun idx entry -> draw press ~sup:sups.(idx) entry) tabs)
+        (List.mapi (fun idx entry -> draw press ~padded:true ~sup:sups.(idx) entry) tabs)
     else begin
       (* Each mark is measured with the count it would draw. Growing the
          window on one side lowers that side's count, so a window that fits
@@ -671,7 +708,7 @@ let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
             let lbl =
               if idx = current then Option.value label_override ~default:lbl else lbl
             in
-            draw press ~sup:sups.(idx) (lbl, cur, tgt))
+            draw press ~padded:true ~sup:sups.(idx) (lbl, cur, tgt))
           |> String.concat sep
         in
         (if !lo > 0 then
@@ -705,10 +742,10 @@ let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
           compose ~sep:" " ~label_override:(Some base_label) press
         else
           let active_only =
-            draw no_press ~sup:cur_sup (base_label, cur_flag, cur_target)
+            draw no_press ~padded:true ~sup:cur_sup (base_label, cur_flag, cur_target)
           in
           if cells active_only <= width then
-            draw press ~sup:cur_sup (base_label, cur_flag, cur_target)
+            draw press ~padded:true ~sup:cur_sup (base_label, cur_flag, cur_target)
           else
             let mark_cells =
               if cur_flag then cells Masc_tui_theme.Glyph.current_entry else 0
@@ -721,7 +758,7 @@ let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
             let fitted =
               Masc_tui_message_layout.truncate_end label_room base_label
             in
-            draw press ~sup:shown_sup (fitted, cur_flag, cur_target)
+            draw press ~padded:false ~sup:shown_sup (fitted, cur_flag, cur_target)
     end
   end
 

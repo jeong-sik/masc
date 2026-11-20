@@ -90,24 +90,30 @@ let stop_text : Store.stop -> string = function
 ;;
 
 let status_of : Machine.state -> status = function
-  | Idle store -> Open (Store.tail store)
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : Machine.asking) }
+  | Resting store -> Open (Store.tail store)
   | Stopped stop -> Stopped stop
 ;;
 
 (* The state after an event, made visible before the event is answered: the
    caller that is woken reads the status the answer is about. *)
-let publish t ~was (state : Machine.state) =
-  (match was, state with
-   | Machine.Idle _, Stopped stop ->
+let publish t ~(was : Machine.t) (next : Machine.t) =
+  (match was.state, next.state with
+   | (Idle _ | Asking _ | Resting _), Stopped stop ->
      Log.Keeper.error ~keeper_name:t.place.keeper_id "librarian memory store stopped: %s"
        (stop_text stop)
-   | (Machine.Idle _ | Stopped _), (Idle _ | Stopped _) -> ());
-  Atomic.set t.status (status_of state)
+   | (Idle _ | Asking _ | Resting _ | Stopped _), (Idle _ | Asking _ | Resting _)
+   | Stopped _, Stopped _ -> ());
+  Atomic.set t.status (status_of next.state)
 ;;
 
 (* The revision the snapshot file holds, when the store is open. *)
-let revision : Machine.state -> int option = function
-  | Idle store -> Some (Store.memory store).revision
+let revision (value : Machine.t) =
+  match value.state with
+  | Idle { store; seen_length = (_ : int option) }
+  | Asking { store; asking = (_ : Machine.asking) }
+  | Resting store -> Some (Store.memory store).revision
   | Stopped (_ : Store.stop) -> None
 ;;
 
@@ -116,8 +122,8 @@ let revision : Machine.state -> int option = function
    again. [was] is the revision before the step, [None] for a store that was
    not open. So a store that opens says its revision too: the boot or the
    adoption that opened it can be what put that revision in the file. *)
-let announce t ~was (state : Machine.state) =
-  match revision state with
+let announce t ~was (value : Machine.t) =
+  match revision value with
   | Some now when not (Option.equal Int.equal was (Some now)) ->
     Keeper_memory_commit_notifications.notify_committed
       { keepers_dir = Unix.realpath t.place.memory_dir
@@ -150,15 +156,15 @@ let live t ~sw =
     Atomic.set t.status Booting;
     Eio.Cancel.protect (fun () ->
       if not !locked then locked := take_lock t ~sw;
-      let state : Machine.state =
-        if !locked then Machine.boot t.place ~at:(t.now ()) else Stopped Store_unwritable
+      let opened : (Store.t, Store.stop) result =
+        if !locked then Machine.boot t.place ~at:(t.now ()) else Error Store_unwritable
       in
-      (match state with
-       | Stopped stop ->
+      (match opened with
+       | Error stop ->
          Log.Keeper.error ~keeper_name:t.place.keeper_id "librarian memory store did not open: %s"
            (stop_text stop)
-       | Idle (_ : Store.t) -> ());
-      state)
+       | Ok (_ : Store.t) -> ());
+      opened)
   in
   let rec loop state =
     (* The caller has its answer before anyone is told to read Memory. *)
@@ -175,8 +181,8 @@ let live t ~sw =
       in
       settle next reply answer
     | Resume reply ->
-      let next, answer = Machine.resume ~boot state in
-      Atomic.set t.status (status_of next);
+      let next, answer = Machine.resume t.place ~boot state ~at:(t.now ()) in
+      Atomic.set t.status (status_of next.state);
       Eio.Promise.resolve reply answer;
       announce t ~was:(revision state) next;
       loop next
@@ -193,8 +199,9 @@ let live t ~sw =
         loop state)
       else reply
   in
-  let state = boot () in
-  Atomic.set t.status (status_of state);
+  (* A writer starts with no lane value, so it does not ask. *)
+  let state = Machine.booted t.place ~at:(t.now ()) ~lane:None ~last_ask:0 (boot ()) in
+  Atomic.set t.status (status_of state.state);
   announce t ~was:None state;
   loop state
 ;;

@@ -700,6 +700,7 @@ Agent-Core 는 다섯 곳을 고친다. 이 스택의 작은 층 하나이고 #5
 | `Nothing_readable` | – | `Skip (Content_missing _)` 을 반영하고 다시 묻는다 |
 | `Span_unknown` | – | `Skip (Unknown_span _)` 을 반영하고 다시 묻는다. 모델을 부르지 않는다 |
 | `Memory_diverged` | – | `Stopped (Log_diverged _)` |
+| `Snapshot_fault` | – | 저장소가 같은 결함에 멈추는 이유로 `Stopped`. 없음·스냅샷 아님은 `Memory_unreadable`, 읽기 실패는 `Store_unwritable` |
 | `Input_fault`, `Ask_failed` | – | `Resting` |
 
 - 고장 난 slot 은 폭 줄이기를 막지 못한다. 거절이 하나만 있어도 줄인다.
@@ -760,7 +761,7 @@ type bottom = { with_memory : judged option; alone : judged option }  (* 맨 앞
 쉬는 시각은 없다. `Resting` 은 값을 갖지 않는다.
 
 - pulse(서버 maintenance tick, 60초)가 오면 `lane_held` 를 본다. 선언한 slot 이 모두 provider 가 잡아 둔 slot 이면 아무것도 읽지 않고 `Resting` 에 남는다. 아니면 다시 묻는다.
-- `lane_held lane ~now` 는 순수 함수다. HTTP 는 `order(lane).held_http`, CLI 는 `Keeper_lane_cli_oneshot.order_slots` 가 잡은 쪽을 읽는다.
+- `lane_held ~now lane` 은 이 프로세스가 남긴 기록을 읽는다. HTTP 는 `order(lane).held_http`, CLI 는 `Keeper_lane_cli_oneshot.order_slots` 가 잡은 쪽을 읽는다.
 - 그래서 멀리 있는 reset 시각 하나가 lane 전체를 쉬게 하지 못한다. provider 가 말한 시각이 지난 뒤 늦는 것은 pulse 한 번까지다.
 - 바닥에서 쉬는 Keeper 는 pulse 마다 크기 사실을 주지 않은 slot 에만 묻는다. 한 항목과 Memory 를 실은 질문을 먼저 만들고, 모두 입력 크기로 판정돼 있으면 부르지 않고 그 항목만 실은 질문으로 넘어간다.
 - pulse 는 등록된 Keeper 를 모두 돈다. Keeper 마다 `ensure` 를 부르고 그 쓰는 쪽에 `Pulse` 를 보낸다(§8.6). 등록부에 없는 Keeper 의 쓰는 쪽에는 `Retire` 를 보낸다.
@@ -1118,8 +1119,8 @@ type state =
   | Retired
 and asking =
   { ask : int; since : float; asked : ask
-  ; lane : Sha256.t                                  (* 묻기를 시작할 때의 lane 값 *)
-  ; removed_since : (int * Memory_id.t list) list }  (* 묻는 사이 직접 쓰기가 지운 fact *)
+  ; lane : Librarian_memory_lane.t                   (* 묻기를 시작할 때의 lane 값 *)
+  ; removed_since : (Memory_id.t * int) list }       (* 묻는 사이 직접 쓰기가 지운 fact 와 그 줄의 seq *)
 type store_stop =
   | Log_diverged of { expected : Sha256.t; observed : Sha256.t }
   | Memory_unreadable | Log_unreadable | Store_unwritable
@@ -1171,7 +1172,7 @@ HTTP slot 의 창은 registry 가 게시할 때 target 옆에 고정한 값이�
 lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slot 이 없다, R 을 적지 않았다, 창을 모르는 slot 이 있다(`Window_unknown {slot}`). 모두 선언이 없는 것과 같이 다룬다(W1).
 `slots` 의 id 가 runtime 을 가리키지 않으면 로드가 거절한다. 그 뒤에 창을 모르는 slot 은 둘뿐이다. registry 가 창 없이 고정한 HTTP target 과, 지금 runtime 표에 없는 CLI id 다.
 
-- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿기 전에 버린다. runtime 표나 registry 가 다시 게시될 때마다 이 사건이 온다.
+- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿지 않는다. runtime 표나 registry 가 다시 게시될 때마다 이 사건이 온다. 상태는 그대로이고 같이 온 풀이만 갈아 둔다. 풀이는 registry 가 고정한 target(credential, 본문 시한)과 provider 가 쥔 slot 이다. credential 이나 본문 시한은 lane 값에 들지 않으니, 그것만 바뀐 게시는 같은 값으로 온다. 다음 묻기와 쉼의 확인은 새 풀이를 읽는다. 나가 있는 묻기는 자기 풀이로 끝난다.
 - 질문 쪽이 바뀌거나 lane 이 켜지고 꺼지면 가던 묻기를 취소한다. 옛 질문으로 만든 것은 반영되지 않는다.
 - slot 목록만 바뀌면 묻기는 끝까지 간다. 답은 반영한다. 선언에서 빠진 slot 의 결과는 읽지 않는다.
 - 어느 쪽이든 새 값을 저장하고 폭 기억을 비운다. 바닥의 크기 사실은 건드리지 않는다. 바뀐 slot 은 key 가 다르고 바뀐 질문은 id 가 다르다(§7.4).
@@ -1232,6 +1233,7 @@ lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slo
 | 읽는 질문 | `Nothing_readable` | `Skip (Content_missing _)` 을 반영한다 → 다음 묻기 |
 | 읽는 질문 | `Span_unknown` | `Skip (Unknown_span _)` 을 반영한다. 모델을 부르지 않았다 → 다음 묻기 |
 | 읽는 질문 | `Memory_diverged` | `Stopped (Log_diverged _)` |
+| 읽는 질문 | `Snapshot_fault` | `Stopped`. 없음·스냅샷 아님은 `Memory_unreadable`, 읽기 실패는 `Store_unwritable` |
 | 읽는 질문 | `Input_fault`, `Ask_failed` | `Resting` |
 | `Read_range` | `Answered` | 반영한다. 폭 기억에 반영한 수를 알린다. Memory 없이 읽었다는 표시를 내리고 마지막 자리 내기의 결과를 비운다. Memory 를 실은 질문에 답이 왔으니 Memory 는 slot 에 들어간다 → 다음 묻기 |
 | `Read_range`, 한 항목보다 넓다 | `Refused_by_lane` | 폭 기억에 거절을 알린다 → 다음 묻기(줄인 폭으로 바로) |
@@ -1242,6 +1244,7 @@ lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slo
 | `Make_room` | `Room_answered` | 효과 있는 op 가 있고 묻는 사이 지워진 fact 가 없으면 반영한다. 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
 | `Make_room` | `Room_refused`, `Room_silent`, `Room_failed` | 마지막 자리 내기의 결과에 적는다 → 다음 묻기 |
 | `Make_room` | `Memory_diverged` | `Stopped (Log_diverged _)` |
+| `Make_room` | `Snapshot_fault` | 읽는 질문과 같다 |
 
 - `Refused_by_lane` 과 `Silent_lane` 은 지금 선언된 slot 의 결과만으로 다시 정한다. 묻는 사이 선언에서 빠진 slot 이 한 거절은 세지 않는다. 남은 slot 가운데 거절한 것이 없으면 말 없음이다.
 - 묻는 사이에 lane 값이 바뀌었고 지금 선언된 slot 가운데 결과가 있는 것이 하나도 없으면, 답이 아닌 결과는 `Resting` 으로 가지 않고 다음 묻기다. 그 묻기는 지금 lane 값으로 가므로 되풀이되지 않는다. 운영자가 방금 선언한 lane 에 pulse 한 번을 기다리지 않고 묻는다.

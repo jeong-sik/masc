@@ -1,14 +1,57 @@
 (** What one event does to one Keeper's writer
-    (RFC librarian-call-only-proposes §9.3), for the states and events that
-    exist before the Librarian asks a model: the store is open, stopped, or
-    its Keeper is gone, and what arrives is a direct write or an operator's
-    act.
+    (RFC librarian-call-only-proposes §9.2, §9.3): an ask, a turn that
+    closed, the pulse, a new declaration, a direct write and an operator's
+    act, in each state of an open or stopped store.
 
-    Every function is synchronous and returns the next state with the
-    answer. The store does the I/O. The fiber that owns a Keeper's writer
-    boots first and then calls one of these for each event it takes from its
-    mailbox, where it cannot be cancelled; events that arrive during the
-    boot wait there. *)
+    Every function is synchronous and returns the next value with the
+    answer. None waits for a model. The commits and the reads that start the
+    next ask happen inside them, and the store and the turn log do the I/O.
+    The fiber that owns a Keeper's writer boots first and then calls one of
+    these for each event it takes from its mailbox, where it cannot be
+    cancelled; events that arrive during the boot wait there. Only the ask
+    runs in a fiber of its own: {!fiber_change} says how to keep that fiber
+    in step with the value.
+
+    [Booting] and [Retired] are {!Librarian_writer.status}'s. The width of a
+    question, what the bottom learned and [Refused_at_bottom] come with the
+    width layer (§20 L7): here every ask reads the whole unread range, and a
+    lane that answers nothing leaves the writer [Resting].
+
+    {b The model.} [specs/bug-models/LibrarianWriter.tla] (§21) has the same
+    transitions. Its names are these:
+
+    {v
+    model                             here
+    "Idle" "Asking" "Resting"         Idle, Asking, Resting
+    "Stopped", Stop(m, why)           Stopped
+    "RaB"                             none: the width layer's Refused_at_bottom
+    "Booting" "Retired" "Absent"      Librarian_writer.status, Librarian_writers
+    HandleHint                        decide _ Turn_closed
+    PulseIdle, PulseResting           decide _ Pulse
+    HandleAsk                         decide _ (Ask_ended _)
+    Declaration                       decide _ (Declaration_changed _)
+    Write, HandleWrite                write
+    Resume                            resume
+    Adopt                             adopt
+    BootFinish                        booted
+    FreshMem(m.lane)                  booted from the lane and the last number only
+    Start(m, c, fb)                   the next ask, inside these functions
+    Committing                        a store commit and the rule of a failed one
+    m.lane, Q(l)                      t.lane, the lane value's question side
+    m.askNo, m.askLane, m.rs          asking.ask, asking.lane, asking.removed_since
+    m.seen, FileLen                   Idle's seen_length, the turn log's length
+    held                              Librarian_memory_lane.lane_held
+    c.gid                             t.last_ask
+    msg.no, msg.res                   Ask_ended's ask and result
+    v}
+
+    The model's results map to {!Librarian_read_result.t}: ["answer"] is
+    [Answered], ["nothing"] [Nothing_to_ask], ["missing"] [Nothing_readable],
+    ["span"] [Span_unknown], ["diverged"] [Memory_diverged] and
+    [Snapshot_fault] (the model's [snapBad] is a snapshot that does not
+    decode, and it stops the store either way), ["fault"]
+    [Input_fault], ["failed"] [Ask_failed], and the lane results
+    ([LaneRes]) are [No_answer]. *)
 
 module Digest := Agent_core.Checkpoint_objects
 
@@ -20,12 +63,145 @@ type place =
   ; keeper_id : string
   }
 
+(** The lane value declared now, and the registry's resolution of it that a
+    walk and {!Librarian_memory_lane.lane_held} read. *)
+type declared =
+  { value : Librarian_memory_lane.t
+  ; resolved : Runtime_exact_output_registry.resolved_lane
+  }
+
+(** The ask that is out. *)
+type asking =
+  { ask : int (** Its number. A writer never gives a number twice. *)
+  ; since : float (** When it started. *)
+  ; lane : Librarian_memory_lane.t (** The lane value it started with. *)
+  ; removed_since : (string * int) list
+  (** Every fact a direct write removed while it was out, with the [seq] of
+      the commit that removed it, in commit order: what
+      {!Librarian_plan.of_answer} takes. *)
+  }
+
 type state =
-  | Idle of Librarian_store.t (** The store is open. Nothing is being asked. *)
+  | Idle of
+      { store : Librarian_store.t
+      ; seen_length : int option
+      (** The turn log's length when the last next ask found nothing to
+          ask. [None]: it could not be read, and the next pulse reads the
+          turn log. *)
+      }
+  (** Nothing is unread, or there is no lane value. *)
+  | Asking of
+      { store : Librarian_store.t
+      ; asking : asking
+      }
+  | Resting of Librarian_store.t
+  (** Something is unread and the last ask ended without a commit. The next
+      pulse asks again unless every slot is held. *)
   | Stopped of Librarian_store.stop
 
-(** Opens the store: [Idle], or [Stopped] with the reason. *)
-val boot : place -> at:float -> state
+(** What the writer holds in memory beside the state (§9.1). Nothing of it
+    is on disk. *)
+type t =
+  { state : state
+  ; lane : declared option (** [None]: no lane value is declared. *)
+  ; last_ask : int (** The last number an ask was given. *)
+  }
+
+(** The store's boot (§8.6): open, or the reason it stopped. *)
+val boot : place -> at:float -> (Librarian_store.t, Librarian_store.stop) result
+
+(** The value of a writer whose boot ended in [opened]: [Stopped], or the
+    next ask on the store it opened. A writer is made with this, and a
+    resumed one is made again with it: nothing of the value before the boot
+    is kept but [lane], the declaration the writer holds, and [last_ask].
+
+    [last_ask] is the last number this writer's mailbox can still hold an
+    answer for: 0 for a new writer. A resumed writer passes its own, because
+    an answer to an ask it cancelled can still be in the mailbox, and a
+    number given again would make that answer current. *)
+val booted
+  :  place
+  -> at:float
+  -> lane:declared option
+  -> last_ask:int
+  -> (Librarian_store.t, Librarian_store.stop) result
+  -> t
+
+(** How an ask ended. *)
+type ended = Read_ended of Librarian_read_result.t
+
+type event =
+  | Turn_closed (** A [Closed] or a [Reset] line was appended to the turn log. *)
+  | Pulse
+  | Ask_ended of
+      { ask : int
+      ; result : ended
+      }
+  | Declaration_changed of declared option
+
+(** One event (§9.3). A [Declaration_changed] whose lane value is the one
+    held does not reach the table: the registry and the runtime table send
+    it on every publication. Its resolution replaces the held one and
+    nothing else changes, so the next ask and a rest's held check go through
+    the target the registry published last (a new credential or body
+    timeout comes with the same value).
+
+    {b The next ask} (§9.2). The turn log's length is read first. With no
+    lane value the writer is [Idle] with that length. Otherwise the turn log
+    is read from the tail ({!Librarian_unread.read} up to the first unit
+    with items): something unread is [Asking] with the number after
+    [last_ask]; nothing is [Idle] with the length read first, so a turn
+    appended during the read is not counted as seen.
+
+    {b A late answer.} An [Ask_ended] whose number is not the current ask's
+    is dropped in every state. One that carried an answer is counted
+    ([LibrarianLateAnswers], by keeper).
+
+    {b A failed commit} (§9.2). A line on disk whose snapshot was not
+    written stops the store as [Store_unwritable]. No line stops it for the
+    reason the store gives. Effects that make no snapshot leave the store
+    as it was and the writer [Resting]: asking again at once would ask the
+    same question.
+
+    {v
+    state     event                              next
+    Idle      Turn_closed                        the next ask
+    Idle      Pulse                              Idle when the length is the one seen;
+                                                 else the next ask
+    Idle      Declaration_changed                held; the next ask
+    Asking    Turn_closed, Pulse                 Asking
+    Asking    Ask_ended, the current ask         the table below
+    Asking    Declaration_changed, another       held; the next ask: the ask is cancelled
+              question side or no lane value
+    Asking    Declaration_changed, slots only    held; Asking: the answer is still committed
+    Resting   Turn_closed                        Resting
+    Resting   Pulse                              Resting when every slot is held; else the next ask
+    Resting   Declaration_changed                held; the next ask
+    Stopped   Turn_closed, Pulse                 Stopped
+    Stopped   Declaration_changed                held; Stopped
+    any       Ask_ended, not the current ask     as it was: a late answer
+    v}
+
+    The current ask's result:
+
+    {v
+    Answered          planned ({!Librarian_plan.of_answer} with removed_since),
+                      committed ({!Librarian_store.commit_read}); the next ask
+    Nothing_to_ask    the next ask
+    No_answer         Resting. The slots the lane declares now are the ones read: when
+                      none of them is in the result and the lane value is not the one
+                      the ask started with, the next ask
+    Nothing_readable  Skip (Content_missing missing) committed at reach; the next ask
+    Span_unknown      Skip (Unknown_span {before; after = reach.covered}) committed
+                      at reach; the next ask
+    Memory_diverged   Stopped (Log_diverged _)
+    Snapshot_fault    Stopped ({!Librarian_store.stop_of_snapshot_fault}): absent and
+                      not a snapshot are Memory_unreadable, a failed read
+                      Store_unwritable
+    Input_fault       Resting
+    Ask_failed        Resting
+    v} *)
+val decide : place -> t -> at:float -> event -> t
 
 (** Why a Keeper's Memory takes neither a write nor an act. *)
 type unavailable =
@@ -45,10 +221,15 @@ type write_answer =
   (** The plan's effects do not make a snapshot. Nothing was written. *)
   | Unavailable of unavailable
 
-(** A direct write (§8.5).
+(** A direct write (§8.5), committed at once in every state of an open
+    store: it does not wait for an ask.
 
-    - [Idle]: the write is planned against Memory and, when the plan writes,
-      committed. An answer that writes no line leaves the state as it was.
+    - The write is planned against Memory and, when the plan writes,
+      committed. The state stays what it was. An answer that writes no line
+      leaves the value as it was.
+    - [Asking]: the facts the commit removed join [removed_since] with its
+      [seq], so the answer cannot bring back what was removed while it was
+      asked.
     - A commit that finds the snapshot or the log other than it left them
       stops the store, and the write is [Unavailable (Store_stopped _)].
     - A commit whose line is on disk and whose snapshot is not is answered
@@ -56,12 +237,12 @@ type write_answer =
       the next boot writes the snapshot from the line.
     - [Stopped s]: [Unavailable (Store_stopped s)]. *)
 val write
-  :  state
+  :  t
   -> at:float
   -> by:Librarian_effects.actor
   -> trace:string
   -> Librarian_direct.write
-  -> state * write_answer
+  -> t * write_answer
 
 type act_refusal =
   | Nothing_to_resume
@@ -74,22 +255,44 @@ type act_answer =
   | Done
   | Not_done of act_refusal
 
-(** An operator starts a stopped store again: [boot], once more. The writer
-    passes the boot it ran when it started, which takes its lock before it
-    opens the store. [Done] says the boot ran; the state says how it ended.
-    A store that is not stopped is [Not_done Nothing_to_resume], and [boot]
-    is not called. *)
-val resume : boot:(unit -> state) -> state -> state * act_answer
+(** An operator's [Resume] (§9.3, §12.4).
+
+    - [Stopped]: [boot] once more, and {!booted} makes the value again from
+      what it returns. The writer passes the boot it ran when it started,
+      which takes its lock before it opens the store. [Done] says the boot
+      ran; the state says how it ended.
+    - [Resting]: the next ask.
+    - [Idle], [Asking]: [Not_done Nothing_to_resume], and [boot] is not
+      called. *)
+val resume
+  :  place
+  -> boot:(unit -> (Librarian_store.t, Librarian_store.stop) result)
+  -> t
+  -> at:float
+  -> t * act_answer
 
 (** An operator adopts the snapshot file of a store stopped as
-    [Log_diverged] or [Log_unreadable] (§8.7). A store stopped for another
-    reason is [Act_unavailable (Store_stopped _)]: booting again is its way
-    out. A store that is not stopped is [Not_stopped]. A refusal leaves the
-    state as it was. *)
+    [Log_diverged] or [Log_unreadable] (§8.7); the next ask follows. A store
+    stopped for another reason is [Act_unavailable (Store_stopped _)]:
+    booting again is its way out. A store that is not stopped is
+    [Not_stopped]. A refusal leaves the value as it was. *)
 val adopt
   :  place
-  -> state
+  -> t
   -> at:float
   -> by:string
   -> observed:Digest.digest
-  -> state * act_answer
+  -> t * act_answer
+
+(** What the writer's fiber does to the ask's fiber after one step. *)
+type fiber_change =
+  | Keep (** The same ask is out, or none is and none starts. *)
+  | Start of asking
+  | Cancel (** The ask that was out is not the current one any more. *)
+  | Cancel_then_start of asking
+
+(** Read from the numbers of the ask before and after the step: the same
+    number is [Keep], another is [Cancel_then_start], an ask only before is
+    [Cancel], only after is [Start]. Cancelling an ask that has ended does
+    nothing. Whether to ask is decided only by the state. *)
+val fiber_change : before:t -> after:t -> fiber_change

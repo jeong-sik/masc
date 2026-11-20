@@ -18,6 +18,14 @@ val mark_of_json
   :  Yojson.Safe.t
   -> (Keeper_turn_log.mark, Keeper_memory_os_types.wire_error) result
 
+(** A slice as a line carries it. The commit log names a missing bundle
+    slice in the same shape. *)
+val slice_to_json : Keeper_turn_log.slice -> Yojson.Safe.t
+
+val slice_of_json
+  :  Yojson.Safe.t
+  -> (Keeper_turn_log.slice, Keeper_memory_os_types.wire_error) result
+
 (** Every object has exactly its fields. Counts and offsets are not negative,
     and a slice takes at least one message. *)
 val of_json

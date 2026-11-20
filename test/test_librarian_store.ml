@@ -1,6 +1,7 @@
 (* One Keeper's Memory on disk (RFC librarian-call-only-proposes §8.2 steps
-   2 to 5, §8.6): each row of the boot table, the chain of commits, and a
-   snapshot that is one line behind its log. *)
+   2 to 5, §8.6): each row of the boot table, the chain of commits, an answer
+   and a skip that move reading, and a snapshot that is one line behind its
+   log. *)
 
 open Alcotest
 module Store = Masc.Librarian_store
@@ -10,6 +11,9 @@ module Log_codec = Masc.Librarian_log_codec
 module Log_store = Masc.Librarian_log_store
 module Direct = Masc.Librarian_direct
 module Effects = Masc.Librarian_effects
+module Answer = Masc.Librarian_answer
+module Plan = Masc.Librarian_plan
+module Read_result = Masc.Librarian_read_result
 module Current = Masc.Keeper_memory_os_current_types
 module Snapshot_codec = Masc.Keeper_memory_os_snapshot_codec
 module Types = Masc.Keeper_memory_os_types
@@ -403,6 +407,162 @@ let test_effects_that_make_no_snapshot () =
     fail "effects that hold one fact twice were committed"
 ;;
 
+let question_id =
+  match
+    Masc.Librarian_question_id.of_halves ~front:(String.make 32 'c') ~back:(String.make 32 'd')
+  with
+  | Some id -> id
+  | None -> fail "the test question halves are not 32 hexadecimal characters"
+;;
+
+(* Past a unit whose line starts at 40, with the next read at 120. The store
+   does not read the turn log again, so these need not be its lines. *)
+let reach : Read_result.reach =
+  { line = 40; within = Whole; covered = { mark with chat_bytes = 64 }; turn_log_offset = 120 }
+;;
+
+let question : Read_result.question =
+  { id = question_id
+  ; shown = { memory = Some []; units = [ "u1", reach.line ] }
+  ; reach
+  ; trace = "trace-2"
+  ; missing = []
+  }
+;;
+
+let answer_plan store ~at ~working_state ops =
+  Plan.of_answer ~shown:question.shown ~facts:(Store.memory store).facts ~removed_since:[] ~at
+    ~trace_id:question.trace
+    { question = question_id; ops; working_state }
+;;
+
+let fast = "claude_code.fast"
+
+let read_committed store ~at plan =
+  match Store.commit_read store ~at ~question ~slot:fast plan with
+  | Committed { store; line } -> store, line
+  | Committed_without_snapshot (_ : Log.commit) -> fail "the snapshot was not written"
+  | Stopped stop -> fail ("commit: " ^ stop_text stop)
+  | Not_a_snapshot (_ : Envelope.refusal) -> fail "the effects do not make a snapshot"
+;;
+
+let position_text : Log.position -> string = function
+  | Before_first -> "before the first"
+  | Through { line; within = Whole } -> Printf.sprintf "through %d, whole" line
+  | Through { line; within = Item index } -> Printf.sprintf "through %d, item %d" line index
+;;
+
+let cause_text : Log.cause -> string = function
+  | Direct _ -> "a direct write"
+  | Adopt _ -> "an adoption"
+  | Read { question = id; shown_memory; slot; trace; missing } ->
+    Printf.sprintf "read %s by %s on %s, memory %s, %d missing"
+      (if Masc.Librarian_question_id.equal id question_id then "the question" else "another")
+      slot trace
+      (if shown_memory then "shown" else "not shown")
+      (List.length missing)
+  | Skip { hole = Content_missing missing } ->
+    Printf.sprintf "skip: content missing at %s"
+      (String.concat ", "
+         (List.map
+            (fun ({ line; _ } : Masc.Librarian_unit.missing_at) -> string_of_int line)
+            missing))
+  | Skip { hole = Unknown_span _ } -> "skip: an unknown span"
+;;
+
+let source_text ({ kind; trace_id } : Current.source) =
+  (match kind with
+   | Librarian -> "librarian"
+   | Explicit_write -> "explicit write"
+   | Explicit_retract -> "explicit retract")
+  ^ " on " ^ trace_id
+;;
+
+let test_an_answer_moves_reading () =
+  let place = started_place () in
+  let store, first = committed (booted place) ~at:201.0 (remember port) in
+  let plan =
+    answer_plan store ~at:202.0 ~working_state:(Set "reading the release notes")
+      [ Add
+          { claim = owner
+          ; category = Types.Fact
+          ; observation = Types.Transcript
+          ; from_units = [ "u1" ]
+          }
+      ]
+  in
+  let store, line = read_committed store ~at:202.0 plan in
+  check int "the next commit" (first.seq + 1) line.seq;
+  check string "is committed on the snapshot of the one before" (hex first.after)
+    (hex line.basis);
+  check string "names the snapshot the file now holds"
+    (hex (digest_of_file (snapshot_path place)))
+    (hex line.after);
+  check int "one revision on" (first.revision + 1) line.revision;
+  check int "the next read starts where the reach says" reach.turn_log_offset line.turn_log_offset;
+  check string "reading stands through the unit" "through 40, whole"
+    (position_text line.covers_through);
+  check int "covered where the reach says" 64 line.covered.chat_bytes;
+  check (option string) "the working state is the answer's" (Some "reading the release notes")
+    line.working_state;
+  check string "the cause"
+    "read the question by claude_code.fast on trace-2, memory shown, 0 missing"
+    (cause_text line.cause);
+  check (list string) "Memory" [ port; owner ] (claims (Store.memory store));
+  check string "the snapshot is the Librarian's" "librarian on trace-2"
+    (source_text (Store.memory store).source);
+  check string "boot reads the line" (encoded (Store.tail store))
+    (encoded (Store.tail (booted place)))
+;;
+
+let test_an_answer_that_changes_no_fact () =
+  let place = started_place () in
+  let store, first = committed (booted place) ~at:201.0 (remember port) in
+  let snapshot = file_bytes (snapshot_path place) in
+  let store, line =
+    read_committed store ~at:202.0 (answer_plan store ~at:202.0 ~working_state:(Set "") [])
+  in
+  check string "the line names the snapshot it was committed on" (hex line.basis) (hex line.after);
+  check int "at the same revision" first.revision line.revision;
+  check string "the file is as it was" snapshot (file_bytes (snapshot_path place));
+  check int "reading moves all the same" reach.turn_log_offset line.turn_log_offset;
+  check (option string) "a cleared working state is the empty text" (Some "") line.working_state;
+  check (list string) "Memory" [ port ] (claims (Store.memory store))
+;;
+
+(* The skip passes part of a unit: reading stands on the unit's line, and
+   [covered] is where the unit starts (D3). *)
+let test_a_skip_moves_reading_only () =
+  let place = started_place () in
+  let store, (_ : Log.commit) = committed (booted place) ~at:201.0 (remember port) in
+  let store, read =
+    read_committed store ~at:202.0
+      (answer_plan store ~at:202.0 ~working_state:(Set "checking the port") [])
+  in
+  let snapshot = file_bytes (snapshot_path place) in
+  let inside : Read_result.reach =
+    { line = 200; within = Item 0; covered = { mark with chat_bytes = 64 }; turn_log_offset = 200 }
+  in
+  let hole : Log.hole =
+    Content_missing [ { line = 200; parts = [ Chat_bytes { from = 64; until = 128 } ] } ]
+  in
+  match Store.commit_skip store ~at:203.0 ~hole inside with
+  | Committed { store; line } ->
+    check int "the next commit" (read.seq + 1) line.seq;
+    check string "leaves the snapshot" (hex line.basis) (hex line.after);
+    check string "the file is as it was" snapshot (file_bytes (snapshot_path place));
+    check int "the next read starts on the unit's line" 200 line.turn_log_offset;
+    check string "reading stands inside the unit" "through 200, item 0"
+      (position_text line.covers_through);
+    check int "covered where the unit starts" 64 line.covered.chat_bytes;
+    check (option string) "the working state is kept" (Some "checking the port")
+      line.working_state;
+    check bool "no effects" true (line.effects = Effects.empty);
+    check string "the cause" "skip: content missing at 200" (cause_text line.cause);
+    check (list string) "Memory" [ port ] (claims (Store.memory store))
+  | Committed_without_snapshot _ | Stopped _ | Not_a_snapshot _ -> fail "the skip was not committed"
+;;
+
 let adoption_text : (Store.t, Store.adoption_refusal) result -> string = function
   | Ok (_ : Store.t) -> "adopted"
   | Error Snapshot_mismatch -> "snapshot mismatch"
@@ -446,7 +606,7 @@ let test_adopt_a_diverged_snapshot () =
      check string "the cause is the adoption" "operator-1"
        (match line.cause with
         | Adopt { by; observed = (_ : Digest.digest) } -> by
-        | Direct _ -> "a direct write")
+        | Direct _ | Read _ | Skip _ -> "another cause")
    | Started _ -> fail "a log whose last line decodes was started over");
   check string "boot now opens the store" "booted" (boot_text place);
   let (_ : Store.t), next = committed store ~at:401.0 (remember owner) in
@@ -547,6 +707,11 @@ let () =
       , [ test_case "commits chain" `Quick test_commits_chain
         ; test_case "effects that make no snapshot" `Quick test_effects_that_make_no_snapshot
         ; test_case "the log moved under the store" `Quick test_log_moved_under_the_store
+        ] )
+    ; ( "reading"
+      , [ test_case "an answer moves reading" `Quick test_an_answer_moves_reading
+        ; test_case "an answer that changes no fact" `Quick test_an_answer_that_changes_no_fact
+        ; test_case "a skip moves reading only" `Quick test_a_skip_moves_reading_only
         ] )
     ; ( "recovery"
       , [ test_case "a snapshot one line behind" `Quick test_snapshot_one_line_behind

@@ -6,9 +6,10 @@
     carries where reading stands and the working state, so every commit
     repeats them.
 
-    The causes here are the ones a direct write and an operator's adoption
-    make. The causes of an answer and of a skip are added with the layers
-    that produce them. *)
+    The causes here are the ones a direct write, an operator's adoption, an
+    answer and the reader's skip make. A skip names what it passed with a
+    {!hole}; the holes of the width layer and of the operator's skips are
+    added with the layer that makes them. *)
 
 module Digest := Agent_core.Checkpoint_objects
 
@@ -25,6 +26,18 @@ type position =
       ; within : within
       }
 
+(** What a [Skip] commit passed without a question answering it. *)
+type hole =
+  | Content_missing of Librarian_unit.missing_at list
+  (** The range held no item that could be read, and these parts of its
+      units were not there. *)
+  | Unknown_span of
+      { before : Keeper_turn_log.mark (** Where the stores ended before the reset. *)
+      ; after : Keeper_turn_log.mark (** Where they ended after it. *)
+      }
+  (** An [Unannounced] reset with no unit holding an item before it. What lay
+      between the two marks is not known. *)
+
 type cause =
   | Direct of
       { by : Librarian_effects.actor
@@ -37,6 +50,19 @@ type cause =
       { by : string (** The operator's name. *)
       ; observed : Digest.digest (** The snapshot bytes the operator named. *)
       }
+  | Read of
+      { question : Librarian_question_id.t
+      ; shown_memory : bool
+      (** The question showed Memory. A question that showed one item alone
+          did not. *)
+      ; slot : string (** The id of the slot that answered. *)
+      ; trace : string
+      (** The trace the question's last unit names. The new facts carry it
+          as their origin and the snapshot the commit leaves names it. *)
+      ; missing : Librarian_unit.missing_at list
+      (** What the question could not show of the units it read. *)
+      }
+  | Skip of { hole : hole }
 
 type commit =
   { seq : int

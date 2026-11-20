@@ -181,26 +181,51 @@ type committed =
 
 let first_seq = 1
 
-(* A line that does not move what was read carries the reading position and
-   the working state of the line before it. *)
-let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects : Log.commit =
-  match tail with
-  | Started { turn_log; turn_log_offset; covered; _ } ->
-    { seq = first_seq
-    ; at
-    ; basis
-    ; after
-    ; revision
-    ; cause
-    ; effects
-    ; turn_log
-    ; turn_log_offset
-    ; covers_through = Before_first
-    ; covered
-    ; working_state = None
+(* Where a commit leaves reading. *)
+type reading =
+  | Stays (* A direct write and an adoption do not move it. *)
+  | Moves of
+      { reach : Librarian_read_result.reach
+      ; working_state : Librarian_plan.working_state
+      }
+
+(* A line carries the reading position and the working state of the line
+   before it, unless it moves them. The turn log it reads is always the one
+   before it names: an event that replaces the file cancels the ask. *)
+let line_after (tail : Log.line) ~at ~basis ~after ~revision ~cause ~effects ~reading
+  : Log.commit
+  =
+  let kept : Log.commit =
+    match tail with
+    | Started { turn_log; turn_log_offset; covered; _ } ->
+      { seq = first_seq
+      ; at
+      ; basis
+      ; after
+      ; revision
+      ; cause
+      ; effects
+      ; turn_log
+      ; turn_log_offset
+      ; covers_through = Before_first
+      ; covered
+      ; working_state = None
+      }
+    | Committed previous ->
+      { previous with seq = previous.seq + 1; at; basis; after; revision; cause; effects }
+  in
+  match reading with
+  | Stays -> kept
+  | Moves { reach; working_state } ->
+    { kept with
+      turn_log_offset = reach.turn_log_offset
+    ; covers_through = Through { line = reach.line; within = reach.within }
+    ; covered = reach.covered
+    ; working_state =
+        (match working_state with
+         | Kept | Not_valid_alone -> kept.working_state
+         | Replaced text -> Some text)
     }
-  | Committed previous ->
-    { previous with seq = previous.seq + 1; at; basis; after; revision; cause; effects }
 ;;
 
 (* The error of an append does not say whether the line is on disk: a write
@@ -226,7 +251,10 @@ let append t (line : Log.commit) =
        else Error (Log_diverged { expected = named last; observed = t.digest }))
 ;;
 
-let commit_direct t ~at ~by ~trace write effects =
+(* Steps 2 to 5 of §8.2: the file holds the snapshot the last line names,
+   the line follows that one, it is appended and synced, and the snapshot is
+   written when the line changes it. *)
+let commit t ~at ~cause ~effects ~reading =
   match read_snapshot_bytes t.snapshot_path with
   | Error fault -> Stopped (stop_of_snapshot_fault fault)
   | Ok bytes ->
@@ -234,7 +262,6 @@ let commit_direct t ~at ~by ~trace write effects =
     if not (same observed t.digest)
     then Stopped (Log_diverged { expected = t.digest; observed })
     else (
-      let cause = Log.Direct { by; trace; write } in
       match Envelope.next ~previous:t.memory ~at cause effects with
       | Error refusal -> Not_a_snapshot refusal
       | Ok next ->
@@ -243,7 +270,9 @@ let commit_direct t ~at ~by ~trace write effects =
           | Unchanged -> t.digest, t.memory.revision
           | Rewritten { snapshot; bytes } -> Digest.digest_of_bytes bytes, snapshot.revision
         in
-        let line = line_after t.tail ~at ~basis:t.digest ~after ~revision ~cause ~effects in
+        let line =
+          line_after t.tail ~at ~basis:t.digest ~after ~revision ~cause ~effects ~reading
+        in
         (match append t line with
          | Error stop -> Stopped stop
          | Ok log_end ->
@@ -254,6 +283,30 @@ let commit_direct t ~at ~by ~trace write effects =
               (match write_snapshot t.snapshot_path bytes with
                | Ok () -> Committed { store = { store with memory = snapshot; digest = after }; line }
                | Error () -> Committed_without_snapshot line))))
+;;
+
+let commit_direct t ~at ~by ~trace write effects =
+  commit t ~at ~cause:(Log.Direct { by; trace; write }) ~effects ~reading:Stays
+;;
+
+let commit_read t ~at ~(question : Librarian_read_result.question) ~slot (plan : Librarian_plan.t)
+  =
+  let cause =
+    Log.Read
+      { question = question.id
+      ; shown_memory = Option.is_some question.shown.memory
+      ; slot
+      ; trace = question.trace
+      ; missing = question.missing
+      }
+  in
+  commit t ~at ~cause ~effects:plan.effects
+    ~reading:(Moves { reach = question.reach; working_state = plan.working_state })
+;;
+
+let commit_skip t ~at ~hole reach =
+  commit t ~at ~cause:(Log.Skip { hole }) ~effects:Librarian_effects.empty
+    ~reading:(Moves { reach; working_state = Kept })
 ;;
 
 type adoption_refusal =
@@ -299,7 +352,7 @@ let adopt ~memory_dir ~turns_dir ~keeper_id ~at ~by ~observed =
         , Log.Committed
             (line_after last ~at ~basis:(named last) ~after:observed ~revision:memory.revision
                ~cause:(Adopt { by; observed })
-               ~effects:Librarian_effects.empty) )
+               ~effects:Librarian_effects.empty ~reading:Stays) )
   in
   match Log_store.append ~path:log_path ~at_end:log_end line with
   | Ok { new_end; at = (_ : int) } ->

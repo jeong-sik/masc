@@ -47,6 +47,19 @@ let f_op = "op"
 let f_why = "why"
 let f_stated = "stated"
 let f_lines = "lines"
+let f_question = "question"
+let f_front = "front"
+let f_back = "back"
+let f_memory = "memory"
+let f_slot = "slot"
+let f_hole = "hole"
+let f_before = "before"
+let f_parts = "parts"
+let f_slice = "slice"
+let f_from = "from"
+let f_until = "until"
+let f_offset = "offset"
+let f_row = "row"
 
 type line_kind =
   | Kind_started
@@ -62,13 +75,72 @@ let line_kinds = [ Kind_started; Kind_committed ]
 type cause_kind =
   | Kind_direct
   | Kind_adopt
+  | Kind_read
+  | Kind_skip
 
 let cause_kind_token = function
   | Kind_direct -> "direct"
   | Kind_adopt -> "adopt"
+  | Kind_read -> "read"
+  | Kind_skip -> "skip"
 ;;
 
-let cause_kinds = [ Kind_direct; Kind_adopt ]
+let cause_kinds = [ Kind_direct; Kind_adopt; Kind_read; Kind_skip ]
+
+type memory_kind =
+  | Kind_memory_shown
+  | Kind_memory_not_shown
+
+let memory_kind_token = function
+  | Kind_memory_shown -> "shown"
+  | Kind_memory_not_shown -> "not_shown"
+;;
+
+let memory_kinds = [ Kind_memory_shown; Kind_memory_not_shown ]
+
+type hole_kind =
+  | Kind_content_missing
+  | Kind_unknown_span
+
+let hole_kind_token = function
+  | Kind_content_missing -> "content_missing"
+  | Kind_unknown_span -> "unknown_span"
+;;
+
+let hole_kinds = [ Kind_content_missing; Kind_unknown_span ]
+
+type part_kind =
+  | Kind_bundle
+  | Kind_history_bytes
+  | Kind_internal_bytes
+  | Kind_chat_bytes
+  | Kind_external_rows
+  | Kind_undecodable_history_line
+  | Kind_undecodable_internal_line
+  | Kind_undecodable_external_row
+
+let part_kind_token = function
+  | Kind_bundle -> "bundle"
+  | Kind_history_bytes -> "history_bytes"
+  | Kind_internal_bytes -> "internal_bytes"
+  | Kind_chat_bytes -> "chat_bytes"
+  | Kind_external_rows -> "external_rows"
+  | Kind_undecodable_history_line -> "undecodable_history_line"
+  | Kind_undecodable_internal_line -> "undecodable_internal_line"
+  | Kind_undecodable_external_row -> "undecodable_external_row"
+;;
+
+let part_kinds =
+  [ Kind_bundle
+  ; Kind_history_bytes
+  ; Kind_internal_bytes
+  ; Kind_chat_bytes
+  ; Kind_external_rows
+  ; Kind_undecodable_history_line
+  ; Kind_undecodable_internal_line
+  ; Kind_undecodable_external_row
+  ]
+;;
 
 type actor_kind =
   | Kind_keeper
@@ -208,6 +280,53 @@ let write_to_json : Direct.write -> Yojson.Safe.t = function
     `Assoc [ kind (write_kind_token Kind_retract); f_id, `String id; f_reason, `String reason ]
 ;;
 
+let question_to_json (question : Librarian_question_id.t) =
+  `Assoc [ f_front, `String question.front; f_back, `String question.back ]
+;;
+
+let range_fields ({ from; until } : Librarian_unit.range) =
+  [ f_from, `Int from; f_until, `Int until ]
+;;
+
+let part_to_json : Librarian_unit.missing_part -> Yojson.Safe.t = function
+  | Bundle slice ->
+    `Assoc [ kind (part_kind_token Kind_bundle); f_slice, Turn_codec.slice_to_json slice ]
+  | History_bytes range -> `Assoc (kind (part_kind_token Kind_history_bytes) :: range_fields range)
+  | Internal_bytes range ->
+    `Assoc (kind (part_kind_token Kind_internal_bytes) :: range_fields range)
+  | Chat_bytes range -> `Assoc (kind (part_kind_token Kind_chat_bytes) :: range_fields range)
+  | External_rows range -> `Assoc (kind (part_kind_token Kind_external_rows) :: range_fields range)
+  | Undecodable_history_line { offset } ->
+    `Assoc [ kind (part_kind_token Kind_undecodable_history_line); f_offset, `Int offset ]
+  | Undecodable_internal_line { offset } ->
+    `Assoc [ kind (part_kind_token Kind_undecodable_internal_line); f_offset, `Int offset ]
+  | Undecodable_external_row { row } ->
+    `Assoc [ kind (part_kind_token Kind_undecodable_external_row); f_row, `Int row ]
+;;
+
+let missing_to_json missing =
+  `List
+    (List.map
+       (fun ({ line; parts } : Librarian_unit.missing_at) ->
+          `Assoc [ f_line, `Int line; f_parts, `List (List.map part_to_json parts) ])
+       missing)
+;;
+
+let hole_to_json = function
+  | Content_missing missing ->
+    `Assoc [ kind (hole_kind_token Kind_content_missing); f_missing, missing_to_json missing ]
+  | Unknown_span { before; after } ->
+    `Assoc
+      [ kind (hole_kind_token Kind_unknown_span)
+      ; f_before, Turn_codec.mark_to_json before
+      ; f_after, Turn_codec.mark_to_json after
+      ]
+;;
+
+let memory_kind_of shown_memory =
+  if shown_memory then Kind_memory_shown else Kind_memory_not_shown
+;;
+
 let cause_to_json = function
   | Direct { by; trace; write } ->
     `Assoc
@@ -219,6 +338,16 @@ let cause_to_json = function
   | Adopt { by; observed } ->
     `Assoc
       [ kind (cause_kind_token Kind_adopt); f_by, `String by; f_observed, digest_json observed ]
+  | Read { question; shown_memory; slot; trace; missing } ->
+    `Assoc
+      [ kind (cause_kind_token Kind_read)
+      ; f_question, question_to_json question
+      ; f_memory, `String (memory_kind_token (memory_kind_of shown_memory))
+      ; f_slot, `String slot
+      ; f_trace, `String trace
+      ; f_missing, missing_to_json missing
+      ]
+  | Skip { hole } -> `Assoc [ kind (cause_kind_token Kind_skip); f_hole, hole_to_json hole ]
 ;;
 
 let within_to_json = function
@@ -419,6 +548,74 @@ let write_of_json json : (Direct.write, wire_error) result =
     Ok (Direct.Retract { id; reason })
 ;;
 
+(* A half that is not one names no question; the halves are checked
+   together, so the refusal names the object. *)
+let question_of_json json =
+  let* fields = object_fields json in
+  let* () = exact_field_names_result [ f_front; f_back ] fields in
+  let* front = wire_string_field f_front fields in
+  let* back = wire_string_field f_back fields in
+  match Librarian_question_id.of_halves ~front ~back with
+  | Some question -> Ok question
+  | None -> wire_here (Unknown_token (front ^ " " ^ back))
+;;
+
+let part_of_json json : (Librarian_unit.missing_part, wire_error) result =
+  let* fields = object_fields json in
+  let* part = of_token ~token_of:part_kind_token part_kinds f_kind fields in
+  let ranged make =
+    let* () = exact_field_names_result [ f_kind; f_from; f_until ] fields in
+    let* from = count_field f_from fields in
+    let* until = count_field f_until fields in
+    Ok (make ({ from; until } : Librarian_unit.range))
+  in
+  let at_offset make =
+    let* () = exact_field_names_result [ f_kind; f_offset ] fields in
+    let* offset = count_field f_offset fields in
+    Ok (make offset)
+  in
+  match part with
+  | Kind_bundle ->
+    let* () = exact_field_names_result [ f_kind; f_slice ] fields in
+    let* slice = object_field f_slice fields Turn_codec.slice_of_json in
+    Ok (Librarian_unit.Bundle slice)
+  | Kind_history_bytes -> ranged (fun range -> Librarian_unit.History_bytes range)
+  | Kind_internal_bytes -> ranged (fun range -> Librarian_unit.Internal_bytes range)
+  | Kind_chat_bytes -> ranged (fun range -> Librarian_unit.Chat_bytes range)
+  | Kind_external_rows -> ranged (fun range -> Librarian_unit.External_rows range)
+  | Kind_undecodable_history_line ->
+    at_offset (fun offset -> Librarian_unit.Undecodable_history_line { offset })
+  | Kind_undecodable_internal_line ->
+    at_offset (fun offset -> Librarian_unit.Undecodable_internal_line { offset })
+  | Kind_undecodable_external_row ->
+    let* () = exact_field_names_result [ f_kind; f_row ] fields in
+    let* row = count_field f_row fields in
+    Ok (Librarian_unit.Undecodable_external_row { row })
+;;
+
+let missing_at_of_json json : (Librarian_unit.missing_at, wire_error) result =
+  let* fields = object_fields json in
+  let* () = exact_field_names_result [ f_line; f_parts ] fields in
+  let* line = count_field f_line fields in
+  let* parts = list_field f_parts fields part_of_json in
+  Ok { Librarian_unit.line; parts }
+;;
+
+let hole_of_json json =
+  let* fields = object_fields json in
+  let* hole = of_token ~token_of:hole_kind_token hole_kinds f_kind fields in
+  match hole with
+  | Kind_content_missing ->
+    let* () = exact_field_names_result [ f_kind; f_missing ] fields in
+    let* missing = list_field f_missing fields missing_at_of_json in
+    Ok (Content_missing missing)
+  | Kind_unknown_span ->
+    let* () = exact_field_names_result [ f_kind; f_before; f_after ] fields in
+    let* before = object_field f_before fields Turn_codec.mark_of_json in
+    let* after = object_field f_after fields Turn_codec.mark_of_json in
+    Ok (Unknown_span { before; after })
+;;
+
 let cause_of_json json =
   let* fields = object_fields json in
   let* cause = of_token ~token_of:cause_kind_token cause_kinds f_kind fields in
@@ -434,6 +631,25 @@ let cause_of_json json =
     let* by = wire_string_field f_by fields in
     let* observed = digest_field f_observed fields in
     Ok (Adopt { by; observed })
+  | Kind_read ->
+    let* () =
+      exact_field_names_result [ f_kind; f_question; f_memory; f_slot; f_trace; f_missing ] fields
+    in
+    let* question = object_field f_question fields question_of_json in
+    let* memory = of_token ~token_of:memory_kind_token memory_kinds f_memory fields in
+    let* slot = wire_string_field f_slot fields in
+    let* trace = wire_string_field f_trace fields in
+    let* missing = list_field f_missing fields missing_at_of_json in
+    let shown_memory =
+      match memory with
+      | Kind_memory_shown -> true
+      | Kind_memory_not_shown -> false
+    in
+    Ok (Read { question; shown_memory; slot; trace; missing })
+  | Kind_skip ->
+    let* () = exact_field_names_result [ f_kind; f_hole ] fields in
+    let* hole = object_field f_hole fields hole_of_json in
+    Ok (Skip { hole })
 ;;
 
 let within_of_json json =

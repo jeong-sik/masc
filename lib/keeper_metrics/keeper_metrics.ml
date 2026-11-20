@@ -183,6 +183,7 @@ type t =
   | MemorySnapshotBytes         (* gauge: rendered fact bytes of a keeper's Memory after its last rewriting commit *)
   | LibrarianAbsorbSources      (* counter: sources of a finished absorb-gate judgment, by keeper, forward outcome and the choice they got *)
   | LibrarianAbsorbCopyChecks   (* counter: reverse copy checks of a finished absorb-gate judgment, by keeper and verdict *)
+  | LibrarianLateAnswers        (* counter: Librarian answers that arrived after their ask had stopped being the writer's current one, by keeper; none is committed *)
 [@@deriving enumerate]
 
 (** String conversion
@@ -377,6 +378,7 @@ let to_string = function
   | MemorySnapshotBytes -> "masc_keeper_memory_snapshot_bytes"
   | LibrarianAbsorbSources -> "masc_keeper_librarian_absorb_sources_total"
   | LibrarianAbsorbCopyChecks -> "masc_keeper_librarian_absorb_copy_checks_total"
+  | LibrarianLateAnswers -> "masc_keeper_librarian_late_answers_total"
 ;;
 
 type collection =
@@ -433,7 +435,8 @@ let collection = function
   | WorkspaceMemoryLedgerClaims | MemoryRecallRequests | MemoryRecallInputBytes
   | MemoryRecallRequestSeconds | MemoryRecallTotal | MemoryRecallSelected
   | MemoryRecallJudgmentSeconds | MemoryRecallPreparationFailures | MemoryChanges | MemoryFacts
-  | MemorySnapshotBytes | LibrarianAbsorbSources | LibrarianAbsorbCopyChecks -> Metric_store
+  | MemorySnapshotBytes | LibrarianAbsorbSources | LibrarianAbsorbCopyChecks
+  | LibrarianLateAnswers -> Metric_store
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

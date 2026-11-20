@@ -9,6 +9,7 @@ module Codec = Masc.Librarian_log_codec
 module Direct = Masc.Librarian_direct
 module Effects = Masc.Librarian_effects
 module Answer = Masc.Librarian_answer
+module Unit = Masc.Librarian_unit
 module Turn_log = Masc.Keeper_turn_log
 module Types = Masc.Keeper_memory_os_types
 
@@ -143,6 +144,42 @@ let full_effects : Effects.t =
   }
 ;;
 
+let question =
+  match
+    Masc.Librarian_question_id.of_halves ~front:(String.make 32 'c') ~back:(String.make 32 'd')
+  with
+  | Some question -> question
+  | None -> fail "the test question halves are not 32 hexadecimal characters"
+;;
+
+let every_part : Unit.missing_part list =
+  [ Bundle { bundle = digest 'c'; skip = 0; take = 2 }
+  ; History_bytes { from = 0; until = 10 }
+  ; Internal_bytes { from = 10; until = 20 }
+  ; Chat_bytes { from = 0; until = 64 }
+  ; External_rows { from = 1; until = 3 }
+  ; Undecodable_history_line { offset = 10 }
+  ; Undecodable_internal_line { offset = 20 }
+  ; Undecodable_external_row { row = 3 }
+  ]
+;;
+
+let missing : Unit.missing_at list = [ { line = 120; parts = every_part } ]
+
+let read ?(shown_memory = true) ?(missing = missing) () =
+  Log.Read { question; shown_memory; slot = "claude_code.fast"; trace = "trace-2"; missing }
+;;
+
+(* Where an unannounced reset left the stores. *)
+let reset_after : Turn_log.mark = { covered with trace = "trace-2"; closed_messages = 0 }
+
+let reset_after_text =
+  {|{"trace":"trace-2","closed_messages":0,"session":"","history_bytes":0,"internal_bytes":0,"chat_bytes":120,"external_rows":2}|}
+;;
+
+let content_missing = Log.Skip { hole = Content_missing missing }
+let unknown_span = Log.Skip { hole = Unknown_span { before = covered; after = reset_after } }
+
 let every_line =
   [ started
   ; committed ()
@@ -169,6 +206,10 @@ let every_line =
   ; committed
       ~cause:(direct (Direct.Retract { id = id port; reason = "the port moved" }))
       ()
+  ; committed ~cause:(read ()) ()
+  ; committed ~cause:(read ~shown_memory:false ~missing:[] ()) ()
+  ; committed ~cause:content_missing ()
+  ; committed ~cause:unknown_span ()
   ]
 ;;
 
@@ -287,7 +328,31 @@ let test_pinned_text () =
     (Yojson.Safe.to_string (member "sources" effects));
   check string "the touched facts"
     (Printf.sprintf {|["%s"]|} (id port))
-    (Yojson.Safe.to_string (member "touched" effects))
+    (Yojson.Safe.to_string (member "touched" effects));
+  check string "an answer"
+    (Printf.sprintf
+       {|{"kind":"read","question":{"front":"%s","back":"%s"},"memory":"shown","slot":"claude_code.fast","trace":"trace-2","missing":[]}|}
+       (String.make 32 'c') (String.make 32 'd'))
+    (part_text [ "cause" ] (committed ~cause:(read ~missing:[] ()) ()));
+  check string "a question that showed no Memory" {|"not_shown"|}
+    (part_text [ "cause"; "memory" ] (committed ~cause:(read ~shown_memory:false ()) ()));
+  check string "every part a unit can miss"
+    (Printf.sprintf
+       {|[{"line":120,"parts":[{"kind":"bundle","slice":{"bundle":"%s","skip":0,"take":2}},{"kind":"history_bytes","from":0,"until":10},{"kind":"internal_bytes","from":10,"until":20},{"kind":"chat_bytes","from":0,"until":64},{"kind":"external_rows","from":1,"until":3},{"kind":"undecodable_history_line","offset":10},{"kind":"undecodable_internal_line","offset":20},{"kind":"undecodable_external_row","row":3}]}]|}
+       (String.make 64 'c'))
+    (part_text [ "cause"; "missing" ] (committed ~cause:(read ()) ()));
+  check string "a skip past content that is not there"
+    {|{"kind":"skip","hole":{"kind":"content_missing","missing":[{"line":120,"parts":[{"kind":"chat_bytes","from":0,"until":64}]}]}}|}
+    (part_text [ "cause" ]
+       (committed
+          ~cause:
+            (Log.Skip
+               { hole = Content_missing [ { line = 120; parts = [ Chat_bytes { from = 0; until = 64 } ] } ] })
+          ()));
+  check string "a skip past a span no unit holds"
+    (Printf.sprintf {|{"kind":"skip","hole":{"kind":"unknown_span","before":%s,"after":%s}}|}
+       covered_text reset_after_text)
+    (part_text [ "cause" ] (committed ~cause:unknown_span ()))
 ;;
 
 let replace_once ~old ~by source =

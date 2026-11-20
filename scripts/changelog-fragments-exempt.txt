@@ -449,3 +449,8 @@
 53974  # docs and comments only: links to purged docs removed and one interface comment restated from code; no user-facing behavior
 53949  # docs only (one RFC file): hand-written TUI counts and signs fail the PR check; no user-facing behavior
 54054  # v0.75.0 release fold backported to main; its content is the v0.75.0 notes themselves
+53966  # already in the v0.75.0 notes (folded on the release branch, backported by #54054); no second entry
+54010  # TUI Board list preview reverted by #54057 before any release; no user-visible change remains
+54029  # intentionally reverted (operator decision 2, executed by #54083); no user-visible change in this window
+54057  # revert of #54010; no user-visible change remains
+54100  # exemption-list update itself; no user-facing behavior

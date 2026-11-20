@@ -3011,6 +3011,7 @@ let test_judgment_lanes_join_the_priority_queue () =
     ; "verifier_exact", "priority"
     ; "candle_appraiser", "standard"
     ; "librarian_memory", "background"
+    ; "workspace_memory_curator", "background"
     ]
     (List.map
        (fun lane ->

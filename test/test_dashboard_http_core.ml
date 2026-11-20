@@ -6761,7 +6761,7 @@ let test_runtime_routing_creates_and_removes_a_lane () =
   check string "an exact lane the server does not run is refused"
     "unknown exact-output lane: verifer_exact (expected one of librarian_exact, \
      hitl_auto_judge, board_attention_exact, verifier_exact, candle_appraiser, \
-     librarian_memory)"
+     librarian_memory, workspace_memory_curator)"
     (refusal
        (post "append to a misspelled exact lane" 400
           {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"test_provider.test_model"}|}));

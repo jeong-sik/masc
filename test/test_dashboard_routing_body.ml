@@ -263,7 +263,8 @@ let () =
                     ~message:
                       "unknown exact-output lane: verifer_exact (expected one of \
                        librarian_exact, hitl_auto_judge, board_attention_exact, \
-                       verifier_exact, candle_appraiser, librarian_memory)"
+                       verifier_exact, candle_appraiser, librarian_memory, \
+                       workspace_memory_curator)"
                     body)
                 [ {|{"lane":"exact/verifer_exact","runtime_ids":["runpod_mtp.qwen"]}|}
                 ; {|{"lane":"exact/verifer_exact","action":"append","runtime_id":"runpod_mtp.qwen"}|}

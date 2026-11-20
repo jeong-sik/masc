@@ -8,10 +8,9 @@
     Internal observability paths (real provider tracking, internal
     metrics) and operator-owned exact execution evidence (receipts and turn
     records) MUST NOT use this module — they should emit the observed value.
-    RFC-0132 §3 enumerates the boundary classification.
 
     Adding a new public label requires both: a new constructor here,
-    and a row in RFC-0132 §3 explaining the surface that emits it. *)
+    and a doc comment on it explaining the surface that emits it. *)
 
 type public_label = private string
 

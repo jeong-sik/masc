@@ -301,8 +301,8 @@ let transition_log_event
      ; "to_status", `String (task_status_to_string to_status)
      ; "ts", `String now
      ]
-     (* RFC-0262 §9: the task's owner *before* this transition (the [from_status]
-        assignee). Recorded so the §9① foreign-completion check is a direct
+     (* The task's owner *before* this transition (the [from_status]
+        assignee). Recorded so a foreign-completion check is a direct
         [actor <> assignee] comparison instead of reconstructing ownership from
         the claim stream — the latter is blind to any claim outside the audited
         window. [None] for Todo / Cancelled from-states (no owner). *)

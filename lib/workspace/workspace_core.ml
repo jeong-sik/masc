@@ -63,14 +63,12 @@ include Workspace_gc
    operators can see in Grafana / log aggregation when production
    paths are dispatching lifecycle outside an Eio fiber.
 
-   RFC-0088 §4 Option A (2026-05-15): [event_family] / [event_kind]
-   were previously two free strings. They are now derived from a closed
-   sum [Workspace_telemetry_drop_event.t] mirroring the [Read_drop_reason.t]
-   pattern of RFC-0044. The counter itself is retained — per RFC-0088
-   §4.1 the "event itself is the telemetry payload" and the caller is a
-   fire-and-forget lifecycle hook with no [Result.t] chain to propagate
-   to. But the label cardinality is now compiler-bounded so a new emit
-   site cannot silently widen it. *)
+   [event_family] / [event_kind] are derived from a closed sum
+   [Workspace_telemetry_drop_event.t] mirroring the [Read_drop_reason.t]
+   pattern. The counter itself is retained — the event itself is the
+   telemetry payload and the caller is a fire-and-forget lifecycle hook
+   with no [Result.t] chain to propagate to. The label cardinality is
+   compiler-bounded, so a new emit site cannot silently widen it. *)
 let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
   let exn_str = Printexc.to_string exn in
   let event_family = Workspace_telemetry_drop_event.family_to_wire event in

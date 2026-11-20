@@ -138,8 +138,7 @@ module System_error = struct
       (** Distributed lock acquire budget exhausted under transient
           fleet contention.  Carries the structured key + attempt count
           so callers can dispatch on the typed variant instead of
-          substring-matching the IoError message (RFC-0088
-          "String/Substring 분류기" anti-pattern removal). *)
+          substring-matching the IoError message. *)
 
   let to_string = function
     | NotInitialized -> "[SystemError] MASC not initialized."

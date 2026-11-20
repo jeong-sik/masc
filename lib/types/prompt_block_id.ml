@@ -112,12 +112,12 @@ let cache_rank = function
      [Completion_authority]. *)
   | Goals_awaiting_proof -> 7
   | Completion_authority -> 8
-  (* The two recall blocks are placed before their first measurement (RFC
-     keeper-recall-reaches-the-turn, section 4.4). The body changes only when
-     the set of carried memories does, so it is in front of the context that
-     changes on nearly every turn. The status line names the turn, so it
-     changes every turn and sits behind that context and in front of the
-     clock. The canary measures how often each really changes. *)
+  (* The two recall blocks are placed before their first measurement. The
+     body changes only when the set of carried memories does, so it is in
+     front of the context that changes on nearly every turn. The status line
+     names the turn, so it changes every turn and sits behind that context
+     and in front of the clock. The canary measures how often each really
+     changes. *)
   | Recalled_memory -> 9
   | Dynamic_context -> 10
   | Recalled_memory_status -> 11

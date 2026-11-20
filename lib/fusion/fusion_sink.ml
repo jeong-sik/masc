@@ -1,5 +1,5 @@
 (* Fusion — 심의 결과 가시화 (구현).
-   계약/문서: fusion_sink.mli, docs/rfc/RFC-0252 §8 *)
+   계약: fusion_sink.mli *)
 
 let render_decision (d : Fusion_types.judge_decision) : string =
   match d with
@@ -80,7 +80,7 @@ let render_judge (j : Fusion_types.judge_synthesis) : string =
   Buffer.contents buf
 
 (* Board meta_json의 judge 원소에서 구조화 종합(5섹션 + recommend/
-   missing)을 보존한다. 프론트(FusionJudgeEvidence, keeper-v2 fusion.jsx)가
+   missing)을 보존한다. 프론트(FusionJudgeEvidence)가
    consensus/contradictions/partial_coverage/unique_insights/blind_spots 섹션을
    렌더하려면 이 필드들이 JSON에 있어야 한다 — synthesis markdown만 내보내면
    프론트가 markdown을 재파싱해야 하는 string 분류기 안티패턴이 되므로 근본 fix는
@@ -137,7 +137,7 @@ let recommendation_to_json (r : Fusion_types.recommendation) : Yojson.Safe.t =
 let board_post_ttl_hours = 24 * 7
 
 (* 패널 결과를 board meta_json 원소로. chat lane이 아니라 여기(board)가 패널 답변
-   *서사*를 담는 surface다 (키퍼 observation 도배 방지, RFC §8.1 개정). 답변 텍스트와
+   *서사*를 담는 surface다 (키퍼 observation 도배 방지). 답변 텍스트와
    실측 토큰을 함께 남긴다. *)
 let panel_meta (o : Fusion_types.panel_outcome) : Yojson.Safe.t =
   match o with
@@ -200,7 +200,7 @@ let judge_synthesis_fields (j : Fusion_types.judge_synthesis) :
     ("missing", `List (List.map (fun m -> `String m) missing_for_decision)) :: base
   | Fusion_types.Answer _ -> base
 
-(* 심판 종합을 board meta_json [judge] 원소로 (canonical 단일 키 — RFC-0284 이전 호환). *)
+(* 심판 종합을 board meta_json [judge] 원소로 (canonical 단일 키). *)
 let judge_meta (judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result)
     : Yojson.Safe.t =
   (* status는 형제 panel_meta와 같은 동사형(판이 무엇을 했는가): 종합 산출은
@@ -322,9 +322,8 @@ let tool_trace_meta (trace : Fusion_types.tool_trace) =
     ; "events", `List (List.map tool_trace_event_meta trace.events)
     ]
 
-(* 자리 경로 한 줄을 board meta_json [seat_routes] 배열 원소로 (RFC fusion-seat-routes
-   §2.3). 자리 결과(답·종합)는 [panel]/[judges] 가 나르고, 이 줄은 누가 답했고 그 전에
-   누가 실패했는지만 더한다. *)
+(* 자리 경로 한 줄을 board meta_json [seat_routes] 배열 원소로. 자리 결과(답·종합)는
+   [panel]/[judges] 가 나르고, 이 줄은 누가 답했고 그 전에 누가 실패했는지만 더한다. *)
 let seat_fields = function
   | Fusion_types.Panel_seat identity -> [ "phase", `String "panel"; "seat", `String identity ]
   | Fusion_types.Judge_seat role ->
@@ -361,8 +360,8 @@ let seat_route_meta (route : Fusion_types.seat_route) : Yojson.Safe.t =
 
 (* 심판 실행 노드 한 건을 board meta_json [judges] 배열 원소로. panel_meta와
    동형: [Synthesized] → role/identity + judge_synthesis 5섹션 + 노드별 실측 usage,
-   [Judge_failed] → role/identity + status="failed" + error + 노드별 실측 usage(RFC-0284 E:
-   실패한 심판도 토큰을 태웠으면 관측 record에 비용을 남긴다). *)
+   [Judge_failed] → role/identity + status="failed" + error + 노드별 실측 usage(실패한
+   심판도 토큰을 태웠으면 관측 record에 비용을 남긴다). *)
 let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
   match o with
   | Fusion_types.Synthesized { role; synthesis; usage } ->
@@ -583,8 +582,8 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
       Error (Printf.sprintf "Fusion run %s is not registered" run_id)
   in
   try
-    (* 비용 관측(제약 아님) — 패널 N + 심판 1 실측 토큰 합산 (RFC §10). board 증거에만
-       남긴다 (cost cap은 v1 제외, 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판도
+    (* 비용 관측(제약 아님) — 패널 N + 실행된 심판 전부의 실측 토큰 합산. board 증거에만
+       남긴다 (cost cap 없이 측정값만 — 괴상한 제약 제거 원칙). 실패한 패널/심판도
        provider가 보고한 사용량은 보존한다. 보고 없는 사용량은 추정하지 않는다. *)
     let panel_usage =
       List.fold_left
@@ -596,8 +595,8 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
     in
     let total_usage = Fusion_types.add_usage panel_usage judge_usage in
     (* board post — 패널 답변 전체 + 심판 종합을 쿼리 가능한 구조화 증거(meta_json)로.
-       사용자는 대시보드 board에서 상세를 본다. chat lane *서사*를 board로 옮긴 것이
-       RFC §8.1 대비 변경점(키퍼 observation 도배 방지). 실패는 [Error]로 orchestrator에. *)
+       사용자는 대시보드 board에서 상세를 본다. 패널 *서사*는 chat lane이 아니라 board에
+       둔다(키퍼 observation 도배 방지). 실패는 [Error]로 orchestrator에. *)
     (* 실패한 패널의 per-panel 사유 요약. 실패 headline/chat이 이걸 나르지 않으면
        사유는 meta_json에만 남는데, 키퍼 도구(masc_board_post_get)는 title/body만
        렌더하므로 키퍼가 원인에 도달할 tool-reachable 경로가 없다 (2026-07-01:
@@ -698,7 +697,7 @@ let emit ~source_context ~registry ~base_dir ~keeper ~run_id ~channel ~question 
                 | Board.Recipient_lookup_failed _ )
             | Board.Post_publication_failure.Raised _ -> Ok (Error failure)))
     in
-    (* 키퍼 메인 흐름 통합 ("결과를 키퍼 흐름에 녹이기", RFC-0252 §8 개정).
+    (* 키퍼 메인 흐름 통합.
        상세 트랜스크립트(패널 답변 N개)는 위 board post 증거로만 남기고, 키퍼 chat
        lane에는 judge 결론(decision + resolved_answer)만 키퍼 *메인* conversation
        (conversation_id 생략)에 append한다. board가 생성됐으면 그 post를 가리키는

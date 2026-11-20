@@ -635,7 +635,7 @@ let rec remove_tree path =
     (try Unix.unlink path with Unix.Unix_error _ -> ())
   | exception Unix.Unix_error _ -> ()
 
-(* RFC-0422 diagnosis: one line per request on the guest's tmpfs, so the
+(* Diagnostic trace: one line per request on the guest's tmpfs, so the
    mode a request was framed with and the plan it actually got are readable
    from the host after the fact. Best-effort by construction -- a trace that
    could fail a dispatch would measure the trace, not the box. Capped so a

@@ -181,5 +181,5 @@ let reset_for_testing () = close_all ()
 
 (* Release the descriptors at process exit. Every append has reached the
    kernel before it returned and nothing is buffered here, so this close
-   writes nothing. RFC-0108 §6 keeps per-record fsync out of scope. *)
+   writes nothing. Neither an append nor this close calls fsync. *)
 let () = Stdlib.at_exit close_all

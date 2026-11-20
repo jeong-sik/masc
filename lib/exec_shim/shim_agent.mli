@@ -1,5 +1,4 @@
-(** The [masc-exec-shim --serve] guest agent (RFC
-    microvm-guest-agent-over-socket).
+(** The [masc-exec-shim --serve] guest agent.
 
     The first process of an Apple container Keeper VM. It listens on a unix
     socket the VM publishes to the host with [container run --publish-socket]
@@ -35,7 +34,7 @@ type start_error =
   | Socket_directory_off_root of { directory : string }
     (** the directory sits on another filesystem than [/]; the
         [--publish-socket] relay reaches only sockets on the container's
-        root filesystem (RFC section 4.2) *)
+        root filesystem *)
   | Listen_failed of { socket : string; detail : string }
   | Remount_failed of string
   | Drop_failed of string

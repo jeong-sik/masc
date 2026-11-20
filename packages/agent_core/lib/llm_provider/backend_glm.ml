@@ -33,7 +33,7 @@ type glm_error_origin =
 type glm_error =
   { code : string option
   ; message : string
-  ; error_class : glm_error_class
+  ; error_class : glm_error_class option
   ; origin : glm_error_origin
   }
 
@@ -53,7 +53,7 @@ type glm_error =
     - 1309,1311,1313,1314: subscription/plan (quota). 1314 is an expired
       enterprise package (docs.z.ai, checked 2026-11-06)
     - 1230,1234,500: server error *)
-let classify_glm_error ~code : glm_error_class =
+let classify_glm_error ~code : glm_error_class option =
   match code with
   | "1000"
   | "1001"
@@ -65,8 +65,8 @@ let classify_glm_error ~code : glm_error_class =
   | "1111"
   | "1112"
   | "1120"
-  | "1220" -> Glm_auth_error
-  | "1302" | "1303" | "1305" | "1312" -> Glm_rate_limited
+  | "1220" -> Some Glm_auth_error
+  | "1302" | "1303" | "1305" | "1312" -> Some Glm_rate_limited
   | "1113"
   | "1308"
   | "1309"
@@ -79,8 +79,8 @@ let classify_glm_error ~code : glm_error_class =
   | "1318"
   | "1319"
   | "1320"
-  | "1321" -> Glm_quota_exceeded
-  | "1230" | "1234" | "500" -> Glm_server_error
+  | "1321" -> Some Glm_quota_exceeded
+  | "1230" | "1234" | "500" -> Some Glm_server_error
   | "1300"
   | "1301"
   | "1200"
@@ -90,11 +90,11 @@ let classify_glm_error ~code : glm_error_class =
   | "1213"
   | "1214"
   | "1215"
-  | "1231" -> Glm_invalid_request
+  | "1231" -> Some Glm_invalid_request
   (* agent-core boundary: 1261 is "Prompt exceeds max length" — a context-window
      overflow, not a malformed request. Typed so consumers can shrink. *)
-  | "1261" -> Glm_context_overflow
-  | _unknown_code -> Glm_invalid_request
+  | "1261" -> Some Glm_context_overflow
+  | _unknown_code -> None
 ;;
 
 let http_code_of_glm_error_class = function
@@ -207,9 +207,7 @@ let check_glm_error_json (json : Yojson.Safe.t) : glm_error option =
         |> Option.value ~default:(Yojson.Safe.to_string err)
       in
       let error_class =
-        match code with
-        | Some code -> classify_glm_error ~code
-        | None -> Glm_invalid_request
+        Option.bind code (fun code -> classify_glm_error ~code)
       in
       Some { code; message; error_class; origin = Provider_response }
   with
@@ -234,11 +232,11 @@ let provider_failure_of_glm_error ~retry_after (error : glm_error)
   : Http_client.http_error option
   =
   match error.error_class with
-  | Glm_context_overflow ->
+  | Some Glm_context_overflow ->
     Some
       (Http_client.ProviderFailure
          { kind = Http_client.Context_overflow { limit = None }; message = error.message })
-  | Glm_quota_exceeded ->
+  | Some Glm_quota_exceeded ->
     Some
       (Http_client.ProviderFailure
          { kind = Http_client.Hard_quota { retry_after }
@@ -247,7 +245,8 @@ let provider_failure_of_glm_error ~retry_after (error : glm_error)
               | Some code -> Printf.sprintf "Glm error %s: %s" code error.message
               | None -> error.message)
          })
-  | Glm_rate_limited | Glm_auth_error | Glm_server_error | Glm_invalid_request -> None
+  | Some (Glm_rate_limited | Glm_auth_error | Glm_server_error | Glm_invalid_request)
+  | None -> None
 ;;
 
 let%test "glm quota envelopes promote to hard quota" =
@@ -329,7 +328,7 @@ let glm_parse_error message =
   Glm_api_error
     { code = None
     ; message
-    ; error_class = Glm_invalid_request
+    ; error_class = None
     ; origin = Response_parse
     }
 ;;
@@ -624,7 +623,7 @@ let%test "build_request with declared thinking=false injects disabled" =
 let%test "check_glm_error detects string code" =
   let body = {|{"error":{"code":"1305","message":"service overloaded"}}|} in
   match check_glm_error body with
-  | Some err -> err.code = Some "1305" && err.error_class = Glm_rate_limited
+  | Some err -> err.code = Some "1305" && err.error_class = Some Glm_rate_limited
   | None -> false
 ;;
 
@@ -636,36 +635,36 @@ let%test "check_glm_error returns None for valid response" =
 let%test "check_glm_error handles int code" =
   let body = {|{"error":{"code":400,"message":"bad request"}}|} in
   match check_glm_error body with
-  | Some err -> err.code = Some "400"
+  | Some err -> err.code = Some "400" && err.error_class = None
   | None -> false
 ;;
 
 let%test "unknown code is not classified from message prose" =
-  classify_glm_error ~code:"unknown" = Glm_invalid_request
+  classify_glm_error ~code:"unknown" = None
 ;;
 
 let%test "classify quota from code 1113 (arrears)" =
-  classify_glm_error ~code:"1113" = Glm_quota_exceeded
+  classify_glm_error ~code:"1113" = Some Glm_quota_exceeded
 ;;
 
 let%test "classify auth from code 1001" =
-  classify_glm_error ~code:"1001" = Glm_auth_error
+  classify_glm_error ~code:"1001" = Some Glm_auth_error
 ;;
 
 let%test "code 1304, absent from both code tables, names no quota" =
-  classify_glm_error ~code:"1304" <> Glm_quota_exceeded
+  classify_glm_error ~code:"1304" = None
 ;;
 
 let%test "classify quota from code 1308 (usage limit)" =
-  classify_glm_error ~code:"1308" = Glm_quota_exceeded
+  classify_glm_error ~code:"1308" = Some Glm_quota_exceeded
 ;;
 
 let%test "classify rate limited from code 1305" =
-  classify_glm_error ~code:"1305" = Glm_rate_limited
+  classify_glm_error ~code:"1305" = Some Glm_rate_limited
 ;;
 
 let%test "classify invalid request from code 1301 (unsafe content)" =
-  classify_glm_error ~code:"1301" = Glm_invalid_request
+  classify_glm_error ~code:"1301" = Some Glm_invalid_request
 ;;
 
 let%test "http_code quota maps to 429" =

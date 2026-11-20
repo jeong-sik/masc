@@ -36,7 +36,7 @@ type glm_error_origin =
 type glm_error =
   { code : string option
   ; message : string
-  ; error_class : glm_error_class
+  ; error_class : glm_error_class option
   ; origin : glm_error_origin
   }
 
@@ -47,9 +47,11 @@ type request_artifact
 val request_payload : request_artifact -> string
 val request_output_token_receipt : request_artifact -> Types.output_token_receipt
 
-(** Classify a Glm error code + message into a semantic class.
-    Code-based classification takes priority; message keywords are fallback. *)
-val classify_glm_error : code:string -> glm_error_class
+(** Classify a documented Glm error code into a semantic class.
+    Returns [None] for undocumented codes so callers can preserve the HTTP
+    status or surface a provider-reported error instead of inventing
+    {!Glm_invalid_request}. *)
+val classify_glm_error : code:string -> glm_error_class option
 
 (** Map a Glm error class to the equivalent HTTP status code.
     Used by complete.ml to normalize provider-specific codes

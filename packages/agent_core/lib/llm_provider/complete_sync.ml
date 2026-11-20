@@ -202,20 +202,31 @@ let parse_sync_response_observed
         with
         | Some failure -> Error failure
         | None ->
-          let semantic_code =
-            Backend_glm.http_code_of_glm_error_class error.error_class
-          in
           let body =
             match error.code with
             | Some code -> Printf.sprintf "Glm error %s: %s" code error.message
             | None -> Printf.sprintf "Glm error without code: %s" error.message
           in
-          Error
-            (Http_client.HttpError
-               { code = semantic_code
-               ; body = Http_client.Received body
-               ; retry_after_header = None
-               })))
+          (match error.error_class with
+           | Some error_class ->
+             let semantic_code =
+               Backend_glm.http_code_of_glm_error_class error_class
+             in
+             Error
+               (Http_client.HttpError
+                  { code = semantic_code
+                  ; body = Http_client.Received body
+                  ; retry_after_header = None
+                  })
+           | None ->
+             (* Undocumented or absent GLM code inside an HTTP 200 envelope:
+                do not fabricate a 400 InvalidRequest. Surface as a
+                provider-reported diagnostic error like Openai_chat. *)
+             Error
+               (Http_client.ProviderFailure
+                  { kind = Http_client.Provider_reported_error { error_type = error.code }
+                  ; message = body
+                  }))))
   | exn ->
     Reserved_exn.reraise_if_reserved exn;
     let message = Printexc.to_string exn in
@@ -329,6 +340,55 @@ let%test "sync: an error finish without a provider condition is provider-reporte
                | Http_client.Unknown_provider_failure _ )
            ; _
            }) -> false
+;;
+
+let%test "sync: glm unknown or absent error code surfaces provider-reported error while known codes map" =
+  let cfg =
+    Provider_config.make ~kind:Provider_config.Glm ~model_id:"glm-5" ~base_url:"u" ()
+  in
+  let parse body =
+    parse_sync_response
+      ~http_codec:(Provider_http_codec.of_config cfg)
+      ~provider_kind:Provider_config.Glm
+      body
+  in
+  let expect_provider_reported expected_type body =
+    match parse body with
+    | Error
+        (Http_client.ProviderFailure
+          { kind = Http_client.Provider_reported_error { error_type }; _ }) ->
+      error_type = expected_type
+    | Ok _ | Error (Http_client.HttpError _) | Error (Http_client.NetworkError _ | Http_client.Connect_failed _)
+    | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+    | Error (Http_client.ProviderTerminal _) | Error
+        (Http_client.ProviderFailure
+           { kind =
+               ( Http_client.Capacity_exhausted _
+               | Http_client.Hard_quota _
+               | Http_client.Capability_mismatch _
+               | Http_client.Cli_policy_invalid _
+               | Http_client.Cli_startup_failed _
+               | Http_client.Provider_parse_error _
+               | Http_client.Provider_wire_error _
+               | Http_client.Provider_interrupted
+               | Http_client.Response_body_too_large _
+               | Http_client.Empty_completion _
+               | Http_client.Context_overflow _
+               | Http_client.Unknown_provider_failure _ )
+           ; _
+           }) -> false
+  in
+  let expect_http_code expected_code body =
+    match parse body with
+    | Error (Http_client.HttpError { code; _ }) -> code = expected_code
+    | Ok _ | Error (Http_client.NetworkError _ | Http_client.Connect_failed _)
+    | Error (Http_client.TimeoutError _) | Error (Http_client.AcceptRejected _)
+    | Error (Http_client.ProviderTerminal _) | Error (Http_client.ProviderFailure _) -> false
+  in
+  expect_provider_reported (Some "9999") {|{"error":{"code":"9999","message":"new error"}}|}
+  && expect_provider_reported None {|{"error":{"message":"opaque"}}|}
+  && expect_http_code 400 {|{"error":{"code":"1210","message":"bad param"}}|}
+  && expect_http_code 500 {|{"error":{"code":"1234","message":"server err"}}|}
 ;;
 
 let%test "sync: a top-level 502 is that refusal with the error object as its body" =

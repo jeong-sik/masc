@@ -1178,6 +1178,45 @@ let%test "http_error_diagnostic_body enriches empty provider body" =
      url=https://gen.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent"
 ;;
 
+let%test "glm provider_refusal preserves HTTP status on unknown or 5xx/429 codes" =
+  let codec =
+    Provider_http_codec.of_config
+      (Provider_config.make ~kind:Provider_config.Glm ~model_id:"glm-5" ~base_url:"u" ())
+  in
+  let refusal_503 =
+    Http_client.HttpError
+      { code = 503
+      ; body = Http_client.Received {|{"error":{"code":"9999","message":"upstream"}}|}
+      ; retry_after_header = None
+      }
+  in
+  let refusal_429 =
+    Http_client.HttpError
+      { code = 429
+      ; body = Http_client.Received {|{"error":{"code":"9999","message":"rate?"}}|}
+      ; retry_after_header = None
+      }
+  in
+  let preserves expected_code expected_body actual =
+    match actual with
+    | Http_client.HttpError
+        { code; body = Http_client.Received body; retry_after_header = None } ->
+      code = expected_code && String.equal body expected_body
+    | Http_client.HttpError { body = Http_client.Not_received_in_window; _ }
+    | Http_client.HttpError { retry_after_header = Some _; body = Http_client.Received _; _ }
+    | Http_client.NetworkError _
+    | Http_client.Connect_failed _
+    | Http_client.TimeoutError _
+    | Http_client.AcceptRejected _
+    | Http_client.ProviderTerminal _
+    | Http_client.ProviderFailure _ -> false
+  in
+  preserves 503 {|{"error":{"code":"9999","message":"upstream"}}|}
+    (provider_refusal ~http_codec:codec refusal_503)
+  && preserves 429 {|{"error":{"code":"9999","message":"rate?"}}|}
+       (provider_refusal ~http_codec:codec refusal_429)
+;;
+
 let header_name_eq left right =
   String.equal (String.lowercase_ascii left) (String.lowercase_ascii right)
 ;;

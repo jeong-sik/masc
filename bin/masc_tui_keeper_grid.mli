@@ -35,8 +35,8 @@ val strip_cells : t -> int
 (** The now slot and the half hours after it; 0 when {!t.side_cells} is. *)
 
 val window_label : slots:int -> string
-(** How long [slots] half hours last, as the column headers write it: [12h],
-    [8h], [7h30m]. *)
+(** How long [slots] half hours last, as the column headers write it
+    ({!Masc_tui_value.Interval.text}): [30m], [7h30m], [12h], [1d]. *)
 
 val slot_label : string
 (** How long one half-hour slot lasts: [30m]. *)

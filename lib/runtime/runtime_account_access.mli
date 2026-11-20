@@ -270,10 +270,11 @@ type refusal =
           Two things are outside this judgment. The client of a login gets
           the environment of the capture without it
           ([Runtime_setup_login_client.environment]). The server gives a
-          person only a home made for that login; an operator can log in
-          again on a home that exists. And only these names are read: what
-          else the configuration of a home has its client do is not
-          judged. *)
+          person only a home made for that login. A login at a terminal
+          ([masc runtime-account-login]) starts on the home it is given,
+          whoever the home is of, with the environment of whoever runs
+          it. And only these names are read: what else the configuration
+          of a home has its client do is not judged. *)
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable

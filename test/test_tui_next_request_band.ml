@@ -39,7 +39,7 @@ let measured : Inspector.forecast =
         }
   }
 
-let test_a_refused_seed_origin_decodes () =
+let test_a_refused_range_origin_decodes () =
   let json =
     Yojson.Safe.from_string
       {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
@@ -47,23 +47,23 @@ let test_a_refused_seed_origin_decodes () =
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"not measured"},"history_atoms":4,
            "carried":{"first_atom":2,"kept_atoms":2,"transmitted_bytes":300,"preamble_bytes":null,
-                      "origin":{"kind":"turn_start_after_seed_refusal"},"counted_tokens":null},
+                      "origin":{"kind":"turn_start_after_refusal"},"counted_tokens":null},
            "assembly":null,"place":{"walks_at":0,"declared_at":0,"rest":{"kind":"serving"}}}]}|}
   in
   match Inspector.decode_forecast json with
   | Ok
       { candidates =
-          [ { carried = Some { origin = Inspector.Carried_turn_start_after_seed_refusal; _ }
+          [ { carried = Some { origin = Inspector.Carried_turn_start_after_refusal; _ }
             ; _
             }
           ]
       ; _
       } -> ()
-  | Ok _ -> Alcotest.fail "the refused seed origin decoded as another origin"
-  | Error detail -> Alcotest.fail ("the refused seed origin decodes: " ^ detail)
+  | Ok _ -> Alcotest.fail "the refused range origin decoded as another origin"
+  | Error detail -> Alcotest.fail ("the refused range origin decodes: " ^ detail)
 
-(* The two fronts a refused turn-boundary range moves to where this turn
-   began decode by the server's kind, past a Librarian point too. *)
+(* The front a refused turn-boundary range moves to where this turn began
+   decodes by the server's kind, past a Librarian point too. *)
 let test_a_front_at_this_turns_start_decodes () =
   let decode origin =
     Inspector.decode_forecast
@@ -82,20 +82,17 @@ let test_a_front_at_this_turns_start_decodes () =
     | Ok { Inspector.candidates = [ { carried = Some { origin; _ }; _ } ]; _ } -> Some origin
     | Ok _ | Error _ -> None
   in
-  Alcotest.(check bool) "without a Librarian point" true
-    (origin_of (decode {|{"kind":"this_turn_start_after_seed_refusal"}|})
-     = Some Inspector.Carried_this_turn_start_after_seed_refusal);
-  Alcotest.(check bool) "with a Librarian point" true
-    (origin_of (decode {|{"kind":"this_turn_start_after_librarian_refusal"}|})
-     = Some Inspector.Carried_this_turn_start_after_librarian_refusal);
+  Alcotest.(check bool) "at this turn's start" true
+    (origin_of (decode {|{"kind":"this_turn_start_after_refusal"}|})
+     = Some Inspector.Carried_this_turn_start_after_refusal);
   Alcotest.(check bool) "past the Librarian point" true
     (origin_of
        (decode
-          {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"this_turn_start_after_librarian_refusal"}}|})
+          {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"this_turn_start_after_refusal"}}|})
      = Some
          (Inspector.Carried_past_librarian_point
             { librarian_end_atom = 2
-            ; front = Inspector.Carried_this_turn_start_after_librarian_refusal
+            ; front = Inspector.Carried_this_turn_start_after_refusal
             }))
 
 let test_a_start_past_the_librarian_point_decodes () =
@@ -132,10 +129,10 @@ let test_a_start_past_the_librarian_point_decodes () =
        } -> ()
    | Ok _ -> Alcotest.fail "the start past the point decoded as another origin"
    | Error detail -> Alcotest.fail ("the start past the point decodes: " ^ detail));
-  Alcotest.(check bool) "a front that is itself a Librarian point is refused" true
+  Alcotest.(check bool) "a front that is itself the read end is refused" true
     (Result.is_error
        (decode
-          {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"librarian_progress","end_atom":2}}|}))
+          {|{"kind":"past_librarian_point","librarian_end_atom":2,"front":{"kind":"covered","end_atom":2}}|}))
 
 (* Every origin the server writes decodes as the origin it names. The
    expected value is a match over the server's types, so a new source or
@@ -146,13 +143,8 @@ module Front = Masc.Keeper_carried_front
 let expected_source : Front.source -> Inspector.forecast_carried_origin = function
   | Front.Ledger -> Inspector.Carried_from_ledger
   | Front.Turn_record { turn } -> Inspector.Carried_from_turn_record { turn }
-  | Front.Turn_start_after_seed_refusal -> Inspector.Carried_turn_start_after_seed_refusal
-  | Front.Turn_start_after_librarian_refusal ->
-    Inspector.Carried_turn_start_after_librarian_refusal
-  | Front.This_turn_start_after_seed_refusal ->
-    Inspector.Carried_this_turn_start_after_seed_refusal
-  | Front.This_turn_start_after_librarian_refusal ->
-    Inspector.Carried_this_turn_start_after_librarian_refusal
+  | Front.Turn_start_after_refusal -> Inspector.Carried_turn_start_after_refusal
+  | Front.This_turn_start_after_refusal -> Inspector.Carried_this_turn_start_after_refusal
   | Front.Turn_start_at_max_context -> Inspector.Carried_turn_start_at_max_context
   | Front.Librarian_point_at_max_context -> Inspector.Carried_librarian_point_at_max_context
 ;;
@@ -161,7 +153,7 @@ let expected_origin : Front.origin -> Inspector.forecast_carried_origin = functi
   | Front.Carried source -> expected_source source
   | Front.Past_librarian_point { librarian_end_atom; source } ->
     Inspector.Carried_past_librarian_point { librarian_end_atom; front = expected_source source }
-  | Front.Librarian_progress { end_atom } -> Inspector.Carried_librarian_progress { end_atom }
+  | Front.Covered { end_atom } -> Inspector.Carried_covered { end_atom }
   | Front.Turn_start { end_atom } -> Inspector.Carried_turn_start { end_atom }
   | Front.Turn_start_unknown { reason } -> Inspector.Carried_turn_start_unknown { reason }
 ;;
@@ -170,10 +162,8 @@ let test_every_server_origin_decodes () =
   let sources =
     [ Front.Ledger
     ; Front.Turn_record { turn = 7 }
-    ; Front.Turn_start_after_seed_refusal
-    ; Front.Turn_start_after_librarian_refusal
-    ; Front.This_turn_start_after_seed_refusal
-    ; Front.This_turn_start_after_librarian_refusal
+    ; Front.Turn_start_after_refusal
+    ; Front.This_turn_start_after_refusal
     ; Front.Turn_start_at_max_context
     ; Front.Librarian_point_at_max_context
     ]
@@ -183,7 +173,7 @@ let test_every_server_origin_decodes () =
       (fun source ->
          [ Front.Carried source; Front.Past_librarian_point { librarian_end_atom = 2; source } ])
       sources
-    @ [ Front.Librarian_progress { end_atom = 2 }
+    @ [ Front.Covered { end_atom = 2 }
       ; Front.Turn_start { end_atom = 8 }
       ; Front.Turn_start_unknown { reason = "the boundary log is unreadable" }
       ]
@@ -265,30 +255,11 @@ let test_a_turn_start_origin_decodes () =
          origin)
   in
   (match
-     Inspector.decode_forecast
-       (with_origin {|{"kind":"librarian_snapshot","end_atom":2,"boundary_line":7}|})
+     Inspector.decode_forecast (with_origin {|{"kind":"covered","end_atom":2}|})
    with
    | Ok
        { candidates =
-           [ { carried =
-                 Some
-                   { origin =
-                       Inspector.Carried_librarian_snapshot { end_atom = 2; boundary_line = 7 }
-                   ; _
-                   }
-             ; _
-             }
-           ]
-       ; _
-       } -> ()
-   | Ok _ -> Alcotest.fail "the snapshot origin lost its position"
-   | Error detail -> Alcotest.fail ("the snapshot origin decodes: " ^ detail));
-  (match
-     Inspector.decode_forecast (with_origin {|{"kind":"librarian_progress","end_atom":2}|})
-   with
-   | Ok
-       { candidates =
-           [ { carried = Some { origin = Inspector.Carried_librarian_progress { end_atom = 2 }; _ }
+           [ { carried = Some { origin = Inspector.Carried_covered { end_atom = 2 }; _ }
              ; _
              }
            ]
@@ -645,8 +616,8 @@ let () =
             test_the_forecast_decodes_the_servers_shape
         ; Alcotest.test_case "count, a record origin and a layout decode" `Quick
             test_count_a_record_origin_and_a_layout_decode
-        ; Alcotest.test_case "a refused seed origin decodes" `Quick
-            test_a_refused_seed_origin_decodes
+        ; Alcotest.test_case "a refused range origin decodes" `Quick
+            test_a_refused_range_origin_decodes
         ; Alcotest.test_case "a front at this turn's start decodes" `Quick
             test_a_front_at_this_turns_start_decodes
         ; Alcotest.test_case "a start past the Librarian point decodes" `Quick

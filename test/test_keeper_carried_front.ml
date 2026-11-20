@@ -703,7 +703,7 @@ let test_a_restarted_turn_starts_at_the_recorded_accepted_start () =
       (Front.Past_librarian_point
          { librarian_end_atom = point; source = Front.Turn_record { turn = 1 } })
   in
-  let progress_at end_atom = Front.origin_to_json (Front.Librarian_progress { end_atom }) in
+  let progress_at end_atom = Front.origin_to_json (Front.Covered { end_atom }) in
   let origin = testable Yojson.Safe.pp Yojson.Safe.equal in
   check (pair int origin) "behind the accepted start: open there" (8, past ~point:2)
     (start ~point:2 ~boundary:16);
@@ -1120,10 +1120,11 @@ let test_origin_json_names_its_kind () =
   in
   check string "ledger" "ledger" (kind (Front.Carried Front.Ledger));
   check string "turn record" "turn_record" (kind (Front.Carried (Front.Turn_record { turn = 3 })));
-  check string "rule 8 with a Librarian point" "this_turn_start_after_librarian_refusal"
-    (kind (Front.Carried Front.This_turn_start_after_librarian_refusal));
-  check string "rule 8 without a snapshot" "this_turn_start_after_seed_refusal"
-    (kind (Front.Carried Front.This_turn_start_after_seed_refusal));
+  check string "rule 1" "turn_start_after_refusal"
+    (kind (Front.Carried Front.Turn_start_after_refusal));
+  check string "rule 8" "this_turn_start_after_refusal"
+    (kind (Front.Carried Front.This_turn_start_after_refusal));
+  check string "the read end" "covered" (kind (Front.Covered { end_atom = 4 }));
   check string "turn start" "turn_start" (kind (Front.Turn_start { end_atom = 12 }));
   check int "and the turn start names its atom" 12
     Yojson.Safe.Util.(Front.origin_to_json (Front.Turn_start { end_atom = 12 }) |> member "end_atom" |> to_int);
@@ -1155,7 +1156,7 @@ let test_only_an_unknown_start_origin_warns () =
     (warnings ~since:before_unknown);
   let before_others = latest () in
   List.iter (Front.warn_if_origin_is_unknown_start ~keeper_name)
-    [ Front.Turn_start { end_atom = 3 }; Front.Librarian_progress { end_atom = 2 } ];
+    [ Front.Turn_start { end_atom = 3 }; Front.Covered { end_atom = 2 } ];
   check int "a range opened anywhere else is not" 0 (warnings ~since:before_others)
 ;;
 

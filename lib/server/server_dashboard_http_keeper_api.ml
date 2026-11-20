@@ -553,6 +553,8 @@ let handle_keeper_get_subroutes state req request reqd =
     Prompt_reads.handle_provider_input_part_get state req reqd name
   | Some Route.(Keeper (Provider_input, name)) ->
     Prompt_reads.handle_provider_input_manifest_get state req reqd name
+  | Some Route.(Keeper (Cache_outcome, name)) ->
+    Prompt_reads.handle_cache_outcome_get state req reqd name
   | Some Route.(Keeper (Raw_traces, name)) ->
     Trace_reads.handle_raw_traces_get state req reqd name
   | Some Route.(Keeper (Raw_trace, name)) ->

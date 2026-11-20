@@ -645,6 +645,11 @@ let test_keeper_sensitive_get_permissions_are_exact () =
      = Some Masc_domain.CanReadState);
   check bool "metrics permission does not accept extra segments" true
     (permission "/api/v1/keepers/fixture-keeper/metrics/extra" = None);
+  (* The cache outcome serves counts and times of two requests and where
+     their inputs differ, never what they hold: the turn records' gate. *)
+  check bool "cache outcome requires authenticated state read" true
+    (permission "/api/v1/keepers/fixture-keeper/cache-outcome"
+     = Some Masc_domain.CanReadState);
   check bool "turn records route rejects trailing segment" true
     (permission "/api/v1/keepers/fixture-keeper/turn-records/extra" = None);
   check bool "ordinary keeper read stays public" true

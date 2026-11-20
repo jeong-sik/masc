@@ -251,7 +251,7 @@ let selected_summary ~ko ~now ~activity_cell ~next_run ~recurrence ~memory row =
           (Next.cell ~ko ~now next_run) in
   let next = Option.map (fun text -> text ^ (match recurrence with
     | Some (Schedule_domain.Interval { interval_sec }) ->
-        say " 주기 " " every " ^ Grid.short_span (float_of_int interval_sec)
+        say " 주기 " " every " ^ Masc_tui_value.Interval.text interval_sec
     | Some (Schedule_domain.One_shot as recurrence)
     | Some (Schedule_domain.Daily _ as recurrence)
     | Some (Schedule_domain.Cron _ as recurrence) -> " " ^ clean (Schedule_domain.recurrence_summary recurrence)

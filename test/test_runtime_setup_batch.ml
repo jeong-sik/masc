@@ -1,5 +1,15 @@
 module Batch = Runtime_setup_batch
+module Commit = Runtime.Config_commit_wire
 let get = function Ok value -> value | Error error -> Alcotest.fail (Batch.error_message error)
+(* The commit object as the running server writes it in a save answer: the
+   revision is the SHA-256 of the text it saved. *)
+let server_revision = String.make 64 'b'
+let server_commit_fields = [
+  "source_revision",`String server_revision;"order",`String "3";
+  "durability",`String "durable";"durability_detail",`Null;
+  "warnings",`List [];"ignored_legacy_keys",`List []]
+let server_commit = match Commit.of_yojson (`Assoc server_commit_fields) with
+  | Ok commit -> commit | Error detail -> Alcotest.fail detail
 let text path = In_channel.with_open_bin path In_channel.input_all
 let save path value = Out_channel.with_open_bin path (fun out -> output_string out value)
 let fixture run =
@@ -83,8 +93,7 @@ let test_configure_text_publishes_through_commit () = fixture (fun base runtime 
   let published = ref [] in
   let commit text =
     published := text :: !published;
-    Ok { Batch.source_revision = "server-revision"; order = "server-order";
-         durability = Runtime.Durable; lock_warnings = [] }
+    Ok server_commit
   in
   let receipt =
     get (Batch.configure_text ~binary ~original_text:original
@@ -95,7 +104,8 @@ let test_configure_text_publishes_through_commit () = fixture (fun base runtime 
   Alcotest.check Alcotest.bool "the published text keeps the text it started from" true
     (String.starts_with ~prefix:original (List.hd !published));
   Alcotest.check Alcotest.string "this process writes no file" original (text runtime);
-  Alcotest.check Alcotest.string "the receipt is the commit's" "server-revision" receipt.commit.source_revision;
+  Alcotest.check Alcotest.string "the receipt is the commit's" server_revision
+    (Runtime.config_source_revision_to_string receipt.commit.Commit.source_revision);
   match
     Batch.configure_text ~binary ~original_text:(original ^ "\n# written meanwhile\n")
       ~expected_revision:(Batch.revision_of_text original) ~specs ~runtime_ids:ids
@@ -473,7 +483,7 @@ let test_commit_failures () =
         Alcotest.check Alcotest.string "HTTP and CLI receipt retains uncertainty" "unconfirmed"
           Yojson.Safe.Util.(Batch.receipt_json receipt |> member "commit" |> member "durability" |> to_string);
         Alcotest.check Alcotest.bool "typed receipt retains uncertainty" true
-          (match receipt.commit.durability with Runtime.Durability_unconfirmed _ -> true | Durable -> false)
+          (match receipt.commit.Commit.durability with Runtime.Durability_unconfirmed _ -> true | Durable -> false)
       | _, Error error -> Alcotest.fail (Batch.error_message error)
       | _, Ok _ -> Alcotest.fail "pre-rename failure reported a commit")))
     [Fs_compat.Before_rename; Fs_compat.After_rename]
@@ -493,15 +503,32 @@ let test_lock_release_warning_reaches_receipt () = fixture (fun base runtime bin
       ~expected_revision:(get (Batch.observe ~base_path:base)) ~specs:[added]
       ~runtime_ids:[id] ~default_runtime_id:id ~verify:false ()) in
     Alcotest.check Alcotest.int "completed setup retains its owning lock warning" 1
-      (List.length receipt.commit.lock_warnings);
+      (List.length receipt.commit.Commit.lock_warnings);
     Alcotest.check Alcotest.bool "lock uncertainty is distinct from storage durability" true
-      (receipt.commit.durability=Runtime.Durable);
+      (receipt.commit.Commit.durability=Runtime.Durable);
     let json = Batch.receipt_json receipt in
     Alcotest.check Alcotest.string "safe warning code reaches public receipt"
       {|[{"code":"runtime_config_lock_release_unconfirmed"}]|}
       Yojson.Safe.Util.(json |> member "commit" |> member "warnings" |> Yojson.Safe.to_string);
     Alcotest.check Alcotest.bool "private release diagnostic is not published" false
       (contains (Yojson.Safe.to_string json) "private-release-fixture")))
+
+(* The CLI's batch reads the running server's answer to its text save with
+   the server's own commit codec: the commit the server wrote comes back
+   whole, and one the server never writes is refused. *)
+let test_commit_of_answer () =
+  let answer commit = Yojson.Safe.to_string (`Assoc [
+    "ok",`Bool true;"state",`String "committed";"commit",commit]) in
+  (match Batch.commit_of_answer (answer (Commit.to_yojson server_commit)) with
+   | Ok commit -> Alcotest.check Alcotest.bool "the server's commit is read back whole" true
+       (commit = server_commit)
+   | Error detail -> Alcotest.fail detail);
+  let extra = `Assoc (("path",`String "/private/runtime.toml") :: server_commit_fields) in
+  List.iter (fun (name, body) ->
+    Alcotest.check Alcotest.bool name true (Result.is_error (Batch.commit_of_answer body)))
+    [ "a commit field the server never writes is refused", answer extra;
+      "an answer without a commit is refused", {|{"ok":true}|};
+      "a body that is not JSON is refused", "<html>" ]
 
 let test_final_validation_refusal () = fixture (fun base runtime binary spec original ->
   fake base binary "p.write_text('invalid = [')";
@@ -672,5 +699,6 @@ let () = Alcotest.run "runtime setup batch" ["workspace",[
   Alcotest.test_case "verification probes only what the save changes" `Quick test_probes_only_what_changes;
   Alcotest.test_case "atomic commit failure preserves visibility and durability" `Quick test_commit_failures;
   Alcotest.test_case "observed lock release warning reaches safe setup receipt" `Quick test_lock_release_warning_reaches_receipt;
+  Alcotest.test_case "the server's save answer is read with its commit codec" `Quick test_commit_of_answer;
   Alcotest.test_case "final validation remains a typed refusal" `Quick test_final_validation_refusal;
   Alcotest.test_case "credential lifetime joins commit" `Quick test_credential_commit_join]]

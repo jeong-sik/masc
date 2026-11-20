@@ -280,16 +280,23 @@ let test_exact_output_registry_and_lock_warnings () =
 (* The commit object goes through the server's own codec, so a revision,
    order or warning code the server never writes is refused, not displayed. *)
 let test_rejects_commit_the_server_never_writes () =
-  let wire = receipt () in
-  let commit = Yojson.Safe.Util.member "commit" wire in
-  List.iter (fun invalid -> rejected (replace "commit" invalid wire))
-    [ replace "source_revision" (`String "source-7") commit
-    ; replace "order" (`String "07") commit
-    ; replace "order" (`String "0") commit
-    ; replace "warnings"
+  let invalid ?skills key value =
+    let wire = receipt ?skills () in
+    replace "commit" (replace key value (Yojson.Safe.Util.member "commit" wire)) wire
+  in
+  List.iter rejected
+    [ (* The Skill rows repeat the same revision, so only the SHA-256 form
+         refuses it. *)
+      invalid
+        ~skills:(published ~input_source_revision:"source-7" ())
+        "source_revision"
+        (`String "source-7")
+    ; invalid "order" (`String "07")
+    ; invalid "order" (`String "0")
+    ; invalid
+        "warnings"
         (`List [ `Assoc [ "code", `String "lock_release_unconfirmed"; "detail", `String "x" ] ])
-        commit
-    ; replace "extra" `Null commit
+    ; invalid "extra" `Null
     ]
 ;;
 

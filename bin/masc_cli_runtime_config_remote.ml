@@ -269,28 +269,6 @@ let apply_voice_setup ~clock server ~revision changes =
   | Ok (200, _) -> Ok ()
   | Ok (status, body) -> Error (error_of_body ~status body)
 
-(* The server's commit receipt in its answer to a text save, as the setup
-   batch reports it. *)
-let commit_record_of_answer body =
-  let open Result.Syntax in
-  let* json =
-    match Yojson.Safe.from_string body with
-    | json -> Ok json
-    | exception Yojson.Json_error detail -> Error ("the answer is not JSON: " ^ detail)
-  in
-  let* commit =
-    match answer_field "commit" json with
-    | Some commit -> Runtime.Config_commit_wire.of_yojson commit
-    | None -> Error "the answer carries no commit"
-  in
-  Ok
-    { Runtime_setup_batch.source_revision =
-        Runtime.config_source_revision_to_string commit.Runtime.Config_commit_wire.source_revision
-    ; order = Runtime.config_commit_order_to_string commit.Runtime.Config_commit_wire.order
-    ; durability = commit.Runtime.Config_commit_wire.durability
-    ; lock_warnings = commit.Runtime.Config_commit_wire.lock_warnings
-    }
-
 (* The server validates the whole file, commits it and writes its audit before
    it answers, so the batch waits longer than a plain read. A save that lands
    after this is reported as unobserved, never as refused. *)
@@ -321,7 +299,7 @@ let publish_setup_text ~clock server (source : source) ~text =
     Result.map_error
       (fun reason ->
         Runtime_setup_batch.Commit_unobserved ("the server answered 200 and " ^ reason))
-      (commit_record_of_answer body)
+      (Runtime_setup_batch.commit_of_answer body)
   (* The server answers its save after committing, so a server error may
      follow a save that landed. *)
   | Ok (status, body) when status >= 500 ->

@@ -14,11 +14,8 @@ type readiness =
   | Verified
   | Usage_limited of usage_limited * usage_limited list
   | Partly_checked of { limited : usage_limited list; not_rechecked : string list }
-type commit_record = { source_revision : string; order : string;
-                       durability : Runtime.config_durability;
-                       lock_warnings : Runtime.config_lock_warning list }
 type receipt = { runtime_id:string; runtime_ids:string list; models:string list;
-                 readiness:readiness; commit:commit_record }
+                 readiness:readiness; commit:Runtime.Config_commit_wire.t }
 open Result.Syntax
 let exit_text status = match Process_eio.exit_reason_of_status status with
   | Process_eio.Completed code -> Printf.sprintf "exit %d" code
@@ -296,12 +293,6 @@ let receipt_of ~default_lane_id ~specs ~selected ~readiness commit =
     Ok {runtime_id;runtime_ids=selected;
       models=List.map Runtime_setup_spec.model_id specs; readiness; commit}
 
-let commit_record_of_receipt (receipt : Runtime.config_commit_receipt) =
-  { source_revision = Runtime.config_source_revision_to_string receipt.observation.source_revision;
-    order = Runtime.config_commit_order_to_string receipt.order;
-    durability = receipt.durability;
-    lock_warnings = receipt.lock_warnings }
-
 let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify =
   let* original = snapshot base in
   let first = original in
@@ -327,7 +318,8 @@ let configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary
             Write_failed (Fs_compat.atomic_replace_failure_to_string failure)) in
     List.iter Runtime_setup_credentials.retain pending_credentials;
     Ok receipt) in
-  receipt_of ~default_lane_id ~specs:prepared.specs ~selected ~readiness (commit_record_of_receipt commit)
+  receipt_of ~default_lane_id ~specs:prepared.specs ~selected ~readiness
+    (Runtime.Config_commit_wire.of_receipt commit)
 
 let configure_with_replace_file ~with_lock ~replace_file ?(pending_credentials=[]) ?default_lane_id ~binary ~base_path ~expected_revision ~specs ~runtime_ids ~default_runtime_id ~verify () =
   if runtime_ids=[] || not (List.for_all safe_id runtime_ids)
@@ -340,7 +332,7 @@ let configure_with_replace_file ~with_lock ~replace_file ?(pending_credentials=[
     match with_lock ~runtime_config_path:runtime (fun () ->
       configure_locked ~replace_file ~pending_credentials ~default_lane_id ~binary ~base ~expected_revision ~specs ~selected ~verify) with
     | Ok {Runtime.value=Ok receipt; warnings} ->
-        Ok {receipt with commit={receipt.commit with lock_warnings=receipt.commit.lock_warnings @ warnings}}
+        Ok {receipt with commit=Runtime.Config_commit_wire.attach_lock_warnings warnings receipt.commit}
     | Ok {Runtime.value=Error error; _} -> Error error
     | Error _ -> Error Lock_unavailable)
 let configure ?pending_credentials ?default_lane_id ~binary ~base_path ~expected_revision
@@ -362,19 +354,31 @@ let configure_text ?default_lane_id ~binary ~original_text ~expected_revision ~s
     let* (validated, readiness) = stage_validated ~binary ~default_lane_id ~verify ~selected prepared in
     let* committed = Eio.Cancel.protect (fun () -> commit validated) in
     receipt_of ~default_lane_id ~specs:prepared.specs ~selected ~readiness committed)
+let commit_of_answer body =
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error detail -> Error ("the answer is not JSON: " ^ detail)
+  | `Assoc fields ->
+    (match List.assoc_opt "commit" fields with
+     | Some commit -> Runtime.Config_commit_wire.of_yojson commit
+     | None -> Error "the answer carries no commit")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    Error "the answer is not an object"
 let usage_limited_json (row : usage_limited) = `Assoc [
   "runtime_id",`String row.runtime_id;"code",`String row.code]
-let receipt_json receipt = `Assoc ([
+let receipt_json receipt =
+  let { Runtime.Config_commit_wire.source_revision; order; durability; lock_warnings;
+        ignored_legacy_keys = _ } = receipt.commit in
+  `Assoc ([
   "runtime_id",`String receipt.runtime_id;
   "runtime_ids",`List (List.map (fun s -> `String s) receipt.runtime_ids);
   "models",`List (List.map (fun s -> `String s) receipt.models);
   "configured",`Bool true;"validation",`String "passed";
   "commit",`Assoc [
-    "source_revision",`String receipt.commit.source_revision;
-    "order",`String receipt.commit.order;
-    "durability",`String (match receipt.commit.durability with Runtime.Durable -> "durable" | Durability_unconfirmed _ -> "unconfirmed");
-    "warnings",`List (List.map (function Runtime.Config_lock_release_unconfirmed _ ->
-      `Assoc ["code",`String "runtime_config_lock_release_unconfirmed"]) receipt.commit.lock_warnings)]]
+    "source_revision",`String (Runtime.config_source_revision_to_string source_revision);
+    "order",`String (Runtime.config_commit_order_to_string order);
+    "durability",`String (match durability with Runtime.Durable -> "durable" | Durability_unconfirmed _ -> "unconfirmed");
+    "warnings",`List (List.map (fun warning ->
+      `Assoc ["code",`String (Runtime.config_lock_warning_code warning)]) lock_warnings)]]
   @ match receipt.readiness with
     | Verified -> ["readiness",`String "verified"]
     | Not_probed -> ["readiness",`String "not_probed"]

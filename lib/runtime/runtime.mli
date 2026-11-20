@@ -147,9 +147,11 @@ val config_lock_warning_of_yojson : Yojson.Safe.t -> (config_lock_warning, strin
 (** Reads what {!config_lock_warning_to_yojson} writes; an unknown code or a
     blank detail is an error. *)
 
-(** The [commit] object of a runtime.toml write answer: the commit's identity,
-    durability and lock warnings, without the configuration text. The server
-    writes it and every OCaml client reads it back through this one codec. *)
+(** The [commit] object of the server's answer to a runtime.toml save: the
+    commit's identity, durability and lock warnings, without the
+    configuration text. The server writes it and the TUI and CLI read it back
+    through this one codec. A setup batch answer writes a shorter commit
+    object of its own, with warning codes and no details. *)
 module Config_commit_wire : sig
   type t = private
     { source_revision : config_source_revision
@@ -160,6 +162,9 @@ module Config_commit_wire : sig
     }
 
   val of_receipt : config_commit_receipt -> t
+
+  val attach_lock_warnings : config_lock_warning list -> t -> t
+  (** Appends the warnings the lock reported after the commit returned. *)
 
   val to_yojson : t -> Yojson.Safe.t
 

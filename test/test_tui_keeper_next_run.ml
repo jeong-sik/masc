@@ -68,7 +68,7 @@ let make_snapshot
     ?(truncated = false)
     ?(runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok)
     rows : Masc_tui_types.schedule_snapshot =
-  { scs_observed_at_iso = "2026-11-07T10:00:00Z"
+  { scs_observed_at = 1794045600.
   ; scs_status = status
   ; scs_read_error = read_error
   ; scs_request_count = Some (List.length rows)

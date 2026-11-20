@@ -366,7 +366,7 @@ let test_schedules_report_the_rows_they_drew () =
   let rows = List.init 40 schedule in
   state.schedules <-
     Some
-      { scs_observed_at_iso = "2026-11-19T00:00:00Z"
+      { scs_observed_at = 1795046400.
       ; scs_status = "ok"
       ; scs_read_error = None
       ; scs_request_count = Some 40
@@ -465,7 +465,7 @@ let test_schedules_with_notices_report_the_rows_they_drew () =
   let rows = List.init 40 schedule in
   state.schedules <-
     Some
-      { scs_observed_at_iso = "2026-11-19T00:00:00Z"
+      { scs_observed_at = 1795046400.
       ; scs_status = "ok"
       ; scs_read_error = None
       ; scs_request_count = Some 40

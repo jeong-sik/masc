@@ -529,7 +529,9 @@ let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =
             [ dim (say "  이 페이지에 예정되거나 최근 실행된 일정 없음" "  nothing live or recent on this page") ]
         | _ :: _, ([] | _ :: _) -> List.map (schedule_row_line ~ko ~now) entries
       in
-      let observed = Terminal_text.short_timestamp snapshot.scs_observed_at_iso in
+      let observed =
+        Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now
+          snapshot.scs_observed_at in
       let notes =
         (if snapshot.scs_truncated then
            [ warn (say "  페이지 일부만 표시 · 일정이 더 있을 수 있음" "  the page is cut: more schedules may exist") ]

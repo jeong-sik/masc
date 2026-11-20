@@ -150,7 +150,7 @@ let test_segments_extracts_scheduled_and_memory_cells () =
     }
   in
   state.schedules_agenda <- Some
-    { scs_observed_at_iso = "2026-11-07T10:00:00Z"
+    { scs_observed_at = 1794045600.
     ; scs_status = "ok"
     ; scs_read_error = None
     ; scs_request_count = Some 1

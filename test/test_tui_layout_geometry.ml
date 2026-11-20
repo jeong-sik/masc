@@ -233,7 +233,7 @@ let agenda_strip_up (state : Masc_tui_types.state) =
       ; scs_next_due_iso = None
       ; scs_counts = None
       ; scs_rows = []
-      ; scs_observed_at_iso = "2026-10-26T08:59:00Z"
+      ; scs_observed_at = 1793005140.
       ; scs_runner_status = Masc.Tui_decode.Runner_unrecognised "unknown"
       };
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed

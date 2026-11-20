@@ -3397,7 +3397,7 @@ type schedule_paging =
     rather than an empty list, and the pane keeps the two facts apart the
     same way. *)
 type schedule_snapshot = {
-  scs_observed_at_iso: string;
+  scs_observed_at: float;
   scs_status: string;
   scs_read_error: string option;
   scs_request_count: int option;
@@ -12286,7 +12286,11 @@ let queue_panel_items (state : state) (panel : queue_panel) =
          (match row.sch_payload_summary with
           | Some title ->
             {item with text=Masc.Tui_terminal_text.sanitize_terminal_text title ^ " · " ^ item.text
-              ^ "\nName observed at " ^ Masc.Tui_terminal_text.sanitize_terminal_text snapshot.scs_observed_at_iso}
+              (* The queue panel reads the clock where its items are drawn, as
+                 Terminal_text.short_timestamp did for this moment's text. *)
+              ^ "\nName observed at "
+              ^ Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute
+                  ~now:(Unix.gettimeofday ()) snapshot.scs_observed_at}
           | None -> item)
        | None -> item)
     | Some (Local_message _ | Server_message _ | Running_message _ | Event _ | Schedule _), _
@@ -28434,7 +28438,9 @@ let keeper_message_schedule_rows state ~now ~max_rows ~max_cells =
           let local_minute iso = match Time_codec.parse_rfc3339_opt iso with
             | None -> plain iso
             | Some at -> Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now at in
-          let observed = local_minute snapshot.scs_observed_at_iso in
+          let observed =
+            Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now
+              snapshot.scs_observed_at in
           let freshness =
             if kept
             then [fact ~label:(say "이전 관측 " "retained ") Facts.Plain

@@ -1,5 +1,4 @@
-(** The four run tools, read from [config/tools/masc_run_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The four run tools, read from [config/tools/masc_run_*.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a

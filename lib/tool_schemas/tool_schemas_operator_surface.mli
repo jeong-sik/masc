@@ -1,18 +1,14 @@
-(** The 14 tools RFC-0057's codegen owned, read from the binary-embedded
-    [config/tools/masc_*.toml] declarations (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2, migration item 5).
+(** The operator-surface tools, read from the binary-embedded
+    [config/tools/masc_*.toml] declarations.
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a
     partial operator surface, so a reader of these values never has to ask
     whether a schema loaded.
 
-    [test_operator_surface_toml_parity] pins all 14 against the literals the
-    generator emitted, reaching them through the values below rather than by
-    filename so that a value bound to the wrong declaration fails there. It
-    also carries the two invariants that suite held which had nothing to do
-    with code generation: the masc_config category enum matching its owner,
-    and the Operator_only [pause_status] staying off the Keeper-visible list. *)
+    [test_operator_surface_toml_parity] checks two invariants: the
+    masc_config category enum matches its owner, and the Operator_only
+    [pause_status] stays off the Keeper-visible list. *)
 
 val ask : Masc_domain.tool_schema
 val ask_status : Masc_domain.tool_schema

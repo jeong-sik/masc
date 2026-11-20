@@ -1,16 +1,9 @@
-(** The 19 tools RFC-0057's codegen owned, read from the binary-embedded
-    [config/tools/masc_*.toml] declarations (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2, migration item 5).
+(** The operator-surface tools, read from the binary-embedded
+    [config/tools/masc_*.toml] declarations.
 
-    RFC-0057 solved "one place owns a tool definition" by generating OCaml:
-    [bin/gen_tool_descriptors.ml] held the definitions as OCaml values and a
-    dune rule captured its stdout into [tool_descriptors_gen.ml]. This RFC
-    solves the same problem with data files, which is why its header carries
-    [supersedes: ["0057"]]. The definitions live here; the generator, its dune rule
-    and its regression suite are gone. The two invariants that suite carried
-    which had nothing to do with code generation — the masc_config category
-    enum matching its owner, and the Operator_only [pause_status] staying off
-    the Keeper-visible list — moved to [test_operator_surface_toml_parity].
+    [test_operator_surface_toml_parity] checks two invariants: the masc_config
+    category enum matches its owner, and the Operator_only [pause_status]
+    stays off the Keeper-visible list.
 
     One file declares one tool; [schema_of_name] decodes it through
     [Tool_definition_toml] once at module initialization. A missing file or a

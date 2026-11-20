@@ -257,32 +257,12 @@ A drift-detection lint script would:
    compare hex values.
 3. Fail CI on mismatch; allow `// approx` to opt out.
 
-The lint follows the file-level grep pattern established in RFC-0063 §7-B.
+The lint is a file-level grep script.
 
 A structural alternative — typed mirror codegen (e.g. `mirrorOf('--bg-2')`
 with compile-time token lookup or a codemod that verifies the resolved hex
 against the canonical SSOT) — is noted as a future RFC-Agent Core-018 direction
 to avoid the string-prefix whitelist accumulation risk of `// approx` labels.
-
-## Preview gallery — SPA hash routing (2026-04-28)
-
-`dashboard/design-system/preview/components.html` is a React 18 SPA
-loaded by `cb-root.jsx` + 12 `cb-group-*.jsx` modules. Native anchor
-scroll silently no-ops because the canvas (`DCViewport`) uses
-`transform: pan/zoom` inside `overflow:hidden`.
-
-`cb-root.jsx` includes a `HashBridge` component (lines 10-29) that
-listens for `hashchange` events and routes the hash into `setFocus`
-on the design canvas context. As a result, all `components.html#xxx`
-anchor links from `preview/index.html` work correctly — they focus
-the first artboard slot of the matched section.
-
-Audited 20 anchor IDs (`ide-backbone, ide-tree, ide-edit, ide-pr,
-ide-graph, ide-term, goal-zone, task-zone, account, board-zone, msgs,
-composer-v2, runtime, audit, safe-auto, cost, heur, keeper-v2,
-decisions, episodes`) — all present in cb-*.jsx and
-functional via HashBridge. **Do not assume "SPA = anchors broken"
-without checking HashBridge first.**
 
 ## Related
 
@@ -291,4 +271,3 @@ without checking HashBridge first.**
 - Tailwind v4 documentation: https://tailwindcss.com/docs/v4-beta
 - DS-Drift Phase 3 refresh (CSS layer 0 hex remaining): see this file's commit history (2026-05-11)
 - SSOT-4 (`tokens.css`) origin PRs: #12625 (V2), #12769 (drift elimination), #12881 (polish tokens), #12922 (provider tokens)
-- RFC-0063 §7-B file-level grep lint pattern (precedent for component inline hex lint)

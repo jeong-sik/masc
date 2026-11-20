@@ -225,14 +225,6 @@ The system is **dark-by-design**. A `[data-theme="light"]` override
 exists as foundation infrastructure for future surfaces but the dark
 brass aesthetic remains the canonical look.
 
-```js
-import { setTheme, getTheme } from './preview/cb-shared.jsx';
-
-setTheme('light');   // flips semantic aliases, persists to localStorage
-setTheme('dark');    // explicit dark
-setTheme(null);      // clear → falls back to prefers-color-scheme
-```
-
 The override only redefines the **semantic** alias values. Raw tokens
 (`--bg-0`, `--brass-1`) keep their dark values. A component still using
 raw tokens stays dark in light mode — this is intentional. Migration is
@@ -272,9 +264,7 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
 ```
 /
 ├─ README.md                          ← this file
-├─ SKILL.md                           ← agent-skill manifest
 ├─ SPEC.md                            ← canonical design system specification
-├─ type_layer.css                     ← `.masc-ds` scope element/utility definitions
 ├─ tokens/
 │   ├─ source.ts                      ← SSOT: raw + semantic + themes
 │   ├─ build.ts                       ← codegen driver (`pnpm tokens:build`)
@@ -285,14 +275,6 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
 │   ├─ sidebar.css  ticker.css  kpi.css  lifeline.css
 │   ├─ center.css  swimlanes.css  deck.css  drawer.css
 │   ├─ rail.css    code.css     layers.css
-├─ preview/                           ← design-system cards (Colors / Type / Spacing / Components / Brand)
-├─ patterns/a11y/                     ← ARIA pattern catalog
-└─ ui_kits/
-    └─ cockpit/                       ← the one product surface
-        ├─ README.md
-        ├─ index.html                 ← interactive recreation of the MASC cockpit
-        └─ *.jsx                      ← Topbar, Ticker, KPIStrip, Lifeline, Sidebar,
-                                        Swimlanes, Deck, Rail, Composer, Drawer, CodeMode
 ```
 
 The preview-local `colors_and_type.css` in `design-system/` was removed in Wave 2 (#11250) — the preview surface consumes `source_styles/tokens.generated.css` directly (while the live Preact dashboard also loads `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css`). Sibling generated artifacts live in their consuming surfaces:

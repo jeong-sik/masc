@@ -118,51 +118,77 @@ agent-core 도 그 요청을 보내지 않는다.
 
 ### 4.1 지금
 
+§4 와 §5 의 줄 번호는 main `d7920eae` 기준이다.
+
 - 신호는 턴 첫 요청에서, ledger 가 시작된 뒤 가장 크게 자란 턴만큼 다음 턴이 자란다고 본다. 그보다 많이 자라는 턴은 턴 가운데 넘친다(§1.3 의 19:39 KST).
-- 크기 거절 사다리는 세 단이다(`lib/keeper/keeper_turn_driver_try_provider.ml:3588-3700`).
+- 크기 거절 사다리는 다섯 단이다(`lib/keeper/keeper_turn_driver_try_provider.ml:3558-3740`).
+  - 보관된 tool 결과를 본문 대신 주소로 싣는다(`Keeper_client_tool_outbox.carrier_reprojection`, `lib/keeper/keeper_client_tool_outbox.ml:712`).
+  - 공유 기억 기록 일부를 미룬다(`Keeper_workspace_memory_host_recall.defer_for_capacity`).
   - 턴 경계로 옮긴다(`turn_boundary_resend_sequence`).
   - 거절된 요청의 tool 결과를 표시로 바꾼다(`current_turn_demotion_sequence`).
   - 이 턴이 시작한 곳으로 옮긴다(`this_turn_start_resend_sequence`).
-- 단마다 attempt 를 처음부터 다시 돌린다. 그래서 셋 모두 `same_run_retry_authorized` 가 열려 있을 때만 돈다.
-  - agent-core 가 이 run 에서 checkpoint 단계에 닿으면 닫힌다(`same_run_retry_allowed`, `:844`).
+- 앞 두 단은 attempt 안에서 돈다(`memory_capacity_retry_sequence`, `:3694`).
+- 순서는 코드 주석이 정한다. 「The carrier step answers a size refusal before memory and history do」(`:3715`).
+- 공유 기억은 hook 이 투영 전에 그린다. tool 결과로 끝나는 뒤 round 에서는 그리지 않는다(`lib/keeper/keeper_run_tools_hooks.ml:443-446`, `Keeper_run_prompt.is_later_round_of_this_turn`).
+- 단마다 attempt 를 처음부터 다시 돌린다. 그래서 다섯 모두 `same_run_retry_authorized` 가 열려 있을 때만 돈다.
+  - agent-core 가 이 run 에서 checkpoint 단계에 닿으면 닫힌다(`same_run_retry_allowed`, `:821`).
   - 처음부터 다시 돌리면 이미 저장된 진행 위에 이번 턴 입력을 다시 넣는다(`lib/keeper/keeper_unified_turn_execution.ml:437`).
 - 안쪽 요청은 매번 checkpoint 를 저장한다. 그래서 턴 첫 요청 뒤의 거절에는 사다리가 없다.
 
 ### 4.2 규칙
 
-크기 거절에서는 답이 나오지 않았다.
-그래서 run 안에서 더 좁은 요청을 보내도 tool 을 다시 돌리지 않고, checkpoint 도 되돌리지 않는다.
-
-크기 거절은 둘이고, agent-core 밖으로는 둘 다 `Retry.ContextOverflow` 로 나간다.
-
-- 보내기 전 거절: `admit` 이 입력 한도를 넘는다고 본 요청이다(`Complete.Context_window_exceeded`, `packages/agent_core/lib/pipeline/pipeline_stage_route.ml:166-171`).
-- provider 거절: provider 가 넘침으로 돌려준 요청이다(`packages/agent_core/lib/provider_failure_attribution.ml:65-78`).
-  - 빈 completion 으로 끝난 넘침도 여기 든다. 이때는 provider 가 입력을 읽어서 값이 매겨진다.
+보내기 전 거절은 `admit` 이 입력 한도를 넘는다고 본 요청이다(`Complete.Context_window_exceeded`, `packages/agent_core/lib/pipeline/pipeline_stage_route.ml:166-171`).
+이때는 completion 요청이 나가지 않았다.
+그래서 run 안에서 더 좁은 요청을 견줘도 tool 을 다시 돌리지 않고, checkpoint 도 되돌리지 않는다.
 
 투영(`model_input_projection`, `packages/agent_core/lib/agent/agent_types.mli:57`)은 요청 하나 대신 후보 목록을 돌려준다.
 
 - 첫 후보는 지금 요청이다. 창을 붙잡는다.
-- 다음 후보들은 크기 거절 사다리의 단이고, 순서도 §4.1 과 같다.
+- 다음 후보는 run 이 checkpoint 단계에 닿은 뒤의 요청에만 붙는다(`same_run_retry_allowed`, `:821`).
+  - 그 전 요청에는 다음 후보가 없다. 지금처럼 attempt 사다리가 다섯 단을 차례로 쓴다.
+  - 그래서 거절 하나에 답하는 쪽은 많아야 하나다. checkpoint 전에는 사다리, 뒤에는 run 안 후보다.
+  - checkpoint 전 요청에 후보를 붙이지 않는 까닭은 기억 단이다. run 안 후보는 hook 을 다시 돌리지 않으니 기억을 미룰 수 없다.
+  - 그 요청에 후보를 붙이면 기억을 미루기 전에 history 를 자른다. §4.1 의 순서와 어긋난다.
+- 다음 후보들은 크기 거절 사다리의 단이고, 순서도 §4.1 과 같다. 기억 단만 빠진다.
+  - carrier, 턴 경계, 강등, 이 턴 시작 순서다.
+  - checkpoint 뒤 요청이 기억을 싣는 것은 tool 결과로 끝나지 않을 때뿐이다. 그 요청에서는 기억을 둔 채 history 를 자른다.
+  - 그 요청의 기억을 줄이려면 hook 을 다시 돌려야 한다. 이 층에서는 하지 않는다. 지금은 그 요청이 넘치면 턴이 끝난다.
   - 후보는 누적이다. 앞 단이 붙잡은 front 와 표시 바꾸기를 안고 한 단을 더 쓴다.
   - 지금 사다리도 그렇다(`turn_boundary_resend_sequence` 의 `restore_front` 조건, `this_turn_start_resend_sequence` 의 「whatever demotion [first] chose」).
   - 좁아지지 않는 단은 후보를 내지 않는다. 조건은 지금 단의 조건이다.
-- 목록은 유한하다. 첫 후보 뒤의 단은 thunk 다. 목록 길이가 다시 보내는 횟수의 상한이라 따로 세지 않는다.
-- route 는 후보를 차례로 견주고, 처음 받아들여진 후보를 보낸다. provider 가 그 후보를 넘침으로 거절하면 다음 후보로 간다.
+- 목록은 유한하다. 첫 후보 뒤의 단은 thunk 다. 목록 길이가 견주는 횟수의 상한이라 따로 세지 않는다.
+- route 는 provider 시도를 지금처럼 한 번 연다. 후보를 차례로 견주고, 처음 받아들여진 후보 하나만 보낸다.
 - 후보가 다하면 지금처럼 `Retry.ContextOverflow` 로 턴을 끝낸다. lane 을 돌리는 것도 지금과 같다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
+  - 가장 좁은 후보에도 시스템 프롬프트와 이 턴이 시작한 뒤의 atom 은 남는다. 그것만으로 한도를 넘으면 후보가 다해 턴이 끝난다. 받아들인 한계다.
 - 받아들여진 후보의 좁힘은 run 의 다음 요청으로 이어진다.
-  - 턴 가운데 요청은 ledger 의 마지막 요청이 연 곳을 붙잡는다(`held_window`, `lib/keeper/keeper_turn_driver_try_provider.ml:1429`). ledger 는 응답 때 바뀐다(`:2770`).
-  - 표시 바꾸기는 attempt 가 들고 있는 상태다(`:2108`).
+  - 턴 가운데 요청은 ledger 의 마지막 요청이 연 곳을 붙잡는다(`held_window`, `lib/keeper/keeper_turn_driver_try_provider.ml:1406`). ledger 는 응답 때 바뀐다(`:2741`).
+  - 표시 바꾸기는 attempt 가 들고 있는 상태다(`:2080`).
+- 후보로 front 를 옮긴 attempt 가 크기 아닌 이유로 끝나면, 옮기기 전 front 를 되돌린다.
+  - 사다리의 `restore_front` 와 같은 규칙이다(`turn_boundary_resend_sequence` 위 주석).
+  - 그러지 않으면 다음 lane 이 크기와 상관없는 실패 때문에 좁힌 범위에서 열린다.
+  - carrier 주소와 표시 바꾸기는 사다리처럼 되돌리지 않는다.
 
-agent-core 계약이 바뀐다.
+agent-core 계약에 한 가지를 더한다.
 
-- 지금: 「Route exactly once. … AGENT_CORE does not mutate the transcript or retry implicitly」(`packages/agent_core/lib/pipeline/pipeline.ml:847`).
-- 바뀐 뒤: route 는 caller 가 준 후보마다 많아야 한 번 보낸다. transcript 는 바꾸지 않는다. 다시 보내는 것은 caller 가 후보로 적은 것뿐이다.
-  - thunk 는 앞 후보가 크기로 거절된 뒤에만, 앞에서부터, 하나에 한 번만 부른다. thunk 가 attempt 상태를 바꾸므로, 이 순서가 깨지면 누적이 틀어진다.
+- 「Route exactly once. … AGENT_CORE does not mutate the transcript or retry implicitly」(`packages/agent_core/lib/pipeline/pipeline.ml:847`)는 그대로 참이다. 보내기는 한 번이다.
+- 더하는 것: 보내기 전에, 거절된 후보 대신 caller 가 적은 다음 후보를 견준다. transcript 는 바꾸지 않는다.
+  - thunk 는 앞 후보가 보내기 전에 크기로 거절된 뒤에만, 앞에서부터, 하나에 한 번만 부른다. thunk 가 attempt 상태를 바꾸므로, 이 순서가 깨지면 누적이 틀어진다.
 
-run 안 후보가 checkpoint 앞뒤의 크기 거절을 모두 먼저 받는다.
+provider 거절은 run 안에서 다시 보내지 않는다.
 
-- attempt 를 다시 돌리는 API 레인 사다리 셋은 지운다. 단이 attempt 상태를 바꾸는 부분(front 붙잡기, 표시 바꾸기)만 후보 thunk 로 옮긴다.
-- 공식 클라이언트 런타임 둘이 부르는 `context_overflow_shrink_sequence` 는 이 RFC 가 다루지 않는다.
+- provider 거절은 provider 가 넘침으로 돌려준 요청이다(`packages/agent_core/lib/provider_failure_attribution.ml:65-78`).
+- 실행 기록은 턴 하나에 provider 시도를 하나만 담는다.
+  - provider 시도는 늘 ordinal 0 으로 연다(`packages/agent_core/lib/pipeline/pipeline_execution_scope.ml:116-122`).
+  - resume 은 provider 시도가 둘 이상이면 멈춘다(`packages/agent_core/lib/execution_agent_scope.ml:450-451`).
+  - 그래서 provider 거절 뒤 같은 턴에서 다시 보내면, 그 턴은 resume 할 수 없다.
+- 운영 로그의 route 실패 줄(실패 하나에 한 줄)로 셌다. 11-19 는 보내기 전 거절 259건, provider 거절 7건이다. 11-20 은 지금까지 21건 대 0건이다.
+  - provider 거절 7건은 모두 「Prompt exceeds max length」다.
+- provider 거절 뒤 턴이 끝나도 기록은 맞다. 그래서 이 7건 때문에 내구 기록의 모양을 바꾸지 않는다.
+- provider 거절은 지금처럼 checkpoint 전에는 attempt 사다리가 받고, 뒤에는 턴이 끝난다.
+- checkpoint 뒤 provider 거절로 턴이 끝나는 것은 받아들인 한계다. 이것을 세는 장치는 따로 넣지 않는다.
+  - 보내기 전에 재지 않는 레인(`Body_only`, `lib/runtime/runtime_agent_context.ml:199-207`)에는 보내기 전 거절이 없다. 그 레인에서는 run 안 후보가 돌지 않는다.
+  - 그런 레인이 주력 레인이 되면 다시 본다.
+- attempt 사다리는 남는다. 후보가 도는 요청에서는 사다리가 닫혀 있어, 후보가 다해도 attempt 는 다시 돌지 않는다.
 
 다른 도구는 넘치면 한 번 줄여 다시 보내고, 줄일 것이 없으면 끝낸다.
 
@@ -181,13 +207,18 @@ run 안 후보가 checkpoint 앞뒤의 크기 거절을 모두 먼저 받는다.
    - 시험: 창 400,000, 예약 128,000 에서 다음 턴 예측이 272,000 을 넘으면 신호가 켜진다.
 3. 턴의 `effective_budget`. 고칠 코드는 없다. 입력과 견주는 곳이 없다(§1.2).
 4. Librarian 레인. 지금 고칠 코드는 없다. Librarian RFC §6.3 의 비교를 만드는 층이 입력 한도 타입을 받는다. Librarian 담당이 한다.
-5. 넘칠 때 run 안에서 후보로 좁히기(§4.2). agent-core 의 투영 타입과 route, masc 의 투영과 사다리를 고친다.
+5. 넘칠 때 run 안에서 후보로 좁히기(§4.2). agent-core 의 투영 타입과 route, masc 의 투영을 고친다.
+   - 사다리의 단과 run 안 thunk 는 같은 단 함수를 부른다. 단 로직을 두 벌 두지 않는다.
    - 시험: 턴 가운데 안쪽 요청이 입력 한도를 넘으면 같은 run 에서 다음 후보가 받아들여진다. tool 은 다시 돌지 않고 checkpoint 수도 그대로다.
    - 시험: 거절된 후보는 ledger 를 바꾸지 않는다.
    - 시험: 좁힌 뒤의 안쪽 요청은 거절 없이 첫 후보로 들어간다.
    - 시험: 받아들여진 후보 뒤의 thunk 는 불리지 않는다.
-   - 시험: provider 가 넘침으로 거절하면 다음 후보를 보낸다.
-   - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
+   - 시험: 후보 셋 가운데 셋째가 받아들여지면, provider 시도는 ordinal 0 하나다. `record_provider_request_provenance`(`packages/agent_core/lib/pipeline/pipeline.ml:865`)가 적는 요청은 셋째다.
+   - 시험: provider 가 넘침으로 거절하면 다음 후보를 보내지 않는다. 그 턴의 provider 시도는 하나다.
+   - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. attempt 는 다시 돌지 않는다.
+   - 시험: checkpoint 전 요청에는 다음 후보가 없다. 사다리가 다섯 단을 지금 순서로 쓴다.
+   - 시험: carrier 를 주소로 바꾼 후보가 받아들여지면, history 범위는 첫 후보와 같다.
+   - 시험: 후보로 front 를 옮긴 attempt 가 크기 아닌 이유로 끝나면 front 가 돌아온다.
 
 ## 6. 조사할 것
 

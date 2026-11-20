@@ -198,18 +198,36 @@ let claim_task_with_details_r
          match claim_state with
          | `Not_found -> Error (Masc_domain.Task (Masc_domain.Task_error.NotFound task_id))
          | `Terminal status ->
-           (* Completed work is terminal — point the caller at the
-              linked re-run path instead of a bare AlreadyClaimed. *)
-           Error
-             (Masc_domain.Task
-                (Masc_domain.Task_error.InvalidState
-                   (Printf.sprintf
-                      "Task %s is %s — completed work is terminal. To run it \
-                       again, create a new task with predecessor_task_id=%s \
-                       (masc_add_task, RFC-0323)."
-                      task_id
-                      (Masc_domain.task_status_to_string status)
-                      task_id)))
+           (* Terminal tasks (Done or Cancelled) cannot be claimed — point the
+              caller at the linked re-run path instead of AlreadyClaimed. *)
+           let detail =
+             match status with
+             | Masc_domain.Done _ ->
+               Printf.sprintf
+                 "Task %s is %s — completed work is terminal. To run it \
+                  again, create a new task with predecessor_task_id=%s \
+                  (masc_add_task, RFC-0323)."
+                 task_id
+                 (Masc_domain.task_status_to_string status)
+                 task_id
+             | Masc_domain.Cancelled _ ->
+               Printf.sprintf
+                 "Task %s is %s — cancelled work is terminal and cannot be \
+                  claimed. To run it again, create a new task with \
+                  predecessor_task_id=%s (masc_add_task, RFC-0323)."
+                 task_id
+                 (Masc_domain.task_status_to_string status)
+                 task_id
+             | Masc_domain.Todo
+             | Masc_domain.Claimed _
+             | Masc_domain.InProgress _
+             | Masc_domain.AwaitingVerification _ ->
+               Printf.sprintf
+                 "Task %s is %s — terminal task cannot be claimed."
+                 task_id
+                 (Masc_domain.task_status_to_string status)
+           in
+           Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState detail))
          | `Claimed_by other -> Error (Masc_domain.Task (Masc_domain.Task_error.AlreadyClaimed { task_id; by = other }))
          | `Pending_verdict verification_id ->
            Error

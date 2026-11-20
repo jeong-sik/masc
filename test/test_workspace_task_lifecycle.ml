@@ -426,6 +426,37 @@ let test_awaiting_is_claimable_by_nobody () =
     [ owner; "verifier"; "other" ]
 ;;
 
+let test_cancelled_task_resolves_as_terminal_not_held_by_other () =
+  let cancelled_status =
+    D.Cancelled { cancelled_by = owner; cancelled_at = now; reason = Some "obsolete" }
+  in
+  let task = task_with_status cancelled_status in
+  List.iter
+    (fun actor ->
+       (match L.resolve_claim ~same_actor:(String.equal actor) ~agent_name:actor ~now task with
+        | L.Held_terminal (D.Cancelled { cancelled_by; _ })
+          when String.equal cancelled_by owner -> ()
+        | L.Worker_claim _ | L.Self_owned | L.Held_by_other _
+        | L.Held_terminal _ | L.Held_pending_verdict _ ->
+          failwith (actor ^ " claim resolution on Cancelled must be Held_terminal"));
+       (match
+          L.decide
+            ~new_verification_id:(fun () -> "vrf-unused")
+            ~same_agent:(String.equal owner)
+            ~agent_name:actor
+            ~task_id:"task-1"
+            ~task_status:cancelled_status
+            ~action:D.Claim
+            ~now
+            ~notes:""
+            ~reason:None
+        with
+        | Error L.Invalid_transition -> ()
+        | Ok _ | Error _ ->
+          failwith (actor ^ " decide Claim on Cancelled must fail with Invalid_transition")))
+    [ owner; "bob" ]
+;;
+
 (* A rejection returns its task to the producer. It takes the producer's focus
    unless the producer is working a different task they started meanwhile. *)
 let test_rejection_keeps_the_focus_of_other_active_work () =
@@ -476,6 +507,7 @@ let () =
   test_verdict_rejects_stale_verification_id ();
   test_claim_on_awaiting_is_refused ();
   test_awaiting_is_claimable_by_nobody ();
+  test_cancelled_task_resolves_as_terminal_not_held_by_other ();
   test_operator_cancel_states ();
   test_holder_cancel_ends_the_task_at_once ();
   test_cancel_of_a_pending_submission_ends_the_task ();

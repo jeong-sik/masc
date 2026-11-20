@@ -48,20 +48,17 @@ let exact_rate_rest_sec ~retry_after =
     ~retry_class:Keeper_runtime_failure_route.Rate_limited
     ~retry_after_hint:retry_after
 
+(* RFC-0458 §3.4 (#38174): failed attempts carry no TTL. The Keeper that
+   recorded a failed attempt retries that candidate on its next fresh walk
+   so a working fallback never permanently exiles the head; peer Keepers
+   and deferred/one-shot walks ([Every_mark_demotes]) demote it. *)
 let failed_attempt_demotion ~walk = function
   | None -> Not_demoted
-  | Some (Backpressure.Failed_attempt {recorded_by; failure; _}) ->
-    (match Backpressure_state.failure_scope failure with
-     | Backpressure_state.Provider_wide ->
-       (match walk with
-        | Fresh_walk_by walker when Backpressure.same_recorder walker recorded_by ->
-          Not_demoted
-        | Fresh_walk_by _ | Every_mark_demotes -> Failed_without_rest)
-     | Backpressure_state.Keeper_scoped ->
-       (match walk with
-        | Fresh_walk_by walker when Backpressure.same_recorder walker recorded_by ->
-          Failed_without_rest
-        | Fresh_walk_by _ | Every_mark_demotes -> Not_demoted))
+  | Some (Backpressure.Failed_attempt {recorded_by; _}) ->
+    (match walk with
+     | Fresh_walk_by walker when Backpressure.same_recorder walker recorded_by ->
+       Not_demoted
+     | Fresh_walk_by _ | Every_mark_demotes -> Failed_without_rest)
 
 let demotion_of_backpressure ~now ~walk ~rest_sec ~quota_exhausted backpressure =
   if quota_exhausted then Told_to_rest
@@ -79,22 +76,13 @@ let demotion_of_scoped ~now ~walk ~rest_sec ~quota_exhausted scoped =
     let state = Backpressure_state.observe_scoped ~now state in
     if rate_rests ~now ~rest_sec state.shared.rate_limit then Told_to_rest
     else
-      let keeper_name =
-        match walk with
-        | Fresh_walk_by walker -> Some (Backpressure.recorder_keeper_name walker)
-        | Every_mark_demotes -> None
-      in
-      let keeper_demotion =
-        match keeper_name with
-        | None -> Not_demoted
-        | Some name ->
-          let rec_key = Backpressure.keeper_recorder ~keeper_name:name in
-          failed_attempt_demotion ~walk
-            (Backpressure_state.Recorder_map.find_opt rec_key state.keeper_failures)
-      in
-      match keeper_demotion with
-      | Failed_without_rest | Told_to_rest -> keeper_demotion
-      | Not_demoted -> failed_attempt_demotion ~walk state.shared.failed_attempt
+      match walk with
+      | Fresh_walk_by walker
+        when Option.is_some
+               (Backpressure_state.Recorder_map.find_opt walker state.keeper_failures) ->
+        Failed_without_rest
+      | Fresh_walk_by _ | Every_mark_demotes ->
+        failed_attempt_demotion ~walk state.shared.failed_attempt
 
 let order ~now ~policy ~quota_scope_of ~candidate_backpressure_of candidates =
   let (Keeper_walk {start = walk; rest_sec}) = policy in

@@ -616,6 +616,11 @@ module Glyph : sig
   val priority : int -> string
   (** ["!"] when the priority number is 1 or lower, the top priority, and an
       empty string for the rest. *)
+
+  val superscript_digit : int -> string option
+  (** UTF-8 superscript digit for [1..9] (["¹"]..["⁹"]), or [None] outside that
+      range. Callers draw a digit only when the matching key is bound
+      (RFC tui-one-screen-grammar §3.1). *)
 end
 
 val set_lift_enabled : bool -> unit

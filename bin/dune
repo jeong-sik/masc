@@ -806,6 +806,18 @@
  (libraries masc_tui_message_layout masc_tui_theme masc_tui_value))
 
 (library
+ (name masc_tui_doc)
+ (wrapped false)
+ (modules masc_tui_doc)
+ (libraries
+  masc
+  masc_tui_ansi
+  masc_tui_card
+  masc_tui_message_layout
+  masc_tui_text_block
+  masc_tui_theme))
+
+(library
  (name masc_tui_overview_cards)
  (wrapped false)
  (modules masc_tui_overview_cards)

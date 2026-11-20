@@ -27,17 +27,7 @@ type inline_key =
   ; label : string
   }
 
-let superscript_digit = function
-  | 1 -> Some "\xc2\xb9" (* ¹ *)
-  | 2 -> Some "\xc2\xb2" (* ² *)
-  | 3 -> Some "\xc2\xb3" (* ³ *)
-  | 4 -> Some "\xe2\x81\xb4" (* ⁴ *)
-  | 5 -> Some "\xe2\x81\xb5" (* ⁵ *)
-  | 6 -> Some "\xe2\x81\xb6" (* ⁶ *)
-  | 7 -> Some "\xe2\x81\xb7" (* ⁷ *)
-  | 8 -> Some "\xe2\x81\xb8" (* ⁸ *)
-  | 9 -> Some "\xe2\x81\xb9" (* ⁹ *)
-  | _ -> None
+let superscript_digit = Masc_tui_theme.Glyph.superscript_digit
 
 type edge =
   { name : string

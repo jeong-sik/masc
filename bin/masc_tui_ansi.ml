@@ -374,6 +374,35 @@ module Theme = struct
     let read = Masc_tui_theme.ramp_reader (paint ()) series in
     fun position -> read ~position
 
+  (* btop-style 3-stop thermal gradient (Ok green -> Warn amber -> Bad coral/red),
+     reusing Masc_tui_theme.limit_cell_colour + meter_cell_readable as SSOT.
+     Precompute the 101-step table once per ramp closure for O(1) lookups. *)
+  let thermal_tint () =
+    let p = paint () in
+    let table =
+      Array.init 101 (fun step ->
+        Masc_tui_theme.meter_cell_readable p
+          (Masc_tui_theme.limit_cell_colour ~depth:p.Masc_tui_theme.depth
+             ~index:step ~width:100 ~value:step ~limit:100))
+    in
+    fun position ->
+      let clamped =
+        if Float.is_nan position then 0.0
+        else Float.max 0.0 (Float.min 1.0 position)
+      in
+      table.(int_of_float (Float.round (clamped *. 100.0)))
+
+  (* Upper half of the thermal ramp (Warn amber -> orange -> Bad red) for
+     downward failure waves in mirrored btop charts. *)
+  let warm_tint () =
+    let read = thermal_tint () in
+    fun position ->
+      let clamped =
+        if Float.is_nan position then 0.0
+        else Float.max 0.0 (Float.min 1.0 position)
+      in
+      read (0.50 +. (clamped *. 0.50))
+
   (* The Activity pane's ground, rebuilt only when the palette changes, for
      the same reason [recede] is: it is read once per drawn pane row. *)
   let side_pane_background_cache : (int * string) option Atomic.t =
@@ -528,7 +557,11 @@ let current_tab entries =
    the active entry down to [tab_strip_compact_floor]) before drawing nothing
    below that floor. A row that draws a strip still asks for this before it
    spends width on optional chrome that can give way. *)
-let tab_strip_min_width (tabs : (string * bool * 'target) list) =
+let tab_strip_sup ~numbered idx =
+  if not numbered then ""
+  else Option.value ~default:"" (Masc_tui_theme.Glyph.superscript_digit (idx + 1))
+
+let tab_strip_min_width ?(numbered = false) (tabs : (string * bool * 'target) list) =
   let cells text = Masc_tui_message_layout.display_width text in
   let entries = Array.of_list tabs in
   let n = Array.length entries in
@@ -536,10 +569,12 @@ let tab_strip_min_width (tabs : (string * bool * 'target) list) =
   else begin
     let current = current_tab entries in
     let label, _, _ = entries.(current) in
+    let sup = tab_strip_sup ~numbered current in
     (* The window a strip cannot shrink past holds the current entry alone,
        so the counts the marks would carry are exactly the entries on either
        side of it. *)
     cells Masc_tui_theme.Glyph.current_entry
+    + cells sup
     + cells label
     + (if current > 0 then
          cells tab_strip_gap + cells (hidden_before_mark current)
@@ -566,14 +601,14 @@ let strip_tab_count label =
         if String.equal trimmed "" then label else trimmed
     | Some _ | None -> label
 
-let tab_strip ~width ~(press : 'target -> string -> string)
+let tab_strip ?(numbered = false) ~width ~(press : 'target -> string -> string)
     (tabs : (string * bool * 'target) list) =
-  let draw press (label, current, target) =
+  let draw press ~sup (label, current, target) =
     press target
       (if current then
-         Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry ^ label
-         ^ Ansi.reset
-       else Theme.recede () ^ label ^ Ansi.reset)
+         Ansi.bold ^ Theme.info () ^ Masc_tui_theme.Glyph.current_entry
+         ^ sup ^ label ^ Ansi.reset
+       else Theme.recede () ^ sup ^ label ^ Ansi.reset)
   in
   let target_of (_, _, target) = target in
   let cells text = Masc_tui_message_layout.display_width text in
@@ -581,10 +616,12 @@ let tab_strip ~width ~(press : 'target -> string -> string)
   let n = Array.length entries in
   if n = 0 || width <= 0 then ""
   else begin
+    let sups = Array.init n (fun idx -> tab_strip_sup ~numbered idx) in
     let widths =
-      Array.map
-        (fun (label, current, _) ->
+      Array.mapi
+        (fun idx (label, current, _) ->
           (if current then cells Masc_tui_theme.Glyph.current_entry else 0)
+          + cells sups.(idx)
           + cells label)
         entries
     in
@@ -597,7 +634,8 @@ let tab_strip ~width ~(press : 'target -> string -> string)
       !sum + (gap * (hi - lo))
     in
     if span 0 (n - 1) <= width then
-      String.concat tab_strip_gap (List.map (draw press) tabs)
+      String.concat tab_strip_gap
+        (List.mapi (fun idx entry -> draw press ~sup:sups.(idx) entry) tabs)
     else begin
       (* Each mark is measured with the count it would draw. Growing the
          window on one side lowers that side's count, so a window that fits
@@ -633,7 +671,7 @@ let tab_strip ~width ~(press : 'target -> string -> string)
             let lbl =
               if idx = current then Option.value label_override ~default:lbl else lbl
             in
-            draw press (lbl, cur, tgt))
+            draw press ~sup:sups.(idx) (lbl, cur, tgt))
           |> String.concat sep
         in
         (if !lo > 0 then
@@ -658,6 +696,7 @@ let tab_strip ~width ~(press : 'target -> string -> string)
            active tab, keeping active-tab orientation down to
            [tab_strip_compact_floor] (6 cells) instead of erasing the strip. *)
         let cur_label, cur_flag, cur_target = entries.(current) in
+        let cur_sup = sups.(current) in
         let base_label = strip_tab_count cur_label in
         let compact_window =
           compose ~sep:" " ~label_override:(Some base_label) no_press
@@ -665,18 +704,24 @@ let tab_strip ~width ~(press : 'target -> string -> string)
         if cells compact_window <= width then
           compose ~sep:" " ~label_override:(Some base_label) press
         else
-          let active_only = draw no_press (base_label, cur_flag, cur_target) in
+          let active_only =
+            draw no_press ~sup:cur_sup (base_label, cur_flag, cur_target)
+          in
           if cells active_only <= width then
-            draw press (base_label, cur_flag, cur_target)
+            draw press ~sup:cur_sup (base_label, cur_flag, cur_target)
           else
-            let prefix_cells =
+            let mark_cells =
               if cur_flag then cells Masc_tui_theme.Glyph.current_entry else 0
             in
+            let sup_cells = cells cur_sup in
+            let keep_sup = sup_cells > 0 && width - mark_cells - sup_cells >= 2 in
+            let shown_sup = if keep_sup then cur_sup else "" in
+            let prefix_cells = mark_cells + cells shown_sup in
             let label_room = max 1 (width - prefix_cells) in
             let fitted =
               Masc_tui_message_layout.truncate_end label_room base_label
             in
-            draw press (fitted, cur_flag, cur_target)
+            draw press ~sup:shown_sup (fitted, cur_flag, cur_target)
     end
   end
 

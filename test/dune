@@ -7040,7 +7040,7 @@
  (name test_tui_queue_inspection)
  (modules test_tui_queue_inspection)
  (libraries alcotest masc masc.keeper_runtime masc.http_client masc_tui_queue_inspection
-  masc_tui_workspace_read masc_tui_kept_reads eio_main uri yojson))
+  masc_tui_value masc_tui_workspace_read masc_tui_kept_reads eio_main uri yojson))
 
 (test
  (name test_tui_fork_guard)

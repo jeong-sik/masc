@@ -97,7 +97,8 @@ let of_catalogs ~models ~providers =
           | Caller_api_key | Api_key_env _ | Setup_token_env _ -> true)
       ; default_model=entry.default_model;discovery_timeout_s=entry.discovery_timeout_s;
         capability_policy=Model_provider_catalog.Models_only
-      ; supports_parallel_tool_suppression=false;serves_bare_models=[] } in
+      ; supports_parallel_tool_suppression=false;supports_extended_cache_ttl=false
+      ; serves_bare_models=[] } in
     Ids.add (normalize entry.id) provider index) policy_providers overlay in
   let rec project acc = function
     | [] -> admit ~models ~source_providers:providers ~policy_providers (List.rev acc @ overlay)
@@ -130,6 +131,11 @@ let model_catalog_for_provider t provider =
 let supports_parallel_tool_suppression t ~provider_id =
   match policy_provider t provider_id with
   | Some (_, provider) -> provider.Model_catalog.supports_parallel_tool_suppression
+  | None -> false
+
+let supports_extended_cache_ttl t ~provider_id =
+  match policy_provider t provider_id with
+  | Some (_, provider) -> provider.Model_catalog.supports_extended_cache_ttl
   | None -> false
 
 type default_error =

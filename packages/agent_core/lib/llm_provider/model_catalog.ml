@@ -78,6 +78,7 @@ type provider_entry = Model_provider_catalog.entry =
   ; discovery_timeout_s : float option
   ; capability_policy : Model_provider_catalog.capability_policy
   ; supports_parallel_tool_suppression : bool
+  ; supports_extended_cache_ttl : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 

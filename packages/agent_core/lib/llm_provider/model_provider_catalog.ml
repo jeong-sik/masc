@@ -30,6 +30,7 @@ type entry =
   ; discovery_timeout_s : float option
   ; capability_policy : capability_policy
   ; supports_parallel_tool_suppression : bool
+  ; supports_extended_cache_ttl : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
@@ -110,6 +111,7 @@ let known_keys =
   ; "capabilities_base"
   ; "capabilities_base_by_identity_kind"
   ; "supports_parallel_tool_suppression"
+  ; "supports_extended_cache_ttl"
   ; "serves_bare_models"
   ]
 ;;
@@ -316,6 +318,15 @@ let parse_entry provider_toml =
       Error (Printf.sprintf
         "provider entry %S field \"supports_parallel_tool_suppression\" expected bool" id)
   in
+  let* supports_extended_cache_ttl =
+    match Otoml.find_opt provider_toml Otoml.get_boolean
+            [ "supports_extended_cache_ttl" ] with
+    | Some supported -> Ok supported
+    | None -> Ok false
+    | exception Otoml.Type_error _ ->
+      Error (Printf.sprintf
+        "provider entry %S field \"supports_extended_cache_ttl\" expected bool" id)
+  in
   let* serves_bare_models =
     let* models = string_list_field ~entry_id:id "serves_bare_models" provider_toml in
     let rec parse acc = function
@@ -342,6 +353,7 @@ let parse_entry provider_toml =
     ; discovery_timeout_s
     ; capability_policy
     ; supports_parallel_tool_suppression
+    ; supports_extended_cache_ttl
     ; serves_bare_models
     }
 ;;

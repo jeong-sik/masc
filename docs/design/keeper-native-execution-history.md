@@ -24,9 +24,9 @@ owns the journal's recursive events and lifecycle. The current-call
 
 ## Stored record contract
 
-The semantic execution codec is `masc.keeper_semantic_execution.v3` and requires
-the `native_calls` and `receipt_obligations` lists, including explicit empty
-lists. Other record versions
+The semantic execution codec is `masc.keeper_semantic_execution.v4` and requires
+the `native_calls`, `gate_obligations` and `receipt_obligations` lists, including
+explicit empty lists. Other record versions
 are rejected. An older record cannot prove that an absent association list
 means no calls occurred. There is no inferred empty-history conversion.
 

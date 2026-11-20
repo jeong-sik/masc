@@ -94,7 +94,7 @@ related: []
 
 - 다계정 boot 는 `Server_accounts.run` 으로 간다. 계정 서버가 zone 을 열고 `Multi_account` 를 올린 뒤, 올린 접근 값을 부르는 쪽(`Server_runtime_bootstrap.run`)이 준 함수에 넘긴다. 그 함수가 엔진을 띄운다. 계정 서버가 엔진 boot 를 직접 부르면 두 모듈이 서로를 가리킨다(연구 기록 §19.2).
 - 엔진은 단일 사용자 서버가 하듯 띄운다(연구 기록 §20.1). 접근 값이 올라간 뒤 fiber 에서 초기화한다. 준비 전에 실패하거나 시작 감시의 시간 안에 준비되지 않으면 프로세스를 끝낸다. 계정 서버의 순서는 바꾸지 않는다. 로그인과 설정은 엔진을 기다리지 않는다. 준비 신호(`/health/ready`)는 엔진이 준비된 뒤에야 200 이다. 그래야 `masc restart` 가 곧 끝날 서버를 준비됐다고 적지 않는다(연구 기록 §22.1).
-- 띄우는 것은 네 단계와 시작 감시다. 네 단계는 owner state 초기화, 활성화, 준비 표시, 준비 뒤 lane 이다. stdio 서버도 이 넷을 띄우지만 시작 감시는 띄우지 않는다(연구 기록 §21.1). 시작 감시는 준비 표시까지만 시간을 잰다. gateway, gRPC, WebSocket, Dashboard refresh loop 는 띄우지 않고 server state 도 공개하지 않는다. 준비 뒤 lane 의 background maintenance 는 Dashboard snapshot worker 와 runtime probe loop 를 띄운다(연구 기록 §22.1).
+- 띄우는 것은 네 단계와 시작 감시다. 네 단계는 owner state 초기화, 활성화, 준비 표시, 준비 뒤 lane 이다. stdio 서버도 이 넷을 띄우지만 시작 감시는 띄우지 않는다(연구 기록 §21.1). 시작 감시는 준비 표시까지만 시간을 잰다. 단일 사용자 서버의 보조 구성(`Server_auxiliary_startup.run_all`: gateway, gRPC, WebSocket, refresh loop 들)은 띄우지 않는다. 보조 구성 가운데 준비 뒤 lane 만 엔진이 넷째 단계로 직접 띄운다. server state 도 공개하지 않는다. 준비 뒤 lane 의 background maintenance 는 Dashboard snapshot worker 와 runtime probe loop 를 띄운다(연구 기록 §22.1).
 - 판정을 지나는 호출은 host 의 자격으로 모델을 부르지 못한다. 다계정 판정이 운영자 요청과 host 의 API key provider 를 거절한다(연구 기록 §21.2). 판정을 지나지 않는 길은 §4 에 적는다.
 - 엔진을 띄우는 함수(`initialize_owner_state_blocking`)는 단일 사용자를 받지 않는다. 부르는 쪽이 접근 값을 먼저 올리고, 올린 접근 값(`Runtime_account_access.published`)을 넘긴다. 그 값은 올리는 함수만 만든다. 함수는 base path 를 거기서 꺼낸다. 부르는 쪽은 셋이 된다. 단일 사용자 서버, stdio 서버, 다계정 boot 다.
 - 경로표는 계정 서버의 것이다. 단일 사용자 서버의 경로는 열지 않는다(④).
@@ -102,7 +102,7 @@ related: []
 - `runtime.toml` 의 설정 값을 적용하지 못하면 엔진 초기화가 실패한다. 적용은 됐지만 실행 표를 만들지 못하면 엔진은 지금처럼 빈 표로 서고 Keeper 를 띄우지 않는다. 사람의 Keeper 도 그동안 돌지 않는다(연구 기록 §20.2).
 - 다계정 boot 는 정의 폴더를 본다. 로그에 없는 이름의 정의 파일이 있으면 boot 를 거절하고 그 이름을 말한다. 폴더의 상태를 읽지 못해도 거절한다. 다계정 boot 는 Keeper 정의를 스스로 만들지 않는다. config root 가 없는 설치는 prompt 와 내장 `runtime.toml` 만 받는다(연구 기록 §21.4, §22.2).
 - 엔진의 첫 단계는 끝나지 않은 Keeper 설정 변경을 되돌리며 정의와 `runtime.toml` 을 쓴다. 그래서 다계정 boot 는 Keeper 설정 journal 이 있으면 거절한다. 어느 프로세스가 남긴 journal 이든 같다(연구 기록 §22.2).
-- 엔진 boot 는 admin token 과 internal Keeper token 을 프로세스 environment 에 넣는다. 사람 경로와 사람 MCP 경로의 gate 는 둘을 legacy credential 로 읽고 거절한다. 로그인 경로는 cookie 만 보고, health 와 console 은 credential 을 읽지 않는다(연구 기록 §21.3, §22.3).
+- 다계정 엔진 boot 는 admin token 과 internal Keeper token 을 프로세스 environment 에 내보내지 않는다(#53877). 엔진을 띄운 셸이 넣은 값은 프로세스에 남는다. 사람 경로와 사람 MCP 경로의 gate 는 두 token 을 legacy credential 로 읽고 거절한다. 로그인 경로는 cookie 만 보고, health 와 console 은 credential 을 읽지 않는다(연구 기록 §21.3, §22.3).
 - 사람의 CLI 자식은 builder 가 정한 이름을 받는다. Codex 자식은 홈의 `config.toml` 이 적은 이름도 받는다. 그 이름에 두 token 이 들어가는 것은 두 곳이 막는다. 턴과 observe 에서는 판정(#53704)이 막고, 로그인에서는 늘 새로 만드는 홈이 막는다(연구 기록 §22.3). 남는 위험은 §4 에 적는다.
 
 고르지 않은 길이다.
@@ -265,7 +265,7 @@ related: []
 - **긴 대화**(S2). 대화 요약은 Librarian 이 하고 Librarian 은 거절된다. 대화가 창을 넘은 턴이 어떻게 되는지 읽지 않았다. 실패하면 Librarian 을 주인의 계정으로 돌리는 규칙이 S2 앞에 든다.
 - **엔진 boot 가 다계정 설치에 남기는 것**(S2). auth 폴더에 `admin` 이름의 Admin credential 과 `auth/agents/` 가 생기고, internal Keeper token 의 hash 가 쓰인다. 만료된 agent credential 은 하루 한 번 지워진다. `runtime.toml` 이 없던 설치에는 내장 `runtime.toml` 이 생긴다. Auto 모드면 boot 마다 내장 Skill 을 `.masc/skills/` 에 맞춘다. tool blob sweep 은 사람 폴더를 범위에 두고 그 안을 읽지 않는다. 볼륨 GC 보고는 같은 기계의 다른 서버가 쓰는 Keeper 볼륨을 읽는다. 지우지는 않는다. authz 로그와 사람 폴더를 고치는 lane 은 조사에서 나오지 않았다. 조사만 함: config root 가 없던 설치는 seed 가 복사하던 identity, themes 같은 항목을 받지 않는다. 그 영향은 Keeper 가 도는 S2 에서 읽는다(연구 기록 §21.3~§21.5, §22.2, §22.4, §22.6).
 - **Keeper 앞의 정리**(S2). 단일 사용자 boot 가 Keeper 앞에 도는 정리 넷은 다계정이면 건너뛴다. Keeper 가 쓰기 시작하는 S2 에서 다계정 boot 도 돌린다(연구 기록 §20.1, §21.5).
-- **environment 의 운영자 token**(S2). 사람의 CLI 자식이 두 token 의 이름을 받지 않는 것은 builder 마다의 허용 목록과 판정, 새 로그인 홈에 기댄다. Codex 의 builder 는 홈이 적은 이름을 넘기고, 로그인 자식은 판정을 거치지 않는다. 지금은 로그인 홈이 늘 새것이라 닿지 않는다. 그 조건을 고정하는 시험은 없다(연구 기록 §21.6, §22.3). 다계정 엔진이 두 token 을 environment 에 넣지 않으면 이 길들이 함께 사라진다. 엔진 안에서 두 token 을 environment 로 읽는 곳은 일부만 찾았다.
+- **environment 의 운영자 token**(S2). 다계정 엔진은 두 token 을 environment 에 내보내지 않지만, 엔진을 띄운 셸이 넣은 값은 프로세스에 남는다(#53877). 사람의 CLI 자식이 그 이름을 받지 않는 것은 builder 마다의 허용 목록과 판정, 새 로그인 홈에 기댄다. Codex 의 builder 는 홈이 적은 이름을 넘기고, 로그인 자식은 판정을 거치지 않는다. 지금은 로그인 홈이 늘 새것이라 닿지 않는다. 그 조건을 고정하는 시험은 없다(연구 기록 §21.6, §22.3). 다계정 boot 가 셸이 넣은 값을 비우면 이 길들이 함께 사라진다. 엔진 안에서 두 token 을 environment 로 읽는 곳은 일부만 찾았다.
 - **판정을 지나지 않는 호출**(S2). host 의 자격으로 모델을 부르지 못한다는 것은 모든 호출이 판정을 지난다는 데 기댄다. 조사만 함: 판정 받은 값을 받는 실행 함수, 사용량 읽기, Dashboard probe 는 판정을 지난다. lane add-on 은 읽지 않았다. 조사만 함: 판정 밖에서 host 의 것을 쓰는 곳으로 셋이 나왔다. 실행 표를 만들 때 공식 client 값이 host 계정 파일을 읽어 봉인한다. S1 의 엔진도 boot 때 실행 표를 만든다. GitHub pull reader 는 reader Keeper 의 token 을 쓴다. Vertex 의 credential 값은 `gcloud` 를 부른다(연구 기록 §21.6, §22.5).
 - **boot 뒤에 생기는 Keeper**(S2). 계정 서버는 boot 때 한 번 정의 폴더를 본다. supervisor sweep 은 돌 때마다 그 폴더를 다시 읽고, meta 가 없고 `manual` 이 아닌 정의를 keepalive 후보로 올린다. 그래서 boot 뒤 폴더에 생긴 정의는 후보가 된다. 조사만 함: 후보는 Keeper 를 만들고, 그 길이 Keeper 설정 journal 을 쓴다. 엔진은 boot 때 meta(`.masc/keepers/*.json`)로 owner 를 세우는데, 계정 서버의 검사는 meta 를 보지 않는다. 그렇게 선 Keeper 의 턴은 다계정 판정이 거절한다. 판정은 운영자 Keeper 의 턴을 모두 거절한다. meta 만 있는 Keeper 가 도는지는 읽지 않았다(연구 기록 §22.2).
 - **Board 로 가는 알림**(S2). 볼륨 damage watch 는 Keeper 볼륨의 손상을 Board 에 쓴다. 사람의 Keeper 가 생기면 그 알림이 Board(③)로 간다(연구 기록 §22.6).
@@ -293,7 +293,7 @@ related: []
 | 남은 Keeper 설정 journal 은 boot 를 멈춘다 | 엔진이 정의를 써서 되돌릴 journal 을 놓고 boot 한다. 거절이 journal 을 말한다 |
 | 엔진이 준비 전에 실패하면 프로세스가 끝난다 | 엔진 초기화가 거절하는 store 를 놓고 boot 한다. 프로세스가 0 이 아닌 값으로 끝난다 |
 | 계정 서버는 엔진이 준비된 뒤에 준비됐다고 답한다 | 엔진의 promise 가 풀리기 전 `/health/ready` 는 503 이고, 풀린 뒤 200 이다 |
-| 사람 경로는 운영자의 token 을 거절하고, CLI 자식은 그 이름을 받지 않는다 | boot 가 만든 두 token 으로 사람 경로를 부르면 401 이다. 가짜 CLI 가 받은 environment 에 admin token 과 internal Keeper token 의 이름이 없다 |
+| 사람 경로는 운영자의 token 을 거절하고, 다계정 엔진은 두 token 을 environment 에 내보내지 않고, CLI 자식은 그 이름을 받지 않는다 | auth 폴더에 미리 넣은 두 token 과 boot 가 메모리에 둔 internal Keeper token 으로 사람 경로를 부르면 401 이다. 다계정 boot 뒤 프로세스 environment 의 두 token 은 비어 있다. 가짜 CLI 가 받은 environment 에 admin token 과 internal Keeper token 의 이름이 없다 |
 | 다계정 boot 는 Keeper 정의를 만들지 않는다 | config root 가 없는 설치를 boot 한다. 정의 폴더에 파일이 없다 |
 | 엔진 이름은 하나뿐이다 | 같은 엔진 이름의 두 번째 기록을 로그가 거절한다 |
 | 두 사람의 같은 id 는 두 Keeper 다 | 두 사람이 같은 id 로 만든다. 엔진 이름이 다르고, 엔진에 둘이 뜬다 |
@@ -351,3 +351,4 @@ related: []
 - 2026-11-20: 엔진이 띄우는 것 일흔 개를 조사하고 결정에 쓰는 줄을 직접 읽었다(연구 기록 §21). S1 이 띄우는 것을 stdio 서버의 네 단계로 정했다. 다계정 boot 가 Keeper 정의를 스스로 만들지 않는다는 것을 더했다.
 - 2026-11-20: S1 을 만들고 공격 리뷰 일곱을 받았다(연구 기록 §22). 시작 감시, Dashboard snapshot worker, 정의를 쓰는 journal, token 이 닿는 경로, 판정을 지나지 않는 길을 사실대로 고쳤다. 준비 신호는 엔진을 기다린다. 운영자의 token 은 §3.1 로 옮기고, 남은 것은 S2 의 위험으로 적었다.
 - 2026-11-20: 앞의 고침(#53803)과 #53790, #53795 의 공격 리뷰를 받았다(연구 기록 §22). CLI 자식이 받는 이름, runtime probe loop, boot 뒤에 생기는 Keeper, journal 을 남기는 쪽을 사실대로 고쳤다. 조사만 한 줄에 그 표시를 되살렸다.
+- 2026-11-20: #53813 의 공격 리뷰와 #53877 을 반영했다. 엔진이 띄우지 않는 것을 단일 사용자 서버의 보조 구성(`Server_auxiliary_startup.run_all`)으로 적었다. 다계정 엔진은 두 token 을 environment 에 내보내지 않는다. 셸이 넣은 값이 프로세스에 남는 것은 S2 의 위험으로 적었다.

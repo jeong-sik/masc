@@ -1816,6 +1816,7 @@ let keeper_message_visible_timeline ?messages (state : state) ~keeper_name =
           message.me_role <> Message_thinking
           || Masc_tui_types.reasoning_drawn state.msg_reasoning_visibility)
         |> Masc_tui_types.project_memory_history
+             ~ko:(state.ui_language = Lang_ko)
              ~visibility:state.msg_memory_visibility
         |> Masc_tui_types.project_gate_history
              ~ko:(state.ui_language = Lang_ko)

@@ -376,7 +376,13 @@ let render_verification_list (state : state) =
                  (if state.ui_language = Lang_ko then "  저장소에 없는 기록을 기다리는 중: %s%s"
                   else "  waiting on a record this store does not hold: %s%s")
                  (String.concat ", " named)
-                 (if rest > 0 then Printf.sprintf " (+%d)" rest else ""))));
+                 (* The ids past the first three: a cut-off count joined as
+                    a fact of the same rank, never "(+N)" (RFC
+                    tui-one-screen-grammar 6.3, 6.5). *)
+                 (if rest > 0 then
+                    " · " ^ Masc_tui_value.Count.more
+                      ~ko:(state.ui_language = Lang_ko) rest
+                  else ""))));
   (* The arm and the server's last refusal sit under the list, the same rows
      the schedule cancel carries them on. *)
   (match state.verification_verdict_armed with

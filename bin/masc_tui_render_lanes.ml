@@ -1664,21 +1664,26 @@ let lane_run_skill_summary = function
   | Tui_decode.Lane_run_skills_contract_unknown ->
     Theme.muted (), "SKILLS  unknown · this run kind has no typed Skill contract"
 
-let lane_run_gate_judgment_summary = function
+let lane_run_gate_judgment_summary ~ko = function
   | Tui_decode.Lane_run_not_gate_judgment -> None
   | Tui_decode.Lane_run_gate_judgment_pending ->
     Some
       ( Ansi.reset
       , Printf.sprintf
-          "%sJUDGMENT%s  %spending%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
+          (if ko then "%s판정%s  %s대기 중%s  ·  게이트 확정 아님"
+           else "%sJUDGMENT%s  %spending%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN")
           Ansi.bold Ansi.reset (Theme.info ()) Ansi.reset )
   | Tui_decode.Lane_run_gate_judgment_unavailable ->
-    Some (Theme.warn (), "JUDGMENT  원문 사용 불가 · 판정 여부를 확인할 수 없습니다")
+    Some
+      ( Theme.warn ()
+      , if ko then "판정  원문 사용 불가 · 판정 여부를 확인할 수 없습니다"
+        else "JUDGMENT  payload unavailable · judgment cannot be confirmed" )
   | Tui_decode.Lane_run_gate_judgment_not_reached ->
     Some
       ( Ansi.reset
       , Printf.sprintf
-          "%sJUDGMENT%s  %snone%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
+          (if ko then "%s판정%s  %s없음%s  ·  게이트 확정 아님"
+           else "%sJUDGMENT%s  %snone%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN")
           Ansi.bold Ansi.reset (Theme.warn ()) Ansi.reset )
   | Tui_decode.Lane_run_gate_advisory judgment ->
     let style =
@@ -1694,17 +1699,20 @@ let lane_run_gate_judgment_summary = function
     Some
       ( Ansi.reset
       , Printf.sprintf
-          "%sJUDGMENT%s  %sADVISORY %s%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN"
+          (if ko then "%s판정%s  %s자문 %s%s  ·  게이트 확정 아님"
+           else "%sJUDGMENT%s  %sADVISORY %s%s  ·  GATE RESOLUTION  NOT PROVEN BY THIS RUN")
           Ansi.bold Ansi.reset style label Ansi.reset )
 
 let lane_run_summary_lines ~cols ~language ~now
     (detail : Tui_decode.lane_run_detail) =
+  let ko = language = Lang_ko in
+  let say korean english = if ko then korean else english in
   let subject =
     match detail.lrd_run_kind, detail.lrd_subject_id with
     | Tui_decode.Lane_run_task_verification, Some subject ->
-      "  ·  TASK " ^ Terminal_text.single_line subject
+      say "  ·  작업 " "  ·  TASK " ^ Terminal_text.single_line subject
     | Tui_decode.Lane_run_goal_verification, Some subject ->
-      "  ·  GOAL " ^ Terminal_text.single_line subject
+      say "  ·  목표 " "  ·  GOAL " ^ Terminal_text.single_line subject
     | (Tui_decode.Lane_run_exact_output | Tui_decode.Lane_run_kind_other _), _
     | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
       None ->
@@ -1721,25 +1729,25 @@ let lane_run_summary_lines ~cols ~language ~now
   let answer_row =
     match detail.lrd_answer_source, detail.lrd_selected_slot with
     | Some (Tui_decode.Lane_run_answer_exact_attempt slot), _ ->
-      Ansi.reset, "응답: EXACT · " ^ Terminal_text.single_line slot
+      Ansi.reset, say "응답: EXACT · " "Answer: EXACT · " ^ Terminal_text.single_line slot
     | Some (Tui_decode.Lane_run_answer_cli_slot slot), _ ->
-      Ansi.reset, "응답: CLI · " ^ Terminal_text.single_line slot
+      Ansi.reset, say "응답: CLI · " "Answer: CLI · " ^ Terminal_text.single_line slot
     | Some (Tui_decode.Lane_run_answer_vendor_system_one { model; endpoint = _ }), _ ->
       ( Theme.warn ()
-      , "응답: VENDOR SYSTEM ONE · "
+      , say "응답: VENDOR SYSTEM ONE · " "Answer: VENDOR SYSTEM ONE · "
         ^ Terminal_text.single_line model
-        ^ " · NO EXACT-FLOW RECEIPT" )
+        ^ say " · EXACT 영수증 없음" " · NO EXACT-FLOW RECEIPT" )
     | None, Some slot ->
-      Ansi.reset, "슬롯: " ^ Terminal_text.single_line slot
+      Ansi.reset, say "슬롯: " "Slot: " ^ Terminal_text.single_line slot
     | None, None ->
-      Theme.recede (), "응답: 슬롯 미배정"
+      Theme.recede (), say "응답: 슬롯 미배정" "Answer: no slot assigned"
   in
   let failure_rows =
     match detail.lrd_failure with
     | None -> []
     | Some failure ->
       [ ( Theme.bad ()
-        , Printf.sprintf "오류: %s · %s"
+        , Printf.sprintf (if ko then "오류: %s · %s" else "Error: %s · %s")
             (Terminal_text.single_line failure.lrf_code)
             (Terminal_text.single_line failure.lrf_detail) ) ]
   in
@@ -1768,7 +1776,7 @@ let lane_run_summary_lines ~cols ~language ~now
   let contract_rows, full_width_tools =
     match detail.lrd_tool_evidence, detail.lrd_skill_evidence with
     | Tui_decode.Lane_run_no_tools_by_contract, Tui_decode.Lane_run_no_skills_by_contract ->
-      [ Theme.muted (), "도구/스킬: 미사용 (Exact-output 계약)" ], []
+      [ Theme.muted (), say "도구/스킬: 미사용 (Exact-output 계약)" "Tools/Skills: none (exact-output contract)" ], []
     | Tui_decode.Lane_run_tools_observed _,
       (Tui_decode.Lane_run_no_skills_by_contract | Tui_decode.Lane_run_skills_contract_unknown) ->
       [ skill_style, skills ], [ tool_style, "  " ^ tools ]
@@ -1778,16 +1786,19 @@ let lane_run_summary_lines ~cols ~language ~now
       [ tool_style, tools; skill_style, skills ], []
   in
   let gate_judgment =
-    match lane_run_gate_judgment_summary detail.lrd_gate_judgment with
+    match lane_run_gate_judgment_summary ~ko detail.lrd_gate_judgment with
     | None -> []
     | Some (style, line) -> [ style, "  " ^ line ]
   in
   let left_rows =
     [ ( verdict_and_status_style
-      , Printf.sprintf "판정: %s  ·  실행: %s" decision
+      , Printf.sprintf
+          (if ko then "판정: %s  ·  실행: %s" else "Decision: %s  ·  Status: %s")
+          decision
           (lane_run_status_text ~language detail.lrd_status) )
     ; ( Ansi.reset
-      , Printf.sprintf "레인: %s  ·  %s%s"
+      , Printf.sprintf
+          (if ko then "레인: %s  ·  %s%s" else "Lane: %s  ·  %s%s")
           (Lane_run_identity.to_id detail.lrd_lane)
           (Terminal_text.single_line
              (Tui_decode.lane_run_kind_label detail.lrd_run_kind))
@@ -1798,7 +1809,8 @@ let lane_run_summary_lines ~cols ~language ~now
   let right_rows =
     [ answer_row
     ; ( Ansi.dim
-      , Printf.sprintf "호출: %s  ·  시작 %s%s"
+      , Printf.sprintf
+          (if ko then "호출: %s  ·  시작 %s%s" else "Actor: %s  ·  started %s%s")
           (Terminal_text.single_line detail.lrd_actor)
           (Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second
              ~now detail.lrd_started_at)
@@ -1807,8 +1819,8 @@ let lane_run_summary_lines ~cols ~language ~now
     @ contract_rows
   in
   split_summary_columns ~titled:true ~cols
-    ~left_title:"판정 · 실행 상태" ~left_rows
-    ~right_title:"응답 모델 · 호출 주체" ~right_rows
+    ~left_title:(say "판정 · 실행 상태" "Decision · Status") ~left_rows
+    ~right_title:(say "응답 모델 · 호출 주체" "Answer Model · Actor") ~right_rows
   @ gate_judgment
   @ full_width_tools
 
@@ -1828,21 +1840,25 @@ let lane_run_panel_titles (detail : Tui_decode.lane_run_detail) =
     "INPUT · VERIFICATION REQUEST", "OUTPUT · VERDICT + TOOL EVIDENCE"
   | Tui_decode.Lane_run_kind_other _, _ -> "INPUT", "OUTPUT"
 
-let lane_run_payload_availability_lines ~width availability payload =
+let lane_run_payload_availability_lines ~ko ~width availability payload =
   match availability with
   | Masc.Exact_lane_run_registry.Available ->
     (match payload with
      | Some value -> lane_run_payload_lines ~width value
-     | None -> [ Theme.warn (), "원문 상태 불일치: 사용 가능한 원문 필드가 없습니다" ])
+     | None ->
+       [ Theme.warn ()
+       , if ko then "원문 상태 불일치: 사용 가능한 원문 필드가 없습니다"
+         else "Payload state mismatch: no readable payload field present" ])
   | Masc.Exact_lane_run_registry.Not_loaded ->
-    [ Theme.muted (), "원문을 불러오지 않았습니다" ]
+    [ Theme.muted (), if ko then "원문을 불러오지 않았습니다" else "Payload not loaded" ]
   | Masc.Exact_lane_run_registry.Unavailable error ->
-    let text = "원문 사용 불가: " ^ Masc.Exact_lane_run_registry.payload_read_error_to_string error in
+    let prefix = if ko then "원문 사용 불가: " else "Payload unavailable: " in
+    let text = prefix ^ Masc.Exact_lane_run_registry.payload_read_error_to_string error in
     Message_layout.wrap_words ~max_cells:(max 1 width) (Terminal_text.single_line text)
     |> List.map (fun line -> Theme.warn (), line)
 
-let lane_run_input_lines ~width (detail : Tui_decode.lane_run_detail) =
-  lane_run_payload_availability_lines ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
+let lane_run_input_lines ~ko ~width (detail : Tui_decode.lane_run_detail) =
+  lane_run_payload_availability_lines ~ko ~width detail.lrd_input_availability (Some detail.lrd_input_payload)
 
 let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_detail) =
   let say korean english = if ko then korean else english in
@@ -1950,7 +1966,7 @@ let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_deta
         if ko then under_way ^ " 실행 중 · 아직 출력이 기록되지 않았습니다"
         else under_way ^ " running · no output recorded yet" ]
   | Some availability, output ->
-    lane_run_payload_availability_lines ~width availability output)
+    lane_run_payload_availability_lines ~ko ~width availability output)
 
 module Continuity_report = Masc.Librarian_continuity_report
 
@@ -2212,8 +2228,8 @@ let inspection_panel_titles = function
   | Inspection_measurement (_, Measurement.Temporal _) ->
     "SOURCE · PREPARED REQUEST EVIDENCE", "TIMELINE · NO VERDICT"
 
-let inspection_input_lines ~width = function
-  | Inspection_lane detail -> lane_run_input_lines ~width detail
+let inspection_input_lines ~ko ~width = function
+  | Inspection_lane detail -> lane_run_input_lines ~ko ~width detail
   | Inspection_measurement (sha256, Measurement.Snapshot report) -> measurement_input_lines ~width ~sha256 report
   | Inspection_measurement (sha256, Measurement.Temporal report) -> temporal_input_lines ~width ~sha256 report
 
@@ -2226,7 +2242,7 @@ let lane_run_stacked_lines ~ko ~details ~width detail =
   let input_title, output_title = inspection_panel_titles detail in
   let indent lines = List.map (fun (style, line) -> style, "  " ^ line) lines in
   [ Ansi.bold, "  " ^ input_title ]
-  @ indent (inspection_input_lines ~width detail)
+  @ indent (inspection_input_lines ~ko ~width detail)
   @ [ Ansi.dim, ""; Ansi.bold, "  " ^ output_title ]
   @ indent (inspection_output_lines ~ko ~details ~width detail)
 
@@ -2361,7 +2377,7 @@ let render_lane_run_detail (state : state) ~run_id =
         let left_width = max 1 ((inner - divider_width) / 2) in
         let right_width = max 1 (inner - left_width - divider_width) in
         let input_lines =
-          inspection_input_lines ~width:left_width detail
+          inspection_input_lines ~ko:(state.ui_language = Lang_ko) ~width:left_width detail
         in
         let output_lines =
           inspection_output_lines ~ko:(state.ui_language = Lang_ko)

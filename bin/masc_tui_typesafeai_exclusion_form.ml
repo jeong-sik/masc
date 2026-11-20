@@ -56,16 +56,18 @@ let table = Runtime_toml_namespace.(key Typesafeai)
 let excluded_key = "excluded_keepers"
 let source_revision t = t.source_revision
 
-let describe_errors (errors : Runtime_toml.parse_error list) =
+let describe_errors ~ko (errors : Runtime_toml.parse_error list) =
   match errors with
-  | [] -> "읽는 쪽이 이유를 주지 않았어요"
+  | [] -> if ko then "읽는 쪽이 이유를 주지 않았어요" else "parser returned no detail"
   | first :: rest ->
     let head =
       Printf.sprintf "%s: %s" first.Runtime_toml.path first.Runtime_toml.message
     in
     (match rest with
      | [] -> head
-     | _ :: _ -> Printf.sprintf "%s (외 %d건)" head (List.length rest))
+     | _ :: _ ->
+         if ko then Printf.sprintf "%s (외 %d건)" head (List.length rest)
+         else Printf.sprintf "%s (+%d more)" head (List.length rest))
 ;;
 
 let without_repeats names =
@@ -75,10 +77,13 @@ let without_repeats names =
     names
 ;;
 
-let open_on ?source_revision ~keepers text =
+let open_on ?(ko = true) ?source_revision ~keepers text =
   match Runtime_toml.parse_string text with
   | Error errors ->
-    Error ("runtime.toml 을 읽지 못해서 폼을 열 수 없어요 · " ^ describe_errors errors)
+    Error
+      ((if ko then "runtime.toml 을 읽지 못해서 폼을 열 수 없어요 · "
+        else "Could not open form: failed to read runtime.toml · ")
+       ^ describe_errors ~ko errors)
   | Ok config ->
     let typesafeai = config.Runtime_schema.typesafeai in
     let held = without_repeats typesafeai.Runtime_schema.excluded_keepers in
@@ -177,8 +182,9 @@ let change t =
       })
 ;;
 
-let unchangeable =
-  "[typesafeai] 가 폼으로 고칠 수 있는 모양이 아니에요. e 로 파일을 직접 고쳐 주세요."
+let unchangeable ~ko =
+  if ko then "[typesafeai] 가 폼으로 고칠 수 있는 모양이 아니에요. e 로 파일을 직접 고쳐 주세요."
+  else "[typesafeai] cannot be edited by this form. Press e to edit runtime.toml directly."
 ;;
 
 (* Nobody picked removes the key: a file without it excludes nobody, which is
@@ -198,7 +204,7 @@ let write names text =
 (* The read-back asks [same_names], as the decision above does: the file may
    hold the chosen names in another order, and the gates read that as the same
    list. *)
-let text_on t =
+let text_on ?(ko = true) t =
   match change t with
   | Unchanged -> Ok t.text
   | Changed _ ->
@@ -209,8 +215,11 @@ let text_on t =
      | Ok config
        when same_names config.Runtime_schema.typesafeai.Runtime_schema.excluded_keepers picked
        -> Ok edited
-     | Ok _ -> refuse unchangeable
-     | Error errors -> refuse ("고친 결과를 읽지 못했어요 · " ^ describe_errors errors))
+     | Ok _ -> refuse (unchangeable ~ko)
+     | Error errors ->
+         refuse
+           ((if ko then "고친 결과를 읽지 못했어요 · " else "Could not parse edited config · ")
+            ^ describe_errors ~ko errors))
 ;;
 
 let intro ~ko =

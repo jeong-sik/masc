@@ -142,7 +142,7 @@ type skill_invocation =
   | Instruction_read
   | Composition_run of { tool_name : string }
 
-val skill_state_label : ?invocation:skill_invocation -> skill_state -> string
+val skill_state_label : ?ko:bool -> ?invocation:skill_invocation -> skill_state -> string
 (** The phrase a full skill row leads with, one per state. A skill's life is
     read (or, for a composition, run), delivered, used, and the phrase says
     how far it got; the last three states are not steps of that life and say
@@ -207,7 +207,7 @@ val skill_activity_of_tool : tool_activity -> skill_activity option
     Skill tool family. A returned call is [Skill_served_pending] until durable
     delivery evidence replaces the live row. *)
 
-val skill_rows : full:bool -> skill_activity list -> string list
+val skill_rows : ?ko:bool -> full:bool -> skill_activity list -> string list
 (** Markdown rows for one block of Skill invocations. Compact: one row per
     skill named in the block, in first-trigger order, with how many times
     it was triggered ([**msx-observe** ×7]) and, only when a trigger failed
@@ -615,6 +615,8 @@ val reply : t -> reply option
 
 val turn_status_text :
   reply:string -> turn_ref:string -> Masc.Keeper_turn_outcome.t -> string
+val turn_status_text_for :
+  ko:bool -> reply:string -> turn_ref:string -> Masc.Keeper_turn_outcome.t -> string
 (** The one line a turn's ending reads as: the reply itself for a
     [Visible_reply] with text, otherwise a sentence naming the outcome and the
     turn. The strict whole-body decode and the log projection both draw a

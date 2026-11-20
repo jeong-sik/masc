@@ -2485,6 +2485,26 @@ let turn_status_text ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
       Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
 ;;
 
+let turn_status_text_for ~ko ~reply ~turn_ref (outcome : Masc.Keeper_turn_outcome.t) =
+  match outcome with
+  | Masc.Keeper_turn_outcome.Visible_reply when String.trim reply <> "" -> reply
+  | Masc.Keeper_turn_outcome.Visible_reply ->
+      if ko then Printf.sprintf "텍스트 외 표시 결과로 턴 완료 (turn %s)" turn_ref
+      else Printf.sprintf "Turn completed with non-text visible content (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.Continuation_checkpoint ->
+      if ko then Printf.sprintf "이어서 진행할 체크포인트 기록됨 (turn %s)" turn_ref
+      else Printf.sprintf "Continuation checkpoint recorded (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.Terminal_effect_settled ->
+      if ko then Printf.sprintf "종료 도구로 응답 전달 완료 (turn %s)" turn_ref
+      else Printf.sprintf "Reply delivered by a terminal tool (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.Awaiting_gate_approval ->
+      if ko then Printf.sprintf "승인 후 턴을 이어서 진행합니다 (turn %s)" turn_ref
+      else Printf.sprintf "Turn continues after approval (turn %s)" turn_ref
+  | Masc.Keeper_turn_outcome.No_visible_reply ->
+      if ko then Printf.sprintf "표시할 응답 없이 턴 완료 (turn %s)" turn_ref
+      else Printf.sprintf "Turn completed without a visible reply (turn %s)" turn_ref
+;;
+
 let admission_prelude t =
   Option.bind t.initial_receipt (fun (at, interactive) ->
     let interactive_text = Option.bind interactive (fun (receipt : Projection.interactive_receipt) ->

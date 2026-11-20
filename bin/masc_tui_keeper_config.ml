@@ -1014,7 +1014,8 @@ let config_revision_value = function
    snapshot the editor opens rather than from the rows drawn here — two rows
    share one heading (sandbox / network) and one row is derived, so a count of
    rows would be a different number than the one [e] shows. *)
-let view_lines ~sanitize json =
+let view_lines ?(ko = true) ~sanitize json =
+  let say korean english = if ko then korean else english in
   let at path = member_path path json in
   let text value = sanitize (value ()) in
   let editable_value_row label value = editable_row label (text value) in
@@ -1029,67 +1030,75 @@ let view_lines ~sanitize json =
   let effective_prompt_summary, effective_prompt =
     system_prompt_lines ~sanitize (system_prompt_view_of_json (prompt "system_prompt"))
   in
-  [ Printf.sprintf " %s editable   %s read-only"
+  [ Printf.sprintf " %s %s   %s %s"
       (styled Masc_tui_theme.Sgr.cyan editable_glyph)
+      (say "편집 가능" "editable")
       (styled Masc_tui_theme.Sgr.dim read_only_glyph)
+      (say "읽기 전용" "read-only")
   ; ""
-  ; section "1. 편집 안내 (edit here)" "$EDITOR form"
-  ; "   e: TOML · E: JSON. Save and close the editor to apply; exit non-zero to cancel."
-  ; "   Only changed fields are sent. The server validates before persisting."
+  ; section (say "1. 편집 안내" "1. Editing guide") (say "$EDITOR 폼" "$EDITOR form")
+  ; say "   e: TOML · E: JSON. 저장하고 편집기를 닫으면 반영되고, 0이 아닌 종료 코드로 닫으면 취소됩니다."
+      "   e: TOML · E: JSON. Save and close the editor to apply; exit non-zero to cancel."
+  ; say "   바뀐 필드만 전송되며 서버가 저장 전에 검증합니다."
+      "   Only changed fields are sent. The server validates before persisting."
   ; ""
-  ; section "2. 적용 중인 설정 (effective settings)" (Printf.sprintf "e opens %d fields" editable_count)
-  ; editable_value_row "Runtime"
+  ; section (say "2. 적용 중인 설정" "2. Effective settings")
+      (if ko then Printf.sprintf "e: %d개 필드 편집" editable_count
+       else Printf.sprintf "e opens %d fields" editable_count)
+  ; editable_value_row (say "런타임" "Runtime")
       (fun () -> string_value (at [ "execution"; "selected_runtime_id" ]))
-  ; editable_value_row "Activation" (fun () -> string_value (at [ "activation_mode" ]))
-  ; editable_value_row "Context override"
+  ; editable_value_row (say "활성화" "Activation") (fun () -> string_value (at [ "activation_mode" ]))
+  ; editable_value_row (say "컨텍스트 재정의" "Context override")
       (fun () -> int_override_value (at [ "max_context_override" ]))
-  ; editable_value_row "Sandbox / network"
+  ; editable_value_row (say "샌드박스 / 네트워크" "Sandbox / network")
       (fun () ->
         Printf.sprintf "%s / %s"
           (string_value (at [ "sandbox_profile" ]))
           (string_value (at [ "network_mode" ])))
-  ; editable_value_row "Remote endpoint"
+  ; editable_value_row (say "원격 엔드포인트" "Remote endpoint")
       (fun () -> string_value (at [ "remote_endpoint" ]))
-  ; read_only_value_row "Registered SSH endpoints"
+  ; read_only_value_row (say "등록된 SSH 엔드포인트" "Registered SSH endpoints")
       (fun () -> match remote_endpoint_names json with
-         | Ok [] -> "none configured"
+         | Ok [] -> say "설정 없음" "none configured"
          | Ok names -> String.concat ", " names
          | Error detail -> detail)
-  ; editable_value_row "Mention targets"
+  ; editable_value_row (say "멘션 대상" "Mention targets")
       (fun () -> string_list_value (at [ "workspace"; "mention_targets" ]))
-  ; editable_value_row "Board interests"
+  ; editable_value_row (say "게시판 관심사" "Board interests")
       (fun () ->
         match at [ "workspace"; "board_interests" ] with
-        | Some (`List []) -> "Targetless discovery off"
+        | Some (`List []) -> say "대상 없는 탐색 꺼짐" "Targetless discovery off"
         | value -> string_list_value value)
-  ; editable_value_row "Skills"
+  ; editable_value_row (say "스킬" "Skills")
       (fun () -> skill_selection_value (at [ "skills"; "names" ]))
   ; ""
-  ; section "3. 파생 상태 · 리비전 (derived)" "read-only"
-  ; read_only_value_row "Config revision"
+  ; section (say "3. 파생 상태 · 리비전" "3. Derived state · revision") (say "읽기 전용" "read-only")
+  ; read_only_value_row (say "설정 리비전" "Config revision")
       (fun () -> config_revision_value (at [ "config_revision" ]))
-  ; read_only_value_row "Sandbox roots"
+  ; read_only_value_row (say "샌드박스 루트" "Sandbox roots")
       (fun () -> string_list_value (at [ "sandbox_roots" ]))
   ; ""
-  ; section "4. 설정 출처 · 우선순위 (provenance)" "read-only"
-  ; read_only_value_row "Live override"
+  ; section (say "4. 설정 출처 · 우선순위" "4. Provenance · precedence") (say "읽기 전용" "read-only")
+  ; read_only_value_row (say "라이브 재정의" "Live override")
       (fun () -> bool_value (source [ "has_live_override" ]))
-  ; read_only_value_row "Override fields"
+  ; read_only_value_row (say "재정의 필드" "Override fields")
       (fun () -> string_list_value (source [ "override_fields" ]))
-  ; read_only_value_row "Precedence"
+  ; read_only_value_row (say "우선순위" "Precedence")
       (fun () -> string_list_value (source [ "precedence" ]))
-  ; read_only_value_row "Default manifest"
+  ; read_only_value_row (say "기본 매니페스트" "Default manifest")
       (fun () -> string_value (source [ "default_manifest_path" ]))
-  ; read_only_value_row "Live metadata"
+  ; read_only_value_row (say "라이브 메타데이터" "Live metadata")
       (fun () -> string_value (source [ "live_meta_path" ]))
   ; ""
-  ; marked_section editable_glyph Masc_tui_theme.Sgr.cyan "5. 키퍼 지침 (instructions)"
-      (Printf.sprintf "editable \xc2\xb7 %s" (counted instructions))
+  ; marked_section editable_glyph Masc_tui_theme.Sgr.cyan
+      (say "5. 키퍼 지침" "5. Keeper instructions")
+      (Printf.sprintf "%s \xc2\xb7 %s" (say "편집 가능" "editable") (counted instructions))
   ]
   @ instructions
   @ [ ""
-    ; marked_section read_only_glyph Masc_tui_theme.Sgr.dim "6. 유효 시스템 프롬프트 (effective system prompt)"
-        (Printf.sprintf "read-only \xc2\xb7 %s" effective_prompt_summary)
+    ; marked_section read_only_glyph Masc_tui_theme.Sgr.dim
+        (say "6. 유효 시스템 프롬프트" "6. Effective system prompt")
+        (Printf.sprintf "%s \xc2\xb7 %s" (say "읽기 전용" "read-only") effective_prompt_summary)
     ]
   @ effective_prompt
   @ (match sources with
@@ -1100,13 +1109,19 @@ let view_lines ~sanitize json =
           and dropping the rest would quietly narrow what the operator can
           see. *)
        ""
-       :: marked_section read_only_glyph Masc_tui_theme.Sgr.dim "7. 원본 출처 JSON (sources)" "read-only \xc2\xb7 raw"
+       :: marked_section read_only_glyph Masc_tui_theme.Sgr.dim
+            (say "7. 원본 출처 JSON" "7. Raw sources JSON")
+            (say "읽기 전용 \xc2\xb7 원문" "read-only \xc2\xb7 raw")
        :: (Yojson.Safe.pretty_to_string value
            |> String.split_on_char '\n'
            |> List.map (fun line -> "   " ^ sanitize line)))
   @ [ ""
-    ; section "8. 필드 편집 규칙 (field rules)" ""
-    ; "   Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
-    ; "   Deleting a field means unchanged. JSON null or TOML reset_fields clears an override."
+    ; section (say "8. 필드 편집 규칙" "8. Field rules") ""
+    ; say
+        "   스킬: {} 전체 선택 · {\"names\":[]} 선택 안 함 · 이름 목록으로 정확히 지정."
+        "   Skills: {} selects all; {\"names\":[]} selects none; names select exactly."
+    ; say
+        "   필드를 지우면 변경 없음으로 처리됩니다. JSON null 또는 TOML reset_fields 로 덮어쓰기를 해제합니다."
+        "   Deleting a field means unchanged. JSON null or TOML reset_fields clears an override."
     ]
 ;;

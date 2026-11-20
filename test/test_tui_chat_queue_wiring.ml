@@ -2191,7 +2191,12 @@ let test_the_reply_row_defers_to_a_log_that_holds_the_turn () =
   state.msg_settled_logs <- [ cancelled.log ];
   check bool "finished without a recorded reply: the log does not stand for the turn"
     false (Tui_types.turn_log_holds_the_turn cancelled.log);
-  check (option (pair string string)) "a control outcome reads as its sentence"
+  check (option (pair string string)) "a control outcome reads as its sentence in default Korean"
+    (Some ("status", "이어서 진행할 체크포인트 기록됨 (turn trace-1#1)"))
+    (row cancelled.sent_request
+       (completed ~outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint ""));
+  state.ui_language <- Tui_types.Lang_en;
+  check (option (pair string string)) "a control outcome reads as its English sentence in EN mode"
     (Some ("status", "Continuation checkpoint recorded (turn trace-1#1)"))
     (row cancelled.sent_request
        (completed ~outcome:Masc.Keeper_turn_outcome.Continuation_checkpoint ""))

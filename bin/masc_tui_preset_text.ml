@@ -5,9 +5,10 @@
 
 module D = Masc.Tui_decode
 
-let counts (m : D.preset_manifest) =
+let counts ~ko (m : D.preset_manifest) =
   Printf.sprintf
-    "overrides %d · keepers %d · assignments %d · lanes %d"
+    (if ko then "프롬프트 %d · 키퍼 %d · 배정 %d · 레인 %d"
+     else "overrides %d · keepers %d · assignments %d · lanes %d")
     m.D.pm_override_count
     (List.length m.D.pm_keepers)
     m.D.pm_assignment_count
@@ -20,25 +21,31 @@ let counts (m : D.preset_manifest) =
 let failed_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
 let caution_mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
 
-let unreadable_only_line = "읽을 수 있는 프리셋이 없습니다 · 아래 줄이 이유입니다"
+let unreadable_only_line ~ko =
+  if ko then "읽을 수 있는 프리셋이 없습니다 · 아래 줄이 이유입니다"
+  else "No readable presets · see the reasons below"
+;;
 
-let listing_lines (snapshot : D.presets_snapshot) =
+let listing_lines ?(ko = false) (snapshot : D.presets_snapshot) =
   let presets =
     match snapshot.D.pss_presets with
     (* Presets whose manifest did not read are still presets; saying "no
        presets yet" beside their rows would send the operator to save one
        when the fix is to look at why the manifest is unreadable. *)
-    | [] when snapshot.D.pss_unreadable <> [] -> [ unreadable_only_line ]
+    | [] when snapshot.D.pss_unreadable <> [] -> [ unreadable_only_line ~ko ]
     | [] ->
-      [ "no presets yet · /preset save <name> [description] snapshots the live state" ]
+      [ (if ko then
+           "저장된 프리셋 없음 · /preset save <이름> [설명]으로 현재 상태를 저장합니다"
+         else
+           "no presets yet · /preset save <name> [description] snapshots the live state") ]
     | presets ->
-      Printf.sprintf "presets (%d):" (List.length presets)
+      Printf.sprintf (if ko then "프리셋 (%d):" else "presets (%d):") (List.length presets)
       :: List.map
            (fun (m : D.preset_manifest) ->
              let description =
                if String.equal m.D.pm_description "" then "" else " · " ^ m.D.pm_description
              in
-             Printf.sprintf "  %s  %s%s  (%s)" m.D.pm_name (counts m) description m.D.pm_created_at)
+             Printf.sprintf "  %s  %s%s  (%s)" m.D.pm_name (counts ~ko m) description m.D.pm_created_at)
            presets
   in
   let unreadable =
@@ -49,8 +56,11 @@ let listing_lines (snapshot : D.presets_snapshot) =
   presets @ unreadable
 ;;
 
-let saved_line (m : D.preset_manifest) =
-  Printf.sprintf "saved preset %s · %s" m.D.pm_name (counts m)
+let saved_line ?(ko = false) (m : D.preset_manifest) =
+  if ko then
+    Printf.sprintf "%s 프리셋 저장됨 · %s" m.D.pm_name (counts ~ko:true m)
+  else
+    Printf.sprintf "saved preset %s · %s" m.D.pm_name (counts ~ko:false m)
 ;;
 
 let text ~ko korean english = if ko then korean else english
@@ -168,7 +178,7 @@ let restore_lines ~ko report = texts (restore_rows ~ko report)
 let pane_empty_line ~ko (snapshot : D.presets_snapshot) =
   match snapshot.D.pss_presets, snapshot.D.pss_unreadable with
   | _ :: _, _ -> None
-  | [], _ :: _ -> Some (text ~ko unreadable_only_line "No readable presets · see the reasons below")
+  | [], _ :: _ -> Some (unreadable_only_line ~ko)
   | [], [] -> Some (text ~ko "프리셋 없음 · n:현재 상태 저장" "No presets · n:save current state")
 
 let pane_row ~ko ~max_cells (m : D.preset_manifest) =

@@ -1987,7 +1987,7 @@ let load_keeper_row ~(host : string) ~(port : int) ~expected_workspace ~keeper_n
             | exception Yojson.Safe.Util.Type_error (detail, _) ->
                 Error (Masc_tui_keeper_control.Roster_malformed detail)))
 
-let load_keeper_config_view ~(host : string) ~(port : int)
+let load_keeper_config_view ~(ko : bool) ~(host : string) ~(port : int)
     ~(keeper_name : string) : (string list, string) result =
   match
     Masc_tui_http.fetch_keeper_config_snapshot ~host ~port ~keeper_name
@@ -1999,7 +1999,7 @@ let load_keeper_config_view ~(host : string) ~(port : int)
        styling that says which rows [e] reaches, and a line-level sanitizer
        would escape it along with the data. *)
     Ok
-      (Masc_tui_keeper_config.view_lines
+      (Masc_tui_keeper_config.view_lines ~ko
          ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text json)
 
 let load_keeper_sandbox_view ~(host : string) ~(port : int)

@@ -1,10 +1,10 @@
 (** The chat-pane text for the [/preset] commands. Pure. *)
 
-val listing_lines : Masc.Tui_decode.presets_snapshot -> string list
+val listing_lines : ?ko:bool -> Masc.Tui_decode.presets_snapshot -> string list
 (** One header, one line per preset with its counts and description, then
     one [✕] line per unreadable directory; a single hint line when empty. *)
 
-val saved_line : Masc.Tui_decode.preset_manifest -> string
+val saved_line : ?ko:bool -> Masc.Tui_decode.preset_manifest -> string
 
 val pane_empty_line : ko:bool -> Masc.Tui_decode.presets_snapshot -> string option
 (** The Config pane's row in place of an empty list, naming the pane's save

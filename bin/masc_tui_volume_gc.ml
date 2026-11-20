@@ -244,21 +244,28 @@ let lines ~server_report t =
 (* Section 4's notice, which moves to two-language values with section 4 in
    the last layer of RFC tui-one-screen-grammar section 7.1. Until then it
    reads as it did, with the summary in Korean. *)
-let status_line t =
-  let summary_line report = Say.render Say.Ko (summary_line report) in
+let status_line ?(ko = true) t =
+  let lang = if ko then Say.Ko else Say.En in
+  let summary_line report = Say.render lang (summary_line report) in
   match t.shown with
-  | Nothing_asked -> "volume GC: not asked"
+  | Nothing_asked ->
+      if ko then "볼륨 정리: 조회 전" else "volume GC: not asked"
   | Answered (Report report) ->
     (match t.phase with
      | Armed names ->
-       Printf.sprintf
-         "volume GC: %s · %s 를 한 번 더 누르면 %s 회수"
-         (summary_line report)
-         key
-         (names_text names)
-     | Idle | Reporting | Reclaiming -> "volume GC: " ^ summary_line report)
-  | Answered (Refused detail) -> "volume GC refused: " ^ single_line detail
-  | Answered (Unreadable detail) -> "volume GC answer unreadable: " ^ single_line detail
-  | Unanswered (_, detail) -> "volume GC: no answer: " ^ single_line detail
+       if ko then
+         Printf.sprintf "볼륨 정리: %s · %s 를 한 번 더 누르면 %s 회수"
+           (summary_line report) key (names_text names)
+       else
+         Printf.sprintf "volume GC: %s · press %s again to reclaim %s"
+           (summary_line report) key (names_text names)
+     | Idle | Reporting | Reclaiming ->
+       (if ko then "볼륨 정리: " else "volume GC: ") ^ summary_line report)
+  | Answered (Refused detail) ->
+      (if ko then "볼륨 정리 거절: " else "volume GC refused: ") ^ single_line detail
+  | Answered (Unreadable detail) ->
+      (if ko then "볼륨 정리 응답 읽기 불가: " else "volume GC answer unreadable: ") ^ single_line detail
+  | Unanswered (_, detail) ->
+      (if ko then "볼륨 정리: 응답 없음: " else "volume GC: no answer: ") ^ single_line detail
   | Kept_back (_, notice) -> notice
 ;;

@@ -91,6 +91,7 @@ type t = {
   mutable activity_started_at : float option;
   mutable failed_context_models : string list;
   mutable batch_cancelled : bool;
+  mutable ko : bool;
 }
 type authentication = Authenticated | Login_completed | Credential_captured
 type event = Started of string * string option | Output of string | Screen of string | Input_ready
@@ -114,7 +115,7 @@ type action = Inventory | Activate_saved of saved | Refresh_saved of saved | Ref
       (** Read the list again, on [client]'s accounts, with this notice. *)
   | Refresh_list of list_view
       (** Read the list again and reopen it on this view. *)
-val create : string -> t
+val create : ?ko:bool -> string -> t
 val text_input_active : t -> bool
 (** Whether the current phase accepts typed text (login code or documented
     context entry). List and model-selection phases read keys as commands. *)
@@ -132,7 +133,7 @@ val paste : t -> string -> unit
     [account_groups] rows against [providers], keeping only complete rows whose
     provider members are configured, same-client, and used by exactly one group.
     Incomplete or overlapping rows collapse to the inventory refresh error. *)
-val groups_of_inventory : provider list -> Yojson.Safe.t -> (account_group list, string) result
+val groups_of_inventory : ?ko:bool -> provider list -> Yojson.Safe.t -> (account_group list, string) result
 
 (** Preserve printable UTF-8 and spaces; remove at most one trailing CR, LF or
     CRLF. Reject other multiline/control input without changing the draft. *)
@@ -159,7 +160,7 @@ val removal_preview : t -> provider -> refused:string option -> Yojson.Safe.t ->
 (** The setup API's removal preview for [provider]: the changes, or why it
     cannot be removed. [Error] when the answer is for another provider or does
     not read. *)
-val removed_notice : provider -> string option -> string
+val removed_notice : ?ko:bool -> provider -> string option -> string
 (** What the list says once the selected provider connection is removed, with the login store left
     on disk. *)
 val save_failed : t -> string -> unit

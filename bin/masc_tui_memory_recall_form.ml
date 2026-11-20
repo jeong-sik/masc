@@ -82,16 +82,18 @@ let scope_all = "all"
 let scope_listed = "listed"
 let source_revision t = t.source_revision
 
-let describe_errors (errors : Runtime_toml.parse_error list) =
+let describe_errors ~ko (errors : Runtime_toml.parse_error list) =
   match errors with
-  | [] -> "읽는 쪽이 이유를 주지 않았어요"
+  | [] -> if ko then "읽는 쪽이 이유를 주지 않았어요" else "parser returned no detail"
   | first :: rest ->
     let head =
       Printf.sprintf "%s: %s" first.Runtime_toml.path first.Runtime_toml.message
     in
     (match rest with
      | [] -> head
-     | _ :: _ -> Printf.sprintf "%s (외 %d건)" head (List.length rest))
+     | _ :: _ ->
+         if ko then Printf.sprintf "%s (외 %d건)" head (List.length rest)
+         else Printf.sprintf "%s (+%d more)" head (List.length rest))
 ;;
 
 let without_repeats names =
@@ -112,11 +114,14 @@ let held_names (declared : Runtime_toml.memory_recall_declaration) =
 (* What the three keys come to. [Runtime_toml.parse_string] refuses a switch
    that is on without a scope, so the last case is not met after it succeeded;
    it is an answer rather than a guess. *)
-let effective (declared : Runtime_toml.memory_recall_declaration) =
+let effective ~ko (declared : Runtime_toml.memory_recall_declaration) =
   match declared.Runtime_toml.switch, declared.Runtime_toml.scope with
   | false, (Some _ | None) -> Ok Runtime_schema.Memory_recall_off
   | true, Some scope -> Ok (Runtime_schema.Memory_recall_on scope)
-  | true, None -> Error "memory_recall = true 인데 memory_recall_scope 가 없어요"
+  | true, None ->
+      Error
+        (if ko then "memory_recall = true 인데 memory_recall_scope 가 없어요"
+         else "memory_recall = true without memory_recall_scope")
 ;;
 
 let mode_of_recall = function
@@ -125,9 +130,13 @@ let mode_of_recall = function
   | Runtime_schema.Memory_recall_on (Runtime_schema.Listed_keepers _) -> Listed
 ;;
 
-let open_on ?source_revision ~keepers text =
+let open_on ?(ko = true) ?source_revision ~keepers text =
+  let open_error_prefix =
+    if ko then "runtime.toml 을 읽지 못해서 폼을 열 수 없어요 · "
+    else "Could not open form: failed to read runtime.toml · "
+  in
   let cannot_open errors =
-    Error ("runtime.toml 을 읽지 못해서 폼을 열 수 없어요 · " ^ describe_errors errors)
+    Error (open_error_prefix ^ describe_errors ~ko errors)
   in
   match Runtime_toml.parse_string text with
   | Error errors -> cannot_open errors
@@ -135,8 +144,8 @@ let open_on ?source_revision ~keepers text =
     (match Runtime_toml.memory_recall_declaration_of_string text with
      | Error errors -> cannot_open errors
      | Ok declared ->
-       (match effective declared with
-        | Error reason -> Error ("runtime.toml 을 읽지 못해서 폼을 열 수 없어요 · " ^ reason)
+       (match effective ~ko declared with
+        | Error reason -> Error (open_error_prefix ^ reason)
         | Ok initial ->
           let excluded_keepers =
             config.Runtime_schema.typesafeai.Runtime_schema.excluded_keepers
@@ -256,10 +265,13 @@ let key t key =
 
 let refused t reason = { t with error = Some reason }
 
-let nobody_picked = "고른 키퍼가 없어요. 한 명 이상 고르거나 범위를 바꿔 주세요."
+let nobody_picked ~ko =
+  if ko then "고른 키퍼가 없어요. 한 명 이상 고르거나 범위를 바꿔 주세요."
+  else "No Keeper selected. Choose at least one or change the scope."
 
-let unchangeable =
-  "[typesafeai] 가 폼으로 고칠 수 있는 모양이 아니에요. e 로 파일을 직접 고쳐 주세요."
+let unchangeable ~ko =
+  if ko then "[typesafeai] 가 폼으로 고칠 수 있는 모양이 아니에요. e 로 파일을 직접 고쳐 주세요."
+  else "[typesafeai] cannot be edited by this form. Press e to edit runtime.toml directly."
 ;;
 
 (* What the form stands for, or [None] for [Listed] with nobody picked, which
@@ -374,10 +386,10 @@ let write ~(declared : Runtime_toml.memory_recall_declaration) chosen text =
 (* The read-back asks [same_choice], as the decision above does: a list the
    file keeps may name the choice's keepers in another order, or twice, and
    the gate reads that as the same list. *)
-let text_on t =
+let text_on ?(ko = true) t =
   let refuse reason = Error { t with error = Some reason } in
   match chosen t with
-  | None -> refuse nobody_picked
+  | None -> refuse (nobody_picked ~ko)
   | Some chosen when same_choice chosen t.initial -> Ok t.text
   | Some chosen ->
     let edited = write ~declared:t.declared chosen t.text in
@@ -386,9 +398,11 @@ let text_on t =
        when same_choice
               config.Runtime_schema.typesafeai.Runtime_schema.memory_recall
               chosen -> Ok edited
-     | Ok _ -> refuse unchangeable
+     | Ok _ -> refuse (unchangeable ~ko)
      | Error errors ->
-       refuse ("고친 결과를 읽지 못했어요 · " ^ describe_errors errors))
+       refuse
+         ((if ko then "고친 결과를 읽지 못했어요 · " else "Could not parse edited config · ")
+          ^ describe_errors ~ko errors))
 ;;
 
 let intro ~ko =

@@ -11,7 +11,7 @@ type target =
   ; operation_id : Keeper_operation_id.t option
   }
 
-let target ~journal ~execution_id ~reply_turn_ref =
+let target_for ~ko ~journal ~execution_id ~reply_turn_ref =
   let open Result.Syntax in
   let* turn_ref, operation_id = match Log.source journal with
     | Log.Autonomous_turn turn_ref -> Ok (turn_ref, None)
@@ -24,16 +24,25 @@ let target ~journal ~execution_id ~reply_turn_ref =
       let decode = function
         | None -> Ok None
         | Some value -> (match Ids.Turn_ref.of_string value with
-          | Some turn_ref -> Ok (Some turn_ref) | None -> Error "기록된 턴 연결을 읽을 수 없음") in
+          | Some turn_ref -> Ok (Some turn_ref)
+          | None ->
+              Error (if ko then "기록된 턴 연결을 읽을 수 없음" else "Recorded turn link cannot be read")) in
       let* reply = decode reply_turn_ref in
       let* terminal = decode terminal_turn_ref in
       let* turn_ref = match reply, terminal with
-        | None, None -> Error "원래 턴 연결이 아직 확인되지 않음"
+        | None, None ->
+            Error (if ko then "원래 턴 연결이 아직 확인되지 않음" else "Original turn link is not confirmed yet")
         | Some turn_ref, None | None, Some turn_ref -> Ok turn_ref
         | Some reply, Some terminal when Ids.Turn_ref.equal reply terminal -> Ok reply
-        | Some _, Some _ -> Error "응답과 operation의 원래 턴 연결이 일치하지 않음" in
+        | Some _, Some _ ->
+            Error (if ko then "응답과 operation의 원래 턴 연결이 일치하지 않음"
+                   else "Reply and operation original turn links do not match") in
       Ok (turn_ref, Some operation_id) in
   Ok {journal; revision=Log.revision journal; keeper_name=Log.keeper_name journal; turn_ref; operation_id}
+;;
+
+let target ~journal ~execution_id ~reply_turn_ref =
+  target_for ~ko:true ~journal ~execution_id ~reply_turn_ref
 ;;
 
 let equal a b =

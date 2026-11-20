@@ -182,7 +182,7 @@ let compact ~width row =
   let days = List.length row.samples in
   width > 0 && (days = 0 || width < axis_cells + (days * 2))
 
-let plot ~width trend row =
+let plot ?(ko = false) ~width trend row =
   let days = List.length row.samples in
   if width <= 0 then []
   else if compact ~width row then
@@ -191,7 +191,10 @@ let plot ~width trend row =
       | Some {report = Measured (value, Some share); _} -> mark value share
       | Some {report = Measured (value, None); _} -> no_share_mark value
       | Some {report = Reported_no_windows; _} -> empty_report_mark) row.samples |> String.concat "" in
-    Masc_tui_message_layout.wrap_words ~max_cells:width (marks ^ " (daily levels; · no report)")
+    let caption =
+      if ko then " (일별 수준 · · 보고 없음)" else " (daily levels; · no report)"
+    in
+    Masc_tui_message_layout.wrap_words ~max_cells:width (marks ^ caption)
   else
     (* A day takes an equal share of the box, as btop's graphs fill theirs:
        a fortnight in a 100-cell box draws six cells a day, not four with
@@ -291,36 +294,59 @@ let plot ~width trend row =
        tui-one-screen-grammar section 7.3). The trend does not know whether
        the window refuses calls, so it does not borrow the limit ramp. *)
     let tint = Masc_tui_ansi.Theme.series_tint Masc_tui_theme.Usage in
+    let recede = Masc_tui_ansi.Theme.recede () in
+    let bad_style = Masc_tui_ansi.Theme.bad () in
+    let warn_style = Masc_tui_ansi.Theme.warn () in
+    let info_style = Masc_tui_ansi.Theme.info () in
+    let reset = Masc_tui_theme.Sgr.reset in
+    let wrap_style s text =
+      if String.equal s "" then text else s ^ text ^ reset
+    in
     let bands =
       List.init plot_height (fun index ->
           let band = plot_height - index - 1 in
           let buf = Buffer.create (cells * 3) in
           let style = tint (float_of_int (band + 1) /. float_of_int plot_height) in
-          let opened = ref false in
+          let open_style = ref "" in
           for cx = 0 to cells - 1 do
-            let marked = (index = 0 && List.mem cx above_cells) || grid.(index).(cx) <> 0 in
-            if marked && not !opened && not (String.equal style "") then begin
-              Buffer.add_string buf style;
-              opened := true
+            let is_above = index = 0 && List.mem cx above_cells in
+            let cell_style =
+              if is_above then bad_style
+              else if grid.(index).(cx) <> 0 then style
+              else !open_style
+            in
+            if not (String.equal cell_style !open_style) then begin
+              Buffer.add_string buf
+                (if String.equal cell_style "" then reset else cell_style);
+              open_style := cell_style
             end;
-            if index = 0 && List.mem cx above_cells then Buffer.add_string buf "↑"
+            if is_above then Buffer.add_string buf "↑"
             else
               Buffer.add_string buf
                 (Masc_tui_braille.braille_cell ~mask:grid.(index).(cx))
           done;
-          if !opened then Buffer.add_string buf Masc_tui_theme.Sgr.reset;
-          Printf.sprintf "%3d%% │ %s" ((band + 1) * 100 / plot_height)
-            (Buffer.contents buf))
+          if not (String.equal !open_style "") then Buffer.add_string buf reset;
+          wrap_style recede
+            (Printf.sprintf "%3d%% │ " ((band + 1) * 100 / plot_height))
+          ^ Buffer.contents buf)
     in
-    let baseline = "  0% └ " ^ (List.map (function
-      | None -> pad no_report_mark
-      | Some {report = Measured (_, Some share); _} when share < 0.0 -> pad "↓"
-      | Some {report = Measured (value, Some _); _} when reported_zero value -> pad "0"
-      | Some {report = Measured (value, None); _} -> pad (no_share_mark value)
-      | Some {report = Reported_no_windows; _} -> pad empty_report_mark
-      | Some {report = Measured (_, Some _); _} -> pad "─") row.samples |> String.concat "") in
+    let baseline =
+      wrap_style recede "  0% └ "
+      ^ (List.map (function
+           | None -> wrap_style recede (pad no_report_mark)
+           | Some {report = Measured (_, Some share); _} when share < 0.0 ->
+               wrap_style warn_style (pad "↓")
+           | Some {report = Measured (value, Some _); _} when reported_zero value ->
+               pad "0"
+           | Some {report = Measured (value, None); _} ->
+               wrap_style info_style (pad (no_share_mark value))
+           | Some {report = Reported_no_windows; _} ->
+               wrap_style recede (pad empty_report_mark)
+           | Some {report = Measured (_, Some _); _} ->
+               wrap_style recede (pad "─")) row.samples |> String.concat "")
+    in
     let dates = List.map (fun (day, _) ->
       Masc_tui_value.Utc_day.day_of_month_text day ^ String.make (max 0 (step - 2)) ' ')
       (dated_samples trend row)
       |> String.concat "" in
-    bands @ [baseline; " UTC   " ^ dates]
+    bands @ [baseline; wrap_style recede (" UTC   " ^ dates)]

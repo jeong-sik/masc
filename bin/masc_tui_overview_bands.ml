@@ -166,13 +166,18 @@ let render_telemetry ~ko ~width ~height snap =
                 p95 stalls
             ^ Ansi.reset
         | Some p95, _ ->
-            Theme.recede () ^ "p95 " ^ Ansi.reset ^ Printf.sprintf "%.2fms" p95
+            let p95_style =
+              if p95 >= 100. then Theme.warn ()
+              else Theme.series_tint Palette.Latency 1.0
+            in
+            Theme.recede () ^ "p95 " ^ Ansi.reset
+            ^ p95_style ^ Printf.sprintf "%.2fms" p95 ^ Ansi.reset
         | None, _ ->
             Theme.recede () ^ "p95 " ^ Value.Unknown.(glyph Unread) ^ Ansi.reset
       in
       match snap.tool_calls_summary with
       | Some summary when not (String.equal summary "") ->
-          sched_part ^ Theme.recede () ^ " · " ^ summary ^ Ansi.reset
+          sched_part ^ Theme.recede () ^ " · " ^ Ansi.reset ^ summary
       | _ -> sched_part
     in
     [ join_columns ~cells fleet_meter heap_line

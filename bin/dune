@@ -346,7 +346,7 @@
  (name masc_tui_chart)
  (wrapped false)
  (modules masc_tui_chart)
- (libraries masc_tui_theme masc_tui_message_layout zarith))
+ (libraries masc_tui_theme masc_tui_terminal_palette masc_tui_message_layout zarith))
 
 ;; Braille cells and graphs (RFC tui-one-screen-grammar 5.6), apart from the
 ;; chart's bars so the graph rules and their sample type stand on their own.

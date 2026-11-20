@@ -217,17 +217,41 @@ let note_lines ?(ko = false) ~days note =
   let title = if ko then "도구 호출" else "Tool calls" in
   [ Printf.sprintf " %s (%s) · %s" title span note ]
 
+let wrap_style style text =
+  if String.equal style "" then text else style ^ text ^ Ansi.reset
+
 let totals_line ~ko ~calls ~failures ~deferred =
-  if ko then
-    Printf.sprintf " 호출 %s건 · 실패 %s건 (%s)%s" (grouped_digits calls)
-      (grouped_digits failures)
-      (percent_text ~failures ~calls)
-      (if deferred = 0 then "" else Printf.sprintf " · 보류 %s건" (grouped_digits deferred))
-  else
-    Printf.sprintf " %s calls · %s failed (%s)%s" (grouped_digits calls)
-      (grouped_digits failures)
-      (percent_text ~failures ~calls)
-      (if deferred = 0 then "" else Printf.sprintf " · %s deferred" (grouped_digits deferred))
+  let sep = wrap_style (Theme.recede ()) " · " in
+  let fail_style =
+    if failures > 0 && failures = calls then Theme.bad ()
+    else if failures > 0 then Theme.warn ()
+    else Theme.recede ()
+  in
+  let fail_part =
+    let body =
+      if ko then
+        Printf.sprintf "실패 %s건 (%s)" (grouped_digits failures)
+          (percent_text ~failures ~calls)
+      else
+        Printf.sprintf "%s failed (%s)" (grouped_digits failures)
+          (percent_text ~failures ~calls)
+    in
+    wrap_style fail_style body
+  in
+  let deferred_part =
+    if deferred = 0 then ""
+    else
+      let body =
+        if ko then Printf.sprintf "보류 %s건" (grouped_digits deferred)
+        else Printf.sprintf "%s deferred" (grouped_digits deferred)
+      in
+      sep ^ wrap_style (Theme.warn ()) body
+  in
+  let calls_part =
+    if ko then Printf.sprintf " 호출 %s건" (grouped_digits calls)
+    else Printf.sprintf " %s calls" (grouped_digits calls)
+  in
+  calls_part ^ sep ^ fail_part ^ deferred_part
 
 (* One glyph per bucket, scaled to the row's own largest value. A bucket in
    which every call failed is red top to bottom, so an outage reads as one
@@ -329,7 +353,7 @@ let ruler ~span ~series_width buckets =
   | (first : Series.tool_series_bucket) :: _, (last : Series.tool_series_bucket) :: _ ->
       let oldest = time_text series_width first.Series.tsb_start in
       let newest = time_text series_width last.Series.tsb_start in
-      let labels = String.length oldest + String.length newest + 2 in
+      let labels = Layout.display_width oldest + Layout.display_width newest + 2 in
       if span < labels + 2 then []
       else
         [ margin
@@ -517,13 +541,18 @@ let reading_of series_width (bucket : Series.tool_series_bucket) =
 
 let reading_cells ~ko ~series_width ~widths ~with_rate reading =
   let time_width, calls_width, failed_width, rate_width, p95_width = widths in
-  let idle, every_failed =
+  let idle, every_failed, any_failed =
     match reading.activity with
-    | Series.Series_idle -> (true, false)
-    | Series.Series_active active -> (false, every_call_failed active)
+    | Series.Series_idle -> (true, false, false)
+    | Series.Series_active active ->
+        (false, every_call_failed active, active.Series.tsc_failures > 0)
   in
   let dim = if idle then Theme.recede () else "" in
-  let failure_style = if every_failed then Theme.bad () else dim in
+  let failure_style =
+    if every_failed then Theme.bad ()
+    else if any_failed then Theme.warn ()
+    else Theme.recede ()
+  in
   [ Table.cell ~style:dim ~header:(time_header ~ko series_width) ~width:time_width
       reading.time;
     Table.cell ~style:dim ~align:Table.Right ~header:(if ko then "호출" else "CALLS") ~width:calls_width
@@ -709,15 +738,32 @@ let summary_line ?(ko = false) ~cells t =
     ^ Layout.truncate_end cells (label ^ summary_gap ^ (if ko then "호출 없음" else "no calls"))
     ^ Ansi.reset
   else
-    let figures =
+    let figures_plain =
       if ko then
         Printf.sprintf "%s건 · 실패 %s" (grouped_digits calls) (grouped_digits failures)
       else
         Printf.sprintf "%s · %s failed" (grouped_digits calls) (grouped_digits failures)
     in
+    let fail_style =
+      if failures > 0 && failures = calls then Theme.bad ()
+      else if failures > 0 then Theme.warn ()
+      else Theme.recede ()
+    in
+    let figures_styled =
+      let calls_str =
+        if ko then Printf.sprintf "%s건" (grouped_digits calls)
+        else grouped_digits calls
+      in
+      let fail_str =
+        if ko then Printf.sprintf "실패 %s" (grouped_digits failures)
+        else Printf.sprintf "%s failed" (grouped_digits failures)
+      in
+      let fail_colored = wrap_style fail_style fail_str in
+      calls_str ^ wrap_style (Theme.recede ()) " · " ^ fail_colored
+    in
     let without_chart =
       Layout.display_width label + String.length summary_gap
-      + Layout.display_width figures
+      + Layout.display_width figures_plain
     in
     let chart_room = List.length buckets + String.length summary_gap in
     if without_chart + chart_room <= cells then
@@ -726,13 +772,18 @@ let summary_line ?(ko = false) ~cells t =
       in
       Theme.recede () ^ label ^ Ansi.reset ^ summary_gap
       ^ draw_cells ~stretch:1 ~gap:0 (row_of columns 0)
-      ^ summary_gap ^ figures
+      ^ summary_gap ^ figures_styled
     else if without_chart <= cells then
-      Theme.recede () ^ label ^ Ansi.reset ^ summary_gap ^ figures
+      Theme.recede () ^ label ^ Ansi.reset ^ summary_gap ^ figures_styled
     else
-      Theme.recede ()
-      ^ Layout.truncate_end cells (label ^ summary_gap ^ figures)
-      ^ Ansi.reset
+      let label_w = Layout.display_width label + String.length summary_gap in
+      if label_w < cells then
+        Theme.recede () ^ label ^ Ansi.reset ^ summary_gap
+        ^ Layout.truncate_end (cells - label_w) figures_plain
+      else
+        Theme.recede ()
+        ^ Layout.truncate_end cells (label ^ summary_gap ^ figures_plain)
+        ^ Ansi.reset
 
 let summary_note ?(ko = false) ~cells window note =
   Theme.recede ()

@@ -24671,10 +24671,8 @@ let keeper_log_diagnostics state =
         | Storage_error _ -> Keeper_log_failure
         | Remote_workspace | Workspace_unconfirmed -> Keeper_log_notice in
       [tone, Metrics_tail.error_to_string error] in
-  let reading = Option.exists (fun request ->
-    request.klr_reading == state.workspace_read_authority
-    && Masc_tui_fetched.is_current ~equal:keeper_log_equal_key state.keeper_logs request.klr_request)
-    state.keeper_log_read in
+  (* Only a first read has words here. A read over a held snapshot is the
+     reading slot's to say (RFC tui-one-screen-grammar section 8). *)
   match keeper_logs_view state with
   | Masc_tui_fetched.Absent ->
       [Keeper_log_notice, say "키퍼 메트릭을 아직 조회하지 않았습니다." "Keeper metrics have not been read."]
@@ -24684,14 +24682,9 @@ let keeper_log_diagnostics state =
         | Workspace_identity_unread | Workspace_identity_mismatch _ -> Keeper_log_notice
         | Workspace_identity_match | Workspace_identity_match_unconfirmed _ -> Keeper_log_failure in
       [tone, detail]
-  | Ready snapshot ->
-      (if reading then
-         [Keeper_log_notice, say "메트릭 새로고침 중 · 마지막 관측 표시 중" "Refreshing metrics; showing the last observation."]
-       else [])
-      @ snapshot_diagnostics snapshot
+  | Ready snapshot -> snapshot_diagnostics snapshot
   | Stale (snapshot, detail) ->
       [Keeper_log_failure, say "마지막 관측 메트릭 · " "Last observed metrics · " ^ detail]
-      @ (if reading then [Keeper_log_notice, say "새로고침 진행 중" "Refresh in progress."] else [])
       @ snapshot_diagnostics snapshot
 
 (* Count after wrapping; drawing and paging share rows and source diagnostics. *)
@@ -24706,9 +24699,7 @@ let keeper_log_rows (state : state) ~cols =
       |> List.map (fun line -> tone, "  " ^ line) in
     let render_reading reading read_at =
       let stamp = Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_minute ~now:(Unix.gettimeofday ()) read_at in
-      let refresh = if Masc_tui_fetched.in_flight state.keeper_execute_output
-        then say " · 새로고침 중" " · refreshing" else "" in
-      let observed = text_rows Keeper_log_notice (say "Execute 출력 · 관측 " "Execute output · observed " ^ stamp ^ refresh) in
+      let observed = text_rows Keeper_log_notice (say "Execute 출력 · 관측 " "Execute output · observed " ^ stamp) in
       match reading with
       | Keeper_execute_none -> observed @ text_rows Keeper_log_notice
           (say "이 서버 프로세스에서 관측된 Execute 출력이 없습니다." "No Execute output observed in this server process.")

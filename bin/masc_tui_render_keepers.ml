@@ -649,7 +649,9 @@ let format_attempt_node (a : Masc_tui_keeper_trail.attempt) =
   let mark = Masc_tui_keeper_mark.attempt_glyph in
   mark ^ " " ^ Terminal_text.single_line a.runtime_id ^ fault_clause
 
-let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt list) =
+(* Older attempts the chain leaves out lead it as a cut-off count, never
+   "+N" (RFC tui-one-screen-grammar 6.3). *)
+let render_attempt_chain ~ko ~max_cells (attempts : Masc_tui_keeper_trail.attempt list) =
   match attempts with
   | [] -> None
   | _ ->
@@ -664,7 +666,8 @@ let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt li
             let cost = if acc = [] then node_cells else node_cells + sep_len in
             let omit_cost =
               if rest <> [] then
-                Message_layout.display_width (Printf.sprintf "+%d › " (List.length rest))
+                Message_layout.display_width
+                  (Masc_tui_value.Count.more ~ko (List.length rest) ^ sep)
               else 0
             in
             if remaining_cells >= cost + omit_cost then
@@ -676,7 +679,7 @@ let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt li
       if fitted = [] then None
       else
         let prefix =
-          if omitted_count > 0 then Printf.sprintf "+%d%s" omitted_count sep else ""
+          if omitted_count > 0 then Masc_tui_value.Count.more ~ko omitted_count ^ sep else ""
         in
         let chain = prefix ^ String.concat sep fitted in
         Some (Theme.warn () ^ chain ^ Ansi.reset)
@@ -732,7 +735,7 @@ let keeper_secondary_row_content ?schedules ?tasks ~ko ?now ?(cells = []) ~inner
   let left_text =
     let beside_detail =
       if has_detail then
-        render_attempt_chain
+        render_attempt_chain ~ko
           ~max_cells:(detail_space - sep_cells - detail_floor_cells)
           attempts
       else None
@@ -744,7 +747,7 @@ let keeper_secondary_row_content ?schedules ?tasks ~ko ?now ?(cells = []) ~inner
         ^ fit_width detail (detail_space - chain_cells - sep_cells)
         ^ Ansi.reset
     | None -> (
-        match render_attempt_chain ~max_cells:detail_space attempts with
+        match render_attempt_chain ~ko ~max_cells:detail_space attempts with
         | Some chain -> fit_width chain detail_space
         | None -> Theme.recede () ^ fit_width detail detail_space ^ Ansi.reset)
   in
@@ -1966,7 +1969,7 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
          (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset)
          (keeper_row_trail_sentence ~ko ~age:(keeper_trail_age ~now) row))
     @ Option.to_list
-        (render_attempt_chain
+        (render_attempt_chain ~ko
            ~max_cells:(max 0 (inner - story_label_cells))
            (Masc_tui_keeper_trail.attempts_of_runtime runtime))
   in

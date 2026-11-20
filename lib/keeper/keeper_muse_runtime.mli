@@ -27,26 +27,6 @@ val resolve_native_posture :
     native read; native none is refused, and native full requires the Keeper's
     explicit full-access mode. *)
 
-type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-      (** [Some] names exact receipt snapshots of a durably settled candidate,
-          not acceptance. [None] carries no authority on failed/prevalidation
-          results. The caller accepts first, then settles with its final stop reason. *)
-  ; effect_disposition : Keeper_provider_attempt_effect.t
-  }
-(** One Muse Code candidate result plus its typed effect observation.
-    Validation, bridge start, process spawn, the session start and a
-    [turn/start] the host refuses are effect-free. A [turn/start] write that
-    broke off, or one that was written and not refused, is
-    [Observation_unavailable]: the host takes a command in durably before it
-    answers. Once the host acknowledges the turn it is at least
-    [Observation_unavailable] whatever follows: the configured native policy
-    constrains permission, but is not an execution receipt, and a subagent's
-    tools run in a child session this adapter does not observe. Entering a dynamic tool is [Effect_attempted]
-    before user/tool code can run. *)
-
 val run :
   ?on_guidance_prepared:(unit -> (unit,Agent_core.Error.t) result) ->
   input_source:Keeper_request_source.t ->
@@ -115,8 +95,19 @@ val run :
   account:Runtime_account_access.declared Runtime_account_access.muse_authorized ->
   config:Runtime_muse_serve.config ->
   unit ->
-  attempt_outcome
-(** Inference values and [quota_scope] come from the selected runtime snapshot;
+  Keeper_official_client_attempt.outcome
+(** One Muse Code candidate result plus its typed effect observation.
+    Validation, bridge start, process spawn, the session start and a
+    [turn/start] the host refuses are effect-free. A [turn/start] write that
+    broke off, or one that was written and not refused, is
+    [Observation_unavailable]: the host takes a command in durably before it
+    answers. Once the host acknowledges the turn it is at least
+    [Observation_unavailable] whatever follows: the configured native policy
+    constrains permission, but is not an execution receipt, and a subagent's
+    tools run in a child session this adapter does not observe. Entering a dynamic tool is [Effect_attempted]
+    before user/tool code can run.
+
+    Inference values and [quota_scope] come from the selected runtime snapshot;
     this adapter does not re-resolve its id after hooks or effects.
     [workspace_root] is an explicitly selected absolute native directory.
     [workspace_origin] says what MASC knows of it and defaults to

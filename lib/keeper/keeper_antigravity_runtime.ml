@@ -3,13 +3,6 @@ open Result.Syntax
 module Host = Keeper_official_client_host
 module Session_store = Keeper_official_client_session_store
 
-type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-  ; effect_disposition : Keeper_provider_attempt_effect.t
-  }
-
 let runtime_label = "Antigravity"
 
 let config_error = Keeper_official_client_host.config_error
@@ -1353,27 +1346,18 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
     ?on_usage_report
     ?on_tool_execution
     ~event_bus ~raw_trace ~on_event ~config () =
-  let settled_session = Atomic.make None in
-  let pending_result_receipts = Atomic.make None in
-  let on_results_ready value = Atomic.set pending_result_receipts value in
-  let on_session_settled value = Atomic.set settled_session (Some value) in
-  let effect_disposition =
-    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
-  in
-  let observe_effect_attempted () =
-    Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
-  in
-  let observe_effect_unavailable () =
-    (* Built-in actions run outside the MCP effect observer. Record their
-       uncertainty before any caller observation can fail; a non-completed
-       result also cannot prove that no unobserved action ran. *)
-    ignore (Atomic.compare_and_set effect_disposition
-      Keeper_provider_attempt_effect.No_effect_observed
-      Keeper_provider_attempt_effect.Observation_unavailable)
-  in
-  let result =
-    Eio.Switch.run (fun result_scope ->
-    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+  Keeper_official_client_attempt.run ~event_bus ~keeper_name
+    (fun ~result_scope
+         { Keeper_official_client_attempt.on_session_settled; on_results_ready; effect_cell } ->
+      let observe_effect_attempted () =
+        Keeper_official_client_attempt.Effect_cell.attempted effect_cell
+      in
+      (* Built-in actions run outside the MCP effect observer. Record their
+         uncertainty before any caller observation can fail; a non-completed
+         result also cannot prove that no unobserved action ran. *)
+      let observe_effect_unavailable () =
+        Keeper_official_client_attempt.Effect_cell.unobserved effect_cell
+      in
       run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~argument_source ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation
         ~outbox_viewer ~read_retained_media
         ~required_native_posture
@@ -1408,15 +1392,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ?argument_source
         ~raw_trace
         ~on_event
         ~observe_effect_attempted ~observe_effect_unavailable
-        ~config))
-  in
-  { result
-  ; settled_session = Atomic.get settled_session
-  ; pending_result_receipts = (match result with
-      | Ok _ -> Atomic.get pending_result_receipts
-      | Error _ -> None)
-  ; effect_disposition = Atomic.get effect_disposition
-  }
+        ~config)
 ;;
 
 module For_testing = struct

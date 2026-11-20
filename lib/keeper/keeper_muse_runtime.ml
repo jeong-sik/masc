@@ -6,13 +6,6 @@ module Serve = Runtime_muse_serve
 module Msp = Runtime_muse_msp
 module Mcp_http = Runtime_official_client_mcp_http
 
-type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-  ; effect_disposition : Keeper_provider_attempt_effect.t
-  }
-
 let runtime_label = "Muse Code"
 
 (* The provider name in errors, the config field a refusal names, and the
@@ -2069,40 +2062,21 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ~turn_start ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
     ?on_native_action ?on_native_tool_completion ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~account ~config () =
-  let settled_session = Atomic.make None in
-  let pending_result_receipts = Atomic.make None in
-  let on_results_ready value = Atomic.set pending_result_receipts value in
-  let on_session_settled value = Atomic.set settled_session (Some value) in
-  let effect_disposition = Atomic.make Keeper_provider_attempt_effect.No_effect_observed in
-  let observe_effect_attempted () =
-    Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
-  in
-  (* Uncertainty cannot erase stronger evidence: the compare-and-set keeps an
-     effect already observed. *)
-  let observe_transport_uncertain () =
-    match
-      Atomic.compare_and_set
-        effect_disposition
-        Keeper_provider_attempt_effect.No_effect_observed
-        Keeper_provider_attempt_effect.Observation_unavailable
-    with
-    | true | false -> ()
-  in
-  (* A quiet turn's own durable range proves the host did nothing outside
-     its session. That settles the uncertainty its acknowledgement
-     raised; an effect MASC observed itself stays. *)
-  let observe_quiet_turn () =
-    match
-      Atomic.compare_and_set
-        effect_disposition
-        Keeper_provider_attempt_effect.Observation_unavailable
-        Keeper_provider_attempt_effect.No_effect_observed
-    with
-    | true | false -> ()
-  in
-  let result =
-    Eio.Switch.run (fun result_scope ->
-    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+  Keeper_official_client_attempt.run ~event_bus ~keeper_name
+    (fun ~result_scope
+         { Keeper_official_client_attempt.on_session_settled; on_results_ready; effect_cell } ->
+      let observe_effect_attempted () =
+        Keeper_official_client_attempt.Effect_cell.attempted effect_cell
+      in
+      let observe_transport_uncertain () =
+        Keeper_official_client_attempt.Effect_cell.unobserved effect_cell
+      in
+      (* A quiet turn's own durable range proves the host did nothing outside
+         its session. That settles the uncertainty its acknowledgement
+         raised; an effect MASC observed itself stays. *)
+      let observe_quiet_turn () =
+        Keeper_official_client_attempt.Effect_cell.quiet effect_cell
+      in
       run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~input_source
         ~outbox_viewer ~read_retained_media
         ~argument_source
@@ -2151,15 +2125,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         ~on_usage_report
         ~on_tool_execution
         ~account
-        ~config))
-  in
-  { result
-  ; settled_session = Atomic.get settled_session
-  ; pending_result_receipts = (match result with
-      | Ok _ -> Atomic.get pending_result_receipts
-      | Error _ -> None)
-  ; effect_disposition = Atomic.get effect_disposition
-  }
+        ~config)
 ;;
 
 module For_testing = struct

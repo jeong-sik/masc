@@ -32,9 +32,9 @@ let audience_to_yojson = function
   | Discoverable -> `Assoc [ "kind", `String "discoverable" ]
 ;;
 
-(* RFC-0233 §7: encode the typed origin as its own top-level [origin] key
+(* Encode the typed origin as its own top-level [origin] key
    (sibling of [meta], NOT nested under it) so the index key needs no
-   meta_json substring scan (RFC §7.6 guard #2). Each sub-field is emitted
+   meta_json substring scan. Each sub-field is emitted
    only when present; turn_ref serializes via [Ids.Turn_ref.to_yojson] (a flat
    "trace#turn" string), matching the chat-row wire form. *)
 let post_origin_to_yojson (o : post_origin) : Yojson.Safe.t =

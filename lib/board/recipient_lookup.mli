@@ -1,5 +1,4 @@
-(** Which Keeper a name written after [@] stands for
-    (RFC-at-name-resolves-to-declared-recipient, layer L2c).
+(** Which Keeper a name written after [@] stands for.
 
     The Board libraries cannot read Keeper settings, so the server hands the
     answer over when it starts the backend ({!Board_dispatch.init_jsonl}) and

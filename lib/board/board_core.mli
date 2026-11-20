@@ -405,15 +405,15 @@ val read_post_for_evidence : store -> post_id:string -> (post, board_read_error)
     establish either visibility or the absence of the post. *)
 
 
-(** RFC-0233 §7: look up a post by the originating turn's join key
+(** Look up a post by the originating turn's join key
     ([Ids.Turn_ref.to_string], i.e. ["<trace_id>#<absolute_turn>"]).  Exact
     O(1) index lookup ([posts_by_turn_ref]); [None] on miss.  No meta_json scan
-    and no time-window heuristic (RFC §7.6 guard #2/#3). *)
+    and no time-window heuristic. *)
 val find_post_by_turn_ref : store -> turn_ref:string -> post option
 
-(** RFC-0233 §7: look up a post by its fusion run correlation id
+(** Look up a post by its fusion run correlation id
     ([origin.fusion_run_id]).  Exact O(1) index lookup ([posts_by_run_id]);
-    [None] on miss.  [run_id] is distinct from [turn_ref] (RFC §7.6 guard #5). *)
+    [None] on miss.  [run_id] is distinct from [turn_ref]. *)
 val find_post_by_run_id : store -> run_id:string -> post option
 
 val list_posts_by_run_origin : store -> post list

@@ -198,17 +198,17 @@ type post_kind =
   | System_post [@tla.symbol "system_post"]
 [@@deriving tla]
 
-(* RFC-0233 §7: typed provenance of a board post — which keeper turn produced
+(* Typed provenance of a board post — which keeper turn produced
    it and through which channel. Replaces the fusion [meta_json] [run_id]
    smuggle with a first-class field that a real index can key on (no
-   meta_json substring scan, RFC §7.6 guard #2).
+   meta_json substring scan).
 
    [source] is the channel's [Surface_ref.lane_label] string, NOT a typed
    [Surface_ref.t]: Surface_ref lives in the [masc] umbrella, which depends on
    [masc_board], so referencing the typed variant here would form a cycle.
 
-   [turn_ref] and [fusion_run_id] are distinct (RFC §7.6 guard #5): turn_ref is
-   the turn-level join key, fusion_run_id correlates a fusion deliberation run.
+   [turn_ref] and [fusion_run_id] are distinct: turn_ref is the turn-level
+   join key, fusion_run_id correlates a fusion deliberation run.
    All sub-fields optional; an all-[None] origin is represented as [origin = None]. *)
 type post_origin = {
   turn_ref: Ids.Turn_ref.t option;

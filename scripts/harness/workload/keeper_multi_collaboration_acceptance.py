@@ -3015,8 +3015,8 @@ class MissionRun:
         return observation.data
 
     def wait_for_async_sources(self) -> None:
-        # masc_fusion_status is a keeper-internal tool (RFC-0266 §7 Phase 3
-        # keeper-scoped isolation; see masc#28963/#28960): the operator MCP
+        # masc_fusion_status is a keeper-internal tool (keeper-scoped
+        # isolation; see masc#28963/#28960): the operator MCP
         # session this runner authenticates as can never observe a researcher
         # keeper's fusion runs through it, so gating on it here would spin the
         # full deadline on every run. Fusion progress is observed instead via

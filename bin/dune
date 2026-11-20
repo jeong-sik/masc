@@ -921,7 +921,8 @@
 (library
  (name masc_tui_exit_reason)
  (wrapped false)
- (modules masc_tui_exit_reason))
+ (modules masc_tui_exit_reason)
+ (libraries masc_tui_value))
 
 ;; The exit-time tcsetattr on a descriptor that is no longer a terminal:
 ;; ENOTTY and EIO mean the terminal is gone and the rest of the at_exit chain

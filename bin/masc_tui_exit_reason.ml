@@ -53,7 +53,10 @@ let bounded text =
   if length <= cause_limit then text
   else
     let cut = character_boundary text cause_limit in
-    Printf.sprintf "%s [+%d bytes]" (String.sub text 0 cut) (length - cut)
+    (* The bytes cut off are a cut-off count, "120 more", never "+120"
+       (RFC tui-one-screen-grammar 6.3). *)
+    Printf.sprintf "%s [%s bytes]" (String.sub text 0 cut)
+      (Masc_tui_value.Count.more ~ko:false (length - cut))
 ;;
 
 let line t =

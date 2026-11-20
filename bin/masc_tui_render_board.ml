@@ -1404,8 +1404,9 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
       | _ -> ""
     in
     let vote_prefix =
-      if post.bp_votes > 0 then Printf.sprintf "+%d " post.bp_votes
-      else if post.bp_votes < 0 then Printf.sprintf "%d " post.bp_votes
+      if post.bp_votes > 0 then Masc_tui_value.Count.increase post.bp_votes ^ " "
+      else if post.bp_votes < 0 then
+        Masc_tui_value.Count.decrease (-post.bp_votes) ^ " "
       else ""
     in
     Printf.sprintf "%s%s%s" hearth_prefix vote_prefix

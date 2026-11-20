@@ -76,8 +76,12 @@ let test_a_runaway_cause_is_cut_and_says_what_it_dropped () =
      are the rest. Well under the 327 an uncut row would take. *)
   check bool "the row does not carry the whole backtrace" true
     (String.length row < 260);
+  (* The bound applies to "exception " ^ detail, 310 bytes. Byte 200 is
+     inside a character, so the cut backs up to the one starting at byte 199
+     and drops 111, written as a cut-off count (RFC tui-one-screen-grammar
+     6.3). *)
   check bool "the row says how many bytes it dropped" true
-    (contains row "[+" && contains row " bytes]")
+    (contains row "[111 more bytes]")
 
 (* Cutting on a byte would leave half a character in the log, and the reader
    that greps these rows decodes them as text. *)

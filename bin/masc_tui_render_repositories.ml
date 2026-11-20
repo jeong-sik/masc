@@ -328,10 +328,7 @@ let repository_inventory_intro (state : state) ~width =
         ~en:"Previous repository list · refresh failed"]
     | None, Some _, _ -> [Theme.bad (), ui_text state ~ko:"저장소 목록 조회 실패"
         ~en:"Repository list unavailable"]
-    | Some _, None, true -> [Theme.info (), ui_text state
-        ~ko:(under_way ^ " 저장소 목록 갱신 중 · 이전 관측")
-        ~en:(under_way ^ " Refreshing repositories · previous observation")]
-    | Some _, None, false -> []
+    | Some _, None, (true | false) -> []
     | None, None, true -> [Theme.info (), ui_text state
         ~ko:(under_way ^ " 저장소 목록 조회 중")
         ~en:(under_way ^ " Reading repositories")]
@@ -1099,9 +1096,12 @@ let render_changes_list (state : state) =
   in
   let ko = state.ui_language = Lang_ko in
   let now = Unix.gettimeofday () in
+  (* Only a first read says so here. A read over held changes is the reading
+     slot's to say (RFC tui-one-screen-grammar section 8). *)
   let changes_started =
     Masc_tui_types.progress_clock_option state ~slot:"keeper-changes" ~now
-      (if state.changes_inflight then Some "reading" else None)
+      (if state.changes_inflight && Option.is_none state.changes then Some "reading"
+       else None)
   in
   let heading ~readings =
     here_row ~cols state
@@ -1138,13 +1138,7 @@ let render_changes_list (state : state) =
               (Masc_tui_message_layout.count_noun
                  s.Masc.Tui_decode.fcs_calls_in_window "call")
         in
-        heading
-          ~readings:
-            (if state.changes_inflight then
-               [ summary
-               ; progress_inline ~ko ~now ?started_at:changes_started
-                   (ui_text state ~ko:"새로고침 중" ~en:"refreshing") ]
-             else [ summary ])
+        heading ~readings:[ summary ]
   in
   box_line buf cols header;
   box_divider buf cols;

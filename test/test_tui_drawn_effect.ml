@@ -164,14 +164,11 @@ let test_waiting () =
 
 let test_turns () =
   let state = state () in
-  state.keeper_turns_inflight <- true;
-  draw_frame state;
-  state.keeper_turns_inflight <- false;
-  check drawn "the frame drew the turn read in progress" T.Drawn_changed (T.keeper_turns_effect state);
   draw_frame state;
   state.keeper_turns_inflight <- true;
+  check drawn "a turn read in progress is not drawn" T.Drawn_unchanged (T.keeper_turns_effect state);
   state.keeper_turns_inflight <- false;
-  check drawn "a turn read that moved nothing" T.Drawn_unchanged (T.keeper_turns_effect state);
+  check drawn "nor is its end" T.Drawn_unchanged (T.keeper_turns_effect state);
   state.keeper_turns_error <- Some (T.Request_failed "turns read failed");
   draw_frame state;
   state.keeper_turns_error <- None;

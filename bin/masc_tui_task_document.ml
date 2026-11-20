@@ -131,16 +131,6 @@ let history_status_lines ~ko ~width
         let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
         [ "    " ^ mark ^ " " ^ (text "조회 중" "loading") ]
   in
-  let pending =
-    if not in_flight then []
-    else
-      let mark = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
-      match view with
-      | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
-          [ "    " ^ mark ^ " " ^ (if continuing then (text "이전 기록 조회 중 · 조회한 범위 표시" "reading earlier history; showing observed prefix")
-            else (text "기록 조회 중 · 이전 관측" "reading history; previous observation")) ]
-      | Masc_tui_fetched.Failed _ -> [ "    " ^ mark ^ " " ^ (text "재조회 중 · 이전 실패 유지" "retrying; previous failure remains") ]
-      | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   let boundary=match Masc_tui_fetched.value view with
     | None -> []
     | Some history -> [match history.history_next_cursor with
@@ -153,7 +143,7 @@ let history_status_lines ~ko ~width
       "    " ^ (match source with Tui_decode.Task_activity -> (text "상태 전환" "Lifecycle") | Tui_decode.Task_audit -> (text "감사 기록" "Audit"))
       ^ (match state with Masc.Tui_decode_task_inspection.Source_observed -> (text ": 조회한 저장 범위" ": observed stored prefix")
         | Masc.Tui_decode_task_inspection.Source_not_created -> (text ": 저장소 미생성 · 관측 없음" ": store not yet created; no observations available"))) history.history_sources in
-  pending @ rows @ sources @ boundary
+  rows @ sources @ boundary
 
 let body_lines ~ko ~cols ~goal_lines (task : Masc_domain.task) =
   let text korean english = if ko then korean else english in

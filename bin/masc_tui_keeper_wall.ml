@@ -97,6 +97,9 @@ let header ~ko ~cols ~now =
   ^ ruler ^ (if ko then " │ 실패" else " │ fail")
   ^ Ansi.reset
 
+(* Intentionally quantized to 2 vertical dot rows (1..2) on 1-row keeper
+   strips so rows stay light and ECG-readable; full 8..12 dot vertical
+   precision lives in the multi-row fleet and selected-cockpit waves. *)
 let ok_activity_level total =
   if total <= 3 then 1
   else 2
@@ -218,7 +221,7 @@ let legend_row ~ko ~cols =
     "  "
     ^ sample (Theme.recede ()) Masc_tui_keeper_mark.grid_dot_mark (say "무활동" "quiet")
     ^ "  " ^ sample (Theme.recede ()) Masc_tui_keeper_mark.grid_unknown_range_mark (say "미기록" "unread")
-    ^ "  " ^ sample (ok_tint 0.85) (Braille.braille_pair ~left:1 ~right:2) (say "정상(↑)" "ok(up)")
+    ^ "  " ^ sample (ok_tint 0.85) (Braille.braille_pair ~left:2 ~right:2) (say "정상(↑)" "ok(up)")
     ^ "  " ^ sample (warm_tint 0.90) (Braille.braille_pair_down ~left:2 ~right:2) (say "실패(↓)" "fail(down)")
     ^ "  " ^ sample (thermal_tint 0.62) (Braille.braille_pair ~left:2 ~right:4) (say "혼재" "mixed")
     ^ "  " ^ sample (Theme.warn ()) (Braille.braille_pair ~left:1 ~right:0) (say "휴식" "rest")

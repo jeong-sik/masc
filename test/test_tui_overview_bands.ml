@@ -157,6 +157,46 @@ let test_keepers_rectangle_invariants () =
   check bool "unread activity renders no-value glyph" true
     (has_substring "\xe2\x80\x94")
 
+let test_attention_state_uses_mark_tone () =
+  let failing_tone = "\027[31m" in
+  let calm_tone = "\027[32m" in
+  let entries : Bands.keeper_entry list =
+    [ { name = "broken-keeper"
+      ; mark = "✕"
+      ; mark_tone = failing_tone
+      ; state_label = "failing"
+      ; activity_summary = "3t"
+      ; detail = "provider error"
+      ; needs_attention = true
+      }
+    ; { name = "calm-keeper"
+      ; mark = "●"
+      ; mark_tone = calm_tone
+      ; state_label = "running"
+      ; activity_summary = "10t"
+      ; detail = ""
+      ; needs_attention = false
+      }
+    ]
+  in
+  let rendered =
+    Bands.render_keepers ~ko:false ~width:100 ~height:4 ~total_keepers:2 entries
+    |> String.concat "\n"
+  in
+  let contains needle =
+    let nlen = String.length needle and hlen = String.length rendered in
+    let rec scan i =
+      if i + nlen > hlen then false
+      else if String.sub rendered i nlen = needle then true
+      else scan (i + 1)
+    in
+    scan 0
+  in
+  check bool "attention state_label wears entry.mark_tone" true
+    (contains (failing_tone ^ "failing"));
+  check bool "non-attention state_label does not wear mark_tone" false
+    (contains (calm_tone ^ "running"))
+
 let () =
   run "tui overview bands"
     [ ( "plan"
@@ -168,5 +208,7 @@ let () =
             test_telemetry_rectangle_invariants
         ; test_case "keepers mini-table preserves exact rectangle geometry" `Quick
             test_keepers_rectangle_invariants
+        ; test_case "attention keeper row matches state tone to mark_tone" `Quick
+            test_attention_state_uses_mark_tone
         ] )
     ]

@@ -561,9 +561,8 @@ let names_text ~ko names =
   let more = List.length names - List.length shown in
   String.concat ", " (List.map Terminal_text.single_line shown)
   ^
-  if more > 0 then
-    Printf.sprintf (if ko then " 외 %d명" else " +%d more") more
-  else ""
+  (* A cut-off count, never "+N" (RFC tui-one-screen-grammar 6.3). *)
+  if more > 0 then " " ^ Masc_tui_value.Count.more ~ko more else ""
 ;;
 
 let summary_text ~ko t =

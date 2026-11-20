@@ -1456,8 +1456,9 @@ let lane_run_payload_lines ?(ko = false) ~width json =
     let full_text = Yojson.Safe.pretty_to_string value in
     let document = fence full_text in
     let notice =
-      if ko then Printf.sprintf "… 잘림, 전체 %d바이트" (String.length full_text)
-      else Printf.sprintf "… truncated, total %d bytes" (String.length full_text)
+      let total = Masc_tui_value.Count.grouped (String.length full_text) in
+      if ko then Printf.sprintf "… 잘림, 전체 %s바이트" total
+      else Printf.sprintf "… truncated, total %s bytes" total
     in
     { full_text; document; notice }
   in
@@ -1914,16 +1915,17 @@ let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_deta
         | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
           Some (Tui_decode.Librarian_memory_unchanged (revision, facts)) ->
           Printf.sprintf
-            (if ko then "기억 snapshot: 변경 없음 · revision %d · %d facts"
-             else "Memory snapshot: unchanged · revision %d · %d facts")
-            revision facts
+            (if ko then "기억 snapshot: 변경 없음 · revision %d · 사실 %s개"
+             else "Memory snapshot: unchanged · revision %d · %s facts")
+            revision (Masc_tui_value.Count.grouped facts)
         | (Tui_decode.Memory_disposition_scope | Tui_decode.Context_only_scope),
           Some (Tui_decode.Librarian_memory_rewritten {revision;facts;added;removed}) ->
           Printf.sprintf
-            (if ko then "기억 snapshot: %s / %s · revision %d · %d facts"
-             else "Memory snapshot: %s / %s · revision %d · %d facts")
+            (if ko then "기억 snapshot: %s / %s · revision %d · 사실 %s개"
+             else "Memory snapshot: %s / %s · revision %d · %s facts")
             (Masc_tui_value.Count.increase added)
-            (Masc_tui_value.Count.decrease removed) revision facts in
+            (Masc_tui_value.Count.decrease removed) revision
+            (Masc_tui_value.Count.grouped facts) in
       let side_writes = List.map (fun (kind, status) ->
         let label = match kind with
           | Tui_decode.Context_write -> "Context"
@@ -1949,9 +1951,9 @@ let lane_run_output_lines ~ko ~details ~width (detail : Tui_decode.lane_run_deta
         else
           let notice =
             Printf.sprintf
-              (if ko then "\n… preflight 생략됨 · 전체 %d바이트"
-               else "\n… truncated preflight, total %d bytes")
-              (String.length document)
+              (if ko then "\n… preflight 생략됨 · 전체 %s바이트"
+               else "\n… truncated preflight, total %s bytes")
+              (Masc_tui_value.Count.grouped (String.length document))
           in
           let room = lane_run_preview_source_max_bytes - String.length notice in
           let cut = String_util.utf8_char_boundary document room in
@@ -2049,8 +2051,8 @@ let measurement_output_preview ~width ~output_path parts =
   let notice =
     if truncated then
       [ Theme.warn (), Printf.sprintf
-          "PREVIEW · output truncated at %d bytes; full report: %s"
-          lane_run_preview_source_max_bytes output_path ]
+          "PREVIEW · output truncated at %s bytes; full report: %s"
+          (Masc_tui_value.Count.grouped lane_run_preview_source_max_bytes) output_path ]
     else []
   in
   let render = function

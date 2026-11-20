@@ -104,7 +104,7 @@ let test_a_stopped_writer () =
     let log_path =
       Masc.Librarian_log_store.path_for_keepers_dir
         ~keepers_dir:
-          (Masc.Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path)
+          (Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path)
         ~keeper_id:keeper
     in
     Fs_compat.mkdir_p (Filename.dirname log_path);

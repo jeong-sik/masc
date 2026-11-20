@@ -2695,6 +2695,108 @@ let test_responses_build_request_round_trips_tool_result_items () =
   check_bool "tool strict" true (Yojson.Safe.Util.to_bool (member "strict" tool_json))
 ;;
 
+let test_responses_build_request_defaults_tool_strict_to_false () =
+  let config =
+    Provider_config.make
+      ~kind:OpenAI_compat
+      ~model_id:"gpt-5.5"
+      ~base_url:"https://api.openai.com"
+      ~request_path:"/v1/responses"
+      ~model_capabilities_override:(require_model_capabilities "gpt-5.5")
+      ()
+  in
+  let non_strict_default_tool =
+    `Assoc
+      [ "name", `String "keeper_memory_write"
+      ; "description", `String "persist durable memory"
+      ; ( "input_schema"
+        , `Assoc
+            [ "type", `String "object"
+            ; ( "properties"
+              , `Assoc
+                  [ ( "tags"
+                    , `Assoc
+                        [ "type", `String "array"
+                        ; "items", `Assoc [ "type", `String "string" ]
+                        ; "uniqueItems", `Bool true
+                        ] )
+                  ] )
+            ; "required", `List []
+            ; "additionalProperties", `Bool false
+            ] )
+      ]
+  in
+  let explicit_strict_true_tool =
+    `Assoc
+      [ "name", `String "strict_tool"
+      ; "description", `String "caller opted into strict"
+      ; "input_schema", `Assoc [ "type", `String "object" ]
+      ; "strict", `Bool true
+      ]
+  in
+  let explicit_strict_false_tool =
+    `Assoc
+      [ "name", `String "non_strict_tool"
+      ; "description", `String "caller explicitly disabled strict"
+      ; "input_schema", `Assoc [ "type", `String "object" ]
+      ; "strict", `Bool false
+      ]
+  in
+  let body =
+    Responses.build_request
+      ~config
+      ~messages:[ msg User [ Text "run" ] ]
+      ~tools:
+        [ non_strict_default_tool
+        ; explicit_strict_true_tool
+        ; explicit_strict_false_tool
+        ]
+      ()
+    |> Yojson.Safe.from_string
+  in
+  let tools = member "tools" body |> to_list in
+  check_int "three serialized tools" 3 (List.length tools);
+  let t0 = List.nth tools 0 in
+  let t1 = List.nth tools 1 in
+  let t2 = List.nth tools 2 in
+  check_string "first tool name" "keeper_memory_write" (member "name" t0 |> to_string);
+  check_bool
+    "omitted strict defaults to false on Responses wire"
+    false
+    (Yojson.Safe.Util.to_bool (member "strict" t0));
+  check_bool
+    "uniqueItems schema keyword is preserved under strict=false"
+    true
+    (member "parameters" t0
+     |> member "properties"
+     |> member "tags"
+     |> member "uniqueItems"
+     |> Yojson.Safe.Util.to_bool);
+  check_bool
+    "explicit strict=true preserved"
+    true
+    (Yojson.Safe.Util.to_bool (member "strict" t1));
+  check_bool
+    "explicit strict=false preserved"
+    false
+    (Yojson.Safe.Util.to_bool (member "strict" t2));
+  (* Chat Completions defaults to non-strict when omitted; keep omitting it there. *)
+  let chat_config = { config with request_path = "/v1/chat/completions" } in
+  let chat_body =
+    Backend_openai.build_request
+      ~config:chat_config
+      ~messages:[ msg User [ Text "run" ] ]
+      ~tools:[ non_strict_default_tool ]
+      ()
+    |> Yojson.Safe.from_string
+  in
+  let chat_tool = member "tools" chat_body |> to_list |> only "chat tool" in
+  check_bool
+    "chat completions still omits unset strict"
+    true
+    (member "function" chat_tool |> member "strict" = `Null)
+;;
+
 let test_responses_build_request_preserves_multiturn_reasoning_tool_order () =
   let raw_reasoning ~id ~encrypted_content ~summary =
     RedactedThinking
@@ -3882,6 +3984,10 @@ let () =
             "build request round-trips tool result items"
             `Quick
             test_responses_build_request_round_trips_tool_result_items
+        ; Alcotest.test_case
+            "build request defaults omitted tool strict to false"
+            `Quick
+            test_responses_build_request_defaults_tool_strict_to_false
         ; Alcotest.test_case
             "build request preserves multiturn reasoning/tool order"
             `Quick

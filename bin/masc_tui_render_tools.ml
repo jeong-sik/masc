@@ -1028,8 +1028,8 @@ let skill_statistics_lines ~cols = function
       rows
         ([ Theme.series_tint Masc_tui_theme.Calls 0.8,
            Say.per_language (function
-             | Say.Ko -> Printf.sprintf "executor 실행 시간 · 보존된 원래 실행 %d건" stats.scst_records
-             | Say.En -> Printf.sprintf "executor run time · %d original runs retained" stats.scst_records)
+             | Say.Ko -> Printf.sprintf "executor 실행 시간 · 보존된 원래 실행 %s건" (Masc_tui_value.Count.grouped stats.scst_records)
+             | Say.En -> Printf.sprintf "executor run time · %s original runs retained" (Masc_tui_value.Count.grouped stats.scst_records))
          ; Theme.recede (), Say.both ~ko:"동일 revision / 전체 Keepers · P50/P95: nearest rank"
                        ~en:"Same revision / all Keepers · P50/P95: nearest rank"
          ; Theme.recede (), window ]
@@ -2366,9 +2366,9 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           in
           [ Ansi.bold,
             Say.per_language (function
-              | Say.Ko -> Printf.sprintf " Skill 타임라인 · 사건 %d개 (최신부터)" total
-              | Say.En -> Printf.sprintf " Skill Timeline · %d event%s (newest first)"
-                  total (if total = 1 then "" else "s"))
+              | Say.Ko -> Printf.sprintf " Skill 타임라인 · 사건 %s개 (최신부터)" (Masc_tui_value.Count.grouped total)
+              | Say.En -> Printf.sprintf " Skill Timeline · %s event%s (newest first)"
+                  (Masc_tui_value.Count.grouped total) (if total = 1 then "" else "s"))
           ; Theme.recede (),
             Say.code "   "
             ++ Say.of_ko_flag (fun ~ko -> Masc_tui_token_scale.note ~ko Masc_tui_token_scale.fleet) ]

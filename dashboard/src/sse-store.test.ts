@@ -20,6 +20,11 @@ const boardAuthorFilter = signal('')
 const boardHearthFilter = signal('')
 const boardSearchText = signal('')
 const boardOffset = signal(0)
+const boardTotal = signal<number | null>(null)
+const boardLoading = signal(false)
+// The store derives this from the list on screen and the filters; here it is
+// set directly to say whether that list answers what is asked for now.
+const boardListCurrent = signal(true)
 const namespaceTruth = signal<unknown>(null)
 const namespaceTruthError = signal<unknown>(null)
 
@@ -87,6 +92,9 @@ async function loadSseStore() {
     boardHearthFilter,
     boardSearchText,
     boardOffset,
+    boardTotal,
+    boardLoading,
+    boardListCurrent,
     removeBoardPost,
   }))
   vi.doMock('./namespace-truth-store', () => ({
@@ -172,6 +180,9 @@ describe('setupServerPushReaction reconnect hydration', () => {
     boardHearthFilter.value = ''
     boardSearchText.value = ''
     boardOffset.value = 0
+    boardTotal.value = null
+    boardLoading.value = false
+    boardListCurrent.value = true
     serverStatus.value = null
     compositeTick.value = { name: '', ts_unix: 0 }
   })
@@ -1012,6 +1023,105 @@ describe('setupServerPushReaction reconnect hydration', () => {
 
     expect(boardPosts.value[0]?.id).toBe('post-1')
     expect(boardOffset.value).toBe(11)
+  })
+
+  // The operator picked another sub-board, sort or filter and its read has
+  // not answered: the rows on screen are the previous query's. The event
+  // matches what is asked for now, which is not what those rows answer.
+  it('reads the list again instead of adding a new post to a list that answers another query', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardExcludeSystem.value = false
+    boardListCurrent.value = false
+    boardOffset.value = 10
+    boardTotal.value = 10
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Note',
+      content: 'body',
+      author: 'agent-a',
+      post_kind: 'direct',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value).toEqual([])
+    expect(boardOffset.value).toBe(10)
+    expect(boardTotal.value).toBe(10)
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  // The answer on the wire replaces the list, and it may have been read
+  // before this post was written: a row added now would be gone with nothing
+  // left to read the list again.
+  it('reads the list again instead of adding a new post while a first page is on the wire', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardExcludeSystem.value = false
+    boardLoading.value = true
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Note',
+      content: 'body',
+      author: 'agent-a',
+      post_kind: 'direct',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value).toEqual([])
+    expect(refreshBoard).toHaveBeenCalledTimes(1)
+  })
+
+  it('counts a prepended post in the total the server gave for the list', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardExcludeSystem.value = false
+    boardOffset.value = 12
+    boardTotal.value = 12
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Note',
+      content: 'body',
+      author: 'agent-a',
+      post_kind: 'direct',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value[0]?.id).toBe('post-1')
+    expect(boardOffset.value).toBe(13)
+    expect(boardTotal.value).toBe(13)
+    expect(refreshBoard).not.toHaveBeenCalled()
+  })
+
+  // The server gives no total for a list it pages; a prepended row does not
+  // make one up.
+  it('leaves the total unknown when the server gave none', async () => {
+    const { sseStore } = await loadSseStore()
+    route.value = { tab: 'workspace', params: { section: 'board' }, postId: null }
+    boardExcludeSystem.value = false
+    boardTotal.value = null
+
+    sseStore.routeServerPushEvent({
+      type: 'post_created',
+      post_id: 'post-1',
+      title: 'Note',
+      content: 'body',
+      author: 'agent-a',
+      post_kind: 'direct',
+    })
+    vi.advanceTimersByTime(1_000)
+    await flushAsyncWork()
+
+    expect(boardPosts.value[0]?.id).toBe('post-1')
+    expect(boardTotal.value).toBeNull()
   })
 
   it('falls back to board refresh when post_kind is missing under kind exclusions', async () => {

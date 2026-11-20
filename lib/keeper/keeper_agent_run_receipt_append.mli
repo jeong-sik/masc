@@ -1,5 +1,5 @@
-(** RFC-0145 PR-6: extract receipt-append safety escalation from
-    [keeper_agent_run.run_turn] Step 8 body (L1942-L1999).
+(** Receipt-append safety escalation, extracted from
+    [keeper_agent_run.run_turn].
 
     Cycle 5 [EveryTurnHasTerminalReceipt] safety invariant
     (KeeperTurnFSM spec): a turn whose

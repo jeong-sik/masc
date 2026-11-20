@@ -1,6 +1,5 @@
-(** RFC-0412 stage 2 consistency auditor. See the .mli for the contract; the
-    comparison rules below encode the known dual-write skews (PLAN.md stage 2
-    context) explicitly. *)
+(** Consistency auditor. See the .mli for the contract; the comparison rules
+    below encode the known dual-write skews explicitly. *)
 
 module Events = Keeper_chat_events
 module Store = Keeper_chat_store

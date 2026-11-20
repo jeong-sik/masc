@@ -1,5 +1,5 @@
-(** Telegram Bot API transport for RFC-0384. No token, URL, remote body or
-    remote description is included in errors. All identities remain integers;
+(** Telegram Bot API transport. No token, URL, remote body or remote
+    description is included in errors. All identities remain integers;
     chat/user identities use int64 (Telegram may exceed 32 bits).
     This layer does not acknowledge updates or own a polling cursor. *)
 type error =

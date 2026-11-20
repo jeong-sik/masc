@@ -84,7 +84,7 @@ val translate :
   state ->
   Agent_core.Types.sse_event ->
   translated_event
-(** [base_dir] is the workspace base path used to persist RFC-0301 model-generated
+(** [base_dir] is the workspace base path used to persist model-generated
     media (via {!Keeper_chat_media_store}) when a media block completes. *)
 
 val terminal_text_scope : state -> int option

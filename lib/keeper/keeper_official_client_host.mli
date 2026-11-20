@@ -286,6 +286,15 @@ val is_carried_on_resume : Agent_core.Types.message -> bool
     context must be tagged with one; an untagged one lands in the system
     prompt file only, which a resume does not read. *)
 
+val is_canonical_source_snapshot_message : Agent_core.Types.message -> bool
+(** Whether a message belongs in a [Canonical_source_guard] history digest
+    (Antigravity, Muse): excludes both per-turn carried context
+    ({!is_carried_on_resume}) and uncheckpointed official-client turns bridged
+    by {!Keeper_turn_bridge.uncheckpointed_official_turns}. Bridged turns still
+    reach fresh Starts in [prepared.messages], while Resumes already witnessed
+    their own turns or receive intervening cross-runtime turns through
+    {!Keeper_turn_bridge.prepend_resume_handoff}. *)
+
 type composed_context = Keeper_context_assembly.t
 
 val transmitted_carrier_receipt :

@@ -2556,6 +2556,44 @@ let test_source_relogin_starts_fresh_and_preserves_vendor_refresh () =
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
 ;;
 
+let test_bridged_official_turns_resume_without_resetting_session () =
+  with_scripted_host (fun ~base_path ->
+    let tool = masc_probe_tool (ref `Null) in
+    let base_history = [ user_message "MUSE_CHECKPOINT_SEED_1" ] in
+    let run ~initial_messages =
+      match (run_turn_with ~initial_messages ~base_path ~tool ()).outcome.result with
+      | Ok _ -> ()
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    run ~initial_messages:base_history;
+    let turn_ref =
+      Ids.Turn_ref.make ~trace_id:keeper_name ~absolute_turn:1 |> Ids.Turn_ref.to_string
+    in
+    let bridged_meta = [ Keeper_turn_bridge.bridged_turn_ref_metadata_key, `String turn_ref ] in
+    let bridged_user =
+      { (user_message "MUSE_BRIDGED_PRIOR_USER") with metadata = bridged_meta }
+    in
+    let bridged_assistant =
+      { (user_message "MUSE_BRIDGED_PRIOR_ASSISTANT") with
+        role = Agent_core.Types.Assistant
+      ; metadata = bridged_meta
+      }
+    in
+    run ~initial_messages:(base_history @ [ bridged_user; bridged_assistant ]);
+    run ~initial_messages:
+      (base_history
+       @ [ bridged_user; bridged_assistant; user_message "MUSE_REAL_CHECKPOINT_ADDITION" ]);
+    check (list string) "bridged turns resume while non-bridged additions start fresh"
+      [ "start"; "resume"; "start" ]
+      (read_text (Filename.concat base_path "sessions.log")
+       |> String.split_on_char '\n' |> List.filter (fun line -> line <> ""));
+    let fresh_prompt = read_text (Filename.concat base_path "start-prompt.txt") in
+    check bool "fresh Start still seeds prior bridged turns" true
+      (String_util.contains_substring fresh_prompt "MUSE_BRIDGED_PRIOR_ASSISTANT");
+    check bool "fresh Start seeds the new canonical history message" true
+      (String_util.contains_substring fresh_prompt "MUSE_REAL_CHECKPOINT_ADDITION"))
+;;
+
 let test_effective_system_override_starts_fresh () =
   with_scripted_host (fun ~base_path ->
     let tool = masc_probe_tool (ref `Null) in
@@ -4268,6 +4306,8 @@ let () =
         ; test_case "late gap after dropped compaction redelivers recall" `Quick
             test_late_gap_after_dropped_compaction_redelivers_recall
         ; test_case "hook nudge identity and carried context" `Quick test_hook_nudges_bind_the_session_but_carried_context_does_not
+        ; test_case "bridged official turns resume without resetting session" `Quick
+            test_bridged_official_turns_resume_without_resetting_session
         ; test_case "per-call usage survives missing terminal aggregate" `Quick test_call_usage_survives_missing_terminal_aggregate
         ; test_case "effective system override starts fresh" `Quick test_effective_system_override_starts_fresh
         ; test_case "missing selected auth requires sign-in before spawn" `Quick test_missing_selected_account_auth_requires_sign_in

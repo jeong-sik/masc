@@ -2790,6 +2790,182 @@ let test_original_result_survives_a_vendor_session_change () =
             check int "completed replacement ACKs its loaded snapshot" 0 (count ()))))))
 ;;
 
+let with_session_resume_fixture f =
+  let base_path = temp_workspace () |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot; cleanup_tree base_path)
+    (fun () ->
+      Unix.mkdir (Filename.concat base_path ".masc") 0o700;
+      let keeper_name = "antigravity-fixture" in
+      Masc_test_deps.declare_fixture_keeper
+        ~base_path ~sandbox_profile:(Some Keeper_types_profile_sandbox.Docker) keeper_name;
+      let oauth_source = Filename.concat base_path "operator-oauth-token" in
+      write_file ~mode:0o600 oauth_source
+        (Masc_test_deps.antigravity_oauth_fixture "resume-continuity-account");
+      let prompt_path = Filename.concat base_path "antigravity-prompt.txt" in
+      let mode_path = Filename.concat base_path "antigravity-mode.txt" in
+      let counter_path = Filename.concat base_path "antigravity-start-counter" in
+      let turns_path = Filename.concat base_path "antigravity-turn-counter" in
+      let cwd_json =
+        Yojson.Safe.to_string
+          (`String
+             (Env_config_core.strip_trailing_slashes
+                (Filename.concat base_path
+                   (Keeper_sandbox.host_root_rel_of_profile
+                      Keeper_types_profile_sandbox.Docker
+                      keeper_name))))
+      in
+      let cli_path = Filename.concat base_path "agy-resume-fixture.sh" in
+      write_file ~mode:0o700 cli_path
+        (Printf.sprintf
+           {|#!/bin/sh
+set -eu
+mode=START
+conv=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "--conversation" ]; then
+    mode=RESUME
+    conv="$arg"
+    break
+  fi
+  prev="$arg"
+done
+turns_file=%s
+if [ "$mode" = "START" ]; then
+  count=0
+  if [ -f %s ]; then
+    count=$(cat %s)
+  fi
+  count=$((count + 1))
+  printf '%%s\n' "$count" > %s
+  conv="conv-$count"
+  turns=1
+else
+  turns=1
+  if [ -f "$turns_file" ]; then
+    turns=$(cat "$turns_file")
+  fi
+  turns=$((turns + 1))
+fi
+printf '%%s\n' "$turns" > "$turns_file"
+printf '%%s:%%s\n' "$mode" "$conv" > %s
+cat > %s
+printf '{"event":"init","conversation_id":"%%s","init":{"model":"gemini-fixture","cwd":%s,"tools":[],"permission_mode":"always-proceed"}}\n' "$conv"
+printf '{"event":"result","result":{"conversation_id":"%%s","status":"SUCCESS","response":"MASC_ANTIGRAVITY_RESUME_OK","error":null,"num_turns":%%d,"usage":{"input_tokens":12,"output_tokens":4,"thinking_tokens":1,"cache_read_tokens":0,"total_tokens":16}}}\n' "$conv" "$turns"
+|}
+           (shell_quote turns_path)
+           (shell_quote counter_path)
+           (shell_quote counter_path)
+           (shell_quote counter_path)
+           (shell_quote mode_path)
+           (shell_quote prompt_path)
+           cwd_json);
+      let runtime_path = Filename.concat base_path "runtime.toml" in
+      write_file ~mode:0o600 runtime_path (runtime_toml ~cli_path ~oauth_source);
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Eio_context.set_env env;
+          Eio_context.with_test_env ~net:env#net ~clock:env#clock ~mono_clock:env#mono_clock ~sw
+            (fun () ->
+              Runtime.init_default ~config_path:runtime_path |> Result.get_ok;
+              let config =
+                match Runtime.get_runtime_by_id "antigravity.gemini" with
+                | Some { Runtime_instance.execution = Runtime_execution.Antigravity_cli cfg; _ } ->
+                  cfg
+                | Some _ | None -> fail "Antigravity binding missing"
+              in
+              let run_turn ?composed_context ?hooks ~system_prompt ~goal ~initial_messages () =
+                let attempt =
+                  Keeper_antigravity_runtime.run
+                    ~read_retained_media:None
+                    ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only
+                    ~host:(antigravity_host ())
+                    ~configured_reasoning_effort:None
+                    ~turn_timeout_s:None
+                    ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+                    ?composed_context
+                    ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
+                    ~accepts_image_input:false
+                    ~runtime_id:"antigravity.gemini"
+                    ~keeper_name
+                    ~pre_tool_rejects:(ref [])
+                    ~base_path
+                    ~goal
+                    ~goal_blocks:None
+                    ~system_prompt
+                    ~tools:[]
+                    ~initial_messages
+                    ~model_input_projection:None
+                    ~on_transmitted_model_input:(fun _ -> ())
+                    ~hooks
+                    ~context_injector:None
+                    ~context:(Some (Agent_core.Context.create ()))
+                    ~event_bus:None
+                    ~raw_trace:None
+                    ~on_event:None
+                    ~config
+                    ()
+                in
+                (match attempt.result with
+                 | Ok _ -> ()
+                 | Error error -> fail (Agent_core.Error.to_string error));
+                ( String.trim (In_channel.with_open_bin mode_path In_channel.input_all)
+                , In_channel.with_open_bin prompt_path In_channel.input_all )
+              in
+              f run_turn))))
+;;
+
+let test_bridged_official_turns_resume_without_resetting_session () =
+  with_session_resume_fixture (fun run_turn ->
+    let base_history = [ Agent_core.Types.user_msg "checkpoint-seed-1" ] in
+    let mode1, _ =
+      run_turn ~system_prompt:"BRIDGE_SYSTEM" ~goal:"Turn 1" ~initial_messages:base_history ()
+    in
+    check string "first turn starts a new session" "START:conv-1" mode1;
+    let turn_ref =
+      Ids.Turn_ref.make ~trace_id:"antigravity-fixture" ~absolute_turn:1
+      |> Ids.Turn_ref.to_string
+    in
+    let bridged_meta = [ Keeper_turn_bridge.bridged_turn_ref_metadata_key, `String turn_ref ] in
+    let bridged_user =
+      { (Agent_core.Types.user_msg "bridged-prior-user") with metadata = bridged_meta }
+    in
+    let bridged_assistant =
+      { (Agent_core.Types.user_msg "bridged-prior-assistant") with
+        role = Agent_core.Types.Assistant
+      ; metadata = bridged_meta
+      }
+    in
+    let mode2, _ =
+      run_turn
+        ~system_prompt:"BRIDGE_SYSTEM"
+        ~goal:"Turn 2"
+        ~initial_messages:(base_history @ [ bridged_user; bridged_assistant ])
+        ()
+    in
+    check string "bridged official turns preserve session resume" "RESUME:conv-1" mode2;
+    let mode3, prompt3 =
+      run_turn
+        ~system_prompt:"BRIDGE_SYSTEM"
+        ~goal:"Turn 3"
+        ~initial_messages:
+          (base_history
+           @ [ bridged_user
+             ; bridged_assistant
+             ; Agent_core.Types.user_msg "real-checkpoint-addition"
+             ])
+        ()
+    in
+    check string "non-bridged canonical history addition starts a fresh session"
+      "START:conv-2" mode3;
+    check bool "fresh Start still seeds prior bridged turns" true
+      (String_util.contains_substring prompt3 "bridged-prior-assistant");
+    check bool "fresh Start seeds the new canonical history message" true
+      (String_util.contains_substring prompt3 "real-checkpoint-addition"))
+;;
+
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   run
@@ -2908,6 +3084,10 @@ let () =
               "stream usage is keyed by the CLI's turn"
               `Quick
               test_stream_usage_is_keyed_by_the_clis_turn
+          ; test_case
+              "bridged official turns resume without resetting session"
+              `Quick
+              test_bridged_official_turns_resume_without_resetting_session
         ] )
     ]
 ;;

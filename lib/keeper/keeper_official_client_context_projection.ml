@@ -275,6 +275,17 @@ let is_carried_on_resume message =
   is_composed_system_context message || Keeper_official_task_reference.is_reference message
 ;;
 
+(* Canonical source guards (Antigravity, Muse) hash only the unbridged,
+   non-carried canonical history. Uncheckpointed official-client turns bridged
+   in by [Keeper_turn_bridge.uncheckpointed_official_turns] are still seeded
+   into fresh Starts, while Resumes either already witnessed their own turns or
+   receive intervening cross-runtime turns via
+   [Keeper_turn_bridge.prepend_resume_handoff]. *)
+let is_canonical_source_snapshot_message message =
+  not (is_carried_on_resume message)
+  && Option.is_none (Keeper_turn_bridge.bridged_turn_ref_of_message message)
+;;
+
 module Session_store = Keeper_official_client_session_store
 
 type composed_context = Keeper_context_assembly.t

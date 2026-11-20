@@ -134,7 +134,7 @@ val respond_mcp_error :
 (** [respond_mcp_error ?extra_headers ?data ?id ~deps ~request_authority request reqd
     ~session_id ~protocol_version ~code msg] writes a single JSON-RPC
     2.0 error response derived from a typed {!Mcp_error_code.t}. This
-    is the {b RFC-0098 SSOT} for transport-boundary error envelopes;
+    is the {b SSOT} for transport-boundary error envelopes;
     new call sites SHOULD use this in preference to the per-code
     factories below.
 

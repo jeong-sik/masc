@@ -113,7 +113,7 @@ let remember_protocol_version_if_initialize_succeeded
       remember_protocol_version ?otel_transport_context session_id version
     | None -> ()
 
-(** RFC-0100 PR-3 — Q3 default: known-session predicate.
+(** Known-session predicate.
 
     A session is "known" once an [initialize] body has registered a
     protocol version for its id (see [remember_protocol_version]). Use

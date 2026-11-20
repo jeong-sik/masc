@@ -48,7 +48,7 @@ val remember_protocol_version_if_initialize_succeeded :
     Rejected initialize requests must not start session-duration state. *)
 
 val is_known_session : string -> bool
-(** RFC-0100 PR-3 — Q3 default. [true] iff the server has previously
+(** [true] iff the server has previously
     recorded a protocol version for [session_id] (i.e., an
     [initialize] request has succeeded). The complementary
     profile map is not consulted because it is populated on every POST

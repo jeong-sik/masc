@@ -90,6 +90,7 @@ export function committedRuntimeTomlConfigFixture(
         ? { durability: 'unconfirmed' as const, durability_detail: 'fixture directory sync uncertainty' }
         : { durability: 'durable' as const, durability_detail: null }),
       warnings: [],
+      ignored_legacy_keys: [],
     },
     application: {
       operation: application?.operation ?? 'test_write',

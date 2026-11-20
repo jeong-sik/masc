@@ -112,7 +112,8 @@ function committedBody(): Record<string, unknown> {
     provider_protocols: providerProtocols,
     reserved_provider_ids: [...runtimeReservedProviderIdsFixture],
     state: 'committed',
-    commit: { source_revision: sourceRevision, order: '7', durability: 'durable', durability_detail: null, warnings: [] },
+    commit: { source_revision: sourceRevision, order: '7', durability: 'durable', durability_detail: null, warnings: [],
+      ignored_legacy_keys: [] },
     application: {
       operation: 'fusion_edit',
       routing: { status: 'applied', requires_restart: false, applied_at: null },

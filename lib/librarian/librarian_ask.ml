@@ -1,6 +1,5 @@
 module Digest = Agent_core.Checkpoint_objects
 module Exact = Agent_core.Exact_output
-module Backpressure = Runtime_exact_lane_backpressure
 module Oneshot = Keeper_lane_cli_oneshot
 module Read_result = Librarian_read_result
 module Room_result = Librarian_room_result
@@ -231,25 +230,11 @@ type no_callback_error = |
 let proceed (_ : 'a) : (unit, no_callback_error) result = Ok ()
 let no_callback_error_text : no_callback_error -> string = function _ -> .
 
-type 'visit walked =
-  | Walk_answered of
-      { slot : string
-      ; answer : Librarian_answer.t
-      }
-  | Walk_unanswered of (string * 'visit) list (* Each slot visited, by its id. *)
-
 let candidate_id (visit : Exact.flow_candidate_visit) = visit.identity.candidate_id
 
 let passed rejection : string * Visit.http =
   ( (Exact.candidate_rejection_identity rejection).candidate_id
   , Rejected_before_dispatch (Exact.candidate_rejection_disposition rejection) )
-;;
-
-let advanced (receipt : Exact.flow_advance_receipt) : string * Visit.http =
-  match receipt.failed with
-  | Flow_advance_candidate_rejected rejection -> passed rejection
-  | Flow_advance_execution_failed { candidate; cause; raw_response_sha256 = (_ : string option) } ->
-    candidate_id candidate.visit, Execution_failed cause
 ;;
 
 let answer_rejected (receipt : Librarian_answer.rejection Exact.semantic_rejection_receipt)
@@ -284,126 +269,89 @@ let last_visit
   | Flow_before_advance_callback_failed { cause = _; _ } -> .
 ;;
 
-let flow_candidate (slot : Runtime_exact_output_registry.selected_slot) =
-  match Exact.make_flow_candidate ~id:slot.slot_id ~admitted_target:slot.admitted_target with
-  | Ok candidate -> Ok candidate
-  | Error Blank_flow_candidate_id -> Error (Failed (Flow_stopped, "a slot has a blank id"))
+let validate_http ~asked success
+  : (Librarian_answer.t, Librarian_answer.rejection) Exact.semantic_verdict
+  =
+  match Librarian_answer.of_json ~asked (Exact.flow_success_output success).output with
+  | Ok answer -> Accept answer
+  | Error rejection -> Reject_and_advance rejection
 ;;
 
-let rec flow_candidates = function
-  | [] -> Ok []
-  | slot :: rest ->
-    let* candidate = flow_candidate slot in
-    let* rest = flow_candidates rest in
-    Ok (candidate :: rest)
+type slot_visit =
+  | Http_visit of (string * Visit.http)
+  | Cli_visit of (string * Visit.cli)
+
+(* What the walk left at one slot it passed. Each HTTP slot is a flow of
+   one candidate, so its failure names that slot. *)
+let slot_visit
+  : ( Exact_lane_slots.t
+      , (Librarian_answer.rejection, no_callback_error) Exact_lane_slots.failure )
+      Exact_lane_walk.passed
+  -> (slot_visit, 'result ended) result
+  = function
+  | Exact_lane_walk.Held { slot = Exact_lane_slots.Http_slot http; until = (_ : float) } ->
+    Ok (Http_visit (http.slot_id, Visit.Held))
+  | Exact_lane_walk.Held { slot = Exact_lane_slots.Cli_slot { runtime_id; runtime = _ }; until } ->
+    Ok (Cli_visit (runtime_id, Visit.Cli_failed (Oneshot.Held { runtime_id; until })))
+  | Exact_lane_walk.Seats_full (Exact_lane_slots.Http_slot http) ->
+    Ok (Http_visit (http.slot_id, Visit.Rejected_before_dispatch Exact.Seats_full))
+  | Exact_lane_walk.Seats_full (Exact_lane_slots.Cli_slot { runtime_id; runtime = _ }) ->
+    Ok (Cli_visit (runtime_id, Visit.Cli_seats_full))
+  | Exact_lane_walk.Failed
+      { slot = _
+      ; failure =
+          Exact_lane_slots.Http_failed
+            { slot_id = _
+            ; error =
+                Exact.Flow_semantic_candidates_exhausted
+                  { rejections = { first; rest = _ }; evidence = _ }
+            }
+      } -> Ok (Http_visit (answer_rejected first))
+  | Exact_lane_walk.Failed
+      { slot = _
+      ; failure =
+          Exact_lane_slots.Http_failed
+            { slot_id = _; error = Exact.Flow_execution_terminal { cause; prior_rejections = _ } }
+      } ->
+    let* last, (_ : Exact.flow_evidence) = last_visit cause in
+    Ok (Http_visit last)
+  | Exact_lane_walk.Failed { slot = _; failure = Exact_lane_slots.Cli_failed { runtime_id; failure } }
+    -> Ok (Cli_visit (runtime_id, Visit.Cli_failed failure))
+  | Exact_lane_walk.Failed
+      { slot = _; failure = Exact_lane_slots.Cli_rejected { runtime_id; rejection } } ->
+    Ok (Cli_visit (runtime_id, Visit.Cli_answer_rejected rejection))
+  | Exact_lane_walk.Failed
+      { slot = _
+      ; failure =
+          ( Exact_lane_slots.Cli_unfit { runtime_id }
+          | Exact_lane_slots.Cli_seats_unpublished { runtime_id; provider_id = _ } )
+      } -> Ok (Cli_visit (runtime_id, Visit.Cli_unservable))
 ;;
 
-(* The question's text goes as one user message with no system prompt. The
-   flow writes the requirement's schema sentence after it. *)
-let start_flow ~requirement ~text first rest =
-  let* first = flow_candidate first in
-  let* rest = flow_candidates rest in
-  let* snapshot =
-    match
-      Exact.snapshot_flow ~first ~rest ~messages:[ Llm_provider.Types.user_msg text ] requirement
-    with
-    | Ok snapshot -> Ok snapshot
-    | Error (Duplicate_flow_candidate_id { candidate_id; _ }) ->
-      Error (Failed (Flow_stopped, "a slot is named twice: " ^ candidate_id))
-  in
-  match
-    Exact.start_flow ~admission_class:(Standalone_lane.admission_class Librarian_memory) snapshot
-  with
-  | Ok attempt -> Ok attempt
-  | Error (Flow_id_generation_failed detail) -> Error (Failed (Flow_stopped, detail))
+let rec slot_visits ~http ~cli = function
+  | [] -> Ok (List.rev http, List.rev cli)
+  | passed :: rest ->
+    let* visit = slot_visit passed in
+    (match visit with
+     | Http_visit seen -> slot_visits ~http:(seen :: http) ~cli rest
+     | Cli_visit seen -> slot_visits ~http ~cli:(seen :: cli) rest)
 ;;
 
-let walk_http env ~resolved ~asked ~requirement ~text =
-  let ordered = Backpressure.order_at ~now:(Eio.Time.now env.clock) resolved in
-  let held =
-    List.map (fun (slot : Backpressure.held_slot) -> slot.slot_id, Visit.Held) ordered.held_http
-  in
-  match ordered.lane.selected_slots with
-  | [] -> Ok (Walk_unanswered held)
-  | first :: rest ->
-    let* attempt = start_flow ~requirement ~text first rest in
-    let validate success : (Librarian_answer.t, Librarian_answer.rejection) Exact.semantic_verdict =
-      match Librarian_answer.of_json ~asked (Exact.flow_success_output success).output with
-      | Ok answer -> Accept answer
-      | Error rejection -> Reject_and_advance rejection
-    in
-    let flow =
-      Exact.execute_flow_once
-        ~net:env.net
-        ~clock:env.clock
-        ~before_measurement_dispatch:proceed
-        ~on_measurement_terminal:proceed
-        ~before_dispatch:proceed
-        ~before_advance:(fun ~failed:_ ~next:_ -> proceed ())
-        ~validate
-        attempt
-    in
-    Backpressure.observe ~resolved:ordered.lane flow;
-    (match flow with
-     | Ok { accepted; transport_success; prior_rejections = _ } ->
-       Ok
-         (Walk_answered
-            { slot = candidate_id (Exact.flow_success_candidate transport_success).visit
-            ; answer = accepted
-            })
-     | Error
-         (Flow_semantic_candidates_exhausted
-            { rejections = { first = first_rejection; rest = later_rejections }; evidence }) ->
-       Ok
-         (Walk_unanswered
-            (held
-             @ List.map advanced evidence.advances
-             @ List.map answer_rejected (first_rejection :: later_rejections)))
-     | Error (Flow_execution_terminal { cause; prior_rejections }) ->
-       let* last, evidence = last_visit cause in
-       Ok
-         (Walk_unanswered
-            (held
-             @ List.map advanced evidence.advances
-             @ List.map answer_rejected prior_rejections
-             @ [ last ])))
-;;
-
-(* Each CLI slot is run and its JSON read here: [Keeper_lane_cli_oneshot.walk]
-   would fold a rejection into text. The order is read again before each
-   slot; a held slot is set aside where a read finds it and is not called, as
-   that walk does. *)
-let walk_cli env ~cli_slots ~asked ~requirement ~text =
-  let rec walk visits slots =
-    let { Runtime_candidate_standing.walk = callable; held } =
-      Oneshot.order_slots_at ~now:(Eio.Time.now env.clock) slots
-    in
-    let visits =
-      List.fold_left
-        (fun visits (runtime_id, until) ->
-           (runtime_id, Visit.Cli_failed (Oneshot.Held { runtime_id; until })) :: visits)
-        visits
-        held
-    in
-    match callable with
-    | [] -> Walk_unanswered visits
-    | runtime_id :: rest ->
-      (match
-         Oneshot.run
-           ~base_dir:env.base_dir
-           ~runtime_id
-           ~system_prompt:""
-           ~requirement
-           ~prompt:text
-           ()
-       with
-       | Error failure -> walk ((runtime_id, Visit.Cli_failed failure) :: visits) rest
-       | Ok json ->
-         (match Librarian_answer.of_json ~asked json with
-          | Ok answer -> Walk_answered { slot = runtime_id; answer }
-          | Error rejection -> walk ((runtime_id, Visit.Cli_answer_rejected rejection) :: visits) rest))
-  in
-  walk [] cli_slots
+let stop_detail : (Librarian_answer.rejection, no_callback_error) Exact_lane_slots.stop -> string =
+  function
+  | Exact_lane_slots.Http_unstartable { slot_id; reason } -> slot_id ^ ": " ^ reason
+  | Exact_lane_slots.Http_stopped
+      { slot_id; error = Exact.Flow_execution_terminal { cause; prior_rejections = _ } } ->
+    slot_id
+    ^ ": "
+    ^ Exact.flow_execution_error_to_string
+        ~callback_error_to_string:no_callback_error_text
+        ~raw_response_to_string:Exact.raw_response_sha256_to_string
+        cause
+  | Exact_lane_slots.Http_stopped
+      { slot_id; error = Exact.Flow_semantic_candidates_exhausted { rejections = _; evidence = _ } }
+    -> slot_id ^ ": every answer was rejected"
+  | Exact_lane_slots.Record_failed _ -> .
 ;;
 
 let fact_of known (key : Lane.slot_key) =
@@ -460,18 +408,41 @@ type lane_walked =
       }
   | Lane_unanswered of (Lane.slot_key * Librarian_slot_outcome.unanswered) list
 
-(* HTTP first, CLI only when no HTTP slot answered. Every slot is asked to
-   match the schema of the question's kind. *)
+(* One walk over the lane's slots, HTTP and CLI alike
+   (RFC exact-lane-walks-one-slot-list). Every slot is asked to match the
+   schema of the question's kind. *)
 let walk_lane env ~(lane : Lane.t) ~resolved ~known ~schema ~asked text =
   let requirement = Exact.make_output_requirement ~schema ~minimum_guarantee:Json_syntax in
   let resolved = to_call lane ~known resolved in
-  let* http = walk_http env ~resolved ~asked ~requirement ~text in
-  match http with
-  | Walk_answered { slot; answer } -> Ok (Lane_answered { slot; answer })
-  | Walk_unanswered http ->
-    (match walk_cli env ~cli_slots:resolved.cli_slots ~asked ~requirement ~text with
-     | Walk_answered { slot; answer } -> Ok (Lane_answered { slot; answer })
-     | Walk_unanswered cli -> Ok (Lane_unanswered (outcomes lane ~known ~http ~cli)))
+  match
+    Exact_lane_slots.walk
+      ~net:env.net
+      ~clock:env.clock
+      ~base_dir:env.base_dir
+      ~admission_class:(Standalone_lane.admission_class Librarian_memory)
+      ~messages:[ Llm_provider.Types.user_msg text ]
+      ~requirement
+      ~cli_request:(Some { Exact_lane_slots.system_prompt = ""; prompt = text })
+      ~before_measurement_dispatch:proceed
+      ~on_measurement_terminal:proceed
+      ~before_dispatch:proceed
+      ~validate_http:(validate_http ~asked)
+      ~validate_cli:(Librarian_answer.of_json ~asked)
+      ~before_cli_visit:(fun ~runtime_id:_ -> proceed ())
+      ~on_advance:(fun ~failed:_ ~next:_ -> proceed ())
+      (Exact_lane_slots.of_resolved_lane resolved)
+  with
+  | Exact_lane_walk.Answered
+      { slot = _; value = Exact_lane_slots.Http_answered { slot_id; success }; passed = _ } ->
+    Ok (Lane_answered { slot = slot_id; answer = success.accepted })
+  | Exact_lane_walk.Answered
+      { slot = _; value = Exact_lane_slots.Cli_answered { runtime_id; accepted }; passed = _ } ->
+    Ok (Lane_answered { slot = runtime_id; answer = accepted })
+  | Exact_lane_walk.Exhausted { passed; standing = _ } ->
+    let* http, cli = slot_visits ~http:[] ~cli:[] passed in
+    Ok (Lane_unanswered (outcomes lane ~known ~http ~cli))
+  | Exact_lane_walk.Stopped { slot = _; stop; passed = _ } ->
+    Error (Failed (Flow_stopped, stop_detail stop))
 ;;
 
 let walk env (input : input) ~which ~schema (question : Read_result.question) text =

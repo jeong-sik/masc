@@ -585,6 +585,24 @@ let test_scrolling_back_leaves_the_whole_reply_unread () =
     | Some {T.pin_mode=(T.Follow_live | T.Hold_search); _} | None -> fail "scrolling back held no point")
     [false; true]
 
+(* A frame where nothing changed reads the same bodies the frame before it
+   read, at the live edge and scrolled back. Their identities are answered
+   from the last frame: digesting 1 MB was 43% of such a frame. *)
+let test_an_unchanged_frame_digests_no_body () =
+  let state = state Layout.Origin_inline in
+  let text = String.concat "" (List.init 100 (fun index -> Printf.sprintf "SAME_%03d\n\n" index)) in
+  state.msg_loaded <- [row ~id:"same" ~request_id:"same" ~role:T.Message_keeper ~text 1.];
+  let digests = Masc_tui_chat_search.For_testing.digest_count in
+  ignore (frame_lines state);
+  let at_live = digests () in
+  ignore (frame_lines state);
+  check int "an unchanged frame at the live edge digests nothing" at_live (digests ());
+  T.set_msg_scroll state 7;
+  ignore (frame_lines state);
+  let scrolled = digests () in
+  ignore (frame_lines state);
+  check int "an unchanged scrolled frame digests nothing" scrolled (digests ())
+
 let visible_line lines needle =
   match List.find_mapi (fun index line ->
     if Astring.String.is_infix ~affix:needle line then Some index else None) lines with
@@ -1859,6 +1877,7 @@ let () = run "chat search projection" [
     test_case "streaming frames leave the whole reply unread" `Quick test_streaming_frames_leave_the_whole_reply_unread;
     test_case "finished blocks read what the whole body reads" `Quick test_finished_blocks_read_what_the_whole_body_reads;
     test_case "scrolling back leaves the whole reply unread" `Quick test_scrolling_back_leaves_the_whole_reply_unread;
+    test_case "an unchanged frame digests no body" `Quick test_an_unchanged_frame_digests_no_body;
     test_case "opening a finished reply leaves the whole reply unread" `Quick test_opening_a_finished_reply_leaves_the_whole_reply_unread;
     test_case "a held turn's tool blocks follow the tool stance" `Quick
       test_held_turn_tool_blocks_follow_the_tool_stance;

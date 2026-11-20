@@ -2,6 +2,8 @@ type body_identity
 (** The identity of an entry's presented body text. *)
 
 val body_identity : string -> body_identity
+(** Asked again for the same string on the same domain, it answers without
+    digesting the text again. *)
 
 (** Every position names the text it indexes as well as its place: a body by
     its identity, a generated label, preview field or journal field by its
@@ -93,3 +95,9 @@ val find : needle:string -> before:position option -> body_rows:int -> run list 
     of marked optional boundaries. Other optional logical-line groups retain a query-prefix frontier
     in O(text * query) time and O(query) memory; neither path imposes a length
     limit or replays recursive branches. *)
+
+module For_testing : sig
+  val digest_count : unit -> int
+  (** Bodies digested by {!body_identity} so far in this process. A body
+      asked for again on the same domain is answered without a digest. *)
+end

@@ -287,7 +287,9 @@ let start ~owner ~base_path ~body request reqd =
                 let* observed = observe () |> Result.map_error (fun detail ->
                   (* The caller is told only that the account was not
                      confirmed. Why is the operator's to read: the detail
-                     can name a path of the server (issue #50018). *)
+                     can name a path of the server (issue #50018), and it
+                     can hold what the client wrote to stderr, as the
+                     detail of a verification does ([log_detail]). *)
                   Log.Server.warn "Setup login %s was not confirmed: %s" (Session.id session) detail;
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
                 let* account = finish owner ~base_path ~integration_id ~cli_path

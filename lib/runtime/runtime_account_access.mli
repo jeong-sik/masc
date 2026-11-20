@@ -25,7 +25,7 @@
     is for, as {!Runtime_account_home_layout} spells it under the namespace of
     their membership, and only on a home that was declared: an inherited home
     carries the credentials of the process environment. The configuration of
-    that home asks the environment of the process for nothing
+    a Codex home asks the environment of the process for nothing
     ({!Home_asks_for_environment}). For a Keeper turn
     that person is the owner of the Keeper, and the log decides the turn
     ({!Authz_keeper_turn.decide}) and names the Runtime and the account. No
@@ -269,10 +269,11 @@ type refusal =
 
           Two things are outside this judgment. The client of a login gets
           the environment of the capture without it
-          ([Runtime_setup_login_client.client_environment]): its caller
-          starts it on a home made for that login. And only these names
-          are read: what else the configuration of a home has its client
-          do is not judged. *)
+          ([Runtime_setup_login_client.environment]). The server gives a
+          person only a home made for that login; an operator can log in
+          again on a home that exists. And only these names are read: what
+          else the configuration of a home has its client do is not
+          judged. *)
   | Account_unavailable of
       { provider_account_id : Authz_types.Provider_account_id.t
       ; reason : Authz_provider_account.unavailable

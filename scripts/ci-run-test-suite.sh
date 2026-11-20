@@ -179,7 +179,10 @@ sandbox_root="_build/.sandbox"
 # deadline, and nothing in the surviving log named the consumer. When free
 # space falls past a band edge, record what holds the bytes once per band, so
 # the next full run names its eater instead of guessing.
-disk_bands="30 20 10 5"
+# 50G is the early-warning rung: a long run can die of "the hosted runner lost
+# communication" before it ever reaches 30G, and then only this band's line has
+# been recorded. Each band costs two du passes, and only when it is crossed.
+disk_bands="50 30 20 10 5"
 disk_bands_seen=" "
 disk_evidence_log="$tmp/test-suite-disk-evidence.log"
 disk_usage() {

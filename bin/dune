@@ -2904,7 +2904,7 @@
  (name masc_tui_loader)
  (wrapped false)
  (modules masc_tui_loader masc_tui_http masc_tui_schedule_decode)
- (libraries masc_tui_engine_samples masc_tui_wake masc_tui_transport_failure masc_tui_preference_writer masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
+ (libraries masc_tui_value masc_tui_engine_samples masc_tui_wake masc_tui_transport_failure masc_tui_preference_writer masc_tui_action_notice masc_tui_evidence_file masc_tui_artifact_check_action masc_tui_original_task_read masc_tui_credential_preparation masc_tui_local_read_observation masc_tui_code_draft
   masc_tui_chat_call_reader
   masc_tui_task_payloads
   masc_tui_backlog_read
@@ -3570,7 +3570,8 @@
   masc_tui_graphics
   masc_tui_message_layout
   masc_tui_portrait_view
-  masc_tui_terminal_palette))
+  masc_tui_terminal_palette
+  masc_tui_value))
 
 ;; What the operator evidence section says about a binary artifact: image,
 ;; other binary, or an image that cannot be shown and why. Apart from the TUI

@@ -47,7 +47,7 @@ let selected_repository_reading (state : state) =
       else
         Some
           (capture
-             ~title:(ui_text state ~ko:"워크스페이스 / 저장소 목록" ~en:"Workspace / inventory")
+             ~title:(ui_text state ~ko:"워크스페이스 › 저장소 목록" ~en:"Workspace › inventory")
              errors)
   | Some (repo : Masc.Tui_decode.repository) ->
       let format_fields fields =

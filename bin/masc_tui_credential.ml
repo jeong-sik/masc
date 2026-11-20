@@ -121,7 +121,7 @@ let remedy =
   Printf.sprintf "run '%s' and restart %s" login_command agent_name
 
 let refusal ~credential_sent reason =
-  Printf.sprintf "%s — %s" (refusal_cause ~credential_sent reason) remedy
+  Printf.sprintf "%s · %s" (refusal_cause ~credential_sent reason) remedy
 
 (* What the workspace holds for this client, judged the way the server judges
    it. The file [masc login] writes carries only the bearer; its expiry lives
@@ -276,7 +276,7 @@ let outcome_notice = function
   | Mint_failed detail ->
       Some
         (Printf.sprintf
-           "no operator token, and minting one failed: %s — %s" detail remedy)
+           "no operator token, and minting one failed: %s · %s" detail remedy)
 
 (* Only a missing workspace is worth a second look, taken when a server
    answers at this base path. The other four are answers a later workspace

@@ -923,19 +923,19 @@ let footer_line ?help_door ?status ?recovery_in_slot ?choices state ~max_cells ~
    around it is drawn in, so a painted span hands that back rather than
    resetting it. *)
 
-let slash_hint_text_with ~accent ~bad ~restore draft =
+let slash_hint_text_with ~ko ~accent ~bad ~restore draft =
   let paint (span : Masc_tui_command.hint_span) =
     match span with
     | Masc_tui_command.Typed text -> accent ^ text ^ restore
     | Masc_tui_command.Wrong text -> bad ^ text ^ restore
     | Masc_tui_command.Untyped text | Masc_tui_command.Detail text -> text
   in
-  match Masc_tui_command.hint_spans (Masc_tui_command.hint draft) with
+  match Masc_tui_command.hint_spans_for ~ko (Masc_tui_command.hint draft) with
   | [] -> None
   | spans -> Some (String.concat "" (List.map paint spans))
 
-let slash_hint_text ~restore draft =
-  slash_hint_text_with ~accent:(Theme.accent ()) ~bad:(Theme.bad ()) ~restore draft
+let slash_hint_text ~ko ~restore draft =
+  slash_hint_text_with ~ko ~accent:(Theme.accent ()) ~bad:(Theme.bad ()) ~restore draft
 
 (* One synchronous frame owns the recipient, prompt and fitted draft used by
    both its row and caret. Nothing survives to the next frame or key handler. *)
@@ -1014,7 +1014,7 @@ let composer_row state ~rows ~cols =
           if String.equal ground "" then Theme.bad ()
           else Theme.Side_pane.bad ()
         in
-        slash_hint_text_with ~accent ~bad ~restore composer.Composer.draft
+        slash_hint_text_with ~ko ~accent ~bad ~restore composer.Composer.draft
     | Composer.Unfocused -> None
   in
   (* Match the chat pane's Codex-style tinted input band: when focused on a
@@ -3465,7 +3465,7 @@ let ask_question_viewport (state : state) =
   let lines =
     let asks = Masc_tui_types.open_ask_rows state in
     match Ask_projection.selected_row asks state.ask_cursor with
-    | None when asks <> [] -> ["  Nothing selected -- [ or ] chooses a question"]
+    | None when asks <> [] -> ["  Nothing selected · [ or ] chooses a question"]
     | None -> ["  No questions waiting"]
     | Some row ->
         let draft = Ask_projection.draft_for state.ask_draft ~row in
@@ -4969,10 +4969,13 @@ let help_lines ~width (state : state) =
     let header_line, entry_rows = section_parts titled in
     Masc_tui_help.Whole (header_line :: List.concat entry_rows)
   in
+  let ko = state.ui_language = Lang_ko in
   let commands =
     List.filter
       (fun (cmd : Masc_tui_command.command_help) ->
-        matches_query (Masc_tui_command.help_usage cmd) || matches_query cmd.summary)
+        matches_query (Masc_tui_command.help_usage cmd)
+        || matches_query cmd.summary
+        || matches_query (Masc_tui_command.summary_for ~ko cmd))
       Masc_tui_command.catalog
   in
   let slash_commands =
@@ -4988,8 +4991,9 @@ let help_lines ~width (state : state) =
               colours the halves, it does not size them. *)
            let text = Masc_tui_command.help_usage cmd in
            let column = 2 + Masc_tui_command.help_summary_column in
+           let summary = Masc_tui_command.summary_for ~ko cmd in
            let summary_rows lead lead_cells =
-             help_entry_rows ~width ~lead ~lead_cells ~column cmd.summary
+             help_entry_rows ~width ~lead ~lead_cells ~column summary
            in
            if 2 + Message_layout.display_width text > width then
              (* The usage alone is wider than the panel, so it wrapped rather
@@ -5032,7 +5036,6 @@ let help_lines ~width (state : state) =
                 lines) ]
   in
   let _, cols = get_terminal_size () in
-  let ko = state.ui_language = Lang_ko in
   let compact_global_legend =
     let dim text = Theme.recede () ^ text ^ Ansi.reset in
     let wrap_indented text =

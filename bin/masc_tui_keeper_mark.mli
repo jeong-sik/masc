@@ -63,7 +63,7 @@ val due_glyph : Masc_tui_keeper_list_model.due -> string
     paused, a coming run waiting, no schedule the dash of a value read as
     none, and an unknown next time the unreported mark. *)
 
-val legend : (string * string) list
+val legend_for : ko:bool -> (string * string) list
 (** Each mark and the word the wide surfaces print beside it, in the order a
     reader meets them. *)
 
@@ -85,7 +85,7 @@ val sandbox_letter : sandbox -> string
 val now_header : string
 val age_header : string
 (** The list's header words over the activity and age columns. The list draws
-    them and {!column_legend} names them from these two values. *)
+    them and {!column_legend_for} names them from these two values. *)
 
 val operator_disposition_word :
   ko:bool -> Masc.Keeper_execution_receipt.operator_disposition_kind -> string
@@ -134,7 +134,7 @@ val axis_next_glyph : string
 
 val axis_now_header : string
 (** The header word over the NOW cell of the views' axis row (RFC-0515 §2.4).
-    {!column_legend} names it. *)
+    {!column_legend_for} names it. *)
 
 (** {1 The views' grid} (RFC-0515 §2.4.1 – §2.4.3) *)
 
@@ -261,7 +261,7 @@ val grid_next_column_word : ko:bool -> window:string -> string
     [lag ▹], or [lag · unread turns ▹] over a bar wide enough for it. [saved]
     is the snapshot's saved time, not a source-revalidation result. *)
 
-val column_legend : (string * string) list
+val column_legend_for : ko:bool -> (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the
     roster does not repeat it above its rows. *)

@@ -199,25 +199,40 @@ let clauses ~ko ~room = function
    with the present sources and not a check of the text, and an open pass is a
    file on disk and not a model running now. The key sheet keeps its key column
    16 cells wide, so a longer key here would push its row's text out of line. *)
-let legend =
-  [ ( unknown
-    , "world line: not read yet or still being read; nothing is known, and it is not zero" )
-  ; ( read_failed_word ~ko:false
-    , "world line: the inventory could not be read just now; any count beside it is from \
-       an earlier read. After it, why: workspace unconfirmed (reading is suspended), or \
-       the failure as received, cut with … or left out when the row is short" )
-  ; ( no_ledger_word ~ko:false
-    , "world line: the server found no curator ledger file when it looked; that is a \
-       value, not an unknown" )
-  ; ( claim_noun ^ "s/" ^ conflict_noun ^ "s"
-    , "world line: how many shared claims and conflicts the curator recorded; its reading \
-       of the Keepers' facts, not a check that any is true" )
-  ; ( briefing_word
-    , "world line: the server's word for the shared briefing, shown as sent. current: it \
-       matches the present claims and prompt contract (always so when there are none), \
-       not that its text is right. stale: they changed since it was written. pending: none \
-       is published. unavailable: it could not be read" )
-  ; ( building_word
-    , "world line: a briefing pass is open on disk, not proof that a model is running now; \
-       N of M left counts entries still to summarize, and N equal to M starts from nothing" )
-  ]
+let legend_for ~ko =
+  if ko then
+    [ ( unknown
+      , "월드 줄: 아직 조회하지 않았거나 조회 중 · 아직 알 수 없음(0이 아님)" )
+    ; ( read_failed_word ~ko:true
+      , "월드 줄: 방금 현황을 읽지 못함 · 옆의 숫자는 이전 조회 값 · 뒤의 이유는 워크스페이스 미확인(조회 중단) 또는 수신 오류" )
+    ; ( no_ledger_word ~ko:true
+      , "월드 줄: 서버에 큐레이터 장부 파일이 없음(미조회가 아닌 확인된 상태)" )
+    ; ( "주장/충돌"
+      , "월드 줄: 큐레이터가 기록한 공유 주장과 충돌 수 · 키퍼 사실에 대한 판독이며 진위 검증은 아님" )
+    ; ( "브리핑"
+      , "월드 줄: 공유 브리핑 상태 · 현재 근거와 일치(현재 주장·프롬프트 계약과 맞음), 갱신 필요(이후 변경됨), 미발행, 조회 불가" )
+    ; ( "작성 중"
+      , "월드 줄: 디스크에 열려 있는 브리핑 패스(현재 모델 실행 중이라는 증거는 아님) · M개 중 N개 남음" )
+    ]
+  else
+    [ ( unknown
+      , "world line: not read yet or still being read; nothing is known, and it is not zero" )
+    ; ( read_failed_word ~ko:false
+      , "world line: the inventory could not be read just now; any count beside it is from \
+         an earlier read. After it, why: workspace unconfirmed (reading is suspended), or \
+         the failure as received, cut with … or left out when the row is short" )
+    ; ( no_ledger_word ~ko:false
+      , "world line: the server found no curator ledger file when it looked; that is a \
+         value, not an unknown" )
+    ; ( claim_noun ^ "s/" ^ conflict_noun ^ "s"
+      , "world line: how many shared claims and conflicts the curator recorded; its reading \
+         of the Keepers' facts, not a check that any is true" )
+    ; ( briefing_word
+      , "world line: the server's word for the shared briefing, shown as sent. current: it \
+         matches the present claims and prompt contract (always so when there are none), \
+         not that its text is right. stale: they changed since it was written. pending: none \
+         is published. unavailable: it could not be read" )
+    ; ( building_word
+      , "world line: a briefing pass is open on disk, not proof that a model is running now; \
+         N of M left counts entries still to summarize, and N equal to M starts from nothing" )
+    ]

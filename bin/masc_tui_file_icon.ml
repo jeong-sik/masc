@@ -62,31 +62,23 @@ let glyph = function
    without being given a word. [kinds] is a list and the compiler cannot check
    it -- it sits here, next to the match that will stop compiling, so both get
    edited in the same pass. *)
-let word = function
-  | Code -> "source"
-  | Data -> "data or configuration"
-  | Prose -> "prose"
-  | Script -> "a shell script"
-  | Web -> "web markup or style"
-  | Media -> "an image, a PDF, audio or video"
-  | Plain -> "anything else"
+let word_for ~ko = function
+  | Code -> if ko then "소스 코드" else "source"
+  | Data -> if ko then "데이터 또는 설정" else "data or configuration"
+  | Prose -> if ko then "문서" else "prose"
+  | Script -> if ko then "셸 스크립트" else "a shell script"
+  | Web -> if ko then "웹 마크업·스타일" else "web markup or style"
+  | Media -> if ko then "이미지·PDF·오디오·비디오" else "an image, a PDF, audio or video"
+  | Plain -> if ko then "기타 파일" else "anything else"
 
 let kinds = [ Code; Data; Prose; Script; Web; Media; Plain ]
 
-(* The eighth mark the tree draws. It is not a [kind] -- a folder is not a
-   kind of file, and the row it marks opens rather than reads -- so it sits
-   beside them rather than inside the closed set.
-
-   It was two literals a branch apart in the renderer: the selected row
-   reached for [Masc_tui_theme.Glyph.current_entry], which is the same arrow
-   by byte and a different thing by name, and the unselected row spelled the
-   bytes. Either one moving would have left the column drawing two marks for
-   one thing depending on where the cursor was. *)
 let folder_glyph = "\xe2\x96\xb8"
 
-let folder_word = "a folder; Enter opens it"
+let folder_word_for ~ko =
+  if ko then "폴더 · Enter로 열기" else "a folder; Enter opens it"
 
 (* The folder first, the way the tree draws it: folders sort above files. *)
-let legend =
-  (folder_glyph, folder_word)
-  :: List.map (fun kind -> (glyph kind, word kind)) kinds
+let legend_for ~ko =
+  (folder_glyph, folder_word_for ~ko)
+  :: List.map (fun kind -> (glyph kind, word_for ~ko kind)) kinds

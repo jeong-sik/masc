@@ -30,13 +30,20 @@ let glyph state = Mark.glyph (mark state)
    two share the failure mark, and a sheet that listed them separately would
    print the same glyph four times with four words beside it. The word says
    what the reading is, not what the glyph looks like. *)
-let legend =
-  [ (Mark.glyph Mark.Settled, "a current snapshot")
-  ; ( Mark.glyph Mark.Caution
-    , "read, with something to look at: a warning, a stopped Librarian, no \
-       current snapshot, or source facts only" )
-  ; (Mark.glyph Mark.Failed, "starving, or the read failed")
-  ]
+let legend_for ~ko =
+  (if ko then
+     [ (Mark.glyph Mark.Settled, "최신 스냅샷 있음")
+     ; ( Mark.glyph Mark.Caution
+       , "조회됨 · 확인 필요(경고, Librarian 중지, 최신 스냅샷 없음, 또는 원본 사실만 있음)" )
+     ; (Mark.glyph Mark.Failed, "기억 부족 또는 조회 실패")
+     ]
+   else
+     [ (Mark.glyph Mark.Settled, "a current snapshot")
+     ; ( Mark.glyph Mark.Caution
+       , "read, with something to look at: a warning, a stopped Librarian, no \
+          current snapshot, or source facts only" )
+     ; (Mark.glyph Mark.Failed, "starving, or the read failed")
+     ])
   (* The words of the header's world line follow the marks, its `?` among them:
      they are what a reader of that line would look up. *)
-  @ Masc_tui_memory_world.legend
+  @ Masc_tui_memory_world.legend_for ~ko

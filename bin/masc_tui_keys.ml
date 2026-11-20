@@ -3086,12 +3086,12 @@ let located_sections ~lang ?current () =
            means. Last rather than beside Global because the section order up
            to there is asserted. *)
         @ List.map (fun section -> (None, section))
-        [ (say "키퍼 상태 기호" "Keeper marks", Masc_tui_keeper_mark.legend)
+        [ (say "키퍼 상태 기호" "Keeper marks", Masc_tui_keeper_mark.legend_for ~ko)
           (* The Keepers header words and the Mode S letters. They were two
              rows above every roster: an empty roster spent them on columns
              it had nothing in, a narrow one on columns it did not draw, and
              beside the Activity pane both rows were cut. *)
-          ; (say "키퍼 열 안내" "Keeper columns", Masc_tui_keeper_mark.column_legend)
+          ; (say "키퍼 열 안내" "Keeper columns", Masc_tui_keeper_mark.column_legend_for ~ko)
           (* The Board's first column is the only place these three appear, and
              the column has no room for a legend of its own: its header already
              spends three rows and the hearth row is cut at 150 columns. *)
@@ -3101,30 +3101,30 @@ let located_sections ~lang ?current () =
              Same move as the Keeper columns above: the row goes, the sheet
              keeps the words, and the glyphs now come from the function the
              column draws with. *)
-          ; (say "기억 상태 기호" "Memory marks", Masc_tui_memory_mark.legend)
-          ; (say "게시판 종류 기호" "Board marks", Masc_tui_board_kind_mark.legend)
+          ; (say "기억 상태 기호" "Memory marks", Masc_tui_memory_mark.legend_for ~ko)
+          ; (say "게시판 종류 기호" "Board marks", Masc_tui_board_kind_mark.legend_for ~ko)
           (* The Code tree's file marks. A folder takes the arrow and a file
              takes its kind's mark, and neither carries a word -- the name
              beside it says the extension the mark was read from, not what the
              mark means. Seven marks drew with nothing anywhere saying so. *)
-          ; (say "파일 종류 기호" "File marks", Masc_tui_file_icon.legend)
+          ; (say "파일 종류 기호" "File marks", Masc_tui_file_icon.legend_for ~ko)
           (* Planning's own legend says the marks its list is drawing, which
              is what keeps that line inside a narrow frame -- so a mark no
              goal carries right now has nowhere else to be explained. Here. *)
-          ; (say "판정 기호" "Judge marks", Masc_tui_planning_proof_mark.legend)
+          ; (say "판정 기호" "Judge marks", Masc_tui_planning_proof_mark.legend_for ~ko)
           (* The marks and phrases on a chat's tool and skill rows. Six
              outcome marks, eight skill phrases and two words of proof sat on
              every transcript with nothing anywhere saying what one meant;
              an operator reading them asked what "받아서 씀" received and
              wrote (2026-09-14). *)
-          ; (say "채팅 기호" "Chat marks", Masc_tui_keeper_chat_transcript.legend)
+          ; (say "채팅 기호" "Chat marks", Masc_tui_keeper_chat_transcript.legend_for ~ko)
           (* The first column of Config's two list panes. The prompt registry
              draws three marks and the params list two, and the words for
              them were only in the detail pane below the list -- for the one
              row the cursor was on. A reader scanning twenty rows could tell
              a marked row from an unmarked one and not what the mark said. *)
-          ; (say "프롬프트 기호" "Prompt marks", Masc_tui_config_mark.prompt_legend)
-          ; (say "매개변수 기호" "Param marks", Masc_tui_config_mark.param_legend)
+          ; (say "프롬프트 기호" "Prompt marks", Masc_tui_config_mark.prompt_legend_for ~ko)
+          ; (say "매개변수 기호" "Param marks", Masc_tui_config_mark.param_legend_for ~ko)
           ])
 
 let help_sections ~lang ?current () = List.map snd (located_sections ~lang ?current ())

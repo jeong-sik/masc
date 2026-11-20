@@ -400,7 +400,7 @@ let lane_summary receipt =
   let file = match receipt.commit.Runtime.Config_commit_wire.durability with
     | Runtime.Durable -> "File saved"
     | Runtime.Durability_unconfirmed { detail } ->
-      "File written; durability unconfirmed — " ^ detail in
+      "File written; durability unconfirmed · " ^ detail in
   let exact = match receipt.application.exact_output_registry with
     | Exact_output_registry_applied _ -> "exact lanes applied"
     | Exact_output_registry_unpublished -> "exact lanes unavailable; restart required"

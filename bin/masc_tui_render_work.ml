@@ -1020,14 +1020,14 @@ let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_g
        | None -> []
        | Some action ->
            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-             (Printf.sprintf (if ko then "확인 대기: %s [%s] · 다시 누르면 제출, 다른 키는 취소" else "ARMED: %s [%s] -- press again to submit; other keys cancel")
+             (Printf.sprintf (if ko then "확인 대기: %s [%s] · 다시 누르면 제출, 다른 키는 취소" else "ARMED: %s [%s] · press again to submit; other keys cancel")
                 (planning_action_label ~ko action) (planning_action_key action))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
   |> fun rows -> rows @ (match drop_reason with
        | None -> []
        | Some reason ->
            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-             (Printf.sprintf (if ko then "중단 사유: %s_ · Enter:중단 요청" else "DROP REASON: %s_ -- Enter requests drop")
+             (Printf.sprintf (if ko then "중단 사유: %s_ · Enter:중단 요청" else "DROP REASON: %s_ · Enter requests drop")
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
 

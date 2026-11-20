@@ -325,7 +325,7 @@ let submit_form overlay json =
             | _ -> "record" in
           let overlay =
             { overlay with text; records; form = None; cursor = clamp records overlay.cursor;
-              message = Some (name ^ " added to draft — Esc then s saves") } in
+              message = Some (name ^ " added to draft · Esc then s saves") } in
           Ok (Apply (overlay, text)))
 
 let drop_selected overlay =
@@ -344,7 +344,7 @@ let drop_selected overlay =
                   text;
                   records;
                   cursor = clamp records overlay.cursor;
-                  message = Some (record.source_id ^ " removed from draft — Esc then s saves");
+                  message = Some (record.source_id ^ " removed from draft · Esc then s saves");
                 } in
               Ok (Apply (overlay, text))))
 

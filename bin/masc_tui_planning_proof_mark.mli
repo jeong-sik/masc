@@ -14,7 +14,7 @@ val tone : Masc.Tui_decode.goal_proof -> Masc_tui_value.Mark.t option
 (** The status the mark stands for (RFC tui-one-screen-grammar 7.2), so the
     caller colours it with that status's tone; [None] for the idle blank. *)
 
-val legend : (string * string) list
+val legend_for : ko:bool -> (string * string) list
 (** Every mark that is not a blank, paired with its word, in the order a goal
     travels: asked, approved, refused, outrun by its own criterion, unreadable. *)
 

@@ -365,6 +365,51 @@ let test_docked_preview_mode_and_vertical_split () =
          state)
     [ Preview_half; Preview_full ]
 
+let test_keeper_column_latch_monotonic () =
+  let open Alcotest in
+  let state = create_state ~workspace:"" ~port:0 () in
+  let l1 =
+    latch_keeper_column_widths None ~view:state.keeper_list_view
+      ~density:state.keeper_list_density ~inner:100 ~widest_runtime:20
+      ~widest_detail:30
+  in
+  check int "initial runtime" 20 l1.kcl_widest_runtime;
+  check int "initial detail" 30 l1.kcl_widest_detail;
+  let l2 =
+    latch_keeper_column_widths (Some l1) ~view:state.keeper_list_view
+      ~density:state.keeper_list_density ~inner:100 ~widest_runtime:12
+      ~widest_detail:15
+  in
+  check int "latched runtime holds high-water mark" 20 l2.kcl_widest_runtime;
+  check int "latched detail holds high-water mark" 30 l2.kcl_widest_detail;
+  let l3 =
+    latch_keeper_column_widths (Some l2) ~view:state.keeper_list_view
+      ~density:state.keeper_list_density ~inner:100 ~widest_runtime:28
+      ~widest_detail:25
+  in
+  check int "grows monotonically" 28 l3.kcl_widest_runtime;
+  check int "keeps detail max" 30 l3.kcl_widest_detail;
+  let l4 =
+    latch_keeper_column_widths (Some l3) ~view:state.keeper_list_view
+      ~density:state.keeper_list_density ~inner:120 ~widest_runtime:14
+      ~widest_detail:18
+  in
+  check int "resets when inner width changes" 14 l4.kcl_widest_runtime;
+  cycle_keeper_list_view state;
+  let l5 =
+    latch_keeper_column_widths (Some l4) ~view:state.keeper_list_view
+      ~density:state.keeper_list_density ~inner:120 ~widest_runtime:10
+      ~widest_detail:12
+  in
+  check int "resets when keeper_list_view changes" 10 l5.kcl_widest_runtime;
+  cycle_keeper_list_density state;
+  let l6 =
+    latch_keeper_column_widths (Some l5) ~view:state.keeper_list_view
+      ~density:state.keeper_list_density ~inner:120 ~widest_runtime:8
+      ~widest_detail:9
+  in
+  check int "resets when keeper_list_density changes" 8 l6.kcl_widest_runtime
+
 let schedule index : schedule_row =
   { sch_schedule_id = Printf.sprintf "schedule-%02d" index
   ; sch_schedule_instance_id = "instance"
@@ -918,6 +963,8 @@ let () =
             test_goals_report_the_entries_they_drew
         ; Alcotest.test_case "docked preview modes split height and preserve Goal page counts" `Quick
             test_docked_preview_mode_and_vertical_split
+        ; Alcotest.test_case "keeper column latch is monotonic within a view and width" `Quick
+            test_keeper_column_latch_monotonic
         ; Alcotest.test_case "the schedule list reports the rows it drew" `Quick
             test_schedules_report_the_rows_they_drew
         ; Alcotest.test_case "a schedule's Keeper link names the Keeper" `Quick

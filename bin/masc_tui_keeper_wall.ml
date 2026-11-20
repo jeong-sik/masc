@@ -327,7 +327,8 @@ let fleet_rows ~ko ~cols ~now runtimes =
       ^ Theme.recede () ^ (if ko then " │ 최대 " else " │ peak ") ^ Ansi.reset
       ^ count_text peak_fail
     in
-    [ fit_row row0; legend_row ~ko ~cols ]
+    let blank_wave = fit_row (prefix name_cells " " "") in
+    [ fit_row row0 ] @ List.init 5 (fun _ -> blank_wave) @ [ legend_row ~ko ~cols ]
   else
     let total_ok, total_bad, active_slots, peak_ok, peak_bad =
       Array.fold_left
@@ -448,6 +449,9 @@ let selected_cockpit_rows ~ko ~cols ~now ~name ~status runtime =
       ; fit_row
           ("  " ^ Theme.recede ()
            ^ Masc_tui_keeper_strip.history_unknown_label ~cells:(min 24 (max 8 (cols - 4))))
+      ; ""
+      ; ""
+      ; ""
       ]
     else
       let tally_arr = Array.of_list keeper_tallies in

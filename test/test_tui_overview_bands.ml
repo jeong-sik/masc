@@ -23,10 +23,20 @@ let test_plan_thresholds () =
            check bool "telemetry_rows >= 4" true (telemetry_rows >= 4);
            check bool "keeper_rows is 0 or >= 3" true
              (keeper_rows = 0 || keeper_rows >= 3);
-           check bool "card_rows >= 8" true (card_rows >= 8);
-           if keeper_count = 0 then
-             check int "no keeper table when keeper_count = 0" 0 keeper_rows)
-    [ (18, 88, 0); (18, 88, 1); (18, 88, 2); (24, 100, 6); (36, 140, 20) ]
+           check bool "card_rows >= 8" true (card_rows >= 8))
+    [ (18, 88, 0); (18, 88, 1); (18, 88, 2); (24, 100, 6); (36, 140, 20) ];
+  List.iter
+    (fun (available, cols) ->
+       let baseline = Bands.plan ~available ~cols ~keeper_count:0 in
+       List.iter
+         (fun count ->
+            check bool
+              (Printf.sprintf "plan invariant at avail=%d cols=%d count=%d"
+                 available cols count)
+              true
+              (Bands.plan ~available ~cols ~keeper_count:count = baseline))
+         [ 1; 2; 6; 20 ])
+    [ (24, 100); (36, 140) ]
 
 let sample_snapshot : Bands.telemetry_snapshot =
   { fleet_running = 3

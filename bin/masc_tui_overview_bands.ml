@@ -19,17 +19,11 @@ let min_rows = 18
 let min_card_rows = 8
 let telemetry_fixed_rows = 4
 
-let plan ~available ~cols ~keeper_count =
+let plan ~available ~cols ~keeper_count:_ =
   if cols < min_cols || available < min_rows then Cards_only
   else
     let telemetry_rows = telemetry_fixed_rows in
-    let raw_keeper_rows =
-      if keeper_count <= 0 then 0
-      else
-        let desired = min 6 (keeper_count + 2) in
-        let max_share = max 4 ((available - telemetry_rows) / 3) in
-        min desired max_share
-    in
+    let raw_keeper_rows = min 6 (max 4 ((available - telemetry_rows) / 3)) in
     let keeper_rows =
       if available - telemetry_rows - raw_keeper_rows >= min_card_rows then
         raw_keeper_rows

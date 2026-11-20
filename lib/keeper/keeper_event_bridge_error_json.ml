@@ -356,11 +356,6 @@ let core_media_error_fields : Agent_core.History.media_error -> _ = function
 let core_provider_error_fields error =
   let message = Llm_provider.Error.to_string error in
   match error with
-  | Llm_provider.Error.MissingApiKey { var_name } ->
-    [ "variant", `String "missing_api_key"
-    ; "message", `String message
-    ; "var_name", `String var_name
-    ]
   | Llm_provider.Error.InvalidConfig { field; detail } ->
     [ "variant", `String "invalid_config"
     ; "message", `String message

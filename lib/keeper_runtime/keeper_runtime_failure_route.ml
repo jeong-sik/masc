@@ -82,7 +82,6 @@ let hard_quota_source (err : Agent_core.Error.t) =
   | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
   | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _)
   | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
-  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
@@ -128,7 +127,6 @@ let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Api (Llm_provider.Retry.InputCapacity _)
   | Agent_core.Error.Api (Llm_provider.Retry.NetworkError _ | Llm_provider.Retry.Connect_failed _)
   | Agent_core.Error.Api (Llm_provider.Retry.Timeout _)
-  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
@@ -403,7 +401,6 @@ let route_of_provider_error (p : Llm_provider.Error.provider_error) =
      is a different provider attempt that may not repeat this provider's own
      report. *)
   | Llm_provider.Error.ProviderReportedError _ -> rotate Provider_reported_failure
-  | Llm_provider.Error.MissingApiKey _ -> exhaust Config_mismatch
   | Llm_provider.Error.InvalidConfig _ -> exhaust Config_mismatch
   | Llm_provider.Error.InvalidRequest _ -> exhaust Deterministic_request
   (* The stream ended before the completion contract's stop reason. The

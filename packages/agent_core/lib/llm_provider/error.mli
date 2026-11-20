@@ -6,7 +6,6 @@
     @since 0.93.1 *)
 
 type provider_error =
-  | MissingApiKey of { var_name : string }
   | InvalidConfig of
       { field : string
       ; detail : string

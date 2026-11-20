@@ -250,7 +250,6 @@ let classify_provider_error = function
     provider_timeout
       ~source:Agent_core_provider
       ~phase:(Some (timeout_phase_of_agent_core_phase phase))
-  | Llm_provider.Error.MissingApiKey _
   | Llm_provider.Error.InvalidConfig _
   | Llm_provider.Error.ParseError _
   | Llm_provider.Error.ProviderWireError _

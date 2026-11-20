@@ -625,7 +625,7 @@ let failure_certainty ~dispatch error =
     | Agent_core.Error.Provider (Llm_provider.Error.RateLimit _ | HardQuota _
         | CapacityExhausted _ | AuthError _ | AuthorizationError _ | ServerError _
         | NotFound _ | InvalidRequest _ | EmptyCompletion _) -> Definite_refusal
-    | Agent_core.Error.Provider (MissingApiKey _ | InvalidConfig _ | ParseError _
+    | Agent_core.Error.Provider (InvalidConfig _ | ParseError _
         | UnknownVariant _ | ProviderUnavailable _ | NetworkError _ | Connect_failed _
         | Timeout _
         | ProviderTerminal _ | ProviderReportedError _ | ProviderWireError _)

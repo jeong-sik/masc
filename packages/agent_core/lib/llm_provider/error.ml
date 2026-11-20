@@ -6,7 +6,6 @@
     @since 0.42.0 *)
 
 type provider_error =
-  | MissingApiKey of { var_name : string }
   | InvalidConfig of
       { field : string
       ; detail : string
@@ -144,7 +143,6 @@ let provider_terminal_reason = function
 ;;
 
 let to_string = function
-  | MissingApiKey r -> Printf.sprintf "Missing API key env var: %s" r.var_name
   | InvalidConfig r -> Printf.sprintf "Invalid config '%s': %s" r.field r.detail
   | ParseError r -> Printf.sprintf "Parse error: %s" r.detail
   | ProviderWireError r ->
@@ -420,7 +418,6 @@ let is_retryable = function
   | NetworkError { kind; _ } | Connect_failed { kind; _ } ->
     not (Http_client.network_error_kind_is_non_retryable kind)
   | Timeout _ -> true
-  | MissingApiKey _
   | InvalidConfig _
   | ParseError _
   | ProviderWireError _
@@ -458,7 +455,6 @@ let timeout_phase_is_local_admission = function
 let is_local_admission_timeout = function
   | Timeout { timeout_phase; provider = _; detail = _ } ->
     timeout_phase_is_local_admission timeout_phase
-  | MissingApiKey _
   | InvalidConfig _
   | ParseError _
   | ProviderWireError _
@@ -481,7 +477,6 @@ let is_local_admission_timeout = function
 
 let is_candidate_access_rejection = function
   | AuthError _ | AuthorizationError _ | NotFound _ -> true
-  | MissingApiKey _
   | InvalidConfig _
   | ParseError _
   | ProviderWireError _
@@ -515,7 +510,6 @@ let is_end_turn_empty_completion = function
      | Types.ContextWindowExceeded
      | Types.UnmatchedToolCalls
      | Types.Unknown _ -> false)
-  | MissingApiKey _
   | InvalidConfig _
   | ParseError _
   | ProviderWireError _

@@ -128,8 +128,7 @@ let cause_of_core_error (error : Agent_core.Error.t) =
       (Llm_provider.Error.RateLimit { provider; retry_after; detail }) ->
     Provider_rate_limited { provider = Some provider; retry_after; detail }
   | Agent_core.Error.Provider
-      ( Llm_provider.Error.MissingApiKey _
-      | Llm_provider.Error.InvalidConfig _
+      ( Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.ParseError _
       | Llm_provider.Error.ProviderWireError _
       | Llm_provider.Error.ProviderReportedError _

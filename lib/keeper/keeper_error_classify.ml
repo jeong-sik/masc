@@ -81,7 +81,7 @@ let is_transient_network_error (err : Agent_core.Error.t) : bool =
   | Agent_core.Error.Api (InputCapacity _) -> false
   (* Non-API error families are by definition not transient network errors. *)
   | Agent_core.Error.Provider
-      ( Llm_provider.Error.MissingApiKey _ | Llm_provider.Error.InvalidConfig _
+      ( Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.ParseError _ | Llm_provider.Error.ProviderWireError _
       | Llm_provider.Error.ProviderReportedError _
       | Llm_provider.Error.UnknownVariant _
@@ -124,7 +124,6 @@ let is_provider_rejected_parse_error (err : Agent_core.Error.t) : bool =
       | Llm_provider.Error.ServerError _ | Llm_provider.Error.RateLimit _
       | Llm_provider.Error.AuthError _
       | Llm_provider.Error.AuthorizationError _
-      | Llm_provider.Error.MissingApiKey _
       | Llm_provider.Error.NotFound _ | Llm_provider.Error.CapacityExhausted _
       | Llm_provider.Error.HardQuota _
       | Llm_provider.Error.ProviderUnavailable _
@@ -147,7 +146,7 @@ let is_provider_wire_error (err : Agent_core.Error.t) : bool =
   match err with
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _) -> true
   | Agent_core.Error.Provider
-      ( Llm_provider.Error.MissingApiKey _ | Llm_provider.Error.InvalidConfig _
+      ( Llm_provider.Error.InvalidConfig _
       | Llm_provider.Error.ParseError _ | Llm_provider.Error.ProviderReportedError _
       | Llm_provider.Error.UnknownVariant _
       | Llm_provider.Error.ProviderUnavailable _
@@ -190,7 +189,6 @@ let is_empty_completion_error (err : Agent_core.Error.t) : bool =
      nothing. If a future Agent Core promotes empty completions to
      [ParseError], that pin update is the place to classify them — as a
      typed shape, not a message substring. *)
-  | Agent_core.Error.Provider (Llm_provider.Error.MissingApiKey _)
   | Agent_core.Error.Provider (Llm_provider.Error.InvalidConfig _)
   | Agent_core.Error.Provider (Llm_provider.Error.ParseError _)
   | Agent_core.Error.Provider (Llm_provider.Error.ProviderWireError _)
@@ -465,8 +463,7 @@ let recoverable_runtime_failure_reason (err : Agent_core.Error.t) =
              if is_empty_completion_error err then Some Server_error else None
          | Agent_core.Error.Provider
              ( Llm_provider.Error.AuthError _
-             | Llm_provider.Error.AuthorizationError _
-             | Llm_provider.Error.MissingApiKey _ ) ->
+             | Llm_provider.Error.AuthorizationError _ ) ->
              Some Auth_error
          (* Wire/provided-response failures are intentionally excluded here.
             This function selects a deferred whole-runtime lane after the

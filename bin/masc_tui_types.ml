@@ -15207,11 +15207,25 @@ let complete_connectors_read state request result =
 let clear_connectors_read state =
   state.connectors_read <- Connector_read.empty
 
+(* A plain refresh over a held snapshot draws nothing: the reading slot says a
+   read is under way (RFC tui-one-screen-grammar §8). A read owed after a
+   binding write keeps its words, because the held snapshot may predate the
+   write. Every pair is listed, so a new cause or follow-up fails to compile
+   here instead of falling into one of the two answers. *)
+let connectors_refresh_is_silent (state : state) (cause : Connector_read.cause)
+    (follow_up : Connector_read.follow_up) =
+  Option.is_some state.connectors
+  && (match cause, follow_up with
+      | Connector_read.Refresh, No_follow_up -> true
+      | Refresh, Read_after_write
+      | After_write, (No_follow_up | Read_after_write) -> false)
+
 let connectors_read_notice state =
   let ko = state.ui_language = Lang_ko in
   let recheck_queued = if ko then " · 재확인 예약됨" else " · recheck queued" in
   match Connector_read.view state.connectors_read with
   | Connector_read.Quiet -> None
+  | Reading (cause, follow_up) when connectors_refresh_is_silent state cause follow_up -> None
   | Reading (cause, follow_up) ->
       (match Connector_read.stage state.connectors_read with
        | Some Connector_read.Names_pending ->

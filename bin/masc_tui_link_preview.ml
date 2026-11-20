@@ -30,6 +30,29 @@ let preview_cache : (string, og_preview) Masc_tui_lru.t ref =
 
 let preview_generation = ref 0
 
+(* The URLs whose page this cache has asked for, under [preview_cache_mu].
+   The ask is remembered apart from the fetched cards: [preview_cache] keeps
+   only the newest [preview_cache_capacity] of them, and a reply with more
+   links than that used to forget each one within a frame and ask its site
+   again on the next. A fetched card the cache forgot falls back to the
+   synthesized one; the site is not asked twice. *)
+let fetch_asked : (string, unit) Hashtbl.t = Hashtbl.create preview_cache_capacity
+
+(* Synthesized cards, kept apart so they never push a fetched card out. A
+   card here is a function of its URL: forgetting one costs its next draw a
+   parse, and no ask or generation. *)
+let synthesized_capacity = 1024
+let synthesized : (string, og_preview) Masc_tui_lru.t ref =
+  ref (Masc_tui_lru.create ~capacity:synthesized_capacity)
+
+let first_ask url =
+  Stdlib.Mutex.protect preview_cache_mu (fun () ->
+    if Hashtbl.mem fetch_asked url then false
+    else begin
+      Hashtbl.replace fetch_asked url ();
+      true
+    end)
+
 let cache_generation () =
   Stdlib.Mutex.protect preview_cache_mu (fun () -> !preview_generation)
 
@@ -126,7 +149,9 @@ let retry_mosaic ~retry url = compute_mosaic Retry_refused ~compute:retry url
 let clear_cache () =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
       incr preview_generation;
-      preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity);
+      preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity;
+      synthesized := Masc_tui_lru.create ~capacity:synthesized_capacity;
+      Hashtbl.reset fetch_asked);
   Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
     Hashtbl.filter_map_inplace (fun _ -> function
       | Decided _ -> None
@@ -433,19 +458,29 @@ let set_background_fetch f = background_fetch := f
 
 let has_informative_preview p = p.has_metadata
 
+(* The cache holds fetched cards only. A synthesized card is a function of
+   the URL, kept in [synthesized], so drawing it again bumps no generation: a
+   reply with more links than the cache holds no longer invalidates every
+   frame's layout. The page is asked for once ([first_ask]); its card
+   replaces the synthesized one on the next render, and a failed or
+   unregistered fetch leaves the synthesized card. A direct image URL has no
+   HTML page to read, so it is not fetched. *)
 let get_preview url =
   match cache_lookup url with
   | Some p -> p
   | None ->
-      let p = synthesize_preview url in
-      cache_store p;
-      (* Kick off a real fetch exactly once -- this is the only cache miss for
-         the url. Its result replaces this synthesized card on the next render;
-         a failed or unregistered fetch simply leaves the synthesized card. A
-         direct image URL has no HTML page to read, so it is not fetched. *)
+      let p =
+        match Stdlib.Mutex.protect preview_cache_mu (fun () -> Masc_tui_lru.find !synthesized url) with
+        | Some p -> p
+        | None ->
+            let p = synthesize_preview url in
+            Stdlib.Mutex.protect preview_cache_mu (fun () -> Masc_tui_lru.set !synthesized url p);
+            p
+      in
       (match p.kind with
         | Image_direct _ -> ()
-        | Github _ | Arxiv _ | HackerNews _ | YouTube _ | Web_page -> !background_fetch url);
+        | Github _ | Arxiv _ | HackerNews _ | YouTube _ | Web_page ->
+            if first_ask url then !background_fetch url);
       p
 
 let site_icon p =

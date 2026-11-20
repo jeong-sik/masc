@@ -5,20 +5,15 @@ type successful_tool_completion =
   | Successful_tool_completion
 
 type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-      (** [Some] names exact receipt snapshots of a durably settled candidate,
-          not acceptance. [None] carries no authority on failed/prevalidation
-          results. The caller accepts first, then settles with its final stop reason. *)
-  ; effect_disposition : Keeper_provider_attempt_effect.t
+  { outcome : Keeper_official_client_attempt.outcome
   ; successful_tool_completion : successful_tool_completion
   }
 (** One Codex candidate result plus two distinct typed tool facts observed
     while producing it. The outer runtime-lane owner consumes
-    [effect_disposition] as retry authority; [successful_tool_completion]
-    only proves that a handler returned a successful result and can therefore
-    support accepting a tool-only terminal. *)
+    [outcome.effect_disposition] as retry authority;
+    [successful_tool_completion] only proves that a handler returned a
+    successful result and can therefore support accepting a tool-only
+    terminal. *)
 
 val request_context_of_last_usage :
   Runtime_codex_app_server.last_usage -> Runtime_observation.request_context
@@ -149,7 +144,6 @@ val run :
     Without it, the complete carrier is compared as one context. *)
 
 module For_testing : sig
-  val note_transport_uncertainty : Keeper_provider_attempt_effect.t Atomic.t -> unit
   val observe_failed_dispatch :
     observe_transport_uncertain:(unit -> unit) -> Runtime_codex_app_server.error -> unit
 

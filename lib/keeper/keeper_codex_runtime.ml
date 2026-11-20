@@ -10,10 +10,7 @@ type successful_tool_completion =
   | Successful_tool_completion
 
 type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-  ; effect_disposition : Keeper_provider_attempt_effect.t
+  { outcome : Keeper_official_client_attempt.outcome
   ; successful_tool_completion : successful_tool_completion
   }
 
@@ -2066,13 +2063,6 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id
 ;;
 (* Uncertainty cannot erase stronger evidence from an earlier attempt. The
    compare-and-set also preserves an effect observed concurrently. *)
-let note_transport_uncertainty effect_disposition =
-  match Atomic.compare_and_set effect_disposition
-          Keeper_provider_attempt_effect.No_effect_observed
-          Keeper_provider_attempt_effect.Observation_unavailable with
-  | true | false -> ()
-;;
-
 let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal ?official_task_reference ?composed_context ~accepts_image_input ?required_native_posture ?official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~keeper_name ~pre_tool_rejects ~base_path ~outbox_viewer ~read_retained_media ~goal ~goal_blocks
     ~system_prompt ~tools ?(loading_plan = Keeper_official_client_host.All_on_demand) ~initial_messages ~model_input_projection
     ~on_transmitted_model_input ~hooks
@@ -2095,19 +2085,6 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
   let quota_scope =
     Runtime_quota_window.scope_of_codex_home
       (Some (Runtime_official_account.home (Runtime_account_access.account account)))
-  in
-  let settled_session = Atomic.make None in
-  let pending_result_receipts = Atomic.make None in
-  let on_results_ready value = Atomic.set pending_result_receipts value in
-  let on_session_settled value = Atomic.set settled_session (Some value) in
-  let effect_disposition =
-    Atomic.make Keeper_provider_attempt_effect.No_effect_observed
-  in
-  let observe_effect_attempted () =
-    Atomic.set effect_disposition Keeper_provider_attempt_effect.Effect_attempted
-  in
-  let observe_transport_uncertain () =
-    note_transport_uncertainty effect_disposition
   in
   let successful_tool_completion = Atomic.make No_successful_tool_completion in
   let observe_successful_tool_completion () =
@@ -2132,9 +2109,16 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         (Option.value on_memory_capacity_refusal
            ~default:(fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged))
   in
-  let result =
-    Eio.Switch.run (fun result_scope ->
-    Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
+  let outcome =
+    Keeper_official_client_attempt.run ~event_bus ~keeper_name
+      (fun ~result_scope
+           { Keeper_official_client_attempt.on_session_settled; on_results_ready; effect_cell } ->
+      let observe_effect_attempted () =
+        Keeper_official_client_attempt.Effect_cell.attempted effect_cell
+      in
+      let observe_transport_uncertain () =
+        Keeper_official_client_attempt.Effect_cell.unobserved effect_cell
+      in
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
         ~on_memory_capacity_refusal
         ~on_memory_retry:(fun () ->
@@ -2152,7 +2136,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
          | Keeper_request_source.Keeper_history _ -> true)
         && Option.is_none official_client_continuation
         && Keeper_provider_attempt_effect.allows_same_turn_retry
-             (Atomic.get effect_disposition))
+             (Keeper_official_client_attempt.Effect_cell.read effect_cell))
       ~shrink_capacity:(fun ~capacity ~default_capacity:_ ->
         Option.value
           !observed_next_shrink_capacity_bytes
@@ -2246,20 +2230,12 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         ~observe_transport_uncertain
           ~account
           ~config)
-      ()))
+      ())
   in
-  { result
-  ; settled_session = Atomic.get settled_session
-  ; pending_result_receipts = (match result with
-      | Ok _ -> Atomic.get pending_result_receipts
-      | Error _ -> None)
-  ; effect_disposition = Atomic.get effect_disposition
-  ; successful_tool_completion = Atomic.get successful_tool_completion
-  }
+  { outcome; successful_tool_completion = Atomic.get successful_tool_completion }
 ;;
 
 module For_testing = struct
-  let note_transport_uncertainty = note_transport_uncertainty
   let observe_failed_dispatch = observe_failed_dispatch
   let observe_stream_native_action ~turn_count ~observe event =
     match

@@ -307,46 +307,33 @@ let test_gate_resume_overflow_is_session_full () =
     true
 ;;
 
-let test_transport_uncertainty_preserves_stronger_evidence () =
-  let module Effect = Masc.Keeper_provider_attempt_effect in
-  List.iter (fun (before, expected) ->
-    let observation = Atomic.make before in
-    Map.note_transport_uncertainty observation;
-    Map.note_transport_uncertainty observation;
-    Alcotest.(check string) "uncertainty joins without losing effect evidence"
-      (Effect.to_string expected) (Effect.to_string (Atomic.get observation));
-    Alcotest.(check bool) "uncertainty cannot reopen same-run retry" false
-      (Effect.allows_same_turn_retry (Atomic.get observation)))
-    Effect.[ No_effect_observed, Observation_unavailable;
-             Observation_unavailable, Observation_unavailable;
-             Effect_attempted, Effect_attempted ]
-;;
-
 let test_accepted_transport_failure_fences_replay_but_routes_timeout () =
   let module Effect = Masc.Keeper_provider_attempt_effect in
+  let module Cell = Masc.Keeper_official_client_attempt.Effect_cell in
   List.iter (fun error ->
-    List.iter (fun initial ->
-      let observation = Atomic.make initial in
+    List.iter (fun effect_attempted ->
+      let cell = Cell.create () in
+      if effect_attempted then Cell.attempted cell;
       Map.observe_failed_dispatch
-        ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)
+        ~observe_transport_uncertain:(fun () -> Cell.unobserved cell)
         error;
       Alcotest.(check bool) "an accepted turn is not replayed without a terminal receipt"
-        false (Effect.allows_same_turn_retry (Atomic.get observation));
-      if initial = Effect.Effect_attempted then
+        false (Effect.allows_same_turn_retry (Cell.read cell));
+      if effect_attempted then
         Alcotest.(check bool) "known effect is not weakened" true
-          (Atomic.get observation = Effect.Effect_attempted))
-      Effect.[No_effect_observed; Effect_attempted])
+          (Cell.read cell = Effect.Effect_attempted))
+      [false; true])
     [ Codex.Timeout { seconds = 300.; turn_accepted = true }
     ; Codex.Process_exited { detail = "stdout closed"; turn_accepted = true }
     ; Codex.Turn_input_write_failed "partial write"
     ];
   List.iter (fun before_dispatch ->
-    let observation = Atomic.make Effect.No_effect_observed in
+    let cell = Cell.create () in
     Map.observe_failed_dispatch
-      ~observe_transport_uncertain:(fun () -> Map.note_transport_uncertainty observation)
+      ~observe_transport_uncertain:(fun () -> Cell.unobserved cell)
       before_dispatch;
     Alcotest.(check bool) "pre-dispatch failure still permits fallback" true
-      (Effect.allows_same_turn_retry (Atomic.get observation)))
+      (Effect.allows_same_turn_retry (Cell.read cell)))
     [ Codex.Timeout {seconds = 300.; turn_accepted = false}
     ; Codex.Reasoning_effort_admission_failed
         {model = "fixture"; detail = "model/list timed out"}
@@ -366,8 +353,6 @@ let () =
     [ ( "carriage"
       , [ Alcotest.test_case "accepted transport failure fences replay and preserves timeout routing" `Quick
             test_accepted_transport_failure_fences_replay_but_routes_timeout
-        ; Alcotest.test_case "transport uncertainty preserves prior effects" `Quick
-            test_transport_uncertainty_preserves_stronger_evidence
         ; Alcotest.test_case
             "every variant lands in its class"
             `Quick

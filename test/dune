@@ -3572,6 +3572,7 @@
 (include stanzas/test_keeper_codex_tool_outbox_wake.inc)
 (include stanzas/test_keeper_agent_core_result_outbox.inc)
 (include stanzas/test_keeper_agent_core_retained_carrier.inc)
+(include stanzas/test_keeper_in_run_narrowing.inc)
 (include stanzas/test_keeper_execute_background.inc)
 (include stanzas/test_keeper_host_result_retention.inc)
 (include stanzas/test_keeper_retained_media_ownership.inc)

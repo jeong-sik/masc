@@ -8,12 +8,57 @@ module Markdown = Masc_tui_markdown
 let table_frame_enabled = ref false
 
 
+(* The opening codes of the chat's Markdown as the reader's settings give
+   them at one moment: the theme, the contrast lift, direct Truecolor and the
+   table frame. Reading them is the only step that touches those settings, so
+   a domain that does not own them renders with the codes the UI domain read
+   (#54137). *)
+type dress = {
+  code_span : string;
+  heading_1 : string;
+  heading_2 : string;
+  link : string;
+  rule : string;
+  accent : string;
+  table_frame : bool;
+  keyword : string;
+  string_literal : string;
+  code_comment : string;
+  code_number : string;
+  code_type : string;
+  json_key : string;
+  json_number : string;
+  json_literal : string;
+  diff_added : string;
+  diff_removed : string;
+}
+
+let dress () =
+  { code_span = Theme.Syntax.code_span ()
+  ; heading_1 = Ansi.bold ^ Ansi.underline ^ Theme.category Theme.Slot_1
+  ; heading_2 = Ansi.bold ^ Theme.category Theme.Slot_2
+  ; link = Theme.Syntax.link ()
+  ; rule = Theme.Syntax.rule ()
+  ; accent = Ansi.bold ^ Theme.category Theme.Slot_1
+  ; table_frame = !table_frame_enabled
+  ; keyword = Theme.Syntax.keyword ()
+  ; string_literal = Theme.Syntax.string ()
+  ; code_comment = Theme.Syntax.code_comment ()
+  ; code_number = Theme.Syntax.code_number ()
+  ; code_type = Ansi.bold ^ Theme.Syntax.code_type ()
+  ; json_key = Theme.Syntax.json_key ()
+  ; json_number = Theme.Syntax.json_number ()
+  ; json_literal = Theme.Syntax.json_literal ()
+  ; diff_added = Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg ()
+  ; diff_removed = Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg ()
+  }
+
 (* Terminal dress for the markdown a keeper writes. The marker is the noise:
    a backticked identifier should read as the identifier, and a fenced diff
    should keep the alignment that made it worth fencing. Colours stay inside
    the palette the renderer already uses, so a chat row is still recognisably
    one of this TUI's rows. *)
-let palette ~closing : Markdown.palette =
+let palette_of dress ~closing : Markdown.palette =
   { strong = (Ansi.bold, closing)
     (* Slanted, not dimmed. Emphasis that recedes is the opposite of
        emphasis, and dim was standing in for an italic the theme did not
@@ -21,53 +66,51 @@ let palette ~closing : Markdown.palette =
        inside a coloured row leaves the row's colour alone. *)
   ; emphasis = (Ansi.italic, Ansi.no_italic)
   ; strike = (Ansi.strike, Ansi.no_strike)
-  ; code = (Theme.Syntax.code_span (), closing)
+  ; code = (dress.code_span, closing)
   (* Two palette-relative accents give documents a visible hierarchy, with
      weight and underline in addition to hue. Lower headings keep bold. *)
   ; heading =
       (fun level ->
-        if level <= 1 then
-          (Ansi.bold ^ Ansi.underline ^ Theme.category Theme.Slot_1, closing)
-        else if level = 2 then
-          (Ansi.bold ^ Theme.category Theme.Slot_2, closing)
+        if level <= 1 then (dress.heading_1, closing)
+        else if level = 2 then (dress.heading_2, closing)
         else (Ansi.bold, closing))
   ; quote = (Ansi.dim, closing)
-  ; link_text = (Theme.Syntax.link (), closing)
+  ; link_text = (dress.link, closing)
   ; link_target = (Ansi.dim, closing)
-  ; rule = (Theme.Syntax.rule (), closing)
+  ; rule = (dress.rule, closing)
   ; bullet = "\xe2\x80\xa2"
   ; code_gutter = "\xe2\x94\x82 "
-  ; code_header = (Ansi.bold ^ Theme.category Theme.Slot_1, closing)
-  ; code_border = (Theme.Syntax.rule (), closing)
+  ; code_header = (dress.accent, closing)
+  ; code_border = (dress.rule, closing)
   ; quote_gutter = "\xe2\x96\x8f "
-  ; table_header = (Ansi.bold ^ Theme.category Theme.Slot_1, closing)
+  ; table_header = (dress.accent, closing)
   ; table_gutter = " \xe2\x94\x82 "
   ; table_rule_gutter = "\xe2\x94\x80\xe2\x94\xbc\xe2\x94\x80"
-  ; table_frame = !table_frame_enabled
+  ; table_frame = dress.table_frame
   (* Fenced-code tokens, inside the cyan the plain code span already uses:
      one hue per role a keeper's eye scans for -- what binds, what is data,
      what the reader can skip. *)
-  ; code_keyword = (Theme.Syntax.keyword (), closing)
-  ; code_string = (Theme.Syntax.string (), closing)
-  ; code_comment = (Theme.Syntax.code_comment (), closing)
-  ; code_number = (Theme.Syntax.code_number (), closing)
-  ; code_type = (Ansi.bold ^ Theme.Syntax.code_type (), closing)
+  ; code_keyword = (dress.keyword, closing)
+  ; code_string = (dress.string_literal, closing)
+  ; code_comment = (dress.code_comment, closing)
+  ; code_number = (dress.code_number, closing)
+  ; code_type = (dress.code_type, closing)
   (* A JSON body has the four roles the chat's tool results and a Task note
      draw, so one payload reads the same wherever it is shown. *)
-  ; json_key = (Theme.Syntax.json_key (), closing)
-  ; json_number = (Theme.Syntax.json_number (), closing)
-  ; json_literal = (Theme.Syntax.json_literal (), closing)
+  ; json_key = (dress.json_key, closing)
+  ; json_number = (dress.json_number, closing)
+  ; json_literal = (dress.json_literal, closing)
   ; json_punctuation = (Theme.Syntax.json_punctuation, closing)
   (* Changed rows follow the dedicated diff surfaces: their background runs
      through the code gutter and the unused cells, so lines of different
      lengths still read as one patch. On Truecolor terminals both the tinted
      background and 4.5:1 foreground adapt to the active palette; non-Truecolor
      terminals keep the fixed 256-colour fallback pair. *)
-  ; code_diff_added =
-      (Theme.Syntax.diff_added_bg () ^ Theme.Syntax.diff_added_fg (), closing)
-  ; code_diff_removed =
-      (Theme.Syntax.diff_removed_bg () ^ Theme.Syntax.diff_removed_fg (), closing)
+  ; code_diff_added = (dress.diff_added, closing)
+  ; code_diff_removed = (dress.diff_removed, closing)
   }
+
+let palette ~closing = palette_of (dress ()) ~closing
 
 
 let render ~closing ~width body =

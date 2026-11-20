@@ -1513,6 +1513,43 @@ let test_find_retired_during_the_trailing_batch_delivers_nothing () = at_sizes (
       check int "the trailing batch rendered" entries (built () - before);
       check int "a search retired during it delivers nothing" 0 !delivered))))
 
+(* The worker renders with the Markdown settings the plan read on the UI
+   domain. A table frame turned on after the plan, while the candidates wait
+   behind a held job, adds no border row to what the worker renders: the
+   answer lands where the same search finds it in place without the frame. *)
+let test_find_worker_renders_with_the_settings_the_plan_read () = at_sizes (fun origin ->
+  let state = state origin in
+  let text = "before the table\n\n| key | value |\n|---|---|\n| first | plain |\n\
+              | second | FRAME_MATCH |\n\nafter the table" in
+  state.msg_loaded <- [row ~id:"framed" ~request_id:"framed" ~role:user ~text 1.];
+  let frame = Masc_tui_markdown_theme.table_frame_enabled in
+  let in_place = (Render.keeper_message_find_scroll state ~keeper_name:"alpha"
+    ~needle:"FRAME_MATCH" ~older_than:None).match_result in
+  check bool "the search in place matches" true (Option.is_some in_place);
+  Fun.protect ~finally:(fun () -> frame := false; Domain_pool_ref.clear_for_tests ()) (fun () ->
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      Eio_context.set_switch sw;
+      let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+      Domain_pool_ref.set pool;
+      let gate = Atomic.make false in
+      Eio.Fiber.fork ~sw (fun () ->
+        Domain_pool.submit_cpu ~name:"gate" pool (fun () ->
+          while not (Atomic.get gate) do Domain.cpu_relax () done));
+      Atomic.incr state.msg_search_generation;
+      let plan = Render.plan_keeper_message_search state ~keeper_name:"alpha"
+          ~needle:"FRAME_MATCH" ~older_than:None in
+      let answer, resolve = Eio.Promise.create () in
+      Render.launch_keeper_message_search state plan ~deliver:(Eio.Promise.resolve resolve);
+      for _ = 1 to 16 do Eio.Fiber.yield () done;
+      frame := true;
+      Atomic.set gate true;
+      match Eio.Promise.await answer with
+      | Error detail -> fail detail
+      | Ok (work, matched) ->
+          frame := false;
+          check bool "the worker answers as the plan's settings draw it" true
+            ((Render.complete_keeper_message_search work matched).match_result = in_place)))))
+
 (* Short entries go to the worker together, one job for several. The answer
    it delivers is the one the same search finds in place: the newest match,
    and the cursor that names it. *)
@@ -1675,6 +1712,8 @@ let () = run "chat search projection" [
       test_retired_matcher_stops_before_next_candidate;
     test_case "find renders candidates after the handler returns" `Quick
       test_find_renders_candidates_after_the_handler_returns;
+    test_case "find worker renders with the settings the plan read" `Quick
+      test_find_worker_renders_with_the_settings_the_plan_read;
     test_case "find retired during the trailing batch delivers nothing" `Quick
       test_find_retired_during_the_trailing_batch_delivers_nothing;
     test_case "batched find answers like the find in place" `Quick

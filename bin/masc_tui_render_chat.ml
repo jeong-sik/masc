@@ -211,8 +211,7 @@ let chat_body_with_previews ~preview ~mode ~entry ~width =
    -- eight hues is a legend to memorise, and the theme has measured contrast
    for the ones already in it. A drop is dim: the reason a fact was let go is
    not the change itself. The claim keeps the body's own colour. *)
-let chat_journal_rows ~(context : Chat_theme.body_context) ~width lines =
-  let palette = chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+let chat_journal_rows ~(palette : Markdown.palette) ~width lines =
   let span_of : Message_layout.journal_piece -> string * string = function
     | Journal_piece_sign Journal_added -> palette.code_diff_added
     | Journal_piece_sign Journal_removed -> palette.code_diff_removed
@@ -256,7 +255,10 @@ let cached_chat_markdown_with_preview ~preview ~link_previews_mode ~theme =
   let journal =
     match entry.journal with
     | [] -> []
-    | lines -> "" :: chat_journal_rows ~context ~width lines
+    | lines ->
+        "" :: chat_journal_rows
+          ~palette:(chat_markdown_palette ~closing:context.Chat_theme.markdown_close)
+          ~width lines
   in
   let body_rows =
     Masc_tui_frame_timing.time_stage ~name:"chat.markdown" (fun () ->
@@ -298,7 +300,7 @@ let body_byte_origin (entry : Message_layout.entry) body_identity offset =
   | Thinking_summary -> Search.Thinking_summary_byte {body=body_identity;offset}
   | Projected_body projection -> Search.Projected_byte {body=body_identity;projection;offset;expansion=0}
 
-let search_chat_markdown ~link_previews_mode ~theme ~cards ~(entry : Message_layout.entry) ~width =
+let search_chat_markdown ~link_previews_mode ~theme ~dress ~cards ~(entry : Message_layout.entry) ~width =
   let fields=ref [] in
   let body=chat_body_with_previews_internal ~on_field:(fun ~index ~url ~start field ->
     fields:=(index,url,start,field):: !fields) ~cards ~mode:link_previews_mode ~entry ~width () in
@@ -312,7 +314,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~cards ~(entry : Message_lay
         value=field.value;byte=field.source_start_byte+delta;expansion=0})
     done) !fields;
   let context=Chat_theme.body_context theme entry.style in
-  let palette=chat_markdown_palette ~closing:context.Chat_theme.markdown_close in
+  let palette=Masc_tui_markdown_theme.palette_of dress ~closing:context.Chat_theme.markdown_close in
   let document=Markdown.render_document_with_spans ~palette ~width body in
   let runs,unavailable=Search.of_document ~presentation:entry.body_presentation ~body:body_identity ~body_length:(String.length entry.body) ~origins document in
   let journal_rows,journal_runs=match entry.journal with
@@ -330,7 +332,7 @@ let search_chat_markdown ~link_previews_mode ~theme ~cards ~(entry : Message_lay
               visible_rows=[first+span.row,ranges];joins_previous=false;reading=Markdown.Source_order}
           | Some (run : Search.run) -> Hashtbl.replace fields key {run with visible_rows=(first+span.row,ranges)::run.visible_rows}) mapped.journal_fields;
         let runs=Hashtbl.to_seq fields |> List.of_seq |> List.sort (fun (a,_) (b,_) -> compare a b) |> List.map snd in
-        "" :: chat_journal_rows ~context ~width lines,runs in
+        "" :: chat_journal_rows ~palette ~width lines,runs in
   {mapped_rows=document.document_rows @ journal_rows;runs=runs @ journal_runs;unavailable}
 
 
@@ -4299,7 +4301,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
           | Some _ | None ->
           incr source_index_builds;
           let body = search_chat_markdown ~link_previews_mode:state.link_previews_mode
-            ~theme ~cards ~entry ~width in
+            ~theme ~dress:(Masc_tui_markdown_theme.dress ()) ~cards ~entry ~width in
           (* A partial body still indexes its mapped runs; a row of an omitted
              label has no source and reads as a generated row. *)
           let index = if owner = Unknown_polled_source then None else
@@ -4596,6 +4598,9 @@ type chat_search_plan = {
   search_memory:memory_visibility;
   search_markdown:entry:Message_layout.entry -> width:int -> string list;
   search_theme:Chat_theme.snapshot;
+  search_dress:Masc_tui_markdown_theme.dress;
+    (** The Markdown codes read on the UI domain; the worker renders with
+        these rather than reading the settings itself. *)
   search_preview:string -> Masc_tui_link_preview.og_preview;
     (** First lookup per URL wins; [search_preview_values] records it. *)
   search_preview_values:(string * Masc_tui_link_preview.og_preview) list ref;
@@ -4686,7 +4691,8 @@ let plan_keeper_message_search ?(preview_lookup=Masc_tui_link_preview.get_previe
      search_selected_keeper=Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state);
      search_reasoning=state.msg_reasoning_visibility;search_tools=state.msg_tool_visibility;
      search_memory=state.msg_memory_visibility;
-     search_markdown=markdown;search_theme=theme;search_preview=preview;
+     search_markdown=markdown;search_theme=theme;
+     search_dress=Masc_tui_markdown_theme.dress ();search_preview=preview;
      search_preview_values=preview_values;search_sources=sources 0 None [] tagged}
 
 (* Suffix geometry may include newer entries than a repeated cursor. Freeze
@@ -4700,12 +4706,13 @@ let freeze_search_previews plan (entry : Message_layout.entry) =
 type search_render = {
   render_mode:[`Off | `Compact | `Rich];
   render_theme:Chat_theme.snapshot;
+  render_dress:Masc_tui_markdown_theme.dress;
   render_origin:Message_layout.origin_display;
   render_inner_width:int;
 }
 
 let search_render plan =
-  {render_mode=plan.search_preview_mode;render_theme=plan.search_theme;
+  {render_mode=plan.search_preview_mode;render_theme=plan.search_theme;render_dress=plan.search_dress;
    render_origin=plan.search_origin;render_inner_width=plan.search_inner_width}
 
 (* A candidate's link cards, taken on the UI domain. Freezing every entry
@@ -4728,7 +4735,7 @@ let build_search_candidate render ~cards = function
   let mapped=ref None in
   let observe ~entry ~width =
     let body=search_chat_markdown ~link_previews_mode:render.render_mode
-      ~theme:render.render_theme ~cards ~entry ~width in
+      ~theme:render.render_theme ~dress:render.render_dress ~cards ~entry ~width in
     mapped:=Some body;
     body.mapped_rows in
   let rows=Message_layout.rows_of_entry ~markdown:observe ~origin:render.render_origin
@@ -6070,6 +6077,7 @@ module For_testing = struct
     let sorted table =
       List.sort compare (Hashtbl.fold (fun row position rows -> (row, position) :: rows) table []) in
     let whole = search_chat_markdown ~link_previews_mode:`Off ~theme
+      ~dress:(Masc_tui_markdown_theme.dress ())
       ~cards:(link_cards ~preview ~mode:`Off entry) ~entry ~width in
     let whole_index = source_body_index_of_runs
       ~convert:(fun position -> Some (Durable_position position))

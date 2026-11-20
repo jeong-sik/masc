@@ -317,6 +317,7 @@ type rendering = {
   rows : line list;
   targets : row_target list;
   scroll_max : int;
+  body_rows : int;
   context_rows : int;
 }
 
@@ -327,10 +328,17 @@ type 'source frame = {
   frame_columns : int;
   frame_targets : row_target list;
   frame_scroll_max : int;
+  frame_body_rows : int;
   frame_source : 'source option;
 }
 
-let empty_frame = { frame_columns = 0; frame_targets = []; frame_scroll_max = 0; frame_source = None }
+let empty_frame =
+  { frame_columns = 0
+  ; frame_targets = []
+  ; frame_scroll_max = 0
+  ; frame_body_rows = 0
+  ; frame_source = None
+  }
 
 let target_at frame ~line =
   if line < 0 then Target_none
@@ -1877,16 +1885,70 @@ let legend ~ko ~cols =
      which is not what any row carries. *)
   ^ pad_left tokens_cells (say ko "새 tok" "new tok")
 
+let is_actionable_target = function
+  | Target_none -> false
+  | Target_next_tab | Target_keeper _ | Target_more | Target_file _
+  | Target_calls _ | Target_call _ | Target_call_order -> true
+
+type scroll_snap =
+  | Snap_top
+  | Snap_end
+  | Snap_body_first
+  | Snap_body_last
+
+let page_height ~body_rows =
+  if body_rows >= 3 then body_rows - 2 else 1
+
+let target_rows ~(targets : row_target array) =
+  let acc = ref [] in
+  for index = Array.length targets - 1 downto 0 do
+    if is_actionable_target targets.(index) then acc := index :: !acc
+  done;
+  !acc
+
+let snap_target_row ~(targets : row_target array) ~row =
+  let count = Array.length targets in
+  if count = 0 then None
+  else if row >= 0 && row < count && is_actionable_target targets.(row) then Some row
+  else
+    let rec nearest best = function
+      | [] -> Option.map fst best
+      | idx :: rest ->
+          let dist = Int.abs (idx - row) in
+          let best =
+            match best with
+            | None -> Some (idx, dist)
+            | Some (_, best_dist) when dist < best_dist -> Some (idx, dist)
+            | Some _ -> best
+          in
+          nearest best rest
+    in
+    nearest None (target_rows ~targets)
+
+let rec last_of = function
+  | [] -> None
+  | [ x ] -> Some x
+  | _ :: rest -> last_of rest
+
+let resolve_scroll_snap ~(targets : row_target array) ~snap =
+  let all = target_rows ~targets in
+  let body = List.filter (fun idx -> idx > 0) all in
+  match snap with
+  | Snap_top -> (match all with first :: _ -> Some first | [] -> None)
+  | Snap_end -> last_of all
+  | Snap_body_first -> (
+      match body with
+      | first :: _ -> Some first
+      | [] -> (match all with first :: _ -> Some first | [] -> None))
+  | Snap_body_last -> (
+      match last_of body with Some _ as hit -> hit | None -> last_of all)
+
 let next_target_row ~(targets : row_target array) ~row ~step =
   let count = Array.length targets in
   let rec walk index =
     if index < 0 || index >= count then None
-    else
-      match targets.(index) with
-      | Target_none -> walk (index + step)
-      | Target_next_tab | Target_keeper _ | Target_more | Target_file _
-      | Target_calls _ | Target_call _ | Target_call_order ->
-          Some index
+    else if is_actionable_target targets.(index) then Some index
+    else walk (index + step)
   in
   if step = 0 then None else walk (row + step)
 
@@ -1993,7 +2055,7 @@ let keeper_context_lines ~cols input =
 
 let lines ~rows ~cols ~scroll input =
   let rows = max 0 rows in
-  if rows = 0 then { rows = []; targets = []; scroll_max = 0; context_rows = 0 }
+  if rows = 0 then { rows = []; targets = []; scroll_max = 0; body_rows = 0; context_rows = 0 }
   else
     let header = (header_line ~cols input, Target_next_tab) in
     let fleet = match input.tab with
@@ -2028,4 +2090,4 @@ let lines ~rows ~cols ~scroll input =
     in
     let drawn = List.filteri (fun index _ -> index < rows) (drawn @ padding) in
     { rows = List.map fst drawn; targets = List.map snd drawn; scroll_max;
-      context_rows = List.length context }
+      body_rows = max 0 below; context_rows = List.length context }

@@ -417,6 +417,68 @@ let test_a_page_of_uneven_items_passes_none () =
   Alcotest.(check int) "two short items then tall ones" 1
     (items_always_shown ~heights:[ 1; 1; 3; 3 ] ~rows:4)
 
+let test_wheel_or_key_move_and_cursor_conversion () =
+  let key ?vim_edges name expected =
+    check (Alcotest.option key_move_t) (Printf.sprintf "key %S" name) expected
+      (Masc_tui_scroll.wheel_or_key_move ?vim_edges name)
+  in
+  key "wheel-down" (Some Masc_tui_scroll.Line_down);
+  key "wheel-up" (Some Masc_tui_scroll.Line_up);
+  key "g" (Some Masc_tui_scroll.To_top);
+  key "G" (Some Masc_tui_scroll.To_end);
+  key ~vim_edges:false "g" None;
+  key ~vim_edges:false "G" None;
+  key ~vim_edges:false "home" (Some Masc_tui_scroll.To_top);
+  key ~vim_edges:false "end" (Some Masc_tui_scroll.To_end);
+  key ~vim_edges:false "pagedown" (Some Masc_tui_scroll.Page_down);
+  key ~vim_edges:false "pageup" (Some Masc_tui_scroll.Page_up);
+  check int "cursor_move_of_key_move uses page" 9
+    (Masc_tui_scroll.cursor_apply ~count:30
+       (Masc_tui_scroll.cursor_move_of_key_move ~page:9 Masc_tui_scroll.Page_down) 0);
+  check int "cursor_move_of_key_move floors page to 1" 1
+    (Masc_tui_scroll.cursor_apply ~count:30
+       (Masc_tui_scroll.cursor_move_of_key_move ~page:0 Masc_tui_scroll.Page_down) 0)
+
+let test_visible_target_for_scroll () =
+  let snap ~targets ~scroll ~height ~current move =
+    Masc_tui_scroll.visible_target_for_scroll ~targets ~scroll ~height ~current move
+  in
+  let dense = List.init 40 Fun.id in
+  check (Alcotest.option int) "dense list PgDn from top lands on overlap row"
+    (Some 9) (snap ~targets:dense ~scroll:9 ~height:10 ~current:(Some 0) Masc_tui_scroll.Page_down);
+  check (Alcotest.option int) "dense list PgDn from middle keeps relative row"
+    (Some 14) (snap ~targets:dense ~scroll:9 ~height:10 ~current:(Some 5) Masc_tui_scroll.Page_down);
+  check (Alcotest.option int) "dense list PgUp undoes PgDn"
+    (Some 5) (snap ~targets:dense ~scroll:0 ~height:10 ~current:(Some 14) Masc_tui_scroll.Page_up);
+  (* Short modal where scroll stays at 0: PgDn/PgUp still reach edges. *)
+  let short_targets = [ 2; 4; 6 ] in
+  check (Alcotest.option int) "short modal PgDn advances to last visible target"
+    (Some 6) (snap ~targets:short_targets ~scroll:0 ~height:10 ~current:(Some 2) Masc_tui_scroll.Page_down);
+  check (Alcotest.option int) "short modal PgUp returns to first visible target"
+    (Some 2) (snap ~targets:short_targets ~scroll:0 ~height:10 ~current:(Some 6) Masc_tui_scroll.Page_up);
+  (* Mixed modal with top non-selectable prose: scrolling to top yields None. *)
+  let mixed_targets = [ 15; 17; 19; 22; 25 ] in
+  check (Alcotest.option int) "top prose window without targets yields None"
+    None (snap ~targets:mixed_targets ~scroll:0 ~height:10 ~current:None Masc_tui_scroll.To_top);
+  check (Alcotest.option int) "PgDn from prose snaps to first visible target"
+    (Some 15) (snap ~targets:mixed_targets ~scroll:9 ~height:10 ~current:None Masc_tui_scroll.Page_down);
+  check (Alcotest.option int) "PgDn again advances to visible target near desired"
+    (Some 25) (snap ~targets:mixed_targets ~scroll:16 ~height:10 ~current:(Some 15) Masc_tui_scroll.Page_down);
+  check (Alcotest.option int) "PgUp back into top prose clears off-screen selection"
+    None (snap ~targets:mixed_targets ~scroll:0 ~height:10 ~current:(Some 15) Masc_tui_scroll.Page_up);
+  check (Alcotest.option int) "To_end picks last visible target"
+    (Some 25) (snap ~targets:mixed_targets ~scroll:16 ~height:10 ~current:None Masc_tui_scroll.To_end);
+  check (Alcotest.option int) "To_top with visible targets picks first visible"
+    (Some 2) (snap ~targets:short_targets ~scroll:0 ~height:10 ~current:(Some 6) Masc_tui_scroll.To_top);
+  check (Alcotest.option int) "zero height yields None"
+    None (snap ~targets:short_targets ~scroll:0 ~height:0 ~current:(Some 2) Masc_tui_scroll.Page_down);
+  check (Alcotest.option int) "scroll=max_int does not overflow"
+    None (snap ~targets:short_targets ~scroll:max_int ~height:10 ~current:None Masc_tui_scroll.To_end);
+  check (Alcotest.option int) "negative scroll normalizes to 0"
+    (Some 2) (snap ~targets:short_targets ~scroll:(-5) ~height:10 ~current:None Masc_tui_scroll.To_top);
+  check (Alcotest.option int) "prev=max_int on Page_down saturates without overflow"
+    (Some 6) (snap ~targets:short_targets ~scroll:0 ~height:10 ~current:(Some max_int) Masc_tui_scroll.Page_down)
+
 let () =
   Alcotest.run "tui_scroll"
     [ ( "bound"
@@ -425,8 +487,12 @@ let () =
         ; Alcotest.test_case "a page keeps one row of the window it leaves"
             `Quick test_a_page_keeps_one_row_of_the_window_it_leaves
         ; Alcotest.test_case "a key names one move" `Quick test_a_key_names_one_move
+        ; Alcotest.test_case "wheel and vim-edge opt-out share key moves" `Quick
+            test_wheel_or_key_move_and_cursor_conversion
         ; Alcotest.test_case "a move travels as far as its mover" `Quick
             test_a_move_travels_as_far_as_its_mover
+        ; Alcotest.test_case "mixed-modal scroll snaps cursor to visible target"
+            `Quick test_visible_target_for_scroll
         ] )
     ; ( "moving"
       , [ Alcotest.test_case "an uncounted surface holds at the top" `Quick

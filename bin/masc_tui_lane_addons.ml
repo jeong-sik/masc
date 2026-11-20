@@ -540,6 +540,44 @@ let move_instance view delta =
       let instance_cursor = if count=0 then -1
         else max 0 (min (count - 1) (view.instance_cursor + delta)) in
       {view with instance_cursor; scroll=0}
+let apply_instance_move ~page move view =
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      let count = List.length (selectable_overview_entries view snapshot) in
+      let instance_cursor =
+        if count = 0 then -1
+        else if view.instance_cursor < 0 then
+          (match move with
+           | Masc_tui_scroll.To_end -> count - 1
+           | Masc_tui_scroll.Line_up | Masc_tui_scroll.Line_down
+           | Masc_tui_scroll.Page_up | Masc_tui_scroll.Page_down
+           | Masc_tui_scroll.To_top -> 0)
+        else
+          Masc_tui_scroll.cursor_apply ~count
+            (Masc_tui_scroll.cursor_move_of_key_move ~page move)
+            view.instance_cursor
+      in
+      {view with instance_cursor; scroll=0}
+let apply_configuration_move ~page move view =
+  match Option.bind view.snapshot (fun snapshot -> snapshot.configuration) with
+  | None -> view
+  | Some configuration ->
+      let count = List.length configuration.declarations in
+      let configuration_cursor =
+        if count = 0 then -1
+        else if view.configuration_cursor < 0 then
+          (match move with
+           | Masc_tui_scroll.To_end -> count - 1
+           | Masc_tui_scroll.Line_up | Masc_tui_scroll.Line_down
+           | Masc_tui_scroll.Page_up | Masc_tui_scroll.Page_down
+           | Masc_tui_scroll.To_top -> 0)
+        else
+          Masc_tui_scroll.cursor_apply ~count
+            (Masc_tui_scroll.cursor_move_of_key_move ~page move)
+            view.configuration_cursor
+      in
+      {view with configuration_cursor}
 let overview_anchor = function
   | `Instance (instance : instance) -> Worker_anchor (instance.id, instance.incarnation)
   | `Declaration (_, declaration) -> Declaration_anchor (declaration.source_path, declaration.installation_id)
@@ -758,6 +796,16 @@ let move_evidence view delta = match view.evidence_prompt with
   | None -> view
   | Some prompt ->
       let choice = max 0 (min (List.length prompt.keepers + 1) (prompt.choice + delta)) in
+      {view with evidence_prompt=Some {prompt with choice}}
+let apply_evidence_move ~page move view = match view.evidence_prompt with
+  | None -> view
+  | Some prompt ->
+      let count = List.length prompt.keepers + 2 in
+      let choice =
+        Masc_tui_scroll.cursor_apply ~count
+          (Masc_tui_scroll.cursor_move_of_key_move ~page move)
+          prompt.choice
+      in
       {view with evidence_prompt=Some {prompt with choice}}
 let evidence_keeper prompt = if prompt.choice=0 then None else List.nth_opt prompt.keepers (prompt.choice-1)
 let submit_evidence view = match view.evidence_prompt with
@@ -1049,6 +1097,29 @@ let action_lines view =
     | Technical_json {value;indent} ->
         String.split_on_char '\n' (Yojson.Safe.pretty_to_string value)
         |> List.map (fun line -> String.make indent ' ' ^ line)) (action_parts view)
+let apply_indexed_row_move ~page move rows current =
+  let count = List.length rows in
+  if count = 0 then None
+  else
+    let rec find position = function
+      | [] -> None
+      | (index, _) :: rest ->
+          if index = current then Some position else find (position + 1) rest
+    in
+    let next_pos =
+      match find 0 rows with
+      | None ->
+          (match move with
+           | Masc_tui_scroll.To_end -> count - 1
+           | Masc_tui_scroll.Line_up | Masc_tui_scroll.Line_down
+           | Masc_tui_scroll.Page_up | Masc_tui_scroll.Page_down
+           | Masc_tui_scroll.To_top -> 0)
+      | Some pos ->
+          Masc_tui_scroll.cursor_apply ~count
+            (Masc_tui_scroll.cursor_move_of_key_move ~page move)
+            pos
+    in
+    List.nth_opt rows next_pos |> Option.map fst
 let move_observation view delta =
   match view.snapshot with
   | None -> view
@@ -1061,6 +1132,13 @@ let move_observation view delta =
       match List.nth_opt rows position with
       | None -> view
       | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None}
+let apply_observation_move ~page move view =
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      match apply_indexed_row_move ~page move (ordered_result_rows view snapshot) view.row_cursor with
+      | None -> view
+      | Some row_cursor -> {view with row_cursor; scroll=0; document_key=None}
 let move_record view delta =
   match view.snapshot with
   | None -> view
@@ -1073,6 +1151,13 @@ let move_record view delta =
       match List.nth_opt rows position with
       | None -> view
       | Some (row_cursor, _) -> {view with row_cursor;scroll=0;document_key=None}
+let apply_record_move ~page move view =
+  match view.snapshot with
+  | None -> view
+  | Some snapshot ->
+      match apply_indexed_row_move ~page move (ordered_rows view snapshot) view.row_cursor with
+      | None -> view
+      | Some row_cursor -> {view with row_cursor; scroll=0; document_key=None}
 let move_lane view delta =
   match view.snapshot, selected_row view with
   | Some snapshot, Some row ->
@@ -1458,6 +1543,13 @@ let move_action view delta =
       | Some (Row_list {entries;_}) -> List.length entries + 1
       | Some (Row_form _) | None -> List.length menu.choices in
     {menu with cursor=max 0 (min (count - 1) (menu.cursor+delta))}) view.action_menu}
+let apply_action_move ~page move view =
+  let cmove = Masc_tui_scroll.cursor_move_of_key_move ~page move in
+  {view with scroll=0;action_menu=Option.map (fun menu ->
+    let count = match menu.row with
+      | Some (Row_list {entries;_}) -> List.length entries + 1
+      | Some (Row_form _) | None -> List.length menu.choices in
+    {menu with cursor=Masc_tui_scroll.cursor_apply ~count cmove menu.cursor}) view.action_menu}
 
 let unfilled_text : Masc.Lane_addon_row_action.unfilled -> string = function
   | Not_offered refusal -> (match refusal with

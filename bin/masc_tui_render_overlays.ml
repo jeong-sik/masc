@@ -898,6 +898,7 @@ let render_palette (state : state) =
           in
           let desc_rows = if show_description then 2 else 0 in
           let list_rows = max 0 (budget - header_rows - desc_rows) in
+          report_drawn_list Palette_entries ~height:list_rows;
           let first = max 0 (cursor - max 1 list_rows + 1) in
           let visible =
             matches
@@ -957,7 +958,30 @@ let render_palette (state : state) =
    They did not agree before -- the renderer sized the card to the window while
    the keys moved a fixed five lines -- so a page key covered a quarter of a
    tall window and four windows of a short one. *)
-let link_modal_card (state : state) =
+let link_modal_progress_sheet ~now (state : state) preview =
+  let site = Masc_tui_link_preview.site_label preview in
+  let mosaic_loading =
+    Option.exists Masc_tui_link_preview.mosaic_pending
+      preview.Masc_tui_link_preview.image_url
+  in
+  let started_at =
+    Masc_tui_types.progress_clock_option state ~slot:"link-preview" ~now
+      (if mosaic_loading then preview.Masc_tui_link_preview.image_url else None)
+  in
+  if not mosaic_loading then None
+  else
+    Some
+      { ps_title =
+          ui_text state ~ko:"미리보기 이미지 불러오는 중"
+            ~en:"Loading preview image"
+      ; ps_detail = Some (Terminal_text.single_line site)
+      ; ps_started_at = started_at
+      ; ps_meter = None
+      ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
+      ; ps_blocking = false
+      }
+
+let link_modal_card ?(now = Unix.gettimeofday ()) (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let url_opt =
     match state.link_modal_url with
@@ -972,29 +996,31 @@ let link_modal_card (state : state) =
   | Some url ->
       let preview = Masc_tui_link_preview.get_preview url in
       let total_links = List.length state.link_modal_links in
-      (* Link index/total moved to zone 2 ([c.position]); body uses the full
-         overlay budget without subtracting deleted in-body nav rows. *)
+      let progress_sheet = link_modal_progress_sheet ~now state preview in
+      (* Link index/total moved to zone 2 ([c.position]); body uses the same
+         overlay budget (including any active loading sheet) that
+         [render_link_preview_modal] passes to [surface_chrome]. *)
       let content_height =
-        surface_chrome_budget ~frame:Chrome_overlay state ~terminal_rows
+        surface_chrome_budget ~frame:Chrome_overlay ?progress_sheet state ~terminal_rows
       in
       let content_lines =
         Masc_tui_link_preview.render_modal_card
           ~width:(framed_inner_width cols) ~height:content_height preview
       in
-      Some (url, preview, total_links, content_height, content_lines)
+      Some (url, preview, total_links, content_height, content_lines, progress_sheet)
 
 (* The rows the modal shows and the rows it holds, for the page keys. *)
 let link_modal_viewport (state : state) =
   match link_modal_card state with
   | None -> (0, 1)
-  | Some (_, _, _, content_height, content_lines) ->
+  | Some (_, _, _, content_height, content_lines, _) ->
       (List.length content_lines, content_height)
 
 let render_link_preview_modal (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let ko = state.ui_language = Lang_ko in
   let now = Unix.gettimeofday () in
-  match link_modal_card state with
+  match link_modal_card ~now state with
   | None ->
       ignore (Masc_tui_types.progress_clock_option state ~slot:"link-preview" ~now None);
       surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"link-modal"
@@ -1008,31 +1034,9 @@ let render_link_preview_modal (state : state) =
           c.push
             (ui_text state ~ko:"  (이 대화에서 미리볼 웹 링크가 없습니다)"
                ~en:"  (no web links found in this conversation to preview)"))
-  | Some (_url, preview, total_links, _content_height, content_lines) ->
+  | Some (_url, preview, total_links, _content_height, content_lines, progress_sheet) ->
       let site = Masc_tui_link_preview.site_label preview in
       let total = List.length content_lines in
-      let mosaic_loading =
-        Option.exists Masc_tui_link_preview.mosaic_pending
-          preview.Masc_tui_link_preview.image_url
-      in
-      let started_at =
-        Masc_tui_types.progress_clock_option state ~slot:"link-preview" ~now
-          (if mosaic_loading then preview.Masc_tui_link_preview.image_url else None)
-      in
-      let progress_sheet =
-        if not mosaic_loading then None
-        else
-          Some
-            { ps_title =
-                ui_text state ~ko:"미리보기 이미지 불러오는 중"
-                  ~en:"Loading preview image"
-            ; ps_detail = Some (Terminal_text.single_line site)
-            ; ps_started_at = started_at
-            ; ps_meter = None
-            ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
-            ; ps_blocking = false
-            }
-      in
       let title_badge =
         match progress_sheet with
         | None -> ""

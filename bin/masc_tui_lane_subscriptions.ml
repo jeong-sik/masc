@@ -76,6 +76,14 @@ let move t delta =
     | Keeper index -> Keeper (advance index (List.length t.keepers))
     | Output (keeper,index) -> Output (keeper,advance index (List.length t.targets))
     | Confirm_add _ | Confirm_remove _ -> t.phase)}
+let apply_move ~page move t =
+  let cmove = Masc_tui_scroll.cursor_move_of_key_move ~page move in
+  let advance index count = Masc_tui_scroll.cursor_apply ~count cmove index in
+  {t with phase=(match t.phase with
+    | Browse index -> Browse (advance index (List.length (entries t)))
+    | Keeper index -> Keeper (advance index (List.length t.keepers))
+    | Output (keeper,index) -> Output (keeper,advance index (List.length t.targets))
+    | Confirm_add _ | Confirm_remove _ -> t.phase)}
 let add t = match t.snapshot,t.keepers,t.targets with
   | None,_,_ -> {t with error=Some "Read subscription configuration before editing."}
   | _,[],_ -> {t with error=Some "No workspace Keeper is available in the roster. Close and refresh."}

@@ -6969,6 +6969,7 @@ let toggle_acting_pane (state : state) =
       state.acting_pane_preference <- Chosen_acting_pane restored;
       state.acting_pane_scroll <- 0;
       state.acting_pane_cursor <- None;
+      state.acting_pane_snap <- None;
       Ok restored
   end else
   match
@@ -6983,6 +6984,7 @@ let toggle_acting_pane (state : state) =
       state.acting_pane_preference <- Chosen_acting_pane layout;
       state.acting_pane_scroll <- 0;
       state.acting_pane_cursor <- None;
+      state.acting_pane_snap <- None;
       Ok layout
 
 (* Show one of the pane's tabs. Where the pane cannot show, the tab is not
@@ -7170,11 +7172,13 @@ let focus_acting_pane (state : state) =
   with
   | Some row ->
       state.acting_pane_cursor <- Some row;
+      state.acting_pane_snap <- None;
       true
   | None -> false
 
 let leave_acting_pane (state : state) =
   state.acting_pane_cursor <- None;
+  state.acting_pane_snap <- None;
   (* The cycle closes where it opened: the left pane. *)
   (match state.view with
    | Board ->
@@ -7187,6 +7191,7 @@ let leave_acting_pane (state : state) =
    | Tools | System_logs | Keepers _ -> ())
 
 let move_acting_pane_cursor (state : state) ~row ~step =
+  state.acting_pane_snap <- None;
   match
     Masc_tui_acting_pane.next_target_row
       ~targets:(acting_pane_frame_targets state) ~row ~step
@@ -7198,12 +7203,51 @@ let move_acting_pane_cursor (state : state) ~row ~step =
       scroll_acting_pane state ~delta:step
 
 let acting_pane_focus_keys =
-  [ "j"; "down"; "k"; "up"; "enter"; "\r"; "\n"; "esc"; "\023" ]
+  [ "j"; "down"; "k"; "up"; "pageup"; "pagedown"; "home"; "end"; "g"; "G"
+  ; "enter"; "\r"; "\n"; "esc"; "\023" ]
+
+let page_acting_pane_cursor (state : state) ~row move =
+  let targets = acting_pane_frame_targets state in
+  let target_rows = Masc_tui_acting_pane.target_rows ~targets in
+  let body_rows =
+    if state.acting_pane_presented.frame_body_rows > 0 then
+      state.acting_pane_presented.frame_body_rows
+    else max 1 (Array.length targets)
+  in
+  let page_h = Masc_tui_acting_pane.page_height ~body_rows in
+  let max_scroll = state.acting_pane_presented.frame_scroll_max in
+  let count = max_scroll + page_h in
+  let prev_scroll =
+    Masc_tui_scroll.normalize ~count ~height:page_h state.acting_pane_scroll
+  in
+  let next_scroll =
+    Masc_tui_scroll.apply_move ~count ~height:page_h move prev_scroll
+  in
+  state.acting_pane_scroll <- next_scroll;
+  if next_scroll <> prev_scroll then
+    state.acting_pane_snap <-
+      Some
+        (match move with
+         | Masc_tui_scroll.To_top -> Masc_tui_acting_pane.Snap_top
+         | Masc_tui_scroll.To_end -> Masc_tui_acting_pane.Snap_end
+         | Masc_tui_scroll.Page_down | Masc_tui_scroll.Line_down ->
+             Masc_tui_acting_pane.Snap_body_first
+         | Masc_tui_scroll.Page_up | Masc_tui_scroll.Line_up ->
+             Masc_tui_acting_pane.Snap_body_last)
+  else begin
+    state.acting_pane_snap <- None;
+    state.acting_pane_cursor <-
+      Masc_tui_scroll.visible_target_for_scroll ~targets:target_rows ~scroll:0
+        ~height:(Array.length targets) ~current:(Some row) move
+  end
 
 let handle_acting_pane_focus_key (state : state) ~base_path ~mailbox ~row key =
   match key with
   | "j" | "down" -> move_acting_pane_cursor state ~row ~step:1
   | "k" | "up" -> move_acting_pane_cursor state ~row ~step:(-1)
+  | "pageup" | "pagedown" | "home" | "end" | "g" | "G" ->
+      Option.iter (page_acting_pane_cursor state ~row)
+        (Masc_tui_scroll.move_of_key key)
   | "esc" | "\023" -> leave_acting_pane state
   | _ -> handle_acting_pane_click state ~base_path ~mailbox ~line:row
 
@@ -8619,6 +8663,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.acting_detail <- None;
   state.acting_detail_scroll <- 0;
   state.acting_pane_cursor <- None;
+  state.acting_pane_snap <- None;
   state.acting_pane_expanded <- [];
   state.acting_chunk_projection <- None;
   state.detail_reads <- [];
@@ -21678,7 +21723,7 @@ let main
          on a stale row when the pane returns; it goes down here, before
          any key reads it. *)
       if Option.is_some state.acting_pane_cursor && not (acting_pane_drawn state)
-      then state.acting_pane_cursor <- None;
+      then (state.acting_pane_cursor <- None; state.acting_pane_snap <- None);
       let composer_claimed =
         Option.is_none state.account_login && Option.is_none state.lane_addons &&
         not panel_owns_input &&
@@ -22054,72 +22099,64 @@ let main
                    layout. *)
                 state.context_inspector_focus <-
                   (if k = "h" then Left_pane else Right_pane)
-            | ("j" | "down" | "k" | "up" | "pageup" | "pagedown"
-              | "home" | "end" | "wheel-up" | "wheel-down")
-              when state.context_inspector_tab = Masc_tui_context_inspector.Response ->
-                let count, height = Masc_tui_render.context_inspector_viewport state in
-                let move = match k with
-                  | "j" | "down" | "wheel-down" -> Masc_tui_scroll.down ~count ~height
-                  | "k" | "up" | "wheel-up" -> Masc_tui_scroll.up ~count ~height
-                  | "pageup" -> Masc_tui_scroll.page_up ~count ~height
-                  | "pagedown" -> Masc_tui_scroll.page_down ~count ~height
-                  | "home" -> (fun _ -> 0)
-                  | _ -> (fun _ -> Masc_tui_scroll.maximum ~count ~height) in
-                state.context_inspector_response_scroll <- move state.context_inspector_response_scroll
-            | ("j" | "down" | "k" | "up")
-              when Option.is_some state.context_inspector_exact
-                   || state.context_inspector_tab
-                      = Masc_tui_context_inspector.Composition
-                   || scroll_plain_body ->
-                let count, height =
-                  Masc_tui_render.context_inspector_viewport state
-                in
-                let move =
-                  match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                state.context_inspector_scroll <-
-                  move ~count ~height state.context_inspector_scroll
-            | ("j" | "down" | "k" | "up")
-              when state.context_inspector_focus = Right_pane
-                   && terminal_columns >= keeper_split_threshold_cols ->
-                (* The width condition mirrors the h/l arm that set the
-                   focus. A terminal narrowed under the threshold keeps the
-                   stored focus but renders no split, and without this guard
-                   j/k would reach for a detail window that does not exist --
-                   while the cursor arms below, which do work, sat
-                   shadowed. *)
-                let count, height =
-                  Masc_tui_render.context_inspector_detail_viewport state
-                in
-                let move =
-                  match k with
-                  | "j" | "down" -> Masc_tui_scroll.down
-                  | _ -> Masc_tui_scroll.up
-                in
-                state.context_inspector_detail_scroll <-
-                  move ~count ~height state.context_inspector_detail_scroll
-            | "j" | "down" ->
-                let count =
-                  match state.context_inspector_tab with
-                  | Masc_tui_context_inspector.Exact_input ->
-                      List.length (exact_input_items ())
-                  | Masc_tui_context_inspector.Input_map ->
-                      List.length (input_map_rows ())
-                  | Masc_tui_context_inspector.Composition
-                  | Masc_tui_context_inspector.Response -> 0
-                in
-                let last = max 0 (count - 1) in
-                state.context_inspector_cursor <-
-                  min last (state.context_inspector_cursor + 1);
-                (* A new item is a new document; its reader starts at its
-                   top, not at the window the previous one was left in. *)
-                state.context_inspector_detail_scroll <- 0
-            | "k" | "up" ->
-                state.context_inspector_cursor <-
-                  max 0 (state.context_inspector_cursor - 1);
-                state.context_inspector_detail_scroll <- 0
+            | k when Option.is_some (Masc_tui_scroll.wheel_or_key_move k) ->
+                Option.iter (fun move ->
+                  if state.context_inspector_tab = Masc_tui_context_inspector.Response then
+                    let count, height = Masc_tui_render.context_inspector_viewport state in
+                    state.context_inspector_response_scroll <-
+                      Masc_tui_scroll.apply_move ~count ~height move
+                        state.context_inspector_response_scroll
+                  else if
+                    Option.is_some state.context_inspector_exact
+                    || state.context_inspector_tab = Masc_tui_context_inspector.Composition
+                    || scroll_plain_body
+                  then
+                    let count, height = Masc_tui_render.context_inspector_viewport state in
+                    state.context_inspector_scroll <-
+                      Masc_tui_scroll.apply_move ~count ~height move
+                        state.context_inspector_scroll
+                  else if
+                    state.context_inspector_focus = Right_pane
+                    && terminal_columns >= keeper_split_threshold_cols
+                  then
+                    (* The width condition mirrors the h/l arm that set the
+                       focus. A terminal narrowed under the threshold keeps the
+                       stored focus but renders no split, and without this guard
+                       j/k would reach for a detail window that does not exist --
+                       while the cursor arms below, which do work, sat
+                       shadowed. *)
+                    let count, height =
+                      Masc_tui_render.context_inspector_detail_viewport state
+                    in
+                    state.context_inspector_detail_scroll <-
+                      Masc_tui_scroll.apply_move ~count ~height move
+                        state.context_inspector_detail_scroll
+                  else
+                    let count =
+                      match state.context_inspector_tab with
+                      | Masc_tui_context_inspector.Exact_input ->
+                          List.length (exact_input_items ())
+                      | Masc_tui_context_inspector.Input_map ->
+                          List.length (input_map_rows ())
+                      | Masc_tui_context_inspector.Composition
+                      | Masc_tui_context_inspector.Response -> 0
+                    in
+                    let cmove =
+                      Masc_tui_list_moves.cursor_move
+                        ~height:(Masc_tui_list_moves.page_height state Context_inspector_items)
+                        move
+                    in
+                    let next =
+                      Masc_tui_scroll.cursor_apply ~count cmove
+                        state.context_inspector_cursor
+                    in
+                    if next <> state.context_inspector_cursor then begin
+                      state.context_inspector_cursor <- next;
+                      (* A new item is a new document; its reader starts at its
+                         top, not at the window the previous one was left in. *)
+                      state.context_inspector_detail_scroll <- 0
+                    end)
+                  (Masc_tui_scroll.wheel_or_key_move k)
             | "\r" ->
                 if
                   state.context_inspector_tab
@@ -22548,7 +22585,7 @@ let main
                 let selected action = match Addons.selected_instance view with
                   | None -> update { view with error = Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "Choose an attached instance first" }
                   | Some instance -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages (action instance.id) in
-                let scroll_lane_addons ~page ~down =
+                let lane_addons_viewport () =
                   let terminal_rows, cols = get_terminal_size () in
                   let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
                   let ({ Addons.total_list_rows = count; list_budget; scroll = current; _ }
@@ -22556,16 +22593,39 @@ let main
                     Addons.viewport_frame ~ko:(state.ui_language = Lang_ko) ~height
                       ~width:(framed_inner_width cols) view
                   in
-                  let page_height = max 1 list_budget in
-                  let distance = if page then page_height else 1 in
-                  let delta = if down then distance else -distance in
-                  update { view with scroll = Masc_tui_scroll.normalize ~count ~height:page_height (current + delta) }
+                  (count, max 1 list_budget, current)
+                in
+                let scroll_lane_addons move =
+                  let count, height, current = lane_addons_viewport () in
+                  update { view with scroll = Masc_tui_scroll.apply_move ~count ~height move current }
+                in
+                let lane_addons_height () =
+                  let _, height, _ = lane_addons_viewport () in
+                  height
+                in
+                let scroll_page_key = function
+                  | "pageup" -> Some Masc_tui_scroll.Page_up
+                  | "pagedown" -> Some Masc_tui_scroll.Page_down
+                  | _ -> None
+                in
+                let scroll_page_or_edge_key = function
+                  | "pageup" -> Some Masc_tui_scroll.Page_up
+                  | "pagedown" -> Some Masc_tui_scroll.Page_down
+                  | "home" -> Some Masc_tui_scroll.To_top
+                  | "end" -> Some Masc_tui_scroll.To_end
+                  | _ -> None
                 in
                 (match view.installer with
                  | Some installer ->
-                     if key="pageup" || key="pagedown" then
-                       scroll_lane_addons ~page:false ~down:(key = "pagedown")
-                     else if view.loading then (
+                     let installer_scroll_key =
+                       if Masc_tui_lane_installer.text_entry_open installer then
+                         scroll_page_or_edge_key key
+                       else scroll_page_key key
+                     in
+                     (match installer_scroll_key with
+                      | Some move -> scroll_lane_addons move
+                      | None ->
+                     if view.loading then (
                        if key="esc" then invalidate {view with installer=None;loading=false;error=None;scroll=0})
                      else (match Masc_tui_lane_installer.handle ~key installer with
                        | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail}
@@ -22577,34 +22637,41 @@ let main
                        | Ok (Draft session) ->
                            if List.exists (fun (existing : Masc_tui_lane_declaration.session) -> existing.file_name=session.file_name) view.documents
                            then update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure "A draft with this installation name is already open; choose another name or edit the existing draft."}
-                           else update (Addons.put_document {view with installer=None;error=None;scroll=0} session))
+                           else update (Addons.put_document {view with installer=None;error=None;scroll=0} session)))
                  | None -> match view.evidence_prompt with
                  | Some _ ->
                      (match key with
                       | "esc" | "q" -> update {view with evidence_prompt=None;scroll=0}
-                      | "j" | "down" -> update (Addons.move_evidence view 1)
-                      | "k" | "up" -> update (Addons.move_evidence view (-1))
                       | "\r" | "\n" | "enter" ->
                           (match Addons.submit_evidence view with
                            | Ok (next, request) -> update next; Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages request
                            | Error detail -> update {view with evidence_prompt=None;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
+                      | k when Option.is_some (Masc_tui_scroll.wheel_or_key_move k) ->
+                          Option.iter
+                            (fun move ->
+                              let page =
+                                Masc_tui_scroll.page_step
+                                  ~height:(max 1 (lane_addons_height () - 4))
+                              in
+                              update (Addons.apply_evidence_move ~page move view))
+                            (Masc_tui_scroll.wheel_or_key_move k)
                       | _ -> ())
                  | None when Option.is_some view.records ->
-                     if key="pageup" || key="pagedown" then
-                       scroll_lane_addons ~page:true ~down:(key="pagedown")
-                     else (match Addons.edit_records ~key view with
+                     (match scroll_page_or_edge_key key with
+                      | Some move -> scroll_lane_addons move
+                      | None ->
+                     (match Addons.edit_records ~key view with
                       | Ok next -> update next
-                      | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail;scroll=0})
+                      | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail;scroll=0}))
                  | None -> match view.subscription_panel,view.action_menu,view.draft with
                  | Some panel,_,_ ->
                      let module Subs = Masc_tui_lane_subscriptions in
                      let set panel = update {view with subscription_panel=Some panel;scroll=0} in
                      (match key with
                       | "esc" | "q" -> update {view with subscription_panel=Subs.back panel;scroll=0}
-                      | "J" | "K" -> scroll_lane_addons ~page:false ~down:(key = "J")
+                      | "J" -> scroll_lane_addons Masc_tui_scroll.Line_down
+                      | "K" -> scroll_lane_addons Masc_tui_scroll.Line_up
                       | _ when view.loading -> ()
-                      | "j" | "down" -> set (Subs.move panel 1)
-                      | "k" | "up" -> set (Subs.move panel (-1))
                       | "a" -> set (Subs.add panel)
                       | "d" -> set (Subs.remove panel)
                       | "r" when not (Subs.is_confirming_save panel) ->
@@ -22614,25 +22681,37 @@ let main
                           let panel,request=Subs.enter ~keepers ~targets:(Addons.subscription_targets view) panel in
                           set panel;
                           Option.iter (Masc_tui_surface_requests.Lane_browser_requests.launch_lane_subscriptions state ~mailbox:async_messages) request
+                      | k when Option.is_some (Masc_tui_scroll.wheel_or_key_move k) ->
+                          Option.iter
+                            (fun move ->
+                              (* Subscriptions displays one item card at a time. *)
+                              set (Subs.apply_move ~page:1 move panel))
+                            (Masc_tui_scroll.wheel_or_key_move k)
                       | _ -> ())
                  | None,Some {form=Some _;_}, _ ->
-                     if key="pageup" || key="pagedown" then
-                       scroll_lane_addons ~page:false ~down:(key = "pagedown")
-                     else (match Addons.edit_action ~key view with
+                     (match scroll_page_or_edge_key key with
+                      | Some move -> scroll_lane_addons move
+                      | None ->
+                     (match Addons.edit_action ~key view with
                       | Ok (next,None) -> update next
                       | Ok (_,Some action) -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
-                      | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
+                      | Error detail -> update {view with error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail}))
                  | None,Some _, _ ->
                      (match key with
                       | "esc" -> update {view with action_menu=None;scroll=0}
-                      | "j" | "down" -> update (Addons.move_action view 1)
-                      | "k" | "up" -> update (Addons.move_action view (-1))
-                      | "J" | "K" -> scroll_lane_addons ~page:false ~down:(key = "J")
+                      | "J" -> scroll_lane_addons Masc_tui_scroll.Line_down
+                      | "K" -> scroll_lane_addons Masc_tui_scroll.Line_up
                       | "\r" | "\n" | "enter" ->
                           (match Addons.enter_action view with
                            | Ok (next,None) -> update next
                            | Ok (_,Some action) -> Masc_tui_surface_requests.Lane_browser_requests.launch_lane_addons state ~mailbox:async_messages (Addons.Act action)
                            | Error detail -> update {view with action_menu=None;error=Masc_tui_surface_requests.Lane_browser_requests.lane_addons_input_failure detail})
+                      | k when Option.is_some (Masc_tui_scroll.wheel_or_key_move k) ->
+                          Option.iter
+                            (fun move ->
+                              (* Action menu displays one action card at a time. *)
+                              update (Addons.apply_action_move ~page:1 move view))
+                            (Masc_tui_scroll.wheel_or_key_move k)
                       | _ -> ())
                  (* A line that takes letters owns them. This branch answered
                     "3", "q", "r" and "s" as surface commands first, so typing
@@ -22663,9 +22742,10 @@ let main
                      match key with
                      | "esc" when view.help_open -> update {view with help_open=false;scroll=0}
                      | "?" -> update {view with help_open=not view.help_open;scroll=0}
-                     | ("j" | "down" | "J" | "k" | "up" | "K" | "pageup" | "pagedown") when view.help_open ->
-                         scroll_lane_addons ~page:(key="pageup" || key="pagedown")
-                           ~down:(key="j" || key="down" || key="J" || key="pagedown")
+                     | "J" when view.help_open -> scroll_lane_addons Masc_tui_scroll.Line_down
+                     | "K" when view.help_open -> scroll_lane_addons Masc_tui_scroll.Line_up
+                     | k when view.help_open && Option.is_some (Masc_tui_scroll.wheel_or_key_move k) ->
+                         Option.iter scroll_lane_addons (Masc_tui_scroll.wheel_or_key_move k)
                      | _ when view.help_open -> ()
                      | "r" when Option.is_some view.document_key ->
                          Masc_tui_surface_requests.Lane_browser_requests.launch_lane_application state ~mailbox:async_messages
@@ -22788,31 +22868,43 @@ let main
                            | Addons.Connections -> Addons.Configurations
                            | Addons.Configurations -> Addons.Rows
                            | Addons.Rows -> Addons.Timeline) }
-                     | "J" | "K" -> scroll_lane_addons ~page:false ~down:(key = "J")
+                     | "J" -> scroll_lane_addons Masc_tui_scroll.Line_down
+                     | "K" -> scroll_lane_addons Masc_tui_scroll.Line_up
                      | "left" | "right" when (match view.focus with
                        | Addons.Timeline | Addons.Connections -> true
                        | Addons.Configurations | Instances | Rows -> false) ->
                          let delta = if key = "right" then 1 else -1 in
                          update (Addons.move_lane view delta)
-                     | "j" | "down" | "k" | "up" ->
-                         let delta = if key = "j" || key = "down" then 1 else -1 in
-                         (match view.snapshot, view.screen, view.focus with
-                          | Some snapshot, Addons.Overview, Addons.Configurations ->
-                              (match snapshot.configuration with
-                               | None -> ()
-                               | Some configuration -> update {view with configuration_cursor=max 0
-                                   (min (List.length configuration.declarations - 1) (view.configuration_cursor + delta))})
-                          | Some _, Addons.Overview, _ ->
-                              (* Flow draws only workers; moving among the
-                                 declarations it hides left the action target
-                                 on a row nobody could see. *)
-                              let next = Addons.move_instance view delta in
-                              if next.instance_cursor <> view.instance_cursor then update next
-                          | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) -> ()
-                          | Some _, Addons.Detail _, Addons.Rows ->
-                              update (Addons.move_record view delta)
-                          | Some _, Addons.Detail _, Addons.Timeline -> update (Addons.move_observation view delta)
-                          | None, _, _ -> ())
+                     | k when Option.is_some (Masc_tui_scroll.wheel_or_key_move k) ->
+                         Option.iter (fun move ->
+                           if Option.is_some view.document_key then
+                             scroll_lane_addons move
+                           else
+                             let height = lane_addons_height () in
+                             match view.snapshot, view.screen, view.focus with
+                             | Some _, Addons.Overview, Addons.Configurations ->
+                                 let page = max 1 ((height - 2) / 2) in
+                                 update (Addons.apply_configuration_move ~page move view)
+                             | Some _, Addons.Overview, _ ->
+                                 (* Flow draws only workers; moving among the
+                                    declarations it hides left the action target
+                                    on a row nobody could see. Overview caps
+                                    display at 9 multi-line entries. *)
+                                 let page = min 8 (max 1 ((height - 2) / 3)) in
+                                 let next = Addons.apply_instance_move ~page move view in
+                                 if next.instance_cursor <> view.instance_cursor then update next
+                             | Some _, Addons.Detail _, (Addons.Configurations | Addons.Instances | Addons.Connections) ->
+                                 scroll_lane_addons move
+                             | Some _, Addons.Detail _, Addons.Rows ->
+                                 let page = max 1 ((height - 2) / 6) in
+                                 update (Addons.apply_record_move ~page move view)
+                             | Some _, Addons.Detail _, Addons.Timeline ->
+                                 let page =
+                                   Masc_tui_scroll.page_step ~height:(max 1 (height - 3))
+                                 in
+                                 update (Addons.apply_observation_move ~page move view)
+                             | None, _, _ -> scroll_lane_addons move)
+                           (Masc_tui_scroll.wheel_or_key_move k)
                      | " " ->
                          (match Addons.selected_row view with None -> () | Some row ->
                            update { view with selected = if List.mem row.id view.selected then List.filter ((<>) row.id) view.selected else row.id :: view.selected })
@@ -23405,8 +23497,9 @@ let main
             | Some next ->
                 if next <> state.pane_zoom then begin
                   state.pane_zoom <- next;
-                  if Masc_tui_roster_pane.hides_activity next then
+                  if Masc_tui_roster_pane.hides_activity next then (
                     state.acting_pane_cursor <- None;
+                    state.acting_pane_snap <- None);
                   if Masc_tui_roster_pane.hides_roster next then
                     state.keeper_detail_focus <- Right_pane;
                   reconcile_chat_focus ()
@@ -23821,24 +23914,12 @@ let main
             | "?" ->
                 state.help_open <- true;
                 state.help_scroll <- 0
-            | "j" | "down" ->
-                state.link_modal_scroll <-
-                  Masc_tui_types.scroll_down_from state.link_modal_scroll ~by:1
-            | "k" | "up" ->
-                state.link_modal_scroll <- max 0 (state.link_modal_scroll - 1)
-            | "d" | "pagedown" ->
-                let _, height = Masc_tui_render.link_modal_viewport state in
-                state.link_modal_scroll <-
-                  Masc_tui_types.scroll_down_from state.link_modal_scroll
-                    ~by:height
-            | "u" | "pageup" ->
-                let _, height = Masc_tui_render.link_modal_viewport state in
-                state.link_modal_scroll <- max 0 (state.link_modal_scroll - height)
-            | "g" | "home" ->
-                state.link_modal_scroll <- 0
-            | "G" | "end" ->
-                state.link_modal_scroll <-
-                  Masc_tui_types.clamped_scroll_end
+            | k when Option.is_some (Masc_tui_scroll.wheel_or_key_move k) ->
+                Option.iter (fun move ->
+                  let count, height = Masc_tui_render.link_modal_viewport state in
+                  state.link_modal_scroll <-
+                    Masc_tui_scroll.apply_move ~count ~height move state.link_modal_scroll)
+                  (Masc_tui_scroll.wheel_or_key_move k)
             | "n" | "right" | "\t" ->
                 let count = List.length state.link_modal_links in
                 if count > 1 then begin
@@ -24446,6 +24527,13 @@ let main
                      | Masc_tui_palette.Palette_code_search_match _)) | None -> ())
             | "down" | "\014" -> move_palette 1
             | "up" | "\016" -> move_palette (-1)
+            | "pagedown" | "pageup" ->
+                let page =
+                  match Masc_tui_list_moves.page_height state Palette_entries with
+                  | Some height -> Masc_tui_scroll.page_step ~height
+                  | None -> 1
+                in
+                move_palette (if k = "pagedown" then page else -page)
             | "home" -> move_palette (-state.palette_cursor)
             | "end" -> move_palette (List.length (Masc_tui_palette.palette_matches state))
             | "\021" ->
@@ -26066,6 +26154,7 @@ let main
                   && Option.is_none state.voice_capture
                   && Masc_tui_message_input.can_leave_left state.msg_input) ->
            state.acting_pane_cursor <- None;
+           state.acting_pane_snap <- None;
            state.keeper_navigation_open <- true;
            state.keeper_message_focus <- Left_pane
        | Some ("j" | "down" | "k" | "up" as key) when state.view = Overview ->

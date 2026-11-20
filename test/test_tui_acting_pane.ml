@@ -617,6 +617,39 @@ let test_cursor_stops_at_the_frames_edge () =
   check (option int) "an empty frame has no row" None
     (Pane.next_target_row ~targets:[||] ~row:(-1) ~step:1)
 
+let test_target_rows_and_snap () =
+  check (list int) "actionable row indexes in ascending order"
+    [ 0; 2; 5 ] (Pane.target_rows ~targets:cursor_targets);
+  check (option int) "snap keeps an actionable row"
+    (Some 2) (Pane.snap_target_row ~targets:cursor_targets ~row:2);
+  check (option int) "snap moves from a non-target row to the nearest target"
+    (Some 2) (Pane.snap_target_row ~targets:cursor_targets ~row:3);
+  check (option int) "snap moves from an out-of-range row to the nearest edge target"
+    (Some 5) (Pane.snap_target_row ~targets:cursor_targets ~row:99);
+  check (option int) "snap handles max_int distance cleanly"
+    (Some 5) (Pane.snap_target_row ~targets:cursor_targets ~row:max_int);
+  check (option int) "snap returns None on an empty frame"
+    None (Pane.snap_target_row ~targets:[||] ~row:0);
+  check int "page_height subtracts top and bottom scroll indicators"
+    8 (Pane.page_height ~body_rows:10);
+  check int "page_height floors at 1 for tiny panes"
+    1 (Pane.page_height ~body_rows:2);
+  check (option int) "Snap_top selects first actionable row"
+    (Some 0) (Pane.resolve_scroll_snap ~targets:cursor_targets ~snap:Pane.Snap_top);
+  check (option int) "Snap_end selects last actionable row"
+    (Some 5) (Pane.resolve_scroll_snap ~targets:cursor_targets ~snap:Pane.Snap_end);
+  check (option int) "Snap_body_first skips fixed row-0 header into body"
+    (Some 2) (Pane.resolve_scroll_snap ~targets:cursor_targets ~snap:Pane.Snap_body_first);
+  check (option int) "Snap_body_last picks last body target"
+    (Some 5) (Pane.resolve_scroll_snap ~targets:cursor_targets ~snap:Pane.Snap_body_last);
+  check (option int) "Snap_body_first falls back to row-0 header if body has no targets"
+    (Some 0)
+    (Pane.resolve_scroll_snap
+       ~targets:[| Pane.Target_next_tab; Pane.Target_none |]
+       ~snap:Pane.Snap_body_first);
+  check (option int) "resolve_scroll_snap yields None when frame has no targets"
+    None (Pane.resolve_scroll_snap ~targets:[| Pane.Target_none |] ~snap:Pane.Snap_end)
+
 (* An age is read from the feed's stamp and the TUI's own clock. A stamp after
    the clock, or one that is not a number, has no age: the cell holds the
    no-value mark, not "0ms" (#38663). *)
@@ -839,6 +872,8 @@ let () =
             test_cursor_steps_over_rows_a_press_does_nothing_on
         ; test_case "the cursor stops at the frame's edge" `Quick
             test_cursor_stops_at_the_frames_edge
+        ; test_case "target_rows and snap_target_row keep focus on actionable rows" `Quick
+            test_target_rows_and_snap
         ] )
     ; ( "beside the roster"
       , [ test_case "waiting context uses the selected Keeper's typed evidence" `Quick

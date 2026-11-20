@@ -521,7 +521,7 @@
  (name masc_tui_lane_subscriptions)
  (wrapped false)
  (modules masc_tui_lane_subscriptions)
- (libraries masc yojson))
+ (libraries masc masc_tui_scroll yojson))
 
 (library
  (name masc_tui_play_pending)

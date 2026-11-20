@@ -754,7 +754,7 @@ let render_inline_card_with_spans ~width p =
 let modal_hints ~total_links ~has_image =
   "o:browser  y:copy  v:image  "
   ^ (if total_links > 1 then "n/p:cycle  " else "")
-  ^ "j/k:scroll  d/u:page  g/G:first/last  "
+  ^ "j/k:scroll  PgUp/PgDn:page  Home/End:first/last  "
   ^ (if has_image then "r:retry image  " else "")
   ^ "Esc:close"
 

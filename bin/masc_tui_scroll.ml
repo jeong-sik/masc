@@ -68,6 +68,13 @@ let move_of_key = function
   | "G" | "end" -> Some To_end
   | _ -> None
 
+let wheel_or_key_move ?(vim_edges = true) = function
+  | "wheel-down" -> Some Line_down
+  | "wheel-up" -> Some Line_up
+  | "g" when not vim_edges -> None
+  | "G" when not vim_edges -> None
+  | key -> move_of_key key
+
 let apply_move ~count ~height move scroll =
   match move with
   | Line_down -> down ~count ~height scroll
@@ -76,6 +83,57 @@ let apply_move ~count ~height move scroll =
   | Page_up -> page_up ~count ~height scroll
   | To_top -> 0
   | To_end -> maximum ~count ~height
+
+let rec last_of = function
+  | [] -> None
+  | [ x ] -> Some x
+  | _ :: rest -> last_of rest
+
+let visible_target_for_scroll ~targets ~scroll ~height ~current move =
+  if height <= 0 then None
+  else
+    let scroll = Int.max 0 scroll in
+    let visible =
+      List.filter (fun idx -> idx >= scroll && idx - scroll < height) targets
+    in
+    match visible with
+    | [] -> None
+    | first :: _ -> (
+        match move with
+        | To_top -> Some first
+        | To_end -> last_of visible
+        | Page_down | Line_down -> (
+            match current with
+            | None -> Some first
+            | Some prev ->
+                let delta =
+                  match move with
+                  | Page_down -> page_step ~height
+                  | Line_down -> 1
+                  | Line_up | Page_up | To_top | To_end -> 0
+                in
+                let desired =
+                  if prev > max_int - delta then max_int else prev + delta
+                in
+                (match List.find_opt (fun idx -> idx >= desired) visible with
+                 | Some hit -> Some hit
+                 | None -> last_of visible))
+        | Page_up | Line_up -> (
+            match current with
+            | None -> last_of visible
+            | Some prev ->
+                let delta =
+                  match move with
+                  | Page_up -> page_step ~height
+                  | Line_up -> 1
+                  | Line_down | Page_down | To_top | To_end -> 0
+                in
+                let desired =
+                  if prev < min_int + delta then min_int else prev - delta
+                in
+                (match List.find_opt (fun idx -> idx <= desired) (List.rev visible) with
+                 | Some hit -> Some hit
+                 | None -> Some first)))
 
 let cursor_last ~count = Int.max 0 (count - 1)
 
@@ -121,6 +179,14 @@ let cursor_apply ~count (move : Cursor_move.t) cursor =
   | Page_up page -> cursor_move ~count ~delta:(-Int.max 1 page) cursor
   | To_top -> 0
   | To_end -> cursor_last ~count
+
+let cursor_move_of_key_move ~page = function
+  | Line_down -> Cursor_move.Line_down
+  | Line_up -> Cursor_move.Line_up
+  | Page_down -> Cursor_move.Page_down (Int.max 1 page)
+  | Page_up -> Cursor_move.Page_up (Int.max 1 page)
+  | To_top -> Cursor_move.To_top
+  | To_end -> Cursor_move.To_end
 
 (* A run that fits is a row of several lines: it is on screen whole or the
    reader cannot read it, so a step that leaves its tail under the window

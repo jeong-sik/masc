@@ -9,6 +9,7 @@ val decode : Yojson.Safe.t -> (snapshot,string) result
 val request_json : request -> Yojson.Safe.t
 val loaded : t -> (snapshot,string) result -> t
 val move : t -> int -> t
+val apply_move : page:int -> Masc_tui_scroll.key_move -> t -> t
 val add : t -> t
 val remove : t -> t
 val back : t -> t option

@@ -943,6 +943,54 @@ let test_a_frame_drawn_again_cuts_no_window () =
       window ~entries:below ~inner_width:50 ~height:below_height,
       fresh ~entries:below ~inner_width:50 ~height:below_height ]
 
+(* A body's trailing blank lines draw no rows, blank lines between content
+   stay, and a body of nothing but blanks draws one empty row. *)
+let test_trailing_blank_lines_draw_no_rows () =
+  let body_texts body =
+    Layout.rows_of_entry ~origin:Layout.Origin_inline ~inner_width:60 ~previous:None
+      (entry Layout.Keeper "alpha" "" body)
+    |> List.filter_map (fun (row : Layout.row) ->
+         match row.kind with
+         | Layout.Body -> Some row.text
+         | Layout.Metadata _ | Spacing | Viewport_gap _ -> None) in
+  let trimmed body = List.map String.trim (body_texts body) in
+  check (list string) "trailing blanks" [ "line one" ] (trimmed "line one\n\n  \n\t\n");
+  check (list string) "a blank between" [ "a"; ""; "b" ] (trimmed "a\n  \nb\n\n");
+  check (list string) "nothing but blanks" [ "  " ] (body_texts "  \n\t\n");
+  check (list string) "no body" [ "  " ] (body_texts "")
+
+(* Diagnostics follow the whole body, and the window of a newest entry too
+   tall for its room keeps them below the latest output. *)
+let test_diagnostics_follow_the_body () =
+  let body = String.concat "\n" (List.init 30 (Printf.sprintf "output line %02d")) in
+  let noted =
+    { (entry Layout.Keeper "alpha" "" body) with diagnostics = [ "first note"; "second note" ] } in
+  let texts rows = List.map (fun (row : Layout.row) -> String.trim row.text) rows in
+  let notes rows = List.filter_map (fun (row : Layout.row) ->
+    match row.kind with
+    | Layout.Metadata Layout.Diagnostic -> Some (String.trim row.text)
+    | Layout.Metadata _ | Body | Spacing | Viewport_gap _ -> None) rows in
+  let last_three rows =
+    let all = texts rows in
+    List.filteri (fun index _ -> index >= List.length all - 3) all in
+  let rows = Layout.rows_of_entry ~origin:Layout.Origin_inline ~inner_width:60 ~previous:None noted in
+  check (list string) "the notes are drawn" [ "first note"; "second note" ] (notes rows);
+  check (list string) "after the body" [ "output line 29"; "first note"; "second note" ]
+    (last_three rows);
+  let window = Layout.clamped_scrolled_rows ~origin:Layout.Origin_inline ~inner_width:60
+      ~height:10 ~requested:0 [ noted ] in
+  check (list string) "a short room keeps the notes" [ "first note"; "second note" ]
+    (notes window.rows);
+  check (list string) "below the latest output" [ "output line 29"; "first note"; "second note" ]
+    (last_three window.rows);
+  (* Four rows: the opening, the gap, one row of the latest output and the
+     last note. The output keeps its row; the older note gives its own. *)
+  let short = Layout.clamped_scrolled_rows ~origin:Layout.Origin_inline ~inner_width:60
+      ~height:4 ~requested:0 [ noted ] in
+  check (list string) "a room of four keeps the latest output and the last note"
+    [ "output line 29"; "second note" ]
+    (List.filteri (fun index _ -> index >= List.length short.rows - 2) (texts short.rows))
+
 let test_window_positions_name_the_rows_shown () =
   let long = String.concat "\n" (List.init 300 (Printf.sprintf "long line %03d")) in
   let repeated = String.concat "\n" ("start" :: List.init 12 (fun _ -> "same") @ [ "end" ]) in
@@ -1048,6 +1096,9 @@ let () =
             test_an_entry_drawn_again_returns_its_kept_rows
         ; test_case "a growing body draws only its new rows" `Quick
             test_a_growing_body_draws_only_its_new_rows
+        ; test_case "trailing blank lines draw no rows" `Quick
+            test_trailing_blank_lines_draw_no_rows
+        ; test_case "diagnostics follow the body" `Quick test_diagnostics_follow_the_body
         ; test_case "window positions name the rows shown" `Quick
             test_window_positions_name_the_rows_shown
         ; test_case "a frame drawn again cuts no window" `Quick

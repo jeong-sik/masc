@@ -394,6 +394,9 @@ let sanitize_utf8 s =
     Buffer.contents buf
   end
 
+let is_blank value =
+  String.for_all (function ' ' | '\012' | '\n' | '\r' | '\t' -> true | _ -> false) value
+
 let trim_nonempty value =
   let v = String.trim value in
   if v = "" then None else Some v

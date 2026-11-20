@@ -2408,14 +2408,15 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
   in
   (* The rows themselves, once the body lines are known. *)
   let lay_out body_chunks =
-    let body_chunks =
-      let rec drop_empty = function
-        | chunk :: rest when String.trim chunk = "" -> drop_empty rest
-        | reversed -> List.rev reversed
+    (* The chunks up to the last one with content; a body with none draws one
+       blank row. *)
+    let content_count =
+      let rec last_content index last = function
+        | [] -> last
+        | chunk :: rest ->
+            last_content (index + 1) (if String_util.is_blank chunk then last else index + 1) rest
       in
-      match drop_empty (List.rev body_chunks) with
-      | [] -> [ "" ]
-      | chunks -> chunks
+      last_content 0 0 body_chunks
     in
     let sender_chunks = match origin, entry.style with
       | Origin_bare, (Inbound | Thinking Thinking_arrived) when not (continues_previous ~previous entry) ->
@@ -2425,13 +2426,24 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
       | ((Origin_row | Origin_inline), _) | (Origin_bare, Thinking Thinking_arrived)
       | (Origin_bare, Inbound) -> [] in
     let sender_rows = List.length sender_chunks in
-    let body_chunks = sender_chunks @ body_chunks in
+    (* The lines go straight into the array the rows are drawn from. A 1MB
+       reply has some 60k of them, and each list copy on the way was another
+       60k cells on every frame of a streaming reply. *)
+    let lines = Array.make (sender_rows + Int.max 1 content_count) "" in
+    List.iteri (fun index chunk -> lines.(index) <- chunk) sender_chunks;
+    let rec fill index = function
+      | chunk :: rest when index < content_count ->
+          lines.(sender_rows + index) <- chunk;
+          fill (index + 1) rest
+      | _ :: _ | [] -> ()
+    in
+    fill 0 body_chunks;
     let body_rows =
       let margin, rail_cells, label_at, clock_cells =
         Option.value gutter ~default:("", 0, 0, 0)
       in
       let blank = fit_width "" (display_width margin) in
-      let last = List.length body_chunks - 1 in
+      let last = Array.length lines - 1 in
       (* The bracket runs the height of the entry, so a wrapped body keeps the
          line its first row started. Broken at every wrap it would read as one
          turn per screen line, which is the opposite of what it is for.
@@ -2473,7 +2485,7 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
           shape_rail_cells = rail_cells; shape_label_at = label_at;
           shape_clock_cells = clock_cells; shape_indent = indent }
       in
-      body_rows_reusing ~shape (Array.of_list body_chunks) (fun index chunk ->
+      body_rows_reusing ~shape lines (fun index chunk ->
         { style = entry.style
         ; kind = (if index < sender_rows then Metadata Sender else Body)
         ; shade = shade_of_style entry.style
@@ -2534,7 +2546,9 @@ let rows_of_entry ?markdown ?(origin = Origin_row) ~inner_width ~previous entry 
     in
     (* After the whole body: a row of metadata between two rows of one message
        reads as the message ending there. *)
-    let body_with_diagnostics = body_rows @ diagnostic_rows in
+    let body_with_diagnostics =
+      match diagnostic_rows with [] -> body_rows | _ :: _ -> body_rows @ diagnostic_rows
+    in
     let message_rows = (
       match origin with
       | Origin_inline | Origin_bare -> body_with_diagnostics
@@ -2719,7 +2733,11 @@ let newest_entry_window ~inner_width ~height rows =
       | [] -> [ first ]
       | latest :: _ -> [ first; latest ])
   | _, first :: rest ->
-      let diagnostics, output = List.partition is_diagnostic rest in
+      (* Most entries carry no diagnostic; partitioning one would copy every
+         row of it to find none. *)
+      let diagnostics, output =
+        if List.exists is_diagnostic rest then List.partition is_diagnostic rest else [], rest
+      in
       (* The first row, the gap and one row of the latest output come before
          any diagnostic: a pane too short for all of them keeps the last. *)
       let diagnostics = take_last (Int.max 1 (height - 3)) diagnostics in

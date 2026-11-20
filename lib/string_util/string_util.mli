@@ -140,6 +140,10 @@ val utf8_complete_prefix : string -> string
     {!utf8_suffix}: {!utf8_prefix} needs the byte after the cut, this does
     not. *)
 
+val is_blank : string -> bool
+(** [is_blank s] is [String.trim s = ""] without building the trimmed copy:
+    every byte is one of those [String.trim] removes. *)
+
 val trim_nonempty : string -> string option
 (** [trim_nonempty s] trims whitespace and returns [Some s] if non-empty,
     [None] otherwise. SSOT for the per-module [trim_nonempty] helpers. *)

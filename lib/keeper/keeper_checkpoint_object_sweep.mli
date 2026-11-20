@@ -5,7 +5,10 @@
     roots are the session's canonical head, its history archive heads, its
     retained heads under [accepted-checkpoints/] and the Gate preparation heads
     the keepers' operation stores hold for that trace. A head of an earlier
-    [checkpoint_version] is not a root: no load reads it again.
+    [checkpoint_version] is not a root: no load reads it again. The bundles
+    that the Keepers' turn log lines past each Memory writer's reading name
+    are kept as well ({!Keeper_unread_turn_bundles}), so a line not yet read
+    reads the content it was written with.
 
     The pass is run only by the server process that holds the BasePath writer
     lease, after the retained checkpoint sweep and before the scheduler of
@@ -17,12 +20,15 @@
     of a later version, a segment that cannot be followed,
     or an operation store {!Keeper_retained_checkpoint_sweep.owner_records}
     cannot read stops the pass with nothing removed, because what that head or
-    store names is unknown. Only entries named [objects/<aa>/<sha256>] for a
-    digest beginning with [<aa>] are removed; nothing else there is touched. *)
+    store names is unknown. So does a turn log that cannot be read, or a line
+    of it from where reading stands that does not decode. Only entries named
+    [objects/<aa>/<sha256>] for a digest beginning with [<aa>] are removed;
+    nothing else there is touched. *)
 
 type report =
   { sessions : int  (** session directories with an [objects/] directory *)
   ; roots : int  (** current-version heads read in those sessions *)
+  ; turn_log_bundles : int  (** bundles unread turn log lines name, each counted once per session *)
   ; kept : int
   ; removed : int
   ; removed_bytes : int
@@ -31,6 +37,7 @@ type report =
 
 type error =
   | Owner_stores_unreadable of Keeper_retained_checkpoint_sweep.error
+  | Turn_logs_unreadable of Keeper_unread_turn_bundles.error
   | Listing_failed of
       { path : string
       ; detail : string
@@ -52,9 +59,14 @@ type error =
 
 val error_to_string : error -> string
 
-(** [run ~runtime_root] removes the objects under
+(** [run ~runtime_root ~turns_dir ~memory_dir] removes the objects under
     [<runtime_root>/traces/<session>/objects] that no root reaches. The
     session root is resolved as the store resolves it, so it may be a link;
     below it only entries that are directories themselves are read, and
-    nothing else there is touched. *)
-val run : runtime_root:string -> (report, error) result
+    nothing else there is touched. [turns_dir] holds the Keepers' turn logs
+    and [memory_dir] their Memory writers' commit logs. *)
+val run
+  :  runtime_root:string
+  -> turns_dir:string
+  -> memory_dir:string
+  -> (report, error) result

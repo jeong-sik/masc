@@ -346,18 +346,22 @@ let sweep_single_user_state (judged : Server_runtime_bootstrap.judged) =
      (* After the retained sweep, so the accepted checkpoints it removed are no
         longer roots. Optional cleanup, logged as the one above. *)
      let started = Unix.gettimeofday () in
+     (* The two directories the Memory writers are given
+        (Keeper_memory_writers.start). *)
+     let turns_dir = Common.keepers_runtime_dir_of_base ~base_path:canonical_base_path in
+     let memory_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:canonical_base_path in
      match
-       Masc.Keeper_checkpoint_object_sweep.run ~runtime_root
+       Masc.Keeper_checkpoint_object_sweep.run ~runtime_root ~turns_dir ~memory_dir
      with
      | exception exn ->
        Log.Server.warn "[Startup] checkpoint object sweep raised: %s" (Printexc.to_string exn)
      | Error error ->
        Log.Server.warn "[Startup] checkpoint object sweep skipped: %s"
          (Masc.Keeper_checkpoint_object_sweep.error_to_string error)
-     | Ok { sessions; roots; kept; removed; removed_bytes; failures } ->
+     | Ok { sessions; roots; turn_log_bundles; kept; removed; removed_bytes; failures } ->
        Log.Server.info
-         "[Startup] checkpoint object sweep: sessions=%d roots=%d kept=%d removed=%d bytes=%d failures=%d elapsed_s=%.3f"
-         sessions roots kept removed removed_bytes (List.length failures)
+         "[Startup] checkpoint object sweep: sessions=%d roots=%d turn_log_bundles=%d kept=%d removed=%d bytes=%d failures=%d elapsed_s=%.3f"
+         sessions roots turn_log_bundles kept removed removed_bytes (List.length failures)
          (Unix.gettimeofday () -. started);
        List.iter
          (fun failure -> Log.Server.warn "[Startup] checkpoint object sweep: %s" failure)

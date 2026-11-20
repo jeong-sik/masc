@@ -478,9 +478,9 @@ type purge_refused = Turn_log_unwritable of io_error
 ```
 
 - 끊긴 곳 뒤를 버리는 purge 는 head 를 줄이는 쪽이다(§5.2). 열린 메시지를 닫고 줄을 쓴 뒤에 버린다. 버린 메시지는 닫혀 있던 것이든 열려 있던 것이든 안 읽은 줄이 가리키는 bundle 로 계속 읽힌다. 깨진 head 를 가진 Keeper 가 Librarian 을 기다리는 일이 없다.
-- object sweep 은 프로세스가 시작할 때 한 번, 쓰는 쪽이 생기기 전에 돈다(`bin/main_eio.ml:350`). 그래서 sweep 은 `turn_log_offset` 을 반영 기록의 꼬리 줄에서 직접 읽는다.
+- object sweep 은 프로세스가 시작할 때 한 번, 쓰는 쪽이 생기기 전에 돈다(`bin/main_eio.ml:353`). 그래서 sweep 은 `turn_log_offset` 을 반영 기록의 꼬리 줄에서 직접 읽는다.
 - 그 offset 은 꼬리 줄의 `turn_log` 가 턴 기록 파일의 id 와 같고, offset 이 그 파일의 줄 시작일 때만 쓴다. 아니거나 꼬리 줄을 읽지 못하면 턴 기록의 모든 줄이 가리키는 bundle 을 뿌리로 잡는다.
-- 턴 기록을 읽지 못하면 sweep 은 아무것도 지우지 않고 끝난다. 뿌리로 읽을 줄 하나가 해석되지 않아도 같다. 지금 읽지 못하는 head 를 만났을 때와 같다(`keeper_checkpoint_object_sweep.mli:17-23`).
+- 턴 기록을 읽지 못하면 sweep 은 아무것도 지우지 않고 끝난다. 뿌리로 읽을 줄 하나가 해석되지 않아도 같다. 읽지 못하는 head 를 만났을 때와 같다(`keeper_checkpoint_object_sweep.mli:18-26`).
 - 줄의 bundle 은 그 줄의 trace 가 가리키는 session 에 뿌리로 잡는다. `Closed` 는 `after.trace`, `Reset` 은 `before.trace` 다.
 - sweep 은 턴 기록이 있는 Keeper 디렉터리를 모두 읽는다. Keeper 가 켜져 있든 꺼져 있든 같다.
 - Keeper 를 멈추면서 session 을 지우면(`remove_session`) head 와 그 trace 의 bundle 이 함께 없어지고 턴 기록은 남는다. 정지가 지우기 전에 `Unannounced` 줄을 쓴다(§5.2). 그 앞의 안 읽은 단위는 `Content_missing` 으로 적힌다.
@@ -2347,7 +2347,7 @@ head 하나와 턴 기록 하나, 그 기록을 읽는 쪽이다. 메시지는 �
 | slot 결과 표의 생성자 176개 가운데 실제로 Exact 경로에 닿는 것이 어느 것인지. 표는 타입에서 만들었고 호출 경로를 따라가지 않았다 | 닿지 않는 생성자의 행은 쓰이지 않을 뿐이다. 닿는데 갈래가 틀린 행은 폭을 잘못 줄이거나 줄이지 않는다 | 끝맺음 타입 층(L2)과 묻기 층(L6). 생성자마다 분류 시험 |
 | 계정별 Claude API provider 는 catalog 행이 없어 Exact slot 이 되지 못한다는 것. 다른 작업이 찾은 사실이고 여기서 확인하지 않았다(#53022) | Librarian lane 에 그런 provider 를 선언할 수 없다 | 그 작업의 RFC |
 
-본문이 줄 번호로 인용한 코드는 읽은 것이다. 그 가운데 그 코드가 바뀌면 설계가 깨지는 전제는 셋이다. 턴은 등록된 Keeper 에게만 돈다(`keeper_turn.ml:227-236`, §8.6). object sweep 은 프로세스가 시작할 때 쓰는 쪽이 생기기 전에 한 번 돈다(`bin/main_eio.ml:350`, §5.6). 주기 작업으로 바뀌면 깨진다. 지금은 autoboot 가 띄우지 않은 Keeper 의 것도 따라잡는다(`server_bootstrap_loops.ml:2197-2206`, §9.3).
+본문이 줄 번호로 인용한 코드는 읽은 것이다. 그 가운데 그 코드가 바뀌면 설계가 깨지는 전제는 셋이다. 턴은 등록된 Keeper 에게만 돈다(`keeper_turn.ml:227-236`, §8.6). object sweep 은 프로세스가 시작할 때 쓰는 쪽이 생기기 전에 한 번 돈다(`bin/main_eio.ml:353`, §5.6). 주기 작업으로 바뀌면 깨진다. 지금은 autoboot 가 띄우지 않은 Keeper 의 것도 따라잡는다(`server_bootstrap_loops.ml:2197-2206`, §9.3).
 
 ### 23.3 모델이 다루지 않은 것
 

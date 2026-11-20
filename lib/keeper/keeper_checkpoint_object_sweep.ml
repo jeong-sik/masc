@@ -9,6 +9,7 @@ module String_set = Set.Make (String)
 type report =
   { sessions : int
   ; roots : int
+  ; turn_log_bundles : int
   ; kept : int
   ; removed : int
   ; removed_bytes : int
@@ -17,6 +18,7 @@ type report =
 
 type error =
   | Owner_stores_unreadable of Keeper_retained_checkpoint_sweep.error
+  | Turn_logs_unreadable of Keeper_unread_turn_bundles.error
   | Listing_failed of
       { path : string
       ; detail : string
@@ -39,6 +41,9 @@ let error_to_string = function
   | Owner_stores_unreadable error ->
     "keeper operation stores could not be read, so the Gate preparation heads are unknown: "
     ^ Keeper_retained_checkpoint_sweep.error_to_string error
+  | Turn_logs_unreadable error ->
+    "the turn logs could not be read, so the bundles their unread lines name are unknown: "
+    ^ Keeper_unread_turn_bundles.error_to_string error
   | Listing_failed { path; detail } -> Printf.sprintf "%s could not be listed: %s" path detail
   | Root_unreadable { path; detail } -> Printf.sprintf "root head %s could not be read: %s" path detail
   | Root_unusable { root; detail } ->
@@ -216,7 +221,7 @@ type session_plan =
   ; live : String_set.t
   }
 
-let plan_sessions ~session_root ~external_roots =
+let plan_sessions ~session_root ~external_roots ~unread =
   let* sessions = subdirectories session_root in
   List.fold_left
     (fun acc session_id ->
@@ -236,7 +241,10 @@ let plan_sessions ~session_root ~external_roots =
            |> List.map (fun root -> Root_bytes root)
          in
          let* current, live = reached ~session_root ~session_dir (own @ others) in
-         Ok (roots_seen + current, { objects_dir; live } :: plans))
+         let unread_here =
+           Option.value ~default:String_set.empty (String_map.find_opt session_id unread)
+         in
+         Ok (roots_seen + current, { objects_dir; live = String_set.union live unread_here } :: plans))
     (Ok (0, []))
     sessions
 ;;
@@ -276,20 +284,34 @@ let remove_unreached report { objects_dir; live } =
       prefixes
 ;;
 
-let run ~runtime_root =
+let run ~runtime_root ~turns_dir ~memory_dir =
   let* records =
     Keeper_retained_checkpoint_sweep.owner_records ~runtime_root
     |> Result.map_error (fun error -> Owner_stores_unreadable error)
   in
   let external_roots = gate_roots records in
+  let* unread =
+    Keeper_unread_turn_bundles.read ~turns_dir ~memory_dir
+    |> Result.map_error (fun error -> Turn_logs_unreadable error)
+  in
   let* session_root = resolved (Keeper_fs.session_store_path_for_runtime_root runtime_root) in
   let* roots, plans =
     match session_root with
     | None -> Ok (0, [])
-    | Some session_root -> plan_sessions ~session_root ~external_roots
+    | Some session_root -> plan_sessions ~session_root ~external_roots ~unread
+  in
+  let turn_log_bundles =
+    String_map.fold (fun (_ : string) bundles count -> count + String_set.cardinal bundles) unread 0
   in
   let empty =
-    { sessions = List.length plans; roots; kept = 0; removed = 0; removed_bytes = 0; failures = [] }
+    { sessions = List.length plans
+    ; roots
+    ; turn_log_bundles
+    ; kept = 0
+    ; removed = 0
+    ; removed_bytes = 0
+    ; failures = []
+    }
   in
   let report = List.fold_left remove_unreached empty (List.rev plans) in
   Ok { report with failures = List.rev report.failures }

@@ -2588,7 +2588,10 @@ let keeper_message_visible_entries visible_timeline =
    Physical row ordinals can change with terminal width or origin gutters;
    only a producer-owned source byte can recover that same reading position. *)
 type source_body_index = {
-  source_rows : (chat_source_position, int) Hashtbl.t;
+  source_rows : (chat_source_position, int) Hashtbl.t Lazy.t;
+      (** Every visible byte's row: a key per byte, so a 1 MB reply's table
+          is a million structural hashes. Only a held pin or a searched point
+          reads it, so a frame following the live edge never builds it. *)
   row_sources : (int, chat_source_position) Hashtbl.t;
   row_end_sources : (int, chat_source_position) Hashtbl.t;
 }
@@ -4171,6 +4174,7 @@ let same_source_body_key (a : source_body_key) (b : source_body_key) =
   && Bool.equal a.source_polled_unavailable b.source_polled_unavailable
 
 let source_index_builds = ref 0
+let source_rows_builds = ref 0
 
 type source_mapping_owner =
   | Durable_source
@@ -4267,26 +4271,34 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                  | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
                  | Projected_byte _ | Projected_label _
                  | Preview_byte _ | Journal_byte _ | Request_byte _ -> None) in
-          let source_rows = Hashtbl.create 64 and row_sources = Hashtbl.create 16 in
-          let row_end_sources = Hashtbl.create 16 in
           let body_rows = List.length body.mapped_rows in
-          List.iter (fun (run : Search.run) ->
-            let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
-            let visible_bytes = Array.make (String.length run.text) false in
-            Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
-            List.iter (fun (row, ranges) ->
-              if row >= 0 && row < body_rows then
-                List.iter (fun (range : Markdown.source_range) ->
-                  for byte = range.start_byte to range.end_byte - 1 do
-                    if visible_bytes.(byte) then Option.iter (fun position ->
-                      (* A normalized origin can occur more than once. Keep the
-                         first actually visible row, matching search's source
-                         producer traversal, without electing by source words. *)
-                      if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row;
-                      if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
-                      Hashtbl.replace row_end_sources row position)
-                      (Option.bind run.positions.(byte) convert)
-                  done) ranges) run.visible_rows) body.runs;
+          (* Each visible byte with a source, in the order search's source
+             producer walks them. *)
+          let iter_visible f =
+            List.iter (fun (run : Search.run) ->
+              let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
+              let visible_bytes = Array.make (String.length run.text) false in
+              Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
+              List.iter (fun (row, ranges) ->
+                if row >= 0 && row < body_rows then
+                  List.iter (fun (range : Markdown.source_range) ->
+                    for byte = range.start_byte to range.end_byte - 1 do
+                      if visible_bytes.(byte) then
+                        Option.iter (f row) (Option.bind run.positions.(byte) convert)
+                    done) ranges) run.visible_rows) body.runs in
+          let row_sources = Hashtbl.create 16 and row_end_sources = Hashtbl.create 16 in
+          iter_visible (fun row position ->
+            if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
+            Hashtbl.replace row_end_sources row position);
+          (* A normalized origin can occur more than once. Keep the first
+             actually visible row, matching search's source producer
+             traversal, without electing by source words. *)
+          let source_rows = lazy (
+            incr source_rows_builds;
+            let source_rows = Hashtbl.create 64 in
+            iter_visible (fun row position ->
+              if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row);
+            source_rows) in
           Some {source_rows;row_sources;row_end_sources} in
           Source_entry_cache.replace source_body_indexes entry {key;index};
           index in
@@ -4297,7 +4309,7 @@ let body_row_of_point ~source_body entry_index (point : chat_scroll_point) =
   match point.source_position with
   | None -> None
   | Some position -> Option.bind (source_body entry_index) (fun body ->
-      Hashtbl.find_opt body.source_rows position)
+      Hashtbl.find_opt (Lazy.force body.source_rows) position)
 
 let source_point_on_row ~source_body entry_index body_row =
   Option.bind (source_body entry_index) (fun body -> Hashtbl.find_opt body.row_sources body_row)
@@ -4792,7 +4804,7 @@ let admit_keeper_message_search state work ({matched;unavailable_entries} as ans
             | Search.Request_byte _ -> Some (0, None)
             | Body_byte _ | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
             | Projected_byte _ | Projected_label _ | Preview_byte _ | Journal_byte _ ->
-                Option.map (fun body_row -> body_row, Some source) (Hashtbl.find_opt body.source_rows source) in
+                Option.map (fun body_row -> body_row, Some source) (Hashtbl.find_opt (Lazy.force body.source_rows) source) in
           Option.bind (source_body entry_index) (fun body ->
             Option.bind (landing body) (fun (body_row, source_position) ->
               let markdown=cached_chat_markdown_with_preview ~preview
@@ -5925,6 +5937,7 @@ module For_testing = struct
   let chat_markdown_cache = chat_markdown_cache
   let chat_markdown_theme_revision = chat_markdown_theme_revision
   let source_index_build_count () = !source_index_builds
+  let source_rows_build_count () = !source_rows_builds
   let source_url_discovery_count () = !source_url_discoveries
   let search_candidate_build_count () = !search_candidate_builds
 end

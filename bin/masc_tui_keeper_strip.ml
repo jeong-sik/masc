@@ -222,10 +222,21 @@ let fleet_cells ?(summarize_wakes = false) ~ko ~now ~(grid : Grid.t) ~wakes rows
         else if peak > 2 && n * 3 <= peak then low_tint
         else warn
       in
+      let count_arr = Array.of_list counts in
+      let scale_dots n = max 1 (min 4 (((n * 4) + peak - 1) / max 1 peak)) in
+      let level_arr =
+        Array.map (fun (n, _) -> if n > 0 then scale_dots n else 0) count_arr
+      in
       with_styled_cells ~capacity:(grid.side_cells * 6) (fun emit ->
-        List.iter (fun (n, unknown) ->
-          if n > 0 then emit (fail_tone n) (Grid.level_glyph ~peak n)
-          else emit recede (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")) counts) in
+        Array.iteri (fun i (n, unknown) ->
+          if n > 0 then
+            let h = level_arr.(i) in
+            let left =
+              if i > 0 && level_arr.(i - 1) > 0 then max 1 ((level_arr.(i - 1) + h) / 2)
+              else max 1 (h / 2)
+            in
+            emit (fail_tone n) (Masc_tui_braille.braille_pair_down ~left ~right:h)
+          else emit recede (if unknown then Grid.strip_mark Grid.Strip_unknown else "·")) count_arr) in
   let active = List.filter (fun row -> match runtime row with
     | Some row -> not row.Decode.kr_paused | None -> true) rows in
   let future = match active with

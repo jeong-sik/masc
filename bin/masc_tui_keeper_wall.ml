@@ -89,14 +89,12 @@ let header ~ko ~cols ~now =
   ^ Ansi.reset
 
 let ok_activity_level total =
-  if total <= 2 then 1
-  else if total <= 6 then 2
-  else 3
+  if total <= 3 then 1
+  else 2
 
 let fail_activity_level total =
-  if total <= 1 then 2
-  else if total <= 4 then 3
-  else 4
+  if total <= 2 then 1
+  else 2
 
 type slot_class =
   | Class_quiet_or_unknown
@@ -115,14 +113,14 @@ let classify_tally = function
       else if ok > 0 then Class_mixed (ok_activity_level ok)
       else Class_rested
 
-(* Partition Braille shapes 100% disjointly by turn outcome so NO_COLOR
-   preserves every distinction while consecutive pure-ok or pure-failed slots
-   connect smoothly like btop C0..C15 waves:
+(* Partition Braille shapes 100% disjointly by turn outcome while keeping
+   1-row keeper strips light and ECG-readable (max 2 dot rows high instead of
+   solid 8-dot blocks):
    - quiet = ·, unread = ─
-   - pure ok: bottom-aligned (dots 1,4 clear; dot 8 set)
-   - rested only: single bottom-left dot ⠄ (dot 8 clear)
-   - mixed: asymmetric left 1..3 + right 4 (dot 1 clear, dot 4 set)
-   - pure fail: top-hanging down-Braille ⠙..⣿ (dot 1 set, dot 4 set) *)
+   - pure ok: low bottom-aligned 1..2 dots ⣀..⣤ (dots 1,4 clear; dot 8 set)
+   - rested only: single bottom-left dot ⡀ (dots 1,4,8 clear)
+   - mixed: asymmetric left 1..2 + right 4 ⣸..⣼ (dot 1 clear, dot 4 set)
+   - pure fail: top-hanging 1..2 dots ⠉..⠛ (dot 1 set, dot 4 set) *)
 let tally_marks slot_tallies =
   let arr = Array.of_list slot_tallies in
   let n = Array.length arr in
@@ -155,28 +153,25 @@ let tally_marks slot_tallies =
             let left =
               if i > 0 then
                 match classes.(i - 1) with
-                | Class_ok prev_h -> max 1 ((prev_h + h) / 2)
+                | Class_ok prev_h -> prev_h
                 | Class_quiet_or_unknown | Class_rested | Class_failed _
-                | Class_mixed _ ->
-                    if h >= 2 then h - 1 else 1
-              else if h >= 2 then h - 1
+                | Class_mixed _ -> 1
               else 1
             in
             let glyph = Braille.braille_pair ~left ~right:h in
-            let tone = ok_tint (float_of_int h /. 3.0) in
+            let tone = ok_tint (0.45 +. (0.40 *. float_of_int (h - 1))) in
             emit tone glyph
         | Class_failed h ->
             let left =
               if i > 0 then
                 match classes.(i - 1) with
-                | Class_failed prev_h -> max 1 ((prev_h + h) / 2)
+                | Class_failed prev_h -> prev_h
                 | Class_quiet_or_unknown | Class_rested | Class_ok _
-                | Class_mixed _ ->
-                    max 1 (h - 1)
-              else max 1 (h - 1)
+                | Class_mixed _ -> 1
+              else 1
             in
             let glyph = Braille.braille_pair_down ~left ~right:h in
-            let tone = warm_tint (float_of_int (h - 1) /. 3.0) in
+            let tone = warm_tint (0.45 +. (0.45 *. float_of_int (h - 1))) in
             emit tone glyph
         | Class_mixed ok_h ->
             let glyph = Braille.braille_pair ~left:ok_h ~right:4 in
@@ -219,8 +214,8 @@ let legend_row ~ko ~cols =
     "  "
     ^ sample (Theme.recede ()) Masc_tui_keeper_mark.grid_dot_mark (say "무활동" "quiet")
     ^ "  " ^ sample (Theme.recede ()) Masc_tui_keeper_mark.grid_unknown_range_mark (say "미기록" "unread")
-    ^ "  " ^ sample (ok_tint 0.85) (Braille.braille_pair ~left:2 ~right:3) (say "정상(↑)" "ok(up)")
-    ^ "  " ^ sample (warm_tint 0.90) (Braille.braille_pair_down ~left:2 ~right:4) (say "실패(↓)" "fail(down)")
+    ^ "  " ^ sample (ok_tint 0.85) (Braille.braille_pair ~left:1 ~right:2) (say "정상(↑)" "ok(up)")
+    ^ "  " ^ sample (warm_tint 0.90) (Braille.braille_pair_down ~left:2 ~right:2) (say "실패(↓)" "fail(down)")
     ^ "  " ^ sample (thermal_tint 0.62) (Braille.braille_pair ~left:2 ~right:4) (say "혼재" "mixed")
     ^ "  " ^ sample (Theme.warn ()) (Braille.braille_pair ~left:1 ~right:0) (say "휴식" "rest")
   in

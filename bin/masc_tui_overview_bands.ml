@@ -103,7 +103,7 @@ let render_telemetry ~ko ~width ~height snap =
     let right_w = if cells >= 48 then cells - 2 - col_w else cells in
     let fleet_meter =
       if snap.fleet_bootable > 0 then
-        Chart.meter ~width:col_w ~value:snap.fleet_running
+        Chart.dot_meter ~width:col_w ~value:snap.fleet_running
           ~max_value:(max 1 snap.fleet_bootable)
           ~label:(say "실행" "Run") ~label_style:(Theme.recede ())
           ~suffix:(Printf.sprintf "%d/%d" snap.fleet_running snap.fleet_bootable)
@@ -122,7 +122,7 @@ let render_telemetry ~ko ~width ~height snap =
               (Masc_tui_value.Count.decrease snap.capacity_shortfall)
           else Printf.sprintf "%d/%d" snap.capacity_avail snap.capacity_target
         in
-        Chart.meter ~width:col_w ~value:snap.capacity_avail
+        Chart.dot_meter ~width:col_w ~value:snap.capacity_avail
           ~max_value:(max 1 snap.capacity_target)
           ~label:(say "여력" "Cap") ~label_style:(Theme.recede ())
           ~suffix
@@ -140,7 +140,7 @@ let render_telemetry ~ko ~width ~height snap =
         snap.heap_live_words, snap.heap_total_words, snap.heap_live_text, snap.heap_total_text
       with
       | Some live, Some total, Some live_s, Some total_s when total > 0 ->
-          Chart.meter ~width:right_w ~value:live ~max_value:(max 1 total)
+          Chart.dot_meter ~width:right_w ~value:live ~max_value:(max 1 total)
             ~label:(say "힙" "Heap") ~label_style:(Theme.recede ())
             ~suffix:(Printf.sprintf "%s/%s" live_s total_s)
             ~scale:(Chart.Series { paint = Theme.paint (); series = Palette.Memory })

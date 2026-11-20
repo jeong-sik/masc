@@ -439,7 +439,7 @@ let keeper_row_context_chip (state : state) (row : Keeper_list_model.row) =
                 let pct = (value + 5) / 10 in
                 let scale = Masc_tui_chart.Declared_limit (Theme.paint ()) in
                 let bar =
-                  Masc_tui_chart.meter_bar ~width:5 ~value ~max_value ~scale
+                  Masc_tui_chart.dot_meter_bar ~width:5 ~value ~max_value ~scale
                     ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
                 in
                 Some (Printf.sprintf "%s %3d%%" bar pct)
@@ -806,8 +806,8 @@ let grid_name (grid : Grid.t) ~yolo verdict name =
 
 let grid_repeat count mark = String.concat "" (List.init (max 0 count) (fun _ -> mark))
 
-(* Four-stage semantic progression: quiet dot (receded), healthy ok pip (ok),
-   mixed half block (warn), pure failed block (bad). *)
+(* Four-stage semantic progression: quiet dot (receded), low ok Braille (ok),
+   mid mixed Braille (warn), high failed Braille (bad). *)
 let make_half_hour_styler () =
   let bad = Theme.bad () and warn = Theme.warn () and ok = Theme.ok () and recede = Theme.recede () in
   function
@@ -1254,23 +1254,36 @@ let group_pulse ~now members =
     let peak = max 1 (List.length members) in
     let low_tint = Theme.series_tint Masc_tui_theme.Latency 0.55 in
     let bad = Theme.bad () and warn = Theme.warn () and recede = Theme.recede () in
-    emit_styled_cells
-      (List.init group_pulse_slots (fun position ->
-        let count, unknown = List.fold_left (fun (count, unknown) slots ->
+    let counts =
+      Array.init group_pulse_slots (fun position ->
+        List.fold_left (fun (count, unknown) slots ->
           if position < Array.length slots then
             match slots.(position) with
             | Masc_tui_keeper_pulse.Half_hour_failed | Masc_tui_keeper_pulse.Half_hour_failed_and_ok -> count + 1, unknown
             | Masc_tui_keeper_pulse.Half_hour_unknown -> count, true
             | Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_ok -> count, unknown
           else count, true)
-          (0, false) reading_arrays in
+          (0, false) reading_arrays)
+    in
+    let scale_dots count = max 1 (min 4 (((count * 4) + peak - 1) / peak)) in
+    let levels =
+      Array.map (fun (count, _) -> if count > 0 then scale_dots count else 0) counts
+    in
+    emit_styled_cells
+      (List.init group_pulse_slots (fun i ->
+        let count, unknown = counts.(i) in
         if count > 0 then
           let tone =
             if peak > 1 && count * 3 >= peak * 2 then bad
             else if peak > 2 && count * 3 <= peak then low_tint
             else warn
           in
-          (tone, Grid.level_glyph ~peak count)
+          let h = levels.(i) in
+          let left =
+            if i > 0 && levels.(i - 1) > 0 then max 1 ((levels.(i - 1) + h) / 2)
+            else max 1 (h / 2)
+          in
+          (tone, Masc_tui_braille.braille_pair_down ~left ~right:h)
         else
           (recede, if unknown then Keeper_mark.grid_unknown_range_mark else "·")))
 

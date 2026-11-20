@@ -990,7 +990,7 @@ let skill_statistics_lines ~cols = function
         [ completed_word, Theme.ok (), stats.Masc.Tui_decode_skill_evidence.scst_completed
         ; failed_word, Theme.bad (), stats.scst_failed ] in
       let milliseconds = function
-        | None -> "—"
+        | None -> Masc_tui_theme.Glyph.no_value
         | Some value -> Printf.sprintf "%.1fms" value in
       let duration (name, style, row) =
         [ style,
@@ -1829,8 +1829,15 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                          in
                          let duration =
                            match json_assoc_member_opt "duration_ms" result with
-                           | Some (`Float value) -> Printf.sprintf "%.0fms" value
-                           | Some (`Int value) -> Printf.sprintf "%dms" value
+                           (* A finished call's length (RFC
+                              tui-one-screen-grammar 6.2); a negative one is
+                              a reading that failed. *)
+                           | Some (`Float value) ->
+                               Option.value ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+                                 (Masc_tui_message_layout.elapsed_text (value /. 1000.))
+                           | Some (`Int value) ->
+                               Option.value ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+                                 (Masc_tui_message_layout.elapsed_text (Float.of_int value /. 1000.))
                            | Some _ | None -> Masc_tui_theme.Glyph.no_value
                          in
                          let success =

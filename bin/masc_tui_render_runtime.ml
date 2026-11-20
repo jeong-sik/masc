@@ -114,11 +114,18 @@ let runtime_probe_badge state = function
 let runtime_route_probe_badge state runtime probe =
   runtime_route_badge state runtime ^ " / " ^ runtime_probe_badge state probe
 
+(* A probe's latency is a finished length (RFC tui-one-screen-grammar 6.2):
+   [243ms] below a second, [1.5s] and [2m05s] past it. A negative one is a
+   reading that failed. *)
+let latency_text milliseconds =
+  Option.value ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+    (Message_layout.elapsed_text (milliseconds /. 1000.))
+
 let runtime_probe_detail ~ko = function
   | None -> []
   | Some (probe : Masc.Tui_decode_runtime_probe.runtime_provider_probe) ->
       let latency =
-        Option.map (fun value -> Printf.sprintf "%.0fms" value) probe.rpp_latency_ms
+        Option.map latency_text probe.rpp_latency_ms
       in
       let http =
         Option.map (fun value -> Printf.sprintf "HTTP %d" value) probe.rpp_http_status
@@ -469,8 +476,7 @@ let runtime_detail_lines state target ~width =
             @ (match row.rpp_latency_ms with
                | None -> []
                | Some value ->
-                   fact (say "지연 시간" "Latency")
-                     (Printf.sprintf "%.0fms" value))
+                   fact (say "지연 시간" "Latency") (latency_text value))
             @ (match row.rpp_http_status with
                | None -> []
                | Some value ->

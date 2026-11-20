@@ -2017,7 +2017,8 @@ let bounded_model_input_projection
       ~media_store
       ~on_resolved
       ~(provider_config : Llm_provider.Provider_config.t)
-  : Agent_core.Agent.model_input_projection
+  : Agent_core.Types.message list
+    -> (Llm_provider.Types.message list, Agent_core.Error.t) result
   =
   match ctx.request_input with
   | Completion_review ->
@@ -2996,7 +2997,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                  | None -> history
                  | Some retained ->
                    Keeper_client_tool_outbox.place_carrier retained history) !resolved_history;
-               messages) (project messages))
+               messages) (project messages)
+               |> Result.map Agent_core.Agent.one_request)
       }
     in
     (* Explicit stream stall detection is handled by AGENT_CORE's

@@ -862,17 +862,30 @@ let validate_content_blocks_for_config
 (* A projection owns which canonical messages become this request. Validate
    its actual wire result, without resolving or projecting a second time.
    History and wire share [content_block_with], so the same complete modality
-   scan and capability predicate cover both, including nested tool results. *)
+   scan and capability predicate cover both, including nested tool results.
+   A narrower request is validated as the request it would replace. *)
 let validated_model_input_projection (config : config) =
   Option.map (fun project ->
     let caps = input_capabilities_for_config config in
     let label = provider_label config.provider_cfg in
-    fun messages ->
-      let open Result.Syntax in
-      let* projected = project messages in
+    let open Result.Syntax in
+    let validate request =
       let+ () = validate_content_blocks_against_capabilities
-          ~provider_label:label caps (content_blocks_of_messages projected) in
-      projected) config.model_input_projection
+          ~provider_label:label caps (content_blocks_of_messages request) in
+      request
+    in
+    fun messages ->
+      let* (candidates : Agent_core.Agent.model_input_candidates) = project messages in
+      let+ request = validate candidates.request in
+      { Agent_core.Agent.request
+      ; narrower =
+          List.map (fun (narrow : Agent_core.Agent.narrower_model_input) refusal ->
+              let* narrower = narrow refusal in
+              match narrower with
+              | None -> Ok None
+              | Some request -> Result.map Option.some (validate request))
+            candidates.narrower
+      }) config.model_input_projection
 
 (* capability-driven proactive runtime reroute. A pure decision from
    the turn's required input modalities and the candidate runtimes' declared

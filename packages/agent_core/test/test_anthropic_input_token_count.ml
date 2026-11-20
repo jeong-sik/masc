@@ -574,12 +574,9 @@ let admitted_anthropic_sync_response =
   {|{"id":"msg-1","type":"message","role":"assistant","model":"input-count-fixture","content":[{"type":"text","text":"accepted"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":1}}|}
 ;;
 
-let with_admitted_http_mock ?(input_tokens = 10) ?(on_count = fun _ -> ()) ~stream f =
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let net = Eio.Stdenv.net env in
+(* The count endpoint answers [count_of] of the counted body. The completion
+   endpoint keeps the last body it received and answers that it accepted. *)
+let serve_admitted ~sw ~net ~count_of ~on_count ~stream =
   let port = fresh_port () in
   let completion_body = ref None in
   let handler _conn request body =
@@ -589,7 +586,7 @@ let with_admitted_http_mock ?(input_tokens = 10) ?(on_count = fun _ -> ()) ~stre
     then (
       on_count body;
       Cohttp_eio.Server.respond_string ~status:`OK
-        ~body:(Printf.sprintf {|{"input_tokens":%d}|} input_tokens) ())
+        ~body:(Printf.sprintf {|{"input_tokens":%d}|} (count_of body)) ())
     else (
       completion_body := Some body;
       let headers =
@@ -615,7 +612,22 @@ let with_admitted_http_mock ?(input_tokens = 10) ?(on_count = fun _ -> ()) ~stre
   let server = Cohttp_eio.Server.make ~callback:handler () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
-  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  Printf.sprintf "http://127.0.0.1:%d" port, completion_body
+;;
+
+let with_admitted_http_mock
+      ?(input_tokens = 10)
+      ?(count_of = fun (_ : string) -> input_tokens)
+      ?(on_count = fun _ -> ())
+      ~stream
+      f
+  =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let base_url, completion_body = serve_admitted ~sw ~net ~count_of ~on_count ~stream in
   let result = f ~sw ~net ~base_url in
   result, !completion_body
 ;;
@@ -1561,7 +1573,8 @@ let test_agent_projection_is_shared_by_measurement_and_dispatch () =
         ~model_input_projection:(fun history ->
           incr projection_calls;
           match Agent_core.History.to_wire_messages media_store history with
-          | Ok provider_messages -> Ok (provider_messages @ [ hydrated ])
+          | Ok provider_messages ->
+            Ok (Agent_core.Agent.one_request (provider_messages @ [ hydrated ]))
           | Error error -> Error (Agent_core.Error.Media error))
         ()
     in
@@ -1636,6 +1649,324 @@ let test_agent_projection_exception_is_typed () =
   |> check_projection_failure
        (Agent_core.Error.to_string
           (Agent_core.Error.Internal (Printexc.to_string exception_)))
+;;
+
+(* In-run narrower requests (RFC a-request-fits-by-the-one-input-limit-
+   agent-core-decides §4.2). Every request carries one marker message. The
+   count endpoint measures a request whose marker says too-large past the
+   512-token limit and any other request at 10 tokens. *)
+let contains ~sub text =
+  let sub_length = String.length sub in
+  let rec from index =
+    index + sub_length <= String.length text
+    && (String.equal (String.sub text index sub_length) sub || from (index + 1))
+  in
+  from 0
+;;
+
+let measured_by_marker body = if contains ~sub:"too-large" body then 1000 else 10
+
+let narrowing_projection ~media_store ~asked ~first narrower history =
+  Agent_core.History.to_wire_messages media_store history
+  |> Result.map_error (fun error -> Agent_core.Error.Media error)
+  |> Result.map (fun provider_messages ->
+    let marked marker = provider_messages @ [ msg User [ Text marker ] ] in
+    { Agent_core.Agent.request = marked first
+    ; narrower =
+        List.mapi
+          (fun index narrow refusal ->
+             asked := (index, refusal) :: !asked;
+             Result.map (Option.map marked) (narrow refusal))
+          narrower
+    })
+;;
+
+let run_narrowing ?(count_of = measured_by_marker) ~stream narrower =
+  let asked = ref [] in
+  let counted = ref 0 in
+  let observations = ref [] in
+  let result, completion_body =
+    with_admitted_http_mock
+      ~stream
+      ~count_of:(fun body ->
+        incr counted;
+        count_of body)
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let agent =
+      build_admission_agent
+        ~media_store
+        ~net
+        ~provider_config
+        ~model_input_projection:
+          (narrowing_projection ~media_store ~asked ~first:"first-request-too-large" narrower)
+        ~pre_dispatch_serialization_observer:(fun observation ->
+          observations := observation :: !observations;
+          Ok ())
+        ()
+    in
+    if stream
+    then Agent_core.Agent.run_stream ~sw ~on_event:(fun _ -> ()) agent "narrow the request"
+    else Agent_core.Agent.run ~sw agent "narrow the request"
+  in
+  result, completion_body, List.rev !asked, !counted, !observations
+;;
+
+let is_size_refusal_before_sending = function
+  | Agent_core.Error.Api (Retry.ContextOverflow { limit = Some 512; _ }) -> true
+  | _ -> false
+;;
+
+let test_the_first_request_that_fits_is_the_one_sent ~stream () =
+  let result, completion_body, asked, counted, observations =
+    run_narrowing
+      ~stream
+      [ (fun _ -> Ok (Some "second-request-too-large"))
+      ; (fun _ -> Ok (Some "third-request-fits"))
+      ; (fun _ -> fail "a narrower request after the accepted one was asked")
+      ]
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  check (list int) "narrower requests are asked front to back until one fits" [ 0; 1 ]
+    (List.map fst asked);
+  check bool "each step receives the refusal made before sending" true
+    (List.for_all (fun (_, refusal) -> is_size_refusal_before_sending refusal) asked);
+  check int "every compared request is measured once" 3 counted;
+  match completion_body with
+  | None -> fail "the request that fits was not sent"
+  | Some body ->
+    check bool "the third request is the one sent" true
+      (contains ~sub:"third-request-fits" body);
+    check bool "no refused request is sent" false (contains ~sub:"too-large" body);
+    check_pre_dispatch_serialization ~label:"narrowed route" ~body observations
+;;
+
+let test_a_step_without_a_request_passes_the_refusal_on () =
+  let result, completion_body, asked, counted, _observations =
+    run_narrowing
+      ~stream:false
+      [ (fun _ -> Ok None); (fun _ -> Ok (Some "third-request-fits")) ]
+  in
+  (match result with
+   | Ok _ -> ()
+   | Error error -> fail (Agent_core.Error.to_string error));
+  (match asked with
+   | [ (0, first); (1, second) ] ->
+     check bool "the next step receives the same refusal" true (first == second)
+   | _ -> fail "both steps were expected, in order");
+  check int "a step without a request measures nothing" 2 counted;
+  check bool "the request that fits is sent" true
+    (match completion_body with
+     | Some body -> contains ~sub:"third-request-fits" body
+     | None -> false)
+;;
+
+let test_the_last_refusal_ends_the_turn_when_requests_run_out () =
+  let result, completion_body, asked, counted, observations =
+    run_narrowing ~stream:false [ (fun _ -> Ok (Some "second-request-too-large")) ]
+  in
+  (match result with
+   | Error error when is_size_refusal_before_sending error -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "no request fits, so the turn must end");
+  check (list int) "the one narrower request is asked" [ 0 ] (List.map fst asked);
+  check int "both requests are measured" 2 counted;
+  check bool "nothing is sent" true (Option.is_none completion_body);
+  check int "nothing is dispatched" 0 (List.length observations)
+;;
+
+let test_a_failed_step_ends_the_turn_with_its_own_error () =
+  let failure = Agent_core.Error.Internal "narrower request unavailable" in
+  let result, completion_body, asked, counted, _observations =
+    run_narrowing
+      ~stream:false
+      [ (fun _ -> Error failure); (fun _ -> Ok (Some "third-request-fits")) ]
+  in
+  (match result with
+   | Error error ->
+     check string "the step's own error ends the turn"
+       (Agent_core.Error.to_string failure)
+       (Agent_core.Error.to_string error)
+   | Ok _ -> fail "a failed step must end the turn");
+  check (list int) "no step after the failed one is asked" [ 0 ] (List.map fst asked);
+  check int "only the first request is measured" 1 counted;
+  check bool "nothing is sent" true (Option.is_none completion_body)
+;;
+
+(* A narrower request that cannot be measured is no request: the turn ends
+   with the refusal before it, as it would without narrower requests. The
+   count endpoint answers a negative count for it, which the count parser
+   refuses. *)
+let test_an_unmeasurable_narrower_request_leaves_the_refusal_before_it () =
+  let unmeasurable body =
+    if contains ~sub:"unmeasurable" body then -1 else measured_by_marker body
+  in
+  let result, completion_body, asked, counted, observations =
+    run_narrowing
+      ~count_of:unmeasurable
+      ~stream:false
+      [ (fun _ -> Ok (Some "second-request-unmeasurable"))
+      ; (fun _ -> fail "a step after the unmeasurable request was asked")
+      ]
+  in
+  (match result with
+   | Error error when is_size_refusal_before_sending error -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "an unmeasurable narrower request must not be sent");
+  check (list int) "only the step before it is asked" [ 0 ] (List.map fst asked);
+  check int "both requests are counted" 2 counted;
+  check bool "nothing is sent" true (Option.is_none completion_body);
+  check int "nothing is dispatched" 0 (List.length observations)
+;;
+
+(* A provider refusal of a sent request is not a refusal before sending: the
+   provider attempt is the turn's only one, so no narrower request is
+   asked. *)
+let test_a_provider_refusal_asks_no_narrower_request () =
+  let asked = ref [] in
+  let (result, sent), _captured =
+    with_mock ~status:`OK ~response:{|{"input_tokens":10}|}
+    @@ fun ~sw ~net ~base_url ->
+    let provider_config = config ~max_context:512 base_url in
+    let media_store = Agent_core.History.Memory_store.create () in
+    let sent = ref 0 in
+    let transport =
+      Llm_provider.Llm_transport.custom
+        { Llm_transport.complete_sync =
+            (fun _ ->
+              incr sent;
+              { Llm_transport.response =
+                  Error
+                    (Http_client.ProviderFailure
+                       { kind = Http_client.Context_overflow { limit = Some 512 }
+                       ; message = "the provider refused the prompt as too long"
+                       })
+              ; latency_ms = Some 1
+              })
+        ; complete_stream =
+            (fun ?on_telemetry:_ ~on_event:_ _ -> fail "unexpected streaming dispatch")
+        }
+    in
+    let agent =
+      build_admission_agent
+        ~media_store
+        ~net
+        ~provider_config
+        ~transport
+        ~model_input_projection:
+          (narrowing_projection ~media_store ~asked ~first:"first-request-fits"
+             [ (fun _ -> Ok (Some "second-request-fits")) ])
+        ()
+    in
+    let result = Agent_core.Agent.run ~sw agent "the provider refuses" in
+    result, !sent
+  in
+  (match result with
+   | Error (Agent_core.Error.Api (Retry.ContextOverflow _)) -> ()
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "a provider refusal must end the turn");
+  check int "the request is sent once" 1 sent;
+  check int "a provider refusal asks no narrower request" 0 (List.length !asked)
+;;
+
+module Projection = Agent_core.Agent.Execution_projection
+
+(* RFC section 5: when the third of three requests fits, the turn's journal
+   keeps one provider attempt, ordinal 0, and the request that attempt
+   records is the third, the one sent. *)
+let test_the_one_provider_attempt_records_the_request_sent () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let base_url, completion_body =
+      serve_admitted ~sw ~net ~count_of:measured_by_marker ~on_count:ignore ~stream:false
+    in
+    let runtime =
+      match
+        Agent_core.Agent.create_execution_runtime
+          ~sw
+          ~domain_mgr:(Eio.Stdenv.domain_mgr env)
+          ~domain_count:1
+      with
+      | Ok runtime -> runtime
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    let native_path = Filename.temp_file "agent_core-narrowed-request-" ".dir" in
+    Sys.remove native_path;
+    let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
+    Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+    Fun.protect
+      ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir)
+      (fun () ->
+         let locator = ref None in
+         let execution_store =
+           Agent_core.Agent.execution_store
+             ~runtime
+             ~dir
+             ~on_scope_ready:(fun exact ->
+               locator := Some exact;
+               Ok ())
+             ()
+         in
+         let media_store = Agent_core.History.Memory_store.create () in
+         let agent =
+           build_admission_agent
+             ~media_store
+             ~net
+             ~provider_config:(config ~max_context:512 base_url)
+             ~model_input_projection:
+               (narrowing_projection
+                  ~media_store
+                  ~asked:(ref [])
+                  ~first:"first-request-too-large"
+                  [ (fun _ -> Ok (Some "second-request-too-large"))
+                  ; (fun _ -> Ok (Some "third-request-fits"))
+                  ])
+             ()
+         in
+         (match Agent_core.Agent.run ~sw ~execution_store agent "narrow the request" with
+          | Ok _ -> ()
+          | Error error -> fail (Agent_core.Error.to_string error));
+         let body =
+           match !completion_body with
+           | Some body -> body
+           | None -> fail "the request that fits was not sent"
+         in
+         check bool "the third request is the one sent" true
+           (contains ~sub:"third-request-fits" body);
+         let projection_value = function
+           | Ok value -> value
+           | Error error -> fail (Projection.error_to_string error)
+         in
+         let locator =
+           match !locator with
+           | Some locator -> locator
+           | None -> fail "the run has no durable scope locator"
+         in
+         let projection =
+           projection_value (Agent_core.Agent.open_execution_projection ~runtime ~dir locator)
+         in
+         match projection_value (Projection.provider_requests projection ()) with
+         | [ { Projection.ordinal = 0
+             ; provenance = Some (Llm_provider.Completion_outcome.Serialized request)
+             ; _
+             }
+           ] ->
+           check string "the attempt records the request it sent"
+             Agent_core_sha256.(to_hex (digest_string body))
+             request.body_sha256
+         | requests ->
+           failf "expected one provider attempt that records its request, got %d"
+             (List.length requests));
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
 ;;
 
 let test_agent_count_preflight_uses_completion_timeout () =
@@ -2006,6 +2337,38 @@ let () =
             "Agent projection exception is typed"
             `Quick
             test_agent_projection_exception_is_typed
+        ; test_case
+            "sync route sends the first narrower request that fits"
+            `Quick
+            (test_the_first_request_that_fits_is_the_one_sent ~stream:false)
+        ; test_case
+            "stream route sends the first narrower request that fits"
+            `Quick
+            (test_the_first_request_that_fits_is_the_one_sent ~stream:true)
+        ; test_case
+            "a narrower step without a request passes the refusal on"
+            `Quick
+            test_a_step_without_a_request_passes_the_refusal_on
+        ; test_case
+            "the last refusal ends the turn when narrower requests run out"
+            `Quick
+            test_the_last_refusal_ends_the_turn_when_requests_run_out
+        ; test_case
+            "a failed narrower step ends the turn with its own error"
+            `Quick
+            test_a_failed_step_ends_the_turn_with_its_own_error
+        ; test_case
+            "a provider refusal asks no narrower request"
+            `Quick
+            test_a_provider_refusal_asks_no_narrower_request
+        ; test_case
+            "an unmeasurable narrower request leaves the refusal before it"
+            `Quick
+            test_an_unmeasurable_narrower_request_leaves_the_refusal_before_it
+        ; test_case
+            "the one provider attempt records the narrower request sent"
+            `Quick
+            test_the_one_provider_attempt_records_the_request_sent
         ; test_case
             "Agent count preflight uses completion timeout"
             `Quick

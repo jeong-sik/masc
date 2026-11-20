@@ -53,9 +53,42 @@ type context_fit_admission =
     already rotates on. The projection turns history into the provider
     request, so it also resolves the request's media through the agent's
     media store; an agent without a projection converts the whole history
-    with {!History.to_wire_message}. *)
+    with {!History.to_wire_message}.
+
+    The projection names the request the turn sends first and the narrower
+    requests it would send instead ({!model_input_candidates}). *)
+
+(** A narrower request the caller would send instead of the request before
+    it. It receives that request's refusal. [Ok None] names no narrower
+    request at this step, and the next step is asked with the same refusal.
+    [Error e] ends the turn with [e]. *)
+type narrower_model_input =
+  Error.t -> (Llm_provider.Types.message list option, Error.t) result
+
+(** The request a turn sends first, and the narrower requests the caller
+    would send instead, widest first.
+
+    AGENT_CORE opens one provider attempt and sends one request. It calls a
+    step only after the request before it was refused before sending because
+    it does not fit ([Llm_provider.Complete.Context_window_exceeded]), front
+    to back, each at most once. A step may change the caller's state, so this
+    order is what keeps each narrower request built on the one before. A
+    provider's refusal of a sent request calls no step: the provider attempt
+    is the turn's only one. A narrower request that fails before it is sent
+    -- it cannot be checked or measured, or the windows are spent -- ends the
+    turn with the refusal before it, as the turn would end without it, and no
+    later step is called. The list is finite, so its length bounds how many
+    requests one turn compares. *)
+type model_input_candidates =
+  { request : Llm_provider.Types.message list
+  ; narrower : narrower_model_input list
+  }
+
 type model_input_projection =
-  Types.message list -> (Llm_provider.Types.message list, Error.t) result
+  Types.message list -> (model_input_candidates, Error.t) result
+
+(** The candidates of a projection that names no narrower request. *)
+val one_request : Llm_provider.Types.message list -> model_input_candidates
 
 type pre_dispatch_serialization_observer = Llm_provider.Request_wire_observer.try_observe
 

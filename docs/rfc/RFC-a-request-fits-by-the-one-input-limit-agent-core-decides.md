@@ -160,6 +160,9 @@ agent-core 도 그 요청을 보내지 않는다.
 - route 는 provider 시도를 지금처럼 한 번 연다. 후보를 차례로 견주고, 처음 받아들여진 후보 하나만 보낸다.
 - 후보가 다하면 지금처럼 `Retry.ContextOverflow` 로 턴을 끝낸다. lane 을 돌리는 것도 지금과 같다. 다음 턴 첫 요청에서 신호가 창을 옮긴다.
   - 가장 좁은 후보에도 시스템 프롬프트와 이 턴이 시작한 뒤의 atom 은 남는다. 그것만으로 한도를 넘으면 후보가 다해 턴이 끝난다. 받아들인 한계다.
+  - 보내기 전에 실패한 좁은 후보는 없는 후보로 본다. 검사나 재기가 실패했거나 창을 다 쓴 경우다.
+  - 그때 턴은 그 앞 거절로 끝나고, 실패는 log 에 남는다. 후보를 붙여도 턴이 끝나는 이유는 지금과 같다.
+  - 단계 함수가 낸 `Error e` 는 caller 가 정한 것이라 `e` 로 끝난다.
 - 받아들여진 후보의 좁힘은 run 의 다음 요청으로 이어진다.
   - 턴 가운데 요청은 ledger 의 마지막 요청이 연 곳을 붙잡는다(`held_window`, `lib/keeper/keeper_turn_driver_try_provider.ml:1406`). ledger 는 응답 때 바뀐다(`:2741`).
   - 표시 바꾸기는 attempt 가 들고 있는 상태다(`:2080`).
@@ -216,6 +219,7 @@ provider 거절은 run 안에서 다시 보내지 않는다.
    - 시험: 후보 셋 가운데 셋째가 받아들여지면, provider 시도는 ordinal 0 하나다. `record_provider_request_provenance`(`packages/agent_core/lib/pipeline/pipeline.ml:865`)가 적는 요청은 셋째다.
    - 시험: provider 가 넘침으로 거절하면 다음 후보를 보내지 않는다. 그 턴의 provider 시도는 하나다.
    - 시험: 후보가 다하면 턴이 끝나고 lane 을 돌리는 것은 지금과 같다. attempt 는 다시 돌지 않는다.
+   - 시험: 보내기 전에 실패한 좁은 후보는 없는 후보다. 턴은 그 앞 거절로 끝나고, 다음 thunk 는 불리지 않는다.
    - 시험: checkpoint 전 요청에는 다음 후보가 없다. 사다리가 다섯 단을 지금 순서로 쓴다.
    - 시험: carrier 를 주소로 바꾼 후보가 받아들여지면, history 범위는 첫 후보와 같다.
    - 시험: 후보로 front 를 옮긴 attempt 가 크기 아닌 이유로 끝나면 front 가 돌아온다.

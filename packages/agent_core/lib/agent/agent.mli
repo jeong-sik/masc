@@ -49,7 +49,18 @@ type context_fit_admission = Agent_types.context_fit_admission =
   | Body_only
   | Require_exact_fit
 
+type narrower_model_input = Agent_types.narrower_model_input
+
+type model_input_candidates = Agent_types.model_input_candidates =
+  { request : Llm_provider.Types.message list
+  ; narrower : narrower_model_input list
+  }
+
 type model_input_projection = Agent_types.model_input_projection
+
+(** The candidates of a projection that names no narrower request. *)
+val one_request : Llm_provider.Types.message list -> model_input_candidates
+
 type pre_dispatch_serialization_observer = Agent_types.pre_dispatch_serialization_observer
 
 type serialization_executor = Agent_types.serialization_executor = { run : 'a. (unit -> 'a) -> 'a }

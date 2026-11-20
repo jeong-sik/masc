@@ -184,6 +184,9 @@ let contains text needle =
   try ignore (Str.search_forward (Str.regexp_string needle) text 0); true
   with Not_found -> false
 
+let contains_plain text needle =
+  contains (Masc_tui_theme.strip_sgr text) needle
+
 let domain_task ~id ~created_at ~status : Masc_domain.task =
   { id; title = id; description = ""; task_status = status; priority = 3;
     files = []; created_at; created_by = Some "producer";
@@ -393,9 +396,11 @@ let test_retained_task_outcomes () =
       ~now:(Unix.gettimeofday ()) flow.window_started_at
   in
   check bool "snapshot window is explicit" true
-    (contains output ("Window: " ^ window_start ^ " to "));
-  check bool "source warning does not erase known counts" true (contains output "New tasks 3 · Done 1 · Cancelled 1");
-  check bool "source warning is visible" true (contains output "goal links unavailable");
+    (contains_plain output ("Window: " ^ window_start ^ " to "));
+  check bool "source warning does not erase known counts" true
+    (contains_plain output "New tasks 3 · Done 1 · Cancelled 1");
+  check bool "source warning is visible" true
+    (contains_plain output "goal links unavailable");
   check bool "old glow cache is not presented as history" false (contains output "Heatmap")
 ;;
 
@@ -539,7 +544,7 @@ let test_assignee_rows_capped () =
   state.task_flow <- Some flow;
   let output = String.concat "\n" (Render_metrics.render_section_resources ~cols:160 state) in
   check bool "the tail is reported rather than dropped" true
-    (contains output "    3 more")
+    (contains_plain output "    3 more")
 ;;
 
 let test_approval_source_observations () =
@@ -551,30 +556,36 @@ let test_approval_source_observations () =
   check (option int) "unread held calls are not zero" None kpis.held_approvals_count;
   let governance () = String.concat "\n" (Render_metrics.render_section_tools ~cols:120 state) in
   let output = governance () in
-  check bool "first read stays explicit" true (contains output "Pending Gate Calls: not loaded");
-  check bool "unread queues cannot claim empty" false (contains output "no active pending");
+  check bool "first read stays explicit" true
+    (contains_plain output "Pending Gate Calls: not loaded");
+  check bool "unread queues cannot claim empty" false
+    (contains_plain output "no active pending");
   state.gate_snapshot_observed <- true;
   state.keeper_tool_approvals_observed <- true;
   let kpis = Render_metrics.calculate_kpis state in
   check (option int) "observed empty Gate is zero" (Some 0) kpis.gate_pending_count;
   check (option int) "observed empty held calls are zero" (Some 0) kpis.held_approvals_count;
-  check bool "both observed queues may claim empty" true (contains (governance ()) "no active pending");
+  check bool "both observed queues may claim empty" true
+    (contains_plain (governance ()) "no active pending");
   state.gate_pending <- [ make_gate_pending ~id:"gp1" ~keeper:"alpha" ];
   state.gate_error <- Some "gate-refresh-offline";
   let kpis = Render_metrics.calculate_kpis state in
   check (option int) "stale Gate count is not current" None kpis.gate_pending_count;
   check (option int) "available held count survives" (Some 0) kpis.held_approvals_count;
   let output = governance () in
-  check bool "stale source error is visible" true (contains output "gate-refresh-offline");
-  check bool "stale tool is not charted" false (contains output "bash");
-  check bool "partial empty cannot claim all empty" false (contains output "no active pending");
+  check bool "stale source error is visible" true
+    (contains_plain output "gate-refresh-offline");
+  check bool "stale tool is not charted" false (contains_plain output "bash");
+  check bool "partial empty cannot claim all empty" false
+    (contains_plain output "no active pending");
   state.gate_error <- None;
   state.gate_rules_unavailable <- Some "rules-store-offline";
   check (option int) "rules failure does not hide ready queue" (Some 1)
     (Render_metrics.calculate_kpis state).gate_pending_count;
   let output = governance () in
-  check bool "partial store error is visible" true (contains output "Standing Rules: load failed: rules-store-offline");
-  check bool "available tool is charted" true (contains output "bash")
+  check bool "partial store error is visible" true
+    (contains_plain output "Standing Rules: load failed: rules-store-offline");
+  check bool "available tool is charted" true (contains_plain output "bash")
 ;;
 
 let escape = "\027[31m"

@@ -352,7 +352,8 @@ let held_top series t =
      | Unscaled -> None
      | Scaled held -> Some held.top)
 
-let graph ~tint ~width ~axis_cells ~axis series t =
+let graph ?(baseline_style = "") ?(axis_style = "")
+    ~tint ~width ~axis_cells ~axis series t =
   let samples = samples series t in
   let drawn = newest (Braille.graph_times ~width ~axis_cells) samples in
   let held = held_top series t in
@@ -368,6 +369,6 @@ let graph ~tint ~width ~axis_cells ~axis series t =
     | Some top -> top
     | None -> 0
   in
-  Braille.braille_graph ~tint ~width ~rows:1
+  Braille.braille_graph ~baseline_style ~axis_style ~tint ~width ~rows:1
     ~axis:(Layout.fit_width top (Stdlib.max 0 axis_cells))
     ~maximum samples

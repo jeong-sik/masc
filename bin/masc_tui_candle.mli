@@ -5,14 +5,17 @@
 
 val amount_text : string -> string
 
-val summary_lines : now:float -> (Masc.Tui_decode.candle_reading, string) result option -> string list
+val summary_lines :
+  ?ko:bool -> now:float -> (Masc.Tui_decode.candle_reading, string) result option -> string list
 
-val compact_status : (Masc.Tui_decode.candle_reading, string) result option -> string option
+val compact_status :
+  ?ko:bool -> (Masc.Tui_decode.candle_reading, string) result option -> string option
 (** A typed reading status for a crowded Overview. Full reasons and exact
     supply amounts remain available in the global help sheet and Keeper Info.
     Off adds no status. *)
 
 val balance_text :
+  ?ko:bool ->
   now:float -> (Masc.Tui_decode.candle_reading, string) result option -> keeper:string -> string option
 
 val balance_milli :

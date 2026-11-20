@@ -525,13 +525,15 @@ let label_of_event ~ko (event : Observer.event) =
       | None -> call_word)
   | Observer.Keeper_tool_call_evidence_committed _ -> say "호출 기록" "call log"
   | Observer.Keeper_turn_complete _ -> say "턴 완료" "turn done"
-  | Observer.Keeper_composite_changed _ -> "composite"
+  | Observer.Keeper_composite_changed _ -> say "컴포지트" "composite"
   | Observer.Keeper_metrics_appended _ -> say "지표" "metrics"
   | Observer.Keeper_turn_observation _ -> say "호출" "call"
   | Observer.Keeper_chat_appended _ -> say "채팅" "chat"
   | Observer.Keeper_memory_journal_appended _ -> say "메모리" "memory"
-  | Observer.Keeper_runtime_journal_appended { journal = Observer.Native_tasks_journal; _ } -> "native tasks"
-  | Observer.Keeper_runtime_journal_appended { journal = Observer.Child_content_journal; _ } -> "child content"
+  | Observer.Keeper_runtime_journal_appended { journal = Observer.Native_tasks_journal; _ } ->
+      say "네이티브 작업" "native tasks"
+  | Observer.Keeper_runtime_journal_appended { journal = Observer.Child_content_journal; _ } ->
+      say "하위 콘텐츠" "child content"
   | Observer.Keeper_chat_stream_frame _ -> say "채팅 스트림" "chat stream"
   | Observer.Keeper_waiting_inventory_changed _ -> say "대기열" "waiting queue"
   | Observer.Keeper_async_requests_changed _ -> say "비동기 요청" "async requests"
@@ -575,12 +577,16 @@ let label_of_event ~ko (event : Observer.event) =
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Skill_catalog -> say "스킬" "skills"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_probe -> say "런타임 점검" "runtime probe"
   | Observer.Dataset_changed Masc.Workspace_dataset_event.Runtime_metrics -> say "런타임 기록" "runtime history"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> "lanes"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live _) -> "machine live"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Lanes -> say "레인" "lanes"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Machine_live _) ->
+      say "머신 실시간" "machine live"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Browser_observation _) -> say "브라우저 관측" "browser observation"
-  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room _) -> "play room"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.Play_seats -> "play seats"
-  | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory -> "world memory"
+  | Observer.Dataset_changed (Masc.Workspace_dataset_event.Play_room _) ->
+      say "플레이 룸" "play room"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.Play_seats ->
+      say "플레이 좌석" "play seats"
+  | Observer.Dataset_changed Masc.Workspace_dataset_event.World_memory ->
+      say "월드 메모리" "world memory"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Dashboard_observation _) -> say "대시보드 관측" "dashboard observation"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Lane_addons _) -> say "Add-on" "add-ons"
   | Observer.Dataset_changed (Masc.Workspace_dataset_event.Memory_health _) -> say "메모리 상태" "memory health"
@@ -1589,24 +1595,24 @@ let evidence_fields ~ko (entry : entry) =
       [ some (say "출처" "Source") (say "런타임 관찰 이벤트" "runtime observer event")
       ; some (say "이벤트 종류" "Event kind") kind
       ; field (say "도구 이름" "Tool name") e.tool
-      ; field "Tool use ID" e.tool_use_id
-      ; field "Execution ID" e.execution_id
-      ; field "Event ID" e.event_id
-      ; field "Run ID" e.run_id
-      ; field "Parent event ID" e.parent
-      ; field "Caused by" e.caused_by
-      ; field "Correlation ID" e.correlation
+      ; field (say "도구 호출 ID" "Tool use ID") e.tool_use_id
+      ; field (say "실행 ID" "Execution ID") e.execution_id
+      ; field (say "이벤트 ID" "Event ID") e.event_id
+      ; field (say "실행 회차 ID" "Run ID") e.run_id
+      ; field (say "상위 이벤트 ID" "Parent event ID") e.parent
+      ; field (say "원인 이벤트" "Caused by") e.caused_by
+      ; field (say "상관 ID" "Correlation ID") e.correlation
       ; field (say "런타임 에이전트" "Runtime agent") e.agent
       ; field
           (match e.kind with
            (* These carry the run's own wire id there, not a task. *)
            | Agent_started | Agent_completed _ | Agent_failed _ | Agent_yielded _
            | Agent_input_required _ ->
-               "Agent run ID"
+               say "에이전트 실행 ID" "Agent run ID"
            | Tool_called | Tool_completed | Turn_started | Turn_ready
            | Turn_completed | Tool_approval_completed | Telemetry | Relay_subscription_loss _
            | Agent_core_other _ ->
-               "Task ID")
+               say "작업 ID" "Task ID")
           e.task
       ; number (say "에이전트 세션 턴" "Agent session turn") e.turn
       ; field (say "배치 순서 / 크기" "Batch index / size") (Option.map (fun (index, size) -> Printf.sprintf "%d / %d" index size) e.batch)
@@ -1629,7 +1635,7 @@ let evidence_fields ~ko (entry : entry) =
             ]
       in
       [ some (say "출처" "Source") (say "keeper_tool_call 관찰 이벤트" "keeper_tool_call observer event")
-      ; some "Keeper" call.kt_keeper
+      ; some (say "키퍼" "Keeper") call.kt_keeper
       ; some (say "도구 이름" "Tool name") call.kt_tool
       ; number (say "에이전트 세션 턴" "Agent session turn") call.kt_turn
       ; (match call.kt_disposition with
@@ -1638,19 +1644,20 @@ let evidence_fields ~ko (entry : entry) =
              some (say "처리 결과" "Disposition")
                (Masc.Tui_decode.keeper_call_disposition_word ~ko disposition)
          | Some (Error error) -> some (say "처리 결과 오류" "Disposition error") error)
-      ; field "Tool use ID" call.kt_tool_use_id
+      ; field (say "도구 호출 ID" "Tool use ID") call.kt_tool_use_id
       ; some (say "입출력" "Input/output") (say "아래는 보낸 쪽이 가린 관측 · 전체 내용은 보장되지 않음" "producer-redacted observations below; full payload not guaranteed")
       ] @ schedule_fields
   | Observer.Keeper_tool_call_evidence_committed e ->
       [ some (say "출처" "Source")
           (Masc.Keeper_tool_composition_surface_observation.evidence_committed_event_type
            ^ say " 관찰 이벤트" " observer event")
-      ; some "Keeper" e.ce_keeper
+      ; some (say "키퍼" "Keeper") e.ce_keeper
       ; some (say "도구 이름" "Tool name") e.ce_tool
       ; some (say "스킬 도구" "Skill tool") e.ce_composition_tool
-      ; some "Composition run ID"
+      ; some (say "컴포지션 실행 ID" "Composition run ID")
           (Masc.Keeper_tool_plan.Composition_run_id.to_string e.ce_run_id)
-      ; some "Composition node ID" (Masc.Keeper_tool_plan.Node_id.to_string e.ce_node_id)
+      ; some (say "컴포지션 노드 ID" "Composition node ID")
+          (Masc.Keeper_tool_plan.Node_id.to_string e.ce_node_id)
       ; some (say "입출력" "Input/output") (say "이 관찰 이벤트에 실려 오지 않음" "not carried by this observer event")
       ; some (say "호출 근거" "Call evidence") (say "이 이벤트는 도구 호출 그 자체가 아님" "this event is not an exact tool invocation")
       ]

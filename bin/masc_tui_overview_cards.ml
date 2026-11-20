@@ -40,11 +40,18 @@ let row_lines ~cells label =
       end
 
 (* The band covers the card's whole content width on every line of the row, so
-   a row that wraps is still one selected thing. *)
+   a row that wraps is still one selected thing. When the terminal supports a
+   surface-tinted selection background (Truecolor or 256-color),
+   [paint_row_background] paints the full row surface cleanly; otherwise it
+   falls back to [Theme.selection_style ()] (reverse video). *)
 let band ~cells line =
-  Theme.selection_style ()
-  ^ Layout.fit_width (Masc_tui_theme.strip_sgr line) cells
-  ^ Ansi.reset
+  match Theme.sidebar_selection_background () with
+  | Some bg ->
+      Masc_tui_theme.paint_row_background ~bg (Layout.fit_width line cells)
+  | None ->
+      Theme.selection_style ()
+      ^ Layout.fit_width (Masc_tui_theme.strip_sgr line) cells
+      ^ Ansi.reset
 
 let row_body ~is_selected ~cells (action, label) =
   let gutter = 2 in

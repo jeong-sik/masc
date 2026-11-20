@@ -131,6 +131,8 @@ val samples : series -> t -> Masc_tui_braille.sample list
     sample. *)
 
 val graph :
+  ?baseline_style:string ->
+  ?axis_style:string ->
   tint:Masc_tui_braille.tint ->
   width:int ->
   axis_cells:int ->

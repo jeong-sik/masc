@@ -37,7 +37,13 @@ let test_a_balance_falls_with_the_half_life () =
 let test_the_supply_burns_what_the_wallets_lost () =
   Alcotest.(check (list string)) "one half-life later"
     [ "Candle issued: 1.000"; "Candle burned: 0.500"; "Candle circulating: 0.500" ]
-    (Candle.summary_lines ~now:(since_s +. one_hour_s) reading)
+    (Candle.summary_lines ~now:(since_s +. one_hour_s) reading);
+  Alcotest.(check (list string)) "korean supply labels"
+    [ "Candle 발행: 1.000"; "Candle 소각: 0.500"; "Candle 유통: 0.500" ]
+    (Candle.summary_lines ~ko:true ~now:(since_s +. one_hour_s) reading);
+  Alcotest.(check (option string)) "korean compact status"
+    (Some "Candle 준비됨: ?:Candle 상세")
+    (Candle.compact_status ~ko:true reading)
 
 let test_a_clock_behind_the_ledger_draws_the_last_event () =
   Alcotest.(check (option string)) "a minute before the event" (Some "1.000 Candle")

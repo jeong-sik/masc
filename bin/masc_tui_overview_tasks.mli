@@ -176,6 +176,6 @@ val age_text : age_text:(int -> string) -> now:float -> float option -> string
     {!Masc_tui_theme.Glyph.no_value} when there is no instant to measure from. *)
 
 val summary_text :
-  age_text:(int -> string) -> now:float -> line -> string option
+  ?ko:bool -> age_text:(int -> string) -> now:float -> line -> string option
 (** The plain text of a line that is not a task row. [None] for
     [Task_row]. *)

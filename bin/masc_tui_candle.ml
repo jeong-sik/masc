@@ -31,27 +31,39 @@ let supply ~now basis =
 let balance ~now basis ~keeper =
   Result.bind (instant ~now basis) (fun at -> decayed (Candle_decay_basis.balance_at basis ~keeper ~at))
 
-let summary_lines ~now = function
+let summary_lines ?(ko = false) ~now = function
   | None | Some (Ok Decode.Candle_off) -> []
-  | Some (Error detail) -> ["Candle unavailable: " ^ detail]
-  | Some (Ok (Decode.Candle_disabled reason)) -> ["Candle disabled: " ^ reason]
+  | Some (Error detail) ->
+      [ (if ko then "Candle 사용 불가: " else "Candle unavailable: ") ^ detail ]
+  | Some (Ok (Decode.Candle_disabled reason)) ->
+      [ (if ko then "Candle 비활성화: " else "Candle disabled: ") ^ reason ]
   | Some (Ok (Decode.Candle_ready basis)) -> (
       match supply ~now basis with
       | Ok supply ->
-          ["Candle issued: " ^ amount_text supply.Candle_balance.issued_milli;
-           "Candle burned: " ^ amount_text supply.burned_milli;
-           "Candle circulating: " ^ amount_text supply.circulating_milli]
-      | Error detail -> ["Candle unavailable: " ^ detail])
+          if ko then
+            [ "Candle 발행: " ^ amount_text supply.Candle_balance.issued_milli
+            ; "Candle 소각: " ^ amount_text supply.burned_milli
+            ; "Candle 유통: " ^ amount_text supply.circulating_milli
+            ]
+          else
+            [ "Candle issued: " ^ amount_text supply.Candle_balance.issued_milli
+            ; "Candle burned: " ^ amount_text supply.burned_milli
+            ; "Candle circulating: " ^ amount_text supply.circulating_milli
+            ]
+      | Error detail ->
+          [ (if ko then "Candle 사용 불가: " else "Candle unavailable: ") ^ detail ])
 
-let balance_text ~now reading ~keeper = match reading with
-  | None -> Some "not yet read"
+let balance_text ?(ko = false) ~now reading ~keeper = match reading with
+  | None -> Some (if ko then "아직 조회 전" else "not yet read")
   | Some (Ok Decode.Candle_off) -> None
-  | Some (Error detail) -> Some ("unavailable: " ^ detail)
-  | Some (Ok (Decode.Candle_disabled reason)) -> Some ("disabled: " ^ reason)
+  | Some (Error detail) ->
+      Some ((if ko then "사용 불가: " else "unavailable: ") ^ detail)
+  | Some (Ok (Decode.Candle_disabled reason)) ->
+      Some ((if ko then "비활성화: " else "disabled: ") ^ reason)
   | Some (Ok (Decode.Candle_ready basis)) ->
     Some (match balance ~now basis ~keeper with
       | Ok milli -> amount_text (string_of_int milli) ^ " Candle"
-      | Error detail -> "unavailable: " ^ detail)
+      | Error detail -> (if ko then "사용 불가: " else "unavailable: ") ^ detail)
 
 let balance_milli ~now reading ~keeper = match reading with
   | Some (Ok (Decode.Candle_ready basis)) -> Result.to_option (balance ~now basis ~keeper)
@@ -63,8 +75,11 @@ let keeper_basis reading ~keeper = match reading with
   | Some (Ok (Decode.Candle_ready { Candle_decay_basis.decay = No_decaying_balance; _ }))
   | Some (Ok (Decode.Candle_off | Decode.Candle_disabled _)) | Some (Error _) | None -> None
 
-let compact_status = function
+let compact_status ?(ko = false) = function
   | None | Some (Ok Decode.Candle_off) -> None
-  | Some (Error _) -> Some "Candle unavailable: ?:Candle details"
-  | Some (Ok (Decode.Candle_disabled _)) -> Some "Candle disabled: ?:Candle details"
-  | Some (Ok (Decode.Candle_ready _)) -> Some "Candle ready: ?:Candle details"
+  | Some (Error _) ->
+      Some (if ko then "Candle 사용 불가: ?:Candle 상세" else "Candle unavailable: ?:Candle details")
+  | Some (Ok (Decode.Candle_disabled _)) ->
+      Some (if ko then "Candle 비활성화: ?:Candle 상세" else "Candle disabled: ?:Candle details")
+  | Some (Ok (Decode.Candle_ready _)) ->
+      Some (if ko then "Candle 준비됨: ?:Candle 상세" else "Candle ready: ?:Candle details")

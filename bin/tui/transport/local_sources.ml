@@ -49,7 +49,18 @@ let launch_source (state : Masc_tui_types.state) ~mailbox ~intent ~source ~read
            (Masc_tui_types.Local_read_order.request_revision request.lwr_request))
         request.lwr_started_ns;
       let enqueue_async = Workspace_admission.workspace_enqueue state in
-      let deliver result = enqueue_async mailbox (message request result) in
+      (* The reading slot counts this read from its launch to its end (RFC
+         tui-one-screen-grammar section 8). [track_reading] ends it at the
+         first of the result, the withdrawal and the job's release. *)
+      let on_not_run, deliver, released =
+        Workspace_admission.track_reading state
+          ~on_not_run:(fun () ->
+            Masc_tui_local_read_observation.observe request.lwr_observation
+              (Masc_tui_local_read_observation.Caller_observed
+                 Masc_tui_local_read_observation.Not_started);
+            Masc_tui_types.finish_local_source_read state source token)
+          ~deliver:(fun result -> enqueue_async mailbox (message request result))
+      in
       let run () =
         Fun.protect
           ~finally:(fun () ->
@@ -84,18 +95,16 @@ let launch_source (state : Masc_tui_types.state) ~mailbox ~intent ~source ~read
       | Some sw -> (
           match
             Workspace_admission.fork_job ~observation:true
-              ~observe:(function
+              ~observe:(fun event ->
+                released event;
+                match event with
                 | Masc_tui_workspace_job.Cancellation_requested ->
                     Masc_tui_local_read_observation.observe request.lwr_observation
                       Masc_tui_local_read_observation.Cancellation_requested
                 | Masc_tui_workspace_job.Registration_released ->
                     Masc_tui_local_read_observation.observe request.lwr_observation
                       Masc_tui_local_read_observation.Registration_released)
-              ~on_withdrawn:(fun () ->
-                Masc_tui_local_read_observation.observe request.lwr_observation
-                  (Masc_tui_local_read_observation.Caller_observed
-                     Masc_tui_local_read_observation.Not_started);
-                Masc_tui_types.finish_local_source_read state source token)
+              ~on_withdrawn:on_not_run
               state ~mailbox ~sw run
           with
           | () -> ()
@@ -210,9 +219,14 @@ let launch_live_context_load (state : Masc_tui_types.state) ~mailbox keeper =
       let enqueue_async = Workspace_admission.workspace_enqueue state in
       let started_ns = Mtime_clock.elapsed_ns () in
       log_live_context_read ~phase:"started" request ~started_ns ~outcome:"pending";
-      let deliver result =
-        enqueue_async mailbox
-          (Masc_tui_async_protocol.Live_context_loaded (request, started_ns, result))
+      (* The reading slot counts this read from its launch to its end (RFC
+         tui-one-screen-grammar section 8); see [launch_source]. *)
+      let on_not_run, deliver, released =
+        Workspace_admission.track_reading state
+          ~on_not_run:(fun () -> ())
+          ~deliver:(fun result ->
+            enqueue_async mailbox
+              (Masc_tui_async_protocol.Live_context_loaded (request, started_ns, result)))
       in
       let run () =
         Fun.protect
@@ -244,7 +258,8 @@ let launch_live_context_load (state : Masc_tui_types.state) ~mailbox keeper =
            deliver (Error "Eio switch is unavailable for live context reading")
        | Some sw -> (
            try
-             Workspace_admission.fork_job ~observation:true state ~mailbox ~sw run
+             Workspace_admission.fork_job ~observation:true ~observe:released
+               ~on_withdrawn:on_not_run state ~mailbox ~sw run
            with
            | Eio.Cancel.Cancelled _ as exn -> raise exn
            | exn -> deliver (Error (Printexc.to_string exn))));

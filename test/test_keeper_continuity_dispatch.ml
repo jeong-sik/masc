@@ -137,6 +137,19 @@ let latest_observation ~config =
   match Keeper_continuity_observation.latest ~config ~keeper_name with
   | Some observed -> observed | None -> fail "serialized request observation missing"
 
+(* Where the latest request started against the writer's read end, as the
+   screen reads it (RFC librarian-call-only-proposes §11.3, §12.2 W2). *)
+let request_start ~config =
+  match Keeper_request_start.standing ~config ~keeper_name with
+  | Keeper_request_start.Not_behind { sends_from; read_end } ->
+    Printf.sprintf "not behind: sends from %d, read to %d" sends_from read_end
+  | Keeper_request_start.Behind { sends_from; read_end } ->
+    Printf.sprintf "behind: sends from %d, read to %d" sends_from read_end
+  | Keeper_request_start.Unknown_until_next_request -> "unknown until the next request"
+  | Keeper_request_start.View_unavailable -> "no view"
+  | Keeper_request_start.No_read_end -> "no read end"
+  | Keeper_request_start.Not_comparable (_ : Keeper_request_start.unresolved) -> "not comparable"
+
 (* The driver's own read of the Keeper's Memory writer
    (RFC librarian-call-only-proposes §11.1): the writer read the completed
    turn and committed a working state, so the request starts after that
@@ -189,6 +202,8 @@ let test_real_dispatch_preserves_pair_across_refusal () =
     check bool "raw working state is absent" true
       (selection |> U.member "working_state" = `Null))
     [ "refused.sample", refused; "accepted.sample", accepted ];
+  check string "the request starts at the writer's read end"
+    "not behind: sends from 2, read to 2" (request_start ~config);
   check string "observation names the fallback runtime" "accepted.sample" observed.runtime_id;
   check int "observation counts actual serialized body bytes"
     (String.length (List.hd (Fixture.request_bodies accepted))) observed.request_bytes;
@@ -224,8 +239,12 @@ let check_dispatched_from_the_turn_start ~config ~accepted =
 let test_without_a_memory_writer_the_turn_starts_at_the_turn_start () =
   with_dispatch_fixture @@ fun ~sw ~net ~config ~base_path ~refused:_ ~accepted ->
   let (_ : B.record) = record_completed_turn ~config in
+  check string "before any request the start is not known" "unknown until the next request"
+    (request_start ~config);
   let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
-  check_dispatched_from_the_turn_start ~config ~accepted
+  check_dispatched_from_the_turn_start ~config ~accepted;
+  check string "with no writer there is no view to compare the start with" "no view"
+    (request_start ~config)
 ;;
 
 (* A writer whose store holds no read has a view that names no place, and
@@ -237,7 +256,9 @@ let test_a_writer_that_read_nothing_starts_at_the_turn_start () =
    | Librarian_log.Before_first -> ()
    | Librarian_log.Through _ -> fail "the fixture's writer read a unit");
   let (_ : (string * Agent_core.Error.t) list) = dispatch ~sw ~net ~base_path () in
-  check_dispatched_from_the_turn_start ~config ~accepted
+  check_dispatched_from_the_turn_start ~config ~accepted;
+  check string "a writer that read nothing has no read end to be behind" "no read end"
+    (request_start ~config)
 ;;
 
 (* RFC librarian-lifecycle §4.10, rule 1, through the driver's own attempt
@@ -291,7 +312,11 @@ let test_a_librarian_behind_refusal_resends_from_the_boundary () =
   check bool "and not at the read end" false (has_content first "ask 1");
   check bool "the resend carries this turn's input" true (has_content resent pending);
   check bool "the resend opens at the turn boundary, not the recorded start" false
-    (has_content resent "ask 2")
+    (has_content resent "ask 2");
+  (* G11: the writer read two messages, and the resend leaves out six. The
+     four between are in neither the request nor the Memory. *)
+  check string "the resend's start is past the writer's read end"
+    "behind: sends from 6, read to 2" (request_start ~config)
 ;;
 
 (* RFC librarian-lifecycle §4.10, rule 8, through the driver's own attempt

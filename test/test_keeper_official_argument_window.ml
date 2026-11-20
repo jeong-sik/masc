@@ -131,7 +131,8 @@ let test_seed_witness_uses_raw_source_and_dropped_arguments_are_not_written () =
   let carried_front_seed () = incr reads; {Keeper_carried_front.no_seed_read with seed=Some seed} in
   let sent = project ?argument_projection:(projection (source base) base) ~carried_front_seed
     ~librarian_front:Choice.No_read_end
-    ~on_carried_front:(fun front ~transmitted_bytes:_ -> fronts:=front::!fronts) raw_history in
+    ~on_carried_front:(fun front ~transmitted_bytes:_ ~sends_from:_ -> fronts:=front::!fronts)
+    raw_history in
   check int "one authority read across select and recut" 1 !reads;
   check bool "the raw opener still admits its carried front" true
     (match !fronts with [Host.Carried_seed _] -> true
@@ -212,12 +213,23 @@ let test_zero_history_floor_does_not_write_dropped_slots () = with_base @@ fun b
   let _, atom_count = Runtime_model_input_tail_window.annotate raw_history in
   let floor, capacity_bytes = Runtime_model_input_tail_window.project_from_atom
     ~allow_empty_history:true ~measure_message_bytes:measure ~first_atom:atom_count raw_history in
-  let observed = ref None in
+  let observed = ref None and reported = ref None in
   let sent = project ?argument_projection:(projection (source base) base) ~capacity_bytes
-    ~on_model_input_window_observation:(fun observation -> observed := Some observation) raw_history in
+    ~on_model_input_window_observation:(fun observation -> observed := Some observation)
+    ~on_carried_front:(fun front ~transmitted_bytes:_ ~sends_from ->
+      reported := Some (front, sends_from))
+    raw_history in
   check (list string) "the floor carries exactly its omission"
     (List.map Host.encode_history_message floor.messages)
     (List.map Host.encode_history_message sent);
+  (* The floor still goes out, so its start is reported: past every message
+     of the history, all of which open or join an atom. *)
+  (match !reported with
+   | Some (Host.Lane_cut, sends_from) ->
+     check int "the floor's request starts past the whole history" (List.length raw_history)
+       sends_from
+   | Some _ -> fail "the floor names a front other than the lane's own cut"
+   | None -> fail "the floor reported no front");
   (* The synthetic User preamble explains omitted history; it is not a
      durable source atom. The observation uses the source's coordinates. *)
   (match !observed with
@@ -338,7 +350,7 @@ let test_completion_review_preserves_the_full_evidence_without_history_reads () 
           { Keeper_carried_front.no_seed_read with seed = Some late_seed })
         ~librarian_front:summarized
         ~on_model_input_window_observation:(fun _ -> incr windows)
-        ~on_carried_front:(fun _ ~transmitted_bytes:_ -> incr carried_fronts)
+        ~on_carried_front:(fun _ ~transmitted_bytes:_ ~sends_from:_ -> incr carried_fronts)
         ~turn_start:boundary ~keeper_name:"completion-evidence-fixture"
         ~runtime_id:"official.sample" evidence
       |> Result.map_error Agent_core.Error.to_string |> require

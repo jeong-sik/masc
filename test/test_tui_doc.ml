@@ -99,7 +99,7 @@ let test_kv_rows_align_stack_and_fit () =
   check int "wider ASCII label sets shared column" col_a col_c;
   (* Below 2-column threshold, labels stack cleanly above indented values. *)
   let stacked = Doc.kv_rows ~width:24 ~indent:2 [ Doc.kv "Long Label" "short value" ] in
-  check bool "stacked mode produces >= 2 rows" true (List.length stacked >= 2)
+  check bool "stacked mode produces >= 2 rows" true (List.length stacked >= 2);
   (* A width with room for two columns but not for the whole label stacks it
      rather than cutting it: at every width the label is drawn whole. *)
   List.iter

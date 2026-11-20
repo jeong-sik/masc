@@ -1069,8 +1069,7 @@ let render_code (state : state) =
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
          | Some (Some _, line) when i = 0 ->
-             box_line_selected pane_buf pane_cols
-               ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr line)
+             box_line_selected_styled pane_buf pane_cols ("\xe2\x80\xba " ^ line)
          | Some (_, line) ->
              box_line pane_buf pane_cols ("  " ^ line ^ Ansi.reset)
          | None -> box_empty pane_buf pane_cols

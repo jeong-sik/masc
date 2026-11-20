@@ -18,13 +18,7 @@ let wrap_style style text =
   else style ^ text ^ Ansi.reset
 
 let box_line_selection buf cols styled_line =
-  match Theme.sidebar_selection_background () with
-  | Some bg ->
-      let inner = framed_inner_width cols in
-      box_line buf cols
-        (Masc_tui_theme.paint_row_background ~bg (fit_width styled_line inner))
-  | None ->
-      box_line_selected buf cols (Masc_tui_theme.strip_sgr styled_line)
+  box_line_selected_styled buf cols styled_line
 
 let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> "\xc2\xb7"

@@ -717,12 +717,12 @@ let render_exact_lane_provider_editor (state : state) editor =
                   ""
               in
               if picker.rlp_selected_row = Some offset then
-                box_line_selected buf cols refused_line
+                box_line_selected_styled buf cols refused_line
               else
                 box_line_styled buf cols ~style:(Theme.recede ()) refused_line
             | Masc_tui_types.Pick_available ->
               (if picker.rlp_selected_row = Some offset
-               then box_line_selected buf cols
+               then box_line_selected_styled buf cols
                else box_line buf cols)
                 (line destination
                    (if List.mem runtime.ro_id picker.rlp_already
@@ -839,7 +839,7 @@ let render_exact_lane_provider_editor (state : state) editor =
                    else ui_text state ~ko:"  (수락되지 않음)" ~en:"  (not admitted)")
               in
               if Some index = selected_index
-              then box_line_selected buf cols line
+              then box_line_selected_styled buf cols line
               else box_line buf cols line));
      if entries <> [] && Option.is_none (selected_index) then
        box_line_styled buf cols ~style:(Theme.warn ())

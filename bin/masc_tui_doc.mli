@@ -79,10 +79,12 @@ val docked_preview_chrome :
   ?footer_hints:Masc_tui_card.inline_key list ->
   unit ->
   int
-(** Number of chrome rows {!docked_preview} consumes at full height
-    (hairline rule + optional header + optional footer hints). Callers
-    sizing a docked sheet from body height should use this instead of
-    hardcoding a chrome offset. *)
+(** Upper bound on chrome rows {!docked_preview} consumes at full height
+    (hairline rule + optional header + optional footer hints). When
+    [footer_hints] is non-empty, very narrow widths where every hint is
+    dropped cause {!docked_preview} to omit the footer row. Callers sizing
+    a docked sheet from body height should use this instead of hardcoding
+    a chrome offset. *)
 
 val kv_rows :
   width:int ->

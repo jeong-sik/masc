@@ -528,7 +528,7 @@ let render_detail_reading (state : state) reading =
             | Masc_tui_detail_reading.Heading text | Content text | Note text -> text in
           match mark with
           | Masc_tui_detail_reading.Current_match ->
-              c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr text)
+              c.push_selected_styled ("\xe2\x80\xba " ^ text)
           | Match ->
               c.push_styled ~style:Ansi.underline ("* " ^ Masc_tui_theme.strip_sgr text)
           | No_match ->
@@ -863,7 +863,7 @@ let render_palette (state : state) =
       List.iter (fun note -> c.push ("   " ^ note)) finder_notes;
       match explicit_question with
       | Some (question, symbol) ->
-          c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ question ^ " "
+          c.push_selected_styled (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ question ^ " "
             ^ Terminal_text.single_line symbol);
           c.push
             (say "   코드 화면에 열린 파일의 이 심볼에 대해 질문"
@@ -915,7 +915,7 @@ let render_palette (state : state) =
           List.iteri
             (fun visible_index (label, _) ->
                if first + visible_index = cursor then
-                 c.push_selected (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ Terminal_text.single_line label)
+                 c.push_selected_styled (" " ^ Masc_tui_theme.Glyph.current_entry ^ " " ^ Terminal_text.single_line label)
                else c.push ("   " ^ Terminal_text.single_line label))
             visible;
           (match show_description, selected_description with
@@ -1659,17 +1659,14 @@ let render_queue_panel (state : state) (panel : queue_panel) =
               Option.fold ~none:text ~some:(fun id ->
                 Terminal_text.single_line (queue_panel_item_identity ~ko:(state.ui_language = Lang_ko) id)) item.id
             else text in
-          let row =
-            if selected then marker ^ Masc_tui_theme.strip_sgr text
-            else marker ^ text
-          in
+          let row = marker ^ text in
           let row = if selected && queue_selection_visible
               ~inner_width:(framed_inner_width queue_cols) ~marker ~text then
               match queue_selection_for_item state panel item with
               | Some authority -> pressable (Press_queue_selected authority) row
               | None -> row
             else row in
-          if selected then c.push_selected row else c.push row
+          if selected then c.push_selected_styled row else c.push row
         end) items;
       if items <> [] then
         c.position
@@ -2049,12 +2046,12 @@ let render_account_login state view =
           | selected, Masc_tui_account_login.Text text ->
               let clean = Masc.Tui_terminal_text.sanitize_terminal_text text in
               if selected then
-                c.push_selected (fit_width (Masc_tui_theme.strip_sgr clean) width)
+                c.push_selected_styled (fit_width clean width)
               else c.push (fit_width clean width)
           | selected, Masc_tui_account_login.Progress text ->
               let clean = Masc.Tui_terminal_text.sanitize_terminal_text text in
               if selected then
-                c.push_selected (fit_width (Masc_tui_theme.strip_sgr clean) width)
+                c.push_selected_styled (Theme.info () ^ fit_width clean width ^ Ansi.reset)
               else c.push (Theme.info () ^ fit_width clean width ^ Ansi.reset)
           | _, Masc_tui_account_login.Terminal line ->
               let rendered =
@@ -2189,7 +2186,7 @@ let render_collab state view =
       Masc_tui_collab.lines_with_selection ~ko ~height:budget ~width view
       |> List.iter (fun (is_selected, line) ->
            if is_selected then
-             c.push_selected (fit_width (Masc_tui_theme.strip_sgr line) width)
+             c.push_selected_styled (fit_width line width)
            else c.push (fit_width line width)))
 
 let render_lane_addons state (view : Masc_tui_lane_addons.t) =

@@ -1906,7 +1906,7 @@ let keeper_story_context_meter (state : state) ~ko ~inner (row : Keeper_list_mod
       let label = if ko then "컨텍스트" else "ctx" in
       let width = min 44 (max 1 (inner - story_label_cells)) in
       Some
-        (Masc_tui_chart.meter ~width ~value ~max_value ~scale ~label ~suffix
+        (Masc_tui_chart.dot_meter ~width ~value ~max_value ~scale ~label ~suffix
            ~track_style:(Theme.recede ()) ~reset:Ansi.reset ())
 
 let keeper_story_task_segment ~ko (row : Keeper_list_model.row) =

@@ -131,7 +131,7 @@ else
   fail "concurrent connections" "${success}/4 succeeded"
 fi
 
-# Test 6: TLS listener (RFC-0512). ALPN picks h2 for --http2 and http/1.1 for
+# Test 6: TLS listener. ALPN picks h2 for --http2 and http/1.1 for
 # --http1.1 on the same route table. Skipped when the listener is off.
 # /health reads the listener state directly; transport-health is a cached
 # snapshot, so it is not reread here.

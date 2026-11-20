@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The reference cut of a memory into statements (RFC-librarian-absorb-gate).
+"""The reference cut of a memory into statements.
 
 This is the cut the scorer of issue #37079 used to calibrate the question
 "the claim under review conveys this statement" (floor 0.94, ceiling 0.10;

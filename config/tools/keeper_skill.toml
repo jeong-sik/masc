@@ -36,7 +36,7 @@ min_length = 1
 # carry. A schema-level gate answered those calls with a generic length
 # error that could not name the catalog (task-828).
 #
-# Optional since RFC-0411 §4.2. Omitted, the turn's frozen Skill list decides
+# Optional. Omitted, the turn's frozen Skill list decides
 # which body is read — the same list a spelled-out revision is matched against,
 # so leaving it out reaches nothing new. Spelled out, it is still matched
 # exactly and refused on a mismatch: a revision the caller named is never

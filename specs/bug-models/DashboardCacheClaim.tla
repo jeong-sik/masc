@@ -1,6 +1,6 @@
 ---- MODULE DashboardCacheClaim ----
 \* Bug model: a Dashboard_cache compute queued behind the pool jobs that wait
-\* for it (RFC-0204 3.4 L4b).
+\* for it.
 \*
 \* Models lib/dashboard/dashboard_cache.ml:get_or_compute_eio for one key and
 \* one Computing epoch (own_claimed, run_claimed, the `Wait claim guard).

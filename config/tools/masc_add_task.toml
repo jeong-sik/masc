@@ -115,10 +115,11 @@ type = "string"
 required = true
 min_length = 1
 
-# Optional since RFC-0411 §4.2. Omitted, the catalog at creation supplies the
+# Optional. Omitted, the catalog at creation supplies the
 # revision and the Task stores it, so the durable record is unchanged — only
-# the asking is. Of 292 Tasks recorded on this workspace before that change, 0
-# named a Skill, and 126 of those were made through this tool.
+# the asking is. Of 292 Tasks recorded on this workspace before the field
+# became optional, 0 named a Skill, and 126 of those were made through this
+# tool.
 [[params.items.params]]
 name = "content_revision"
 type = "string"

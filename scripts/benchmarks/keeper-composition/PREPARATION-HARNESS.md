@@ -279,7 +279,7 @@ to the TurnRecord's SDK trajectory. A composition leaf joins its exact canonical
 execution artifact and original SDK parent; its child execution ID is not an
 outer SDK trajectory ID. The parent's full reply comes from the exact raw run,
 not the potentially truncated call-log preview. Internal
-final thoughts are deliberately excluded from replay checkpoints (RFC-0385),
+final thoughts are deliberately excluded from replay checkpoints,
 so their last Assistant message is recorded separately and never substituted
 for the exact-run final response. The fixture also checks the ordinary
 autonomous inspector's exact turn/run projection; an unavailable run remains

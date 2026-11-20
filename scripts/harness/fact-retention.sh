@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# RFC-0228 P2 — fact-retention harness, live half.
+# Fact-retention harness, live half.
 #
 # Deterministic half (CI): test/test_fact_retention_reachability.ml
 # proves every planted fact is mechanically reachable through the

@@ -52,7 +52,7 @@ scheduler lag for every other fiber on it.
 
 `rtev_fibers` also reads the traced sections Eio reports for
 `Eio.Private.Trace.with_span`; masc opens one per pool job, named after the
-submitting function (RFC-0474 L4c). For each section it counts the time the
+submitting function. For each section it counts the time the
 section's fibers ran, including fibers created inside it, and the time they
 spent suspended, by suspend reason. Sections nest, and an outer section also
 counts the time spent in the sections inside it. Both numbers are sums over

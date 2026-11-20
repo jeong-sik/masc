@@ -1,5 +1,5 @@
 ---- MODULE KeeperFiberLocalSwitch ----
-\* RFC-0107 Phase C.1 — Eio.Fiber.with_binding (Option 3) race-freedom proof.
+\* Eio.Fiber.with_binding (Option 3) race-freedom proof.
 \*
 \* Companion to KeeperSwitchHierarchy.tla (Phase C.0, Option 2 model).
 \* Where the Phase C.0 spec proved that Option 2 (atomic swap) is UNSAFE

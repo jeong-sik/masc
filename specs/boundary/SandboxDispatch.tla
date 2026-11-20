@@ -125,8 +125,8 @@ BackendImpliesBackendVia ==
 \* I2: RemoteSshImpliesSshVia. Same contract for the Phase 1 SSH lane:
 \* a Remote_ssh-declared keeper whose request has resolved MUST dispatch
 \* via Ssh (or not have dispatched yet); never Host (the local-playground
-\* route) and never the Docker vias — a silent lane swap violates
-\* RFC-0001 exactly like the host fallback does.
+\* route) and never the Docker vias — a silent lane swap breaks the
+\* declared profile exactly like the host fallback does.
 RemoteSshImpliesSshVia ==
     (meta_profile = "Remote_ssh" /\ ~ request_pending) =>
         dispatched_via \in {"None", "Ssh"}

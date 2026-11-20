@@ -1,8 +1,8 @@
-# Coding-outcome eval corpus (RFC-0396)
+# Coding-outcome eval corpus
 
 Each case is a self-contained coding task a Keeper is asked to finish. The
-only pass verdict is deterministic: `verify.sh <workspace-dir>` exits 0
-(RFC-0396 D2). No grader, score, or string match decides a pass.
+only pass verdict is deterministic: `verify.sh <workspace-dir>` exits 0.
+No grader, score, or string match decides a pass.
 
 ## Case layout
 

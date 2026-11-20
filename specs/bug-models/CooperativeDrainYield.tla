@@ -2,8 +2,8 @@
 \* Bug model: Eio drain loop without cooperative yield starves co-located fibers.
 \*
 \* Models the regression introduced by PR #14491 (Keeper_telemetry_consumer
-\* drain loop) and fixed by PR #14499. RFC-0063 §6 codifies the contract;
-\* this spec is the §7-C ("TLA+ Bug Model") layer of enforcement.
+\* drain loop) and fixed by PR #14499. The contract it checks: the drain
+\* fiber yields after each iteration.
 \*
 \* Cooperative scheduling premise
 \*   A single Eio domain runs at most one fiber at a time. A fiber retains

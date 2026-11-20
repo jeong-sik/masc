@@ -41,7 +41,7 @@
 # A release shim (masc-exec-shim with its sha256 sidecar) is left alone, and
 # no release is asked for, unless --refresh-guest-shim is given. That option
 # updates an existing release shim when deploying a server/shim change to
-# microVM Keepers. The release installer places it initially (RFC-0427 B-2).
+# microVM Keepers. The release installer places it initially.
 # With this option, an existing release shim is replaced by
 # the same asset of the release this build names, checked against that
 # release's SHA256SUMS. Which asset is read from the sidecar, which records

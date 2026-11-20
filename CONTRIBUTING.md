@@ -126,7 +126,7 @@ test/                            Alcotest suites, Python checks and fixtures
   the rest.
 
 No CI job runs `ocamlformat`. `.ocamlformat` sets `disable = true` repo-wide
-until a migration RFC decides on a reformat (RFC-0010), so `dune fmt` is a
+until a migration RFC decides on a reformat, so `dune fmt` is a
 no-op for OCaml today; match the style of the code around your change.
 
 ## Tests

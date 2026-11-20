@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Probe how Jev handles a recall-sized judgment request.
 
-Builds the request that RFC-keeper-recall-reaches-the-turn section 4.2 describes
-from one Keeper's current facts: a ``state`` that holds the purpose and the
+Builds a recall judgment request from one Keeper's current facts: a
+``state`` that holds the purpose and the
 candidates, and one short choice question per candidate. ``--shape three`` offers
 needed, maybe_needed and not_needed. ``--shape two`` offers only possibly_needed
 and not_needed. The rule for a question sits in that question's ``instructions``,

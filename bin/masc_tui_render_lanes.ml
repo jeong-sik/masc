@@ -1239,8 +1239,9 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
       match Rows.at runs_window (index + scroll) with
       | None -> box_empty buf cols
       | Some (run : Tui_decode.lane_run_summary) ->
+          let selected = index + scroll = state.lane_runs_cursor in
           let line =
-            "  "
+            (if selected then "\xe2\x80\xba " else "  ")
             ^ Render_schedule.lane_run_row run_table ~now
                 ~status_style:(lane_run_status_style run.lrs_status)
                 { Render_schedule.lrow_started = run.lrs_started_at
@@ -1255,7 +1256,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
                       run.lrs_selected_slot
                 }
           in
-          if index + scroll = state.lane_runs_cursor then
+          if selected then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
     done;
@@ -2304,7 +2305,10 @@ let render_client_detail state (client : Masc.Tui_decode.client_row) =
     @ field ~style:status_style (t "상태" "Status")
         (Masc.Tui_decode.client_status_to_string client.cr_status)
     @ field (t "대신하는 Keeper" "Acting for") (optional client.cr_keeper_name)
-    @ field (t "태스크" "Task") (optional client.cr_current_task)
+    @ field (t "태스크" "Task")
+        (match client.cr_current_task with
+         | None -> Masc_tui_theme.Glyph.no_value
+         | Some id -> resolve_task_title state id)
     @ field (t "읽기 전 마지막 관측" "Seen before read")
         (client_last_seen_text ~read_at:(clients_read_at state) client)
     @ field ~style:Ansi.dim (t "마지막 관측 (읽은 그대로)" "Last seen (as read)")
@@ -2462,11 +2466,13 @@ let render_clients (state : state) =
           in
           let task =
             match row.cr_current_task with
-            | Some task -> Terminal_text.single_line task
+            | Some task -> resolve_task_title state task
             | None -> Masc_tui_theme.Glyph.no_value
           in
+          let selected = idx = state.clients_surface_cursor in
           let line =
-            "  " ^ Masc_tui_table.row (cells ~status ~name
+            (if selected then "\xe2\x80\xba " else "  ")
+            ^ Masc_tui_table.row (cells ~status ~name
               ~agent_type:(Terminal_text.single_line row.cr_agent_type) ~keeper ~task
               (* Age is relative to the roster observation, not render time. *)
               ~last_seen:(client_last_seen_text ~read_at row))
@@ -2478,8 +2484,8 @@ let render_clients (state : state) =
             | Client_inactive -> Theme.recede ()
             | Client_active | Client_busy | Client_listening -> Ansi.reset
           in
-          if idx = state.clients_surface_cursor then
-            box_line_selected buf cols line
+          if selected then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line_styled buf cols ~style line
     done;
   box_bottom buf cols;

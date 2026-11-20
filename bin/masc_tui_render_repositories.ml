@@ -1142,17 +1142,18 @@ let render_changes_list (state : state) =
       | Some change ->
           let kind_style, kind = change_kind_badge ~ko:(state.ui_language = Lang_ko) change in
           let result_style, result = change_result_badge ~ko:(state.ui_language = Lang_ko) change in
+          let selected = idx = cursor in
           let line =
-            "  "
+            (if selected then "\xe2\x80\xba " else "  ")
             ^ Render_schedule.change_row ~op_style:kind_style ~result_style
                 ~layout:file_change_layout
                 { Render_schedule.crow_turn =
                     Option.fold ~none:Masc_tui_theme.Glyph.no_value ~some:string_of_int
                       change.Masc.Tui_decode.fc_turn
                 ; crow_task =
-                    Terminal_text.single_line
-                      (Option.value ~default:Masc_tui_theme.Glyph.no_value
-                         change.Masc.Tui_decode.fc_task_id)
+                    (match change.Masc.Tui_decode.fc_task_id with
+                     | None -> Masc_tui_theme.Glyph.no_value
+                     | Some id -> resolve_task_title state id)
                 ; crow_op = kind
                 ; crow_result = result
                 ; crow_file =
@@ -1163,7 +1164,7 @@ let render_changes_list (state : state) =
           (* A call that failed still changed what the keeper tried to do, and
              it is the row an operator is looking for. Dim marks it as an
              attempt rather than hiding it. *)
-          if idx = cursor then
+          if selected then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr line)
           else box_line buf cols line
     done;

@@ -515,6 +515,10 @@ val quiet_connection_tail : Masc_tui_types.state -> string
 (** Two-space-prefixed {!reading_connection_notice} for Zone 2 headers; returns
     [""] when healthy so Zone 2 does not churn on ordinary background reads. *)
 
+val resolve_task_title : Masc_tui_types.state -> string -> string
+(** Resolve a task ID to its human-readable title from [state.tasks], falling
+    back to the sanitized ID when absent or blank. *)
+
 val compact_connection_badge : Masc_tui_types.state -> width:int -> string * string option
 (** A narrow textual state and any longer status details that remain to show. *)
 

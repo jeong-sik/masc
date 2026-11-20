@@ -203,7 +203,8 @@ let machine_keys ~ko ~width =
    first row and a longer row hangs under the name. *)
 let invite_rows ~ko ~width ~last_read t controller (row : Masc.Tui_decode.play_invite_row) =
   let lead = "  " in
-  let mark = if Some row.pi_name = t.selected then "› " else lead in
+  let is_selected = Some row.pi_name = t.selected in
+  let mark = if is_selected then "› " else lead in
   wrap ~width:(max 1 (width - String.length lead))
     ((if last_read then (if ko then "마지막 조회 · " else "Last read · ") else "")
      ^ row.pi_name ^ controller_note ~ko controller row.pi_name
@@ -211,7 +212,7 @@ let invite_rows ~ko ~width ~last_read t controller (row : Masc.Tui_decode.play_i
      ^ " · " ^ (match row.pi_expires_at with
                 | Some date -> date
                 | None -> if ko then "만료 시각 미기록" else "expiry not recorded"))
-  |> List.mapi (fun index text -> (if index = 0 then mark else lead) ^ text)
+  |> List.mapi (fun index text -> is_selected, (if index = 0 then mark else lead) ^ text)
 
 (* The invites that fit [available] rows: the selected one always, the ones
    above it first, the ones below with the rows that are left. *)
@@ -226,8 +227,9 @@ let visible_invites ~available ~selected invites =
   let below, _ = fit room [] below in
   List.concat (above @ [current] @ List.rev below)
 
-let lines ?(ko = false) ~height ~width t =
+let lines_with_selection ?(ko = false) ~height ~width t =
   let say korean english = if ko then korean else english in
+  let plain rows = List.map (fun row -> false, row) rows in
   let wrap_each = List.concat_map (wrap ~width) in
   let last_read = match t.read, t.inventory with
     | Some _, (Fetched.Ready _ | Fetched.Stale _) | None, Fetched.Stale _ -> true
@@ -307,7 +309,8 @@ let lines ?(ko = false) ~height ~width t =
   let fixed = details in
   let kept = List.length form + List.length message + List.length fixed in
   let everything = List.length heading + kept + List.length (List.concat invites) + 1 + List.length footer in
-  if everything <= height then heading @ form @ message @ fixed @ List.concat invites @ [""] @ footer
+  if everything <= height then
+    plain heading @ plain form @ plain message @ plain fixed @ List.concat invites @ plain ("" :: footer)
   else begin
     (* A short window gives up its static text first. The heading is whole while
        it fits in what the form, the messages, the fixed text and the selected
@@ -332,6 +335,9 @@ let lines ?(ko = false) ~height ~width t =
     let room = height - kept - current - 1 in
     let heading = Option.value (List.find_opt (fun rows -> List.length rows <= room) [heading; keys]) ~default:[] in
     let available = max 1 (height - List.length heading - kept - 1) in
-    heading @ form @ message @ fixed @ visible_invites ~available ~selected invites
-    @ trailing_message @ details @ [""] @ footer
+    plain heading @ plain form @ plain message @ plain fixed @ visible_invites ~available ~selected invites
+    @ plain trailing_message @ plain details @ plain ("" :: footer)
   end
+
+let lines ?(ko = false) ~height ~width t =
+  List.map snd (lines_with_selection ~ko ~height ~width t)

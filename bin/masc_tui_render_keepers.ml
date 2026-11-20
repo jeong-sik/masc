@@ -270,17 +270,33 @@ let keeper_badge_text ~ko (badge : Keeper_list_model.badge) =
 (* Between two pieces of DETAIL. *)
 let detail_separator = " · "
 
-let keeper_task_detail ~ko (row : Keeper_list_model.row) =
+let keeper_task_detail ?tasks ~ko (row : Keeper_list_model.row) =
   let task_word = if ko then "작업 " else "task " in
   match row.task with
   | Some task ->
-      let id = Terminal_text.single_line task.Tui_decode.id in
       let title = Terminal_text.single_line task.Tui_decode.title in
-      Some (task_word ^ id ^ if String.equal title "" then "" else detail_separator ^ title)
+      let id = Terminal_text.single_line task.Tui_decode.id in
+      Some (task_word ^ if String.equal (String.trim title) "" then id else title)
   | None -> (
       match row.keeper.Tui_decode.k_activity with
-      | Some activity -> Option.map (fun id -> task_word ^ Terminal_text.single_line id)
-          activity.Tui_decode.k_current_task_id
+      | Some activity ->
+          Option.map
+            (fun id ->
+              let label =
+                match tasks with
+                | Some list ->
+                    (match
+                       List.find_opt
+                         (fun (t : Tui_decode.task) -> String.equal t.id id)
+                         list
+                     with
+                     | Some t when not (String.equal (String.trim t.title) "") ->
+                         Terminal_text.single_line t.title
+                     | Some _ | None -> Terminal_text.single_line id)
+                | None -> Terminal_text.single_line id
+              in
+              task_word ^ label)
+            activity.Tui_decode.k_current_task_id
       | None -> Some (if ko then "작업 조회 불가" else "task not observed"))
 
 let schedule_title_for_id (schedules : schedule_snapshot option) schedule_id =
@@ -440,7 +456,7 @@ let keeper_questions_text ~ko count =
   if ko then Printf.sprintf "답을 기다리는 질문 %d건" count
   else Masc_tui_message_layout.count_noun count "question" ^ " awaiting you"
 
-let keeper_detail_text ~ko ?now (row : Keeper_list_model.row) =
+let keeper_detail_text ?schedules ?tasks ~ko ?now (row : Keeper_list_model.row) =
   let health =
     Option.map
       (fun word -> (if ko then "상태 " else "health ") ^ word)
@@ -450,7 +466,7 @@ let keeper_detail_text ~ko ?now (row : Keeper_list_model.row) =
   @ List.filter_map Fun.id
       [ Option.map (keeper_approval_text ~ko) row.approval
       ; (if row.open_questions > 0 then Some (keeper_questions_text ~ko row.open_questions) else None)
-      ; keeper_waiting_detail ?now ~ko row; keeper_task_detail ~ko row; health
+      ; keeper_waiting_detail ?schedules ?now ~ko row; keeper_task_detail ?tasks ~ko row; health
       ; keeper_next_text ~ko ?now row ]
   |> String.concat detail_separator
 
@@ -483,8 +499,8 @@ let keeper_row_context_chip (state : state) (row : Keeper_list_model.row) =
        | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
        | Masc_tui_fetched.Failed _ -> None)
 
-let keeper_detail_cell ~ko ?now ?context_chip ~width ~failure_context row =
-  let rest = keeper_detail_text ~ko ?now row in
+let keeper_detail_cell ?schedules ?tasks ~ko ?now ?context_chip ~width ~failure_context row =
+  let rest = keeper_detail_text ?schedules ?tasks ~ko ?now row in
   match failure_context with
   | None ->
       (match context_chip with
@@ -583,7 +599,7 @@ let keeper_now_cell ~ko ?(padded = true) (row : Keeper_list_model.row) =
   ^ (if padded then Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2) else status_word)
   ^ Ansi.reset
 
-let keeper_row_content ~ko ?context_chip ~(columns : Render_schedule.keeper_columns)
+let keeper_row_content ?schedules ?tasks ~ko ?context_chip ~(columns : Render_schedule.keeper_columns)
     ~now ~yolo ~selected (row : Keeper_list_model.row) =
   let runtime = keeper_row_runtime row in
   let failure_context =
@@ -612,7 +628,7 @@ let keeper_row_content ~ko ?context_chip ~(columns : Render_schedule.keeper_colu
        else "")
     ; (if columns.kcol_show_detail then
          " "
-         ^ keeper_detail_cell ~ko ~now ?context_chip ~width:columns.kcol_task
+         ^ keeper_detail_cell ?schedules ?tasks ~ko ~now ?context_chip ~width:columns.kcol_task
              ~failure_context:
                (Render_schedule.keeper_failure_context_for_detail
                   ~show_runtime:columns.kcol_show_runtime failure_context)
@@ -680,12 +696,12 @@ let style_axis_cell (cell : Masc_tui_keeper_axis_cell.t) =
 let secondary_indent_cells = Render_schedule.keeper_marker_width
 let secondary_separator = "  ·  "
 
-let keeper_secondary_row_content ~ko ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
+let keeper_secondary_row_content ?schedules ?tasks ~ko ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
   let indent_cells = secondary_indent_cells in
   let available = max 0 (inner - indent_cells) in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime (keeper_row_runtime row) in
   let detail =
-    match keeper_detail_text ~ko ?now row with
+    match keeper_detail_text ?schedules ?tasks ~ko ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
@@ -1955,7 +1971,10 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
         Option.value (Message_layout.age_text ~now ~since) ~default:Masc_tui_theme.Glyph.no_value
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  let detail = keeper_detail_text ~ko ~now row in
+  let schedules =
+    if Option.is_some state.schedules_agenda_error then None else state.schedules_agenda
+  in
+  let detail = keeper_detail_text ?schedules ~tasks:state.tasks ~ko ~now row in
   let telemetry_row =
     let parts =
       List.filter_map Fun.id
@@ -3009,7 +3028,7 @@ let render_keeper_axes (state : state) =
           | None -> 0
           | Some text ->
             let task_w =
-              match keeper_task_detail ~ko row with
+              match keeper_task_detail ~tasks:state.tasks ~ko row with
               | None -> 0
               | Some t -> Message_layout.display_width t + 3
             in
@@ -3247,7 +3266,12 @@ let render_keeper_axes (state : state) =
                   ~cols:inner ~now:now_unix
                   ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
             | None, Axis_row.List_columns ->
-                keeper_row_content ~ko:(state.ui_language = Lang_ko)
+                let schedules =
+                  if Option.is_some state.schedules_agenda_error then None
+                  else state.schedules_agenda
+                in
+                keeper_row_content ?schedules ~tasks:state.tasks
+                  ~ko:(state.ui_language = Lang_ko)
                   ?context_chip:(keeper_row_context_chip state row) ~columns ~now:now_unix ~yolo
                   ~selected row
             | None, Axis_row.Grid grid_columns ->
@@ -3273,7 +3297,13 @@ let render_keeper_axes (state : state) =
                    ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name
                    ~runtime:(keeper_row_runtime row)
                in
-               emit (keeper_secondary_row_content ~ko ~now:now_unix ~inner ~cells row)
+               let schedules =
+                 if Option.is_some state.schedules_agenda_error then None
+                 else state.schedules_agenda
+               in
+               emit
+                 (keeper_secondary_row_content ?schedules ~tasks:state.tasks ~ko ~now:now_unix
+                    ~inner ~cells row)
            | Axis_row.Failure_chain -> emit (grid_failure_line ~ko:(state.ui_language = Lang_ko) grid ~now:now_unix row)))
     entries_window;
 
@@ -3820,13 +3850,19 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
         + List.length observation + List.length empty + List.length footer in
       let visible = min count (max 1 (base_height - reserved)) in
       let first = max 0 (min (cursor - visible / 2) (count - visible)) in
+      let row_width = match portrait with
+        | None -> inner
+        | Some band -> max 1 (inner - 2 - band.Masc_tui_keeper_portrait.box.cols)
+      in
       let rows = List.filter_map (fun (index, item) ->
         if index < first || index >= first + visible then None
         else
           let line = item_row index item in
           Some
             (if index = cursor then
-               Theme.selection_style () ^ Masc_tui_theme.strip_sgr line ^ Ansi.reset
+               Theme.selection_style ()
+               ^ fit_width (Masc_tui_theme.strip_sgr line) row_width
+               ^ Ansi.reset
              else line))
         (List.mapi (fun index item -> index, item) items) in
       let listing = match portrait with
@@ -3910,8 +3946,10 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       add_row (t "작업:" "Task:")
         (match k.k_activity with
          | None -> keeper_activity_absent_mark k
-         | Some activity -> Terminal_text.single_line_or
-             ~default:Masc_tui_theme.Glyph.no_value activity.k_current_task_id);
+         | Some activity ->
+             (match activity.k_current_task_id with
+              | None -> Masc_tui_theme.Glyph.no_value
+              | Some id -> resolve_task_title state id));
       add_empty ();
 
       add_section (t "실시간 컨텍스트" "Live Context");

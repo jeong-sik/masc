@@ -8,8 +8,8 @@ end
 module Make (Host : HOST) = struct
 (** DOS lane tools — the workspace DOS machine, reachable from a keeper.
 
-    Follows RFC-0439 (the MSX machine lives in the server) for a second
-    machine. [masc_dos_load] boots a program, [masc_dos_screen] reads it,
+    Like the MSX machine, this second machine lives in the server.
+    [masc_dos_load] boots a program, [masc_dos_screen] reads it,
     [masc_dos_press] and [masc_dos_step] move its time, [masc_dos_eject] ends
     it. The machine is {!Dos_lane}'s: one per workspace, in this process,
     shared by every caller.

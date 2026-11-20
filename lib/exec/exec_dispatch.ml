@@ -711,13 +711,12 @@ let rec dispatch_simple_with_timeout ?base_host_env ?stdin_content ?on_output_ch
 (* Evaluating a substitution is dispatch: [dispatch_with_timeout] handles
    pipelines, sequences and nested substitutions inside the child with
    the same semantics as any other IR, and the child inherits the parent's
-   dispatch target through [Shell_ir.with_sandbox] (RFC
-   shell-ir-typed-command-substitution §2.3 item 1).  The path jail covers
+   dispatch target through [Shell_ir.with_sandbox].  The path jail covers
    the child: [validate_shell_ir_paths] runs at the gate on cwd and redirect
    targets and descends into these child stages, which carry literal
    cwd/redirects of their own; a substitution produces argv text — never a
-   path the gate had not seen (plan risk 1).  Child output is captured,
-   never streamed to the parent's [on_output_chunk]; child stderr joins the
+   path the gate had not seen.  Child output is captured, not streamed to
+   [on_output_chunk] while the child runs; child stderr joins the
    parent's stderr.  Nesting depth is bounded only by the shared ~50k-token
    parse budget (roughly 100KB of source), and the recursion
    [eval_substitutions] -> [dispatch_with_timeout] ->
@@ -753,11 +752,10 @@ and eval_substitutions ?base_host_env ?stdin_content
             (* Keep the original budget and epoch together through nested
                substitutions, sequences and pipelines. Passing the checked
                remainder with the original epoch would debit elapsed time
-               again in the child (RFC shell-ir-typed-command-substitution
-               §2.3 item 4). The child also reads the same [stdin_content]
-               the parent will — in bash the two share one file descriptor
-               and race for it; handing each the same bytes is the
-               deterministic reading of that. *)
+               again in the child. The child also reads the same
+               [stdin_content] the parent will — in bash the two share one
+               file descriptor and race for it; handing each the same bytes
+               is the deterministic reading of that. *)
             dispatch_with_timeout
               ?base_host_env
               ?stdin_content
@@ -766,9 +764,8 @@ and eval_substitutions ?base_host_env ?stdin_content
               child
       in
       Buffer.add_string child_stderr result.stderr;
-      (* The child's exit status decides nothing (RFC
-         shell-ir-typed-command-substitution §2.3.2 — bash reads the same);
-         its stdout becomes one argv element, trailing newlines stripped. *)
+      (* The child's exit status decides nothing (bash reads the same); its
+         stdout becomes one argv element, trailing newlines stripped. *)
       Shell_ir.Lit (strip_trailing_newlines result.stdout, Shell_ir.default_meta)
     | Shell_ir.Concat parts -> Shell_ir.Concat (List.map eval_arg parts)
     | (Shell_ir.Lit _ | Shell_ir.Var _) as leaf -> leaf

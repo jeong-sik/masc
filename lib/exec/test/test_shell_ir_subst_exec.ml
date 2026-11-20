@@ -1,5 +1,4 @@
-(* Command-substitution execution tests (RFC
-   shell-ir-typed-command-substitution §2.3): the child's stdout becomes
+(* Command-substitution execution tests: the child's stdout becomes
    exactly one argv element of the parent — no re-split, no glob — trailing
    newlines stripped, child stderr joining the parent's, child exit status
    deciding nothing.
@@ -67,7 +66,7 @@ let test_one_argv_element_no_resplit () =
   assert (result.stdout = "a b|")
 
 let test_child_failure_does_not_fail_parent () =
-  (* RFC §2.3.2: the child's exit status decides nothing. *)
+  (* The child's exit status decides nothing. *)
   let result = dispatch "echo $(false)" in
   assert (result.Exec_dispatch.status = Unix.WEXITED 0);
   assert (result.stdout = "\n")

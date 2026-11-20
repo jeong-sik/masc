@@ -386,8 +386,8 @@ let test_cmd_subst_unterminated_is_parse_error () =
   | _ -> assert false
 
 let test_cmd_subst_in_bin_position_refused () =
-  (* A substituted program name is not opened by the RFC: [$(cmd) args]
-     stays refused even though $( ) parses in argument position. *)
+  (* A substituted program name is not opened: [$(cmd) args] stays
+     refused even though $( ) parses in argument position. *)
   match Bash.parse_string "$(echo x) arg" with
   | Parsed.Too_complex `Cmd_subst -> ()
   | _ -> assert false
@@ -483,8 +483,7 @@ let test_cmd_subst_backtick_rejected () =
   | _ -> assert false
 
 (* [eval]/[source]/[.] re-parse their arguments in the running shell, which
-   no IR node holds — refused by name in bin position (RFC
-   shell-ir-typed-command-substitution §2.4). *)
+   no IR node holds — refused by name in bin position. *)
 let test_eval_refused_as_shell_builtin () =
   match Bash.parse_string "eval echo ok" with
   | Parsed.Too_complex (`Shell_builtin "eval") -> ()
@@ -679,8 +678,7 @@ let test_double_quote_var_word_continues () =
 
 let test_double_quote_cmd_subst_parses_to_subst () =
   (* Inside quotes the substitution is one quoted word whose only piece is
-     the Subst — quoted or not, a substitution is one argv element (RFC
-     shell-ir-typed-command-substitution §2.3 item 3). *)
+     the Subst — quoted or not, a substitution is one argv element. *)
   match Bash.parse_string "echo \"$(date)\"" with
   | Parsed.Parsed (Shell_ir.Simple s) ->
     (match s.args with

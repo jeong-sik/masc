@@ -3,7 +3,7 @@
     A store is a directory written as [YYYY-MM/DD.jsonl]. The list says where
     each one lives, so a writer, a reader and the retention pass all name the
     same directory, and a store cannot be opened at a path that no list knows
-    about (RFC dated-stores-take-retention-from-one-list). *)
+    about. *)
 
 (** Stores directly under [<base>/.masc]. *)
 module Root : sig

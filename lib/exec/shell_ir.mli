@@ -7,8 +7,7 @@
     whose tag is unquoted, process substitution, the redirect forms the
     grammar does not spell ([&>], [>|], [<>], [>&-]), backgrounding,
     subshell parentheses, and braces.  [$(cmd)] is no longer refused: it is
-    read into [Subst], whose child is a complete [t] (RFC
-    shell-ir-typed-command-substitution §2.1–2.2).
+    read into [Subst], whose child is a complete [t].
 
     Three things this sentence used to name are inside the subset. [&&],
     [||] and [;] are connectors the IR holds. A heredoc with a quoted tag
@@ -49,8 +48,7 @@ type arg =
       (** Command substitution: the child is a complete IR — pipes,
           sequences and nested substitutions use the same grammar. The
           child's stdout becomes exactly one argv element of the parent;
-          there is no word splitting or glob after it (RFC
-          shell-ir-typed-command-substitution §2.1, §2.3). *)
+          there is no word splitting or glob after it. *)
 
 and simple = {
   bin : Exec_program.t;

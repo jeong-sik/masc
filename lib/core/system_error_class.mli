@@ -2,8 +2,6 @@
     fleet reactors (FD pressure circuit breaker, disk pressure circuit
     breaker, dashboard coverage-gap hint).
 
-    RFC-0154 §3.1.
-
     A new named variant is added only when (a) a backend reactor exists
     for the failure mode and (b) a canonical RFC describes the operator
     remediation.  Otherwise the original message is preserved verbatim

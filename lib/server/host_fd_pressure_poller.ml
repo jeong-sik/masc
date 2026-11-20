@@ -1,8 +1,5 @@
 (* Host_fd_pressure_poller — see .mli for contract.
 
-   Sunsets when RFC-0097 (sandbox container reuse)
-   reaches steady state.
-
    Design choices worth noting:
    - [Keeper_fd_pressure.engage_external] records each exact (level, ts)
      signal once, so an unchanged state file does not inflate telemetry.

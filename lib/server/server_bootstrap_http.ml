@@ -126,9 +126,7 @@ let print_startup_banner
 (** Run a list of cleanups on [sw] release, executing all of them
     even if an earlier one raises a non-Cancel exception.  Each cleanup
     runs under its own [try/with] so a single failure cannot prevent
-    the remaining cleanups (RFC-0194 §3 PR-B spirit: an
-    [Eio.Switch.on_release] callback must be *all-or-nothing* across
-    its cleanup steps).  [Eio.Cancel.Cancelled] propagates as usual so
+    the remaining cleanups.  [Eio.Cancel.Cancelled] propagates as usual so
     structured-concurrency cancellation honors the enclosing fiber.
 
     List ordering is preserved: cleanups run in the order supplied. *)

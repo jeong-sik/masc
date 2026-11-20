@@ -1772,14 +1772,40 @@ let start_startup_watchdog ~sw ~clock =
     `Stop_daemon)
 ;;
 
+(* The first mark is ServerBootstrap's resolved line. Each later mark names
+   the time since the previous mark and since resolved; a stage that stalls
+   leaves its .begin line as the last boot timing record. *)
+let boot_stage_recorder () =
+  let times = ref None in
+  fun stage ->
+    let now = Mtime_clock.now () in
+    match !times with
+    | None ->
+      times := Some (now, now);
+      Log.Server.info "boot stage=%s elapsed_ms=%.1f total_ms=%.1f" stage 0.0 0.0
+    | Some (started, previous) ->
+      let elapsed_ms =
+        Mtime.Span.to_float_ns (Mtime.span previous now) /. 1_000_000.0
+      in
+      let total_ms =
+        Mtime.Span.to_float_ns (Mtime.span started now) /. 1_000_000.0
+      in
+      times := Some (started, now);
+      Log.Server.info
+        "boot stage=%s elapsed_ms=%.1f total_ms=%.1f"
+        stage elapsed_ms total_ms
+;;
+
 (* The engine on an access its caller published: the four steps the stdio
    server starts, in a fiber, as the single-user server starts its owner. No
    server state is published and no HTTP surface of the owner starts (RFC
-   a-persons-keeper-runs-on-the-engine, S1). *)
+   a-persons-keeper-runs-on-the-engine, S1). Its stages are logged as the
+   single-user server logs its own. *)
 let start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine access =
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs = init_runtime_context env in
   let engine, set_engine = Eio.Promise.create () in
   Server_startup_state.reset ();
+  let boot_stage = boot_stage_recorder () in
   Eio.Fiber.fork ~sw (fun () ->
     Eio.Switch.run ~name:"engine-initialization" @@ fun _ ->
     owner_initialization @@ fun () ->
@@ -1789,7 +1815,7 @@ let start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine 
           ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
       let activated =
-        activate_owner_state ~sw ~clock ~mono_clock ~net ~proc_mgr initialized
+        activate_owner_state ~boot_stage ~sw ~clock ~mono_clock ~net ~proc_mgr initialized
       in
       (match mark_owner_state_ready () with
        | Ok () -> ()
@@ -1798,7 +1824,9 @@ let start_engine ~sw ~runtime_sw ~env ?input_base_path ~accept_store_quarantine 
          after it marks the engine degraded and leaves it ready, as the
          single-user server goes on serving degraded. *)
       Eio.Promise.resolve set_engine activated.state;
-      ignore (start_post_ready_owner_lanes ~sw ~clock ~env activated.state : string * string));
+      boot_stage "post_ready_lanes.begin";
+      ignore (start_post_ready_owner_lanes ~sw ~clock ~env activated.state : string * string);
+      boot_stage "post_ready_lanes.end");
   start_startup_watchdog ~sw ~clock;
   engine
 ;;
@@ -1811,9 +1839,6 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
   in
   let configured_agent_transport = Masc_grpc_transport.configure_from_env () in
   let configured_http_mode = Env_config.Transport.configure_h2_from_env () in
-  (* Route provider diagnostics into the structured log before any
-     provider call runs (#25148). *)
-  Provider_diag_log_sink.install ();
   (* 0. Dashboard bundle freshness — a stale bundle silently keeps calling
      routes the current binary already removed (#24332 governance->gate:
      the served SPA still called DELETE'd /api/v1/dashboard/governance for
@@ -1876,29 +1901,7 @@ let run_single_user ~sw ~runtime_sw ~env ~address ~port ~base_path ~single_user 
   clear_server_state ();
   Server_startup_state.reset ();
   let listener_bound, publish_listener_bound = Eio.Promise.create () in
-  (* The first mark is ServerBootstrap's resolved line. Each later mark names
-     the time since the previous mark and since resolved; a stage that stalls
-     leaves its .begin line as the last boot timing record. *)
-  let boot_stage =
-    let times = ref None in
-    fun stage ->
-      let now = Mtime_clock.now () in
-      match !times with
-      | None ->
-        times := Some (now, now);
-        Log.Server.info "boot stage=%s elapsed_ms=%.1f total_ms=%.1f" stage 0.0 0.0
-      | Some (started, previous) ->
-        let elapsed_ms =
-          Mtime.Span.to_float_ns (Mtime.span previous now) /. 1_000_000.0
-        in
-        let total_ms =
-          Mtime.Span.to_float_ns (Mtime.span started now) /. 1_000_000.0
-        in
-        times := Some (started, now);
-        Log.Server.info
-          "boot stage=%s elapsed_ms=%.1f total_ms=%.1f"
-          stage elapsed_ms total_ms
-  in
+  let boot_stage = boot_stage_recorder () in
 
   (* 2. Run owner initialization outside the accept loop. The state and
      long-lived owner fibers attach to the parent switch because HTTP request
@@ -2439,6 +2442,9 @@ let run ~sw ~runtime_sw ~env ~address ~port ~judged ?input_base_path ?on_ready
      raise
        (Env_config_core.Config_error
           (Server_auth.configure_error_to_string error)));
+  (* Route provider diagnostics into the structured log before any
+     provider call runs (#25148), in either kind of server. *)
+  Provider_diag_log_sink.install ();
   (* A multi-account installation gets the account server and its own route
      table (plan S1a), and the engine the account server starts once it
      published its access (RFC a-persons-keeper-runs-on-the-engine, S1). The

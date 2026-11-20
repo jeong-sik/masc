@@ -660,7 +660,8 @@ val paint_row_background : bg:string -> string -> string
 (** Overlay [bg] across a styled row while preserving foreground SGR colours,
     attributes, and private hit marks ([ESC [=...m]). Inner background codes
     are dropped and [bg] is re-applied after any embedded SGR reset so the
-    highlight band never breaks mid-row. *)
+    highlight band never breaks mid-row. The returned string always terminates
+    with {!Sgr.reset}; callers should not append another reset. *)
 
 (** The shared glyph vocabulary. Plain text — callers colour it. *)
 module Glyph : sig

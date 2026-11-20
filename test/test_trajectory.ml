@@ -90,7 +90,7 @@ let test_structurally_redacted_tool_arguments_persist_without_secrets () =
     let input = `Assoc
       [ "token_hash_prefix", `String "sk-synthetic-trajectory-credential"
       ; "credential_file", `String "/fixture/credentials.toml"
-      ; "session_tokens_v2", `Assoc [ "opaque-map-credential", `Bool true ]
+      ; "token", `String "opaque-listed-key-credential"
       ; "correlation", `Assoc [ "token_hash_prefix", `String "9c723fa1" ]
       ] in
     (* The MCP and Keeper trajectory producers use this direct structural
@@ -109,11 +109,11 @@ let test_structurally_redacted_tool_arguments_persist_without_secrets () =
     List.iter (fun secret ->
       Alcotest.(check bool) "no credential persisted in JSONL" false
         (String_util.contains_substring raw secret))
-      [ "sk-synthetic-trajectory-credential"; "opaque-map-credential" ];
+      [ "sk-synthetic-trajectory-credential"; "opaque-listed-key-credential" ];
     match Trajectory.read_entries ~masc_root ~keeper_name ~trace_id with
     | [ persisted ] ->
       Alcotest.(check string) "metadata and scalar shape survive persistence"
-        {|{"token_hash_prefix":"[REDACTED]","credential_file":"/fixture/credentials.toml","session_tokens_v2":{"[REDACTED]":true},"correlation":{"token_hash_prefix":"9c723fa1"}}|}
+        {|{"token_hash_prefix":"[REDACTED]","credential_file":"/fixture/credentials.toml","token":"[REDACTED]","correlation":{"token_hash_prefix":"9c723fa1"}}|}
         persisted.args_json
     | entries -> Alcotest.failf "expected one persisted call, got %d" (List.length entries))
 

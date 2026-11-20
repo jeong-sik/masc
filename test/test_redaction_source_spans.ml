@@ -48,8 +48,8 @@ let with_secrets secrets f =
     f redaction))
 
 let test_named_prefix_and_unicode () =
-  let prefix = "α before api_key=" in
-  let named = "'opaque-value'" and between = " after " and token = "ghp_abcDEF123" in
+  let prefix = "α before Authorization: " in
+  let named = "Basic opaque-value" and between = "\nafter " and token = "ghp_abcDEF123" in
   let input = prefix ^ named ^ between ^ token in
   let pieces = S.redact_text_mapped input in
   let first = String.length prefix in
@@ -63,13 +63,14 @@ let test_named_prefix_and_unicode () =
   check string "existing API projects the same policy" (S.render_pieces pieces) (S.redact_text input)
 
 let test_ordered_composition_and_literal_marker () =
-  let credential = "Bearer https://user\t:pass@" in
-  let input = credential ^ " next" in
+  let prefix = "Authorization: " in
+  let value = "x -----BEGIN PRIVATE KEY-----\nopaque body\n-----END PRIVATE KEY----- y" in
+  let input = prefix ^ value ^ "\nnext" in
   let pieces = S.redact_text_mapped input in
-  check string "URL is masked before the enclosing Bearer pass"
-    "[REDACTED] next" (S.render_pieces pieces);
-  check mask_testable "later match composes onto the original URL and Bearer bytes"
-    [0,String.length credential,"[REDACTED]"] (masks pieces);
+  check string "the key block is masked before the enclosing header pass"
+    (prefix ^ "[REDACTED]\nnext") (S.render_pieces pieces);
+  check mask_testable "later match composes onto the original header value bytes"
+    [String.length prefix,String.length prefix + String.length value,"[REDACTED]"] (masks pieces);
   check_coverage ~input ~first:0 ~past:(String.length input) pieces;
   let literal = "[REDACTED] ordinary" in
   let pieces = S.redact_text_mapped literal in

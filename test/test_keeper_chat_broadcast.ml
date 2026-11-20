@@ -174,14 +174,16 @@ let test_operation_event_carries_seq_when_given () =
 ;;
 
 let test_projection_redacts_content_without_rewriting_protocol () =
-  let path = Filename.temp_file "keeper-projection-secrets" ".txt" in
-  Fun.protect ~finally:(fun () -> Sys.remove path) (fun () ->
-    let output = open_out_bin path in
-    Fun.protect ~finally:(fun () -> close_out output) (fun () ->
-      output_string output "heartbeat_reported\nelapsed_seconds\ncall-secret\nprivate-note\n");
+  let secrets = [ "heartbeat_reported"; "elapsed_seconds"; "call-secret"; "private-note" ] in
+  let paths =
+    List.map (fun _ -> Filename.temp_file "keeper-projection-secrets" ".txt") secrets in
+  Fun.protect ~finally:(fun () -> List.iter Sys.remove paths) (fun () ->
+    List.iter2 (fun path secret ->
+      Out_channel.with_open_bin path (fun output -> output_string output (secret ^ "\n")))
+      paths secrets;
     let redaction = Masc.Keeper_secret_redaction.snapshot_with_additional_secret_files
-      ~redact_identity_scalars:false ~additional_secret_files:[path]
-      ~base_path:(Filename.dirname path) ~keeper_name:"projection-fixture" in
+      ~redact_identity_scalars:false ~additional_secret_files:paths
+      ~base_path:(Filename.get_temp_dir_name ()) ~keeper_name:"projection-fixture" in
     let redact_text = Masc.Keeper_secret_redaction.redact_text redaction in
     let tool : E.native_tool =
       { occurrence = {stream_scope=2; block_index=3; provider_message_id=Some "call-secret"}

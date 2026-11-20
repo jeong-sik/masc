@@ -134,7 +134,7 @@ type source_integrity = Source_intact | Source_redacted | Source_unavailable
 
 (* Rendered equality alone is insufficient: a secret may itself spell the
    replacement marker. The redactor's mapped pieces say whether it actually
-   masked a source byte; JSON key policies may also mask an entire subtree. *)
+   masked a source byte; a sensitive JSON key also masks its whole value. *)
 let text_copied ~redaction text =
   Keeper_secret_redaction.redact_text_mapped redaction text
   |> List.for_all (function Secret_patterns.Copied _ -> true | Masked _ -> false)
@@ -146,7 +146,7 @@ let rec json_copied ~redaction = function
     List.for_all
       (fun (key, value) ->
          text_copied ~redaction key
-         && not (Secret_patterns.is_sensitive_key key || Secret_patterns.key_suggests_secret key)
+         && not (Secret_patterns.is_sensitive_key key)
          && json_copied ~redaction value)
       fields
   | `List values -> List.for_all (json_copied ~redaction) values

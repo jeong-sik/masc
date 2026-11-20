@@ -710,11 +710,14 @@ let rec rm_rf path =
 let test_public_operation_source_integrity_tracks_actual_redaction () =
   let base_path = temp_base "keeper-source-integrity" in
   Fun.protect ~finally:(fun () -> rm_rf base_path) (fun () ->
-    let secret_file = Filename.concat base_path "identity-secrets" in
-    Out_channel.with_open_bin secret_file (fun out ->
-      output_string out "orchid river seventy nine\n[redacted]\n");
+    let secret_files =
+      List.mapi (fun index secret ->
+        let path = Filename.concat base_path (Printf.sprintf "identity-secret-%d" index) in
+        Out_channel.with_open_bin path (fun out -> output_string out (secret ^ "\n"));
+        path)
+        [ "orchid river seventy nine"; "[redacted]" ] in
     let redaction = Keeper_secret_redaction.snapshot_with_additional_secret_files
-        ~redact_identity_scalars:true ~additional_secret_files:[secret_file]
+        ~redact_identity_scalars:true ~additional_secret_files:secret_files
         ~base_path ~keeper_name:"receiver" in
     let marker_secret_file = Filename.concat base_path "marker-secret" in
     Out_channel.with_open_bin marker_secret_file (fun out ->
@@ -839,18 +842,6 @@ let test_public_operation_source_integrity_tracks_actual_redaction () =
       (field "source" public_secret_key_name = secret_key_name);
     check string "an unchanged masked gate key is not trusted" "redacted"
       (integrity public_secret_key_name);
-    let fragment_key = imessage_source "client_secret_v2" "opaque-credential-value" in
-    let public_fragment_key = project ~redaction:Keeper_secret_redaction.empty fragment_key in
-    check bool "fragment key policy masks its value" true
-      (field "client_secret_v2"
-         (field "address" (field "surface" (field "source" public_fragment_key)))
-       = `String "[REDACTED]");
-    let fragment_marker = imessage_source "client_secret_v2" "[REDACTED]" in
-    let public_fragment_marker = project ~redaction:Keeper_secret_redaction.empty fragment_marker in
-    check bool "fragment key policy can mask an identical source" true
-      (field "source" public_fragment_marker = fragment_marker);
-    check string "unchanged fragment-policy masking is not trusted" "redacted"
-      (integrity public_fragment_marker);
     let masked_other_field = source ~sender:"alice" ~submitted_by:"orchid river seventy nine" in
     check string "a redacted source is not asserted to be intact" "redacted"
       (integrity (project ~redaction masked_other_field));

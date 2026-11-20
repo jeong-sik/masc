@@ -1293,6 +1293,144 @@ let test_adopt_is_not_the_way_out_of_every_stop () =
   check string "and stays stopped" (state_text stopped) (state_text same)
 ;;
 
+(* {1 What the row reads}
+
+   The writer keeps how its last asks ended for the operator's row (§12.2),
+   as the model's [SetLast] and [SetRoom] set them. *)
+
+let last_read_text (value : Machine.t) =
+  match value.last_read with
+  | None -> "none"
+  | Some Committed -> "committed"
+  | Some (Lane { one_item; silent; basis = (_ : Digest.digest); slots = _ }) ->
+    Printf.sprintf "lane, %s, %s"
+      (if one_item then "one item" else "wider")
+      (if silent then "a slot silent" else "none silent")
+  | Some Input_fault -> "input fault"
+  | Some (Ask_failed Raised) -> "failed: raised"
+  | Some (Ask_failed Flow_stopped) -> "failed: flow stopped"
+  | Some (Ask_failed Read_failed) -> "failed: read failed"
+;;
+
+let last_room_text (value : Machine.t) =
+  match value.last_room with
+  | None -> "none"
+  | Some Made -> "made"
+  | Some Unchanged -> "unchanged"
+  | Some Stale -> "stale"
+  | Some Not_judged -> "not judged"
+  | Some (Fits_none { memory = (_ : Digest.digest); lane = (_ : Lane.t) }) -> "fits none"
+;;
+
+let last_basis (value : Machine.t) =
+  match value.last_read with
+  | Some (Lane { basis; _ }) -> hex basis
+  | Some (Committed | Input_fault | Ask_failed _) | None -> fail "the last read is not the lane's"
+;;
+
+(* A boot holds none; a failed ask and an input fault are kept as they
+   ended, and an ask with nothing to read keeps what the last one left. *)
+let test_the_row_starts_empty_and_keeps_each_failure () =
+  let place, value = asking_place () in
+  check string "a boot holds no read" "none" (last_read_text value);
+  check string "and no room" "none" (last_room_text value);
+  check bool "and no read alone" false value.read_alone;
+  let faulted =
+    Machine.decide place value ~at:300.0
+      (ended value 1 (Input_fault (Line_unreadable { offset = 0 })))
+  in
+  check string "an input fault" "input fault" (last_read_text faulted);
+  let failed = resting (started_place ()) in
+  check string "a failed ask" "failed: raised" (last_read_text failed)
+;;
+
+(* At one item the row says whether a slot declared now was silent: one not
+   in the walk is, one that refused without a size is not. The basis is the
+   snapshot the question was made against. *)
+let test_a_one_item_rest_says_whether_a_slot_was_silent () =
+  let place = started_place () in
+  close_turn place ~from:0 ~until:64;
+  let value = booted ~lane:(declared [ fast; wide ]) place ~at:100.0 in
+  let question = question place value in
+  let rested =
+    step "one slot sized, the other not in the walk" place value
+      (ended value 1 (No_answer { question; slots = sized Output_over_reserve }))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  check string "is a silent one-item rest" "lane, one item, a slot silent" (last_read_text rested);
+  let place, value = asking_place () in
+  let question = question place value in
+  let rested =
+    step "the one slot refused without a size" place value
+      (ended value 1 (No_answer { question; slots = [ fast, Refused Unsized ] }))
+      ~state:"resting, holding: " ~fiber:"cancel"
+  in
+  check string "is not silent" "lane, one item, none silent" (last_read_text rested);
+  check string "about the snapshot it was asked against" (hex question.basis) (last_basis rested)
+;;
+
+(* The item read alone marks the read, and the room ask after it that every
+   slot refused for its input says so with the Memory and the lane value it
+   was asked with. A range read after it is one with Memory again and
+   empties the room's verdict. *)
+let test_an_item_read_alone_and_a_room_that_fits_no_slot () =
+  let place, room = making_room () in
+  check string "the item alone was committed" "committed" (last_read_text room);
+  check bool "and read without Memory" true room.read_alone;
+  let shown = room_question room in
+  let fits_none =
+    step "every slot refused the room for its input" place room
+      (room_ended 3 (Room_not_answered { question = shown; slots = sized Input_too_large }))
+      ~state:("idle, holding: " ^ owner) ~fiber:"cancel"
+  in
+  check string "fits none" "fits none" (last_room_text fits_none);
+  (match fits_none.last_room with
+   | Some (Fits_none { memory; lane }) ->
+     check string "with the Memory it showed" (hex shown.basis) (hex memory);
+     check bool "and the lane value it was asked with" true
+       (Lane.equal (declared [ fast ]).value lane)
+   | Some (Made | Unchanged | Stale | Not_judged) | None -> fail "the room does not fit none");
+  close_turn place ~from:64 ~until:128;
+  let asking = Machine.decide place fits_none ~at:400.0 Turn_closed in
+  let read =
+    Machine.decide place asking ~at:410.0
+      (ended asking 4 (answered (question place asking) [ Add (stated port) ]))
+  in
+  check string "a range read" "committed" (last_read_text read);
+  check bool "is not alone" false read.read_alone;
+  check string "and empties the room" "none" (last_room_text read)
+;;
+
+(* Each other end of a room ask is kept as it ended. *)
+let test_each_room_end_is_kept () =
+  let place, room = making_room () in
+  let made =
+    Machine.decide place room ~at:320.0
+      (room_ended 3
+         (room_answered (room_question room) [ Drop { ref_ = "m1"; reason = "held elsewhere" } ]))
+  in
+  check string "an answer committed" "made" (last_room_text made);
+  let place, room = making_room () in
+  let unchanged =
+    Machine.decide place room ~at:320.0 (room_ended 3 (room_answered (room_question room) []))
+  in
+  check string "an answer that changes nothing" "unchanged" (last_room_text unchanged);
+  let place, room = making_room () in
+  let shown = room_question room in
+  let retracted, (_ : Machine.write_answer) =
+    write place room ~at:310.0
+      (Direct.Retract { id = Types.memory_id_of_claim owner; reason = "moved" })
+  in
+  let stale =
+    Machine.decide place retracted ~at:320.0
+      (room_ended 3 (room_answered shown [ Drop { ref_ = "m1"; reason = "held elsewhere" } ]))
+  in
+  check string "an answer about a fact gone" "stale" (last_room_text stale);
+  let place, room = making_room () in
+  let failed = Machine.decide place room ~at:320.0 (room_ended 3 (Room_failed Raised)) in
+  check string "a failed ask" "not judged" (last_room_text failed)
+;;
+
 let () =
   run "librarian_machine"
     [ "boot", [ test_case "opens or stops, and asks" `Quick test_boot ]
@@ -1345,6 +1483,15 @@ let () =
     ; ( "making room"
       , [ test_case "an answer that changes something" `Quick test_making_room
         ; test_case "follows the item it was asked under" `Quick test_making_room_follows_the_item
+        ] )
+    ; ( "row"
+      , [ test_case "starts empty and keeps each failure" `Quick
+            test_the_row_starts_empty_and_keeps_each_failure
+        ; test_case "a one-item rest says whether a slot was silent" `Quick
+            test_a_one_item_rest_says_whether_a_slot_was_silent
+        ; test_case "an item read alone and a room that fits no slot" `Quick
+            test_an_item_read_alone_and_a_room_that_fits_no_slot
+        ; test_case "each room end is kept" `Quick test_each_room_end_is_kept
         ] )
     ; ( "write"
       , [ test_case "when idle" `Quick test_write_when_idle

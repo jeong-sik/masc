@@ -1088,13 +1088,15 @@ let add_routes ~sw ~clock router =
              let description =
                Safe_ops.json_string_opt "description" args |> Option.value ~default:""
              in
-             let members = Safe_ops.json_string_list "members" args in
              let owner = String.trim agent_name in
              (match
-                Result.bind (Board.sub_board_access_field_of_yojson args)
-                  (fun access ->
-                    Board_dispatch.create_sub_board ~reader ~slug ~name ~description
-                      ~owner ~members ?access ())
+                Result.bind (Board.sub_board_members_field_of_yojson args)
+                  (fun members_opt ->
+                    let members = Option.value ~default:[] members_opt in
+                    Result.bind (Board.sub_board_access_field_of_yojson args)
+                      (fun access ->
+                        Board_dispatch.create_sub_board ~reader ~slug ~name ~description
+                          ~owner ~members ?access ()))
               with
               | Ok sb ->
                   Http.Response.json_value (Board.sub_board_to_yojson sb) reqd
@@ -1171,15 +1173,17 @@ let add_routes ~sw ~clock router =
              let args = Yojson.Safe.from_string body in
              let name = Safe_ops.json_string_opt "name" args in
              let description = Safe_ops.json_string_opt "description" args in
-             let members = Safe_ops.json_string_list "members" args in
-             let members_arg = if members = [] then None else Some members in
              let path = Http.Request.path request in
-             (match Board.sub_board_access_field_of_yojson args with
+             (match
+                Result.bind (Board.sub_board_members_field_of_yojson args) (fun members_arg ->
+                  Result.map (fun access -> members_arg, access)
+                    (Board.sub_board_access_field_of_yojson args))
+              with
               | Error e ->
                   Http.Response.json_value ~status:`Bad_request
                     (`Assoc [("error", `String (Board_tool.board_error_to_string e))])
                     reqd
-              | Ok access ->
+              | Ok (members_arg, access) ->
              match extract_path_param ~prefix:"/api/v1/board/sub-boards/" path with
               | None ->
                   Http.Response.json_value ~status:`Bad_request

@@ -40,8 +40,11 @@ let handle_sub_board_create ~reader ~tool_name ~start_time args : Tool_result.re
   let slug = get_string_opt args "slug" |> Option.value ~default:"" in
   let name = get_string_opt args "name" |> Option.value ~default:"" in
   let description = get_string_opt args "description" |> Option.value ~default:"" in
-  let members = get_string_list args "members" in
   let owner = get_string_opt args "owner" |> Option.value ~default:"" in
+  match Board.sub_board_members_field_of_yojson args with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok members_opt ->
+  let members = Option.value ~default:[] members_opt in
   match Board.sub_board_access_field_of_yojson args with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok access ->
@@ -121,8 +124,9 @@ let handle_sub_board_update ~reader ~tool_name ~start_time args : Tool_result.re
   let sub_board_id = get_string_opt args "sub_board_id" |> Option.value ~default:"" in
   let name = get_string_opt args "name" in
   let description = get_string_opt args "description" in
-  let members_raw = get_string_list args "members" in
-  let members = if members_raw = [] then None else Some members_raw in
+  match Board.sub_board_members_field_of_yojson args with
+  | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
+  | Ok members ->
   match Board.sub_board_access_field_of_yojson args with
   | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
   | Ok access ->

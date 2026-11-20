@@ -44,9 +44,9 @@ module KeeperReactive = struct
 end
 
 module KeeperWikiContents = struct
-  (** Whether each Keeper turn carries the wiki table of contents (RFC
-      keepers-see-the-wiki-table-of-contents). On by default; off, the turn
-      neither lists the wiki nor carries the paragraph. *)
+  (** Whether each Keeper turn carries the wiki table of contents. On by
+      default; off, the turn neither lists the wiki nor carries the
+      paragraph. *)
   let enabled_env_key = "MASC_KEEPER_WIKI_CONTENTS_ENABLED"
   let enabled () = get_bool ~default:true enabled_env_key
 end
@@ -867,9 +867,8 @@ end
 
 (* MASC_KEEPER_RUNTIME_PROVIDER_ALLOWLIST (KeeperRuntimeProviderFilter) was
    deleted (audit F8): its value was threaded as [?provider_filter] into
-   [Keeper_turn_driver.run_named], which silently ignored it after the RFC-0206
-   single-runtime purge. The knob was dead while its docs were live; deletion
-   documents reality. Provider selection is runtime.toml SSOT
-   ([runtime].default / [[runtime.assignments]]). *)
+   [Keeper_turn_driver.run_named], which silently ignored it. The knob was dead
+   while its docs were live; deletion documents reality. Provider selection is
+   runtime.toml SSOT ([runtime].default / [[runtime.assignments]]). *)
 
 (** Print configuration summary for debugging *)

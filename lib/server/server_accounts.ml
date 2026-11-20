@@ -218,11 +218,12 @@ let no_keeper_definition ~base_path =
 ;;
 
 (* The journal of a change of a Keeper configuration that did not finish.
-   The first step of the engine rolls such a change back, after this check:
-   it writes the definition the journal recorded, or removes the one the
-   change wrote ([Keeper_config_journal.recover_interrupted]). Whichever
-   process left the journal, the boot stops on it as on the definition its
-   rollback would write. *)
+   After this check, the first step of the engine rolls the change back when
+   the journal decodes and names this configuration root: it writes the
+   definition the journal recorded, or removes the one the change wrote
+   ([Keeper_config_journal.recover_interrupted]). On any other journal the
+   engine does not start. So the boot stops on a journal whichever process
+   left it, without reading it. *)
 let no_keeper_configuration_change ~base_path =
   let journal = Keeper_config_journal.journal_path_for_base_path ~base_path in
   match Unix.lstat journal with

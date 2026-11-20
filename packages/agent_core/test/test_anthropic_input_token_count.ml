@@ -574,18 +574,9 @@ let admitted_anthropic_sync_response =
   {|{"id":"msg-1","type":"message","role":"assistant","model":"input-count-fixture","content":[{"type":"text","text":"accepted"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":1}}|}
 ;;
 
-let with_admitted_http_mock
-      ?(input_tokens = 10)
-      ?(count_of = fun (_ : string) -> input_tokens)
-      ?(on_count = fun _ -> ())
-      ~stream
-      f
-  =
-  Eio_main.run
-  @@ fun env ->
-  Eio.Switch.run
-  @@ fun sw ->
-  let net = Eio.Stdenv.net env in
+(* The count endpoint answers [count_of] of the counted body. The completion
+   endpoint keeps the last body it received and answers that it accepted. *)
+let serve_admitted ~sw ~net ~count_of ~on_count ~stream =
   let port = fresh_port () in
   let completion_body = ref None in
   let handler _conn request body =
@@ -621,7 +612,22 @@ let with_admitted_http_mock
   let server = Cohttp_eio.Server.make ~callback:handler () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Cohttp_eio.Server.run socket server ~on_error:(fun _ -> ()));
-  let base_url = Printf.sprintf "http://127.0.0.1:%d" port in
+  Printf.sprintf "http://127.0.0.1:%d" port, completion_body
+;;
+
+let with_admitted_http_mock
+      ?(input_tokens = 10)
+      ?(count_of = fun (_ : string) -> input_tokens)
+      ?(on_count = fun _ -> ())
+      ~stream
+      f
+  =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let net = Eio.Stdenv.net env in
+  let base_url, completion_body = serve_admitted ~sw ~net ~count_of ~on_count ~stream in
   let result = f ~sw ~net ~base_url in
   result, !completion_body
 ;;
@@ -1840,6 +1846,103 @@ let test_a_provider_refusal_asks_no_narrower_request () =
   check int "a provider refusal asks no narrower request" 0 (List.length !asked)
 ;;
 
+module Projection = Agent_core.Agent.Execution_projection
+
+(* RFC section 5: when the third of three requests fits, the turn's journal
+   keeps one provider attempt, ordinal 0, and the request that attempt
+   records is the third, the one sent. *)
+let test_the_one_provider_attempt_records_the_request_sent () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let net = Eio.Stdenv.net env in
+    let base_url, completion_body =
+      serve_admitted ~sw ~net ~count_of:measured_by_marker ~on_count:ignore ~stream:false
+    in
+    let runtime =
+      match
+        Agent_core.Agent.create_execution_runtime
+          ~sw
+          ~domain_mgr:(Eio.Stdenv.domain_mgr env)
+          ~domain_count:1
+      with
+      | Ok runtime -> runtime
+      | Error error -> fail (Agent_core.Error.to_string error)
+    in
+    let native_path = Filename.temp_file "agent_core-narrowed-request-" ".dir" in
+    Sys.remove native_path;
+    let dir = Eio.Path.(Eio.Stdenv.fs env / native_path) in
+    Eio.Path.mkdirs ~exists_ok:false ~perm:0o700 dir;
+    Fun.protect
+      ~finally:(fun () -> Eio.Path.rmtree ~missing_ok:true dir)
+      (fun () ->
+         let locator = ref None in
+         let execution_store =
+           Agent_core.Agent.execution_store
+             ~runtime
+             ~dir
+             ~on_scope_ready:(fun exact ->
+               locator := Some exact;
+               Ok ())
+             ()
+         in
+         let media_store = Agent_core.History.Memory_store.create () in
+         let agent =
+           build_admission_agent
+             ~media_store
+             ~net
+             ~provider_config:(config ~max_context:512 base_url)
+             ~model_input_projection:
+               (narrowing_projection
+                  ~media_store
+                  ~asked:(ref [])
+                  ~first:"first-request-too-large"
+                  [ (fun _ -> Ok (Some "second-request-too-large"))
+                  ; (fun _ -> Ok (Some "third-request-fits"))
+                  ])
+             ()
+         in
+         (match Agent_core.Agent.run ~sw ~execution_store agent "narrow the request" with
+          | Ok _ -> ()
+          | Error error -> fail (Agent_core.Error.to_string error));
+         let body =
+           match !completion_body with
+           | Some body -> body
+           | None -> fail "the request that fits was not sent"
+         in
+         check bool "the third request is the one sent" true
+           (contains ~sub:"third-request-fits" body);
+         let projection_value = function
+           | Ok value -> value
+           | Error error -> fail (Projection.error_to_string error)
+         in
+         let locator =
+           match !locator with
+           | Some locator -> locator
+           | None -> fail "the run has no durable scope locator"
+         in
+         let projection =
+           projection_value (Agent_core.Agent.open_execution_projection ~runtime ~dir locator)
+         in
+         match projection_value (Projection.provider_requests projection ()) with
+         | [ { Projection.ordinal = 0
+             ; provenance = Some (Llm_provider.Completion_outcome.Serialized request)
+             ; _
+             }
+           ] ->
+           check string "the attempt records the request it sent"
+             Agent_core_sha256.(to_hex (digest_string body))
+             request.body_sha256
+         | requests ->
+           failf "expected one provider attempt that records its request, got %d"
+             (List.length requests));
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
 let test_agent_count_preflight_uses_completion_timeout () =
   let (result, dispatched), _captured =
     with_mock_env ~response_delay_s:1.0 ~status:`OK ~response:{|{"input_tokens":321}|}
@@ -2232,6 +2335,10 @@ let () =
             "a provider refusal asks no narrower request"
             `Quick
             test_a_provider_refusal_asks_no_narrower_request
+        ; test_case
+            "the one provider attempt records the narrower request sent"
+            `Quick
+            test_the_one_provider_attempt_records_the_request_sent
         ; test_case
             "Agent count preflight uses completion timeout"
             `Quick

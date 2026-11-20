@@ -618,7 +618,8 @@
  (name masc_tui_collab)
  (wrapped false)
  (modules masc_tui_collab)
- (libraries masc masc.masc_types masc_tui_message_layout masc_tui_fetched masc_tui_value))
+ (libraries masc masc.masc_types masc_tui_message_layout masc_tui_fetched masc_tui_value
+  masc_tui_theme))
 
 (library
  (name masc_tui_play_room)

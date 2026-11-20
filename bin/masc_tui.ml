@@ -12982,7 +12982,9 @@ and apply_async_message_body ~server_contact ?(input_pending = fun () -> false) 
              let expires_at =
                match invite.Tui_decode.pi_expires_at with
                | Some value -> value
-               | None -> if ko then "미기록" else "not recorded"
+               (* A credential with no expiry never expires: the value is
+                  absent, not unread (RFC tui-one-screen-grammar 6.4). *)
+               | None -> Masc_tui_theme.Glyph.no_value
              in
              invite.pi_name
              ^ (if ko then " · 만료 " else " · expires ") ^ expires_at

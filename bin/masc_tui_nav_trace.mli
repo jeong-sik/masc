@@ -1,4 +1,4 @@
-(** The events the opt-in navigation trace writes (RFC-0485).
+(** The events the opt-in navigation trace writes.
 
     Two things earn a line: a frame that drew another screen than the one
     before it, and a key after which the frame was the same as the one before.

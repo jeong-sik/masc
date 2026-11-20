@@ -578,8 +578,8 @@ let render_code (state : state) =
                      Colour used to carry the kind, over four slots, and it
                      could not. Two reasons, both measured.
 
-                     RFC-0431 measured the slot hues across every shipped
-                     scheme: 0.0014 to 0.0044 apart in Oklab under
+                     The slot hues, measured across every shipped
+                     scheme, sit 0.0014 to 0.0044 apart in Oklab under
                      deuteranopia and protanopia, against the 0.024 a colour
                      has to clear to read as a distinction at all. About a
                      seventh of it. For roughly one reader in twelve the axis
@@ -600,8 +600,8 @@ let render_code (state : state) =
 
                      Blue rather than magenta, because magenta already means
                      Verifying, microvm, EDIT, MEMO and two context readings
-                     elsewhere, and one more meaning on it is the pile
-                     RFC-0431 was opened to take apart.
+                     elsewhere, and one more meaning on it would only
+                     grow that pile.
 
                      Plain recedes rather than taking a constant [dim], so a
                      mark nobody classified still moves with the theme. *)
@@ -837,7 +837,7 @@ let render_code (state : state) =
                    | None -> base)
           in
           (* What the memo on the cursor's line says. The gutter already
-             marks which rows carry one (RFC-0429 §3.1); a mark alone makes
+             marks which rows carry one; a mark alone makes
              the reader open the list to learn what it marks. This rides the
              title for the same reason blame's status does: the margin is one
              cell wide and has no pane to speak in.

@@ -1,4 +1,4 @@
-(** The MSX spectator screen (RFC-0439 §3.7).
+(** The MSX spectator screen.
 
     The machine lives in the server; this screen draws the frame the server
     hands over. [state.msx_open] plays the role [state.image_open] plays for a
@@ -123,7 +123,7 @@ val close : write:(string -> unit) -> Masc_tui_types.state -> unit
     workspace is withdrawn or the operator closes it. The caller must also
     invalidate the ordinary frame presenter. *)
 
-(** {1 The load menu (RFC-0439 §3.7)}
+(** {1 The load menu}
 
     The human picks a game from the cartridge inventory. It is an overlay on the
     MSX screen: while [state.msx_menu_open] the keyboard drives the picker, so a

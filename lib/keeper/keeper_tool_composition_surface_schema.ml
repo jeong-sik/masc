@@ -90,7 +90,7 @@ type composition_skill =
 (* Each line carries what a call needs and nothing else: the identity, copyable
    straight into the tool's [identity] argument. It used to carry the whole
    reference, whose 64-hex content_revision is the larger half of every line and
-   is no longer asked for — the turn's frozen list decides that (RFC-0411 §4.2).
+   is no longer asked for — the turn's frozen list decides that.
    The revision comes back only on a refusal, where it is the one thing that can
    still separate two Skills sharing an identity. *)
 let instruction_skill_description (instruction_skills : instruction_skill list) =

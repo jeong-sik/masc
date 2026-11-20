@@ -1742,8 +1742,8 @@ let artifact_read_output_schema =
 (* Producer: Workspace_goals.handle_goal_list over rollup_to_yojson. A short
    row is the fields declared here and criterion_revision. A whole row
    (detailed, or a goal_id read) is Goal_store.goal_to_yojson with the
-   RFC-0387 verification ledger (Goal_verification.record_to_yojson) joined
-   per goal as [verification]. Option-carrying goal fields serialize as
+   verification ledger (Goal_verification.record_to_yojson) joined per goal
+   as [verification]. Option-carrying goal fields serialize as
    string-or-null and stay undeclared; [criterion_revision] and
    [verification] ride the items' additionalProperties:true. *)
 let goal_list_output_schema =
@@ -2168,8 +2168,8 @@ let masc_workspace_descriptor
     ()
 ;;
 
-(* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
-   misc / control / agent_timeline / local_runtime). *)
+(* Additional cluster descriptor helpers (misc / agent_timeline /
+   local_runtime). *)
 let masc_misc_descriptor
     ?(keeper_model_projection = Internal_name)
     ?ordinary_execution_mode
@@ -2898,7 +2898,7 @@ let internal_descriptors : t list =
       ~policy:(read_only_in_process_policy ())
       ~handler:Tool_analyze_image
       ()
-    (* ── voice cluster (RFC-0179 PR-3, 3 tools) ───────────────── *)
+    (* ── voice cluster (3 tools) ──────────────────────────────── *)
   ; voice_descriptor
       "keeper_voice_speak"
       ~readonly:false
@@ -2910,7 +2910,7 @@ let internal_descriptors : t list =
   ; voice_descriptor ~ordinary_execution_mode:Concurrent
       "keeper_voice_agent"
       ~readonly:true
-    (* ── task / broadcast cluster (RFC-0179 PR-3, 6 tools) ────── *)
+    (* ── task / broadcast cluster (6 tools) ───────────────────── *)
   ; (task_descriptor
        (* Concurrent: backlog reads go through the mtime/size-keyed cache in
           Workspace_backlog, whose lookups and refreshes run under a
@@ -3173,7 +3173,7 @@ let internal_descriptors : t list =
   @ List.map masc_schedule_descriptor Tool_schemas_schedule.definitions
   @ List.map keeper_owned_job_descriptor Tool_schemas_owned_job.definitions
   @ [ keeper_composition_result_descriptor () ]
-  (* ── RFC a-language-server-the-keeper-can-ask (1 entry) ───────── *)
+  (* ── keeper_code_query (1 entry) ───────────────────── *)
   @ [ keeper_code_query_descriptor () ]
   @ [ keeper_receipt_wait_descriptor () ]
   @ [
@@ -3367,13 +3367,12 @@ let descriptors_for_internal internal_name =
 let readonly_static_hint d = d.policy.readonly_hint
 let readonly_for_input d ~input = d.policy.readonly_of_input input
 
-(* Composition node set (#49177, RFC-0502 draft): [Tool_execute] and
-   [Tool_board_dispatch] (including masc_board_post) answer [Direct_only],
-   so a composition naming them fails in
-   [Keeper_composition_nested.validate_leaves] ([Unsupported_leaf]) and, for
-   async catalog entries, in [Keeper_tool_composition_catalog.parse_composition]
-   ([Async_leaf_not_admitted]). Admitting them needs the RFC-0502 decision;
-   this match only records the current boundary. *)
+(* Composition node set: [Tool_execute] and masc_board_post answer
+   [Inline_effect_leaf], so only an inline composition may name them. An
+   async one fails in [Keeper_composition_nested.validate_leaves]
+   ([Unsupported_leaf]) and, for async catalog entries, in
+   [Keeper_tool_composition_catalog.parse_composition]
+   ([Async_leaf_not_admitted]). *)
 let prepared_leaf_admission descriptor =
   match descriptor.execution with
   | Terminal -> Direct_only

@@ -599,7 +599,7 @@ let spawn
     caller's [~sw] — which the gRPC proxy scopes to the SERVER lifetime. Without
     this teardown a failed [initialize] orphans the proc + 3 pipe FDs + 2 reader
     fibers on that switch until server shutdown, and the next request re-spawns
-    (RFC-0261 / issue #21546).
+    (issue #21546).
 
     Mechanism: closing [stdin_w], [stdout_r], and [stderr_r] releases all three
     FDs the record holds — every pipe FD bound to the switch. (Fiber exit on EOF

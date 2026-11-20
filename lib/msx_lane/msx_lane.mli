@@ -1,4 +1,4 @@
-(** Msx_lane — the one MSX machine the workspace plays on (RFC-0439 §3.1).
+(** Msx_lane — the one MSX machine the workspace plays on.
 
     The machine lives here, in the MSX add-on worker's process
     ([masc-msx-addon-worker]); the server reaches it through the attached
@@ -6,7 +6,7 @@
     The core is turn-based: only {!step} and {!press} move time, and each
     call is capped at
     {!max_frames_per_call} so a tool call stays inside the domain-0 budget
-    (the real-time ticker is RFC-0439 §6.2, not this module).
+    (the real-time ticker is [Server_machine_spectator], not this module).
 
     Every key edge is appended to a ledger as (frame, who, key, edge). The
     same cartridge and the same ledger reproduce the same frames — the core

@@ -1,7 +1,4 @@
-(** RFC-0107 Phase D Connection Pool.
-
-    Design rationale lives in [docs/rfc/RFC-0107-phase-d-pool-design.md].
-    Critical findings absorbed from Phase B Prior Art research:
+(** Connection Pool.
 
     - piaf's [Client.t] is per-endpoint, not multi-host. We build the
       [Host_key -> piaf Client.t queue] layer ourselves on top.
@@ -17,8 +14,7 @@
     [idle_ttl]. *)
 type t
 
-(** Pool tuning parameters. Conservative defaults derived from
-    RFC-0101 §2 nofile cap (10240).
+(** Pool tuning parameters, with conservative defaults.
 
     [max_idle_per_host]: bound on idle (reusable) connections kept per
     {scheme, host, port} tuple after a request completes.
@@ -196,10 +192,9 @@ val request :
 
     Notably absent: silent retry. If a reused connection fails, the
     caller sees [Error] with the underlying reason. Caller decides
-    whether to retry — N-of-M silent retry is an
-    RFC-0107 §"Workaround Rejection Bar" anti-pattern. *)
+    whether to retry. *)
 
-(** {2 RFC-0129 — idle-timeout request with streaming progress}
+(** {2 Idle-timeout request with streaming progress}
 
     Replaces the wall-clock total-timeout pattern used by [request].
     Chunk arrival on the response body resets the idle timer; a stream
@@ -208,9 +203,7 @@ val request :
     [idle_timeout_sec] is cancelled.
 
     Progress fields are returned on both the [Ok] and [Error] branches
-    so runtime rotation receipts can attach them without a side-channel.
-
-    Design rationale: docs/rfc/RFC-0129-http-idle-timeout-and-streaming-progress.md *)
+    so runtime rotation receipts can attach them without a side-channel. *)
 
 (** Body streaming progress observed during a single request. All
     timestamps are seconds since request start (monotonic). *)
@@ -292,8 +285,8 @@ val request_streaming :
 
 (* ── Telemetry ─────────────────────────────────────────────────── *)
 
-(** Non-mutating pool snapshot for Otel_metric_store / dashboard. Phase D.4
-    wires this to the metrics layer. *)
+(** Non-mutating pool snapshot for Otel_metric_store / dashboard.
+    [Pool_metrics] wires this to the metrics layer. *)
 type stats = {
   idle_per_host : (string * int) list;
   total_idle : int;

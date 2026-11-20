@@ -1,8 +1,7 @@
 (** The language-server pool a turn is using, bound the way its switch is.
 
-    RFC a-language-server-the-keeper-can-ask §6 asked whether a Keeper's
-    language server should belong to the turn or be shared across turns. This
-    is the answer, and it is the measured one.
+    A Keeper's language server belongs to the turn rather than being shared
+    across turns, and that choice is the measured one.
 
     Starting a server is cheap: [initialize] against a real [ocamllsp] answered
     in 11-60 ms. Keeping one is not: an idle server on this host held 12-17 MB

@@ -1,7 +1,6 @@
-(** RFC-0107 Phase D Connection Pool — piaf-backed implementation.
+(** Connection Pool — piaf-backed implementation.
 
-    Design constraints from RFC-0107 Phase D design note and Phase B
-    Prior Art research:
+    Design constraints:
 
     - piaf [Client.t] is per-endpoint (single host). Multi-host pool
       ([Host_key -> queue]) is built here.
@@ -9,8 +8,7 @@
       [Eio.Switch] (typically server root_sw).
     - Scoped [request] API over naked acquire/release for leak resistance
       (Eio #244 exactly-one-owner principle).
-    - No silent retry — caller decides. (RFC-0107 §"Workaround
-      Rejection Bar" anti-pattern.)
+    - No silent retry — caller decides.
 
     Parts:
     - [Host_key]: pure host identity (scheme, host, port) — pool key.
@@ -512,7 +510,7 @@ let take_live ?(is_live = fun _ -> true) ~now ~ttl entries =
    their TTL in the queue, and this handed one out without looking. The peer
    had closed it, and the request failed with "unexpected eof" (#30831).
 
-   Retrying is not the fix. RFC-0107 says no silent retry, and the first
+   Retrying is not the fix. The pool never retries silently, and the first
    place this was seen was an OAuth token exchange, where the code is
    single-use: a request that got no answer cannot be repeated without
    risking the tokens it may already have minted. Not handing out a dead

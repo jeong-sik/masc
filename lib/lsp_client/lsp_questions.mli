@@ -2,8 +2,7 @@
 
     Not a protocol client. Completion, formatting and code actions belong to an
     editor; rename writes files. What is left is: where is this used, where
-    does it come from, what is it (RFC a-language-server-the-keeper-can-ask
-    §3.1). *)
+    does it come from, what is it. *)
 
 type question =
   | References

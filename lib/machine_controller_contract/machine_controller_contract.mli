@@ -30,8 +30,7 @@ val pass_target :
 (** {1 DOS tools}
 
     The shared DOS machine's tools, named once for the host that admits a
-    call and the worker that runs it (RFC play-link-for-the-shared-machine
-    §2.8). *)
+    call and the worker that runs it. *)
 
 type dos_tool =
   | Dos_load

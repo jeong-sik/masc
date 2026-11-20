@@ -1,7 +1,6 @@
 (** Which Lane: one id type for every lane the operator lists, turns on and
-    off, and reads the state of (RFC every-lane-is-one-row-in-one-registry
-    §2.1). Built-in lanes are compiled into the server and enumerated here.
-    Package lanes are Lane Add-on declaration files. *)
+    off, and reads the state of. Built-in lanes are compiled into the server
+    and enumerated here. Package lanes are Lane Add-on declaration files. *)
 
 (** [all_of_builtin] (derived) lists every built-in lane once: exact-output
     lanes, then Browser Lane backends, then machines, each in its own type's

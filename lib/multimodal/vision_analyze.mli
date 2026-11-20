@@ -1,11 +1,10 @@
 (** Pure core of the [analyze_image] delegation tool.
-    RFC-keeper-vision-delegation-tool §2.2.
 
     Encodes the input/output contract of a vision sub-call independent of the
-    provider transport (the mid-turn provider round-trip of §2.6 is the impure
-    shell, deferred). The load-bearing guarantee: an empty or truncated vision
-    reply is a typed error, never [Ok ""] — so delegation cannot reproduce the
-    2026-06-25 empty-reply failure class one layer inward. *)
+    provider transport (the mid-turn provider round-trip is the impure shell).
+    The load-bearing guarantee: an empty or truncated vision reply is a typed
+    error, never [Ok ""] — so delegation cannot reproduce the 2026-06-25
+    empty-reply failure class one layer inward. *)
 
 type request =
   { query : string

@@ -1,4 +1,4 @@
-(** MSX lane tools (RFC-0439 §3.5; increment §6.1, turn-based only).
+(** MSX lane tools (turn-based only).
 
     [masc_msx_load] plugs a game into the workspace machine — a cartridge ROM
     or a raw .dsk floppy image (same [cart] argument; a name ending in .dsk
@@ -7,7 +7,7 @@
     [masc_msx_eject] ends it. The machine is {!Msx_lane}'s: one per
     workspace, in this process, shared by every caller. The observation is
     text first — mode, name table, sprite table — because a keeper without a
-    vision runtime cannot read pixels (RFC-0414). *)
+    vision runtime cannot read pixels. *)
 
 open Tool_args
 
@@ -397,7 +397,7 @@ let handle_eject ~relay ~tool_name ~start_time ~agent_name _args =
 ;;
 
 (* RAM introspection handlers. Read-only, so no board relay and no agent
-   identity: anyone may look, nobody may write (RFC-0439's cheat line).
+   identity: anyone may look, nobody may write.
    Addresses arrive as hex strings ("e000", "0xE000") because that is how
    memory is talked about; digits alone are hex too ({!Msx_lane.Address}).
    They leave in the same notation, four hex digits, so an address read from

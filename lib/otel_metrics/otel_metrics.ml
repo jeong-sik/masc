@@ -1,8 +1,8 @@
-(* RFC-0217 S1 — OTel metric bridge. See otel_metrics.mli.
-   opentelemetry + stdlib only; no masc dep (broken-main isolated, RFC-0056 leaf).
+(* OTel metric bridge. See otel_metrics.mli.
+   opentelemetry + stdlib only; no masc dep (broken-main isolated, leaf library).
    Preserves Otel_metric_store pull semantics: the in-process accumulator stays the
    source of truth, and a Metrics_callbacks observable reports its current value
-   as a cumulative metric at each OTLP export tick (validated by the S0 spike). *)
+   as a cumulative metric at each OTLP export tick. *)
 
 module M = Opentelemetry.Metrics
 

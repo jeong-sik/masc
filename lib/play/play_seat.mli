@@ -1,5 +1,5 @@
-(** Who sits at the shared machine (RFC play-link-for-the-shared-machine
-    §2.6, §2.8): the names a player can hand the controller to. *)
+(** Who sits at the shared machine: the names a player can hand the
+    controller to. *)
 
 val keeper_names : Workspace.config -> (string list, string) result
 (** The persisted fleet and the keepers declared in TOML that have not booted

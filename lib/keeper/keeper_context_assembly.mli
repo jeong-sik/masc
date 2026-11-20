@@ -21,8 +21,8 @@ type system_observation =
   | Direct_input_source of string
   | Goals_awaiting_proof of string
 (** Only these issued observations can become System suffixes.
-    [Current_norms] is the complete article set of
-    {!Keeper_turn_system.t.current_norms}, under the
+    [Current_norms] is the complete article set a
+    {!Keeper_turn_system.Beside_text} names, under the
     {!Prompt_block_id.Constitution_amendments} id. It is the same text on
     every request of a turn, so Agent Core carries it here: as a User tail it
     was answered again after every tool result. An official client receives

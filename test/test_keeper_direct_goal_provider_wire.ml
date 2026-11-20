@@ -14,6 +14,7 @@ let system_of_text text =
   match
     Keeper_turn_system.issue ~held:None ~lane:Keeper_turn_system.Without_basis
       ~render:(fun (_ : World_constitution_types.t list) -> text) ~current:[]
+      ~status:World_constitution_store.Resolved
       ~at:{ World_constitution_store.end_offset = 0; digest = "" }
       ~articles_at:(fun (_ : World_constitution_store.position) -> Ok None)
   with

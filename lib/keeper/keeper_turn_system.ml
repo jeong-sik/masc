@@ -3,10 +3,15 @@
 
 open Result.Syntax
 
+type current_norms =
+  | Not_carried
+  | In_text of string
+  | Beside_text of string
+
 type t =
   { text : string
   ; amendments : string option
-  ; current_norms : string option
+  ; current_norms : current_norms
   }
 
 type stored =
@@ -86,13 +91,40 @@ let resolve ~articles_at stored =
   Ok (Option.map (fun articles -> { articles; stored }) articles)
 ;;
 
-let issue ~held ~lane ~render ~current ~at ~articles_at =
+(* A System whose [<norms>] are the current articles. Under an isolated
+   move the complete set still names what the turn holds, for bytes that
+   later replace these ({!with_bytes}). *)
+let rendered_current ~status ~current text =
+  let current_norms =
+    match status with
+    | World_constitution_store.Resolved -> Not_carried
+    | World_constitution_store.Isolated_history ->
+      In_text (Keeper_prompt.constitution_current_block current)
+  in
+  { text; amendments = None; current_norms }
+;;
+
+(* A System rendered with a basis whose articles differ from [current].
+   Under an isolated move a delta would name a withheld article as taken
+   back, so the complete set replaces it. *)
+let rendered_older ~status ~current text amendments =
+  match status with
+  | World_constitution_store.Resolved ->
+    { text; amendments = block (Some amendments); current_norms = Not_carried }
+  | World_constitution_store.Isolated_history ->
+    { text
+    ; amendments = None
+    ; current_norms = Beside_text (Keeper_prompt.constitution_current_block current)
+    }
+;;
+
+let issue ~held ~lane ~render ~current ~status ~at ~articles_at =
   let by_runtime = Option.fold ~none:Runtime_map.empty ~some:(fun held -> held.by_runtime) held in
   let from_current text = { at; system_digest = digest text } in
   match lane with
   | Without_basis ->
     let text = render current in
-    Ok ({ text; amendments = None; current_norms = None }, { issued = from_current text; by_runtime })
+    Ok (rendered_current ~status ~current text, { issued = from_current text; by_runtime })
   | Agent_core { runtime_id; front } ->
     let* basis =
       match front, Runtime_map.find_opt runtime_id by_runtime with
@@ -101,16 +133,18 @@ let issue ~held ~lane ~render ~current ~at ~articles_at =
     in
     Ok
       (match decide ~front ~basis ~render ~current with
-       | From_basis { text; amendments; basis } ->
-         { text; amendments = block amendments; current_norms = None }, { issued = basis.stored; by_runtime }
+       | From_basis { text; amendments = None; basis } ->
+         rendered_current ~status ~current text, { issued = basis.stored; by_runtime }
+       | From_basis { text; amendments = Some amendments; basis } ->
+         rendered_older ~status ~current text amendments, { issued = basis.stored; by_runtime }
        | From_current { text } ->
          let stored = from_current text in
-         ( { text; amendments = None; current_norms = None }
+         ( rendered_current ~status ~current text
          , { issued = stored; by_runtime = Runtime_map.add runtime_id stored by_runtime } ))
 ;;
 
 let resend ~held ~runtime_id ~current ~articles_at recorded =
-  let unknown = { text = recorded; amendments = None; current_norms = None } in
+  let unknown = { text = recorded; amendments = None; current_norms = Not_carried } in
   match held with
   | Some held when String.equal held.issued.system_digest (digest recorded) ->
     let* basis = resolve ~articles_at held.issued in
@@ -120,7 +154,7 @@ let resend ~held ~runtime_id ~current ~articles_at recorded =
          ( { text = recorded
            ; amendments =
                block (World_constitution_render.amendments ~built_with:basis.articles current)
-           ; current_norms = None
+           ; current_norms = Not_carried
            }
          , Some { held with by_runtime = Runtime_map.add runtime_id held.issued held.by_runtime } )
        | None -> unknown, Some held)
@@ -129,12 +163,19 @@ let resend ~held ~runtime_id ~current ~articles_at recorded =
 
 let with_current_norms articles issued =
   { issued with amendments = None;
-    current_norms = Some (Keeper_prompt.constitution_current_block articles) }
+    current_norms = Beside_text (Keeper_prompt.constitution_current_block articles) }
 ;;
 
 let with_bytes ~issued text =
   if String.equal issued.text text then issued
-  else { issued with text; amendments = None }
+  else
+    { text
+    ; amendments = None
+    ; current_norms =
+        (match issued.current_norms with
+         | Not_carried -> Not_carried
+         | In_text block | Beside_text block -> Beside_text block)
+    }
 ;;
 
 (* Session checkpoint form. The schema is closed: a missing, unknown or

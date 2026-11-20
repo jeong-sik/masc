@@ -268,7 +268,13 @@ let preview_lookup = function
 (* A finished reply's body with its link cards, per entry, as the last frame
    composed it. Composing asked every link's card again: a reply with 13,000
    links built 13,000 cards, beyond the synthesized-card memo, on every frame
-   where nothing had changed, about 85 ms of a frame for a 1 MB reply. *)
+   where nothing had changed, about 85 ms of a frame for a 1 MB reply.
+
+   The key is the entry itself. Its record has no mutable field, so the
+   entry a frame finds is the body it was composed from; a changed reply is
+   another entry. A reply with no card composes to its own body string, so
+   only a reply with cards holds a second copy here, its body and cards,
+   for as long as the entry lives. *)
 type composed_body = {
   composed_mode : [ `Off | `Compact | `Rich ];
   composed_width : int;

@@ -312,9 +312,27 @@ let test_link_cards_are_composed_again_only_when_the_store_changes () =
   let settled = composed () in
   ignore (frame_lines state);
   check int "the fetched body is kept in turn" settled (composed ());
+  let cache = Masc_tui_ansi.terminal_size_cache in
+  let previous = Masc_tui_ansi.get_terminal_size () in
+  let resize size =
+    ignore (Masc_tui_render_schedule.Terminal_size_cache.refresh cache ~probe:(fun () -> Some size)) in
+  Fun.protect ~finally:(fun () -> resize previous) (fun () ->
+    resize (fst previous, snd previous + 20);
+    ignore (frame_lines state);
+    check bool "another width composes again" true (composed () > settled));
+  ignore (frame_lines state);
+  let widened = composed () in
+  (* Emptying the store moves its generation: the body is composed again from
+     the cards the store answers now, and the fetched card is gone. *)
+  Masc_tui_link_preview.clear_cache ();
+  let cleared = frame_lines state in
+  check bool "an emptied store composes again" true (composed () > widened);
+  check bool "the emptied store's card is not drawn" false
+    (List.exists (fun line -> Astring.String.is_infix ~affix:"FETCHED_TITLE" line) cleared);
+  let restored = composed () in
   state.link_previews_mode <- `Rich;
   ignore (frame_lines state);
-  check bool "another preview mode composes again" true (composed () > settled);
+  check bool "another preview mode composes again" true (composed () > restored);
   state.link_previews_mode <- `Off;
   let off = composed () in
   let plain = frame_lines state in

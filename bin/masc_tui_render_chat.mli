@@ -185,7 +185,8 @@ module For_testing : sig
     Masc_tui_types.chat_scroll_point -> int option
   val bodies_composed : unit -> int
   (** How many times a frame composed a finished reply's body with its link
-      cards rather than taking the body kept for the same preview store. *)
+      cards rather than taking the body kept for the same preview store. It
+      only grows over the process; a test reads it before and after. *)
   val thinking_height_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
   val chat_markdown_cache : chat_markdown_identity Masc_tui_markdown_render_cache.t
   val chat_markdown_theme_revision : int

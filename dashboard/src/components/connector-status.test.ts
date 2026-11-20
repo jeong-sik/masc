@@ -832,9 +832,8 @@ describe('ConnectorStatusPanel', () => {
     expect(bobGroup!.querySelector('[data-channel-id="999888"]')).not.toBeNull()
   })
 
-  // RFC-0203 §Phase 3 — Discord runs in-process. When the gateway
-  // hasn't connected (e.g. DISCORD_BOT_TOKEN unset), the operator
-  // sees the in-process hint panel.
+  // Discord runs in-process. When the gateway hasn't connected (e.g.
+  // DISCORD_BOT_TOKEN unset), the operator sees the in-process hint panel.
   it('shows in-process unavailable hint for Discord', async () => {
     const fetchGateStatus = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleGateResponse())
     const fetchGateConnectors = vi.fn<() => Promise<unknown>>().mockResolvedValue(sampleConnectorsResponse({
@@ -1041,7 +1040,7 @@ describe('filterKeeperGroups', () => {
   })
 
   it('does not match on a retired runtime-label spelling', async () => {
-    // RFC-0393 removed the keeper-<name>-agent alias; only the name matches.
+    // Only the name matches; the keeper-<name>-agent spelling does not.
     const filterKeeperGroups = await loadFilter()
     const rows = [group('nova', { name: 'nova', status: 'idle' })]
     expect(filterKeeperGroups(rows, 'nova')).toHaveLength(1)

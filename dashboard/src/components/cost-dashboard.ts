@@ -64,8 +64,8 @@ import {
 } from './cost/audit-summarizer'
 import { useModelMetrics } from '../lib/use-model-metrics'
 
-// Re-export RFC-0050 PR-1 — preserve every public symbol callers import
-// from this module so the per-domain split is mechanical.
+// Re-export every public symbol callers import from this module so the
+// per-domain split is mechanical.
 export {
   type CostFocus,
   type AuditFocus,

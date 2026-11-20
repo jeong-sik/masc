@@ -1,22 +1,21 @@
-// keeper-v2 Fleet aside 잔여 섹션 (fleet.jsx AsideQueue / AsideRotation /
+// keeper-v2 Fleet aside 잔여 섹션 (FleetQueueSection / FleetRotationSection /
 // 활동 미니). 전부 라이브 소스에 연결한다 — 관측되지 않는 값은 행 자체를
 // 렌더하지 않는다 (mark, don't fake):
 //
 //   · fl-q-*   — keeper_waiting_inventory keeper-scoped read
 //                (subscribeKeeperWaitingInventory 공유 스토어, keeper-shared /
 //                lanes 패널과 같은 소스) + keeper keepalive/heartbeat 필드.
-//                디자인의 admitted/deferred/dropped 회계(fl-q-acct/fl-q-c)는
+//                admitted/deferred/dropped 회계(fl-q-acct/fl-q-c)는
 //                라이브 소스가 없어 렌더하지 않는다.
 //   · fl-rot-* — GET /api/v1/runtime/resolved 의 lane 후보 체인
-//                (선언 순서). 디자인의
-//                failover 이벤트 피드(fl-rot-ev*)는 keeper 별 라이브 이벤트
-//                소스가 없어 생략한다.
-//   · fl-as-mini/fl-mini — keeper 카운터 필드 중 관측되는 것만. 디자인의
-//                초당 토큰(tps)·트레이스는 roster 모델에 소스가 없다
+//                (선언 순서). failover 이벤트 피드(fl-rot-ev*)는 keeper 별
+//                라이브 이벤트 소스가 없어 생략한다.
+//   · fl-as-mini/fl-mini — keeper 카운터 필드 중 관측되는 것만. 초당
+//                토큰(tps)·트레이스는 roster 모델에 소스가 없다
 //                (agent-roster.ts 의 P1-6 감사 주석 참조).
 //   · fl-actbar/fl-btn/fl-noact — aside 액션 섹션. keeperActionVisibility
 //                (directive/boot/shutdown/purge API) 가 여는 조작만 버튼으로
-//                렌더하고, 하나도 없으면 디자인의 fl-noact 문구를 렌더한다.
+//                렌더하고, 하나도 없으면 fl-noact 문구를 렌더한다.
 
 import { html } from 'htm/preact'
 import { Fragment } from 'preact'
@@ -77,8 +76,7 @@ export function fleetActivityMinis(keeper: Keeper | null | undefined): FleetActi
 
 /* ── 이벤트 큐 + 하트비트 (fl-q-*) ─────────────────────────────────────── */
 
-// 디자인 EVENT_KIND (ops-data.jsx) 의 글리프 어휘를 waiting-inventory source
-// 닫힌 집합에 대응시킨다. mention @ · board ▤ · gate ⚿ · wake ○ · handoff ⇄.
+// 큐 행 글리프를 waiting-inventory source 닫힌 집합에 대응시킨다.
 const QUEUE_SOURCE_GLYPH: Record<DashboardKeeperWaitingSource, string> = {
   event_queue_pending: '○',
   chat_operation_queued: '▤',
@@ -236,9 +234,8 @@ export function FleetRotationSection({ keeper }: { keeper: Keeper }) {
 /* ── aside 액션 (fl-actbar / fl-btn / fl-noact) ────────────────────────── */
 
 // 버튼 순서는 행 액션(KeeperActionButtons) 과 맞춘다: 기동 · 멈춤 · 재개 ·
-// 깨움 · 종료 · 제거. 디자인 fleet.jsx 의 aside 액션 섹션은 FSM 단계별
-// FSM_ACTIONS 를 나열하고, 가능한 조작이 없으면 fl-noact 문구를 보인다.
-// 라이브 측 가시성 SSOT 는 keeperActionVisibility 다.
+// 깨움 · 종료 · 제거. 가능한 조작이 없으면 fl-noact 문구를 보인다.
+// 가시성 SSOT 는 keeperActionVisibility 다.
 const ASIDE_ACTION_ORDER: readonly KeeperActionKey[] = [
   'boot',
   'pause',
@@ -262,7 +259,7 @@ function asideActionVisible(
   }
 }
 
-/** 디자인 fleet.jsx FleetAside 의 액션 섹션. 확인 대화(종료/제거)는
+/** Fleet aside 의 액션 섹션. 확인 대화(종료/제거)는
  *  runKeeperAction 이 담당하므로 여기서 다시 묻지 않는다. */
 export function FleetAsideActions({ keeper }: { keeper: Keeper }) {
   const busy = useSignal(false)

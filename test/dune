@@ -7886,3 +7886,5 @@
 (include stanzas/test_runtime_official_client_seats.inc)
 
 (include stanzas/test_exact_lane_walk.inc)
+
+(include stanzas/test_exact_lane_slots.inc)

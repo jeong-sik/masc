@@ -2017,7 +2017,8 @@ let bounded_model_input_projection
       ~media_store
       ~on_resolved
       ~(provider_config : Llm_provider.Provider_config.t)
-  : Agent_core.Agent.model_input_projection
+  : Agent_core.Types.message list
+    -> (Llm_provider.Types.message list, Agent_core.Error.t) result
   =
   match ctx.request_input with
   | Completion_review ->

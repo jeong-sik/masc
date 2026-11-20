@@ -9,7 +9,7 @@ let tool_use_ids blocks =
       | Thinking _
       | ReasoningDetails _
       | RedactedThinking _
-      | ToolResult _
+      | ToolReference _ | ToolResult _
       | Image _
       | Document _
       | Audio _ -> None)
@@ -25,6 +25,7 @@ let tool_result_ids blocks =
       | ReasoningDetails _
       | RedactedThinking _
       | ToolUse _
+      | ToolReference _
       | Image _
       | Document _
       | Audio _ -> None)
@@ -45,7 +46,7 @@ let last_tool_turn messages =
                | Thinking _
                | ReasoningDetails _
                | RedactedThinking _
-               | ToolResult _
+               | ToolReference _ | ToolResult _
                | Image _
                | Document _
                | Audio _ -> false)
@@ -65,7 +66,7 @@ let recovered_tool_results messages_after =
        let results =
          List.filter
            (function
-             | ToolResult _ -> true
+             | ToolReference _ | ToolResult _ -> true
              | Text _
              | Thinking _
              | ReasoningDetails _

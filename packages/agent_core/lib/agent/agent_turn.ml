@@ -222,7 +222,7 @@ let history_tool_result_of_block : content_block -> Hooks.history_tool_result op
   function
   | ToolResult { tool_use_id; content; outcome; content_blocks; json = _ } ->
     Some { tool_use_id; content; outcome; content_blocks }
-  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
+  | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _
   | Document _ | Audio _ -> None
 ;;
 
@@ -233,7 +233,7 @@ let last_tool_results_from messages =
       when List.for_all
              (function
                | ToolResult _ -> true
-               | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _
+               | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _
                | Document _ | Audio _ -> false)
              content ->
       List.filter_map history_tool_result_of_block content
@@ -315,6 +315,7 @@ let apply_context_injection ~context ~messages ~injector ~tool_uses ~results =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolResult _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ )
@@ -444,6 +445,7 @@ let[@warning "-32"] single_tool_result = function
       | [ ReasoningDetails _ ]
       | [ RedactedThinking _ ]
       | [ ToolUse _ ]
+      | [ ToolReference _ ]
       | [ Image _ ]
       | [ Document _ ]
       | [ Audio _ ]

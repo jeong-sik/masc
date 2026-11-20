@@ -15,6 +15,7 @@ let reorder priority (blocks : content_block list) : content_block list =
       | ReasoningDetails _
       | RedactedThinking _
       | ToolUse _
+      | ToolReference _
       | ToolResult _ -> false
     in
     let visuals, others = List.partition is_visual blocks in

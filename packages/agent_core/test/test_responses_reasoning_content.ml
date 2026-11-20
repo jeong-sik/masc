@@ -57,7 +57,7 @@ let input ?(config=config) message trailing = Codec.build_request ~config ~messa
 let check_reasoning label expected response =
   let actual = List.filter_map (function Thinking {content;_} -> Some content
     | Llm_provider.Types.Text _ | Llm_provider.Types.ReasoningDetails _ | Llm_provider.Types.RedactedThinking _ | Llm_provider.Types.ToolUse _ | Llm_provider.Types.ToolResult _
-    | Llm_provider.Types.Image _ | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> None) response.content in
+    | Llm_provider.Types.ToolReference _ | Llm_provider.Types.Image _ | Llm_provider.Types.Document _ | Llm_provider.Types.Audio _ -> None) response.content in
   Alcotest.(check (list string)) label expected actual
 let replay_text item = item |> member "summary" |> to_list
   |> List.map (fun part -> member "text" part |> to_string) |> String.concat "\n"

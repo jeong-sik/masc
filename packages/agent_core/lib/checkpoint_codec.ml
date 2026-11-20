@@ -204,6 +204,7 @@ module Wire_block = struct
     | ReasoningDetails _
     | RedactedThinking _
     | ToolUse _
+    | ToolReference _
     | Image _
     | Document _
     | Audio _ -> Llm_provider.Api_common.content_block_to_json block
@@ -366,8 +367,8 @@ module Wire_block = struct
                        "Checkpoint ReasoningDetails reasoning_content must be a string"
                    })))
       | Some
-          (( Text _ | Thinking _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
-           | Audio _ ) as block) -> Ok block
+          (( Text _ | Thinking _ | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _
+           | Document _ | Audio _ ) as block) -> Ok block
       | None ->
         (* The option-returning decoder collapses every refusal into [None], and
            reading the block's own "type" back out of the JSON described the
@@ -419,6 +420,7 @@ let tool_result_block : content_block -> bool = function
   | ReasoningDetails _
   | RedactedThinking _
   | ToolUse _
+  | ToolReference _
   | Image _
   | Document _
   | Audio _ -> false
@@ -662,7 +664,7 @@ let rec drop_unencodable_block (dropped : int ref) block =
                { detail with Types.raw = empty_object }))
     in
     ReasoningDetails { reasoning_content; details }
-  | Text _ | Thinking _ | RedactedThinking _ | Image _ | Document _ | Audio _ ->
+  | Text _ | Thinking _ | RedactedThinking _ | ToolReference _ | Image _ | Document _ | Audio _ ->
     block
 ;;
 

@@ -22,7 +22,7 @@ let all_admitted_snapshot (response : Llm_provider.Types.api_response)
          (function
            | Llm_provider.Types.ToolUse _ -> true
            | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-           | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+           | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
          response.content)
   in
   { Agent_core__.Execution_provider_response_snapshot.response
@@ -3805,7 +3805,7 @@ let test_resume_restores_tool_admission ~settled () =
                   let rec scan i = i + n <= m && (String.sub text i n = needle || scan (i + 1)) in
                   scan 0
                 | Types.Thinking _ | Types.ReasoningDetails _ | Types.RedactedThinking _
-                | Types.ToolUse _ | Types.ToolResult _ | Types.Image _ | Types.Document _
+                | Types.ToolUse _ | Types.ToolResult _ | Types.ToolReference _ | Types.Image _ | Types.Document _
                 | Types.Audio _ -> false)
               message.content
        in

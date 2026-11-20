@@ -90,6 +90,7 @@ let message_has_responses_raw_reasoning (msg : message) =
       | Thinking _
       | ReasoningDetails _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -115,6 +116,7 @@ let validate_projected_opaque_reasoning (messages : message list) =
             | Thinking _
             | ReasoningDetails _
             | ToolUse _
+            | ToolReference _
             | ToolResult _
             | Image _
             | Document _
@@ -142,6 +144,8 @@ let responses_tool_json tool =
 
 let content_string_of_tool_result ~content ~content_blocks =
   match content_blocks with
+  | Some blocks when List.exists (function ToolReference _ -> true | _ -> false) blocks ->
+    Utf8_sanitize.sanitize content
   | Some blocks ->
     Yojson.Safe.to_string (`List (List.map Api_common.content_block_to_json blocks))
   | None -> Utf8_sanitize.sanitize content
@@ -207,7 +211,7 @@ let input_content_part_of_block = function
           [ "type", `String "input_audio"
           ; "input_audio", `Assoc [ "data", `String data; "format", `String format ]
           ])
-  | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
+  | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _ ->
     None
 ;;
 
@@ -261,7 +265,7 @@ let assistant_output_item_of_block ?phase = function
           ; "name", `String name
           ; "arguments", `String (Yojson.Safe.to_string input)
           ])
-  | Thinking _ | Text _ | ToolResult _ | Image _ | Document _ | Audio _ -> None
+  | Thinking _ | Text _ | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> None
 ;;
 
 (* Responses function outputs accept an array of input_text/input_image/input_file,
@@ -289,7 +293,7 @@ let rec tool_output_parts = function
     :: (List.concat_map tool_output_parts blocks
         @ [ input_text_content_part ("End nested tool result " ^ identity) ])
   | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-    | ToolResult _ | Document _ | Audio _) as block ->
+    | ToolReference _ | ToolResult _ | Document _ | Audio _) as block ->
     [ input_text_content_part
         (Yojson.Safe.to_string (Api_common.content_block_to_json block)) ]
 ;;
@@ -319,6 +323,7 @@ let tool_result_items blocks =
     | ReasoningDetails _
     | RedactedThinking _
     | ToolUse _
+    | ToolReference _
     | Image _
     | Document _
     | Audio _ -> None)
@@ -352,7 +357,7 @@ let input_items_of_native_groups content replay =
          let parts = List.map (function
            | Text text -> output_text_content_part text
            | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-           | ToolResult _ | Image _ | Document _ | Audio _ ->
+           | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ ->
              invalid_arg "responses_replay:message_content_kind") blocks in
          [`Assoc (Response_replay.phase_fields phase @
            ["type", `String "message"; "role", `String "assistant"; "content", `List parts])]
@@ -369,7 +374,7 @@ let input_items_of_message (msg : message) =
     let non_tool_content =
       List.filter
         (function
-          | ToolResult _ -> false
+          | ToolResult _ | ToolReference _ -> false
           | Text _
           | Thinking _
           | ReasoningDetails _
@@ -577,6 +582,7 @@ let project_history ?(tools_present = false) config messages =
       | ReasoningDetails _
       | Text _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -861,7 +867,7 @@ let content_and_replay_of_output ~drop_function_call output =
                  (function
                    | ToolUse _ -> true
                    | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-                   | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+                   | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ -> false)
                  blocks)
           in
           blocks, unreadable_rev, tool_calls + readable_calls
@@ -1048,6 +1054,7 @@ let parse_response_result json_str =
             | Thinking _
             | ReasoningDetails _
             | RedactedThinking _
+            | ToolReference _
             | ToolResult _
             | Image _
             | Document _

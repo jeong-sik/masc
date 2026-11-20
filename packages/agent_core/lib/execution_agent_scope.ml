@@ -713,6 +713,7 @@ let tool_result_of_block durable = function
   | Llm_provider.Types.ReasoningDetails _
   | Llm_provider.Types.RedactedThinking _
   | Llm_provider.Types.ToolUse _
+  | Llm_provider.Types.ToolReference _
   | Llm_provider.Types.ToolResult _
   | Llm_provider.Types.Image _
   | Llm_provider.Types.Document _

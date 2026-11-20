@@ -40,6 +40,7 @@ let project_history ?(tools_present = false) config messages =
       | RedactedThinking _
       | Text _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -891,7 +892,7 @@ let%test "parse_ollama_response maps done_reason=tool_calls to StopToolUse" =
           | Types.Thinking _
           | Types.ReasoningDetails _
           | Types.RedactedThinking _
-          | Types.ToolResult _
+          | Types.ToolReference _ | Types.ToolResult _
           | Types.Image _
           | Types.Document _
           | Types.Audio _ )
@@ -991,7 +992,7 @@ let%test "parse_ollama_response extracts thinking block from message" =
          | Types.ReasoningDetails _
          | Types.RedactedThinking _
          | Types.ToolUse _
-         | Types.ToolResult _
+         | Types.ToolReference _ | Types.ToolResult _
          | Types.Image _
          | Types.Document _
          | Types.Audio _ )
@@ -1016,7 +1017,7 @@ let%test "Ollama sync flush retains unfinished reasoning as reasoning" =
   | Ok response ->
       let thinking_text = function
         | Thinking {content;_} -> Some content
-        | Text _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+        | Text _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolReference _ | ToolResult _
         | Image _ | Document _ | Audio _ -> None in
       let blocks = List.map thinking_text response.content in
       List.for_all Option.is_some blocks

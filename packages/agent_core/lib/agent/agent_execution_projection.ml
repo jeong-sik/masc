@@ -783,7 +783,7 @@ let tool_invocations t =
       Ok (List.filter_map (function
         | Llm_provider.Types.ToolUse use -> Some use.name
         | Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-        | ToolResult _ | Image _ | Document _ | Audio _ -> None) response.content)
+        | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> None) response.content)
     | Journal.Agent_run_state | Journal.Agent_turn_state | Journal.Output_block_state _
     | Journal.Tool_invocation_state _ | Journal.Tool_attempt_state ->
       invalid "provider attempt holds another node's state"
@@ -839,12 +839,12 @@ let tool_invocations t =
           | Journal.Tool_invocation_state {input=None; result=Some _}
           | Journal.Tool_invocation_state
               {input=Some (Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _
-                          | RedactedThinking _ | ToolResult _ | Image _ | Document _ | Audio _);
+                          | RedactedThinking _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _);
                result=Some _}
           | Journal.Tool_invocation_state
               {input=Some (Llm_provider.Types.ToolUse _);
                result=Some (Llm_provider.Types.Text _ | Thinking _ | ReasoningDetails _
-                           | RedactedThinking _ | ToolUse _ | Image _ | Document _ | Audio _)}
+                           | RedactedThinking _ | ToolUse _ | ToolReference _ | Image _ | Document _ | Audio _)}
           | Journal.Agent_run_state | Journal.Agent_turn_state
           | Journal.Provider_attempt_state _ | Journal.Output_block_state _
           | Journal.Tool_attempt_state ->

@@ -311,6 +311,7 @@ let admit_tool_use_names ~unreadable_tool_uses tool_index blocks =
          | ReasoningDetails _
          | RedactedThinking _
          | ToolResult _
+         | ToolReference _
          | Image _
          | Document _
          | Audio _ -> retain block)
@@ -620,7 +621,7 @@ let repair_utf8_tool_result : tool_result -> tool_result = function
     let repair_block = function
       | Text text -> Text (Llm_provider.Utf8_sanitize.repair_invalid_utf8 text)
       | ( Thinking _ | RedactedThinking _ | ReasoningDetails _ | ToolUse _
-        | ToolResult _ | Image _ | Document _ | Audio _ ) as block -> block
+        | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ ) as block -> block
     in
     Ok
       { content = Llm_provider.Utf8_sanitize.repair_invalid_utf8 content

@@ -10,7 +10,7 @@ let base_messages agent =
 let sanitize_user_input_blocks =
   List.map (function
     | Text s -> Text (Llm_provider.Utf8_sanitize.sanitize s)
-    | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _) as block -> block)
+    | (Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _) as block -> block)
 ;;
 
 let trace_prompt_of_blocks blocks =
@@ -36,7 +36,7 @@ let trace_prompt_of_blocks blocks =
              "[audio:%s data_chars=%d]"
              media_type
              (History.media_source_wire_length source))
-      | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
+      | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ | ToolReference _ ->
         None)
   in
   match String.concat "\n" parts with
@@ -53,7 +53,8 @@ let validate_user_input_blocks blocks =
         | ReasoningDetails _ -> Some "ReasoningDetails"
         | RedactedThinking _ -> Some "RedactedThinking"
         | ToolUse _ -> Some "ToolUse"
-        | ToolResult _ -> Some "ToolResult")
+        | ToolResult _ -> Some "ToolResult"
+        | ToolReference _ -> Some "ToolReference")
       blocks
   in
   match unsupported with

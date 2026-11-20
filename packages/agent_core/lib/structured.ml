@@ -25,6 +25,7 @@ let text_block : Llm_provider.Types.content_block -> string option = function
   | Document _
   | Audio _
   | ToolUse _
+  | ToolReference _
   | ToolResult _ -> None
 ;;
 
@@ -91,7 +92,7 @@ let response_has_tool_calls (response : api_response) =
       match block with
       | ToolUse _ -> true
       | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-      | Image _ | Document _ | Audio _ | ToolResult _ -> false)
+      | Image _ | Document _ | Audio _ | ToolReference _ | ToolResult _ -> false)
     response.content
 ;;
 

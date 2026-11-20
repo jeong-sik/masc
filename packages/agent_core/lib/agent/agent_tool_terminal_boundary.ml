@@ -14,7 +14,7 @@ let tool_use_blocks blocks =
       | Thinking _
       | ReasoningDetails _
       | RedactedThinking _
-      | ToolResult _
+      | ToolReference _ | ToolResult _
       | Image _
       | Document _
       | Audio _ -> None)
@@ -137,6 +137,7 @@ let recovered_batch_completion ~invocations tool_results =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolUse _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ -> None)

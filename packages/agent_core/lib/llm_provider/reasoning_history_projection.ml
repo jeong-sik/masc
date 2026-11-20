@@ -167,7 +167,7 @@ let validate_and_classify (messages : _ Types.message_with list) =
 let content_has_reasoning content =
   List.exists (function
     | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> true
-    | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
+    | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> false)
     content
 ;;
 
@@ -260,7 +260,7 @@ let content_has_tool_use content =
     | Thinking _
     | ReasoningDetails _
     | RedactedThinking _
-    | ToolResult _
+    | ToolReference _ | ToolResult _
     | Image _
     | Document _
     | Audio _ -> false)
@@ -277,7 +277,7 @@ let without_reasoning content =
   filter_content
     (function
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ -> false
-      | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ -> true)
+      | Text _ | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> true)
     content
 ;;
 
@@ -287,7 +287,7 @@ let content_has_generic_reasoning content =
     | Text _
     | RedactedThinking _
     | ToolUse _
-    | ToolResult _
+    | ToolReference _ | ToolResult _
     | Image _
     | Document _
     | Audio _ -> false)
@@ -301,7 +301,7 @@ let without_generic_reasoning content =
       | Text _
       | RedactedThinking _
       | ToolUse _
-      | ToolResult _
+      | ToolReference _ | ToolResult _
       | Image _
       | Document _
       | Audio _ -> true)
@@ -322,7 +322,7 @@ let unsupported_reasoning_block ~reasoning_block_supported content =
       | ReasoningDetails _
       | RedactedThinking _
       | ToolUse _
-      | ToolResult _
+      | ToolReference _ | ToolResult _
       | Image _
       | Document _
       | Audio _ )

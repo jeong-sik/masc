@@ -52,6 +52,7 @@ let classify_blocks blocks =
        | Llm_provider.Types.RedactedThinking _
        | Llm_provider.Types.ToolUse _
        | Llm_provider.Types.ToolResult _
+       | Llm_provider.Types.ToolReference _
        | Llm_provider.Types.Image _
        | Llm_provider.Types.Document _
        | Llm_provider.Types.Audio _ -> text, thinking, details)

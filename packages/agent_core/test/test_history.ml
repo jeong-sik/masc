@@ -326,6 +326,7 @@ let non_media_blocks =
             ]
         } )
   ; "redacted thinking", P.RedactedThinking "opaque"
+  ; "tool reference", P.ToolReference { tool_name = "masc_board_list" }
   ; ( "tool use"
     , P.ToolUse
         { id = "call_7"; name = "read"; input = `Assoc [ "path", `String "/tmp/x" ] } )
@@ -339,6 +340,10 @@ let non_media_blocks =
     , history_tool_result ~outcome:(failed P.Validation_error) ~content:"bad args" None )
   ; ( "structured tool result"
     , history_tool_result ~content:"line one" (Some [ P.Text "line one" ]) )
+  ; ( "tool reference result"
+    , history_tool_result
+        ~content:"now callable:\n- masc_board_list"
+        (Some [ P.ToolReference { tool_name = "masc_board_list" } ]) )
   ; ( "failed structured tool result"
     , history_tool_result
         ~outcome:(failed ~error_class:P.Deterministic P.Non_retryable_tool_error)
@@ -457,7 +462,7 @@ let test_same_bytes_as_api_common () =
     (fun (name, history) ->
        match history with
        | P.Text _ | P.Thinking _ | P.ReasoningDetails _ | P.RedactedThinking _ | P.ToolUse _
-       | P.Image _ | P.Document _ | P.Audio _ ->
+       | P.ToolReference _ | P.Image _ | P.Document _ | P.Audio _ ->
          Alcotest.(check string)
            name
            (Yojson.Safe.to_string

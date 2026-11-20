@@ -315,6 +315,7 @@ let tool_use_count (content : Types.content_block list) =
        | ReasoningDetails _
        | RedactedThinking _
        | ToolResult _
+       | ToolReference _
        | Image _
        | Document _
        | Audio _ -> acc)

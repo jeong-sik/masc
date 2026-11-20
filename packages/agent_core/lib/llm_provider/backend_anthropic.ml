@@ -183,6 +183,7 @@ let parse_response json =
         | ReasoningDetails _
         | RedactedThinking _
         | ToolResult _
+        | ToolReference _
         | Image _
         | Document _
         | Audio _ -> false)
@@ -431,6 +432,7 @@ let project_history ?(tools_present = false) config messages =
       | ReasoningDetails _
       | Text _
       | ToolUse _
+      | ToolReference _
       | ToolResult _
       | Image _
       | Document _
@@ -469,6 +471,7 @@ let rec anthropic_content_block_to_json = function
   | ToolUse { id; name; input } ->
     Api_common.content_block_to_json
       (ToolUse { id = Tool_call_id_wire.wire_id_for_anthropic id; name; input })
+  | ToolReference _ as block -> Api_common.content_block_to_json block
   | ToolResult { tool_use_id; outcome; content_blocks = Some blocks; _ } ->
     `Assoc
       [ "type", `String "tool_result"
@@ -485,7 +488,7 @@ let rec anthropic_content_block_to_json = function
   | ( Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | Audio _ ) as block
     -> Api_common.content_block_to_json block
 and anthropic_tool_result_content_block_to_json = function
-  | (Text _ | Image _ | Document _) as block -> anthropic_content_block_to_json block
+  | (Text _ | ToolReference _ | Image _ | Document _) as block -> anthropic_content_block_to_json block
   | (Thinking _ | ReasoningDetails _ | RedactedThinking _
     | ToolUse _ | ToolResult _ | Audio _) as block ->
     (* Tool output is data, not a nested assistant turn. Messages accepts

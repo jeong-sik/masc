@@ -38,7 +38,7 @@ let result (_,acc)=match Acc.finalize_stream_acc acc with
 let fails s=match Acc.finalize_stream_acc(snd s)with
   | Error _->() | Ok _->Alcotest.fail "contradictory stream was accepted"
 let texts response=List.filter_map(function Thinking{content;_}->Some content
-  | Llm_provider.Types.Text _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.ToolUse _| Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->None)response.content
+  | Llm_provider.Types.Text _| Llm_provider.Types.RedactedThinking _| Llm_provider.Types.ReasoningDetails _| Llm_provider.Types.ToolUse _| Llm_provider.Types.ToolReference _ | Llm_provider.Types.ToolResult _| Llm_provider.Types.Image _| Llm_provider.Types.Document _| Llm_provider.Types.Audio _->None)response.content
 let check expected s=Alcotest.(check(list string))"canonical reasoning"expected(texts(result s))
 let persisted_input response =
   let response=Complete_common.patch_telemetry response ~config None in

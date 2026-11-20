@@ -324,12 +324,12 @@ let emit_synthetic_events (response : api_response) on_event =
            | Document _ -> "document", None, None
            | Audio _ -> "audio", None, None
            | RedactedThinking data -> "redacted_thinking", Some data, None
-           | ToolResult _ -> "text", None, None
+           | ToolReference _ | ToolResult _ -> "text", None, None
          in
          (match block with
           | ToolUse _ -> emit_unreadable_due ()
-          | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolResult _
-          | Image _ | Document _ | Audio _ -> ());
+          | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolReference _
+          | ToolResult _ | Image _ | Document _ | Audio _ -> ());
          let index = take_index () in
          on_event (ContentBlockStart { index; content_type; tool_id; tool_name });
          (match block with
@@ -358,7 +358,7 @@ let emit_synthetic_events (response : api_response) on_event =
             on_event
               (ContentBlockDelta
                  { index; delta = MediaDelta { media_type; source } })
-          | RedactedThinking _ | ToolResult _ -> ());
+          | RedactedThinking _ | ToolReference _ | ToolResult _ -> ());
          on_event (ContentBlockStop { index });
          index)
       response.content

@@ -51,7 +51,7 @@ let project ~find_node event =
                   ~tool_use_id:use.id ~turn ~schedule ~completion in
               Ok (agent_name,invocation,tool_name,use.input)
           | None | Some (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-              | ToolResult _ | Image _ | Document _ | Audio _) -> invalid ())
+              | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _) -> invalid ())
        | Agent_run_state | Agent_turn_state | Provider_attempt_state _ | Output_block_state _
        | Tool_attempt_state -> invalid ())
     | Agent_run _ | Agent_turn _ | Provider_attempt _ | Output_block _ | Tool_attempt -> invalid () in
@@ -109,7 +109,7 @@ let project ~find_node event =
              ?content_blocks:result.content_blocks ~content:result.content result.outcome in
          Ok (observed (ToolCompleted {agent_name;invocation;tool_name;output}))
        | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-       | ToolResult _ | Image _ | Document _ | Audio _ -> Error (Invalid_tool_fact node_id))
+       | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _ -> Error (Invalid_tool_fact node_id))
   | Node_closed {node_id;terminal=Succeeded} ->
     let* view = read node_id in
     (match Event.node_kind view.node with

@@ -91,6 +91,7 @@ let seen_of_blocks blocks =
        | Types.ToolUse { id; _ } -> { seen with tool_use_ids = seen.tool_use_ids @ [ id ] }
        | Types.ReasoningDetails _
        | Types.ToolResult _
+       | Types.ToolReference _
        | Types.Image _
        | Types.Document _
        | Types.Audio _ -> seen)

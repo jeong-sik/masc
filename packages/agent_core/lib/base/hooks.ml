@@ -88,6 +88,7 @@ let extract_reasoning (messages : message list) : reasoning_summary =
              | Text _
              | RedactedThinking _
              | ToolUse _
+             | ToolReference _
              | ToolResult _
              | Image _
              | Document _

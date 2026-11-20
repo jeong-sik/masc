@@ -739,7 +739,7 @@ let rec raw_trace_content_block_to_json (block : Llm_provider.Types.content_bloc
               else key, value)
             fields)
      | json -> json)
-  | Text _ | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _ ->
+  | Text _ | ToolUse _ | ToolResult _ | ToolReference _ | Image _ | Document _ | Audio _ ->
     Llm_provider.Api_common.content_block_to_json block
 ;;
 
@@ -763,6 +763,8 @@ let observe_assistant_block (block : Llm_provider.Types.content_block) =
     Observable_block { block_kind = "tool_use"; json = raw_trace_content_block_to_json block }
   | ToolResult _ ->
     Observable_block { block_kind = "tool_result"; json = raw_trace_content_block_to_json block }
+  | ToolReference _ ->
+    Observable_block { block_kind = "tool_reference"; json = raw_trace_content_block_to_json block }
   | Image _ ->
     Observable_block { block_kind = "image"; json = raw_trace_content_block_to_json block }
   | Document _ ->

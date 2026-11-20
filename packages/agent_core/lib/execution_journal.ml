@@ -795,6 +795,7 @@ module Reducer = struct
         | Llm_provider.Types.ReasoningDetails _
         | Llm_provider.Types.RedactedThinking _
         | Llm_provider.Types.ToolResult _
+        | Llm_provider.Types.ToolReference _
         | Llm_provider.Types.Image _
         | Llm_provider.Types.Document _
         | Llm_provider.Types.Audio _ -> Error (Tool_input_snapshot_not_tool_use node_id))
@@ -819,6 +820,7 @@ module Reducer = struct
             | Llm_provider.Types.ReasoningDetails _
             | Llm_provider.Types.RedactedThinking _
             | Llm_provider.Types.ToolUse _
+            | Llm_provider.Types.ToolReference _
             | Llm_provider.Types.Image _
             | Llm_provider.Types.Document _
             | Llm_provider.Types.Audio _ )
@@ -1739,6 +1741,7 @@ let stage_open_tool_invocation
         | (Event.Tool_invocation _, Some (Llm_provider.Types.ReasoningDetails _))
         | (Event.Tool_invocation _, Some (Llm_provider.Types.RedactedThinking _))
         | (Event.Tool_invocation _, Some (Llm_provider.Types.ToolResult _))
+        | (Event.Tool_invocation _, Some (Llm_provider.Types.ToolReference _))
         | (Event.Tool_invocation _, Some (Llm_provider.Types.Image _))
         | (Event.Tool_invocation _, Some (Llm_provider.Types.Document _))
         | (Event.Tool_invocation _, Some (Llm_provider.Types.Audio _)) -> false

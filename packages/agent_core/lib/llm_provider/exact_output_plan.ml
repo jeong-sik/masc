@@ -225,11 +225,12 @@ let[@warning "-32"] normalization_error_name = function
 
 let content_uses_exact_cross_feature = function
   | Types.ToolUse _
+  | Types.ToolReference _
   | Types.ToolResult _
   | Types.Thinking _
   | Types.ReasoningDetails _
   | Types.RedactedThinking _ -> true
-  | Types.Text _ | Types.Image _ | Types.Document _ | Types.Audio _ -> false
+  | Types.Text _ | Types.ToolReference _ | Types.Image _ | Types.Document _ | Types.Audio _ -> false
 ;;
 
 let contains_reserved_response_phase_metadata metadata =
@@ -316,6 +317,7 @@ let rec content_capability_rejection capabilities = function
     | Types.ReasoningDetails _
     | Types.RedactedThinking _
     | Types.ToolUse _
+    | Types.ToolReference _
     | Types.ToolResult _
     | Types.Image _
     | Types.Document _ )

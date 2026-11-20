@@ -309,7 +309,7 @@ let extract_reasoning_content_json (resp : api_response) (json : Yojson.Safe.t)
        | Some r when String.trim r <> "" ->
          (match resp.content with
           | Thinking { content; _ } :: _ when String.equal content r -> resp
-          | (Text _ | (ReasoningDetails _ | (RedactedThinking _ | (ToolUse _ | (ToolResult _ | (Image _ | (Document _ | Audio _)))))))::_
+          | (Text _ | (ReasoningDetails _ | (RedactedThinking _ | (ToolUse _ | (ToolResult _ | (ToolReference _ | (Image _ | (Document _ | Audio _))))))))::_
           | [] | Thinking _::_ -> let thinking_block = Thinking { signature = None; content = r } in
             { resp with content = thinking_block :: resp.content })
        | Some _ | None -> resp)
@@ -692,7 +692,7 @@ let%test "extract_reasoning_content prepends thinking block" =
   | [ Thinking { content = "step by step"; _ }; Text "answer" ] -> true
   | []
   | [ (Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _
-      | ToolUse _ | ToolResult _ | Image _ | Document _ | Audio _) ]
+      | ToolUse _ | ToolReference _ | ToolResult _ | Image _ | Document _ | Audio _) ]
   | [ _; _ ]
   | _ :: _ :: _ :: _ -> false
 ;;

@@ -576,6 +576,7 @@ type request_policy =
   ; anthropic_thinking_control : anthropic_thinking_control option
   ; pricing_source : Pricing.source
   ; cache_session_wire : cache_session_wire
+  ; cache_session_header : string option
   ; supports_provider_routing_filter : bool
   }
 
@@ -589,6 +590,11 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
     | Some entry -> entry.Model_catalog.cache_session_wire
     | None -> No_cache_session_wire
   in
+  let cache_session_header =
+    match provider_entry with
+    | Some entry -> entry.Model_catalog.cache_session_header
+    | None -> None
+  in
   let supports_provider_routing_filter =
     match provider_entry with
     | Some entry -> entry.Model_catalog.supports_provider_routing_filter
@@ -600,6 +606,7 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
     ; anthropic_thinking_control = None
     ; pricing_source
     ; cache_session_wire
+    ; cache_session_header
     ; supports_provider_routing_filter
     }
   | Ok model_id ->
@@ -617,6 +624,7 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
   ; anthropic_thinking_control
   ; pricing_source
   ; cache_session_wire
+  ; cache_session_header
   ; supports_provider_routing_filter
   }
 ;;
@@ -625,6 +633,7 @@ let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provi
     ~capabilities ~model_id =
   let pricing_source = Pricing.of_provider_entry ~catalog ~provider in
   let cache_session_wire = provider.Model_catalog.cache_session_wire in
+  let cache_session_header = provider.Model_catalog.cache_session_header in
   let supports_provider_routing_filter =
     provider.Model_catalog.supports_provider_routing_filter
   in
@@ -644,6 +653,7 @@ let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provi
     ; anthropic_thinking_control = None
     ; pricing_source
     ; cache_session_wire
+    ; cache_session_header
     ; supports_provider_routing_filter
     }
   | Some row ->
@@ -659,6 +669,7 @@ let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provi
     ; anthropic_thinking_control
     ; pricing_source
     ; cache_session_wire
+    ; cache_session_header
     ; supports_provider_routing_filter
     }
 ;;
@@ -701,6 +712,7 @@ let request_policy_capabilities policy = capabilities_of_catalog_answer policy.c
 let request_policy_anthropic_thinking_control policy = policy.anthropic_thinking_control
 let request_policy_pricing_source policy = policy.pricing_source
 let request_policy_cache_session_wire policy = policy.cache_session_wire
+let request_policy_cache_session_header policy = policy.cache_session_header
 let request_policy_supports_provider_routing_filter policy =
   policy.supports_provider_routing_filter
 

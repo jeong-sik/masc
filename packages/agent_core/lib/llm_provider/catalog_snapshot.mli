@@ -64,6 +64,10 @@ val supports_extended_cache_ttl : t -> provider_id:string -> bool
 val cache_session_wire : t -> provider_id:string -> Capability_vocab.cache_session_wire
 (** The prompt-cache session wire field declared by the model-policy provider of
     [provider_id]. An unknown provider returns [No_cache_session_wire]. *)
+val cache_session_header : t -> provider_id:string -> string option
+(** The optional HTTP header name declared by the model-policy provider of
+    [provider_id] for per-session prompt-cache routing (for example
+    ["x-opencode-session"]). An unknown provider returns [None]. *)
 val supports_provider_routing_filter : t -> provider_id:string -> bool
 (** The model-policy provider of [provider_id] declares upstream provider
     routing filter support ([provider: { only; ignore }]). An unknown provider

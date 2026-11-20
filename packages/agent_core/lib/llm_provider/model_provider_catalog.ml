@@ -32,6 +32,7 @@ type entry =
   ; supports_parallel_tool_suppression : bool
   ; supports_extended_cache_ttl : bool
   ; cache_session_wire : Capability_vocab.cache_session_wire
+  ; cache_session_header : string option
   ; supports_provider_routing_filter : bool
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
@@ -115,6 +116,7 @@ let known_keys =
   ; "supports_parallel_tool_suppression"
   ; "supports_extended_cache_ttl"
   ; "cache_session_wire"
+  ; "cache_session_header"
   ; "supports_provider_routing_filter"
   ; "serves_bare_models"
   ]
@@ -254,6 +256,53 @@ let capabilities_base_by_identity_kind_field ~entry_id ~identity_kinds toml =
        loop [] [] pairs)
 ;;
 
+let is_rfc7230_tchar = function
+  | '0' .. '9' | 'a' .. 'z' | 'A' .. 'Z'
+  | '!' | '#' | '$' | '%' | '&' | '\'' | '*' | '+' | '-' | '.' | '^' | '_' | '`' | '|' | '~' ->
+    true
+  | _ -> false
+;;
+
+let forbidden_cache_session_headers =
+  [ "authorization"
+  ; "x-api-key"
+  ; "x-goog-api-key"
+  ; "host"
+  ; "content-length"
+  ; "content-type"
+  ; "connection"
+  ; "transfer-encoding"
+  ; "cookie"
+  ; "proxy-authorization"
+  ]
+;;
+
+let cache_session_header_field ~entry_id toml =
+  match exact_non_empty_string_field ~entry_id "cache_session_header" toml with
+  | Error _ as e -> e
+  | Ok None -> Ok None
+  | Ok (Some raw) ->
+    let len = String.length raw in
+    let rec all_tchar i = i >= len || (is_rfc7230_tchar raw.[i] && all_tchar (i + 1)) in
+    if not (all_tchar 0)
+    then
+      Error
+        (Printf.sprintf
+           "provider entry %S field \"cache_session_header\" must be a valid RFC 7230 header token; got %S"
+           entry_id
+           raw)
+    else (
+      let normalized = String.lowercase_ascii raw in
+      if List.mem normalized forbidden_cache_session_headers
+      then
+        Error
+          (Printf.sprintf
+             "provider entry %S field \"cache_session_header\" forbids auth/hop-by-hop header %S"
+             entry_id
+             normalized)
+      else Ok (Some normalized))
+;;
+
 let parse_entry provider_toml =
   let* id =
     match exact_non_empty_string_field ~entry_id:"<unknown>" "id" provider_toml with
@@ -347,6 +396,7 @@ let parse_entry provider_toml =
               raw
               (String.concat ", " Capability_vocab.cache_session_wire_values)))
   in
+  let* cache_session_header = cache_session_header_field ~entry_id:id provider_toml in
   let* supports_provider_routing_filter =
     match Otoml.find_opt provider_toml Otoml.get_boolean
             [ "supports_provider_routing_filter" ] with
@@ -384,6 +434,7 @@ let parse_entry provider_toml =
     ; supports_parallel_tool_suppression
     ; supports_extended_cache_ttl
     ; cache_session_wire
+    ; cache_session_header
     ; supports_provider_routing_filter
     ; serves_bare_models
     }

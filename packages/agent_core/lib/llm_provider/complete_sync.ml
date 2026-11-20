@@ -685,11 +685,12 @@ let complete_http
           | Error reason -> Error (Http_client.AcceptRejected { reason }), None
         in
         let* auth_headers = Provider_config.resolve_auth_headers config in
+        let effective_headers = Provider_config.effective_request_headers config in
         let base_headers =
           match config.kind with
           | Provider_config.Anthropic ->
-            Backend_anthropic.request_headers ~body:body_str config.headers @ auth_headers
-          | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> config.headers @ auth_headers
+            Backend_anthropic.request_headers ~body:body_str effective_headers @ auth_headers
+          | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> effective_headers @ auth_headers
         in
         let request_headers =
           ("content-length", string_of_int body_len)

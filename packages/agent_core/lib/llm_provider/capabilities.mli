@@ -421,6 +421,10 @@ val request_policy_cache_session_wire : request_policy -> cache_session_wire
 (** The prompt-cache session routing wire field declared by the selected
     provider entry, or {!No_cache_session_wire} when undeclared or anonymous. *)
 
+val request_policy_cache_session_header : request_policy -> string option
+(** The optional HTTP header name declared by the selected provider entry for
+    per-session prompt-cache routing, or [None] when undeclared or anonymous. *)
+
 val request_policy_supports_provider_routing_filter : request_policy -> bool
 (** Whether the selected provider entry declares upstream provider routing
     filter support ([provider: { only; ignore }]), or [false] when undeclared

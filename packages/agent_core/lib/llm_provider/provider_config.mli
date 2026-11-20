@@ -390,6 +390,25 @@ val validated_cache_session_key : t -> string option
     [None] otherwise so invalid keys are silently omitted instead of producing
     a 400 wire rejection. *)
 
+val cache_session_header : t -> string option
+(** Optional lowercase HTTP header name declared by this config's selected
+    provider policy for per-session prompt-cache routing (for example
+    ["x-opencode-session"]), or [None] when undeclared or anonymous. *)
+
+val validated_cache_session_header_value : t -> string option
+(** Trimmed {!field-cache_session_key} when present, non-empty, at most 256
+    bytes, and composed strictly of visible ASCII bytes ([0x21..0x7e],
+    rejecting CR/LF, whitespace, control characters, and non-ASCII bytes so it
+    is safe for HTTP header emission). Returns [None] otherwise. *)
+
+val effective_request_headers : t -> (string * string) list
+(** Request headers derived from {!field-headers}. When the selected provider
+    declares {!cache_session_header} and {!validated_cache_session_header_value}
+    returns [Some value], strips any existing header matching that name
+    case-insensitively and prepends [(header_name, value)]. Otherwise returns
+    {!field-headers} unchanged (preserving static fallback headers when
+    [cache_session_key = None] or invalid). *)
+
 val supports_provider_routing_filter : t -> bool
 (** Whether this config's selected provider policy declares upstream provider
     routing filter support ([provider: { only; ignore }]), or [false] when

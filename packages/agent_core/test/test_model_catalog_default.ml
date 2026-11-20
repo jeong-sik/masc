@@ -1515,6 +1515,80 @@ let test_openrouter_claude_prompt_cache_wire_declarations () =
     ]
 ;;
 
+let test_provider_cache_session_header_declarations () =
+  let catalog =
+    Model_catalog_test_support.load_repo_model_catalog
+      ~suite:"provider cache_session_header"
+  in
+  let snapshot =
+    match Llm_provider.Catalog_snapshot.of_catalogs ~models:(Some catalog) ~providers:None with
+    | Ok s -> s
+    | Error err -> Alcotest.fail (Llm_provider.Catalog_snapshot.error_to_string err)
+  in
+  check
+    (option string)
+    "opencode_go declares x-opencode-session"
+    (Some "x-opencode-session")
+    (Llm_provider.Catalog_snapshot.cache_session_header snapshot ~provider_id:"opencode_go");
+  List.iter
+    (fun provider_id ->
+       check
+         (option string)
+         (provider_id ^ " defaults cache_session_header None")
+         None
+         (Llm_provider.Catalog_snapshot.cache_session_header snapshot ~provider_id))
+    [ "openrouter"; "openai"; "openai-responses"; "claude"; "glm-coding"; "mistral" ];
+  let parse_provider_header raw_header =
+    Model_catalog.of_toml_string
+      ~source:"cache_session_header validation"
+      (Printf.sprintf
+         {|[[providers]]
+id = "custom-header-provider"
+kind = "openai_compat"
+base_url = "https://example.invalid"
+request_path = "/v1/chat/completions"
+auth = "none"
+capabilities_base = "openai_chat"
+cache_session_header = %S
+|}
+         raw_header)
+  in
+  (match parse_provider_header "X-Custom-Session_1.2" with
+   | Ok parsed ->
+     (match Model_catalog.provider_entries parsed with
+      | [ (entry : Model_catalog.provider_entry) ] ->
+        check
+          (option string)
+          "valid RFC 7230 token is lowercased"
+          (Some "x-custom-session_1.2")
+          entry.cache_session_header
+      | _ -> Alcotest.fail "expected single provider entry")
+   | Error msg -> Alcotest.failf "valid RFC 7230 token should parse: %s" msg);
+  List.iter
+    (fun bad ->
+       match parse_provider_header bad with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.failf "invalid cache_session_header %S must fail closed" bad)
+    [ ""
+    ; " x-session"
+    ; "x-session "
+    ; "x-bad header"
+    ; "x-bad:colon"
+    ; "x-bad\r\nheader"
+    ; "Authorization"
+    ; "authorization"
+    ; "X-API-Key"
+    ; "x-goog-api-key"
+    ; "Host"
+    ; "Content-Length"
+    ; "Content-Type"
+    ; "Connection"
+    ; "Transfer-Encoding"
+    ; "Cookie"
+    ; "Proxy-Authorization"
+    ]
+;;
+
 let () =
   run
     "model catalog default"
@@ -1633,6 +1707,10 @@ let () =
             "openrouter claude prompt_cache_wire declarations"
             `Quick
             test_openrouter_claude_prompt_cache_wire_declarations
+        ; test_case
+            "provider cache_session_header declarations and validation"
+            `Quick
+            test_provider_cache_session_header_declarations
         ; test_case
             "empty capability vocab value is rejected"
             `Quick

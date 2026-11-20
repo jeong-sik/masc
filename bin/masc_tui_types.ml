@@ -1586,7 +1586,7 @@ end
    opens all of them.
 
    Full mode is neither filtered nor folded: it exists to show every pass. *)
-let project_memory_history ~visibility entries =
+let project_memory_history ~ko ~visibility entries =
   match visibility with
   | Memory_hidden | Memory_full -> entries
   | Memory_summary ->
@@ -1605,7 +1605,12 @@ let project_memory_history ~visibility entries =
         ( { entry with
             me_memory_summary =
               Option.map
-                (fun summary -> Printf.sprintf "%s · +%d earlier" summary folded)
+                (* How many earlier passes this one folds: a count, never
+                   "+N" (RFC tui-one-screen-grammar 6.3). *)
+                (fun summary ->
+                  summary ^ " · "
+                  ^ Printf.sprintf (if ko then "이전 %s건" else "%s earlier")
+                      (Masc_tui_value.Count.grouped folded))
                 entry.me_memory_summary
           }
         , extra )

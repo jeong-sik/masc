@@ -25,9 +25,10 @@ type ('a, 'error) observation =
           it and says it is stale. A retry in flight stays [Stale] until it
           answers. *)
   | Failed of 'error
-      (** Failed with nothing read before it. Explicit refresh retains this
-          known cause until its replacement settles; {!in_flight} distinguishes
-          the pending retry from a settled failure. No value is invented. *)
+      (** Failed with nothing read before it. A retry of the same key, asked
+          ({!refresh}) or automatic ({!start}), retains this known cause until
+          its replacement settles; {!in_flight} distinguishes the pending
+          retry from a settled failure. No value is invented. *)
 
 type 'a view = ('a, string) observation
 
@@ -47,8 +48,9 @@ val initial : ('k, 'a, 'error) source
 val start : equal:('k -> 'k -> bool) -> ('k, 'a, 'error) source -> key:'k -> ('k, 'a, 'error) reading
 (** Ask for [key]. [Already_loading] when a request for the same key is
     already in flight, so a pane that redraws per keystroke asks once. Asking
-    for a key already shown keeps the last good value on screen while the new
-    request runs, rather than flashing back to {!Loading}. *)
+    for a key already shown keeps the last good value, or the known failure,
+    on screen while the new request runs, rather than flashing back to
+    {!Loading}. *)
 
 val clear : ('k, 'a, 'error) source -> ('k, 'a, 'error) source
 val cancel_pending : reason:'error -> ('k, 'a, 'error) source -> ('k, 'a, 'error) source
@@ -60,8 +62,9 @@ val cancel_pending : reason:'error -> ('k, 'a, 'error) source -> ('k, 'a, 'error
 val refresh : equal:('k -> 'k -> bool) -> ('k, 'a, 'error) source -> key:'k -> ('k, 'a, 'error) reading
 (** Explicitly supersede an outstanding request, including for the same key.
     Retain that key's last good value or known no-value failure while its replacement
-    runs. Only the returned request may settle the source; {!start} keeps its
-    existing same-key sharing behavior. This does not launch any work. *)
+    runs. Only the returned request may settle the source; {!start} instead
+    shares a same-key request already in flight. This does not launch any
+    work. *)
 val invalidate : reason:'error -> ('k, 'a, 'error) source -> ('k, 'a, 'error) source
 (** Mark a retained value stale after a change without retiring its owner.
     Preserve an existing stale reason; a source without a value is unchanged. *)

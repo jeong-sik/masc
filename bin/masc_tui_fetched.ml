@@ -103,7 +103,10 @@ let start_with intent ~equal state ~key =
   | Join, Status_refreshing (request, _, _) when equal request.key key -> Already_loading
   | Refresh, Status_refreshing (current, value, error) when equal current.key key ->
     fresh (fun request -> Status_refreshing (request, value, error))
-  | Refresh, (Status_failed (current, error) | Status_retrying (current, error))
+  (* A retry of a known failure, asked or automatic, keeps the cause on screen
+     until its answer settles, as a refresh keeps the last good value. A
+     joining ask that finds a retry in flight shares it (above). *)
+  | (Join | Refresh), (Status_failed (current, error) | Status_retrying (current, error))
       when equal current.key key ->
     fresh (fun request -> Status_retrying (request, error))
   | (Join | Refresh), Status_ready (current, value) when equal current.key key ->

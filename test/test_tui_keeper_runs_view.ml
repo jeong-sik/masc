@@ -56,8 +56,11 @@ let test_failed_read () =
 let test_retry_after_failure () =
   let state = fresh () in
   answer state (ask state) (Error failure);
-  ignore (ask state);
-  check "a retry with nothing read is loading" "loading" state
+  let retry = ask state in
+  check "a retry with nothing read keeps the failure on screen" ("failed: " ^ failure) state;
+  Alcotest.(check bool) "and the retry is in flight" true (Fetched.in_flight state.Types.fusion_runs);
+  answer state retry (Ok snapshot);
+  check "its answer replaces the failure" "ready: 0 runs" state
 
 let test_rows_kept_on_failure () =
   let state = fresh () in

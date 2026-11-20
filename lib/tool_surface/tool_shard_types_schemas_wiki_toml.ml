@@ -1,6 +1,5 @@
 (** The keeper_wiki_* declarations, read from the binary-embedded
-    [config/tools/*.toml] tree (RFC prompts-and-tool-definitions-outside-ocaml
-    §2.2, migration item 6).
+    [config/tools/*.toml] tree.
 
     Decoded once at module initialization. A missing file or a declaration that
     does not decode refuses the boot rather than advertising a partial wiki

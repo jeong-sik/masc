@@ -1,5 +1,4 @@
-(** The three voice tools, read from [config/tools/keeper_voice_*.toml] (RFC
-    prompts-and-tool-definitions-outside-ocaml §2.2).
+(** The three voice tools, read from [config/tools/keeper_voice_*.toml].
 
     Each value is decoded once at module initialization. A missing file or a
     declaration that does not decode refuses the boot rather than advertising a

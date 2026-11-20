@@ -3,7 +3,7 @@ rfc: "librarian-call-only-proposes-and-one-writer-per-keeper-commits-in-one-line
 title: "Librarian 의 모델 호출은 제안만 하고, 반영은 Keeper 마다 하나인 쓰는 쪽이 기록 한 줄로 한다"
 status: Draft
 created: 2026-11-18
-updated: 2026-11-18
+updated: 2026-11-21
 author: vincent + claude
 supersedes: []
 superseded_by: null
@@ -614,7 +614,7 @@ type rejection = Not_json | Schema_violation of wire_error | Echo_mismatch | Emp
 1. 쓰는 쪽이 메모리에 둔 마지막 줄의 값을 읽는다. 스냅샷 sha, 읽은 자리, 턴 기록의 offset 이다.
 2. 스냅샷 바이트를 읽고 그 값을 다시 읽는다. 값이 그대로인데 바이트의 sha 가 다르면 `Memory_diverged` 로 끝난다. 값이 달라졌으면 처음부터 다시 읽는다. 스냅샷은 반영(§8.2)이 읽는 함수로 읽고, sha 를 해석보다 먼저 비교한다. 파일이 없거나, 일반 파일이 아니거나, 읽기가 실패하거나, sha 는 맞는데 해석되지 않으면 `Snapshot_fault` 로 끝난다. 쓰는 쪽은 그 결함에 저장소와 같은 이유로 멈춘다. 이 결함은 저절로 낫지 않으니 쉬고 다시 묻지 않는다.
 3. 턴 기록을 그 offset 부터 읽어 질문을 만든다(§5, §6).
-4. slot 을 걷는다. 자리를 잡는 방법은 #52986 의 §3.1 이다. 빈 자리가 있는 slot 가운데 앞의 것, 없으면 먼저 비는 자리다. HTTP slot 이 모두 실패하거나 쉬거나 빠졌을 때만 CLI slot 으로 간다.
+4. slot 을 선언한 순서대로 걷는다. HTTP slot 과 CLI slot 을 가리지 않는다. 자리를 잡는 방법은 `RFC-exact-lane-walks-one-slot-list` §3.6 이다. 빈 자리가 있는 slot 가운데 앞의 것, 없으면 먼저 비는 자리다.
 5. 걷기 전에 `Runtime_exact_lane_backpressure.order` 를 읽는다. provider 가 「이 시각까지 두라」고 한 slot 은 부르지 않는다. slot 결과마다 `observe` 를 부른다.
 6. 선언한 slot 마다 결과를 하나씩 붙여 돌려준다.
 

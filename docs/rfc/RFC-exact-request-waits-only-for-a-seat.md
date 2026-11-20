@@ -3,11 +3,11 @@ rfc: "exact-request-waits-only-for-a-seat"
 title: "Exact 요청은 자리만 기다린다"
 status: Draft
 created: 2026-11-18
-updated: 2026-11-18
+updated: 2026-11-21
 author: claude
 supersedes: []
 superseded_by: null
-related: ["host-cycle-runs-exact-requests-side-by-side", "operator-quiz-lane", "exact-lane-waits-for-a-stated-reset", "server-carries-its-exact-worker-packages"]
+related: ["host-cycle-runs-exact-requests-side-by-side", "operator-quiz-lane", "exact-lane-waits-for-a-stated-reset", "server-carries-its-exact-worker-packages", "exact-lane-walks-one-slot-list"]
 ---
 
 # Exact 요청은 자리만 기다린다
@@ -155,8 +155,8 @@ Librarian 의 다음 요청은 앞 요청의 결과가 반영된 뒤에 생긴�
   - Keeper 턴과 계정을 나누지 않는 slot(tinker)이 lane 에 없으면 선언이 없어도 Keeper 턴이 기다린다. 같은 재생에서 GLM 8 + ollama 4 lane 은 900초 넘게 기다린 Keeper 턴 호출이 GLM 283건, ollama 1,189건이다.
   - 이 RFC 는 이 키를 요구하지 않는다. 선언과 값은 운영자가 계정마다 잰 시간 비를 보고 정한다.
 - 쉬는 slot 은 provider 가 밝힌 때까지 부르지 않는다. 지금과 같다.
-- HTTP slot 과 CLI slot 은 층이 다르다. CLI slot 은 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓴다. HTTP 자리가 꽉 찬 것만으로는 CLI 로 가지 않는다.
-  - HTTP 자리는 앞 요청의 본문 한도 안에 빈다. CLI 는 프로세스를 띄우고, 구독 한도를 Keeper 턴과 나눠 쓴다.
+- HTTP slot 과 CLI slot 은 한 목록에서 같은 규칙으로 고른다. 꽉 찬 slot 은 종류와 상관없이 지나간다. 모두 꽉 차면 먼저 비는 자리를 기다린다(운영자, 2026-11-21).
+  - 목록과 걸음의 모양은 `RFC-exact-lane-walks-one-slot-list` §3.3·§3.6 이다.
 
 ## 3. 설계
 
@@ -194,7 +194,7 @@ walk(slots):   # 선언 순서. 쉬는 slot 과 크기로 거절된 slot 은 빠
 - 자리 대기를 함께 재던 바깥 한도는 없어진다. 재기와 생성 요청은 각자 본문 한도를 싣고 가므로, 한도가 보낼 때부터 센다.
 - Exact flow 의 `Permit_wait_expired`, `Permit_granted_as_deadline_passed` 와 `*_admission_timed_out` 생성자는 지운다. Keeper 턴의 `complete.ml`·`prepared_completion_request.ml` 는 `Provider_admission` 의 같은 이름 값을 계속 쓴다.
 - 시작 표시는 지금처럼 첫 생성 요청을 보내기 직전에 쓴다. 줄에서 취소된 요청에는 표시가 없다.
-- CLI 층 안에서도 같은 규칙으로 고른다. 자리는 §3.2 가 센다.
+- 이 걷기는 HTTP slot 과 CLI slot 을 가리지 않는다. 걸음마다 slot 하나를 부르고, 자리를 고르는 쪽은 남은 목록 전체를 본다(`RFC-exact-lane-walks-one-slot-list` §3.3). CLI 자리는 §3.2 가 센다.
 
 이 걷기는 `execute_flow_once` 를 쓰는 다른 Exact 소비자에도 같이 걸린다. `hitl_summary_worker`, `keeper_board_attention_exact_flow`, `keeper_librarian_runtime`, `server_lane_addon_exact` 다.
 

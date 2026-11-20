@@ -3112,7 +3112,7 @@
   masc_tui_fetched masc_tui_frame_presenter masc_tui_frame_timing masc_tui_keys
   masc_tui_layout masc_tui_link masc_tui_magnitude masc_tui_message_layout
   masc_tui_render_prim masc_tui_render_schedule masc_tui_rows masc_tui_text_block
-  masc_tui_theme masc_tui_types masc_tui_value))
+  masc_tui_theme masc_tui_types masc_tui_value masc_tui_card masc_tui_doc))
 
 (library
  (name masc_tui_render_config)

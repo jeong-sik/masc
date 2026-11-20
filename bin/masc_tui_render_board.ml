@@ -514,6 +514,40 @@ let board_posts_status state =
       Some (origin ^ (match status with None -> "" | Some status -> "; " ^ status))
   | Some _ | None -> status
 
+(* The selected post under the list, the same docked preview Goals and
+   Verdicts draw. It returns exactly [rows] lines, so the list rows above it
+   stay where they are while the cursor moves. Space grows it, Esc folds it
+   back, Enter opens the post as before. The title is not repeated: the
+   selected row above already shows it. *)
+let board_preview_lines (state : state) ~cols ~rows (post : board_post) =
+  let width = max 1 (framed_inner_width cols) in
+  let stage =
+    match state.board_preview_mode with
+    | Preview_compact -> words state "미리보기 확장" "expand"
+    | Preview_half -> words state "최대" "full"
+    | Preview_full -> words state "접기" "compact"
+  in
+  let comments =
+    let n = Masc_tui_value.Count.grouped post.bp_comment_count in
+    if state.ui_language = Lang_ko then "댓글 " ^ n
+    else if post.bp_comment_count = 1 then "1 comment"
+    else n ^ " comments"
+  in
+  let body =
+    match String.trim post.bp_body with
+    | "" -> [ Theme.recede () ^ Masc_tui_theme.Glyph.no_value ^ Ansi.reset ]
+    | text -> Masc_tui_doc.prose_block ~width ~indent:0 text
+  in
+  Masc_tui_doc.docked_preview ~width ~height:rows ~indent:0
+    ~eyebrow:(words state "선택한 글" "Selected post")
+    ~meta:(Terminal_text.single_line post.bp_author ^ " · " ^ comments)
+    ~footer_hints:
+      [ { Masc_tui_card.key = "Space"; label = stage }
+      ; { Masc_tui_card.key = "Enter"; label = words state "읽기" "read" }
+      ; { Masc_tui_card.key = "Esc"; label = words state "닫기/뒤로" "back" }
+      ]
+    body
+
 let render_board_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
 
@@ -663,9 +697,14 @@ let render_board_list (state : state) =
       else begin
         Option.iter render_list_error list_error;
         let error_rows = if Option.is_some list_error then 1 else 0 in
-        let content_height =
-          max 0 (budget - List.length heading - error_rows)
+        let selected_post = List.nth_opt (board_posts state) cursor in
+        let split =
+          docked_vertical_split
+            ~total_rows:(max 0 (budget - List.length heading - error_rows))
+            ~mode:state.board_preview_mode
+            ~has_selection:(Option.is_some selected_post)
         in
+        let content_height = split.list_rows in
         let scroll_offset =
           if cursor >= content_height then
             cursor - content_height + 1
@@ -682,7 +721,10 @@ let render_board_list (state : state) =
         for i = 0 to content_height - 1 do
           let idx = i + scroll_offset in
           match Rows.at board_posts_window idx with
-          | None -> ()
+          | None ->
+              (* A short list keeps the preview docked at the bottom
+                 rather than drawn under its last row. *)
+              if split.preview_rows > 0 then c.push ""
           | Some p ->
             let is_selected = idx = cursor in
             (* The age is since the post or one of its comments last moved.
@@ -751,7 +793,13 @@ let render_board_list (state : state) =
             if is_selected then
               c.push_selected ("\xe2\x80\xba " ^ Masc_tui_theme.strip_sgr content)
             else c.push ("  " ^ content)
-        done
+        done;
+        if split.preview_rows > 0 then
+          Option.iter
+            (fun post ->
+              List.iter c.push
+                (board_preview_lines state ~cols ~rows:split.preview_rows post))
+            selected_post
       end)
 
 (* Owned by the single render loop, like the chat Markdown cache. Only the

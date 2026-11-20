@@ -1688,7 +1688,7 @@ let tool_result_rows state ~keeper_name ~max_cells projection =
   else
     rows
     @ [ (if ko then
-           Printf.sprintf "(대화 기록에서 도구 단계 %d건 생략됨)" projection.omitted_steps
+           Printf.sprintf "(대화 기록에서 도구 단계 %s건 생략됨)" (Masc_tui_value.Count.grouped projection.omitted_steps)
          else
            Printf.sprintf "(%s omitted from transcript)"
              (Message_layout.count_noun projection.omitted_steps "tool step")) ]
@@ -5243,7 +5243,7 @@ let render_keeper_message (state : state) =
     (if state.msg_loaded_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (if state.ui_language = Lang_ko then
-            Printf.sprintf "  저장된 행 %d개를 읽지 못해 표시하지 않음" state.msg_loaded_dropped
+            Printf.sprintf "  저장된 행 %s개를 읽지 못해 표시하지 않음" (Masc_tui_value.Count.grouped state.msg_loaded_dropped)
           else
             Printf.sprintf "  %s could not be read and %s not shown"
               (Message_layout.count_noun state.msg_loaded_dropped "saved row")
@@ -5259,7 +5259,7 @@ let render_keeper_message (state : state) =
     (if state.msg_memory_dropped > 0 then
        box_line_styled chat_buf chat_cols ~style:(Theme.warn ())
          (if state.ui_language = Lang_ko then
-            Printf.sprintf "  기억 기록 행 %d개를 읽지 못해 표시하지 않음" state.msg_memory_dropped
+            Printf.sprintf "  기억 기록 행 %s개를 읽지 못해 표시하지 않음" (Masc_tui_value.Count.grouped state.msg_memory_dropped)
           else
             Printf.sprintf "  %s could not be read and %s not shown"
               (Message_layout.count_noun state.msg_memory_dropped "memory journal row")
@@ -5286,7 +5286,7 @@ let render_keeper_message (state : state) =
               ~en:"  \xe2\x86\x93 back at the newest row"
           else if state.msg_older_exist then
             if state.ui_language = Lang_ko then
-              Printf.sprintf "  \xe2\x86\x91 %d줄 위를 읽는 중 \xc2\xb7 Ctrl-E 로 가장 최근 줄" scroll
+              Printf.sprintf "  \xe2\x86\x91 %s줄 위를 읽는 중 \xc2\xb7 Ctrl-E 로 가장 최근 줄" (Masc_tui_value.Count.grouped scroll)
             else
               Printf.sprintf "  \xe2\x86\x91 reading back %s \xc2\xb7 Ctrl-E returns to the newest"
                 (Message_layout.count_noun scroll "row")

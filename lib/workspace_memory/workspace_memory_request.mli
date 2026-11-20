@@ -15,7 +15,7 @@ type error =
 
 (** How many facts a new batch may hold. [Fill_frame] takes as many as the
     frame holds. [Up_to n] takes at most [n], a count earlier provider answers
-    support (RFC-workspace-curator-curates-changed-facts 2.4, "다음 묶음"). *)
+    support. *)
 type size = Fill_frame | Up_to of int
 val size_to_json : size -> Yojson.Safe.t
 (** [null] for [Fill_frame], the count for [Up_to]. *)

@@ -40,7 +40,7 @@ type submitted_evidence_item =
       ; format : string
       ; body : string option
       (* base_path-relative path of the persisted bytes; [None] when the
-         caller gave no request to file the body under (RFC-0436 §4.2). *)
+         caller gave no request to file the body under. *)
       }
 
 type evidence_access_failure =

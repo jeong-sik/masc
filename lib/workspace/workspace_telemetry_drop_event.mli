@@ -1,10 +1,6 @@
 (** Closed sum type for the [(event_family, event_kind)] label pair of
     [Otel_metric_store.metric_workspace_telemetry_drop].
 
-    Introduced by RFC-0088 §4 Option A (Counter-as-Fix umbrella scoping,
-    Workspace async-context-free telemetry drop sub-scope) as a fold-in
-    amendment to RFC-0044.
-
     Motivation: the three call sites in [Workspace] that invoke
     [warn_telemetry_drop] (after catching [Stdlib.Effect.Unhandled] when
     the lifecycle/task hook runs outside an Eio scheduler)
@@ -15,7 +11,7 @@
     (family, kind) label set cannot silently lose tracking when a new
     site is added.
 
-    Per RFC-0088 §4.1 the counter itself is retained: the "data loss"
+    The counter itself is retained: the "data loss"
     here is loss of a single observability event, not durable state, and
     the caller is a fire-and-forget lifecycle hook with no [Result.t]
     chain to propagate to. So this module narrows the *typing* surface

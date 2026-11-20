@@ -307,8 +307,8 @@ let batch_add_tasks_internal_with_result ?created_by config tasks =
                   ; files = []
                   ; created_at = now_iso ()
                   ; created_by
-                  (* batch add does not carry re-run links (RFC-0323 W2 scopes
-                     the arg to masc_add_task) *)
+                  (* batch add does not carry re-run links: only
+                     masc_add_task takes that arg *)
                   ; predecessor_task_id = None
                   ; contract
                   ; handoff_context = None

@@ -474,8 +474,8 @@ let fusion_preview_indent ~frame_width ~indent_cells rows =
 let fusion_tool_preview_lines ~width ~frame_width ~label preview =
   let size =
     if preview.ftp_truncated
-    then Printf.sprintf "%d bytes; preview truncated" preview.ftp_bytes
-    else Printf.sprintf "%d bytes" preview.ftp_bytes
+    then Printf.sprintf "%s bytes; preview truncated" (Masc_tui_value.Count.grouped preview.ftp_bytes)
+    else Printf.sprintf "%s bytes" (Masc_tui_value.Count.grouped preview.ftp_bytes)
   in
   let complete_json =
     if preview.ftp_truncated then None
@@ -1011,13 +1011,13 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
           if answered = 0 then t "패널 토큰 사용량: 기록 없음" "panel token usage: not recorded"
           else if failed = 0 then
             Printf.sprintf
-              (if ko then "입력 %d / 출력 %d 토큰" else "%d input / %d output tokens")
-              input_tokens output_tokens
+              (if ko then "입력 %s / 출력 %s 토큰" else "%s input / %s output tokens")
+              (Masc_tui_value.Count.grouped input_tokens) (Masc_tui_value.Count.grouped output_tokens)
           else
             Printf.sprintf
-              (if ko then "측정 %d/%d 패널: 입력 %d / 출력 %d 토큰"
-               else "measured %d/%d panels: %d input / %d output tokens")
-              answered (answered + failed) input_tokens output_tokens
+              (if ko then "측정 %d/%d 패널: 입력 %s / 출력 %s 토큰"
+               else "measured %d/%d panels: %s input / %s output tokens")
+              answered (answered + failed) (Masc_tui_value.Count.grouped input_tokens) (Masc_tui_value.Count.grouped output_tokens)
         in
         Printf.sprintf
           (if ko then "  응답 %d / 실패 %d  \xc2\xb7  %s" else "  %d answered / %d failed  \xc2\xb7  %s")

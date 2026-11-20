@@ -385,14 +385,14 @@ let runtime_detail_lines state target ~width =
         @ fact (say "제공자" "Provider") runtime.ro_provider
         @ fact (say "모델" "Model") runtime.ro_model
         @ fact (say "적용 컨텍스트" "Effective context")
-            (Printf.sprintf (if ko then "%d 토큰" else "%d tokens")
-               runtime.ro_effective_max_context)
+            (Printf.sprintf (if ko then "%s 토큰" else "%s tokens")
+               (Masc_tui_value.Count.grouped runtime.ro_effective_max_context))
         @ fact (say "컨텍스트 출처" "Context source")
             (runtime_context_source_label runtime.ro_max_context_source)
         @ fact (say "최대 출력" "Max output")
             (match runtime.ro_max_output_tokens with
              | Some tokens ->
-                 Printf.sprintf (if ko then "%d 토큰" else "%d tokens") tokens
+                 Printf.sprintf (if ko then "%s 토큰" else "%s tokens") (Masc_tui_value.Count.grouped tokens)
              | None -> say "미지정" "not specified")
         @ fact (say "로컬 런타임" "Local runtime")
             (runtime_bool ~ko runtime.ro_is_local)
@@ -513,8 +513,8 @@ let runtime_detail_lines state target ~width =
               | None -> say "활동 보고 없음" "activity not reported"
               | Some (turns, tokens, cost) ->
                 Printf.sprintf
-                  (if ko then "%d턴 · %s 토큰 · %s" else "%d turns · %s tokens · %s")
-                  turns (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
+                  (if ko then "%s턴 · %s 토큰 · %s" else "%s turns · %s tokens · %s")
+                  (Masc_tui_value.Count.grouped turns) (format_context_tokens tokens) (Tui_decode.keeper_cost_summary cost)
             in
             fact (say "배정 키퍼" "Bound keepers") names
             @ fact (say "키퍼 누적 활동" "Keeper lifetime")

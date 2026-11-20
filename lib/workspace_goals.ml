@@ -355,8 +355,8 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
        (match Goal_store.find_goal ctx.config ~goal_id with
         | Goal_store.Goal_absent ->
           error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-        (* A store this build cannot read is never "goal not found" (RFC-0444
-           S5, criterion 4): it answers the typed Unavailable envelope. *)
+        (* A store this build cannot read is never "goal not found": it
+           answers the typed Unavailable envelope. *)
         | Goal_store.Store_unavailable unavailable ->
           unavailable_result ~tool_name ~start_time unavailable
         | Goal_store.Goal_found goal ->
@@ -534,14 +534,14 @@ let handle_goal_measure ~tool_name ~start_time (ctx : context) args
         (Goal_measurement.error_to_string error)
 ;;
 
-(* RFC-0387 stage 2 — the completion gate.
+(* The completion gate.
 
    Ordering for every gated action: [Goal_phase.decide_transition] first (the
    FSM is the ONLY transition decider), then the ledger commit, then the phase
    write, then the event. The ledger never judges a transition — it records
    durable requests ([mark_*_pending]) and verdicts, and its commit failure
-   vetoes the phase write (persist-before-model-call), which is what keeps a
-   crashed write reconcilable instead of wedged (stage-2 review P0-2). *)
+   vetoes the phase write, which is what keeps a crashed write reconcilable
+   instead of wedged. *)
 
 (* The gate actions carry a verdict; a verdict without evidence is not a
    judgment, so [evidence] is required non-blank. *)
@@ -1306,8 +1306,8 @@ let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
     (match Goal_store.find_goal ctx.config ~goal_id with
      | Goal_store.Goal_absent ->
        error_result_typed ~tool_name ~start_time ~code:Not_found "goal not found"
-     (* A store this build cannot read is never "goal not found" (RFC-0444
-        S5, criterion 4): it answers the typed Unavailable envelope. *)
+     (* A store this build cannot read is never "goal not found": it
+        answers the typed Unavailable envelope. *)
      | Goal_store.Store_unavailable unavailable ->
        unavailable_result ~tool_name ~start_time unavailable
      | Goal_store.Goal_found goal when Option.is_some evidence_refs &&

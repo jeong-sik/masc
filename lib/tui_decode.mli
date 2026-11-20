@@ -215,7 +215,7 @@ type planning_snapshot = {
   pl_generated_at : string;
 }
 
-(** The RFC-0444 Goal store envelope
+(** The Goal store envelope
     [{ok:false, error_code:"goal_store_unavailable", reason, field, file,
     mirror:{status, goal_count}, reset_step}] as the TUI reads it. [reason]
     and [mirror] are views: the wire carries the constructor name, the refused
@@ -2284,14 +2284,12 @@ val decode_goal_source_failure :
 val goal_store_unavailable_view_to_string : goal_store_unavailable_view -> string
 (** [goal_store: unavailable reason=… file=… mirror=… reset=…], the shape of
     [Goal_store_unavailable.to_string] minus the payloads the wire omits. The
-    line the Planning header and the detail pane show until RFC-0444 PR-4
-    draws the view in the pane body. *)
+    line the Planning header and the detail pane show. *)
 
 val decode_planning_snapshot :
   Yojson.Safe.t -> (planning_snapshot, string) result
 (** An unreadable Goal store is the rendered
-    {!goal_store_unavailable_view_to_string} line as the [Error]; RFC-0444 PR-4
-    lifts it into a [Planning_unavailable] constructor. *)
+    {!goal_store_unavailable_view_to_string} line as the [Error]. *)
 
 type overview_goal_measurement =
   | Goal_measurement_unread

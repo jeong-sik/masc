@@ -25,7 +25,7 @@ val delete_verification_request :
   config:Workspace.config ->
   verification_id:string ->
   (unit, string) result
-(** RFC-0221 §3.1 compensation: remove the verification record for
+(** Compensation: remove the verification record for
     [verification_id] when its task_status commit did not land, so the two
     stores never disagree. A missing record is success (idempotent). *)
 

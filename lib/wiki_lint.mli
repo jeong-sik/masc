@@ -1,11 +1,10 @@
 (** The wiki lint rules over a {!Wiki_graph.t}. Pure and deterministic: the
     same graph gives the same findings in the same order.
 
-    First step of RFC-wiki-lint-and-page-contracts (§4.2, §4.3): broken
-    links, links in a shape the lint does not interpret, orphan pages, pages
-    without sources, pages whose only sources are hearsay, pages whose
-    header does not read. The second step (§4.5, §7) adds the page the log
-    has run ahead of. Unreachable pages and contradictions are later steps. *)
+    The lint finds broken links, links in a shape it does not interpret,
+    orphan pages, pages without sources, pages whose only sources are
+    hearsay, pages whose header does not read, the page the log has run
+    ahead of, and a revision the log skips. *)
 
 type finding =
   | Broken_link of
@@ -37,7 +36,7 @@ type finding =
       (** The log records a revision this page never reached. The other
           direction -- a page ahead of the log -- is not a finding: a read
           takes no lock, so it sees the page of a write in flight before the
-          log line of that write (§4.5). *)
+          log line of that write. *)
   | Revision_log_hole of
       { page : string
       ; missing : int  (** The lowest [r<N>] the log skips below its highest. *)

@@ -8,7 +8,7 @@
   activity_graph_types
   activity_graph_registry)
  (wrapped false)
- ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on. + unused-value ratchet (warning 32)
+ ; Warning 4 (fragile pattern match), 33 (unused open) and 37 (unused constructor) on.
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries

@@ -179,9 +179,8 @@ let record_to_json ~tool_name ~disposition ~caller =
 (* [on_io_failure] is injected by the installer (server bootstrap) so this
    generic tool-usage logger does not reference the keeper FD/disk pressure
    subsystem directly. Tool->Keeper dependency direction: a tool-surface module
-   must not name keeper internals (generalizes RFC-0084's dispatch-path rule to
-   the whole surface). Keeper-facing IO-failure handling is supplied at the
-   install boundary (lib/server/server_bootstrap_maintenance.ml). *)
+   must not name keeper internals. Keeper-facing IO-failure handling is supplied
+   at the install boundary (lib/server/server_bootstrap_maintenance.ml). *)
 let log_call ~on_io_failure ~tool_name ~disposition ~caller =
   match Atomic.get store_ref with
   | None ->

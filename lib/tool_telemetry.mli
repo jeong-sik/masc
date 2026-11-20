@@ -1,4 +1,4 @@
-(** RFC-0084 §2.1 — Tool dispatch telemetry 4-tuple emission SSOT.
+(** Tool dispatch telemetry 4-tuple emission SSOT.
 
     Every tool dispatch must emit a 4-tuple [(Span, Audit, Metric, Trace_id)].
     This module wraps the three existing emission surfaces in masc:
@@ -7,15 +7,7 @@
     - [Otel_metric_store.inc_counter "tool_dispatch_total"] for the metric
     - [Otel_spans.current_trace_id] (passed as a thunk) for trace_id propagation
 
-    The audit emission slot is filled by callers via [Audit_log.log_action]
-    using the [outcome] string returned from [with_span]. PR-10 will unify
-    audit emission into a typed [Dispatch_outcome.t].
-
-    PR-3 establishes the wrapper skeleton; no callers migrate to
-    [Tool_dispatch.guarded_dispatch] in this PR. Migration:
-    - PR-7: keeper turn loop [keeper_tool_registered_runtime.ml:164,218]
-    - PR-8: MCP server [mcp_server_eio_execute.ml:817,999]
-    - PR-9: tag-dispatch fallback [keeper_tag_dispatch.ml] *)
+    The audit emission slot is left to callers. *)
 
 type trace_id = string
 
@@ -36,8 +28,7 @@ val tool_type_of_name : string -> string
     OTel span is active, [None] otherwise (e.g. when the exporter is disabled).
 
     [f] returns a pair [(result, outcome)] where [outcome] is the metric
-    label. PR-10 will replace the [string] outcome with a typed
-    [Dispatch_outcome.t]. *)
+    label. *)
 val with_span
   :  ?force_new_trace_id:bool
   -> ?surface:string

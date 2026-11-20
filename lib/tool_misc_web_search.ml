@@ -1043,9 +1043,8 @@ let simulated_search_impl ~outcomes ~query:_ ~limit =
 let with_simulated_search_for_test ~outcomes f =
   with_search_impl_for_test (simulated_search_impl ~outcomes) f
 
-(* RFC-0189 PR-1b.9 / PR-2 — typed result. Failure-class mapping at the
-   handle boundary (source-typed at each construction site; no
-   substring matching):
+(* Typed result. Failure-class mapping at the handle boundary
+   (source-typed at each construction site; no substring matching):
 
    - [Workflow_rejection]: empty query input.
    - [Dependency_unavailable]: the credentialed chain was empty

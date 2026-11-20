@@ -106,11 +106,14 @@ let every_call_failed (calls : Series.tool_series_calls) =
 
 let grouped_digits = Masc_tui_value.Count.grouped
 
+(* A p95 is how long calls took, so it reads on the finished-length ladder of
+   RFC tui-one-screen-grammar 6.2 that the Lanes table and approvals already
+   use: [243ms], [29.2s], [6m55s], with no space before the unit. A negative
+   or non-numeric p95 is a reading that failed and draws the failed mark. *)
 let milliseconds_text ms =
-  if ms >= 1000.0 then Printf.sprintf "%.1f s" (ms /. 1000.0)
-  else if ms >= 100.0 then Printf.sprintf "%.0f ms" ms
-  else if ms >= 10.0 then Printf.sprintf "%.1f ms" ms
-  else Printf.sprintf "%.2f ms" ms
+  Option.value
+    ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+    (Masc_tui_message_layout.elapsed_text (ms /. 1000.0))
 
 let percent_text ~failures ~calls =
   if failures = 0 then "0%"

@@ -1,8 +1,6 @@
 module Snapshot = Keeper_provider_input_snapshot
 module Cost_events = Keeper_hooks_agent_core_cost_events
 
-let schema = "masc.keeper-cache-outcome.v1"
-
 (* The One_hour class asks Anthropic for [ttl = "1h"]. *)
 let one_hour_s = 3600.0
 
@@ -300,10 +298,12 @@ type lifetime_check =
   | Outlived
   | Within
   | Undecided
+[@@deriving enumerate]
 
 type default_unknown =
   | Default_undeclared
   | Runtime_inactive
+[@@deriving enumerate]
 
 type lifetime =
   | Lifetime_unrecorded
@@ -488,135 +488,6 @@ let reading_of_walk walk ~provider_default_s ~current_snapshot ~earlier_snapshot
   ; unattributed_rows = walk.passed_over
   ; outcome
   }
-;;
-
-(* ── JSON ────────────────────────────────────────────────────── *)
-
-let kind_field = "kind"
-let turn_ref_field = "turn_ref"
-let request_field = "request"
-let detail_field = "detail"
-
-let tagged kind (fields : (string * Yojson.Safe.t) list) : Yojson.Safe.t =
-  `Assoc ((kind_field, `String kind) :: fields)
-;;
-
-let turn_ref_json turn_ref : Yojson.Safe.t = `String (Ids.Turn_ref.to_string turn_ref)
-
-let optional (to_json : 'a -> Yojson.Safe.t) : 'a option -> Yojson.Safe.t = function
-  | Some value -> to_json value
-  | None -> `Null
-;;
-
-let request_to_json (request : request) : Yojson.Safe.t =
-  `Assoc
-    [ turn_ref_field, turn_ref_json request.turn_ref
-    ; "runtime_id", `String request.runtime_id
-    ; "scope", `String (Runtime_usage_scope.to_string request.scope)
-    ; "ended_at", `Float request.ended_at
-    ; "latency_ms", optional (fun ms -> `Int ms) request.latency_ms
-    ; "cache_read_tokens", optional (fun count -> `Int count) request.cache_read_tokens
-    ; ( "cache_creation_tokens"
-      , optional (fun count -> `Int count) request.cache_creation_tokens )
-    ; ( "cache_write_lifetime"
-      , optional
-          (fun lifetime ->
-             `String (Agent_core.Types.cache_write_lifetime_to_string lifetime))
-          request.lifetime )
-    ]
-;;
-
-let lifetime_check_to_string = function
-  | Outlived -> "outlived"
-  | Within -> "within"
-  | Undecided -> "undecided"
-;;
-
-let default_unknown_to_string = function
-  | Default_undeclared -> "undeclared"
-  | Runtime_inactive -> "runtime_inactive"
-;;
-
-let lifetime_to_json = function
-  | Lifetime_unrecorded -> tagged "unrecorded" []
-  | Provider_default_unknown unknown ->
-    tagged
-      "provider_default_unknown"
-      [ "reason", `String (default_unknown_to_string unknown) ]
-  | Lifetime_declared { lifetime_s; check } ->
-    tagged
-      "declared"
-      [ "lifetime_s", `Float lifetime_s
-      ; "check", `String (lifetime_check_to_string check)
-      ]
-;;
-
-let idle_to_json = function
-  | Start_unrecorded -> tagged "start_unrecorded" []
-  | Idle { idle_s; lifetime } ->
-    tagged "idle" [ "idle_s", `Float idle_s; "lifetime", lifetime_to_json lifetime ]
-;;
-
-let not_compared_to_json = function
-  | Earlier_turn_not_settled -> tagged "earlier_turn_not_settled" []
-  | Snapshot_unread { turn_ref; detail } ->
-    tagged
-      "snapshot_unread"
-      [ turn_ref_field, turn_ref_json turn_ref; detail_field, `String detail ]
-  | Snapshot_of_other_runtime { turn_ref; runtime_profile } ->
-    tagged
-      "snapshot_of_other_runtime"
-      [ turn_ref_field, turn_ref_json turn_ref
-      ; "runtime_profile", `String runtime_profile
-      ]
-;;
-
-let prefix_to_json = function
-  | Compared { system_changed; tools_changed; messages } ->
-    tagged
-      "compared"
-      [ "system_changed", `Bool system_changed
-      ; "tools_changed", `Bool tools_changed
-      ; "messages", Keeper_projection_change.message_change_to_json messages
-      ]
-  | Not_compared reason -> tagged "not_compared" [ "reason", not_compared_to_json reason ]
-;;
-
-let earlier_to_json = function
-  | No_earlier_request { horizon_s } -> tagged "none_within" [ "horizon_s", `Float horizon_s ]
-  | Earlier { request; idle; prefix } ->
-    tagged
-      "earlier"
-      [ request_field, request_to_json request
-      ; "idle", idle_to_json idle
-      ; "prefix", prefix_to_json prefix
-      ]
-;;
-
-let outcome_to_json = function
-  | Turn_not_in_ledger -> tagged "turn_not_in_ledger" []
-  | Ledger_row_unreadable detail ->
-    tagged "ledger_row_unreadable" [ detail_field, `String detail ]
-  | Not_per_request request ->
-    tagged "not_per_request" [ request_field, request_to_json request ]
-  | First_request { request; other_runtime_since; earlier } ->
-    tagged
-      "first_request"
-      [ request_field, request_to_json request
-      ; ( "other_runtime_since"
-        , optional (fun runtime_id -> `String runtime_id) other_runtime_since )
-      ; "earlier", earlier_to_json earlier
-      ]
-;;
-
-let to_json (reading : reading) =
-  `Assoc
-    [ "schema", `String schema
-    ; "keeper", `String reading.keeper
-    ; turn_ref_field, turn_ref_json reading.turn_ref
-    ; "unattributed_rows", `Int reading.unattributed_rows
-    ; "outcome", outcome_to_json reading.outcome
-    ]
 ;;
 
 (* ── Reading ─────────────────────────────────────────────────── *)

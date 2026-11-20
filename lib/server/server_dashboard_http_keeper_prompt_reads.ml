@@ -203,7 +203,7 @@ let handle_cache_outcome_get state req reqd name =
              ~turn_ref
              ~born_at
              ~provider_default_s:provider_default_cache_ttl_s
-           |> Result.map Keeper_cache_outcome.to_json)
+           |> Result.map Keeper_cache_outcome_json.to_json)
         (keeper_born_at ~config ~keeper))
     ~error_status:(fun (Keeper_cache_outcome.Ledger_unreadable _) -> `Service_unavailable)
     ~error_to_string:Keeper_cache_outcome.read_error_to_string

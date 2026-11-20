@@ -13,9 +13,6 @@
     the next on its first runtime again: that request can still read what the
     first runtime cached a turn earlier. *)
 
-val schema : string
-(** [masc.keeper-cache-outcome.v1]. *)
-
 (** One request as its raw cost row records it. *)
 type request =
   { turn_ref : Ids.Turn_ref.t
@@ -77,6 +74,7 @@ type lifetime_check =
   | Undecided
       (** The rows give each start to the second, and the lifetime falls
           inside that uncertainty. *)
+[@@deriving enumerate]
 
 (** Why the length of a provider's default lifetime is not known. *)
 type default_unknown =
@@ -85,6 +83,7 @@ type default_unknown =
   | Runtime_inactive
       (** The runtime is not active in the running configuration, so which
           provider answered it is not known. *)
+[@@deriving enumerate]
 
 type lifetime =
   | Lifetime_unrecorded
@@ -199,8 +198,6 @@ val reading_of_walk :
   reading
 (** Ends the walk where it stands and builds the outcome. [earlier_snapshot]
     is read only when an earlier request was found in a settled turn. *)
-
-val to_json : reading -> Yojson.Safe.t
 
 (** {1 Reading} *)
 

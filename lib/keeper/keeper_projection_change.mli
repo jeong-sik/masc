@@ -184,4 +184,8 @@ val digests_of_parts :
 
 val message_change_to_json : message_change -> Yojson.Safe.t
 
+val message_change_of_json : Yojson.Safe.t -> (message_change, string) result
+(** Reads a {!message_change_to_json} object back. An unknown kind, a missing
+    or negative count, or an unknown role is an error. *)
+
 val change_to_json : change -> Yojson.Safe.t

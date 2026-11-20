@@ -162,7 +162,8 @@ val grid_paused_mark : string
 val grid_recovered_mark : string
 val grid_ok_mark : string
 (** The row marks, status marks of RFC tui-one-screen-grammar §7.2: [✕]
-    failing, [‖] paused, [▲] recovered (the cause view only), [●] the rest. *)
+    failing, [‖] paused or expected offline, [▲] unexpected autonomous offline
+    (or recovered in the cause view), [●] sound; unread rows wear [◌]. *)
 
 val grid_late_word : string
 val grid_held_word : string

@@ -52,6 +52,8 @@ let verdict_label = function
   | Grid.Failing { resting = false } -> "failing"
   | Grid.Failing { resting = true } -> "failing, resting"
   | Grid.Paused -> "paused"
+  | Grid.Offline { unexpected = true } -> "offline, unexpected"
+  | Grid.Offline { unexpected = false } -> "offline"
   | Grid.Recovered -> "recovered"
   | Grid.Sound -> "sound"
   | Grid.Other -> "other"
@@ -97,9 +99,33 @@ let test_a_failed_half_hour_in_the_last_twelve_hours_is_a_recovery () =
   check "no pulse is no failed half hour" "sound" (Some idle)
 
 let test_offline_can_recover_and_unread_is_other () =
+  let auto_offline = runtime (health "offline") in
+  let manual_offline = { auto_offline with kr_activation_mode = Decode.Activation_manual } in
+  let on_demand_offline = { auto_offline with kr_activation_mode = Decode.Activation_on_demand } in
+  let paused = { auto_offline with kr_paused = true } in
   check "an offline Keeper with a failed half hour is recovered" "recovered"
-    (Some (with_pulse [ slot_ago ~failed:1 0 ] (runtime (health "offline"))));
-  check "a Keeper the roster did not read" "other" None
+    (Some (with_pulse [ slot_ago ~failed:1 0 ] auto_offline));
+  check "an autonomous offline Keeper without recovery is unexpected offline"
+    "offline, unexpected" (Some auto_offline);
+  check "a manual offline Keeper without recovery is expected offline"
+    "offline" (Some manual_offline);
+  check "an on-demand offline Keeper without recovery is expected offline"
+    "offline" (Some on_demand_offline);
+  check "a Keeper the roster did not read" "other" None;
+  Alcotest.(check string) "unexpected offline wears caution mark"
+    "\xe2\x96\xb2" (Grid.mark Masc_tui_keeper_list_model.By_state (Grid.verdict ~now (Some auto_offline)));
+  Alcotest.(check string) "manual offline wears paused mark"
+    "\xe2\x80\x96" (Grid.mark Masc_tui_keeper_list_model.By_state (Grid.verdict ~now (Some manual_offline)));
+  Alcotest.(check string) "on-demand offline wears paused mark"
+    "\xe2\x80\x96" (Grid.mark Masc_tui_keeper_list_model.By_state (Grid.verdict ~now (Some on_demand_offline)));
+  Alcotest.(check string) "paused wears paused mark"
+    "\xe2\x80\x96" (Grid.mark Masc_tui_keeper_list_model.By_state (Grid.verdict ~now (Some paused)));
+  Alcotest.(check string) "recovered wears caution mark in cause view"
+    "\xe2\x96\xb2" (Grid.mark Masc_tui_keeper_list_model.By_cause Grid.Recovered);
+  Alcotest.(check string) "recovered wears settled mark in state view"
+    "\xe2\x97\x8f" (Grid.mark Masc_tui_keeper_list_model.By_state Grid.Recovered);
+  Alcotest.(check string) "unread roster row wears unread mark, not healthy dot"
+    "\xe2\x97\x8c" (Grid.mark Masc_tui_keeper_list_model.By_state (Grid.verdict ~now None))
 
 let test_the_level_rises_with_the_value () =
   let level peak value = Grid.level_glyph ~peak value in

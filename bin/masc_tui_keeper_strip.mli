@@ -5,7 +5,9 @@ val header :
   selected:string option ->
   age:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_list_model.memory_age) ->
   Masc_tui_keeper_list_model.row list -> string
-(** Four fixed known groups; unknown readings keep an explicit [?] count.
+(** Six fixed verdict groups (failing, unexpected offline, recovered, sound,
+    paused, expected offline); unread readings keep an explicit [◌] count
+    (age view uses five age buckets with [?]).
     Each non-empty group draws its status mark and count once without
     per-member glyph repetition. *)
 

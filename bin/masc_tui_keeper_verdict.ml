@@ -1,7 +1,13 @@
 module Decode = Masc.Tui_decode
 module Pulse = Masc.Keeper_turn_pulse
 
-type t = Failing of { resting : bool } | Paused | Recovered | Sound | Other
+type t =
+  | Failing of { resting : bool }
+  | Paused
+  | Offline of { unexpected : bool }
+  | Recovered
+  | Sound
+  | Other
 
 let recovery_slots = 24
 
@@ -25,4 +31,11 @@ let of_runtime ~now = function
       | Decode.Health_running | Decode.Health_idle ->
           if failed_recently ~now runtime.kr_recent_turns then Recovered else Sound
       | Decode.Health_offline ->
-          if failed_recently ~now runtime.kr_recent_turns then Recovered else Other
+          if failed_recently ~now runtime.kr_recent_turns then Recovered
+          else
+            let unexpected =
+              match runtime.kr_activation_mode with
+              | Decode.Activation_autonomous -> true
+              | Decode.Activation_manual | Decode.Activation_on_demand -> false
+            in
+            Offline { unexpected }

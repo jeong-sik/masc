@@ -408,40 +408,88 @@ let overview_keeper_entries (state : state) : Masc_tui_overview_bands.keeper_ent
     |> Option.map (fun (row : keeper_turn_row) -> row.ktr_state)
   in
   let entry_of (k : keeper) =
+    let reading = keeper_reading state k in
     let turn_state = turn_state_of k.k_name in
+    let paused_entry =
+      ( Masc_tui_value.Mark.(glyph Paused)
+      , Theme.status_tone Masc_tui_value.Mark.Paused
+      , (if ko then "일시정지" else "paused")
+      , false
+      , 4 )
+    in
+    let turn_entry () =
+      match turn_state with
+      | Some (Keeper_turn_unavailable _) ->
+          ( Masc_tui_value.Mark.(glyph Failed)
+          , Theme.status_tone Masc_tui_value.Mark.Failed
+          , (if ko then "확인 필요" else "check")
+          , true
+          , 0 )
+      | Some (Keeper_turn_running _) ->
+          ( Masc_tui_value.Mark.(glyph Under_way)
+          , Theme.ok ()
+          , (if ko then "실행 중" else "running")
+          , false
+          , 2 )
+      | Some Keeper_turn_idle ->
+          ( Masc_tui_value.Mark.(glyph Settled)
+          , Theme.recede ()
+          , (if ko then "대기" else "idle")
+          , false
+          , 3 )
+      | None ->
+          ( Masc_tui_value.Unknown.(glyph Unread)
+          , Theme.recede ()
+          , (if ko then "관측 중" else "observing")
+          , false
+          , 6 )
+    in
     let mark, mark_tone, state_label, needs_attention, priority =
-      if k.k_paused then
-        ( Masc_tui_value.Mark.(glyph Paused)
-        , Theme.warn ()
-        , (if ko then "일시정지" else "paused")
-        , true
-        , 1 )
-      else
-        match turn_state with
-        | Some (Keeper_turn_unavailable _) ->
-            ( Masc_tui_value.Mark.(glyph Failed)
-            , Theme.warn ()
-            , (if ko then "확인 필요" else "check")
-            , true
-            , 0 )
-        | Some (Keeper_turn_running _) ->
-            ( Masc_tui_value.Mark.(glyph Under_way)
-            , Theme.ok ()
-            , (if ko then "실행 중" else "running")
-            , false
-            , 2 )
-        | Some Keeper_turn_idle ->
-            ( Masc_tui_value.Mark.(glyph Settled)
+      match reading.Keeper_control.liveness with
+      | Keeper_control.Present r ->
+          if reading.Keeper_control.paused || r.Tui_decode.kr_paused then
+            paused_entry
+          else
+            (match Tui_decode.keeper_health_reading r.Tui_decode.kr_health with
+             | Tui_decode.Health_failing ->
+                 ( Masc_tui_value.Mark.(glyph Failed)
+                 , Theme.status_tone Masc_tui_value.Mark.Failed
+                 , (if ko then "실패" else "failing")
+                 , true
+                 , 0 )
+             | Tui_decode.Health_offline ->
+                 (match r.Tui_decode.kr_activation_mode with
+                  | Tui_decode.Activation_autonomous ->
+                      ( Masc_tui_value.Mark.(glyph Caution)
+                      , Theme.status_tone Masc_tui_value.Mark.Caution
+                      , (if ko then "자율 꺼짐" else "auto off")
+                      , true
+                      , 1 )
+                  | Tui_decode.Activation_manual | Tui_decode.Activation_on_demand ->
+                      ( Masc_tui_value.Mark.(glyph Paused)
+                      , Theme.status_tone Masc_tui_value.Mark.Paused
+                      , (if ko then "오프라인" else "offline")
+                      , false
+                      , 5 ))
+             | Tui_decode.Health_running | Tui_decode.Health_idle ->
+                 turn_entry ())
+      | Keeper_control.Invalid _ ->
+          ( Masc_tui_value.Unknown.(glyph Read_failed)
+          , Theme.status_tone Masc_tui_value.Mark.Failed
+          , Keeper_control.health_label ~ko reading
+          , true
+          , 0 )
+      | Keeper_control.Absent ->
+          if reading.Keeper_control.paused then paused_entry
+          else
+            ( Masc_tui_theme.Glyph.no_value
             , Theme.recede ()
-            , (if ko then "대기" else "idle")
+            , (if ko then "오프라인" else "offline")
             , false
-            , 3 )
-        | None ->
-            ( Masc_tui_value.Mark.(glyph Waiting)
-            , Theme.recede ()
-            , (if ko then "관측 중" else "observing")
-            , false
-            , 4 )
+            , 5 )
+      | Keeper_control.Unobserved ->
+          if reading.Keeper_control.paused then paused_entry
+          else turn_entry ()
     in
     (* Overview does not query per-keeper live_context; show real roster
        activity (turns and tokens) that Overview already holds. *)

@@ -55,6 +55,7 @@ let slot_label = window_label ~slots:1
 type verdict = Masc_tui_keeper_verdict.t =
   | Failing of { resting : bool }
   | Paused
+  | Offline of { unexpected : bool }
   | Recovered
   | Sound
   | Other
@@ -72,9 +73,11 @@ let marks_recovery = function
 
 let mark view = function
   | Failing _ -> Mark.grid_failing_mark
-  | Paused -> Mark.grid_paused_mark
+  | Paused | Offline { unexpected = false } -> Mark.grid_paused_mark
+  | Offline { unexpected = true } -> Mark.grid_recovered_mark
   | Recovered when marks_recovery view -> Mark.grid_recovered_mark
-  | Recovered | Sound | Other -> Mark.grid_ok_mark
+  | Recovered | Sound -> Mark.grid_ok_mark
+  | Other -> Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread
 ;;
 
 let levels =

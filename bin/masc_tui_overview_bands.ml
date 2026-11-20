@@ -200,7 +200,7 @@ let render_keeper_row ~cells entry =
     else
       pad_cell ~width:activity_w text
   in
-  let prefix = mark ^ " " ^ name_cell ^ "  " ^ state_cell ^ "  " ^ activity_cell in
+  let prefix = " " ^ mark ^ " " ^ name_cell ^ "  " ^ state_cell ^ "  " ^ activity_cell in
   let prefix_cells = Layout.display_width prefix in
   let detail_room = cells - prefix_cells - 2 in
   if detail_room <= 3 || String.equal entry.detail "" then

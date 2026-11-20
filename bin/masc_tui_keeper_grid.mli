@@ -48,11 +48,14 @@ type verdict = Masc_tui_keeper_verdict.t =
       (** The health reading is failing. [resting] is a dispatch path that waits
           out a rest. *)
   | Paused  (** A person paused the Keeper; this takes precedence over failure. *)
+  | Offline of { unexpected : bool }
+      (** Keepalive is offline without recovery. [unexpected] is [true] when
+          the Keeper starts autonomously and is not paused. *)
   | Recovered
       (** Neither failing nor paused, and a half hour of the
           last twelve hours holds a failed or rested turn. *)
   | Sound  (** Neither failing nor paused, running or idle, no failed half hour. *)
-  | Other  (** Offline without recovery, or a Keeper the roster did not read. *)
+  | Other  (** A Keeper the roster did not read. *)
 
 val recovery_slots : int
 (** How many half hours back a failure makes a Keeper recovered: 24. *)
@@ -66,8 +69,9 @@ val verdict : now:float -> Masc.Tui_decode.keeper_runtime option -> verdict
     hour. *)
 
 val mark : Masc_tui_keeper_list_model.view -> verdict -> string
-(** The row mark: [✕] failing, [‖] paused, [●] otherwise. The cause view marks
-    a recovered Keeper [▲]. *)
+(** The row mark (RFC tui-one-screen-grammar §6.4, §7.2): [✕] failing,
+    [‖] paused or expected offline, [▲] autonomous unexpected offline (and
+    recovered in the cause view), [◌] unread roster row, [●] healthy/sound. *)
 
 (** {1 Values} *)
 

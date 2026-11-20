@@ -111,6 +111,13 @@ val resolve_max_context_resolution_for_runtime_id
   -> runtime_id:string
   -> (max_context_resolution, max_context_resolution_error) result
 
+val resolve_max_context_resolution_for_route
+  :  requested_override:int option
+  -> route:string
+  -> (string * max_context_resolution, max_context_resolution_error) result
+(** Resolves a configured route (declared lane or direct runtime ID) to the
+    selected concrete candidate runtime ID and its context resolution. *)
+
 val max_context_resolution_error_to_string
   :  max_context_resolution_error
   -> string

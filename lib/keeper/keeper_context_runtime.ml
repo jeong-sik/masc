@@ -197,3 +197,25 @@ let resolve_max_context_resolution_for_runtime_id
   | None -> Error (Runtime_context_window_unavailable { runtime_id })
   | Some runtime ->
     resolve_max_context_resolution_for_runtime ~requested_override runtime
+
+let resolve_max_context_resolution_for_route ~requested_override ~route =
+  let route = String.trim route in
+  if String.equal route "" then
+    Error (Runtime_context_window_unavailable { runtime_id = route })
+  else
+    match Runtime.resolve_assignment route with
+    | `Lane lane ->
+      (match Runtime_lane.ordered_candidates lane with
+       | first :: _ ->
+         resolve_max_context_resolution_for_runtime_id
+           ~requested_override
+           ~runtime_id:first
+         |> Result.map (fun resolution -> first, resolution)
+       | [] ->
+         Error (Runtime_context_window_unavailable { runtime_id = route }))
+    | `Unavailable missing ->
+      Error
+        (Runtime_context_window_unavailable
+           { runtime_id = missing.Runtime.runtime_id })
+    | `Missing ->
+      Error (Runtime_context_window_unavailable { runtime_id = route })

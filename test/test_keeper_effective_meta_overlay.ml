@@ -1688,6 +1688,35 @@ let test_config_snapshot_offers_declared_lanes_apart_from_runtimes () =
       [ "fallback.test_model"; "primary.test_model" ]
       (strings "runtime_options" execution)
 
+let test_status_resolves_declared_lane_context_budget () =
+  with_config_dir @@ fun ~base ~config_dir ~keepers_dir ->
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let runtime_path = Filename.concat config_dir "runtime.toml" in
+  let name = "lane-status-budget" in
+  write_file runtime_path (runtime_toml_with_lane ~keeper_name:name);
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      (match Runtime.init_default ~config_path:runtime_path with
+       | Ok () -> ()
+       | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e);
+      write_file (Filename.concat keepers_dir (name ^ ".toml"))
+        "[keeper]\nsandbox_profile = \"docker\"\nsandbox_image = \"base\"\ninstructions = \"lane status fixture\"\n";
+      let config = Workspace.default_config base in
+      ignore (seed_runtime_meta config name : Masc.Keeper_meta_contract.keeper_meta);
+      let json = status_json_with ~name config in
+      let context_budget = json_assoc_field "context_budget" json in
+      Alcotest.(check bool) "no capacity_error on lane-assigned keeper" true
+        (json_field "capacity_error" context_budget = None);
+      Alcotest.(check (option string)) "context_budget resolves lane head runtime_id"
+        (Some "primary.test_model")
+        (json_string_field "runtime_id" context_budget);
+      Alcotest.(check (option int)) "context_budget reports lane head effective_budget"
+        (Some 8192)
+        (match json_field "effective_budget" context_budget with
+         | Some (`Int value) -> Some value
+         | Some _ | None -> None))
+
 let test_config_snapshot_does_not_fallback_to_raw_meta () =
   with_config_dir @@ fun ~base ~config_dir:_ ~keepers_dir ->
   let name = "bad-config-snapshot" in
@@ -2318,6 +2347,8 @@ let () =
         Alcotest.test_case "config snapshot exposes sandbox image" `Quick test_config_snapshot_exposes_sandbox_image;
           Alcotest.test_case "config snapshot offers declared lanes apart from runtimes" `Quick
             test_config_snapshot_offers_declared_lanes_apart_from_runtimes;
+          Alcotest.test_case "status resolves declared lane context_budget" `Quick
+            test_status_resolves_declared_lane_context_budget;
           Alcotest.test_case
             "config snapshot prompt is nested only"
             `Quick test_config_snapshot_prompt_is_nested_only;

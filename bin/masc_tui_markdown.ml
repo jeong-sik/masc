@@ -922,9 +922,13 @@ type alignment =
 
 let table_cells_with_offsets line =
   let start, stop = trim_source_bounds line 0 (String.length line) in
-  let trimmed = String.sub line start (stop - start) in
-  if not (String.contains trimmed '|') then None
-  else
+  (* Every line outside a fence is asked this, and most hold no pipe, so the
+     pipe is found in place before the line is copied, and a line without one
+     costs no allocation and no exception. *)
+  match String.index_from_opt line start '|' with
+  | None -> None
+  | Some _ ->
+    let trimmed = String.sub line start (stop - start) in
     let offset = ref start in
     let parts = String.split_on_char '|' trimmed |> List.map (fun raw ->
       let at = !offset in

@@ -18,7 +18,7 @@
 (* [struct include ... end] strengthens every type to an alias of the SSOT's,
    which is what the hand-written [with type] list did one type at a time. It
    is written this way because [fenced_cause] and [masc_internal_error] are
-   one recursive group (RFC-0454 D1): a [with type] on either member sees the
+   one recursive group: a [with type] on either member sees the
    other as the copy this include made, so the manifest is refused. *)
 include module type of struct
   include Keeper_internal_error
@@ -89,13 +89,12 @@ type lane_terminal_error =
 val deferred_runtime_ids : deferred_runtime_lane -> string list
 (** The suffix the lane names: [next_runtime_id], then [later_runtime_ids]. *)
 
-(** How the lane that dispatched a turn continues after the turn fails
-    (RFC last-path-resumes-after-progress §3.5).
+(** How the lane that dispatched a turn continues after the turn fails.
     - [Resume_operation_checkpoint]: the chat lane. The named operation resumes
       from its latest saved checkpoint, so tool results it saved are not run
       again. It carries the operation because only a lane that has one can
       resume: the heartbeat lane runs no chat operation, and a cycle that
-      resumed a path this way would never end (§3.5). The driver reports the
+      resumed a path this way would never end. The driver reports the
       operation when it defers one to the path it failed on.
     - [Restart_cycle]: the heartbeat lane. The next cycle is a new turn. *)
 type failure_continuation =
@@ -153,7 +152,7 @@ val walk_rest_resting_wire : string
 
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
-    the quota window; a failed attempt is no rest (RFC-0458 §3.4). At
+    the quota window; a failed attempt is no rest. At
     [release_at] the walk order moves the path ahead of the paths still told
     to rest; a failed attempt the path also holds keeps it behind the paths
     with no evidence. [release_basis] is who set the latest rest on the path,
@@ -181,7 +180,7 @@ type walk_rest =
       ; resting_runtime_id : string
       }
 
-(** Who a walk runs for (RFC-0458 §3.4 rule 5, plan D2-5).
+(** Who a walk runs for.
     [Fleet_keeper_turn turn]: a fleet Keeper's turn. It comes back every
     cycle, so a failure it sees names the Keeper as the recorder
     ({!Runtime_candidate_backpressure.keeper_recorder}). An official CLI
@@ -213,7 +212,7 @@ type walk_owner =
 val account_refused : Runtime_account_access.refusal -> Agent_core.Error.t
 (** Converts an account authorization refusal to the non-rotating driver error. *)
 
-(** Whose walk orders the lane (RFC-0458 §3.4, 2026-09-23).
+(** Whose walk orders the lane.
     [Fresh_walk_by recorder]: a fleet Keeper's turn without a deferred
     suffix. A failed attempt that Keeper recorded does not demote its
     candidate, so its next cycle dispatches the first such candidate again
@@ -236,7 +235,7 @@ val deferred_lane_rest : now:float -> deferred_runtime_lane -> walk_rest
     resting or exhausted candidate behind its siblings and excludes none.
     Nothing else reorders it: a success leaves no preference behind, so the
     cycle after a failover starts from the declared head again. The walk may
-    still replace the head for an input modality it cannot take (RFC-0265).
+    still replace the head for an input modality it cannot take.
     A turn that failed and deferred its input walks {!resumed_walk_ids}
     instead. The suffix it deferred only says where that walk starts: the
     candidates after the one that failed, or, for a chat operation with no
@@ -389,7 +388,7 @@ type attempt_input =
   ; attempt_agent_core_checkpoint : Agent_core.Checkpoint.t option
   ; attempt_replay_prefix_projection : Keeper_replay_prefix.projection
   }
-(** One candidate's dispatch view of the turn input. RFC-0265 media degrade
+(** One candidate's dispatch view of the turn input. Media degrade
     projects the goal, the pre-turn history and the resumed checkpoint against
     the input capabilities of the runtime being dispatched; the caller's
     canonical history is never rewritten, and
@@ -772,7 +771,7 @@ module For_testing : sig
     runtime_id:string ->
     Runtime_instance.t ->
     attempt_input
-  (** The per-attempt RFC-0265 decision for one resolved candidate: unchanged
+  (** The per-attempt degrade decision for one resolved candidate: unchanged
       when the runtime admits the turn's modalities. Otherwise unsupported
       media become readings/references before any remaining unsupported blocks
       are stripped. A runtime that refuses the mixed bundle receives readings

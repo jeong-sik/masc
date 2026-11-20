@@ -119,7 +119,7 @@ let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.InputRequired _ -> Turn_input_required meta
 ;;
 
-(* RFC-0377 admits a whole conversation backlog as one wake: intake batches
+(* Intake admits a whole conversation backlog as one wake: it batches
    one connector conversation's pending rows together with every other ready
    payload, including a compatible HITL cohort, so a batch is not connector rows
    only. The batch continues on one channel only when every member has a routable
@@ -332,7 +332,7 @@ let run_keeper_cycle
           ~turn_state
           ~site:"runtime_routed"
           ~runtime_id:effective_runtime_id
-          (* RFC-0132-EXEMPT: internal observability — manifest decision reason label, not a redacted public surface *)
+          (* Internal observability — manifest decision reason label, not a redacted public surface *)
           ~decision:(`Assoc [ "reason", `String "runtime" ])
           Keeper_runtime_manifest.Runtime_routed
       in
@@ -1196,7 +1196,7 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:
                       [ "keeper", meta.name
-                      ; (* RFC-0132-EXEMPT: internal observability — real runtime identity on a metric label, not a redacted public surface *)
+                      ; (* Internal observability — real runtime identity on a metric label, not a redacted public surface *)
                         "runtime", final_execution.runtime_id
                       ; "route", Keeper_runtime_failure_route.route_kind_label failure_route
                       ; "class", Keeper_runtime_failure_route.route_class_label failure_route

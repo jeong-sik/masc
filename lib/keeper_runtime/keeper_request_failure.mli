@@ -75,10 +75,9 @@ end
 type cause =
   | Core of Keeper_request_failure_core.t
       (** An agent-core failure this module has no arm of its own for.
-          RFC-0454 §2.2's per-constructor table replaces this arm; the named
-          shapes below are the ones a producer already rendered as its own
-          sentence, and moving them here is what keeps that rendering from
-          living above the value. *)
+          The named shapes below are the ones a producer already rendered as
+          its own sentence, and moving them here is what keeps that rendering
+          from living above the value. *)
   | Masc of Keeper_internal_error.masc_internal_error
       (** A MASC error that arrived on the agent-core carrier, kept as the
           value it is. *)

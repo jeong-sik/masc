@@ -4437,6 +4437,8 @@ let test_full_health_response_carries_every_computed_field () =
   in
   Alcotest.(check (list string)) "no computed field is left out" []
     (List.filter (fun name -> not (List.mem name response)) computed);
+  Alcotest.(check bool) "the Memory writers' section is answered" true
+    (List.mem "librarian" response);
   Alcotest.(check (list string)) "no key is answered twice" []
     (List.filter
        (fun name -> List.length (List.filter (String.equal name) response) > 1)

@@ -2,11 +2,13 @@
     Librarian section of [/health?full=1] (RFC
     librarian-call-only-proposes §12.1, §12.3).
 
-    Each row is read when the answer is written, from what the writer holds
-    now ({!Librarian_writers.held}): nothing is cached or stored, so a
-    restart shows the boot's rows. The rows carry closed tokens and numbers
-    only. A slot is named by its declared id; no provider text, claim or
-    answer goes in. The level is {!Librarian_level.level}. *)
+    Each row is read from what the writer holds ({!Librarian_writers.held})
+    when the section is computed. [/health?full=1] answers from the full
+    health snapshot, so its rows are as old as that snapshot's last refresh.
+    Nothing is written to disk, so a restart shows the boot's rows. The rows
+    carry closed tokens and numbers only. A slot is named by its declared id;
+    no provider text, claim or answer goes in. The level is
+    {!Librarian_level.level}. *)
 
 (** One Keeper's row: its state, the alarms on and their level, what is
     unread, how far reading stands, the last asks, and Memory. *)

@@ -587,7 +587,7 @@ let make_health_fields ?(listener = default_listener) ?section_timings_ref
           ~config:(Mcp_server.workspace_config state))
   in
   (* The Memory writers' rows (RFC librarian-call-only-proposes §12.3), read
-     from what each writer holds when this answer is written. *)
+     from what each writer holds when the full health snapshot is refreshed. *)
   let librarian_json =
     compute_section ~name:"librarian" ?section_timings_ref (fun () ->
       match server_state with

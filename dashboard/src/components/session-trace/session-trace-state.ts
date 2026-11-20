@@ -68,9 +68,9 @@ export interface UnifiedTraceEvent {
   round?: number
   cost_usd?: number
   error?: string | null
-  // RFC-0233: canonical execution identity — same id across trajectory,
+  // Canonical execution identity — same id across trajectory,
   // tool_call log, and agent-core-event rows for one physical execution.
-  // Absent on rows written before PR-1 and on timeline rows.
+  // Absent on older rows and on timeline rows.
   executionId?: string
   // thinking fields
   thinkingContent?: string

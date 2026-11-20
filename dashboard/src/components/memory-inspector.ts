@@ -1,9 +1,8 @@
 import { isDismissEscape } from '../lib/keyboard'
 // MASC v2 — Keeper memory inspector (read-only overlay-drawer).
 //
-// Pixel-matched to the Claude-Design prototype keeper-v2/memory.jsx — same
-// drawer shell, section headers, scope toggle, and `.mem-*` classes
-// (memory-inspector-v2.css). Every datum is fetched from
+// Renders a drawer shell with section headers and a scope toggle, styled by
+// the `.mem-*` classes (memory-inspector-v2.css). Every datum is fetched from
 // `GET /api/v1/keepers/:name/turn-records`.
 //
 // Section data sources:
@@ -66,9 +65,9 @@ export function memFmtBytes(n: number): string {
 interface BlockMeta {
   readonly lbl: string
   readonly color: string
-  // Whether this block is the memory-os contribution to the prompt. Mirrors the
-  // prototype MEM_BLOCKS `mem` flag (memory.jsx) — only memory_os_recall
-  // carries recalled memory; the rest are instructions/context/surface.
+  // Whether this block is the memory-os contribution to the prompt. Only
+  // memory_os_recall and recalled_memory carry recalled memory; the rest are
+  // instructions/context/surface.
   readonly mem: boolean
 }
 const PROMPT_BLOCK_META: Readonly<Record<TurnPromptBlockId, BlockMeta>> = {
@@ -489,11 +488,10 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
   if (injections.length === 0) {
     return html`<div class="mem-empty">최근 memory_os_recall 주입 없음.</div>`
   }
-  // keeper-v2/memory.jsx 메모리 형성 에피소드 timeline (.mem-timeline >
-  // .mem-tl-row): op chip / timestamp / text+range / freed bytes. Every row
-  // here is a real memory_os_recall injection, so the op chip is always
-  // 'recall' — the design's compact/summarize/evict roles have no live event
-  // source and are not rendered.
+  // 메모리 형성 에피소드 timeline (.mem-timeline > .mem-tl-row): op chip /
+  // timestamp / text+range / injected bytes. Every row here is a real
+  // memory_os_recall injection, so the op chip is always 'recall' — the
+  // compact/summarize/evict ops have no live event source and are not rendered.
   return html`
     <div class="mem-timeline">
       ${injections.map(inj => html`
@@ -511,10 +509,10 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
   `
 }
 
-// Row shape follows keeper-v2/memory.jsx MemStoreRow: category chip, claim,
-// one meta line. The wire carries `first_seen` only (no provenance, no
-// verification time), so the meta line is the insertion age with the absolute
-// instant in the title, plus the row's place in the latest revision delta.
+// Row shape: category chip, claim, one meta line. The wire carries `basis`
+// and `first_seen` (no verification time), so the meta line is the basis label
+// and the insertion age with the absolute instant in the title, plus the row's
+// place in the latest revision delta.
 // The state chip renders the live `current` flag: store rows are current by
 // construction, while change.removed rows are exact non-current delta evidence.
 // `srcOverride` adds the owning keeper label in the aggregate current-facts list.
@@ -627,10 +625,9 @@ function memDotState(status: MemoryKeeper['status']): 'ok' | 'idle' | 'bad' {
   return status === 'run' ? 'ok' : status === 'off' ? 'bad' : 'idle'
 }
 
-// Filter chips follow keeper-v2/memory.jsx (전체 + one chip per category
-// present, only when there is more than one category to choose between). The
-// delta chip is added only when the latest revision changed rows, so a chip
-// never filters to an empty list.
+// Filter chips: 전체 + one chip per category present, only when there is more
+// than one category to choose between. The delta chip is added only when the
+// latest revision changed rows, so a chip never filters to an empty list.
 function StoreFilters({
   cats,
   deltaCount,

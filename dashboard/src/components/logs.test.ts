@@ -368,9 +368,8 @@ describe('LogViewer Code links', () => {
     )
   })
 
-  // RFC-0079 removed the dropped-rows surface. decodeLogsData now
-  // throws LogsSchemaDriftError instead of silently dropping bad rows,
-  // so there is no "parser dropped N rows" state to render here.
+  // decodeLogsData fails with LogsSchemaDriftError when a row does not
+  // decode, so there is no "parser dropped N rows" state to render here.
 
   it('renders v2 surface marker classes for CSS scoping', async () => {
     const fetchLogs = vi.fn().mockResolvedValue(logData([entry({

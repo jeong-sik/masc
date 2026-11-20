@@ -11303,9 +11303,6 @@ type state = {
       returns the ordinary wrapped-row scroll position. *)
   mutable board_history_post_id: string option;
   mutable board_cursor: int;
-  (* How tall the selected post's preview under the Board list stands.
-     Space cycles it, Esc folds it back before leaving the list. *)
-  mutable board_preview_mode: docked_preview_mode;
   mutable msg_find: string;
       (** What [/find] was last given on this pane, or [""] before it is used.
           Kept so the arg-less form continues the same search instead of
@@ -22181,7 +22178,6 @@ let create_state
   board_comment_landing = None;
   board_history_post_id = None;
   board_cursor = 0;
-  board_preview_mode = Preview_compact;
   msg_find = "";
   msg_search_generation = Atomic.make 0;
   msg_find_at = None;

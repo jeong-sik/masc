@@ -1,8 +1,8 @@
 (* The content of one unit of a Keeper's turn log, read as items
    (RFC librarian-call-only-proposes §5.1, §5.3, §5.5): every store's rows in
-   the unit's order, what a store does not hold named the way the line names
-   it with the rest still read, and a bundle that is there and does not
-   read. *)
+   the unit's order with the conversation from the one record that holds it,
+   what a store does not hold named the way the line names it with the rest
+   still read, and a bundle that is there and does not read. *)
 
 open Alcotest
 module Unread = Masc.Librarian_unread
@@ -228,42 +228,43 @@ let read_text stores span =
     @ List.map (fun part -> "missing " ^ missing_text part) unit_.missing
 ;;
 
-let segment ?(slices = []) ?(history = range 0 0) ?(internal = range 0 0) ?(chat = range 0 0)
-      ?(external_rows = range 0 0) () : Unread.segment =
-  { slices; history; internal; chat; external_rows }
+let files ?(history = range 0 0) ?(internal = range 0 0) () = Unread.Official_files { history; internal }
+
+let segment ?(record = files ()) ?(chat = range 0 0) ?(external_rows = range 0 0) () : Unread.segment =
+  { record; chat; external_rows }
 ;;
 
-(* Each store's rows, a segment at a time: chat, external, Agent-Core,
-   history, internal. The own segment's items are numbered after the
+(* Each store's rows, a segment at a time: chat, external, then the
+   conversation's record. The own segment's items are numbered after the
    unattributed ones. *)
 let test_each_store_in_order () =
   with_stores
   @@ fun stored ->
-  let after_q1, after_a1, after_c1, after_c2 =
+  let after_a1, after_c1, after_c2 =
     match stored.history, stored.chat with
-    | [ after_q1; after_a1 ], [ after_c1; after_c2 ] -> after_q1, after_a1, after_c1, after_c2
+    | [ (_ : int); after_a1 ], [ after_c1; after_c2 ] -> after_a1, after_c1, after_c2
     | _ -> fail "the fixture wrote two history rows and two chat rows"
   in
   let unattributed =
-    segment ~slices:[ slice stored.bundle 0 1 ] ~history:(range 0 after_q1) ~chat:(range 0 after_c1)
-      ~external_rows:(range 0 1) ()
+    segment
+      ~record:(files ~history:(range 0 after_a1) ~internal:(range 0 stored.internal) ())
+      ~chat:(range 0 after_c1) ~external_rows:(range 0 1) ()
   in
   let own =
-    segment ~slices:[ slice stored.bundle 1 2 ] ~history:(range after_q1 after_a1)
-      ~internal:(range 0 stored.internal) ~chat:(range after_c1 after_c2) ~external_rows:(range 1 2) ()
+    segment ~record:(Checkpoint [ slice stored.bundle 1 2 ]) ~chat:(range after_c1 after_c2)
+      ~external_rows:(range 1 2) ()
   in
   let opened : Read_unit.opened = { runtime = "glm-main"; task = No_task; stimuli = [] } in
   check (list string) "every item, in the unit's order"
     [ "unattributed 0 chat c1"
     ; "unattributed 1 external e1"
-    ; "unattributed 2 message first"
-    ; "unattributed 3 history q1"
-    ; "own 4 chat c2"
-    ; "own 5 external e2"
-    ; "own 6 message second"
-    ; "own 7 message third"
-    ; "own 8 history a1"
-    ; "own 9 internal noted"
+    ; "unattributed 2 history q1"
+    ; "unattributed 3 history a1"
+    ; "unattributed 4 internal noted"
+    ; "own 5 chat c2"
+    ; "own 6 external e2"
+    ; "own 7 message second"
+    ; "own 8 message third"
     ]
     (read_text stored.stores
        (span (Turn { turn = 10; outcome = Completed; opened; unattributed; own })))
@@ -283,25 +284,32 @@ let test_what_a_store_does_not_hold () =
   append_raw stored.internal_path "not json\n";
   append_raw stored.external_path "x\n";
   let absent = Objects.digest_of_bytes "a bundle that was never stored" in
-  let held =
-    segment
-      ~slices:[ slice absent 0 1; slice stored.bundle 0 1 ]
-      ~history:(range after_a1 (after_a1 + 40))
-      ~internal:(range stored.internal (size stored.internal_path))
-      ~chat:(range after_c2 (after_c2 + 10))
-      ~external_rows:(range 1 4) ()
+  let read record =
+    read_text stored.stores
+      (span
+         (Announced_reset
+            { cause = Recovered
+            ; segment =
+                segment ~record ~chat:(range after_c2 (after_c2 + 10)) ~external_rows:(range 1 4) ()
+            }))
   in
-  check (list string) "the items that are there, then what is not"
-    [ "reset 0 external e2"
-    ; "reset 1 message first"
-    ; Printf.sprintf "missing chat bytes %d-%d" after_c2 (after_c2 + 10)
+  let chat_and_external =
+    [ Printf.sprintf "missing chat bytes %d-%d" after_c2 (after_c2 + 10)
     ; "missing external row 2"
     ; "missing external rows 3-4"
-    ; "missing bundle 0+1"
-    ; Printf.sprintf "missing history bytes %d-%d" after_a1 (after_a1 + 40)
-    ; Printf.sprintf "missing internal line at %d" stored.internal
     ]
-    (read_text stored.stores (span (Announced_reset { cause = Recovered; segment = held })))
+  in
+  check (list string) "the checkpoint's messages that are there, then what is not"
+    ([ "reset 0 external e2"; "reset 1 message first" ] @ chat_and_external @ [ "missing bundle 0+1" ])
+    (read (Checkpoint [ slice absent 0 1; slice stored.bundle 0 1 ]));
+  check (list string) "the files' rows that are there, then what is not"
+    (("reset 0 external e2" :: chat_and_external)
+     @ [ Printf.sprintf "missing history bytes %d-%d" after_a1 (after_a1 + 40)
+       ; Printf.sprintf "missing internal line at %d" stored.internal
+       ])
+    (read
+       (files ~history:(range after_a1 (after_a1 + 40))
+          ~internal:(range stored.internal (size stored.internal_path)) ()))
 ;;
 
 (* A bundle that is there and does not match its digest, and one that holds
@@ -313,7 +321,7 @@ let test_a_bundle_that_does_not_read () =
   append_raw (Masc.Keeper_checkpoint_object_store.path ~session_dir:stored.session_dir changed) "other bytes";
   let reading slices =
     read_text stored.stores
-      (span (Announced_reset { cause = Recovered; segment = segment ~slices () }))
+      (span (Announced_reset { cause = Recovered; segment = segment ~record:(Checkpoint slices) () }))
   in
   check (list string) "a bundle whose bytes changed" [ "content of 100 unreadable" ]
     (reading [ slice changed 0 1 ]);

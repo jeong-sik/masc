@@ -840,9 +840,18 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
          | Some true -> [ Masc_tui_footer.Server_worktree_binary ]
          | Some false | None -> [])
         @
-        (* The server's rollup, from the probe it serves on every refresh. *)
-        (match Masc_tui_types.operator_actions state with
-         | Some (_ :: rest) ->
+        (* The server's rollup, from the probe it serves on every refresh.
+           Where the list is not there the notice draws why (RFC
+           tui-one-screen-grammar 6.4): the identity did not carry it [?],
+           or carried a list this build could not read [✕]. *)
+        let reasons_gap gap =
+          [ Masc_tui_footer.Operator_action
+              { notice = pressable (Press_surface Overview)
+                  (ui_text state ~ko:"조치 원인 " ~en:"Action reasons "
+                   ^ Masc_tui_value.Unknown.glyph gap)
+              ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations" } ] in
+        (match identity.Tui_decode.sid_operator_action with
+         | Some (Tui_decode.Operator_actions_observed (_ :: rest)) ->
            let count = 1 + List.length rest in
            let notice =
              ui_text state
@@ -854,12 +863,10 @@ let footer_line_keys ?help_door ?(status = []) ?position ?(recovery_in_slot = No
                { notice
                ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations"
                } ]
-         | Some [] -> []
-         | None ->
-             [ Masc_tui_footer.Operator_action
-                 { notice = pressable (Press_surface Overview)
-                     (ui_text state ~ko:"조치 원인 미관측" ~en:"Action reasons unobserved")
-                 ; detail = ui_text state ~ko:"운영에서 확인" ~en:"Open Operations" } ])
+         | Some (Tui_decode.Operator_actions_observed []) -> []
+         | Some (Tui_decode.Operator_actions_unavailable _) ->
+             reasons_gap Masc_tui_value.Unknown.Read_failed
+         | None -> reasons_gap Masc_tui_value.Unknown.Unreported)
         @
         (* This TUI's own embedded commit against the server's: the pair
            that told "restart masc" apart from "the feature is not merged"
@@ -5299,7 +5306,9 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
     List.map (fun line -> "  " ^ line) (Context_bars.wrap ~width text)
   in
   let selected_model =
-    Option.value ~default:"model not observed" record.selected_model
+    Option.value
+      ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported)
+      record.selected_model
   in
   (* Three short rows rather than one long one. Joined, the turn number and
      the timestamp fall off the right edge of a narrow pane, and the turn
@@ -5375,7 +5384,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
             Ansi.dim (Inspector.format_tokens maximum) Ansi.reset
         ]
     | Some tokens, (None | Some _) ->
-        [ Printf.sprintf "  %s %s  %s(window not observed)%s"
+        [ Printf.sprintf "  %s %s  %s(window not reported)%s"
             (Inspector.format_tokens tokens) count_label Ansi.dim Ansi.reset
         ]
     | None, _ -> [ "  Context usage was not reported for this turn" ]
@@ -5421,7 +5430,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
                     ~scale:(Chart.Declared_limit (Theme.paint ()))
               ]
         | Some tokens, (None | Some _) ->
-            [ Printf.sprintf "  %s input tokens; window not observed"
+            [ Printf.sprintf "  %s input tokens; window not reported"
                 (Inspector.format_tokens tokens) ]
         | None, _ -> [ "  Context usage was not reported for this turn" ]))
   in
@@ -5524,7 +5533,7 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
         @ prose reach_prose
     | None ->
         context_wrapped_lines ~cols ~style:(Theme.bad ())
-          "Conversation history window was not observed"
+          "Conversation history window was not reported"
   in
   let component_lines =
     match

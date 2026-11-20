@@ -21,7 +21,7 @@ let request_view ?continuity ?completed_arguments ?held_window ?tools ~provider_
 module Snapshot = Masc.Librarian_continuity_snapshot
 module Boundary = Masc.Keeper_turn_boundaries
 module Front = Masc.Keeper_carried_front
-module Progress = Masc.Keeper_librarian_progress
+module Point = Masc.Keeper_covered_point
 module Window = Runtime_model_input_tail_window
 module T = Agent_core.Types
 
@@ -32,16 +32,23 @@ let text role body = message role [T.Text body]
 let pinned = text T.System "Do not publish without approval."
 let source = [pinned; text T.User "Build the patch."; text T.Assistant "The build passed."]
 
-let capture_source source =
+(* The Memory writer's read end at [end_atom], with the working state it
+   committed ([state], the fixture's by default). *)
+let read_end ?(state = Some working_state) end_atom =
+  Driver.Covered { Driver.end_atom; working_state = state }
+;;
+
+(* Every atom of [source] is read. *)
+let source_end = snd (Window.annotate source)
+
+(* The boundary log's one completed turn over [source]. *)
+let boundary_lines source =
   let position = match Boundary.position_of_messages source with
     | Ok position -> position | Error detail -> fail detail in
-  let lines = [1, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
+  [1, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
     { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:1;
-      history_at_start = Boundary.Fresh_history; position } }] in
-  match Snapshot.capture ~unread_messages:[] ~trace_id ~lines ~messages:source ~working_state with
-  | Ok snapshot -> snapshot, lines | Error error -> fail (Snapshot.error_to_string error)
+      history_at_start = Boundary.Fresh_history; position } }]
 ;;
-let snapshot () = fst (capture_source source)
 
 let provider_config = Agent_core.Llm_provider.Provider_config.make
   ~kind:Agent_core.Llm_provider.Provider_config.OpenAI_compat
@@ -49,16 +56,14 @@ let provider_config = Agent_core.Llm_provider.Provider_config.make
 let measure m = String.length (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json m))
 let encode messages = Yojson.Safe.to_string (`List (List.map Agent_core.Checkpoint.message_to_json messages))
 
-let view ?front ?held_window snapshot messages =
-  let _, lines = capture_source source in
-  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
-  request_view ?held_window ~continuity ~provider_config
+(* A request over [messages] whose writer read all of [source]. *)
+let view ?front ?held_window messages =
+  request_view ?held_window ~continuity:(read_end source_end) ~provider_config
     ~measure_message_bytes:measure ~accepted:None ~front
     ~history_digest_at:(Window.atom_opening_digest messages)
     ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ())
-    ~turn_boundary:(Front.Turn_boundary { end_atom = snapshot.Snapshot.end_atom })
+    ~turn_boundary:(Front.Turn_boundary { end_atom = source_end })
     ~materialize:(fun ~pending:_ _ -> fail "unsummarized history entered tool demotion") messages
 ;;
 
@@ -102,7 +107,7 @@ let tool_pair () =
    it goes out exactly as the range first sent it: rewriting it when the turn
    boundary moves would change the prefix the provider cached (RFC-0363
    §3.4.1). *)
-let test_without_snapshot_seed_sends_earlier_tool_bodies_as_sent () =
+let test_without_a_read_end_a_seed_range_sends_earlier_tool_bodies_as_sent () =
   let earlier_body = String.make 4_000 'o' in
   let earlier =
     [ pinned; text T.User "Read the old log.";
@@ -119,7 +124,7 @@ let test_without_snapshot_seed_sends_earlier_tool_bodies_as_sent () =
   let front : Front.seed = {first_atom = 0; front = Model_input_front.At_atom front_digest; source = Front.Ledger} in
   let planned = ref 0 in
   let seeded =
-    request_view ~continuity:Driver.without_snapshot
+    request_view ~continuity:Driver.No_read_end
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front:(Some front)
       ~history_digest_at ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ())
@@ -138,14 +143,13 @@ let test_without_snapshot_seed_sends_earlier_tool_bodies_as_sent () =
 ;;
 
 let test_actual_wire_and_tool_append () =
-  let snapshot = snapshot () in
   let current = text T.User "Inspect the unpublished patch." in
   let initial = source @ [current] in
-  let first = view snapshot initial in
+  let first = view initial in
   check string "first wire has exact raw suffix" (encode [pinned; current])
     (encode (without_working_state (wire first)));
   let exchange = tool_pair () in
-  let second = view snapshot (initial @ exchange) in
+  let second = view (initial @ exchange) in
   check string "next request preserves tool exchange verbatim" (encode (pinned :: current :: exchange))
     (encode (without_working_state (wire second)));
   check int "original atom numbering retained" 4 second.composed.history_atom_count;
@@ -157,63 +161,38 @@ let test_actual_wire_and_tool_append () =
 ;;
 
 let test_an_old_front_does_not_drop_unread () =
-  let snapshot = snapshot () in
   let suffix = [text T.User "First pending request"] @ tool_pair ()
     @ [text T.User "Second pending request"] in
   let messages = source @ suffix in
   let front_digest = Window.atom_opening_digest messages 4 |> Option.get in
   let front : Front.seed = {first_atom = 4; front = Model_input_front.At_atom front_digest; source = Front.Ledger} in
-  let projected = view ~front snapshot messages in
+  let projected = view ~front messages in
   check string "old advanced ledger cannot discard pending work" (encode (pinned :: suffix))
     (encode (without_working_state (wire projected)));
-  check int "a snapshot range demotes nothing" 0 projected.composed.demote_before;
+  check int "a read-end range demotes nothing" 0 projected.composed.demote_before;
   (match projected.composed.origin with
-   | Front.Librarian_snapshot {end_atom = 2; boundary_line = 1} -> ()
-   | _ -> fail "request attribution lost exact snapshot frontier")
+   | Front.Librarian_progress {end_atom = 2} -> ()
+   | _ -> fail "request attribution lost the exact read end")
 ;;
 
 let test_all_covered_keeps_only_working_and_pinned () =
-  let projected = view (snapshot ()) source in
+  let projected = view source in
   check string "last covered atom is not retained by clamp" (encode [pinned])
     (encode (without_working_state (wire projected)));
   check int "exclusive end can equal atom count" projected.composed.projection.atom_count
     projected.composed.projection.dropped_atoms
 ;;
 
-let test_each_request_validates_frozen_covered_messages () =
-  let covered = [pinned; text T.User "Inspect the patch"] @ tool_pair () in
-  let snapshot, lines = capture_source covered in
-  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages:covered snapshot with
-    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
-  let accepted messages = match Driver.validate_continuity ~messages continuity with
-    | Ok () -> () | Error _ -> fail "unchanged covered prefix was refused" in
-  accepted covered;
-  accepted (covered @ [text T.User "Continue without publishing"] @ tool_pair ());
-  (* Equality is by immutable values, not physical object identity. *)
-  accepted (List.map (fun (m : T.message) -> {m with content = List.map Fun.id m.content}) covered);
-  accepted (text T.System "Updated current instructions" :: List.tl covered);
-  let refused messages = match Driver.validate_continuity ~messages continuity with
-    | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig {field = "librarian.continuity"; _})) -> ()
-    | _ -> fail "changed covered prefix did not fail with typed continuity error" in
-  refused [pinned; text T.User "Inspect the patch"];
-  refused (List.map (fun (m : T.message) ->
-    {m with content = List.map (function
-      | T.ToolResult result -> T.ToolResult {result with content = "Rewritten result"}
-      | block -> block) m.content}) covered);
-  (match Driver.prepare_continuity ~trace_id:"another-trace" ~lines ~messages:covered snapshot with
-   | Error Snapshot.Trace_mismatch -> () | _ -> fail "dispatch accepted another trace's snapshot")
-;;
-
-(* Without a snapshot the range starts at the seed when one is valid for
+(* Without a read end the range starts at the seed when one is valid for
    this history, and only with none at the end of the last completed turn
-   (RFC keeper-context-window-in-tokens §13.4). A keeper whose Librarian has
-   no point yet keeps carrying the earlier turns its ledger front holds. *)
-let test_without_snapshot_starts_at_the_turn_start () =
+   (RFC keeper-context-window-in-tokens §13.4). A keeper whose writer has
+   read nothing yet keeps carrying the earlier turns its ledger front holds. *)
+let test_without_a_read_end_the_range_starts_at_the_turn_start () =
   let this_turn = [text T.User "Fresh unsummarized work"] @ tool_pair () in
   let messages = source @ this_turn in
   let completed_end = snd (Window.annotate source) in
   let project ?front ~turn_boundary () =
-    request_view ~continuity:Driver.without_snapshot
+    request_view ~continuity:Driver.No_read_end
       ~provider_config ~measure_message_bytes:measure ~accepted:None ~front
       ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
       ~base_path:(Filename.get_temp_dir_name ()) ~turn_boundary
@@ -285,96 +264,85 @@ let test_without_snapshot_starts_at_the_turn_start () =
     unknown.composed.projection.dropped_atoms;
   (match unknown.composed.origin with
    | Front.Turn_start_unknown { reason = said } when String.equal said reason -> ()
-   | _ -> fail "the origin does not name the unknown turn start");
-  (match Driver.validate_continuity ~messages:[] Driver.without_snapshot with
-   | Ok () -> () | Error _ -> fail "the snapshot-less path borrowed stale prefix obligations")
+   | _ -> fail "the origin does not name the unknown turn start")
 ;;
 
-let progress ~trace_id ~end_atom ~last_atom_digest : Progress.t =
-  { position = { Progress.trace_id; end_atom; last_atom_digest }; boundary_lines_seen = 1 }
-;;
-
-let absorbed_view continuity messages =
+let read_end_view continuity messages =
   request_view ~continuity ~provider_config ~measure_message_bytes:measure
     ~accepted:None ~front:None ~history_digest_at:(Window.atom_opening_digest messages) ~current_turn_results:Driver.Current_turn_verbatim
     ~base_path:(Filename.get_temp_dir_name ())
-    (* Unread under a position: the range starts at the position itself. *)
+    (* Unread under a read end: the range starts at the read end itself. *)
     ~turn_boundary:(Front.Turn_boundary { end_atom = 0 })
-    ~materialize:(fun ~pending:_ _ -> fail "absorbed history entered demotion") messages
+    ~materialize:(fun ~pending:_ _ -> fail "read history entered demotion") messages
 ;;
 
-(* A saved continuity snapshot that no longer fits, and a Librarian position
-   that does: the request starts at the position, nothing summarizes what
-   lies before it, and a position of another trace, over a message this
-   history does not hold, or past its end is no front at all. *)
-let test_absorbed_history_starts_at_the_librarians_position () =
+(* A read end with no working state: the request starts there, and nothing
+   summarizes what lies before it. A read end at the end of the history
+   leaves only the pinned messages. *)
+let test_a_read_end_alone_starts_there () =
   let fresh = text T.User "Fresh unsummarized work" in
   let messages = source @ [fresh] @ tool_pair () in
   let _, atom_count = Window.annotate messages in
-  let digest_at = Window.atom_opening_digest messages in
-  let read_one = progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0)) in
-  let end_atom, continuity = match Driver.absorbed_history ~trace_id ~messages read_one with
-    | Some value -> value | None -> fail "a position that matches this history was refused" in
-  check int "the position is the front" 1 end_atom;
-  let projected = absorbed_view continuity messages in
+  let projected = read_end_view (read_end ~state:None 1) messages in
   (match projected.composed.origin with
    | Front.Librarian_progress {end_atom = 1} -> ()
-   | _ -> fail "the request was not attributed to the Librarian's position");
+   | _ -> fail "the request was not attributed to the read end");
   check int "the read atom is not sent again" 1 projected.composed.projection.dropped_atoms;
   let sent = wire projected in
   check bool "the pinned message stays" true (List.mem pinned sent);
-  check bool "the absorbed atom is gone" false (List.mem (text T.User "Build the patch.") sent);
+  check bool "the read atom is gone" false (List.mem (text T.User "Build the patch.") sent);
   check bool "the unread atom is sent" true (List.mem fresh sent);
   check bool "no working state is invented" false
     (List.exists Runtime_model_input_tail_window.is_working_state sent);
-  (match Driver.validate_continuity ~messages continuity with
-   | Ok () -> () | Error _ -> fail "the position it was built from failed its own check");
-  let read_all =
-    progress ~trace_id ~end_atom:atom_count ~last_atom_digest:(Option.get (digest_at (atom_count - 1))) in
-  (match Driver.absorbed_history ~trace_id ~messages read_all with
-   | Some (end_atom, at_end) ->
-     check int "a Librarian that read everything stands at the end" atom_count end_atom;
-     let projected = absorbed_view at_end messages in
-     check int "every atom is dropped" atom_count projected.composed.projection.dropped_atoms;
-     check bool "no history atom is on the wire" false (List.mem fresh (wire projected));
-     check bool "the pinned message still is" true (List.mem pinned (wire projected))
-   | None -> fail "a position at the end of this history was refused");
-  check bool "another trace's position is no front" true
-    (Option.is_none (Driver.absorbed_history ~trace_id:"another-trace" ~messages read_one));
-  check bool "a position over a message this history does not hold is no front" true
-    (Option.is_none (Driver.absorbed_history ~trace_id ~messages
-       (progress ~trace_id ~end_atom:1 ~last_atom_digest:"not-the-opening-message")));
-  check bool "a position past this history is no front" true
-    (Option.is_none (Driver.absorbed_history ~trace_id ~messages
-       (progress ~trace_id ~end_atom:(atom_count + 1) ~last_atom_digest:(Option.get (digest_at 0)))));
-  let changed = List.map (fun (m : T.message) ->
-    if m = text T.User "Build the patch." then text T.User "Rewritten under the position" else m) messages in
-  (match Driver.validate_continuity ~messages:changed continuity with
-   | Error _ -> () | Ok () -> fail "a history that changed under the position passed its check")
+  let at_end = read_end_view (read_end ~state:None atom_count) messages in
+  check int "every atom is dropped" atom_count at_end.composed.projection.dropped_atoms;
+  check bool "no history atom is on the wire" false (List.mem fresh (wire at_end));
+  check bool "the pinned message still is" true (List.mem pinned (wire at_end))
+;;
+
+(* What the view says becomes the turn's continuity (RFC
+   librarian-call-only-proposes §11.1). Only a read end that is a place in
+   this history is one, and only it carries the working state. With no
+   view, nothing read, or a read end that is no place here, the request
+   starts at the seed or at the turn's boundary, and the note says why. *)
+let test_the_view_gives_the_continuity () =
+  let messages = source @ [text T.User "Fresh unsummarized work"] in
+  let state = Some working_state in
+  let read place = Driver.continuity_of_read (Ok { Point.place; working_state = state }) in
+  (match read (Point.Covered { end_atom = 1 }) with
+   | Driver.Covered { Driver.end_atom = 1; working_state = Some said }, None ->
+     check string "the read end carries the committed working state" working_state said
+   | _ -> fail "a read end in this history was not the continuity");
+  (match read Point.Nothing_read with
+   | Driver.No_read_end, Some Driver.Nothing_read -> ()
+   | _ -> fail "a writer that read nothing gave a read end");
+  (match read (Point.Front_unresolved (Point.Other_trace { covered = "another-trace" })) with
+   | Driver.No_read_end, Some (Driver.Read_end_unresolved (Point.Other_trace _)) -> ()
+   | _ -> fail "a read end on another trace gave a read end");
+  (match Driver.continuity_of_read (Error `Booting) with
+   | Driver.No_read_end, Some (Driver.No_view `Booting) -> ()
+   | _ -> fail "a writer still opening its store gave a read end");
+  (match Driver.continuity_of_read (Error (`Stopped Masc.Librarian_store.Memory_unreadable)) with
+   | Driver.No_read_end, Some (Driver.No_view (`Stopped Masc.Librarian_store.Memory_unreadable)) -> ()
+   | _ -> fail "a stopped store gave a read end");
+  (match (read_end_view (fst (read Point.Nothing_read)) messages).composed.origin with
+   | Front.Turn_start { end_atom = 0 } -> ()
+   | _ -> fail "a turn with no read end did not start at its own boundary")
 ;;
 
 (* Rule 8 names its front after the continuity it ran on, with a label of
    its own: rule 7 bounds that front by where this turn began, and rule 1's
-   front at the turn boundary by the boundary. A snapshot and a read
-   position are both a Librarian point. *)
+   front at the turn boundary by the boundary. A read end, with or without
+   its working state, is a Librarian point. *)
 let test_a_rule_8_front_is_named_after_the_continuity () =
-  let messages = source @ [text T.User "Fresh unsummarized work"] in
-  let digest_at = Window.atom_opening_digest messages in
-  let snapshot, lines = capture_source source in
-  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
-  let absorbed =
-    match Driver.absorbed_history ~trace_id ~messages
-            (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0))) with
-    | Some (_, continuity) -> continuity
-    | None -> fail "a position that matches this history was refused" in
   let name continuity =
     Front.source_to_string (Driver.For_testing.this_turn_front_source continuity) in
-  check string "a turn with a snapshot" "this_turn_start_after_librarian_refusal" (name summarized);
-  check string "a turn at the read position" "this_turn_start_after_librarian_refusal"
-    (name absorbed);
-  check string "a turn without a snapshot" "this_turn_start_after_seed_refusal"
-    (name Driver.without_snapshot)
+  check string "a turn with a working state" "this_turn_start_after_librarian_refusal"
+    (name (read_end source_end));
+  check string "a turn at a read end alone" "this_turn_start_after_librarian_refusal"
+    (name (read_end ~state:None 1));
+  check string "a turn without a read end" "this_turn_start_after_seed_refusal"
+    (name Driver.No_read_end)
 ;;
 
 (* The forecast asks the driver's own chooser, so every start the driver
@@ -382,7 +350,7 @@ let test_a_rule_8_front_is_named_after_the_continuity () =
    range opens on and its bytes. The first three cases hold a seed this
    history still opens with the same message, so a forecast that tried the
    seed before the Librarian point would name the seed where the driver
-   names the snapshot or the read position. *)
+   names the read end. *)
 let test_the_forecast_takes_the_drivers_start () =
   let fresh = text T.User "Fresh unsummarized work" in
   let messages = source @ [fresh] in
@@ -391,38 +359,32 @@ let test_the_forecast_takes_the_drivers_start () =
     {first_atom = 0; front = Model_input_front.At_atom (Option.get (digest_at 0)); source = Front.Ledger} in
   let outlived_seed : Front.seed =
     {first_atom = 0; front = Model_input_front.At_atom ("not-the-opening-message"); source = Front.Ledger} in
-  let snapshot, lines = capture_source source in
-  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
-  let absorbed =
-    match Driver.absorbed_history ~trace_id ~messages
-            (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0))) with
-    | Some (_, continuity) -> continuity
-    | None -> fail "a position that matches this history was refused" in
+  let with_state = read_end source_end in
+  let alone = read_end ~state:None 1 in
   let boundary = Front.Turn_boundary { end_atom = 2 } in
   let unknown = Front.Turn_boundary_unknown { reason = "boundary read failed: fixture" } in
   (* The start the provider last accepted, as the turn record keeps it
-     (RFC librarian-lifecycle §4.10, rule 2): past the read position, so
-     both the driver and the forecast open there. *)
+     (RFC librarian-lifecycle §4.10, rule 2): past the read end, so both
+     the driver and the forecast open there. *)
   let accepted : Front.seed =
     {first_atom = 2; front = Model_input_front.At_atom (Option.get (digest_at 2)); source = Front.Turn_record { turn = 3 }} in
   let cases =
-    [ "a fitting snapshot", summarized, Some held_seed, None, boundary,
-      (function Front.Librarian_snapshot _ -> true | _ -> false);
-      "the read position", absorbed, Some held_seed, None, boundary,
+    [ "a read end with its working state", with_state, Some held_seed, None, boundary,
+      (function Front.Librarian_progress { end_atom = 2 } -> true | _ -> false);
+      "a read end alone", alone, Some held_seed, None, boundary,
       (function Front.Librarian_progress { end_atom = 1 } -> true | _ -> false);
-      "an accepted start past the read position", absorbed, Some held_seed, Some accepted, boundary,
+      "an accepted start past the read end", alone, Some held_seed, Some accepted, boundary,
       (function
         | Front.Past_librarian_point
             { librarian_end_atom = 1; source = Front.Turn_record { turn = 3 } } -> true
         | _ -> false);
-      "a held seed", Driver.without_snapshot, Some held_seed, None, boundary,
+      "a held seed", Driver.No_read_end, Some held_seed, None, boundary,
       (function Front.Carried Front.Ledger -> true | _ -> false);
-      "an outlived seed", Driver.without_snapshot, Some outlived_seed, None, boundary,
+      "an outlived seed", Driver.No_read_end, Some outlived_seed, None, boundary,
       (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
-      "the turn boundary", Driver.without_snapshot, None, None, boundary,
+      "the turn boundary", Driver.No_read_end, None, None, boundary,
       (function Front.Turn_start { end_atom = 2 } -> true | _ -> false);
-      "an unknown boundary", Driver.without_snapshot, None, None, unknown,
+      "an unknown boundary", Driver.No_read_end, None, None, unknown,
       (function Front.Turn_start_unknown _ -> true | _ -> false) ]
   in
   List.iter (fun (name, continuity, front, accepted, turn_boundary, expected) ->
@@ -447,50 +409,47 @@ let test_the_forecast_takes_the_drivers_start () =
     cases
 ;;
 
-(* RFC librarian-lifecycle §4.10: a snapshot that fits is still the
-   Librarian point when the provider last accepted a later start. The range
-   opens at that start and the working state still rides ahead of it, once;
-   the atoms between the snapshot's cut and the accepted start are not sent. *)
 (* A window that stays carries the working state it carried when it
-   opened, whatever the snapshot says now, and none when it opened with none
-   (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.3). A
-   window that opened anywhere else carries the snapshot's. *)
+   opened, whatever the read end's says now, and none when it opened with
+   none (RFC a-sent-request-prefix-changes-only-when-the-window-moves §3.3).
+   A window that opened anywhere else carries the read end's. *)
 let test_a_window_that_stays_keeps_its_working_state () =
-  let snapshot = snapshot () in
   let messages = source @ [ text T.User "Publish it now." ] in
-  let opened_at = snapshot.Snapshot.end_atom in
+  let opened_at = source_end in
   let carried ?held_window () =
     List.filter_map
       (fun (m : T.message) ->
          if m.metadata = Runtime_model_input_tail_window.working_state_metadata
          then Some m.content
          else None)
-      (wire (view ?held_window snapshot messages))
+      (wire (view ?held_window messages))
   in
   let held ~at working_state =
     { Driver.window_opened_at = at; markers_before = 0; working_state }
   in
   let opened_with = "[Librarian working state: the summary the window opened with]" in
-  let current = [ [ T.Text (Driver.working_state_text snapshot) ] ] in
+  let current = [ [ T.Text (Driver.working_state_text working_state) ] ] in
   check bool "a window that stays carries the text it opened with" true
     (carried ~held_window:(held ~at:opened_at (Some opened_with)) ()
      = [ [ T.Text opened_with ] ]);
   check bool "and none when it opened with none" true
     (carried ~held_window:(held ~at:opened_at None) () = []);
-  check bool "a window that opened elsewhere carries the snapshot's" true
+  check bool "a window that opened elsewhere carries the read end's" true
     (carried ~held_window:(held ~at:(opened_at + 1) (Some opened_with)) () = current);
-  check bool "with nothing held, the snapshot's" true (carried () = current)
+  check bool "with nothing held, the read end's" true (carried () = current)
 ;;
 
-let test_a_start_past_the_snapshot_keeps_the_working_state () =
+(* RFC librarian-lifecycle §4.10: a read end is still the Librarian point
+   when the provider last accepted a later start. The range opens at that
+   start and the working state still rides ahead of it, once; the atoms
+   between the read end and the accepted start are not sent. *)
+let test_a_start_past_the_read_end_keeps_the_working_state () =
   let skipped = text T.User "Fresh unsummarized work" in
   let accepted_atom = text T.Assistant "The accepted range opens here." in
   let current = text T.User "This turn's input." in
   let messages = source @ [skipped; accepted_atom; current] in
   let digest_at = Window.atom_opening_digest messages in
-  let snapshot, lines = capture_source source in
-  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
+  let summarized = read_end source_end in
   let accepted : Front.seed =
     {first_atom = 3; front = Model_input_front.At_atom (Option.get (digest_at 3)); source = Front.Turn_record { turn = 5 }} in
   let projected =
@@ -503,8 +462,8 @@ let test_a_start_past_the_snapshot_keeps_the_working_state () =
   (match projected.composed.origin with
    | Front.Past_librarian_point
        { librarian_end_atom; source = Front.Turn_record { turn = 5 } } ->
-     check int "the gap opens at the snapshot's cut" snapshot.Snapshot.end_atom librarian_end_atom
-   | _ -> fail "the request was not attributed to the start past the snapshot");
+     check int "the gap opens at the read end" source_end librarian_end_atom
+   | _ -> fail "the request was not attributed to the start past the read end");
   check int "the range opens at the accepted start" 3 projected.composed.projection.dropped_atoms;
   let sent = without_working_state (wire projected) in
   check bool "the skipped atom is not sent" false (List.mem skipped sent);
@@ -517,15 +476,15 @@ let test_a_start_past_the_snapshot_keeps_the_working_state () =
   let gap ~read_position =
     Option.map
       (fun (g : Front.librarian_gap) -> g.gap_start_atom, g.gap_end_atom)
-      (Front.librarian_gap ~snapshot_cut:(Some snapshot.Snapshot.end_atom)
+      (Front.librarian_gap ~snapshot_cut:(Some source_end)
          ~read_position ~accepted_start:accepted.first_atom)
   in
   check (option (pair int int)) "a read position at the accepted start leaves no gap" None
     (gap ~read_position:(Some 3));
   check (option (pair int int)) "a read position behind the cut leaves the cut to the start"
-    (Some (snapshot.Snapshot.end_atom, 3)) (gap ~read_position:(Some 1));
+    (Some (source_end, 3)) (gap ~read_position:(Some 1));
   check (option (pair int int)) "no read position leaves the cut to the start"
-    (Some (snapshot.Snapshot.end_atom, 3)) (gap ~read_position:None)
+    (Some (source_end, 3)) (gap ~read_position:None)
 ;;
 
 let exchange id body =
@@ -559,12 +518,9 @@ let test_completed_bodies_go_raw_until_a_size_refusal () =
   let messages = completed @ current in
   let original = encode messages in
   let completed_end = snd (Window.annotate completed) in
-  (* The Librarian is one turn behind: its snapshot covers [source], so the
-     request carries the completed "older" exchange and this turn. *)
-  let behind =
-    let snapshot, lines = capture_source source in
-    match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
+  (* The writer is one turn behind: it read [source], so the request
+     carries the completed "older" exchange and this turn. *)
+  let behind = read_end source_end in
   let carried = pinned :: (older @ current) in
   let refused = Driver.Current_turn_demoted { refused_atom_count = snd (Window.annotate messages) } in
   let project ?(base_path = base_path) ?(continuity = Some behind)
@@ -596,14 +552,11 @@ let test_completed_bodies_go_raw_until_a_size_refusal () =
   check string "a resend with no store keeps the exact raw source" (encode carried)
     (encode (project ~base_path:"" ~current_turn_results:refused ()
              |> without_working_state |> without_preamble));
-  (* No snapshot and no seed: the range starts at the completed boundary, so
+  (* No read end and no seed: the range starts at the completed boundary, so
      this turn goes raw. *)
-  check string "without a snapshot only this turn goes, raw" (encode (pinned :: current))
-    (encode (project ~continuity:(Some Driver.without_snapshot) ()));
-  let snapshot, lines = capture_source completed in
-  let continuity = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
-  let summarized = project ~continuity:(Some continuity) () |> without_working_state in
+  check string "without a read end only this turn goes, raw" (encode (pinned :: current))
+    (encode (project ~continuity:(Some Driver.No_read_end) ()));
+  let summarized = project ~continuity:(Some (read_end completed_end)) () |> without_working_state in
   check string "covered prefix excluded, unfinished suffix intact" (encode (pinned :: current))
     (encode summarized);
   check string "durable source values unchanged" original (encode messages)
@@ -620,10 +573,7 @@ let test_failed_externalization_keeps_raw_body () =
   let this_turn = [text T.User "Next turn."] in
   let messages = completed @ this_turn in
   let completed_end = snd (Window.annotate completed) in
-  let behind =
-    let snapshot, lines = capture_source source in
-    match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-    | Ok value -> value | Error error -> fail (Snapshot.error_to_string error) in
+  let behind = read_end source_end in
   let reverted = ref 0 in
   let projected = request_view
     ~continuity:behind ~provider_config ~measure_message_bytes:measure
@@ -642,7 +592,7 @@ let test_failed_externalization_keeps_raw_body () =
 
 let test_completed_boundary_protects_resumed_work () =
   let completed = source @ exchange "completed" (String.make 8000 'd') in
-  let _, lines = capture_source completed in
+  let lines = boundary_lines completed in
   let resumed = completed @ [text T.User "Still awaiting approval"]
     @ exchange "resumed-unfinished" (String.make 8000 'u') in
   let endpoint = snd (Window.annotate completed) in
@@ -676,235 +626,6 @@ let test_completed_boundary_protects_resumed_work () =
     (completed_end baseline resumed = Ok endpoint)
 ;;
 
-(* A snapshot that cannot be used is one that does not fit, never a refused
-   turn (#37762): a refused turn runs no Librarian round, so nothing would
-   ever replace the snapshot. The covered bytes changing under unchanged atom
-   openers, a snapshot file that cannot be read, and a boundary log that
-   cannot be read each start at the Librarian's position when it is a place
-   in this history, else at the turn's own boundary. *)
-let test_an_unusable_snapshot_starts_without_it () =
-  let covered = [pinned; text T.User "Inspect the patch"] @ tool_pair () in
-  let snapshot, lines = capture_source covered in
-  let rewritten = List.map (fun (m : T.message) ->
-    {m with content = List.map (function
-      | T.ToolResult result -> T.ToolResult {result with content = "Rewritten result"}
-      | block -> block) m.content}) covered in
-  let fresh = text T.User "Continue with the review" in
-  let messages = rewritten @ [fresh] in
-  (match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
-   | Error Snapshot.Prefix_changed -> ()
-   | Ok _ | Error _ -> fail "the fixture does not change the covered bytes under the same openers");
-  let end_atom = snapshot.Snapshot.end_atom in
-  let digest_at = Window.atom_opening_digest messages in
-  let position =
-    progress ~trace_id ~end_atom ~last_atom_digest:(Option.get (digest_at (end_atom - 1))) in
-  let select
-        ?(read_lines = fun () -> Ok lines)
-        ?(read_progress = fun () -> Ok (Some position))
-        snapshot
-    =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages
-      ~snapshot ~lines:read_lines ~progress:read_progress
-  in
-  let origin continuity = (absorbed_view continuity messages).composed.origin in
-  let starts_at_the_position label continuity =
-    match origin continuity with
-    | Front.Librarian_progress {end_atom = at} -> check int label end_atom at
-    | _ -> fail (label ^ ": the request did not start at the Librarian's position")
-  in
-  starts_at_the_position "changed covered bytes start at the position"
-    (select (Ok (Some snapshot)));
-  (match origin (select ~read_progress:(fun () -> Ok None) (Ok (Some snapshot))) with
-   | Front.Turn_start _ -> ()
-   | _ -> fail "with no position the request did not start at the turn's own boundary");
-  (match origin (select ~read_progress:(fun () -> Error "unreadable") (Ok (Some snapshot))) with
-   | Front.Turn_start _ -> ()
-   | _ -> fail "an unreadable position did not fall back to the turn's own boundary");
-  starts_at_the_position "an unreadable snapshot starts at the position"
-    (select ~read_lines:(fun () -> fail "the boundary log was read for a snapshot that was not")
-       (Error "snapshot file is not JSON"));
-  starts_at_the_position "an unreadable boundary log starts at the position"
-    (select ~read_lines:(fun () -> Error "boundary log cannot be read") (Ok (Some snapshot)));
-  (* A refused line after the snapshot's boundary stops the range
-     (Range_stopped): no later restart settles it. *)
-  let stopped_lines = lines @ [2, Error (Boundary.Not_json "torn append")] in
-  (match Driver.prepare_continuity ~trace_id ~lines:stopped_lines ~messages snapshot with
-   | Error (Snapshot.Range_stopped _) -> ()
-   | Ok _ | Error _ -> fail "the fixture does not stop the range on a refused line");
-  starts_at_the_position "a stopped range starts at the position"
-    (select ~read_lines:(fun () -> Ok stopped_lines) (Ok (Some snapshot)));
-  starts_at_the_position "no saved snapshot starts at the position"
-    (select ~read_lines:(fun () -> fail "the boundary log was read with no snapshot saved")
-       (Ok None));
-  (* The history moved on from the snapshot (the goo-yang-bong branch): an
-     ordinary mismatch, and the position that fits this history is used. *)
-  let moved = [pinned; text T.User "Start over on the docs"; text T.Assistant "Docs drafted."; fresh] in
-  let moved_digest = Window.atom_opening_digest moved in
-  (match Driver.prepare_continuity ~trace_id ~lines ~messages:moved snapshot with
-   | Error (Snapshot.Trace_mismatch | Snapshot.History_changed | Snapshot.Uncovered_history
-           | Snapshot.Unmatched_history) -> ()
-   | Ok _ | Error _ -> fail "the fixture's moved history still fits the snapshot");
-  (match
-     (absorbed_view
-        (Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id
-           ~messages:moved ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines)
-           ~progress:(fun () ->
-             Ok (Some (progress ~trace_id ~end_atom:2
-                         ~last_atom_digest:(Option.get (moved_digest 1))))))
-        moved).composed.origin
-   with
-   | Front.Librarian_progress {end_atom = 2} -> ()
-   | _ -> fail "a snapshot of a history that moved on did not fall back to the position");
-  (match origin
-           (Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id
-              ~messages:(covered @ [fresh]) ~snapshot:(Ok (Some snapshot))
-              ~lines:(fun () -> Ok lines)
-              ~progress:(fun () -> Ok None))
-   with
-   | Front.Librarian_snapshot _ -> ()
-   | _ -> fail "a snapshot that fits was not used")
-;;
-
-(* The official-client lanes take the turn's one continuity choice as a
-   position in the list they cut (#37619 review). The purge shape -- a
-   snapshot that no longer fits, a read position that does -- gives those
-   lanes the read position, as it gives the Agent Core lane; a fitting
-   snapshot gives its working state; a list that no longer holds what the
-   choice covered is an error, and the lane refuses its request with it. *)
-let test_official_lanes_take_the_same_choice () =
-  let snapshot, lines = capture_source source in
-  let moved = [pinned; text T.User "Start over on the docs"; text T.Assistant "Docs drafted.";
-               text T.User "Review the docs"] in
-  let digest_at = Window.atom_opening_digest moved in
-  let chosen =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:moved
-      ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines)
-      ~progress:(fun () ->
-        Ok (Some (progress ~trace_id ~end_atom:2 ~last_atom_digest:(Option.get (digest_at 1)))))
-  in
-  (match Driver.librarian_position ~messages:moved chosen with
-   | Ok (Driver.Librarian_progress {end_atom = 2}) -> ()
-   | Ok _ -> fail "the purge shape did not hand the official lane the read position"
-   | Error error -> fail (Agent_core.Error.to_string error));
-  let current = source @ [text T.User "Continue the review"] in
-  let fitting =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:current
-      ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress:(fun () -> Ok None)
-  in
-  (match Driver.librarian_position ~messages:current fitting with
-   | Ok (Driver.Librarian_snapshot chosen_snapshot) ->
-     check int "the snapshot's end" snapshot.Snapshot.end_atom chosen_snapshot.Snapshot.end_atom
-   | Ok _ -> fail "a fitting snapshot did not reach the official lane"
-   | Error error -> fail (Agent_core.Error.to_string error));
-  let rewritten = List.map (fun (m : T.message) ->
-    if m = text T.Assistant "The build passed." then text T.Assistant "Rewritten reply" else m) current in
-  (match Driver.librarian_position ~messages:rewritten fitting with
-   | Error _ -> ()
-   | Ok _ -> fail "a list that no longer holds the covered messages kept the Librarian front");
-  (match Driver.librarian_position ~messages:current Driver.without_snapshot with
-   | Ok (Driver.No_position) -> ()
-   | Ok _ | Error _ -> fail "no absorbed point was not handed over as no position")
-;;
-
-(* A snapshot the Librarian is rewriting from atom 0 is not used until its
-   end reaches its target: used now, it would move the start back and send
-   what lies after its end again. An ordinary snapshot behind the position is
-   used, because the atoms after its end are the latest turns, and nothing
-   else in the request carries them. *)
-let test_a_rewriting_snapshot_waits_for_its_target () =
-  let messages = source @ [text T.User "Second request"; text T.Assistant "Second answer"] in
-  let turn_line line absolute_turn history =
-    let position = match Boundary.position_of_messages history with
-      | Ok position -> position | Error detail -> fail detail in
-    line, Ok { Boundary.recorded_at = 1.; event = Boundary.Turn_ended
-      { task_context = Masc.Keeper_turn_task_context.No_task; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn;
-        history_at_start = (if line = 1 then Boundary.Fresh_history else Boundary.Continued_history);
-        position } } in
-  let lines = [turn_line 1 1 source; turn_line 2 2 messages] in
-  let capture catch_up_end_atom =
-    match Snapshot.capture_checkpoint_prefix ~unread_messages:[] ~end_atom:2 ~catch_up_end_atom ~trace_id ~lines
-            ~messages ~working_state () with
-    | Ok snapshot -> snapshot | Error error -> fail (Snapshot.error_to_string error) in
-  let digest_at = Window.atom_opening_digest messages in
-  let position = progress ~trace_id ~end_atom:4 ~last_atom_digest:(Option.get (digest_at 3)) in
-  let origin ?(progress = fun () -> Ok (Some position)) snapshot =
-    let continuity =
-      Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages
-        ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress in
-    (absorbed_view continuity messages).composed.origin in
-  let rewriting = capture (Some 4) in
-  check (option int) "the fixture is catching up" (Some 4) rewriting.Snapshot.catch_up_end_atom;
-  (match origin rewriting with
-   | Front.Librarian_progress {end_atom = 4} -> ()
-   | _ -> fail "a snapshot short of its catch-up target was used");
-  (match origin ~progress:(fun () -> Ok None) rewriting with
-   | Front.Turn_start _ -> ()
-   | _ -> fail "with no position a snapshot short of its target was used");
-  (match origin (capture None) with
-   | Front.Librarian_snapshot {end_atom = 2; _} -> ()
-   | _ -> fail "an ordinary snapshot behind the position was not used")
-;;
-
-(* A runtime that cannot see an image is handed a reading of it in the
-   image's place, for that candidate alone (RFC-0265 media degrade). The
-   atoms do not move and nothing is rewritten, so the choice still stands;
-   only the bytes under the covered atoms differ. Held to the checkpoint's
-   bytes, such a candidate had every request refused (#37812). Held to its
-   own rendering, it composes, and a covered message that really changed
-   still refuses. *)
-let test_a_candidates_own_rendering_is_what_the_check_holds_it_to () =
-  let looked = message T.User [T.Text "Look at this";
-    T.Image {media_type = "image/png"; source = T.Url "https://example.invalid/shot.png"}] in
-  let read_instead = message T.User [T.Text "Look at this";
-    T.Text "[unread image URL: https://example.invalid/shot.png; this runtime cannot view the image]"] in
-  let history = [pinned; looked; text T.Assistant "The build passed."] in
-  let projected = [pinned; read_instead; text T.Assistant "The build passed."] in
-  let snapshot, lines = capture_source history in
-  let chosen =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
-      ~snapshot:(Ok (Some snapshot)) ~lines:(fun () -> Ok lines) ~progress:(fun () -> Ok None)
-  in
-  check int "the snapshot covers the atom the image is in" 2 snapshot.Snapshot.end_atom;
-  (match Driver.validate_continuity ~messages:projected chosen with
-   | Error _ -> ()
-   | Ok () -> fail "the fixture does not reproduce the refusal it is about");
-  let for_this_candidate = Driver.continuity_for_attempt ~messages:projected chosen in
-  (match Driver.validate_continuity ~messages:projected for_this_candidate with
-   | Ok () -> ()
-   | Error error ->
-     fail ("a candidate held to its own rendering was still refused: "
-           ^ Agent_core.Error.to_string error));
-  (match Driver.librarian_position ~messages:projected for_this_candidate with
-   | Ok (Driver.Librarian_snapshot _) -> ()
-   | Ok _ -> fail "the official lane did not get the snapshot it composes from"
-   | Error error -> fail (Agent_core.Error.to_string error));
-  let moved_in_flight =
-    [pinned; read_instead; text T.Assistant "Rewritten while the attempt was in flight"] in
-  (match Driver.validate_continuity ~messages:moved_in_flight for_this_candidate with
-   | Error _ -> ()
-   | Ok () -> fail "a covered message that changed in flight was not refused");
-  (* The read position alone is held the same way: its digest is the opening
-     message of the atom before it, which the reading replaced. *)
-  let digest_at = Window.atom_opening_digest history in
-  let absorbed =
-    Driver.continuity_for_request ~keeper_name:"continuity-fixture" ~trace_id ~messages:history
-      ~snapshot:(Ok None) ~lines:(fun () -> Ok lines)
-      ~progress:(fun () ->
-        Ok (Some (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0)))))
-  in
-  (match Driver.validate_continuity ~messages:projected absorbed with
-   | Error _ -> ()
-   | Ok () -> fail "the read-position fixture does not reproduce the refusal");
-  (match
-     Driver.validate_continuity ~messages:projected
-       (Driver.continuity_for_attempt ~messages:projected absorbed)
-   with
-   | Ok () -> ()
-   | Error error ->
-     fail ("a read position held to the candidate's rendering was refused: "
-           ^ Agent_core.Error.to_string error))
-;;
-
 let () = run "continuity request projection"
   ["request", [test_case "completed boundary protects resumed work" `Quick test_completed_boundary_protects_resumed_work;
         test_case "completed bodies go raw until a size refusal" `Quick test_completed_bodies_go_raw_until_a_size_refusal;
@@ -912,18 +633,16 @@ let () = run "continuity request projection"
         test_case "actual wire and tool append" `Quick test_actual_wire_and_tool_append;
         test_case "old front" `Quick test_an_old_front_does_not_drop_unread;
         test_case "all covered" `Quick test_all_covered_keeps_only_working_and_pinned;
-        test_case "covered prefix validation per request" `Quick test_each_request_validates_frozen_covered_messages;
-        test_case "without a snapshot the range starts at the seed, else the turn start" `Quick test_without_snapshot_starts_at_the_turn_start;
-        test_case "without a snapshot a seed range sends earlier tool bodies as sent" `Quick test_without_snapshot_seed_sends_earlier_tool_bodies_as_sent;
-        test_case "absorbed history starts at the Librarian's position" `Quick
-                 test_absorbed_history_starts_at_the_librarians_position;
+        test_case "without a read end the range starts at the seed, else the turn start" `Quick
+          test_without_a_read_end_the_range_starts_at_the_turn_start;
+        test_case "without a read end a seed range sends earlier tool bodies as sent" `Quick
+          test_without_a_read_end_a_seed_range_sends_earlier_tool_bodies_as_sent;
+        test_case "a read end alone starts there" `Quick test_a_read_end_alone_starts_there;
+        test_case "the view gives the continuity" `Quick test_the_view_gives_the_continuity;
         test_case "a rule-8 front is named after the continuity" `Quick
-                 test_a_rule_8_front_is_named_after_the_continuity; test_case "the forecast takes the driver's start" `Quick
-                 test_the_forecast_takes_the_drivers_start; test_case "a start past the snapshot keeps the working state" `Quick
-                 test_a_start_past_the_snapshot_keeps_the_working_state;
-                 test_case "a window that stays keeps its working state" `Quick
-                 test_a_window_that_stays_keeps_its_working_state; test_case "an unusable snapshot starts without it" `Quick
-                 test_an_unusable_snapshot_starts_without_it; test_case "official lanes take the same choice" `Quick
-                 test_official_lanes_take_the_same_choice; test_case "a rewriting snapshot waits for its target" `Quick
-                 test_a_rewriting_snapshot_waits_for_its_target; test_case "a candidate's own rendering is what the check holds it to" `Quick
-                 test_a_candidates_own_rendering_is_what_the_check_holds_it_to]]
+          test_a_rule_8_front_is_named_after_the_continuity;
+        test_case "the forecast takes the driver's start" `Quick test_the_forecast_takes_the_drivers_start;
+        test_case "a start past the read end keeps the working state" `Quick
+          test_a_start_past_the_read_end_keeps_the_working_state;
+        test_case "a window that stays keeps its working state" `Quick
+          test_a_window_that_stays_keeps_its_working_state]]

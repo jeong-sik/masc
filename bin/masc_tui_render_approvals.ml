@@ -336,6 +336,14 @@ let render_approval_detail (state : state) (row : Masc_tui_approvals_model.appro
    same cell the Board and Keeper roster ages take. *)
 let ask_age_cells = 6
 
+(* The asks cut off below the list. The queue and the selected ask's
+   summary list both end with this row, so both write it one way: the
+   cut-off count (RFC tui-one-screen-grammar 6.3, never "+N") and the keys
+   that reach the rest. *)
+let more_asks_text (state : state) count =
+  let ko = state.ui_language = Lang_ko in
+  Masc_tui_value.Count.more ~ko count ^ (if ko then " · [/]: 이동" else " · [/] to reach")
+
 (* A folded Ask leads with its first original question. The asker, age and
    additional-question count distinguish it without opening an answer editor. *)
 let ask_summary_line state ~cols ~now ~(row : Masc.Tui_decode_asks.ask_row) =
@@ -349,7 +357,9 @@ let ask_summary_line state ~cols ~now ~(row : Masc.Tui_decode_asks.ask_row) =
       (fit_width
          (Option.value ~default:"" (Message_layout.age_text ~now ~since:row.ar_asked_at))
          ask_age_cells)
-      (if count > 1 then Printf.sprintf " · +%d" (count - 1) else "") in
+      (if count > 1 then
+         " · " ^ Masc_tui_value.Count.more ~ko:(state.ui_language = Lang_ko) (count - 1)
+       else "") in
   let width = max 1 (framed_inner_width cols - Message_layout.display_width context - 3) in
   Printf.sprintf " %s%s  %s%s" (Theme.recede ()) (fit_width prompt width) context Ansi.reset
 
@@ -650,10 +660,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
               if shown < count then
                 box_line buf cols
                   ("  " ^ Ansi.dim
-                   ^ (if state.ui_language = Lang_ko
-                      then Printf.sprintf "질문 %d개 더 · [/]: 이동" (count - shown)
-                      else Printf.sprintf "+%d more ask%s · [/] to reach" (count - shown)
-                          (if count - shown = 1 then "" else "s"))
+                   ^ more_asks_text state (count - shown)
                    ^ Ansi.reset)
           | Some cursor ->
           let count = List.length rows in
@@ -710,9 +717,13 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  ask's own. Both said "questions", and a reader saw "(1)"
                  three rows above "+2 more questions". *)
               (Printf.sprintf
-                 (if state.ui_language = Lang_ko then "    %s이 요청에 질문 %d개 더 있음 · a:전체 열기%s"
-                  else "    %s+%d more in this ask · a opens the full ask%s")
-                 Ansi.dim plan.Ask_layout.questions_hidden Ansi.reset);
+                 (if state.ui_language = Lang_ko then "    %s이 요청에 질문 %s개 더 있음 · a:전체 열기%s"
+                  else "    %s%s in this ask · a opens the full ask%s")
+                 Ansi.dim
+                 (if state.ui_language = Lang_ko
+                  then Masc_tui_value.Count.grouped plan.Ask_layout.questions_hidden
+                  else Masc_tui_value.Count.more ~ko:false plan.Ask_layout.questions_hidden)
+                 Ansi.reset);
           if plan.Ask_layout.context_shown then
             Buffer.add_string buf (fst (Stdlib.Lazy.force context_block))
           else if plan.Ask_layout.context_notice then
@@ -738,14 +749,8 @@ let draw_ask_questions buf cols (state : state) ~budget =
             rows;
           if plan.Ask_layout.summaries_hidden > 0 then
             box_line buf cols
-              (if state.ui_language = Lang_ko then
-                 Printf.sprintf "  %s질문 요청 %d건 더 있음 · [/]:이동%s" Ansi.dim
-                   plan.Ask_layout.summaries_hidden Ansi.reset
-               else
-                 Printf.sprintf "  %s+%d more ask%s · [/] to reach%s" Ansi.dim
-                   plan.Ask_layout.summaries_hidden
-                   (if plan.Ask_layout.summaries_hidden = 1 then "" else "s")
-                   Ansi.reset))
+              ("  " ^ Ansi.dim ^ more_asks_text state plan.Ask_layout.summaries_hidden
+               ^ Ansi.reset))
 
 (* The selected row's detail, and the only one of the three detail rows whose
    height depends on which kind is selected. A held tool call answers two

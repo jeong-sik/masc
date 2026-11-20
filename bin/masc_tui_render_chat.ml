@@ -2642,26 +2642,36 @@ type source_body_key = {
 
 type source_body_memo = { key : source_body_key; index : source_body_index option }
 
+let source_rows_builds = ref 0
+
 let source_body_index_of_runs ~convert ~body_rows (runs : Search.run list) =
-  let source_rows = Hashtbl.create 64 and row_sources = Hashtbl.create 16 in
-  let row_end_sources = Hashtbl.create 16 in
-  List.iter (fun (run : Search.run) ->
-    let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
-    let visible_bytes = Array.make (String.length run.text) false in
-    Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
-    List.iter (fun (row, ranges) ->
-      if row >= 0 && row < body_rows then
-        List.iter (fun (range : Markdown.source_range) ->
-          for byte = range.start_byte to range.end_byte - 1 do
-            if visible_bytes.(byte) then Option.iter (fun position ->
-              (* A normalized origin can occur more than once. Keep the
-                 first actually visible row, matching search's source
-                 producer traversal, without electing by source words. *)
-              if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row;
-              if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
-              Hashtbl.replace row_end_sources row position)
-              (Option.bind run.positions.(byte) convert)
-          done) ranges) run.visible_rows) runs;
+  (* Each visible byte with a source, in the order search's source producer
+     walks them. *)
+  let iter_visible f =
+    List.iter (fun (run : Search.run) ->
+      let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
+      let visible_bytes = Array.make (String.length run.text) false in
+      Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
+      List.iter (fun (row, ranges) ->
+        if row >= 0 && row < body_rows then
+          List.iter (fun (range : Markdown.source_range) ->
+            for byte = range.start_byte to range.end_byte - 1 do
+              if visible_bytes.(byte) then
+                Option.iter (f row) (Option.bind run.positions.(byte) convert)
+            done) ranges) run.visible_rows) runs in
+  let row_sources = Hashtbl.create 16 and row_end_sources = Hashtbl.create 16 in
+  iter_visible (fun row position ->
+    if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
+    Hashtbl.replace row_end_sources row position);
+  (* A normalized origin can occur more than once. Keep the first actually
+     visible row, matching search's source producer traversal, without
+     electing by source words. *)
+  let source_rows = lazy (
+    incr source_rows_builds;
+    let source_rows = Hashtbl.create 64 in
+    iter_visible (fun row position ->
+      if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row);
+    source_rows) in
   {source_rows;row_sources;row_end_sources}
 
 let source_body_indexes = Source_entry_cache.create 64
@@ -4229,7 +4239,6 @@ let same_source_body_key (a : source_body_key) (b : source_body_key) =
   && Bool.equal a.source_polled_unavailable b.source_polled_unavailable
 
 let source_index_builds = ref 0
-let source_rows_builds = ref 0
 
 type source_mapping_owner =
   | Durable_source
@@ -4326,35 +4335,7 @@ let source_body_lookup state ~keeper_name projection ~inner_width ~theme ~previe
                  | Body_label _ | Thinking_summary_byte _ | Thinking_summary_label _
                  | Projected_byte _ | Projected_label _
                  | Preview_byte _ | Journal_byte _ | Request_byte _ -> None) in
-          let body_rows = List.length body.mapped_rows in
-          (* Each visible byte with a source, in the order search's source
-             producer walks them. *)
-          let iter_visible f =
-            List.iter (fun (run : Search.run) ->
-              let _, copied = Masc_tui_theme.strip_sgr_with_positions run.text in
-              let visible_bytes = Array.make (String.length run.text) false in
-              Array.iter (fun byte -> visible_bytes.(byte) <- true) copied;
-              List.iter (fun (row, ranges) ->
-                if row >= 0 && row < body_rows then
-                  List.iter (fun (range : Markdown.source_range) ->
-                    for byte = range.start_byte to range.end_byte - 1 do
-                      if visible_bytes.(byte) then
-                        Option.iter (f row) (Option.bind run.positions.(byte) convert)
-                    done) ranges) run.visible_rows) body.runs in
-          let row_sources = Hashtbl.create 16 and row_end_sources = Hashtbl.create 16 in
-          iter_visible (fun row position ->
-            if not (Hashtbl.mem row_sources row) then Hashtbl.add row_sources row position;
-            Hashtbl.replace row_end_sources row position);
-          (* A normalized origin can occur more than once. Keep the first
-             actually visible row, matching search's source producer
-             traversal, without electing by source words. *)
-          let source_rows = lazy (
-            incr source_rows_builds;
-            let source_rows = Hashtbl.create 64 in
-            iter_visible (fun row position ->
-              if not (Hashtbl.mem source_rows position) then Hashtbl.add source_rows position row);
-            source_rows) in
-          Some {source_rows;row_sources;row_end_sources} in
+          Some (source_body_index_of_runs ~convert ~body_rows:(List.length body.mapped_rows) body.runs) in
           Source_entry_cache.replace source_body_indexes entry {key;index};
           index in
         Hashtbl.add mapped entry_index value;

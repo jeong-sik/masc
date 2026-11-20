@@ -54,7 +54,7 @@ let media_payload = function
   | P.Audio { source = (P.Url _ | P.File_id _); _ }
   | P.Document { source = (P.Url _ | P.File_id _); _ }
   | P.Text _ | P.Thinking _ | P.RedactedThinking _ | P.ReasoningDetails _
-  | P.ToolUse _ | P.ToolResult _ -> fail "expected a native base64 media block"
+  | P.ToolUse _ | P.ToolReference _ | P.ToolResult _ -> fail "expected a native base64 media block"
 
 let check_refused raw = match Keeper_mcp_content.project raw with
   | Error _ -> ()

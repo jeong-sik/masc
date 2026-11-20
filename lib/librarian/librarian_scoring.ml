@@ -74,7 +74,8 @@ let score case text =
              let successor_claim = Option.value (claim_of successor) ~default:"" in
              ( expected + List.length tokens
              , kept + count (said_in successor_claim) tokens )
-           | Dropped _ | Revised_into _ | Support_lost _ -> expected, kept)
+           | Dropped _ | Revised_into _ | Superseded_by _ | Retracted _ | Support_lost _ ->
+             expected, kept)
         (0, 0)
         plan.effects.removed
     in

@@ -106,6 +106,13 @@ type t =
         authority. An absent, empty or nonmatching prefix keeps the single-block
         representation. Other provider wires ignore this internal hint. *)
   ; cache_extended_ttl : bool
+  ; cache_session_key : string option
+    (** Optional caller-supplied session identifier used to bind multi-turn
+        requests to a prompt-cache routing key (for example OpenRouter
+        ["session_id"] or OpenAI/Mistral ["prompt_cache_key"]). Emitted only
+        when the selected provider declares a matching {!Capabilities.cache_session_wire}
+        and the trimmed key is non-empty and within the 256-byte wire limit.
+        [None] omits the field. *)
   ; model_capabilities_override : Capabilities.capabilities option
     (** Explicit capability declaration for this concrete provider endpoint.
         This is projected from provider catalog entries that have verified the
@@ -257,6 +264,7 @@ val make
   -> ?cache_system_prompt:bool
   -> ?system_prompt_cache_prefix:string
   -> ?cache_extended_ttl:bool
+  -> ?cache_session_key:string
   -> ?model_capabilities_override:Capabilities.capabilities
   -> ?model_anthropic_thinking_control_override:Capabilities.anthropic_thinking_control
   -> ?keep_alive:string
@@ -357,6 +365,17 @@ val cache_write_lifetime : t -> Types.cache_write_lifetime
     [cache_extended_ttl] is set (the Anthropic body then writes [ttl = "1h"]
     on every breakpoint), otherwise [Provider_default]. Pricing
     ({!pricing_source}) and the response telemetry both read it here. *)
+
+val cache_session_wire : t -> Capabilities.cache_session_wire
+(** The prompt-cache session routing wire field declared by this config's
+    selected provider policy, or {!Capabilities.No_cache_session_wire} when
+    undeclared or anonymous. *)
+
+val validated_cache_session_key : t -> string option
+(** Trimmed {!field-cache_session_key} when present, non-blank, and at most
+    256 bytes (the documented OpenRouter [session_id] wire limit). Returns
+    [None] otherwise so invalid keys are silently omitted instead of producing
+    a 400 wire rejection. *)
 
 val pricing_source : t -> Pricing.source
 (** Read request-owned price authority from a matching policy snapshot. An

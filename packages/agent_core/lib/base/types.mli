@@ -99,6 +99,10 @@ type agent_config =
       Write cost is 2x but the cache persists 12x longer — intended
       for long-running agents that go idle 5+ minutes between turns.
       @since 0.151.0 *)
+  ; cache_session_key : string option
+    (** Optional stable session identifier threaded to providers that declare
+      a prompt-cache routing key (e.g. OpenRouter [session_id] or OpenAI/Mistral
+      [prompt_cache_key]). [None] inherits any existing [provider_config] key. *)
   ; initial_messages : message list
   ; yield_on_tool : bool
   ; max_tool_rounds : int option

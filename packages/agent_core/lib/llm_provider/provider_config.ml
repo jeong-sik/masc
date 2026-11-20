@@ -77,6 +77,7 @@ type t =
   ; cache_system_prompt : bool
   ; system_prompt_cache_prefix : string option
   ; cache_extended_ttl : bool
+  ; cache_session_key : string option
   ; model_capabilities_override : Capabilities.capabilities option
   ; model_anthropic_thinking_control_override : Capabilities.anthropic_thinking_control option
   ; request_policy_snapshot : request_policy_snapshot option
@@ -122,6 +123,7 @@ let make
       ?(cache_system_prompt = false)
       ?system_prompt_cache_prefix
       ?(cache_extended_ttl = false)
+      ?cache_session_key
       ?model_capabilities_override
       ?model_anthropic_thinking_control_override
       ?keep_alive
@@ -184,6 +186,7 @@ let make
   ; cache_system_prompt
   ; system_prompt_cache_prefix
   ; cache_extended_ttl
+  ; cache_session_key
   ; model_capabilities_override
   ; model_anthropic_thinking_control_override
   ; request_policy_snapshot = None
@@ -276,6 +279,30 @@ let cache_write_lifetime (config : t) : Types.cache_write_lifetime =
   match config.cache_extended_ttl with
   | true -> Types.One_hour
   | false -> Types.Provider_default
+;;
+
+let cache_session_wire (config : t) : Capabilities.cache_session_wire =
+  let policy =
+    match matching_request_policy config with
+    | Some policy -> policy
+    | None -> resolve_request_policy config
+  in
+  Capabilities.request_policy_cache_session_wire policy
+;;
+
+(* OpenRouter enforces a hard maxLength of 256 characters on [session_id]
+   (400 Bad Request above it); checking UTF-8 byte length <= 256 is a strict
+   upper bound for both character and byte counts. *)
+let max_cache_session_key_bytes = 256
+
+let validated_cache_session_key (config : t) : string option =
+  match config.cache_session_key with
+  | None -> None
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if trimmed = "" || String.length trimmed > max_cache_session_key_bytes
+    then None
+    else Some trimmed
 ;;
 
 let pricing_source (config : t) =

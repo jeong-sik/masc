@@ -78,6 +78,15 @@ type structured_output_support =
   | Json_object_only
   | Native_json_schema
 
+(** Wire field used by a provider to bind multi-turn requests to a prompt-cache
+    routing key. Declared on [[providers]] in [models.toml]; defaults to
+    {!No_cache_session_wire} so endpoints that do not document a session cache
+    key remain unchanged on the wire. *)
+type cache_session_wire =
+  | No_cache_session_wire
+  | Openrouter_session_id
+  | Prompt_cache_key
+
 type json_schema_dialect =
   | Openai_json_schema
   | Json_object_schema
@@ -210,3 +219,7 @@ val capability_fields : string list
 val json_schema_dialect_values : string list
 val json_schema_dialect_of_string : string -> json_schema_dialect option
 val json_schema_dialect_to_string : json_schema_dialect -> string
+
+val cache_session_wire_values : string list
+val cache_session_wire_of_string : string -> cache_session_wire option
+val cache_session_wire_to_string : cache_session_wire -> string

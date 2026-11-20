@@ -243,7 +243,11 @@ let test_explicit_effort_reaches_serialized_request () =
     let body = Yojson.Safe.from_string serialized in
     check string "serialized explicit reasoning effort"
       (Llm_provider.Reasoning_effort.to_string effort)
-      Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string))
+      Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string);
+    check bool "exact-output 1-shot plan omits session_id" false
+      (List.mem_assoc "session_id" (Yojson.Safe.Util.to_assoc body));
+    check bool "exact-output 1-shot plan omits prompt_cache_key" false
+      (List.mem_assoc "prompt_cache_key" (Yojson.Safe.Util.to_assoc body)))
     [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ]
 
 let serialized_body target =

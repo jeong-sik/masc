@@ -31,6 +31,7 @@ type entry =
   ; capability_policy : capability_policy
   ; supports_parallel_tool_suppression : bool
   ; supports_extended_cache_ttl : bool
+  ; cache_session_wire : Capability_vocab.cache_session_wire
   ; serves_bare_models : Model_identifiers.Model_id.t list
   }
 
@@ -112,6 +113,7 @@ let known_keys =
   ; "capabilities_base_by_identity_kind"
   ; "supports_parallel_tool_suppression"
   ; "supports_extended_cache_ttl"
+  ; "cache_session_wire"
   ; "serves_bare_models"
   ]
 ;;
@@ -327,6 +329,22 @@ let parse_entry provider_toml =
       Error (Printf.sprintf
         "provider entry %S field \"supports_extended_cache_ttl\" expected bool" id)
   in
+  let* cache_session_wire =
+    match exact_non_empty_string_field ~entry_id:id "cache_session_wire" provider_toml with
+    | Error _ as e -> e
+    | Ok None -> Ok Capability_vocab.No_cache_session_wire
+    | Ok (Some raw) ->
+      (match Capability_vocab.cache_session_wire_of_string raw with
+       | Some wire -> Ok wire
+       | None ->
+         Error
+           (Printf.sprintf
+              "provider entry %S field \"cache_session_wire\" has unknown value %S \
+               (canonical: %s)"
+              id
+              raw
+              (String.concat ", " Capability_vocab.cache_session_wire_values)))
+  in
   let* serves_bare_models =
     let* models = string_list_field ~entry_id:id "serves_bare_models" provider_toml in
     let rec parse acc = function
@@ -354,6 +372,7 @@ let parse_entry provider_toml =
     ; capability_policy
     ; supports_parallel_tool_suppression
     ; supports_extended_cache_ttl
+    ; cache_session_wire
     ; serves_bare_models
     }
 ;;

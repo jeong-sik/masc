@@ -33,6 +33,10 @@ type entry =
         [Provider_config.cache_extended_ttl] asks for. Missing declarations
         are false: an endpoint that speaks the same wire does not thereby
         accept the [ttl] field. *)
+  ; cache_session_wire : Capability_vocab.cache_session_wire
+    (** Wire field used by this provider to carry a caller-supplied prompt-cache
+        routing session key. Missing declarations default to
+        {!Capability_vocab.No_cache_session_wire}. *)
   ; serves_bare_models : Model_identifiers.Model_id.t list
     (** Explicit exact provider-independent model IDs served by this endpoint.
         Authorization uses ASCII case equality, never a family prefix. Absence or an empty list grants no

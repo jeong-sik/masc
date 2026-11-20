@@ -2773,6 +2773,7 @@ id = "openai-responses"
 # 2026-09-19: documented request suppression, independent of model capability.
 # https://developers.openai.com/api/docs/guides/function-calling#parallel-function-calling
 supports_parallel_tool_suppression = true
+cache_session_wire = "prompt_cache_key"
 kind = "openai_compat"
 base_url = "https://api.openai.com"
 request_path = "/v1/responses"
@@ -3000,6 +3001,7 @@ kind = "openai_compat"
 base_url = "https://openrouter.ai/api/v1"
 request_path = "/chat/completions"
 auth = "api-key"
+cache_session_wire = "openrouter_session_id"
 # The router declares one effort contract for everything it serves, so the
 # accepted set belongs to this row rather than to a model row per served
 # model. See Capabilities.openrouter_capabilities for the source and for why
@@ -3141,6 +3143,7 @@ kind = "openai_compat"
 base_url = "https://api.openai.com/v1"
 request_path = "/chat/completions"
 auth = "api-key"
+cache_session_wire = "prompt_cache_key"
 # No provider-wide capability preset: an unknown model must not inherit
 # structured output from GPT-4o, or reasoning controls from GPT-5.5.
 capabilities_base = "models_only"
@@ -3216,6 +3219,7 @@ kind = "openai_compat"
 base_url = "https://api.mistral.ai/v1"
 request_path = "/chat/completions"
 auth = "api-key"
+cache_session_wire = "prompt_cache_key"
 capabilities_base = "openai_chat_extended"
 
 # Thinking Machines Tinker, OpenAI-compatible inference (Beta). The key is the

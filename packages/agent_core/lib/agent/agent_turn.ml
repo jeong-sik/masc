@@ -177,6 +177,10 @@ let provider_config_with_agent_config
   ; response_format = config.response_format
   ; cache_system_prompt = config.cache_system_prompt
   ; cache_extended_ttl = config.cache_extended_ttl
+  ; cache_session_key =
+      (match config.cache_session_key with
+       | Some _ as key -> key
+       | None -> provider_config.cache_session_key)
   }
 ;;
 

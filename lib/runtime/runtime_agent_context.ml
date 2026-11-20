@@ -245,6 +245,8 @@ let agent_config_for_request (config : config) : Agent_core.Types.agent_config =
        leaving it at the default would send five minutes whatever the
        binding declared. *)
   ; cache_extended_ttl = provider.cache_extended_ttl
+  ; cache_session_key =
+      configured_or_inherited config.session_id provider.cache_session_key
   ; initial_messages = config.initial_messages
   ; yield_on_tool = config.yield_on_tool
   }

@@ -158,6 +158,7 @@ type agent_config =
        the last tool, and a top-level automatic breakpoint that advances
        with the conversation so message history is read from cache. *)
   ; cache_extended_ttl : bool (* true=1h TTL (2x write cost), false=5min default *)
+  ; cache_session_key : string option
   ; initial_messages : message list
     (* Seed conversation with prior history on first run *)
   ; yield_on_tool : bool
@@ -191,6 +192,7 @@ let default_config ~model =
   ; disable_parallel_tool_use = false
   ; cache_system_prompt = false
   ; cache_extended_ttl = false
+  ; cache_session_key = None
   ; initial_messages = []
   ; yield_on_tool = false
   ; max_tool_rounds = None

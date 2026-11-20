@@ -1156,6 +1156,43 @@ let test_board_list_preview_modes_scroll_and_markdown () =
     Alcotest.(check int) "short terminal resets preview max_scroll"
       0 state.board_list_preview_max_scroll)
 
+(* A frame that draws no schedule rows must not store [0] over the offset the
+   reader was holding: the snapshot can be unread for a frame (a refresh after
+   an error, or a view entered before the first read) while the stored viewport
+   offset still describes where the reader was. *)
+let test_schedules_keep_the_offset_when_no_rows_are_drawn () =
+  let rows = List.init 40 schedule in
+  with_size (24, 80) (fun () ->
+    let state = create_state ~workspace:"" ~port:0 () in
+    state.view <- Schedules;
+    state.schedules <-
+      Some
+        { scs_observed_at = 1795046400.
+        ; scs_status = "ok"
+        ; scs_read_error = None
+        ; scs_request_count = Some 40
+        ; scs_truncated = false
+        ; scs_payload_target = None
+        ; scs_paging = Schedule_paging_unavailable
+        ; scs_next_due_iso = None
+        ; scs_counts = None
+        ; scs_rows = rows
+        ; scs_runner_status =
+            Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok
+        };
+    let render_schedules () =
+      Prim.frame_lists := [];
+      let _frame, clamped = Masc_tui_render_work.render_schedules state in
+      Option.iter (apply_clamped_scroll state) clamped;
+      state.schedule_list_scroll
+    in
+    state.schedule_cursor <- 30;
+    let held = render_schedules () in
+    Alcotest.(check bool) "the reader has an offset to lose" true (held > 0);
+    state.schedules <- None;
+    let after = render_schedules () in
+    Alcotest.(check int) "a frame with no rows keeps the stored offset" held after)
+
 let test_schedules_and_themes_keep_sticky_viewport_scroll () =
   let rows = List.init 40 schedule in
   with_size (24, 80) (fun () ->
@@ -1272,5 +1309,7 @@ let () =
             test_board_list_preview_modes_scroll_and_markdown
         ; Alcotest.test_case "Schedules and Config themes keep viewport stationary on in-window cursor moves" `Quick
             test_schedules_and_themes_keep_sticky_viewport_scroll
+        ; Alcotest.test_case "the schedule list keeps its offset when a frame draws no rows" `Quick
+            test_schedules_keep_the_offset_when_no_rows_are_drawn
         ] )
     ]

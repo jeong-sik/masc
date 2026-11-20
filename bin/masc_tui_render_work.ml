@@ -2315,7 +2315,11 @@ let render_schedule_list (state : state) =
       ~readings:[] ~position:None
   in
 
-  let drawn_list_scroll = ref 0 in
+  (* The list starts from the offset the state already holds: a frame that
+     draws no rows (a snapshot not read yet, or a failed read) would otherwise
+     report [0] and store it over the reader's position. Workspace activity
+     starts from its state field for the same reason. *)
+  let drawn_list_scroll = ref state.schedule_list_scroll in
   surface_chrome_keys
     ~overflow:
       (Self_scrolled

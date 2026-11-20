@@ -1,6 +1,5 @@
 (** The candidate memories a recall judgment looks at, and how they are cut
-    into requests (docs/rfc/RFC-keeper-recall-reaches-the-turn.md, section
-    4.2). Nothing here filters candidates. *)
+    into requests. Nothing here filters candidates. *)
 
 (** One current fact as the judge sees it. *)
 type t

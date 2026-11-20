@@ -84,8 +84,8 @@ import { finishGlowFor, keeperFinishes, keeperTurns, runningTurnFor, subscribeKe
 import { operatorSnapshot } from '../operator-store'
 import { FleetAsideActions, FleetQueueSection, FleetRotationSection } from './fleet-aside-extras'
 
-// keeper-v2 fleet.jsx ChatGlyph — deep link glyph into the keeper conversation
-// console (here: the keepers surface scoped to this keeper).
+// Deep link glyph into the keeper conversation console (here: the keepers
+// surface scoped to this keeper).
 function FleetChatGlyph({ size = 14 }: { size?: number }) {
   return html`<svg
     viewBox="0 0 24 24"
@@ -169,9 +169,9 @@ function rosterContextMeta(
 }
 
 /**
- * RFC-0135 §1.1 root fix. Decide the roster card state note from the
- * typed `KeeperOperationalState` SSOT — the same function the detail
- * panel calls — so the two surfaces cannot diverge.
+ * Decide the roster card state note from the typed
+ * `KeeperOperationalState` SSOT — the same function the detail panel
+ * calls — so the two surfaces cannot diverge.
  *
  * Display rules per typed state:
  *  - stuck             → `현재 차단`  (text: backend summary or typed reason)
@@ -182,7 +182,7 @@ function rosterContextMeta(
  *                       resume gate. A bare paused band with no recorded
  *                       cause returns null — the band chip already reads
  *                       `일시정지`, and a second identical status text per
- *                       row is the duplication this SSOT pass removed.
+ *                       row would only repeat it.
  *  - offline          → interrupted work / diagnostics / monitoring hint when
  *                       available; otherwise the row action axis carries the
  *                       "start required" state.
@@ -1320,10 +1320,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
         <div class="fl-actcell" aria-label="액션" onClick=${(e: Event) => e.stopPropagation()}>
           ${row.keeperRuntime
-            // keeper-v2 fleet.jsx: hover-revealed .fl-actions group + fl-chat
-            // deep link into the keepers conversation surface. The design's
-            // per-button .fl-act glyph buttons stay unbuilt — the live row
-            // deliberately renders text action buttons (six-track grid with
+            // Hover-revealed .fl-actions group + fl-chat deep link into the
+            // keepers conversation surface. The row deliberately renders text
+            // action buttons, not .fl-act glyph buttons (six-track grid with
             // a 160px action cell).
             ? html`<div class="fl-actions"><${KeeperActionButtons}
                 keeper=${row.keeperRuntime}
@@ -1361,9 +1360,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
         </div>
         <span class="fl-spacer"></span>
-        <!-- keeper-v2 fleet.jsx fl-top-actions: the design's second slot is the
-             프롬프트 (AGENT.md persona library) button — no live persona store
-             exists in the dashboard, so only the create action renders. -->
+        <!-- fl-top-actions: only the create action renders — no live persona
+             store exists in the dashboard to back a 프롬프트 (AGENT.md persona
+             library) button. -->
         <div class="fl-top-actions">
           <button
             type="button"
@@ -1485,7 +1484,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </div>
                 ` : null}
                 ${selectedRuntime.source === 'assigned' ? html`
-                  <!-- keeper-v2 fleet.jsx fl-as-runtime: bound runtime under the
+                  <!-- fl-as-runtime: bound runtime under the
                        aside identity block. Rendered only when a runtime is
                        actually assigned (mark, don't fake — the 런타임 vitals
                        grid below carries the 미확인 case). -->
@@ -1633,7 +1632,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <div class="fl-as-sec">
                 <h4>최근 도구</h4>
                 ${selectedRow.recentTools.length > 0 ? html`
-                  <!-- keeper-v2 fleet.jsx fl-tools/fl-toolrow: mono rows, one
+                  <!-- fl-tools/fl-toolrow: mono rows, one
                        per observed tool name (recent_tool_names ∪
                        latest_tool_names). -->
                   <div class="fl-tools">

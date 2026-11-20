@@ -440,7 +440,7 @@ describe('shouldSuppressFloatingChrome', () => {
 
   it('keeps floating chrome only for surfaces outside the prototype rail', () => {
     // `command` and `lab` joined V2_PRIMARY_SURFACE_IDS in #29798 — the
-    // prototype rail (shell.jsx) carries the 명령·Lab group.
+    // v2 rail carries the 명령·Lab group.
     expect(shouldSuppressFloatingChrome({
       currentTab: 'command',
       keeperDetailMode: false,

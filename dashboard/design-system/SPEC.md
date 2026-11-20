@@ -121,8 +121,7 @@ primitive, which resolves slot + sigil from a keeper id automatically.
 
 #### 3.6.2 Mapping — keeper id → slot
 
-`kSlot(id)` (cb-shared.jsx) is canonical. Five anchor IDs are pinned in
-`KEEPER_REGISTRY`; everything else is FNV-1a hashed mod 12. This avoids
+`kSlot(id)` is canonical: every id is FNV-1a hashed mod 12. This avoids
 re-mapping when the roster grows.
 
 #### 3.6.3 Attribution rule — color is not enough
@@ -231,7 +230,7 @@ active named variant 테마는 **dark-fantasy + paper** 두 종이며 source.ts 
 
 | Surface | 메커니즘 | localStorage key | URL hash | Default |
 |---------|----------|------------------|----------|---------|
-| dashboard/ | `cb-shared.jsx` `getTheme()` / `setTheme(t)` | `masc-ds-theme` | (없음, 향후 검토) | dark (또는 prefers-color-scheme) |
+| dashboard/ | `ThemeSwitch` (`src/components/theme-switch.ts`), boot 시 `src/main.ts` | `dashboardTheme`, `masc-theme-v2` | (없음, `?theme=` query 사용) | dark (data-theme 없음) |
 
 ---
 

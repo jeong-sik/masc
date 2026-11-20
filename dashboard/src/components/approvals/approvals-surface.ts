@@ -95,10 +95,9 @@ function ApprovalAuditWriteFailureAlert() {
 type ApprovalsView = 'queue' | 'history'
 type ApprovalHistoryFilter = 'all' | KeeperResolvedApprovalDecision | GateDecisionSource
 
-// Design pill order (keeper-v2 approvals.jsx AP_HIST_FILTERS): decision pills
-// first, then decider pills. The design's 보류 pill is omitted — the live
-// decision model is the closed {approve, reject} set (see file header); the
-// decider pills are backed by the live decision_source field.
+// Pill order: decision pills first, then decider pills. There is no 보류
+// pill — the decision model is the closed {approve, reject} set (see file
+// header); the decider pills are backed by the live decision_source field.
 const APPROVAL_HISTORY_FILTERS: ReadonlyArray<{
   id: ApprovalHistoryFilter
   label: string

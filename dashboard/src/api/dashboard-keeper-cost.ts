@@ -301,7 +301,7 @@ export async function fetchKeeperDecisions(
 
 // --- Cost-per-agent / cost-matrix / cost-latency ---
 // payload required by the CostPerAgent / CostMatrix / CostLatency
-// frontend components (Phase 2 spec cb-group-f.jsx:291-429).
+// frontend components.
 
 export interface CostPerAgentRow {
   agent: string

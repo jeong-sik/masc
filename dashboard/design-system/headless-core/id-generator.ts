@@ -5,14 +5,13 @@
  * (Drawer/Popover/Dialog) where the trigger and content need a stable
  * shared id for `aria-labelledby` / `aria-controls` wiring.
  *
- * Design (RFC 0001 §"First 3 primitives"):
+ * Design:
  *   - Per-instance monotonic counter
  *   - Caller may supply a seed prefix (defaults to `"id"`); each `next()`
  *     call may also override the prefix at the call site
  *   - `reset()` zeroes the counter (for hydration boundaries / SSR replay)
  *   - Two independent generators with the same seed produce identical
- *     id sequences — sufficient for the SSR/hydration determinism the
- *     RFC sketches as a future requirement
+ *     id sequences — sufficient for SSR/hydration determinism
  *
  * Out of scope (will land later if/when the dashboard adopts SSR):
  *   - Tree-aware id allocation (Preact useId is the right primitive there)

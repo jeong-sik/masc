@@ -765,7 +765,7 @@ describe('keeper tool telemetry fetchers', () => {
             diff_vs_prev: null,
           },
           {
-            // RFC-0233 §2.3: error turn omits selected_model/finish_reason — must
+            // Error turn omits selected_model/finish_reason — must
             // decode to undefined, never a fabricated "stop"/placeholder.
             record: {
               keeper: 'keeper-alpha',

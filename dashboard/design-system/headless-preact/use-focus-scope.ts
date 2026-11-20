@@ -12,7 +12,7 @@
  *
  * Caller controls the container via a Preact ref (matches the rest of
  * the dashboard's ref discipline) and toggles activation via the
- * `active` flag. The hook honors RFC 0001 §"focus-scope.ts" options
+ * `active` flag. The hook passes FocusScope's options through
  * 1:1: `loop`, `restoreFocus`, `initialFocus`.
  *
  * Returns the underlying FocusScope handle so callers that need

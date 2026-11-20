@@ -13,7 +13,7 @@ export type TrajectoryEntry = {
   ts: number
   ts_iso: string
   turn: number
-  // RFC-0233: canonical execution identity minted at dispatch (absent on pre-PR-1 rows)
+  // Canonical execution identity minted at dispatch (absent on older rows)
   execution_id?: string
   // Tool-call fields (absent on thinking entries)
   round?: number

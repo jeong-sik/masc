@@ -358,10 +358,16 @@ let output_config_for_config _mode (config : Provider_config.t) =
      constant is shared by thinking and answer and silently truncates
      long reasoning. *)
 let required_output_token_receipt (config : Provider_config.t) =
-  Backend_openai_request.output_token_receipt
-    ~envelope:Types.Anthropic_messages_max_tokens
-    config
-  |> Types.required_output_token_receipt
+  let envelope =
+    Provider_http_codec.output_token_envelope Provider_http_codec.anthropic_messages
+  in
+  match Input_budget.resolve_output_token_receipt ~envelope config with
+  | Ok receipt ->
+    Backend_openai_request.warn_if_output_token_clamped
+      ~model_id:config.model_id
+      receipt;
+    Ok receipt
+  | Error _ as err -> err
 ;;
 
 let required_output_token_error_message (config : Provider_config.t) = function

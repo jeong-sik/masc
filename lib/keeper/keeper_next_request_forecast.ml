@@ -498,14 +498,17 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
       let front = Keeper_carried_front.of_ledger ledger in
       (* The next request is a turn's first, where the driver reads the size
          signal and the window it holds from the same ledger and the same
-         declaration. *)
-      let max_context = Option.map fst (Runtime.resolve_max_context_of_runtime_id runtime_id) in
+         input-budget declaration. *)
+      let input_limit =
+        Keeper_turn_driver_try_provider.input_limit_of_runtime
+          (Runtime.get_runtime_by_id runtime_id)
+      in
       ( front
       , front
       , ledger.Keeper_model_input_ledger.total_tokens
-      , Keeper_turn_driver_try_provider.past_max_context ~max_context
+      , Keeper_turn_driver_try_provider.past_max_context ~input_limit
           ~continuity:(Some reads.continuity) ~history_digest_at:reads.digest_at ~turn_boundary:reads.turn_start (Some ledger)
-      , Keeper_turn_driver_try_provider.held_window ~opens_turn:true ~max_context
+      , Keeper_turn_driver_try_provider.held_window ~opens_turn:true ~input_limit
           ~history_digest_at:reads.digest_at (Some ledger) )
     | Some _ | None -> None, Lazy.force reads.seed, None, None, None
   in

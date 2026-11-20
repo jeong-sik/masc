@@ -785,3 +785,8 @@
  (name test_http_request_stream)
  (modules test_http_request_stream)
  (libraries llm_provider yojson alcotest))
+
+(test
+ (name test_input_budget)
+ (modules test_input_budget)
+ (libraries agent_core_test_deps llm_provider alcotest yojson))

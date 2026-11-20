@@ -1341,14 +1341,44 @@ type past_max_context =
   { window_first_atom : int
   ; moved_to : Keeper_carried_front.seed
   ; next_turn_peak : int
-  ; max_context : int
+  ; input_limit : Llm_provider.Input_budget.t
   }
 
-let past_max_context ~max_context ~continuity ~history_digest_at ~turn_boundary
+let input_limit_of_provider_config (provider_config : Llm_provider.Provider_config.t) =
+  match Llm_provider.Input_budget.of_provider_config provider_config with
+  | Ok limit -> Some limit
+  | Error err ->
+    Log.Keeper.debug
+      "input budget unavailable for %s: %s"
+      provider_config.model_id
+      (Llm_provider.Input_budget.error_to_string err);
+    None
+;;
+
+let input_limit_of_runtime (runtime : Runtime_instance.t option) =
+  match runtime with
+  | Some { Runtime_instance.execution = Runtime_execution.Agent_core sealed; _ } ->
+    input_limit_of_provider_config (Runtime_account_access.api_declaration sealed)
+  | Some
+      { Runtime_instance.execution =
+          Runtime_execution.(
+            Codex_app_server _
+            | Antigravity_cli _
+            | Claude_code _
+            | Muse_serve _
+            | Vibe_cli _)
+      ; _
+      }
+  | None -> None
+;;
+
+let past_max_context
+      ~(input_limit : Llm_provider.Input_budget.t option)
+      ~continuity ~history_digest_at ~turn_boundary
       (ledger : Keeper_model_input_ledger.t option) =
   let ( let* ) = Option.bind in
   let* ledger = ledger in
-  let* max_context = max_context in
+  let* input_limit = input_limit in
   let* next_turn_peak = Keeper_model_input_ledger.next_turn_peak ledger in
   let* end_atom =
     match turn_boundary with
@@ -1364,7 +1394,7 @@ let past_max_context ~max_context ~continuity ~history_digest_at ~turn_boundary
       point_end, Keeper_carried_front.Librarian_point_at_max_context
     | Some (_ : int) | None -> end_atom, Keeper_carried_front.Turn_start_at_max_context
   in
-  if next_turn_peak > max_context
+  if next_turn_peak > Llm_provider.Input_budget.to_int input_limit
      && end_atom > window_first_atom
      && Keeper_model_input_ledger.holds ~digest_at:history_digest_at ledger
   then
@@ -1377,7 +1407,7 @@ let past_max_context ~max_context ~continuity ~history_digest_at ~turn_boundary
              ; source
              }
          ; next_turn_peak
-         ; max_context
+         ; input_limit
          })
       (history_digest_at moved_to_atom)
   else None
@@ -1396,14 +1426,14 @@ type held_window =
    grows until the provider refuses it. Later in the turn it holds where the
    turn's first request opened it, which the ledger's last request
    records. *)
-let held_window ~opens_turn ~max_context ~history_digest_at
+let held_window ~opens_turn ~(input_limit : Llm_provider.Input_budget.t option) ~history_digest_at
       (ledger : Keeper_model_input_ledger.t option) =
   match ledger with
   | None -> None
   | Some ledger ->
     let watched =
       (not opens_turn)
-      || (Option.is_some max_context
+      || (Option.is_some input_limit
           && Option.is_some (Keeper_model_input_ledger.next_turn_peak ledger))
     in
     if watched && Keeper_model_input_ledger.holds ~digest_at:history_digest_at ledger
@@ -2159,13 +2189,10 @@ let bounded_model_input_projection
   (* The cold-start seed is read once per attempt and only when no ledger
      answers; every response updates the working ledger even without usage. *)
   let cold_seed = lazy (ctx.carried_front_seed ()) in
-  (* The binding's max-context, which the size signal compares the ledger's
-     counts against; read once per attempt. *)
-  let max_context =
-    lazy
-      (Option.bind ctx.input_runtime (fun runtime ->
-         Option.map fst (Runtime_instance.resolve_max_context_of_runtime runtime)))
-  in
+  (* The binding's unified input-token limit (context window minus codec
+     output reservation), which the size signal compares the ledger's counts
+     against; read once per attempt. *)
+  let input_limit = lazy (input_limit_of_provider_config provider_config) in
   let to_wire = memoize_wire_message media_store in
   fun messages ->
     state.request_range := None;
@@ -2257,7 +2284,7 @@ let bounded_model_input_projection
     let past_max_context =
       if opens_turn
       then
-        past_max_context ~max_context:(Lazy.force max_context)
+        past_max_context ~input_limit:(Lazy.force input_limit)
           ~continuity:(input_continuity ctx.request_input) ~history_digest_at
           ~turn_boundary:ctx.turn_boundary !(state.ledger)
       else None
@@ -2265,7 +2292,7 @@ let bounded_model_input_projection
     (* Read before this request moves the ledger: where a window that stays
        last sent its markers and what working state it carried. *)
     let held_window =
-      held_window ~opens_turn ~max_context:(Lazy.force max_context) ~history_digest_at
+      held_window ~opens_turn ~input_limit:(Lazy.force input_limit) ~history_digest_at
         !(state.ledger)
     in
     let current_turn_results = !(state.current_turn_results) in
@@ -2336,9 +2363,11 @@ let bounded_model_input_projection
        ctx.hold_carried_front moved;
        Log.Keeper.info
          ~keeper_name:ctx.keeper_name
-         "model input window moved before the provider counted past max-context \
-          runtime=%s next_turn_peak=%d max_context=%d window_first_atom=%d front=%s"
-         ctx.runtime_id signal.next_turn_peak signal.max_context signal.window_first_atom
+         "model input window moved before the provider counted past input limit \
+          runtime=%s next_turn_peak=%d input_limit=%d window_first_atom=%d front=%s"
+         ctx.runtime_id signal.next_turn_peak
+         (Llm_provider.Input_budget.to_int signal.input_limit)
+         signal.window_first_atom
          (Yojson.Safe.to_string (Keeper_carried_front.seed_to_json moved))
      | Some _, None | None, (Some _ | None) -> ());
     let history_atom_count = composed.history_atom_count in

@@ -1,4 +1,4 @@
-(* MSX HTTP control routes (RFC-0439 §3.7, RFC #38695).
+(* MSX HTTP control routes.
    Tests tick, press, checkpoint, carts and load HTTP route endpoints
    and responses under a real loaded machine. Machine spectating is
    handled via GET /api/v1/lane-addons/live. *)

@@ -1,11 +1,11 @@
 (* test/test_orphan_surfacer.ml
 
-   RFC-0294 PR-4: single-owner orphan-task surfacer. Pins the pure grouping the
+   Single-owner orphan-task surfacer. Pins the pure grouping the
    workspace observation Pulse emits as the [masc_orphan_tasks] gauge:
    - Every status class in [orphan_status_classes] is reported (0 when empty), so
      a cleared class resets the gauge instead of going stale.
    - An AwaitingVerification orphan is counted under "awaiting_verification";
-     observation does not mutate or reassign the obligation. T6.
+     observation does not mutate or reassign the obligation.
    - Drift guard: the fixed class labels equal [task_status_to_string] of the
      orphan-eligible statuses, so a rename of the canonical strings fails here
      rather than silently splitting the metric vocabulary. *)
@@ -33,7 +33,7 @@ let make_task ~id ~status : MD.task =
 let count_of cls counts =
   match List.assoc_opt cls counts with Some n -> n | None -> -1
 
-(* T6: an AwaitingVerification orphan is surfaced under its own class, and the
+(* An AwaitingVerification orphan is surfaced under its own class, and the
    other classes report 0 (fixed-set emission, no stale value). *)
 let test_emits_for_awaiting_verification () =
   let awaiting =

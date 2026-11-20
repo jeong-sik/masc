@@ -630,7 +630,7 @@ let forgotten_label = function
       runtime_id (String.concat "," session_ids)
 ;;
 
-(* RFC-0501 §2.1 on the store's own transitions, not on hand-built phases:
+(* [forgotten_sessions] on the store's own transitions, not on hand-built phases:
    a resume keeps the settled thread, a moved surface drops it at the claim,
    a revert names it again, a transient release drops the thread the run
    had opened, and a record of another runtime says whose thread it was. *)
@@ -1363,10 +1363,9 @@ let test_restart_fresh_lets_the_next_fresh_turn_start () =
       fail ("a fresh conversation after restart was rejected: " ^ detail))
 ;;
 
-(* RFC claude-code-context-overflow-bounded-restart §6.2 admission rules: a
-   typed input rejection must not be auto-superseded by the next claim on the
-   same runtime, while every other recovery keeps the supersede and the
-   operator resolution path stays the only way back in. *)
+(* Claim admission rules: a typed input rejection must not be auto-superseded
+   by the next claim on the same runtime, while every other recovery keeps the
+   supersede and the operator resolution path stays the only way back in. *)
 let test_input_rejected_recovery_is_not_auto_superseded () =
   with_workspace "masc-official-client-store-input-rejected-" (fun base_path ->
     let keeper_name = "input-rejected" in

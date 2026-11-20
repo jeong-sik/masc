@@ -6024,6 +6024,7 @@ type paged_list =
   | Identity_services
   | Overview_destinations
   | Model_bindings
+  | Palette_entries
 
 (* One list a frame drew: which, and the rows of it the frame drew. *)
 type drawn_list = { dl_list : paged_list; dl_height : int }
@@ -9506,6 +9507,7 @@ let same_acting_pane_authority left right =
   in
   left.Masc_tui_acting_pane.frame_columns = right.Masc_tui_acting_pane.frame_columns
   && left.frame_scroll_max = right.frame_scroll_max
+  && left.frame_body_rows = right.frame_body_rows
   && List.equal same_acting_pane_target left.frame_targets right.frame_targets
   && Option.equal same_source left.frame_source right.frame_source
 
@@ -10348,6 +10350,9 @@ type state = {
      surface has them. A row of the last frame, the way a press is; the
      renderer paints that row in reverse video, which NO_COLOR keeps. *)
   mutable acting_pane_cursor: int option;
+  (* Pending post-scroll cursor snap resolved against the next rendered targets
+     when PgUp/PgDn/Home/End scrolls the Activity pane. *)
+  mutable acting_pane_snap: Masc_tui_acting_pane.scroll_snap option;
   (* Which of the pane's two readings is up. Survives a toggle: a reader
      who put the pane away on Changes gets Changes back. *)
   mutable acting_pane_tab: Masc_tui_acting_pane.tab;
@@ -21602,6 +21607,7 @@ let create_state
   acting_pane_presented = Masc_tui_acting_pane.empty_frame;
   acting_pane_scroll = 0;
   acting_pane_cursor = None;
+  acting_pane_snap = None;
   acting_pane_tab = Masc_tui_acting_pane.Tab_fleet;
   acting_pane_call_order = Masc_tui_acting_pane.Newest_first;
   acting_pane_expanded = [];

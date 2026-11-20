@@ -302,6 +302,7 @@ type rendering = {
   rows : line list;
   targets : row_target list;  (** one per row, in the same order *)
   scroll_max : int;
+  body_rows : int;  (** drawn rows of the scrollable body below headers and context *)
   context_rows : int;
       (** the largest [scroll] that still shows content: zero when everything
           fits, so a wheel over a short pane moves nothing *)
@@ -317,11 +318,34 @@ type 'source frame = {
   frame_columns : int;
   frame_targets : row_target list;
   frame_scroll_max : int;
+  frame_body_rows : int;
   frame_source : 'source option;
 }
 
 val empty_frame : 'source frame
 val target_at : 'source frame -> line:int -> row_target
+
+type scroll_snap =
+  | Snap_top
+  | Snap_end
+  | Snap_body_first
+  | Snap_body_last
+
+val page_height : body_rows:int -> int
+(** Effective body-row capacity when top and bottom scroll indicators are
+    present. Passing this to {!Masc_tui_scroll.apply_move} guarantees at least
+    one row of overlap and zero skipped rows on every page jump. *)
+
+val target_rows : targets:row_target array -> int list
+(** Ascending screen row indexes in [targets] that carry an actionable target. *)
+
+val snap_target_row : targets:row_target array -> row:int -> int option
+(** If [row] is already an actionable target in [targets], keep it; otherwise
+    snap to the nearest actionable target row in [targets]. *)
+
+val resolve_scroll_snap : targets:row_target array -> snap:scroll_snap -> int option
+(** Resolve a pending post-scroll cursor snap against the newly rendered
+    [targets], leaving the fixed row-0 tab header when paging into the body. *)
 
 val next_target_row : targets:row_target array -> row:int -> step:int -> int option
 (** The row a keyboard cursor rests on next: from [row], stepping [step]

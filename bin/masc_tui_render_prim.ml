@@ -2024,17 +2024,29 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
       ~previous_rows:!acting_pane_context_rows
       ~current_rows:rendering.Masc_tui_acting_pane.context_rows state.acting_pane_cursor;
     acting_pane_context_rows := rendering.Masc_tui_acting_pane.context_rows;
+    let targets = Array.of_list rendering.Masc_tui_acting_pane.targets in
+    (match state.acting_pane_cursor, state.acting_pane_snap with
+     | Some _, Some snap ->
+         state.acting_pane_snap <- None;
+         state.acting_pane_cursor <-
+           Masc_tui_acting_pane.resolve_scroll_snap ~targets ~snap
+     | None, Some _ ->
+         state.acting_pane_snap <- None
+     | Some row, None ->
+         state.acting_pane_cursor <-
+           Masc_tui_acting_pane.snap_target_row ~targets ~row
+     | None, None -> ());
     frame_acting_pane :=
       { Masc_tui_acting_pane.frame_columns = pane_cols
       ; frame_targets = rendering.Masc_tui_acting_pane.targets
       ; frame_scroll_max = rendering.Masc_tui_acting_pane.scroll_max
+      ; frame_body_rows = rendering.Masc_tui_acting_pane.body_rows
       ; frame_source = Some { aps_scope = state.workspace_authority, state.workspace_read_authority
                       ; aps_file_source = source }
       };
     let ground = Theme.side_pane_background () in
     let right = Buffer.create 4096 in
     let cursor = Option.value state.acting_pane_cursor ~default:(-1) in
-    let targets = Array.of_list rendering.Masc_tui_acting_pane.targets in
     List.iteri
       (fun index line ->
          let target =
@@ -2049,6 +2061,7 @@ let add_rows_beside_acting_pane (state : state) framed ~cols ~pane_rows lines =
   end
   else begin
     acting_pane_context_rows := 0;
+    state.acting_pane_snap <- None;
     List.iter
       (fun line ->
          Buffer.add_string framed line;

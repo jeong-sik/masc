@@ -249,8 +249,11 @@ val current_category : snapshot ->
 val toggle_history : t -> t
 (** Explicitly switch the overview list. Detail keeps its pinned incarnation. *)
 val move_instance : t -> int -> t
+val apply_instance_move : page:int -> Masc_tui_scroll.key_move -> t -> t
+val apply_configuration_move : page:int -> Masc_tui_scroll.key_move -> t -> t
 (** Move among visible entries in the current overview mode and presentation. *)
 val move_record : t -> int -> t
+val apply_record_move : page:int -> Masc_tui_scroll.key_move -> t -> t
 (** Move only among records belonging to the pinned detail incarnation. *)
 val selected_source_path : t -> string option
 val selected_row : t -> Row.row option
@@ -337,6 +340,7 @@ val open_actions : request_id:string -> t -> (t, string) result
     opens that row's list, aimed at the instance that produced the row.
     Otherwise the selected instance's actions open. *)
 val move_action : t -> int -> t
+val apply_action_move : page:int -> Masc_tui_scroll.key_move -> t -> t
 val enter_action : t -> (t * action_request option, string) result
 (** Enter on a menu without a form: in a row's list it opens the chosen row
     action's form, or the instance's other actions from the last line; on a
@@ -365,11 +369,13 @@ val overview_hints : ?ko:bool -> t -> string list
     into rows with {!Masc_tui_message_layout.pack_clauses}. *)
 val subscription_targets : t -> Masc_tui_lane_subscriptions.target list
 val move_observation : t -> int -> t
+val apply_observation_move : page:int -> Masc_tui_scroll.key_move -> t -> t
 val evidence_request : t -> (request, string) result
 val open_evidence : request_id:string -> keepers:string list -> t -> (t, string) result
 (** Open the export choice for the marked rows. Fails like [evidence_request]
     when the rows span owners or left the view. *)
 val move_evidence : t -> int -> t
+val apply_evidence_move : page:int -> Masc_tui_scroll.key_move -> t -> t
 val acknowledge_broadcast : t -> Yojson.Safe.t -> t
 (** A committed response ends this send. Unanswered requests retain their ID
     across reopening the same selected evidence; a later acknowledged send gets

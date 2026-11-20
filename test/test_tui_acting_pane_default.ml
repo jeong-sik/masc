@@ -72,7 +72,7 @@ let test_file_action_uses_the_presented_source () =
   in
   state.acting_pane_presented <-
     { Pane.frame_columns = 20; frame_targets = [Pane.Target_file 0]; frame_scroll_max = 0
-    ; frame_source = Some source };
+    ; frame_body_rows = 1; frame_source = Some source };
   (* A newer read may land before a new frame is accepted. *)
   let next, request =
     match Masc_tui_fetched.start ~equal:Masc_tui_types.same_acting_pane_keeper

@@ -72,8 +72,25 @@ val move_of_key : string -> key_move option
     and [End] the last row that still shows content. [None] for any other
     key, which the caller keeps for itself. *)
 
+val wheel_or_key_move : ?vim_edges:bool -> string -> key_move option
+(** Like {!move_of_key}, plus [wheel-down] / [wheel-up]. Pass
+    [~vim_edges:false] on screens where [g] / [G] are bound to actions. *)
+
 val apply_move : count:int -> height:int -> key_move -> int -> int
 (** The scroll after [move], bounded as {!down} and {!up} bound it. *)
+
+val visible_target_for_scroll
+  :  targets:int list
+  -> scroll:int
+  -> height:int
+  -> current:int option
+  -> key_move
+  -> int option
+(** Snap a selection cursor to a selectable row inside the viewport
+    [[scroll, scroll + height - 1]] after a mixed-content modal scrolls.
+    [targets] are selectable row indexes in ascending display order. Returns
+    [None] when no selectable row lies in the new viewport so Enter cannot act
+    on an off-screen row. *)
 
 (** A row cursor over the same list. The cursor names a row, the scroll names
     a window; a keypress moves the cursor and the window follows with
@@ -118,6 +135,9 @@ val cursor_apply : count:int -> Cursor_move.t -> int -> int
     A list whose j and k land on more than its data rows, such as group
     headings, counts those places here too, so Home and End reach the same
     first and last place j and k reach. Folding is not a move. *)
+
+val cursor_move_of_key_move : page:int -> key_move -> Cursor_move.t
+(** Convert a {!key_move} to a {!Cursor_move.t} using [page] for page keys. *)
 
 val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
 (** Like {!ensure_visible} for a cursor that names a run of lines [start] to

@@ -168,6 +168,12 @@ let is_person_sealed = function
   | Person_account _ -> true
   | Captured _ -> false
 ;;
+
+let person_provider_account_id = function
+  | Person_account person -> Some person.provider_account_id
+  | Captured _ -> None
+;;
+
 let publish_host_tool ~base_path ~config_dir =
   match Authz_boot_mode_read.tool ~base_path ~config_dir with
   | Error _ as refused -> refused
@@ -182,6 +188,7 @@ type request =
       { owner : Authz_types.User_id.t
       ; keeper_id : Authz_types.Keeper_id.t
       ; channel : Authz_types.Channel.t
+      ; stored_scope : Authz_types.Authorization_scope.t
       ; pat : Authz_types.Pat_binding.t
       ; runtime_id : string
       }
@@ -425,8 +432,17 @@ let on_trusted zone judge =
 
 (* The turn the log gives a request of a person's Keeper. It reads nothing
    of the account the request was captured on. *)
-let decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now =
-  match Authz_keeper_turn.decide trusted ~owner ~keeper_id ~channel ~pat ~now:(now ()) with
+let decided_turn trusted ~owner ~keeper_id ~channel ~stored_scope ~pat ~runtime_id ~now =
+  match
+    Authz_keeper_turn.decide
+      trusted
+      ~owner
+      ~keeper_id
+      ~channel
+      ~stored_scope
+      ~pat
+      ~now:(now ())
+  with
   | Error refusal -> Error (Turn_refused refusal)
   | Ok turn ->
     if String.equal (Authz_types.Runtime_id.to_string turn.Authz_keeper_turn.runtime_id) runtime_id
@@ -435,6 +451,42 @@ let decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now =
       Error
         (Not_the_assigned_runtime
            { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })
+;;
+
+let admit_by_engine_name ~engine_name ~owner ~channel ~pat =
+  match Atomic.get state with
+  | Unpublished -> Error Not_published
+  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Error No_operator
+  | Published (Multi_account { zone; base_path = _; now }) ->
+    on_trusted zone (fun trusted authz_state ->
+      match Authz_keeper_state.find_by_engine_name authz_state.Authz_state.keepers engine_name with
+      | None -> Error (No_operator_keeper engine_name)
+      | Some (resolved_owner, keeper_id, (_ : Authz_keeper_state.keeper)) ->
+        if not (Authz_types.User_id.equal resolved_owner owner)
+        then Error (No_operator_keeper engine_name)
+        else (
+          let stored_scope = Authz_types.Authorization_scope.all in
+          Authz_keeper_turn.decide
+            trusted
+            ~owner
+            ~keeper_id
+            ~channel
+            ~stored_scope
+            ~pat
+            ~now:(now ())
+          |> Result.map (fun (_ : Authz_keeper_turn.turn) -> Authz_types.Pat_binding.scope pat)
+          |> Result.map_error (fun refusal -> Turn_refused refusal)))
+;;
+
+let person_keeper_of_engine_name engine_name =
+  match Atomic.get state with
+  | Unpublished -> Error Not_published
+  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Error No_operator
+  | Published (Multi_account { zone; base_path = _; now = _ }) ->
+    on_trusted zone (fun (_ : Authz_zone.trusted) authz_state ->
+      match Authz_keeper_state.find_by_engine_name authz_state.Authz_state.keepers engine_name with
+      | None -> Error (No_operator_keeper engine_name)
+      | Some (owner, keeper_id, (_ : Authz_keeper_state.keeper)) -> Ok (owner, keeper_id))
 ;;
 
 (* The person, the turn and the home are read in the same state. *)
@@ -462,10 +514,12 @@ let multi_account ~zone ~base_path ~now request claim =
         own_key ~runtime_root state provider_account_id claim
       | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
   | Operator_keeper_turn { keeper_name; runtime_id = _ } -> Error (No_operator_keeper keeper_name)
-  | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->
+  | Keeper_turn { owner; keeper_id; channel; stored_scope; pat; runtime_id } ->
     on_trusted (fun trusted state ->
       let ( let* ) = Result.bind in
-      let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now in
+      let* turn =
+        decided_turn trusted ~owner ~keeper_id ~channel ~stored_scope ~pat ~runtime_id ~now
+      in
       let owner = turn.Authz_keeper_turn.owner in
       let provider_account_id = turn.Authz_keeper_turn.provider_account_id in
       let* runtime_root = person_root ~base_path state owner in
@@ -495,7 +549,8 @@ let after_off ~base_path (records : Authz_state.t) request claim =
     match request with
     | Operator_call -> None
     | Own_account { user_id; provider_account_id = _ } -> Some (Off_own_account user_id)
-    | Keeper_turn { owner = _; keeper_id; channel = _; pat = _; runtime_id = _ } ->
+    | Keeper_turn
+        { owner = _; keeper_id; channel = _; stored_scope = _; pat = _; runtime_id = _ } ->
       (* A Keeper of a person, whichever record the log holds of it. *)
       Some (Off_keeper keeper_id)
     | Operator_keeper_turn { keeper_name = _; runtime_id } ->
@@ -536,9 +591,9 @@ let admit request =
   | Unpublished, (Keeper_turn _ | Operator_keeper_turn _ | Own_account _ | Operator_call) ->
     Error Not_published
   | ( Published (Multi_account { zone; base_path = _; now })
-    , Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ) ->
+    , Keeper_turn { owner; keeper_id; channel; stored_scope; pat; runtime_id } ) ->
     on_trusted zone (fun trusted (_ : Authz_state.t) ->
-      decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now
+      decided_turn trusted ~owner ~keeper_id ~channel ~stored_scope ~pat ~runtime_id ~now
       |> Result.map (fun (_ : Authz_keeper_turn.turn) -> ()))
   | ( Published (Multi_account { zone = _; base_path = _; now = _ })
     , (Operator_keeper_turn _ | Own_account _ | Operator_call) )
@@ -671,8 +726,14 @@ let authorize_person request (person : _ person_sealed) =
         | Operator_keeper_turn { keeper_name; runtime_id = _ } ->
           Error (No_operator_keeper keeper_name)
         | Own_account { user_id; provider_account_id = _ }
-        | Keeper_turn { owner = user_id; keeper_id = _; channel = _; pat = _; runtime_id = _ } ->
-          Error (No_membership user_id)))
+        | Keeper_turn
+            { owner = user_id
+            ; keeper_id = _
+            ; channel = _
+            ; stored_scope = _
+            ; pat = _
+            ; runtime_id = _
+            } -> Error (No_membership user_id)))
   | Published (Multi_account { zone; base_path; now }) ->
     (match request with
      | Operator_call -> Error No_operator
@@ -704,10 +765,12 @@ let authorize_person request (person : _ person_sealed) =
                 ~kind
                 person)
          | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
-     | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->
+     | Keeper_turn { owner; keeper_id; channel; stored_scope; pat; runtime_id } ->
        on_trusted zone (fun trusted state ->
          let ( let* ) = Result.bind in
-         let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now in
+         let* turn =
+           decided_turn trusted ~owner ~keeper_id ~channel ~stored_scope ~pat ~runtime_id ~now
+         in
          let owner = turn.Authz_keeper_turn.owner in
          let provider_account_id = turn.Authz_keeper_turn.provider_account_id in
          let* runtime_root = person_root ~base_path state owner in
@@ -858,9 +921,9 @@ let authorize_person_api_multi ~zone ~base_path ~now ~provider_account_id reques
           in
           read_person_api_key ~base_path state ~owner:user_id provider_account_id
         | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
-  | Keeper_turn { owner; keeper_id; channel; pat; runtime_id } ->
+  | Keeper_turn { owner; keeper_id; channel; stored_scope; pat; runtime_id } ->
     on_trusted zone (fun trusted state ->
-      let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~pat ~runtime_id ~now in
+      let* turn = decided_turn trusted ~owner ~keeper_id ~channel ~stored_scope ~pat ~runtime_id ~now in
       if not (Authz_types.Provider_account_id.equal turn.Authz_keeper_turn.provider_account_id provider_account_id)
       then Error (Not_the_account_key turn.Authz_keeper_turn.provider_account_id)
       else read_person_api_key ~base_path state ~owner:turn.Authz_keeper_turn.owner provider_account_id)
@@ -876,7 +939,7 @@ let authorize_person_api ~provider_account_id request =
      | Some records ->
        (match request with
         | Own_account { user_id; provider_account_id = _ } -> Error (Off_own_account user_id)
-        | Keeper_turn { owner = _; keeper_id; channel = _; pat = _; runtime_id = _ } ->
+        | Keeper_turn { owner = _; keeper_id; channel = _; stored_scope = _; pat = _; runtime_id = _ } ->
           Error (Off_keeper keeper_id)
         | Operator_keeper_turn { keeper_name = _; runtime_id } ->
           (match off_runtime records runtime_id with

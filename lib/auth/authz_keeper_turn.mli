@@ -38,8 +38,10 @@
       every effect of {!requested} must be inside it, and it must not have
       expired. A turn that a session started, and a turn the server starts
       itself, has none.
-    - No durable work stores a scope in phase 1, so the stored scope puts no
-      limit.
+    - [stored_scope]: the scope stored when durable work (e.g. a queued chat
+      operation) was admitted. It defaults to {!Authorization_scope.all} for
+      direct non-queued turns and narrows queued turns without re-checking the
+      originating PAT.
 
     {b One snapshot.} The facts and the gate read one snapshot, the one the
     caller took with {!Authz_zone.read}, so no record separates what they
@@ -84,6 +86,7 @@ val decide
   -> owner:User_id.t
   -> keeper_id:Keeper_id.t
   -> channel:Channel.t
+  -> stored_scope:Authorization_scope.t
   -> pat:Pat_binding.t
   -> now:float
   -> (turn, refusal) result

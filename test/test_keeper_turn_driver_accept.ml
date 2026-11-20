@@ -1799,6 +1799,68 @@ let test_lost_capture_failure_does_not_log_another_execution () =
            Runtime_observation.execution_evidence_to_json observed.execution_evidence)
   | _ -> Alcotest.fail "expected the original terminal and one missing-capture diagnostic"
 
+let test_single_user_decoded_person_caller_is_refused () =
+  let open Masc in
+  let user_id =
+    match Authz_types.User_id.of_string (String.make 32 'a') with
+    | Ok id -> id
+    | Error _ -> Alcotest.fail "fixture user_id refused"
+  in
+  let person_caller : Keeper_chat_operation_payload.person_caller =
+    { user_id; stored_scope = Authz_types.Authorization_scope.all }
+  in
+  let continuation_channel =
+    match Keeper_continuation_channel.dashboard ~thread_id:"thread-single-user" with
+    | Ok channel -> channel
+    | Error msg -> Alcotest.fail msg
+  in
+  let encoded_source =
+    match
+      Keeper_chat_operation_payload.source_to_json_with_person_caller
+        ~person_caller:(Some person_caller)
+        ~submitted_by:"user"
+        ~thread_id:"thread-single-user"
+        ~continuation_channel
+        ~surface:(Surface_ref.Dashboard { session_id = None })
+        ~channel:"dashboard"
+        ~channel_user_id:""
+        ~channel_user_name:""
+        ~channel_workspace_id:""
+        ~conversation_id:None
+        ~external_message_id:None
+        ~workspace_id:None
+        ~extra_mentions:[]
+        ~sender_keeper:None
+        ~user_row_origin:Keeper_chat_store.Needs_append
+    with
+    | Ok json -> json
+    | Error msg -> Alcotest.fail msg
+  in
+  let decoded =
+    match Keeper_chat_operation_payload.source_of_json encoded_source with
+    | Ok src -> src
+    | Error msg -> Alcotest.fail msg
+  in
+  Alcotest.(check bool)
+    "source_of_json decodes person_caller unconditionally in single-user mode"
+    true
+    (Keeper_chat_operation_payload.equal_person_caller
+       (Some person_caller)
+       decoded.person_caller);
+  match
+    Keeper_agent_run.resolve_turn_walk_owner
+      ~keeper_name:"single-user-keeper"
+      ~turn_kind:Turn_record.Direct
+      ~wake_reason:None
+      ~person_caller:decoded.person_caller
+  with
+  | Ok _ -> Alcotest.fail "Single_user process must refuse decoded person_caller"
+  | Error err ->
+    Alcotest.(check bool)
+      "Single_user routes decoded person_caller to Off_person_home"
+      true
+      (err = Keeper_turn_driver.account_refused Runtime_account_access.Off_person_home)
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
@@ -1948,5 +2010,9 @@ let () =
             "a dropped response is written through the sink"
             `Quick
             test_a_dropped_response_is_written_through_the_sink;
+          Alcotest.test_case
+            "single-user refuses unconditionally decoded person_caller"
+            `Quick
+            test_single_user_decoded_person_caller_is_refused;
         ] );
     ]

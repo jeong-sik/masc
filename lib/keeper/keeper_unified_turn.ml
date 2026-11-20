@@ -780,6 +780,7 @@ let run_keeper_cycle
                            { base_dir
                            ; build_turn_prompt
                            ; channel
+                           ; wake
                            ; continuation_channel = continuation_channel_of_wake wake
                            ; approval_admission = Keeper_approval_origin.Admitted
                                (Keeper_heartbeat_source_batch.selections

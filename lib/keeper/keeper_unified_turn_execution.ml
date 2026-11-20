@@ -82,6 +82,7 @@ type ctx =
       base_system_prompt:string -> messages:Agent_core.Types.message list ->
       Keeper_agent_run.turn_prompt
   ; channel : Keeper_world_observation.keeper_cycle_channel
+  ; wake : Keeper_registry.wake_reason
   ; continuation_channel : Keeper_continuation_channel.t option
       (* Reply route for a continuation-bearing wake, handed to tool setup so
          surface posts know the admitted external destination. *)
@@ -262,6 +263,7 @@ let run (ctx : ctx)
                  ~user_message
                  ~input_speaker:(Keeper_unified_prompt.autonomous_input_speaker observation)
                  ~woken_by:ctx.woken_by
+                 ~wake_reason:ctx.wake
                  ~turn_kind:Turn_record.Autonomous
                  ~skill_snapshot
                  ~task_skill_selection

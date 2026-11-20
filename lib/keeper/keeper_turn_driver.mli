@@ -196,9 +196,22 @@ type walk_rest =
     starts for it as an operator call ({!Runtime_account_access.Operator_call}). *)
 type fleet_turn = { keeper_name : string  (** The Keeper, which is the name of its TOML. *) }
 
+type person_turn =
+  { owner : Authz_types.User_id.t
+  ; keeper_id : Authz_types.Keeper_id.t
+  ; engine_name : string
+  ; channel : Authz_types.Channel.t
+  ; stored_scope : Authz_types.Authorization_scope.t
+  ; pat : Authz_types.Pat_binding.t
+  }
+
 type walk_owner =
   | Fleet_keeper_turn of fleet_turn
+  | Person_keeper_turn of person_turn
   | One_shot_walk
+
+val account_refused : Runtime_account_access.refusal -> Agent_core.Error.t
+(** Converts an account authorization refusal to the non-rotating driver error. *)
 
 (** Whose walk orders the lane (RFC-0458 §3.4, 2026-09-23).
     [Fresh_walk_by recorder]: a fleet Keeper's turn without a deferred

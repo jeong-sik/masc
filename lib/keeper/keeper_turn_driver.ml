@@ -235,8 +235,18 @@ type lane_terminal_error =
    and for a one-shot walk as an operator call (plan D2-5). *)
 type fleet_turn = { keeper_name : string }
 
+type person_turn =
+  { owner : Authz_types.User_id.t
+  ; keeper_id : Authz_types.Keeper_id.t
+  ; engine_name : string
+  ; channel : Authz_types.Channel.t
+  ; stored_scope : Authz_types.Authorization_scope.t
+  ; pat : Authz_types.Pat_binding.t
+  }
+
 type walk_owner =
   | Fleet_keeper_turn of fleet_turn
+  | Person_keeper_turn of person_turn
   | One_shot_walk
 
 (* Whose walk is ordering the lane. A failed attempt holds until its candidate
@@ -254,6 +264,8 @@ type walk_start = Runtime_candidate_standing.walk_start =
 let fresh_walk_of = function
   | Fleet_keeper_turn { keeper_name } ->
     Fresh_walk_by (Runtime_candidate_backpressure.keeper_recorder ~keeper_name)
+  | Person_keeper_turn { engine_name; _ } ->
+    Fresh_walk_by (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:engine_name)
   | One_shot_walk -> Every_mark_demotes
 
 let account_request walk_owner ~runtime_id =
@@ -262,6 +274,9 @@ let account_request walk_owner ~runtime_id =
     (* A lane runs the Keepers that the TOMLs of the installation name: the
        operator's, not a person's of the authorization log. *)
     Runtime_account_access.Operator_keeper_turn { keeper_name; runtime_id }
+  | Person_keeper_turn { owner; keeper_id; channel; stored_scope; pat; engine_name = _ } ->
+    Runtime_account_access.Keeper_turn
+      { owner; keeper_id; channel; stored_scope; pat; runtime_id }
   | One_shot_walk -> Runtime_account_access.Operator_call
 
 (* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI, Claude Code (plan
@@ -286,6 +301,28 @@ let authorize_muse_account walk_owner ~runtime_id home =
     (account_request walk_owner ~runtime_id)
     (Runtime_account_access.Declared_home home)
   |> Result.map_error account_refused
+;;
+
+let provider_account_id_of_attempt ~(runtime : Runtime_instance.t) =
+  match runtime.Runtime_instance.execution with
+  | Runtime_execution.Claude_code config ->
+    Runtime_account_access.person_provider_account_id config.account_home
+  | Runtime_execution.Codex_app_server config ->
+    Runtime_account_access.person_provider_account_id config.account_home
+  | Runtime_execution.Muse_serve _
+  | Runtime_execution.Agent_core _ ->
+    if Runtime_execution.is_person_execution runtime.execution
+    then Authz_types.Provider_account_id.of_string runtime.provider.id |> Result.to_option
+    else None
+  | Runtime_execution.Antigravity_cli _
+  | Runtime_execution.Vibe_cli _ -> None
+;;
+
+let with_account_call_slot ~(runtime : Runtime_instance.t) f =
+  match provider_account_id_of_attempt ~runtime with
+  | None -> f ()
+  | Some account_id ->
+    Runtime_account_call.call_in_turn_of account_id (fun (_call : Runtime_account_call.t) -> f ())
 ;;
 
 let authorize_host_account client =
@@ -1039,6 +1076,14 @@ let attempt_runtime_candidates
                 Runtime_candidate_backpressure.note_failed_attempt
                   ~candidate ~failure
                   ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name))
+             attempt_candidate_backpressure
+         | Person_keeper_turn { engine_name; _ } ->
+           Option.iter
+             (fun candidate ->
+                Runtime_candidate_backpressure.note_failed_attempt
+                  ~candidate ~failure
+                  ~recorded_by:
+                    (Runtime_candidate_backpressure.keeper_recorder ~keeper_name:engine_name))
              attempt_candidate_backpressure
          | One_shot_walk -> ()
        in
@@ -3219,6 +3264,7 @@ let run_named
           official_model_input_observation hooks
         in
         let run_codex ~initial_messages () =
+          with_account_call_slot ~runtime (fun () ->
           match
             authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
           with
@@ -3291,7 +3337,7 @@ let run_named
             ~on_event
             ~account
             ~config
-            ()
+            ())
         in
         let codex_attempt =
           match provider_config_transform, agent_core_checkpoint with
@@ -3517,6 +3563,7 @@ let run_named
           official_model_input_observation hooks
         in
         let run_muse ~initial_messages () =
+          with_account_call_slot ~runtime (fun () ->
           match
             authorize_muse_account walk_owner ~runtime_id:attempt_runtime_id
               execution.account_home
@@ -3598,7 +3645,7 @@ let run_named
             ~on_event
             ~account
             ~config:(muse_serve_client_config execution)
-            ()
+            ())
         in
         let muse_attempt =
           match provider_config_transform, agent_core_checkpoint with
@@ -3657,6 +3704,7 @@ let run_named
           official_model_input_observation hooks
         in
         let run_claude ~initial_messages () =
+          with_account_call_slot ~runtime (fun () ->
           match
             authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
           with
@@ -3739,7 +3787,7 @@ let run_named
             ~on_event
             ~account
             ~config
-            ()
+            ())
         in
         let claude_attempt =
           match provider_config_transform, agent_core_checkpoint with
@@ -3796,6 +3844,7 @@ let run_named
         , official_client_dispatch ~provider_config_transform claude_result )
       | Runtime_execution.Agent_core sealed ->
        let request_input = Eio.Lazy.force continuity in
+       with_account_call_slot ~runtime (fun () ->
        (match
           match authorize_api_provider walk_owner ~runtime_id:attempt_runtime_id sealed with
           | Error _ as refused -> refused
@@ -4012,7 +4061,7 @@ let run_named
           , checkpoint_after
           , Keeper_provider_attempt_effect.No_effect_observed
           , provider_attempt_dispatch ~request_serialized:!request_serialized
-              turn_result )))))
+              turn_result ))))))
        ))))
     attempt_candidates)
 

@@ -409,6 +409,93 @@ let capture_skill_snapshot ~base_path =
          ~detail:"Skill snapshot workspace has no published revision")
 ;;
 
+let is_allowed_person_autonomous_stimulus = function
+  | Keeper_event_queue.Bootstrap -> true
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Tool_result_ready _
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Task_outcome _ -> false
+;;
+
+let resolve_turn_walk_owner
+      ~keeper_name
+      ~(turn_kind : Turn_record.turn_kind)
+      ~(wake_reason : Keeper_registry.wake_reason option)
+      ~(person_caller : Keeper_chat_operation_payload.person_caller option)
+  : (Keeper_turn_driver.walk_owner, Agent_core.Error.t) result
+  =
+  match Runtime_account_access.current () with
+  | None | Some (Runtime_account_access.Single_user _) ->
+    (match person_caller with
+     | Some _ ->
+       Error
+         (Keeper_turn_driver.account_refused Runtime_account_access.Off_person_home)
+     | None -> Ok (Keeper_turn_driver.Fleet_keeper_turn { keeper_name }))
+  | Some (Runtime_account_access.Multi_account _) ->
+    let channel_and_caller =
+      match turn_kind, wake_reason, person_caller with
+      | Turn_record.Direct, (None | Some Keeper_registry.Chat_request), Some caller ->
+        Ok (Authz_types.Channel.Direct, caller.stored_scope, Some caller.user_id)
+      | Turn_record.Direct, (None | Some Keeper_registry.Chat_request), None ->
+        Error
+          (Keeper_turn_driver.account_refused
+             (Runtime_account_access.Turn_refused
+                (Authz_keeper_turn.Denied Authz_decision.Invocation_not_allowed)))
+      | Turn_record.Direct, Some (Keeper_registry.Proactive_tick | Keeper_registry.Woken _), _ ->
+        Error
+          (Keeper_turn_driver.account_refused
+             (Runtime_account_access.Turn_refused
+                (Authz_keeper_turn.Denied Authz_decision.Channel_out_of_scope)))
+      | Turn_record.Autonomous, Some Keeper_registry.Proactive_tick, None ->
+        Ok (Authz_types.Channel.Autonomous, Authz_types.Authorization_scope.all, None)
+      | Turn_record.Autonomous, Some (Keeper_registry.Woken (_ :: _ as stimuli)), None
+        when List.for_all is_allowed_person_autonomous_stimulus stimuli ->
+        Ok (Authz_types.Channel.Autonomous, Authz_types.Authorization_scope.all, None)
+      | Turn_record.Autonomous, Some (Keeper_registry.Woken _), _
+      | Turn_record.Autonomous, Some Keeper_registry.Proactive_tick, Some _
+      | Turn_record.Autonomous, Some Keeper_registry.Chat_request, _
+      | Turn_record.Autonomous, None, _ ->
+        Error
+          (Keeper_turn_driver.account_refused
+             (Runtime_account_access.Turn_refused
+                (Authz_keeper_turn.Denied Authz_decision.Channel_out_of_scope)))
+    in
+    (match channel_and_caller with
+     | Error _ as err -> err
+     | Ok (channel, stored_scope, expected_owner) ->
+       (match Runtime_account_access.person_keeper_of_engine_name keeper_name with
+        | Error refusal -> Error (Keeper_turn_driver.account_refused refusal)
+        | Ok (owner, keeper_id) ->
+          (match expected_owner with
+           | Some caller_id when not (Authz_types.User_id.equal owner caller_id) ->
+             Error
+               (Keeper_turn_driver.account_refused
+                  (Runtime_account_access.Turn_refused
+                     (Authz_keeper_turn.Denied Authz_decision.Invocation_not_allowed)))
+           | Some _ | None ->
+             Ok
+               (Keeper_turn_driver.Person_keeper_turn
+                  { owner
+                  ; keeper_id
+                  ; engine_name = keeper_name
+                  ; channel
+                  ; stored_scope
+                  ; pat = Authz_types.Pat_binding.Not_pat
+                  }))))
+;;
+
 (** Run a single keeper turn via Agent_core.Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -449,6 +536,8 @@ let run_turn
       ~(user_message : string)
       ~(input_speaker : Keeper_input_speaker.t)
       ~(woken_by : Keeper_event_queue.stimulus list)
+      ?wake_reason
+      ?person_caller
       ~(turn_kind : Turn_record.turn_kind)
       ~(approval_admission : Keeper_approval_origin.admission)
       ~(skill_snapshot : Skill_catalog_snapshot.t)
@@ -491,6 +580,41 @@ let run_turn
       ()
   : Keeper_agent_result.turn_settlement
   =
+  let walk_owner_result =
+    match
+      resolve_turn_walk_owner
+        ~keeper_name:meta.name
+        ~turn_kind
+        ~wake_reason
+        ~person_caller
+    with
+    | Error _ as err -> err
+    | Ok (Keeper_turn_driver.Fleet_keeper_turn _ as walk_owner) -> Ok walk_owner
+    | Ok (Keeper_turn_driver.One_shot_walk as walk_owner) -> Ok walk_owner
+    | Ok (Keeper_turn_driver.Person_keeper_turn _ as walk_owner) ->
+      (match turn_kind, wake_reason, woken_by with
+       | Turn_record.Autonomous, Some Keeper_registry.Proactive_tick, _ :: _ ->
+         Error
+           (Keeper_turn_driver.account_refused
+              (Runtime_account_access.Turn_refused
+                 (Authz_keeper_turn.Denied Authz_decision.Channel_out_of_scope)))
+       | Turn_record.Autonomous, _, stimuli
+         when not
+                (List.for_all
+                   (fun (stimulus : Keeper_event_queue.stimulus) ->
+                      is_allowed_person_autonomous_stimulus stimulus.payload)
+                   stimuli) ->
+         Error
+           (Keeper_turn_driver.account_refused
+              (Runtime_account_access.Turn_refused
+                 (Authz_keeper_turn.Denied Authz_decision.Channel_out_of_scope)))
+       | Turn_record.Autonomous, (None | Some (Keeper_registry.Proactive_tick | Keeper_registry.Woken _ | Keeper_registry.Chat_request)), _
+       | Turn_record.Direct, (None | Some (Keeper_registry.Proactive_tick | Keeper_registry.Woken _ | Keeper_registry.Chat_request)), _ ->
+         Ok walk_owner)
+  in
+  match walk_owner_result with
+  | Error e -> Keeper_agent_result.not_dispatched e
+  | Ok walk_owner ->
   let native_binding, native_resume = match native_continuation with
     | None -> None, None
     | Some { binding; resumed } -> Some binding, resumed in
@@ -1506,8 +1630,7 @@ let run_turn
                       ~media_store:(Tool_blob_media_store.of_base_path ~base_path:config.base_path)
                       ~media_readers:s.Keeper_run_tools.media_readers
                       ~keeper_name:meta.name
-                      ~walk_owner:
-                        (Keeper_turn_driver.Fleet_keeper_turn { keeper_name = meta.name })
+                      ~walk_owner
                       ~pre_tool_rejects
                       ~continue_from_checkpoint
                       ?native_binding

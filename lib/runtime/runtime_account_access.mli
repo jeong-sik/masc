@@ -205,6 +205,11 @@ val is_person_home : string -> bool
 
 (** Whether [sealed] was built for a person's account ({!seal_person}). *)
 val is_person_sealed : _ sealed -> bool
+
+(** The provider account id of a person's sealed client context, or [None]
+    for a single-user/captured seal. *)
+val person_provider_account_id : _ sealed -> Authz_types.Provider_account_id.t option
+
 (** What a CLI starts for. *)
 type request =
   | Keeper_turn of
@@ -214,6 +219,9 @@ type request =
                 ({!Authz_keeper_state}). *)
       ; keeper_id : Authz_types.Keeper_id.t
       ; channel : Authz_types.Channel.t  (** What started the turn. *)
+      ; stored_scope : Authz_types.Authorization_scope.t
+            (** The scope stored when durable work was admitted; checked on
+                every attempt without re-checking the originating PAT. *)
       ; pat : Authz_types.Pat_binding.t
             (** The personal access token that authenticated the request the
                 turn answers: its scope narrows the turn
@@ -367,6 +375,30 @@ val authorize : request -> 'client sealed -> ('client authorized, refusal) resul
     multi-account process it refuses an operator's call and a turn of an
     operator's Keeper, which [admit] does not judge. *)
 val admit : request -> (unit, refusal) result
+
+(** Admits a person's Keeper turn addressed by [engine_name], verifying the
+    recorded owner equals [owner] plus keeper record, assigned runtime,
+    channel, and live PAT scope [pat] against one trusted authorization-zone
+    snapshot before any queued operation or user row is recorded. Returns
+    the effective [stored_scope] to persist with the queued operation
+    (RFC §6.4). Fails closed with {!No_operator_keeper} when no person Keeper
+    claims [engine_name] or when its recorded owner differs from [owner],
+    avoiding any cross-person existence oracle. *)
+val admit_by_engine_name
+  :  engine_name:string
+  -> owner:Authz_types.User_id.t
+  -> channel:Authz_types.Channel.t
+  -> pat:Authz_types.Pat_binding.t
+  -> (Authz_types.Authorization_scope.t, refusal) result
+
+(** Resolves a person Keeper's [(owner, keeper_id)] from [engine_name] using
+    one trusted authorization-zone snapshot. Returns [Error No_operator_keeper]
+    if no person Keeper claims that engine name, or [Error Zone_uncertain] /
+    [Error Not_published] / [Error No_operator] if multi-account auth is not
+    active or trustworthy. *)
+val person_keeper_of_engine_name
+  :  string
+  -> (Authz_types.User_id.t * Authz_types.Keeper_id.t, refusal) result
 
 (** Authorizes a Muse account for [request] by the access the process
     published, by the rule of {!authorize}. *)

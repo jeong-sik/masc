@@ -85,6 +85,13 @@ val rejection_kind : rejection -> string
     what it reads. *)
 val to_json : t -> Yojson.Safe.t
 
+(** The JSON schema every answer is asked to match: the lane value's
+    [answer_schema]. It is built from the field lists the decoder takes, so
+    it names the same fields of every object. The decoder still refuses what
+    the schema does not state: a blank claim, reason or name, an empty or
+    repeated [refs], an unknown category. *)
+val schema : Yojson.Safe.t
+
 (** A new fact alone, with the fields it has inside an op: [claim],
     [category], [basis], [from]. A commit line carries the claim of an op
     that was left out in this shape. *)

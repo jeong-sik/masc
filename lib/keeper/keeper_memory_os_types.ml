@@ -666,18 +666,32 @@ let board_ref_of_json = function
     wire_here Expected_object
 ;;
 
+type basis_kind =
+  | Basis_observed
+  | Basis_derived
+
+let basis_kinds = [ Basis_observed; Basis_derived ]
+
+let basis_kind_token = function
+  | Basis_observed -> "observed"
+  | Basis_derived -> "derived"
+;;
+
+let basis_kind_of_token token =
+  List.find_opt (fun kind -> String.equal (basis_kind_token kind) token) basis_kinds
+;;
+
+let basis_kind_field kind = wire_field_kind, `String (basis_kind_token kind)
+
 let basis_to_json = function
-  | Observed Transcript -> `Assoc [ wire_field_kind, `String "observed" ]
+  | Observed Transcript -> `Assoc [ basis_kind_field Basis_observed ]
   | Observed (Board board) ->
-    `Assoc
-      [ wire_field_kind, `String "observed"
-      ; wire_field_board, board_ref_to_json board
-      ]
+    `Assoc [ basis_kind_field Basis_observed; wire_field_board, board_ref_to_json board ]
   | Derived derivations ->
     if not (valid_derivations derivations)
     then invalid_arg "derived memory basis must carry valid derivations";
     `Assoc
-      [ wire_field_kind, `String "derived"
+      [ basis_kind_field Basis_derived
       ; wire_field_derivations, `List (List.map derivation_to_json derivations)
       ]
 ;;
@@ -710,8 +724,8 @@ let derivations_rejection derivations =
 let basis_of_json = function
   | `Assoc fields ->
     let* kind = wire_string_field wire_field_kind fields in
-    (match kind with
-     | "observed" ->
+    (match basis_kind_of_token kind with
+     | Some Basis_observed ->
        (match List.assoc_opt wire_field_board fields with
         | None ->
           let+ () = exact_fields_result (wire_field_set [ wire_field_kind ]) fields in
@@ -726,7 +740,7 @@ let basis_of_json = function
             wire_at (Wire_field wire_field_board) (board_ref_of_json board_json)
           in
           Observed (Board board))
-     | "derived" ->
+     | Some Basis_derived ->
        let* () =
          exact_fields_result
            (wire_field_set [ wire_field_kind; wire_field_derivations ])
@@ -744,9 +758,41 @@ let basis_of_json = function
        let* derivations = decode 0 [] values in
        let+ () = derivations_rejection derivations in
        Derived derivations
-     | _ -> wire_fail [ Wire_field wire_field_kind ] (Unknown_token kind))
+     | None -> wire_fail [ Wire_field wire_field_kind ] (Unknown_token kind))
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     wire_here Expected_object
+;;
+
+(* The two field sets [basis_of_json] takes for an observed basis, and the two
+   [board_ref_of_json] takes for its Board reference. Every property of each
+   object is required, and a field that may be absent is a second object
+   without it: a model that writes this shape writes one [basis_of_json]
+   reads. The ids' grammar is checked by the decoder. *)
+let observed_basis_schema =
+  let string_schema = `Assoc [ "type", `String "string" ] in
+  let closed properties =
+    `Assoc
+      [ "type", `String "object"
+      ; "additionalProperties", `Bool false
+      ; "properties", `Assoc properties
+      ; "required", `List (List.map (fun (name, _) -> `String name) properties)
+      ]
+  in
+  let any_of schemas = `Assoc [ "anyOf", `List schemas ] in
+  let kind =
+    ( wire_field_kind
+    , `Assoc
+        [ "type", `String "string"
+        ; "enum", `List [ `String (basis_kind_token Basis_observed) ]
+        ] )
+  in
+  let board =
+    any_of
+      [ closed [ wire_field_post_id, string_schema ]
+      ; closed [ wire_field_post_id, string_schema; wire_field_comment_id, string_schema ]
+      ]
+  in
+  any_of [ closed [ kind ]; closed [ kind; wire_field_board, board ] ]
 ;;
 
 (* The exact claim bytes are the only memory-content authority. The digest is a

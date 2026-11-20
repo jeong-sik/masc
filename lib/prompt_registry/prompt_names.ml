@@ -85,6 +85,10 @@ let keeper_held_task_skills_heading = "keeper.held_task.skills_heading"
 let keeper_skills_unavailable_diagnostic = "keeper.skills.unavailable_diagnostic"
 let librarian = "librarian"
 
+(* The question of the Memory writer's ask (RFC librarian-call-only-proposes
+   §6.1): the first part of every question's text. *)
+let librarian_ask = "librarian.ask"
+
 (* Managed admission and absorption policy fragments. *)
 let librarian_admission_policy = "librarian.admission_policy"
 let librarian_retirement_policy = "librarian.retirement_policy"

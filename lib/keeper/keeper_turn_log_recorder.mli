@@ -54,7 +54,11 @@ val now
     writer got in: the tail is read again and the lines are planned afresh.
     When the rows still end where the failed attempt read them to end,
     nothing was appended in between and reading again would change nothing:
-    the answer is [Not_appended]. *)
+    the answer is [Not_appended].
+
+    Lines that end a unit ([Closed], [Reset]) tell the Keeper's Memory
+    writer once they are appended ({!Librarian_writers.turn_closed}), when
+    this process runs the workspace's writers. *)
 val record
   :  at:float
   -> new_log_id:Keeper_turn_log.Log_id.t
@@ -70,6 +74,17 @@ val record_drop
   -> new_log_id:Keeper_turn_log.Log_id.t
   -> place
   -> after:(Keeper_turn_log.mark -> Keeper_turn_log.mark)
+  -> (recorded, not_recorded) result
+
+(** Appends {!Keeper_turn_log_writer.start}'s line, the same way as
+    {!record}: the [Log_started] of a log with no complete line, or nothing.
+    The stores are read for that line only. When a turn's first append gets
+    in between, the tail is read again and nothing is appended: the log has
+    one [Log_started]. *)
+val record_start
+  :  at:float
+  -> new_log_id:Keeper_turn_log.Log_id.t
+  -> place
   -> (recorded, not_recorded) result
 
 (** What an admission's turn carries to its end. *)

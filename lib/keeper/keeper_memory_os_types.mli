@@ -323,6 +323,11 @@ val basis_to_json : basis -> Yojson.Safe.t
 (** Decode a basis; the exact field set of each shape is enforced. *)
 val basis_of_json : Yojson.Safe.t -> (basis, wire_error) result
 
+(** The JSON schema of an observed basis, built from the field sets
+    {!basis_of_json} takes: [{"kind": "observed"}], or the same with a
+    [board] reference. A new fact a model proposes has this shape. *)
+val observed_basis_schema : Yojson.Safe.t
+
 val wire_field_kind : string
 
 (** Canonical lowercase token for an origin kind. Category tokens only —

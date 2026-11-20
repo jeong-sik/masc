@@ -997,6 +997,21 @@ let rec waitpid_nointr pid =
   try Unix.waitpid [] pid with
   | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
 
+(** The ask of a Memory writer whose table declares no Librarian lane:
+    such a writer never asks, so a call fails the case. *)
+let never_asks (_ : Masc.Librarian_ask.input) : Masc.Librarian_read_result.t =
+  failwith "a Memory writer asked, and the case declares no Librarian lane"
+;;
+
+(** Stores for a writer that never asks: its Memory directory stands for
+    them. *)
+let stores_of_place (place : Masc.Librarian_machine.place) : Masc.Librarian_unit_content.stores =
+  { session_dir = (fun ~session:(_ : string) -> place.memory_dir)
+  ; base_path = place.memory_dir
+  ; keeper_name = place.keeper_id
+  }
+;;
+
 (** A Keeper's Memory tools write through its Memory writer
     ({!Masc.Keeper_memory_writers}), so a test that calls one gives the
     Keeper a writer first.
@@ -1009,7 +1024,11 @@ let rec waitpid_nointr pid =
 let ensure_memory_writer ~sw ~(config : Masc.Workspace.config) name =
   let base_path = config.base_path in
   if Option.is_none (Masc.Keeper_memory_writers.find ~base_path)
-  then Masc.Keeper_memory_writers.start ~sw ~config;
+  then
+    ignore
+      (Masc.Keeper_memory_writers.start ~sw ~ask:never_asks
+         ~start_turn_log:(Masc.Keeper_turn_log_store_start.run config) ~config
+       : Masc.Librarian_writers.t);
   if not (Masc.Keeper_registry.is_registered ~base_path name)
   then (
     match

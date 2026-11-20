@@ -622,6 +622,7 @@
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask
+  test_librarian_writer_asks
   test_librarian_l6g_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store
@@ -976,6 +977,7 @@
   test_librarian_question
   test_librarian_slot_visit
   test_librarian_ask
+  test_librarian_writer_asks
   test_librarian_l6g_scoring
   test_keeper_turn_log
   test_keeper_turn_log_store

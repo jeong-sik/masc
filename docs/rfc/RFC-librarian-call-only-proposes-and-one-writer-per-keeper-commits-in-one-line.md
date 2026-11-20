@@ -242,7 +242,7 @@ type turn_line =
 
 ### 5.2 누가 언제 무엇을 덧붙이나
 
-턴 기록은 턴 기록 모듈만 쓴다. 그 모듈을 부르는 곳은 턴 경로(받아들임, 끝남), 프로세스 시작 단계, Keeper 만들기, head 를 줄이는 함수, purge, session 을 지우는 정지, 쓰는 쪽을 만들 때와 운영자의 `Resume` 때 하는 저장소 시작(§8.6)이다. Memory 를 쓰는 쪽(§9)은 이 파일을 읽기만 한다.
+턴 기록은 턴 기록 모듈만 쓴다. 그 모듈을 부르는 곳은 턴 경로(받아들임, 끝남), 프로세스 시작 단계, head 를 줄이는 함수, purge, session 을 지우는 정지, 쓰는 쪽을 만들 때와 운영자의 `Resume` 때 하는 저장소 시작(§8.6)이다. Keeper 를 만드는 길은 턴 기록을 쓰지 않는다. 프로세스가 뜬 뒤 만든 Keeper 의 `Log_started` 는 첫 저장소 시작이나 첫 턴의 덧붙임 가운데 먼저 오는 쪽이 쓴다. Memory 를 쓰는 쪽(§9)은 이 파일을 읽기만 한다.
 부르는 곳은 그 Keeper 의 owner 안이거나, Keeper 가 등록되지 않은 동안의 purge 이거나, 정지의 마무리 단계다. owner 안은 턴이거나 턴 사이의 idle maintenance 자리다. 정지의 마무리 단계는 그 Keeper 의 턴이 모두 끝난 뒤에만 돈다. 까닭은 문단 아래에 적었다. dashboard purge 는 Keeper 가 등록되지 않았을 때만 돌고 그 Keeper 의 lifecycle key lock 을 쥔다(`server_dashboard_http_keeper_api_checkpoints.ml:618-626`). CLI purge 는 서버가 workspace 를 쥐고 있으면 적용을 거절한다(`bin/masc_checkpoint_purge.ml:322`). 그래서 저장소 시작을 빼면, 한 Keeper 의 턴 기록을 쓰는 곳은 한 번에 하나다.
 
 - 마무리는 `Joined_idle` 과 그 뒤의 phase 에서만 돈다. 그 앞의 phase 는 `Unsupported_phase` 로 거절한다(`keeper_shutdown_finalize.ml` 의 `run`).
@@ -254,7 +254,7 @@ type turn_line =
 
 | 때 | 덧붙이는 것 |
 |---|---|
-| 파일이 없거나 완전한 줄이 하나도 없다(프로세스 시작 때, Keeper 를 만들 때, 덧붙이기 직전) | `Log_started {id; mark}`. `id` 는 새로 만든다 |
+| 파일이 없거나 완전한 줄이 하나도 없다(프로세스 시작 때, 저장소 시작 때, 덧붙이기 직전) | `Log_started {id; mark}`. `id` 는 새로 만든다 |
 | 턴을 받아들인다. 앞선 `Opened` 는 모두 닫혔다 | `Opened {baseline = 지금 끝자리}` |
 | 턴을 받아들인다. 마지막 `Opened` 가 닫히지 않았다 | 한 번의 덧붙임으로 두 줄. `Closed {Close_missing}`, 그다음 `Opened`. 둘 다 들어가거나 둘 다 안 들어간다 |
 | 받아들일 때 덧붙임이 실패한다 | 줄 없이 턴이 돈다. 카운터 `turn_log_append_failed` 가 오른다. 턴은 거절하지 않는다 |
@@ -1035,7 +1035,7 @@ Keeper 의 도구는 이 답을 영수증으로 옮긴다.
 - 쓰기를 보낸 쪽이 답을 먼저 받는다.
 
 boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬리를 복구한 뒤에 돈다. Keeper 마다 fiber 하나라서, 느린 boot 는 자기 Keeper 의 Memory 만 늦춘다.
-그 전에 턴 기록에는 `Log_started` 가 있다. 프로세스가 시작할 때와 Keeper 를 만들 때 쓴다(§5.2).
+그 전에 턴 기록에는 `Log_started` 가 있다. 프로세스가 시작할 때와 저장소 시작의 첫 단계가 쓴다(§5.2, 아래).
 
 - **Keeper 는 쓰는 쪽을 기다리지 않는다.** 쓰는 쪽에 view 가 없는 동안(`Booting`, `Stopped`) 요청은 seed 시작점을 쓴다(§11.1). 쓰기는 boot 가 끝날 때까지 mailbox 에서 기다리고, boot 가 `Stopped` 로 끝나면 거절된다.
   - Keeper 를 띄우는 길(autoboot, supervisor, dashboard, `keeper_up`, direct message)은 어느 것도 Librarian 의 파일을 보지 않는다. 쓰는 쪽을 만들지도 않는다.
@@ -1051,7 +1051,7 @@ boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬
 | 있다 | 스냅샷 sha 가 꼬리 줄의 `after` 다 | 복구됐다 |
 | 있다 | 스냅샷 sha 가 꼬리 줄의 `basis` 다 | 5단계를 그 줄에서 다시 한다. 결과의 sha 가 `after` 가 아니면 `Stopped (Log_diverged _)`. 그 줄에서 스냅샷이 만들어지지 않을 때도 같다. 쓰지 않는다 |
 | 있다 | 둘 다 아니다 | `Stopped (Log_diverged _)` |
-| 없다 | 턴 기록 파일이 없다 | `Stopped Store_unwritable`. `Started` 는 턴 기록의 id 를 적어야 하고, 쓰는 쪽은 그 파일을 만들지 않는다. 턴 기록의 첫 줄이 `Log_started` 가 아닐 때도 같다 |
+| 없다 | 턴 기록 파일이 없다 | `Stopped Store_unwritable`. `Started` 는 턴 기록의 id 를 적어야 하고, 쓰는 쪽은 그 파일을 만들지 않는다. 턴 기록의 첫 줄이 `Log_started` 가 아닐 때도 같다. 저장소 시작의 첫 단계가 그 줄을 쓴 뒤라서, 이 행은 그사이 파일이 지워졌을 때다 |
 | – | 반영 기록이나 스냅샷을 읽는 I/O 가 실패한다 | `Stopped Store_unwritable`. 해석되지 않는 꼬리, 없는 스냅샷과 다르다. `Adopt` 나 파일 되돌리기가 아니라 `Resume` 이 다시 읽어 본다 |
 | – | 잠금을 잡지 못한다 | `Stopped Store_unwritable`. `Resume` 이 다시 해 본다 |
 | – | boot 가 하는 쓰기(빈 envelope, `Started`, 스냅샷 다시 쓰기)가 실패한다 | `Stopped Store_unwritable` |
@@ -1071,6 +1071,10 @@ boot 는 새 쓰는 쪽이 맨 먼저 하는 일이다. 서버가 checkpoint 꼬
   - 행에서 알아볼 수 있다. 반영 기록의 첫 줄 시각과 턴 기록의 `Log_started` 시각을 나란히 싣는다(§12.1). 수준은 없다.
   - 지금부터 새로 시작하려면 턴 기록도 같이 지운다(§18.5).
 - Keeper 의 저장소 시작은 함수 하나의 두 단계다. 턴 기록 모듈이 파일과 `Log_started` 가 있는지 확인하고, 그다음 쓰는 쪽이 boot 한다. `ensure` 가 쓰는 쪽을 만들 때 하고, `Stopped` 에서 `Resume` 하면 두 단계를 다시 한다. 첫 단계는 owner 의 자리를 기다리지 않는다(§5.2). 쓰는 쪽은 턴 기록을 읽기만 한다.
+  - 첫 단계는 첫 줄만 읽는다(`Keeper_turn_log_store.read_start`). 첫 줄이 있으면 아무것도 더 읽지 않는다. 마지막 줄, Keeper 의 메타데이터, 내용 저장소를 읽지 않으니, 이미 시작한 Keeper 의 boot 에 새 멈춤을 더하지 않는다.
+  - 완전한 줄이 없으면 메타데이터로 session 을 찾고, 지금 끝자리로 `Log_started` 하나를 덧붙인다. 열린 턴을 닫지 않는다. 프로세스 시작 단계와 다른 점이다. 저장소 시작은 턴이 도는 동안 온다.
+  - 첫 줄을 써야 하는데 쓰지 못하면 `Stopped Store_unwritable` 이고 그 까닭을 로그에 남긴다. 첫 줄을 읽지 못하면 로그만 남기고 boot 가 늘 하던 대로 읽는다.
+  - 쓰는 쪽은 서버가 넘긴 함수를 부르기만 한다. 턴 기록 모듈이 쓰는 쪽 표를 부르므로(§9.5 의 알림), 표가 그 모듈을 직접 부르면 고리가 생긴다.
 - 쉬던 상태, 마지막 묻기의 결과, 폭 기억, 바닥에서 받은 크기 사실, Memory 없이 읽었다는 표시는 되살리지 않는다. 메모리에만 있던 값이다. 대가는 §7.7 에 있다. `Stopped` 에서 `Resume` 하는 것도 boot 다.
 - 재시작 때 가던 묻기는 다시 묻는다. Keeper 마다 생성 하나까지다.
 - 턴 기록이 바뀌었거나 잘렸거나 읽히지 않는 것은 boot 가 보지 않는다. 「안 읽은 것이 있다」가 그것을 세고(§9.2), 첫 묻기가 입력 결함으로 알린다(§5.4).
@@ -1119,7 +1123,7 @@ type state =
   | Retired
 and asking =
   { ask : int; since : float; asked : ask
-  ; lane : Librarian_memory_lane.t                   (* 묻기를 시작할 때의 lane 값 *)
+  ; lane : Librarian_machine.declared                (* 묻기를 시작할 때의 lane 값과 그 registry 풀이 *)
   ; removed_since : (Memory_id.t * int) list }       (* 묻는 사이 직접 쓰기가 지운 fact 와 그 줄의 seq *)
 type store_stop =
   | Log_diverged of { expected : Sha256.t; observed : Sha256.t }
@@ -1811,7 +1815,7 @@ tinker 없는 lane, 모두 GLM 속도인 재생에서 run limit L 을 바꿨다.
    - 새 lane 표에 `max_output_tokens` 를 넣는다. §6.4 의 두 한도를 보고 정한 값이다.
 3. **지운다.** 목록은 §19.1 에 파일마다 있다. 디스크의 모든 Librarian 파일은 그 목록에서 「지운다」나 「남긴다」 가운데 하나다.
 4. **새 빌드의 `validate-stores` 를 돌린다.** 읽기 전용이다. 모든 저장소가 통과하고 분류 안 된 파일이 0개여야 한다. blob sweep 의 dry run 도 0개여야 한다. 배포 preflight 는 `keeper-librarian` add-on 이 남아 있으면 거절한다.
-5. **설치하고 서버를 띄운다.** 프로세스가 시작할 때 턴 경로가 Keeper 마다 `Log_started` 를 쓴다. 쓰는 쪽은 첫 pulse 안에 생겨 `Started` 를 쓴다.
+5. **설치하고 서버를 띄운다.** 프로세스가 시작할 때 턴 경로가 Keeper 마다 `Log_started` 를 쓴다. 쓰는 쪽은 첫 pulse 안에 생겨 `Started` 를 쓴다. 프로세스가 뜬 뒤 만든 Keeper 는 쓰는 쪽의 저장소 시작이 `Log_started` 를 쓴다.
 6. **health 를 본다.** 등록된 Keeper 는 모두 `Idle` 이나 `Asking` 이고 `Stopped` 는 없다. 쓰는 쪽은 첫 pulse 안에 생긴다(§8.6).
 
 ### 18.3 첫 한 시간
@@ -2027,6 +2031,7 @@ changelog 는 「Fresh state required」 제목 아래 한 문장이다. 무엇�
 | L5u | 운영자 route `POST <k>/memory/act` 가 `Resume` 과 `Adopt` 를 쓰는 쪽에 보낸다. 답은 `Done` 과 그 뒤 저장소의 상태이거나 거절한 이유다 | 밖에서 바뀐 스냅샷으로 멈춘 저장소를 `Resume` 하면 같은 이유로 멈춘다. 파일의 sha 로 `Adopt` 하면 열리고 줄이 하나 붙는다. 열린 저장소는 둘 다 거절한다 |
 | L5 | **전환.** 운영자 행동 route 와 TUI 진입, 반영 기록을 읽는 `memory_search`. Keeper 의 쓰기·철회 도구가 이것을 쓴다. 옛 durable, admission, cleanup consumer 는 이 층부터 시작하지 않는다 | 단계마다 crash 를 넣는 시험. 두 번 복구. 밖에서 바꾼 스냅샷은 `Log_diverged` 가 되고 `Adopt` 가 푼다. 같은 fact 에 옛 codec 과 바이트가 같다. 둘째 프로세스는 잠금을 못 잡는다. 껐다가 다시 켠 Keeper 의 쓰기가 거절되지 않는다. Keeper 를 띄우는 코드와 등록부에서 빼는 코드가 쓰는 쪽 모듈을 부르지 않는다. 꼬리를 읽지 못한 반영 기록을 맡기면 턴 기록의 처음부터 읽는다. 묻는 중인 Keeper 를 지운 뒤에 스냅샷 파일이 다시 생기지 않는다. 반영 기록에 쓰는 코드가 끝을 확인하지 않는 덧붙임(`Fs_compat.append_jsonl`)을 부르지 않는다 |
 | L6 | 묻기: 질문 만들기와 싣기, 만든 질문의 고정 corpus(합성 자료만. 단위의 타입이 L3a 에서 생기므로 여기서 넣는다), slot 결과 분류, 묻는 fiber 와 걷기, `Read` 반영, 다시 쓴 프롬프트 | 가짜 provider: 닫힌 턴 셋이 질문 하나, 반영 하나가 된다. 호출 중 재시작은 다시 묻기 하나다. §13 의 F2, F7, F10, F11 시험. L1c 채점기를 slot 마다 돌린 결과를 붙인다. corpus 를 만들 때 셋을 검사하고 어긋난 case 를 거절한다. merge 가 지울 수 있는 fact 가 모두 `must_keep` 에 있다. token 이 다른 낱말이나 수의 일부가 아니다. token 이 처음 Memory 의 claim 에 없다. 채점기는 처음 Memory 가 가진 token 을 어느 수에도 세지 않는다. 그래서 셋째 검사가 없으면 `planted` 가 조용히 줄어든다 |
+| L6h | 저장소 시작의 첫 단계(§8.6). 턴 기록 writer 의 `start`, recorder 의 `record_start`, `Keeper_turn_log_store_start.run`. 쓰는 쪽이 boot 마다 먼저 부르고 서버가 그 함수를 넘긴다 | 턴 기록이 없는 Keeper 의 첫 boot 가 `Log_started` 를 쓰고 열린다. 첫 단계가 실패하면 `Stopped Store_unwritable` 이다. `Resume` 이 두 단계를 다시 한다. 열린 턴은 닫지 않는다. 턴이 먼저 시작한 기록에는 쓰지 않는다. 찢긴 첫 줄은 잘리고 0 자리에 쓴다. 메타데이터가 없는 Keeper 는 첫 줄을 쓰지 못한다 |
 | L7 | 폭과 바닥: 폭 기억, 바닥의 크기 판정, 항목만 읽기, 자리 내기, 건너뜀, 쉼, 운영자의 건너뛰기 셋 | 가짜 tokenizer 시험(F6). 바닥의 끝마다 타입 있는 결과에 닿는다. 크기를 말하지 않는 slot 을 넣은 lane 은 그 slot 이 거절하면 E4 에서, 말이 없으면 W1 에서 선다. 가짜 시계로 쉼 시험. L2 의 slot 별 표에서, 운영 lane 이 한 항목 아래의 단계에 닿는지를 PR 에 적는다 |
 | L8 | Keeper 와 만나는 곳, runtime 다섯: view, 읽은 곳의 끝, 요청이 뒤에서 시작했다는 표시, 하던 일. purge 규칙과 sweep 뿌리 | runtime 마다 §13 의 G11 시험. 읽지 않은 턴을 purge 해도 그 단위가 줄을 쓸 때의 내용으로 읽힌다. 쓰는 쪽이 `Stopped` 여도 purge 가 돈다. sweep 이 꼬리 줄의 턴 기록 id 가 다르면 모든 줄을 뿌리로 잡고, 턴 기록을 읽지 못하면 아무것도 지우지 않는다 |
 | L9 | 화면과 경보: health 절, `keeper-memory-health` 행, TUI 해석, 수준 함수 | 생성자마다 해석 시험. health JSON 에 자유 글이 없다 |

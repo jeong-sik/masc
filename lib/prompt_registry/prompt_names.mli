@@ -77,6 +77,9 @@ val keeper_observation_rejected_digest_row : string
 
 val librarian : string
 
+(** The first part of every question a Memory writer asks. *)
+val librarian_ask : string
+
 (** Managed admission and absorption policy fragments. *)
 val librarian_admission_policy : string
 val librarian_retirement_policy : string

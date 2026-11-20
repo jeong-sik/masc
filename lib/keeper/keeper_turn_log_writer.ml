@@ -134,3 +134,11 @@ let drop ~at ~new_log_id ~(tail : Store.tail) ~(now : Log.mark) ~after =
   | Written { point; open_turn = (_ : Store.open_turn option); rows_end = (_ : int); last = (_ : Log.line) }
     -> Log.Reset { at; cause = Unannounced; before = point; after = after point; closed_before = [] }
 ;;
+
+let start ~at ~new_log_id ~(tail : Store.tail) ~now =
+  match tail with
+  | Written _ -> Ok []
+  | Nothing_written ->
+    let* mark = now () in
+    Ok [ Log.Log_started { id = new_log_id; at; mark } ]
+;;

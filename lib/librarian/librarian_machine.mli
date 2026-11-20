@@ -74,7 +74,9 @@ type declared =
 type asking =
   { ask : int (** Its number. A writer never gives a number twice. *)
   ; since : float (** When it started. *)
-  ; lane : Librarian_memory_lane.t (** The lane value it started with. *)
+  ; lane : declared
+  (** The declaration it started with: the lane value its question carries
+      and the resolution its walk goes through. *)
   ; removed_since : (string * int) list
   (** Every fact a direct write removed while it was out, with the [seq] of
       the commit that removed it, in commit order: what

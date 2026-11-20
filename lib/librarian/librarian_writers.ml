@@ -7,15 +7,23 @@ type t =
   { now : unit -> float
   ; registered : string -> bool
   ; place : string -> Machine.place
+  ; stores : string -> Librarian_unit_content.stores
+  ; ask : Librarian_ask.input -> Librarian_read_result.t
+  ; start_turn_log : string -> (unit, string) result
+  ; declared : Machine.declared option Atomic.t
   ; writers : Writer.t By_keeper.t Atomic.t
   ; to_run : Writer.t Eio.Stream.t
   }
 
-let create ~sw ~now ~registered ~place =
+let create ~sw ~now ~registered ~place ~stores ~ask ~start_turn_log =
   let t =
     { now
     ; registered
     ; place
+    ; stores
+    ; ask
+    ; start_turn_log
+    ; declared = Atomic.make None
     ; writers = Atomic.make By_keeper.empty
     ; to_run = Eio.Stream.create max_int
     }
@@ -55,7 +63,14 @@ let rec ensure t keeper =
     then None
     else (
       let writer =
-        Writer.create ~now:t.now ~registered:(fun () -> t.registered keeper) (t.place keeper)
+        Writer.create
+          ~now:t.now
+          ~registered:(fun () -> t.registered keeper)
+          ~declared:(fun () -> Atomic.get t.declared)
+          ~stores:(t.stores keeper)
+          ~ask:t.ask
+          ~start_turn_log:(fun () -> t.start_turn_log keeper)
+          (t.place keeper)
       in
       if Atomic.compare_and_set t.writers writers (By_keeper.add keeper writer writers)
       then (
@@ -123,8 +138,21 @@ let retire t keeper =
   | Some writer -> retire_writer t keeper writer
 ;;
 
+let turn_closed t keeper = Option.iter Writer.turn_closed (ensure t keeper)
+
+(* The value is set before any writer is told, and a writer reads it only
+   when it takes a hint. A writer in the table the hints go to takes one; a
+   writer added after that takes its first event later than the set, so it
+   reads this value or a newer one. *)
+let declaration_changed t declared =
+  Atomic.set t.declared declared;
+  By_keeper.iter
+    (fun (_ : string) writer -> Writer.declaration_changed writer)
+    (Atomic.get t.writers)
+;;
+
 let pulse t keepers =
-  List.iter (fun keeper -> ignore (ensure t keeper : Writer.t option)) keepers;
+  List.iter (fun keeper -> Option.iter Writer.pulse (ensure t keeper)) keepers;
   By_keeper.iter
     (fun keeper writer ->
        if not (t.registered keeper)

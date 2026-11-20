@@ -490,13 +490,16 @@ Boot ==
     /\ turnLine' = 0
     /\ UNCHANGED << nextMsg, openLost, saved, bad, pend, gv, av, droppedUnread, rvars, badPurge >>
 
-\* Log_started at Keeper creation, with no turn running.
+\* Log_started at a store start (RFC §8.6): the writer's boot runs it first,
+\* and a resume runs it again. It writes only to a log with no line, and it
+\* does not wait for the owner: a turn whose admission wrote no line may be
+\* running, and its open messages stay open.
 StartLog ==
     /\ up
     /\ log = << >>
-    /\ turn = "none"
     /\ AppendCore(<< >>, head, closedIds)
-    /\ UNCHANGED << hv, tv, gv, av, bad, up, pend, droppedUnread, rvars, badPurge, wit, budget >>
+    /\ wit' = Flag(IF turn = "none" THEN {} ELSE {"store_start_in_turn"})
+    /\ UNCHANGED << hv, tv, gv, av, bad, up, pend, droppedUnread, rvars, badPurge, budget >>
 
 \* ------------------------------------------------- resets: one function, line first
 
@@ -1121,6 +1124,7 @@ W_NoBootClose == \A i \in AllIdx : log[i].outcome # "process_exited"
 \* flags recorded by the actions (SpecWit only)
 W_NoResetClosedOpen == "reset_closed_open" \notin wit
 W_NoStartStepClosedOpen == "start_step_closed_open" \notin wit
+W_NoStoreStartInTurn == "store_start_in_turn" \notin wit
 W_NoPurgeClosedOpen == "purge_closed_open" \notin wit
 W_NoSweepRemoved == "sweep_removed_an_object" \notin wit
 W_NoSweepRootedEveryLine == "sweep_rooted_every_line" \notin wit

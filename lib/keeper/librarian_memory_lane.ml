@@ -105,14 +105,15 @@ let resolve ~prompt ~answer_schema registry =
      | (Error (Registry.No_admitted_lane_slots _) | Ok { Registry.selected_slots = []; cli_slots = [] }), _ ->
        Error No_admitted_slots
      | Ok _, None -> Error Reserve_undeclared
-     | Ok { Registry.selected_slots; cli_slots }, Some reserve ->
+     | Ok ({ Registry.selected_slots; cli_slots } as resolved), Some reserve ->
        Result.bind (keys (http_key ~reserve) selected_slots) (fun http ->
          Result.map
            (fun cli ->
-              { question = { prompt; answer_schema; max_output_tokens = reserve; thinking = decl.thinking }
-              ; http
-              ; cli
-              })
+              ( { question = { prompt; answer_schema; max_output_tokens = reserve; thinking = decl.thinking }
+                ; http
+                ; cli
+                }
+              , resolved ))
            (keys cli_key cli_slots)))
 ;;
 

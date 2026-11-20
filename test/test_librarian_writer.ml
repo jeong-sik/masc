@@ -128,8 +128,12 @@ let ticking () =
 
 let with_switch body = Eio_main.run (fun (_ : Eio_unix.Stdenv.base) -> Eio.Switch.run body)
 
-let start ?(registered = fun () -> true) ~sw place =
-  let writer = Writer.create ~now:(ticking ()) ~registered place in
+let start ?(registered = fun () -> true) ?(start_turn_log = fun () -> Ok ()) ~sw place =
+  let writer =
+    Writer.create ~now:(ticking ()) ~registered ~declared:(fun () -> None)
+      ~stores:(Masc_test_deps.stores_of_place place) ~ask:Masc_test_deps.never_asks
+      ~start_turn_log place
+  in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Writer.run writer;
     `Stop_daemon);
@@ -183,6 +187,33 @@ let test_stopped_until_resumed () =
     check string "and takes the write" "written as commit 1" (write writer "the port is 8935");
     check string "an open store has nothing to resume" "nothing to resume"
       (act_text (Writer.resume writer)))
+;;
+
+(* §8.6: the store start's first step runs before every boot, the first one
+   and a resume's. A first step that fails stops the store; one that writes
+   the turn log's first line lets the boot open it. *)
+let test_the_first_step_runs_before_every_boot () =
+  with_switch (fun sw ->
+    let place = new_place () in
+    let steps = ref 0 in
+    let writable = ref false in
+    let first_step () =
+      incr steps;
+      if !writable
+      then (
+        start_turn_log place;
+        Ok ())
+      else Error "the directory is not writable"
+    in
+    let writer = start ~start_turn_log:first_step ~sw place in
+    check string "a first step that fails stops the store" "the store is stopped: store unwritable"
+      (write writer "the port is 8935");
+    check int "the first boot ran it" 1 !steps;
+    writable := true;
+    check string "a resume" "done" (act_text (Writer.resume writer));
+    check int "runs it again before its boot" 2 !steps;
+    check string "and the store opens on the line it wrote" "open at its start"
+      (status_text writer))
 ;;
 
 let test_one_writer_holds_the_lock () =
@@ -275,6 +306,8 @@ let () =
         ; test_case "writes are answered in the order they came" `Quick
             test_writes_are_answered_in_the_order_they_came
         ; test_case "stopped until resumed" `Quick test_stopped_until_resumed
+        ; test_case "the first step runs before every boot" `Quick
+            test_the_first_step_runs_before_every_boot
         ; test_case "one writer holds the lock" `Quick test_one_writer_holds_the_lock
         ] )
     ; ( "what it says"

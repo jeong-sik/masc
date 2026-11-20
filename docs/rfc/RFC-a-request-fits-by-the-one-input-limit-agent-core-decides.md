@@ -3,7 +3,7 @@ rfc: "a-request-fits-by-the-one-input-limit-agent-core-decides"
 title: "요청이 들어가는지는 agent-core 가 정한 입력 한도 하나로 본다"
 status: Draft
 created: 2026-11-19
-updated: 2026-11-19
+updated: 2026-11-20
 author: claude
 supersedes: []
 superseded_by: null
@@ -79,6 +79,16 @@ masc 는 창을 옮길지 정할 때 「입력 ≤ 창」으로 본다.
 
 입력 한도를 못 구하면 창 옮김 신호가 없다. sent prefix RFC §4 의 「값 하나라도 모르면 신호가 없다」와 같다.
 agent-core 도 그 요청을 보내지 않는다.
+
+### 2.5 공식 클라이언트 런타임
+
+공식 클라이언트 런타임(`Codex_app_server`·`Antigravity_cli`·`Claude_code`·`Muse_serve`·`Vibe_cli`)에는 입력 한도가 없다.
+`input_limit_of_runtime` 이 `None` 을 돌려준다(`.mli` 계약: official-client owned).
+그래서 그 턴의 다음 요청 예측에는 창 옮김 신호(`past_max_context`·`held_window`)가 없다. §2.4 와 같은 규칙이다.
+
+옛 신호원 `Runtime.resolve_max_context_of_runtime_id` 는 런타임 종류를 가리지 않았다.
+바인딩·provider·model 의 `max_context` 를 capability 상한으로 깎아 돌려줘서, 공식 클라이언트 턴의 다음 요청 예측에도 신호가 켜졌다.
+이 RFC 를 구현하면 그 신호가 꺼진다. 공식 클라이언트 턴의 예측 동작이 바뀐다.
 
 ## 3. 고르지 않은 것
 

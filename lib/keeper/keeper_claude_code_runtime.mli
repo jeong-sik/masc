@@ -1,22 +1,5 @@
 (** Keeper projection for the official Claude Code subscription runtime. *)
 
-type attempt_outcome =
-  { result : (Runtime_agent.run_result, Agent_core.Error.t) result
-  ; settled_session : Keeper_official_client_session_store.t option
-  ; pending_result_receipts : Keeper_client_tool_outbox.consumption option
-      (** [Some] names exact receipt snapshots of a durably settled candidate,
-          not acceptance. [None] carries no authority on failed/prevalidation
-          results. The caller accepts first, then settles with its final stop reason. *)
-  ; effect_disposition : Keeper_provider_attempt_effect.t
-  }
-(** One Claude Code candidate result plus the explicit tool-effect observation
-    available at its runtime boundary. Preflight failures remain
-    [No_effect_observed]. Under [full] the adapter fails closed with
-    [Observation_unavailable] once the model turn is dispatched. Under [none]
-    and [read] every effect passes through a MASC handler, so the disposition
-    follows what was observed: an [Effect_possible] handler entered, response
-    text delivered, or a built-in the grant does not name. *)
-
 module For_testing : sig
   (** Typed carriage of Claude Code client errors into agent-core errors, the
       twin of [Keeper_codex_runtime.For_testing.codex_error_to_core_error].
@@ -172,8 +155,16 @@ val run :
      this value, not from [config]. *)
   config:Runtime_execution.claude_code ->
   unit ->
-  attempt_outcome
-(** [configured_reasoning_effort] and [turn_timeout_s] come from the selected
+  Keeper_official_client_attempt.outcome
+(** One Claude Code candidate result plus the explicit tool-effect observation
+    available at its runtime boundary. Preflight failures remain
+    [No_effect_observed]. Under [full] the adapter fails closed with
+    [Observation_unavailable] once the model turn is dispatched. Under [none]
+    and [read] every effect passes through a MASC handler, so the disposition
+    follows what was observed: an [Effect_possible] handler entered, response
+    text delivered, or a built-in the grant does not name.
+
+    [configured_reasoning_effort] and [turn_timeout_s] come from the selected
     runtime snapshot, without re-resolving its ID. Absent effort leaves the
     request unset; [Some None_] explicitly requests disabled thinking. Hooks
     can replace or clear effort before the existing model/CLI admission.

@@ -5223,7 +5223,7 @@ let test_task_binding_does_not_adopt_an_earlier_unattributed_call () =
 ;;
 
 let check_pre_dispatch_attempt label attempt =
-  (match attempt.Keeper_claude_code_runtime.result with
+  (match attempt.Keeper_official_client_attempt.result with
    | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field = "claude_code"; _ })) ->
      ()
    | Error error -> fail (Agent_core.Error.to_string error)
@@ -5315,7 +5315,7 @@ let test_cut_auth_probe_rotates_the_lane_before_dispatch () =
          let attempt =
            run_direct_attempt ~base_path ~cli_path ~goal:"AUTH_PROBE" ~tools:[] ()
          in
-         (match attempt.Keeper_claude_code_runtime.result with
+         (match attempt.Keeper_official_client_attempt.result with
           | Error
               (Agent_core.Error.Api
                  (Llm_provider.Retry.InvalidRequest
@@ -5833,7 +5833,7 @@ let test_a_closed_client_connection_is_typed () =
 ;;
 
 let check_disposition label (expected : Keeper_provider_attempt_effect.t)
-    (attempt : Keeper_claude_code_runtime.attempt_outcome) =
+    (attempt : Keeper_official_client_attempt.outcome) =
   check string label
     (Keeper_provider_attempt_effect.to_string expected)
     (Keeper_provider_attempt_effect.to_string attempt.effect_disposition);

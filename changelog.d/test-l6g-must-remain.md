@@ -1,0 +1,5 @@
+### Fixed
+
+- The L6g scoring test builds again: its twelve cases name `must_remain`, the
+  field the scorer gained in #53633, and its pinned tally reads the new
+  `must remain` line.

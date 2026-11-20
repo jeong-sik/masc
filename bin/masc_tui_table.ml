@@ -160,6 +160,49 @@ let trim_trailing_spaces s =
   done;
   if !len = String.length s then s else String.sub s 0 !len
 
+(* Place [badge] inside the widest left-aligned column header whose trailing
+   slack holds [" · " ^ badge] whole. This keeps every column at its exact
+   width and preserves right-aligned trailing headers (e.g. numeric counts)
+   instead of cutting them off the right edge. *)
+let place_badge_in_left_slack ~badge cells =
+  let suffix = " \xc2\xb7 " ^ badge in
+  let suffix_cells = Masc_tui_message_layout.display_width suffix in
+  let best =
+    List.mapi
+      (fun index cell ->
+        match cell.align with
+        | Right -> None
+        | Left ->
+            let header_cells =
+              Masc_tui_message_layout.display_width cell.header
+            in
+            let slack = cell.width - header_cells in
+            if header_cells <= cell.width && slack >= suffix_cells then
+              Some (index, slack)
+            else None)
+      cells
+    |> List.filter_map Fun.id
+    |> List.fold_left
+         (fun acc ((_, slack) as cand) ->
+           match acc with
+           | None -> Some cand
+           | Some (_, best_slack) ->
+               if slack > best_slack then Some cand else acc)
+         None
+  in
+  match best with
+  | None -> None
+  | Some (target_index, _) ->
+      let updated =
+        List.mapi
+          (fun index cell ->
+            if index = target_index then
+              { cell with header = cell.header ^ suffix }
+            else cell)
+          cells
+      in
+      Some (header_row updated)
+
 let header_row_with_dropped ~ko ~inner_width ~dropped cells =
   let base = header_row cells in
   match dropped_columns_badge ~ko dropped with
@@ -170,10 +213,19 @@ let header_row_with_dropped ~ko ~inner_width ~dropped cells =
     let trimmed_cells = Masc_tui_message_layout.display_width trimmed in
     if trimmed_cells + cell_gap + badge_cells <= inner_width then
       trimmed ^ String.make (inner_width - trimmed_cells - badge_cells) ' ' ^ badge
-    else if inner_width >= badge_cells + cell_gap + 1 then
-      let keep = inner_width - badge_cells - cell_gap in
-      Masc_tui_message_layout.fit_width trimmed keep ^ separator ^ badge
-    else base
+    else
+      let in_slack =
+        if used_width cells <= inner_width then
+          place_badge_in_left_slack ~badge cells
+        else None
+      in
+      match in_slack with
+      | Some placed -> placed
+      | None ->
+          if inner_width >= badge_cells + cell_gap + 1 then
+            let keep = inner_width - badge_cells - cell_gap in
+            Masc_tui_message_layout.fit_width trimmed keep ^ separator ^ badge
+          else base
 
 let row ?(close = default_close) cells =
   line

@@ -100,6 +100,70 @@ let test_dropped_columns_badge_and_header_width () =
   check int "tight header trims base rather than overflowing" 18
     (Layout.display_width tight)
 
+let contains_sub ~needle haystack =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec scan i =
+    i + nlen <= hlen
+    && (String.equal (String.sub haystack i nlen) needle || scan (i + 1))
+  in
+  scan 0
+
+let test_dropped_badge_preserves_right_aligned_headers () =
+  let cells_en =
+    [ Table.cell ~align:Table.Left ~header:"NAME" ~width:28 ""
+    ; Table.cell ~align:Table.Right ~header:"SCORE" ~width:7 ""
+    ; Table.cell ~align:Table.Right ~header:"REPLIES" ~width:7 ""
+    ]
+  in
+  let inner_width = Table.used_width cells_en in
+  let header_en =
+    Table.header_row_with_dropped ~ko:false ~inner_width ~dropped:1 cells_en
+  in
+  check int "EN header keeps exact used_width" inner_width
+    (Layout.display_width header_en);
+  check bool "EN badge sits inside left-aligned slack" true
+    (contains_sub ~needle:"NAME \xc2\xb7 1 more col" header_en);
+  check bool "EN right-aligned SCORE preserved" true
+    (contains_sub ~needle:"SCORE" header_en);
+  check bool "EN right-aligned REPLIES preserved" true
+    (contains_sub ~needle:"REPLIES" header_en);
+  let cells_ko =
+    [ Table.cell ~align:Table.Left ~header:"제목" ~width:24 ""
+    ; Table.cell ~align:Table.Right ~header:"점수" ~width:6 ""
+    ; Table.cell ~align:Table.Right ~header:"댓글" ~width:6 ""
+    ]
+  in
+  let inner_ko = Table.used_width cells_ko in
+  let header_ko =
+    Table.header_row_with_dropped ~ko:true ~inner_width:inner_ko ~dropped:2 cells_ko
+  in
+  check int "KO header keeps exact used_width" inner_ko
+    (Layout.display_width header_ko);
+  check bool "KO badge sits inside left-aligned slack" true
+    (contains_sub ~needle:"제목 \xc2\xb7 외 2열" header_ko);
+  check bool "KO right-aligned 점수 preserved" true
+    (contains_sub ~needle:"점수" header_ko);
+  check bool "KO right-aligned 댓글 preserved" true
+    (contains_sub ~needle:"댓글" header_ko);
+  (* When [used_width cells > inner_width] (all droppable columns already gone
+     and flex hit its floor), the badge must still stay inside [inner_width]
+     even if a left-aligned trailing column has large per-cell slack. *)
+  let overflow_cells =
+    [ Table.cell ~align:Table.Left ~header:"커넥터" ~width:12 ""
+    ; Table.cell ~align:Table.Left ~header:"연결" ~width:9 ""
+    ; Table.cell ~align:Table.Left ~header:"상태" ~width:12 ""
+    ; Table.cell ~align:Table.Left ~header:"채널" ~width:16 ""
+    ]
+  in
+  let overflow_hdr =
+    Table.header_row_with_dropped ~ko:true ~inner_width:44 ~dropped:1 overflow_cells
+  in
+  check bool "overflowing table header stays within inner_width" true
+    (Layout.display_width overflow_hdr <= 44);
+  check bool "overflowing table header keeps dropped badge visible" true
+    (contains_sub ~needle:"외 1열" overflow_hdr)
+
 let () =
   run "Masc_tui_table"
     [ ( "layout and overflow"
@@ -107,5 +171,7 @@ let () =
         ; test_case "fit tracks dropped columns" `Quick test_fit_tracks_dropped_columns
         ; test_case "dropped columns badge and header width" `Quick
             test_dropped_columns_badge_and_header_width
+        ; test_case "dropped badge preserves right-aligned trailing headers" `Quick
+            test_dropped_badge_preserves_right_aligned_headers
         ] )
     ]

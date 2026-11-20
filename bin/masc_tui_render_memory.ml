@@ -1655,8 +1655,9 @@ let memory_selector_line ?(selected = false) ?(max_facts = 0) ~cols (state : sta
     let bar_cells = 10 in
     let facts_s =
       if keeper.mkh_snapshot_present then
-        Printf.sprintf (if ko then "%5d건" else "%5d") keeper.mkh_facts
-      else Message_layout.pad_left Masc_tui_theme.Glyph.no_value (if ko then 7 else 5)
+        let grouped = Masc_tui_value.Count.grouped keeper.mkh_facts in
+        Message_layout.pad_left (if ko then grouped ^ "건" else grouped) 7
+      else Message_layout.pad_left Masc_tui_theme.Glyph.no_value 7
     in
     let size_s =
       let raw =
@@ -1767,13 +1768,41 @@ let render_memory_body ~cols ~budget (state : state)
     (if state.memory_overview_detail then "  " ^ Render_schedule.memory_header_row ~ko columns
      else if inner_w >= 58 && max_facts > 0 then
        let name_cells = min 22 (max 14 (inner_w / 3)) in
-       let facts_h =
-         Message_layout.pad_left (if ko then "기억" else "FACTS") (if ko then 7 else 5)
+       let desc_arrow = " \xe2\x86\x93" in
+       let asc_arrow = " \xe2\x86\x91" in
+       let keeper_label =
+         (if ko then "키퍼" else "KEEPER")
+         ^ (match state.memory_overview_sort with
+            | Mem_overview_name -> asc_arrow
+            | Mem_overview_facts | Mem_overview_size | Mem_overview_delta
+            | Mem_overview_state | Mem_overview_updated -> "")
        in
-       let size_h = Message_layout.pad_left (if ko then "저장" else "SIZE") 7 in
-       "    " ^ Message_layout.fit_width (if ko then "키퍼" else "KEEPER") name_cells
+       let facts_label =
+         (if ko then "기억" else "FACTS")
+         ^ (match state.memory_overview_sort with
+            | Mem_overview_facts -> desc_arrow
+            | Mem_overview_size | Mem_overview_delta | Mem_overview_state
+            | Mem_overview_name | Mem_overview_updated -> "")
+       in
+       let size_label =
+         (if ko then "저장" else "SIZE")
+         ^ (match state.memory_overview_sort with
+            | Mem_overview_size -> desc_arrow
+            | Mem_overview_facts | Mem_overview_delta | Mem_overview_state
+            | Mem_overview_name | Mem_overview_updated -> "")
+       in
+       let state_label =
+         (if ko then "상태" else "STATE")
+         ^ (match state.memory_overview_sort with
+            | Mem_overview_state -> desc_arrow
+            | Mem_overview_facts | Mem_overview_size | Mem_overview_delta
+            | Mem_overview_name | Mem_overview_updated -> "")
+       in
+       let facts_h = Message_layout.pad_left facts_label 7 in
+       let size_h = Message_layout.pad_left size_label 7 in
+       "    " ^ Message_layout.fit_width keeper_label name_cells
        ^ "  " ^ Message_layout.fit_width (if ko then "점유" else "USAGE") 10
-       ^ "  " ^ facts_h ^ "  " ^ size_h ^ "  " ^ (if ko then "상태" else "STATE")
+       ^ "  " ^ facts_h ^ "  " ^ size_h ^ "  " ^ state_label
      else ui_text state
        ~ko:"  키퍼 · 상태"
        ~en:"  Keeper · state");

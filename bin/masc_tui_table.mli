@@ -103,9 +103,14 @@ val dropped_columns_badge : ko:bool -> int -> string option
 
 val header_row_with_dropped :
   ko:bool -> inner_width:int -> dropped:int -> cell list -> string
-(** {!header_row} with {!dropped_columns_badge} placed at the right edge of
-    [inner_width] when [dropped > 0]. When [inner_width] has room for the
-    badge plus {!cell_gap}, the badge is never clipped off the right edge. *)
+(** {!header_row} with {!dropped_columns_badge} shown when [dropped > 0].
+    When the trimmed header leaves trailing room within [inner_width], the
+    badge is right-aligned at the end. Otherwise, when [used_width cells <=
+    inner_width] and a left-aligned column header has enough trailing slack,
+    the badge sits inside that column's slack so right-aligned trailing headers
+    stay intact. When [used_width cells > inner_width] or no left-aligned slack
+    fits, it trims the header to keep the badge inside [inner_width] whenever
+    [inner_width] holds the badge plus {!cell_gap}. *)
 
 val row : ?close:string -> cell list -> string
 (** One row's readings, laid out on the same cells as {!header_row}. A reading

@@ -1027,13 +1027,29 @@ let render_planning_list (state : state) =
            let title_w = max 10 (inner - prefix_w - phase_w - tail_w - 4) in
            let col_header =
              if list_rows >= 4 then
+               let phase_header =
+                 match state.planning_sort with
+                 | Planning_sort_phase_priority ->
+                     text "단계 \xe2\x86\x93" "Phase \xe2\x86\x93"
+                 | Planning_sort_updated | Planning_sort_due ->
+                     text "단계" "Phase"
+               in
+               let tail_header =
+                 match state.planning_sort with
+                 | Planning_sort_due ->
+                     if tail_w >= 13 then
+                       text "연결 · 기한 \xe2\x86\x91" "Tasks / Due \xe2\x86\x91"
+                     else text "기한 \xe2\x86\x91" "Due \xe2\x86\x91"
+                 | Planning_sort_phase_priority | Planning_sort_updated ->
+                     text "연결 · 기한" "Tasks / Due"
+               in
                [ Theme.recede ()
                  ^ fit_width
                      (Printf.sprintf "  %s %s  %s  %s"
                         (fit_width (text "우선" "Prio") 5)
                         (fit_width (text "제목" "Goal") title_w)
-                        (fit_width (text "단계" "Phase") phase_w)
-                        (fit_width (text "연결 · 기한" "Tasks / Due") tail_w))
+                        (fit_width phase_header phase_w)
+                        (fit_width tail_header tail_w))
                      inner
                  ^ Ansi.reset
                ]

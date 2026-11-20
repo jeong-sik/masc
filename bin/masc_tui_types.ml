@@ -16961,8 +16961,15 @@ let tools_skill_profiles (state : state) =
       ; _ }
   | None -> []
 
+let clamped_tools_skill_cursor ~count cursor =
+  if count <= 0 then 0 else max 0 (min cursor (count - 1))
+
 let selected_tools_skill_profile (state : state) =
-  List.nth_opt (tools_skill_profiles state) state.tools_skill_cursor
+  let profiles = tools_skill_profiles state in
+  let cursor =
+    clamped_tools_skill_cursor ~count:(List.length profiles) state.tools_skill_cursor
+  in
+  List.nth_opt profiles cursor
 
 (* A cell image owns the input until it is dismissed.  Its source is the
    selection to restore after a partial roster or Skill inventory recovers. *)

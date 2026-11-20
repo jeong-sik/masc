@@ -112,6 +112,8 @@ val disarm : t -> t
 type tone =
   | Plain
   | Dim
+  | Ok
+  | Warn
   | Info
   | Bad
 

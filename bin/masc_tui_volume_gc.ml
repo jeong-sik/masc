@@ -95,6 +95,8 @@ let disarm t =
 type tone =
   | Plain
   | Dim
+  | Ok
+  | Warn
   | Info
   | Bad
 
@@ -114,22 +116,27 @@ let summary_line report =
 ;;
 
 let volume_label = function
-  | None -> "-"
+  | None -> "\xe2\x80\x94"
   | Some name -> single_line name
 ;;
 
 (* The verdict in the tool's own words and the two volumes by name. *)
 let keeper_line (verdict : Answer.verdict) =
-  let tone =
+  let tone, mark =
     match verdict.kind with
-    | Answer.Kept -> Dim
-    | Answer.Reclaim_candidate | Answer.Reclaimed -> Plain
-    | Answer.Reclaim_failed -> Bad
+    | Answer.Kept ->
+        Dim, Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Waiting
+    | Answer.Reclaim_candidate ->
+        Warn, Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Caution
+    | Answer.Reclaimed ->
+        Ok, Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+    | Answer.Reclaim_failed ->
+        Bad, Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
   in
   ( tone
-  , Say.code "  " ++ received verdict.keeper_name ++ Say.code ": " ++ received verdict.outcome
+  , Say.code ("  " ^ mark ^ " ") ++ received verdict.keeper_name ++ Say.code ": " ++ received verdict.outcome
     ++ Say.per_language (function
-         | Say.Ko -> Printf.sprintf " (작업 %s, build %s)"
+         | Say.Ko -> Printf.sprintf " (작업 %s, 빌드 %s)"
              (volume_label verdict.work_volume) (volume_label verdict.build_volume)
          | Say.En -> Printf.sprintf " (work %s, build %s)"
              (volume_label verdict.work_volume) (volume_label verdict.build_volume)) )
@@ -138,17 +145,17 @@ let keeper_line (verdict : Answer.verdict) =
 let report_lines (report : Answer.t) =
   let state =
     if report.executed
-    then Say.both ~ko:"회수를 요청한 답입니다. 보낸 이름 가운데 지금도 후보인 Keeper 만 지웠습니다."
+    then Say.both ~ko:"회수를 요청한 답입니다. 보낸 이름 가운데 지금도 후보인 키퍼만 지웠습니다."
         ~en:"This answers a reclaim request. Only the Keepers sent that were still candidates were removed."
     else if report.image_given
     then Say.both ~ko:"보고만 받았습니다. 지운 볼륨은 없습니다."
         ~en:"A report only. No volume was removed."
-    else Say.both ~ko:"보고만 받았습니다. claims 이미지가 없어 주인을 확인하지 못한 Keeper 는 그대로 둡니다."
+    else Say.both ~ko:"보고만 받았습니다. claims 이미지가 없어 주인을 확인하지 못한 키퍼는 그대로 둡니다."
         ~en:"A report only. With no claims image, Keepers whose owner could not be checked are left alone."
   in
   let keepers =
     match report.keepers with
-    | [] -> [ Dim, Say.both ~ko:"  은퇴한 Keeper 의 볼륨이 없습니다." ~en:"  No retired Keeper has a volume." ]
+    | [] -> [ Dim, Say.both ~ko:"  은퇴한 키퍼의 볼륨이 없습니다." ~en:"  No retired Keeper has a volume." ]
     | verdicts -> List.map keeper_line verdicts
   in
   let unlisted =
@@ -192,7 +199,7 @@ let phase_line =
   let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way ^ " " in
   function
   | Idle ->
-    Dim, Say.code key ++ Say.both ~ko:": 은퇴한 Keeper 의 볼륨 보고 (지우지 않음)"
+    Dim, Say.code key ++ Say.both ~ko:": 은퇴한 키퍼의 볼륨 보고 (지우지 않음)"
                           ~en:": report retired Keepers' volumes (removes nothing)"
   | Reporting ->
     Info, Say.code under_way ++ Say.both ~ko:"보고를 받는 중입니다." ~en:"Waiting for the report."
@@ -200,14 +207,14 @@ let phase_line =
     ( Bad
     , Say.per_language (function
         | Say.Ko -> Printf.sprintf
-            "%s 를 한 번 더 누르면 %s 의 build 볼륨을 회수합니다. 다른 키는 취소입니다."
+            "%s 를 한 번 더 누르면 %s 의 빌드 볼륨을 회수합니다. 다른 키는 취소입니다."
             key (names_text names)
         | Say.En -> Printf.sprintf
             "Press %s again to reclaim the build volumes of %s. Any other key cancels."
             key (names_text names)) )
   | Reclaiming ->
     Info, Say.code under_way
-          ++ Say.both ~ko:"회수를 요청했습니다. 보낸 이름 가운데 지금도 후보인 Keeper 만 지웁니다."
+          ++ Say.both ~ko:"회수를 요청했습니다. 보낸 이름 가운데 지금도 후보인 키퍼만 지웁니다."
                ~en:"Reclaim requested. Only the Keepers sent that are still candidates are removed."
 ;;
 
@@ -223,7 +230,7 @@ let server_report_line ~timestamp = function
        (match Answer.reclaim_candidates report with
         | [] -> Dim, head ++ Say.both ~ko:"회수 후보 없음" ~en:"nothing to reclaim"
         | names ->
-          ( Plain
+          ( Warn
           , head
             ++ Say.per_language (function
                  | Say.Ko -> Printf.sprintf "회수 후보 %d" (List.length names)
@@ -236,7 +243,7 @@ let server_report_line ~timestamp = function
 ;;
 
 let lines ~server_report t =
-  ((Plain, Say.both ~ko:"은퇴 키퍼 볼륨 (" ~en:"Retired Keepers' volumes (" ++ Say.code tool ++ Say.code ")")
+  ((Plain, Say.both ~ko:"은퇴한 키퍼 볼륨 (" ~en:"Retired Keepers' volumes (" ++ Say.code tool ++ Say.code ")")
    :: phase_line t.phase :: Option.to_list server_report)
   @ shown_lines t.shown
 ;;

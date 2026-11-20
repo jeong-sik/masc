@@ -27,10 +27,27 @@ module Say = Masc_tui_say
 let ( ++ ) = Say.( ++ )
 let say_dot = Say.code " \xc2\xb7 "
 
-(* Pads to [cells] display cells and never cuts, as Printf's "%-Ns" did for
-   ASCII: a Korean word is counted in cells, not bytes. *)
+let wrap_style style text =
+  if String.equal style "" || String.equal text "" then text
+  else style ^ text ^ Ansi.reset
+
+(* Right-pads to [cells] display cells without truncating; Korean words are
+   measured in cells, not bytes. Use [pad_cells_fit] for fixed-width data
+   columns that must truncate cleanly with "…" when wider. *)
 let pad_cells cells text =
-  text ^ String.make (max 0 (cells - Masc_tui_message_layout.display_width text)) ' '
+  text
+  ^ String.make
+      (max 0 (cells - Masc_tui_message_layout.display_width text))
+      ' '
+
+let pad_cells_fit cells text =
+  Masc_tui_message_layout.fit_width text cells
+
+let format_unix_ts ~now value =
+  if not (Float.is_finite value) then Printf.sprintf "%.3f" value
+  else
+    try Masc_tui_value.Instant.detail_text Masc_tui_value.Instant.To_second ~now value
+    with Unix.Unix_error _ | Invalid_argument _ -> Printf.sprintf "%.3f" value
 
 let say_language (state : state) =
   match state.ui_language with
@@ -113,12 +130,12 @@ let skill_async_evidence_lines evidence =
           let presentation = match delivery.presentation with
             | Inline_result -> Say.both ~ko:"본문 결과" ~en:"inline result"
             | Manifest_reference -> Say.both ~ko:"manifest 참조" ~en:"manifest reference" in
-          [ Ansi.dim,
+          [ (Theme.recede ()),
             Say.code "       " ++ Say.both ~ko:"비동기 " ~en:"Async " ++ presentation
             ++ Say.code (Terminal_text.single_line (Printf.sprintf " received=%s runtime=%s at=%s"
                  (Ids.Turn_ref.to_string delivery.physical_turn_ref)
                  delivery.runtime_id delivery.observed_at))
-          ; Ansi.dim, Say.code (Terminal_text.single_line (Printf.sprintf
+          ; (Theme.recede ()), Say.code (Terminal_text.single_line (Printf.sprintf
               "         original=%s run=%s parent=%s request=%s bytes=%d sha256=%s"
               (Ids.Turn_ref.to_string delivery.original_turn_ref)
               (Masc.Keeper_tool_plan.Composition_run_id.to_string delivery.composition_run_id)
@@ -135,7 +152,7 @@ let skill_async_evidence_lines evidence =
             | Masc.Keeper_skill_async_action.Sdk_result { invocation; result } ->
               let style, outcome, bytes, sha256 = match result with
                 | Handler_returned { bytes; sha256 } ->
-                  Ansi.dim, Say.both ~ko:"SDK 반환" ~en:"SDK returned", bytes, sha256
+                  (Theme.recede ()), Say.both ~ko:"SDK 반환" ~en:"SDK returned", bytes, sha256
                 | Handler_errored { bytes; sha256; recoverable; error_class } ->
                   let error = match error_class with
                     | None -> "unclassified"
@@ -154,7 +171,7 @@ let skill_async_evidence_lines evidence =
                 | Runtime_native_tools.Call_id id -> "call=" ^ id
                 | Provider_step { conversation_id; step_index } ->
                   Printf.sprintf "step=%s:%d" conversation_id step_index in
-              Ansi.dim,
+              (Theme.recede ()),
               Say.both ~ko:"Native 시작" ~en:"Native started"
               ++ Say.code (Printf.sprintf " official-turn=%d %s" official_turn identity)
           in
@@ -165,14 +182,14 @@ let skill_async_evidence_lines evidence =
                 (Ids.Turn_ref.to_string action.physical_turn_ref) action.runtime_id)))
           :: List.map
                (fun (link : Masc.Keeper_skill_async_action.t) ->
-                 Ansi.dim,
+                 (Theme.recede ()),
                  Say.code "         " ++ Say.both ~ko:"인과 연결" ~en:"causal"
                  ++ Say.code (Terminal_text.single_line (Printf.sprintf " handoff=%s at=%s"
                       link.delivery_sha256 link.observed_at)))
                (group.first :: group.additional_links))
         view.actions
     in
-    (Ansi.dim,
+    ((Theme.recede ()),
      Say.per_language (function
        | Say.Ko -> Printf.sprintf "       비동기 결과: 전달 %d · 물리 동작 %d · 인과 연결 %d"
            (List.length deliveries) (List.length view.actions) view.action_link_count
@@ -274,7 +291,7 @@ let skill_action_lines actions =
              { conversation_id; step_index } ->
            Printf.sprintf "step=%s:%d" conversation_id step_index
        in
-       Ansi.dim,
+       (Theme.recede ()),
        Say.code "       " ++ Say.both ~ko:"동작" ~en:"action"
        ++ Say.code (Printf.sprintf
          " turn=%d runtime=%s tool=%s %s at=%s"
@@ -358,10 +375,10 @@ let async_request_inventory_lines (state : state) =
     in
     let recovery_lines = match recovery with
       | None ->
-        [ Ansi.dim, Say.both ~ko:"   시작 복구: 이 process 에 보고 없음"
+        [ (Theme.recede ()), Say.both ~ko:"   시작 복구: 이 process 에 보고 없음"
                       ~en:"   startup recovery: not reported to this process" ]
       | Some report ->
-        [ Ansi.dim,
+        [ (Theme.recede ()),
           Say.both ~ko:"   시작 복구: " ~en:"   startup recovery: "
           ++ Say.code (Printf.sprintf
             "lost=%d finalized=%d cleaned=%d unreadable=%d failed=%d staging=%d/%d/%d"
@@ -371,22 +388,22 @@ let async_request_inventory_lines (state : state) =
     in
     rows summary_lines @ request_lines @ rows recovery_lines)
 
-let async_logical_lines value =
+let async_logical_lines ~now value =
   let module Detail = Masc.Tui_decode_async_request in
   let safe value = Say.as_received (Terminal_text.single_line value) in
   match value with
   | Detail.Not_composition ->
-    [Ansi.dim, Say.both ~ko:" 논리: Composition 원본 없음" ~en:" Logical: no original Composition"]
+    [Theme.recede (), Say.both ~ko:" 논리: Composition 원본 없음" ~en:" Logical: no original Composition"]
   | Original_run run ->
     [Theme.series_tint Masc_tui_theme.Calls 0.8, Say.both ~ko:" 원본 run: " ~en:" Original run: " ++ safe run.run_id;
-     Ansi.dim, Say.both ~ko:" 원본 Task: " ~en:" Original Task: "
+     Theme.recede (), Say.both ~ko:" 원본 Task: " ~en:" Original Task: "
        ++ Option.fold ~none:(Say.both ~ko:"없음(기록)" ~en:"none (recorded)") ~some:safe run.source_task_id;
-     Ansi.dim, Say.both ~ko:" 현재 run owner: " ~en:" Current run owner: " ++ safe run.owner.request_id
+     Theme.recede (), Say.both ~ko:" 현재 run owner: " ~en:" Current run owner: " ++ safe run.owner.request_id
        ++ say_dot ++ Say.per_language (function
             | Say.Ko -> Printf.sprintf "세대 %d" run.owner.generation
             | Say.En -> Printf.sprintf "generation %d" run.owner.generation);
-     Ansi.dim, Say.both ~ko:" 논리 관측 시각: " ~en:" Logical observed at: "
-       ++ Say.code (Printf.sprintf "%.3f" run.observed_at)
+     Theme.recede (), Say.both ~ko:" 논리 관측 시각: " ~en:" Logical observed at: "
+       ++ Say.code (format_unix_ts ~now run.observed_at)
        ++ say_dot ++ Say.both ~ko:"저널 " ~en:"journal " ++ safe run.journal_version]
     @ (match run.resolution with
       | None ->
@@ -397,12 +414,13 @@ let async_logical_lines value =
            ++ (match resolution.decision with
                | Detail.Rejected -> Say.both ~ko:"거절" ~en:"rejected"
                | Cancelled_continuation -> Say.both ~ko:"취소" ~en:"cancelled");
-         Ansi.dim, Say.both ~ko:" 결정: " ~en:" Decided by: " ++ safe resolution.requested_by
-           ++ say_dot ++ Say.code (Printf.sprintf "%.3f" resolution.resolved_at);
+         Theme.recede (), Say.both ~ko:" 결정: " ~en:" Decided by: " ++ safe resolution.requested_by
+           ++ say_dot ++ Say.code (format_unix_ts ~now resolution.resolved_at);
          Theme.series_tint Masc_tui_theme.Calls 0.8, Say.both ~ko:" 사유: " ~en:" Reason: " ++ safe resolution.reason])
 
 let async_request_detail_lines ~cols state target =
   let module Detail = Masc.Tui_decode_async_request in
+  let now = Unix.gettimeofday () in
   let view = Masc_tui_fetched.view_for ~equal:Detail.equal_target state.tools_async_detail ~key:target in
   let pending = Masc_tui_fetched.in_flight state.tools_async_detail in
   let safe value = Say.as_received (Terminal_text.single_line value) in
@@ -414,7 +432,7 @@ let async_request_detail_lines ~cols state target =
       [Theme.info (), Say.code (" " ^ under_way) ++ Say.both ~ko:"원본 요청 조회 중" ~en:"Reading the original request"]
     | false,_ -> [] in
   let failures = match view with
-    | Masc_tui_fetched.Absent -> [Ansi.dim, Say.both ~ko:" 미조회" ~en:" Not read"]
+    | Masc_tui_fetched.Absent -> [Theme.recede (), Say.both ~ko:" 미조회" ~en:" Not read"]
     | Loading -> []
     | Failed (Request_failed detail) ->
       [Theme.bad (), Say.both ~ko:" 조회 실패: " ~en:" Read failed: " ++ safe detail]
@@ -444,31 +462,31 @@ let async_request_detail_lines ~cols state target =
         | Done true -> Say.both ~ko:"끝남 (물리 성공)" ~en:"done (physical success)"
         | Done false -> Say.both ~ko:"오류 (물리 실패)" ~en:"error (physical failure)" in
       let physical = [Theme.series_tint Masc_tui_theme.Calls 0.8, Say.both ~ko:" 물리 상태: " ~en:" Physical state: " ++ phase;
-        Ansi.dim, Say.both ~ko:" 접수: " ~en:" Submitted: " ++ Say.code (Printf.sprintf "%.3f" snapshot.submitted_at)
+        Theme.recede (), Say.both ~ko:" 접수: " ~en:" Submitted: " ++ Say.code (format_unix_ts ~now snapshot.submitted_at)
           ++ say_dot ++ Say.both ~ko:"종료: " ~en:"Ended: "
           ++ Option.fold ~none:(Say.both ~ko:"미종료" ~en:"not ended")
-               ~some:(fun at -> Say.code (Printf.sprintf "%.3f" at)) snapshot.completed_at] in
+               ~some:(fun at -> Say.code (format_unix_ts ~now at)) snapshot.completed_at] in
       let dependencies = List.map (fun dependency ->
-        Ansi.dim, Say.both ~ko:" 의존: " ~en:" Depends on: "
+        Theme.recede (), Say.both ~ko:" 의존: " ~en:" Depends on: "
           ++ Say.as_received (Terminal_text.single_line
                (Yojson.Safe.to_string (Masc.Keeper_composition_dependency.to_json dependency))))
         snapshot.dependencies in
       let logical = match snapshot.logical with
-        | Detail.Confirmed value -> async_logical_lines value
+        | Detail.Confirmed value -> async_logical_lines ~now value
         | Unavailable detail ->
           [Theme.bad (), Say.both ~ko:" 논리 상태 조회 불가: " ~en:" Logical state unavailable: " ++ safe detail]
           @ (match state.tools_async_last_logical with
             | Some (source,value) when Detail.equal_source source snapshot.source ->
               [Theme.warn (), Say.both ~ko:" 아래 논리는 마지막 관측이며 최신 확인이 아닙니다"
                                 ~en:" The logical state below is the last observation, not a current check"]
-              @ async_logical_lines value
+              @ async_logical_lines ~now value
             | Some _ | None ->
-              [Ansi.dim, Say.both ~ko:" 확인된 이전 논리 관측 없음" ~en:" No earlier confirmed logical observation"]) in
+              [Theme.recede (), Say.both ~ko:" 확인된 이전 논리 관측 없음" ~en:" No earlier confirmed logical observation"]) in
       let nested = Masc_tui_nested_result.sections snapshot.nested
         |> List.concat_map (fun (heading,body) ->
           (Ansi.bold, Say.as_received (Terminal_text.single_line heading)) ::
           (Masc_tui_text_block.rows ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) body
-           |> List.map (fun row -> Ansi.dim, Say.as_received row))) in
+           |> List.map (fun row -> Theme.recede (), Say.as_received row))) in
       physical @ Option.to_list (Option.map (fun notice -> Theme.warn (),
         Say.both ~ko:" 물리 사유: " ~en:" Physical reason: " ++ safe notice) snapshot.notice)
       @ dependencies @ logical @ nested in
@@ -478,6 +496,7 @@ let async_request_detail_lines ~cols state target =
 
 let async_source_task_lines ~cols state source =
   let width=max 1 (Masc_tui_frame.inner_width ~cols) in
+  let now = Unix.gettimeofday () in
   let ko = state.ui_language = Lang_ko in
   let body=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_body ~key:source in
   let history=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_history ~key:source in
@@ -486,7 +505,7 @@ let async_source_task_lines ~cols state source =
       [Theme.info (), Say.both ~ko:(" " ^ under_way ^ " Task 본문 조회 중 · 기존 관측·실패 유지")
                    ~en:(" " ^ under_way ^ " Reading the Task body · earlier observation and failure kept")] else [] in
   let errors=match body with
-    | Masc_tui_fetched.Absent -> [Ansi.dim, Say.both ~ko:" Task 본문 미조회" ~en:" Task body not read"]
+    | Masc_tui_fetched.Absent -> [Theme.recede (), Say.both ~ko:" Task 본문 미조회" ~en:" Task body not read"]
     | Loading | Ready _ -> []
     | Failed (Request_failed detail) ->
       [Theme.bad (), Say.both ~ko:" Task 본문 조회 실패: " ~en:" Task body read failed: " ++ Say.as_received detail]
@@ -512,9 +531,9 @@ let async_source_task_lines ~cols state source =
   rows
   [Ansi.bold, Say.both ~ko:" 원본 Task · " ~en:" Original Task · " ++ Say.as_received source.ats_task_id
      ++ Say.both ~ko:"  r:재조회  Esc:원본 요청" ~en:"  r:reread  Esc:original request";
-   Ansi.dim, Say.both ~ko:" 출처 run: " ~en:" Source run: " ++ Say.as_received source.ats_run_id
+   Theme.recede (), Say.both ~ko:" 출처 run: " ~en:" Source run: " ++ Say.as_received source.ats_run_id
      ++ Say.both ~ko:" · 논리 관측 " ~en:" · logical observation "
-     ++ Say.code (Printf.sprintf "%.3f" source.ats_observed_at)
+     ++ Say.code (format_unix_ts ~now source.ats_observed_at)
      ++ (if source.ats_retained
          then Say.both ~ko:" · 이전 확인 관측에서 열림" ~en:" · opened from an earlier confirmed observation"
          else Say.empty)]
@@ -604,7 +623,7 @@ let skill_config_line (config : Masc.Tui_decode_tools.skill_catalog_config optio
           | Say.Ko -> Printf.sprintf "resource 읽기 \xe2\x89\xa4 %s바이트" (Masc_tui_value.Count.grouped bytes)
           | Say.En -> Printf.sprintf "resource read \xe2\x89\xa4 %s bytes" (Masc_tui_value.Count.grouped bytes))
     in
-    [ ( Ansi.dim
+    [ ( (Theme.recede ())
       , Say.both ~ko:"   설정 " ~en:"   config "
         ++ Say.as_received (Terminal_text.single_line revision) ++ say_dot ++ cap )
     ]
@@ -669,7 +688,7 @@ let skill_flow_detail_lines (flow : Masc.Tui_decode_tools.skill_flow) =
   let safe value = Say.as_received (Terminal_text.single_line value) in
   let batches = List.map
     (fun (batch : Masc.Tui_decode_tools.skill_flow_batch) ->
-      Ansi.dim,
+      (Theme.recede ()),
       Say.per_language (function
         | Say.Ko -> Printf.sprintf "배치 %d · " batch.sfb_index
         | Say.En -> Printf.sprintf "Batch %d · " batch.sfb_index)
@@ -679,7 +698,7 @@ let skill_flow_detail_lines (flow : Masc.Tui_decode_tools.skill_flow) =
     flow.sf_batches in
   let nodes = List.concat_map
     (fun (node : Masc.Tui_decode_tools.skill_flow_node) ->
-      (Ansi.dim,
+      ((Theme.recede ()),
        Say.both ~ko:"노드 " ~en:"Node " ++ safe node.sfn_id
        ++ Say.both ~ko:" · 도구: " ~en:" · tool: " ++ safe node.sfn_tool_name
        ++ Say.per_language (function
@@ -687,17 +706,17 @@ let skill_flow_detail_lines (flow : Masc.Tui_decode_tools.skill_flow) =
             | Say.En -> Printf.sprintf " · batch: %d · mode: " node.sfn_batch_index)
        ++ safe node.sfn_execution_mode)
       :: (match node.sfn_dependencies with
-          | [] -> [Ansi.dim, Say.both ~ko:"  의존: 없음" ~en:"  Dependencies: none"]
+          | [] -> [(Theme.recede ()), Say.both ~ko:"  의존: 없음" ~en:"  Dependencies: none"]
           | dependencies -> List.map
               (fun (dependency : Masc.Tui_decode_tools.skill_flow_dependency) ->
-                Ansi.dim,
+                (Theme.recede ()),
                 Say.both ~ko:"  의존 " ~en:"  Dependency " ++ safe dependency.sfd_node_id
                 ++ Say.both ~ko:" · 종류: " ~en:" · kind: " ++ safe dependency.sfd_kind) dependencies))
     flow.sf_nodes in
   batches @ nodes
 ;;
 
-let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_source list) =
+let skill_source_lines ~cols ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_source list) =
   let ready =
     List.length
       (List.filter
@@ -718,35 +737,55 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
         | Say.En -> Printf.sprintf " Skill Sources · %d of %d root%s carrying skills"
             ready total (if total = 1 then "" else "s")) )
   in
+  let meter_row =
+    let inner = Masc_tui_frame.inner_width ~cols in
+    if total <= 0 || inner < 24 then []
+    else
+      let meter_width = min 44 (max 16 (inner - 6)) in
+      [ ( ""
+        , Say.per_language (fun lang ->
+              let label = match lang with Say.Ko -> "활성 루트" | Say.En -> "Active roots" in
+              "   "
+              ^ Masc_tui_chart.meter ~width:meter_width ~value:ready ~max_value:(max 1 total)
+                  ~label ~label_style:(Theme.recede ())
+                  ~suffix:(Printf.sprintf "%d/%d" ready total)
+                  ~scale:(Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Capacity })
+                  ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()) )
+      ]
+  in
   let source_rows =
     List.map
       (fun (source : Masc.Tui_decode_tools.skill_catalog_source) ->
          let tone, mark, reading = skill_source_reading source.scso_observation in
          let path =
            match source.scso_path with
-           | Some path -> Say.as_received (Terminal_text.single_line path)
-           | None -> Say.both ~ko:"(절대 경로라 공개 안 함)" ~en:"(absolute; path not published)"
+           | Some path -> Say.as_received (pad_cells_fit 26 (Terminal_text.single_line path))
+           | None ->
+             Say.map (pad_cells 26)
+               (Say.both ~ko:"(절대 경로라 공개 안 함)" ~en:"(absolute; path not published)")
          in
          ( tone
          , Say.code (Printf.sprintf "   %s " mark)
            ++ Say.as_received
-                (pad_cells 16 (Terminal_text.single_line source.scso_id) ^ " "
-                 ^ pad_cells 10 (Terminal_text.single_line source.scso_anchor) ^ " ")
-           ++ Say.map (pad_cells 26) path
-           ++ Say.code (Printf.sprintf " %-2s  " (skill_access_short source.scso_access))
+                (pad_cells_fit 16 (Terminal_text.single_line source.scso_id) ^ " "
+                 ^ pad_cells_fit 10 (Terminal_text.single_line source.scso_anchor) ^ " ")
+           ++ path
+           ++ Say.code (" " ^ pad_cells 2 (skill_access_short source.scso_access) ^ "  ")
            ++ reading ))
       sources
   in
   match sources with
   | [] -> []
-  | _ -> (heading :: source_rows) @ skill_config_line config @ [ (Ansi.dim, Say.empty) ]
+  | _ -> (heading :: meter_row @ source_rows) @ skill_config_line config @ [ (Theme.recede (), Say.empty) ]
 ;;
 
 (* The catalog's volume child shows what the next press sends, the server's
    last periodic inventory report, and the last operator-request answer. *)
 let volume_tone = function
   | Masc_tui_volume_gc.Plain -> ""
-  | Masc_tui_volume_gc.Dim -> Ansi.dim
+  | Masc_tui_volume_gc.Dim -> Theme.recede ()
+  | Masc_tui_volume_gc.Ok -> Theme.ok ()
+  | Masc_tui_volume_gc.Warn -> Theme.warn ()
   | Masc_tui_volume_gc.Info -> Theme.info ()
   | Masc_tui_volume_gc.Bad -> Theme.bad ()
 
@@ -776,7 +815,7 @@ let volume_gc_lines (state : state) =
         | Masc_tui_volume_gc.Info, Some at ->
             let duration = Masc_tui_value.Ongoing.since ~now at in
             text ++ Say.both ~ko:(" · " ^ duration ^ " 경과") ~en:(" · " ^ duration)
-        | (Masc_tui_volume_gc.Plain | Dim | Info | Bad), (Some _ | None) -> text
+        | (Masc_tui_volume_gc.Plain | Dim | Ok | Warn | Info | Bad), (Some _ | None) -> text
       in
       Row (volume_tone tone, Say.code " " ++ text))
     (Masc_tui_volume_gc.lines ~server_report state.volume_gc)
@@ -803,7 +842,7 @@ let storage_lines (state : state) =
              match tone with
              | Masc_tui_storage.Heading -> Ansi.bold
              | Masc_tui_storage.Plain -> ""
-             | Masc_tui_storage.Dim -> Ansi.dim
+             | Masc_tui_storage.Dim -> Theme.recede ()
              | Masc_tui_storage.Warn -> Theme.warn ()
              | Masc_tui_storage.Bad -> Theme.bad ()
            in
@@ -817,7 +856,7 @@ let storage_lines (state : state) =
       (reading
        @ [ Ansi.bold, Say.both ~ko:" 은퇴한 Keeper 의 볼륨" ~en:" Retired Keepers' volumes"
          ; volume_tone tone, Say.code "   " ++ report
-         ; Ansi.dim,
+         ; (Theme.recede ()),
            Say.both ~ko:"   회수: 전체 도구 탭  " ~en:"   Reclaim on All tools tab  "
            ++ Say.code Masc_tui_volume_gc.key
            ++ Say.both ~ko:":정리" ~en:":reclaim" ])
@@ -848,24 +887,24 @@ let tools_pane_strip ~cols (state : state) =
 let skill_usage_box ~cols rows =
   let width = Masc_tui_frame.inner_width ~cols in
   let content_width = max 1 (width - 4) in
-  let border left right = Ansi.dim, left ^ draw_hline (max 0 (width - 2)) ^ right in
+  let border_style = Theme.border_muted () in
+  let border left right = border_style, left ^ draw_hline (max 0 (width - 2)) ^ right in
+  let vbar = wrap_style border_style Ansi.box_v in
   let body =
     List.concat_map (fun (style, text) ->
       (if Masc_tui_message_layout.display_width text <= content_width then [text]
-       else Masc_tui_message_layout.wrap_words ~max_cells:content_width text)
+       else Masc_tui_message_layout.wrap_styled_words ~max_cells:content_width text)
       |> List.map (fun line ->
         "",
-        Ansi.dim ^ Ansi.box_v ^ Ansi.reset ^ " "
-        ^ style ^ fit_width line content_width ^ Ansi.reset
-        ^ " " ^ Ansi.dim ^ Ansi.box_v ^ Ansi.reset)) rows
+        vbar ^ " " ^ wrap_style style (fit_width line content_width) ^ " " ^ vbar)) rows
   in
   if width < 5 then
     List.concat_map (fun (style, text) ->
-      Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) text
+      Masc_tui_message_layout.wrap_styled_words ~max_cells:(max 1 width) text
       |> List.map (fun line -> style, line)) rows
   else
     border Ansi.box_tl Ansi.box_tr :: body
-    @ [border Ansi.box_bl Ansi.box_br; Ansi.dim, ""]
+    @ [border Ansi.box_bl Ansi.box_br; Theme.recede (), ""]
 ;;
 
 let skill_json_lines ~cols ~indent json =
@@ -917,11 +956,11 @@ let json_rows lines = List.map (fun (style, text) -> style, Say.as_received text
 
 let skill_io_lines ~cols = function
   | Masc.Tui_decode_tools.Model_orchestrated ->
-      [ Ansi.dim, Say.both ~ko:"     입력: 정확한 Skill 참조 / 고를 수 있는 resource 경로"
+      [ (Theme.recede ()), Say.both ~ko:"     입력: 정확한 Skill 참조 / 고를 수 있는 resource 경로"
                     ~en:"     Input: exact Skill reference / optional resource path";
-        Ansi.dim, Say.both ~ko:"     출력: 지침 본문이나 resource · 그다음 도구는 모델이 고름"
+        (Theme.recede ()), Say.both ~ko:"     출력: 지침 본문이나 resource · 그다음 도구는 모델이 고름"
                     ~en:"     Output: instruction body or resource; subsequent tools are model-orchestrated";
-        Ansi.dim, Say.both ~ko:"     평균 실행 시간: 지침 텍스트에는 없음"
+        (Theme.recede ()), Say.both ~ko:"     평균 실행 시간: 지침 텍스트에는 없음"
                     ~en:"     Average execution: not applicable to instruction text" ]
   | Composition_io { input_schema; exports } ->
       (Ansi.bold, Say.both ~ko:"     선언한 입력 schema (필수 인자, 타입, enum)"
@@ -929,12 +968,12 @@ let skill_io_lines ~cols = function
       :: json_rows (cached_skill_json skill_schema_projection ~cols
            ~render:(skill_json_lines ~cols ~indent:7) input_schema)
       @ (match exports with
-         | [] -> [Ansi.dim, Say.both ~ko:"     선언한 출력: 실행 결과 전체 (고른 export 없음)"
+         | [] -> [(Theme.recede ()), Say.both ~ko:"     선언한 출력: 실행 결과 전체 (고른 export 없음)"
                               ~en:"     Declared output: complete execution result (no selected exports)"]
          | routes ->
            (Ansi.bold, Say.both ~ko:"     선언한 출력 경로" ~en:"     Declared output routes")
            :: List.map (fun route ->
-             Ansi.dim,
+             (Theme.recede ()),
              Say.code "       " ++ Say.as_received (Terminal_text.single_line route.Masc.Tui_decode_tools.sor_name)
              ++ Say.both ~ko:" ← 노드 " ~en:" ← node " ++ Say.as_received (Terminal_text.single_line route.sor_node_id)
              ++ Say.code " · JSON pointer "
@@ -948,7 +987,7 @@ let deferred_word = Say.both ~ko:"미룸" ~en:"deferred"
 
 let skill_statistics_lines ~cols = function
   | None ->
-    [Row (Ansi.dim, Say.both ~ko:"실행 시간 집계 없음 · 보고되지 않은 값은 0ms가 아닙니다"
+    [Row ((Theme.recede ()), Say.both ~ko:"실행 시간 집계 없음 · 보고되지 않은 값은 0ms가 아닙니다"
                       ~en:"No run-time totals · an unreported total is not 0ms")]
   | Some stats ->
       let measured =
@@ -964,7 +1003,7 @@ let skill_statistics_lines ~cols = function
           ++ Say.code (Printf.sprintf "%s · P50 %s · P95 %s"
                (milliseconds row.sds_mean_ms) (milliseconds row.sds_p50_ms)
                (milliseconds row.sds_p95_ms))
-        ; Ansi.dim,
+        ; (Theme.recede ()),
           Say.per_language (function
             | Say.Ko -> Printf.sprintf "  최소 %s → 최대 %s"
                 (milliseconds row.sds_min_ms) (milliseconds row.sds_max_ms)
@@ -991,9 +1030,9 @@ let skill_statistics_lines ~cols = function
            Say.per_language (function
              | Say.Ko -> Printf.sprintf "executor 실행 시간 · 보존된 원래 실행 %d건" stats.scst_records
              | Say.En -> Printf.sprintf "executor run time · %d original runs retained" stats.scst_records)
-         ; Ansi.dim, Say.both ~ko:"동일 revision / 전체 Keepers · P50/P95: nearest rank"
+         ; Theme.recede (), Say.both ~ko:"동일 revision / 전체 Keepers · P50/P95: nearest rank"
                        ~en:"Same revision / all Keepers · P50/P95: nearest rank"
-         ; Ansi.dim, window ]
+         ; Theme.recede (), window ]
          @ List.concat_map duration measured
          @ [ Ansi.bold, Say.both ~ko:"실행 결과 분포 · 분모는 보존된 원래 실행 수"
                           ~en:"Run results · out of the original runs retained" ])
@@ -1008,7 +1047,7 @@ let skill_statistics_lines ~cols = function
               ; { name = Say.render language deferred_word
                 ; count = stats.scst_deferred; style = Masc_tui_theme.Warn } ]
             |> List.map (fun line -> "", line)) ]
-      @ [ Row (Ansi.dim, Say.both ~ko:"deferred는 실행 시간에서 제외 · queue/의존 대기/model 시간은 별도"
+      @ [ Row ((Theme.recede ()), Say.both ~ko:"deferred는 실행 시간에서 제외 · queue/의존 대기/model 시간은 별도"
                            ~en:"deferred is left out of run time · queue, dependency wait and model time are separate") ]
 ;;
 
@@ -1023,14 +1062,14 @@ let skill_settlement_lines_uncached ~cols composition =
         let content label name = (Ansi.bold, Say.code "       " ++ label) ::
           (match json_assoc_member_opt name node with
            | Some value -> json_rows (skill_json_lines ~cols ~indent:9 value)
-           | None -> [Ansi.dim, Say.both ~ko:"         없음" ~en:"         unavailable"]) in
+           | None -> [(Theme.recede ()), Say.both ~ko:"         없음" ~en:"         unavailable"]) in
         [Ansi.bold,
          Say.both ~ko:"     관측한 노드 " ~en:"     Observed node " ++ field "node_id"
          ++ say_dot ++ field "tool_name" ++ Say.code " · origin=" ++ field "execution_origin";
-         Ansi.dim,
+         (Theme.recede ()),
          Say.code "       output bytes=" ++ field "result_bytes"
          ++ Say.code " · truncated_to=" ++ field "truncated_to";
-         Ansi.dim,
+         (Theme.recede ()),
          Say.code "       execution=" ++ field "execution_id"
          ++ Say.code " · tool use=" ++ field "tool_use_id"]
         @ content (Say.both ~ko:"관측한 입력" ~en:"Observed input") "input"
@@ -1064,21 +1103,21 @@ let skill_run_history_lines state (evidence : Masc.Tui_decode_skill_evidence.ski
      Say.per_language (function
        | Say.Ko -> Printf.sprintf "     원래 실행: %s  [:이전  ]:다음  Enter:최신" position
        | Say.En -> Printf.sprintf "     Original runs: %s  [:older  ]:newer  Enter:latest" position);
-     Ansi.dim, Say.both ~ko:"       실행마다 보존된 마지막 결과 · 앞선 전이는 바뀌었을 수 있음"
+     (Theme.recede ()), Say.both ~ko:"       실행마다 보존된 마지막 결과 · 앞선 전이는 바뀌었을 수 있음"
                  ~en:"       Each run's latest retained result; earlier transitions may be replaced"]
     @ (match evidence.se_composition_selection, index with
        | Exact_run run_id, None ->
          [Theme.warn (), Say.both ~ko:"       요청한 실행이 이 revision 의 보존 범위에 없음: "
                            ~en:"       Requested run absent in this revision's retained coverage: "
            ++ Say.as_received (Masc.Keeper_tool_plan.Composition_run_id.to_string run_id);
-          Ansi.dim, Say.both ~ko:"       다른 실행으로 바꾸지 않음 · 통계는 보존된 실행 전체"
+          (Theme.recede ()), Say.both ~ko:"       다른 실행으로 바꾸지 않음 · 통계는 보존된 실행 전체"
                       ~en:"       No other run substituted; statistics still cover all retained runs"]
        | Latest_retained, (None | Some _) | Exact_run _, Some _ -> [])
     @ List.filter_map (fun (label, delta) ->
         adjacent_skill_evidence_run state ~reference:evidence.se_reference
           ~selection:evidence.se_composition_selection ~runs:evidence.se_composition_runs ~delta
         |> Option.map (fun run_id ->
-          Ansi.dim, Say.code "       " ++ label ++ Say.code ": "
+          (Theme.recede ()), Say.code "       " ++ label ++ Say.code ": "
                     ++ Say.as_received (Masc.Keeper_tool_plan.Composition_run_id.to_string run_id)))
         [Say.both ~ko:"이전" ~en:"older", 1; Say.both ~ko:"다음" ~en:"newer", -1]
 ;;
@@ -1108,13 +1147,13 @@ let tools_selection_line ~cols state =
          Say.map (Masc_tui_message_layout.fit_middle (Masc_tui_frame.inner_width ~cols))
            (request_selection_prefix ++ Say.as_received (Terminal_text.single_line target.request_id)))
     | None ->
-      (match selected_tools_skill_profile state with
+      let profiles = tools_skill_profiles state in
+      let count = List.length profiles in
+      let cursor = clamped_tools_skill_cursor ~count state.tools_skill_cursor in
+      (match List.nth_opt profiles cursor with
        | None -> Say.both ~ko:"Skill: 없음" ~en:"Skill: none"
        | Some profile ->
-         let prefix =
-           skill_selection_prefix ~index:state.tools_skill_cursor
-             ~count:(List.length (tools_skill_profiles state))
-         in
+         let prefix = skill_selection_prefix ~index:cursor ~count in
          prefix ++ Say.as_received (Masc_tui_message_layout.fit_middle
            (max 1 (Masc_tui_frame.inner_width ~cols
                    - Masc_tui_message_layout.display_width (Say.render language prefix)))
@@ -1137,7 +1176,7 @@ let request_selection_document ~cols (target : Masc.Tui_decode_async_request.tar
   let request_id = Say.as_received (Terminal_text.single_line target.request_id) in
   [ named_again ~cols ~selection_row:(request_selection_prefix ++ request_id)
       ~title:(Row (Ansi.bold, Say.code " " ++ request_selection_prefix ++ request_id))
-  ; Row (Ansi.dim,
+  ; Row ((Theme.recede ()),
          Say.both ~ko:" 원래 요청자: " ~en:" Requested by: "
          ++ Say.as_received (Terminal_text.single_line target.submitted_by)
          ++ Say.both ~ko:" · 대상 Keeper: " ~en:" · Keeper: "
@@ -1156,7 +1195,7 @@ let skill_selection_document ~cols ~count index
   let field label value = label ++ Say.code " " ++ Say.as_received value in
   [ named_again ~cols ~selection_row:(skill_selection_prefix ~index ~count ++ name)
       ~title:(Row (Ansi.bold, Say.both ~ko:"동작 대상 Skill: " ~en:"Action Skill: " ++ name))
-  ; Row (Ansi.dim,
+  ; Row ((Theme.recede ()),
          Say.concat ~sep:say_dot
            [ field (Say.both ~ko:"출처" ~en:"Source") (Terminal_text.single_line
                (Skill_reference.identity_source_id_to_string reference.identity));
@@ -1170,11 +1209,12 @@ let tools_selection_document ~cols state =
     Option.fold ~none:[] ~some:(request_selection_document ~cols) state.tools_async_selection
   else
     let profiles = tools_skill_profiles state in
-    match List.nth_opt profiles state.tools_skill_cursor with
+    let count = List.length profiles in
+    let cursor = clamped_tools_skill_cursor ~count state.tools_skill_cursor in
+    match List.nth_opt profiles cursor with
     | None -> []
     | Some profile ->
-        skill_selection_document ~cols ~count:(List.length profiles) state.tools_skill_cursor
-          profile
+        skill_selection_document ~cols ~count cursor profile
 
 (* The loaded list the move keys walk on this pane, as it was read: the
    Skills of the Effective Keeper Surface, or the async requests while no
@@ -1289,8 +1329,12 @@ let tools_diagnostics_copy_text (state : state) =
        | Masc.Tui_decode_tools.Effective_surface_unavailable _ -> None
        | Masc.Tui_decode_tools.Effective_surface_available { ets_keeper_name; _ } ->
            let field label value = label ++ Say.code ": " ++ Say.as_received (Terminal_text.single_line value) in
+           let profiles = tools_skill_profiles state in
+           let skill_cursor =
+             clamped_tools_skill_cursor ~count:(List.length profiles) state.tools_skill_cursor
+           in
            let skill =
-             match selected_tools_skill_profile state with
+             match List.nth_opt profiles skill_cursor with
              | None -> []
              | Some profile ->
                  let reference = profile.esp_reference in
@@ -1312,9 +1356,9 @@ let tools_diagnostics_copy_text (state : state) =
 let skill_source_picker_prefix summary =
   [ Ansi.bold, Say.both ~ko:" 패키지 저장 출처 선택 (쓰기 가능)"
                  ~en:" Choose the writable source for this package"
-  ; Ansi.dim, Say.both ~ko:" j/k·화살표:선택  Enter:편집  /:필터  Esc:취소"
+  ; (Theme.recede ()), Say.both ~ko:" j/k·화살표:선택  Enter:편집  /:필터  Esc:취소"
                 ~en:" j/k/arrows:select  Enter:edit  /:filter  Esc:cancel"
-  ; Ansi.dim, Say.code " " ++ summary ]
+  ; (Theme.recede ()), Say.code " " ++ summary ]
 
 let skill_source_picker_page state ~terminal_rows =
   max 1 (tools_content_rows state ~terminal_rows ~count:0
@@ -1347,7 +1391,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
            @ (if view.rows = [] then [Theme.warn (), Say.both ~ko:" 맞는 출처 없음" ~en:" No matching source"] else
                List.mapi (fun index source ->
                  let selected = view.selected_row = Some index in
-                 (if selected then Theme.selection_style () else Ansi.dim),
+                 (if selected then Theme.selection_style () else ""),
                  Say.code (if selected then " › " else "   ")
                  ++ Say.as_received (Terminal_text.single_line source)) view.rows)))
     ; cursor = None
@@ -1413,7 +1457,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
         let delivery_tone, delivery =
           match ets_tool_delivery with
           | Masc.Tui_decode_tools.Effective_tools_delivered ->
-            Ansi.dim, Say.both ~ko:"지원" ~en:"delivered"
+            (Theme.recede ()), Say.both ~ko:"지원" ~en:"delivered"
           | Masc.Tui_decode_tools.Effective_tools_suppressed_runtime_unsupported ->
             Theme.warn (), Say.both ~ko:"미지원으로 제외" ~en:"left out, the runtime does not support tools"
         in
@@ -1422,7 +1466,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
            64-character digest each. *)
         let diagnostics_lines =
           let folded = state.tools_diagnostics_folded in
-          ( Ansi.dim,
+          ( (Theme.recede ()),
             Say.code (Printf.sprintf "   %s " (if folded then "▸" else "▾"))
             ++ Say.both ~ko:"진단" ~en:"Diagnostics"
             ++ say_dot ++ Say.code (Masc_tui_keys.expand_turn_label ^ " ")
@@ -1430,8 +1474,23 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             ++ say_dot ++ Say.code "Y " ++ Say.both ~ko:"전체 복사" ~en:"copy all" )
           :: (if folded then []
               else
-                List.map (fun line -> Ansi.dim, Say.code "     " ++ line)
+                List.map (fun line -> (Theme.recede ()), Say.code "     " ++ line)
                   (effective_surface_diagnostics ~hash:Masc_tui_value.Hash.short surface))
+        in
+        let origin_label = function
+          | Masc.Tui_decode_tools.Descriptor_origin ->
+              Say.both ~ko:"정의" ~en:"descriptor"
+          | Masc.Tui_decode_tools.Instruction_skill_origin ->
+              Say.both ~ko:"지침 스킬" ~en:"instruction_skill"
+          | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = Some source_id } ->
+              Say.both ~ko:"컴포지션 스킬:" ~en:"composition_skill:"
+              ++ Say.as_received (Terminal_text.single_line source_id)
+          | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None } ->
+              Say.both ~ko:"컴포지션 스킬" ~en:"composition_skill"
+          | Masc.Tui_decode_tools.Composition_control_origin ->
+              Say.both ~ko:"컴포지션 제어" ~en:"composition_control"
+          | Masc.Tui_decode_tools.Unrecognised_origin raw ->
+              Say.as_received (Terminal_text.single_line raw)
         in
         let tool_lines =
           List.map
@@ -1441,25 +1500,19 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                   work-intake), while the id answers the question this
                   column asks -- which configured source this came from. It
                   is also short, so the column does not have to cut it. *)
-               let kind = Masc.Tui_decode_tools.effective_tool_origin_kind tool.et_origin in
-               let source =
-                 match tool.et_origin with
-                 | Masc.Tui_decode_tools.Composition_skill_origin
-                     { skill_source_id = Some source_id } ->
-                   kind ^ ":" ^ source_id
-                 | Masc.Tui_decode_tools.Composition_skill_origin { skill_source_id = None }
-                 | Masc.Tui_decode_tools.Descriptor_origin
-                 | Masc.Tui_decode_tools.Instruction_skill_origin
-                 | Masc.Tui_decode_tools.Composition_control_origin
-                 | Masc.Tui_decode_tools.Unrecognised_origin _ -> kind
-               in
-               Ansi.dim,
-               Tool_table.effective_tool_line
-                 ~name:(Terminal_text.single_line (Masc.Tool_display.list_label tool.et_name))
-                 ~origin:(Terminal_text.single_line source))
+               "",
+               Say.per_language (fun lang ->
+                 Say.render lang
+                   (Tool_table.effective_tool_line
+                      ~name:(Terminal_text.single_line (Masc.Tool_display.list_label tool.et_name))
+                      ~origin:(Say.render lang (origin_label tool.et_origin)))))
             ets_tools
         in
         let ets_skill_profiles = tools_skill_profiles state in
+        let skill_cursor =
+          clamped_tools_skill_cursor ~count:(List.length ets_skill_profiles)
+            state.tools_skill_cursor
+        in
         let is_normal profile = match profile.Masc.Tui_decode_tools.esp_io with
           | Model_orchestrated -> true | Composition_io _ -> false in
         (* The name column is as wide as the longest name, up to a cap, so a
@@ -1538,7 +1591,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                              ~en:"Composition Skills · executable plans")
                      ++ Say.code (Printf.sprintf " (%d)"
                           (List.length (List.filter (fun value -> is_normal value = instruction) ets_skill_profiles)))] in
-               let selected = index = state.tools_skill_cursor in
+               let selected = index = skill_cursor in
                let name_fitted =
                  Masc_tui_message_layout.fit_middle skill_name_cells
                    (Terminal_text.single_line profile.esp_name)
@@ -1587,10 +1640,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             ets_skill_profiles
         in
         let selected_skill_flow_lines =
-          match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
+          match List.nth_opt ets_skill_profiles skill_cursor with
           | None -> []
           | Some { Masc.Tui_decode_tools.esp_flow = None; _ } ->
-            [ Ansi.dim, Say.both ~ko:"     흐름: 지침 본문 온디맨드 로드 · 도구 모델 자율 선택"
+            [ (Theme.recede ()), Say.both ~ko:"     흐름: 지침 본문 온디맨드 로드 · 도구 모델 자율 선택"
                           ~en:"     Flow: instruction body loads on demand; the model orchestrates tools" ]
           | Some { Masc.Tui_decode_tools.esp_flow = Some flow; _ } ->
             (* Grouped under the batch that runs them, rather than listed
@@ -1645,7 +1698,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                       ( Say.as_received (Terminal_text.single_line node.sfn_tool_name)
                       , dependency_text node )
                   in
-                  ( Ansi.dim
+                  ( (Theme.recede ())
                   , Say.code (Printf.sprintf "     %s " stem)
                     ++ Say.as_received
                          (pad_cells 12 label ^ " "
@@ -1654,7 +1707,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                     ++ tool ++ Say.as_received dependencies ))
                 |> fun lines ->
                 if node_count = 0 then
-                  [ ( Ansi.dim
+                  [ ( (Theme.recede ())
                     , Say.code (Printf.sprintf "     %s %d "
                         (if last_batch then "\xe2\x94\x94" else "\xe2\x94\x9c")
                         batch.sfb_index)
@@ -1673,7 +1726,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             :: batch_lines
         in
         let selected_skill_statistics_lines, selected_skill_evidence_lines =
-          match List.nth_opt ets_skill_profiles state.tools_skill_cursor with
+          match List.nth_opt ets_skill_profiles skill_cursor with
           | None -> [], []
           | Some profile ->
             let key =
@@ -1740,14 +1793,14 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                                 (Terminal_text.single_line keepers)
                                 action_count
                                 (Terminal_text.single_line (string_field "activated_at")))
-                         ; Ansi.dim,
+                         ; (Theme.recede ()),
                            Say.both ~ko:"       추적 " ~en:"       trace "
                            ++ Say.as_received (Terminal_text.single_line item.sea_trace_id)
                            ++ Say.both ~ko:" · 도구 호출 " ~en:" · tool use "
                            ++ Say.as_received (Terminal_text.single_line (string_field "skill_tool_use_id"))
                            ++ (if tied then Say.both ~ko:" · 같은 시각 후보" ~en:" · equal-time candidate"
                                else Say.empty)
-                         ; Ansi.dim,
+                         ; (Theme.recede ()),
                            Say.both ~ko:"       원본 " ~en:"       original "
                            ++ Say.code (Printf.sprintf "%s · runtime %s"
                                 (Terminal_text.single_line (string_field "turn_ref"))
@@ -1812,7 +1865,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                            ++ or_no_value (string_field "keeper")
                            ++ Say.code " · run=" ++ or_no_value (string_field "composition_run_id")
                            ++ Say.code (Printf.sprintf " · settlements=%d" settlement_count)
-                         ; Ansi.dim,
+                         ; (Theme.recede ()),
                            Say.code "       recorded="
                            ++ (match json_assoc_member_opt "recorded_at" composition with
                                | Some (`Float value) ->
@@ -1830,7 +1883,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                            ++ Option.fold (string_field "request_id")
                                 ~none:(Say.both ~ko:"없음" ~en:"none")
                                 ~some:Say.as_received
-                         ; Ansi.dim,
+                         ; (Theme.recede ()),
                            Say.code "       parent tool use="
                            ++ Say.as_received (Option.value ~default:"" (string_field "parent_tool_use_id"))
                            ++ Say.code " · turn=" ++ json_or_unavailable "parent_turn"
@@ -1842,15 +1895,15 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                                 | Some (`String value) -> Say.as_received (Terminal_text.single_line value)
                                 | _ -> unavailable in
                               [ Theme.bad (), Say.code "       " ++ field "message"
-                              ; Ansi.dim, Say.code "       failure class=" ++ field "failure_class"
-                                ++ Say.code " · effect evidence=" ++ field "effect_disposition" ]
+                              ; Theme.recede (), Say.both ~ko:"       실패 유형=" ~en:"       failure class=" ++ field "failure_class"
+                                ++ Say.both ~ko:" · 효과 근거=" ~en:" · effect evidence=" ++ field "effect_disposition" ]
                             | _ -> [])
                          @ (match json_assoc_member_opt "data" result with
                             | Some output ->
                               (Ansi.bold, Say.both ~ko:"       최종 결과 데이터" ~en:"       Final result data")
                               :: json_rows (cached_skill_json skill_final_result_projection ~cols
                                    ~render:(skill_json_lines ~cols ~indent:9) output)
-                            | None -> [Ansi.dim, Say.both ~ko:"       출력 없음" ~en:"       no output"])
+                            | None -> [(Theme.recede ()), Say.both ~ko:"       출력 없음" ~en:"       no output"])
                        | Some _ | None ->
                          [ Theme.bad (), Say.both ~ko:"     Composition 실측 형식 오류"
                                            ~en:"     Composition evidence is malformed" ])
@@ -1875,7 +1928,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                      Terminal_text.single_line
                      coverage.sec_composition_unavailable
                  in
-                   [ Ansi.dim,
+                   [ (Theme.recede ()),
                      Say.both ~ko:"       범위" ~en:"       coverage"
                      ++ Say.code (Printf.sprintf
                        " retained_sessions=%d ledgers=%d activation=%s gaps=%d owner_gaps=%d exact_reference=%s runs_observed=%d"
@@ -1903,13 +1956,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                @ Option.fold ~none:[] ~some:(skill_settlement_lines ~cols) evidence.se_composition
                @ coverage_lines)
              | Some _ | None ->
-               rows [ Ansi.dim, Say.both ~ko:"Enter:선택 revision 실측 읽기  f:다음 Composition 실측"
+               rows [ (Theme.recede ()), Say.both ~ko:"Enter:선택 revision 실측 읽기  f:다음 Composition 실측"
                                   ~en:"Enter:load revision measurements  f:next Composition" ],
-               [ Ansi.dim, Say.both ~ko:"     보존 실측  Enter:이 revision 불러오기"
+               [ (Theme.recede ()), Say.both ~ko:"     보존 실측  Enter:이 revision 불러오기"
                              ~en:"     Retained evidence  Enter:load this revision" ])
         in
         let performance_card =
-          match selected_tools_skill_profile state with
+          match List.nth_opt ets_skill_profiles skill_cursor with
           | None -> []
           | Some profile ->
             let card_body = match profile.esp_io with
@@ -1917,7 +1970,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                   rows
                     (* f and the keys that walk the list are in section 5
                        of the frame, so the card names no key of its own. *)
-                    [ Ansi.dim, Say.both ~ko:"지침 Skill · executor 실행 시간 없음"
+                    [ (Theme.recede ()), Say.both ~ko:"지침 Skill · executor 실행 시간 없음"
                         ~en:"Normal Skill · instructions have no executor run time" ]
               | Composition_io _ -> selected_skill_statistics_lines in
             let pending = match state.tools_evidence_reference, state.tools_evidence_request with
@@ -1935,6 +1988,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             in
             [ Measurement_card (fun language -> skill_usage_box ~cols (draw language card_pieces)) ]
         in
+        let selected_profile = List.nth_opt ets_skill_profiles skill_cursor in
         rows
           [ Ansi.bold,
             surface_title ++ Say.code " · " ++ Say.as_received (Terminal_text.single_line ets_keeper_name)
@@ -1956,10 +2010,10 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
            tui-one-screen-grammar section 8). *)
         @ performance_card
         @ rows
-          ((match selected_tools_skill_profile state with
+          ((match selected_profile with
              | None -> [] | Some profile -> skill_io_lines ~cols profile.esp_io)
           @ selected_skill_flow_lines
-          @ (match state.tools_evidence_reference, state.tools_evidence_request, selected_tools_skill_profile state with
+          @ (match state.tools_evidence_reference, state.tools_evidence_request, selected_profile with
              | Some reference, Some _, Some profile when Skill_reference.equal reference profile.esp_reference ->
                  let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
                  [Theme.info (),
@@ -2111,7 +2165,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                    (Skill_reference.identity_package_id_to_string
                       scoped.scope.reference.identity)
                in
-               [ Ansi.dim,
+               [ (Theme.recede ()),
                  Say.code "   " ++ Say.as_received name
                  (* A skill is usually named after the package that holds
                     it, and "work-intake · work-intake" says it twice. *)
@@ -2120,7 +2174,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  ++ Say.code " \xc2\xb7 rev "
                  ++ safe (Skill_reference.content_revision_to_string
                             scoped.scope.reference.content_revision)
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.both ~ko:"     턴 " ~en:"     turn "
                  ++ safe (Ids.Turn_ref.to_string scoped.scope.turn_ref)
                  ++ say_dot ++ safe scoped.scope.invocation_runtime_id
@@ -2142,7 +2196,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                      then None
                      else
                        Some
-                         ( Ansi.dim
+                         ( (Theme.recede ())
                          , Say.code "     " ++ counts_row ~cells:11 kind invoked delivered handoffs actions ))
                    [ ( instruction_kind
                      , scoped_summary.instruction_invocations
@@ -2163,7 +2217,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                      && scoped_summary.skill_resources_served = 0
                   then []
                   else
-                    [ ( Ansi.dim
+                    [ ( (Theme.recede ())
                       , Say.code "     "
                         ++ served_row ~bodies:scoped_summary.skill_bodies_served
                              ~resources:scoped_summary.skill_resources_served )
@@ -2184,7 +2238,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                   match runtimes with
                   | [] -> []
                   | runtimes ->
-                      [ ( Ansi.dim
+                      [ ( (Theme.recede ())
                         , Say.both ~ko:"     runtime 별 \xc2\xb7 " ~en:"     runtimes \xc2\xb7 "
                           ++ Say.concat ~sep:say_dot
                                (List.map
@@ -2199,26 +2253,26 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                let origin, served = skill_invocation_text activation.invocation in
                (* The receipt in the ledger's own field names, which a reader
                   matches against the ledger file. *)
-               [ Ansi.dim,
+               [ (Theme.recede ()),
                  Say.both ~ko:"   시작" ~en:"   begin" ++ Say.code " id=" ++ safe activation.skill_tool_use_id
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.code "   receipt_sha256="
                  ++ Say.as_received
                       (Masc.Keeper_skill_activation_ledger.receipt_projection_revision
                          sap_ledger
                          ~skill_tool_use_id:activation.skill_tool_use_id)
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.both ~ko:"   정확한" ~en:"   exact" ++ Say.code " source_id="
                  ++ safe (Skill_reference.identity_source_id_to_string activation.identity)
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.code "     package_id="
                  ++ safe (Skill_reference.identity_package_id_to_string activation.identity)
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.code "     name=" ++ safe activation.identity.name
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.code "     content_revision="
                  ++ safe (Skill_reference.content_revision_to_string activation.content_revision)
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.both ~ko:"     호출" ~en:"     invoked"
                  ++ Say.code (Printf.sprintf
                    " turn=%d id=%s runtime=%s at=%s"
@@ -2226,15 +2280,15 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                    (Terminal_text.single_line activation.skill_tool_use_id)
                    (Terminal_text.single_line activation.runtime_id)
                    (Terminal_text.single_line activation.activated_at))
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.both ~ko:"       제공 " ~en:"       served " ++ Say.map Terminal_text.single_line served
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.both ~ko:"       전달 " ~en:"       delivered "
                  ++ Say.map Terminal_text.single_line
                       (skill_delivery_text
                          ~has_action:(not (List.is_empty activation.actions))
                          activation.delivery)
-               ; Ansi.dim,
+               ; (Theme.recede ()),
                  Say.code (Printf.sprintf "       snapshot=%s keeper_turn=%s origin="
                    (Skill_catalog_snapshot.snapshot_revision_to_string
                       activation.snapshot_revision
@@ -2244,7 +2298,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                  ++ Say.map Terminal_text.single_line origin
                ]
                @ skill_action_lines activation.actions
-               @ [ Ansi.dim,
+               @ [ (Theme.recede ()),
                    Say.both ~ko:"       끝" ~en:"       end" ++ Say.code " id=" ++ safe activation.skill_tool_use_id
                  ])
             sap_activations
@@ -2278,7 +2332,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                                    record to take a scale from, and the timeline
                                    header says it reads at the fleet figure. *)
                                 " %s \xe2\x89\x88%6s tok %9s turn#%d %s"
-                                (pad_cells 20 skill)
+                                (pad_cells_fit 20 skill)
                                 (Masc_tui_context_inspector.format_tokens
                                    (Masc_tui_token_scale.estimate
                                       Masc_tui_token_scale.fleet
@@ -2296,7 +2350,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                           ++ event_kind (Say.both ~ko:"동작" ~en:"action")
                           ++ Say.code
                                (Printf.sprintf " %s turn#%d %s"
-                                  (pad_cells 20
+                                  (pad_cells_fit 20
                                      (Terminal_text.single_line
                                         (Masc.Tool_display.list_label act.tool_name)))
                                   act.agent_core_turn
@@ -2315,17 +2369,17 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
               | Say.Ko -> Printf.sprintf " Skill 타임라인 · 사건 %d개 (최신부터)" total
               | Say.En -> Printf.sprintf " Skill Timeline · %d event%s (newest first)"
                   total (if total = 1 then "" else "s"))
-          (* Masc_tui_token_scale writes this note in English for every screen
-             that estimates tokens; it moves with the Context inspector. *)
-          ; Ansi.dim, Say.code "   " ++ Say.as_received (Masc_tui_token_scale.note Masc_tui_token_scale.fleet) ]
-          @ List.map (fun (_, line) -> (Ansi.dim, Say.code "   " ++ line)) capped
+          ; Theme.recede (),
+            Say.code "   "
+            ++ Say.of_ko_flag (fun ~ko -> Masc_tui_token_scale.note ~ko Masc_tui_token_scale.fleet) ]
+          @ List.map (fun (_, line) -> ("", Say.code "   " ++ line)) capped
         in
         [ Ansi.bold,
           Say.both ~ko:" Skill 사용 · " ~en:" Skill Use · " ++ safe sap_keeper_name
           ++ Say.per_language (function
                | Say.Ko -> Printf.sprintf " (영수증 %d개)" (List.length sap_activations)
                | Say.En -> Printf.sprintf " (%d receipts)" (List.length sap_activations))
-        ; Ansi.dim,
+        ; (Theme.recede ()),
           Say.code "   " ++ Say.map (pad_cells 13) (Say.both ~ko:"이 세션" ~en:"this session")
           ++ Say.code "\xc2\xb7 "
           ++ counts_row ~cells:11 instruction_kind
@@ -2333,17 +2387,17 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                summary.instruction_provider_deliveries
                summary.instruction_official_client_handoffs
                summary.instruction_actions_observed
-        ; Ansi.dim,
+        ; (Theme.recede ()),
           Say.code "                "
           ++ counts_row ~cells:11 composition_kind
                summary.composition_invocations
                summary.composition_provider_deliveries
                summary.composition_official_client_handoffs
                summary.composition_actions_observed
-        ; Ansi.dim,
+        ; (Theme.recede ()),
           Say.code "                "
           ++ served_row ~bodies:summary.skill_bodies_served ~resources:summary.skill_resources_served
-        ; Ansi.dim,
+        ; (Theme.recede ()),
           Say.code (Printf.sprintf "   session=%s  ledger=%s"
             (Masc.Keeper_skill_activation_ledger.session_id sap_ledger
              |> Keeper_id.Trace_id.to_string
@@ -2351,7 +2405,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
             (Masc.Keeper_skill_activation_ledger.revision sap_ledger
              |> Masc.Keeper_skill_activation_ledger.ledger_revision_to_string
              |> Terminal_text.single_line))
-        ; Ansi.dim,
+        ; (Theme.recede ()),
           Say.code "   workspace="
           ++ safe (Masc.Keeper_skill_activation_ledger.workspace_key sap_ledger)
         ]
@@ -2419,18 +2473,29 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                 Tool_table.Called
                   { calls = tu_calls; failures = tu_failures; p95_ms = tu_p95_ms })
       in
+      let localized_domain name =
+        match name with
+        | "board" -> Say.both ~ko:"보드" ~en:"board"
+        | "work" -> Say.both ~ko:"작업" ~en:"work"
+        | "run" -> Say.both ~ko:"실행" ~en:"run"
+        | "keeper ops" -> Say.both ~ko:"키퍼 운영" ~en:"keeper ops"
+        | "keeper self" -> Say.both ~ko:"키퍼 자체" ~en:"keeper self"
+        | "system" -> Say.both ~ko:"시스템" ~en:"system"
+        | "unsorted" -> Say.both ~ko:"미분류" ~en:"unsorted"
+        | other -> Say.as_received (Terminal_text.single_line other)
+      in
       let count = List.length registered_tools in
       [ Row (Ansi.bold,
              Say.per_language (function
                | Say.Ko -> Printf.sprintf " 전체 등록 도구 · %d개" count
                | Say.En -> Printf.sprintf " All registered tools · %s"
                    (Masc_tui_message_layout.count_noun count "tool")));
-        Row (Ansi.dim, Tool_table.catalog_tool_header layout) ]
+        Row (Theme.recede (), Tool_table.catalog_tool_header layout) ]
       @ List.map
           (function
             | Tool_tree.Domain { name; count } ->
                 Row ( Ansi.bold,
-                  Say.code " " ++ Say.as_received (Terminal_text.single_line name)
+                  Say.code " " ++ localized_domain name
                   ++ Say.code (Printf.sprintf " (%d) %s" count tool_domain_rule) )
             | Tool_tree.Family { name; count } ->
                 Row (Ansi.bold,
@@ -2447,7 +2512,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                    column that says so, so the warning starts there instead of
                    recolouring the name, which is not itself the problem. *)
                 let metadata =
-                  if tool.tl_surfaces = [] then (Theme.warn ()) else Ansi.dim
+                  if tool.tl_surfaces = [] then (Theme.warn ()) else (Theme.recede ())
                 in
                 Row ( "",
                   Tool_table.catalog_tool_line layout ~metadata
@@ -2479,18 +2544,26 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
     match state.skills_catalog with
     | None ->
         rows
-          [ Ansi.dim,
+          [ (Theme.recede ()),
             usage_title
             ++ (match state.skills_catalog_error with
                 | None -> Say.both ~ko:" · 작업 공간 catalog 조회 없음" ~en:" · no workspace catalog reading"
                 | Some _ -> Say.both ~ko:" · 조회 불가 (catalog 조회 없음)" ~en:" · unavailable (no catalog reading)") ]
     | Some { Masc.Tui_decode_tools.sc_state; _ }
       when sc_state <> Masc.Tui_decode_tools.Skills_ready ->
+        let state_label =
+          match sc_state with
+          | Masc.Tui_decode_tools.Skills_ready -> Say.both ~ko:"준비됨" ~en:"ready"
+          | Masc.Tui_decode_tools.Skills_not_registered ->
+              Say.both ~ko:"미등록" ~en:"not registered"
+          | Masc.Tui_decode_tools.Skills_uninitialized ->
+              Say.both ~ko:"초기화 전" ~en:"uninitialized"
+          | Masc.Tui_decode_tools.Skills_invalid_workspace ->
+              Say.both ~ko:"잘못된 작업 공간" ~en:"invalid workspace"
+        in
         rows
-          [ Ansi.dim,
-            usage_title ++ Say.code " · catalog "
-            ++ Say.as_received (Terminal_text.single_line
-                 (Masc.Tui_decode_tools.skills_catalog_state_to_string sc_state)) ]
+          [ Theme.recede (),
+            usage_title ++ Say.both ~ko:" · 카탈로그 " ~en:" · catalog " ++ state_label ]
     | Some
         { Masc.Tui_decode_tools.sc_surfaces
         ; sc_rejections
@@ -2629,13 +2702,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           match state.keepers, state.tools_keeper_usage with
           | [], [] ->
               if Masc_tui_types.roster_complete state
-              then [ Ansi.dim, Say.both ~ko:"명단에 Keeper 없음." ~en:"No Keepers in the roster." ]
+              then [ (Theme.recede ()), Say.both ~ko:"명단에 Keeper 없음." ~en:"No Keepers in the roster." ]
               else []
           | _ :: _, [] ->
             [ Theme.warn (), Say.both ~ko:"활성화 장부 범위: 아직 안 읽음 · 합계가 일부일 수 있음."
                                ~en:"Activation ledger coverage: not read yet; totals may be partial." ]
           | ([] | _ :: _), _ :: _ ->
-              ( Ansi.dim,
+              ( (Theme.recede ()),
                 Say.per_language (function
                   | Say.Ko -> Printf.sprintf "읽은 활성화 장부 %d · 조회 불가 %d%s" ledgers_read excluded
                       (if earlier > 0 then Printf.sprintf " · 이전 조회에서 %d" earlier else "")
@@ -2661,36 +2734,87 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                 ++ Say.as_received (Terminal_text.single_line detail)
                 ++ Say.both ~ko:" · 합계는 나열된 Keeper 만 셈." ~en:"; totals cover only the Keepers listed." ]
           | None, Local_workspace_unread ->
-            [ Ansi.dim, Say.both ~ko:"Keeper 명단 아직 안 읽음." ~en:"Keeper roster not read yet." ]
+            [ (Theme.recede ()), Say.both ~ko:"Keeper 명단 아직 안 읽음." ~en:"Keeper roster not read yet." ]
           | None, Local_workspace_read -> []
+        in
+        let total_surfaces = List.length sc_surfaces in
+        let observed_surfaces = List.length used in
+        let card_inner = Masc_tui_frame.inner_width ~cols - 4 in
+        let coverage_meter_row =
+          if total_surfaces <= 0 || card_inner < 18 then []
+          else
+            [ ( ""
+              , Say.per_language (fun lang ->
+                    let label = match lang with Say.Ko -> "관측 비율" | Say.En -> "Observed" in
+                    Masc_tui_chart.meter
+                      ~width:(min 52 card_inner)
+                      ~value:observed_surfaces ~max_value:(max 1 total_surfaces)
+                      ~label ~label_style:(Theme.recede ())
+                      ~suffix:(Printf.sprintf "%d/%d" observed_surfaces total_surfaces)
+                      ~scale:(Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Completion })
+                      ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()) )
+            ]
         in
         let heading = card ~cols (rows
           ([ Ansi.bold,
              Say.per_language (function
                | Say.Ko -> Printf.sprintf "Skill 사용 집계 · catalog Skill %d개 중 %d개 관측"
-                   (List.length sc_surfaces) (List.length used)
+                   total_surfaces observed_surfaces
                | Say.En -> Printf.sprintf "Skill Usage · %d of %d catalog Skills observed"
-                   (List.length used) (List.length sc_surfaces))
-           ; Theme.series_tint Masc_tui_theme.Calls 0.8,
-             Say.per_language (function
-               | Say.Ko -> Printf.sprintf "Keeper %d · " keepers
-               | Say.En -> Printf.sprintf "Keepers %d · " keepers)
-             ++ counts_text ~invocations:(invocations all_usage) ~deliveries:(deliveries all_usage)
-                  ~actions:(actions all_usage)
-           ; Ansi.dim, Say.both ~ko:"범위: 지금 Keeper 세션의 정확한 Skill revision · 전달에는 비동기 넘김 포함"
-                         ~en:"Scope: exact Skill revisions in current Keeper sessions · deliveries include async handoffs"
-           ; Ansi.dim, Say.both ~ko:"동작: Skill 호출마다 셈 · 호출 여럿이 도구 호출 하나를 나눌 수 있음"
-                         ~en:"Actions: counted per Skill invocation; several invocations may share one tool call"
-           ; Ansi.dim,
-             Say.per_language (function
-               | Say.Ko -> Printf.sprintf "보존된 호출이 없는 것 %d개 · 한 번도 안 썼다는 뜻은 아님."
-                   (List.length sc_surfaces - List.length used)
-               | Say.En -> Printf.sprintf "%d without retained invocation; this does not establish never used."
-                   (List.length sc_surfaces - List.length used))
-           ] @ coverage_lines @ roster_lines))
+                   observed_surfaces total_surfaces)
+           ]
+           @ coverage_meter_row
+           @ [ Theme.series_tint Masc_tui_theme.Calls 0.8,
+               Say.per_language (function
+                 | Say.Ko -> Printf.sprintf "Keeper %d · " keepers
+                 | Say.En -> Printf.sprintf "Keepers %d · " keepers)
+               ++ counts_text ~invocations:(invocations all_usage) ~deliveries:(deliveries all_usage)
+                    ~actions:(actions all_usage)
+             ; Theme.recede (), Say.both ~ko:"범위: 지금 Keeper 세션의 정확한 Skill revision · 전달에는 비동기 넘김 포함"
+                           ~en:"Scope: exact Skill revisions in current Keeper sessions · deliveries include async handoffs"
+             ; Theme.recede (), Say.both ~ko:"동작: Skill 호출마다 셈 · 호출 여럿이 도구 호출 하나를 나눌 수 있음"
+                           ~en:"Actions: counted per Skill invocation; several invocations may share one tool call"
+             ; Theme.recede (),
+               Say.per_language (function
+                 | Say.Ko -> Printf.sprintf "보존된 호출이 없는 것 %d개 · 한 번도 안 썼다는 뜻은 아님."
+                     (total_surfaces - observed_surfaces)
+                 | Say.En -> Printf.sprintf "%d without retained invocation; this does not establish never used."
+                     (total_surfaces - observed_surfaces))
+             ] @ coverage_lines @ roster_lines))
+        in
+        let total_invocations = invocations all_usage in
+        let surface_kind_label kind =
+          match String.lowercase_ascii kind with
+          | "instruction" -> Say.both ~ko:"지침" ~en:"instruction"
+          | "composition" -> Say.both ~ko:"컴포지션" ~en:"composition"
+          | _ -> Say.as_received (Terminal_text.single_line kind)
         in
         let surface_cards = List.map
           (fun ((surface : Masc.Tui_decode_tools.skills_catalog_surface), usage) ->
+            let skill_invocations = invocations usage in
+            let share_bar_row =
+              if total_invocations <= 0 || card_inner < 32 then []
+              else
+                let share_pct =
+                  float skill_invocations /. float total_invocations *. 100.
+                in
+                let bar_w = min 24 (max 8 (card_inner - 24)) in
+                let bar =
+                  Masc_tui_chart.meter_bar ~width:bar_w ~value:skill_invocations
+                    ~max_value:total_invocations
+                    ~scale:(Masc_tui_chart.Series { paint = Theme.paint (); series = Masc_tui_theme.Calls })
+                    ~track_style:(Theme.recede ()) ~reset:Ansi.reset ()
+                in
+                let pct_text =
+                  if skill_invocations > 0 && share_pct < 0.05 then "<0.1%"
+                  else Printf.sprintf "%.1f%%" share_pct
+                in
+                [ "",
+                  Say.code bar ++ Say.code "  "
+                  ++ Say.per_language (function
+                       | Say.Ko -> Printf.sprintf "전체 호출의 %s" pct_text
+                       | Say.En -> Printf.sprintf "%s of total calls" pct_text) ]
+            in
             let keeper_readings = usage
               |> List.map (fun (keeper, (row : Masc.Tui_decode_tools.keeper_skill_usage_row)) ->
                   let last_used = Terminal_text.single_line row.ksu_last_used_at in
@@ -2722,15 +2846,16 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
               | None -> []
               | Some flow ->
                   (match skill_flow_line flow with
-                   | None -> [] | Some line -> [Ansi.dim, line])
+                   | None -> [] | Some line -> [Theme.recede (), line])
                   @ skill_flow_detail_lines flow in
             card ~cols
               (rows
-                 [ Ansi.bold, Say.as_received (Terminal_text.single_line (surface_name surface))
-                     ++ Say.code "  " ++ Say.as_received (Terminal_text.single_line surface.scs_kind)
-                 ; Theme.series_tint Masc_tui_theme.Calls 0.8, counts_text ~invocations:(invocations usage)
-                     ~deliveries:(deliveries usage) ~actions:(actions usage)
-                 ]
+                 ([ Ansi.bold, Say.as_received (Terminal_text.single_line (surface_name surface))
+                      ++ Say.code "  " ++ surface_kind_label surface.scs_kind
+                  ; Theme.series_tint Masc_tui_theme.Calls 0.8, counts_text ~invocations:skill_invocations
+                      ~deliveries:(deliveries usage) ~actions:(actions usage)
+                  ]
+                  @ share_bar_row)
                @ [ Laid_out (fun language -> draw language (rows (keeper_rows language))) ]
                @ rows flow_rows)) used
         in
@@ -2751,7 +2876,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                               ++ Say.as_received (Terminal_text.single_line
                                    (Skill_reference.content_revision_to_string
                                       row.ksu_reference.content_revision)) )
-                          ; ( Ansi.dim,
+                          ; ( (Theme.recede ()),
                               Say.as_received (Terminal_text.single_line keeper) ++ say_dot
                               ++ counts_text ~invocations:row.ksu_invocations ~deliveries:row.ksu_deliveries
                                    ~actions:row.ksu_actions
@@ -2834,7 +2959,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
                         ++ Say.as_received (Terminal_text.single_line shadow.scsh_shadowed.Skill_reference.name)
                         ++ say_dot
                         ++ Say.as_received (Terminal_text.single_line (identity_text shadow.scsh_shadowed)) )
-                    ; ( Ansi.dim,
+                    ; ( (Theme.recede ()),
                         Say.both ~ko:"     가린 것: " ~en:"     shadowed by "
                         ++ Say.as_received (Terminal_text.single_line (identity_text shadow.scsh_winner)) )
                     ])
@@ -2842,7 +2967,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
         in
         heading :: surface_cards @ outside_rows
         @ rows (unavailable_rows
-                @ skill_source_lines ~config:sc_config ~sources:sc_sources
+                @ skill_source_lines ~cols ~config:sc_config ~sources:sc_sources
                 @ rejection_rows @ shadow_rows)
     in
     rows error_lines @ reading_lines
@@ -2947,7 +3072,7 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
         [ Theme.warn (), Say.code " " ++ source
                          ++ Say.both ~ko:" 마지막 조회 유지 · r:새로 읽기" ~en:" · last reading retained · r:refresh" ]
     | false, false, None ->
-        [ Ansi.dim, Say.code " " ++ source ++ Say.both ~ko:" 안 읽음 · r:새로 읽기" ~en:" not read · r:refresh" ]
+        [ (Theme.recede ()), Say.code " " ++ source ++ Say.both ~ko:" 안 읽음 · r:새로 읽기" ~en:" not read · r:refresh" ]
     | false, true, None | false, false, Some _ -> []
   in
   let error_lines = match (selected_tools_error state) with
@@ -3116,7 +3241,9 @@ let skill_landing (state : state) display =
         | Composition_io _ -> false
       in
       let profiles = tools_skill_profiles state in
-      let cursor = state.tools_skill_cursor in
+      let cursor =
+        clamped_tools_skill_cursor ~count:(List.length profiles) state.tools_skill_cursor
+      in
       let lead =
         if cursor <= 0 then entry.first_row
         else

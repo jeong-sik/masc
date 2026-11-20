@@ -237,11 +237,6 @@ let sidebar_tree_rows ~ko ~width ~height ~world ~selected ~entries =
          in
          let line =
            if is_selected then
-             let plain_fitted =
-               Layout.fit_width
-                 (lead ^ branch ^ fitted_label ^ String.make pad_cells ' ' ^ right_str)
-                 width
-             in
              match Theme.sidebar_selection_background () with
              | Some bg when not (String.equal bg "") ->
                  let styled_row =
@@ -253,8 +248,13 @@ let sidebar_tree_rows ~ko ~width ~height ~world ~selected ~entries =
                       ^ Theme.recede () ^ right_str ^ Ansi.reset)
                      width
                  in
-                 Masc_tui_theme.paint_row_background ~bg styled_row ^ Ansi.reset
+                 Masc_tui_theme.paint_row_background ~bg styled_row
              | Some _ | None ->
+                 let plain_fitted =
+                   Layout.fit_width
+                     (lead ^ branch ^ fitted_label ^ String.make pad_cells ' ' ^ right_str)
+                     width
+                 in
                  Theme.selection_style () ^ plain_fitted ^ Ansi.reset
            else
              Layout.fit_width

@@ -1904,10 +1904,13 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     max 0 (room_below_chrome - memory_fact_list_floor_rows - 1)
   in
   let tallest = if total = 0 then 0 else tallest_fact_detail_lines ~ko ~cols rows in
+  (* [Doc.docked_preview] spends 3 chrome rows (hairline, header, footer hints),
+     so reserve [tallest + 3] (clamped to 7..13) to keep the final metadata row
+     visible whenever [detail_budget] permits. *)
   let sheet_height =
     if total = 0 || detail_budget < 5 || tallest <= 0 || width < Masc_tui_card.min_width
     then 0
-    else min detail_budget (min 12 (max 6 (tallest + 2)))
+    else min detail_budget (min 13 (max 7 (tallest + 3)))
   in
   let detail_lines, detail_is_sheet =
     match selected_row with
@@ -2167,7 +2170,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
         let painted =
           match Theme.sidebar_selection_background () with
           | Some bg when not (String.equal bg "") ->
-              Masc_tui_theme.paint_row_background ~bg fitted ^ Ansi.reset
+              Masc_tui_theme.paint_row_background ~bg fitted
           | Some _ | None -> Theme.selection_style () ^ fitted ^ Ansi.reset
         in
         collect (false, painted))

@@ -221,7 +221,7 @@ let changes_lines (state : Masc_tui_types.state) ~cols ~max_lines ~now ~keeper_n
             in
             match Theme.sidebar_selection_background () with
             | Some bg when not (String.equal bg "") ->
-                Masc_tui_theme.paint_row_background ~bg fitted ^ Ansi.reset
+                Masc_tui_theme.paint_row_background ~bg fitted
             | Some _ | None -> Theme.selection_style () ^ fitted ^ Ansi.reset
           else "  " ^ row) shown
       @ [quiet (text "Enter:전문  .:변화 카드  Ctrl-O:연결 트리"

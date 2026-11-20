@@ -1136,27 +1136,68 @@ let test_memory_tree_hierarchy_and_safety () =
 ;;
 
 let test_memory_facts_docked_preview_and_tree_tint () =
-  let state = three_kinds_state () in
-  let drawn = ref [] in
-  Render_memory.render_memory_facts_body ~cols:100 ~budget:22 state
-    ~report_drawn_list:(fun _ ~height:_ -> ())
-    ~hand_position:ignore
-    ~push:(fun line -> drawn := line :: !drawn)
-    ~push_styled:(fun ~style:_ line -> drawn := line :: !drawn)
-    ~push_selected:(fun line -> drawn := line :: !drawn)
-    ~push_divider:(fun () -> drawn := "---" :: !drawn)
-    ~push_empty:(fun () -> drawn := "" :: !drawn);
-  let lines = List.rev !drawn in
-  let plain_lines = List.map Masc_tui_theme.strip_sgr lines in
+  let render_plain ~cols ~budget state =
+    let drawn = ref [] in
+    Render_memory.render_memory_facts_body ~cols ~budget state
+      ~report_drawn_list:(fun _ ~height:_ -> ())
+      ~hand_position:ignore
+      ~push:(fun line -> drawn := line :: !drawn)
+      ~push_styled:(fun ~style:_ line -> drawn := line :: !drawn)
+      ~push_selected:(fun line -> drawn := line :: !drawn)
+      ~push_divider:(fun () -> drawn := "---" :: !drawn)
+      ~push_empty:(fun () -> drawn := "" :: !drawn);
+    List.rev !drawn |> List.map Masc_tui_theme.strip_sgr
+  in
   List.iter
-    (fun line ->
-      check bool "docked facts preview emits no raw control bytes" false
-        (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) line);
-      check bool "docked facts header emits no escaped SGR literal" false
-        (contains "\\x1B" line))
-    plain_lines;
-  check bool "docked preview renders selected fact header" true
-    (List.exists (contains "Selected Fact") plain_lines);
+    (fun (lang, expected_eyebrow, expected_id_label, expected_sha_label, expected_dropped_label) ->
+      let state = three_kinds_state () in
+      state.ui_language <- lang;
+      state.memory_facts_category <- Types.Category_ordinary Cat.Fact;
+      state.memory_facts_cursor <- 0;
+      let plain_fact = render_plain ~cols:100 ~budget:24 state in
+      List.iter
+        (fun line ->
+          check bool "docked facts preview emits no raw control bytes" false
+            (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) line);
+          check bool "docked facts header emits no escaped SGR literal" false
+            (contains "\\x1B" line))
+        plain_fact;
+      check bool "docked preview renders selected fact header" true
+        (List.exists (contains expected_eyebrow) plain_fact);
+      check bool "docked preview keeps final Memory ID metadata row" true
+        (List.exists
+           (fun line ->
+             contains expected_id_label line
+             && contains "mem-The renderer draws the board" line)
+           plain_fact);
+      state.memory_facts_category <- Types.Category_source;
+      state.memory_facts_cursor <- 0;
+      let plain_source = render_plain ~cols:100 ~budget:24 state in
+      check bool "docked preview keeps final File SHA metadata row" true
+        (List.exists
+           (fun line ->
+             contains expected_sha_label line && contains "abc123sha" line)
+           plain_source);
+      state.memory_facts_category <- Types.Category_dropped;
+      state.memory_facts_cursor <- 0;
+      let plain_dropped = render_plain ~cols:100 ~budget:24 state in
+      check bool "docked preview keeps final Dropped At metadata row" true
+        (List.exists (contains expected_dropped_label) plain_dropped);
+      state.memory_facts_category <- Types.Category_all;
+      state.memory_facts_cursor <- 0;
+      let plain_wide = render_plain ~cols:120 ~budget:24 state in
+      List.iter
+        (fun line ->
+          check bool "split-pane docked preview emits no raw control bytes" false
+            (String.exists (fun ch -> Char.code ch < 0x20 || Char.code ch = 0x7f) line);
+          check bool "split-pane docked preview emits no escaped SGR literal" false
+            (contains "\\x1B" line))
+        plain_wide;
+      check bool "split-pane docked preview renders selected fact header" true
+        (List.exists (contains expected_eyebrow) plain_wide))
+    [ Types.Lang_en, "Selected Fact", "Memory ID", "File SHA", "Dropped At"
+    ; Types.Lang_ko, "선택한 사실", "기억 ID", "파일 SHA", "무효화 시점"
+    ];
   let tree_entries =
     [ Types.Category_all, Some 4
     ; Types.Category_ordinary Cat.Fact, Some 2

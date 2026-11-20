@@ -91,6 +91,7 @@ related: ["tui-one-screen-grammar", "an-idle-tui-receives-only-changes-it-draws"
 | `Engine_sample` | `Masc_tui_engine_samples` 의 다음 slot | 단조 |
 | `Play_room_read` | `Masc_tui_play_room` 의 `next_read` | 단조 |
 | `Tool_series_reread` | `state.tool_series_reread_at` | 단조 |
+| `Reading_slot` | 지금 화면의 읽기가 1초를 넘겨 읽는 중 칸이 켜지는 때와, 끄기를 늦춘 1초가 끝나는 때(RFC tui-one-screen-grammar §8). 요청 계층이 내는 칸 값의 결정이 적는다 | 단조 |
 | `Provider_history_day` | `state.provider_history_reread_at` | 벽 |
 | `Harness_stale` | `state.harness_stale_at` | 벽 |
 | `Identity_attempt_deadline` | `identity_login_expectations` 의 `ile_expires_at` | 벽 |

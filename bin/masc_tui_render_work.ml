@@ -15,6 +15,9 @@ module Planning_detail = Masc_tui_planning_detail
 module Planning_due = Masc_tui_planning_due
 module Link = Masc_tui_link
 module Press = Masc_tui_press
+module Doc = Masc_tui_doc
+module Card = Masc_tui_card
+module Text_block = Masc_tui_text_block
 
 (* A moment the wire spells out as ISO-8601 text, drawn the way every other
    moment on these screens is: in the operator's zone, with only as much of
@@ -461,9 +464,28 @@ let planning_detail_tone (tone : Planning_detail.tone) =
   | Planning_detail.Refused -> (Theme.bad ())
   | Planning_detail.Waiting | Planning_detail.Unreadable -> (Theme.warn ())
   | Planning_detail.Active -> (Theme.info ())
-  | Planning_detail.Note | Planning_detail.Quiet -> Ansi.dim
+  | Planning_detail.Note | Planning_detail.Quiet -> Theme.recede ()
   | Planning_detail.Plain -> Ansi.default_fg
   | Planning_detail.Heading -> Masc_tui_ansi.Section.style
+  | Planning_detail.Prestyled -> ""
+
+let planning_phase_mark = function
+  | Goal_phase.Executing -> Masc_tui_value.Mark.Under_way
+  | Goal_phase.Verifying -> Masc_tui_value.Mark.Under_way
+  | Goal_phase.Awaiting_confirmation -> Masc_tui_value.Mark.Yours
+  | Goal_phase.Completed -> Masc_tui_value.Mark.Settled
+  | Goal_phase.Paused _ -> Masc_tui_value.Mark.Paused
+  | Goal_phase.Blocked _ -> Masc_tui_value.Mark.Failed
+  | Goal_phase.Dropped -> Masc_tui_value.Mark.Paused
+
+let planning_phase_sidebar_glyph = function
+  | Goal_phase.Awaiting_confirmation -> "\xe2\x97\x86" (* ◆ *)
+  | Goal_phase.Executing -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way
+  | Goal_phase.Verifying -> "\xe2\x97\x8e" (* ◎ *)
+  | Goal_phase.Completed -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Settled
+  | Goal_phase.Paused _ -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Paused
+  | Goal_phase.Blocked _ -> "!"
+  | Goal_phase.Dropped -> Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Failed
 
 let planning_progress_sheet ~now ?goal_id (state : state) =
   let matching_inflight =
@@ -1066,39 +1088,74 @@ let planning_confirmation_view (state : state) ~goal_id =
 
 let planning_detail_action_rows ~ko ~cols ~armed ~drop_reason (goal : planning_goal) =
   let text korean english = if ko then korean else english in
-  let item action =
-    let key = planning_action_key action and label = planning_action_label ~ko action in
-    Printf.sprintf "%s:%s" key label
+  let inner_w = max 1 (framed_inner_width cols - 2) in
+  let footer_keys =
+    let base =
+      Goal_phase.Public_action.all
+      |> List.filter (planning_goal_offers_action goal)
+      |> List.map (fun action ->
+           { Card.key = planning_action_key action
+           ; label = planning_action_label ~ko action
+           })
+    in
+    let extra =
+      if not (planning_goal_has_valid_id goal) then []
+      else if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
+      then [ { Card.key = "a"; label = text "근거 최종 확인" "confirm proof" } ]
+      else if goal.pg_phase = Goal_phase.Completed
+      then [ { Card.key = "a"; label = text "확인 조회" "inspect proof" } ]
+      else []
+    in
+    extra @ base
   in
-  let actions = Goal_phase.Public_action.all
-    |> List.filter (planning_goal_offers_action goal)
-    |> List.map item in
-  let actions = actions
-    @ (if not (planning_goal_has_valid_id goal) then []
-       else if Goal_phase.moves_goal ~phase:goal.pg_phase ~action:Goal_phase.Confirm_completion
-       then [(text "a:근거 최종 확인" "a:confirm proof")] else if goal.pg_phase = Goal_phase.Completed
-       then [(text "a:저장된 확인 조회" "a:inspect confirmation")] else []) in
-  (* Keep available actions visible while reading; disabled lifecycle keys
-     remain refused by the dispatcher. Layout reserves these same rows. *)
-  (if actions = [] then [] else
-     Message_layout.wrap_styled_words ~max_cells:(max 1 (framed_inner_width cols - 2))
-       ((text "행동: " "Actions: ") ^ String.concat "  " actions))
-  |> List.map (fun line -> "  " ^ line)
+  let _, next_step = planning_next_step ~ko goal in
+  let role =
+    match goal.pg_proof with
+    | Tui_decode.Proof_refuted _ -> Masc_tui_theme.Panel_attention
+    | Tui_decode.
+        ( Proof_idle | Proof_pending | Proof_proven _ | Proof_stale _
+        | Proof_unreadable _ ) -> (
+        match goal.pg_phase with
+        | Goal_phase.Awaiting_confirmation | Goal_phase.Blocked _ ->
+            Masc_tui_theme.Panel_attention
+        | Goal_phase.Executing | Goal_phase.Verifying ->
+            Masc_tui_theme.Panel_fleet
+        | Goal_phase.Completed | Goal_phase.Dropped | Goal_phase.Paused _ ->
+            Masc_tui_theme.Panel_neutral)
+  in
+  let status =
+    { Card.symbol = Card.Mark (planning_phase_mark goal.pg_phase)
+    ; word = planning_phase_label ~ko goal.pg_phase
+    ; tone = planning_phase_color goal.pg_phase
+    }
+  in
+  let summary_clauses =
+    [ text "목표값 " "Target " ^ Planning_detail.measure_text goal.pg_measure
+    ; Printf.sprintf "P%d" goal.pg_priority
+    ]
+  in
+  let card_rows =
+    Doc.action_callout_card ~ko ~width:inner_w ~role
+      ~title:(text "다음 행동" "Next Action")
+      ~status ~next_step ~summary_clauses ~footer_keys
+    |> List.map (fun row -> "  " ^ row)
+  in
+  card_rows
   |> fun rows -> rows @ (if planning_goal_has_valid_id goal then [] else
-       Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+       Message_layout.wrap_words ~max_cells:inner_w
          (text "목표 ID가 비어 있거나 앞뒤 공백이 있습니다 · 상태를 바꿀 수 없습니다." "Goal ID is blank or has disallowed surrounding whitespace; lifecycle actions are unavailable.")
        |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
   |> fun rows -> rows @ (match armed with
        | None -> []
        | Some action ->
-           Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+           Message_layout.wrap_words ~max_cells:inner_w
              (Printf.sprintf (if ko then "확인 대기: %s [%s] · 다시 누르면 제출, 다른 키는 취소" else "ARMED: %s [%s] · press again to submit; other keys cancel")
                 (planning_action_label ~ko action) (planning_action_key action))
-           |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
+           |> List.map (fun line -> "  " ^ Theme.warn () ^ Ansi.bold ^ line ^ Ansi.reset))
   |> fun rows -> rows @ (match drop_reason with
        | None -> []
        | Some reason ->
-           Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols - 2))
+           Message_layout.wrap_words ~max_cells:inner_w
              (Printf.sprintf (if ko then "중단 사유: %s_ · Enter:중단 요청" else "DROP REASON: %s_ · Enter requests drop")
                 (Terminal_text.single_line reason))
            |> List.map (fun line -> "  " ^ Theme.warn () ^ line ^ Ansi.reset))
@@ -1116,71 +1173,144 @@ let planning_proof_rows lines =
   List.map (fun (line : Planning_detail.line) ->
     { line with text = planning_proof_lead ^ line.text }) lines
 
+let planning_measurement_kv (state : state) ~doc_width (goal : planning_goal) =
+  let ko = state.ui_language = Lang_ko in
+  let text k e = ui_text state ~ko:k ~en:e in
+  let prestyled rows =
+    List.map (fun s -> { Planning_detail.tone = Prestyled; text = s }) rows
+  in
+  let kv_rows = Doc.kv_rows ~width:doc_width ~indent:2 ~max_label_cells:16 in
+  let unreconciled reason =
+    kv_rows [ Doc.kv ~tone:(Theme.warn ()) (text "실제 측정" "Measured") reason ]
+    |> prestyled
+  in
+  if Option.is_none goal.pg_criterion_revision then []
+  else match state.overview_goals with
+  | Goals_unread ->
+      kv_rows [ Doc.kv ~tone:(Theme.warn ()) (text "실제 측정" "Measured") (text "실제 측정 미조회" "Actual measurement not observed") ]
+      |> prestyled
+  | Goals_failed reason ->
+      unreconciled (text "조회 실패: " "Unavailable: " ^ Terminal_text.single_line reason)
+  | Goals_read goals ->
+      (match List.find_opt (fun (row : Tui_decode.overview_goal) -> String.equal row.og_id goal.pg_id) goals with
+       | None -> unreconciled (text "현재 측정 목록에 목표 없음" "Goal missing from measurement tree")
+       | Some row ->
+           if not (Option.equal String.equal goal.pg_criterion_revision row.og_criterion_revision)
+              || not (Goal_measure.equal goal.pg_measure row.og_measure)
+              || not (String.equal goal.pg_procedure row.og_procedure)
+           then unreconciled (text "목표 목록과 측정 목록의 기준 버전 또는 목표값이 다름" "Criterion revision or target differs from Goal tree")
+           else
+             let tasks_str =
+               Printf.sprintf
+                 (if ko then "%d/%d 완료 · 목표 측정과 별개" else "%d/%d done (separate from measurement)")
+                 row.og_task_done_count row.og_task_count
+             in
+             let fields =
+               match row.og_measurement with
+               | Goal_measurement_unread ->
+                   [ Doc.kv ~tone:(Theme.warn ()) (text "실제 측정" "Measured") (text "미조회" "not read")
+                   ; Doc.kv ~tone:(Theme.recede ()) (text "연결 작업" "Linked tasks") tasks_str
+                   ]
+               | Goal_measurement_not_recorded ->
+                   [ Doc.kv ~tone:(Theme.recede ()) (text "실제 측정" "Measured") (text "기록된 측정 없음" "no measurement recorded")
+                   ; Doc.kv ~tone:(Theme.recede ()) (text "연결 작업" "Linked tasks") tasks_str
+                   ]
+               | Goal_measurement_unavailable reason ->
+                   [ Doc.kv ~tone:(Theme.warn ()) (text "실제 측정" "Measured") (Terminal_text.single_line reason)
+                   ; Doc.kv ~tone:(Theme.recede ()) (text "연결 작업" "Linked tasks") tasks_str
+                   ]
+               | Goal_measurement_reported { value; evidence; actor; recorded_at } ->
+                   [ Doc.kv ~tone:(Theme.ok () ^ Ansi.bold) (text "실제값" "Actual")
+                       (Terminal_text.single_line value ^ text " (보고된 값)" " (reported)")
+                   ; Doc.kv (text "측정 근거" "Evidence") (Terminal_text.single_line evidence)
+                   ; Doc.kv ~tone:(Theme.recede ()) (text "측정 주체" "Recorded by")
+                       (Terminal_text.single_line actor ^ " · " ^ wire_moment recorded_at)
+                   ; Doc.kv ~tone:(Theme.recede ()) (text "연결 작업" "Linked tasks") tasks_str
+                   ]
+             in
+             kv_rows fields |> prestyled)
+
 let planning_detail_content (state : state) ~confirmation ~cols (goal : planning_goal) =
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
-  let width = max 1 (framed_inner_width cols - 2) in
-  (* A field is a fact the operator reads, so it takes the plain foreground.
-     Provenance rows (Created, Link) pass [Quiet] to recede. *)
-  let field ?(tone = Planning_detail.Plain) ?(separator = ": ") label text =
-    let prefix = "  " ^ label ^ separator in
-    let cells = Message_layout.display_width prefix in
-    let project text = { Planning_detail.tone; text } in
-    if cells < framed_inner_width cols then
-      (match Masc_tui_text_block.rows ~max_cells:(framed_inner_width cols - cells) text with
-       | [] -> [project prefix]
-       | lines -> List.mapi (fun index line ->
-           project ((if index = 0 then prefix else String.make cells ' ') ^ line)) lines)
-    else
-      (Message_layout.wrap_words ~max_cells:width label |> List.map (fun line -> project ("  " ^ line)))
-      @ (Masc_tui_text_block.rows ~max_cells:width text |> List.map (fun line -> project ("  " ^ line)))
+  let inner_w = max 1 (framed_inner_width cols) in
+  let width = max 1 (inner_w - 2) in
+  let prestyled rows =
+    List.map (fun s -> { Planning_detail.tone = Prestyled; text = s }) rows
+  in
+  let line_p text = { Planning_detail.tone = Prestyled; text } in
+  let section ?badge ?badge_tone title =
+    [ line_p (Doc.section_rule ~width:inner_w ~indent:2 ?badge ?badge_tone title) ]
+  in
+  let kv_block ?label_style ?max_label_cells fields =
+    Doc.kv_rows ~width:inner_w ~indent:2 ?label_style ?max_label_cells fields |> prestyled
   in
   let optional = function Some value -> value | None -> Masc_tui_theme.Glyph.no_value in
-  (* The row this detail was opened from says past due; the Due field says it
-     too, in the plain foreground every field here keeps. *)
+  let due_standing = Planning_due.standing ~now:(Ptime_clock.now ()) goal in
+  let due_tone =
+    match due_standing with
+    | Planning_due.Due_passed | Planning_due.Unreadable_due _ -> Theme.warn ()
+    | Planning_due.Due_ahead | Planning_due.Not_in_progress | Planning_due.No_due -> ""
+  in
   let due = optional goal.pg_due_date
-    ^ (match planning_due_clause ~ko (Planning_due.standing ~now:(Ptime_clock.now ()) goal) with
+    ^ (match planning_due_clause ~ko due_standing with
        | None -> ""
        | Some words -> " · " ^ words) in
-  let _, next_text = planning_next_step ~ko goal in
-  let section title =
-    Masc_tui_text_block.rows ~max_cells:width (Masc_tui_ansi.Section.rule_text title)
-    |> List.map (fun line -> { Planning_detail.tone = Heading; text = "  " ^ line })
+  let gap = [ { Planning_detail.tone = Planning_detail.Quiet; text = "" } ] in
+  let title_rows =
+    Text_block.rows ~max_cells:(max 1 (inner_w - 4)) goal.pg_title
+    |> List.map (fun row -> line_p ("  " ^ Ansi.bold ^ row ^ Ansi.reset))
   in
-  let gap = [ { Planning_detail.tone = Quiet; text = "" } ] in
   let overview =
     section (text "목표와 성공 조건" "Goal and criterion")
-    @ field (text "제목" "Title") goal.pg_title
-    @ field (text "목표" "Measure") (Planning_detail.measure_text goal.pg_measure)
-    @ field (text "측정 방법" "Procedure") goal.pg_procedure
-    @ field (text "다음 행동" "Next") next_text in
-  let metadata = gap @ section (text "상세 정보" "Details")
-    @ field ~tone:Planning_detail.Quiet (text "목표 ID" "Goal") goal.pg_id
-    @ field (text "기한" "Due") due
-    @ field (text "우선순위" "Priority") (Printf.sprintf "P%d" goal.pg_priority)
-    @ (List.concat_map (fun (label, value) -> match value with
-         | None -> [] | Some value -> field ~tone:Planning_detail.Quiet label (wire_moment value))
-         [(text "생성" "Created"), goal.pg_created_at; (text "갱신" "Updated"), goal.pg_updated_at; (text "검토" "Reviewed"), goal.pg_last_review_at])
-    @ field ~tone:Planning_detail.Quiet (text "링크" "Link") (Link.reference Goal goal.pg_id)
-    @ (match state.planning with None -> [] | Some snapshot ->
-      field ~tone:Planning_detail.Quiet (text "목록 관측 시각" "List observed") (wire_moment snapshot.pl_generated_at))
+    @ title_rows
+    @ kv_block ~max_label_cells:14
+        [ Doc.kv ~tone:(Theme.ok () ^ Ansi.bold) (text "목표값" "Measure") (Planning_detail.measure_text goal.pg_measure)
+        ; Doc.kv (text "측정 방법" "Procedure") goal.pg_procedure
+        ; Doc.kv ~tone:due_tone (text "기한" "Due") due
+        ; Doc.kv ~tone:(if goal.pg_priority <= 1 then Theme.warn () ^ Ansi.bold else "")
+            (text "우선순위" "Priority") (Printf.sprintf "P%d" goal.pg_priority)
+        ]
   in
-  let request_results = (match List.assoc_opt goal.pg_id state.goal_action_errors with
-       | Some (Request_failed error) ->
-         field ~tone:Planning_detail.Refused (text "실패" "Error") error
-       | Some (Request_withdrawn refusal) ->
-         (* Kept back before it left: the notice alone, without the error label. *)
-         field ~tone:Planning_detail.Refused ~separator:"" ""
+  let metadata =
+    gap
+    @ section (text "상세 정보" "Details")
+    @ kv_block ~max_label_cells:16
+        ([ Doc.kv ~tone:(Theme.recede ()) (text "목표 ID" "Goal ID") goal.pg_id ]
+         @ List.filter_map (fun (label, value) ->
+             Option.map (fun v -> Doc.kv ~tone:(Theme.recede ()) label (wire_moment v)) value)
+             [ (text "생성" "Created"), goal.pg_created_at
+             ; (text "갱신" "Updated"), goal.pg_updated_at
+             ; (text "검토" "Reviewed"), goal.pg_last_review_at
+             ]
+         @ [ Doc.kv ~tone:(Theme.recede ()) (text "링크" "Link") (Link.reference Goal goal.pg_id) ]
+         @ (match state.planning with
+            | None -> []
+            | Some snapshot ->
+                [ Doc.kv ~tone:(Theme.recede ()) (text "목록 관측 시각" "List observed")
+                    (wire_moment snapshot.pl_generated_at) ]))
+  in
+  let request_results =
+    (match List.assoc_opt goal.pg_id state.goal_action_errors with
+     | Some (Request_failed error) ->
+         kv_block [ Doc.kv ~tone:(Theme.bad ()) (text "실패" "Error") error ]
+     | Some (Request_withdrawn refusal) ->
+         Doc.prose_block ~width:inner_w ~indent:2 ~guide_style:(Theme.bad ()) ~tone:(Theme.bad ())
            (workspace_refusal_text ~ko ~request:Kept_request.Goal_transition refusal)
-       | None -> [])
+         |> prestyled
+     | None -> [])
     @ (state.goal_action_receipts |> List.filter_map (fun receipt ->
          if not (String.equal receipt.gar_goal_id goal.pg_id) then None
-         else Some (field ~tone:Planning_detail.Unreadable (text "요청 결과" "Request result")
-           (match goal_receipt_answer state receipt with
-            | `Kept_back notice ->
-              Printf.sprintf "%s · %s · %s" notice receipt.gar_workspace receipt.gar_ticket
-            | `Answer answer ->
-              Printf.sprintf "%s · %s · %s" receipt.gar_workspace receipt.gar_ticket answer)))
+         else
+           Some
+             (kv_block
+                [ Doc.kv ~tone:(Theme.warn ()) (text "요청 결과" "Request result")
+                    (match goal_receipt_answer state receipt with
+                     | `Kept_back notice ->
+                         Printf.sprintf "%s · %s · %s" notice receipt.gar_workspace receipt.gar_ticket
+                     | `Answer answer ->
+                         Printf.sprintf "%s · %s · %s" receipt.gar_workspace receipt.gar_ticket answer)
+                ]))
        |> List.concat)
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
@@ -1189,175 +1319,322 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
     let links_complete, link_notices = match state.goal_task_links with
       | Goal_links_read _ -> true, []
       | Goal_links_not_read -> false,
-          field ~tone:Planning_detail.Unreadable (text "목표 연결" "Goal links")
-            (ui_text state ~ko:"연결 정보 미조회" ~en:"links not read")
+          kv_block [ Doc.kv ~tone:(Theme.warn ()) (text "목표 연결" "Goal links") (ui_text state ~ko:"연결 정보 미조회" ~en:"links not read") ]
       | Goal_links_read_failed reason -> false,
-          field ~tone:Planning_detail.Unreadable (text "목표 연결" "Goal links") reason in
+          kv_block [ Doc.kv ~tone:(Theme.warn ()) (text "목표 연결" "Goal links") reason ] in
     let complete = links_complete && work_task_rows_complete state in
     let count = List.length linked_tasks in
     let count_text =
-      if complete then string_of_int count
-      else if count = 0 then ui_text state ~ko:"일부 관측" ~en:"partial reading"
-      else if state.ui_language = Lang_ko then Printf.sprintf "%d개 표시 · 일부 관측" count
-      else Printf.sprintf "%d shown · partial reading" count in
+      if complete then Printf.sprintf (if ko then "%d건" else "%d") count
+      else if count = 0 then ui_text state ~ko:"일부 관측" ~en:"partial"
+      else if ko then Printf.sprintf "%d건 (일부)" count
+      else Printf.sprintf "%d (partial)" count
+    in
+    let task_rows =
+      List.concat_map (fun (task : Tui_decode.task) ->
+        let icon = task_status_icon task.status in
+        let icon_style = task_state_style task.status in
+        let status_word = task_status_word state task.status in
+        let header =
+          Printf.sprintf "  %s%s%s %s%s%s  %s%s%s  "
+            icon_style icon Ansi.reset
+            (Theme.recede ()) (Masc.Tui_terminal_text.sanitize_terminal_text task.id) Ansi.reset
+            icon_style (Masc.Tui_terminal_text.sanitize_terminal_text status_word) Ansi.reset
+        in
+        let lead_w = Message_layout.display_width (Masc_tui_theme.strip_sgr header) in
+        let title_w = max 1 (inner_w - lead_w) in
+        let wrapped_title = Text_block.rows ~max_cells:title_w task.title in
+        (match wrapped_title with
+         | [] -> [ line_p header ]
+         | first :: rest ->
+             line_p (header ^ first)
+             :: List.map (fun r -> line_p (String.make (min lead_w (max 0 (inner_w - 1))) ' ' ^ r)) rest))
+        linked_tasks
+    in
     gap
-    @ section
-        (ui_text state ~ko:"연결 작업"
-           ~en:"Linked Tasks")
-    @ (if warning then field ~tone:Planning_detail.Unreadable (text "작업 관측" "Task reading") scope else [])
+    @ section ~badge:count_text (ui_text state ~ko:"연결 작업" ~en:"Linked Tasks")
+    @ (if warning then kv_block [ Doc.kv ~tone:(Theme.warn ()) (text "작업 관측" "Task reading") scope ] else [])
     @ (match state.tasks_error with
        | None -> []
-       | Some reason -> field ~tone:Planning_detail.Unreadable (text "작업 조회 범위" "Task coverage") reason)
+       | Some reason -> kv_block [ Doc.kv ~tone:(Theme.warn ()) (text "작업 조회 범위" "Task coverage") reason ])
     @ link_notices
-    @ field ~tone:(if complete then Planning_detail.Plain else Unreadable) (text "열린 작업" "Open tasks") count_text
-    @ (if linked_tasks = [] then [] else [ { Planning_detail.tone = Plain; text = "" } ])
-        (* One row per task, led by its id. Its [Link.reference] is that id
-           under a fixed prefix, and only the board scans text for links, so
-           a row of its own would repeat the id. *)
-    @ List.concat_map (fun (task : Tui_decode.task) ->
-        field ~separator:"  " task.id
-          (task_status_word state task.status ^ " · " ^ task.title)) linked_tasks
+    @ task_rows
   in
   let proof_width = planning_proof_width ~width in
   let under_way = Masc_tui_value.Mark.glyph Masc_tui_value.Mark.Under_way in
   let confirmation_rows =
-    (match confirmation with
-       | `Submitting -> [{Planning_detail.tone = Active; text = under_way ^ " " ^ (text "근거 최종 확인 요청 중" "Sending proof confirmation")}]
-       | `Inspect (Masc_tui_fetched.Ready value) ->
-           Planning_detail.confirmation_lines ~width:proof_width
-             ~ko:(state.ui_language = Lang_ko) value
-       | `Inspect Loading -> [{Planning_detail.tone = Active; text = under_way ^ " " ^ (text "확인할 근거 조회 중" "Reading the proof to confirm")}]
-       | `Inspect (Stale (_, reason) | Failed reason) -> Planning_detail.wrapped ~width:proof_width Unreadable reason
-       | `Inspect Masc_tui_fetched.Absent ->
-           (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~ko ~width:proof_width blocked | None -> [])
-           @ Planning_detail.body ~ko ~width:proof_width goal.pg_proof goal.pg_last_review_note)
+    match confirmation with
+    | `Submitting -> [ { Planning_detail.tone = Active; text = under_way ^ " " ^ text "근거 최종 확인 요청 중" "Sending proof confirmation" } ]
+    | `Inspect (Masc_tui_fetched.Ready value) ->
+        Planning_detail.confirmation_lines ~width:proof_width ~ko value
+    | `Inspect Loading -> [ { Planning_detail.tone = Active; text = under_way ^ " " ^ text "확인할 근거 조회 중" "Reading the proof to confirm" } ]
+    | `Inspect (Stale (_, reason) | Failed reason) -> Planning_detail.wrapped ~width:proof_width Unreadable reason
+    | `Inspect Masc_tui_fetched.Absent ->
+        (match goal.pg_verifier_unreconciled with Some blocked -> Planning_detail.unreconciled_lines ~ko ~width:proof_width blocked | None -> [])
+        @ Planning_detail.body ~ko ~width:proof_width goal.pg_proof goal.pg_last_review_note
   in
-  let measurement = planning_measurement_lines state ~width:proof_width goal in
-  let criterion_review = Planning_detail.criterion_review_lines ~width:proof_width
-    ~ko:(state.ui_language = Lang_ko) goal.pg_criterion_review in
-  let timeline =
+  let proof_badge_word, proof_badge_tone =
+    match goal.pg_proof with
+    | Tui_decode.Proof_proven _ -> (text "검증 통과" "proven"), Theme.ok ()
+    | Tui_decode.Proof_refuted _ -> (text "검증 거절" "refused"), Theme.bad ()
+    | Tui_decode.Proof_pending -> (text "판정 대기" "pending"), Theme.warn ()
+    | Tui_decode.Proof_stale _ -> (text "기준 변경" "stale"), Theme.recede ()
+    | Tui_decode.Proof_unreadable _ -> (text "읽기 실패" "unreadable"), Theme.warn ()
+    | Tui_decode.Proof_idle -> (text "판정 없음" "no verdict"), Theme.recede ()
+  in
+  let doc_proof_and_measurement =
+    let unreconciled_doc =
+      match goal.pg_verifier_unreconciled with
+      | None -> []
+      | Some blocked ->
+          let headline =
+            "  " ^ Theme.bad () ^ Ansi.bold
+            ^ Masc.Tui_terminal_text.sanitize_terminal_text (Planning_detail.unreconciled_heading ~ko blocked.vu_step)
+            ^ Ansi.reset
+          in
+          line_p headline
+          :: prestyled (Doc.prose_block ~width:inner_w ~indent:2 ~guide_style:(Theme.bad ()) ~break_numbered:true blocked.vu_detail)
+    in
+    let evidence_prose_block tone reason_opt =
+      match reason_opt with
+      | None -> []
+      | Some reason ->
+          let guide_style =
+            if String.equal tone "" then Theme.border_muted () else tone
+          in
+          prestyled (Doc.prose_block ~width:inner_w ~indent:2 ~guide_style ~break_numbered:true reason)
+    in
+    let note_block =
+      match goal.pg_last_review_note with
+      | None -> []
+      | Some n ->
+          gap
+          @ [ line_p ("  " ^ Theme.recede () ^ text "검토 메모" "Review note" ^ Ansi.reset) ]
+          @ prestyled (Doc.prose_block ~width:inner_w ~indent:2 ~guide_style:(Theme.recede ()) ~tone:(Theme.recede ()) n)
+    in
+    let proof_prose =
+      match goal.pg_proof with
+      | Tui_decode.Proof_proven reason ->
+          evidence_prose_block (Theme.ok ()) reason
+      | Tui_decode.Proof_refuted reason ->
+          evidence_prose_block (Theme.bad ()) reason
+      | Tui_decode.Proof_pending ->
+          [ line_p ("  " ^ Theme.warn () ^ text "완료 판정 대기 중" "Verification result pending" ^ Ansi.reset) ]
+      | Tui_decode.Proof_stale evidence ->
+          [ line_p ("  " ^ Theme.recede () ^ text "기준 변경 · 이전 근거 보존됨" "Criterion changed; previous proof retained" ^ Ansi.reset) ]
+          @ evidence_prose_block (Theme.recede ()) evidence
+      | Tui_decode.Proof_unreadable detail ->
+          evidence_prose_block (Theme.warn ()) detail
+      | Tui_decode.Proof_idle ->
+          [ line_p ("  " ^ Theme.recede () ^ text "기록된 판정 없음" "No verdict recorded on the ledger" ^ Ansi.reset) ]
+    in
+    let criterion_subsection =
+      match goal.pg_criterion_review with
+      | Tui_decode.Criterion_unchecked -> []
+      | Tui_decode.Criterion_unavailable detail ->
+          gap
+          @ section ~badge:(text "확인 불가" "unavailable") ~badge_tone:(Theme.warn ())
+              (text "도달 가능한 성공 기준" "Criterion feasibility")
+          @ prestyled (Doc.prose_block ~width:inner_w ~indent:2 ~guide_style:(Theme.warn ()) ~tone:(Theme.recede ()) detail)
+      | Tui_decode.Criterion_observed observed ->
+          let badge_word, badge_tone, reason =
+            match observed.state with
+            | Tui_decode.Criterion_pending -> text "대기" "pending", Theme.warn (), observed.detail
+            | Criterion_execution_pending -> text "실행 중" "executing", Theme.warn (), observed.detail
+            | Criterion_execution_unknown -> text "불확실" "unknown", Theme.warn (), observed.detail
+            | Criterion_judgment_pending -> text "반영 대기" "publishing", Theme.warn (), observed.detail
+            | Criterion_deferred -> text "보류" "deferred", Theme.warn (), observed.detail
+            | Criterion_viable reason -> text "도달 가능" "viable", Theme.ok (), Some reason
+            | Criterion_needs_revision reason -> text "수정 필요" "needs revision", Theme.bad (), Some reason
+            | Criterion_superseded -> text "대체됨" "superseded", Theme.recede (), observed.detail
+          in
+          let body =
+            match reason with
+            | None -> []
+            | Some r ->
+                prestyled
+                  (Doc.prose_block ~width:inner_w ~indent:2
+                     ~guide_style:(Theme.recede ()) ~break_numbered:true
+                     ~tone:(Theme.recede ()) r)
+          in
+          let rev_kv =
+            kv_block ~max_label_cells:12
+              [ Doc.kv ~tone:(Theme.recede ()) (text "기준 버전" "Revision") (Masc_tui_value.Hash.short observed.criterion_revision)
+              ; Doc.kv ~tone:(Theme.recede ()) (text "검토 요청" "Request") (Masc_tui_value.Hash.short observed.request_id)
+              ]
+          in
+          gap
+          @ section ~badge:badge_word ~badge_tone (text "성공 기준 검토" "Criterion review")
+          @ body
+          @ rev_kv
+    in
+    section ~badge:proof_badge_word ~badge_tone:proof_badge_tone (text "판정과 측정" "Proof and measurement")
+    @ planning_measurement_kv state ~doc_width:inner_w goal
+    @ (if unreconciled_doc = [] && proof_prose = [] then [] else gap)
+    @ unreconciled_doc
+    @ proof_prose
+    @ note_block
+    @ criterion_subsection
+  in
+  let raw_timeline =
     Planning_detail.timeline ~ko ~now:(Unix.gettimeofday ()) ~width
       ~goal_id:goal.pg_id state.goal_timeline
+    |> List.map (fun (line : Planning_detail.line) ->
+         match line.tone with
+         | Heading -> line_p (Doc.section_rule ~width:inner_w ~indent:2 line.text)
+         | Proven | Refused | Waiting | Active | Unreadable | Note | Quiet | Plain
+         | Prestyled ->
+             line)
   in
   let candle =
     let open Candle_goal_observation in
-    let coverage = field ~tone:Planning_detail.Quiet (text "후보 범위" "Candidate coverage")
-      (text "후보 준비는 증명 기록 때 저장한 스냅샷의 작업 연결을 읽습니다. 이 원장만으로 전체 연결 이력이나 누락된 기여를 알 수 없습니다." "current candidate preparation reads Snapshot links saved during proof recording; this ledger cannot establish full link history or missing contributions") in
-    let describe ({configuration; ledger} : Candle_goal_observation.t) =
+    let kv_opt = kv_block ~max_label_cells:16 in
+    let kv_note label text_s = kv_opt [ Doc.kv ~tone:(Theme.recede ()) label text_s ] in
+    let kv_warn label text_s = kv_opt [ Doc.kv ~tone:(Theme.warn ()) label text_s ] in
+    let coverage =
+      prestyled
+        (Doc.prose_block ~width:inner_w ~indent:2 ~guide_style:(Theme.recede ())
+           ~tone:(Theme.recede ())
+           (text "후보 준비는 증명 기록 때 저장한 스냅샷의 작업 연결을 읽습니다. 이 원장만으로 전체 연결 이력이나 누락된 기여를 알 수 없습니다."
+              "Candidate preparation reads Snapshot links saved during proof recording; this ledger cannot establish full link history or missing contributions."))
+    in
+    let describe ({ configuration; ledger } : Candle_goal_observation.t) =
       let config = match configuration with Enabled -> (text "켜짐" "enabled") | Off -> (text "꺼짐" "off") | Disabled -> (text "비활성 또는 읽기 실패" "disabled or unreadable") in
       let identity (id : identity) =
-        field ~tone:Planning_detail.Quiet (text "검증 요청" "Verification request") id.request_id
-        @ field ~tone:Planning_detail.Quiet (text "검증 실행" "Verifier run") id.verification_run_id in
+        kv_opt
+          [ Doc.kv ~tone:(Theme.recede ()) (text "검증 요청" "Verification req") id.request_id
+          ; Doc.kv ~tone:(Theme.recede ()) (text "검증 실행" "Verifier run") id.verification_run_id
+          ]
+      in
       let snapshot = function
         | Snapshot_matching -> []
-        | Snapshot_missing -> field ~tone:Planning_detail.Unreadable (text "스냅샷" "Snapshot") (text "확인된 검증 실행의 스냅샷 없음" "missing for this confirmed run")
-        | Snapshot_conflicting -> field ~tone:Planning_detail.Unreadable (text "스냅샷" "Snapshot") (text "확인된 검증 실행의 스냅샷 기록 충돌" "conflicting records for this confirmed run") in
+        | Snapshot_missing -> kv_warn (text "스냅샷" "Snapshot") (text "확인된 검증 실행의 스냅샷 없음" "missing for this confirmed run")
+        | Snapshot_conflicting -> kv_warn (text "스냅샷" "Snapshot") (text "확인된 검증 실행의 스냅샷 기록 충돌" "conflicting records for this confirmed run") in
       let payout = function
         | No_recorded_obligation ->
-          field (text "지급" "Payout") (text "이 원장에 지급 의무 기록 없음 · 이전 이력은 미조회" "no obligation recorded in this ledger; prior history not read")
-        | Inconsistent -> field ~tone:Planning_detail.Unreadable (text "지급" "Payout") (text "원장 상태를 해석할 수 없음" "ledger state could not be interpreted")
-        | Owed {identity=id; snapshot=pass; stage} ->
-          field ~tone:Planning_detail.Waiting (text "지급" "Payout")
-            (match stage with
-             | Candidates_unrecorded ->
-               (match pass with Snapshot_matching -> (text "지급 대기 · 후보 기록 없음 · 대기 사유 보고 안 됨" "owed; no candidates recorded; waiting reason not reported")
-                | Snapshot_missing | Snapshot_conflicting -> (text "지급 대기 · 스냅샷 확인 전 후보 준비 대기" "owed; candidate preparation waits for the unresolved Snapshot"))
-             | Candidates_consistent -> (text "지급 대기 · 후보 기록됨 · 정산 대기" "owed; candidates recorded; awaiting settlement")
-             | Candidates_inconsistent -> (text "지급 대기 · 기록된 후보 근거 불일치" "owed; recorded candidate evidence is inconsistent")
-             | Candidates_unchecked -> (text "지급 대기 · 기록된 후보 근거 미점검" "owed; recorded candidate evidence is not checked"))
-          @ snapshot pass @ identity id
-        | Held {identity=id; snapshot=pass; origin; issues} ->
-          field ~tone:Planning_detail.Waiting (text "지급" "Payout") (text "보류 · 기여 기간이 불확실함" "held: contribution window is uncertain")
-          @ field ~tone:Planning_detail.Quiet (text "보류 근거" "Hold evidence")
-              (match origin with Stored -> (text "원장에 기록됨" "recorded in ledger") | Derived_candidates -> (text "기록된 후보에서 도출됨" "derived from recorded candidates"))
-          @ snapshot pass @ identity id
-          @ (match issues with
-             | Issues_unavailable -> field ~tone:Planning_detail.Unreadable (text "문제" "Issues") (text "보류 상세 보고 안 됨" "hold details not reported")
-             | Complete_issues issues -> List.concat_map (fun issue ->
-                 field ~tone:Planning_detail.Unreadable (text "문제" "Issue") (Candle_payout.window_issue_to_string issue)) issues
-             | Snapshot_independent_issues issues ->
-               List.concat_map (fun issue ->
-                 field ~tone:Planning_detail.Unreadable (text "문제" "Issue") (Candle_payout.window_issue_to_string issue)) issues
-               @ field ~tone:Planning_detail.Unreadable (text "시간 경계" "Time boundary") (text "스냅샷이 정해지기 전에는 추가 문제를 볼 수 없음" "additional issues cannot be seen until the Snapshot is resolved"))
-          @ (match origin with
-             | Stored -> []
-             | Derived_candidates -> field ~tone:Planning_detail.Unreadable (text "후보 근거" "Candidate evidence")
-                 (text "작업 범위와 후보의 일치 여부는 미점검" "Task coverage and candidate consistency have not been checked"))
-        | Paid {identity=id; recorded_at; allocations} ->
-          field ~tone:Planning_detail.Proven (text "지급" "Payout") ((text "지급 기록 시각: " "recorded paid at ") ^ Candle_time.to_rfc3339 recorded_at)
-          @ identity id
-          @ List.concat_map (fun (allocation : allocation) ->
-              field (text "기록된 배분" "Recorded allocation") (Printf.sprintf (if ko then "%s: %d.%03d Candle (가중치 %d)" else "%s: %d.%03d Candle (weight %d)")
-                allocation.keeper (allocation.amount_milli / 1000) (allocation.amount_milli mod 1000) allocation.weight)) allocations
-          @ field ~tone:Planning_detail.Quiet (text "금액" "Amounts") (text "지급 당시 금액 · 현재 잔액과 다를 수 있음" "at payout; current balances may differ")
-        | Unattributed {identity=id; recorded_at; reason} ->
-          field (text "지급" "Payout") ((match reason with
-            | No_candidates -> (text "지급 대상 후보 없음" "no payable candidates")
-            | All_unrelated -> (text "후보 작업이 무관함" "candidate tasks unrelated")
-            | No_related_keepers -> (text "관련 Keeper 없음" "no related Keepers")
-            | Window_released -> (text "해제된 기여 기간이 모호함" "released window stayed ambiguous")) ^ " (" ^ Candle_time.to_rfc3339 recorded_at ^ ")")
-          @ identity id
-        | Payout_failed {identity=id} ->
-          field ~tone:Planning_detail.Refused (text "지급" "Payout") (text "지급 기한을 읽지 못한 실패 기록" "failure recorded as unreadable due date") @ identity id in
-      field (text "마지막 설정 관측" "Last observed config") config
+            kv_opt [ Doc.kv (text "지급" "Payout") (text "이 원장에 지급 의무 기록 없음 · 이전 이력은 미조회" "no obligation recorded in this ledger; prior history not read") ]
+        | Inconsistent -> kv_warn (text "지급" "Payout") (text "원장 상태를 해석할 수 없음" "ledger state could not be interpreted")
+        | Owed { identity = id; snapshot = pass; stage } ->
+            kv_opt
+              [ Doc.kv ~tone:(Theme.warn ()) (text "지급" "Payout")
+                  (match stage with
+                   | Candidates_unrecorded ->
+                       (match pass with Snapshot_matching -> (text "지급 대기 · 후보 기록 없음 · 대기 사유 보고 안 됨" "owed; no candidates recorded; waiting reason not reported")
+                        | Snapshot_missing | Snapshot_conflicting -> (text "지급 대기 · 스냅샷 확인 전 후보 준비 대기" "owed; candidate preparation waits for the unresolved Snapshot"))
+                   | Candidates_consistent -> (text "지급 대기 · 후보 기록됨 · 정산 대기" "owed; candidates recorded; awaiting settlement")
+                   | Candidates_inconsistent -> (text "지급 대기 · 기록된 후보 근거 불일치" "owed; recorded candidate evidence is inconsistent")
+                   | Candidates_unchecked -> (text "지급 대기 · 기록된 후보 근거 미점검" "owed; recorded candidate evidence is not checked"))
+              ]
+            @ snapshot pass @ identity id
+        | Held { identity = id; snapshot = pass; origin; issues } ->
+            kv_opt
+              [ Doc.kv ~tone:(Theme.warn ()) (text "지급" "Payout") (text "보류 · 기여 기간이 불확실함" "held: contribution window is uncertain")
+              ; Doc.kv ~tone:(Theme.recede ()) (text "보류 근거" "Hold evidence")
+                  (match origin with Stored -> (text "원장에 기록됨" "recorded in ledger") | Derived_candidates -> (text "기록된 후보에서 도출됨" "derived from recorded candidates"))
+              ]
+            @ snapshot pass @ identity id
+            @ (match issues with
+               | Issues_unavailable -> kv_warn (text "문제" "Issues") (text "보류 상세 보고 안 됨" "hold details not reported")
+               | Complete_issues issues -> List.concat_map (fun issue ->
+                   kv_warn (text "문제" "Issue") (Candle_payout.window_issue_to_string issue)) issues
+               | Snapshot_independent_issues issues ->
+                   List.concat_map (fun issue ->
+                     kv_warn (text "문제" "Issue") (Candle_payout.window_issue_to_string issue)) issues
+                   @ kv_warn (text "시간 경계" "Time boundary") (text "스냅샷이 정해지기 전에는 추가 문제를 볼 수 없음" "additional issues cannot be seen until the Snapshot is resolved"))
+            @ (match origin with
+               | Stored -> []
+               | Derived_candidates -> kv_warn (text "후보 근거" "Candidate evidence")
+                   (text "작업 범위와 후보의 일치 여부는 미점검" "Task coverage and candidate consistency have not been checked"))
+        | Paid { identity = id; recorded_at; allocations } ->
+            kv_opt
+              ([ Doc.kv ~tone:(Theme.ok ()) (text "지급" "Payout") ((text "지급 기록 시각: " "recorded paid at ") ^ Candle_time.to_rfc3339 recorded_at) ]
+               @ List.map (fun (allocation : allocation) ->
+                   Doc.kv (text "기록된 배분" "Allocation")
+                     (Printf.sprintf (if ko then "%s: %d.%03d Candle (가중치 %d)" else "%s: %d.%03d Candle (weight %d)")
+                        allocation.keeper (allocation.amount_milli / 1000) (allocation.amount_milli mod 1000) allocation.weight)) allocations
+               @ [ Doc.kv ~tone:(Theme.recede ()) (text "금액" "Amounts") (text "지급 당시 금액 · 현재 잔액과 다를 수 있음" "at payout; current balances may differ") ])
+            @ identity id
+        | Unattributed { identity = id; recorded_at; reason } ->
+            kv_opt
+              [ Doc.kv (text "지급" "Payout")
+                  ((match reason with
+                    | No_candidates -> (text "지급 대상 후보 없음" "no payable candidates")
+                    | All_unrelated -> (text "후보 작업이 무관함" "candidate tasks unrelated")
+                    | No_related_keepers -> (text "관련 Keeper 없음" "no related Keepers")
+                    | Window_released -> (text "해제된 기여 기간이 모호함" "released window stayed ambiguous"))
+                   ^ " (" ^ Candle_time.to_rfc3339 recorded_at ^ ")")
+              ]
+            @ identity id
+        | Payout_failed { identity = id } ->
+            kv_opt [ Doc.kv ~tone:(Theme.bad ()) (text "지급" "Payout") (text "지급 기한을 읽지 못한 실패 기록" "failure recorded as unreadable due date") ]
+            @ identity id
+      in
+      kv_opt [ Doc.kv (text "마지막 설정 관측" "Last config") config ]
       @ (match ledger with
-         | Missing -> field ~tone:Planning_detail.Unreadable (text "원장" "Ledger") (text "원장 파일 없음 · 이전 이력은 읽을 수 없음" "file absent; earlier history cannot be read")
-         | Unavailable reason -> field ~tone:Planning_detail.Unreadable (text "원장" "Ledger")
+         | Missing -> kv_warn (text "원장" "Ledger") (text "원장 파일 없음 · 이전 이력은 읽을 수 없음" "file absent; earlier history cannot be read")
+         | Unavailable reason -> kv_warn (text "원장" "Ledger")
              (match reason with Locked -> (text "잠김" "locked") | Unreadable -> (text "읽기 실패" "unreadable") | Invalid_row -> (text "유효하지 않은 행" "invalid row"))
          | Observed result -> payout result)
       @ (match ledger with
          | Observed (Owed _ | Held _ | Paid _ | Unattributed _ | Payout_failed _) -> coverage
          | Missing | Unavailable _ | Observed (No_recorded_obligation | Inconsistent) -> [])
-      @ field ~tone:Planning_detail.Quiet (text "모델 실행" "Model execution") (text "지급 원장에서 관측하지 않음" "not observed from the payout ledger") in
+      @ kv_note (text "모델 실행" "Model exec") (text "지급 원장에서 관측하지 않음" "not observed from payout ledger")
+    in
     let reading = Masc_tui_fetched.view_for ~equal:String.equal state.goal_candle ~key:goal.pg_id in
-    let reading_label s = under_way ^ " " ^ s in
+    let kv_active label s = kv_opt [ Doc.kv ~tone:(Theme.info ()) label (under_way ^ " " ^ s) ] in
     let rows =
       if not (server_authority_ready state) then
-        field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (workspace_identity_unconfirmed ~ko)
+        kv_warn "Candle" (workspace_identity_unconfirmed ~ko)
       else match reading with
-      | Masc_tui_fetched.Absent -> field ~tone:Planning_detail.Quiet (text "Candle" "Candle") (text "미조회" "not read")
-      | Loading -> field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
+      | Masc_tui_fetched.Absent -> kv_note "Candle" (text "미조회" "not read")
+      | Loading -> kv_active "Candle" (text "지급 원장 조회 중" "reading payout ledger")
       | Failed (Goal_candle_unread error) ->
-        if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error))
-        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") error
+          if Masc_tui_fetched.in_flight state.goal_candle then
+            kv_active "Candle" (text "조회 중 · 이전 조회 실패: " "reading; previous read failed: " ^ error)
+          else kv_warn "Candle" error
       | Failed (Goal_candle_kept_back notice) ->
-        if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
-        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") notice
+          if Masc_tui_fetched.in_flight state.goal_candle then
+            kv_active "Candle" (text "지급 원장 조회 중" "reading payout ledger")
+          else kv_warn "Candle" notice
       | Ready (owner, _, _) | Stale ((owner, _, _), _) when not (Masc_tui_http.credential_owner_is_current owner) ->
-        if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "조회 중 · 이전 인증 정보의 관측은 표시하지 않음" "reading; previous credential observation hidden"))
-        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (text "인증 정보 변경 · 다시 조회하세요" "credential changed; read again")
+          if Masc_tui_fetched.in_flight state.goal_candle then
+            kv_active "Candle" (text "조회 중 · 이전 인증 정보의 관측은 표시하지 않음" "reading; previous credential observation hidden")
+          else kv_warn "Candle" (text "인증 정보 변경 · 다시 조회하세요" "credential changed; read again")
       | Ready (_, instance, _) | Stale ((_, instance, _), _)
         when not (Option.exists (fun identity -> identity.Tui_decode.sid_runtime_instance_id = Some instance) state.server_identity) ->
-        field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") (text "서버 인스턴스 변경 · 다시 조회하세요" "server instance changed; read again")
+          kv_warn "Candle" (text "서버 인스턴스 변경 · 다시 조회하세요" "server instance changed; read again")
       | Ready (_, _, observation) ->
-        if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
-        else describe observation
+          if Masc_tui_fetched.in_flight state.goal_candle then
+            kv_active "Candle" (text "지급 원장 조회 중" "reading payout ledger")
+          else describe observation
       | Stale (_, Goal_candle_unread error) ->
-        if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label ((text "조회 중 · 이전 조회 실패: " "reading; previous read failed: ") ^ error))
-        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") error
+          if Masc_tui_fetched.in_flight state.goal_candle then
+            kv_active "Candle" (text "조회 중 · 이전 조회 실패: " "reading; previous read failed: " ^ error)
+          else kv_warn "Candle" error
       | Stale (_, Goal_candle_kept_back notice) ->
-        if Masc_tui_fetched.in_flight state.goal_candle then
-          field ~tone:Planning_detail.Active (text "Candle" "Candle") (reading_label (text "지급 원장 조회 중" "reading payout ledger"))
-        else field ~tone:Planning_detail.Unreadable (text "Candle" "Candle") notice in
-    gap @ section (Printf.sprintf "%s [%s:%s]"
-      (ui_text state ~ko:"Candle 지급 기록" ~en:"Candle payout record")
-      Masc_tui_keys.goal_candle_refresh_key (ui_text state ~ko:"조회" ~en:"read")) @ rows in
+          if Masc_tui_fetched.in_flight state.goal_candle then
+            kv_active "Candle" (text "지급 원장 조회 중" "reading payout ledger")
+          else kv_warn "Candle" notice
+    in
+    gap
+    @ section ~badge:(Printf.sprintf "[%s:%s]" Masc_tui_keys.goal_candle_refresh_key (text "조회" "read"))
+        (text "Candle 지급 기록" "Candle payout record")
+    @ rows
+  in
   (* Confirmation stays at physical row zero: the presented-row guard below
-     measures this exact block. Other core observations follow it. *)
-  let proof = confirmation_rows @ measurement @ criterion_review in
-  let wrapped_proof = planning_proof_rows proof in
-  let before_candle = match confirmation with
+     measures this exact block. When not inspecting confirmation, the modern
+     structured document presents Summary -> Measurement+Proof -> Linked Tasks. *)
+  let before_candle =
+    match confirmation with
     | `Inspect Masc_tui_fetched.Absent ->
-        request_results @ overview @ gap @ section (text "판정과 측정" "Proof and measurement")
-        @ wrapped_proof @ linked
+        request_results @ overview @ gap @ doc_proof_and_measurement @ linked
     | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-        wrapped_proof @ request_results @ gap @ overview @ linked in
-  let after_candle = metadata @ timeline in
+        let measurement = planning_measurement_lines state ~width:proof_width goal in
+        let criterion_review = Planning_detail.criterion_review_lines ~width:proof_width ~ko goal.pg_criterion_review in
+        let wrapped_proof = planning_proof_rows (confirmation_rows @ measurement @ criterion_review) in
+        wrapped_proof @ request_results @ gap @ overview @ linked
+  in
+  let after_candle = metadata @ raw_timeline in
   before_candle @ candle @ after_candle,
   List.length before_candle + List.length gap
 
@@ -1484,7 +1761,14 @@ let planning_detail_pane (state : state) ~armed ~confirmation ~rows ~cols (goal 
   for offset = 0 to height - 1 do
     match Rows.at window (scroll + offset) with
     | None -> box_empty buf cols
-    | Some line -> box_line_styled buf cols ~style:(planning_detail_tone line.Planning_detail.tone) line.text
+    | Some { Planning_detail.tone = Prestyled; text } -> box_line buf cols text
+    | Some
+        { Planning_detail.tone =
+            ( Proven | Refused | Waiting | Active | Unreadable | Note | Quiet
+            | Plain | Heading ) as tone
+        ; text
+        } ->
+        box_line_styled buf cols ~style:(planning_detail_tone tone) text
   done;
   List.iter (box_line buf cols) sheet_lines;
   let seen = match confirmation with
@@ -1543,7 +1827,8 @@ let render_planning_detail (state : state)
       let left_buf = Buffer.create 1024 in
       let right_buf = Buffer.create 4096 in
       let format_sidebar_goal (row : planning_goal) =
-        Printf.sprintf "%s · %s" (planning_phase_label ~ko:(state.ui_language = Lang_ko) row.pg_phase)
+        Printf.sprintf "%s %s"
+          (planning_phase_sidebar_glyph row.pg_phase)
           (Terminal_text.single_line row.pg_title)
       in
       (* The goal filter narrows to a phase; the goals it leaves out are on

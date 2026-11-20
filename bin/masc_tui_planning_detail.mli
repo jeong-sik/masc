@@ -22,6 +22,9 @@ type tone =
       (** A section's own title. It is drawn in the heading style the other
           detail screens use (info colour, bold), so a long detail has
           landmarks to scroll between; the rows under it keep their tones. *)
+  | Prestyled
+      (** Line already laid out and styled by {!Masc_tui_doc}; the renderer
+          draws it verbatim without wrapping a uniform line tone around it. *)
 
 type line =
   { tone : tone

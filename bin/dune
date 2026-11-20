@@ -3111,8 +3111,8 @@
  (wrapped false)
  (modules masc_tui_render_work)
  (libraries masc masc.goal_measure masc.masc_candle masc.masc_goal masc.masc_schedule
-  masc.masc_types masc_tui_agenda masc_tui_ansi
-  masc_tui_detail_reading masc_tui_fetched masc_tui_frame_presenter masc_tui_keys
+  masc.masc_types masc_tui_agenda masc_tui_ansi masc_tui_card
+  masc_tui_detail_reading masc_tui_doc masc_tui_fetched masc_tui_frame_presenter masc_tui_keys
   masc_tui_link masc_tui_loader masc_tui_message_layout masc_tui_overview_tasks
   masc_tui_planning_detail masc_tui_planning_due masc_tui_press masc_tui_render_prim
   masc_tui_render_schedule masc_tui_rows masc_tui_schedule_recurrence masc_tui_scroll
@@ -3277,6 +3277,7 @@
   masc_tui_answering
   masc_tui_ask_layout
   masc_tui_card
+  masc_tui_doc
   masc_tui_overview_cards
   masc_tui_overview_bands
   masc_tui_ask_projection

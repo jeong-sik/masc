@@ -20,6 +20,7 @@ type tone =
      readable volumes instead of one flat shout. *)
   | Plain
   | Heading
+  | Prestyled
 
 type line =
   { tone : tone

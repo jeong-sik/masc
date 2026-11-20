@@ -33366,6 +33366,17 @@ Use relative paths for resources already held in the package. -->
                         state.changes_diff_max_width <- 0;
                         launch_git_diff_load state ~mailbox:async_messages
                           ~keeper:(Some change.Masc.Tui_decode.fc_keeper) ~path)))
+       | Some ("1" | "2" | "3" as digit)
+         when (state.view = Planning || state.view = Verification || state.view = Harness)
+              && not state.composer_focused
+              && not (modal_owns_keys state) && not state.palette_open
+              && not state.answering_open && not state.link_modal_open
+              && Option.is_none (text_input_target state ~compact_viewport) ->
+           goto_surface state ~mailbox:async_messages
+             (match digit with
+              | "1" -> Planning
+              | "2" -> Verification
+              | "3" | _ -> Harness)
        | Some "v" | Some "V"
          when state.view = Planning || state.view = Verification
               || state.view = Harness ->

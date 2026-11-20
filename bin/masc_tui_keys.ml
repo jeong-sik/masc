@@ -1099,6 +1099,8 @@ let for_surface = function
       ; b ~role:Moves ~ko:"다음 작업 탭" Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
+      ; b ~role:Moves ~ko:"작업 탭 이동" Navigate "1-3" "jump Work tab"
+          ~help:"1: Goals, 2: Task Review, 3: Task Verdicts"
       ; b ~role:Moves ~ko:"상세" Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
         (* Left only closes an open Goal or Task detail ([Planning_list -> ()]
            in the [Some "left"] arm of masc_tui.ml); Esc also leaves Work. *)
@@ -1154,6 +1156,8 @@ let for_surface = function
           ~help:"move; in details, scroll the evidence"
       ; b ~role:Moves ~ko:"다음 작업 탭" Navigate "v" "next Work tab"
           ~help:"on to Task Verdicts, then back to Goals"
+      ; b ~role:Moves ~ko:"작업 탭 이동" Navigate "1-3" "jump Work tab"
+          ~help:"1: Goals, 2: Task Review, 3: Task Verdicts"
       ; b ~role:Acts ~ko:"대기 / 기록" Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
                  every request ever submitted, which nothing removes"
@@ -1195,6 +1199,8 @@ let for_surface = function
       [ b ~role:Moves ~ko:"선택" Navigate "j/k" "move" ~rows:Needs_row
           ~help:"move; in a verdict, scroll"
       ; b ~role:Moves ~ko:"다음 작업 탭" Navigate "v" "next Work tab" ~help:"back round to Goals"
+      ; b ~role:Moves ~ko:"작업 탭 이동" Navigate "1-3" "jump Work tab"
+          ~help:"1: Goals, 2: Task Review, 3: Task Verdicts"
       ; b ~role:Moves ~ko:"페이지" Navigate "PgUp/PgDn" "page" ~rows:Needs_row
       ; b ~role:Moves ~ko:"판정" Act "Right / Enter" "verdict" ~detail:List_only ~rows:Needs_row
           ~help:"open the full evaluator verdict"

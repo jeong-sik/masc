@@ -114,7 +114,8 @@ val wrapped : width:int -> tone -> string -> line list
 
 val measure_text : Goal_measure.t -> string
 (** A Goal's measure as the screens print it: [14 층], [≤ 100 ms],
-    [≥ 90 %], or the condition sentence itself. *)
+    [≥ 90 %], or the condition sentence itself. A quantity target reads back
+    as the float it is: [≤ 1048576 bytes], [≥ 0.1234567 ratio]. *)
 (** [text] split at its line breaks and wrapped between words to [width]. *)
 
 val body :

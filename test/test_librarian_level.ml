@@ -100,6 +100,21 @@ let machine ?(lane = Some (declared ())) ?last_read ?last_room ?(read_alone = fa
 let resting () = Machine.Resting (Lazy.force store)
 let idle () = Machine.Idle { store = Lazy.force store; seen_length = None }
 
+(* The ask a pulse starts from a rest: the unread range, with Memory. *)
+let asking () =
+  Machine.Asking
+    { store = Lazy.force store
+    ; asking =
+        { Machine.ask = 1
+        ; since = 100.0
+        ; lane = declared ()
+        ; removed_since = []
+        ; asked = Machine.Read (Masc.Librarian_read_result.Read_range Masc.Librarian_width.All)
+        ; bottom = Masc.Librarian_bottom.empty
+        }
+    }
+;;
+
 let one_item ?(silent = false) basis =
   Last.Lane { one_item = true; silent; basis; slots = [] }
 ;;
@@ -152,6 +167,8 @@ let test_e4_a_one_item_rest_about_the_snapshot_now () =
     (running (machine ~last_read:(one_item (now ())) (resting ())));
   check_alarms "the writer is not resting" [ "W1" ]
     (running (machine ~last_read:(one_item (now ())) (idle ())));
+  check_alarms "the next pulse is asking it again" [ "W1" ]
+    (running (machine ~last_read:(one_item (now ())) (asking ())));
   check_alarms "a slot was silent" [ "W1" ]
     (running (machine ~last_read:(one_item ~silent:true (now ())) (resting ())));
   check_alarms "Memory changed since" [ "W1" ]

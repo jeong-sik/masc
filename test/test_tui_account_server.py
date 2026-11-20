@@ -4,8 +4,8 @@
 The fixture answers /health as the account server does and every other
 request with the plain 404 the account server gives. The TUI is started on
 it in a terminal; the fixture records the requests it sends, and the
-navigation trace (RFC-0485, MASC_TUI_NAV_TRACE) records which screen each
-frame drew and which keys changed nothing. The screen's words are not read.
+navigation trace (MASC_TUI_NAV_TRACE) records which screen each frame drew
+and which keys changed nothing. The screen's words are not read.
 
 The account server is asked for nothing but the probe, its screen covers the
 others and takes the operator keys. The control is the same fixture answering

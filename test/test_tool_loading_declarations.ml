@@ -3,9 +3,9 @@
 
     The axis this replaces is per-source: every descriptor tool loaded because
     it was a descriptor, every attached tool deferred because it was attached.
-    That is the shape PR #31728 removed at the Keeper level (RFC-0389 tool
-    groups) for the reason it recurs here — a roster somebody maintains, and
-    the tools themselves saying nothing about their own cost. *)
+    That is the shape PR #31728 removed at the Keeper level for the reason it
+    recurs here — a roster somebody maintains, and the tools themselves saying
+    nothing about their own cost. *)
 
 open Alcotest
 open Masc
@@ -172,12 +172,11 @@ defer_loading = true
    below it become unreachable, and nothing reports it, because a name in a
    listing is a live tool as far as every other check can tell. *)
 (* [keeper_skill] is here for the same reason, arrived at from the other side.
-   It reads a Skill body, so it looks like an ordinary tool to defer — and it
-   was, from #32726 until RFC-0411. But the list of Skills it can read lives in
-   its description (tool_schemas_skill.mli: "the list of instruction skills it
-   can read is whatever the catalog found"), and a deferred tool is named but
-   not described. Deferring it hides the catalogue, which is the cost the
-   comment above says bytes do not capture. *)
+   It reads a Skill body, so it looks like an ordinary tool to defer. But the
+   list of Skills it can read lives in its description (tool_schemas_skill.mli:
+   "the list of instruction skills it can read is whatever the catalog found"),
+   and a deferred tool is named but not described. Deferring it hides the
+   catalogue, which is the cost the comment above says bytes do not capture. *)
 let test_the_tools_that_load_deferred_tools_are_never_deferred () =
   List.iter
     (fun name ->

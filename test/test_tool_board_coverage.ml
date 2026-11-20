@@ -2109,9 +2109,8 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
   in
   Alcotest.(check bool) "MCP runtime curation submit ok" true submit_ok;
   let submitted = Yojson.Safe.from_string submit_body in
-  (* #23489 routes curation_submit through [enforce_caller_identity];
-     RFC-0393: the caller's name is stored verbatim — nothing is recovered
-     from its shape. *)
+  (* #23489 routes curation_submit through [enforce_caller_identity]; the
+     caller's name is stored verbatim — nothing is recovered from its shape. *)
   Alcotest.(check string) "MCP runtime submitted_by persisted"
     "mcp-runtime-curator"
     Yojson.Safe.Util.(submitted |> member "submitted_by" |> to_string);

@@ -272,12 +272,12 @@ end
     entry; readers (API) take no lock.
     Optional file sink persists entries across restarts. *)
 module Ring = struct
-  (* RFC-0079: [entry] is the typed record produced by the write-side encoder.
+  (* [entry] is the typed record produced by the write-side encoder.
      [level] and [source] are typed closed sums — see [type level] / [type
      source] at the top of this module. Wire format (the JSON emitted by
      [entry_to_json]) renders them as their canonical strings; the dashboard
-     reads those strings back. Decode failures raise — silent skipping of
-     malformed rows is gone, which is the F1 / RFC-0079 root-fix. *)
+     reads those strings back. Decode failures raise — malformed rows are
+     never skipped silently. *)
   type entry = {
     seq : int;
     ts : string;
@@ -808,8 +808,7 @@ module Ring = struct
   (* The diagnostic kind is in memory only: the sink wire has no key for it,
      so every row read back from disk arrives with [diagnostic_kind = None]
      and only its message text. This fold boundary is the one place string
-     matching is allowed: decoding wire where a string is all that remains
-     (the same rule RFC-0371 §6.1(3) applies to rehydrated provider wire).
+     matching is allowed: decoding wire where a string is all that remains.
      The signal row's text comes from a format string, so the literal
      "Received SIGTERM" does not appear at its emission site. If the JSONL
      sink writes the kind, restored rows carry it and this function goes

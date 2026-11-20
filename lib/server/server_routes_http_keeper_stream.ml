@@ -245,10 +245,10 @@ let chat_surface_of_request payload =
   else Surface_ref.Dashboard { session_id = None }
 
 (* [Owner] is what is left once the request names neither a sender Keeper
-   nor a connector speaker. It is not an authentication fact (RFC-0468
-   §3.2). A Keeper's masc_keeper_msg / delegate arrives on the agent channel
-   with no connector speaker, so without [sender_keeper] it would land here
-   as the operator. *)
+   nor a connector speaker. It is not an authentication fact. A Keeper's
+   masc_keeper_msg / delegate arrives on the agent channel with no
+   connector speaker, so without [sender_keeper] it would land here as the
+   operator. *)
 let chat_speaker_of_request payload =
   match payload.sender_keeper with
   | Some keeper_id -> Keeper_chat_store.keeper_speaker keeper_id
@@ -1674,7 +1674,7 @@ let process_single_turn_with_outcome_ref ~on_turn_ref ~batch_binding ~user_row_o
     | media_blocks -> Some media_blocks
   in
   (* [err] is [Keeper_request_failure.summary] of the cause its producer
-     built. The row still carries text; RFC-0454 D3 gives it the value. *)
+     built. The row carries that text. *)
   let publish_tool_transcript_bindings tool_calls =
     let open Result.Syntax in
     let* resumed_from = resumed_from in

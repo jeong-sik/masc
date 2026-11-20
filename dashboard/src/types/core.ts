@@ -898,10 +898,9 @@ export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string 
 // think/tool order structurally in this array; persisted legacy rows may omit
 // timestamps and still render in stored order.
 // `contentWithheld` marks a step the server admitted without carrying its
-// reasoning (RFC-0358 §2 public autonomous projection). `text` is '' in that
-// case and the label shown for it is this client's to choose. Distinct from
-// ChatThinkingBlock's `redacted`, which means the provider itself sent only a
-// signature.
+// reasoning. `text` is '' in that case and the label shown for it is this
+// client's to choose. Distinct from ChatThinkingBlock's `redacted`, which
+// means the provider itself sent only a signature.
 export type ChatTraceThinkStep = {
   responseOwner?: KeeperResponseOwner
   kind: 'think'

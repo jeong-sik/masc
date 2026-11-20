@@ -49,8 +49,8 @@ export interface GoalStoreUnavailable {
 
 /**
  * `error_code: "goal_task_links_unavailable"` — the Goal–Task link registry,
- * a different source outside RFC-0444, which still answers with a rendered
- * line.
+ * a different source outside the Goal store envelope, which still answers
+ * with a rendered line.
  */
 export interface GoalTaskLinksUnavailable {
   kind: 'links_unavailable'

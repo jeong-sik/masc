@@ -314,9 +314,9 @@
   --k-11-glow: var(--color-k-11-glow);
   --k-12-glow: var(--color-k-12-glow);
 
-  /* Keeper-v2 palette bridge — primitives.jsx uses --kp1..--kp12 to tint
-     sigils and identity chips. Map them onto the dashboard's generated
-     12-slot keeper palette so ported components resolve without edits. */
+  /* Keeper-v2 palette bridge — --kp1..--kp12 tint sigils and identity
+     chips. Map them onto the dashboard's generated 12-slot keeper palette
+     so ported components resolve without edits. */
   --kp1: var(--color-keeper-1);
   --kp2: var(--color-keeper-2);
   --kp3: var(--color-keeper-3);
@@ -678,12 +678,10 @@ html:not([data-theme="paper"]) {
    Desktop type-scale bump (approved 2026-06-17)
 
    The canonical @theme scale (tokens.generated.css) tops out at base 14px /
-   sm 13px, which reads too small on the keeper-v2 surfaces. The token
-   generator (design-system/tokens/build.ts) is absent, so the generated file
-   can't be regenerated — bump the scale here at :root instead (variables.css
-   loads after tokens.generated.css). Scoped to desktop so the mobile
-   scale-down in responsive.css stays authoritative on small screens. Aligns
-   with RFC-0253 (dashboard keeper-v2 token scale).
+   sm 13px, which reads too small on the keeper-v2 surfaces. Bump the scale
+   here at :root (variables.css loads after tokens.generated.css). Scoped to
+   desktop so the mobile scale-down in responsive.css stays authoritative on
+   small screens.
 
    Only --font-size-* is bumped here. The numeric --fs-9..56 ladder used to be
    bumped alongside it and never took effect: tokens.css redefines the whole

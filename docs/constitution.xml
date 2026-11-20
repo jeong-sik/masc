@@ -317,13 +317,22 @@
       이 수치는 작업 분해와 에이전트 출력 범위이며 Keeper 런타임의 제어 게이트가 아니다.
       작업은 Stacked PR 로만 작성한다. 각 PR 은 직전 스택 브랜치를 base 로 삼고,
       가장 아래 PR 만 main 을 base 로 삼는다. 피처 개발과 CI 개선은 각자의 스택에서 진행한다.
+      main 밖의 장기 피처 브랜치에 여러 독립 스택이나 비-네이티브 브랜치 체인을 분기해 매달지 않고,
+      main 기반의 짧은 Native Stack 으로 작업해 통째로 빠르게 착지한다.
+      이 저장소는 main 에 squash 병합만 허용한다(GitHub 저장소 설정과 ruleset `26823705` 강제).
       스택이 main 과 충돌하면 gh stack rebase 로 스택 전체를 main 위에 다시 올리고 모든 층을 한 번에 push 한다.
       아래층만 고쳐 따로 push 하지 않는다. 충돌과 병합 불가는 맨 아래 PR 이 아니라 스택 단위로 보고한다.
+      자기 피처·스택 브랜치에서 충돌을 풀기 위한 `gh stack rebase` / `git rebase` 뒤 `--force-with-lease` push 는
+      파괴적 force-push 금지 대상이 아니라 표준 충돌 해소 경로다(단, `main`·`release/*` 와 타인 소유 브랜치에 대한
+      force-push 와 bare `--force` 는 계속 금지한다). force-push 를 피하려고 `git merge` 로 main 이나 다른 PR 을
+      끌어들이지 않는다.
       스택은 gh stack(native stack)으로 만들고 유지한다. 스택 브랜치에 다른 PR 이나
       main 을 merge 로 끌어들이지 않는다. squash-merge 저장소에서 merge 적분은 조상을
       줄이지 못해 체인이 수백 커밋씩 불어나고 GitHub 의 병합 가능성 계산이 죽는다
       (2026-10-12 PR 스윕: UNKNOWN 3건과 충돌 5건의 원인). 층 충돌은 해당 층을 고쳐
-      gh stack rebase 로 스택 전체를 다시 올린다.
+      gh stack rebase 로 스택 전체를 다시 올린다. 일반 브랜치의 merge 커밋 도입은
+      `.githooks/pre-push`(`release/*` 예외)와 필수 검사 `changes`(`scripts/ci/pr_no_merge_commits.py`,
+      동일 저장소 `release/v*` 예외)가 차단한다.
     </work_unit>
     <build_and_ci>
       PR·일반 branch push 로 자동 CI 를 시작하지 않는다.
@@ -382,14 +391,17 @@
       리뷰 에이전트는 직접 읽고 판단해야 할 책임을 대체하지 않는다.
     </review>
     <merge>
-      운영자가 요청한 일반 PR 자동 병합은 서로 다른 GitHub 계정 2개의 유효한 정식 승인을 조건으로 한다.
+      main 은 squash 병합만 허용한다(ruleset `26823705` `allowed_merge_methods=["squash"]` 및 저장소 squash 전용 설정).
+      운영자가 요청한 일반 PR 자동 병합은 main ruleset 의 `required_approving_review_count`(현재 작성자 외 1계정,
+      2026-11-18 운영자 결정 `ask894f7f704c77e60a` c2 · `#52979` · 규약 제안 #38)와 `dismiss_stale_reviews_on_push` 를 조건으로 한다.
+      고위험 변경은 서로 다른 2계정 승인을 권고하되, 자동 병합기의 강제 상수는 ruleset 과 맞춘다.
       Native Stack 이 아닌 main 대상 Ready PR 은 생성·Ready 전환 시 GitHub Auto-merge 를 기본으로 켠다.
-      이 기본 예약은 --auto 를 사용할 수 있다. Draft 와 Release/Tag 는 자동 예약하지 않는다.
+      이 기본 예약은 --auto --squash 를 사용할 수 있다. Draft 와 Release/Tag 는 자동 예약하지 않는다.
       리뷰어는 승인 전에 소스와 미해결 지적을 확인한다. 자동화는 정식 리뷰 상태를 읽으며,
       COMMENTED 본문의 FAIL·HOLD 를 자동 해석하지 않는다. 자동 병합을 막을 판정은 CHANGES_REQUESTED 로 등록한다.
       단일 PR 의 예약은 GitHub 가 유효한 승인과 검토할 변경의 이전 승인 해제를 판정한다.
-      Native Stack worker 는 모든 미병합 PR 에서 현재 head 와 같은 commit_id 의 서로 다른 계정 승인 2개를 확인한 뒤 맨 위 PR 로 전체를 병합한다.
-      GitHub 는 승인 2개와 검토할 새 변경의 이전 승인 해제를 서버에서 강제하고, 자동화는 규칙을 우회하지 않는다.
+      Native Stack worker 는 모든 미병합 PR 에서 현재 head 와 같은 commit_id 의 필수 승인 수(현재 작성자 외 1계정)를 확인한 뒤 맨 위 PR 로 전체를 squash 병합한다.
+      GitHub 는 필수 승인과 검토할 새 변경의 이전 승인 해제, squash 전용 병합, 필수 검사(`changes`·`type-check`)를 서버에서 강제하고, 자동화는 규칙을 우회하지 않는다.
       리뷰 이벤트 자동화는 빌드·테스트 CI 를 시작하지 않는다. Release/Tag 는 기존 수동 전체 검증·병합 절차를 따른다.
       일반 스택은 현재 head 의 리뷰와 P0·P1·P2 해소로 병합 판단을 한다.
       CI 가 없거나 진행 중이라는 이유만으로 일반 스택의 리뷰·승인·병합을 막지 않는다.
@@ -406,7 +418,7 @@
       Release/Tag 단계는 현재 head 의 전체 검증이 성공해야 병합·게시한다.
       Native Stack 의 실제 병합은 스택 전체가 승인된 경우
       PUT pulls/{맨 위 PR 번호}/merge-async 에 맨 위 PR 의 현재 head 를 sha 로 전달한다.
-      일반 PR 의 실제 병합은 gh pr merge --match-head-commit (현재 head) 로 한다.
+      일반 PR 의 실제 병합은 gh pr merge --squash --match-head-commit (현재 head) 로 한다.
       비동기 접수와 완료를 구분하고 반환된 details.uuid 의 비동기 결과 및 각 PR 의 merged 상태·병합 커밋을 확인한다.
       Native Stack 의 개별 PR 에 --auto 를 쓰거나 --admin 으로 규칙을 우회하지 않는다.
       구체 절차는 docs/guides/NATIVE-GITHUB-STACKS.md 를 따른다.

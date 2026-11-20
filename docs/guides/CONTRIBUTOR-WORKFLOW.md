@@ -30,14 +30,18 @@ flowchart LR
 
 ## Repository strategy
 
-- Work in stacked PRs created and maintained with `gh stack`. The bottom PR targets `main`; each later PR targets the
-  preceding branch. Never merge another PR or `main` into a stack branch. Give each PR one concrete outcome.
+- Work in short stacked PRs rooted directly on `main` and maintained with `gh stack`. The bottom PR targets `main`; each later PR targets the
+  preceding branch. `main` is **squash-only** (enforced by repository merge settings and the `main` ruleset). Never merge another PR or `main` into a feature or stack branch, and avoid hanging multiple independent stacks or non-native chains off a long-lived feature branch. Give each PR one concrete outcome.
 - **Land a native stack whole, once, through its top PR. Never merge it layer by
   layer from the bottom**, including `merge-async` on a lower PR. Each partial
   merge moves `main` and makes the remaining layers, and other stacks, conflict again.
 - When a stack conflicts with `main`, run `gh stack rebase` over the whole stack
-  and push every layer once. Never push a fix to the bottom layer alone. Report
-  conflicts per stack, not per bottom PR.
+  and push every layer once (`gh stack push` or `--force-with-lease`). Rebasing
+  your own feature or stack branch and pushing with `--force-with-lease` is the
+  standard conflict-resolution path; never fall back to `git merge main` to avoid
+  force-pushing (`main`, `release/*`, and other sessions' branches remain
+  protected). Never push a fix to the bottom layer alone. Report conflicts per
+  stack, not per bottom PR.
 - Keep concurrent changes in separate worktrees. Task claims coordinate who is
   doing the work; they do not lock files or authorize editing another checkout.
 - Put generated evidence and copied source snapshots under `artifacts/`. The root
@@ -158,10 +162,12 @@ remove repetition or rewrite sentences; do not concatenate words. Preserve quote
 source text, code, paths and identifiers exactly.
 
 **Commit boundary.** With `.githooks` active, pre-commit refuses a commit on
-`main`, `master` or `develop`, and pre-push refuses a push that adds Dune build
-traces (`trace.csexp`, `_build-*/`). Neither hook runs a build, so commit
-normally from a worktree branch and keep both hooks active. Independent source
-review is still required.
+`main`, `master` or `develop`, and pre-push refuses a push that introduces merge
+commits onto an ordinary feature or stack branch (`release/*` is exempt locally;
+the required `changes` PR check enforces the same rule on GitHub and exempts
+only same-repository `release/v*` branches). Neither hook runs
+a build, so commit normally from a worktree branch and keep both hooks active.
+Independent source review is still required.
 
 Keeper lanes may build/test locally if their toolchain exists. Those results do
 not replace independent source review or full Release/Tag CI. A session's
@@ -257,9 +263,11 @@ classifier or recovery path.
 ## 5. Review and integrate
 
 Ordinary PRs targeting main have [operator-requested automatic merge](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)
-enabled by default when Ready. Non-native PRs show GitHub's Auto-merge reservation
-and use GitHub's valid-approval rules. Native stacks use the whole-scope worker
-after two distinct accounts approve the exact current head of every unmerged
+enabled by default when Ready, using squash merges only. Non-native PRs show
+GitHub's Auto-merge reservation and use GitHub's valid-approval rules. Native
+stacks use the whole-scope worker after the `main` ruleset's required non-author
+account approval count (currently 1; two distinct accounts remain recommended
+for high-risk changes) is satisfied on the exact current head of every unmerged
 member. Use CHANGES_REQUESTED for blocking findings; COMMENTED prose is not an
 automatic stop. Reviewers still inspect source before approving. Release/Tag
 integration remains manual and requires full verification.

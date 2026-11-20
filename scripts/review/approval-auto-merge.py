@@ -369,7 +369,7 @@ def prepare_reads(repo, number):
                    f'{", ".join(f"#{n}" for n in outside)}; push the layers above again so '
                    f'that the type-check of the top compiles them')
     # Membership, all head/base identities and review histories must still
-    # match. GitHub independently enforces the two-review rule during merge.
+    # match. GitHub independently enforces the main ruleset's review rule during merge.
     for pr, history in histories.items():
         if pages(f'repos/{repo}/pulls/{pr}/reviews?per_page=100') != history:
             raise Hold(f'#{pr} reviews changed during admission')

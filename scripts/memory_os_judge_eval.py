@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""memory_os_judge_eval.py — RFC-0247 §-1 P-1 step 0b: LLM-as-judge value eval.
+"""memory_os_judge_eval.py — LLM-as-judge value eval.
 
 Auto-labels memory-os facts useful | noise | uncertain and reports the
 noise_rate that the OCaml harness (test/eval_memory_os_value.ml) defines:
@@ -32,7 +32,7 @@ reproducible via the recorded label output.
 
 This "judge" is the memory-os VALUE-EVAL judge (labels a fact useful/noise). It
 is NOT the `verifier` Keeper (which approves tasks), and NOT the
-[fusion] judge (RFC-0252, synthesizes a panel of model answers). Three distinct roles,
+[fusion] judge (synthesizes a panel of model answers). Three distinct roles,
 three distinct config keys: [runtime.assignments] verifier / [fusion] judge /
 [memory_os] judge.
 

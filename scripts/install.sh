@@ -458,7 +458,7 @@ prefer_available_default() {
 # Prints the index of the one ready ("green") source, or nothing when zero or
 # more than one are ready. "Exactly one" is the only unambiguous choice, so it is
 # the only case the wizard makes for the operator without a terminal or a
-# --provider (RFC-0408 zero-config). Zero or several stays a question.
+# --provider. Zero or several stays a question.
 single_green_index() {
   local found="" i
   for i in "${!PROVIDER_IDS[@]}"; do

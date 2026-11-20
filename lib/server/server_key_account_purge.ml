@@ -39,7 +39,7 @@ let logged id what detail =
 (* The second and the third step: the files, and the record of the end. It
    takes the call of the account, inside which the files of an account
    change. *)
-let finish (_ : Login.in_call) (person : Login.person) ~base_path id =
+let finish (_ : Runtime_account_call.t) (person : Login.person) ~base_path id =
   let account = account_of person id in
   let ended written ~then_ =
     match written with
@@ -108,7 +108,7 @@ let remove ~(person : Login.person) ~base_path id =
   match key_account_of person id with
   | Error refusal -> Error refusal
   | Ok () ->
-    Login.one_call_of id ~busy:Account_busy (fun in_call -> remove_in_call in_call ~person ~base_path id)
+    Runtime_account_call.one_call_of id ~busy:Account_busy (fun in_call -> remove_in_call in_call ~person ~base_path id)
 ;;
 
 (* A place that could not be looked at is left as it is: a removal that went
@@ -124,7 +124,7 @@ let resume_one ~zone ~base_path ~owner ~namespace id =
   let name = Provider_account_id.to_string id in
   let ended in_call = Result.map (fun () -> true) (finish in_call person ~base_path id) in
   match
-    Login.one_call_of id ~busy:Account_busy (fun in_call ->
+    Runtime_account_call.one_call_of id ~busy:Account_busy (fun in_call ->
       match status_of person id with
       | Some Purges.Account_pending -> ended in_call
       | Some Purges.Account_purged ->

@@ -996,7 +996,14 @@ let fusion_evidence_lines ~ko ~width ~frame_width (evidence : fusion_evidence) =
                          match (failed.fjno_timed_out, failed.fjno_elapsed_s) with
                          | true, _ -> t "  (시간 초과)" "  (timed out)"
                          | false, Some seconds ->
-                             Printf.sprintf "  (%.0fs)" seconds
+                             (* How long the judge ran before it failed, on
+                                the finished-length ladder (RFC
+                                tui-one-screen-grammar 6.2); a negative span
+                                is a reading that failed. *)
+                             "  ("
+                             ^ Option.value ~default:(Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed)
+                                 (Message_layout.elapsed_text seconds)
+                             ^ ")"
                          | false, None -> ""
                        in
                        [ ( (Theme.bad ())

@@ -139,9 +139,9 @@ let render_workspace_activity (state : state) repo_id =
       let listing ~budget reading =
           let ko = state.ui_language = Lang_ko in
           c.push (Printf.sprintf
-            (if ko then "  최근 %.0f시간 · 기록된 변경 %d건 · 성공 %d건 · 끝나지 않은 저장소 호출 %d건 · 위치 모르는 호출 %d건"
-             else "  Last %.0fh · %d recorded changes · %d successful · %d incomplete repo calls · %d unlocated fleet calls")
-            reading.Tui_decode.ras_window_hours (List.length rows)
+            (if ko then "  최근 %s · 기록된 변경 %d건 · 성공 %d건 · 끝나지 않은 저장소 호출 %d건 · 위치 모르는 호출 %d건"
+             else "  Last %s · %d recorded changes · %d successful · %d incomplete repo calls · %d unlocated fleet calls")
+            (Masc_tui_value.Interval.of_hours reading.Tui_decode.ras_window_hours) (List.length rows)
             (List.length (List.filter (fun ((change : Tui_decode.file_change), _) -> change.fc_succeeded) rows))
             reading.ras_incomplete reading.ras_unattributed);
           let names = List.map (fun ((change : Tui_decode.file_change), _) -> change.fc_keeper) rows |> List.sort_uniq String.compare in

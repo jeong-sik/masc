@@ -170,28 +170,21 @@ val continuity_for_attempt :
 
 (** Where the chosen continuity puts a lane's range, for the official-client
     lanes that cut their own start seed. *)
-type librarian_position_kind =
+type librarian_position =
   | No_position
       (** No absorbed point: no snapshot or position fits this history
           ({!without_snapshot}). The lane's seed, its own cut, or the turn
           start decides. *)
   | Librarian_snapshot of Librarian_continuity_snapshot.t
       (** A snapshot fits: the represented messages before its end are
-          summarised by its working state. Unread exceptions travel separately. *)
+          summarised by its working state. *)
   | Librarian_progress of { end_atom : int }
       (** No snapshot fits, and the Librarian's read position does. No working
-          state stands in for the prior atoms; unread exceptions are still
-          carried independently and are not claimed to be in Memory. *)
+          state stands in for the prior atoms. *)
 
-type librarian_position =
-  { point : librarian_position_kind
-  ; unread : Keeper_librarian_request_unread.t
-  }
 val no_librarian_position : librarian_position
-(** No observation was provided: both sources remain unavailable, not empty. *)
-val request_unread : continuity -> Keeper_librarian_request_unread.t
-(** The original frozen observations, independent of point selection and the
-    candidate-specific message baseline. *)
+(** The position of a request with no continuity: a completion review, or a
+    lane handed no reader. *)
 
 val librarian_position :
   messages:Agent_core.Types.message list ->
@@ -220,7 +213,6 @@ val continuity_for_request :
       string)
      result) ->
   progress:(unit -> (Keeper_librarian_progress.t option, string) result) ->
-  memory_unread:(unit -> (Keeper_librarian_unread.t list, string) result) ->
   continuity
 (** Where a request starts (RFC keeper-context-window-in-tokens §13.4, §13.6):
     a [snapshot] that fits these messages, else the Librarian's durable
@@ -237,10 +229,7 @@ val continuity_for_request :
     ([Librarian_continuity_snapshot.t.catch_up_end_atom]); until then the
     request starts as it would with no snapshot, so the rewrite never moves
     the start back.
-    [lines] is read only when a snapshot is saved. [memory_unread] is read
-    after selecting the point, pairing with writers that archive holes before
-    advancing progress. Its result and the raw snapshot's unread observation
-    survive a failed snapshot restore and all later request range choices.
+    [lines] is read only when a snapshot is saved.
     It writes {!choose_continuity}'s notes to [keeper_name]'s log. *)
 
 (** What {!choose_continuity} passed over on the way to its choice, in the
@@ -252,7 +241,6 @@ type continuity_note =
   | Progress_unreadable of { why : string; detail : string }
       (** No snapshot fits, and the Librarian's progress file could not be
           read. A warning. *)
-  | Unread_memory_unreadable of { detail : string }
   | Started_at_read_position of { why : string; end_atom : int }
   | Started_at_turn_boundary of { why : string }
 
@@ -266,11 +254,9 @@ val choose_continuity :
       string)
      result) ->
   progress:(unit -> (Keeper_librarian_progress.t option, string) result) ->
-  memory_unread:(unit -> (Keeper_librarian_unread.t list, string) result) ->
   continuity * continuity_note list
 (** {!continuity_for_request}'s choice, with what it passed over returned
-    instead of logged. A fitting snapshot and readable Memory evidence produce
-    no notes. *)
+    instead of logged. A fitting snapshot produces no notes. *)
 
 val log_continuity_note : keeper_name:string -> continuity_note -> unit
 
@@ -281,8 +267,7 @@ val read_keeper_continuity :
   messages:Agent_core.Types.message list ->
   continuity * continuity_note list
 (** {!choose_continuity} over [keeper_name]'s own snapshot, turn-boundary
-    log, Librarian progress and passively read cumulative Memory unread ledger.
-    The turn driver logs the notes; the
+    log and Librarian progress. The turn driver logs the notes; the
     next-request forecast, which only looks, does not. *)
 
 (** The Librarian point a request with a continuity stands on. *)
@@ -458,7 +443,6 @@ val carried_working_state : held_window:held_window option -> range_start -> str
     ({!working_state_text}), and none without one. *)
 
 val project_range_start :
-  unread:Keeper_librarian_request_unread.t ->
   working_state:string option ->
   measure_message_bytes:(Agent_core.Types.message -> int) ->
   atom_count:int ->

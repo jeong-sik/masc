@@ -179,8 +179,6 @@ let carry_indexed ~measure ~past_max_context ~held_window ~continuity ~front ~ac
   in
   let projection, transmitted_bytes =
     Keeper_turn_driver_try_provider.project_range_start
-      ~unread:(Option.fold ~none:Keeper_librarian_request_unread.empty
-        ~some:Keeper_turn_driver_try_provider.request_unread continuity)
       ~working_state:(Keeper_turn_driver_try_provider.carried_working_state ~held_window start)
       ~measure_message_bytes:measure
       ~atom_count

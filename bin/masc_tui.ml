@@ -2551,8 +2551,8 @@ let launch_resource_share state ~mailbox ~report ~entry ~recovery ~dispatch_allo
        report_withdrawn state ~request:Kept_request.Resource_share refusal
      | Ok request ->
        report_action state "system" (if recovery then
-         "Reconciling the original share operation; it may be applied now..."
-         else if operation.requested then "Enabling external sharing..." else "Revoking external sharing...");
+         "Reconciling the original share operation; it may be applied now"
+         else if operation.requested then "Enabling external sharing" else "Revoking external sharing");
        let credential = Masc_tui_http.bind_credential () in
        let host = server_peer_host and port = state.port in
        let identity = Some expected_workspace in
@@ -2632,7 +2632,7 @@ let toggle_resource_external_share state ~mailbox ~dispatch_allowed =
 let begin_resource_share_recovery_lookup state ~mailbox =
   match open_resource_report state, workspace_change_origin state, state.resource_share_recovery_lookup with
   | Error detail, _, _ | _, Error detail, _ -> report_action state "error" detail
-  | Ok _, Ok _, Some _ -> report_action state "system" "Checking the recorded share operation..."
+  | Ok _, Ok _, Some _ -> report_action state "system" "Checking the recorded share operation"
   | Ok report, Ok origin, None when List.exists (fun pending ->
       pending.share_workspace_identity = origin && String.equal pending.share_report.id report.id)
       state.resource_share_pending ->
@@ -2642,7 +2642,7 @@ let begin_resource_share_recovery_lookup state ~mailbox =
       recovery_lookup_origin=origin; recovery_lookup_key=Masc_tui_resource_catalog.Report_revision report } in
     Masc_tui_resources_updates.begin_share_recovery_lookup state ~origin ~report;
     state.resource_share_recovery_lookup <- Some request;
-    report_action state "system" "Checking the recorded share operation...";
+    report_action state "system" "Checking the recorded share operation";
     let path = artifact_share_journal_path origin in
     launch_workspace_result ~observation:true state ~mailbox
       ~boundary_error:Fun.id
@@ -2979,7 +2979,7 @@ let start_masc_server_here ~base_path ~host ~port ~note =
           | Error e -> note ("masc server start failed: " ^ e)
           | Ok owned -> (
               tui_owned_server := Some owned;
-              note "starting masc server here...";
+              note "starting masc server here";
               match Eio_context.get_switch_opt () with
               | None -> ()
               | Some sw ->
@@ -11902,7 +11902,7 @@ let msg_entry_of_history_row state keeper_name ~operation_seq
         in
         ( Message_status
         , Turn_progress
-        , Printf.sprintf "Fusion deliberation %s — 상세는 Runs 탭" pointer
+        , Printf.sprintf "Fusion deliberation %s · 상세는 Runs 탭" pointer
         , None
         , [] )
   in
@@ -13816,7 +13816,7 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
   let cancelling = match clear_targets with
     | [] -> []
     | _ :: _ ->
-      [Printf.sprintf "Cancelling %d in the server queue…" (List.length clear_targets)] in
+      [Printf.sprintf "Cancelling %d in the server queue" (List.length clear_targets)] in
   (match action with
    | Inbox.Inspect_peers _ -> ()
    | Inspect | Pause | Resume | Clear | Cancel _ | Move_to_end _ | Run_next _ | Edit _
@@ -13824,11 +13824,11 @@ let launch_keeper_queue state ~mailbox ~keeper_name action =
        (match state.queue_panel with
         | Some panel when String.equal panel.qp_keeper keeper_name ->
           state.queue_panel <- Some {panel with qp_reading=Queue_loading;
-            qp_notice=Some (Queue_info (if action = Inbox.Inspect then "Reading queue…" else "Sending queue change…"))}
+            qp_notice=Some (Queue_info (if action = Inbox.Inspect then "Reading queue" else "Sending queue change"))}
         | Some _ | None ->
           if action <> Inbox.Inspect then
             chat_notice state ~keeper_name:(Some keeper_name) ~kind:Notice_reply
-              (String.concat " · " (cancelling @ ["Sending queue change…"]))));
+              (String.concat " · " (cancelling @ ["Sending queue change"]))));
   match Eio_context.get_switch_opt () with
   | Some sw -> fork_workspace_job state ~mailbox ~sw run
   | None -> enqueue_async mailbox (Keeper_msg (Keeper_queue_loaded (keeper_name, control_generation, action, Error (Request_failed "Eio switch is unavailable"))))
@@ -14007,7 +14007,7 @@ let paste_clipboard_image state =
        Masc_tui_message_input.insert state.msg_input (Printf.sprintf "[Image #%d] " index);
        notice ~kind:Notice_reply
          (Printf.sprintf
-            "pasted [Image #%d] (%s, %d bytes) \xe2\x80\x94 %d staged for the next message"
+            "pasted [Image #%d] (%s, %d bytes) \xc2\xb7 %d staged for the next message"
             index
             attachment.Masc_tui_keeper_chat_projection.mime_type
             attachment.Masc_tui_keeper_chat_projection.size
@@ -16025,20 +16025,20 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
 let apply_chat_search_result state ~target ~restart ~needle result =
   let notice=chat_notice state ~keeper_name:target in
       let partial=if result.unavailable_entries=0 then "" else
-        Printf.sprintf " — search unavailable for %d entry(s); results may be incomplete" result.unavailable_entries in
+        Printf.sprintf " · search unavailable for %d entry(s); results may be incomplete" result.unavailable_entries in
       match result.match_result with
       | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
           apply_clamped_scroll state (Message_scroll position);
           notice ~kind:Notice_reply
-            (Printf.sprintf "/find %s \xe2\x80\x94 %d row(s) back (/find repeats)"
+            (Printf.sprintf "/find %s \xc2\xb7 %d row(s) back (/find repeats)"
                needle position.scroll ^ partial)
       | None when result.unavailable_entries>0 ->
           notice ~kind:Notice_failure ("/find" ^ partial)
       | None ->
           if restart then
             notice ~kind:Notice_reply
-              (Printf.sprintf "/find %s \xe2\x80\x94 nothing in this conversation"
+              (Printf.sprintf "/find %s \xc2\xb7 nothing in this conversation"
                  needle)
           else
             (* The walk is over, not empty. Said apart from the case above
@@ -16046,7 +16046,7 @@ let apply_chat_search_result state ~target ~restart ~needle result =
                one. *)
             notice ~kind:Notice_reply
               (Printf.sprintf
-                 "/find %s \xe2\x80\x94 no older match; /find %s starts again"
+                 "/find %s \xc2\xb7 no older match; /find %s starts again"
                  needle needle)
 
 
@@ -16067,7 +16067,7 @@ let seek_in_chat state ~mailbox ~target ~restart =
          match the row itself. *)
       let plan=plan_keeper_message_search state ~keeper_name ~needle ~older_than in
       report_action state "system"
-        (Terminal_text.single_line ("/find " ^ needle ^ " — searching conversation"));
+        (Terminal_text.single_line ("/find " ^ needle ^ " · searching conversation"));
       launch_keeper_message_search state plan ~deliver:(fun result ->
         enqueue_async mailbox (Chat_msg (Chat_search_finished (generation,restart,plan,result))))
 
@@ -16489,7 +16489,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           in
           notice ~kind:Notice_reply
             (Printf.sprintf
-               "referenced %s (%s) — the provider fetches it; %d reference(s)                 staged for the next message"
+               "referenced %s (%s) · the provider fetches it; %d reference(s) staged for the next message"
                value
                kind
                (List.length state.msg_references)))
@@ -16504,7 +16504,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
           note_attachment_staged state;
           notice ~kind:Notice_reply
             (Printf.sprintf
-               "attached %s (%s, %d bytes) — %d staged for the next message"
+               "attached %s (%s, %d bytes) · %d staged for the next message"
                attachment.Masc_tui_keeper_chat_projection.name
                attachment.Masc_tui_keeper_chat_projection.mime_type
                attachment.Masc_tui_keeper_chat_projection.size
@@ -16540,7 +16540,8 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
   | Masc_tui_command.Help ->
       Masc_tui_message_input.clear state.msg_input;
       notice ~kind:Notice_reply
-        (String.concat "\n" Masc_tui_command.help_lines)
+        (String.concat "\n"
+           (Masc_tui_command.help_lines_for ~ko:(state.ui_language = Lang_ko)))
   | Masc_tui_command.Features ->
       Masc_tui_message_input.clear state.msg_input;
       let _, cols = get_terminal_size () in
@@ -17206,7 +17207,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       else begin
       Masc_tui_message_input.clear state.msg_input;
       notice ~kind:Notice_reply
-        (Printf.sprintf "restoring preset %s — the live state is autosaved first" name);
+        (Printf.sprintf "restoring preset %s · the live state is autosaved first" name);
       launch_preset_call state ~mailbox
         ~call:(fun ~host ~port -> Masc_tui_loader.restore_preset ~host ~port ~name)
         ~wrap:(fun result -> Preset_msg (Preset_restored (Preset_to_chat target, result)))
@@ -23723,7 +23724,7 @@ let export_verification_evidence state ~mailbox ~open_file =
       if request.vex_authority = state.workspace_authority
          && request.vex_reading == state.workspace_read_authority
       then Ok () else Error "Workspace changed before the evidence file operation" in
-    report_action state "system" "선택한 증거 사본을 내려받는 중…";
+    report_action state "system" "선택한 증거 사본을 내려받는 중";
     launch_guarded_request ~operation:true state ~mailbox
       ~boundary_error:(fun detail -> Request_failed detail)
       ~withdrawn:(fun refusal -> Request_withdrawn refusal)
@@ -24569,7 +24570,7 @@ let attach_dropped_image ?(protect_recovered = false) state ~base_path ~mailbox
     (Masc_tui_message_input.invalidate_revision state.msg_input; state.msg_attachments <- state.msg_attachments @ [ attachment ]);
     note_attachment_staged state;
     report_action state "system"
-      (Printf.sprintf "Attached %s (%s, %d bytes) — %d staged for the next message"
+      (Printf.sprintf "Attached %s (%s, %d bytes) · %d staged for the next message"
          attachment.Masc_tui_keeper_chat_projection.name
          attachment.Masc_tui_keeper_chat_projection.mime_type
          attachment.Masc_tui_keeper_chat_projection.size
@@ -28029,7 +28030,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if Masc_tui_types.finish_play_change state request outcome then begin
       settle_play_mutation state target;
       let retry reason =
-        Printf.sprintf "retry /play revoke %s — %s" requested_name reason
+        Printf.sprintf "retry /play revoke %s · %s" requested_name reason
       in
       (match result with
        | Play_revoke_absent ->
@@ -40810,7 +40811,7 @@ Use relative paths for resources already held in the package. -->
               (match state.resource_read_owner with
                | Some owner ->
                  state.resource_copy_pending <- Some {Masc_tui_resource_catalog.key;owner};
-                 report_action state "system" "Refreshing external sharing before copying the public link..."
+                 report_action state "system" "Refreshing external sharing before copying the public link"
                | None -> report_action state "error" "Could not verify sharing before copying the public link"))
        | Some "R" when state.view = Resources && state.resource_focus = Right_pane ->
            (match Masc_tui_resource_document.current state with

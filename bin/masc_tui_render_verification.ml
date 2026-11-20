@@ -330,7 +330,7 @@ let render_verification_list (state : state) =
          ((Theme.warn ())
          ^ Printf.sprintf
              (if state.ui_language = Lang_ko then "  승인 대기: %s · 같은 키를 한 번 더 누르면 전송 [%s]"
-              else "  armed: approve %s -- same key again to send [%s]")
+              else "  armed: approve %s · same key again to send [%s]")
              (Terminal_text.single_line task_id)
              (Terminal_text.single_line request_id)
          ^ Ansi.reset)
@@ -550,8 +550,8 @@ let verification_detail_pane (state : state) ~rows ~cols
          in
          Printf.sprintf "%s  %s"
            (planning_workspace_title state ~cols ~tab:Planning_task_review ~window:""
-              ~after:(Printf.sprintf " \xe2\x96\xb8 %s  %s" details_step task_label)
-            ^ " \xe2\x96\xb8 " ^ details_step)
+              ~after:(Printf.sprintf " \xe2\x80\xba %s  %s" details_step task_label)
+            ^ " \xe2\x80\xba " ^ details_step)
            task_label));
   box_divider buf cols;
   (* The frame cell of the first content row, counted from what was drawn

@@ -62,6 +62,7 @@ val tick_line : column:int -> string
     column draws no ladder. *)
 
 val column_legend : empty:string -> string
+val column_legend_for : ko:bool -> empty:string -> string
 (** The age view's column for the key sheet: the bins, the axis and its
     edges, the merge on a narrow list, the level and the colours. [empty] is
     the mark an empty cell draws. *)
@@ -95,6 +96,7 @@ val cell : Masc.Keeper_memory_age_bins.t option -> Masc_tui_keeper_axis_cell.t
     {!Masc_tui_keeper_axis_cell.Quiet}. *)
 
 val legend : string
+val legend_for : ko:bool -> string
 (** The sentence the key sheet prints for the cell. It names the groups by
     their edges, says that a bar is relative to the largest group of the same
     strip, and spells the two marks that are not bars: [0] for a group with no

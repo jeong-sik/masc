@@ -5564,7 +5564,7 @@ let render_keeper_message (state : state) =
           Some
             (say "↑/↓:선택  Tab/Enter:넣기  Esc:닫기"
                "↑/↓:select  Tab/Enter:insert  Esc:close")
-      | None -> slash_hint_text ~restore:(Theme.recede ()) (Masc_tui_message_input.contents state.msg_input)
+      | None -> slash_hint_text ~ko ~restore:(Theme.recede ()) (Masc_tui_message_input.contents state.msg_input)
     in
     let help_hint =
       if help_door then "  " ^ Masc_tui_footer.help_hint ~ko

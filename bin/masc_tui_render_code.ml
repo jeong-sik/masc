@@ -80,12 +80,12 @@ let code_note_text ~ko = function
   | Code_note_pr_without_remote number ->
       Printf.sprintf
         (if ko then "#%d · 이 범위에는 링크할 원격 저장소가 등록되지 않음"
-         else "#%d -- this scope has no registered remote to link into")
+         else "#%d · this scope has no registered remote to link into")
         number
   | Code_note_pr_remote_not_github number ->
       Printf.sprintf
         (if ko then "#%d · 원격 저장소가 GitHub 가 아니라 링크 모양을 모름"
-         else "#%d -- the remote is not GitHub, so the link shape is unknown")
+         else "#%d · the remote is not GitHub, so the link shape is unknown")
         number
 
 (* The file pane's usable rows: the surface title, then the pane's top gap,
@@ -487,8 +487,8 @@ let render_code (state : state) =
     let where =
       match state.code_scope with
       | Code_scope_project -> where
-      | Code_scope_keeper keeper -> keeper ^ " \xe2\x96\xb8 " ^ where
-      | Code_scope_repo repo -> repo ^ " \xe2\x96\xb8 " ^ where
+      | Code_scope_keeper keeper -> keeper ^ " \xe2\x80\xba " ^ where
+      | Code_scope_repo repo -> repo ^ " \xe2\x80\xba " ^ where
     in
     framed_line pane_buf pane_cols
       ((if list_focused then Ansi.bold else Ansi.dim)

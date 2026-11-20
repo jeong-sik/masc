@@ -398,7 +398,15 @@ let test_every_command_has_a_help_line () =
       check bool (Printf.sprintf "help mentions /%s" word) true
         (List.exists
            (fun line -> String.starts_with ~prefix:("/" ^ word) line)
-           Command.help_lines))
+           Command.help_lines);
+      check bool (Printf.sprintf "KO help mentions /%s" word) true
+        (List.exists
+           (fun line -> String.starts_with ~prefix:("/" ^ word) line)
+           (Command.help_lines_for ~ko:true));
+      let ko_summary = Command.summary_for ~ko:true entry in
+      let en_summary = Command.summary_for ~ko:false entry in
+      check bool (Printf.sprintf "KO summary for /%s is non-empty and localized" word) true
+        (String.trim ko_summary <> "" && not (String.equal ko_summary en_summary)))
     Command.catalog
 
 let test_keeper_names_resolve_by_unique_prefix () =

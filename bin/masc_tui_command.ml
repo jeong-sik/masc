@@ -360,12 +360,70 @@ let help_usage entry =
 let help_summary_padding text =
   String.make (max 2 (help_summary_column - String.length text)) ' '
 
-let help_lines =
+let summary_ko = function
+  | "login" -> "공식 클라이언트에 로그인하고 모델 연결을 확인합니다"
+  | "task-inspect" -> "이 세션의 작업 생성 이력을 반복 생성 없이 확인합니다"
+  | "task-recover" -> "보관된 키퍼 작업 명령을 복구합니다 (미확인 생성은 작업 목록 먼저 확인)"
+  | "task" -> "이 키퍼에 작업을 만듭니다 (아래 줄은 본문으로 들어갑니다)"
+  | "keeper" -> "이 대화 창을 다른 키퍼로 전환합니다"
+  | "addons" -> "선택형 크로스레인 관측 및 패키지 동작을 엽니다"
+  | "play" -> "공유 DOS 플레이 링크를 조회·발급·취소합니다"
+  | "listen" -> "이 대화의 가장 최근 오디오 또는 MIDI 첨부를 재생합니다"
+  | "artifacts" | "reports" -> "발행된 Markdown·HTML 보고서를 전체 폭 리더로 봅니다"
+  | "settings" -> "타입별 런타임 설정 화면을 엽니다"
+  | "diff" -> "워크스페이스 Git 변경 목록과 diff를 엽니다"
+  | "cost" -> "제공자 할당량과 키퍼 사용량 화면을 엽니다"
+  | "changes" -> "이 키퍼에 기록된 파일 변경 목록을 엽니다"
+  | "queue" -> "대기열 패널을 열거나 대기 중인 작업을 관리합니다"
+  | "run-next" -> "내 대기 메시지를 우선 올리고 현재 턴을 멈춘 뒤 이어서 실행합니다"
+  | "reconcile" -> "결과가 확인되지 않은 이 키퍼의 보류 요청을 다시 확인합니다"
+  | "priority" | "autonext" -> "사용자 입력의 다음 턴 자동 우선 승격을 켜거나 끕니다"
+  | "approve" -> "이 키퍼의 보류 중인 도구 호출을 승인합니다"
+  | "deny" -> "이 키퍼의 보류 중인 도구 호출을 거절합니다"
+  | "interrupt" -> "진행 중인 턴에 중단 신호를 보냅니다 (현재 창 또는 지정 키퍼)"
+  | "steer" -> "이 메시지를 먼저 올리고 현재 턴을 멈춘 뒤 이어서 실행합니다"
+  | "thinking" -> "추론 과정 표시 방식을 설정하거나 순환합니다"
+  | "calls" -> "대화의 원본 실행 기록을 골라 전체 결과를 봅니다"
+  | "tools" -> "도구 요약·짧은 결과·전체 상세 표시를 설정하거나 순환합니다"
+  | "memory" -> "기억 기록 표시를 순환하거나 최근 처리 상태를 조회하고 동기화를 요청합니다"
+  | "fleet-memory" -> "전체 키퍼의 통합 기억 사실을 한꺼번에 탐색합니다"
+  | "find" -> "텍스트가 들어 있는 최신 메시지로 이동합니다 (다시 입력하면 이전 일치)"
+  | "copy" -> "이 키퍼의 가장 최근 완료 답변을 터미널 클립보드로 복사합니다"
+  | "measurement" -> "발행된 의미 보존 측정 결과를 확인합니다"
+  | "context" -> "최근 관측된 제공자 입력 구성을 검사합니다"
+  | "music" -> "음악 라이브러리를 열거나 최신 채팅 MIDI 편집·악기 선택을 엽니다"
+  | "score" -> "이 터미널에서 alphaTex 악보와 재생을 엽니다 (N은 최신순)"
+  | "image" -> "이미지 파일을 터미널에 표시합니다"
+  | "images" -> "대화 이미지나 다이어그램을 엽니다 (N은 최신순)"
+  | "attach" -> "다음 키퍼 메시지에 보낼 이미지를 첨부합니다"
+  | "ref" -> "제공자가 가져올 이미지 참조(URL/file_id)를 첨부합니다"
+  | "preset" -> "프롬프트 프리셋을 조회·저장·복원(자동 백업)·삭제합니다"
+  | "errors" -> "현재 대화·기억 불러오기 오류 전문을 읽습니다"
+  | "help" -> "이 명령어 목록을 표시합니다"
+  | "features" -> "이 TUI의 기능별 한 줄 설명과 여는 방법을 봅니다"
+  | "about" | "splash" -> "회전하는 MASC 임프와 현재 테마·키퍼 수를 봅니다"
+  | "metrics" | "telemetry" -> "제공자 할당량·키퍼 보고서·텔레메트리가 있는 사용량 화면을 엽니다"
+  | "activity" -> "활동 패널을 좁게·넓게·숨김으로 전환하거나 탭·정렬·스크롤을 제어합니다"
+  | "preview" -> "웹 링크의 OpenGraph 미리보기를 엽니다"
+  | "links" -> "현재 대화에 언급된 모든 웹 링크를 탐색합니다"
+  | "embeds" -> "채팅 인라인 리치 임베드 카드 표시를 설정합니다 (on/compact/off)"
+  | _ -> ""
+
+let summary_for ~ko entry =
+  if not ko then entry.summary
+  else
+    match summary_ko entry.word with
+    | "" -> entry.summary
+    | ko_text -> ko_text
+
+let help_lines_for ~ko =
   List.map
     (fun entry ->
        let text = help_usage entry in
-       text ^ help_summary_padding text ^ entry.summary)
+       text ^ help_summary_padding text ^ summary_for ~ko entry)
     catalog
+
+let help_lines = help_lines_for ~ko:false
 
 (* Every spelling the parser answers to, one entry each. An alias is not a
    second command: the parser folds the pair into a single arm
@@ -662,7 +720,7 @@ let word_spans ~typed entry =
    above -- so bytes and cells are the same count here. *)
 let bare_slash_hint_cells = 80
 
-let bare_slash_spans entries =
+let bare_slash_spans ~ko entries =
   let total = List.length entries in
   let rendered kept_count =
     let words =
@@ -672,11 +730,17 @@ let bare_slash_spans entries =
       |> String.concat " "
     in
     let dropped = total - kept_count in
-    let tail =
-      if dropped <= 0 then ""
-      else Printf.sprintf " +%d more (/help)" dropped
+    let tail, tail_cells =
+      if dropped <= 0 then "", 0
+      else if ko then
+        let text = Printf.sprintf " 외 %d개 (/help)" dropped in
+        (* Each of the two Hangul syllables is 3 UTF-8 bytes and 2 display cells. *)
+        text, String.length text - 2
+      else
+        let text = Printf.sprintf " +%d more (/help)" dropped in
+        text, String.length text
     in
-    (words, tail, 1 + String.length words + String.length tail)
+    (words, tail, 1 + String.length words + tail_cells)
   in
   (* At most one row of candidates and a dozen words, so the fit is found by
      trying rather than by solving for a marker whose own width depends on how
@@ -691,20 +755,20 @@ let bare_slash_spans entries =
   [ Typed "/"; Untyped words ]
   @ (if String.equal tail "" then [] else [ Detail tail ])
 
-let hint_spans = function
+let hint_spans_for ~ko = function
   | No_command -> []
   | Chosen entry ->
       Typed ("/" ^ entry.word)
       :: (if String.equal entry.args "" then []
           else [ Detail (" " ^ entry.args) ])
-      @ [ Detail (detail_sep ^ entry.summary) ]
+      @ [ Detail (detail_sep ^ summary_for ~ko entry) ]
   | Candidates { typed; entries = [ entry ] } ->
       (* Down to one word, so there is room to say how it ends even though the
          word itself is not typed out yet. *)
       word_spans ~typed entry
       @ (if String.equal entry.args "" then []
          else [ Detail (" " ^ entry.args) ])
-  | Candidates { typed = ""; entries } -> bare_slash_spans entries
+  | Candidates { typed = ""; entries } -> bare_slash_spans ~ko entries
   | Candidates { typed; entries } ->
       (* Names only. Every usage spelled out runs past a 120-column pane on
          the bare slash, and the commands that fell off the end were the ones
@@ -721,8 +785,12 @@ let hint_spans = function
            entries)
   | Unknown_command word ->
       [ Wrong ("/" ^ word)
-      ; Detail (" is not a command" ^ detail_sep ^ "/help lists them")
+      ; Detail
+          (if ko then " · 없는 명령" ^ detail_sep ^ "/help로 목록 보기"
+           else " is not a command" ^ detail_sep ^ "/help lists them")
       ]
+
+let hint_spans h = hint_spans_for ~ko:false h
 
 (* How [/keeper <name>] finds its keeper. The command grammar stays closed —
    no prefix matching on command words — but a keeper NAME is an argument,
@@ -817,7 +885,7 @@ type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draf
 type menu_item = { completion : string; label : string; description : string }
 type menu = { items : menu_item list; selected : int }
 
-let menu ~keeper_names ~state text =
+let menu ?(ko = false) ~keeper_names ~state text =
   let dismissed = match state with
     | Menu_dismissed draft -> String.equal draft text
     | Menu_idle | Menu_selected _ -> false in
@@ -833,7 +901,7 @@ let menu ~keeper_names ~state text =
           if String.starts_with ~prefix:word entry.word then
             let suffix = if String.equal entry.args "" then "" else " " in
             Some {completion = with_body body ("/" ^ entry.word ^ suffix);
-                  label = "/" ^ entry.word; description = entry.summary}
+                  label = "/" ^ entry.word; description = summary_for ~ko entry}
           else None) spelled_catalog
       else if not (String.equal argument "") && String.ends_with ~suffix:" " line then []
       else match List.find_opt (fun entry -> String.equal entry.word word) spelled_catalog with
@@ -845,7 +913,7 @@ let menu ~keeper_names ~state text =
           if String.starts_with ~prefix:argument option then
             let label = "/" ^ word ^ " " ^ option in
             Some {completion = with_body body label; label;
-                  description = entry.summary}
+                  description = summary_for ~ko entry}
           else None) options in
     match items with
     | [] -> None

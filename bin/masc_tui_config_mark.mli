@@ -13,6 +13,7 @@ val prompt_glyph : held_back:bool -> Masc.Tui_decode.prompt_source -> string
     reader still has on disk. *)
 
 val prompt_legend : (string * string) list
+val prompt_legend_for : ko:bool -> (string * string) list
 (** Every prompt mark once, paired with what a row wearing it reads as. The
     shipped file draws a blank and is not a row here -- a state with no mark
     needs no word -- so the override row names the unmarked case instead. *)
@@ -21,5 +22,6 @@ val param_glyph : has_override:bool -> string
 (** The mark for one row of the params list, uncoloured. *)
 
 val param_legend : (string * string) list
+val param_legend_for : ko:bool -> (string * string) list
 (** The param override mark, paired with what a row wearing it reads as. The
     registered default draws a blank, so the row names it too. *)

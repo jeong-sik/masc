@@ -36,10 +36,15 @@ let kind_of_post : Reading.board_post_kind option -> kind option = function
   | None -> None
 
 (* The word says who, not what the glyph looks like. *)
-let entry = function
-  | Person -> (person_glyph, "a person wrote it")
-  | Automation -> (automation_glyph, "a keeper or a lane wrote it")
-  | Unknown -> (unknown_glyph, "a kind this build was not taught")
+let entry_for ~ko = function
+  | Person ->
+      (person_glyph, if ko then "사람이 작성" else "a person wrote it")
+  | Automation ->
+      (automation_glyph, if ko then "키퍼 또는 레인이 작성" else "a keeper or a lane wrote it")
+  | Unknown ->
+      (unknown_glyph, if ko then "알 수 없는 작성자 종류" else "a kind this build was not taught")
+
+let entry = entry_for ~ko:false
 
 let kinds = [ Person; Automation; Unknown ]
 
@@ -48,4 +53,6 @@ let glyph post_kind =
   | None -> no_mark
   | Some kind -> fst (entry kind)
 
-let legend = List.map entry kinds
+let legend_for ~ko = List.map (entry_for ~ko) kinds
+
+let legend = legend_for ~ko:false

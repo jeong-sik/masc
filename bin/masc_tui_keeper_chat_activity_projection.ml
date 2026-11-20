@@ -843,64 +843,127 @@ let observed_action_word = "observed action"
    sheet, in the shape the other legends take: the mark or phrase as the row
    draws it, and what it says. Built from the same functions and words the
    rows use, so the sheet cannot explain a mark the pane no longer draws. *)
-let legend =
-  let outcome_meaning = function
-    | Started -> "arguments still arriving"
-    | Awaiting_result -> "arguments sent, result not back yet"
-    | Returned -> "result came back"
-    | Native_running -> "native step running"
-    | Native_ended -> "native step ended; provider report shown when available, not a MASC execution receipt"
-    | Native_failed -> "provider reported an error, a decline or a nonzero exit for its native step; not a MASC execution receipt"
-    | Failed -> "the tool answered with a failure"
-    | Never_returned ->
-        "no result was seen in this view before the attempt ended; this \
-         does not establish that the tool failed"
-    | Outcome_unrecorded ->
-        "the stored record has no outcome field; a gap in the record, not \
-         a failure"
+let legend_for ~ko =
+  let outcome_label_for =
+    if not ko then outcome_label
+    else function
+      | Started -> "실행 중"
+      | Awaiting_result -> "결과 대기"
+      | Returned -> "응답 완료"
+      | Native_running -> "네이티브 실행"
+      | Native_ended -> "네이티브 종료"
+      | Native_failed -> "네이티브 실패"
+      | Failed -> "실패"
+      | Never_returned -> "결과 못 봄"
+      | Outcome_unrecorded -> "결과 미기록"
   in
-  let skill_meaning = function
-    | Skill_calling -> "the model asked to read the skill; nothing back yet"
-    | Skill_served_pending ->
-        "the skill text came back; the server's delivery record is not read yet"
-    | Skill_served_only ->
-        "the skill text came back; the server has no record of delivering it"
-    | Skill_delivered ->
-        "the server recorded the delivery; no tool call followed from it"
-    | Skill_used ->
-        "the server recorded the delivery and the tool calls the model made \
-         because of it (the rows marked observed action)"
-    | Skill_failed -> "reading the skill failed"
-    | Skill_evidence_missing ->
-        "this pane never saw the read come back; says nothing about the skill"
-    | Skill_evidence_unavailable ->
-        "the server's skill record is in a shape this build cannot read"
+  let outcome_meaning =
+    if ko then function
+      | Started -> "인자가 도착하는 중"
+      | Awaiting_result -> "인자 전송 완료 · 응답 대기 중"
+      | Returned -> "도구 응답 수신 완료"
+      | Native_running -> "제공자 네이티브 단계 실행 중"
+      | Native_ended -> "네이티브 단계 종료 · 제공자 보고만 표시(MASC 실행 영수증 아님)"
+      | Native_failed -> "제공자가 네이티브 단계 오류·거절·0이 아닌 종료 코드 보고(MASC 영수증 아님)"
+      | Failed -> "도구가 실패로 응답함"
+      | Never_returned -> "시도가 끝날 때까지 이 창에서 결과를 못 봄(실패 확정은 아님)"
+      | Outcome_unrecorded -> "저장된 기록에 결과 필드가 없음(기록 공백이며 실패 아님)"
+    else function
+      | Started -> "arguments still arriving"
+      | Awaiting_result -> "arguments sent, result not back yet"
+      | Returned -> "result came back"
+      | Native_running -> "native step running"
+      | Native_ended -> "native step ended; provider report shown when available, not a MASC execution receipt"
+      | Native_failed -> "provider reported an error, a decline or a nonzero exit for its native step; not a MASC execution receipt"
+      | Failed -> "the tool answered with a failure"
+      | Never_returned ->
+          "no result was seen in this view before the attempt ended; this \
+           does not establish that the tool failed"
+      | Outcome_unrecorded ->
+          "the stored record has no outcome field; a gap in the record, not \
+           a failure"
+  in
+  let skill_label_en ?invocation state =
+    let read, done_ =
+      match invocation with
+      | Some (Composition_run _) -> "running", "ran"
+      | Some Instruction_read | None -> "reading", "read"
+    in
+    match state with
+    | Skill_calling -> read
+    | Skill_served_pending -> done_ ^ ", checking delivery"
+    | Skill_served_only -> done_ ^ ", delivery unrecorded"
+    | Skill_delivered -> "delivered, no tool used"
+    | Skill_used -> "delivered, tool used"
+    | Skill_failed -> "failed"
+    | Skill_evidence_missing -> "result not seen"
+    | Skill_evidence_unavailable -> "record format unreadable"
+  in
+  let skill_label ?invocation state =
+    if ko then skill_state_label ?invocation state
+    else skill_label_en ?invocation state
+  in
+  let skill_meaning =
+    if ko then function
+      | Skill_calling -> "모델이 스킬 읽기를 요청함 · 아직 응답 전"
+      | Skill_served_pending -> "스킬 본문은 도착 · 서버 전달 기록은 아직 미조회"
+      | Skill_served_only -> "스킬 본문은 도착 · 서버 전달 기록 없음"
+      | Skill_delivered -> "서버 전달 기록 있음 · 이어진 도구 호출은 없음"
+      | Skill_used -> "서버 전달 기록과 그에 따른 도구 호출(관측된 동작)이 기록됨"
+      | Skill_failed -> "스킬 읽기 실패"
+      | Skill_evidence_missing -> "이 창에서 읽기 완료를 보지 못함(스킬 자체에 대한 판정은 아님)"
+      | Skill_evidence_unavailable -> "이 빌드가 읽을 수 없는 형식의 서버 스킬 기록"
+    else function
+      | Skill_calling -> "the model asked to read the skill; nothing back yet"
+      | Skill_served_pending ->
+          "the skill text came back; the server's delivery record is not read yet"
+      | Skill_served_only ->
+          "the skill text came back; the server has no record of delivering it"
+      | Skill_delivered ->
+          "the server recorded the delivery; no tool call followed from it"
+      | Skill_used ->
+          "the server recorded the delivery and the tool calls the model made \
+           because of it (the rows marked observed action)"
+      | Skill_failed -> "reading the skill failed"
+      | Skill_evidence_missing ->
+          "this pane never saw the read come back; says nothing about the skill"
+      | Skill_evidence_unavailable ->
+          "the server's skill record is in a shape this build cannot read"
   in
   List.map
     (fun outcome ->
-      marker_of_outcome outcome ^ " " ^ outcome_label outcome, outcome_meaning outcome)
+      marker_of_outcome outcome ^ " " ^ outcome_label_for outcome, outcome_meaning outcome)
     all_outcomes
-  @ [ received_marker ^ " received",
-      "a result is present; receipt alone does not establish success" ]
+  @ [ ( received_marker ^ (if ko then " 수신됨" else " received")
+      , if ko then "결과 수신됨 · 수신만으로 성공 확정은 아님"
+        else "a result is present; receipt alone does not establish success" ) ]
   @ List.map
-      (fun state -> skill_state_label state, skill_meaning state)
+      (fun state -> skill_label state, skill_meaning state)
       all_skill_states
   @ (let composition = Composition_run { tool_name = "" } in
      List.filter_map
        (fun state ->
-         let run_word = skill_state_label ~invocation:composition state in
-         if String.equal run_word (skill_state_label state) then None
+         let run_word = skill_label ~invocation:composition state in
+         if String.equal run_word (skill_label state) then None
          else
            Some
              ( run_word,
-               "as above, for a composition: the skill ran as its own tool \
-                rather than being read as text" ))
+               if ko then
+                 "위와 같으나 조합 도구 실행 형태: 텍스트 읽기가 아니라 자체 도구로 실행됨"
+               else
+                 "as above, for a composition: the skill ran as its own tool \
+                  rather than being read as text" ))
        all_skill_states)
-  @ [ ( proof_word
-      , "the ids behind a skill row: use= the read call, turn= the turn, \
-         runtime= who ran it, rev= the skill text's revision" )
-    ; (observed_action_word, "a tool call the server attributes to the skill above it")
+  @ [ ( (if ko then "증거 (proof)" else proof_word)
+      , if ko then "스킬 줄의 근거 ID: use=읽기 호출, turn=턴, runtime=실행 런타임, rev=스킬 리비전"
+        else "the ids behind a skill row: use= the read call, turn= the turn, \
+              runtime= who ran it, rev= the skill text's revision" )
+    ; ( (if ko then "관측된 동작" else observed_action_word)
+      , if ko then "서버가 위 스킬에 귀속시킨 도구 호출"
+        else "a tool call the server attributes to the skill above it" )
     ]
+
+let legend = legend_for ~ko:false
 
 let proof_edge_bytes = 8
 let proof_full_bytes = 18

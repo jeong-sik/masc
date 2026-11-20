@@ -290,7 +290,7 @@ let resource_document entry
     | Some (_ :: []) | Some [] | None -> [Part_body index, body] in
   let read_status, body = match error, contents with
     | Some detail, _ -> [Read_status, Markdown_text detail], []
-    | None, None when requested -> [Read_status, Markdown_text "(reading resource…)"], []
+    | None, None when requested -> [Read_status, Markdown_text "(reading resource)"], []
     | None, None -> [Read_status, Markdown_text "(Enter reads the selected resource.)"], []
     | None, Some [] -> [Read_status, Markdown_text "(No content parts returned.)"], []
     | None, Some parts ->

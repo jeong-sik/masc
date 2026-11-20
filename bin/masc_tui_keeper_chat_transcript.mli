@@ -152,9 +152,10 @@ val all_skill_states : skill_state list
 (** Every state, in the order of the skill's life. *)
 
 val legend : (string * string) list
+val legend_for : ko:bool -> (string * string) list
 (** Each mark and phrase a tool or skill row can carry, with what it means,
-    for the help sheet. Built from {!outcome_label} and
-    {!skill_state_label}, so it prints the words the rows print. *)
+    for the help sheet. [legend] returns the English entries; [legend_for ~ko]
+    returns Korean ([~ko:true]) or English ([~ko:false]). *)
 
 type skill_activity = private
   { skill_name : string

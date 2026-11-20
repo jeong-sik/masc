@@ -147,7 +147,7 @@ let summary ~keeper_name results =
     (List.length failed)
     (match failed with
      | [] -> ""
-     | labels -> " -- " ^ String.concat ", " labels)
+     | labels -> " · " ^ String.concat ", " labels)
 
 let any_failed results =
   List.exists
@@ -246,7 +246,7 @@ let row_mark confirmation connector binding =
    part that can be long. *)
 let offer_prompt ~keeper_name ~unreadable targets =
   Printf.sprintf
-    "%s: also unbind %s's %d channel%s, or any other key to keep them -- %s%s"
+    "%s: also unbind %s's %d channel%s, or any other key to keep them · %s%s"
     offer_key
     (Terminal_text.single_line keeper_name)
     (List.length targets)

@@ -17,6 +17,7 @@ val glyph : Masc_tui_types.board_post_kind option -> string
     system's, and marking the majority marks nothing. *)
 
 val legend : (string * string) list
+val legend_for : ko:bool -> (string * string) list
 (** Every mark that is not a blank, paired with the word for who wrote it. *)
 
 val kinds : kind list

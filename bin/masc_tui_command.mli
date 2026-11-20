@@ -262,6 +262,12 @@ val hint_spans : hint -> hint_span list
 (** The hint as coloured pieces, in reading order. Empty for
     {!No_command}. *)
 
+val hint_spans_for : ko:bool -> hint -> hint_span list
+(** {!hint_spans} localized for Korean ([ko = true]) or English ([ko = false]). *)
+
+val summary_for : ko:bool -> command_help -> string
+(** Localized one-line summary for a catalogued command. *)
+
 val hint : string -> hint
 (** What to show while the operator is typing. A half-typed word lists its
     candidates rather than describing one, because {!parse} does no prefix
@@ -271,6 +277,9 @@ val help_lines : string list
 (** One line per command, the list [/help] draws. Kept beside the parser so a
     new command cannot ship without its line. An alias shares its command's
     line rather than repeating the summary below it. *)
+
+val help_lines_for : ko:bool -> string list
+(** {!help_lines} localized for Korean ([ko = true]) or English ([ko = false]). *)
 
 (** How [/keeper <name>] resolved against the roster. *)
 type keeper_match =
@@ -306,7 +315,7 @@ type direction = Next | Prev
 type menu_state = Menu_idle | Menu_dismissed of string | Menu_selected of { draft : string; index : int }
 type menu_item = { completion : string; label : string; description : string }
 type menu = private { items : menu_item list; selected : int }
-val menu : keeper_names:string list -> state:menu_state -> string -> menu option
+val menu : ?ko:bool -> keeper_names:string list -> state:menu_state -> string -> menu option
 (** Suggestions describe existing commands. Selection never changes the draft
     or executes a command. A dismissed menu stays closed until the draft changes. *)
 val menu_step : direction:direction -> draft:string -> menu -> menu_state

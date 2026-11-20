@@ -92,21 +92,35 @@ let tick_line ~column =
   Bytes.to_string line
 ;;
 
-let column_legend ~empty =
-  let edge e = span_text ~ko:false (Bins.edge_span e) in
-  Printf.sprintf
-    "the server's %d age bins, %s or older on the left and under %s on the right, on log \
-     steps between the edges %s, two or four bins to a cell on a narrow list; a cell is a \
-     level against the row's largest one, %s when empty, in the info colour under %s, the \
-     row's own to %s and dim past that"
-    Bins.bin_count
-    (edge Bins.Month)
-    (edge Bins.Hour)
-    (String.concat ", " (List.map edge Bins.edges))
-    empty
-    (edge Bins.Day)
-    (edge Bins.Week)
+let column_legend_for ~ko ~empty =
+  let edge e = span_text ~ko (Bins.edge_span e) in
+  if ko then
+    Printf.sprintf
+      "서버의 %d개 나이 구간(왼쪽이 %s 이상, 오른쪽이 %s 미만, 경계 %s 사이의 로그 눈금, 좁은 목록에서는 2~4구간 병합): \
+       각 칸은 해당 줄 최댓값 대비 높이이며 비어 있으면 %s, %s 미만은 정보색, %s 이하는 기본색, 그 이상은 흐리게 표시"
+      Bins.bin_count
+      (edge Bins.Month)
+      (edge Bins.Hour)
+      (String.concat ", " (List.map edge Bins.edges))
+      empty
+      (edge Bins.Day)
+      (edge Bins.Week)
+  else
+    Printf.sprintf
+      "the server's %d age bins, %s or older on the left and under %s on the right, on log \
+       steps between the edges %s, two or four bins to a cell on a narrow list; a cell is a \
+       level against the row's largest one, %s when empty, in the info colour under %s, the \
+       row's own to %s and dim past that"
+      Bins.bin_count
+      (edge Bins.Month)
+      (edge Bins.Hour)
+      (String.concat ", " (List.map edge Bins.edges))
+      empty
+      (edge Bins.Day)
+      (edge Bins.Week)
 ;;
+
+let column_legend ~empty = column_legend_for ~ko:false ~empty
 
 (* {1 Words and the second-row strip} *)
 
@@ -179,15 +193,25 @@ let cell bins : Masc_tui_keeper_axis_cell.t =
   { text; tone = Quiet }
 ;;
 
-let legend =
-  Printf.sprintf
-    "ordinary memory facts by time since first seen, one bar per group oldest first (%s); \
-     bar height is relative to the largest group of the same strip, %s is none, %s is \
-     not measured"
-    (String.concat ", " (List.map (group_words ~ko:false) groups_oldest_first))
-    empty_mark
-    unmeasured_mark
+let legend_for ~ko =
+  if ko then
+    Printf.sprintf
+      "처음 관측된 시점별 일반 기억 사실 수, 오래된 구간부터 막대 하나씩(%s): \
+       막대 높이는 같은 줄의 최대 구간 대비이며 %s는 없음, %s는 미측정"
+      (String.concat ", " (List.map (group_words ~ko:true) groups_oldest_first))
+      empty_mark
+      unmeasured_mark
+  else
+    Printf.sprintf
+      "ordinary memory facts by time since first seen, one bar per group oldest first (%s); \
+       bar height is relative to the largest group of the same strip, %s is none, %s is \
+       not measured"
+      (String.concat ", " (List.map (group_words ~ko:false) groups_oldest_first))
+      empty_mark
+      unmeasured_mark
 ;;
+
+let legend = legend_for ~ko:false
 
 let ages_clauses ~ko = function
   | None -> [ (if ko then "기억 나이 " else "fact ages ") ^ unmeasured_mark ]

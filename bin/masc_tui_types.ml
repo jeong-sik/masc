@@ -7509,7 +7509,7 @@ module Browser_lane_view = struct
     (match connection_summary t with
      | Some connection -> "  " ^ connection
      | None -> "  Automatic browser")
-    ^ " • b:choose browser"
+    ^ " · b:choose browser"
   let browser_choice_label = function
     | Automatic_browser -> "Automatic · use an available browser"
     | Connected_browser client ->
@@ -28719,7 +28719,8 @@ let keeper_message_command_menu ?scroll state =
   | Keepers Keeper_message, Right_pane, None, None
     when not (keeper_message_reading_back ?scroll state) ->
     let keeper_names = List.map (fun (keeper : keeper) -> keeper.k_name) state.keepers in
-    Masc_tui_command.menu ~keeper_names ~state:state.msg_command_menu
+    Masc_tui_command.menu ~ko:(state.ui_language = Lang_ko)
+      ~keeper_names ~state:state.msg_command_menu
       (Masc_tui_message_input.contents state.msg_input)
   | (Keepers (Keeper_message), Right_pane, None, Some _)
   | (Keepers (Keeper_message), Right_pane, Some _, _) | (Keepers (Keeper_message), Left_pane, _, _)

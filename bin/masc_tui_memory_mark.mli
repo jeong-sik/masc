@@ -14,6 +14,7 @@ val glyph : Masc_tui_types.memory_state -> string
 (** {!mark} as its glyph, uncoloured. *)
 
 val legend : (string * string) list
+val legend_for : ko:bool -> (string * string) list
 (** Every mark once, paired with what a row wearing it reads as. Four states
     share the caution mark and two share the failure mark, so this is
     shorter than {!Masc_tui_types.memory_state} has constructors. The words of

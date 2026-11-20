@@ -674,7 +674,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  three rows above "+2 more questions". *)
               (Printf.sprintf
                  (if state.ui_language = Lang_ko then "    %s이 요청에 질문 %d개 더 있음 · a:전체 열기%s"
-                  else "    %s+%d more in this ask -- a opens the full ask%s")
+                  else "    %s+%d more in this ask · a opens the full ask%s")
                  Ansi.dim plan.Ask_layout.questions_hidden Ansi.reset);
           if plan.Ask_layout.context_shown then
             Buffer.add_string buf (fst (Stdlib.Lazy.force context_block))
@@ -688,7 +688,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
             box_line buf cols
               (Printf.sprintf
                  (if state.ui_language = Lang_ko then "    %s배경 설명 생략됨 · a:전체 열기%s"
-                  else "    %sthe reason did not fit -- a opens it%s")
+                  else "    %sthe reason did not fit · a opens it%s")
                  Ansi.dim Ansi.reset);
           let printed = ref 0 in
           List.iteri
@@ -705,7 +705,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
                  Printf.sprintf "  %s질문 요청 %d건 더 있음 · [/]:이동%s" Ansi.dim
                    plan.Ask_layout.summaries_hidden Ansi.reset
                else
-                 Printf.sprintf "  %s+%d more ask%s -- [/] to reach%s" Ansi.dim
+                 Printf.sprintf "  %s+%d more ask%s · [/] to reach%s" Ansi.dim
                    plan.Ask_layout.summaries_hidden
                    (if plan.Ask_layout.summaries_hidden = 1 then "" else "s")
                    Ansi.reset))
@@ -1294,7 +1294,7 @@ let render_question_reader (state : state) =
          (match Masc_tui_approvals_model.approvals_questions_reading state with
           | Masc_tui_approvals_model.List_read when asks <> [] ->
               say "  선택된 질문 없음 · [ 또는 ] 키로 선택"
-                "  Nothing selected -- [ or ] chooses a question"
+                "  Nothing selected · [ or ] chooses a question"
           | Masc_tui_approvals_model.List_read ->
               say "  대기 중인 질문 없음" "  No questions waiting"
           | List_not_read (Approval_unread | Approval_kept_back _) ->

@@ -172,6 +172,36 @@ let test_each_activity_wears_its_status_mark () =
     ; "an unread activity has no mark", Model.Unknown, None ]
 ;;
 
+let has_hangul s =
+  let len = String.length s in
+  let rec scan i =
+    if i >= len then false
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let cp = Uchar.to_int (Uchar.utf_decode_uchar dec) in
+      if cp >= 0xAC00 && cp <= 0xD7A3 then true
+      else scan (i + Uchar.utf_decode_length dec)
+  in
+  scan 0
+;;
+
+let test_english_legends_have_no_hangul () =
+  List.iter
+    (fun (k, v) ->
+      Alcotest.(check bool) ("legend_for ~ko:false key has no Hangul: " ^ k) false (has_hangul k);
+      Alcotest.(check bool) ("legend_for ~ko:false desc has no Hangul: " ^ k) false (has_hangul v))
+    (Mark.legend_for ~ko:false);
+  List.iter
+    (fun (k, v) ->
+      Alcotest.(check bool) ("column_legend_for ~ko:false key has no Hangul: " ^ k) false (has_hangul k);
+      Alcotest.(check bool) ("column_legend_for ~ko:false desc has no Hangul: " ^ k) false (has_hangul v))
+    (Mark.column_legend_for ~ko:false);
+  Alcotest.(check int) "KO and EN legend_for have matching row counts"
+    (List.length (Mark.legend_for ~ko:false)) (List.length (Mark.legend_for ~ko:true));
+  Alcotest.(check int) "KO and EN column_legend_for have matching row counts"
+    (List.length (Mark.column_legend_for ~ko:false)) (List.length (Mark.column_legend_for ~ko:true))
+;;
+
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
@@ -189,5 +219,7 @@ let () =
             test_work_under_way_wears_the_still_under_way_mark
         ; Alcotest.test_case "each activity wears its status mark" `Quick
             test_each_activity_wears_its_status_mark
+        ; Alcotest.test_case "English legends have no Hangul and match KO row counts" `Quick
+            test_english_legends_have_no_hangul
         ] )
     ]

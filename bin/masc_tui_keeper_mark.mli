@@ -64,6 +64,7 @@ val due_glyph : Masc_tui_keeper_list_model.due -> string
     none, and an unknown next time the unreported mark. *)
 
 val legend : (string * string) list
+val legend_for : ko:bool -> (string * string) list
 (** Each mark and the word the wide surfaces print beside it, in the order a
     reader meets them. *)
 
@@ -262,6 +263,7 @@ val grid_next_column_word : ko:bool -> window:string -> string
     is the snapshot's saved time, not a source-revalidation result. *)
 
 val column_legend : (string * string) list
+val column_legend_for : ko:bool -> (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the
     roster does not repeat it above its rows. *)

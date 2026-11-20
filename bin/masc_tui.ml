@@ -29443,6 +29443,7 @@ let main
                              makes. *)
                           Masc_tui_shell.Terminal_session.hand_off terminal_session;
                           let command =
+                            (* tui-value: the editor's line-number argument, never drawn *)
                             Printf.sprintf "%s +%d %s" editor line
                               (Filename.quote path)
                           in

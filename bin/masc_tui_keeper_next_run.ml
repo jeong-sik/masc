@@ -405,6 +405,7 @@ let cell ?(ko = true) ~now = function
   | Late_since at ->
       let text =
         if now > at then
+          (* tui-value: how far past the scheduled time, not a count that grew *)
           Printf.sprintf (if ko then "◷ 늦음 +%s" else "◷ late +%s")
             (Masc_tui_value.Ongoing.since ~now at)
         else if ko then

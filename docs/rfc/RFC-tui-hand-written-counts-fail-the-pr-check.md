@@ -70,7 +70,8 @@ RFC tui-one-screen-grammar §6.3 은 수를 이렇게 적는다.
 
 ### 3.1 무엇을 읽나
 
-- 파일: PR 의 merge commit 에서 바뀐 `bin/masc_tui*.ml`.
+- 파일: PR 의 merge commit 에서 바뀐 `bin/masc_tui*.ml` 와 `bin/tui/**/*.ml`.
+  `bin/masc_tui.ml` 을 쪼갠 모듈은 `bin/tui/` 아래로 옮겨 간다.
 - 글자: OCaml 문자열 literal(`"…"`, `{|…|}`). 주석 안의 문자열은 읽지 않는다.
 - 문자 literal `'"'` 는 문자열의 시작이 아니다.
 
@@ -135,7 +136,8 @@ L2 는 `.github/workflows/` 를 바꾼다. 승인 worker 는 이런 PR 을 병�
 | `bin/masc_tui.ml` | 편집기 `+%d` 줄 인자 | 표지 |
 | `bin/masc_tui_editor_jump.ml` | vim `edit +%d` | 표지 |
 | `bin/masc_tui_keeper_memory_reading.ml` | 지난 시각 `+%s` | 표지 |
-| `bin/masc_tui_keeper_next_run.ml` 두 곳 | `늦음 +%s` / `late +%s` | §7 D2 |
+| `bin/masc_tui_keeper_next_run.ml` | `늦음 +%s` / `late +%s` | 표지 (§7 D2) |
+| `bin/tui/shell/quit_guard.ml` | 종료 알림 ` +%d unsent` | ` and N unsent`, `Count.grouped` |
 
 ### 4.2 하지 않는 것
 
@@ -156,10 +158,10 @@ L2 는 `.github/workflows/` 를 바꾼다. 승인 worker 는 이런 PR 을 병�
 - L1 PR: 시제품 스크립트를 PR head 에 돌린 출력(규칙별 0)을 본문에 적는다.
 - L2 PR: hit 하나를 넣은 커밋에서 `changes` 가 실패한 실행 링크와, 되돌린 커밋에서 통과한 실행 링크를 본문에 적는다.
 
-## 7. 사용자가 정할 것
+## 7. 사용자가 정한 것 (2026-11-21)
 
-- **D1. 읽는 범위.** 바뀐 파일 전체(제안) / PR 이 더한 줄만.
+- **D1. 읽는 범위.** 바뀐 파일 전체로 정했다. 다른 안은 PR 이 더한 줄만 읽는 것이었다.
   더한 줄만 읽으면 L1 없이 켤 수 있다. 대신 diff 를 줄 번호로 다시 맞추는 코드가 더 생긴다.
-- **D2. 늦은 시간 `늦음 +5m`.** 표지로 둔다(제안) / `5m 늦음` 처럼 부호 없이 바꾼다.
+- **D2. 늦은 시간 `늦음 +5m`.** 표지로 두기로 정했다. 다른 안은 `5m 늦음` 처럼 부호를 빼는 것이었다.
   여기서 `+` 는 늘어난 값이 아니라 "예정보다 뒤" 를 뜻한다. 개수 변화가 아니라서 표지로 둘 수 있다.
   부호를 빼면 §6.3 과 부딪칠 글자가 아예 없어진다.

@@ -40,6 +40,7 @@ let vim_string_literal text =
   Buffer.contents buffer
 
 let remote_expression { path; line } =
+  (* tui-value: vim's line-number argument, never drawn *)
   Printf.sprintf "execute('edit +%d ' . fnameescape(%s))" (max 1 line)
     (vim_string_literal path)
 

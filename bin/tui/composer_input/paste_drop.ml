@@ -102,6 +102,7 @@ let handle_paste ?(protect_recovered = false) (state : T.state) ~base_path ~mail
          state.T.msg_spill <- Some { T.msp_paste = spill; msp_owner = owner });
     if paste.Masc_tui_paste.dropped > 0 then
       Masc_tui_loader.report_action state "error"
-        (Printf.sprintf "Paste kept the first %d bytes; %d more were dropped"
-           Masc_tui_paste.max_bytes paste.Masc_tui_paste.dropped)
+        (Printf.sprintf "Paste kept the first %s bytes; %s were dropped"
+           (Masc_tui_value.Count.grouped Masc_tui_paste.max_bytes)
+           (Masc_tui_value.Count.more ~ko:false paste.Masc_tui_paste.dropped))
   end

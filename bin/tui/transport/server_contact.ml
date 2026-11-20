@@ -141,6 +141,16 @@ let apply_settled_starts t (state : Masc_tui_types.state) ~on_server_ready =
     false
     (Masc_tui_server_lifecycle.take_settled t.settled_starts)
 
+(* What a refresh completing owes the operator, decided from the status it
+   concluded rather than from which message carried it.
+
+   Both reactions used to hang off [Http_refresh_failed], which carries an
+   exception a surface load threw. Nothing listening on the port is not that:
+   each surface returns its own connection error, the refresh completes, and
+   [apply_http_surfaces] concludes [Disconnected] from the results. So the
+   one case a first install produces reached neither the server start the
+   installer promises nor a second look at a credential that could not be
+   minted yet. *)
 let react_to_contact t (state : Masc_tui_types.state) ~base_path ~host ~port =
   let contact = contact_of_connection_status state.connection_status in
   if
@@ -150,10 +160,21 @@ let react_to_contact t (state : Masc_tui_types.state) ~base_path ~host ~port =
     t.auto_start_spent <- true;
     start_here_then_read t state ~base_path ~host ~port
   end;
+  (* A server answering here is the workspace appearing. The decision is the
+     same guarded one taken at boot -- it still refuses a base path that holds
+     no workspace, so a server reached on some other path changes nothing --
+     taken again at the moment its precondition can hold. It stays pending
+     while it keeps failing, because the server that would settle it may be
+     the one this session is still starting. *)
   if t.credential_retry_pending && contact = Masc_tui_server_lifecycle.Server_reached then
     launch_credential_preparation state
       ~purpose:Masc_tui_credential_preparation.Workspace_retry ~base_path ~host
       ~port;
+  (* The start-up settings read failed, typically because the server this
+     session starts itself was not up yet. It is read once more, when the
+     server reached is this workspace's and this terminal's credential is
+     no longer being retried: a read either of those would refuse is not
+     spent. *)
   match state.settings_reread with
   | Masc_tui_types.Reread_due
     when contact = Masc_tui_server_lifecycle.Server_reached
@@ -161,6 +182,8 @@ let react_to_contact t (state : Masc_tui_types.state) ~base_path ~host ~port =
          && not t.credential_retry_pending -> (
       match Eio_context.get_switch_opt () with
       | Some sw ->
+          (* The loop peeks this promise in its drain, so the bell says when
+             there is something to see. *)
           state.settings_reread <-
             Masc_tui_types.Reread_running
               (Eio.Fiber.fork_promise ~sw (fun () ->

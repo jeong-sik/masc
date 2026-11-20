@@ -237,12 +237,23 @@ let launch_observer ~browser_scope (state : Masc_tui_types.state)
                        (Masc_tui_async_protocol.Observer_opened
                           (owner, session_id, handshake)))
                 in
+                (* The socket is read without waiting on the UI. Handing each
+                   chunk to the mailbox stopped this reader whenever the UI was
+                   behind; the server's queue for the session then filled and
+                   it closed the stream (four closes in 15 minutes,
+                   2026-11-17). Deliveries collect in [received], and the
+                   forwarder hands all collected so far to the UI as one
+                   batch, which the UI already reads as one. *)
                 let received = Eio.Stream.create max_int in
                 let backlog = Atomic.make 0 in
                 let on_chunk chunk =
                   match Masc_tui_observer.feed reader chunk with
                   | [] -> ()
                   | decoded ->
+                      (* Past what the server can replay, holding more gains
+                         nothing: the stream is closed, and the reopen
+                         resumes from the last applied cursor or revalidates
+                         after the gap. *)
                       if
                         Atomic.fetch_and_add backlog (List.length decoded)
                         + List.length decoded
@@ -417,6 +428,11 @@ let launch_fleet_stream (state : Masc_tui_types.state) ~expected_workspace ~host
         in
         let read_one_connection () =
           Masc_tui_fleet_stream.started reader;
+          (* [Ok ()] covers two different ends: the transport returned without
+             an error, or this client chose to stop reading -- a revision gap,
+             an update before the snapshot, a rejected frame -- and unwound
+             through Close_connection. The metric must not call the second one
+             a server close, so the choice is remembered here. *)
           let client_reconnect = ref false in
           let outcome =
             try
@@ -431,6 +447,10 @@ let launch_fleet_stream (state : Masc_tui_types.state) ~expected_workspace ~host
                       raise Close_connection)
             with Close_connection -> Ok ()
           in
+          (* Every end emits exactly one connection_ended line so reconnect
+             cadence is countable per outcome; the warn on transport failure
+             stays the alarm signal with the detail. This replaces the old
+             debug-only tui_fleet_stream_ended, which no reader could see. *)
           (match outcome with
            | Error (Masc_tui_http.Http_refused { status; detail }) ->
                Masc_tui_fleet_stream.refused reader ~status ~detail;

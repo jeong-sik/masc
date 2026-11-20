@@ -2350,8 +2350,10 @@ let schedule_detail_lines ~ko ~width ~freshness ~runner (row : schedule_row)
     | Some Masc.Schedule_payload_projection.Keeper_wake -> true
     | Some Masc.Schedule_payload_projection.Lane_act | None -> false
   in
+  (* The link names the Keeper by its own field. [sch_payload_target] is
+     "keeper:<name>", which no Keeper is called (#53077). *)
   let target_link =
-    match keeper_wake, row.sch_payload_target with
+    match keeper_wake, row.sch_payload_keeper_name with
     | true, Some keeper ->
         [ field (t "Keeper 링크" "Keeper link")
             (Link.reference Keeper (Terminal_text.single_line keeper))

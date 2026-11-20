@@ -384,6 +384,42 @@ let test_schedules_report_the_rows_they_drew () =
     ; wl_cursor = (fun state -> state.schedule_cursor) }
     state
 
+(* #53077: the Keeper link of a Keeper wake names the Keeper, not the
+   "keeper:<name>" target the server derives from it, which no Keeper is
+   called. *)
+let test_schedule_keeper_link_names_the_keeper () =
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Schedules;
+  let row =
+    { (schedule 1) with
+      sch_payload_kind = Some "masc.keeper_wake"
+    ; sch_payload_target = Some "keeper:alice"
+    ; sch_payload_keeper_name = Some "alice" }
+  in
+  state.schedules <-
+    Some
+      { scs_observed_at = 1795046400.
+      ; scs_status = "ok"
+      ; scs_read_error = None
+      ; scs_request_count = Some 1
+      ; scs_truncated = false
+      ; scs_payload_target = None
+      ; scs_paging = Schedule_paging_unavailable
+      ; scs_next_due_iso = None
+      ; scs_counts = None
+      ; scs_rows = [ row ]
+      ; scs_runner_status = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok };
+  state.schedule_detail_id <- Some row.sch_schedule_id;
+  with_size (120, 40) (fun () ->
+    let lines, _ = draw Masc_tui_render_work.render_schedules state in
+    let named marker = rows_naming marker lines > 0 in
+    let link = Masc_tui_link.reference Masc_tui_link.Keeper "alice" in
+    if not (named link) then
+      List.iter (fun line -> if rows_naming "Keeper" [ line ] > 0 then prerr_endline line) lines;
+    Alcotest.(check bool) "the link names the Keeper" true (named link);
+    Alcotest.(check bool) "and not the target" false
+      (named (Masc_tui_link.reference Masc_tui_link.Keeper "keeper:alice")))
+
 (* Each notice is drawn at both sizes, so the list really shares the body
    with it. *)
 let check_notices_drawn ~name render state notices =
@@ -826,6 +862,8 @@ let () =
             test_goals_report_the_entries_they_drew
         ; Alcotest.test_case "the schedule list reports the rows it drew" `Quick
             test_schedules_report_the_rows_they_drew
+        ; Alcotest.test_case "a schedule's Keeper link names the Keeper" `Quick
+            test_schedule_keeper_link_names_the_keeper
         ; Alcotest.test_case "the Task list with notices reports the entries it drew" `Quick
             test_tasks_with_notices_report_the_entries_they_drew
         ; Alcotest.test_case "the Goal list with notices reports the entries it drew" `Quick

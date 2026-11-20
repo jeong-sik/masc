@@ -2488,7 +2488,8 @@ let memory_unchanged : Keeper_memory_delivery_reprojection.t =
    always asked it. *)
 
 (* What a step that moves the turn's front did. [before] is the front held
-   until then, which a later failure that is not about size gives back. *)
+   until then, which the ladder gives back when the attempt it sends again
+   fails for a reason not about size ([resend_holding]). *)
 type front_move =
   | Front_held of { before : Keeper_carried_front.seed option }
   | Front_kept
@@ -2685,12 +2686,6 @@ let history_rungs (ctx : try_provider_ctx) ~(state : attempt_state) ~(continuity
   }
 ;;
 
-(* Where the turn's front stood before an attempt's first in-run candidate
-   moved it. *)
-type candidate_front =
-  | Front_not_moved
-  | Front_moved_from of Keeper_carried_front.seed option
-
 (* RFC a-request-fits-by-the-one-input-limit-agent-core-decides §4.2: the next
    candidates of a request after the run's checkpoint stage, the ladder's
    rungs in its order without memory: the carrier, the turn boundary, the
@@ -2699,16 +2694,13 @@ type candidate_front =
    over what the rungs before it moved. A step that moves nothing gives no
    candidate. A carrier that cannot switch gives none and closes the rest,
    as the ladder's [on_projection_failure] closes its rungs, so the turn
-   ends with the refusal. [on_front_held] gets the front each hold
-   replaced. *)
-let in_run_narrower ~carrier ~boundary ~demotion ~this_turn ~on_front_held ~compose =
+   ends with the refusal. *)
+let in_run_narrower ~carrier ~boundary ~demotion ~this_turn ~compose =
   let closed = ref false in
   let composed () = Result.map Option.some (compose ()) in
   let holding step refusal =
     match step refusal with
-    | Front_held { before } ->
-      on_front_held before;
-      composed ()
+    | Front_held _ -> composed ()
     | Front_kept -> Ok None
   in
   List.map
@@ -2748,7 +2740,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
   let saved_provider_turn_ordinal = ref None in
   let retained_results_projected = ref false in
   let final_projected_messages = ref None in
-  let candidate_front = ref Front_not_moved in
   let capture_provider_ordinal (config : Runtime_agent.config) =
     let capture = { Agent_core.Hooks.empty with after_turn = Some (function
       | Agent_core.Hooks.AfterTurn { turn; _ } ->
@@ -3205,10 +3196,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
                    ~this_turn_front:rungs.this_turn_front
                    ~held_front:ctx.carried_front_after_refusal ~hold_front:ctx.hold_carried_front
                    ~on_this_turn_start:rungs.on_this_turn_start)
-              ~on_front_held:(fun before ->
-                match !candidate_front with
-                | Front_not_moved -> candidate_front := Front_moved_from before
-                | Front_moved_from (_ : Keeper_carried_front.seed option) -> ())
               ~compose:(fun () -> compose messages)
         }
     in
@@ -3539,17 +3526,6 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         |> Result.map (fun () -> run_result)
         |> Result.map_error (fun detail -> Agent_core.Error.Internal detail)
       | Some _ | None -> Ok run_result) in
-    (* An attempt whose in-run candidate moved the turn's front and that ended
-       for a reason not about size gives back the front held before the first
-       move, as the ladder's resend does: a later attempt of the turn would
-       otherwise open on a range narrowed for a failure that was not about
-       size. The carrier's form and the demotion stay (RFC
-       a-request-fits-by-the-one-input-limit-agent-core-decides §4.2). *)
-    (match !candidate_front, result with
-     | Front_moved_from before, Error error when not (is_size_refusal error) ->
-       ctx.restore_carried_front before
-     | Front_moved_from (_ : Keeper_carried_front.seed option), (Ok _ | Error _)
-     | Front_not_moved, (Ok _ | Error _) -> ());
     result, checkpoint_after, None
 ;;
 

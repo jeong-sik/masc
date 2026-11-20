@@ -298,7 +298,7 @@ let shell_simple ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd argv =
 
    Recognition and classification only: nothing here changes what runs.
 
-   RFC execute-boundary-is-the-sandbox §6 adds the [Command] source. It used to
+   The [Command] source is walked too, as [shell; "-c"; text]. It used to
    yield nothing on the grounds that it "already crossed the gate", which was
    true while crossing the gate decided whether it ran. It no longer does. A
    command that says [<<EOF] gets no advice any more: the stdin field is gone

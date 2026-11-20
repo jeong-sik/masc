@@ -1,8 +1,5 @@
 (** Typed process-vector schema for Execute.
 
-    Introduced by RFC-0091 PR-1 (§5.1.1) to replace raw
-    command-string parsing with a structured non-empty argv boundary.
-
     {2 Design constraints}
 
     - **No shell-string parsing**.  Validation is structural only:
@@ -27,9 +24,7 @@
       redirection-looking tokens, wildcard characters, and repeated argument
       tokens remain caller-authored literal argv.
     - **Cwd is a string for now**.  Path SSOT does not yet expose a
-      [Path.t] type (RFC-0091 §2.3 mis-cited [Host_config.cwd_for_keeper]
-      which does not exist).  Absolute-path enforcement happens in
-      {!validate}.  PR-3 may revisit when a path SSOT module lands. *)
+      [Path.t] type.  Absolute-path enforcement happens in {!validate}. *)
 
 type command = {
   shell : string;
@@ -155,8 +150,7 @@ val to_shell_ir :
     provide Docker runtime targets after sandbox/profile resolution. *)
 
 val pp_validation_error : Format.formatter -> validation_error -> unit
-(** Human-readable formatter for {!validation_error}.  Stable across
-    PR-1/PR-2 — callers may rely on the message structure for log
-    classification.  ERROR text intentionally lacks the retired
-    path-tokenizer prefix so the 4-layer log amplification is severed
-    at PR-2 lexer deletion. *)
+(** Human-readable formatter for {!validation_error}.  Callers may rely on
+    the message structure for log classification.  ERROR text intentionally
+    lacks the retired path-tokenizer prefix so the 4-layer log amplification
+    is severed. *)

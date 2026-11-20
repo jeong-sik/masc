@@ -338,7 +338,7 @@ val handle_masc_fusion_with_outcome
   -> unit
   -> Keeper_tool_execution.t
 
-(** RFC-0430 Phase 3 — [handle_masc_file_with_outcome] is the in-process
+(** [handle_masc_file_with_outcome] is the in-process
     handler for the [masc_file_{upload,delete}] provider Files tools: it
     resolves the server root switch + net from {!Eio_context} (same reason as
     fusion: the upload must not be tied to the keeper turn) and the API key

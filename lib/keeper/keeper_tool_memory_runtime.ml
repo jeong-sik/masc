@@ -142,11 +142,10 @@ let ranking_failure_logged = Atomic.make false
    boundaries; longer and UTF-8 terms use substring matching. That tier is ordered by the index's
    BM25 score, best first; an item the index did not rank follows the ranked
    ones in store order. Choosing among many exact matches is the recall
-   judgment's work (RFC-memory-search-beyond-substring section 3.2), not a
-   lexical score's. When the index cannot be built, the second tier keeps
-   store order, the same query matching still answers, and the log says so once
-   per process: a host whose SQLite lacks the trigram tokenizer (older than
-   3.34) fails every search the same way. *)
+   judgment's work, not a lexical score's. When the index cannot be built, the
+   second tier keeps store order, the same query matching still answers, and
+   the log says so once per process: a host whose SQLite lacks the trigram
+   tokenizer (older than 3.34) fails every search the same way. *)
 let answering ~claim_of ~query items =
   if String.equal query ""
   then items, []
@@ -654,8 +653,8 @@ let ordinary_memory_id_of_all_match = function
   | All_history _ -> None
 ;;
 
-(* Append one memory use event per id to the keeper's events sidecar
-   (RFC-0418). The caller's result is already decided; a failed append is
+(* Append one memory use event per id to the keeper's events sidecar.
+   The caller's result is already decided; a failed append is
    reported in the log and does not change it. *)
 let record_memory_events ~keepers_dir ~(meta : keeper_meta) ~now ~kind memory_ids =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -897,7 +896,7 @@ let keeper_memory_search_with_outcome
        not take a slot from an absorbed row holding the whole query. The
        explicit all scope is the only combined view. The default current scope
        never silently widens into absorbed history. Only ordinary current facts are
-       retrievals (RFC-0418); an absorbed row leaves no Retrieved event. *)
+       retrievals; an absorbed row leaves no Retrieved event. *)
     let all_stores () =
       match search_current_with_successors ~clock ~config ~keepers_dir ~meta ~query ~limit:(Some limit) with
       | Error _ as error -> error
@@ -980,7 +979,7 @@ let keeper_memory_search_with_outcome
     in
     (* source=absorbed and source=dropped. No Retrieved event: a fact that
        left is not a current memory, and the events sidecar is about current
-       memories (RFC-0418). [page] picks the facts of one source and counts
+       memories. [page] picks the facts of one source and counts
        them. *)
     let left_answer page =
       match read_current_facts ~keepers_dir ~keeper_id:meta.name with
@@ -1085,7 +1084,7 @@ let keeper_memory_search_with_outcome
        | true, (true | false) -> Matched
        | false, false -> No_match
        | false, true -> No_match_partial_read);
-    (* Each ordinary fact the model was shown is a retrieval (RFC-0418): the
+    (* Each ordinary fact the model was shown is a retrieval: the
        event is what later says this memory was used. A sidecar that cannot be
        written does not take the results away from the model; it is said in
        the log. *)

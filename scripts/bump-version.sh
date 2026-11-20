@@ -137,27 +137,19 @@ if [ -n "$base_ref" ]; then
 fi
 
 
-# 1) SSOT: dune-project
+# 1) The version lives in dune-project; everything below follows it.
 sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
   "$ROOT_DIR/dune-project"
 echo "  dune-project updated"
 
-# 2) README badge, if the README still carries one
-if grep -Eq 'version-[0-9]+\.[0-9]+\.[0-9]+-blue' "$ROOT_DIR/README.md"; then
-  sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
-    "$ROOT_DIR/README.md"
-  echo "  README.md badge updated"
-else
-  echo "  README.md has no version badge — nothing to update"
-fi
-
-# 3) opam metadata (if tracked)
+# 2) masc.opam is generated from dune-project. The bump writes the same line
+# dune would; scripts/check-opam-file-regenerated.sh compares it with dune.
 if [ -f "$ROOT_DIR/masc.opam" ]; then
   sedi -E "s/^version: \"[^\"]*\"$/version: \"$NEW_VERSION\"/" "$ROOT_DIR/masc.opam"
   echo "  masc.opam version synchronized (CI verifies generated metadata)"
 fi
 
-# 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
+# 3) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
 # [Unreleased], then add the version stub if missing. The release author moves
 # the [Unreleased] entries into the version section before tagging.
 python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
@@ -186,47 +178,6 @@ else
   echo "  CHANGELOG already has $NEW_VERSION entry"
 fi
 
-# 5) ROADMAP.md — current package version + latest changelog entry
-sedi -E "s/^> Current package version: v[^ ]*/> Current package version: v$NEW_VERSION/" \
-  "$ROOT_DIR/ROADMAP.md"
-sedi -E "s/^> Latest changelog entry: v[^ ]+ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$/> Latest changelog entry: v$NEW_VERSION ($TODAY)/" \
-  "$ROOT_DIR/ROADMAP.md"
-sedi -E "s/^> Updated: [0-9]{4}-[0-9]{2}-[0-9]{2}$/> Updated: $TODAY/" \
-  "$ROOT_DIR/ROADMAP.md"
-echo "  ROADMAP.md updated"
-
-# 6) docs/PRODUCT-OPERATING-PLAN.md — current package version + latest changelog entry
-sedi -E "s/^> Current package version: v[^ ]*/> Current package version: v$NEW_VERSION/" \
-  "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
-sedi -E "s/^> Latest changelog entry: v[^ ]+ \([0-9]{4}-[0-9]{2}-[0-9]{2}\)$/> Latest changelog entry: v$NEW_VERSION ($TODAY)/" \
-  "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
-sedi -E "s/^> Updated: [0-9]{4}-[0-9]{2}-[0-9]{2}$/> Updated: $TODAY/" \
-  "$ROOT_DIR/docs/PRODUCT-OPERATING-PLAN.md"
-echo "  PRODUCT-OPERATING-PLAN.md updated"
-
-# 7) docs/spec/SPEC-INDEX.md — snapshot baseline + release baseline table
-sedi -E "s/version \`[0-9]+\.[0-9]+\.[0-9]+\`/version \`$NEW_VERSION\`/" \
-  "$ROOT_DIR/docs/spec/SPEC-INDEX.md"
-sedi -E "s/Release baseline \| [0-9]+\.[0-9]+\.[0-9]+/Release baseline | $NEW_VERSION/" \
-  "$ROOT_DIR/docs/spec/SPEC-INDEX.md"
-echo "  SPEC-INDEX.md updated"
-
-# 8) Install pins — the copy-paste block in README and INSTALL names the
-# release being cut. Nothing else moves them, and they
-# sat on v0.35.14 while five later releases went out. Until the tag exists
-# the pins name a release readers cannot download yet; the README's "check tag
-# availability" line moves with them.
-for readme in README.md README.ko.md; do
-  sedi -E "s#releases/tag/v[0-9]+\.[0-9]+\.[0-9]+#releases/tag/v$NEW_VERSION#g" \
-    "$ROOT_DIR/$readme"
-  sedi -E "s/^> Installation target: v[^ ]+ /> Installation target: v$NEW_VERSION /" \
-    "$ROOT_DIR/$readme"
-done
-for install_doc in README.md README.ko.md docs/INSTALL.md docs/INSTALL.ko.md; do
-  sedi -E "s/^TAG=v[^ ]+$/TAG=v$NEW_VERSION/" "$ROOT_DIR/$install_doc"
-done
-echo "  install pins updated"
-
 echo ""
 echo "Release version layers:"
 echo "  1) release SemVer: $NEW_VERSION"
@@ -237,5 +188,5 @@ echo ""
 echo "Next:"
 echo "  scripts/check-version-truth.sh"
 echo "  # Build and installed-release smoke run in CI."
-echo "  git add dune-project README.md README.ko.md CHANGELOG.md changelog.d masc.opam ROADMAP.md docs/PRODUCT-OPERATING-PLAN.md docs/spec/SPEC-INDEX.md docs/INSTALL.md docs/INSTALL.ko.md"
+echo "  git add dune-project CHANGELOG.md changelog.d masc.opam"
 echo "  git commit -m \"chore(release): bump version to $NEW_VERSION\""

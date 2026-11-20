@@ -161,10 +161,10 @@ bash /tmp/masc-install.sh --base-path "$HOME/masc-workspace"
 ```
 
 최신 릴리스가 아니라 특정 릴리스를 설치하려면 그 태그의 설치기를 받아 고정합니다.
-먼저 GitHub Releases 에 그 태그가 있는지 확인하세요.
+`TAG` 에는 [GitHub Releases](https://github.com/jeong-sik/masc/releases) 에 있는 태그를 넣으세요.
 
 ```bash
-TAG=v0.74.0
+TAG=vX.Y.Z
 curl -fsSL "https://github.com/jeong-sik/masc/releases/download/${TAG}/install.sh" \
   -o /tmp/masc-install.sh &&
 bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
@@ -172,7 +172,7 @@ bash /tmp/masc-install.sh --version "$TAG" --base-path "$HOME/masc-workspace"
 
 태그의 설치기를 내려받기만 해서는 설치 버전이 고정되지 않습니다. 위처럼
 `--version "$TAG"`도 지정해야 합니다. 생략하면 설치기가 최신 릴리스를 찾습니다.
-예시는 게시된 v0.73.1을 고정하며, `main` 문서에는 그 릴리스에 없는 변경이 있을 수 있습니다.
+`main` 문서에는 그 릴리스에 없는 변경이 있을 수 있습니다.
 
 셸 PATH 변경에 동의한 경우 새 터미널에서 `masc`가 잡힙니다. 그 외에는 설치
 디렉터리를 PATH에 직접 추가하세요. 기본 경로라면

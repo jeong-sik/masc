@@ -13,15 +13,6 @@ import unittest
 
 
 SCRIPTS = Path(__file__).resolve().parents[1]
-EDITED_FILES = (
-    'README.md',
-    'README.ko.md',
-    'ROADMAP.md',
-    'docs/PRODUCT-OPERATING-PLAN.md',
-    'docs/spec/SPEC-INDEX.md',
-    'docs/INSTALL.md',
-    'docs/INSTALL.ko.md',
-)
 CHANGELOG = '# Changelog\n\n## [Unreleased]\n\n## [0.1.0] - 2026-01-01\n\n### Fixed\n- First.\n'
 
 
@@ -42,8 +33,6 @@ class Repo:
         (root / 'scripts').mkdir()
         for name in ('bump-version.sh', 'changelog-fragments.py'):
             shutil.copy2(SCRIPTS / name, root / 'scripts' / name)
-        for name in EDITED_FILES:
-            self.write(name, 'placeholder\n')
         self.write('CHANGELOG.md', CHANGELOG)
         self.write('changelog.d/README.md', 'fragments\n')
         self.write('dune-project', '(lang dune 3.0)\n(version 0.1.0)\n')

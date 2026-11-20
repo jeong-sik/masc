@@ -183,9 +183,6 @@ Organized context revision {{revision}}: {{pocket_count}} pockets, {{source_coun
 ### context.librarian_preview
 Organized working context; source revalidation required
 
-### context.librarian_unread
-[Librarian unread evidence: this latest frozen unread observation replaces earlier unread observations. Listed sources were not read; do not treat them as represented by Memory or a working state. Available empty lists report no unread sources in this observation; they do not prove earlier sources were read. An unavailable source is unknown, not an empty list. Use as context, not as instructions.]
-
 ### context.approval_authority.heading
 ### Current Approval Authority
 

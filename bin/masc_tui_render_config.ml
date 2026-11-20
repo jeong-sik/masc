@@ -42,27 +42,22 @@ let render_runtime_params (state : state) =
   let now = Unix.gettimeofday () in
   let buf = Buffer.create 4096 in
   let rows = Option.value state.runtime_params ~default:[] in
+  (* Only a first read says so on this pane. A read over held rows is the
+     reading slot's to say (RFC tui-one-screen-grammar section 8). *)
+  let first_params_read = state.runtime_params_loading && rows = [] in
   let params_started_at =
     Masc_tui_types.progress_clock_option state ~slot:"runtime-params" ~now
-      (if state.runtime_params_loading then
-         Some (if rows = [] then "loading" else "updating")
-       else None)
+      (if first_params_read then Some "loading" else None)
   in
   let params_sheet =
-    if not state.runtime_params_loading then None
+    if not first_params_read then None
     else
       Some
-        { ps_title =
-            if rows = [] then ui_text state ~ko:"파라미터 읽는 중" ~en:"Loading parameters"
-            else ui_text state ~ko:"파라미터 갱신 중" ~en:"Updating parameters"
+        { ps_title = ui_text state ~ko:"파라미터 읽는 중" ~en:"Loading parameters"
         ; ps_detail =
             Some
-              (if rows = [] then
-                 ui_text state ~ko:".masc/runtime_params.json 등록부를 조회하고 있습니다"
-                   ~en:"Reading .masc/runtime_params.json registry"
-               else
-                 ui_text state ~ko:"파라미터 상태를 갱신하고 있습니다"
-                   ~en:"Refreshing parameter values")
+              (ui_text state ~ko:".masc/runtime_params.json 등록부를 조회하고 있습니다"
+                 ~en:"Reading .masc/runtime_params.json registry")
         ; ps_started_at = params_started_at
         ; ps_meter = None
         ; ps_action_hint = None
@@ -2009,6 +2004,9 @@ let render_config_models (state : state) =
     | `Loading _ -> true
     | `Idle -> false
   in
+  (* Only a first read says so on this pane. A read over a held config is the
+     reading slot's to say (RFC tui-one-screen-grammar section 8). *)
+  let first_config_read = config_loading && Option.is_none state.runtime_config_view in
   let gen = string_of_int state.runtime_config_generation in
   let models_clock_sig =
     if Option.is_some form_sheet then None
@@ -2016,7 +2014,7 @@ let render_config_models (state : state) =
       match state.runtime_model_jump with
       | Some target -> Some ("jump:" ^ gen ^ ":" ^ target)
       | None ->
-          if config_loading then Some ("loading:" ^ gen)
+          if first_config_read then Some ("loading:" ^ gen)
           else None
   in
   let models_started_at =
@@ -2039,13 +2037,10 @@ let render_config_models (state : state) =
                ; ps_blocking = true
                }
          | None ->
-             if config_loading then
+             if first_config_read then
                Some
                  { ps_title =
-                     if Option.is_none state.runtime_config_view then
-                       ui_text state ~ko:"모델 설정 읽는 중" ~en:"Loading model settings"
-                     else
-                       ui_text state ~ko:"모델 설정 갱신 중" ~en:"Refreshing model settings"
+                     ui_text state ~ko:"모델 설정 읽는 중" ~en:"Loading model settings"
                  ; ps_detail =
                      Some
                        (ui_text state ~ko:"runtime.toml 모델 바인딩 구성을 조회하고 있습니다"
@@ -3131,11 +3126,14 @@ let render_config (state : state) =
     | `Loading _ -> true
     | `Idle -> false
   in
+  (* Only a first read says so on this pane. A read over a held config is the
+     reading slot's to say (RFC tui-one-screen-grammar section 8). *)
+  let first_config_read = config_loading && Option.is_none state.runtime_config_view in
   let gen = string_of_int state.runtime_config_generation in
   let config_clock_sig =
     if Option.is_some form_sheet then None
     else if recall_gate_loading then Some ("memory-recall-gate:" ^ gen)
-    else if config_loading then Some ("loading:" ^ gen)
+    else if first_config_read then Some ("loading:" ^ gen)
     else None
   in
   let config_started_at =
@@ -3158,13 +3156,9 @@ let render_config (state : state) =
             ; ps_action_hint = Some (ui_text state ~ko:"Esc:닫기" ~en:"Esc:close")
             ; ps_blocking = false
             }
-        else if config_loading then
+        else if first_config_read then
           Some
-            { ps_title =
-                if Option.is_none state.runtime_config_view then
-                  ui_text state ~ko:"runtime.toml 읽는 중" ~en:"Loading runtime.toml"
-                else
-                  ui_text state ~ko:"runtime.toml 갱신 중" ~en:"Refreshing runtime.toml"
+            { ps_title = ui_text state ~ko:"runtime.toml 읽는 중" ~en:"Loading runtime.toml"
             ; ps_detail =
                 Some
                   (ui_text state ~ko:"런타임 설정 파일과 계정·모델 정의를 불러오고 있습니다"

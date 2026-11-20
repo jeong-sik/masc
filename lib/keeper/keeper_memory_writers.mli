@@ -34,6 +34,10 @@ val find : base_path:string -> Librarian_writers.t option
 (** The table {!start} made for the workspace. [None]: this process started
     none for it. Can be called from any domain. *)
 
+val registered : base_path:string -> string list
+(** The Keepers the workspace's registry holds: the ones a pulse gives a
+    writer (RFC librarian-call-only-proposes §8.6). *)
+
 val follow_declaration
   :  sw:Eio.Switch.t
   -> prompt:string

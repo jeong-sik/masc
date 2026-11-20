@@ -141,6 +141,24 @@ let statuses f =
   List.map (fun (keeper, status) -> keeper ^ ": " ^ status_text status) (Writers.statuses f.writers)
 ;;
 
+(* What each writer holds, by the state of its machine (§12). *)
+let held f =
+  List.map
+    (fun (keeper, (held : Writer.held)) ->
+       keeper
+       ^ ": "
+       ^
+       match held with
+       | Held_booting -> "booting"
+       | Held { state = Idle _; _ } -> "idle"
+       | Held { state = Asking _; _ } -> "asking"
+       | Held { state = Resting _; _ } -> "resting"
+       | Held { state = Refused_at_bottom _; _ } -> "refused at the bottom"
+       | Held { state = Stopped stop; _ } -> "stopped: " ^ stop_text stop
+       | Held_retired -> "retired")
+    (Writers.held f.writers)
+;;
+
 let view_text f keeper =
   match Writers.view f.writers keeper with
   | Error `Booting -> "booting"
@@ -219,9 +237,12 @@ let test_stopped_and_resumed () =
     check string "a Keeper without a turn log" "the store is stopped: store unwritable"
       (write f "keeper-a" port);
     check string "its view says why" "stopped: store unwritable" (view_text f "keeper-a");
+    check (list string) "and what it holds is the stopped machine"
+      [ "keeper-a: stopped: store unwritable" ] (held f);
     start_turn_log (f.place "keeper-a");
     check string "a resume" "done" (act_text (Writers.resume f.writers "keeper-a"));
     check string "opens it" "nothing read, from message 4" (view_text f "keeper-a");
+    check (list string) "and it holds the open one" [ "keeper-a: idle" ] (held f);
     check string "an open store has nothing to resume" "nothing to resume"
       (act_text (Writers.resume f.writers "keeper-a")))
 ;;

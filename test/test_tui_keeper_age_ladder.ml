@@ -22,54 +22,10 @@ let is_empty = function
 ;;
 
 let make_keeper ~keeper_id age_bins : Masc.Tui_decode_memory_health.memory_keeper_health =
-  { mkh_keeper_id = keeper_id
-  ; mkh_revision = 1
-  ; mkh_updated_at = None
-  ; mkh_facts = 10
-  ; mkh_observed_facts = 8
-  ; mkh_derived_facts = 2
-  ; mkh_support_invalidations = 0
-  ; mkh_snapshot_bytes = 1024
-  ; mkh_added = 0
-  ; mkh_removed = 0
-  ; mkh_snapshot_present = true
-  ; mkh_age_bins = age_bins
-  ; mkh_facts_by_hour = []
-  ; mkh_changes_since_start = []
-  ; mkh_context_cycle =
-      { mcc_saved = None
-      ; mcc_saved_unreadable = false
-      ; mcc_read_position = None
-      ; mcc_read_position_unreadable = false
-      ; mcc_rewriting_through = None
-      ; mcc_unread_snapshot = Ok []
-      ; mcc_unread_memory = Ok []
-      ; mcc_prepared = None
-      ; mcc_synthesis = None
-      }
-  ; mkh_librarian =
-      { mlh_state = None
-      ; mlh_admission_wait = None
-      ; mlh_operator_action_required = false
-      ; mlh_measured_at = None
-      ; mlh_unread_atom_turns = None
-      ; mlh_unread_official_turns = None
-      ; mlh_continuity_unread_atoms = None
-      ; mlh_last_success_at = None
-      ; mlh_last_failure_kind = None
-      ; mlh_stalled = None
-      }
-  ; mkh_librarian_failures = 0
-  ; mkh_vision_ingest_errors = 0
-  ; mkh_vision_ingest_error_reasons = []
-  ; mkh_read_error = None
-  ; mkh_source_revision = 1
+  { (Memory_keeper_health_fixture.keeper ~keeper_id) with
+    mkh_age_bins = age_bins
   ; mkh_source_facts = 0
-  ; mkh_source_invalidations = 0
   ; mkh_source_snapshot_bytes = 0
-  ; mkh_source_snapshot_present = true
-  ; mkh_source_read_error = None
-  ; mkh_alerts = []
   }
 ;;
 

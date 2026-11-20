@@ -93,47 +93,8 @@ let make_keeper ?(paused = false) name : Decode.keeper =
 ;;
 
 let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memory_health.memory_keeper_health =
-  { mkh_keeper_id = keeper_id
-  ; mkh_revision = 1
-  ; mkh_updated_at = Some 1700000000.
-  ; mkh_facts = facts
-  ; mkh_observed_facts = facts - 2
-  ; mkh_derived_facts = 2
-  ; mkh_support_invalidations = 0
-  ; mkh_snapshot_bytes = snapshot_bytes
-  ; mkh_added = facts
-  ; mkh_removed = 0
-  ; mkh_snapshot_present = true
-  ; mkh_age_bins = Some Masc.Keeper_memory_age_bins.zero
-  ; mkh_facts_by_hour = []
-  ; mkh_changes_since_start = []
-  ; mkh_context_cycle =
-      { mcc_saved = None; mcc_saved_unreadable = false; mcc_read_position = None;
-        mcc_read_position_unreadable = false; mcc_rewriting_through = None;
-        mcc_prepared = None; mcc_synthesis = None; mcc_unread_snapshot = Ok []; mcc_unread_memory = Ok [] }
-  ; mkh_librarian =
-      { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
-      ; mlh_admission_wait = None
-      ; mlh_operator_action_required = false
-      ; mlh_measured_at = Some 1_775_000_000.0
-      ; mlh_unread_atom_turns = Some 0
-      ; mlh_unread_official_turns = Some 0
-      ; mlh_continuity_unread_atoms = Some 0
-      ; mlh_last_success_at = None
-      ; mlh_last_failure_kind = None
-      ; mlh_stalled = None
-      }
-  ; mkh_librarian_failures = 0
-  ; mkh_vision_ingest_errors = 0
-  ; mkh_vision_ingest_error_reasons = []
-  ; mkh_read_error = None
-  ; mkh_source_revision = 0
-  ; mkh_source_facts = 0
-  ; mkh_source_invalidations = 0
-  ; mkh_source_snapshot_bytes = 0
-  ; mkh_source_snapshot_present = false
-  ; mkh_source_read_error = None
-  ; mkh_alerts = []
+  { (Memory_keeper_health_fixture.keeper_without_source ~keeper_id ~facts ~snapshot_bytes) with
+    mkh_observed_facts = facts - 2
   }
 ;;
 

@@ -21,6 +21,11 @@ type status =
   | Stopped of Store.stop
   | Retired
 
+type held =
+  | Held_booting
+  | Held of Machine.t
+  | Held_retired
+
 type retirement =
   | Retired_now
   | Still_registered
@@ -63,7 +68,7 @@ type t =
   ; ask_room : Librarian_ask.room_input -> Librarian_room_result.t
   ; start_turn_log : unit -> (unit, string) result
   ; mailbox : event Eio.Stream.t
-  ; status : status Atomic.t
+  ; held : held Atomic.t
   ; between : status option Atomic.t
   (* The status while the fiber waits for its next event; [None] while it
      takes one. *)
@@ -72,7 +77,7 @@ type t =
   ; ended : unit Eio.Promise.u
   }
 
-let status t = Atomic.get t.status
+let held t = Atomic.get t.held
 let lock_suffix = ".memory.lock"
 
 let lock_path_for_keepers_dir ~keepers_dir ~keeper_id =
@@ -116,6 +121,15 @@ let status_of : Machine.state -> status = function
   | Stopped stop -> Stopped stop
 ;;
 
+(* The status is what the writer holds, read through [status_of]: one
+   value, so the two never disagree. *)
+let status t =
+  match held t with
+  | Held_booting -> Booting
+  | Held machine -> status_of machine.state
+  | Held_retired -> Retired
+;;
+
 (* The state after an event, made visible before the event is answered: the
    caller that is woken reads the status the answer is about. *)
 let publish t ~(was : Machine.t) (next : Machine.t) =
@@ -126,7 +140,7 @@ let publish t ~(was : Machine.t) (next : Machine.t) =
    | ( (Idle _ | Asking _ | Resting _ | Refused_at_bottom _ | Stopped _)
      , (Idle _ | Asking _ | Resting _ | Refused_at_bottom _) )
    | Stopped _, Stopped _ -> ());
-  Atomic.set t.status (status_of next.state)
+  Atomic.set t.held (Held next)
 ;;
 
 (* The revision the snapshot file holds, when the store is open. *)
@@ -272,7 +286,7 @@ let live t ~sw =
       start asking
   in
   let boot () =
-    Atomic.set t.status Booting;
+    Atomic.set t.held Held_booting;
     Eio.Cancel.protect (fun () ->
       if not !locked then locked := take_lock t ~sw;
       let opened : (Store.t, Store.stop) result =
@@ -329,7 +343,7 @@ let live t ~sw =
       settle next reply answer
     | Resume reply ->
       let next, answer = Machine.resume t.place ~boot state ~at:(t.now ()) in
-      Atomic.set t.status (status_of next.state);
+      Atomic.set t.held (Held next);
       follow ~before:state ~after:next;
       Eio.Promise.resolve reply answer;
       announce t ~was:(revision state) next;
@@ -358,7 +372,7 @@ let live t ~sw =
     let raised : Store.raised = { detail = Printexc.to_string exn } in
     let next : Machine.t = stopped (Store.Raised raised) in
     cancel ();
-    Atomic.set t.status (status_of next.state);
+    Atomic.set t.held (Held next);
     answer (Store.Raised raised);
     Log.Keeper.error ~keeper_name:t.place.keeper_id "librarian memory writer raised: %s\n%s"
       raised.detail
@@ -383,7 +397,7 @@ let live t ~sw =
      declaration is the first event in its mailbox. *)
   let first () =
     let state = Machine.booted t.place ~at:(t.now ()) ~lane:None ~last_ask:0 (boot ()) in
-    Atomic.set t.status (status_of state.state);
+    Atomic.set t.held (Held state);
     announce t ~was:None state;
     state
   in
@@ -409,7 +423,7 @@ let create ~now ~registered ~declared ~stores ~ask ~ask_room ~start_turn_log pla
   ; ask_room
   ; start_turn_log
   ; mailbox
-  ; status = Atomic.make Booting
+  ; held = Atomic.make Held_booting
   ; between = Atomic.make None
   ; settled = Eio.Condition.create ()
   ; gone
@@ -421,7 +435,7 @@ let run t =
   let retiring =
     Fun.protect
       ~finally:(fun () ->
-        Atomic.set t.status Retired;
+        Atomic.set t.held Held_retired;
         Eio.Promise.resolve t.ended ())
       (fun () -> Eio.Switch.run (fun sw -> live t ~sw))
   in

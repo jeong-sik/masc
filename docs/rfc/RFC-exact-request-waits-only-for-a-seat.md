@@ -3,11 +3,11 @@ rfc: "exact-request-waits-only-for-a-seat"
 title: "Exact 요청은 자리만 기다린다"
 status: Draft
 created: 2026-11-18
-updated: 2026-11-18
+updated: 2026-11-21
 author: claude
 supersedes: []
 superseded_by: null
-related: ["host-cycle-runs-exact-requests-side-by-side", "operator-quiz-lane", "exact-lane-waits-for-a-stated-reset", "server-carries-its-exact-worker-packages"]
+related: ["host-cycle-runs-exact-requests-side-by-side", "operator-quiz-lane", "exact-lane-waits-for-a-stated-reset", "server-carries-its-exact-worker-packages", "exact-lane-walks-one-slot-list"]
 ---
 
 # Exact 요청은 자리만 기다린다
@@ -46,10 +46,12 @@ Librarian 은 Keeper 와 종류(admission, durable)마다 끝나지 않은 원�
 바꾸지 않는 것:
 
 - slot 순서, 쉬는 slot 처리(`Runtime_exact_lane_backpressure`), 실패하면 다음 slot 으로 가는 규칙
-- CLI slot 은 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓴다. 입력 크기로 거절된 slot 도 실패로 센다. 지금과 같다
+- 입력 크기로 거절된 slot 도 실패로 센다
 - 걷기 영수증의 형식. 지나친 slot 은 거절 사유 `Seats_full` 하나를 더해 적는다
 - 원본 규칙, 시작 표시(`Started`)를 쓰는 때
 - 한 instance 의 cycle 은 겹치지 않는다. 요청은 cycle 마다 한 번만 시도한다
+
+CLI slot 을 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓰던 규칙은 §2 개정으로 지운다(운영자, 2026-11-21, Q7). HTTP slot 과 CLI slot 은 한 목록에서 같은 규칙으로 고른다.
 
 대가는 §5 에 적는다.
 
@@ -155,8 +157,8 @@ Librarian 의 다음 요청은 앞 요청의 결과가 반영된 뒤에 생긴�
   - Keeper 턴과 계정을 나누지 않는 slot(tinker)이 lane 에 없으면 선언이 없어도 Keeper 턴이 기다린다. 같은 재생에서 GLM 8 + ollama 4 lane 은 900초 넘게 기다린 Keeper 턴 호출이 GLM 283건, ollama 1,189건이다.
   - 이 RFC 는 이 키를 요구하지 않는다. 선언과 값은 운영자가 계정마다 잰 시간 비를 보고 정한다.
 - 쉬는 slot 은 provider 가 밝힌 때까지 부르지 않는다. 지금과 같다.
-- HTTP slot 과 CLI slot 은 층이 다르다. CLI slot 은 HTTP slot 이 모두 실패하거나 쉬거나 지나쳐졌을 때만 쓴다. HTTP 자리가 꽉 찬 것만으로는 CLI 로 가지 않는다.
-  - HTTP 자리는 앞 요청의 본문 한도 안에 빈다. CLI 는 프로세스를 띄우고, 구독 한도를 Keeper 턴과 나눠 쓴다.
+- HTTP slot 과 CLI slot 은 한 목록에서 같은 규칙으로 고른다. 꽉 찬 slot 은 종류와 상관없이 지나간다. 모두 꽉 차면 먼저 비는 자리를 기다린다(운영자, 2026-11-21).
+  - 목록과 걸음의 모양은 `RFC-exact-lane-walks-one-slot-list` §3.3·§3.6 이다.
 
 ## 3. 설계
 
@@ -194,7 +196,7 @@ walk(slots):   # 선언 순서. 쉬는 slot 과 크기로 거절된 slot 은 빠
 - 자리 대기를 함께 재던 바깥 한도는 없어진다. 재기와 생성 요청은 각자 본문 한도를 싣고 가므로, 한도가 보낼 때부터 센다.
 - Exact flow 의 `Permit_wait_expired`, `Permit_granted_as_deadline_passed` 와 `*_admission_timed_out` 생성자는 지운다. Keeper 턴의 `complete.ml`·`prepared_completion_request.ml` 는 `Provider_admission` 의 같은 이름 값을 계속 쓴다.
 - 시작 표시는 지금처럼 첫 생성 요청을 보내기 직전에 쓴다. 줄에서 취소된 요청에는 표시가 없다.
-- CLI 층 안에서도 같은 규칙으로 고른다. 자리는 §3.2 가 센다.
+- 이 걷기는 HTTP slot 과 CLI slot 을 가리지 않는다. 걸음마다 slot 하나를 부르고, 자리를 고르는 쪽은 남은 목록 전체를 본다(`RFC-exact-lane-walks-one-slot-list` §3.3). CLI 자리는 §3.2 가 센다.
 
 이 걷기는 `execute_flow_once` 를 쓰는 다른 Exact 소비자에도 같이 걸린다. `hitl_summary_worker`, `keeper_board_attention_exact_flow`, `keeper_librarian_runtime`, `server_lane_addon_exact` 다.
 
@@ -301,7 +303,7 @@ Librarian lane 의 HTTP slot 이 선언 순서로 A(자리 8, Keeper 턴과 같�
 
 ### 4.4 HTTP 가 모두 막혔다
 
-- A, B, C 가 모두 실패하거나 쉬면 CLI 층으로 간다. CLI 층에서도 같은 규칙으로 자리를 고른다.
+- A, B, C 가 모두 실패하거나 쉬면 목록에 남은 CLI slot 으로 간다. HTTP slot 과 CLI slot 은 한 목록에서 같은 규칙으로 고르므로(운영자, 2026-11-21, Q7), 이 예에서 CLI slot 은 A·B·C 다음의 한 항목이다.
 - CLI 자리가 모두 차 있으면 그 줄에 선다. 프로세스는 자리 수보다 많이 뜨지 않는다.
 
 ### 4.5 Keeper 31명의 요청이 한꺼번에 있다
@@ -377,7 +379,7 @@ L4 를 내기 전에 확인할 것 둘:
 | 수를 두고, 값을 Keeper 수로 자동으로 맞춘다 | 여전히 host 가 센 수다. 바퀴가 가장 늦은 요청을 기다리는 일은 그대로다. host 가 Keeper 를 알아야 한다 |
 | host 가 「Keeper 마다 하나」를 센다 | host 요청에는 만든 Keeper 가 없다(`Lane_addon_exact.request`). Librarian 원본 규칙이 이미 그것을 지킨다 |
 | 지나친 slot 을 나중에 다시 본다(방문 순서를 바꾼다) | 영수증이 선언 순서 방문을 요구한다. 영수증을 바꾸면 저장된 원본을 읽지 못해 원본 저장소를 새로 시작해야 한다 |
-| HTTP 자리가 꽉 차면 CLI 로도 넘긴다 | CLI 는 프로세스와 구독 한도를 쓴다. HTTP 자리는 본문 한도 안에 빈다. §2 |
+| HTTP 자리가 꽉 차도 CLI 로 넘기지 않고 HTTP 줄에서만 기다린다(2026-11-21 이전 동작) | 빈 CLI 자리를 두고 기다린다. 목록을 놀리고, 뒤 slot 으로 넘어가는 이득을 버린다. §2 가 2026-11-21 에 뒤집혔다(운영자, Q7) |
 | 기다림에 따로 한도를 둔다 | 고른 수다. 여러 줄에 같이 서면 기다림은 처음 비는 자리에서 끝난다 |
 | 꽉 찬 slot 을 지금처럼 기다리고 본문 한도만 허가 뒤로 옮긴다(#52981 만 고침) | 잘린 생성은 사라진다. 꽉 찬 첫 slot 앞의 기다림은 남는다 |
 

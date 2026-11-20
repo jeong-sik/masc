@@ -108,11 +108,9 @@ let handle_run_list ~tool_name ~start_time ctx args : Tool_result.result =
 
 (** {1 Dispatcher} *)
 
-(* RFC-0189 PR-1b.6 — boundary projection lives here. Handlers above are
-   typed; external callers (mcp_server_eio_execute, tools.ml,
-   keeper_tag_dispatch) still consume Tool_result.result option. PR-1c will
-   move the Tool_dispatch.handler ABI itself to result, removing this
-   bridge. *)
+(* Boundary projection lives here. Handlers above are typed; external
+   callers (mcp_server_eio_execute, keeper_tag_dispatch,
+   keeper_tool_in_process_runtime) consume Tool_result.result option. *)
 (* The wire name is parsed once and the operations are matched, so an operation
    added to [Tool_schemas_run] is a compile error here. *)
 let dispatch ctx ~name ~args : Tool_result.result option =

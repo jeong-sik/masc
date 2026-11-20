@@ -851,7 +851,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
       | Some status -> Error (Http_status status)
       | None -> Error No_http_status)
 
-(* RFC-0189 PR-1b.8 — typed result.
+(* Typed result.
    Failure-class assignments live with construction:
    - [Workflow_rejection]: caller-input violation (invalid URL).
    - [Dependency_unavailable]: transport failure or an upstream HTTP response
@@ -861,8 +861,7 @@ let fetch_impl ~url ~timeout_sec ~extract_mode ~max_chars ~fetched_at_unix =
 
    Note: no substring classifier downstream. Each [fetch_failure]
    variant carries its own [fetch_failure_class], assigned at the
-   call site that constructs it. Avoids the workaround signature
-   §2 anti-pattern (string-based classification). *)
+   call site that constructs it. Avoids string-based classification. *)
 
 let handle ~tool_name ~start_time args : Tool_result.result =
   let url = get_string args "url" "" in

@@ -60,11 +60,10 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
 	      a window never splits a multi-byte sequence. Each successful
 	      offload also appends one [masc.web_artifact.v1] fact row (sha256,
 	      source_url, optional title, bytes, fetched_at) to [index.jsonl]
-	      under [<base>/.masc/artifacts/web-fetch/] — RFC-0383's
-	      requeryable corpus. The index is a projection: deleting it
-	      changes no behavior, and an append failure surfaces as an
-	      [\[index_unavailable=<reason>\]] marker line without demoting the
-	      offload
+	      under [<base>/.masc/artifacts/web-fetch/]. The index is a
+	      projection: deleting it changes no behavior, and an append
+	      failure surfaces as an [\[index_unavailable=<reason>\]] marker
+	      line without demoting the offload
 	    - [content_type]: optional upstream content type
 	    - [downloaded_bytes]: optional curl-reported download size
 	    - [title]: optional, extracted from [<title>] tag
@@ -80,7 +79,7 @@ val handle : tool_name:string -> start_time:Tool_timing.started -> Yojson.Safe.t
     (64:ff9b::/96) are likewise not unwrapped — only the standard
     IPv4-mapped form (::ffff:0:0/96) is.
 
-    Failure classes (RFC-0189):
+    Failure classes:
     - [Workflow_rejection]: invalid or rejected URL — caller-input
       violation (blocked destinations included).
     - [Dependency_unavailable]: transport failure or upstream HTTP non-2xx.

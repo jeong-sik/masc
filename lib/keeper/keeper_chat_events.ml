@@ -215,6 +215,35 @@ let public_error_code = "event_error"
 let public_error_message = "The Keeper turn failed."
 let public_protocol_error_message = "The stream event could not be used."
 
+let public_protocol_error_message_of_kind = function
+  | Sse_timeout ->
+      "The live stream timed out waiting for the next event."
+  | Sse_stream_incomplete ->
+      "The live stream ended before the response completed."
+  | Tool_start_duplicate_index
+  | Tool_start_missing_identity
+  | Tool_args_without_start
+  | Tool_stop_without_start
+  | Tool_replay_mismatch
+  | Tool_delta_invalid_kind
+  | Tool_attempt_superseded
+  | Tool_message_start_conflict
+  | Stream_event_after_terminal
+  | Tool_occurrence_mapping_invalid
+  | Media_delta_invalid_block
+  | Media_source_unsupported
+  | Media_decode_failed
+  | Media_payload_too_large
+  | Media_persist_failed
+  | Sse_error
+  | Ndjson_error
+  | Sse_parse_failed
+  | Ndjson_parse_failed
+  | Sse_unknown_event_type
+  | Sse_unsupported_part
+  | Sse_unsupported_response ->
+      public_protocol_error_message
+
 let map_content ~public_errors ~redact_text = function
   | Text_delta delta -> Text_delta {delta with text = redact_text delta.text}
   | Event_error event ->
@@ -230,7 +259,7 @@ let map_content ~public_errors ~redact_text = function
       Agent_core_media_delta {event with media_ref=redact_text event.media_ref}
   | Agent_core_stream_protocol_error event ->
       Agent_core_stream_protocol_error {event with
-        reason = if public_errors then Some public_protocol_error_message
+        reason = if public_errors then Some (public_protocol_error_message_of_kind event.kind)
           else Option.map redact_text event.reason;
         event_type = if public_errors then None else Option.map redact_text event.event_type}
   | Tool_call_args event -> Tool_call_args {event with delta=redact_text event.delta}

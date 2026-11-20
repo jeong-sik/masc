@@ -54,6 +54,8 @@ type stream_protocol_error_kind =
       (** The transport's stream liveness bound expired (first event or idle
           gap) before the provider finished. Ends the attempt, not the turn. *)
 
+val all_of_stream_protocol_error_kind : stream_protocol_error_kind list
+
 type runtime_attempt_scope_disposition =
   | Preserve_previous_scope
   | Abandon_previous_scope
@@ -317,12 +319,14 @@ val redact_content :
 val public_error_code : string
 val public_error_message : string
 val public_protocol_error_message : string
+val public_protocol_error_message_of_kind : stream_protocol_error_kind -> string
 val public_content :
   redact_text:(string -> string) -> keeper_chat_event -> keeper_chat_event
 (** The public copy redacts content with the captured Keeper exact-secret
     policy and replaces terminal diagnostic messages with one fixed safe
-    message. Stream protocol diagnostics retain their closed kind and safe
-    message, while provider diagnostic text stays internal.
+    message. Stream protocol diagnostics retain their closed kind and a fixed
+    safe message selected by {!public_protocol_error_message_of_kind}, while
+    provider diagnostic text stays internal.
     Event/correlation identities stay intact. The public replay journal stores
     this safe copy, so reconnects reproduce the public live event. This pure
     projection leaves the original in-process event and private operation

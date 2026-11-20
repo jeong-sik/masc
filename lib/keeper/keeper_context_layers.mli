@@ -40,7 +40,6 @@ type layer_id =
   | Completion_authority
   | Task_cancellations
   | Pending_mentions
-  | Scope_messages
   | Own_board_posts
   | Board_activity
   | Own_recent_actions

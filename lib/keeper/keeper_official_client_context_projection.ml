@@ -929,7 +929,7 @@ let resume_prompt ~goal ~held ~turn_observation ?composed_context
            | Layer (Active_goals | Goal_observations | Goals_awaiting_proof | Current_task
                | Approval_authority | Connected_surfaces | Namespace_state | Workspace_memory
                | Wiki | Lane_updates | Autonomous_trigger | Scheduled_automation
-               | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
+               | Completion_authority | Task_cancellations | Pending_mentions
                | Own_board_posts | Board_activity | Own_recent_actions | Recent_work | Fleet_messages)
            | Unattributed (World_frame | Host_workspace_recall | Direct_turn) -> true) sections
        | Some _, None | None, _ -> false)

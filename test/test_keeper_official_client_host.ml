@@ -3090,7 +3090,7 @@ let test_direct_operation_source_reaches_official_start_and_resume () =
       | Layers.Approval_authority | Layers.Connected_surfaces | Layers.Namespace_state
       | Layers.Workspace_memory | Layers.Wiki | Layers.Lane_updates | Layers.Autonomous_trigger
       | Layers.Scheduled_automation | Layers.Completion_authority | Layers.Task_cancellations
-      | Layers.Pending_mentions | Layers.Scope_messages | Layers.Own_board_posts
+      | Layers.Pending_mentions | Layers.Own_board_posts
       | Layers.Board_activity | Layers.Own_recent_actions | Layers.Recent_work
       | Layers.Fleet_messages -> None)
       |> fun partition -> Layers.append_unattributed partition Direct_turn "TASK GATE LANE" in

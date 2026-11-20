@@ -1874,7 +1874,6 @@ let prepare_prompt_internal
            ^ format_pending_messages observation.pending_messages
            ^ "\n\n")
       else None
-    | Keeper_context_layers.Scope_messages -> None
     (* 9b. Own recent board posts — the keeper's own published posts, newest
        first. Cursor-independent standing context: Board_activity only carries
        other authors' unseen posts, so this is the only in-prompt view of what
@@ -1997,7 +1996,7 @@ let project_prompt prepared ?workspace_memory_access ?own_recent_actions
     | Active_goals | Direct_input_source | Goal_observations | Goals_awaiting_proof | Current_task | Approval_authority
     | Connected_surfaces
     | Namespace_state | Lane_updates | Autonomous_trigger | Scheduled_automation
-    | Completion_authority | Task_cancellations | Pending_mentions | Scope_messages
+    | Completion_authority | Task_cancellations | Pending_mentions
     | Own_board_posts | Board_activity | Fleet_messages ->
       (* Captured and assembled through the same immutable [ordered] keys. *)
       Layer_map.find layer prepared.common_layers

@@ -81,7 +81,7 @@ let project_partition prepared ~workspace_memory_access =
     | Current_task | Approval_authority | Connected_surfaces | Namespace_state
     | Workspace_memory | Wiki | Lane_updates | Autonomous_trigger
     | Scheduled_automation | Completion_authority | Task_cancellations | Pending_mentions
-    | Scope_messages | Own_board_posts | Board_activity | Own_recent_actions | Recent_work
+    | Own_board_posts | Board_activity | Own_recent_actions | Recent_work
     | Fleet_messages -> None) in
   Keeper_context_layers.append_unattributed observations Direct_turn
     (if remaining = "" then "" else "\n\n" ^ remaining)

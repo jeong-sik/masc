@@ -1073,6 +1073,160 @@ let ensure_memory_writer ~sw ~(config : Masc.Workspace.config) name =
          failwith "memory writer fixture: the turn log was not started"))
 ;;
 
+(** A [Closed] line of a Keeper's turn log: the byte offset where it
+    starts, where the line after it starts, and the closed messages it
+    leaves. *)
+type turn_log_closing =
+  { line : int
+  ; line_end : int
+  ; closed_messages : int
+  }
+
+(** [write_closed_turn_log ~keepers_dir ~keeper_name ~trace_id closings]
+    starts the Keeper's turn log before any message of [trace_id], then
+    appends one completed turn that closes after each count of [closings],
+    in order. It returns those turns' [Closed] lines in the same order. *)
+let write_closed_turn_log ~keepers_dir ~keeper_name ~trace_id closings =
+  let path =
+    Masc.Keeper_turn_log_store.path_for_keepers_dir ~keepers_dir ~keeper_id:keeper_name
+  in
+  let mark closed_messages = turn_log_mark ~trace_id ~closed_messages in
+  let append ~at_end line =
+    match Masc.Keeper_turn_log_store.append ~path ~at_end (line, []) with
+    | Ok appended -> appended
+    | Error (_ : Masc.Keeper_turn_log_store.append_error) ->
+      failwith "write_closed_turn_log: a line was not appended"
+  in
+  let rec close_turns ~at_end ~before ~turn = function
+    | [] -> []
+    | after :: rest ->
+      let opened =
+        append ~at_end
+          (Masc.Keeper_turn_log.Opened
+             { at = float_of_int turn
+             ; turn_ref = Ids.Turn_ref.make ~trace_id ~absolute_turn:turn
+             ; runtime = "fixture"
+             ; task = Masc.Keeper_turn_log.No_task
+             ; stimuli = []
+             ; baseline = mark before
+             })
+      in
+      let closed =
+        append ~at_end:opened.Masc.Keeper_turn_log_store.new_end
+          (Masc.Keeper_turn_log.Closed
+             { turn = opened.Masc.Keeper_turn_log_store.last_at
+             ; at = float_of_int turn +. 0.5
+             ; outcome = Masc.Keeper_turn_log.Completed
+             ; after = mark after
+             ; unattributed = []
+             ; own = []
+             })
+      in
+      { line = closed.Masc.Keeper_turn_log_store.last_at
+      ; line_end = closed.Masc.Keeper_turn_log_store.new_end
+      ; closed_messages = after
+      }
+      :: close_turns
+           ~at_end:closed.Masc.Keeper_turn_log_store.new_end
+           ~before:after
+           ~turn:(turn + 1)
+           rest
+  in
+  let started = append ~at_end:0 (turn_log_started_line (mark 0)) in
+  close_turns ~at_end:started.Masc.Keeper_turn_log_store.new_end ~before:0 ~turn:1 closings
+;;
+
+(** [commit_memory_read ~config ~keeper_name ~trace_id ~working_state closing]
+    commits one read to the Keeper's Memory store before its writer boots:
+    the line a read the writer asked would leave, through the turn that
+    [closing] closed, with [working_state] ([Keep] leaves the none a new
+    store has). The store is booted first, which starts it when it has no
+    commit log. *)
+let commit_memory_read
+      ~(config : Masc.Workspace.config)
+      ~keeper_name
+      ~trace_id
+      ~working_state
+      (closing : turn_log_closing)
+  =
+  let store =
+    match
+      Masc.Librarian_store.boot
+        ~memory_dir:(Config_dir_resolver.keepers_dir_for_base_path ~base_path:config.base_path)
+        ~turns_dir:(Masc.Workspace.keepers_runtime_dir config)
+        ~keeper_id:keeper_name
+        ~at:10.
+    with
+    | Ok store -> store
+    | Error (_ : Masc.Librarian_store.stop) -> failwith "commit_memory_read: the store did not boot"
+  in
+  let id =
+    match
+      Masc.Librarian_question_id.of_halves ~front:(String.make 32 'c') ~back:(String.make 32 'd')
+    with
+    | Some id -> id
+    | None -> failwith "commit_memory_read: the question id is not hexadecimal"
+  in
+  let question : Masc.Librarian_read_result.question =
+    { Masc.Librarian_read_result.id
+    ; shown = { Masc.Librarian_plan.memory = Some []; units = [ "turn", closing.line ] }
+    ; reach =
+        { Masc.Librarian_read_result.line = closing.line
+        ; within = Masc.Librarian_log.Whole
+        ; covered = turn_log_mark ~trace_id ~closed_messages:closing.closed_messages
+        ; turn_log_offset = closing.line_end
+        }
+    ; trace = trace_id
+    ; missing = []
+    ; offered = { Masc.Librarian_width.units = 1; head_items = 1 }
+    }
+  in
+  let plan =
+    Masc.Librarian_plan.of_answer
+      ~shown:question.Masc.Librarian_read_result.shown
+      ~facts:(Masc.Librarian_store.memory store).Masc.Keeper_memory_os_current_types.facts
+      ~removed_since:[]
+      ~at:11.
+      ~trace_id
+      { Masc.Librarian_answer.question = id; ops = []; working_state }
+  in
+  match Masc.Librarian_store.commit_read store ~at:11. ~question ~slot:"fixture.librarian" plan with
+  | Masc.Librarian_store.Committed _ -> ()
+  | Masc.Librarian_store.Committed_without_snapshot _
+  | Masc.Librarian_store.Stopped _
+  | Masc.Librarian_store.Not_a_snapshot _ -> failwith "commit_memory_read: the read was not committed"
+;;
+
+(** [booted_memory_writer_view ~sw ~config name] gives [name] its Memory
+    writer ({!ensure_memory_writer}) and returns the writer's view once its
+    boot has opened the store: a reading makes the writer, and a resume is
+    answered only after the boot. *)
+let booted_memory_writer_view ~sw ~(config : Masc.Workspace.config) name =
+  ensure_memory_writer ~sw ~config name;
+  let writers =
+    match Masc.Keeper_memory_writers.find ~base_path:config.base_path with
+    | Some writers -> writers
+    | None -> failwith "booted_memory_writer_view: the workspace has no Memory writers"
+  in
+  (match Masc.Librarian_writers.view writers name with
+   | Error `Booting | Ok (_ : Masc.Librarian_writer.view) -> ()
+   | Error (`Stopped (_ : Masc.Librarian_store.stop) | `No_writer) ->
+     failwith "booted_memory_writer_view: the Keeper has no writer");
+  (match Masc.Librarian_writers.resume writers name with
+   | Masc.Librarian_machine.Not_done Masc.Librarian_machine.Nothing_to_resume -> ()
+   | Masc.Librarian_machine.Done
+   | Masc.Librarian_machine.Not_done
+       ( Masc.Librarian_machine.Not_stopped
+       | Masc.Librarian_machine.Snapshot_mismatch
+       | Masc.Librarian_machine.Snapshot_unreadable
+       | Masc.Librarian_machine.Act_unavailable _ ) ->
+     failwith "booted_memory_writer_view: the writer did not open its store");
+  match Masc.Librarian_writers.view writers name with
+  | Ok view -> view
+  | Error (`Booting | `Stopped (_ : Masc.Librarian_store.stop) | `No_writer) ->
+    failwith "booted_memory_writer_view: the writer has no view after its boot"
+;;
+
 (** For a test file whose cases are plain [unit -> unit] functions outside
     any Eio loop: {!run} gives a case its loop, and {!writer} gives a Keeper
     its Memory writer on the running case's switch. *)

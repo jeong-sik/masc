@@ -56,7 +56,8 @@ let line ~verb ~url = function
          ("the response stopped for " ^ setting_text after_seconds)
      | Pool.Body_limit_exceeded { status; limit } ->
        exchange_line ~verb ~url
-         (Printf.sprintf "the HTTP %d response is larger than %d bytes" status limit)
+         (Printf.sprintf "the HTTP %d response is larger than %s bytes" status
+            (Masc_tui_value.Count.grouped limit))
      | Pool.Exchange_failed detail -> exchange_line ~verb ~url detail
      | Pool.Invalid_request _ ->
        exchange_line ~verb ~url (Pool.request_error_to_string error))

@@ -48,8 +48,9 @@ let detail_text = function
 
 let meta_text ~ko = function
   | Catalog.Report report ->
-      Printf.sprintf (if ko then "%s · %s · %d바이트" else "%s · %s · %d bytes")
-        report.revision.author report.revision.created_at report.revision.body.bytes
+      Printf.sprintf (if ko then "%s · %s · %s바이트" else "%s · %s · %s bytes")
+        report.revision.author report.revision.created_at
+        (Masc_tui_value.Count.grouped report.revision.body.bytes)
   | Mcp _ as resource ->
       Option.value (Catalog.metadata resource).mime_type
         ~default:(if ko then "유형 미상" else "type unknown")

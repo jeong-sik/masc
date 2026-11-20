@@ -216,6 +216,7 @@
  (modules keeper_capability_probe_cli)
  (public_name masc-keeper-capability-probe)
  (package masc)
+ (link_deps masc-antigravity-path-hook)
  (libraries
   masc
   masc.masc_process

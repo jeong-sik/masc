@@ -107,7 +107,7 @@ let endpoint t =
   { url = t.endpoint; headers = [ "Authorization", bearer_authorization t ] }
 ;;
 
-let mcp_config_json t ~eager_tools =
+let mcp_config_json t =
   let { url; headers } = endpoint t in
   `Assoc
     [ ( "mcpServers"
@@ -117,11 +117,6 @@ let mcp_config_json t ~eager_tools =
                 [ "url", `String url
                 ; ( "headers"
                   , `Assoc (List.map (fun (name, value) -> name, `String value) headers) )
-                ; ( "tools"
-                  , `Assoc
-                      (List.map
-                         (fun name -> name, `Assoc [ "eager", `Bool true ])
-                         eager_tools) )
                 ] )
           ] )
     ]

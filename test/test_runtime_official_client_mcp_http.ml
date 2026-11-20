@@ -7,7 +7,7 @@ type response =
 
 let config_fields bridge =
   let open Yojson.Safe.Util in
-  let config = Runtime_official_client_mcp_http.mcp_config_json bridge ~eager_tools:[] in
+  let config = Runtime_official_client_mcp_http.mcp_config_json bridge in
   let server = config |> member "mcpServers" |> member "masc" in
   let endpoint = server |> member "url" |> to_string in
   let authorization =
@@ -767,11 +767,10 @@ let test_structured_text_is_sanitized_before_it_reaches_the_client () =
     [Llm_provider.Utf8_sanitize.sanitize raw] content
 ;;
 
-(* A tool the config does not declare eager is listed to the model by name
-   only, and the schema file it is told to read sits behind a masc home's
-   read_file deny. Every name passed in comes back declared eager, and a
-   name not passed is not declared. *)
-let test_config_declares_the_given_tools_eager () =
+(* RFC-0490 L4: mcp_config_json omits the per-tool eager map so agy keeps every
+   masc tool in its lazy list and loads schemas on demand from the allowed
+   schema folder instead of silently dropping large eager schemas past ~62 KB. *)
+let test_config_omits_eager_tools_for_on_demand_loading () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -788,20 +787,12 @@ let test_config_declares_the_given_tools_eager () =
       ()
   in
   let open Yojson.Safe.Util in
-  let tools =
-    Runtime_official_client_mcp_http.mcp_config_json
-      bridge
-      ~eager_tools:[ "masc_ask"; "Read" ]
+  let server =
+    Runtime_official_client_mcp_http.mcp_config_json bridge
     |> member "mcpServers"
     |> member "masc"
-    |> member "tools"
   in
-  check (list string) "one entry per given tool" [ "masc_ask"; "Read" ] (keys tools);
-  List.iter
-    (fun name ->
-      check bool (name ^ " is eager") true (tools |> member name |> member "eager" |> to_bool))
-    [ "masc_ask"; "Read" ];
-  check bool "a tool not given is not declared" true (tools |> member "Execute" = `Null)
+  check bool "tools map is omitted for lazy loading" true (server |> member "tools" = `Null)
 ;;
 
 let test_independent_tool_can_complete_while_another_is_blocked () =
@@ -1041,8 +1032,8 @@ let () =
               ~expected:["valid Base64"] ())
         ; test_case "structured text is sanitized before it reaches the client"
             `Quick test_structured_text_is_sanitized_before_it_reaches_the_client
-        ; test_case "the config declares the given tools eager" `Quick
-            test_config_declares_the_given_tools_eager
+        ; test_case "the config omits eager tool declarations for on-demand loading" `Quick
+            test_config_omits_eager_tools_for_on_demand_loading
         ] )
     ; ( "response delivery"
       , [ test_case "reused string ID keeps physical delivery and substitution separate"

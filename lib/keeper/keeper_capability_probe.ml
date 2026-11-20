@@ -679,6 +679,19 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                   (Antigravity_home_unavailable
                      (Runtime_antigravity_home.error_to_string error))
               | Ok (home, native_cwd) ->
+                (match
+                   Eio_guard.run_in_systhread ~label:"antigravity-read-hook" (fun () ->
+                     Runtime_antigravity_home.prepare_read_hook
+                       home
+                       ~posture:Runtime_native_tools.Native_none
+                       ~cwd:native_cwd
+                       ~additional_workspaces:[])
+                 with
+                 | Error error ->
+                   Error
+                     (Antigravity_home_unavailable
+                        (Runtime_antigravity_home.error_to_string error))
+                 | Ok () ->
                 (* Released with the switch so a probe cannot leave a live MCP
                    URL in a HOME the next probe reuses. *)
                 Eio.Switch.on_release sw (fun () ->
@@ -714,9 +727,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                 (match
                    Runtime_antigravity_home.publish_mcp_config
                      home
-                     (Runtime_official_client_mcp_http.mcp_config_json
-                        bridge
-                        ~eager_tools:[ probe_tool.name ])
+                     (Runtime_official_client_mcp_http.mcp_config_json bridge)
                  with
                  | Error error ->
                    Error
@@ -763,7 +774,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                            ~seen
                            ~elapsed_s:(now () -. started)
                            ~text:(Some turn.text)
-                           ~dynamic_tool_calls:(List.length !seen)))))))))
+                           ~dynamic_tool_calls:(List.length !seen))))))))))
 ;;
 
 (* The same isolated, selected-account MCP runner used by setup verification.

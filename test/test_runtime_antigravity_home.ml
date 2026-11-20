@@ -764,9 +764,10 @@ let test_native_permissions_match_posture_and_workspace () =
   let workspace = Filename.concat runtime_root "workspace" in
   Unix.mkdir workspace 0o700;
   let paths = Runtime_antigravity_home.For_testing.paths home in
-  (* RFC-0490 2.2: every posture names the lazily loaded masc tools' schema
-     folder and the two secret paths. Native_none keeps its all-files deny
-     until L3, so it cannot read that folder before the hook. *)
+  (* RFC-0490 2.2 + L3b: every posture names the lazily loaded masc tools'
+     schema folder and the two secret paths. None of them emit the broad
+     all-files read deny that would shadow schema reads; Native_none denies
+     workspace roots explicitly and pairs with the read-guard hook. *)
   let schema_allow =
     "read_file(" ^ Filename.concat (Filename.dirname paths.settings_path) "mcp/masc" ^ ")" in
   let secret_denies =
@@ -784,23 +785,16 @@ let test_native_permissions_match_posture_and_workspace () =
     check bool "no workspace-wide root read" false
       (List.mem ("read_file(" ^ runtime_root ^ ")") (rules "allow"));
     check bool "no all-files read" false (List.mem "read_file(*)" (rules "allow"));
-    (match posture with
-     | Runtime_native_tools.Native_none ->
-       check bool "Native_none keeps the all-files deny until the hook lands" true
-         (List.mem "read_file(*)" (rules "deny"))
-     | Native_read | Native_full ->
-       check bool "post-hook postures do not shadow the schema allow" false
-         (List.mem "read_file(*)" (rules "deny")));
+    check bool "no posture shadows the schema allow with read_file(*)" false
+      (List.mem "read_file(*)" (rules "deny"));
     check bool "no command grant can authorize sandbox escape" false
       (List.mem "command(*)" (rules "allow"));
     check bool "no unsupported unsandboxed rule" false
       (List.mem "unsandboxed(*)" (rules "deny")) in
   let network_denies = ["read_url(*)"; "execute_url(*)"] in
-  (* Until L3, the all-files deny keeps an unmatched read from becoming an
-     Ask. The workspace deny remains for when L3 removes the broader rule. *)
   check_policy Runtime_native_tools.Native_none
     ["mcp(masc/*)"; schema_allow]
-    (secret_denies @ ["read_file(*)"; "read_file(" ^ workspace ^ ")"; "write_file(*)"; "command(*)"] @ network_denies);
+    (secret_denies @ ["read_file(" ^ workspace ^ ")"; "write_file(*)"; "command(*)"] @ network_denies);
   check_policy Runtime_native_tools.Native_read
     ["mcp(masc/*)"; schema_allow; "read_file(" ^ workspace ^ ")"]
     (secret_denies @ ["write_file(*)"; "command(*)"] @ network_denies);
@@ -886,27 +880,64 @@ let test_published_read_hook_preserves_permissions_and_scopes_reads () =
     ~posture:Runtime_native_tools.Native_read
     ~workspace:(Runtime_antigravity_home.Shared_workspace workspace) ~additional_workspaces:[] |> require_ok in
   let paths = Runtime_antigravity_home.For_testing.paths home in
+  let mcp_dir = Filename.concat (Filename.dirname paths.settings_path) "mcp" in
+  let schema_dir = Filename.concat mcp_dir "masc" in
+  Unix.mkdir mcp_dir 0o700;
+  Unix.mkdir schema_dir 0o700;
+  let schema_file = Filename.concat schema_dir "Execute.json" in
+  write_file ~mode:0o600 schema_file "{}";
   let permissions = Fs_compat.load_file paths.settings_path in
-  Runtime_antigravity_home.prepare_read_hook home ~cwd ~additional_workspaces:[] |> require_ok;
+  Runtime_antigravity_home.prepare_read_hook home ~posture:Runtime_native_tools.Native_read
+    ~cwd ~additional_workspaces:[] |> require_ok;
   check string "publishing the read guard does not change permissions" permissions
     (Fs_compat.load_file paths.settings_path);
   let hooks_path = Filename.concat (Filename.dirname paths.mcp_config_path) "hooks.json" in
   check int "hook config stays private" 0o600 (permission hooks_path);
   let open Yojson.Safe.Util in
-  let handler = Yojson.Safe.from_file hooks_path |> member "masc-native-read"
-    |> member "PreToolUse" |> to_list |> List.hd in
-  let command = handler |> member "hooks" |> to_list |> List.hd |> member "command" |> to_string in
   let input = Filename.concat runtime_root "hook-input.json" in
   let output = Filename.concat runtime_root "hook-output.json" in
-  let invoke path =
+  let invoke_current path =
+    let handler = Yojson.Safe.from_file hooks_path |> member "masc-native-read"
+      |> member "PreToolUse" |> to_list |> List.hd in
+    let command = handler |> member "hooks" |> to_list |> List.hd |> member "command" |> to_string in
     write_file ~mode:0o600 input (Yojson.Safe.to_string (`Assoc [
       "toolCall", `Assoc ["name", `String "read_file"; "args", `Assoc ["Path", `String path]];
       "conversationId", `String "fixture"]));
     check int "published hook exits with a decision" 0
       (Sys.command (command ^ " < " ^ Filename.quote input ^ " > " ^ Filename.quote output));
     Yojson.Safe.from_file output |> member "decision" |> to_string in
-  check string "workspace read delegates" "allow" (invoke inside);
-  check string "account credential read is denied" "deny" (invoke paths.oauth_path)
+  let extra = Filename.concat runtime_root "extra-workspace" in
+  Unix.mkdir extra 0o700;
+  let extra_file = Filename.concat extra "extra.txt" in
+  write_file ~mode:0o600 extra_file "extra";
+  check string "Native_read workspace read delegates" "allow" (invoke_current inside);
+  check string "Native_read schema read delegates" "allow" (invoke_current schema_file);
+  check string "Native_read account credential read is denied" "deny" (invoke_current paths.oauth_path);
+  let brain_dir = Filename.concat (Filename.dirname paths.settings_path) "brain" in
+  let mk_brain_output conv =
+    let conv_dir = Filename.concat brain_dir conv in
+    let sys_dir = Filename.concat conv_dir ".system_generated" in
+    let steps_dir = Filename.concat sys_dir "steps" in
+    let step_dir = Filename.concat steps_dir "1" in
+    List.iter (fun dir -> if not (Sys.file_exists dir) then Unix.mkdir dir 0o700)
+      [ brain_dir; conv_dir; sys_dir; steps_dir; step_dir ];
+    let file = Filename.concat step_dir "output.txt" in
+    write_file ~mode:0o600 file "generated";
+    file
+  in
+  let own_brain_output = mk_brain_output "fixture" in
+  let other_brain_output = mk_brain_output "other-conversation" in
+  Runtime_antigravity_home.prepare_read_hook home ~posture:Runtime_native_tools.Native_none
+    ~cwd ~additional_workspaces:[extra] |> require_ok;
+  check string "Native_none schema read delegates" "allow" (invoke_current schema_file);
+  check string "Native_none own brain generated output delegates" "allow"
+    (invoke_current own_brain_output);
+  check string "Native_none other conversation brain output is denied" "deny"
+    (invoke_current other_brain_output);
+  check string "Native_none workspace read is denied" "deny" (invoke_current inside);
+  check string "Native_none relative workspace read is denied" "deny" (invoke_current "inside.txt");
+  check string "Native_none additional workspace read is denied" "deny" (invoke_current extra_file);
+  check string "Native_none account credential read is denied" "deny" (invoke_current paths.oauth_path)
 ;;
 
 let test_native_roots_never_overlap_the_runtime_root () =

@@ -1418,6 +1418,7 @@ let antigravity_readiness_fixture = {|#!/usr/bin/env python3
 import json
 import os
 from pathlib import Path
+import shlex
 import sys
 import urllib.request
 
@@ -1427,7 +1428,12 @@ home = Path(os.environ["HOME"])
 settings = json.loads((home / ".gemini/antigravity-cli/settings.json").read_text())
 assert settings["permissions"]["allow"] == ["mcp(masc/*)", "read_file(" + str(home / ".gemini/antigravity-cli/mcp/masc") + ")"]
 assert "command(*)" in settings["permissions"]["deny"]
-assert "read_file(*)" in settings["permissions"]["deny"]
+assert "read_file(*)" not in settings["permissions"]["deny"]
+hooks = json.loads((home / ".gemini/config/hooks.json").read_text())
+hook_cmd = hooks["masc-native-read"]["PreToolUse"][0]["hooks"][0]["command"]
+hook_argv = shlex.split(hook_cmd)
+read_roots = [hook_argv[i + 1] for i, arg in enumerate(hook_argv) if arg == "--read-root"]
+assert read_roots == [str(home / ".gemini/antigravity-cli/mcp/masc")], hook_argv
 assert os.getcwd() == str(home / "native-workspace")
 assert "read_file(" + os.getcwd() + ")" in settings["permissions"]["deny"]
 assert "read_file(" + str(home / ".gemini/config") + ")" in settings["permissions"]["deny"]
@@ -1451,8 +1457,7 @@ headers["MCP-Protocol-Version"] = "2025-11-25"
 rpc("notifications/initialized", {})
 listed = rpc("tools/list", {}, 2)
 assert [tool["name"] for tool in listed["result"]["tools"]] == ["runtime_readiness_challenge"]
-assert sorted(server["tools"]) == sorted(tool["name"] for tool in listed["result"]["tools"]), server.get("tools")
-assert all(v == {"eager": True} for v in server["tools"].values()), server["tools"]
+assert "tools" not in server, server.get("tools")
 result = rpc("tools/call", {"name": "runtime_readiness_challenge", "arguments": {}}, 3)
 text = result["result"]["content"][0]["text"]
 model = sys.argv[sys.argv.index("--model") + 1]

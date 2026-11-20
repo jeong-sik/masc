@@ -16,24 +16,32 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~host ~oauth_source ~con
           ~additional_workspaces:[] with
       | Error _ -> Error Private_home_unavailable
       | Ok (home, native_cwd) ->
-        let bridge = Runtime_official_client_mcp_http.start ~sw ~net ~secure_random
-          ~server_name:Runtime_antigravity_home.mcp_server_name
-          ~tool_specs:(fun () -> [`Assoc [
-            "name", `String tool.Runtime_official_client_tool.name;
-            "description", `String tool.description; "inputSchema", tool.input_schema]])
-          ~tool_execution_mode:(fun ~name ~arguments ->
-          if String.equal name tool.name then Some (tool.execution_mode arguments) else None)
-        ~call_tool:(fun ~name ~call_id ~arguments ->
-            if not (String.equal name tool.name) then None else
-            let result = tool.call ~call_id arguments in
-            Some { Runtime_official_client_mcp_http.outcome =
-              { Runtime_official_client_mcp.success = result.success; content = result.content; content_blocks = result.content_blocks };
-              stop = None; after_response_sent = (fun () -> ()) }) () in
-        match Runtime_antigravity_home.publish_mcp_config home
-          (Runtime_official_client_mcp_http.mcp_config_json bridge
-             ~eager_tools:[ tool.Runtime_official_client_tool.name ]) with
-        | Error _ -> Error Private_home_unavailable
-        | Ok () ->
-          Runtime_antigravity.run_turn ~home_dir:(Runtime_antigravity_home.home_dir home) ~host
-            ~mgr ~clock ~cwd:Eio.Path.(cwd / native_cwd) { config with cwd = native_cwd } ~prompt
-          |> Result.map_error (fun error -> Client_error error)))
+        (match
+           Eio_guard.run_in_systhread ~label:"antigravity-read-hook" (fun () ->
+             Runtime_antigravity_home.prepare_read_hook home
+               ~posture:Runtime_native_tools.Native_none
+               ~cwd:native_cwd
+               ~additional_workspaces:[])
+         with
+         | Error _ -> Error Private_home_unavailable
+         | Ok () ->
+           let bridge = Runtime_official_client_mcp_http.start ~sw ~net ~secure_random
+             ~server_name:Runtime_antigravity_home.mcp_server_name
+             ~tool_specs:(fun () -> [`Assoc [
+               "name", `String tool.Runtime_official_client_tool.name;
+               "description", `String tool.description; "inputSchema", tool.input_schema]])
+             ~tool_execution_mode:(fun ~name ~arguments ->
+             if String.equal name tool.name then Some (tool.execution_mode arguments) else None)
+           ~call_tool:(fun ~name ~call_id ~arguments ->
+               if not (String.equal name tool.name) then None else
+               let result = tool.call ~call_id arguments in
+               Some { Runtime_official_client_mcp_http.outcome =
+                 { Runtime_official_client_mcp.success = result.success; content = result.content; content_blocks = result.content_blocks };
+                 stop = None; after_response_sent = (fun () -> ()) }) () in
+           match Runtime_antigravity_home.publish_mcp_config home
+             (Runtime_official_client_mcp_http.mcp_config_json bridge) with
+           | Error _ -> Error Private_home_unavailable
+           | Ok () ->
+             Runtime_antigravity.run_turn ~home_dir:(Runtime_antigravity_home.home_dir home) ~host
+               ~mgr ~clock ~cwd:Eio.Path.(cwd / native_cwd) { config with cwd = native_cwd } ~prompt
+             |> Result.map_error (fun error -> Client_error error))))

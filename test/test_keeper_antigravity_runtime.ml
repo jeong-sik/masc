@@ -145,9 +145,8 @@ post({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":v
 post({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}, version)
 tools = post({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}, version)
 assert sorted(tool["name"] for tool in tools["result"]["tools"]) == %s
-# Every tool masc serves is declared eager and nothing else is, or the model sees its name only.
-assert sorted(server["tools"]) == sorted(tool["name"] for tool in tools["result"]["tools"]), server.get("tools")
-assert all(v == {"eager": True} for v in server["tools"].values()), server["tools"]
+# RFC-0490 L4: masc leaves tools lazy so agy exposes every schema on demand instead of dropping large eager tools past ~62 KB.
+assert "tools" not in server, server.get("tools")
 called = post({"jsonrpc":"2.0","id":"call-1","method":"tools/call","params":{"name":"masc_probe","arguments":{"marker":"from-antigravity"}}}, version)
 assert called["result"]["content"][0]["text"] == "MASC_TOOL_RESULT"
 PY
@@ -2301,26 +2300,6 @@ let test_only_an_effect_capable_call_closes_the_retry_boundary () =
     (Cell.read cell = Effect.Effect_attempted)
 ;;
 
-let test_every_declared_loading_is_eager_on_antigravity () =
-  let tool name loading : Keeper_official_client_host.dynamic_tool =
-    { name
-    ; description = name
-    ; input_schema = `Assoc [ "type", `String "object" ]
-    ; loading
-    ; result_bound = Runtime_official_client_tool.Unbounded
-    ; execution_mode = (fun _ -> Agent_core.Tool_contract.Serial)
-    ; call_effect = (fun _ -> Agent_core.Tool.Effect_possible)
-    ; call = (fun ~call_id:_ _ -> Alcotest.fail "not called")
-    }
-  in
-  check (list string) "upfront and on-demand tools are both eager"
-    [ "upfront_tool"; "on_demand_tool" ]
-    (Keeper_antigravity_runtime.eager_tool_names
-       [ tool "upfront_tool" Runtime_official_client_tool.Upfront
-       ; tool "on_demand_tool" Runtime_official_client_tool.On_demand
-       ])
-;;
-
 (* #39768: the Antigravity runtime boundary catches unexpected exceptions the
    same way as Claude Code's, and they are masc internal failures, not parse
    errors of the CLI's reply. *)
@@ -2847,10 +2826,6 @@ let () =
             "only an effect-capable call closes the retry boundary"
             `Quick
             test_only_an_effect_capable_call_closes_the_retry_boundary
-          ; test_case
-            "every declared loading is eager on Antigravity"
-            `Quick
-            test_every_declared_loading_is_eager_on_antigravity
           ; test_case
               "blank result starts fresh next turn"
               `Quick

@@ -1,7 +1,10 @@
 (* HIGH-RISK-UNREVIEWED: native read guard. It never grants a permission: "allow" delegates to
    agy's remaining hooks and settings. An unmatched outside read must return
    a tool error instead of reaching the headless Ask that ends a Keeper turn.
-   Native_none's settings deny remains in force. *)
+   Under Native_none, settings.json omits the broad all-files read deny so
+   schema reads under mcp/masc remain allowed while workspace roots and secret
+   paths stay denied; this hook enforces that reads outside schema_dir and
+   current-conversation brain outputs fail closed as tool errors. *)
 
 exception Invalid_input
 

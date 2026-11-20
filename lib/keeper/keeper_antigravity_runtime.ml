@@ -118,14 +118,6 @@ let home_error_to_core_error error =
     (Runtime_antigravity_home.error_to_string error)
 ;;
 
-(* Antigravity sends a tool's schema to the model up front only when the MCP
-   config marks it [eager] ({!Runtime_official_client_mcp_http.mcp_config_json}).
-   Every tool is eager on this lane, whatever its declared [loading];
-   RFC-0490 L4 removes the mark. *)
-let eager_tool_names (tools : Host.dynamic_tool list) =
-  List.map (fun (tool : Host.dynamic_tool) -> tool.name) tools
-;;
-
 let tool_spec (tool : Host.dynamic_tool) =
   `Assoc
     [ "name", `String tool.name
@@ -1037,7 +1029,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
       let* _native_cwd = Eio_guard.run_in_systhread ~label:"antigravity-native-policy" (fun () ->
           let* cwd = Runtime_antigravity_home.prepare_native_tools home
             ~posture:native_posture ~workspace:native_workspace ~additional_workspaces:add_dirs in
-          let* () = Runtime_antigravity_home.prepare_read_hook home ~cwd ~additional_workspaces:add_dirs in
+          let* () = Runtime_antigravity_home.prepare_read_hook home
+            ~posture:native_posture ~cwd ~additional_workspaces:add_dirs in
           Ok cwd)
         |> Result.map_error (fun error ->
              recovery_failure := Session_store.Pre_dispatch_failed;
@@ -1079,9 +1072,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
           let* () =
             Runtime_antigravity_home.publish_mcp_config
               home
-              (Runtime_official_client_mcp_http.mcp_config_json
-                 bridge
-                 ~eager_tools:(eager_tool_names dynamic_tools))
+              (Runtime_official_client_mcp_http.mcp_config_json bridge)
             |> Result.map_error (fun error ->
               recovery_failure := Session_store.State_persistence_failed;
               home_error_to_core_error error)

@@ -71,18 +71,17 @@ val endpoint : t -> endpoint
     values (Muse Code's [session/start]). *)
 
 (** Remote-MCP configuration for Antigravity CLI: [url] and [headers] as
-    measured against 1.1.11, [tools] as measured against 1.2.9. The returned
-    JSON carries {!endpoint}, so it contains the ephemeral capability and must
-    not be logged or persisted after the turn.
+    measured against 1.1.11. The returned JSON carries {!endpoint}, so it
+    contains the ephemeral capability and must not be logged or persisted
+    after the turn.
 
-    [eager_tools] are declared [tools.<name>.eager = true]. An eager tool is
-    registered with its schema (agy 1.2.9, measured 2026-09-24). Antigravity
-    lists a tool without that declaration by name only; after L3 opens the
-    schema folder for [Native_none], the model reads its schema file from
-    the folder named in the masc home's settings and calls it through
-    [call_mcp_tool]. agy 1.5.1 keeps eager tools only up to a size budget and
-    drops the rest (RFC-0490 1.2). *)
-val mcp_config_json : t -> eager_tools:string list -> Yojson.Safe.t
+    No [tools.<name>.eager] map is emitted (RFC-0490 L4): agy 1.5.1+ keeps
+    eager MCP tools smallest-first only up to ~62 KB and silently drops the
+    rest without adding them to the lazy list, losing large core tools such
+    as [Execute] and [Read]. Omitting [tools] puts every advertised tool on
+    agy's lazy list, where the model reads its schema from the masc home's
+    opened schema folder and invokes it through [call_mcp_tool]. *)
+val mcp_config_json : t -> Yojson.Safe.t
 
 module For_testing : sig
   type snapshot =

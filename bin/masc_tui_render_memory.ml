@@ -59,7 +59,7 @@ let facts_title_reading ~ko = function
   | Facts_unread { reading } -> reading
   | Facts_loaded { total; filter_label; query_label } ->
     Printf.sprintf "%s \xc2\xb7 %s%s"
-      (if ko then Printf.sprintf "목록 %d개" total else Masc_tui_message_layout.count_noun total "listed row") filter_label
+      (if ko then Printf.sprintf "목록 %s개" (Masc_tui_value.Count.grouped total) else Masc_tui_message_layout.count_noun total "listed row") filter_label
       query_label
 
 (* The row under the facts title. The title says the total and the filter; this
@@ -72,9 +72,9 @@ let facts_title_reading ~ko = function
 
    [grand_total] is not passed in because it is not drawn here. *)
 let facts_stats_row ~ko ~ordinary ~source ~dropped ~sort_label =
-  Printf.sprintf (if ko then "  %s목록: 일반 %d · 원본 %d · 무효화 %d%s · %s정렬 [s]:%s %s"
-    else "  %sListed: %d ordinary · %d source · %d dropped%s · %sSort [s]:%s %s")
-    (Theme.recede ()) ordinary source dropped Ansi.reset
+  Printf.sprintf (if ko then "  %s목록: 일반 %s · 원본 %s · 무효화 %s%s · %s정렬 [s]:%s %s"
+    else "  %sListed: %s ordinary · %s source · %s dropped%s · %sSort [s]:%s %s")
+    (Theme.recede ()) (Masc_tui_value.Count.grouped ordinary) (Masc_tui_value.Count.grouped source) (Masc_tui_value.Count.grouped dropped) Ansi.reset
     (Theme.recede ()) Ansi.reset sort_label
 
 let memory_category_filter_text ~ko = function
@@ -237,8 +237,10 @@ let memory_input_lines ~ko ~cols ~unit reading =
     let last = match measured.last with None -> not_reported | Some n -> format (float n) in
     wrap [label; text "평균 " "avg " ^ avg; text "최대 " "max " ^ maximum; text "최소 " "min " ^ minimum; text "최근 " "last " ^ last]
     @ wrap
-        [ Printf.sprintf (if ko then "최근 기록 턴 %d개" else "Recent %d recorded turns") snapshot.records
-        ; Printf.sprintf (if ko then "%d/%d 측정" else "%d/%d recorded") samples snapshot.records
+        [ Printf.sprintf (if ko then "최근 기록 턴 %s개" else "Recent %s recorded turns")
+            (Masc_tui_value.Count.grouped snapshot.records)
+        ; Printf.sprintf (if ko then "%s/%s 측정" else "%s/%s recorded")
+            (Masc_tui_value.Count.grouped samples) (Masc_tui_value.Count.grouped snapshot.records)
         ; (match unit with Memory_usage.Tokens -> text "런타임 입력 추정치 포함 가능" "input may include runtime estimates" | Memory_usage.Bytes -> text "직렬화된 본문" "serialized body")
         ]
   in
@@ -352,7 +354,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   let unread_lag = Masc_tui_keeper_memory_reading.unread_lag librarian in
   let unread =
     match unread_lag with
-    | Some behind -> Printf.sprintf (if ko then "미읽은 턴 %d개" else "unread %d") behind
+    | Some behind -> Printf.sprintf (if ko then "미읽은 턴 %s개" else "unread %s") (Masc_tui_value.Count.grouped behind)
     | None -> text "미읽은 턴 ?" "unread ?"
   in
   (* The two rounds fall behind separately, so the continuity lag prints
@@ -360,7 +362,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
      reading: no snapshot, an unreadable one, or one from another trace. *)
   let continuity =
     match librarian.mlh_continuity_unread_atoms with
-    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 %d개" else "continuity behind %d") atoms
+    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 %s개" else "continuity behind %s") (Masc_tui_value.Count.grouped atoms)
     | None -> text "연속성 지연 ?" "continuity behind ?"
   in
   let memory_saved = text "기억 저장 " "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at in
@@ -488,9 +490,9 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       | Ok records ->
         let count = List.length records in
         let heading =
-          if ko then Printf.sprintf "  %s · 기록된 미읽음 메시지 %d건" label count
+          if ko then Printf.sprintf "  %s · 기록된 미읽음 메시지 %s건" label (Masc_tui_value.Count.grouped count)
           else if count = 1 then Printf.sprintf "  %s · 1 recorded unread message" label
-          else Printf.sprintf "  %s · %d recorded unread messages" label count
+          else Printf.sprintf "  %s · %s recorded unread messages" label (Masc_tui_value.Count.grouped count)
         in
         heading ::
         List.map (fun record ->
@@ -505,8 +507,8 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   in
   let source_line =
     Printf.sprintf
-      (if ko then "  원본 저장 r%d · 사실 %d개 · 무효화 %d건 · 저장량 %s · %s" else "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s · %s")
-      k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
+      (if ko then "  원본 저장 r%d · 사실 %s개 · 무효화 %s건 · 저장량 %s · %s" else "  source-bound snapshot r%d · facts %s · invalidations %s · stored %s · %s")
+      k.mkh_source_revision (Masc_tui_value.Count.grouped k.mkh_source_facts) (Masc_tui_value.Count.grouped k.mkh_source_invalidations)
       (stored_amount unit k.mkh_source_snapshot_bytes)
       (if k.mkh_source_snapshot_present then text "저장됨" "present" else text "스냅샷 없음" "absent")
   in
@@ -815,13 +817,13 @@ let fact_detail_parts_for_width ?state ~ko ~width (row : memory_fact_row) =
           match fact.mf_events.mfe_retrieval with
           | Never_retrieved -> text "조회된 적 없음" "Never retrieved"
           | Retrieved { count; distinct_days; last_at } ->
-              Printf.sprintf (if ko then "조회 %d회 · %s · 최근 %s" else "Retrieved %d on %s · last %s") count
+              Printf.sprintf (if ko then "조회 %s회 · %s · 최근 %s" else "Retrieved %s on %s · last %s") (Masc_tui_value.Count.grouped count)
                 (if ko then Printf.sprintf "%d일에 걸쳐" distinct_days else Message_layout.count_noun distinct_days "day")
                 (memory_fact_age_label last_at)
         in
-        Printf.sprintf (if ko then "%s · 철회 %d회 · 이전 사실 %d개" else "%s · Retracted %d · Revised from %d") read
-          fact.mf_events.mfe_retracted_count
-          (List.length fact.mf_events.mfe_revised_from)
+        Printf.sprintf (if ko then "%s · 철회 %s회 · 이전 사실 %s개" else "%s · Retracted %s · Revised from %s") read
+          (Masc_tui_value.Count.grouped fact.mf_events.mfe_retracted_count)
+          (Masc_tui_value.Count.grouped (List.length fact.mf_events.mfe_revised_from))
       in
       let cat_label, cat_tone = Memory_tree.category_badge ~ko fact.mf_category in
       let heading_plain = text "기억한 사실" "Fact Detail" in
@@ -972,11 +974,11 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           ^ missing_reading (text "메모리 관측 대기" "waiting for memory snapshots") ]
     | Some snapshot ->
        labelled (text "전체" "Total")
-         ([ (if ko then Printf.sprintf "기억 %d개" (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts)
+         ([ (if ko then Printf.sprintf "기억 %s개" (Masc_tui_value.Count.grouped (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts))
              else Masc_tui_message_layout.count_noun
                (snapshot.mhs_total_facts + snapshot.mhs_total_source_facts) "fact")
-          ; Printf.sprintf (if ko then "일반 %d + 원본 %d" else "%d ordinary + %d source")
-              snapshot.mhs_total_facts snapshot.mhs_total_source_facts
+          ; Printf.sprintf (if ko then "일반 %s + 원본 %s" else "%s ordinary + %s source")
+              (Masc_tui_value.Count.grouped snapshot.mhs_total_facts) (Masc_tui_value.Count.grouped snapshot.mhs_total_source_facts)
           ; Printf.sprintf (if ko then "저장 %s" else "stored %s")
               (stored_amount state.memory_unit
                  (snapshot.mhs_total_snapshot_bytes + snapshot.mhs_total_source_snapshot_bytes))
@@ -1012,10 +1014,10 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           "1 failures". The unread turns keep "?" when nothing measured
           them, which is not a count and cannot take a noun from one. *)
        labelled (text "일반:" "Ordinary:")
-         [ Printf.sprintf (if ko then "관측 %d / 파생 %d" else "%d observed / %d derived")
-             snapshot.mhs_total_observed_facts snapshot.mhs_total_derived_facts
+         [ Printf.sprintf (if ko then "관측 %s / 파생 %s" else "%s observed / %s derived")
+             (Masc_tui_value.Count.grouped snapshot.mhs_total_observed_facts) (Masc_tui_value.Count.grouped snapshot.mhs_total_derived_facts)
          ; (let inv_text =
-              if ko then Printf.sprintf "근거 무효화 %d건" snapshot.mhs_total_support_invalidations
+              if ko then Printf.sprintf "근거 무효화 %s건" (Masc_tui_value.Count.grouped snapshot.mhs_total_support_invalidations)
               else Masc_tui_message_layout.count_noun
                 snapshot.mhs_total_support_invalidations "support invalidation"
             in
@@ -1040,7 +1042,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
           does with "read error". *)
        @ labelled (text "원본:" "Source:")
          ([ (let inv_text =
-               if ko then Printf.sprintf "무효화 %d건" snapshot.mhs_total_source_invalidations
+               if ko then Printf.sprintf "무효화 %s건" (Masc_tui_value.Count.grouped snapshot.mhs_total_source_invalidations)
                else Masc_tui_message_layout.count_noun
                  snapshot.mhs_total_source_invalidations "invalidation"
              in
@@ -1061,13 +1063,13 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          [ (if ko then
               match snapshot.mhs_total_librarian_unread_turns with
               | None -> "미읽은 턴 ?"
-              | Some turns -> Printf.sprintf "미읽은 턴 %d개" turns
+              | Some turns -> Printf.sprintf "미읽은 턴 %s개" (Masc_tui_value.Count.grouped turns)
             else
               (match snapshot.mhs_total_librarian_unread_turns with
                | None -> "? turns"
                | Some turns -> Masc_tui_message_layout.count_noun turns "turn") ^ " unread")
-         ; (if ko then Printf.sprintf "연속성 지연 아톰 %d개 (미측정 키퍼 %d명)"
-              snapshot.mhs_total_librarian_continuity_unread_atoms
+         ; (if ko then Printf.sprintf "연속성 지연 아톰 %s개 (미측정 키퍼 %d명)"
+              (Masc_tui_value.Count.grouped snapshot.mhs_total_librarian_continuity_unread_atoms)
               snapshot.mhs_total_librarian_continuity_unmeasured
             else Printf.sprintf "%s behind in continuity (%s not measured)"
               (Masc_tui_message_layout.count_noun snapshot.mhs_total_librarian_continuity_unread_atoms "atom")
@@ -1218,18 +1220,20 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
     | Some _, _ -> [text ~ko:"출처 기억 읽기 실패" ~en:"source memory unreadable"]
     | None, false -> [text ~ko:"출처 기억 스냅샷 없음" ~en:"no source memory snapshot"]
     | None, true ->
-        [ Printf.sprintf (if ko then "출처 사실 %d개" else "%d source facts") keeper.mkh_source_facts
-        ; Printf.sprintf (if ko then "출처 무효화 %d건" else "%d source invalidations") keeper.mkh_source_invalidations
+        [ Printf.sprintf (if ko then "출처 사실 %s개" else "%s source facts")
+            (Masc_tui_value.Count.grouped keeper.mkh_source_facts)
+        ; Printf.sprintf (if ko then "출처 무효화 %s건" else "%s source invalidations")
+            (Masc_tui_value.Count.grouped keeper.mkh_source_invalidations)
         ]
   in
   let librarian = keeper.mkh_librarian in
   let unread = match Masc_tui_keeper_memory_reading.unread_lag librarian with
     | None -> text ~ko:"미읽은 턴 미측정" ~en:"unread turns unmeasured"
-    | Some turns -> Printf.sprintf (if ko then "미읽은 턴 %d개" else "%d unread turns") turns
+    | Some turns -> Printf.sprintf (if ko then "미읽은 턴 %s개" else "%s unread turns") (Masc_tui_value.Count.grouped turns)
   in
   let continuity = match librarian.mlh_continuity_unread_atoms with
     | None -> text ~ko:"연속성 지연 미측정" ~en:"continuity lag unmeasured"
-    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 아톰 %d개" else "continuity behind %d atoms") atoms
+    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 아톰 %s개" else "continuity behind %s atoms") (Masc_tui_value.Count.grouped atoms)
   in
   let pass = match librarian.mlh_state with
     | None -> text ~ko:"처리 결과 보고 안 됨" ~en:"pass not reported"

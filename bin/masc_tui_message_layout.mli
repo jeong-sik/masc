@@ -567,7 +567,9 @@ val dress_bare_links :
     link. *)
 
 val count_noun : ?plural:string -> int -> string -> string
-(** [count_noun 1 "line"] is ["1 line"], [count_noun 2 "line"] is ["2 lines"].
+(** [count_noun 1 "line"] is ["1 line"], [count_noun 2 "line"] is ["2 lines"],
+    and the count takes commas from a thousand up ([count_noun 8347 "post"]
+    is ["8,347 posts"], RFC tui-one-screen-grammar 6.3).
     [?plural] names an irregular plural: [count_noun ~plural:"entries" 3 "entry"]. *)
 
 val compact_count : int -> string

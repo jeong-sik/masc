@@ -272,7 +272,7 @@ let test_agent_turn_preparation () =
    | Some tools_json -> Alcotest.(check int) "2 tools in json" 2 (List.length tools_json)
    | None -> Alcotest.fail "expected tools_json");
   (* effective_messages should contain our user message *)
-  Alcotest.(check int) "1 message" 1 (List.length prep.effective_messages);
+  Alcotest.(check int) "1 message" 1 (List.length prep.request.effective_messages);
   (* visible_tool_names mirrors tools_json — exact list LLM sees *)
   Alcotest.(check (list string))
     "visible_tool_names matches"
@@ -343,6 +343,7 @@ let test_provider_context_retention () =
       | _ -> messages
     in
     Agent_core.History.to_wire_messages media_store messages
+    |> Result.map Agent_core.Agent.one_request
     |> Result.map_error (fun error -> Error.Media error)
   in
   let agent = Internal_agent.create ~media_store ~net:env#net ~model_input_projection:projection
@@ -469,6 +470,7 @@ let test_turn_scoped_lane_retains_the_canonical_carrier () =
       Error (Error.Internal (Llm_provider.Reasoning_history_projection.error_to_string error))
     | Ok transmitted ->
       Agent_core.History.to_wire_messages media_store transmitted
+      |> Result.map Agent_core.Agent.one_request
       |> Result.map_error (fun error -> Error.Media error)
   in
   let agent =
@@ -1454,7 +1456,7 @@ let test_prepare_turn_no_tools () =
   (match prep.tools_json with
    | None -> ()
    | Some _ -> Alcotest.fail "expected no tools_json for empty tool set");
-  Alcotest.(check int) "1 message" 1 (List.length prep.effective_messages);
+  Alcotest.(check int) "1 message" 1 (List.length prep.request.effective_messages);
   (* visible_tool_names is empty when the caller supplies no tools. *)
   Alcotest.(check (list string)) "empty visible_tool_names" [] prep.visible_tool_names
 ;;
@@ -1489,7 +1491,7 @@ let test_prepare_turn_preserves_messages () =
       ()
     |> Result.get_ok
   in
-  Alcotest.(check int) "3 messages" 3 (List.length prep.effective_messages)
+  Alcotest.(check int) "3 messages" 3 (List.length prep.request.effective_messages)
 ;;
 
 (* ── Agent_turn.make_tool_results ───────────────────── *)
@@ -1675,8 +1677,8 @@ let test_prepare_turn_extra_context () =
   Alcotest.(check int)
     "2 messages (original + context)"
     2
-    (List.length prep.effective_messages);
-  let last = List.nth prep.effective_messages 1 in
+    (List.length prep.request.effective_messages);
+  let last = List.nth prep.request.effective_messages 1 in
   match last.content with
   | [ Llm_provider.Types.Text s ] ->
     Alcotest.(check string)

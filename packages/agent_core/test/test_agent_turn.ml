@@ -190,6 +190,7 @@ let test_retained_context_respects_projection () =
   let media_store = Agent_core.History.Memory_store.create () in
   let to_wire messages =
     Agent_core.History.to_wire_messages media_store messages
+    |> Result.map Agent_core.Agent.one_request
     |> Result.map_error (fun error -> Error.Media error)
   in
   let prepare project =
@@ -201,13 +202,13 @@ let test_retained_context_respects_projection () =
   in
   let removed = prepare (fun messages -> to_wire (List.filter (fun m -> not (is_current m)) messages)) in
   Alcotest.(check bool) "removed context is never retained" true
-    (Result.get_ok removed.context_message = None);
+    (Result.get_ok removed.request.context_message = None);
   let rewritten = prepare (fun messages -> to_wire (List.map (fun (message : Types.message) ->
     if is_current message then
       { message with content = [Text "redacted"];
         metadata = ("test-origin", `String "projected") :: message.metadata }
     else message) messages)) in
-  match Result.get_ok rewritten.context_message with
+  match Result.get_ok rewritten.request.context_message with
   | None -> Alcotest.fail "projected context missing"
   | Some message ->
     Alcotest.(check string) "retained bytes equal transmitted bytes" "redacted"
@@ -229,14 +230,14 @@ let test_context_ambiguity_does_not_reject_preparation () =
     | Error error -> Error (Error.Media error)
     | Ok projected ->
       let carrier = List.hd (List.rev projected) in
-      Ok (projected @ [carrier])
+      Ok (Agent_core.Agent.one_request (projected @ [carrier]))
   in
   let prepared = Agent_turn.prepare_turn ~media_store ~tools:Tool_set.empty ~messages ~turn_params
       ~model_input_projection:duplicate_current () |> Result.get_ok in
   Alcotest.(check int) "all projected messages remain available" 3
-    (List.length prepared.effective_messages);
+    (List.length prepared.request.effective_messages);
   Alcotest.(check bool) "ambiguity is deferred to signed-response collection" true
-    (Result.is_error prepared.context_message)
+    (Result.is_error prepared.request.context_message)
 ;;
 
 let test_prepare_messages_system_prompt_override_noop () =

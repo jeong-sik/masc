@@ -421,7 +421,7 @@ let test_callback_and_restored_response_prepare_same_model_input () =
       | Hooks.BeforeTurnParams {messages;current_params;_} ->
         let prepared=Result.get_ok (Agent_turn.prepare_turn ~media_store:(Agent_core.History.Memory_store.create ()) ~tools:Tool_set.empty
             ~messages ~turn_params:current_params ()) in
-        seen:=Some prepared.effective_messages;
+        seen:=Some prepared.request.effective_messages;
         Hooks.HookFailed {stage=Hooks.Before_turn_params;detail="captured model input before dispatch"}
       | _ -> Alcotest.fail "unexpected hook stage" in
     let check_stopped = function

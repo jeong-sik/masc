@@ -1,6 +1,6 @@
-(* RFC play-link-for-the-shared-machine §2.9 through the real router: the pad
-   answers the loaded program's layout, and a button presses the machine keys
-   it stands for, under the credential's name and in turn. *)
+(* Through the real router: the pad answers the loaded program's layout, and
+   a button presses the machine keys it stands for, under the credential's
+   name and in turn. *)
 
 open Alcotest
 module Routes = Server_routes_http_routes_play_pad

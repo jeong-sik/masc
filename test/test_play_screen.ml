@@ -1,6 +1,5 @@
-(* RFC play-link-for-the-shared-machine §2.7 through the real router: an
-   invite's bearer reads the shared DOS machine's frame as a PNG, and reading
-   it never moves the machine. *)
+(* Through the real router: an invite's bearer reads the shared DOS machine's
+   frame as a PNG, and reading it never moves the machine. *)
 
 open Alcotest
 module Screen = Server_routes_http_routes_play_screen

@@ -11,7 +11,7 @@ controlling terminal. The stdin cases run it as the terminal's foreground job
 with the terminal as its stdin; the child's shell must reach end of input.
 The manager case also verifies that foreground Ctrl+C can still stop the
 fixture and its child. A background server's explicit /dev/tty access is a
-separate RFC-0470 supervisor problem.
+separate supervisor problem.
 
 The pipe cases start the fixture with a pipe holding one line as its stdin.
 A runner child given no input must reach end of input and never read that

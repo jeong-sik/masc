@@ -635,7 +635,7 @@ let test_an_age_the_clocks_cannot_give_draws_the_no_value_mark () =
 
 let test_keeper_waiting_context_preserves_evidence () =
   let module Model = Masc_tui_keeper_list_model in
-  let context waiting = Pane.{keeper_name = "alpha"; task = Task_not_observed;
+  let context waiting = Pane.{keeper_name = "alpha"; task = Task_none;
     waiting; waiting_stale = false; waiting_revalidating = false;
     waiting_failed = false} in
   let item source producer what : Masc.Tui_decode.waiting_item =
@@ -699,12 +699,12 @@ let test_context_change_keeps_focus_in_pane () =
 let test_task_source_preserves_failed_refresh () =
   let classify ~workspace_ready ~source ~metadata_failed ~task_id =
     Pane.summarize_keeper_task ~workspace_ready ~source ~metadata_failed ~task_id in
-  check bool "unread metadata is unavailable" true
+  check bool "unread metadata is unread" true
     (classify ~workspace_ready:true ~source:Task_source_unread ~metadata_failed:false
-       ~task_id:(Some "old") = Task_unavailable);
-  check bool "foreign workspace metadata is unavailable" true
+       ~task_id:(Some "old") = Task_unread);
+  check bool "foreign workspace metadata is unread" true
     (classify ~workspace_ready:false ~source:Task_source_read ~metadata_failed:false
-       ~task_id:(Some "old") = Task_unavailable);
+       ~task_id:(Some "old") = Task_unread);
   check bool "failed local read retains only last observed task" true
     (classify ~workspace_ready:true ~source:Task_source_failed ~metadata_failed:false
        ~task_id:(Some "old") = Task_observed { id = "old"; refresh_failed = true });

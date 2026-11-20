@@ -214,19 +214,19 @@ let next_call_order = function
 
 type task_source = Task_source_unread | Task_source_read | Task_source_failed
 type keeper_task =
-  | Task_unavailable
-  | Task_not_observed
+  | Task_unread
+  | Task_none
   | Task_refresh_failed
   | Task_observed of { id : string; refresh_failed : bool }
 
 let summarize_keeper_task ~workspace_ready ~source ~metadata_failed ~task_id =
   match workspace_ready, source, task_id with
-  | false, _, _ | true, Task_source_unread, _ -> Task_unavailable
+  | false, _, _ | true, Task_source_unread, _ -> Task_unread
   | true, (Task_source_read | Task_source_failed), Some id ->
       Task_observed { id; refresh_failed = metadata_failed || source = Task_source_failed }
   | true, Task_source_failed, None -> Task_refresh_failed
   | true, Task_source_read, None ->
-      if metadata_failed then Task_refresh_failed else Task_not_observed
+      if metadata_failed then Task_refresh_failed else Task_none
 
 type keeper_context = {
   keeper_name : string;
@@ -1900,10 +1900,13 @@ let keeper_context_lines ~cols input =
     when String.equal selected context.keeper_name ->
     let say = say input.ko in
     let task = match context.task with
-      | Task_unavailable -> say "작업 · 조회 불가" "task · unavailable"
-      | Task_not_observed -> say "작업 · 관측 전" "task · not observed"
+      (* Where no task id is held, the value's place draws why (RFC
+         tui-one-screen-grammar 6.4): not read yet [◌], read and none [—],
+         the read failed [✕]. *)
+      | Task_unread -> say "작업 · " "task · " ^ Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unread
+      | Task_none -> say "작업 · " "task · " ^ Masc_tui_theme.Glyph.no_value
       | Task_refresh_failed ->
-          say "작업 새로 조회 실패 · 관측 전" "task refresh failed · not observed"
+          say "작업 · " "task · " ^ Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Read_failed
       | Task_observed { id; refresh_failed = true } ->
           say "작업 새로 조회 실패 · 마지막 관측 · " "task refresh failed · last observed · "
           ^ Terminal_text.single_line id

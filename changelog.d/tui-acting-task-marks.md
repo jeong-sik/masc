@@ -1,0 +1,8 @@
+### Changed
+
+- The Acting card's task line draws why it holds no task id: `◌` while
+  the workspace or the task source is not read yet, `—` when the read
+  found no task, `✕` when the read failed. It read `조회 불가` /
+  `unavailable` for a source not read yet and `관측 전` / `not observed`
+  for a Keeper the read found with no task (RFC tui-one-screen-grammar
+  6.4).

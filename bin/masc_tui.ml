@@ -32323,6 +32323,16 @@ let main
   let resize_requested = Atomic.make false in
   let resize_generation = Atomic.make 0 in
 
+  (* The terminal changes hands: its queued bytes go first, but a terminal
+     that stopped reading does not hold the handoff or the exit for good. *)
+  let drain_before_handoff () =
+    match Masc_tui_terminal_out.(drain ~within_s:handoff_limit_s) with
+    | Masc_tui_terminal_out.Drained -> ()
+    | Masc_tui_terminal_out.Abandoned ->
+        Log.Transport.warn
+          "tui_terminal_not_reading: dropped the queued output after %.1fs and handed the terminal over"
+          Masc_tui_terminal_out.handoff_limit_s
+  in
   let restore_terminal_outcome () =
     (* No tracking-off here. [cleanup] writes the off byte once, at real
        process exit, after the farewell. [suspend] writes it before the stop
@@ -32335,7 +32345,7 @@ let main
     (* Raw mode and the alternate screen are given back only after every
        queued byte reached the terminal: a frame still queued would otherwise
        land on the shell's screen, or in a child process's input. *)
-    Masc_tui_terminal_out.drain ();
+    drain_before_handoff ();
     (* Keep the known-loss result so exit cleanup does not write a farewell
        or tracking controls to a terminal that already rejected restoration. *)
     let outcome =
@@ -32382,7 +32392,7 @@ let main
            would see its own keys reported in a form it does not read. *)
         if Terminal_profile.kitty_keyboard terminal_profile then
           Masc_tui_terminal_out.write Masc_tui_csi.disable_kitty_keyboard;
-        Masc_tui_terminal_out.drain ()
+        drain_before_handoff ()
       in
       Terminal_restore.finish_after_restore ~restore:restore_terminal_outcome
         ~finish

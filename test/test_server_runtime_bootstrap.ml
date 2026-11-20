@@ -4421,6 +4421,27 @@ let test_full_health_dirty_success_after_wait_timeout () =
         (Yojson.Safe.to_string !failed_stale_since)
         (metadata |> member "stale_since_ts" |> Yojson.Safe.to_string))
 
+(* Every field the full computation produces is in the [/health?full=1]
+   response, once. A section used to reach the response only when its name was
+   also in the rollup's list, so [runtime_truth] and [server_hibernation] were
+   computed on every refresh and left out (#53985). *)
+let test_full_health_response_carries_every_computed_field () =
+  Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
+  let request = Httpun.Request.create `GET "/health?full=1" in
+  Server_routes_http_runtime.For_testing.refresh_full_health_snapshot_now request;
+  let computed =
+    Yojson.Safe.Util.keys (Server_routes_http_runtime.make_health_json request)
+  in
+  let response =
+    Yojson.Safe.Util.keys (Server_routes_http_runtime.make_health_response_json request)
+  in
+  Alcotest.(check (list string)) "no computed field is left out" []
+    (List.filter (fun name -> not (List.mem name response)) computed);
+  Alcotest.(check (list string)) "no key is answered twice" []
+    (List.filter
+       (fun name -> List.length (List.filter (String.equal name) response) > 1)
+       response)
+
 let test_full_health_refresh_timeout_preserves_last_snapshot () =
   Server_routes_http_runtime.For_testing.reset_full_health_snapshot ();
   let request = Httpun.Request.create `GET "/health?full=1" in
@@ -7936,6 +7957,9 @@ let () =
             test_full_health_returned_failure_after_wait_timeout;
           Alcotest.test_case "full health critical edge resets after recovery" `Quick
             test_full_health_critical_failure_edge_and_recovery;
+          Alcotest.test_case
+            "full health response carries every computed field" `Quick
+            test_full_health_response_carries_every_computed_field;
           Alcotest.test_case
             "full health refresh timeout preserves last snapshot" `Quick
             test_full_health_refresh_timeout_preserves_last_snapshot;

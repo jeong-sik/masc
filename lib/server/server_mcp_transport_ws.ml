@@ -141,11 +141,9 @@ let sessions_mutex = Stdlib.Mutex.create ()
 let with_sessions_rw f = Stdlib.Mutex.protect sessions_mutex f
 
 (** Side index mapping each dashboard slice to the set of session IDs
-    currently subscribed to it.  Phase 1 of the slice-indexed fanout RFC
-    (#10119): the index is maintained at subscribe / unsubscribe / cleanup
-    time but the broadcast fanout still iterates every session.  Phase 2
-    consults this index to skip raw-SSE-forwards to sessions whose route
-    does not subscribe to the event's slice.
+    currently subscribed to it.  The index is maintained at subscribe /
+    unsubscribe / cleanup time; the broadcast fanout iterates every session
+    and does not read it.
 
     Inner [Hashtbl.t] is keyed by [session_id] with [unit] values — a set.
     Mutated only under [sessions_mutex], so the consistency invariant
@@ -806,7 +804,7 @@ let session_is_backpressured session =
     in
     buffered_limit_exceeded || ack_stale
 
-(** RFC #10119 Phase 2 gate.  When enabled (default since the bandwidth
+(** Slice-index gate.  When enabled (default since the bandwidth
     burst hardening pass), slice-scoped events skip the raw-SSE-forward
     to authenticated sessions whose route does not subscribe to the
     event's slice.  Catch-all events (no slice mapping) still reach
@@ -864,12 +862,12 @@ let send_dashboard_or_raw_sse session (ev : Sse.external_event) =
     | _ ->
         (* Two sub-cases lead here:
            1. The event has a parsed slice but this session's route is
-              not subscribed.  Today we raw-forward anyway so the client
-              can hydrate its store via [handleRawPush].  With the
-              slice-index gate enabled (RFC #10119 Phase 2) we skip
-              instead, since the client cannot do anything useful with
-              a slice it did not request and the wire write is pure
-              waste at the dashboard fleet's scale.
+              not subscribed.  With the slice-index gate enabled (the
+              default) we skip, since the client cannot do anything
+              useful with a slice it did not request and the wire write
+              is pure waste at the dashboard fleet's scale.  With it
+              disabled we raw-forward so the client can hydrate its
+              store via [handleRawPush].
            2. The event has no slice mapping (parse miss or unknown
               event_type).  This is the catch-all path and must still
               raw-forward so events outside the slice vocabulary still

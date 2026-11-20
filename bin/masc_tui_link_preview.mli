@@ -32,13 +32,18 @@ val has_informative_preview : og_preview -> bool
     Respects the silence contract: returns [false] for arbitrary web links where
     nothing meaningful can be inferred from the URL alone. *)
 
-(** Changes when cached preview metadata changes, for layout invalidation. *)
+(** Changes when cached preview metadata changes, for layout invalidation:
+    a stored card that differs from the one held, and {!clear_cache}. A card
+    the store evicts moves nothing; whatever was drawn from it holds until
+    that URL is stored again, which moves the generation. *)
 val cache_generation : unit -> int
 
 val cache_lookup : string -> og_preview option
 val cache_store : og_preview -> unit
 val get_preview : string -> og_preview
 val clear_cache : unit -> unit
+(** Empty the stores and move {!cache_generation}, so a body drawn from the
+    cards they held is drawn again. *)
 
 type mosaic_refusal =
   | Fetch_failed of { detail : string }

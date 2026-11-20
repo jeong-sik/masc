@@ -125,6 +125,7 @@ let retry_mosaic ~retry url = compute_mosaic Retry_refused ~compute:retry url
 
 let clear_cache () =
   Stdlib.Mutex.protect preview_cache_mu (fun () ->
+      incr preview_generation;
       preview_cache := Masc_tui_lru.create ~capacity:preview_cache_capacity);
   Stdlib.Mutex.protect mosaic_cache_mu (fun () ->
     Hashtbl.filter_map_inplace (fun _ -> function

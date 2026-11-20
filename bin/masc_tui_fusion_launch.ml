@@ -203,7 +203,7 @@ let lines ?(ko = false) launch =
          [ (if ko then request.keeper ^ " 실행 시작 중"
             else "Starting the run for " ^ request.keeper) ]
      | None -> [])
-  @ Form.lines launch.form
+  @ Form.lines ~ko launch.form
 
 let hints_for ~ko =
   if ko then "Tab:필드  ←/→:선택  Ctrl-U:해제  Ctrl-S:검토  Esc:취소"

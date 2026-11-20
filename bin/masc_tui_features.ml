@@ -135,9 +135,104 @@ let sections =
       ] )
   ]
 
+let sections_ko =
+  [ ( "어디서나 이동"
+    , [ { opener = Key ":"; description = "명령 팔레트: 이름으로 화면·동작 바로 이동" }
+      ; { opener = Key ";"
+        ; description = "일정·대기 요약: 예정 일정과 확인이 필요한 항목 보기" }
+      ; { opener = Key "@"
+        ; description = "응답 현황: 지금 턴을 돌거나 방금 끝낸 키퍼 보기" }
+      ; { opener = Key "Ctrl-L"
+        ; description = "활동 창: 모든 키퍼가 지금 하는 일 한눈에 보기" }
+      ; { opener = Command "keeper"
+        ; description = "대화 창을 다른 키퍼로 전환: /keeper <이름>" }
+      ; { opener = Key "&"
+        ; description = "협업: MSX/DOS 관전 및 플레이 초대 링크 관리" }
+      ; { opener = Surface "Operations"
+        ; description = "결정 사항과 기억된 대화 요약 · Enter로 선택한 대상 열기" }
+      ; { opener = Surface "Work"
+        ; description = "목표, 태스크, 검증 증거 · t로 목록 전환, Enter로 상세 보기" }
+      ; { opener = Surface "Keepers"
+        ; description = "대화, 설정, 이력 · c로 채팅 열기, l로 로그 보기" }
+      ; { opener = Surface "Operations / Usage"
+        ; description = "f로 계정 선택, v로 요금제/추이/키퍼/호출 전환, a로 전체 계정 복원" }
+      ; { opener = Surface "Work / Board"
+        ; description = "Enter로 게시글 읽기 · S로 후속 글 이동, Esc로 돌아가기" }
+      ; { opener = Surface "Workspace"
+        ; description = "Enter로 파일 탐색 · 코드 화면 Ctrl-P로 파일 검색, v로 저장소 상세 보기" }
+      ; { opener = Surface "Features & plugins"
+        ; description = "관측된 기능과 플러그인 워커 · Enter로 증거 읽기, d로 전체 상세 보기" }
+      ; { opener = Surface "System"
+        ; description = "p로 설정 탭 순환 · 모델 탭에서 v로 계정·모델 전체 상세 보기" }
+      ] )
+  ; ( "턴 제어"
+    , [ { opener = Command "steer"
+        ; description = "실행 중인 턴에 방향 지시 입력: /steer <메시지>" }
+      ; { opener = Command "interrupt"
+        ; description = "스트리밍 중인 턴 중단: /interrupt [키퍼]" }
+      ; { opener = Command "run-next"
+        ; description = "대기열 메시지를 다음 순서로 올리고 재개" }
+      ; { opener = Command "priority"
+        ; description = "입력한 메시지 자동 우선 실행 전환: /priority on|off" }
+      ; { opener = Command "queue"
+        ; description = "대기 중인 메시지 확인 및 관리" }
+      ; { opener = Command "find"
+        ; description = "텍스트가 포함된 가장 최근 메시지로 이동" }
+      ; { opener = Command "copy"
+        ; description = "가장 최근 완료된 응답을 클립보드에 복사" }
+      ] )
+  ; ( "기록·결과 확인"
+    , [ { opener = Command "artifacts"
+        ; description = "Markdown/HTML 보고서 · f로 형식 선택, t로 오늘 필터, Enter로 전체 읽기, {/}로 리비전 이동" }
+      ; { opener = Command "context"
+        ; description = "마지막으로 관측된 모델 입력 맥락 검사" }
+      ; { opener = Key "Ctrl-X"
+        ; description = "현재 대화의 마지막 턴 맥락 검사기 열기" }
+      ; { opener = Command "measurement"
+        ; description = "게시된 측정 기록 읽기: /measurement <sha256>" }
+      ; { opener = Command "errors"
+        ; description = "이 대화의 로딩 실패 기록을 스크롤 목록으로 보기" }
+      ; { opener = Command "diff"; description = "Git 작업 트리 변경 사항 및 diff 보기" }
+      ] )
+  ; ( "미디어 가져오기"
+    , [ { opener = Command "image"
+        ; description = "터미널에 이미지 파일 그리기: /image <경로>" }
+      ; { opener = Command "images"
+        ; description = "대화 속 이미지·다이어그램 최신순 열기: /images [N] · Ctrl-O로 최신 항목 미리보기" }
+      ; { opener = Command "attach"
+        ; description = "다음 메시지에 보낼 이미지 첨부: /attach <경로>" }
+      ; { opener = Command "ref"
+        ; description = "이미지 참조 첨부: /ref <url|file_id>" }
+      ; { opener = Command "listen"
+        ; description = "가장 최근 오디오 또는 MIDI 첨부 재생" }
+      ; { opener = Command "embeds"
+        ; description = "인라인 리치 임베드 카드 설정: /embeds on|compact|off" }
+      ] )
+  ; ( "그리기·도구 호출"
+    , [ { opener = Token "```mermaid"
+        ; description = "코드 블록을 다이어그램으로 렌더링" }
+      ; { opener = Token "```alphatex"
+        ; description = "코드 블록으로 기타 타브 악보 그리기 (실험 기능)" }
+      ; { opener = Command "score"
+        ; description = "이 터미널에서 alphaTex 악보 보기 및 재생: /score [N]" }
+      ; { opener = Command "music"
+        ; description = "프레이즈, 편곡, 테이크 작업: /music 또는 대시보드 s · 일반 터미널 지원" }
+      ; { opener = Token "masc_tool_help"
+        ; description = "모든 도구의 사용법과 호출 시점 조회" }
+      ; { opener = Token "masc_wiki_lint"
+        ; description = "위키 문서 점검 · 쓰기 없음 (실험 기능)" }
+      ; { opener = Surface "Features & plugins / Tools"
+        ; description = "도구 카탈로그, 실행 영수증, 사용 현황" }
+      ; { opener = Command "addons"
+        ; description = "레인 간 관측 및 패키지 관리: /addons" }
+      ; { opener = Command "play"
+        ; description = "공유 DOS 플레이 링크 및 QR 초대: /play invites" }
+      ] )
+  ]
+
 let all_rows = List.concat_map snd sections
 
-let lines ~width =
+let lines_for ~ko ~width =
   (* The rows draw plain, deliberately: [/features] answers as a chat notice,
      and a notice passes through [Keeper_chat.terminal_safe_text], which turns
      every control byte -- ESC with them -- into text the operator reads. A
@@ -169,4 +264,6 @@ let lines ~width =
     :: List.concat_map row_lines rows
     @ [ "" ]
   in
-  List.concat_map section_lines sections
+  List.concat_map section_lines (if ko then sections_ko else sections)
+
+let lines ~width = lines_for ~ko:false ~width

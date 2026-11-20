@@ -22,8 +22,8 @@ val resolve :
   snapshot:Masc.Tui_decode.keeper_calls_snapshot option -> keeper_call_association
 
 val durable_call_failed : keeper_call_association -> bool
-val tool_outcome_label : Masc_tui_keeper_chat_transcript.tool_outcome -> string
-val keeper_call_schedule_label : Masc.Tui_decode.keeper_call_schedule -> string
+val tool_outcome_label : ?ko:bool -> Masc_tui_keeper_chat_transcript.tool_outcome -> string
+val keeper_call_schedule_label : ?ko:bool -> Masc.Tui_decode.keeper_call_schedule -> string
 
 type result_state =
   | Durable_failed
@@ -35,4 +35,4 @@ val result_state :
 (** Exact durable failure takes priority. A recorded output on an unfinished
     transcript is evidence in the call log, without claiming turn delivery. *)
 val result_marker : result_state -> string
-val result_label : result_state -> string
+val result_label : ?ko:bool -> result_state -> string

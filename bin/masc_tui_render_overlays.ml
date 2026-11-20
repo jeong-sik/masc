@@ -44,7 +44,8 @@ let render_about (state : state) =
                   | Keeper_control.Present runtime -> runtime.kr_portrait
                   | Keeper_control.Unobserved | Keeper_control.Absent
                   | Keeper_control.Invalid _ ->
-                      Keeper_portrait_equipment.Unavailable "Keeper equipment not observed"
+                      Keeper_portrait_equipment.Unavailable
+                        (ui_text state ~ko:"키퍼 장비 미관측" ~en:"Keeper equipment not observed")
                 in
                 keeper.k_name, portrait) state.keepers
           | Masc_tui_emblem_screen.Keepers_unreadable
@@ -1118,7 +1119,7 @@ let render_play_card (state : state) card =
                    (window_cols + max 0 (columns - width))
                    (window_rows + max 0 (rows - budget)))
           | Masc_tui_play_card.Blank -> c.push_empty ())
-        (Masc_tui_play_card.draw card ~width ~rows:budget))
+        (Masc_tui_play_card.draw ~ko:(state.ui_language = Lang_ko) card ~width ~rows:budget))
 
 (* The record's rows and the viewport that shows them, the way
    [help_viewport] answers for the sheet: one pair for the keypress that
@@ -2292,7 +2293,10 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       else if Option.is_some view.subscription_panel then
         say "j/k:선택  Enter:선택/저장  a:추가  d:제거  J/K:스크롤  r:새로고침  Esc:뒤로"
           "j/k:select  Enter:choose/save  a:add  d:remove  J/K:scroll  r:refresh  Esc:back"
-      else if Option.is_some view.installer then Option.fold ~none:"" ~some:Masc_tui_lane_installer.hints view.installer
+      else if Option.is_some view.installer then
+        Option.fold ~none:""
+          ~some:(Masc_tui_lane_installer.hints ~ko:(state.ui_language = Lang_ko))
+          view.installer
       else if Option.exists Masc_tui_lane_records.text_entry_open view.records
         then say "Tab:필드  ←/→:선택  Ctrl-S:검토  PgUp/PgDn:스크롤  Esc:취소"
           "Tab:field  Left/Right:choice  Ctrl-S:review  PageUp/Down:scroll  Esc:cancel"
@@ -2308,7 +2312,10 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       else String.concat "  " (Masc_tui_lane_addons.overview_hints view))
     ~body:(fun ~budget c ->
       let inner_width = framed_inner_width cols in
-      let lines = Masc_tui_lane_addons.lines_with_selection ~height:budget ~width:inner_width view in
+      let lines =
+        Masc_tui_lane_addons.lines_with_selection ~ko:(state.ui_language = Lang_ko)
+          ~height:budget ~width:inner_width view
+      in
       let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in
       Option.iter c.position
         (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total:(List.length lines));

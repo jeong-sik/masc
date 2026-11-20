@@ -79,10 +79,10 @@ val title : t -> string
 val message : t -> string option
 (** The last edit result, if any. *)
 
-val lines : t -> string list
+val lines : ?ko:bool -> t -> string list
 (** The overlay as printable rows: the entries, the open form if any, and
     the keys that act here. *)
 
-val lines_with_selection : t -> (bool * string) list
+val lines_with_selection : ?ko:bool -> t -> (bool * string) list
 (** Same as {!lines}, pairing each row with whether it is the active selected
     record or open form field. *)

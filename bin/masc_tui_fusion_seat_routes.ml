@@ -7,21 +7,23 @@ let seat_text = function
   | Masc.Tui_decode_fusion.Fusion_judge_seat { fs_role; fs_identity } ->
       Printf.sprintf "judge/%s/%s" (Masc.Tui_decode_fusion.fusion_judge_role_label fs_role) (safe fs_identity)
 
-let route_line (route : Masc.Tui_decode_fusion.fusion_seat_route) =
+let route_line ~ko (route : Masc.Tui_decode_fusion.fusion_seat_route) =
   let answer =
     match route.fsr_answered_by with
-    | Some runtime -> "answered by " ^ safe runtime
-    | None -> "no candidate answered"
+    | Some runtime -> (if ko then "응답: " else "answered by ") ^ safe runtime
+    | None -> if ko then "응답한 후보 없음" else "no candidate answered"
   in
-  Printf.sprintf "%s \xc2\xb7 route %s \xe2\x86\x92 %s" (seat_text route.fsr_seat)
+  Printf.sprintf
+    (if ko then "%s \xc2\xb7 경로 %s \xe2\x86\x92 %s" else "%s \xc2\xb7 route %s \xe2\x86\x92 %s")
+    (seat_text route.fsr_seat)
     (safe route.fsr_route) answer
 
 let attempt_line (attempt : Masc.Tui_decode_fusion.fusion_seat_attempt) =
   Printf.sprintf "    %s: %s %s" (safe attempt.fsa_runtime) (safe attempt.fsa_code)
     (safe attempt.fsa_detail)
 
-let lines routes =
+let lines ?(ko = false) routes =
   List.concat_map
     (fun (route : Masc.Tui_decode_fusion.fusion_seat_route) ->
-      route_line route :: List.map attempt_line route.fsr_failed_attempts)
+      route_line ~ko route :: List.map attempt_line route.fsr_failed_attempts)
     routes

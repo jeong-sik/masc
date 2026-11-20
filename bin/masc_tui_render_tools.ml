@@ -1957,10 +1957,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           @ (match ets_skills_left_out with
              | [] -> []
              | left_out ->
+               let count = List.length left_out in
                ( (Theme.warn ()),
                  Say.per_language (function
-                   | Say.Ko -> Printf.sprintf "   catalog 에서 빠진 Skill %d개" (List.length left_out)
-                   | Say.En -> Printf.sprintf "   %d skill(s) left out of the catalog" (List.length left_out)) )
+                   | Say.Ko -> Printf.sprintf "   카탈로그에서 빠진 스킬 %d개" count
+                   | Say.En ->
+                       Printf.sprintf "   %d %s left out of the catalog"
+                         count (if count = 1 then "skill" else "skills")) )
                :: List.map
                     (fun entry ->
                       (Theme.warn ()),
@@ -1975,11 +1978,13 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
           @ (match ets_unavailable_skill_names with
              | [] -> []
              | unavailable ->
+               let count = List.length unavailable in
                ( (Theme.warn ()),
                  Say.per_language (function
-                   | Say.Ko -> Printf.sprintf "   턴 catalog 에 없는 설정 Skill 이름 %d개" (List.length unavailable)
-                   | Say.En -> Printf.sprintf "   %d configured skill name(s) not in the turn catalog"
-                       (List.length unavailable)) )
+                   | Say.Ko -> Printf.sprintf "   턴 카탈로그에 없는 설정 스킬 이름 %d개" count
+                   | Say.En ->
+                       Printf.sprintf "   %d configured skill %s not in the turn catalog"
+                         count (if count = 1 then "name" else "names")) )
                :: List.map
                     (fun { Masc.Tui_decode_tools.csn_name; csn_reason } ->
                       (Theme.warn ()),
@@ -2053,7 +2058,9 @@ let tools_display ?(cols = 80) ?terminal_rows (state : state) : display =
         let invalid_row count =
           Say.per_language (function
             | Say.Ko -> Printf.sprintf "잘못된 전이 %d개" count
-            | Say.En -> Printf.sprintf "%d invalid transition(s)" count)
+            | Say.En ->
+                Printf.sprintf "%d invalid %s" count
+                  (if count = 1 then "transition" else "transitions"))
         in
         let scoped_lines =
           List.concat_map

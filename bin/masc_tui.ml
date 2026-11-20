@@ -4516,7 +4516,9 @@ let open_chat_call_reader ?execution_id state ~mailbox keeper_name =
           {Masc_tui_chat_call_reader.execution_id;tool=activity.tool_name;
            args=activity.args;subject=activity.subject}) activity.execution_id)
         (from_rows @ live) in
-      let reader = Masc_tui_chat_call_reader.create (List.rev choices) in
+      let reader =
+        Masc_tui_chat_call_reader.create ~ko:(state.ui_language = Lang_ko) (List.rev choices)
+      in
       let selected = match execution_id with None -> Some reader
         | Some id -> Masc_tui_chat_call_reader.select_execution id reader in
       Option.iter (fun reader ->
@@ -15503,15 +15505,22 @@ let open_indexed_image state ~mailbox ~index =
   let notice = chat_notice state ~keeper_name:state.msg_target_keeper_name in
   if catalog.ic_reading != state.workspace_read_authority
      || catalog.ic_keeper <> state.msg_target_keeper_name then
-    notice ~kind:Notice_failure "/images: conversation changed; run /images to read its current list"
+    notice ~kind:Notice_failure
+      (ui_text state
+         ~ko:"/images: 대화가 바뀌었습니다 · /images를 다시 실행해 현재 목록을 읽으세요"
+         ~en:"/images: conversation changed; run /images to read its current list")
   else match List.nth_opt catalog.ic_previews (index - 1) with
   | Some preview ->
       Masc_tui_message_input.clear state.msg_input;
       open_selected_image state ~mailbox preview
   | None ->
+      let count = List.length catalog.ic_previews in
       notice ~kind:Notice_failure
-        (Printf.sprintf "/images: %d image/diagram preview(s) in the loaded conversation and composer"
-           (List.length catalog.ic_previews))
+        (if state.ui_language = Lang_ko then
+           Printf.sprintf "/images: 불러온 대화와 입력창에 이미지·다이어그램 미리보기가 %d개 있습니다" count
+         else
+           Printf.sprintf "/images: %s in the loaded conversation and composer"
+             (Masc_tui_message_layout.count_noun count "image/diagram preview"))
 
 (* The MIDI soundfont read at boot from [tui].midi_soundfont (the same load
    that applies the theme and the saved sort). The numbered attachment keys
@@ -15685,36 +15694,52 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
    none at all, because only one of the two is fixed by starting over. *)
 let apply_chat_search_result state ~target ~restart ~needle result =
   let notice=chat_notice state ~keeper_name:target in
+  let ko = state.ui_language = Lang_ko in
       let partial=if result.unavailable_entries=0 then "" else
-        Printf.sprintf " · search unavailable for %d entry(s); results may be incomplete" result.unavailable_entries in
+        if ko then
+          Printf.sprintf " · 항목 %d건 검색 불가 · 결과가 일부 누락될 수 있습니다" result.unavailable_entries
+        else
+          Printf.sprintf " · search unavailable for %d %s; results may be incomplete"
+            result.unavailable_entries (if result.unavailable_entries = 1 then "entry" else "entries") in
       match result.match_result with
       | Some (position, anchor) ->
           state.msg_find_at <- Some anchor;
           apply_clamped_scroll state (Message_scroll position);
           notice ~kind:Notice_reply
-            (Printf.sprintf "/find %s \xc2\xb7 %d row(s) back (/find repeats)"
-               needle position.scroll ^ partial)
+            ((if ko then
+                Printf.sprintf "/find %s \xc2\xb7 %d줄 위로 이동 (/find 반복)" needle position.scroll
+              else
+                Printf.sprintf "/find %s \xc2\xb7 %s back (/find repeats)"
+                  needle (Masc_tui_message_layout.count_noun position.scroll "row"))
+             ^ partial)
       | None when result.unavailable_entries>0 ->
           notice ~kind:Notice_failure ("/find" ^ partial)
       | None ->
           if restart then
             notice ~kind:Notice_reply
-              (Printf.sprintf "/find %s \xc2\xb7 nothing in this conversation"
-                 needle)
+              (if ko then Printf.sprintf "/find %s \xc2\xb7 이 대화에 일치하는 내용이 없습니다" needle
+               else Printf.sprintf "/find %s \xc2\xb7 nothing in this conversation" needle)
           else
             (* The walk is over, not empty. Said apart from the case above
                because starting again is what fixes this one and not that
                one. *)
             notice ~kind:Notice_reply
-              (Printf.sprintf
-                 "/find %s \xc2\xb7 no older match; /find %s starts again"
-                 needle needle)
+              (if ko then
+                 Printf.sprintf "/find %s \xc2\xb7 이전 일치 항목 없음 · /find %s 로 처음부터 다시 검색"
+                   needle needle
+               else
+                 Printf.sprintf
+                   "/find %s \xc2\xb7 no older match; /find %s starts again"
+                   needle needle)
 
 
 let seek_in_chat state ~mailbox ~target ~restart =
   let notice=chat_notice state ~keeper_name:target in
   match target with
-  | None -> notice ~kind:Notice_failure "/find needs a Keeper selected on the roster"
+  | None ->
+      notice ~kind:Notice_failure
+        (ui_text state ~ko:"/find: 목록에서 키퍼를 먼저 선택하세요"
+           ~en:"/find needs a Keeper selected on the roster")
   | Some keeper_name ->
       let needle=String.trim state.msg_find in
       let older_than=if restart then None else state.msg_find_at in
@@ -16148,12 +16173,15 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
             | Keeper_chat.Ref_url _ -> "url"
             | Keeper_chat.Ref_file_id _ -> "file_id"
           in
+          let count = List.length state.msg_references in
           notice ~kind:Notice_reply
-            (Printf.sprintf
-               "referenced %s (%s) · the provider fetches it; %d reference(s) staged for the next message"
-               value
-               kind
-               (List.length state.msg_references)))
+            (if state.ui_language = Lang_ko then
+               Printf.sprintf "참조 추가됨 %s (%s) · 제공자가 직접 가져옵니다 · 다음 메시지 참조 %d개 대기 중"
+                 value kind count
+             else
+               Printf.sprintf
+                 "referenced %s (%s) · the provider fetches it; %s staged for the next message"
+                 value kind (Masc_tui_message_layout.count_noun count "reference")))
   | Masc_tui_command.Attach_image path -> (
       Masc_tui_message_input.clear state.msg_input;
       match Masc_tui_attachment.of_file ~path:(String.trim path) with
@@ -16212,7 +16240,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         else Masc_tui_help.column_width ~cols
       in
       notice ~kind:Notice_reply
-        (String.concat "\n" (Masc_tui_features.lines ~width))
+        (String.concat "\n" (Masc_tui_features.lines_for ~ko:(state.ui_language = Lang_ko) ~width))
   | Masc_tui_command.About ->
       Masc_tui_message_input.clear state.msg_input;
       state.about_open <- true;
@@ -16437,12 +16465,20 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       let sources = image_conversation_rows state
         |> List.concat_map (fun (entry : msg_entry) -> Masc_tui_markdown.alphatex_sources entry.me_text)
         |> List.rev in
-      if index > List.length sources then
+      let count = List.length sources in
+      if index > count then
         notice ~kind:Notice_failure
-          (Printf.sprintf "/score: this loaded conversation has %d closed alphaTex block(s)" (List.length sources))
+          (if state.ui_language = Lang_ko then
+             Printf.sprintf "/score: 불러온 대화에 닫힌 alphaTex 코드 블록이 %d개 있습니다" count
+           else
+             Printf.sprintf "/score: this loaded conversation has %s"
+               (Masc_tui_message_layout.count_noun count "closed alphaTex block"))
       else
         (match !score_terminal_handoff with
-         | None -> notice ~kind:Notice_failure "alphaTex viewer requires an active terminal session"
+         | None ->
+             notice ~kind:Notice_failure
+               (ui_text state ~ko:"alphaTex 악보 보기는 활성 터미널 세션이 필요합니다"
+                  ~en:"alphaTex viewer requires an active terminal session")
          | Some launch ->
              Masc_tui_message_input.clear state.msg_input;
              match launch ~sources ~index with
@@ -20369,7 +20405,11 @@ let invalidate_language_cached_views state =
   let ko = state.ui_language = Lang_ko in
   List.iter
     (fun (view : Masc_tui_account_login.t) -> view.ko <- ko)
-    (Option.to_list state.account_login @ state.account_login_detached)
+    (Option.to_list state.account_login @ state.account_login_detached);
+  state.chat_call_reader <-
+    Option.map
+      (fun (origin, reader) -> (origin, Masc_tui_chat_call_reader.set_language ~ko reader))
+      state.chat_call_reader
 
 let refresh_keeper_config_view_if_open state ~mailbox =
   if state.view = Keepers Keeper_detail && state.detail_tab = Detail_instructions then
@@ -24291,8 +24331,13 @@ let handle_paste ?(protect_recovered = false) state ~base_path ~mailbox
        that says nothing and goes nowhere is the silence this surface keeps
        being caught by. *)
     report_action state "error"
-      (Printf.sprintf "Pasted %d character(s) with no Keeper to send them to"
-         (String.length paste.Masc_tui_paste.text))
+      (let count = String.length paste.Masc_tui_paste.text in
+       if state.ui_language = Lang_ko then
+         Printf.sprintf "보낼 키퍼가 선택되지 않은 상태에서 %d바이트가 붙여넣기되었습니다" count
+       else
+         Printf.sprintf "Pasted %s with no Keeper to send %s to"
+           (Masc_tui_message_layout.count_noun count "character")
+           (if count = 1 then "it" else "them"))
   else begin
     forget_recall state;
     let text =
@@ -27598,7 +27643,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               to the card and, on [y], the clipboard: not to the chat row,
               the footer or the session log. *)
            (match
-              Masc_tui_play_card.make
+              Masc_tui_play_card.make_for
+                ~ko:(state.ui_language = Lang_ko)
                 ~project:Masc_tui_play_card.project_for_terminal
                 ~name:invite.Tui_decode.pii_name
                 ~expires_at:invite.pii_expires_at ~link:invite.pii_link
@@ -27609,7 +27655,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 state.play_invite <- stored;
                 state.play_invite_scroll <- 0;
                 play_notice state ~sink:target ~kind:Notice_reply
-                  (Masc_tui_play_card.issued_notice card
+                  (Masc_tui_play_card.issued_notice ~ko:(state.ui_language = Lang_ko) card
                      ~retained:(Masc_tui_types.play_invite_holds_earlier stored))
             | Error reason ->
                 (* The link is the server's public base URL and a hex token,
@@ -37100,7 +37146,11 @@ Use relative paths for resources already held in the package. -->
                 let scroll_lane_addons ~page ~down =
                   let terminal_rows, cols = get_terminal_size () in
                   let height = Masc_tui_render_prim.surface_chrome_budget state ~terminal_rows in
-                  let count = List.length (Addons.lines ~height ~width:(framed_inner_width cols) view) in
+                  let count =
+                    List.length
+                      (Addons.lines ~ko:(state.ui_language = Lang_ko) ~height
+                         ~width:(framed_inner_width cols) view)
+                  in
                   let current = Masc_tui_scroll.normalize ~count ~height view.scroll in
                   let distance = if page then height else 1 in
                   let delta = if down then distance else -distance in

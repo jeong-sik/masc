@@ -55,9 +55,13 @@ let resolve ~keeper_name ~execution_id ~loaded_keeper ~loading ~error ~snapshot 
                    (* Filtered foreign rows never join. One of them may carry
                       the queried execution id, so a nonzero mismatch count
                       means this absence is unproven even when health says ok. *)
+                   let mismatched = snapshot.Tui_decode.kcs_mismatched in
                    Call_execution_coverage_gap
-                     (Printf.sprintf "%d row(s) named another keeper and were not drawn"
-                        snapshot.Tui_decode.kcs_mismatched)
+                     (if mismatched = 1 then
+                        "1 row named another keeper and was not drawn"
+                      else
+                        Printf.sprintf "%d rows named another keeper and were not drawn"
+                          mismatched)
                | None -> (
                    (* No match is only proof of absence against a log known
                       complete: [ok], or [empty]/[missing] with nothing in it.
@@ -95,27 +99,41 @@ let durable_call_failed = function
   | Call_execution_coverage_gap _ | Call_execution_ambiguous _ -> false
 
 
-let tool_outcome_label : Keeper_chat_transcript.tool_outcome -> string = function
-  | Keeper_chat_transcript.Started -> "PREPARING · ARGUMENTS STREAMING"
-  | Keeper_chat_transcript.Awaiting_result -> "WAITING FOR RESULT"
-  | Keeper_chat_transcript.Returned -> "RETURNED"
-  | Keeper_chat_transcript.Native_running -> "NATIVE STEP RUNNING"
-  | Keeper_chat_transcript.Native_ended -> "NATIVE STEP ENDED · PROVIDER OBSERVATION"
-  | Keeper_chat_transcript.Native_failed -> "NATIVE STEP FAILED · PROVIDER OBSERVATION"
-  | Keeper_chat_transcript.Failed -> "FAILED"
-  | Keeper_chat_transcript.Never_returned -> "RESULT NOT SEEN HERE"
-  | Keeper_chat_transcript.Outcome_unrecorded -> "OUTCOME UNRECORDED"
+let tool_outcome_label ?(ko = false) : Keeper_chat_transcript.tool_outcome -> string = function
+  | Keeper_chat_transcript.Started ->
+      if ko then "준비 중 · 인자 수신 중" else "PREPARING · ARGUMENTS STREAMING"
+  | Keeper_chat_transcript.Awaiting_result ->
+      if ko then "결과 대기 중" else "WAITING FOR RESULT"
+  | Keeper_chat_transcript.Returned ->
+      if ko then "반환됨" else "RETURNED"
+  | Keeper_chat_transcript.Native_running ->
+      if ko then "네이티브 단계 실행 중" else "NATIVE STEP RUNNING"
+  | Keeper_chat_transcript.Native_ended ->
+      if ko then "네이티브 단계 종료 · 제공자 관측" else "NATIVE STEP ENDED · PROVIDER OBSERVATION"
+  | Keeper_chat_transcript.Native_failed ->
+      if ko then "네이티브 단계 실패 · 제공자 관측" else "NATIVE STEP FAILED · PROVIDER OBSERVATION"
+  | Keeper_chat_transcript.Failed ->
+      if ko then "실패" else "FAILED"
+  | Keeper_chat_transcript.Never_returned ->
+      if ko then "결과 미관측" else "RESULT NOT SEEN HERE"
+  | Keeper_chat_transcript.Outcome_unrecorded ->
+      if ko then "결과 미기록" else "OUTCOME UNRECORDED"
 
 
-let keeper_call_schedule_label (schedule : Tui_decode.keeper_call_schedule) =
+let keeper_call_schedule_label ?(ko = false) (schedule : Tui_decode.keeper_call_schedule) =
   let execution =
     match schedule.kcs_execution_mode with
-    | Tui_decode.Keeper_call_serial -> "serial"
-    | Tui_decode.Keeper_call_concurrent -> "concurrent"
+    | Tui_decode.Keeper_call_serial -> if ko then "순차" else "serial"
+    | Tui_decode.Keeper_call_concurrent -> if ko then "병렬" else "concurrent"
   in
-  Printf.sprintf "%s · batch %d · width %d · plan step %d" execution
-    (schedule.kcs_batch_index + 1) schedule.kcs_batch_size
-    (schedule.kcs_planned_index + 1)
+  if ko then
+    Printf.sprintf "%s · 배치 %d · 폭 %d · 계획 %d단계" execution
+      (schedule.kcs_batch_index + 1) schedule.kcs_batch_size
+      (schedule.kcs_planned_index + 1)
+  else
+    Printf.sprintf "%s · batch %d · width %d · plan step %d" execution
+      (schedule.kcs_batch_index + 1) schedule.kcs_batch_size
+      (schedule.kcs_planned_index + 1)
 
 
 type result_state =
@@ -147,17 +165,17 @@ let result_marker = function
        | Outcome_unrecorded ) as outcome) ->
       Keeper_chat_transcript.marker_of_outcome outcome
 
-let result_label = function
-  | Durable_failed -> "failed"
-  | Durable_output -> "in call log"
+let result_label ?(ko = false) = function
+  | Durable_failed -> if ko then "실패" else "failed"
+  | Durable_output -> if ko then "호출 기록에 있음" else "in call log"
   | Transcript_outcome outcome ->
       match outcome with
-      | Keeper_chat_transcript.Started -> "starting"
-      | Awaiting_result -> "waiting"
-      | Failed -> "failed"
-      | Never_returned -> "not seen"
-      | Outcome_unrecorded -> "not recorded"
-      | Native_running -> "native running"
-      | Native_ended -> "native ended"
-      | Native_failed -> "native failed"
-      | Returned -> "received"
+      | Keeper_chat_transcript.Started -> if ko then "시작 중" else "starting"
+      | Awaiting_result -> if ko then "대기 중" else "waiting"
+      | Failed -> if ko then "실패" else "failed"
+      | Never_returned -> if ko then "미관측" else "not seen"
+      | Outcome_unrecorded -> if ko then "미기록" else "not recorded"
+      | Native_running -> if ko then "네이티브 실행 중" else "native running"
+      | Native_ended -> if ko then "네이티브 종료" else "native ended"
+      | Native_failed -> if ko then "네이티브 실패" else "native failed"
+      | Returned -> if ko then "수신됨" else "received"

@@ -5,7 +5,8 @@ type request = string Masc_tui_fetched.request
 val path : keeper:string -> execution_id:string -> string
 type action = Close | Choose of int | Open | Retry | Move of Masc_tui_detail_reading.movement | Ignore
 val action : key:string -> t -> action
-val create : choice list -> t
+val create : ?ko:bool -> choice list -> t
+val set_language : ko:bool -> t -> t
 val choices : t -> choice list
 val selected : t -> choice option
 val choosing : t -> bool

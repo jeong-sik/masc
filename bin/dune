@@ -2688,7 +2688,7 @@
  (name masc_tui_next_request_band)
  (wrapped false)
  (modules masc_tui_next_request_band)
- (libraries masc_tui_context_inspector masc_tui_token_scale masc_tui_ansi masc_tui_value unix))
+ (libraries masc_tui_context_inspector masc_tui_token_scale masc_tui_ansi masc_tui_value masc_tui_message_layout unix))
 
 (library
  (name masc_tui_render_prim)

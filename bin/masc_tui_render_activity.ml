@@ -538,12 +538,14 @@ let render_keeper_calls (state : state) =
        box_divider buf cols);
   (match state.keeper_calls with
    | Some snapshot when snapshot.Masc.Tui_decode.kcs_mismatched > 0 ->
+       let mismatched = snapshot.Masc.Tui_decode.kcs_mismatched in
        box_line_styled buf cols ~style:(Theme.warn ())
-         (Printf.sprintf
-            (if state.ui_language = Lang_ko then
-               "  다른 Keeper 를 가리킨 %d줄은 그리지 않음"
-             else "  %d row(s) named another keeper and were not drawn")
-            snapshot.Masc.Tui_decode.kcs_mismatched);
+         (if state.ui_language = Lang_ko then
+            Printf.sprintf "  다른 키퍼를 가리킨 %d줄은 그리지 않음" mismatched
+          else
+            Printf.sprintf "  %s named another keeper and %s not drawn"
+              (Message_layout.count_noun mismatched "row")
+              (if mismatched = 1 then "was" else "were"));
        box_divider buf cols
    | Some _ | None -> ());
   let entries =

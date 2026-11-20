@@ -23,6 +23,15 @@ val make :
   expires_at:string ->
   link:string ->
   (t, string) result
+
+val make_for :
+  ko:bool ->
+  project:
+    (Masc_tui_terminal_palette.rgb -> Masc_tui_terminal_palette.projected_color option) ->
+  name:string ->
+  expires_at:string ->
+  link:string ->
+  (t, string) result
 (** The card for an issued invite. The QR is encoded and coloured here, once,
     not on every frame. [Error] when [link] is not an http(s) URL of printable
     ASCII with no blank in it: a card draws its link as text and encodes it as
@@ -43,7 +52,7 @@ val classify_address : t -> address_class
     unspecified bind address, [Local_only] for a loopback host, otherwise
     [Reachable]. The card's address advice is chosen from this value. *)
 
-val issued_notice : t -> retained:bool -> string
+val issued_notice : ?ko:bool -> t -> retained:bool -> string
 (** The line the conversation keeps of an issue: which invite, when it
     expires, and that [/play link] opens the card again. It never carries the
     link. [retained] says whether another card remains available by name in
@@ -65,7 +74,7 @@ type row =
           window units. *)
   | Blank
 
-val draw : t -> width:int -> rows:int -> row list
+val draw : ?ko:bool -> t -> width:int -> rows:int -> row list
 (** The card laid out for [width] cells and [rows] body rows. The QR is drawn
     only when the whole of it fits: a QR cut short scans as nothing, so when it
     does not fit the card says what it needs instead ({!Qr_needs}). *)

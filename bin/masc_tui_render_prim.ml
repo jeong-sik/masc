@@ -2766,7 +2766,7 @@ let refresh_progress_pieces (state : state) =
   let surface_name source = if not ko then Surface_read_order.source_name source else
     match source with
     | Surface_read_source.Transport -> "연결" | Board -> "게시판" | Planning -> "목표·작업"
-    | Runtime_quota -> "제공자 한도" | Keeper_usage -> "Keeper 사용량"
+    | Runtime_quota -> "제공자 한도" | Keeper_usage -> "키퍼 사용량"
     | Provider_history -> "제공자 기록" | Overview_goals -> "목표"
     | Account_emails -> "계정" | Tool_series -> "도구 호출" in
   let source_name source = if not ko then Http_refresh_progress.source_name source else
@@ -3615,16 +3615,18 @@ let draw_list_idle buf cols ~ko ~empty ~height idle =
     box_empty buf cols
   done
 
-let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
+let draw_ask_text_entry ?(ko = false) buf cols ~draft ~question (entry : ask_text_entry) =
   box_wrapped_field buf cols
-    ~head:(Printf.sprintf "      %swrite: " Ansi.bold)
+    ~head:(Printf.sprintf "      %s%s" Ansi.bold (if ko then "입력: " else "write: "))
     ~style:Ansi.bold
     (Terminal_text.single_line entry.ate_text ^ "\xe2\x96\x8c");
   match Ask_projection.response_for draft ~question with
   | Some (Ask_projection.Draft_chose _) ->
       box_line buf cols
-        (Printf.sprintf "      %ssaving replaces what you picked%s"
-           Ansi.dim Ansi.reset)
+        (Printf.sprintf "      %s%s%s"
+           Ansi.dim
+           (if ko then "저장하면 앞서 고른 선택이 바뀝니다" else "saving replaces what you picked")
+           Ansi.reset)
   | Some (Ask_projection.Draft_wrote _)
   | Some Ask_projection.Draft_skipped
   | None -> ()
@@ -3634,7 +3636,7 @@ let draw_ask_text_entry buf cols ~draft ~question (entry : ask_text_entry) =
    choices and their marks, whatever the draft holds, and the free-text line.
    Lifted out of the panel so the panel can draw a question into a buffer of
    its own and ask how tall it came out before deciding to spend those rows. *)
-let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
+let draw_ask_question ?(ko = false) buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
     ~draft ~(question : Masc.Tui_decode_asks.ask_question) ~answering
     ~selected_question =
   (* The caret is the only thing saying where the cursor is: which question
@@ -3708,10 +3710,11 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
   (match Ask_projection.response_for draft ~question with
    | Some (Ask_projection.Draft_wrote text) ->
        box_wrapped_field buf cols
-         ~head:(Printf.sprintf "      %swrote: " Ansi.bold)
+         ~head:(Printf.sprintf "      %s%s" Ansi.bold (if ko then "작성함: " else "wrote: "))
          ~style:Ansi.bold text
    | Some Ask_projection.Draft_skipped ->
-       box_line buf cols (Printf.sprintf "      %sskipped%s" Ansi.dim Ansi.reset)
+       box_line buf cols
+         (Printf.sprintf "      %s%s%s" Ansi.dim (if ko then "건너뜀" else "skipped") Ansi.reset)
    | Some (Ask_projection.Draft_chose _) | None -> ());
   let ask = Masc.Tui_decode_asks.ask_key row in
   let slot = Ask_projection.free_text_slot ~ask question in
@@ -3737,7 +3740,7 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
          search uses. Without it the keys went into a buffer nothing on screen
          showed, which reads as a terminal that has stopped listening. *)
       | Some entry ->
-          draw_ask_text_entry buf cols ~draft ~question entry
+          draw_ask_text_entry ~ko buf cols ~draft ~question entry
       | None -> (
           let key =
             if not (answering && selected_question) then ""
@@ -3746,8 +3749,10 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
               | None -> "[t] "
           in
           let label =
-            if question.Masc.Tui_decode_asks.aq_choices = [] then "Write your answer"
-            else "Other: write your own answer"
+            if question.Masc.Tui_decode_asks.aq_choices = [] then
+              if ko then "답변을 직접 입력하세요" else "Write your answer"
+            else
+              if ko then "기타: 직접 답변 입력" else "Other: write your own answer"
           in
           box_line buf cols
             (Printf.sprintf "      %s%s%s%s" (Theme.info ()) key label Ansi.reset);
@@ -3757,12 +3762,12 @@ let draw_ask_question buf cols ~text_entry ~(row : Masc.Tui_decode_asks.ask_row)
 
 (* The reason is what separates a decision that matters from one that does
    not, so it is drawn, not hidden behind a detail view. *)
-let draw_ask_context buf cols ~(row : Masc.Tui_decode_asks.ask_row) =
+let draw_ask_context ?(ko = false) buf cols ~(row : Masc.Tui_decode_asks.ask_row) =
   match row.Masc.Tui_decode_asks.ar_context with
   | None -> ()
   | Some context ->
       box_wrapped_field buf cols
-        ~head:(Printf.sprintf "    %swhy: " Ansi.dim)
+        ~head:(Printf.sprintf "    %s%s" Ansi.dim (if ko then "이유: " else "why: "))
         ~style:Ansi.dim context
 
 
@@ -3838,8 +3843,9 @@ let ask_question_viewport (state : state) =
     | Some row ->
         let draft = Ask_projection.draft_for state.ask_draft ~row in
         (match List.nth_opt row.ar_questions state.ask_question_cursor with
-         | None -> ["  No question selected"]
+         | None -> [ui_text state ~ko:"  선택된 질문 없음" ~en:"  No question selected"]
          | Some question ->
+             let ko = state.ui_language = Lang_ko in
              let text, _ = ask_block (fun b ->
                match text_entry with
                | Some entry
@@ -3852,12 +3858,12 @@ let ask_question_viewport (state : state) =
                       and saving still targets the slot's original owner. *)
                    box_wrapped_field b cols ~head:"  " ~style:Ansi.bold
                      question.aq_prompt;
-                   draw_ask_text_entry b cols ~draft ~question entry
+                   draw_ask_text_entry ~ko b cols ~draft ~question entry
                | Some _ | None ->
                    draw_ask_origin b cols state;
-                   draw_ask_question b cols ~text_entry ~row ~draft ~question
+                   draw_ask_question ~ko b cols ~text_entry ~row ~draft ~question
                      ~answering:true ~selected_question:true;
-                   draw_ask_context b cols ~row) in
+                   draw_ask_context ~ko b cols ~row) in
              String.split_on_char '\n' text |> List.filter (fun line -> line <> ""))
   in
   (* title, progress, help, the divider under them, outer edges and footer.
@@ -4525,24 +4531,35 @@ let fusion_run_state_text ~status ~stage =
   | Fusion_failed failure -> Terminal_text.single_line failure.frs_failure_code
 
 
-let fusion_run_progress_text = function
-  | Fusion_stage_accepted -> "accepted; waiting for panel dispatch"
+let fusion_run_progress_text ?(ko = false) = function
+  | Fusion_stage_accepted ->
+      if ko then "접수됨 · 패널 전달 대기 중" else "accepted; waiting for panel dispatch"
   | Fusion_stage_panel { frs_expected } ->
-      Printf.sprintf "panel deliberation running across %d model(s)" frs_expected
+      if ko then Printf.sprintf "패널 모델 %d개 심의 실행 중" frs_expected
+      else Printf.sprintf "panel deliberation running across %s" (Message_layout.count_noun frs_expected "model")
   | Fusion_stage_judge { frs_expected; frs_answered; frs_failed } ->
       Printf.sprintf
-        "panel complete: %d answered / %d failed of %d; judge running"
-        frs_answered frs_failed frs_expected
+        (if ko then "패널 완료: %d개 중 응답 %d / 실패 %d · 판정 실행 중"
+         else "panel complete: %d answered / %d failed of %d; judge running")
+        (if ko then frs_expected else frs_answered)
+        (if ko then frs_answered else frs_failed)
+        (if ko then frs_failed else frs_expected)
   | Fusion_stage_computed { frs_expected; frs_answered; frs_failed } ->
       Printf.sprintf
-        "compute complete: %d answered / %d failed of %d; awaiting durable projection"
-        frs_answered frs_failed frs_expected
+        (if ko then "계산 완료: %d개 중 응답 %d / 실패 %d · 기록 저장 대기 중"
+         else "compute complete: %d answered / %d failed of %d; awaiting durable projection")
+        (if ko then frs_expected else frs_answered)
+        (if ko then frs_answered else frs_failed)
+        (if ko then frs_failed else frs_expected)
   | Fusion_stage_recording_evidence { frs_expected; frs_answered; frs_failed } ->
       Printf.sprintf
-        "recording evidence: %d answered / %d failed of %d"
-        frs_answered frs_failed frs_expected
-  | Fusion_stage_completed -> "completed"
-  | Fusion_stage_failed -> "failed"
+        (if ko then "근거 기록 중: %d개 중 응답 %d / 실패 %d"
+         else "recording evidence: %d answered / %d failed of %d")
+        (if ko then frs_expected else frs_answered)
+        (if ko then frs_answered else frs_failed)
+        (if ko then frs_failed else frs_expected)
+  | Fusion_stage_completed -> if ko then "완료" else "completed"
+  | Fusion_stage_failed -> if ko then "실패" else "failed"
 
 
 (* A run's start in a list of runs: a column moment. *)
@@ -4720,27 +4737,41 @@ let resolve_change_context (state : state) ~(path_opt : string option) : change_
   }
 
 
-let build_change_context_lines ~cols (change_ctx : change_context) : string list =
+let build_change_context_lines ?(ko = false) ~cols (change_ctx : change_context) : string list =
   let items =
-    [ Option.map (fun keeper -> "Record: Keeper: " ^ keeper) change_ctx.ctx_keeper
+    [ Option.map
+        (fun keeper -> (if ko then "기록: 키퍼: " else "Record: Keeper: ") ^ keeper)
+        change_ctx.ctx_keeper
     ; (match change_ctx.ctx_task_id, change_ctx.ctx_task_title with
-       | Some id, Some title -> Some (Printf.sprintf "Task: %s (%s)" id
-           (Message_layout.truncate_middle 26 title))
-       | Some id, None -> Some ("Task: " ^ id)
+       | Some id, Some title ->
+           Some (Printf.sprintf "%s %s (%s)"
+             (if ko then "작업:" else "Task:") id
+             (Message_layout.truncate_middle 26 title))
+       | Some id, None -> Some ((if ko then "작업: " else "Task: ") ^ id)
        | None, (Some _ | None) -> None)
     ; (match change_ctx.ctx_goal_id, change_ctx.ctx_goal_title with
-       | Some id, Some title -> Some (Printf.sprintf "Goal: %s (%s)" id
-           (Message_layout.truncate_middle 24 title))
-       | Some id, None -> Some ("Goal: " ^ id)
+       | Some id, Some title ->
+           Some (Printf.sprintf "%s %s (%s)"
+             (if ko then "목표:" else "Goal:") id
+             (Message_layout.truncate_middle 24 title))
+       | Some id, None -> Some ((if ko then "목표: " else "Goal: ") ^ id)
        | None, (Some _ | None) -> None)
-    ; Option.map (fun _ -> "Checkout unverified") change_ctx.ctx_keeper
-    ; Option.map (fun turn -> Printf.sprintf "Turn #%d" turn) change_ctx.ctx_turn
+    ; Option.map
+        (fun _ -> if ko then "체크아웃 미확인" else "Checkout unverified")
+        change_ctx.ctx_keeper
+    ; Option.map
+        (fun turn ->
+          if ko then Printf.sprintf "턴 #%d" turn else Printf.sprintf "Turn #%d" turn)
+        change_ctx.ctx_turn
     ; (match change_ctx.ctx_pr, change_ctx.ctx_pr_slug with
        | Some pr, Some slug -> Some (Printf.sprintf "PR: %s#%d" slug (Masc_tui_pr_ref.number pr))
-       | Some pr, None -> Some (Printf.sprintf "PR: #%d (repository not reported)" (Masc_tui_pr_ref.number pr))
+       | Some pr, None ->
+           Some (if ko then Printf.sprintf "PR: #%d (저장소 미보고)" (Masc_tui_pr_ref.number pr)
+                 else Printf.sprintf "PR: #%d (repository not reported)" (Masc_tui_pr_ref.number pr))
        | None, (Some _ | None) -> None)
     ; (match change_ctx.ctx_comment with
-       | Some text when String.trim text <> "" -> Some ("Note: " ^ first_line_summary ~max_len:34 text)
+       | Some text when String.trim text <> "" ->
+           Some ((if ko then "메모: " else "Note: ") ^ first_line_summary ~max_len:34 text)
        | Some _ | None -> None)
     ] |> List.filter_map Fun.id in
   let width = max 1 (framed_inner_width cols - 2) in
@@ -4978,7 +5009,7 @@ let render_diff_surface (state : state) (ds : diff_surface) =
 
 let repository_changes_diff_geometry state ~terminal_rows ~cols ~path =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
-  let context = build_change_context_lines ~cols
+  let context = build_change_context_lines ~ko:(state.ui_language = Lang_ko) ~cols
       (resolve_change_context state ~path_opt:(Some path)) in
   diff_surface_geometry ~rows ~context_lines:context
     ~has_error:(Option.is_some state.repository_changes_diff_error)
@@ -4996,7 +5027,7 @@ let render_repository_changes_diff (state : state) ~path =
   render_diff_surface state
     { ds_path = [ git_changes_step state ]
     ; ds_address = Terminal_text.single_line path
-    ; ds_context_lines = build_change_context_lines ~cols change_ctx
+    ; ds_context_lines = build_change_context_lines ~ko:(state.ui_language = Lang_ko) ~cols change_ctx
     ; ds_diff =
         (* A diff held for another path is not this file's reading. *)
         (match state.repository_changes_diff with
@@ -5632,8 +5663,9 @@ let context_error_lines ~cols ~label detail =
   context_wrapped_lines ~cols ~style:(Theme.bad ())
     (label ^ ": " ^ context_detail_preview detail)
 
-let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_note = false) ~cols ~scale
+let context_next_request_lines ?(ko = false) ?(runtime_details = fun _ -> []) ?(show_scale_note = false) ~cols ~scale
     (forecast : Masc_tui_context_inspector.forecast Masc_tui_context_inspector.observation) =
+  let say korean english = if ko then korean else english in
   let width = max 1 (framed_inner_width cols - 2) in
   let prose text =
     List.map
@@ -5647,14 +5679,17 @@ let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_not
     context_wrapped_lines ~cols ~style:(if dim then Ansi.dim else "") text
   in
   [ "  "
-    ^ Context_bars.band ~width ~title:"NEXT REQUEST"
-        ~caption:"what the next Agent Core request would carry, computed now"
+    ^ Context_bars.band ~width
+        ~title:(say "다음 요청" "NEXT REQUEST")
+        ~caption:(say "지금 계산한 다음 Agent Core 요청 구성" "what the next Agent Core request would carry, computed now")
   ]
   @ (match forecast with
-     | Masc_tui_context_inspector.Not_requested -> prose "Next request has not been read."
-     | Masc_tui_context_inspector.Pending -> prose "Next request is still loading."
+     | Masc_tui_context_inspector.Not_requested ->
+         prose (say "다음 요청을 아직 읽지 않았습니다." "Next request has not been read.")
+     | Masc_tui_context_inspector.Pending ->
+         prose (say "다음 요청을 불러오는 중입니다." "Next request is still loading.")
      | Masc_tui_context_inspector.Observed forecast ->
-       Masc_tui_next_request_band.lines ~runtime_details ~prose ~fact ~detail
+       Masc_tui_next_request_band.lines ~ko ~runtime_details ~prose ~fact ~detail
       ~error:(context_error_lines ~cols)
       ~safe:Keeper_chat.terminal_safe_text ~safe_detail:context_detail_preview
       ~scale forecast)
@@ -5668,7 +5703,7 @@ let context_next_request_lines ?(runtime_details = fun _ -> []) ?(show_scale_not
    no-value mark both sit in it, so the rows line up on the same column. *)
 let token_cell_width = 7
 
-let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
+let context_composition_lines ?(ko = false) ?(runtime_details = fun _ -> []) ~cols ~turn_back
     ?forecast
     (selection : Masc_tui_context_inspector.selection) =
   let module Inspector = Masc_tui_context_inspector in
@@ -6332,16 +6367,20 @@ let context_composition_lines ?(runtime_details = fun _ -> []) ~cols ~turn_back
   @ cache_lines
   @ [ "" ]
   @ [ "  "
-      ^ Context_bars.band ~width ~title:"HOW FAR BACK"
-          ~caption:"how much of the kept conversation this request carried"
+      ^ Context_bars.band ~width
+          ~title:(if ko then "대화 도달 범위" else "HOW FAR BACK")
+          ~caption:(if ko then "보존된 대화 중 이 요청에 실린 비중" else "how much of the kept conversation this request carried")
     ]
   @ history_lines
   @ [ "" ]
-  @ Option.fold ~none:[] ~some:(context_next_request_lines ~runtime_details ~cols ~scale) forecast
+  @ Option.fold ~none:[] ~some:(context_next_request_lines ~ko ~runtime_details ~cols ~scale) forecast
   @ (if selection.Inspector.recent = [] then [] else recent_turns_lines) @ [ "" ]
   @ prose
-      "Three readings of one turn, not three views of one number: none of \
-       them is a breakdown of another, and they do not add up."
+      (if ko then
+         "같은 턴에 대한 세 가지 독립 측정치입니다. 서로의 하위 항목이 아니므로 합산되지 않습니다."
+       else
+         "Three readings of one turn, not three views of one number: none of \
+          them is a breakdown of another, and they do not add up.")
 
 
 
@@ -7228,7 +7267,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
            Plain
              ( context_error_lines ~cols ~label:(say "구성 조회 불가" "Composition unavailable") detail
                @ [ "" ]
-               @ context_next_request_lines ~runtime_details ~cols
+               @ context_next_request_lines ~ko ~runtime_details ~cols
                    ~scale:Masc_tui_token_scale.fleet
                    ~show_scale_note:true forecast
              , None )
@@ -7247,28 +7286,38 @@ let context_inspector_content_lines ~cols state : context_pane_body =
       let record = Inspector.inspected_record ~target:state.context_inspector_target
           (Inspector.Exact_read reading) in
       let prefix =
-        [ "  Original question turn: "
+        [ say "  원본 질문 턴: " "  Original question turn: "
           ^ Keeper_chat.terminal_safe_text (Ids.Turn_ref.to_string reading.turn_ref) ]
         @ (match reading.record with
-           | Inspector.Not_requested -> [ Ansi.dim ^ "  Turn record has not been read" ^ Ansi.reset ]
-           | Inspector.Pending -> [ Ansi.dim ^ "  Turn record is still loading" ^ Ansi.reset ]
+           | Inspector.Not_requested ->
+               [ Ansi.dim ^ say "  턴 기록을 아직 읽지 않았습니다" "  Turn record has not been read" ^ Ansi.reset ]
+           | Inspector.Pending ->
+               [ Ansi.dim ^ say "  턴 기록을 불러오는 중입니다" "  Turn record is still loading" ^ Ansi.reset ]
            | Inspector.Observed (Error detail) ->
-               context_error_lines ~cols ~label:"Turn record unavailable" detail
+               context_error_lines ~cols ~label:(say "턴 기록 조회 불가" "Turn record unavailable") detail
            | Inspector.Observed (Ok exact) ->
                if exact.skipped_rows = 0 then [] else
-                 [ Ansi.dim ^ Printf.sprintf "  Exact record found; %d unreadable history rows were encountered"
-                     exact.skipped_rows ^ Ansi.reset ])
+                 [ Ansi.dim
+                   ^ (if ko then
+                        Printf.sprintf "  원본 기록 확인됨 · 읽을 수 없는 이력 행 %d건 건너뜀" exact.skipped_rows
+                      else
+                        Printf.sprintf "  Exact record found; %s %s encountered"
+                          (Message_layout.count_noun exact.skipped_rows "unreadable history row")
+                          (if exact.skipped_rows = 1 then "was" else "were"))
+                   ^ Ansi.reset ])
       in
       let prepend = function
         | Plain (lines, selected) ->
             Plain (prefix @ lines, Option.map (fun row -> List.length prefix + row) selected)
         | Split body -> Split { body with common = prefix @ body.common }
       in
-      let pending label = Plain ([ Ansi.dim ^ "  " ^ label ^ " is still loading" ^ Ansi.reset ], None) in
+      let pending label =
+        Plain ([ Ansi.dim ^ "  " ^ label ^ say " 불러오는 중입니다" " is still loading" ^ Ansi.reset ], None)
+      in
       let unavailable label detail =
         Plain
           ( context_error_lines ~cols
-              ~label:(label ^ " unavailable") detail
+              ~label:(label ^ say " 조회 불가" " unavailable") detail
           , None ) in
       let scale = Option.fold ~none:Masc_tui_token_scale.fleet
           ~some:(fun record -> Masc_tui_token_scale.of_turn ~rows:[ record ] record) record in
@@ -7286,12 +7335,14 @@ let context_inspector_content_lines ~cols state : context_pane_body =
                    ; recent = []
                    ; rows = [ record ]
                    ; skipped_rows = None } in
-                 Plain (context_composition_lines ~cols ~turn_back:0 selection, None))
+                 Plain (context_composition_lines ~ko ~cols ~turn_back:0 selection, None))
         | Inspector.Exact_input ->
+            let label = say "원본 입력" "Original input" in
             (match reading.provider_input with
-             | Inspector.Not_requested -> Plain ([ "  Original input has not been read" ], None)
-             | Inspector.Pending -> pending "Original input"
-             | Inspector.Observed (Error detail) -> unavailable "Original input" detail
+             | Inspector.Not_requested ->
+                 Plain ([ say "  원본 입력을 아직 읽지 않았습니다" "  Original input has not been read" ], None)
+             | Inspector.Pending -> pending label
+             | Inspector.Observed (Error detail) -> unavailable label detail
              | Inspector.Observed (Ok input) ->
                  context_exact_input_lines ~cols ~scale state ~response:record
                    ~response_parts:reading.response input)
@@ -7308,22 +7359,22 @@ let context_inspector_content_lines ~cols state : context_pane_body =
           { selection; provider_input; response; forecast } ) ->
       (match state.context_inspector_target with
        | Masc_tui_context_inspector.Pinned _ ->
-           Plain ([ "  Waiting for the requested immutable source" ], None)
+           Plain ([ say "  요청한 불변 원본 기록 대기 중" "  Waiting for the requested immutable source" ], None)
        | Masc_tui_context_inspector.Recent turn_back ->
       (match state.context_inspector_tab with
        | Masc_tui_context_inspector.Response ->
            context_response_lines ~cols state response
        | Masc_tui_context_inspector.Composition ->
            Plain
-             ( context_composition_lines ~runtime_details ~cols
+             ( context_composition_lines ~ko ~runtime_details ~cols
                  ~turn_back ~forecast selection
              , None )
        | Masc_tui_context_inspector.Exact_input ->
            (match provider_input with
             | Masc_tui_context_inspector.Not_requested ->
-                Plain ([ "  Original input has not been read" ], None)
+                Plain ([ say "  원본 입력을 아직 읽지 않았습니다" "  Original input has not been read" ], None)
             | Masc_tui_context_inspector.Pending ->
-                Plain ([ Ansi.dim ^ "  Original input is still loading" ^ Ansi.reset ], None)
+                Plain ([ Ansi.dim ^ say "  원본 입력을 불러오는 중입니다" "  Original input is still loading" ^ Ansi.reset ], None)
             | Masc_tui_context_inspector.Observed (Ok input) ->
                 (* The same stepped/attributed record names the input,
                    token scale and response counters on this tab. *)
@@ -7336,7 +7387,7 @@ let context_inspector_content_lines ~cols state : context_pane_body =
             | Masc_tui_context_inspector.Observed (Error detail) ->
                 Plain
                   ( context_error_lines ~cols
-                      ~label:"Exact input unavailable" detail
+                      ~label:(say "요청 입력 조회 불가" "Exact input unavailable") detail
                   , None ))
        | Masc_tui_context_inspector.Input_map ->
            (

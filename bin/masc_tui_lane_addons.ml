@@ -2655,7 +2655,7 @@ let links_lines ~width view =
     | Some _, None | None, (Some _ | None) -> [] in
   fact_spans_with_selection ~width (bound @ (Fact_text "" :: flow_rows ~embedded:true view))
 
-let lines_with_selection ?(height=24) ?(failed_note = "") ~width view =
+let lines_with_selection ?(ko = false) ?(height=24) ?(failed_note = "") ~width view =
   let plain lines = List.map (fun line -> false, line) lines in
   let wrap_selected rows =
     List.concat_map (fun (selected, line) ->
@@ -2667,14 +2667,17 @@ let lines_with_selection ?(height=24) ?(failed_note = "") ~width view =
       let diagnostics = List.concat_map render (diagnostic_lines view) in
       plain diagnostics
       @ Masc_tui_lane_installer.lines_with_selection
-          ~height:(max 1 (height - List.length diagnostics)) ~render installer
+          ~ko ~height:(max 1 (height - List.length diagnostics)) ~render installer
   | None -> match view.evidence_prompt with
   | Some prompt ->
       plain (List.concat_map (document_rows ~width) (diagnostic_lines view))
       @ evidence_rows ~width prompt
   | None -> match view.subscription_panel,view.action_menu,view.records with
   | Some panel,_,_ ->
-      (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing" else "Last received subscription state") (max 1 width)
+      (Masc_tui_message_layout.fit_width
+         (if view.loading then (if ko then "새로고침 중" else "Refreshing")
+          else (if ko then "마지막으로 수신한 구독 상태" else "Last received subscription state"))
+         (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (document_rows ~width)
       |> plain
@@ -2684,9 +2687,11 @@ let lines_with_selection ?(height=24) ?(failed_note = "") ~width view =
        | Some (Row_list {row_title;entries;_}) ->
            (* The title names the chosen row and the instance that produced
               it; an action the row cannot fill stays listed with why. *)
-           plain (wrap ([Printf.sprintf "Actions for %s · %s" row_title menu.target_title]
+           plain (wrap ([Printf.sprintf (if ko then "%s 동작 · %s" else "Actions for %s · %s") row_title menu.target_title]
                  @ diagnostic_lines view)
-           @ key_rows ~width ["Up/Down:choose"; "Enter:open"; "Esc:cancel"])
+           @ key_rows ~width
+               (if ko then ["↑/↓:선택"; "Enter:열기"; "Esc:취소"]
+                else ["Up/Down:choose"; "Enter:open"; "Esc:cancel"]))
            @ wrap_selected (List.mapi (fun position (entry : row_entry) ->
                let selected = position = menu.cursor in
                selected,
@@ -2694,30 +2699,33 @@ let lines_with_selection ?(height=24) ?(failed_note = "") ~width view =
                ^ (match entry.filled with
                   | Ok _ -> ""
                   | Error unfilled ->
-                      " · unavailable: " ^ String.concat "; " (List.map unfilled_text unfilled))) entries
+                      (if ko then " · 사용 불가: " else " · unavailable: ")
+                      ^ String.concat "; " (List.map unfilled_text unfilled))) entries
              @ (let selected = menu.cursor = List.length entries in
-                [selected, (if selected then "› " else "  ") ^ "Other action"]))
+                [selected, (if selected then "› " else "  ") ^ (if ko then "기타 동작" else "Other action")]))
        | Some (Row_form {label;_}) ->
            (* One sentence for what sending does: which instance receives
               which action. *)
-           plain (wrap ([Printf.sprintf "Sends \"%s\" to %s" label menu.target_title]
+           plain (wrap ([Printf.sprintf (if ko then "\"%s\" 전송 대상: %s" else "Sends \"%s\" to %s") label menu.target_title]
                  @ diagnostic_lines view))
-           @ wrap_selected (Option.fold ~none:[] ~some:(Masc_tui_schema_form.lines_with_selection ~show_description:true) menu.form)
+           @ wrap_selected (Option.fold ~none:[] ~some:(Masc_tui_schema_form.lines_with_selection ~ko ~show_description:true) menu.form)
        | None ->
-           plain (wrap (["Run action on " ^ menu.target_title] @ diagnostic_lines view))
+           plain (wrap ([(if ko then "동작 실행 대상: " else "Run action on ") ^ menu.target_title] @ diagnostic_lines view))
            @ (match menu.form with
-           | Some form -> wrap_selected (Masc_tui_schema_form.lines_with_selection ~show_description:true form)
+           | Some form -> wrap_selected (Masc_tui_schema_form.lines_with_selection ~ko ~show_description:true form)
            | None ->
                plain (key_rows ~width
-                 [Printf.sprintf "Action %d/%d" (menu.cursor+1) (List.length menu.choices);
-                  "Up/Down:choose"; "Enter:run once"; "Esc:cancel"]
-               @ key_rows ~width ["J/K:scroll action details"]
+                 [Printf.sprintf (if ko then "동작 %d/%d" else "Action %d/%d") (menu.cursor+1) (List.length menu.choices);
+                  (if ko then "↑/↓:선택" else "Up/Down:choose");
+                  (if ko then "Enter:1회 실행" else "Enter:run once");
+                  (if ko then "Esc:취소" else "Esc:cancel")]
+               @ key_rows ~width [if ko then "J/K:동작 상세 스크롤" else "J/K:scroll action details"]
                @ wrap (match List.nth_opt menu.choices menu.cursor with
                   | Some action -> action_fields "" action
-                  | None -> ["No selected action"]))))
+                  | None -> [if ko then "선택된 동작 없음" else "No selected action"]))))
   | _,_,Some overlay ->
       plain (List.concat_map (document_rows ~width) (diagnostic_lines view))
-      @ wrap_selected (Masc_tui_lane_records.lines_with_selection overlay)
+      @ wrap_selected (Masc_tui_lane_records.lines_with_selection ~ko overlay)
   | None,None,None ->
       if view.help_open then plain (help_lines ~width)
       else if view.presentation = Flow then fact_spans_with_selection ~width (flow_rows view)
@@ -2731,7 +2739,7 @@ let lines_with_selection ?(height=24) ?(failed_note = "") ~width view =
           | None -> []
           | Some json -> (match evidence_receipt_lines json with
               | [] -> []
-              | receipt -> ["Last evidence receipt"] @ receipt @ [""]) in
+              | receipt -> [if ko then "마지막 증거 영수증" else "Last evidence receipt"] @ receipt @ [""]) in
         let receipt_lines = plain (List.concat_map (document_rows ~width) receipt_lines) in
         (match view.screen with
         | Overview -> overview_lines ~width view @ receipt_lines
@@ -2740,8 +2748,8 @@ let lines_with_selection ?(height=24) ?(failed_note = "") ~width view =
                | Connections -> links_lines ~width view
                | Timeline | Configurations | Instances | Rows -> []))
 
-let lines ?height ?failed_note ~width view =
-  List.map snd (lines_with_selection ?height ?failed_note ~width view)
+let lines ?ko ?height ?failed_note ~width view =
+  List.map snd (lines_with_selection ?ko ?height ?failed_note ~width view)
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,
    live worker count, and failures separate on the Lanes surface. *)

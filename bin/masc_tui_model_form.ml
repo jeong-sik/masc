@@ -84,24 +84,51 @@ let key t key =
   | key when String.length key > 0 && String.length key = Uchar.utf_decode_length (String.get_utf_8_uchar key 0) -> Editing (paste t key)
   | _ -> Editing t
 
-let rows_with_selection ?(input_locked=false) ~width ~height t =
+let rows_with_selection ?(ko = false) ?(input_locked=false) ~width ~height t =
+  let say korean english = if ko then korean else english in
   let plain lines = List.map (fun line -> false, line) lines in
   let wrap = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) in
-  let heading = (match t.mode with Edit -> "Edit model" | Copy -> "Copy model") ^ " · " ^ t.source.provider in
-  let label = function Name -> "Variant name" | Context -> "Context tokens" | Effort -> "Reasoning effort" | Temperature -> "Temperature" | Output -> "Max output tokens" in
+  let heading =
+    (match t.mode with
+     | Edit -> say "모델 설정 편집" "Edit model"
+     | Copy -> say "모델 복제" "Copy model")
+    ^ " · " ^ t.source.provider
+  in
+  let label = function
+    | Name -> say "변형 이름" "Variant name"
+    | Context -> say "컨텍스트 토큰" "Context tokens"
+    | Effort -> say "추론 강도" "Reasoning effort"
+    | Temperature -> say "Temperature" "Temperature"
+    | Output -> say "최대 출력 토큰" "Max output tokens"
+  in
   let pad_label text =
     text ^ String.make (max 0 (17 - Masc_tui_message_layout.display_width text)) ' '
   in
   let field_rows = List.mapi (fun i field ->
     Printf.sprintf "%s %s %s" (if i = t.selected then "›" else " ") (pad_label (label field))
       (value t field ^ (if i = t.selected && not input_locked then "_" else "")
-       ^ (if field=Context then (match t.context_choice with Preset _ -> " [preset]" | Custom -> " [custom]") else ""))) fields in
-  let hint = if input_locked then "Input retained · Esc back · Ctrl-X closes recovery after receipt" else
-    (if focused t=Context then "←/→ 272k/500k/750k/1M/custom · " else "")
-    ^ "Tab/↑/↓ fields · Ctrl-U clear · Enter next/save · Esc cancel" in
+       ^ (if field=Context then
+            (match t.context_choice with
+             | Preset _ -> say " [프리셋]" " [preset]"
+             | Custom -> say " [직접 입력]" " [custom]")
+          else ""))) fields in
+  let hint =
+    if input_locked then
+      say "입력 유지 · Esc:뒤로 · Ctrl-X:영수증 확인 후 복구 닫기"
+        "Input retained · Esc back · Ctrl-X closes recovery after receipt"
+    else
+      (if focused t=Context then
+         say "←/→ 272k/500k/750k/1M/직접 입력 · " "←/→ 272k/500k/750k/1M/custom · "
+       else "")
+      ^ say "Tab/↑/↓:필드 · Ctrl-U:지우기 · Enter:다음/저장 · Esc:취소"
+          "Tab/↑/↓ fields · Ctrl-U clear · Enter next/save · Esc cancel" in
   let notes = (match t.mode with
-    | Copy -> "Same account and API model; independent settings. Add the saved variant to a Lane to use it."
-    | Edit -> "Context/output apply to this account. Effort/temperature affect every account sharing this model; use Copy for independent settings.") in
+    | Copy ->
+        say "같은 계정과 API 모델을 쓰며 설정만 분리됩니다. 저장한 변형을 레인에 추가해 사용하세요."
+          "Same account and API model; independent settings. Add the saved variant to a Lane to use it."
+    | Edit ->
+        say "컨텍스트·출력은 이 계정에만 적용됩니다. 추론 강도·Temperature는 이 모델을 공유하는 모든 계정에 적용되므로 분리하려면 복제를 사용하세요."
+          "Context/output apply to this account. Effort/temperature affect every account sharing this model; use Copy for independent settings.") in
   let content =
     plain (wrap heading)
     @ List.concat (List.mapi (fun i row ->
@@ -113,22 +140,25 @@ let rows_with_selection ?(input_locked=false) ~width ~height t =
   let height = max 0 height in
   let hints = wrap hint in
   let hints = if List.length hints < height then hints
-    else List.take height (wrap (if input_locked then "Esc back · input retained" else "Esc cancel · Enter next/save")) in
+    else List.take height (wrap
+      (if input_locked then say "Esc:뒤로 · 입력 유지" "Esc back · input retained"
+       else say "Esc:취소 · Enter:다음/저장" "Esc cancel · Enter next/save")) in
   let available = max 0 (height - List.length hints) in
-  let errors = match t.error with None -> [] | Some error -> wrap ("Error: " ^ error) in
+  let errors = match t.error with None -> [] | Some error -> wrap ((say "오류: " "Error: ") ^ error) in
   let error_room = max 0 (available - (if available > 1 then 1 else 0)) in
   let errors = if List.length errors <= error_room then errors
     else if error_room = 0 then []
     else if error_room = 1 then List.take 1 errors
     else List.take (error_room - 1) errors
-      @ [Masc_tui_message_layout.fit_middle (max 1 width) "… error continues; edit or Esc"] in
+      @ [Masc_tui_message_layout.fit_middle (max 1 width)
+           (say "… 오류 계속 · 수정하거나 Esc" "… error continues; edit or Esc")] in
   let room = max 0 (available - List.length errors) in
   let selected_line = List.length (wrap heading) + List.fold_left (fun n row -> n + List.length (wrap row)) 0 (List.take t.selected field_rows) in
   let first = max 0 (selected_line - room + 1) in
   List.take room (List.drop first content) @ plain errors @ plain hints
 
-let rows ?input_locked ~width ~height t =
-  List.map snd (rows_with_selection ?input_locked ~width ~height t)
+let rows ?ko ?input_locked ~width ~height t =
+  List.map snd (rows_with_selection ?ko ?input_locked ~width ~height t)
 
 let path parts = String.concat "." (List.map Edit_text.render_key parts)
 let errors errors = String.concat "; " (List.map (fun (e:Runtime_toml.parse_error) -> e.path ^ ": " ^ e.message) errors)

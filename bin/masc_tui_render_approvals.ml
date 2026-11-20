@@ -681,18 +681,19 @@ let draw_ask_questions buf cols (state : state) ~budget =
              and emission below are its only force sites; no cell/provider
              escapes to a fiber, worker or later frame. Capture original
              immutable inputs rather than mutable UI state in the cells. *)
+          let ko = state.ui_language = Lang_ko in
           let question_blocks =
             Array.mapi
               (fun index question ->
                 lazy (ask_block (fun b ->
-                    draw_ask_question b cols ~text_entry ~row:selected ~draft ~question
+                    draw_ask_question ~ko b cols ~text_entry ~row:selected ~draft ~question
                       ~answering
                       ~selected_question:(index = question_cursor))))
               questions
           in
           let question_block index = Stdlib.Lazy.force question_blocks.(index) in
           let context_block =
-            lazy (ask_block (fun b -> draw_ask_context b cols ~row:selected))
+            lazy (ask_block (fun b -> draw_ask_context ~ko b cols ~row:selected))
           in
           let plan =
             Ask_layout.plan ~budget ~spent:(count_frame_lines buf)

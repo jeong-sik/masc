@@ -287,12 +287,15 @@ let lines ~ko ~now fetched ~keeper_name =
       match unreconciled_items with
       | [] -> []
       | oldest :: _ ->
+        let count = List.length unreconciled_items in
+        let part = Terminal_text.single_line oldest.Command.partition_id in
         [ ( Bad
-          , Printf.sprintf
-              (if ko then "partition ledger 가 확인하지 않는 다시 넣기 %d건 \xc2\xb7 가장 오래된 것 %s"
-               else "%d requeue(s) the partition ledger does not confirm \xc2\xb7 oldest %s")
-              (List.length unreconciled_items)
-              (Terminal_text.single_line oldest.Command.partition_id) )
+          , if ko then
+              Printf.sprintf "partition ledger 가 확인하지 않는 다시 넣기 %d건 \xc2\xb7 가장 오래된 것 %s"
+                count part
+            else
+              Printf.sprintf "%d %s the partition ledger does not confirm \xc2\xb7 oldest %s"
+                count (if count = 1 then "requeue" else "requeues") part )
         ]
     in
     let unreadable = unreadable_rows quarantines @ quarantines.unreadable_errors in
@@ -300,11 +303,12 @@ let lines ~ko ~now fetched ~keeper_name =
       match unreadable with
       | [] -> []
       | first :: _ ->
+        let count = List.length unreadable in
+        let detail = Terminal_text.single_line first in
         [ ( Bad
-          , Printf.sprintf
-              (if ko then "이 TUI 가 못 읽는 줄 %d개: %s" else "%d row(s) this TUI cannot read: %s")
-              (List.length unreadable)
-              (Terminal_text.single_line first) )
+          , if ko then Printf.sprintf "이 TUI 가 못 읽는 줄 %d개: %s" count detail
+            else Printf.sprintf "%d %s this TUI cannot read: %s"
+                   count (if count = 1 then "row" else "rows") detail )
         ]
     in
     let ledger_lines =

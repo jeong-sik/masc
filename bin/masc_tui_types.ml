@@ -28387,9 +28387,10 @@ let keeper_message_inflight_rows (state : state) ~now =
     if group.reconciling_count > 0 then
       if group.count = 1 then ui_text state ~ko:"기록 대조 중" ~en:"reconciling"
       else
-        Printf.sprintf
-          (if ko then "스트림 %d개 기록 대조 중" else "reconciling %d stream(s)")
-          group.reconciling_count
+        (if ko then Printf.sprintf "스트림 %d개 기록 대조 중" group.reconciling_count
+         else
+           Printf.sprintf "reconciling %d %s" group.reconciling_count
+             (if group.reconciling_count = 1 then "stream" else "streams"))
     else
       let transcript = group.representative.log.tl_transcript in
       if Masc_tui_keeper_chat_transcript.awaiting_continuation transcript then

@@ -212,27 +212,38 @@ let numbered_line ~max_line_cells (numbered : Diff.numbered) =
     ~old_line:numbered.old_line ~new_line:numbered.new_line ~marker
   ^ clipped ~max_cells:(max_line_cells - Diff.numbered_gutter_cells) text
 
-let preview_block ~max_line_cells ~language lines =
+let preview_block ~ko ~max_line_cells ~language lines =
   match Markdown.non_colliding_fence_marker lines with
   | None ->
+      let count = List.length lines in
       [ clipped ~max_cells:max_line_cells
-          (Printf.sprintf
-             "(%d recorded preview row%s withheld: text contains both supported fence markers; open Changes)"
-             (List.length lines) (if List.length lines = 1 then "" else "s"))
+          (if ko then
+             Printf.sprintf
+               "(기록된 미리보기 %d줄 생략: 본문에 지원 코드 펜스가 모두 포함됨 · 변경 화면에서 확인)"
+               count
+           else
+             Printf.sprintf
+               "(%d recorded preview row%s withheld: text contains both supported fence markers; open Changes)"
+               count (if count = 1 then "" else "s"))
       ]
   | Some marker ->
       (marker ^ language) :: lines @ [ marker ]
 
-let omission_row ~max_line_cells omitted =
+let omission_row ~ko ~max_line_cells omitted =
   if omitted = 0 then []
   else
     [ clipped ~max_cells:max_line_cells
-        (Printf.sprintf "(%d more recorded row%s; open Changes for the full view)"
-           omitted (if omitted = 1 then "" else "s"))
+        (if ko then
+           Printf.sprintf "(기록된 %d줄 더 있음 · 전체 보기는 변경 화면)" omitted
+         else
+           Printf.sprintf "(%d more recorded row%s; open Changes for the full view)"
+             omitted (if omitted = 1 then "" else "s"))
     ]
 
-let attempted_suffix (change : Masc.Tui_decode.file_change) =
-  if change.fc_succeeded then "" else " · failed attempt"
+let attempted_suffix ~ko (change : Masc.Tui_decode.file_change) =
+  if change.fc_succeeded then ""
+  else if ko then " · 실패한 시도"
+  else " · failed attempt"
 
 let short_sha256 sha256 =
   if String.length sha256 <= 12 then sha256 else String.sub sha256 0 12
@@ -241,13 +252,16 @@ let line_range_label (range : Masc.Keeper_file_change_evidence.line_range) =
   if range.start_line = range.end_line then Printf.sprintf "L%d" range.start_line
   else Printf.sprintf "L%d-%d" range.start_line range.end_line
 
-let occurrence_range_label
+let occurrence_range_label ~ko
       (occurrence : Masc.Keeper_file_change_evidence.edit_occurrence)
   =
-  let old_range = "old " ^ line_range_label occurrence.old_range in
+  let old_range =
+    (if ko then "이전 " else "old ") ^ line_range_label occurrence.old_range
+  in
   match occurrence.new_range with
-  | Some new_range -> old_range ^ " -> new " ^ line_range_label new_range
-  | None -> old_range ^ " -> deleted"
+  | Some new_range ->
+      old_range ^ (if ko then " -> 이후 " else " -> new ") ^ line_range_label new_range
+  | None -> old_range ^ (if ko then " -> 삭제됨" else " -> deleted")
 
 let rec take count = function
   | _ when count <= 0 -> []
@@ -256,35 +270,44 @@ let rec take count = function
 
 let max_occurrence_range_rows = 3
 
-let edited_evidence_rows ~max_line_cells ~replace_all
+let edited_evidence_rows ~ko ~max_line_cells ~replace_all
       (change : Masc.Tui_decode.file_change) =
-  let attempted = attempted_suffix change in
+  let attempted = attempted_suffix ~ko change in
   match change.fc_line_evidence with
   | None ->
     ( (if replace_all then
-         "  replace-all template · match count unavailable"
-       else "  recorded replacement")
+         if ko then "  전체 치환 템플릿 · 일치 횟수 미확인"
+         else "  replace-all template · match count unavailable"
+       else
+         if ko then "  기록된 치환" else "  recorded replacement")
       ^ attempted
     , [] )
   | Some
       (Masc.Keeper_file_change_evidence.Edited
         { occurrence_count; occurrences = None }) ->
-    ( Printf.sprintf
-        "  %d matches · line ranges omitted · replace-all template%s"
-        occurrence_count
-        attempted
+    ( (if ko then
+         Printf.sprintf
+           "  일치 %d건 · 줄 범위 생략 · 전체 치환 템플릿%s"
+           occurrence_count attempted
+       else
+         Printf.sprintf
+           "  %d match%s · line ranges omitted · replace-all template%s"
+           occurrence_count (if occurrence_count = 1 then "" else "es") attempted)
     , [] )
   | Some
       (Masc.Keeper_file_change_evidence.Edited
         { occurrence_count; occurrences = Some occurrences }) ->
     let detail =
       if replace_all then
-        Printf.sprintf
-          "  %d match%s · replace-all template%s"
-          occurrence_count
-          (if occurrence_count = 1 then "" else "es")
-          attempted
-      else "  recorded replacement" ^ attempted
+        if ko then
+          Printf.sprintf "  일치 %d건 · 전체 치환 템플릿%s" occurrence_count attempted
+        else
+          Printf.sprintf
+            "  %d match%s · replace-all template%s"
+            occurrence_count
+            (if occurrence_count = 1 then "" else "es")
+            attempted
+      else (if ko then "  기록된 치환" else "  recorded replacement") ^ attempted
     in
     let shown = take max_occurrence_range_rows occurrences in
     let range_rows =
@@ -296,7 +319,7 @@ let edited_evidence_rows ~max_line_cells ~replace_all
            in
            clipped
              ~max_cells:max_line_cells
-             (prefix ^ occurrence_range_label occurrence))
+             (prefix ^ occurrence_range_label ~ko occurrence))
         shown
     in
     let hidden = occurrence_count - List.length shown in
@@ -305,10 +328,13 @@ let edited_evidence_rows ~max_line_cells ~replace_all
       else
         [ clipped
             ~max_cells:max_line_cells
-            (Printf.sprintf
-               "(%d more recorded line range%s withheld)"
-               hidden
-               (if hidden = 1 then "" else "s"))
+            (if ko then
+               Printf.sprintf "(기록된 줄 범위 %d건 생략)" hidden
+             else
+               Printf.sprintf
+                 "(%d more recorded line range%s withheld)"
+                 hidden
+                 (if hidden = 1 then "" else "s"))
         ]
     in
     detail, range_rows @ hidden_row
@@ -316,8 +342,10 @@ let edited_evidence_rows ~max_line_cells ~replace_all
     (* The strict endpoint decoder rejects this mismatch. Keep the renderer
        fail-closed for directly-constructed test values too. *)
     ( (if replace_all then
-         "  replace-all template · match count unavailable"
-       else "  recorded replacement")
+         if ko then "  전체 치환 템플릿 · 일치 횟수 미확인"
+         else "  replace-all template · match count unavailable"
+       else
+         if ko then "  기록된 치환" else "  recorded replacement")
       ^ attempted
     , [] )
 
@@ -344,19 +372,22 @@ let address_rows ~max_line_cells ~summary change =
   in
   List.mapi (fun index row -> (if index = 0 then lead else hang) ^ row) rows
 
-let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
+let edited_section ~ko ~max_line_cells change ~preview ~omitted ~removed ~added
     ~replace_all ~numbered =
   let detail, evidence_rows =
-    edited_evidence_rows ~max_line_cells ~replace_all change
+    edited_evidence_rows ~ko ~max_line_cells ~replace_all change
   in
   let summary =
-    if replace_all then Printf.sprintf "(+%d -%d per match)" added removed
+    if replace_all then
+      if ko then Printf.sprintf "(일치당 +%d -%d)" added removed
+      else Printf.sprintf "(+%d -%d per match)" added removed
     else Printf.sprintf "(+%d -%d)" added removed
   in
   let address = address_rows ~max_line_cells ~summary change in
   if removed = 0 && added = 0 then
     address
-    @ [ clipped ~max_cells:max_line_cells (detail ^ " · no textual delta") ]
+    @ [ clipped ~max_cells:max_line_cells
+          (detail ^ (if ko then " · 본문 변화 없음" else " · no textual delta")) ]
     @ evidence_rows
   else
     (* Coordinates cost the fourteen-cell gutter plus clipped source, whose
@@ -378,30 +409,39 @@ let edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
     address
     @ (detail
        :: (evidence_rows
-           @ preview_block ~max_line_cells ~language:(diff_language change) lines
-           @ omission_row ~max_line_cells omitted))
+           @ preview_block ~ko ~max_line_cells ~language:(diff_language change) lines
+           @ omission_row ~ko ~max_line_cells omitted))
 
-let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
+let written_section ~ko ~max_line_cells (change : Masc.Tui_decode.file_change)
       ~preview ~omitted ~row_count =
   let summary =
     if change.fc_succeeded then
-      Printf.sprintf "(%d row%s written)" row_count
-        (if row_count = 1 then "" else "s")
-    else Printf.sprintf "(%d-row write attempt)" row_count
+      if ko then Printf.sprintf "(%d줄 작성)" row_count
+      else
+        Printf.sprintf "(%d row%s written)" row_count
+          (if row_count = 1 then "" else "s")
+    else
+      if ko then Printf.sprintf "(%d줄 작성 시도)" row_count
+      else Printf.sprintf "(%d-row write attempt)" row_count
   in
   let address = address_rows ~max_line_cells ~summary change in
   let evidence_rows =
     match change.fc_line_evidence with
     | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
-      [ clipped ~max_cells:max_line_cells ("  new " ^ line_range_label range) ]
+      [ clipped ~max_cells:max_line_cells
+          ((if ko then "  새 범위 " else "  new ") ^ line_range_label range) ]
     | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
-      [ "  empty body" ]
+      [ if ko then "  빈 본문" else "  empty body" ]
     | None | Some (Masc.Keeper_file_change_evidence.Edited _) -> []
   in
   let detail =
-    Printf.sprintf
-      "  recorded write body · previous content unavailable%s"
-      (attempted_suffix change)
+    (if ko then
+       Printf.sprintf "  기록된 작성 본문 · 이전 내용 없음%s"
+         (attempted_suffix ~ko change)
+     else
+       Printf.sprintf
+         "  recorded write body · previous content unavailable%s"
+         (attempted_suffix ~ko change))
     |> clipped ~max_cells:max_line_cells
   in
   if row_count = 0 then address @ (detail :: evidence_rows)
@@ -416,43 +456,52 @@ let written_section ~max_line_cells (change : Masc.Tui_decode.file_change)
     address
     @ (detail
        :: (evidence_rows
-           @ preview_block ~max_line_cells ~language:"" lines
-           @ omission_row ~max_line_cells omitted))
+           @ preview_block ~ko ~max_line_cells ~language:"" lines
+           @ omission_row ~ko ~max_line_cells omitted))
 
-let materialized_section ~max_line_cells (change : Masc.Tui_decode.file_change)
+let materialized_section ~ko ~max_line_cells (change : Masc.Tui_decode.file_change)
       ~sha256 =
   let summary =
-    if change.fc_succeeded then "(materialized)" else "(materialize attempt)"
+    if change.fc_succeeded then
+      if ko then "(실체화됨)" else "(materialized)"
+    else
+      if ko then "(실체화 시도)" else "(materialize attempt)"
   in
   let address = address_rows ~max_line_cells ~summary change in
   let evidence_rows =
     match change.fc_line_evidence with
     | Some (Masc.Keeper_file_change_evidence.Written { new_range = Some range }) ->
-      [ clipped ~max_cells:max_line_cells ("  new " ^ line_range_label range) ]
+      [ clipped ~max_cells:max_line_cells
+          ((if ko then "  새 범위 " else "  new ") ^ line_range_label range) ]
     | Some (Masc.Keeper_file_change_evidence.Written { new_range = None }) ->
-      [ "  empty body" ]
+      [ if ko then "  빈 본문" else "  empty body" ]
     | None | Some (Masc.Keeper_file_change_evidence.Edited _) -> []
   in
   let detail =
-    Printf.sprintf
-      "  materialized blob %s · the log holds the blob's identity, not its bytes%s"
-      (short_sha256 sha256) (attempted_suffix change)
+    (if ko then
+       Printf.sprintf
+         "  실체화 블롭 %s · 로그는 바이트가 아니라 블롭 식별자만 보관%s"
+         (short_sha256 sha256) (attempted_suffix ~ko change)
+     else
+       Printf.sprintf
+         "  materialized blob %s · the log holds the blob's identity, not its bytes%s"
+         (short_sha256 sha256) (attempted_suffix ~ko change))
     |> clipped ~max_cells:max_line_cells
   in
   address @ (detail :: evidence_rows)
 
-let section ~max_line_cells prepared =
+let section ~ko ~max_line_cells prepared =
   let change = prepared.change in
   match prepared.kind with
   | Edited { preview; omitted; removed; added; replace_all; numbered } ->
-      edited_section ~max_line_cells change ~preview ~omitted ~removed ~added
+      edited_section ~ko ~max_line_cells change ~preview ~omitted ~removed ~added
         ~replace_all ~numbered
   | Written { preview; omitted; row_count } ->
-      written_section ~max_line_cells change ~preview ~omitted ~row_count
+      written_section ~ko ~max_line_cells change ~preview ~omitted ~row_count
   | Materialized { sha256 } ->
-      materialized_section ~max_line_cells change ~sha256
+      materialized_section ~ko ~max_line_cells change ~sha256
 
-let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
+let rows ?(ko = false) ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
     (projection : Transcript.tool_projection) =
   match mode with
   | Transcript.Compact -> projection.details
@@ -467,15 +516,20 @@ let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
                 match associate indexed activity with
                 | No_recorded_change -> [], previews_left, withheld
                 | Exact prepared when previews_left > 0 ->
-                    ( section ~max_line_cells prepared
+                    ( section ~ko ~max_line_cells prepared
                     , previews_left - 1
                     , withheld )
                 | Exact _ -> [], previews_left, withheld + 1
                 | Ambiguous count when previews_left > 0 ->
                     ( [ clipped ~max_cells:max_line_cells
-                          (Printf.sprintf
-                             "(%d recorded changes share this execution_id; inline preview withheld)"
-                             count)
+                          (if ko then
+                             Printf.sprintf
+                               "(기록된 변경 %d건이 같은 execution_id를 공유해 인라인 미리보기를 생략함)"
+                               count
+                           else
+                             Printf.sprintf
+                               "(%d recorded changes share this execution_id; inline preview withheld)"
+                               count)
                       ]
                     , previews_left - 1
                     , withheld )
@@ -492,9 +546,14 @@ let rows ~mode ~max_line_cells ?(activity_details = fun _ -> []) indexed
                 if withheld = 0 then []
                 else
                   [ clipped ~max_cells:max_line_cells
-                      (Printf.sprintf
-                         "(%d more recorded-change annotation%s withheld; open Changes)"
-                         withheld (if withheld = 1 then "" else "s"))
+                      (if ko then
+                         Printf.sprintf
+                           "(기록된 변경 주석 %d건 더 있음 · 변경 화면에서 확인)"
+                           withheld
+                       else
+                         Printf.sprintf
+                           "(%d more recorded-change annotation%s withheld; open Changes)"
+                           withheld (if withheld = 1 then "" else "s"))
                   ]
               in
               rows @ withheld_row @ remaining

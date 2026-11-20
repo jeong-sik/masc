@@ -153,3 +153,4 @@
 53313  # behavior-preserving refactor: a parted help section stays one value with its heading; no user-facing behavior
 53458  # test only (one file): metrics cached-window count expectation; no user-facing behavior
 53964  # comments only: stale plan text removed from two source comments; no user-facing behavior
+54015  # comments only: the wire-format sentence in read_drop_reason.mli now describes the pre-PR-2 constants; no user-facing behavior

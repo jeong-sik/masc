@@ -56,11 +56,12 @@ type t =
           value that appears at a second site belongs in a
           constructor. *)
 
-(** Stable wire format. The strings produced here are byte-for-byte
-    compatible with the existing string constants in
-    [Core.Safe_ops] ([Read_drop_reason.List_dir_error],
-    [_entry_load_error], [_invalid_payload]) so swapping callers in
-    PR-2 does not change the Otel_metric_store label cardinality.
+(** Stable wire format. Before PR-2 (#29664), the strings produced here
+    were byte-for-byte compatible with the string constants that
+    [Core.Safe_ops] used ([persistence_read_drop_reason_list_dir_error],
+    [persistence_read_drop_reason_entry_load_error],
+    [persistence_read_drop_reason_invalid_payload]), so swapping callers
+    in PR-2 does not change the Otel_metric_store label cardinality.
 
     Wire mapping:
     - [List_dir_error] → ["list_dir_error"]

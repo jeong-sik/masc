@@ -1530,6 +1530,11 @@ let test_provider_cache_session_header_declarations () =
     "opencode_go declares x-opencode-session"
     (Some "x-opencode-session")
     (Llm_provider.Catalog_snapshot.cache_session_header snapshot ~provider_id:"opencode_go");
+  check
+    (option string)
+    "xai declares x-grok-conv-id"
+    (Some "x-grok-conv-id")
+    (Llm_provider.Catalog_snapshot.cache_session_header snapshot ~provider_id:"xai");
   List.iter
     (fun provider_id ->
        check

@@ -66,8 +66,7 @@ let describe_errors ~ko (errors : Runtime_toml.parse_error list) =
     (match rest with
      | [] -> head
      | _ :: _ ->
-         if ko then Printf.sprintf "%s (외 %d건)" head (List.length rest)
-         else Printf.sprintf "%s (+%d more)" head (List.length rest))
+         head ^ " (" ^ Masc_tui_value.Count.more ~ko (List.length rest) ^ ")")
 ;;
 
 let without_repeats names =

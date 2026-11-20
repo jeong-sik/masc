@@ -124,8 +124,8 @@ let render_telemetry ~ko ~width ~height snap =
       if snap.capacity_target > 0 then
         let suffix =
           if snap.capacity_shortfall > 0 then
-            Printf.sprintf "%d/%d -%d" snap.capacity_avail snap.capacity_target
-              snap.capacity_shortfall
+            Printf.sprintf "%d/%d %s" snap.capacity_avail snap.capacity_target
+              (Masc_tui_value.Count.decrease snap.capacity_shortfall)
           else Printf.sprintf "%d/%d" snap.capacity_avail snap.capacity_target
         in
         Chart.meter ~width:col_w ~value:snap.capacity_avail

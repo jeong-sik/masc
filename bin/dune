@@ -735,6 +735,7 @@
   ; is false, so the module is not reachable through the others.
   masc.masc_types
   masc_tui_keeper_chat_transcript
+  masc_tui_value
   yojson))
 
 (library
@@ -1202,7 +1203,8 @@
   masc_tui_keeper_chat_projection
   masc_tui_keeper_chat_transcript
   masc_tui_markdown
-  masc_tui_message_layout))
+  masc_tui_message_layout
+  masc_tui_value))
 
 (library
  (name masc_tui_chat_search)

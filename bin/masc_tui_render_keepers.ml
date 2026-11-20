@@ -1487,14 +1487,13 @@ let grid_header state (grid : Grid.t) (columns : Axis_row.columns) =
    running (2026-09-16). Executable is the set with a live fiber (Running or
    Failing), which is the fact the label names. *)
 (* Format a list of keeper names to fit within [max_cells] without slicing
-   a name in half, summarizing remaining keepers as "외 N명" / "+N more". *)
+   a name in half, summarizing remaining keepers as "외 N" / "N more"
+   (RFC tui-one-screen-grammar 6.3). *)
 let fit_keeper_name_list ~ko ~max_cells names =
   let clean_names = List.map Terminal_text.single_line names in
   let total = List.length clean_names in
   let more_suffix remaining =
-    if remaining <= 0 then ""
-    else if ko then Printf.sprintf " 외 %d명" remaining
-    else Printf.sprintf " +%d more" remaining
+    if remaining <= 0 then "" else " " ^ Masc_tui_value.Count.more ~ko remaining
   in
   let rec take acc used count = function
     | [] -> String.concat ", " (List.rev acc)

@@ -378,10 +378,12 @@ let edited_section ~ko ~max_line_cells change ~preview ~omitted ~removed ~added
     edited_evidence_rows ~ko ~max_line_cells ~replace_all change
   in
   let summary =
+    let added = Masc_tui_value.Count.increase added
+    and removed = Masc_tui_value.Count.decrease removed in
     if replace_all then
-      if ko then Printf.sprintf "(일치당 +%d -%d)" added removed
-      else Printf.sprintf "(+%d -%d per match)" added removed
-    else Printf.sprintf "(+%d -%d)" added removed
+      if ko then Printf.sprintf "(일치당 %s %s)" added removed
+      else Printf.sprintf "(%s %s per match)" added removed
+    else Printf.sprintf "(%s %s)" added removed
   in
   let address = address_rows ~max_line_cells ~summary change in
   if removed = 0 && added = 0 then

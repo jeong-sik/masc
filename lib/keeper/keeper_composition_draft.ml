@@ -41,14 +41,12 @@ let reference draft = draft.reference
 let authored_source draft = draft.authored_source
 
 let failure_class = function
-  | Draft_read_failed (Tool_blob_store.Invalid_sha256 _) -> Tool_result.Policy_rejection
-  | Storage_failed _
-  | Draft_read_failed
-      ( Tool_blob_store.Owned_read_failed _
-      | Tool_blob_store.Too_large _
-      | Tool_blob_store.Invalid_max_bytes _
-      | Tool_blob_store.Integrity_mismatch _ ) -> Tool_result.Runtime_failure
-  | Plan_rejected _ | Inputs_rejected _ | Unsupported_node _ | Draft_not_found
+  | Draft_read_failed error ->
+    Keeper_blob_lookup_failure.failure_class_of_blob_store_error error
+  | Storage_failed _ -> Tool_result.Runtime_failure
+  | Draft_not_found ->
+    Keeper_blob_lookup_failure.failure_class Keeper_blob_lookup_failure.Absent
+  | Plan_rejected _ | Inputs_rejected _ | Unsupported_node _
   | Malformed_draft _ | Different_keeper | Capability_changed | Publication_rejected _
   | Skill_not_prepared | Different_package | Nested_rejected _
   | Nested_publication_requires_catalog -> Tool_result.Policy_rejection

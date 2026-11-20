@@ -1129,15 +1129,15 @@ let handle_with_outcome
        let dir = vision_store_dir ?base_path ~keeper_name:meta.name () in
          (match load_artifact ~dir (Store.of_string handle_str) with
         | Error error ->
-          let failure_class, code, recovery = match error with
-            | Store.Malformed_handle _ -> Tool_result.Policy_rejection,
+          let failure_kind, code, recovery = match error with
+            | Store.Malformed_handle _ -> Keeper_blob_lookup_failure.Malformed_sha256,
                 "invalid_artifact", "Copy the exact artifact returned by the image-producing tool."
-            | Store.Missing_artifact _ -> Tool_result.Workflow_rejection,
+            | Store.Missing_artifact _ -> Keeper_blob_lookup_failure.Absent,
                 "artifact_not_found", "Observe again and use the artifact returned for this Keeper."
-            | Store.Hash_mismatch _ | Store.Read_failed _ -> Tool_result.Runtime_failure,
+            | Store.Hash_mismatch _ | Store.Read_failed _ -> Keeper_blob_lookup_failure.Unreadable,
                 "artifact_load_failed", "The stored image could not be read with verified integrity." in
           failed
-            ~failure_class
+            ~failure_class:(Keeper_blob_lookup_failure.failure_class failure_kind)
             ~detail:(Store.load_error_to_string error ^ " " ^ recovery)
             code
         | Ok bytes ->

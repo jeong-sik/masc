@@ -189,9 +189,20 @@ let invalid_input message =
           ]))
 ;;
 
-let storage_failure message =
+let artifact_missing message =
   Keeper_tool_execution.failure
-    ~class_:Tool_result.Runtime_failure
+    ~class_:(Keeper_blob_lookup_failure.failure_class Keeper_blob_lookup_failure.Absent)
+    (Yojson.Safe.to_string
+       (`Assoc
+          [ "ok", `Bool false
+          ; "error", `String "artifact_not_found"
+          ; "message", `String message
+          ]))
+;;
+
+let storage_failure ?(class_ = Tool_result.Runtime_failure) message =
+  Keeper_tool_execution.failure
+    ~class_
     (Yojson.Safe.to_string
        (`Assoc
           [ "ok", `Bool false
@@ -467,8 +478,11 @@ let read_page ~base_path (request : request) =
       ~offset:request.offset
       ~max_bytes:request.max_bytes
   with
-  | Error error -> storage_failure (Tool_blob_store.fetch_error_to_string error), None
-  | Ok None -> invalid_input artifact_missing_message, None
+  | Error error ->
+    storage_failure
+      ~class_:(Keeper_blob_lookup_failure.failure_class_of_blob_store_error error)
+      (Tool_blob_store.fetch_error_to_string error), None
+  | Ok None -> artifact_missing artifact_missing_message, None
   | Ok (Some { content; total_bytes }) ->
     (match page_of_slice_within_output_budget request ~total_bytes content with
      | Error message -> invalid_input message, None
@@ -492,14 +506,17 @@ let search_artifact ~base_path (search : search) =
   in
   match Keeper_artifact_search.scan ~read spec with
   | Error (Keeper_artifact_search.Read_failed Artifact_missing) ->
-    invalid_input artifact_missing_message
+    artifact_missing artifact_missing_message
   | Error (Keeper_artifact_search.Read_failed (Storage_failed error)) ->
-    storage_failure (Tool_blob_store.fetch_error_to_string error)
+    storage_failure
+      ~class_:(Keeper_blob_lookup_failure.failure_class_of_blob_store_error error)
+      (Tool_blob_store.fetch_error_to_string error)
   | Error (Keeper_artifact_search.Offset_past_end { offset; total_bytes }) ->
     invalid_input
       (Printf.sprintf "offset %d exceeds artifact size %d" offset total_bytes)
   | Error (Keeper_artifact_search.Short_read { offset; total_bytes }) ->
     storage_failure
+      ~class_:(Keeper_blob_lookup_failure.failure_class Keeper_blob_lookup_failure.Unreadable)
       (Printf.sprintf "artifact ended early: no bytes at offset %d of %d" offset total_bytes)
   | Ok outcome ->
     (match search_page search outcome with

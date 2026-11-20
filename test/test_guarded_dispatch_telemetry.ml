@@ -1,16 +1,13 @@
 open Alcotest
 
-(** RFC-0084 PR-3 — [Tool_telemetry.with_span] + [Tool_dispatch.guarded_dispatch]
-    skeleton tests.
+(** [Tool_telemetry.with_span] skeleton tests.
 
     Verifies:
     - [with_span] invokes the callback exactly once
     - The callback receives a [trace_id_thunk] that is callable (returns
       [None] when OTel is disabled, [Some _] when active)
     - The [outcome] string returned from the callback propagates back to
-      the caller
-    - [guarded_dispatch] for an unregistered tool returns [None] (the
-      [No_handler] arm — PR-10 will narrow the outcome to a typed variant) *)
+      the caller *)
 
 let test_with_span_invokes_callback_once () =
   let invoked = ref 0 in

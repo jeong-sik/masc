@@ -1,4 +1,4 @@
-(* RFC-0286 — Discord WSS bridge contract.
+(* Discord WSS bridge contract.
 
    [Discord_wss_connection] adapts ws-direct's callback-style endpoint
    (on_message / on_close / on_eof / on_error) to the gateway reader's

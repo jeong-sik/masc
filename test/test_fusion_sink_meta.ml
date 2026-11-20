@@ -1,6 +1,6 @@
 (* judge_meta 가 board meta_json 에 구조화 5섹션을 보존하는지 핀한다.
 
-   프론트(FusionJudgeEvidence, keeper-v2 fusion.jsx)가 consensus/contradictions/
+   프론트(FusionJudgeEvidence)가 consensus/contradictions/
    partial_coverage/unique_insights/blind_spots + decision-variant 최상위
    recommend|missing 를 소비한다. 키 매핑(OCaml 레코드명 → LLM-facing JSON 키:
    gap_topic→topic, insight_text→text, from_model→model, supporting_models→models)이

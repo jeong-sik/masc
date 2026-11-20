@@ -335,9 +335,8 @@ let make_stage bin args =
 ;;
 
 let test_subst_bearing_ir_allows_and_lists_children () =
-  (* Task B of RFC shell-ir-typed-command-substitution: a Subst-bearing IR
-     is no longer a structural refusal — the gate traverses the child
-     stages, so they appear in the stage list the context carries. *)
+  (* A Subst-bearing IR is not a structural refusal — the gate traverses the
+     child stages, so they appear in the stage list the context carries. *)
   let stage =
     { (make_stage "echo" []) with
       Masc_exec.Shell_ir.args =

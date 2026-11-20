@@ -1,8 +1,7 @@
-(* RFC-0107 Phase C.1 wiring tests — Eio_context.with_turn_switch
-   fiber-local binding semantics.
+(* Eio_context.with_turn_switch fiber-local binding semantics.
 
-   Verifies the four properties that make Option (3) race-free per
-   audit §10.5:
+   Verifies the four properties that make the fiber-local binding
+   race-free:
 
    1. Binding-scope. Inside [with_turn_switch turn_sw f], reads of
       [get_switch_opt ()] return [Some turn_sw].
@@ -15,10 +14,10 @@
    4. Sibling isolation. A sibling fiber run with [Eio.Fiber.both] in
       a separate branch does NOT see the binding from the other branch.
 
-   Property 4 is the audit §10.2 invariant in test form: server fibers
+   Property 4 is the server-side invariant in test form: server fibers
    that are siblings of (or above) the keeper run_turn fiber tree must
-   not see turn_sw. This codifies the structural separation that makes
-   the §5 race scenario impossible. *)
+   not see turn_sw. This codifies the structural separation that keeps
+   their resources off turn_sw, which closes when the turn ends. *)
 
 let test_get_switch_opt_returns_binding_inside_with_turn_switch () =
   Eio_main.run @@ fun _env ->

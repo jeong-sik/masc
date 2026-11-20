@@ -1,4 +1,4 @@
-(** eval_memory_os_value.ml — RFC-0247 §-1 P-1: memory-os value METRIC (math only).
+(** eval_memory_os_value.ml — memory-os value METRIC (math only).
 
     The VALUE measurement of the live store is done by an LLM judge. This file
     models only whether a fact has later-turn value ([Useful]) or is noise
@@ -12,7 +12,7 @@
     [noise_rate] means. Tests use synthetic labels — no hand-labelled real claims,
     no recorded baseline number.
 
-    Anti-fake-success is enforced where the judgement actually happens (0b: the judge
+    Anti-fake-success is enforced where the judgement actually happens (the judge
     must reproduce the human gold via [judge_accuracy] before its live numbers count),
     not by hand-coding a baseline here. *)
 
@@ -36,8 +36,8 @@ let noise_rate (labelled : (string * label) list) =
 let useful_present labelled = List.exists (fun (_, label) -> is_useful label) labelled
 
 (* Accuracy of a judge's labels against a gold set, over the gold's decided entries.
-   0b applies this against the human-anchored gold over a live model; here it is
-   exercised on synthetic inputs to pin the math. *)
+   The LLM judge applies this against the human-anchored gold over a live model;
+   here it is exercised on synthetic inputs to pin the math. *)
 let judge_accuracy ~gold ~judged =
   let decided = List.filter (fun (_, g) -> g <> Uncertain) gold in
   match decided with
@@ -74,8 +74,8 @@ let test_non_vacuity () =
 
 let test_calibration_gate_math () =
   (* anti-rig gate (math): a faithful judge scores 1.0; a non-discriminating judge
-     that labels everything Useful to flatter the score is caught (< 0.6). 0b runs
-     this against the HUMAN gold over a live model before trusting it. *)
+     that labels everything Useful to flatter the score is caught (< 0.6). The LLM
+     judge runs this against the HUMAN gold over a live model before trusting it. *)
   let gold = [ "x", Useful; "y", Noise; "z", Noise ] in
   Alcotest.(check (float 0.001)) "faithful judge -> 1.0" 1.0
     (judge_accuracy ~gold ~judged:gold);

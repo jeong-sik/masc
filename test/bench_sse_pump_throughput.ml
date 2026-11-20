@@ -1,16 +1,14 @@
 (* Not a test. Prints how many SSE frames per second one connection carries
-   over loopback (RFC-0493 §1.4 asks for 2,616 in a second for Keeper chat).
-   Every run queues all its frames before the first is written, as a burst
-   does. Four ways:
+   over loopback. Every run queues all its frames before the first is
+   written, as a burst does. Four ways:
 
    - pump: Server_sse_pump takes the frames and writes the ones already
      queued in one Server_sse_response.send, which waits for the socket.
    - send: one Server_sse_response.send per frame, each waiting for the
      socket under the response's stall bound.
    - flush: one write per frame, waiting only for its flush.
-   - fire: one write per frame, dropping the flush result, as the Keeper chat
-     stream wrote before RFC-0493. Nothing waits and nothing bounds what the
-     writer holds.
+   - fire: one write per frame, dropping the flush result. Nothing waits and
+     nothing bounds what the writer holds.
 
    The server, the reader and the driver run in one process on one domain, so
    the reader's work competes with the server's writes. The numbers say what

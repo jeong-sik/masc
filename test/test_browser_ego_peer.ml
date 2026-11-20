@@ -1475,8 +1475,7 @@ let test_storage_names_withhold_every_value () =
   check string "a read without a tab is refused" "before effect" (failure_kind (dispatch peer Live.Page_cookies (obj [])));
   check int "and neither runs a script" runs (List.length !asked)
 
-(* A page.network answer as mascNetworkLog emits it, with one row of each
-   state (L8 evidence c). *)
+(* A page.network answer as mascNetworkLog emits it, with one row of each state. *)
 let network_row ?(url="http://127.0.0.1:18775/x?tag=REDACTED&token=REDACTED") ?(cut=false) ?(state=["state",str "pending"]) () =
   obj (["method",str "GET";"url",str url;"urlCut",`Bool cut;"timestamp",`Int 1794029599447;
         "requestHeaders",obj ["names",`List [str "X-Masc-L8";str "Referer"];"total",`Int 2]] @ state)
@@ -1548,8 +1547,7 @@ let test_network_log_rebuilds_every_row () =
   check int "and neither runs a script" runs (List.length !asked)
 
 (* ego's buffer empties on every drain, so one shared drain reads it and the
-   step scripts that need events call it (RFC-browser-ego-cdp-capabilities
-   §3.4). *)
+   step scripts that need events call it. *)
 let test_one_drain_reads_the_event_buffer () =
   let count text part =
     let width = String.length part in
@@ -1565,7 +1563,7 @@ let test_one_drain_reads_the_event_buffer () =
   check int "the console read never reads ego's buffer itself" 0
     (count (Masc.Browser_ego_console.script ~answer_units:1000) ".events()")
 
-(* A page.console answer as mascConsoleRead emits it (L9 evidence c). *)
+(* A page.console answer as mascConsoleRead emits it. *)
 let console_entry ?(kind="console") ?(level="log") ?(text="load-line 7 Object") ?(cut=false) () =
   obj ["type",str kind;"level",str level;"text",str text;"textCut",`Bool cut;"timestamp",`Int 1794035766700]
 let console_answer ?(entries=[console_entry ()]) ?(hiding=obj ["offMs",`Int 8;"restored",`Bool true]) () =

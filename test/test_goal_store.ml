@@ -1174,11 +1174,10 @@ let test_missing_criterion_revision_refuses_bound_mutation () =
   | Error other -> fail ("missing revision was not Store_unavailable: " ^ write_error_msg other)
   | Ok _ -> fail "missing revision was silently accepted"
 
-(* {1 RFC-0444 PR-1: the closed source sum}
+(* {1 The closed source sum}
 
-   Six read conditions (RFC §2.1), the four mirror states inside
-   [Unavailable], writer refusal with byte identity (criterion 5), and reads
-   that move nothing. *)
+   The read conditions, the four mirror states inside [Unavailable], writer
+   refusal with byte identity, and reads that move nothing. *)
 
 let mirror_path = goals_recovery_path
 
@@ -1280,12 +1279,12 @@ let test_source_uninitialized_only_when_both_files_absent () =
   check bool "reading did not create goals.json" false
     (Sys.file_exists (Goal_store.goals_path config))
 
-(* RFC a-goal-states-its-measure-as-a-typed-value §6, RFC-0444 §2.7: a store
-   written before the typed measure holds rows with free-text [metric] and
-   [target_value]. Every phase is present, the mirror holds the same bytes,
-   and one row was hand-edited to carry a measure but no procedure. Reading
-   refuses the store, names the field and repair step, and writes nothing,
-   however many times the server boots. *)
+(* RFC a-goal-states-its-measure-as-a-typed-value §6: a store written before
+   the typed measure holds rows with free-text [metric] and [target_value].
+   Every phase is present, the mirror holds the same bytes, and one row was
+   hand-edited to carry a measure but no procedure. Reading refuses the
+   store, names the field and repair step, and writes nothing, however many
+   times the server boots. *)
 let rows_before_the_measure_cut config ~edit =
   Goal_store.write_state config
     { pending_events = []; pending_notifications = []; version = 1;
@@ -1860,8 +1859,8 @@ let test_mirror_four_states_are_evidence () =
     | Goal_store.Mirror_rejected _ | Goal_store.Mirror_unreadable _ | Goal_store.Mirror_nonregular _
     | Goal_store.Mirror_absent | Goal_store.Mirror_decodes _ -> false)
 
-(* Criterion 5: every writer refuses a Schema_rejected store and neither
-   file changes a byte across the call. *)
+(* Every writer refuses a Schema_rejected store and neither file changes a
+   byte across the call. *)
 let test_writers_refuse_unavailable_and_keep_bytes () =
   with_workspace @@ fun config ->
   seed_schema_rejected config;

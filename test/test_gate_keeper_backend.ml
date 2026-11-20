@@ -628,11 +628,10 @@ let test_keeper_multimodal_input_converts_user_blocks_to_agent_core_blocks () =
   | Ok _ -> fail "expected image then text AGENT_CORE blocks"
   | Error err -> fail ("expected AGENT_CORE block conversion: " ^ err)
 
-(* RFC-0371 B1 regression: each media kind string must select its own
-   constructor. The parser used to pick the constructor by re-matching a
-   string behind an unreachable arm; a wildcard rewrite there could have
-   silently mapped a new kind onto the wrong constructor, which is exactly
-   what this pins. *)
+(* Each media kind string must select its own constructor. The parser used
+   to pick the constructor by re-matching a string behind an unreachable
+   arm; a wildcard rewrite there could have silently mapped a new kind onto
+   the wrong constructor, which is exactly what this pins. *)
 let test_keeper_multimodal_parse_maps_each_kind_to_its_constructor () =
   let block kind =
     `Assoc

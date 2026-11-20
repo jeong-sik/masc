@@ -1,12 +1,11 @@
 (** RFC-0162 §3.4 — [Fs_compat.append_jsonl] per-path fd cache tests.
 
     The fd cache is a behaviour-preserving optimisation: the
-    Record-interleave-0 and partial-write-0 guarantees from
-    RFC-0108 §3.2 must continue to hold. We re-run RFC-0108's
-    canonical stress cases (16-thread concurrent records, 4 KB
-    PIPE_BUF-busting records, multibyte boundary) against the
-    cached path and additionally verify the lifecycle helper
-    ([reset_fd_cache_for_testing]). *)
+    Record-interleave-0 and partial-write-0 guarantees must continue
+    to hold. We re-run the canonical stress cases (16-thread
+    concurrent records, 4 KB PIPE_BUF-busting records, multibyte
+    boundary) against the cached path and additionally verify the
+    lifecycle helper ([reset_fd_cache_for_testing]). *)
 
 open Alcotest
 
@@ -47,9 +46,9 @@ let read_lines path =
         String.split_on_char '\n' content |> List.filter (fun s -> s <> "")))
 ;;
 
-(* Re-run the canonical RFC-0108 §5.1 16-fiber stress, now over the
-   cached path. The cache must NOT degrade the existing
-   Record-interleave-0 guarantee. *)
+(* Re-run the canonical 16-fiber stress, now over the cached path.
+   The cache must NOT degrade the existing Record-interleave-0
+   guarantee. *)
 let test_concurrent_multibyte_records () =
   Fs_compat.reset_fd_cache_for_testing ();
   let dir = tmpdir "fd_cache_multibyte" in
@@ -188,8 +187,8 @@ let test_lru_evict_preserves_data () =
     paths
 ;;
 
-(* RFC-0108 §3.2 Record-interleave-0 over the cached [append_file_unix]
-   path. task-196 reinstated the fd cache for [append_file_unix]; this
+(* Record-interleave-0 over the cached [append_file_unix] path.
+   task-196 reinstated the fd cache for [append_file_unix]; this
    stress re-runs the canonical 16-thread case against that path so the
    cache must not degrade the existing guarantee. *)
 let test_append_file_unix_concurrent_records () =

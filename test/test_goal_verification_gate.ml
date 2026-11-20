@@ -1,4 +1,4 @@
-(** RFC-0387 — B1 creation requirement + verification ledger + the stage-2
+(** B1 creation requirement + verification ledger + the stage-2
     completion gate.
 
     B1: creation without a declared success condition ([measure] +
@@ -497,7 +497,7 @@ let test_goal_list_renders_a_ledger_error_state () =
   | _ -> fail "expected one listed goal"
 ;;
 
-(* {1 Stage 2 — the completion gate (RFC-0387 §3.2/§3.3/§4/§5)} *)
+(* {1 Stage 2 — the completion gate} *)
 
 let create_goal ctx title =
   let created =

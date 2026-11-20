@@ -85,8 +85,8 @@
 .ti-head-actions {
   display: flex;
   align-items: center;
-  /* prototype spaces the ID-copy button and close with the close's inline
-     marginLeft:8px (turn-inspector.jsx). --sp-2 is 6px under v2; pin 8px. */
+  /* The ID-copy button and close sit 8px apart. --sp-2 is 6px under v2;
+     pin 8px. */
   gap: 8px;
   margin-left: auto;
   flex-shrink: 0;
@@ -662,10 +662,9 @@
 }
 
 .ti-msg-role.context {
-  /* prototype renders the injected-context chip with the SAME .system styling
-     (turn-inspector.jsx: <span className="ti-msg-role system">context</span>) —
-     info/--accent-ice text + 35% info border, not amber. Mirror .system so the
-     context chip matches the prototype rather than introducing a warn tint. */
+  /* The context role chip takes the SAME styling as .system —
+     info/--accent-ice text + 35% info border, not amber — rather than
+     introducing a warn tint. */
   color: var(--color-status-info);
   border: 1px solid rgb(var(--color-status-info-glow) / .35);
 }

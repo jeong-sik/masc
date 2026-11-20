@@ -1,21 +1,13 @@
 /* ══════════════════════════════════════════════════════════════
    MASC v2 — Keeper memory inspector (read-only overlay-drawer).
-   Pixel-matched to the Claude-Design prototype:
-     keeper-v2/memory.jsx + keeper-v2/styles/memory.css
-   and the drawer shell from keeper-v2/styles/v2.css.
 
-   The prototype reuses .turn-overlay / .turn-drawer / .turn-hd /
-   .turn-body / .turn-sec (defined in keeper-v2/styles/v2.css).
-   Those shell classes do NOT yet exist in this
-   dashboard, so they are ported here verbatim (scoped where the
-   prototype scopes them). Everything else is the prototype's .mem-* set,
-   copied 1:1 from keeper-v2/styles/memory.css.
+   The drawer shell (.turn-overlay / .turn-drawer / .turn-hd /
+   .turn-body / .turn-sec) repeats the rules styles/keeper-v2/v2.css
+   defines for those classes.
 
    v2 canonical tokens only (--volt*, --border*, --bg-*, --text-*,
    --status-*, --info, --radius-*, --font-*). Literal px values are kept
-   where the prototype specifies a literal that the 2px-base --sp-* scale
-   would shrink; each literal originates from the prototype source cited
-   inline.
+   where the 2px-base --sp-* scale would shrink them.
 
    SYNC CONTRACT — this is the working stylesheet the component depends on
    (loaded via the *-v2.css glob at main.ts:67, before the vendored mirror).
@@ -29,7 +21,7 @@
    this design-delta work.
    ══════════════════════════════════════════════════════════════ */
 
-/* ── drawer shell (ported from keeper-v2/styles/v2.css) ── */
+/* ── drawer shell ── */
 .turn-overlay { position: fixed; inset: 0; background: rgba(4, 5, 8, 0.42); z-index: 90; display: flex; justify-content: flex-end; }
 .turn-drawer {
   width: min(560px, 94vw); height: 100%; background: var(--bg-panel);
@@ -49,12 +41,11 @@
 .v2-app .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
 
 /* ══════════════════════════════════════════════════════════════
-   .mem-* — copied 1:1 from keeper-v2/styles/memory.css
+   .mem-*
    ══════════════════════════════════════════════════════════════ */
-/* keeper-v2/styles/memory.css:6 */
 .v2-app .mem-drawer { width: min(680px, 96vw); }
 
-/* header scope toggle — keeper-v2/styles/memory.css:9-14 */
+/* header scope toggle */
 .mem-scope { margin-left: auto; display: inline-flex; border: 1px solid var(--border-main); border-radius: var(--radius-sm); overflow: hidden; }
 .mem-scope button { font-family: var(--font-ui); font-size: var(--fs-11); padding: 5px 12px; background: transparent; color: var(--text-dim); border: 0; border-left: 1px solid var(--border-main); cursor: pointer; transition: 0.14s; }
 .mem-scope button:first-child { border-left: 0; }
@@ -62,7 +53,6 @@
 .mem-scope button.on { color: var(--volt-ink); background: var(--volt); }
 .mem-drawer .turn-close { margin-left: 10px; }
 
-/* keeper-v2/styles/memory.css:16-20 */
 .mem-empty { font-size: var(--fs-12); color: var(--text-dim); padding: 10px 2px; }
 /* Disclosure rows are distinct from empty state and are not styled as data. */
 .mem-disclosure { border-left: 2px solid var(--border-main); padding-left: 10px; color: var(--text-dim); }
@@ -94,7 +84,7 @@
 .mem-prompt-capture { padding: 8px 0 4px 30px; }
 .mem-prompt-foot { margin-top: 3px; padding-top: 8px; border-top: 1px solid var(--border-soft); color: var(--text-dim); font-size: var(--fs-10); }
 
-/* ── context composition — keeper-v2/styles/memory.css:23-33 ── */
+/* ── context composition ── */
 .mem-compo { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); padding: 11px 12px; background: var(--bg-card); }
 .mem-compo-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .mem-compo-tot { font-size: 18px; color: var(--text-bright); }
@@ -107,7 +97,7 @@
 .mem-leg-lbl { font-size: 11.5px; color: var(--text-mid); flex: 1; min-width: 0; }
 .mem-leg-v { font-size: var(--fs-11); color: var(--text-dim); }
 
-/* ── pinned facts — keeper-v2/styles/memory.css:36-45 ── */
+/* ── pinned facts ── */
 .mem-pins { display: flex; flex-direction: column; gap: 7px; }
 .mem-pin { display: flex; gap: 9px; padding: 9px 11px; border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); background: var(--bg-card); }
 .mem-pin-ico { color: var(--volt); font-size: var(--fs-13); line-height: 1.5; flex: none; }
@@ -198,13 +188,10 @@
 .mem-th { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-dim); cursor: default; border-top: 0; }
 .mem-td-id { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
 .mem-td-id .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* status dot in the keeper table — mirrors the prototype's <StatusDot>
-   (keeper-v2/memory.jsx:196 → window.KV.Dot → .dot2).
-   This dashboard has no .dot2 primitive that carries the v2 status palette,
-   so a self-contained 7px dot is rendered 1:1 with the prototype's .dot2:
+/* status dot in the keeper table — a self-contained 7px dot:
    base/idle → --status-idle, ok → --status-ok, bad → --status-bad, each
-   coloured state carrying the same `0 0 7px` glow. The prototype mapping is
-   run→ok / pause→idle / else→bad (StatusDot in keeper-v2/messages.jsx:8-11). */
+   coloured state carrying the same `0 0 7px` glow. memDotState maps
+   run→ok / off→bad / else→idle. */
 .mem-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--status-idle); }
 .mem-dot.ok { background: var(--status-ok); box-shadow: 0 0 7px var(--status-ok); }
 .mem-dot.idle { background: var(--status-idle); }
@@ -227,9 +214,9 @@
 }
 
 /* Inspector trigger button (.cmp-open).
-   In the prototype this lives in the ctx-rail; here it opens the inspector
-   from the memory seam (agent-detail-memory). Ported verbatim: literal
-   11.5px / 10px font + 8px 10px padding (rails.jsx:513-515 text). */
+   Opens the inspector from the keeper workspace rail and from the memory
+   seam (agent-detail-memory). Literal 11.5px / 10px font + 8px 10px
+   padding. */
 .cmp-open {
   width: 100%; margin-top: 10px; display: flex; align-items: center; gap: 7px;
   font-family: var(--font-ui); font-size: 11.5px; color: var(--text-mid);

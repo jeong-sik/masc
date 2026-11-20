@@ -641,9 +641,7 @@
   flex: none;
 }
 
-/* ── Domain status section — keeper-v2/overview.jsx:159-261 ─────────────────── */
-/* Every value below is transcribed verbatim from the prototype's
- * styles/surfaces.css (line references in comments). */
+/* ── Domain status section ──────────────────────────────────────────────────── */
 
 /* section header "도메인 현황" */
 .ov-section-h {

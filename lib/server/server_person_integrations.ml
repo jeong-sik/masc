@@ -15,6 +15,7 @@ type integration =
   ; models : string list
   ; withheld : (string * withheld) list
   ; calls : calls
+  ; takes_login : bool
   ; takes_key : bool
   }
 
@@ -35,17 +36,10 @@ let calls_of client =
   | Error refusal -> Refused refusal
 ;;
 
-(* A binding makes its Runtime from the model row it names, as a Runtime is
-   materialized; a binding of no declared row makes none. [of_config] only
-   reaches this check for providers accepted by
-   {!Server_setup_account_login.person_target} (official clients
-   [Codex | Claude | Muse]; Agent Core protocols fail with
-   [Unsupported_connection] in
-   {!Server_runtime_setup_actions.login_target_of_config}), so
-   {!Runtime_verification.model_refusal} on the model row matches its
-   official-client contract. A model row that declares no tool calling is
-   not offered: the verification refuses it before any client starts. *)
-let verdict (config : Runtime_schema.config) (binding : Runtime_schema.binding) =
+(* Official-client rows declare tool support directly on [model_spec].
+   HTTP [Agent_core] rows resolve tool support via {!Runtime_adapter.http_model_declares_tools}
+   so catalog rows are never overridden by TOML defaults. *)
+let official_verdict (config : Runtime_schema.config) (binding : Runtime_schema.binding) =
   match Runtime_schema.model_of_id config binding.model_id with
   | None -> Error Model_undeclared
   | Some model ->
@@ -54,14 +48,31 @@ let verdict (config : Runtime_schema.config) (binding : Runtime_schema.binding) 
      | None -> Ok ())
 ;;
 
+let http_verdict
+      (config : Runtime_schema.config)
+      (provider : Runtime_schema.provider)
+      (binding : Runtime_schema.binding)
+  =
+  match Runtime_schema.model_of_id config binding.model_id with
+  | None -> Error Model_undeclared
+  | Some model ->
+    (match Runtime_adapter.http_model_declares_tools provider model with
+     | Ok true -> Ok ()
+     | Ok false -> Error (Model_refused Runtime_verification.Tools_not_declared)
+     | Error (_ : string) ->
+       (match Runtime_verification.model_refusal model with
+        | Some unavailable -> Error (Model_refused unavailable)
+        | None -> Ok ()))
+;;
+
 (* The bindings of the provider in declared order, each on the side its
    verdict puts it: the models a person may name, and the others with why. *)
-let models_and_withheld (config : Runtime_schema.config) provider_id =
+let models_and_withheld_by ~verdict (config : Runtime_schema.config) provider_id =
   config.bindings
   |> List.filter (fun (binding : Runtime_schema.binding) ->
     String.equal binding.provider_id provider_id)
   |> List.partition_map (fun (binding : Runtime_schema.binding) ->
-    match verdict config binding with
+    match verdict binding with
     | Ok () -> Either.Left binding.model_id
     | Error why -> Either.Right (binding.model_id, why))
 ;;
@@ -69,18 +80,36 @@ let models_and_withheld (config : Runtime_schema.config) provider_id =
 let of_config (config : Runtime_schema.config) =
   List.filter_map
     (fun (provider : Runtime_schema.provider) ->
-      match Server_setup_account_login.person_target config ~integration_id:provider.id with
-      | Error (_ : Server_setup_account_login.person_refusal) -> None
-      | Ok { Server_runtime_setup_actions.client; cli_path = _; spawn_path = _ } ->
-        let models, withheld = models_and_withheld config provider.id in
+      if Server_key_account.http_takes_key provider
+      then
+        let models, withheld =
+          models_and_withheld_by ~verdict:(http_verdict config provider) config provider.id
+        in
         Some
           { integration_id = provider.id
           ; display_name = provider.display_name
           ; models
           ; withheld
-          ; calls = calls_of client
-          ; takes_key = Server_key_account.takes_key client
-          })
+          ; calls = Allowed
+          ; takes_login = false
+          ; takes_key = true
+          }
+      else
+        (match Server_setup_account_login.person_target config ~integration_id:provider.id with
+         | Error (_ : Server_setup_account_login.person_refusal) -> None
+         | Ok { Server_runtime_setup_actions.client; cli_path = _; spawn_path = _ } ->
+           let models, withheld =
+             models_and_withheld_by ~verdict:(official_verdict config) config provider.id
+           in
+           Some
+             { integration_id = provider.id
+             ; display_name = provider.display_name
+             ; models
+             ; withheld
+             ; calls = calls_of client
+             ; takes_login = true
+             ; takes_key = Server_key_account.takes_key client
+             }))
     config.providers
 ;;
 
@@ -111,16 +140,19 @@ let withheld_json (model, why) =
   `Assoc [ "model", `String model; "reason", `String (withheld_code why) ]
 ;;
 
-(* Every integration here is one a person signs in to ([of_config]). *)
-let connect_json ~takes_key =
-  `List (`String "login" :: (if takes_key then [ `String "key" ] else []))
+let connect_json ~takes_login ~takes_key =
+  let entries =
+    (if takes_login then [ `String "login" ] else [])
+    @ (if takes_key then [ `String "key" ] else [])
+  in
+  `List entries
 ;;
 
-let integration_json { integration_id; display_name; models; withheld; calls; takes_key } =
+let integration_json { integration_id; display_name; models; withheld; calls; takes_login; takes_key } =
   `Assoc
     ([ "integration_id", `String integration_id
      ; "display_name", `String display_name
-     ; "connect", connect_json ~takes_key
+     ; "connect", connect_json ~takes_login ~takes_key
      ; "models", `List (List.map (fun model -> `String model) models)
      ; "withheld", `List (List.map withheld_json withheld)
      ]
@@ -144,7 +176,14 @@ let start_notes = function
   | _ :: _ as integrations ->
     let notes =
       List.filter_map
-        (fun { integration_id; display_name = (_ : string); models; withheld; calls; takes_key = (_ : bool) } ->
+        (fun { integration_id
+             ; display_name = (_ : string)
+             ; models
+             ; withheld
+             ; calls
+             ; takes_login = (_ : bool)
+             ; takes_key = (_ : bool)
+             } ->
           match calls, models with
           | Refused Runtime_account_access.Native_unpublished, (_ : string list) ->
             Some Access_unpublished

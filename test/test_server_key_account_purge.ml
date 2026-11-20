@@ -383,11 +383,84 @@ let test_resume =
     files_there "its files" ~base_path bob false)
 ;;
 
+(* HTTP provider key accounts carry No_home: removal and server-start resume
+   remove their keys without requiring or creating any CLI account home. *)
+let test_http_key_removed_and_resumed =
+  with_env_zone (fun ~env ~zone ~base_path ->
+    let config_path = Server_runtime_setup_actions.config_path ~base_path in
+    private_dirs (Filename.dirname config_path);
+    Out_channel.with_open_bin config_path (fun out ->
+      output_string
+        out
+        {|[runtime]
+default = "openrouter.sonnet"
+
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[models.sonnet]
+api-name = "anthropic/claude-sonnet-4"
+max-context = 200000
+tools-support = true
+streaming = true
+
+[openrouter.sonnet]
+|});
+    let openrouter = get (Integration_id.of_string "openrouter") in
+    let with_http_key ~name ~hex =
+      let person = admit zone ~name ~hex in
+      let account = get (Provider_account_id.of_string (String.make 64 hex)) in
+      linked
+        (Authz_provider_account.link_key
+           zone
+           ~user_id:person.Login.user_id
+           ~provider_account_id:account
+           ~integration_id:openrouter);
+      let who = { person; account } in
+      let runtime_root = runtime_root_of ~base_path who in
+      private_dirs runtime_root;
+      (match Runtime_api_key_file.key_of_string "sk-test-http-key" with
+       | None -> Alcotest.fail "a fixture key was refused"
+       | Some key ->
+         (match Files.make ~home:Files.No_home ~runtime_root ~account_id:account ~generation:Key_generation.first key with
+          | Ok () -> ()
+          | Error err -> Alcotest.fail (Files.make_error_detail err)));
+      who
+    in
+    let alice = with_http_key ~name:"alice" ~hex:'a' in
+    let bob = with_http_key ~name:"bob" ~hex:'b' in
+    let no_home_there label who expected =
+      match Files.present ~home:Files.No_home ~runtime_root:(runtime_root_of ~base_path who) ~account_id:who.account with
+      | Ok there -> Alcotest.(check bool) label expected there
+      | Error detail -> Alcotest.failf "%s: %s" label detail
+    in
+    let claude_home_of who =
+      Layout.home
+        ~runtime_root:(runtime_root_of ~base_path who)
+        Layout.Claude_home
+        ~account_id:(Provider_account_id.to_string who.account)
+      |> Result.map Sys.file_exists
+    in
+    Alcotest.(check (result bool string)) "alice HTTP key has no CLI home" (Ok false) (claude_home_of alice);
+    no_home_there "alice HTTP key present before purge" alice true;
+    removes "alice removes her own HTTP key account" ~base_path ~by:alice ~of_:alice "removed";
+    no_home_there "alice HTTP key gone after purge" alice false;
+    stands "alice purge recorded" alice "purged";
+    started bob;
+    Eio.Switch.run (fun sw -> Server_stopped_work.start ~sw ~env ~zone ~base_path);
+    stands "bob pending HTTP purge resumed at start" bob "purged";
+    no_home_there "bob HTTP key gone after resume" bob false;
+    Alcotest.(check (result bool string)) "bob never gained a CLI home" (Ok false) (claude_home_of bob))
+;;
+
 let () =
   Alcotest.run
     "server_key_account_purge"
     [ ( "remove"
       , [ Alcotest.test_case "the key and the home of one's own account" `Quick test_removed
+        ; Alcotest.test_case "HTTP key account removed and resumed without CLI home" `Quick test_http_key_removed_and_resumed
         ; Alcotest.test_case "not the account of another person" `Quick test_not_ones_own
         ; Alcotest.test_case "a removal that was started and not ended" `Quick test_started
         ; Alcotest.test_case "not an account that holds a login" `Quick test_login_account

@@ -3,11 +3,13 @@
    tells the person a deletion happened that did not. *)
 
 (** The files of a key account under the runtime root of its person (RFC
-    a-persons-api-key-is-their-own-provider-account 3.3 and 3.6): the home
-    its client runs in and the folder of its key files.
+    a-persons-api-key-is-their-own-provider-account 3.3, 3.6 and 3.9): the
+    home its official client runs in (when the provider is a CLI client) and
+    the folder of its key files.
 
-    The home is a Claude Code home ({!Runtime_account_home_layout.home}):
-    the keys of stage 1 are keys of Claude Code (the same RFC, 3.9). The key
+    Official CLI key accounts of Claude Code carry a Claude Code home
+    ({!Runtime_account_home_layout.home}); HTTP provider key accounts take
+    [No_home] and have no CLI account home (the same RFC, 3.9). The key
     files are where {!Runtime_account_home_layout.key_dir} says.
 
     The files of an account change only inside the call of the account, which
@@ -18,6 +20,12 @@
     choose the thread; the spelling of a path reads the runtime root
     ([Unix.realpath]) on the fiber. *)
 
+(** Whether a key account carries an official-client account home. HTTP
+    provider key accounts have no CLI client and therefore take [No_home]. *)
+type home_kind =
+  | Claude_home
+  | No_home
+
 (** Why the files of an account were not made. The detail of a home can name
     a path of the server, so it is for the log of the server. *)
 type make_error =
@@ -26,24 +34,29 @@ type make_error =
       (** The home is there. What the write left is what
           {!Runtime_api_key_file.write} says of its error. *)
 
-(** Makes the home of [account_id] under [runtime_root], or looks at the one
-    that is there, and writes no key: the first step of {!make}, alone. The
-    runtime root is read by its real path, as every function of this module
-    reads it, and is a directory of this user that no other user writes
-    ({!Runtime_account_home_folder.make}).
+(** Makes the home of [account_id] under [runtime_root] for [home]
+    (defaulting to {!Claude_home}), or looks at the one that is there, and
+    writes no key: the first step of {!make}, alone. For {!No_home}, checks
+    that [runtime_root] exists as a safe user-owned directory without creating
+    a CLI home. The runtime root is read by its real path, as every function
+    of this module reads it, and is a directory of this user that no other
+    user writes ({!Runtime_account_home_folder.make}).
 
     The replacement of a key asks for it before its record: a root or a
     home this process does not reach turns the replacement down while
     nothing is recorded. The detail is for the log of the server: it can
     name a path of the server. *)
 val make_home
-  :  runtime_root:string
+  :  ?home:home_kind
+  -> runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (unit, string) result
 
 (** Makes the home of [account_id] ({!make_home}) and then writes [key] as
     the key of [generation] ({!Runtime_api_key_file.write}). The home comes
-    first, so an account whose key file is there has its home.
+    first, so an account whose key file is there has its home when [home] is
+    {!Claude_home}; for {!No_home}, only [runtime_root] and the key file
+    exist.
 
     It makes the files of an account that has none: a registration calls it
     once, inside the call of the account it has just recorded. After an
@@ -61,7 +74,8 @@ val make_home
     away. A replacement asks for that after its record ({!remove_keys}),
     where the key before is not read any more. *)
 val make
-  :  runtime_root:string
+  :  ?home:home_kind
+  -> runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> generation:Authz_types.Key_generation.t
   -> Runtime_api_key_file.key
@@ -97,7 +111,8 @@ type remove_error =
     reported as not removed; the removal asked again finds it gone and syncs
     again. *)
 val remove
-  :  runtime_root:string
+  :  ?home:home_kind
+  -> runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (unit, remove_error) result
 
@@ -118,13 +133,14 @@ val remove_keys
   -> (unit, string) result
 
 (** Whether something has the name of the folder of the keys of [account_id]
-    or of its home under [runtime_root], a link included. A restore of a
-    backup brings back the files of an account whose removal went through,
-    and the start of the server asks this of each such account. [Error] when
-    a name could not be looked at; the detail can name a path of the
-    server. *)
+    or (when [home] is {!Claude_home}) of its home under [runtime_root], a link
+    included. A restore of a backup brings back the files of an account whose
+    removal went through, and the start of the server asks this of each such
+    account. [Error] when a name could not be looked at; the detail can name
+    a path of the server. *)
 val present
-  :  runtime_root:string
+  :  ?home:home_kind
+  -> runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> (bool, string) result
 
@@ -223,7 +239,8 @@ type other_keys =
     ({!remove_keys}): the key of the generation before is on disk and is
     not read, and the file of [generation] is not known to be absent. *)
 val replace
-  :  runtime_root:string
+  :  ?home:home_kind
+  -> runtime_root:string
   -> account_id:Authz_types.Provider_account_id.t
   -> generation:Authz_types.Key_generation.t
   -> Runtime_api_key_file.key

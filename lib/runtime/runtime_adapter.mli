@@ -24,6 +24,10 @@ val http_protocol_metadata : Runtime_schema.provider ->
   ((Llm_provider.Provider_config.provider_kind * string), string) result
 (** Resolve the actual HTTP kind and request path without a model or credential. *)
 
+val http_model_declares_tools : Runtime_schema.provider -> Runtime_schema.model_spec -> (bool, string) result
+(** Whether [spec] on HTTP [provider] resolves [supports_tools = true] through
+    the AGENT_CORE catalog and TOML capabilities without reading credentials. *)
+
 (** Capture a fresh named-provider selection from admitted current declarations. *)
 val materialize_credentials : provider_id:string -> credential:Runtime_schema.credential option ->
   (Runtime_credential_selection.materialized, string) result

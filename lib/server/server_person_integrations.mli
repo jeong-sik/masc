@@ -46,15 +46,18 @@ type integration =
           binding of the provider once, in declared order. A provider with
           neither has no binding. *)
   ; calls : calls
+  ; takes_login : bool
+      (** Whether a person connects it through an official-client login.
+          False for HTTP API-key providers (RFC
+          a-persons-api-key-is-their-own-provider-account 3.9). *)
   ; takes_key : bool
       (** Whether a person registers an API key of their own for it
-          ({!Server_key_account.takes_key}), beside the login every
-          integration of this list takes. *)
+          ({!Server_key_account.takes_key} or {!Server_key_account.http_takes_key}). *)
   }
 
-(** The providers of runtime.toml a person may log in to, in declared order:
-    those {!Server_setup_account_login.person_target} allows, the rule the
-    connect route judges a person's login by. *)
+(** The providers of runtime.toml a person may connect, in declared order:
+    official clients allowed by {!Server_setup_account_login.person_target}
+    and HTTP API-key providers allowed by {!Server_key_account.http_takes_key}. *)
 val of_config : Runtime_schema.config -> integration list
 
 (** What a start of the routes of people says once about the providers a
@@ -97,9 +100,9 @@ val path : string
 
 (** The answer of [GET path] for a signed-in person:
     [{"integrations":[{"integration_id":...,"display_name":...,"connect":[...],"models":[...],"withheld":[...],"calls":"allowed"}]}],
-    where ["connect"] holds how a person connects it: ["login"], and ["key"]
-    for one that takes an API key (RFC
-    a-persons-api-key-is-their-own-provider-account 3.8),
+    where ["connect"] holds how a person connects it: ["login"] for official
+    clients, and ["key"] for one that takes an API key (RFC
+    a-persons-api-key-is-their-own-provider-account 3.8 and 3.9),
     and ["calls":"refused","refusal":<code>] for a refused one, where the code
     names the {!Runtime_account_access.native_refusal}. A member of
     ["withheld"] is [{"model":<id>,"reason":<code>}]: the code is

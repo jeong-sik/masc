@@ -4,6 +4,7 @@ open Authz_types
 module Login = Server_setup_account_login
 module Event = Authz_purge_event
 module Purges = Authz_purge_state
+module Accounts = Authz_provider_account_state
 module Files = Runtime_key_account_files
 
 type error =
@@ -36,11 +37,30 @@ let logged id what detail =
   Log.Server.warn "The removal of account %s: %s: %s" (Provider_account_id.to_string id) what detail
 ;;
 
+let home_kind_of_integration config integration_id =
+  match config with
+  | Some config -> Login.key_account_home_kind config ~integration_id
+  | None -> Files.Claude_home
+;;
+
+let home_kind_of_account person ~base_path id =
+  match Accounts.find (state_of person).Authz_state.provider_accounts id with
+  | Some { Accounts.kind = Accounts.Key { integration_id; generation = _ }; owner = _ } ->
+    Login.key_account_home_kind_at ~base_path ~integration_id
+  | Some { Accounts.kind = Accounts.Login { integration_id = _ }; owner = _ }
+  | None -> Files.Claude_home
+;;
+
 (* The second and the third step: the files, and the record of the end. It
    takes the call of the account, inside which the files of an account
    change. *)
-let finish (_ : Runtime_account_call.t) (person : Login.person) ~base_path id =
+let finish ?home (_ : Runtime_account_call.t) (person : Login.person) ~base_path id =
   let account = account_of person id in
+  let home =
+    match home with
+    | Some home -> home
+    | None -> home_kind_of_account person ~base_path id
+  in
   let ended written ~then_ =
     match written with
     | Ok () -> then_
@@ -48,7 +68,7 @@ let finish (_ : Runtime_account_call.t) (person : Login.person) ~base_path id =
       logged id "the end was not recorded" (Authz_purge.error_detail error);
       Error (Not_ended error)
   in
-  match Files.remove ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
+  match Files.remove ~home ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
   | Ok () -> ended (Authz_purge.purged person.zone (Event.Account_purged { account })) ~then_:(Ok ())
   | Error stayed ->
     let failed_stage, detail =
@@ -74,8 +94,8 @@ let key_account_of (person : Login.person) id =
   | Some (_ : Authz_provider_account_state.account) | None -> Error Not_found
 ;;
 
-let remove_in_call in_call ~(person : Login.person) ~base_path id =
-  let finish () = finish in_call person ~base_path id in
+let remove_in_call ?home in_call ~(person : Login.person) ~base_path id =
+  let finish () = finish ?home in_call person ~base_path id in
   let start () =
     match Authz_purge.start person.zone ~user_id:person.user_id (target person id) with
     | Ok () -> finish ()
@@ -119,16 +139,16 @@ let not_looked_at id detail =
 
 (* The status is judged again inside the call of the account, where the
    removal of the owner runs too, so the two do not both end it. *)
-let resume_one ~zone ~base_path ~owner ~namespace id =
+let resume_one ~zone ~base_path ~owner ~namespace ~home id =
   let person = { Login.zone; user_id = owner; namespace } in
   let name = Provider_account_id.to_string id in
-  let ended in_call = Result.map (fun () -> true) (finish in_call person ~base_path id) in
+  let ended in_call = Result.map (fun () -> true) (finish ~home in_call person ~base_path id) in
   match
     Runtime_account_call.one_call_of id ~busy:Account_busy (fun in_call ->
       match status_of person id with
       | Some Purges.Account_pending -> ended in_call
       | Some Purges.Account_purged ->
-        (match Files.present ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
+        (match Files.present ~home ~runtime_root:(runtime_root_of person ~base_path) ~account_id:id with
          | Ok true -> ended in_call
          | Ok false -> Ok false
          | Error detail ->
@@ -169,6 +189,14 @@ let guarded id f =
 
 let resume ~zone ~base_path =
   let state = (Authz_zone.snapshot zone).Authz_zone.state in
+  let config = Result.to_option (Server_runtime_setup_actions.config ~base_path) in
+  let home_of id =
+    match Accounts.find state.Authz_state.provider_accounts id with
+    | Some { Accounts.kind = Accounts.Key { integration_id; generation = _ }; owner = _ } ->
+      home_kind_of_integration config integration_id
+    | Some { Accounts.kind = Accounts.Login { integration_id = _ }; owner = _ }
+    | None -> Files.Claude_home
+  in
   (* An owner wrote [Purge_pending] while active, so with a membership. A
      deletion of the principal takes it out, and with it the one name of
      the folder of their files. *)
@@ -180,16 +208,19 @@ let resume ~zone ~base_path =
   List.iter
     (fun (({ owner; provider_account_id = id } : Event.account), (status : Purges.account_status)) ->
        guarded id @@ fun () ->
+       let home = home_of id in
        match status, namespace_of owner with
-       | Purges.Account_pending, Some namespace -> resume_one ~zone ~base_path ~owner ~namespace id
+       | Purges.Account_pending, Some namespace ->
+         resume_one ~zone ~base_path ~owner ~namespace ~home id
        | Purges.Account_purged, Some namespace ->
          (* An account that went through and is not back takes no call. *)
          (match
             Files.present
+              ~home
               ~runtime_root:(runtime_root_of { Login.zone; user_id = owner; namespace } ~base_path)
               ~account_id:id
           with
-          | Ok true -> resume_one ~zone ~base_path ~owner ~namespace id
+          | Ok true -> resume_one ~zone ~base_path ~owner ~namespace ~home id
           | Ok false -> ()
           | Error detail -> not_looked_at id detail)
        | Purges.Account_pending, None ->

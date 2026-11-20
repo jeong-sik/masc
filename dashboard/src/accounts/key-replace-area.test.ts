@@ -26,7 +26,7 @@ const key = 'made-up-key-one'
 const nothingSent: Send = () => Promise.reject(new Error('nothing is sent'))
 const idle = { send: nothingSent, leave: vi.fn(), token: () => null, refresh: () => Promise.resolve() }
 
-const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: true }
+const claude: Integration = { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: true }
 const keyAccount = (left: Left | null = null): ProviderAccount =>
   ({ id: 'acct_key', integration: 'claude_code', held: { kind: 'key', key: 'readable' }, left })
 const loginAccount: ProviderAccount = { id: 'acct_login', integration: 'claude_code', held: { kind: 'login' }, left: null }

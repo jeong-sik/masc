@@ -97,8 +97,10 @@ export interface Integration {
   /** The other models the operator bound to it. With none of either, the operator bound no model. */
   readonly withheld: readonly Withheld[]
   readonly calls: Calls
-  /** Whether a person registers an API key of their own for it, beside the
-      login every subscription of the list takes (`connect` of
+  /** Whether a person connects it through an official-client login
+      (`connect` of lib/server/server_person_integrations.ml). */
+  readonly takesLogin: boolean
+  /** Whether a person registers an API key of their own for it (`connect` of
       lib/server/server_person_integrations.ml). */
   readonly takesKey: boolean
 }
@@ -278,7 +280,7 @@ function readIntegration(json: unknown): Integration | null {
   // named later is one this console has no control for.
   const connect = readList(json.connect, text)
   if (id === null || typeof json.display_name !== 'string' || models === null || withheld === null || calls === null || connect === null) return null
-  return { id, displayName: json.display_name, models, withheld, calls, takesKey: connect.includes('key') }
+  return { id, displayName: json.display_name, models, withheld, calls, takesLogin: connect.includes('login'), takesKey: connect.includes('key') }
 }
 
 export function readIntegrations(json: unknown): readonly Integration[] | null {

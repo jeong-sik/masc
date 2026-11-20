@@ -115,7 +115,7 @@ describe('readIntegrations', () => {
   })
   it('reads a subscription whose models a Keeper may call', () => {
     expect(readIntegrations(one({}))).toEqual([
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: false },
     ])
   })
   it.each([
@@ -145,11 +145,13 @@ describe('readIntegrations', () => {
     expect(readIntegrations(one({ display_name: '', models: [] }))?.[0]).toMatchObject({ displayName: '', models: [] })
   })
   it.each([
-    ['a login alone', ['login'], false],
-    ['a login and a key', ['login', 'key'], true],
-    ['a way named later beside the login', ['login', 'device'], false],
-  ] as const)('reads whether a subscription takes a key: %s', (_name, connect, takesKey) => {
-    expect(readIntegrations(one({ connect }))?.[0]?.takesKey).toBe(takesKey)
+    ['a login alone', ['login'], true, false],
+    ['a login and a key', ['login', 'key'], true, true],
+    ['a key alone', ['key'], false, true],
+    ['a way named later beside the login', ['login', 'device'], true, false],
+  ] as const)('reads how a subscription connects: %s', (_name, connect, takesLogin, takesKey) => {
+    const read = readIntegrations(one({ connect }))?.[0]
+    expect([read?.takesLogin, read?.takesKey]).toEqual([takesLogin, takesKey])
   })
   it.each([
     ['no object', []],

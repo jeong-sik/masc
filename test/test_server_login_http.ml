@@ -1755,6 +1755,237 @@ let a_person_registers_a_key () =
     Alcotest.(check bool) "and nothing of the key is" false (contains ~sub:key after))
 ;;
 
+(* HTTP API-key providers (RFC 3.9): listed with connect=["key"] (no login),
+   eligible HTTP keys register/list/rotate/remove cleanly without creating any
+   CLI account home, while vertex-gemini and uncredentialed local HTTP servers
+   stay excluded, and POST /auth/connect refuses HTTP providers. *)
+let an_http_provider_key_over_the_routes () =
+  with_installation (fun t ->
+    let config_dir = Filename.concat (Common.masc_dir_from_base_path ~base_path:t.base) "config" in
+    Fs_compat.mkdir_p config_dir;
+    Out_channel.with_open_bin
+      (Filename.concat config_dir Config_dir_resolver.runtime_toml_filename)
+      (fun out ->
+        output_string
+          out
+          {|[runtime]
+default = "claude_code.claude-sonnet-5"
+
+[providers.claude_code]
+display-name = "Claude Code"
+protocol = "claude-code"
+command = "claude"
+is-non-interactive = true
+
+[providers.openrouter]
+display-name = "OpenRouter"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.openrouter.credentials]
+type = "inline"
+value = "sk-operator-http-secret-must-not-leak"
+
+[providers.openrouter.headers]
+x-operator-secret = "op-http-header-must-not-leak"
+
+[providers.custom_http]
+display-name = "Custom HTTP"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1/v1"
+
+[providers.custom_http.credentials]
+type = "env"
+value = "MASC_TEST_UNUSED_HTTP_ENV_KEY"
+
+[providers.local]
+display-name = "Local server"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.vertex]
+display-name = "Vertex Gemini"
+protocol = "vertex-gemini"
+endpoint = "https://us-central1-aiplatform.googleapis.com/v1"
+
+[models."claude-sonnet-5"]
+api-name = "claude-sonnet-5"
+max-context = 1000000
+tools-support = true
+streaming = true
+
+[models."anthropic/claude-sonnet-5"]
+api-name = "anthropic/claude-sonnet-5"
+max-context = 200000
+tools-support = false
+streaming = true
+
+[models.custom-tool-model]
+api-name = "custom-tool-model"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[models.custom-notools]
+api-name = "custom-notools"
+max-context = 128000
+tools-support = false
+streaming = true
+
+[claude_code."claude-sonnet-5"]
+
+[openrouter."anthropic/claude-sonnet-5"]
+
+[custom_http.custom-tool-model]
+
+[custom_http.custom-notools]
+|});
+    let router = Server_login_http.add_person_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let integrations = send admin router ~meth:"GET" ~path:Server_person_integrations.path in
+    Alcotest.(check int) ("integrations 200: " ^ integrations.body) 200 integrations.status;
+    let offered =
+      match Yojson.Safe.from_string integrations.body with
+      | `Assoc fields ->
+        (match List.assoc_opt "integrations" fields with
+         | Some (`List rows) -> rows
+         | _ -> Alcotest.failf "expected integrations list in %S" integrations.body)
+      | _ -> Alcotest.failf "expected JSON object in %S" integrations.body
+    in
+    let find_integration id =
+      List.find_opt
+        (function
+          | `Assoc fields -> List.assoc_opt "integration_id" fields = Some (`String id)
+          | _ -> false)
+        offered
+    in
+    Alcotest.(check bool) "local stays excluded from integrations" false (Option.is_some (find_integration "local"));
+    Alcotest.(check bool) "vertex stays excluded from integrations" false (Option.is_some (find_integration "vertex"));
+    (match find_integration "openrouter" with
+     | Some (`Assoc fields) ->
+       Alcotest.(check bool)
+         "openrouter offers connect=[\"key\"]"
+         true
+         (List.assoc_opt "connect" fields = Some (`List [ `String "key" ]));
+       Alcotest.(check bool)
+         "openrouter resolves catalog model tools-support=true despite TOML false"
+         true
+         (List.assoc_opt "models" fields = Some (`List [ `String "anthropic/claude-sonnet-5" ]));
+       Alcotest.(check bool)
+         "openrouter calls allowed"
+         true
+         (List.assoc_opt "calls" fields = Some (`String "allowed"))
+     | _ -> Alcotest.failf "missing openrouter in %S" integrations.body);
+    (match find_integration "custom_http" with
+     | Some (`Assoc fields) ->
+       Alcotest.(check bool)
+         "custom_http offers connect=[\"key\"]"
+         true
+         (List.assoc_opt "connect" fields = Some (`List [ `String "key" ]));
+       Alcotest.(check bool)
+         "custom_http offers tool-capable model"
+         true
+         (List.assoc_opt "models" fields = Some (`List [ `String "custom-tool-model" ]));
+       Alcotest.(check bool)
+         "custom_http withholds toolless model"
+         true
+         (List.assoc_opt "withheld" fields
+          = Some (`List [ `Assoc [ "model", `String "custom-notools"; "reason", `String "tools_not_declared" ] ]))
+     | _ -> Alcotest.failf "missing custom_http in %S" integrations.body);
+    let connect_http =
+      send
+        admin
+        router
+        ~meth:"POST"
+        ~path:Masc.Auth_preview.connect_path
+        ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+        ~body:{|{"integration_id":"openrouter"}|}
+    in
+    Alcotest.(check int) "POST /auth/connect rejects HTTP provider" 400 connect_http.status;
+    let vertex_refused =
+      send
+        admin
+        router
+        ~meth:"POST"
+        ~path:Server_key_account.path
+        ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+        ~body:{|{"integration_id":"vertex","key":"sk-person-vertex-denied"}|}
+    in
+    Alcotest.(check (pair int string))
+      "POST /setup/accounts/key rejects vertex-gemini"
+      (400, "integration_takes_no_key")
+      (told vertex_refused);
+    let key = "sk-person-http-key-first" in
+    let registered =
+      send
+        admin
+        router
+        ~meth:"POST"
+        ~path:Server_key_account.path
+        ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+        ~body:(Yojson.Safe.to_string (`Assoc [ "integration_id", `String "openrouter"; "key", `String key ]))
+    in
+    Alcotest.(check int) ("openrouter key registered: " ^ registered.body) 200 registered.status;
+    Alcotest.(check bool) "registration body leaks no person key" false (contains ~sub:key registered.body);
+    Alcotest.(check bool)
+      "registration body leaks no operator key"
+      false
+      (contains ~sub:"sk-operator-http-secret-must-not-leak" registered.body);
+    let account =
+      match member "provider_account_id" registered, member "kind" registered with
+      | Some (`String id), Some (`String "key") -> id
+      | _ -> Alcotest.failf "missing HTTP key account id in %S" registered.body
+    in
+    let user_id = user_of t admin in
+    let namespace =
+      match Authz_principal_state.find_membership (Authz_zone.snapshot t.routes.R.zone).Authz_zone.state.Authz_state.principals user_id with
+      | Some m -> m.Authz_principal_state.account_home_namespace
+      | None -> Alcotest.fail "missing membership for admin"
+    in
+    let runtime_root = Runtime_account_home_layout.person_runtime_root ~base_path:t.base ~namespace in
+    Alcotest.(check bool) "no CLI clients folder created for HTTP key" false (Sys.file_exists (Filename.concat runtime_root "clients"));
+    let listed = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+    Alcotest.(check (pair int string))
+      "provider-accounts lists HTTP key account as readable"
+      ( 200
+      , Printf.sprintf
+          {|{"provider_accounts":[{"provider_account_id":"%s","kind":"key","key":"readable","integration_id":"openrouter"}],"runtimes":[]}|}
+          account )
+      (listed.status, listed.body);
+    let rotated = "sk-person-http-key-rotated" in
+    let replaced =
+      send
+        admin
+        router
+        ~meth:"PUT"
+        ~path:(Server_key_account.entry_prefix ^ account)
+        ~headers:(("Content-Type", "application/json") :: changing ~csrf ())
+        ~body:(Yojson.Safe.to_string (`Assoc [ "key", `String rotated ]))
+    in
+    Alcotest.(check (pair int string))
+      "openrouter key rotation succeeds"
+      (200, Printf.sprintf {|{"provider_account_id":"%s","old_keys_removed":true}|} account)
+      (replaced.status, replaced.body);
+    Alcotest.(check bool) "rotation still creates no CLI clients folder" false (Sys.file_exists (Filename.concat runtime_root "clients"));
+    let removed =
+      send
+        admin
+        router
+        ~meth:"DELETE"
+        ~path:(Server_key_account.entry_prefix ^ account)
+        ~headers:(changing ~csrf ())
+    in
+    Alcotest.(check int) ("openrouter key removed: " ^ removed.body) 200 removed.status;
+    let after = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+    Alcotest.(check bool) "removed HTTP account gone from listing" false (contains ~sub:account after.body);
+    Alcotest.(check bool) "removed HTTP account leaks no key" false (contains ~sub:rotated after.body))
+;;
+
 (* Bytes another writer added to the log: the next commit finds the end moved
    and stops the log. From then on no route decides on the state the zone
    holds. A person who signed in before gets a 503 where they read or change
@@ -2005,6 +2236,7 @@ let () =
         ; Alcotest.test_case "a person keeps Keepers over MCP" `Quick a_person_keeps_keepers_over_mcp
         ; Alcotest.test_case "a person removes a key account" `Quick a_person_removes_a_key_account
         ; Alcotest.test_case "a person registers a key" `Quick a_person_registers_a_key
+        ; Alcotest.test_case "an HTTP provider key over the routes" `Quick an_http_provider_key_over_the_routes
         ; Alcotest.test_case "a stopped zone" `Quick a_stopped_zone_answers_no_person
         ; Alcotest.test_case
             "the request that meets a moved log"

@@ -134,8 +134,8 @@ describe('reading the subscriptions', () => {
       kind: 'read',
       forUser: person,
       integrations: [
-        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
-        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
+        { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: false },
+        { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesLogin: true, takesKey: false },
       ],
       owned: {
         accounts: [{ id: 'acct_1', integration: 'claude_code', held: { kind: 'login' }, left: null }],
@@ -595,8 +595,8 @@ describe('removing a key account in the panel', () => {
 
 describe('what the panel knows of each account', () => {
   const integrations: readonly Integration[] = [
-    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey: false },
-    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
+    { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey: false },
+    { id: 'codex', displayName: 'Codex', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesLogin: true, takesKey: false },
   ]
   const facts = accountFacts(integrations, {
     accounts: [
@@ -700,8 +700,8 @@ describe('the panel', () => {
     kind: 'read',
     forUser: person,
     integrations: [
-      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesKey },
-      { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
+      { id: 'claude_code', displayName: 'Claude Code', models: ['claude-sonnet-5'], withheld: [], calls: { kind: 'allowed' }, takesLogin: true, takesKey },
+      { id: 'codex', displayName: '', models: ['gpt-5.5'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesLogin: true, takesKey: false },
     ],
     owned,
   })
@@ -817,9 +817,9 @@ describe('the panel', () => {
       kind: 'read',
       forUser: person,
       integrations: [
-        { id: 'with_model', displayName: 'Has-A-Model', models: ['m'], withheld: [], calls: called, takesKey: false },
-        { id: 'no_model', displayName: 'Has-No-Model', models: [], withheld: [{ model: 'w', reason: 'tools_not_declared' }], calls: called, takesKey: false },
-        { id: 'refused', displayName: 'Is-Refused', models: ['m'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesKey: false },
+        { id: 'with_model', displayName: 'Has-A-Model', models: ['m'], withheld: [], calls: called, takesLogin: true, takesKey: false },
+        { id: 'no_model', displayName: 'Has-No-Model', models: [], withheld: [{ model: 'w', reason: 'tools_not_declared' }], calls: called, takesLogin: true, takesKey: false },
+        { id: 'refused', displayName: 'Is-Refused', models: ['m'], withheld: [], calls: { kind: 'refused', refusal: 'native_tools_reach_other_homes' }, takesLogin: true, takesKey: false },
       ],
       owned: { accounts: [], runtimes: [] },
     })
@@ -1170,5 +1170,34 @@ describe('the panel', () => {
     const { container } = render(html`<${SubscriptionsPanel} model=${panel} />`)
     await act(() => panel.load(sessionOf(person)))
     expect(container.querySelectorAll('li.row').length).toBe(1)
+  })
+
+  it('offers only the API key flow when subscriptions connect by key alone, and keeps check/replace/remove controls on the account card', async () => {
+    const openrouter = {
+      integration_id: 'openrouter',
+      display_name: 'OpenRouter',
+      connect: ['key'],
+      models: ['anthropic/claude-sonnet-4'],
+      withheld: [],
+      calls: 'allowed',
+    }
+    const { panel, container } = live({
+      [paths.integrations]: [json(200, { integrations: [openrouter] })],
+      [paths.owned]: [json(200, {
+        provider_accounts: [{ provider_account_id: 'acct_or', kind: 'key', key: 'readable', integration_id: 'openrouter' }],
+        runtimes: [],
+      })],
+    })
+    await act(() => panel.load(sessionOf(person)))
+    const offer = container.querySelectorAll('section > p.hint')[1]?.textContent ?? ''
+    expect([
+      offer.includes('OpenRouter'),
+      container.querySelector('button[aria-controls=connect-steps]'),
+      container.querySelector('button[aria-controls=key-steps]') !== null,
+      container.querySelector('.check button') !== null,
+      container.querySelector('#replace-acct_or') !== null,
+      container.querySelector('#remove-acct_or') !== null,
+    ]).toEqual([true, null, true, true, true, true])
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

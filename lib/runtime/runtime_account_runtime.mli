@@ -62,6 +62,16 @@ val binding_of
   -> binding:binding
   -> (Runtime_schema.binding, error) result
 
+(** Whether a provider configuration in [runtime.toml] declares an HTTP
+    [Agent_core] API endpoint that takes a person-owned API key in stage 2
+    (RFC a-persons-api-key-is-their-own-provider-account 3.9). Catalog
+    providers whose binding requires an API key take a person key even when
+    operator credentials are omitted from [runtime.toml]; uncatalogued HTTP
+    endpoints take a person key when they declare [credentials].
+    [vertex-gemini] (which uses Google ADC) and official CLI providers return
+    [false]. *)
+val http_provider_takes_key : Runtime_schema.provider -> bool
+
 (** The runtime of [binding] of [template] on the account [provider_id].
 
     The provider of the runtime takes its credential from [account] and never

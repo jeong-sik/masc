@@ -79,6 +79,29 @@ let binding_of config ~template ~provider_id ~binding:choice =
   Result.map snd (template_binding config ~template ~provider_id choice)
 ;;
 
+let http_provider_takes_key (provider : Runtime_schema.provider) =
+  match provider.transport, provider.api_format with
+  | ( Runtime_schema.Http (_ : string)
+    , ( Runtime_schema.Messages_api
+      | Runtime_schema.Chat_completions_api
+      | Runtime_schema.Ollama_api
+      | Runtime_schema.Gemini_api ) ) ->
+    let catalog_id = Runtime_schema.catalog_provider_id provider in
+    (match Agent_core.Provider_runtime_binding.find catalog_id with
+     | Some binding ->
+       binding.Agent_core.Provider_runtime_binding.requires_api_key
+       || Option.is_some provider.credentials
+     | None -> Option.is_some provider.credentials)
+  | ( Runtime_schema.Http (_ : string)
+    , ( Runtime_schema.Vertex_gemini_api
+      | Runtime_schema.Codex_app_server_runtime
+      | Runtime_schema.Claude_code_runtime
+      | Runtime_schema.Antigravity_cli_runtime
+      | Runtime_schema.Muse_serve_runtime
+      | Runtime_schema.Vibe_cli_runtime ) )
+  | Runtime_schema.Cli (_ : string), _ -> false
+;;
+
 (* The credential of the provider of the account. It is never the one of the
    template: a person's account runs on no credential of the workspace. *)
 let credentials_of = function

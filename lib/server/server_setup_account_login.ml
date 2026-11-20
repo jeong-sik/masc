@@ -469,11 +469,43 @@ let owned person id =
     |> Result.map_error (fun (status, message) -> Refused (status, message)) in
   Result.map (fun (_ : Authz_provider_account_state.account) -> ()) (own_account person state id)
 
-(* The account of the call and the runtime of [binding] on its home. The
-   record that linked the account says what it runs on. A login account is of
-   the integration its login receipt names. A key account is of the
-   integration its record names, and its key is the file of the generation the
-   records say (RFC a-persons-api-key-is-their-own-provider-account 3.5).
+let key_account_home_kind (config : Runtime_schema.config) ~integration_id =
+  match
+    Runtime_schema.provider_of_id config (Authz_types.Integration_id.to_string integration_id)
+  with
+  | Some
+      { Runtime_schema.api_format =
+          Runtime_schema.(
+            Messages_api
+            | Chat_completions_api
+            | Ollama_api
+            | Gemini_api
+            | Vertex_gemini_api)
+      ; _
+      } -> Runtime_key_account_files.No_home
+  | Some
+      { Runtime_schema.api_format =
+          Runtime_schema.(
+            Codex_app_server_runtime
+            | Claude_code_runtime
+            | Antigravity_cli_runtime
+            | Muse_serve_runtime
+            | Vibe_cli_runtime)
+      ; _
+      }
+  | None -> Runtime_key_account_files.Claude_home
+
+let key_account_home_kind_at ~base_path ~integration_id =
+  match Server_runtime_setup_actions.config ~base_path with
+  | Ok config -> key_account_home_kind config ~integration_id
+  | Error (_ : Server_runtime_setup_actions.error) -> Runtime_key_account_files.Claude_home
+
+(* The account of the call and the runtime of [binding] on its home (or with
+   no CLI home for HTTP provider key accounts). The record that linked the
+   account says what it runs on. A login account is of the integration its
+   login receipt names. A key account is of the integration its record names,
+   and its key is the file of the generation the records say (RFC
+   a-persons-api-key-is-their-own-provider-account 3.5 and 3.9).
 
    HIGH-RISK-UNREVIEWED: it takes the call of the account, so the records of
    the account and its key file are read inside that call. The files of an
@@ -497,32 +529,46 @@ let person_runtime in_call person ~base_path ~binding =
       Authz_types.Integration_id.to_string integration_id
   in
   let* config = Server_runtime_setup_actions.config ~base_path |> setup in
-  let* target =
-    Server_runtime_setup_actions.login_target_of_config config ~integration_id:template |> setup in
-  let client = target.Server_runtime_setup_actions.client in
   let* runtime_root = runtime_root_of ~base_path (Person person) |> unavailable in
-  let home () =
-    Client.account_home ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
-  let runtime ~account_home ~account =
-    Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
-      ~account_home:(Some account_home) ~account ~binding
-    |> Result.map_error (template_error id) in
-  let* runtime = match account.Authz_provider_account_state.kind with
-    | Authz_provider_account_state.Login { integration_id = _ } ->
-      let* account_home = home () in
-      runtime ~account_home ~account:Runtime_account_runtime.Login
-    | Authz_provider_account_state.Key { integration_id = _; generation } ->
-      (* The key is read before the home is looked at. A process that died
-         between the record of the account and its files left neither, and
-         that account answers that its key is missing (the same RFC, 3.3). *)
+  let* runtime =
+    match account.Authz_provider_account_state.kind, Runtime_schema.provider_of_id config template with
+    | Authz_provider_account_state.Key { integration_id = _; generation }, Some provider
+      when Runtime_account_runtime.http_provider_takes_key provider ->
       let* key_file =
         Runtime_account_home_layout.key_file ~runtime_root ~account_id:id ~generation |> unavailable in
-      let* account_home =
-        Client.account_home_path ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
-      let* runtime =
-        runtime ~account_home ~account:(Runtime_account_runtime.Key { key_file }) in
-      let* (_ : string) = home () in
-      Ok runtime in
+      Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
+        ~account_home:None ~account:(Runtime_account_runtime.Key { key_file }) ~binding
+      |> Result.map_error (template_error id)
+    | Authz_provider_account_state.Key { integration_id = _; generation = _ },
+      Some { api_format = Runtime_schema.(Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api); _ } ->
+      setup (Error Server_runtime_setup_actions.Unsupported_connection)
+    | Authz_provider_account_state.Key _, (Some _ | None)
+    | Authz_provider_account_state.Login { integration_id = _ }, (Some _ | None) ->
+      let* target =
+        Server_runtime_setup_actions.login_target_of_config config ~integration_id:template |> setup in
+      let client = target.Server_runtime_setup_actions.client in
+      let home () =
+        Client.account_home ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
+      let runtime ~account_home ~account =
+        Runtime_account_runtime.of_template config ~template ~provider_id:provider_account_id
+          ~account_home:(Some account_home) ~account ~binding
+        |> Result.map_error (template_error id) in
+      (match account.Authz_provider_account_state.kind with
+       | Authz_provider_account_state.Login { integration_id = _ } ->
+         let* account_home = home () in
+         runtime ~account_home ~account:Runtime_account_runtime.Login
+       | Authz_provider_account_state.Key { integration_id = _; generation } ->
+         (* The key is read before the home is looked at. A process that died
+            between the record of the account and its files left neither, and
+            that account answers that its key is missing (the same RFC, 3.3). *)
+         let* key_file =
+           Runtime_account_home_layout.key_file ~runtime_root ~account_id:id ~generation |> unavailable in
+         let* account_home =
+           Client.account_home_path ~runtime_root ~account_id:provider_account_id ~client |> unavailable in
+         let* runtime =
+           runtime ~account_home ~account:(Runtime_account_runtime.Key { key_file }) in
+         let* (_ : string) = home () in
+         Ok runtime) in
   (* Checked before the call, so a model that makes no Runtime id is not
      called for two minutes first. A [Runtime] binding makes the id it was
      chosen by, which is one. *)

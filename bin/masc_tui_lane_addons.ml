@@ -778,16 +778,21 @@ let acknowledge_broadcast view receipt =
         (fun (_,id) -> not (String.equal id request_id)) view.pending_broadcasts}
   | (Ok _ | Error _), (Ok _ | Error _) -> view
 let evidence_rows ~width prompt =
-  let choice index label = (if prompt.choice=index then "› " else "  ") ^ label in
+  let plain lines = List.map (fun line -> false, line) lines in
+  let choice index label =
+    let selected = prompt.choice = index in
+    List.map (fun line -> selected, line)
+      (document_rows ~width ((if selected then "› " else "  ") ^ label))
+  in
   let wrap = List.concat_map (document_rows ~width) in
-  wrap [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
+  plain (wrap [Printf.sprintf "Preserve %d marked row%s from %s" prompt.row_count
           (if prompt.row_count=1 then "" else "s") prompt.owner_title;
         "Evidence stays preserved; sharing sends its reference. Reads and actions are separate.";
-        "An unanswered Broadcast retries the original saved send, including after restart."]
-  @ key_rows ~width ["j/k:choose"; "Enter:preserve"; "Esc:back"]
-  @ wrap ([choice 0 "Preserve only"]
-          @ List.mapi (fun index keeper -> choice (index+1) ("Preserve and send the reference to " ^ keeper)) prompt.keepers
-          @ [choice (List.length prompt.keepers+1) "Preserve and share the reference via Broadcast"])
+        "An unanswered Broadcast retries the original saved send, including after restart."])
+  @ plain (key_rows ~width ["j/k:choose"; "Enter:preserve"; "Esc:back"])
+  @ choice 0 "Preserve only"
+  @ List.concat (List.mapi (fun index keeper -> choice (index+1) ("Preserve and send the reference to " ^ keeper)) prompt.keepers)
+  @ choice (List.length prompt.keepers+1) "Preserve and share the reference via Broadcast"
 (* The receipt names what was frozen and, separately, whether the optional
    message reached its Keeper. A failed delivery leaves the bundle preserved. *)
 let evidence_receipt_lines json =
@@ -868,7 +873,7 @@ let moment_text time =
   with Unix.Unix_error _ | Invalid_argument _ -> Printf.sprintf "epoch %.6g" time
 let timeline_lines ~instances ?selected ~width rows =
   match rows with
-  | [] -> List.map (fun instance -> instance.title ^ " | " ^ phase_label instance.phase
+  | [] -> List.map (fun instance -> false, instance.title ^ " | " ^ phase_label instance.phase
       ^ " | no observations in this view") instances
   | first :: rest ->
       let first : Row.row = first in
@@ -891,27 +896,31 @@ let timeline_lines ~instances ?selected ~width rows =
       let label_width = List.fold_left (fun widest lane ->
           max widest (Masc_tui_message_layout.display_width (local lane))) 1 lanes
         |> min (min 28 (max 8 (width / 3))) in
-      let axis_width = max 2 (width - label_width - 4) in
+      let axis_width = max 2 (width - label_width - 5) in
       let label lane = Masc_tui_message_layout.fit_width (local lane) label_width in
       let position time = if since = until then axis_width / 2 else
         let span = until -. since in
         let fraction = if Float.is_finite span then (time -. since) /. span
           else (time /. 2. -. since /. 2.) /. (until /. 2. -. since /. 2.) in
         max 0 (min (axis_width - 1) (int_of_float (fraction *. float_of_int (axis_width - 1)))) in
-      [Printf.sprintf "Wall time %s"
+      [false, Printf.sprintf "Wall time %s"
          (if since = until then moment_text since
           else moment_text since ^ " → " ^ moment_text until)]
       @ List.map (fun lane ->
           let axis = Bytes.make axis_width '-' in
           List.iter (fun (row : Row.row) -> if row.lane_id = lane then
             Bytes.set axis (position row.observed_at) (match row.kind with Row.Event -> 'o' | Row.Value -> 'v' | Row.Relation -> '*')) rows;
-          (match selected with Some (row : Row.row) when row.lane_id=lane -> "›" | _ -> " ")
+          let is_selected = match selected with Some (row : Row.row) -> row.lane_id = lane | None -> false in
+          (* Keep the inline lane chevron indicator without emitting a second
+             full-row selection band alongside the Results pane above. *)
+          false,
+          (if is_selected then "› " else "  ")
           ^ label lane ^ " |" ^ Bytes.to_string axis ^ "|") lanes
-      @ ["o event · v value · * relation"]
+      @ [false, "o event · v value · * relation"]
       @ List.filter_map (fun instance ->
           if List.exists (fun (row : Row.row) ->
             String.starts_with ~prefix:(instance.id ^ "/") row.lane_id) rows then None
-          else Some (instance.title ^ " | " ^ phase_label instance.phase ^ " | no observations in this view")) instances
+          else Some (false, instance.title ^ " | " ^ phase_label instance.phase ^ " | no observations in this view")) instances
 let track_application view target =
   match Application.value view.application_reading with
   | None -> Application.Unavailable "Waiting for an application observation"
@@ -1693,32 +1702,37 @@ type fact_row =
   | Fact_heading of string
   | Fact_fields of { indent : int; fields : (string * string) list }
   | Fact_text of string
+  | Fact_selected of string
   | Fact_keys of string list
 
-let fact_spans ~width rows =
+let fact_spans_with_selection ~width rows =
   let label_cells indent = 1 + List.fold_left (fun widest -> function
     | Fact_fields { indent = at; fields } when at = indent ->
         List.fold_left (fun widest (label, _) ->
           max widest (Masc_tui_message_layout.display_width label)) widest fields
-    | Fact_fields _ | Fact_heading _ | Fact_text _ | Fact_keys _ -> widest) 0 rows in
+    | Fact_fields _ | Fact_heading _ | Fact_text _ | Fact_selected _ | Fact_keys _ -> widest) 0 rows in
   let beside = List.for_all (function
     | Fact_fields { indent; _ } -> 2 * (indent + label_cells indent) <= width
-    | Fact_heading _ | Fact_text _ | Fact_keys _ -> true) rows in
+    | Fact_heading _ | Fact_text _ | Fact_selected _ | Fact_keys _ -> true) rows in
   let spaces cells = Span.text Span.plain (String.make (max 0 (min cells (width - 2))) ' ') in
   let spans = function
-    | Fact_heading text -> led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
-    | Fact_text text -> led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
-    | Fact_keys keys -> List.map (Span.text Span.plain) (key_rows ~width keys)
+    | Fact_heading text -> false, led_rows ~width ~lead:Span.empty ~text_style:(label_style ()) text
+    | Fact_text text -> false, led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Fact_selected text -> true, led_rows ~width ~lead:Span.empty ~text_style:Span.plain text
+    | Fact_keys keys -> false, List.map (Span.text Span.plain) (key_rows ~width keys)
     | Fact_fields { indent; fields } when beside ->
+        false,
         List.concat_map (fun (label, value) ->
           let lead = Span.pad_to (label_cells indent) Span.plain (Span.text (label_style ()) label) in
           led_rows ~indent ~width ~lead ~text_style:Span.plain value) fields
     | Fact_fields { indent; fields } ->
+        false,
         List.concat_map (fun (label, value) ->
           led_rows ~width ~lead:(spaces indent) ~text_style:(label_style ()) label
           @ led_rows ~width ~lead:(spaces (indent + 2)) ~text_style:Span.plain value) fields in
   List.concat_map (fun row ->
-    List.map (fun span -> Span.render (Span.truncate width span)) (spans row)) rows
+    let selected, row_spans = spans row in
+    List.map (fun span -> selected, Span.render (Span.truncate width span)) row_spans) rows
 
 let value_row_spans ~width (row : value_row) =
   let lead = Span.concat
@@ -1809,13 +1823,17 @@ let instance_standing ~off_requested (item : instance) = match item.phase, item.
    prints an SGR byte as text. An entry's first row is drawn here instead:
    the mark gets its colour, and [led_rows] wraps and sanitizes the entry text
    after it. *)
-type overview_row = Overview_text of string | Overview_drawn of string list
-let entry_lead ~width ~marker standing text =
-  Overview_drawn (led_rows ~width
-    ~lead:(Span.concat [ Span.text Span.plain marker;
-      Span.text (Span.fg (Standing.colour standing)) (Standing.mark standing);
-      Span.text Span.plain " " ])
-    ~text_style:Span.plain text |> List.map Span.render)
+type overview_row = Overview_text of string | Overview_drawn of (bool * string) list
+let plain_drawn rows = Overview_drawn (List.map (fun row -> false, row) rows)
+let entry_lead ~width ~selected standing text =
+  let marker = if selected then "› " else "  " in
+  Overview_drawn
+    (led_rows ~width
+       ~lead:(Span.concat [ Span.text Span.plain marker;
+         Span.text (Span.fg (Standing.colour standing)) (Standing.mark standing);
+         Span.text Span.plain " " ])
+       ~text_style:Span.plain text
+     |> List.map (fun span -> selected, Span.render span))
 
 let instance_heading _snapshot (item : instance) =
   match installation_identity item with
@@ -1892,12 +1910,12 @@ let overview_lines ~width view =
           | Current_installations, (Some _ | None) -> [] in
         let history = Printf.sprintf "Retained history · %d instances" retained_count in
         texts [heading]
-        @ [Overview_drawn (key_rows ~width (match view.overview_mode with
+        @ [plain_drawn (key_rows ~width (match view.overview_mode with
              | Current_installations -> [history; "h:open"]
              | Retained_runs -> [history; "h:current installations"]))]
-        @ texts [""] @ [Overview_drawn empty]
+        @ texts [""] @ [plain_drawn empty]
         @ List.concat_map (fun (index,item) ->
-            let marker = if index=view.instance_cursor then "› " else "  " in
+            let selected = index = view.instance_cursor in
             let role_header = match view.overview_mode with
               | Retained_runs -> []
               | Current_installations ->
@@ -1913,10 +1931,10 @@ let overview_lines ~width view =
                 let edit = Option.bind snapshot.configuration (fun config ->
                   if Document.editable_source_path ~directory:config.directory declaration.source_path
                   then Some "E:edit" else None) |> Option.to_list in
-                entry_lead ~width ~marker (declaration_entry_standing view declaration)
+                entry_lead ~width ~selected (declaration_entry_standing view declaration)
                   (name ^ " · " ^ declaration_reading_word reading ^ " · " ^ Filename.basename declaration.source_path)
                 :: texts ["    " ^ declaration_application view declaration]
-                @ [Overview_drawn (key_rows ~indent:4 ~width ("Enter:installation" :: edit))]
+                @ [plain_drawn (key_rows ~indent:4 ~width ("Enter:installation" :: edit))]
             | `Instance item ->
                 let group_header = match view.overview_mode with
                   | Current_installations -> []
@@ -1933,7 +1951,7 @@ let overview_lines ~width view =
                   else Printf.sprintf "%d records" item.rows_count in
                 let off_requested = off_requested snapshot item in
                 let activity = if off_requested then "off requested · " else "" in
-                let lead = entry_lead ~width ~marker (instance_standing ~off_requested item)
+                let lead = entry_lead ~width ~selected (instance_standing ~off_requested item)
                   (instance_heading snapshot item ^ " · " ^
                    activity ^
                    (match item.phase with
@@ -1967,11 +1985,13 @@ let overview_lines ~width view =
                 @ (if index=view.instance_cursor then
                      Option.to_list (Option.map (fun text -> "    " ^ text) item.display.description)
                    else []))
-                @ [Overview_drawn controls] @ texts detail) items
+                @ [plain_drawn controls] @ texts detail) items
   in
-  List.concat_map (function Overview_text line -> wrap line | Overview_drawn rows -> rows)
+  List.concat_map (function
+    | Overview_text line -> List.map (fun row -> false, row) (wrap line)
+    | Overview_drawn rows -> rows)
     (texts (diagnostic_lines view) @ content @ texts [""]
-     @ [Overview_drawn (key_rows ~width (overview_hints view))]
+     @ [plain_drawn (key_rows ~width (overview_hints view))]
      @ texts (action_lines view))
 
 (* One line of the Plugins help. [Help_keys] names the keys of a screen or a
@@ -2272,7 +2292,7 @@ let result_list_spans (item : instance) ~(selected : Row.row option) rows =
         ((heading, false) :: List.map (fun row -> (entry row, is_selected row)) same) @ groups others in
   let entries = groups rows in
   let focus = Option.value ~default:0 (List.find_index snd entries) in
-  (List.map fst entries, focus)
+  (entries, focus)
 
 (* Which list rows to show around [focus] as (first, shown): the whole list
    when it fits in [rows], otherwise a window of [rows] that keeps [focus]
@@ -2287,10 +2307,10 @@ let window_spans ~rows ~focus spans =
   let above = first and below = count - (first + shown) in
   let more hidden arrow = Span.text (muted_style ()) (Printf.sprintf "%s %d more" arrow hidden) in
   List.filteri (fun index _ -> index >= first && index < first + shown) spans
-  |> List.mapi (fun index span ->
-       if index = 0 && above > 0 then more (above + 1) "↑"
-       else if index = shown - 1 && below > 0 then more (below + 1) "↓"
-       else span)
+  |> List.mapi (fun index item ->
+       if index = 0 && above > 0 then more (above + 1) "↑", false
+       else if index = shown - 1 && below > 0 then more (below + 1) "↓", false
+       else item)
 
 let selected_result_spans ~width (item : instance) (selected : Row.row option) =
   match selected with
@@ -2309,6 +2329,7 @@ let side_by_side ~list_width ~detail_width list detail =
   let list = Array.of_list list and detail = Array.of_list detail in
   let at items index = if index < Array.length items then items.(index) else Span.empty in
   List.init (max (Array.length list) (Array.length detail)) (fun index ->
+    false,
     Span.render (Span.concat
       [ Span.pad_to list_width Span.plain (Span.truncate list_width (at list index))
       ; Span.text (muted_style ()) results_gutter
@@ -2325,10 +2346,17 @@ let results_lines ~height ~width (item : instance) ~selected rows =
     let detail_width = width - list_width - Span.width (Span.text Span.plain results_gutter) in
     let detail = selected_result_spans ~width:detail_width item selected in
     side_by_side ~list_width ~detail_width
-      (window_spans ~rows:(max height (List.length detail)) ~focus list) detail
+      (window_spans ~rows:(max height (List.length detail)) ~focus list |> List.map fst) detail
   else
-    (selected_result_spans ~width item selected @ (Span.empty :: window_spans ~rows:height ~focus list))
-    |> List.map (fun span -> Span.render (Span.truncate width span))
+    let detail =
+      selected_result_spans ~width item selected
+      |> List.map (fun span -> false, Span.render (Span.truncate width span))
+    in
+    let rows_list =
+      window_spans ~rows:height ~focus list
+      |> List.map (fun (span, sel) -> sel, Span.render (Span.truncate width span))
+    in
+    detail @ ((false, "") :: rows_list)
 
 let tab_strip ~width view =
   let tab focus label =
@@ -2340,19 +2368,20 @@ let tab_strip ~width view =
   |> List.concat |> Span.concat |> Span.truncate width |> Span.render
 
 let detail_lines ~height ~width view =
+  let plain lines = List.map (fun line -> false, line) lines in
   let wrap = document_rows ~width in
   match selected_instance view, view.snapshot with
-  | None, _ -> ["The selected Plugin changed. Esc returns to the list."]
+  | None, _ -> [false, "The selected Plugin changed. Esc returns to the list."]
   | Some item, Some snapshot ->
       let header = instance_heading snapshot item ^ " · " ^ phase_label item.phase in
       (* The footer drops its last items first, and the worker controls sit
          there, so [a] is named here too whenever it opens this worker's form. *)
       let actions =
         if can_observe item && Option.is_some item.action_schema then ["a:actions"] else [] in
-      let head = key_rows ~width (["?:help"; "Esc:back"; "Tab:section"; "j/k:move"] @ actions @ ["D:raw"])
+      let head = plain (key_rows ~width (["?:help"; "Esc:back"; "Tab:section"; "j/k:move"] @ actions @ ["D:raw"])
         @ wrap header
         @ [tab_strip ~width view; ""]
-        @ List.concat_map wrap (diagnostic_lines view) in
+        @ List.concat_map wrap (diagnostic_lines view)) in
       let record_rows = List.map snd (ordered_rows view snapshot) in
       let rows = List.map snd (ordered_result_rows view snapshot) in
       let selected = selected_row view in
@@ -2360,21 +2389,23 @@ let detail_lines ~height ~width view =
       | Timeline | Instances ->
           let selected = Option.bind selected (fun selected ->
             List.find_opt (fun (row : Row.row) -> row.id = selected.id) rows) in
-          if rows=[] then List.concat_map wrap (Option.to_list item.display.description)
+          if rows=[] then plain (List.concat_map wrap (Option.to_list item.display.description)
             @ (if record_rows=[] then empty_result_rows ~width view item
                else List.concat_map wrap ["No declared result rows in this received view.";
                                           "Supporting records remain available in 4 Records."])
-            @ List.concat_map wrap (snapshot_coverage_lines snapshot.output.coverage)
+            @ List.concat_map wrap (snapshot_coverage_lines snapshot.output.coverage))
           else
-            let intro = List.concat_map wrap (Option.to_list item.display.description) in
+            let intro = plain (List.concat_map wrap (Option.to_list item.display.description)) in
             let height = max 1 (height - List.length head - List.length intro) in
             intro
             @ results_lines ~height ~width item ~selected rows
-            @ List.concat_map wrap ([""; "Activity timeline"]
-                @ timeline_lines ~width ~instances:[item] ?selected rows
-                @ snapshot_coverage_lines snapshot.output.coverage)
+            @ plain (List.concat_map wrap [""; "Activity timeline"])
+            @ List.concat_map (fun (is_selected, line) ->
+                List.map (fun row -> is_selected, row) (wrap line))
+                (timeline_lines ~width ~instances:[item] ?selected rows)
+            @ plain (List.concat_map wrap (snapshot_coverage_lines snapshot.output.coverage))
       | Connections -> []
-      | Configurations -> fact_spans ~width (
+      | Configurations -> fact_spans_with_selection ~width (
           [Fact_fields { indent = 0; fields =
              ["Source:", Option.value ~default:"not supplied" item.source_path;
               "Revision:", item.revision;
@@ -2398,17 +2429,29 @@ let detail_lines ~height ~width view =
           @ host_request_lines item
           @ connection_worker_lines snapshot item)
       | Rows ->
-          if record_rows=[] then empty_result_rows ~width view item
+          if record_rows=[] then plain (empty_result_rows ~width view item)
           else List.concat_map (fun (row : Row.row) ->
-            technical_text [(if Option.fold ~none:false ~some:(fun (selected : Row.row) -> selected.id = row.id)
-                 selected then "› " else "  ")
-             ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title;
-             "Row " ^ row.id]
-            @ [Technical_json {value=`Assoc row.fields;indent=0}]
-            @ technical_text (List.map evidence_text row.evidence)
-            |> List.concat_map (technical_rows ~width)) record_rows in
+            let is_selected =
+              Option.fold ~none:false ~some:(fun (chosen : Row.row) -> chosen.id = row.id) selected
+            in
+            let title_line =
+              (if is_selected then "› " else "  ")
+              ^ (if List.mem row.id view.selected then "[selected] " else "") ^ row.title
+            in
+            let title_rows =
+              List.concat_map (technical_rows ~width) (technical_text [title_line])
+              |> List.map (fun line -> is_selected, line)
+            in
+            let rest_rows =
+              (technical_text ["Row " ^ row.id]
+               @ [Technical_json {value=`Assoc row.fields;indent=0}]
+               @ technical_text (List.map evidence_text row.evidence)
+               |> List.concat_map (technical_rows ~width))
+              |> plain
+            in
+            title_rows @ rest_rows) record_rows in
       head @ body
-  | Some _, None -> ["Reading Plugins"]
+  | Some _, None -> [false, "Reading Plugins"]
 
 let rec action_fields prefix = function
   | `Assoc fields -> List.concat_map (fun (key,value) ->
@@ -2558,25 +2601,30 @@ let flow_rows ?(embedded=false) view =
          List.map text notices @ source_lines @ layer_lines
          @ (if workers=[] then [Fact_text "No current workers to place. Review installation issues or install a Plugin."] else [])
          @ [Fact_text ""; Fact_heading "Declared inputs and outputs"]
-         @ List.map text (List.concat_map (fun instance ->
+         @ List.concat_map (fun instance ->
            let target = name instance in
-           [(if Some instance.id = Option.map (fun i -> i.id) (selected_instance view) then "› " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase]
-           @ (match flow_inputs instance.binding with
-              | Error detail -> ["  Invalid source binding: " ^ detail]
-              | Ok [] -> ["  No upstream Add-on dependency (D shows external/owned source binding)"]
-              | Ok upstream -> List.concat_map (fun input ->
-                  ["  " ^ input.installation_id ^ " -> " ^ target ^
-                    (if historical then " · stored binding; producer incarnation unknown"
-                    else match resolve_flow_input ~identity ~run_id:instance.run_id workers input with
-                      | Producer_available _ -> ""
-                      | Producer_ambiguous -> " · producer identity ambiguous across live workers"
-                      | Output_missing port -> " · producer output unavailable: " ^ port
-                      | Producer_missing -> if complete then " · producer absent in this run"
-                          else " · producer unresolved; inventory incomplete")]
-                  @ (match input.output_id with
-                    | None -> []
-                    | Some port -> ["    Input " ^ input.source_id ^ ": " ^ input.installation_id ^ "/" ^ port])) upstream)
-           @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs) workers))
+           let selected = Some instance.id = Option.map (fun i -> i.id) (selected_instance view) in
+           let header_line =
+             (if selected then "› " else "  ") ^ target ^ " · " ^ instance.title ^ " · " ^ phase_label instance.phase
+           in
+           (if selected then Fact_selected header_line else Fact_text header_line)
+           :: List.map text (
+             (match flow_inputs instance.binding with
+               | Error detail -> ["  Invalid source binding: " ^ detail]
+               | Ok [] -> ["  No upstream Add-on dependency (D shows external/owned source binding)"]
+               | Ok upstream -> List.concat_map (fun input ->
+                   ["  " ^ input.installation_id ^ " -> " ^ target ^
+                     (if historical then " · stored binding; producer incarnation unknown"
+                     else match resolve_flow_input ~identity ~run_id:instance.run_id workers input with
+                       | Producer_available _ -> ""
+                       | Producer_ambiguous -> " · producer identity ambiguous across live workers"
+                       | Output_missing port -> " · producer output unavailable: " ^ port
+                       | Producer_missing -> if complete then " · producer absent in this run"
+                           else " · producer unresolved; inventory incomplete")]
+                   @ (match input.output_id with
+                     | None -> []
+                     | Some port -> ["    Input " ^ input.source_id ^ ": " ^ input.installation_id ^ "/" ^ port])) upstream)
+             @ List.map (fun (port,selection) -> "  output " ^ port ^ " -> " ^ (match selection with Row.All_lanes -> "all supplied lanes" | Row.Selected_lanes lanes -> String.concat ", " lanes)) instance.outputs)) workers)
   @ [Fact_text ""; Fact_heading "Result -> retained evidence -> explicit Keeper / Broadcast sharing -> agent use";
      Fact_text "Delivery acceptance and agent reading are separate recorded stages."]
   @ (match Option.map evidence_receipt_lines view.receipt with
@@ -2605,81 +2653,95 @@ let links_lines ~width view =
              | S.Browser_document {id;_} -> "Input:", id) sources }])
         @ [Fact_fields { indent = 0; fields = List.map (fun (name,_) -> "Output:", name) item.outputs }]
     | Some _, None | None, (Some _ | None) -> [] in
-  fact_spans ~width (bound @ (Fact_text "" :: flow_rows ~embedded:true view))
+  fact_spans_with_selection ~width (bound @ (Fact_text "" :: flow_rows ~embedded:true view))
 
-let lines ?(height=24) ?(failed_note = "") ~width view =
+let lines_with_selection ?(height=24) ?(failed_note = "") ~width view =
+  let plain lines = List.map (fun line -> false, line) lines in
+  let wrap_selected rows =
+    List.concat_map (fun (selected, line) ->
+      List.map (fun row -> selected, row) (document_rows ~width line)) rows
+  in
   match view.installer with
   | Some installer ->
       let render = document_rows ~width in
       let diagnostics = List.concat_map render (diagnostic_lines view) in
-      diagnostics @ Masc_tui_lane_installer.lines ~height:(max 1 (height - List.length diagnostics)) ~render installer
+      plain diagnostics
+      @ Masc_tui_lane_installer.lines_with_selection
+          ~height:(max 1 (height - List.length diagnostics)) ~render installer
   | None -> match view.evidence_prompt with
   | Some prompt ->
-      List.concat_map (document_rows ~width) (diagnostic_lines view)
+      plain (List.concat_map (document_rows ~width) (diagnostic_lines view))
       @ evidence_rows ~width prompt
   | None -> match view.subscription_panel,view.action_menu,view.records with
   | Some panel,_,_ ->
       (Masc_tui_message_layout.fit_width (if view.loading then "Refreshing" else "Last received subscription state") (max 1 width)
        :: Masc_tui_lane_subscriptions.lines panel)
       |> List.concat_map (document_rows ~width)
+      |> plain
   | None,Some menu,_ ->
       let wrap = List.concat_map (document_rows ~width) in
       (match menu.row with
        | Some (Row_list {row_title;entries;_}) ->
            (* The title names the chosen row and the instance that produced
               it; an action the row cannot fill stays listed with why. *)
-           wrap ([Printf.sprintf "Actions for %s · %s" row_title menu.target_title]
+           plain (wrap ([Printf.sprintf "Actions for %s · %s" row_title menu.target_title]
                  @ diagnostic_lines view)
-           @ key_rows ~width ["Up/Down:choose"; "Enter:open"; "Esc:cancel"]
-           @ wrap (List.mapi (fun position (entry : row_entry) ->
-               (if position=menu.cursor then "› " else "  ") ^ entry.label
+           @ key_rows ~width ["Up/Down:choose"; "Enter:open"; "Esc:cancel"])
+           @ wrap_selected (List.mapi (fun position (entry : row_entry) ->
+               let selected = position = menu.cursor in
+               selected,
+               (if selected then "› " else "  ") ^ entry.label
                ^ (match entry.filled with
                   | Ok _ -> ""
                   | Error unfilled ->
                       " · unavailable: " ^ String.concat "; " (List.map unfilled_text unfilled))) entries
-             @ [(if menu.cursor=List.length entries then "› " else "  ") ^ "Other action"])
+             @ (let selected = menu.cursor = List.length entries in
+                [selected, (if selected then "› " else "  ") ^ "Other action"]))
        | Some (Row_form {label;_}) ->
            (* One sentence for what sending does: which instance receives
               which action. *)
-           wrap ([Printf.sprintf "Sends \"%s\" to %s" label menu.target_title]
-                 @ diagnostic_lines view
-                 @ Option.fold ~none:[] ~some:(Masc_tui_schema_form.lines ~show_description:true) menu.form)
+           plain (wrap ([Printf.sprintf "Sends \"%s\" to %s" label menu.target_title]
+                 @ diagnostic_lines view))
+           @ wrap_selected (Option.fold ~none:[] ~some:(Masc_tui_schema_form.lines_with_selection ~show_description:true) menu.form)
        | None ->
-           wrap (["Run action on " ^ menu.target_title] @ diagnostic_lines view)
+           plain (wrap (["Run action on " ^ menu.target_title] @ diagnostic_lines view))
            @ (match menu.form with
-           | Some form -> wrap (Masc_tui_schema_form.lines ~show_description:true form)
+           | Some form -> wrap_selected (Masc_tui_schema_form.lines_with_selection ~show_description:true form)
            | None ->
-               key_rows ~width
+               plain (key_rows ~width
                  [Printf.sprintf "Action %d/%d" (menu.cursor+1) (List.length menu.choices);
                   "Up/Down:choose"; "Enter:run once"; "Esc:cancel"]
                @ key_rows ~width ["J/K:scroll action details"]
                @ wrap (match List.nth_opt menu.choices menu.cursor with
                   | Some action -> action_fields "" action
-                  | None -> ["No selected action"])))
+                  | None -> ["No selected action"]))))
   | _,_,Some overlay ->
-      (diagnostic_lines view @ Masc_tui_lane_records.lines overlay)
-      |> List.concat_map (document_rows ~width)
+      plain (List.concat_map (document_rows ~width) (diagnostic_lines view))
+      @ wrap_selected (Masc_tui_lane_records.lines_with_selection overlay)
   | None,None,None ->
-      if view.help_open then help_lines ~width
-      else if view.presentation = Flow then fact_spans ~width (flow_rows view)
+      if view.help_open then plain (help_lines ~width)
+      else if view.presentation = Flow then fact_spans_with_selection ~width (flow_rows view)
       else if view.presentation = Technical && view.screen=Overview && view.focus=Configurations
         && Option.is_none view.document_key && Option.is_none view.draft
-      then installation_detail_lines ~width view
+      then plain (installation_detail_lines ~width view)
       else if view.presentation = Technical || Option.is_some view.document_key || Option.is_some view.draft
-      then technical_lines ~height ~failed_note ~width view
+      then plain (technical_lines ~height ~failed_note ~width view)
       else
         let receipt_lines = match view.receipt with
           | None -> []
           | Some json -> (match evidence_receipt_lines json with
               | [] -> []
               | receipt -> ["Last evidence receipt"] @ receipt @ [""]) in
-        let receipt_lines = List.concat_map (document_rows ~width) receipt_lines in
+        let receipt_lines = plain (List.concat_map (document_rows ~width) receipt_lines) in
         (match view.screen with
         | Overview -> overview_lines ~width view @ receipt_lines
         | Detail _ -> receipt_lines @ detail_lines ~height:(height - List.length receipt_lines) ~width view
             @ (match view.focus with
                | Connections -> links_lines ~width view
                | Timeline | Configurations | Instances | Rows -> []))
+
+let lines ?height ?failed_note ~width view =
+  List.map snd (lines_with_selection ?height ?failed_note ~width view)
 
 (* A TOML declaration may exist while no worker can run. Keep the file count,
    live worker count, and failures separate on the Lanes surface. *)

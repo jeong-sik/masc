@@ -1966,21 +1966,7 @@ let keeper_context_lines ~cols input =
                        else
                          let span = Masc_tui_value.Ongoing.since ~now:input.now due in
                          say ("예정 시각 " ^ span ^ " 지남") ("due " ^ span ^ " ago")) in
-                let what =
-                  let raw = Terminal_text.single_line item.kwi_what in
-                  let prefix_sep = " · sched-" in
-                  let sep_len = String.length prefix_sep in
-                  let rec find i =
-                    if i + sep_len > String.length raw then None
-                    else if String.sub raw i sep_len = prefix_sep then Some i
-                    else find (i + 1)
-                  in
-                  match find 0 with
-                  | None -> raw
-                  | Some idx ->
-                      let head = String.trim (String.sub raw 0 idx) in
-                      if String.equal head "" then say "예약 실행" "scheduled wake" else head
-                in
+                let what = Terminal_text.single_line item.kwi_what in
                 ( one Dim
                     (waiting ^ " "
                      ^ (if input.ko then Printf.sprintf "대기 중인 일정 %d개%s" count suffix

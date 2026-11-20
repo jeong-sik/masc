@@ -12,6 +12,7 @@ val handle : key:string -> t -> (event, string) result
     not been read has no known parent, so Left opens the workspace root. *)
 val hints : t -> string
 val lines : height:int -> render:(string -> string list) -> t -> string list
+val lines_with_selection : height:int -> render:(string -> string list) -> t -> (bool * string) list
 (** [render] sanitizes and wraps terminal text at the actual frame width.
     Lists keep the selected entry visible. Complete selected metadata follows
     the list and can be scrolled, even in a short terminal. *)

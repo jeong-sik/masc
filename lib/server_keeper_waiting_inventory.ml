@@ -953,6 +953,16 @@ let schedule_keeper_owner keeper_set request =
   |> List.find_opt (fun name -> Set_util.StringSet.mem name keeper_set)
 ;;
 
+let schedule_what (request : Schedule_domain.schedule_request) =
+  let _, summary = Schedule_payload_projection.target_summary request in
+  let label =
+    match summary with
+    | Some text when not (String.equal (String.trim text) "") -> String.trim text
+    | Some _ | None -> request.schedule_id
+  in
+  Printf.sprintf "예약 실행 · %s" label
+;;
+
 let schedule_rows ?keeper_name ~keeper_names state =
   let keeper_set = Set_util.StringSet.of_list keeper_names in
   state.Schedule_store.schedules
@@ -967,7 +977,7 @@ let schedule_rows ?keeper_name ~keeper_names state =
          | Scheduled -> Listed_only
          | Due | Running | Succeeded | Failed | Cancelled | Expired -> Holds_state)
     ; waiting_on = schedule_waiting_on request
-    ; what = Printf.sprintf "예약 실행 · %s" request.schedule_id
+    ; what = schedule_what request
     ; wake_producer =
         (match request.status with
          | Scheduled | Due | Running -> Schedule_runner

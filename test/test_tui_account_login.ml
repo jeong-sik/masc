@@ -1435,6 +1435,29 @@ let select_all_non_antigravity_and_progress_clock () =
   t.phase <- Login.Documented_context (model 0);
   check bool "documented context entry claims text input" true (Login.text_input_active t)
 
+let typed_selection_ignores_prefix_in_notice () =
+  let t = Login.create "" in
+  ok (Login.inventory t inventory);
+  t.notice <- "› Quoted chevron notice";
+  let rows, _ = Login.visible_lines_with_selection ~height:12 ~width:80 t in
+  let notice_selected =
+    List.exists
+      (fun (selected, row) -> selected && Login.row_text row = "› Quoted chevron notice")
+      rows
+  in
+  let selected_count = List.length (List.filter fst rows) in
+  check bool "chevron-prefixed notice is not selected" false notice_selected;
+  check int "exactly one client row is selected" 1 selected_count;
+  t.phase <-
+    Login.Finished
+      { saved = Login.Saved_verified
+      ; activation = Login.Active { exact_output_available = true }
+      ; refresh_failed = false };
+  t.notice <- "› Finished chevron line";
+  let finished_rows, _ = Login.visible_lines_with_selection ~height:12 ~width:80 t in
+  check int "finished phase marks zero selected rows" 0
+    (List.length (List.filter fst finished_rows))
+
 let () = run "TUI account login" ["workflow",[
   test_case "select-all on Antigravity batches unknown contexts cleanly" `Quick select_all_antigravity_batch;
   test_case "non-Antigravity select-all and in-progress indicator clock" `Quick select_all_non_antigravity_and_progress_clock;
@@ -1485,4 +1508,5 @@ let () = run "TUI account login" ["workflow",[
   test_case "sgr text keeps what the operator reads" `Quick sgr_text_keeps_what_the_operator_reads;
   test_case "a login address wider than the pane wraps whole" `Quick a_login_address_wraps_whole;
   test_case "removal from the list" `Quick removal_from_the_list;
-  test_case "refused removal" `Quick refused_removal]]
+  test_case "refused removal" `Quick refused_removal;
+  test_case "typed selection ignores chevron prefix in notice" `Quick typed_selection_ignores_prefix_in_notice]]

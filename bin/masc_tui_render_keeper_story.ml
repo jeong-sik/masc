@@ -163,9 +163,7 @@ let schedule_row_line ~ko ~now ((row : Masc_tui_types.schedule_row), due) =
         let status = Masc_tui_render_work.schedule_status_reading ~ko row.sch_status in
         status.tone, status.word
   in
-  let what =
-    Terminal_text.single_line (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)
-  in
+  let what = Masc_tui_render_prim.schedule_row_label row in
   String.concat ""
     [ "  "
     ; color
@@ -304,9 +302,7 @@ let wake_item_text ~ko wake =
     | None -> ""
   in
   dim (if ko then "호출" else "wake") ^ outcome_text
-  ^ dim
-      (" · "
-       ^ Terminal_text.single_line (Option.value ~default:row.sch_schedule_id row.sch_payload_summary))
+  ^ dim (" · " ^ Masc_tui_render_prim.schedule_row_label row)
   ^ error_text
 ;;
 

@@ -2189,6 +2189,46 @@ let records_overlay_keeps_draft_identity_and_scroll () =
   check bool "changed draft text is not overwritten" true
     (Result.is_error (UI.edit_records ~key:"d" changed_under_overlay))
 
+let typed_selection_tracks_cursor_and_two_pane_results () =
+  let mk_instance id title : UI.instance =
+    { id; incarnation = id ^ "-1"; run_id = "run"; addon_id = "demo"; title; revision = "1"
+    ; phase = UI.Row.Attached; runtime_presence = UI.Live_entry; observation_seq = 1
+    ; rows_count = 1; configuration_revision = None; installation_id = None; source_path = None
+    ; binding = `Assoc []; outputs = []; skills_directory = None; ui_category = None
+    ; action_schema = None; binding_schema = None; display = Masc.Lane_addon_presentation.empty
+    ; host_requests = None; row_actions = None; action_tool = None }
+  in
+  let first = mk_instance "inst-1" "› Literal chevron title" in
+  let second = mk_instance "inst-2" "Second plugin" in
+  let row1 : UI.Row.row =
+    { id = "r1"; lane_id = "inst-1/results"; kind = UI.Row.Event; title = "Result A"
+    ; observed_at = 1.; subject_id = "s"; clock = None; actor = None
+    ; fields = [ "k", `String "v" ]; evidence = []; related_ids = [] }
+  in
+  let snapshot : UI.snapshot =
+    { instances = [ first; second ]; configuration = None
+    ; output = { rows = [ row1 ]; coverage = [] }; complete = Some true }
+  in
+  let contains haystack needle =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  let overview = { UI.initial with snapshot = Some snapshot; instance_cursor = 1 } in
+  let ov_rows = UI.lines_with_selection ~height:24 ~width:100 overview in
+  let ov_selected = List.filter_map (fun (sel, line) -> if sel then Some line else None) ov_rows in
+  check bool "non-cursor row with chevron in title is not selected" false
+    (List.exists (fun line -> contains line "Literal chevron title") ov_selected);
+  check bool "cursor row in Overview is selected" true
+    (List.exists (fun line -> contains line "Second plugin") ov_selected);
+  let detail = UI.open_selected_instance { UI.initial with snapshot = Some snapshot; instance_cursor = 0 } in
+  let wide_rows = UI.lines_with_selection ~height:24 ~width:100 detail in
+  check bool "two-pane Results emits no full-row selection" false
+    (List.exists fst wide_rows);
+  let narrow_rows = UI.lines_with_selection ~height:24 ~width:70 detail in
+  check bool "stacked single-pane Results marks the selected result row" true
+    (List.exists (fun (sel, line) -> sel && contains line "Result A") narrow_rows)
+
 let () = run "TUI Lane package operations" ["operator scenarios",[
   test_case "records overlay keeps draft identity and scroll" `Quick records_overlay_keeps_draft_identity_and_scroll;
   test_case "current category requires exact id and path" `Quick
@@ -2231,4 +2271,6 @@ let () = run "TUI Lane package operations" ["operator scenarios",[
     a_value_that_cannot_fit_beside_its_lead_goes_below;
   test_case "a host request cycle decodes and fails alone" `Quick host_request_cycle_decodes_and_fails_alone;
   test_case "every host issue reads back" `Quick every_host_issue_reads_back;
-  test_case "an answered installation opens its Results" `Quick answered_installation_opens_its_results]]
+  test_case "an answered installation opens its Results" `Quick answered_installation_opens_its_results;
+  test_case "typed selection tracks cursor and two-pane Results" `Quick
+    typed_selection_tracks_cursor_and_two_pane_results]]

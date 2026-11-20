@@ -214,15 +214,19 @@ let hints = function
   | Catalog browser -> Browser.hints browser
   | Pending _ | Catalog_pending _ -> "Esc:cancel request"
   | Path _ | Binding _ | Directory _ -> "Tab:field  Left/Right:choice  Ctrl-E:items  Ctrl-U:unset  Ctrl-S:review  Esc:cancel"
-let lines ?(height=24) ?(render=fun line -> [line]) state =
-  let render_lines = List.concat_map render in
+let lines_with_selection ?(height=24) ?(render=fun line -> [line]) state =
+  let plain lines = List.map (fun line -> false, line) (List.concat_map render lines) in
+  let render_selected rows =
+    List.concat_map (fun (selected, line) ->
+      List.map (fun row -> selected, row) (render line)) rows
+  in
   match state with
-  | Catalog browser -> Browser.lines ~height ~render browser
-  | Catalog_pending (_,path,_,_) -> render_lines ["Reading local packages · Esc:cancel";
+  | Catalog browser -> Browser.lines_with_selection ~height ~render browser
+  | Catalog_pending (_,path,_,_) -> plain ["Reading local packages · Esc:cancel";
       "Folder: " ^ (match path with None -> "workspace root" | Some path -> path)]
-  | Directory (form,_) -> render_lines ("Open workspace folder" :: Form.lines form)
-  | Pending (_,path,_) -> render_lines ["Reading package execution · Esc:cancel";"Manifest: " ^ path]
-  | Path form -> render_lines ("Install Add-on: manifest path on the connected server" :: Form.lines form)
+  | Directory (form,_) -> plain ["Open workspace folder"] @ render_selected (Form.lines_with_selection form)
+  | Pending (_,path,_) -> plain ["Reading package execution · Esc:cancel";"Manifest: " ^ path]
+  | Path form -> plain ["Install Add-on: manifest path on the connected server"] @ render_selected (Form.lines_with_selection form)
   | Binding (preview,form) ->
       let execution = match preview.execution with
         | Host_process -> ["Runs as a host process."]
@@ -235,6 +239,9 @@ let lines ?(height=24) ?(render=fun line -> [line]) state =
       let service = match preview.service with
         | Mcp_tools -> "Worker service: MCP tools"
         | Browser_service -> "Worker service: browser" in
-      render_lines (["Install " ^ preview.title ^ " · revision " ^ preview.revision;
+      plain (["Install " ^ preview.title ^ " · revision " ^ preview.revision;
        "Manifest: " ^ preview.path; role; service] @ execution @
-       ["Preview does not start a worker. Enter after review creates a local TOML draft."] @ Form.lines form)
+       ["Preview does not start a worker. Enter after review creates a local TOML draft."])
+      @ render_selected (Form.lines_with_selection form)
+
+let lines ?height ?render state = List.map snd (lines_with_selection ?height ?render state)

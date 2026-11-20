@@ -82,3 +82,7 @@ val message : t -> string option
 val lines : t -> string list
 (** The overlay as printable rows: the entries, the open form if any, and
     the keys that act here. *)
+
+val lines_with_selection : t -> (bool * string) list
+(** Same as {!lines}, pairing each row with whether it is the active selected
+    record or open form field. *)

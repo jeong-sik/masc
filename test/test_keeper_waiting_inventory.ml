@@ -1578,6 +1578,38 @@ let test_public_board_rows_withhold_unverified_identity () = with_workspace @@ f
     | Error detail -> fail ("opaque Board address lost the exact authorized selection: " ^ detail)) rows
 ;;
 
+let test_keeper_wake_schedule_what_prefers_human_summary () =
+  with_workspace
+  @@ fun config ->
+  let keeper_name = "summary-keeper" in
+  ensure_keeper config keeper_name;
+  let titled_payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; "body", `Assoc [ "keeper_name", `String keeper_name; "title", `String "Morning patrol"; "message", `String "body" ]
+      ]
+  in
+  let messaged_payload =
+    `Assoc
+      [ "kind", `String "masc.keeper_wake"
+      ; "body", `Assoc [ "keeper_name", `String keeper_name; "message", `String "Check PR queue" ]
+      ]
+  in
+  ignore (create_schedule_exn ~payload:titled_payload config ~schedule_id:"sched-titled" ~scheduled_by:(automated keeper_name) : Schedule_domain.schedule_request);
+  ignore (create_schedule_exn ~payload:messaged_payload config ~schedule_id:"sched-messaged" ~scheduled_by:(automated keeper_name) : Schedule_domain.schedule_request);
+  ignore (create_schedule_exn config ~schedule_id:"sched-fallback" ~scheduled_by:(automated keeper_name) : Schedule_domain.schedule_request);
+  let json = Server_keeper_waiting_inventory.dashboard_json config in
+  let keeper = match find_keeper json keeper_name with Some row -> row | None -> fail "keeper missing" in
+  let rows = U.(keeper |> member "waiting_on" |> to_list) in
+  let what_of id =
+    List.find (fun row -> U.(row |> member "detail" |> member "schedule_id" |> to_string) = id) rows
+    |> json_string_member "what"
+  in
+  check string "titled keeper_wake uses title" "예약 실행 · Morning patrol" (what_of "sched-titled");
+  check string "untitled keeper_wake uses message" "예약 실행 · Check PR queue" (what_of "sched-messaged");
+  check string "unknown schedule kind falls back to id" "예약 실행 · sched-fallback" (what_of "sched-fallback")
+;;
+
 let () =
   run "keeper_waiting_inventory"
     [ ( "queue_residence"
@@ -1607,6 +1639,8 @@ let () =
             test_unreadable_shutdown_keeps_fence_and_read_error
         ; test_case "keeper-owned schedule rows are lane scoped" `Quick
             test_keeper_owned_schedule_waiting_rows_are_lane_scoped
+        ; test_case "keeper_wake schedule what prefers human summary" `Quick
+            test_keeper_wake_schedule_what_prefers_human_summary
         ; test_case "scoped schedules preserve participants" `Quick test_scoped_schedules_keep_participant_identity
         ; test_case "scoped confirmations preserve targets" `Quick test_scoped_confirmations_keep_target_identity
         ; test_case "nonlive keeper has no current execution" `Quick test_nonlive_keeper_has_no_current_execution

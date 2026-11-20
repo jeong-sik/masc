@@ -2008,20 +2008,22 @@ let render_account_login state view =
     ~hints:(Masc_tui_account_login.hints ~ko view)
     ~body:(fun ~budget c ->
       let lines, position =
-        Masc_tui_account_login.visible_lines ~ko ~now ~height:budget ~width:(framed_inner_width cols) view in
+        Masc_tui_account_login.visible_lines_with_selection ~ko ~now ~height:budget ~width:(framed_inner_width cols) view in
       Option.iter c.position position;
       let width = framed_inner_width cols in
       List.iter
         (function
-          | Masc_tui_account_login.Text text ->
+          | selected, Masc_tui_account_login.Text text ->
               let clean = Masc.Tui_terminal_text.sanitize_terminal_text text in
-              if String.starts_with ~prefix:"\xe2\x80\xba " clean then
+              if selected then
                 c.push_selected (fit_width (Masc_tui_theme.strip_sgr clean) width)
               else c.push (fit_width clean width)
-          | Masc_tui_account_login.Progress text ->
+          | selected, Masc_tui_account_login.Progress text ->
               let clean = Masc.Tui_terminal_text.sanitize_terminal_text text in
-              c.push (Theme.info () ^ fit_width clean width ^ Ansi.reset)
-          | Masc_tui_account_login.Terminal line ->
+              if selected then
+                c.push_selected (fit_width (Masc_tui_theme.strip_sgr clean) width)
+              else c.push (Theme.info () ^ fit_width clean width ^ Ansi.reset)
+          | _, Masc_tui_account_login.Terminal line ->
               let rendered =
                 Masc_tui_sgr_text.render
                   ~sanitize:Masc.Tui_terminal_text.sanitize_terminal_text line
@@ -2306,42 +2308,13 @@ let render_lane_addons state (view : Masc_tui_lane_addons.t) =
       else String.concat "  " (Masc_tui_lane_addons.overview_hints view))
     ~body:(fun ~budget c ->
       let inner_width = framed_inner_width cols in
-      let two_pane_results =
-        (match view.screen, view.presentation, view.focus with
-         | Masc_tui_lane_addons.Detail _, Masc_tui_lane_addons.Summary,
-           (Masc_tui_lane_addons.Timeline | Masc_tui_lane_addons.Instances) -> true
-         | Masc_tui_lane_addons.Overview,
-           (Masc_tui_lane_addons.Summary | Masc_tui_lane_addons.Technical | Masc_tui_lane_addons.Flow),
-           (Masc_tui_lane_addons.Timeline | Masc_tui_lane_addons.Connections
-            | Masc_tui_lane_addons.Configurations | Masc_tui_lane_addons.Instances
-            | Masc_tui_lane_addons.Rows)
-         | Masc_tui_lane_addons.Detail _,
-           (Masc_tui_lane_addons.Technical | Masc_tui_lane_addons.Flow),
-           (Masc_tui_lane_addons.Timeline | Masc_tui_lane_addons.Connections
-            | Masc_tui_lane_addons.Configurations | Masc_tui_lane_addons.Instances
-            | Masc_tui_lane_addons.Rows)
-         | Masc_tui_lane_addons.Detail _, Masc_tui_lane_addons.Summary,
-           (Masc_tui_lane_addons.Connections | Masc_tui_lane_addons.Configurations
-            | Masc_tui_lane_addons.Rows) -> false)
-        && not view.help_open
-        && Option.is_none view.document_key
-        && Option.is_none view.draft
-        && Option.is_none view.evidence_prompt
-        && Option.is_none view.subscription_panel
-        && Option.is_none view.installer
-        && Option.is_none view.records
-        && Option.is_none view.action_menu
-        && inner_width >= 90
-      in
-      let lines = Masc_tui_lane_addons.lines ~height:budget ~width:inner_width view in
+      let lines = Masc_tui_lane_addons.lines_with_selection ~height:budget ~width:inner_width view in
       let scroll = Masc_tui_scroll.normalize ~count:(List.length lines) ~height:budget view.scroll in
       Option.iter c.position
         (Masc_tui_value.Position.window ~first:scroll ~shown:budget ~total:(List.length lines));
       lines
       |> List.filteri (fun index _ -> index >= scroll && index < scroll + budget)
-      |> List.iter (fun line ->
-           let plain = Masc_tui_theme.strip_sgr line in
-           if not two_pane_results && String.starts_with ~prefix:"\xe2\x80\xba " plain then
-             c.push_selected plain
+      |> List.iter (fun (selected, line) ->
+           if selected then c.push_selected (Masc_tui_theme.strip_sgr line)
            else c.push line))
 

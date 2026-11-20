@@ -73,14 +73,15 @@ let left_hint t = match t.snapshot,t.directory with
   | Some _,_ | None,None -> "Left:parent"
 let hints t = String.concat "  " ["j/k:select";"Enter:open";left_hint t;"Right:folder";
   "g:directory";"p:manifest";"n:new TOML";"PgUp/PgDn:details";"Esc:cancel"]
-let lines ~height ~render t =
+let lines_with_selection ~height ~render t =
+  let plain lines = List.map (fun line -> false, line) lines in
   let compact line = match render line with [] -> "" | [line] -> line | first::_ -> first in
   let rows = entries t in
-  let header = List.map compact ["Choose a local package · j/k:select · Enter:open";
+  let header = plain (List.map compact ["Choose a local package · j/k:select · Enter:open";
     ("Folder: " ^ (match t.directory with None -> "workspace root" | Some path -> path));
     left_hint t ^ " · Right:folder · g:directory · p:manifest · n:new TOML · r:reload · Esc:cancel";
     Printf.sprintf "%d/%d entries · lane.toml in this folder and immediate child folders"
-      (if rows=[] then 0 else t.cursor+1) (List.length rows)] in
+      (if rows=[] then 0 else t.cursor+1) (List.length rows)]) in
   let capacity = max 1 (height - List.length header - 6) in
   (* Role headers occupy screen lines, so the window is computed over the drawn
      lines (headers included) and always contains the selected entry's line. *)
@@ -104,12 +105,13 @@ let lines ~height ~render t =
   let window = all_lines |> List.drop start |> List.take capacity in
   let current_heading index =
     List.find_map (fun (i, h, _) -> if i=index then h else None) all_lines in
+  let to_row (index, heading, line) = (Option.is_none heading && index = t.cursor), line in
   let visible = match window with
     | (index, None, _) :: rest when start < cursor_line && index <> t.cursor && start > 0 ->
         (match current_heading index with
-         | Some h -> List.map (fun (_, _, l) -> l) ((index, Some h, h) :: rest)
-         | None -> List.map (fun (_, _, l) -> l) window)
-    | _ -> List.map (fun (_, _, l) -> l) window in
+         | Some h -> List.map to_row ((index, Some h, h) :: rest)
+         | None -> List.map to_row window)
+    | _ -> List.map to_row window in
   let details = match selected t with
     | None -> [match t.snapshot,t.directory with
                | None,None -> "Read a folder or use p to enter a manifest path."
@@ -121,4 +123,6 @@ let lines ~height ~render t =
         [package.metadata.title ^ " · revision " ^ package.metadata.revision;package.manifest_path]
         @ Option.to_list package.metadata.description
         @ ["Enter rereads the package execution; nothing is installed yet."] in
-  header @ visible @ List.concat_map render details
+  header @ visible @ plain (List.concat_map render details)
+
+let lines ~height ~render t = List.map snd (lines_with_selection ~height ~render t)

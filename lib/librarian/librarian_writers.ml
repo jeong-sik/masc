@@ -9,18 +9,20 @@ type t =
   ; place : string -> Machine.place
   ; stores : string -> Librarian_unit_content.stores
   ; ask : Librarian_ask.input -> Librarian_read_result.t
+  ; start_turn_log : string -> (unit, string) result
   ; declared : Machine.declared option Atomic.t
   ; writers : Writer.t By_keeper.t Atomic.t
   ; to_run : Writer.t Eio.Stream.t
   }
 
-let create ~sw ~now ~registered ~place ~stores ~ask =
+let create ~sw ~now ~registered ~place ~stores ~ask ~start_turn_log =
   let t =
     { now
     ; registered
     ; place
     ; stores
     ; ask
+    ; start_turn_log
     ; declared = Atomic.make None
     ; writers = Atomic.make By_keeper.empty
     ; to_run = Eio.Stream.create max_int
@@ -67,6 +69,7 @@ let rec ensure t keeper =
           ~declared:(fun () -> Atomic.get t.declared)
           ~stores:(t.stores keeper)
           ~ask:t.ask
+          ~start_turn_log:(fun () -> t.start_turn_log keeper)
           (t.place keeper)
       in
       if Atomic.compare_and_set t.writers writers (By_keeper.add keeper writer writers)

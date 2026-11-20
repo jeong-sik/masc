@@ -1,8 +1,9 @@
 (** One Keeper's writer: the fiber that owns its Memory store
     (RFC librarian-call-only-proposes §8.2, §8.6, §9).
 
-    The fiber takes [<keeper>.memory.lock], boots the store, and then takes
-    one event at a time from its mailbox. What an event does is
+    The fiber takes [<keeper>.memory.lock], starts the store (the turn log's
+    first line, then the boot: §8.6), and then takes one event at a time
+    from its mailbox. What an event does is
     {!Librarian_machine}'s to say. A write waits for one commit and for
     nothing else: events that arrive during the boot wait in the mailbox and
     are handled in the order they came.
@@ -61,13 +62,19 @@ type status =
       reads this as its first event, and again for every
       {!declaration_changed}.
     - [ask] asks one question ({!Librarian_ask.run}) about the Keeper's
-      stores [stores]. *)
+      stores [stores].
+    - [start_turn_log] is the store start's first step
+      ({!Keeper_turn_log_store_start.run}), run before every boot: the first
+      and the one a [Resume] does. [Error] stops the store as
+      [Store_unwritable], with its text in the log. The writer only calls
+      it: it writes no turn log line itself. *)
 val create
   :  now:(unit -> float)
   -> registered:(unit -> bool)
   -> declared:(unit -> Librarian_machine.declared option)
   -> stores:Librarian_unit_content.stores
   -> ask:(Librarian_ask.input -> Librarian_read_result.t)
+  -> start_turn_log:(unit -> (unit, string) result)
   -> Librarian_machine.place
   -> t
 

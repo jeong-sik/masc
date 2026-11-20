@@ -963,7 +963,8 @@ let ensure_memory_writer ~sw ~(config : Masc.Workspace.config) name =
   if Option.is_none (Masc.Keeper_memory_writers.find ~base_path)
   then
     ignore
-      (Masc.Keeper_memory_writers.start ~sw ~ask:never_asks ~config
+      (Masc.Keeper_memory_writers.start ~sw ~ask:never_asks
+         ~start_turn_log:(Masc.Keeper_turn_log_store_start.run config) ~config
        : Masc.Librarian_writers.t);
   if not (Masc.Keeper_registry.is_registered ~base_path name)
   then (

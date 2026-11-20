@@ -60,6 +60,7 @@ type t =
   ; declared : unit -> Machine.declared option
   ; stores : Librarian_unit_content.stores
   ; ask : Librarian_ask.input -> Librarian_read_result.t
+  ; start_turn_log : unit -> (unit, string) result
   ; mailbox : event Eio.Stream.t
   ; status : status Atomic.t
   ; between : status option Atomic.t
@@ -231,7 +232,18 @@ let live t ~sw =
     Eio.Cancel.protect (fun () ->
       if not !locked then locked := take_lock t ~sw;
       let opened : (Store.t, Store.stop) result =
-        if !locked then Machine.boot t.place ~at:(t.now ()) else Error Store_unwritable
+        if not !locked
+        then Error Store_unwritable
+        else (
+          (* §8.6: the store start is the turn log's first line, then the
+             boot. A first boot and a resume both do the two. *)
+          match t.start_turn_log () with
+          | Ok () -> Machine.boot t.place ~at:(t.now ())
+          | Error detail ->
+            Log.Keeper.error ~keeper_name:t.place.keeper_id
+              "librarian memory store start: the turn log's first line was not written: %s"
+              detail;
+            Error Store_unwritable)
       in
       (match opened with
        | Error stop ->
@@ -301,7 +313,7 @@ let live t ~sw =
   loop state
 ;;
 
-let create ~now ~registered ~declared ~stores ~ask place =
+let create ~now ~registered ~declared ~stores ~ask ~start_turn_log place =
   let gone, ended = Eio.Promise.create () in
   let mailbox = Eio.Stream.create max_int in
   Eio.Stream.add mailbox Declaration_changed;
@@ -311,6 +323,7 @@ let create ~now ~registered ~declared ~stores ~ask place =
   ; declared
   ; stores
   ; ask
+  ; start_turn_log
   ; mailbox
   ; status = Atomic.make Booting
   ; between = Atomic.make None

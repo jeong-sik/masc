@@ -350,6 +350,7 @@ let table ?sw fixture ask =
     ~place:(fun (_ : string) -> fixture.place)
     ~stores:(fun (_ : string) -> fixture.stores)
     ~ask
+    ~start_turn_log:(fun (_ : string) -> Ok ())
 ;;
 
 let tail writers =
@@ -620,7 +621,7 @@ let test_an_ask_reads_the_tail_between_events () =
   in
   let writer =
     Writer.create ~now:Unix.gettimeofday ~registered:(fun () -> true) ~declared:declaration
-      ~stores:fixture.stores ~ask fixture.place
+      ~stores:fixture.stores ~ask ~start_turn_log:(fun () -> Ok ()) fixture.place
   in
   Eio.Fiber.fork_daemon ~sw:fixture.sw (fun () ->
     Writer.run writer;

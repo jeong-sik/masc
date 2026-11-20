@@ -424,7 +424,12 @@ let test_complete_stream_openai_captures_llama_server_timings () =
         | Some (prompt_eval_tokens, cache_hit) ->
           check int "prefill tokens" 26 prompt_eval_tokens;
           check bool "cache_hit" true cache_hit
-        | None -> Alcotest.fail "expected Prefill_complete telemetry")
+        | None -> Alcotest.fail "expected Prefill_complete telemetry");
+       check
+         bool
+         "timings-only stream does not fabricate api_usage"
+         true
+         (Option.is_none resp.usage)
      | Error err ->
        Alcotest.fail
          (Printf.sprintf
@@ -437,6 +442,57 @@ let test_complete_stream_openai_captures_llama_server_timings () =
              | Http_client.AcceptRejected { reason } -> reason
              | Http_client.ProviderTerminal { message; _ } -> message
              | Http_client.ProviderFailure { message; _ } -> message)));
+    Eio.Switch.fail sw Exit
+  with
+  | Exit -> ()
+;;
+
+(* llama-server split-chunk SSE: timings.cache_n arrives on the finish_reason
+   chunk while usage (without prompt_tokens_details) arrives on the final
+   choices:[] chunk. Complete_stream must backfill both usage.cache_read_input_tokens
+   and telemetry.reported_cache_read_input_tokens when 0 <= cache_n <= input_tokens. *)
+let openai_sse_with_split_llama_timings_and_usage =
+  "data: \
+   {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"pong\"},\"finish_reason\":null}],\"id\":\"c-ts\",\"model\":\"qwen3.8-27b\",\"object\":\"chat.completion.chunk\"}\n\n\
+   data: \
+   {\"choices\":[{\"finish_reason\":\"stop\",\"index\":0,\"delta\":{}}],\"id\":\"c-ts\",\"model\":\"qwen3.8-27b\",\"object\":\"chat.completion.chunk\",\"timings\":{\"cache_n\":1741,\"prompt_n\":26,\"prompt_ms\":709.5,\"predicted_n\":2,\"predicted_ms\":122.7,\"predicted_per_second\":16.3}}\n\n\
+   data: \
+   {\"choices\":[],\"id\":\"c-ts\",\"model\":\"qwen3.8-27b\",\"object\":\"chat.completion.chunk\",\"usage\":{\"prompt_tokens\":1767,\"completion_tokens\":2,\"total_tokens\":1769}}\n\n\
+   data: [DONE]\n\n"
+;;
+
+let test_complete_stream_openai_backfills_llama_timings_cache_n_on_split_chunks () =
+  Eio_main.run
+  @@ fun env ->
+  try
+    Eio.Switch.run
+    @@ fun sw ->
+    let url =
+      start_mock_server ~sw ~net:env#net openai_sse_with_split_llama_timings_and_usage
+    in
+    let result =
+      (Complete.complete_stream
+         ~sw
+         ~net:env#net
+         ~config:(make_openai_config url)
+         ~messages
+         ~on_event:(fun _ -> ())
+         ()).Llm_provider.Completion_outcome.result
+    in
+    (match result with
+     | Ok resp ->
+       (match resp.usage with
+        | Some u ->
+          check int "split-chunk input_tokens" 1767 u.input_tokens;
+          check int "split-chunk cache_read backfilled from timings.cache_n" 1741
+            u.cache_read_input_tokens
+        | None -> Alcotest.fail "expected usage on split-chunk stream");
+       (match resp.telemetry with
+        | Some tel ->
+          check (option int) "split-chunk reported_cache_read_input_tokens" (Some 1741)
+            tel.reported_cache_read_input_tokens
+        | None -> Alcotest.fail "expected telemetry on split-chunk stream")
+     | Error _ -> Alcotest.fail "expected Ok split-chunk llama stream");
     Eio.Switch.fail sw Exit
   with
   | Exit -> ()
@@ -5536,6 +5592,10 @@ let () =
             "OpenAI-compat stream captures llama-server timings"
             `Quick
             test_complete_stream_openai_captures_llama_server_timings
+        ; test_case
+            "OpenAI-compat split-chunk stream backfills llama-server cache_n"
+            `Quick
+            test_complete_stream_openai_backfills_llama_timings_cache_n_on_split_chunks
         ; test_case
             "unknown stream latency stays unknown"
             `Quick

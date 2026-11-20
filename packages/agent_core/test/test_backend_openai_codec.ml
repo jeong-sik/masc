@@ -3890,6 +3890,92 @@ let test_openrouter_pre_ext_breakpoints_and_gpt_explicit_opt_out () =
     ]
 ;;
 
+let test_llama_server_timings_cache_n_and_openrouter_byok_cost () =
+  (* 1. llama-server sync: timings.cache_n backfills cache_read_input_tokens
+     when prompt_cache_hit_tokens and prompt_tokens_details.cached_tokens are absent. *)
+  let llama_sync =
+    Yojson.Safe.from_string
+      {|{
+        "id": "chat-llama-1",
+        "model": "qwen3.8-27b",
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": "ok"}}],
+        "usage": {"prompt_tokens": 2000, "completion_tokens": 12},
+        "timings": {"cache_n": 1741, "prompt_n": 259, "predicted_n": 12}
+      }|}
+  in
+  (match Parse.parse_openai_response_result_json llama_sync with
+   | Ok resp ->
+     (match resp.usage with
+      | Some u ->
+        check_int "llama sync input_tokens" 2000 u.input_tokens;
+        check_int "llama sync cache_read backfilled from timings.cache_n" 1741
+          u.cache_read_input_tokens
+      | None -> Alcotest.fail "expected usage");
+     (match resp.telemetry with
+      | Some tel ->
+        Alcotest.(check (option int)) "llama sync reported_cache_read" (Some 1741)
+          tel.reported_cache_read_input_tokens
+      | None -> Alcotest.fail "expected telemetry")
+   | Error _ -> Alcotest.fail "expected Ok llama sync response");
+  (* Explicit cached_tokens = 0 takes precedence over timings.cache_n. *)
+  let explicit_zero =
+    Yojson.Safe.from_string
+      {|{
+        "usage": {"prompt_tokens": 2000, "completion_tokens": 12, "prompt_tokens_details": {"cached_tokens": 0}},
+        "timings": {"cache_n": 1741}
+      }|}
+  in
+  (match Parse.delta_usage_of_openai_json explicit_zero with
+   | Some u ->
+     Alcotest.(check (option int)) "explicit cached_tokens=0 wins over timings.cache_n"
+       (Some 0) u.cache_read_input_tokens
+   | None -> Alcotest.fail "expected delta_usage");
+  (* Out-of-bounds (> prompt_tokens) and negative timings.cache_n are rejected. *)
+  List.iter
+    (fun (label, cache_n) ->
+       let raw =
+         Yojson.Safe.from_string
+           (Printf.sprintf
+              {|{"usage": {"prompt_tokens": 100, "completion_tokens": 5}, "timings": {"cache_n": %d}}|}
+              cache_n)
+       in
+       match Parse.delta_usage_of_openai_json raw with
+       | Some u ->
+         Alcotest.(check (option int)) (label ^ " rejected") None u.cache_read_input_tokens
+       | None -> Alcotest.fail "expected delta_usage")
+    [ "cache_n > prompt_tokens", 101; "negative cache_n", -1 ];
+  (* Absent prompt_tokens must not admit unbounded timings.cache_n. *)
+  (match
+     Parse.delta_usage_of_openai_json
+       (Yojson.Safe.from_string
+          {|{"usage": {"completion_tokens": 5}, "timings": {"cache_n": 10}}|})
+   with
+   | Some u ->
+     Alcotest.(check (option int)) "cache_n without prompt_tokens rejected"
+       None u.cache_read_input_tokens
+   | None -> Alcotest.fail "expected delta_usage");
+  (* 2. OpenRouter BYOK cost_details.upstream_inference_cost semantics. *)
+  let check_cost label expected json_str =
+    let raw = Yojson.Safe.from_string json_str in
+    match Parse.delta_usage_of_openai_json raw with
+    | Some u ->
+      Alcotest.(check (option (float 0.000001))) label expected u.cost_usd
+    | None -> Alcotest.fail ("expected delta_usage for " ^ label)
+  in
+  check_cost "BYOK adds OpenRouter fee + upstream_inference_cost" (Some 0.042)
+    {|{"usage": {"prompt_tokens": 100, "completion_tokens": 10, "is_byok": true, "cost": 0.002, "cost_details": {"upstream_inference_cost": 0.04}}}|};
+  check_cost "BYOK with 0.0 fee reports upstream_inference_cost" (Some 0.04)
+    {|{"usage": {"prompt_tokens": 100, "completion_tokens": 10, "is_byok": true, "cost": 0.0, "cost_details": {"upstream_inference_cost": 0.04}}}|};
+  check_cost "BYOK with null cost falls back to upstream_inference_cost" (Some 0.04)
+    {|{"usage": {"prompt_tokens": 100, "completion_tokens": 10, "is_byok": true, "cost": null, "cost_details": {"upstream_inference_cost": 0.04}}}|};
+  check_cost "BYOK with null/negative upstream keeps direct cost" (Some 0.002)
+    {|{"usage": {"prompt_tokens": 100, "completion_tokens": 10, "is_byok": true, "cost": 0.002, "cost_details": {"upstream_inference_cost": -1.0}}}|};
+  check_cost "non-BYOK (is_byok=false) keeps usage.cost untouched" (Some 0.05)
+    {|{"usage": {"prompt_tokens": 100, "completion_tokens": 10, "is_byok": false, "cost": 0.05, "cost_details": {"upstream_inference_cost": 0.04}}}|};
+  check_cost "absent is_byok keeps usage.cost untouched" (Some 0.05)
+    {|{"usage": {"prompt_tokens": 100, "completion_tokens": 10, "cost": 0.05, "cost_details": {"upstream_inference_cost": 0.04}}}|}
+;;
+
 let test_responses_build_request_uses_text_format_json_schema () =
   let schema =
     `Assoc
@@ -4975,6 +5061,10 @@ let () =
             "openrouter pre-System_context breakpoints and gpt explicit opt-out"
             `Quick
             test_openrouter_pre_ext_breakpoints_and_gpt_explicit_opt_out
+        ; Alcotest.test_case
+            "llama-server timings.cache_n fallback and OpenRouter BYOK cost"
+            `Quick
+            test_llama_server_timings_cache_n_and_openrouter_byok_cost
         ; Alcotest.test_case
             "build request text.format json_schema"
             `Quick

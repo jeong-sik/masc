@@ -1033,12 +1033,13 @@ let test_gemini_malformed_part_precedes_unsupported_part () =
   | GW.Gemini_unsupported_response _ -> fail "malformed sibling is not a response kind"
 ;;
 
-let gemini_chunk ?(parts = []) ?finish_reason ?usage () : GW.gemini_chunk =
+let gemini_chunk ?(parts = []) ?finish_reason ?usage ?reasoning_tokens () : GW.gemini_chunk =
   { gem_model = Some "gemini-test"
   ; gem_parts = parts
   ; gem_finish_reason =
       Option.map (fun reason -> GW.Gemini_candidate_finish_reason reason) finish_reason
   ; gem_usage = usage
+  ; gem_reasoning_tokens = reasoning_tokens
   }
 ;;
 

@@ -1095,26 +1095,40 @@ let parse_response json =
       then None
       else um |> member "cachedContentTokenCount" |> to_int_option
     in
+    let raw_thoughts =
+      if um = `Null
+      then None
+      else (
+        match um |> member "thoughtsTokenCount" |> to_int_option with
+        | Some n when n >= 0 -> Some n
+        | Some _ | None -> None)
+    in
     let usage =
       if um = `Null
       then None
       else
         Some
           { input_tokens = Cli_common_json.member_int "promptTokenCount" um
-          ; output_tokens = Cli_common_json.member_int "candidatesTokenCount" um
+          ; output_tokens =
+              Cli_common_json.member_int "candidatesTokenCount" um
+              + Option.value raw_thoughts ~default:0
           ; cache_creation_input_tokens = 0
           ; cache_read_input_tokens = Option.value raw_cache_read ~default:0
           ; cost_usd = None
           }
     in
     let model_str = Cli_common_json.member_str "modelVersion" json in
+    let telemetry =
+      let base =
+        Types.with_reported_cache_usage
+          ~cache_creation_input_tokens:None
+          ~cache_read_input_tokens:raw_cache_read
+          (Some (Types.with_reported_model ~model:model_str None))
+      in
+      Some { base with reasoning_tokens = raw_thoughts }
+    in
     { id = ""; model = model_str; unreadable_tool_uses = []; stop_reason; content; usage
-    ; telemetry =
-        Some
-          (Types.with_reported_cache_usage
-             ~cache_creation_input_tokens:None
-             ~cache_read_input_tokens:raw_cache_read
-             (Some (Types.with_reported_model ~model:model_str None))) }
+    ; telemetry }
   | err ->
     let msg =
       err

@@ -1131,6 +1131,61 @@ let test_parse_usage () =
   | None -> fail "expected usage"
 ;;
 
+let test_parse_usage_with_thoughts_token_count () =
+  let json =
+    Yojson.Safe.from_string
+      {|{
+    "modelVersion": "gemini-3.8-flash",
+    "candidates": [{
+      "content": {"parts": [{"text": "answer"}], "role": "model"},
+      "finishReason": "STOP"
+    }],
+    "usageMetadata": {
+      "promptTokenCount": 100,
+      "candidatesTokenCount": 40,
+      "thoughtsTokenCount": 260,
+      "cachedContentTokenCount": 80
+    }
+  }|}
+  in
+  let resp = Backend_gemini.parse_response json in
+  (match resp.usage with
+   | Some u ->
+     check int "input" 100 u.input_tokens;
+     check int "inclusive output (candidates + thoughts)" 300 u.output_tokens;
+     check int "cache read" 80 u.cache_read_input_tokens
+   | None -> fail "expected usage");
+  (match resp.telemetry with
+   | Some tel ->
+     check (option int) "reasoning_tokens populated" (Some 260) tel.reasoning_tokens;
+     check (option int) "reported cache read" (Some 80)
+       tel.reported_cache_read_input_tokens
+   | None -> fail "expected telemetry");
+  (* Negative thoughtsTokenCount is ignored and never shrinks output_tokens. *)
+  let neg_json =
+    Yojson.Safe.from_string
+      {|{
+    "modelVersion": "gemini-3.8-flash",
+    "candidates": [{
+      "content": {"parts": [{"text": "answer"}], "role": "model"},
+      "finishReason": "STOP"
+    }],
+    "usageMetadata": {
+      "promptTokenCount": 100,
+      "candidatesTokenCount": 40,
+      "thoughtsTokenCount": -5
+    }
+  }|}
+  in
+  let neg_resp = Backend_gemini.parse_response neg_json in
+  (match neg_resp.usage with
+   | Some u -> check int "negative thoughts ignored in output_tokens" 40 u.output_tokens
+   | None -> fail "expected usage");
+  match neg_resp.telemetry with
+  | Some tel -> check (option int) "negative thoughts stays None" None tel.reasoning_tokens
+  | None -> fail "expected telemetry"
+;;
+
 let test_parse_stop_reasons () =
   let test_reason finish expected =
     let json =
@@ -1838,6 +1893,117 @@ let test_gemini_stream_interleaved_thinking_tool_text_finalizes () =
      | _ -> fail "expected thinking, redacted carrier, tool use, and visible text")
 ;;
 
+let test_gemini_stream_thoughts_token_count_finalizes () =
+  let state =
+    Streaming.create_openai_stream_state
+      ~provider:"gemini"
+      ~model:"gemini-2.5-flash"
+      ()
+  in
+  let acc = Complete_stream_acc.create_stream_acc () in
+  let final_data =
+    {|{
+    "modelVersion": "gemini-2.5-flash",
+    "candidates": [{
+      "content": {
+        "parts": [{"text": "answer"}],
+        "role": "model"
+      },
+      "finishReason": "STOP"
+    }],
+    "usageMetadata": {
+      "promptTokenCount": 100,
+      "candidatesTokenCount": 8,
+      "thoughtsTokenCount": 42,
+      "cachedContentTokenCount": 60
+    }
+  }|}
+  in
+  let chunk = parse_gemini_chunk_exn final_data in
+  check
+    (option int)
+    "chunk gem_reasoning_tokens"
+    (Some 42)
+    chunk.Gemini_wire.gem_reasoning_tokens;
+  let events, _tel = gemini_events state chunk in
+  List.iter (Complete_stream_acc.accumulate_event acc) events;
+  (match Complete_stream_acc.finalize_stream_acc acc with
+   | Error _ -> fail "expected finalized Gemini stream with thoughtsTokenCount"
+   | Ok response ->
+     (match response.usage with
+      | Some usage ->
+        check int "input tokens" 100 usage.input_tokens;
+        check int "output tokens includes thoughts" 50 usage.output_tokens;
+        check int "cache read tokens" 60 usage.cache_read_input_tokens
+      | None -> fail "expected usage");
+     (match response.telemetry with
+      | Some telemetry ->
+        check
+          (option int)
+          "telemetry reasoning_tokens"
+          (Some 42)
+          telemetry.reasoning_tokens
+      | None -> fail "expected telemetry with reasoning_tokens"));
+  (* Prompt-blocked terminal chunks also carry usageMetadata.thoughtsTokenCount. *)
+  let blocked_state =
+    Streaming.create_openai_stream_state
+      ~provider:"gemini"
+      ~model:"gemini-2.5-flash"
+      ()
+  in
+  let blocked_acc = Complete_stream_acc.create_stream_acc () in
+  let blocked_data =
+    {|{
+    "modelVersion": "gemini-2.5-flash",
+    "promptFeedback": {"blockReason": "SAFETY"},
+    "usageMetadata": {
+      "promptTokenCount": 25,
+      "thoughtsTokenCount": 11
+    }
+  }|}
+  in
+  let blocked_chunk = parse_gemini_chunk_exn blocked_data in
+  let blocked_events, _ = gemini_events blocked_state blocked_chunk in
+  List.iter (Complete_stream_acc.accumulate_event blocked_acc) blocked_events;
+  (match Complete_stream_acc.finalize_stream_acc blocked_acc with
+   | Error _ -> fail "expected finalized Gemini prompt-blocked stream"
+   | Ok response ->
+     (match response.usage with
+      | Some usage ->
+        check int "blocked input tokens" 25 usage.input_tokens;
+        check int "blocked output tokens includes thoughts" 11 usage.output_tokens
+      | None -> fail "expected usage on prompt-blocked stream");
+     (match response.telemetry with
+      | Some telemetry ->
+        check
+          (option int)
+          "blocked telemetry reasoning_tokens"
+          (Some 11)
+          telemetry.reasoning_tokens
+      | None -> fail "expected telemetry on prompt-blocked stream"));
+  (* Negative thoughtsTokenCount must fail closed in SSE parsing. *)
+  let bad_data =
+    {|{
+    "candidates": [{
+      "content": {"parts": [{"text": "hi"}], "role": "model"},
+      "finishReason": "STOP"
+    }],
+    "usageMetadata": {
+      "promptTokenCount": 10,
+      "candidatesTokenCount": 5,
+      "thoughtsTokenCount": -1
+    }
+  }|}
+  in
+  match Gemini_wire.parse_gemini_sse_chunk bad_data with
+  | Gemini_wire.Gemini_parse_failed _ -> ()
+  | Gemini_wire.Gemini_chunk _
+  | Gemini_wire.Gemini_provider_error _
+  | Gemini_wire.Gemini_unsupported_part _
+  | Gemini_wire.Gemini_unsupported_response _ ->
+    fail "expected Gemini_parse_failed on negative thoughtsTokenCount"
+;;
+
 (* ── Suite ────────────────────────────────────────── *)
 
 let () =
@@ -1941,6 +2107,10 @@ let () =
             `Quick
             test_signed_inline_image_roundtrip
         ; test_case "usage" `Quick test_parse_usage
+        ; test_case
+            "usage folds thoughtsTokenCount into output and reasoning_tokens"
+            `Quick
+            test_parse_usage_with_thoughts_token_count
         ; test_case "stop reasons" `Quick test_parse_stop_reasons
         ; test_case "error" `Quick test_parse_error
         ] )
@@ -1979,6 +2149,10 @@ let () =
             "interleaved thinking/tool/text finalizes"
             `Quick
             test_gemini_stream_interleaved_thinking_tool_text_finalizes
+        ; test_case
+            "thoughtsTokenCount folds into output and telemetry"
+            `Quick
+            test_gemini_stream_thoughts_token_count_finalizes
         ] )
     ; ( "capabilities"
       , [ test_case "gemini capabilities" `Quick test_gemini_capabilities_named ] )

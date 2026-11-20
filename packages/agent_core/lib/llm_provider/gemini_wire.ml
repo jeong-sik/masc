@@ -11,6 +11,7 @@ type gemini_chunk =
   ; gem_parts : Yojson.Safe.t list
   ; gem_finish_reason : gemini_terminal_reason option
   ; gem_usage : api_usage option
+  ; gem_reasoning_tokens : int option
   }
 
 type gemini_unsupported_part =
@@ -104,6 +105,25 @@ let gemini_optional_int_default_zero ~path key json =
   | Some (`Intlit raw) ->
     (match int_of_string_opt raw with
      | Some value -> Ok value
+     | None -> Error (Printf.sprintf "%s.%s:not_integer" path key))
+  | Some value ->
+    Error
+      (Printf.sprintf
+         "%s.%s:not_integer(got %s)"
+         path
+         key
+         (Json_util.json_type_name value))
+;;
+
+let gemini_optional_non_negative_int ~path key json =
+  match Json_util.assoc_member_opt key json with
+  | None | Some `Null -> Ok None
+  | Some (`Int value) when value >= 0 -> Ok (Some value)
+  | Some (`Int value) -> Error (Printf.sprintf "%s.%s:negative(%d)" path key value)
+  | Some (`Intlit raw) ->
+    (match int_of_string_opt raw with
+     | Some value when value >= 0 -> Ok (Some value)
+     | Some value -> Error (Printf.sprintf "%s.%s:negative(%d)" path key value)
      | None -> Error (Printf.sprintf "%s.%s:not_integer" path key))
   | Some value ->
     Error
@@ -650,9 +670,9 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
     | None -> Ok ()
     | Some part -> Error (Gemini_payload_unsupported_part part)
   in
-  let* gem_usage =
+  let* gem_usage, gem_reasoning_tokens =
     match Json_util.assoc_member_opt "usageMetadata" json with
-    | None | Some `Null -> Ok None
+    | None | Some `Null -> Ok (None, None)
     | Some (`Assoc _ as usage) ->
       let* input_tokens =
         gemini_optional_int_default_zero
@@ -660,11 +680,24 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
           "promptTokenCount"
           usage
       in
-      let* output_tokens =
+      let* candidates_tokens =
         gemini_optional_int_default_zero
           ~path:"gemini.usageMetadata"
           "candidatesTokenCount"
           usage
+      in
+      let* thoughts_tokens =
+        malformed
+          (gemini_optional_non_negative_int
+             ~path:"gemini.usageMetadata"
+             "thoughtsTokenCount"
+             usage)
+      in
+      (* Gemini excludes [thoughtsTokenCount] from [candidatesTokenCount] while
+         billing thinking tokens at the output rate; fold non-negative thoughts
+         into inclusive [output_tokens] to match OpenAI/Anthropic accounting. *)
+      let output_tokens =
+        candidates_tokens + Option.value thoughts_tokens ~default:0
       in
       let* cache_read_input_tokens =
         gemini_optional_int_default_zero
@@ -673,13 +706,14 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
           usage
       in
       Ok
-        (Some
-           { input_tokens
-           ; output_tokens
-           ; cache_creation_input_tokens = 0
-           ; cache_read_input_tokens
-           ; cost_usd = None
-           })
+        ( Some
+            { input_tokens
+            ; output_tokens
+            ; cache_creation_input_tokens = 0
+            ; cache_read_input_tokens
+            ; cost_usd = None
+            }
+        , thoughts_tokens )
     | Some value ->
       Error
         (Gemini_payload_malformed
@@ -687,7 +721,13 @@ let parse_gemini_json json : (gemini_chunk, gemini_payload_failure) result =
               "gemini.usageMetadata:not_object(got %s)"
               (Json_util.json_type_name value)))
   in
-  Ok { gem_model = model_version; gem_parts = parts; gem_finish_reason; gem_usage }
+  Ok
+    { gem_model = model_version
+    ; gem_parts = parts
+    ; gem_finish_reason
+    ; gem_usage
+    ; gem_reasoning_tokens
+    }
 ;;
 
 let gemini_provider_error_of_json ~raw json =

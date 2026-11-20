@@ -19,6 +19,11 @@ type gemini_chunk =
   ; gem_parts : Yojson.Safe.t list
   ; gem_finish_reason : gemini_terminal_reason option
   ; gem_usage : api_usage option
+  ; gem_reasoning_tokens : int option
+    (** Optional [usageMetadata.thoughtsTokenCount] reported on this chunk.
+        When present and non-negative, it is also folded into
+        [gem_usage.output_tokens] so billed output tokens match Gemini's
+        output-rate pricing ([candidatesTokenCount + thoughtsTokenCount]). *)
   }
 
 type gemini_unsupported_part =

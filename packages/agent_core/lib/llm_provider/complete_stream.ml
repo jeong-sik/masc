@@ -1256,20 +1256,37 @@ let complete_stream_http
             let base =
               Option.value resp.telemetry ~default:Types.default_inference_telemetry
             in
+            let merged_timings =
+              match timings with
+              | Some _ -> timings
+              | None -> base.timings
+            in
+            (* llama-server frequently emits [timings.cache_n] on the
+               [finish_reason] chunk separately from the final [usage] chunk.
+               Backfill [cache_read_input_tokens] strictly when usage exists,
+               no explicit cache-read count was reported, and [cache_n] is
+               bounded within [0 .. input_tokens]; never fabricate [api_usage]
+               when [resp.usage = None]. *)
+            let usage, reported_cache_read_input_tokens =
+              match resp.usage, base.reported_cache_read_input_tokens, merged_timings with
+              | Some u, None, Some { Types.cache_n = Some n; _ }
+                when u.cache_read_input_tokens = 0 && n >= 0 && n <= u.input_tokens ->
+                Some { u with cache_read_input_tokens = n }, Some n
+              | (Some _ | None), (Some _ | None), (Some _ | None) ->
+                resp.usage, base.reported_cache_read_input_tokens
+            in
             let telemetry =
               Some
                 { base with
-                  timings =
-                    (match timings with
-                     | Some _ -> timings
-                     | None -> base.timings)
+                  timings = merged_timings
+                ; reported_cache_read_input_tokens
                 ; upstream_provider =
                     (match upstream_provider with
                      | Some _ -> upstream_provider
                      | None -> base.upstream_provider)
                 }
             in
-            { resp with telemetry }
+            { resp with usage; telemetry }
         in
         (match !stream_timings with
          | Some

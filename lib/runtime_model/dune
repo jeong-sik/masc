@@ -1,11 +1,7 @@
-; Runtime_model — runtime/provider label resolution boundary.
-;
-; Bundles the model-label parser and provider-kind resolver used by
-; runtime/keeper/server call sites.
+; Runtime_model — runtime provider binding identity helpers.
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).
-; (wrapped false) keeps the bare `Runtime_model_*`,
-; `Provider_kind_resolver`, and `Runtime_provider_binding` identifiers.
+; (wrapped false) keeps the bare `Runtime_provider_binding` identifier.
 
 (include_subdirs no)
 
@@ -16,8 +12,6 @@
  (libraries
   masc.agent_core
   masc.agent_core.llm_provider
-  masc.discovery_cache
   masc.config
   masc_core
-  angstrom
   uri))

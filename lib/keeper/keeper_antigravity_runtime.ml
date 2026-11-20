@@ -562,9 +562,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     (* This CLI offers no replaceable configuration channel. A vendor session
        that settled against another canonical history or system prompt is
        superseded by a fresh one seeded from the canonical source; ephemeral
-       world context remains on the existing per-turn prompt path. *)
-    let snapshot_messages = List.filter
-        (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
+       world context remains on the existing per-turn prompt path, and bridged
+       official-client turns are already witnessed by this session or handed
+       off on Resume via [Keeper_turn_bridge.prepend_resume_handoff]. *)
+    let snapshot_messages =
+      List.filter Host.is_canonical_source_snapshot_message prepared.messages
+    in
     let snapshot_sha256 = Keeper_official_client_context_codec.canonical_source_sha256
       ~system_prompt:prepared.system_prompt ~messages:snapshot_messages ~rest:[] in
     let admission_error reason =

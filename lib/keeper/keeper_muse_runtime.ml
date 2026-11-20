@@ -1046,9 +1046,12 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
        model is not continued under a new one. Without the root a resumed
        session kept working where it started. *)
     (* Hook nudges are ordinary history seeded only on Start. Carried context
-       is reconciled separately against the acknowledged delivery frontier. *)
-    let canonical_messages = List.filter
-      (fun message -> not (Host.is_carried_on_resume message)) prepared.messages in
+       is reconciled separately against the acknowledged delivery frontier, and
+       bridged official-client turns are already witnessed by this session or
+       handed off on Resume via [Keeper_turn_bridge.prepend_resume_handoff]. *)
+    let canonical_messages =
+      List.filter Host.is_canonical_source_snapshot_message prepared.messages
+    in
     let snapshot_sha256 =
       Keeper_official_client_context_codec.canonical_source_sha256
         ~system_prompt:prepared.system_prompt
@@ -1220,6 +1223,19 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
         Printexc.raise_with_backtrace exn backtrace
     in
     let composed_context = prepared.composed_context in
+    let goal =
+      match session_mode with
+      | Serve.Start -> goal
+      | Serve.Resume { session_id; _ } ->
+        Keeper_turn_bridge.prepend_resume_handoff
+          ~input_source
+          ~base_path
+          ~keeper_name
+          ~client_kind:Keeper_semantic_execution.Muse
+          ~runtime_id
+          ~session_id
+          ~goal
+    in
     (* Push gaps may arrive after a terminal. Until this adapter has a durable
        retention witness spanning turns, a stored digest cannot certify exact
        context after compaction. Resend the selected current context, including

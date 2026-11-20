@@ -284,11 +284,11 @@ val start_post_ready_owner_lanes :
     steps the stdio server starts ({!initialize_owner_state_blocking},
     {!activate_owner_state}, {!mark_owner_state_ready},
     {!start_post_ready_owner_lanes}), in a fiber of [sw], and the startup
-    watchdog. No server state is published, and the auxiliary startup of the
-    single-user server ([Server_auxiliary_startup.run_all]: gateways, gRPC,
-    WebSocket, refresh loops) does not run; the engine starts the owner lanes
-    of that startup itself, as its fourth step (RFC
-    a-persons-keeper-runs-on-the-engine, S1). The background maintenance of
+    watchdog. No server state is published. Of the auxiliary startup of the
+    single-user server ([Server_auxiliary_startup.run_all]) the engine starts
+    only the owner lanes, itself, as its fourth step; the other components,
+    among them the gateways, gRPC, WebSocket and the refresh loops, do not
+    run (RFC a-persons-keeper-runs-on-the-engine, S1). The background maintenance of
     the lanes starts the workers of the Dashboard snapshot sources and the
     runtime probe loop of the Dashboard, as in the single-user server. The
     stages of the engine are logged as the single-user server logs its own

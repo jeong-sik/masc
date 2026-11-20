@@ -384,8 +384,10 @@ let test_half_hour_tallies_share_ssot_with_half_hours () =
   let slot back tally : Pulse.slot =
     { Pulse.starts_at = Pulse.slot_start now - (back * Pulse.slot_seconds); tally }
   in
+  (* [now] sits 1,200 s into its half hour, so [known_since] starts a slot
+     here: two whole slots back, the first one known in full. *)
   let pulse =
-    { Pulse.known_since = now -. (2.0 *. float_of_int Pulse.slot_seconds)
+    { Pulse.known_since = Float.of_int (Pulse.slot_start now - (2 * Pulse.slot_seconds))
     ; slots =
         [ slot 0 { Pulse.ok = 4; rested = 0; failed = 0 }
         ; slot 1 { Pulse.ok = 2; rested = 1; failed = 3 }
@@ -401,6 +403,17 @@ let test_half_hour_tallies_share_ssot_with_half_hours () =
     ; P.Slot_tally_measured { Pulse.ok = 4; rested = 0; failed = 0 }
     ]
     tallies;
+  (* A slot that starts before [known_since] and holds no turn is unknown
+     even when [known_since] falls inside it: its first part was not read. *)
+  check_tally "an empty slot known only in part is unknown"
+    [ P.Slot_tally_unknown
+    ; P.Slot_tally_unknown
+    ; P.Slot_tally_unknown
+    ; P.Slot_tally_measured { Pulse.ok = 2; rested = 1; failed = 3 }
+    ; P.Slot_tally_measured { Pulse.ok = 4; rested = 0; failed = 0 }
+    ]
+    (P.half_hour_tallies ~now ~count:5
+       (Some { pulse with Pulse.known_since = now -. (2.0 *. float_of_int Pulse.slot_seconds) }));
   check_tally "half_hours is an exact pure projection of half_hour_tallies"
     (P.half_hours ~now ~count:5 (Some pulse))
     (List.map P.half_hour_of_tally tallies);

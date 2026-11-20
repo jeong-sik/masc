@@ -1163,7 +1163,7 @@ HTTP slot 의 창은 registry 가 게시할 때 target 옆에 고정한 값이�
 lane 값이 없는 때가 있다. 표가 없다, 꺼져 있다, 받아들인 slot 이 없다, R 을 적지 않았다, 창을 모르는 slot 이 있다(`Window_unknown {slot}`). 모두 선언이 없는 것과 같이 다룬다(W1).
 `slots` 의 id 가 runtime 을 가리키지 않으면 로드가 거절한다. 그 뒤에 창을 모르는 slot 은 둘뿐이다. registry 가 창 없이 고정한 HTTP target 과, 지금 runtime 표에 없는 CLI id 다.
 
-- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿기 전에 버린다. runtime 표나 registry 가 다시 게시될 때마다 이 사건이 온다.
+- 지금 가진 값과 같은 `Declaration_changed` 는 표에 닿지 않는다. runtime 표나 registry 가 다시 게시될 때마다 이 사건이 온다. 상태는 그대로이고 같이 온 풀이만 갈아 둔다. 풀이는 registry 가 고정한 target(credential, 본문 시한)과 provider 가 쥔 slot 이다. credential 이나 본문 시한은 lane 값에 들지 않으니, 그것만 바뀐 게시는 같은 값으로 온다. 다음 묻기와 쉼의 확인은 새 풀이를 읽는다. 나가 있는 묻기는 자기 풀이로 끝난다.
 - 질문 쪽이 바뀌거나 lane 이 켜지고 꺼지면 가던 묻기를 취소한다. 옛 질문으로 만든 것은 반영되지 않는다.
 - slot 목록만 바뀌면 묻기는 끝까지 간다. 답은 반영한다. 선언에서 빠진 slot 의 결과는 읽지 않는다.
 - 어느 쪽이든 새 값을 저장하고 폭 기억을 비운다. 바닥의 크기 사실은 건드리지 않는다. 바뀐 slot 은 key 가 다르고 바뀐 질문은 id 가 다르다(§7.4).

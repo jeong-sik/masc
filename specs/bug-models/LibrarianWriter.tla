@@ -605,7 +605,7 @@ HandleWrite(msg) ==       \* the boot has ended: the Write meets the state boot 
                /\ UNCHANGED << log, snap, dpos, m, fibers, hint, keeperUp >>
   /\ UNCHANGED Env8
 
-(* ---- Declaration_changed with another value (the same value is dropped before the table) ---- *)
+(* ---- Declaration_changed with another value (the same value changes no state: only its resolution, which the model does not carry, is held) ---- *)
 Declaration ==
   /\ c.decl < MaxDecl /\ m.state \in Running \cup {"Stopped", "Absent", "Retired"}
   /\ \E l \in Lanes \ {m.lane} :

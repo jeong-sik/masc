@@ -138,8 +138,11 @@ type event =
   | Declaration_changed of declared option
 
 (** One event (§9.3). A [Declaration_changed] whose lane value is the one
-    held is dropped before the table: the registry and the runtime table
-    send it on every publication.
+    held does not reach the table: the registry and the runtime table send
+    it on every publication. Its resolution replaces the held one and
+    nothing else changes, so the next ask and a rest's held check go through
+    the target the registry published last (a new credential or body
+    timeout comes with the same value).
 
     {b The next ask} (§9.2). The turn log's length is read first. With no
     lane value the writer is [Idle] with that length. Otherwise the turn log

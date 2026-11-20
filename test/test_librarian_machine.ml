@@ -511,6 +511,25 @@ let test_resting_declaration_changed () =
   ()
 ;;
 
+(* A key or body timeout changed in the registry comes with the same lane
+   value. The rest reads the new resolution: here no slot of it is held, so
+   the next pulse asks. *)
+let test_resting_same_value_new_resolution () =
+  let place = started_place () in
+  let at = Unix.gettimeofday () +. 1.0 in
+  let value = resting ~lane:(declared ~resolved:(held_lane ()) [ fast ]) place in
+  let value =
+    step ~at "the value held, its resolution published again" place value
+      (Declaration_changed (Some (declared [ fast ])))
+      ~state:"resting, holding: " ~fiber:"keep"
+  in
+  let (_ : Machine.t) =
+    step ~at "the pulse reads the new resolution" place value Pulse ~state:"asking #2, holding: "
+      ~fiber:"start #2"
+  in
+  ()
+;;
+
 let test_stopped () =
   let place = new_place () in
   let value = booted place ~at:100.0 in
@@ -876,6 +895,8 @@ let () =
         ; test_case "resting, a closed turn" `Quick test_resting_turn_closed
         ; test_case "resting, the pulse" `Quick test_resting_pulse
         ; test_case "resting, a new declaration" `Quick test_resting_declaration_changed
+        ; test_case "resting, the same value with a new resolution" `Quick
+            test_resting_same_value_new_resolution
         ; test_case "stopped" `Quick test_stopped
         ; test_case "late answers" `Quick test_late_answers
         ] )

@@ -214,9 +214,13 @@ let table place t ~at event =
   | Stopped (_ : Store.stop), Declaration_changed lane -> { t with lane }
 ;;
 
+(* The same value changes no state, but its resolution is the one the
+   registry published last: the admitted target with its credential and body
+   timeout, and the slots a provider holds. The next ask and a rest's held
+   check go through it. *)
 let decide place t ~at event =
   match event with
-  | Declaration_changed lane when same_lane t.lane lane -> t
+  | Declaration_changed lane when same_lane t.lane lane -> { t with lane }
   | Turn_closed | Pulse | Ask_ended _ | Declaration_changed _ -> table place t ~at event
 ;;
 

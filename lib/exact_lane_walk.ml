@@ -139,8 +139,11 @@ let standing ~rests passed =
     else Not_every_slot_resting
 ;;
 
-let visit_called ~visit ~on_advance ~last_failure choice =
+(* [before] runs while the called slot's seat is held, so a raise there
+   returns the seat as a raise in the visit does. *)
+let visit_called ~visit ~on_advance ~last_failure ~before choice =
   let run () =
+    before ();
     match last_failure with
     | None -> Ok (visit choice.called.slot choice.seat)
     | Some failed ->
@@ -165,8 +168,9 @@ let walk
       ~rests
       slots
   =
-  (* [passed] is kept newest first. Every pass goes through [pass], so
-     [on_pass] hears them in the order of [passed]. *)
+  (* [passed] is kept newest first. [on_pass] hears each entry in the order
+     of [passed]: a held or failed slot through [pass], the full slots of a
+     step just before its visit. *)
   let pass passed entry =
     on_pass entry;
     entry :: passed
@@ -185,15 +189,21 @@ let walk
     | [] -> Exhausted { passed = List.rev passed; standing = standing ~rests passed }
     | first :: rest ->
       let choice = choose ~seats first rest in
-      let passed =
-        List.fold_left (fun passed placed -> pass passed (Seats_full placed.slot)) passed choice.full
-      in
+      let full = List.map (fun placed -> Seats_full placed.slot) choice.full in
+      let passed = List.rev_append full passed in
       let gone = (choice.called :: choice.full) @ List.map fst held in
       let remaining =
         List.filter (fun placed -> not (List.exists (same_place placed) gone)) remaining
       in
       let slot = choice.called.slot in
-      (match visit_called ~visit ~on_advance ~last_failure choice with
+      (match
+         visit_called
+           ~visit
+           ~on_advance
+           ~last_failure
+           ~before:(fun () -> List.iter on_pass full)
+           choice
+       with
        | Error stop | Ok (Stop stop) -> Stopped { slot; stop; passed = List.rev passed }
        | Ok (Answer value) -> Answered { slot; value; passed = List.rev passed }
        | Ok (Advance failure) ->

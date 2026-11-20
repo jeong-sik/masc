@@ -103,9 +103,11 @@ type ('slot, 'value, 'failure, 'stop) walk_result =
     [Error] ends the walk as [Stopped] at [next].
 
     {b Passes.} [on_pass] hears of each slot the walk passes when it
-    passes it, in the order of [passed]: a held slot before the step that
-    sets it aside, a full slot before the slot called in its place, a
-    failed slot after its visit. A lane records its run there.
+    passes it, in the order of [passed]: a held slot when a step's order
+    sets it aside; a full slot while the seat of the slot called in its
+    place is held, before [on_advance] and the visit; a failed slot after
+    its visit. A raise in [on_pass] for a full slot returns that seat. A
+    lane records its run there.
 
     Cancellation propagates, and a seat the walk holds is returned. *)
 val walk

@@ -332,7 +332,23 @@ let prepare_keeper_name fixture name =
     List.mem name
       [ "keeper_task_done" ]
   then
-    ensure_keeper_claim fixture
+    ensure_keeper_claim fixture;
+  if
+    List.mem name
+      [
+        "keeper_constitution_write";
+        "keeper_constitution_read";
+        "keeper_constitution_remove";
+      ]
+  then (
+    (* Keeper_constitution_roster reads persisted keeper metadata on disk,
+       not the in-memory Keeper_registry, so seed the fixture keeper file
+       before constitution write/read/remove cases run (#53334). *)
+    let path =
+      Masc.Keeper_types_profile.keeper_meta_path fixture.config fixture.meta.name
+    in
+    Generic.mkdir_p (Filename.dirname path);
+    Yojson.Safe.to_file path (Masc.Keeper_meta_json.meta_to_json fixture.meta))
 
 let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   let name = schema.name in

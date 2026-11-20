@@ -975,8 +975,13 @@ let test_current_nested_reads_observe_actual_commits_inside_the_request_ttl () =
       Alcotest.(check (list string))
         "the next read sees the metrics commit"
         ["actual-committed-tool"] (tools ());
-      let trust read_policy = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
-          ~read_policy ~config ~meta in
+      let trust read_policy =
+        match Operator_control_snapshot_trust.read_compact_keeper_runtime_trust
+                ~read_policy ~config ~meta with
+        | Operator_control_snapshot_trust.Read json -> json
+        | Timed_out detail ->
+          Alcotest.failf "runtime trust unexpectedly timed out: %s" detail
+      in
       let initial_trust = trust Reuse in
       Keeper_registry.set_failure_reason ~base_path:dir meta.name (Some (Keeper_registry.Exception "actual registry failure"));
       Alcotest.(check bool) "ordinary compact trust read still holds its prior observation" true
@@ -1046,6 +1051,96 @@ let test_unreadable_metrics_store_is_not_an_empty_tool_audit () =
       match Operator_control_snapshot_tool_audit.completeness ~keeper_name:meta.name read with
       | Partial _ -> ()
       | Complete -> Alcotest.fail "an unreadable tool audit settled as complete"))
+;;
+
+(* #53379: when the compact runtime-trust cache hits its timeout circuit under
+   [Reuse], the projection must report [`Null] with [Partial] completeness
+   rather than projecting missing envelope fields as an empty trust object with
+   [Complete]. *)
+let test_reuse_timeout_is_not_an_empty_runtime_trust () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
+  let dir = temp_dir () in
+  let previous_runtime = Runtime.For_testing.snapshot () in
+  let config = Workspace.default_config dir in
+  let meta = health_projection_meta ~total_turns:1 in
+  let key = Operator_control_snapshot_trust.compact_runtime_trust_cache_key ~config ~meta in
+  Operator_control_snapshot.invalidate_snapshot_cache ();
+  Dashboard_cache.invalidate key;
+  Fun.protect
+    ~finally:(fun () ->
+      Operator_control_snapshot.invalidate_snapshot_cache ();
+      Dashboard_cache.invalidate key;
+      Runtime.For_testing.restore previous_runtime;
+      cleanup_dir dir)
+    (fun () ->
+      init_runtime_default_for_snapshot dir;
+      ignore (Workspace.init config ~agent_name:None);
+      (match Keeper_meta_store.replace_snapshot config meta with
+       | Ok () -> ()
+       | Error detail -> Alcotest.fail detail);
+      let slow () =
+        Eio.Time.sleep clock 0.2;
+        `String "never_reached"
+      in
+      for _attempt = 1 to 3 do
+        let timeout =
+          Dashboard_cache.get_or_compute_with_timeout key ~ttl:10.0 ~clock ~timeout_sec:0.02
+            (Pool_work.cpu ~name:__FUNCTION__ slow)
+        in
+        Alcotest.(check bool) "the trust cache answers with its timeout envelope" true
+          (Dashboard_cache.is_timeout_envelope timeout)
+      done;
+      Dashboard_cache.For_testing.with_default_clock clock (fun () ->
+        (match
+           Operator_control_snapshot_trust.read_compact_keeper_runtime_trust
+             ~read_policy:Dashboard_projection_read.Reuse ~config ~meta
+         with
+         | Operator_control_snapshot_trust.Timed_out detail ->
+           Alcotest.(check bool) "timeout carries diagnostic detail" true
+             (String.length detail > 0)
+         | Read _ -> Alcotest.fail "a trust cache timeout read as a trust summary");
+        let obs =
+          Operator_control_snapshot_trust.keeper_runtime_trust_observation
+            ~read_policy:Dashboard_projection_read.Reuse ~config ~meta
+        in
+        Alcotest.(check bool) "timed-out trust projection JSON is null" true
+          (obs.json = `Null);
+        (match obs.completeness with
+         | Dashboard_projection_read.Partial detail ->
+           Alcotest.(check bool) "partial completeness carries timeout detail" true
+             (String.length detail > 0)
+         | Complete -> Alcotest.fail "timed-out runtime trust settled as Complete");
+        (match
+           Operator_control.snapshot_read
+             ~read_policy:Dashboard_projection_read.Reuse
+             ~view:"keepers"
+             ~include_messages:false
+             ~include_summary_fields:false
+             ~lightweight_summary:false
+             (operator_ctx env sw config "owner")
+         with
+         | Dashboard_projection_cache.Observed _ ->
+           Alcotest.fail "Reuse snapshot unexpectedly returned Observed"
+         | Cached_json json ->
+           let open Yojson.Safe.Util in
+           let row =
+             json |> member "keepers" |> member "items" |> to_list
+             |> List.find (fun item -> item |> member "name" = `String meta.name)
+           in
+           Alcotest.(check bool)
+             "snapshot keeper row runtime_trust is null on Reuse timeout"
+             true
+             (row |> member "runtime_trust" = `Null));
+        match
+          Operator_control_snapshot_trust.read_compact_keeper_runtime_trust
+            ~read_policy:Dashboard_projection_read.Current ~config ~meta
+        with
+        | Operator_control_snapshot_trust.Read _ -> ()
+        | Timed_out detail ->
+          Alcotest.failf "Current trust read bypassed cache yet timed out: %s" detail))
 ;;
 
 let test_current_snapshot_retains_inventory_failure_and_confirmation_deadline () =
@@ -1135,6 +1230,8 @@ let () =
             test_a_read_tool_audit_publishes_its_tools
         ; Alcotest.test_case "an unreadable metrics store is not an empty tool audit" `Quick
             test_unreadable_metrics_store_is_not_an_empty_tool_audit
+        ; Alcotest.test_case "a trust cache timeout is partial and null rather than an empty trust summary" `Quick
+            test_reuse_timeout_is_not_an_empty_runtime_trust
         ; Alcotest.test_case "Current retains actual inventory failure and confirmation expiry" `Quick
             test_current_snapshot_retains_inventory_failure_and_confirmation_deadline] );
       ( "runtime status"

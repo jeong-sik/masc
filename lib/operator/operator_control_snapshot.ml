@@ -94,7 +94,8 @@ let with_keeper_slot ~sem ~name f =
          raise exn)
 ;;
 
-let compact_keeper_runtime_trust_json = Operator_control_snapshot_trust.compact_keeper_runtime_trust_json
+let keeper_runtime_trust_observation =
+  Operator_control_snapshot_trust.keeper_runtime_trust_observation
 
 let earlier_deadline left right = match left, right with
   | None, deadline | deadline, None -> deadline
@@ -108,20 +109,6 @@ let keeper_attention_observation config meta =
     | Keeper_status_bridge.Approval_queue_ready _ -> Dashboard_projection_read.Complete
     | Approval_queue_unavailable error -> Partial (Keeper_approval_queue_result.storage_error_to_string error) in
   Keeper_status_bridge.attention_fields_json_of meta approval_queue attention, completeness
-
-let keeper_runtime_trust_observation ~read_policy ~config ~meta =
-  try match read_policy with
-    | Dashboard_projection_read.Current ->
-        Operator_control_snapshot_trust.compact_keeper_runtime_trust_observation ~config ~meta
-    | Reuse -> {Dashboard_projection_read.json = compact_keeper_runtime_trust_json ~read_policy ~config ~meta;
-        next_deadline_unix = None; completeness = Complete}
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-      let detail = Printexc.to_string exn in
-      Log.Dashboard.warn "operator snapshot trust compact failed for keeper %s: %s" meta.Keeper_meta_contract.name detail;
-      {Dashboard_projection_read.json = `Null; next_deadline_unix = None;
-       completeness = Partial detail}
 
 (* The stored meta of a Keeper, as the snapshot reads it: from the Keeper's
    Owner when the Owner stands for the meta file, and from the file

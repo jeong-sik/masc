@@ -16,7 +16,6 @@
   masc_tui_types
   masc_tui_keeper_chat_projection
   masc_tui_loader
-  masc_tui_words
   masc_tui_editor
   masc_tui_exit_reason
   masc_tui_exit_signals

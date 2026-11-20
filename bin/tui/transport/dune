@@ -1,0 +1,42 @@
+(library
+ (name masc_tui_transport)
+ (wrapped true)
+ (libraries
+  masc
+  masc.runtime
+  masc.config
+  masc.server
+  masc.masc_workspace
+  masc.sse_wire
+  masc_core
+  fs_compat
+  masc_log
+  masc_eio_context
+  masc_tui_types
+  masc_tui_loader
+  masc_tui_words
+  masc_tui_async_protocol
+  masc_tui_workspace_read
+  masc_tui_workspace_precondition
+  masc_tui_workspace_job
+  masc_tui_workspace_result
+  masc_tui_async_read
+  masc_tui_server_lifecycle
+  masc_tui_credential_preparation
+  masc_tui_local_read_observation
+  masc_tui_context_state
+  masc_tui_observer
+  masc_tui_fleet_stream
+  masc_tui_refresh_pace
+  masc_tui_wake
+  masc_tui_keeper_control
+  masc_tui_usage_calls
+  masc_tui_operator_projection
+  masc_tui_code_results
+  masc_tui_context_results
+  masc_tui_fleet_results
+  masc_tui_original_results
+  eio
+  yojson
+  mtime.clock.os
+  unix))

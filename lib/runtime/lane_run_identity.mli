@@ -10,6 +10,9 @@ type t =
   | Verifier
   | Candle_appraiser
   | Librarian_memory
+  | Workspace_memory_curator
+      (** The in-process World Memory curator's lane. [Workspace_curator] names
+          the runs its Add-on predecessor recorded and is no model route. *)
 [@@deriving enumerate]
 
 val to_id : t -> string
@@ -22,4 +25,6 @@ val keeps_run_records : t -> bool
 (** Whether any registry retains this identity's runs. [Librarian_memory]
     keeps none: the Librarian's Memory asks leave no per-ask record (RFC
     librarian-call-only-proposes: nothing grows per pass), so a screen offers
-    no run history for it. *)
+    no run history for it. [Workspace_memory_curator] keeps none either: the
+    in-process curator registers no run, and what it committed is in the
+    World Memory log and ledger. *)

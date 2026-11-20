@@ -199,9 +199,8 @@ let scrolled_surface state surface =
   | Memory when Option.is_none state.memory_facts_keeper ->
       let terminal_rows, cols = get_terminal_size () in
       let budget =
-        max 1
-          (Masc_tui_types.surface_body_rows state ~terminal_rows
-           - Masc_tui_frame.chrome_rows)
+        Masc_tui_render_prim.surface_chrome_budget
+          ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows
       in
       Some (Masc_tui_render_memory.memory_overview_scrolled ~cols ~budget state)
   (* Runtime's authority row wraps to the terminal width too, so its bound is
@@ -533,25 +532,37 @@ let move_runtime_config_cursor state ~delta =
    a row the frame will not draw. *)
 (* The rows a surface's list can draw in once the cursor is on [cursor].
 
-   The three lists measured here are asked at the landing row: a follow
+   The dynamic-chrome lists measured here are asked at the landing row: a follow
    worked out from the layout before the move puts the landing outside the
    window it measured, and the step key and the jump keys were working that
    out differently -- the step recomputed, the landing did not. Every other
    list's [scrolled] is the same at every row. *)
 let surface_body_height_at (state : state) ~cursor scrolled =
+  let terminal_rows, cols = get_terminal_size () in
+  let screen_budget () =
+    Masc_tui_render_prim.surface_chrome_budget
+      ~frame:Masc_tui_render_prim.Chrome_screen state ~terminal_rows
+  in
   if state.repository_changes_open && Option.is_none state.repository_changes_diff_path then
-    let _, cols = get_terminal_size () in
     Masc_tui_render_repositories.repository_changes_content_height state
-      ~cols ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows)) ~cursor
+      ~cols ~budget:(screen_budget ()) ~cursor
   else if state.view = Repositories && not state.repository_changes_open then
-    let _, cols = get_terminal_size () in
     Masc_tui_render.repository_studio_content_height state ~cols
-      ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows)) ~cursor
+      ~budget:(screen_budget ()) ~cursor
   else if state.view = Memory && state.memory_page = Memory_facts && Option.is_some state.memory_facts_keeper then
-    let _, cols = get_terminal_size () in
     Masc_tui_render_memory.memory_facts_content_height ~cols
-      ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
-      ~cursor state
+      ~budget:(screen_budget ()) ~cursor state
+  else if state.view = Memory && Option.is_none state.memory_facts_keeper then
+    surface_body_height ~rows:(screen_budget () + Masc_tui_frame.chrome_rows) scrolled
+  else if state.view = Connectors && Option.is_none (Masc_tui_types.browser_lane_on_screen state) then
+    let fixed =
+      2
+      + (if Option.is_some (Masc_tui_types.connectors_read_notice state) then 1 else 0)
+      + (if Option.is_some state.connectors_error then 2 else 0)
+    in
+    max 1 (screen_budget () - fixed)
+  else if state.view = Config && state.config_pane = Config_runtime && not state.runtime_config_status_open then
+    Masc_tui_render.config_content_height state
   else surface_body_height ~rows:(surface_rows state) scrolled
 
 let move_row_cursor (state : state) ~delta ~cursor ~scroll =
@@ -8413,8 +8424,8 @@ let list_on_screen (state : state) : on_screen option =
         (choose_keeper_row state)
   | Lanes ->
       (match state.lanes_mode with
-       (* The run list keeps a scroll the drawing does not move, so a landing
-          brings the window to the run, as j and k already do. *)
+       (* Follow the cursor explicitly on jumps and moves while drawing also
+          keeps it visible after viewport resize. *)
        | Lanes_run_list _ ->
            scrolling Lane_runs ~cursor:state.lane_runs_cursor ~scroll:state.lane_runs_scroll
              ~set_cursor:(fun i -> state.lane_runs_cursor <- i)

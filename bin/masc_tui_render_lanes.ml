@@ -1215,8 +1215,13 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
     Masc_tui_scroll.content_height ~rows ~chrome:layout.sc_chrome
       ~count:layout.sc_count ~preview_keep:layout.sc_preview_keep
   in
+  let cursor = max 0 (min state.lane_runs_cursor (max 0 (shown - 1))) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.lane_runs_scroll max_scroll) in
+  let scroll =
+    if shown = 0 then scroll
+    else Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll
+  in
   let runs_window = Rows.of_list ~first:scroll ~height:content_height runs in
   report_drawn_list Lane_runs ~height:content_height;
   if shown = 0 then begin
@@ -1239,7 +1244,7 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
       match Rows.at runs_window (index + scroll) with
       | None -> box_empty buf cols
       | Some (run : Tui_decode.lane_run_summary) ->
-          let selected = index + scroll = state.lane_runs_cursor in
+          let selected = index + scroll = cursor in
           let line =
             (if selected then "\xe2\x80\xba " else "  ")
             ^ Render_schedule.lane_run_row run_table ~now
@@ -2427,8 +2432,13 @@ let render_clients (state : state) =
        box_divider buf cols);
   let chrome_rows = listing_chrome ~error:state.clients_surface_error in
   let content_height = max 1 (rows - chrome_rows) in
+  let cursor = max 0 (min state.clients_surface_cursor (max 0 (shown - 1))) in
   let max_scroll = max 0 (shown - content_height) in
   let scroll = max 0 (min state.clients_surface_scroll max_scroll) in
+  let scroll =
+    if shown = 0 then scroll
+    else Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll
+  in
   let clients_window = Rows.of_list ~first:scroll ~height:content_height clients in
   report_drawn_list Client_rows ~height:content_height;
   if shown = 0 then begin
@@ -2469,7 +2479,7 @@ let render_clients (state : state) =
             | Some task -> resolve_task_title state task
             | None -> Masc_tui_theme.Glyph.no_value
           in
-          let selected = idx = state.clients_surface_cursor in
+          let selected = idx = cursor in
           let line =
             (if selected then "\xe2\x80\xba " else "  ")
             ^ Masc_tui_table.row (cells ~status ~name

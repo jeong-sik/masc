@@ -88,8 +88,11 @@ let rows ?(input_locked=false) ~width ~height t =
   let wrap = Masc_tui_message_layout.wrap_words ~max_cells:(max 1 width) in
   let heading = (match t.mode with Edit -> "Edit model" | Copy -> "Copy model") ^ " · " ^ t.source.provider in
   let label = function Name -> "Variant name" | Context -> "Context tokens" | Effort -> "Reasoning effort" | Temperature -> "Temperature" | Output -> "Max output tokens" in
+  let pad_label text =
+    text ^ String.make (max 0 (17 - Masc_tui_message_layout.display_width text)) ' '
+  in
   let field_rows = List.mapi (fun i field ->
-    Printf.sprintf "%s %-17s %s" (if i = t.selected then "›" else " ") (label field)
+    Printf.sprintf "%s %s %s" (if i = t.selected then "›" else " ") (pad_label (label field))
       (value t field ^ (if i = t.selected then "_" else "")
        ^ (if field=Context then (match t.context_choice with Preset _ -> " [preset]" | Custom -> " [custom]") else ""))) fields in
   let hint = if input_locked then "Input retained · Esc back · Ctrl-X closes recovery after receipt" else

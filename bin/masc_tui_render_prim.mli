@@ -576,6 +576,7 @@ val boxed_head : Buffer.t -> int -> string -> unit
 val boxed_head_rows : int -> int
 
 val write_list_sidebar :
+  ?framed:bool ->
   Buffer.t ->
   rows:int ->
   cols:int ->

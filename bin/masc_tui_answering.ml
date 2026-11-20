@@ -224,11 +224,15 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
       (fun widest (name, _) -> max widest (Masc_tui_message_layout.display_width name))
       widest live_finishes
   in
+  let lane_cell lane =
+    Masc_tui_message_layout.fit_width (lane_word ~ko lane)
+      (if ko then 6 else 12)
+  in
   let suffix_width =
     let running_width = List.fold_left
       (fun widest (_, lane, started_at) ->
         max widest (Masc_tui_message_layout.display_width
-          (Printf.sprintf "  %-14s  %s" (lane_word ~ko lane)
+          (Printf.sprintf "  %s  %s" (lane_cell lane)
             (Masc_tui_value.Ongoing.since ~now started_at)))) 0 running
     in
     List.fold_left
@@ -292,9 +296,9 @@ let overlay ?width ~ko ~(now : float) ~(chat_target : string option)
         List.map
           (fun (name, lane, started_at) ->
             { text =
-                Printf.sprintf "%s %s  %-14s  %s" running_mark
+                Printf.sprintf "%s %s  %s  %s" running_mark
                   (fitted_name name)
-                  (lane_word ~ko lane)
+                  (lane_cell lane)
                   (Masc_tui_value.Ongoing.since ~now started_at)
             ; tone = Running
             ; target = Some name

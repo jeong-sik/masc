@@ -576,12 +576,13 @@ type repository_change_authority =
 (* The candidate names the full related record, not just the visible text.
    The caller publishes it only when this exact frame is presented. *)
 let repository_changes_authority state ~surface_key ~terminal_rows ~cols =
-  let rows = surface_body_rows state ~terminal_rows in
   let path =
     match state.repository_changes_open, surface_key, state.repository_changes_diff_path with
     | true, "repository-changes", None
       when repository_changes_context_visible state ~cols
-          ~budget:(max 1 (rows - Masc_tui_frame.chrome_rows))
+          ~budget:(surface_chrome_budget ~frame:Chrome_screen
+            ~has_recovery:(Option.is_some (recovery_slot state ~max_cells:(framed_inner_width cols)))
+            state ~terminal_rows)
           ~cursor:state.repository_changes_cursor ->
         Option.bind state.repository_changes (fun snapshot ->
           List.nth_opt snapshot.rcs_changes state.repository_changes_cursor
@@ -764,9 +765,9 @@ let render_repository_changes (state : state) =
                     else "  "
                   in
                   let line =
-                    Printf.sprintf "%s%-18s %s%s"
+                    Printf.sprintf "%s%s %s%s"
                       lead
-                      (repository_change_status row)
+                      (Message_layout.fit_width (repository_change_status row) 18)
                       (Message_layout.truncate_middle
                          (max 1 (available - Message_layout.display_width attr)) path)
                       attr
@@ -1106,15 +1107,19 @@ let render_changes_list (state : state) =
           ~preview_keep:s.sc_preview_keep
     | None -> max 1 (total_content - preview_height)
   in
-  let max_scroll = max 0 (shown - content_height) in
-  let scroll = max 0 (min state.changes_scroll max_scroll) in
-  let changes_window = Rows.of_list ~first:scroll ~height:content_height changes in
-  report_drawn_list Change_rows ~height:content_height;
   (* The marked row, not the window's top row. They were the same field, so
      the mark never left the first drawn row: every row below it was visible
      and unselectable, and Enter always opened whichever change the window
      happened to start on. *)
   let cursor = max 0 (min state.changes_cursor (max 0 (shown - 1))) in
+  let max_scroll = max 0 (shown - content_height) in
+  let scroll = max 0 (min state.changes_scroll max_scroll) in
+  let scroll =
+    if shown = 0 then scroll
+    else Masc_tui_scroll.ensure_visible ~cursor ~height:content_height scroll
+  in
+  let changes_window = Rows.of_list ~first:scroll ~height:content_height changes in
+  report_drawn_list Change_rows ~height:content_height;
   let cursor_change = List.nth_opt changes cursor in
   if shown = 0 then begin
     let empty =

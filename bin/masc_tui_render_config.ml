@@ -2293,10 +2293,16 @@ let render_voice (state : state) =
                        or address carrying control bytes rewrote the screen the
                        moment the voice pane opened. The probe rows below
                        already pass through the same filter. *)
+                    let pad_cells cells text =
+                      text
+                      ^ String.make
+                          (max 0 (cells - Message_layout.display_width text))
+                          ' '
+                    in
                     Some
-                      (Printf.sprintf "    %-20s %s%-18s%s %s%s"
-                         (Terminal_text.single_line id) Ansi.dim
-                         (Terminal_text.single_line kind)
+                      (Printf.sprintf "    %s %s%s%s %s%s"
+                         (pad_cells 20 (Terminal_text.single_line id)) Ansi.dim
+                         (pad_cells 18 (Terminal_text.single_line kind))
                          Ansi.reset (Terminal_text.single_line address) off))
               items
         | Some _ | None -> [])

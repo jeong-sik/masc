@@ -440,6 +440,9 @@ type materialized_config =
   ; admission_allowances : Llm_provider.Provider_admission.published_allowances
       (** One agreed allowance per provider account, published to provider
           admission by [set_loaded]. *)
+  ; official_client_seats : Runtime_official_client_seats.published
+      (** One agreed number per official client account, published by
+          [set_loaded]. *)
   ; source_config : Runtime_schema.config
   }
 
@@ -682,6 +685,28 @@ let materialize_config
     |> Result.map_error (fun disagreements ->
       Admission_allowances_disagree disagreements)
   in
+  (* Every official client runtime on one account must declare the account's
+     seats alike: its client processes run under one number. *)
+  let* official_client_seats =
+    Runtime_official_client_seats.of_declarations
+      (List.filter_map
+         (fun (runtime : t) ->
+            match
+              ( Runtime_execution.checkpoint_owner runtime.execution
+              , runtime.binding.Runtime_schema.max_concurrent )
+            with
+            | Runtime_execution.Official_client, Some max_concurrent ->
+              Some
+                { Runtime_official_client_seats.runtime_id = runtime.id
+                ; provider_id = runtime.provider.Runtime_schema.id
+                ; max_concurrent
+                }
+            | Runtime_execution.Official_client, None
+            | Runtime_execution.Masc_agent_core, (Some (_ : int) | None) -> None)
+         runtimes)
+    |> Result.map_error (fun disagreements ->
+      Official_client_seats_disagree disagreements)
+  in
   (* The AGENT_CORE catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Startup callers choose fail-closed [init_default_strict] or server-visible
@@ -699,6 +724,7 @@ let materialize_config
     ; machines = cfg.machines
     ; media_readers = cfg.media_readers
     ; admission_allowances
+    ; official_client_seats
     ; source_config = cfg
     }
   in
@@ -1380,6 +1406,7 @@ let set_loaded
   Llm_provider.Provider_admission.publish loaded.admission_allowances;
   let source_config_version = Atomic.fetch_and_add source_config_version_counter 1 + 1 in
   prune_stale_person_runtimes ~keep_version:source_config_version;
+  Runtime_official_client_seats.publish loaded.official_client_seats;
   publish_loaded_state
     { default_runtime = Some rt
     ; default_route = Some loaded.default_route

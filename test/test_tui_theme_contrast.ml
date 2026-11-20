@@ -16,6 +16,11 @@ let int = Alcotest.int
 let list = Alcotest.list
 let fail = Alcotest.fail
 
+(* The terminal's own foreground as a call that turns colour on writes it.
+   [Masc_tui_theme.Sgr.default_fg] follows NO_COLOR, so it is the expected
+   value only for a call that follows NO_COLOR too (#53053). *)
+let default_foreground_with_colour = "\027[39m"
+
 module Color = Masc_tui_color
 module Palette = Masc_tui_terminal_palette
 
@@ -835,7 +840,7 @@ let test_side_pane_limited_capability_paths () =
       check string "16 colours keep the requested code" code
         (colour ~colors_enabled:true Palette.Ansi16);
       check string "an unverified 256-colour status label uses the foreground"
-        Masc_tui_theme.Sgr.default_fg (text Palette.Ansi256);
+        default_foreground_with_colour (text Palette.Ansi256);
       match truecolor_rgb ~prefix:truecolor_prefix (text Palette.True_color) with
       | None -> fail "a verified truecolour status label keeps its colour"
       | Some color ->

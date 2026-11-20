@@ -269,9 +269,9 @@ let test_codec_empty_payload () =
    action. Lock the operator-facing event projection: kind/summary/target must
    surface the config path (not the body, which can carry provider secrets).
    Severity must be "warn" even on success: a runtime.toml write rewrites global
-   keeper routing (RFC-0273 §3.2, highest-risk surface), so it must rank above
-   routine info events in a severity-filtered audit scan. Without this assertion
-   a wildcard refactor in [audit_severity] could silently demote it to "info". *)
+   keeper routing (highest-risk surface), so it must rank above routine info
+   events in a severity-filtered audit scan. Without this assertion a wildcard
+   refactor in [audit_severity] could silently demote it to "info". *)
 let test_runtime_config_write_event_projection () =
   let entry : Audit_log.audit_entry =
     {

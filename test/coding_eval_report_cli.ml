@@ -1,5 +1,5 @@
-(** CLI entry point for the coding-outcome eval report (RFC-0396 W2,
-    issue #28822 option (a)).
+(** CLI entry point for the coding-outcome eval report (issue #28822
+    option (a)).
 
     Reads the case corpus and a [runs.jsonl] produced by
     [scripts/harness_coding_eval.sh], separates configured model, memory mode,

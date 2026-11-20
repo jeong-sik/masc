@@ -1128,7 +1128,7 @@ let run_trial ~base ~experiment ~strategy ~prompt_root ~counter ~receipt ~sw ~en
         | User | System | Tool -> None) messages |> List.rev |> (function [] -> None | first :: _ -> Some first)
     | Checkpoint_absent -> None
     | Checkpoint_unread error -> failwith (Keeper_checkpoint_store.checkpoint_load_error_to_string error) in
-  (* RFC-0385 deliberately omits internal final thoughts from replay history.
+  (* Replay history deliberately omits internal final thoughts.
      The completed TurnRecord owns the exact durable raw run; use the same
      strict projection as the autonomous-turn inspector, not another run or
      the synthetic peer's own final string as proof of acceptance. *)

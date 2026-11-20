@@ -2,17 +2,23 @@
    get no token of the operator (RFC a-persons-keeper-runs-on-the-engine,
    S1, section 5). The engine of a multi-account installation puts the admin
    token and the internal Keeper token in the environment of the process
-   (Server_runtime_startup_credentials). Each client builds the environment
-   of its child from names it lists: Claude Code and Codex capture the
-   account (Runtime_official_account.capture), Muse Code filters by its own
-   list, and Antigravity by its own.
+   (Server_runtime_startup_credentials).
+
+   A person reaches the login children of Claude Code, Codex and Muse Code,
+   and the turn child of Claude Code on a login or on an API key. Login
+   refuses Antigravity for a person, and a turn refuses it and Muse Code
+   (Server_setup_account_login, Server_preview_keeper_turn). Each client
+   builds the environment of its child from names it lists: Claude Code and
+   Codex capture the account (Runtime_official_account.capture, and
+   capture_on_key for a key), and Muse Code filters by its own list.
 
    The process of the case holds a made-up value under both names. No child
-   gets either name, and every child gets the PATH of the process, so the
-   absence is the filter's and not an empty environment. *)
+   gets either name, and every child gets the PATH value of the process, so
+   the absence is the filter's and not an empty environment. *)
 
 let operator_tokens = [ Env_config_core.admin_token_env_key; Auth.internal_keeper_token_env_key ]
 let inherited_name = "PATH"
+let inherited_value = "/made-up/bin"
 
 let rec remove_tree path =
   match Unix.lstat path with
@@ -29,9 +35,9 @@ let rec remove_tree path =
    operator. *)
 let on_a_person_home run =
   List.iter (fun name -> Unix.putenv name ("made-up-value-of-" ^ name)) operator_tokens;
-  Unix.putenv inherited_name "/made-up/bin";
-  let home = Unix.realpath (Filename.temp_dir ~perms:0o700 "person-child-environment-" "") in
-  Fun.protect ~finally:(fun () -> remove_tree home) (fun () -> run home)
+  Unix.putenv inherited_name inherited_value;
+  let created = Filename.temp_dir ~perms:0o700 "person-child-environment-" "" in
+  Fun.protect ~finally:(fun () -> remove_tree created) (fun () -> run (Unix.realpath created))
 ;;
 
 let name_of entry =
@@ -41,14 +47,15 @@ let name_of entry =
 ;;
 
 let no_operator_token label environment =
-  let names = List.map name_of (Array.to_list environment) in
+  let entries = Array.to_list environment in
+  let names = List.map name_of entries in
   List.iter
     (fun token -> Alcotest.(check bool) (label ^ ": no " ^ token) false (List.mem token names))
     operator_tokens;
   Alcotest.(check bool)
     (label ^ ": the " ^ inherited_name ^ " of the process")
     true
-    (List.mem inherited_name names)
+    (List.mem (inherited_name ^ "=" ^ inherited_value) entries)
 ;;
 
 let test_claude_code () =
@@ -56,6 +63,24 @@ let test_claude_code () =
     match Runtime_claude_code.login_environment ~account_home with
     | Ok environment -> no_operator_token "Claude Code" environment
     | Error error -> Alcotest.failf "no environment: %s" (Runtime_claude_code.error_to_string error))
+;;
+
+(* A key account of Claude Code builds the environment of its child apart
+   from [capture]. The file of the key is made-up and private, as a key file
+   is. *)
+let test_claude_code_on_a_key () =
+  on_a_person_home (fun account_home ->
+    let key_file = Filename.concat account_home "made-up-key" in
+    Out_channel.with_open_gen [ Open_wronly; Open_creat; Open_excl ] 0o600 key_file (fun channel ->
+      Out_channel.output_string channel "made-up-key-of-a-person");
+    (* The mode of the open is narrowed by the umask of the process. *)
+    Unix.chmod key_file 0o600;
+    match Runtime_official_account.capture_on_key ~declaration:(Some account_home) ~key_file with
+    | Ok account -> no_operator_token "Claude Code on a key" (Runtime_official_account.environment account)
+    | Error (Runtime_official_account.Key_not_read error) ->
+      Alcotest.failf "the key was not read: %s" (Runtime_api_key_file.read_error_to_string error)
+    | Error (Runtime_official_account.Key_not_captured detail) ->
+      Alcotest.failf "no environment: %s" detail)
 ;;
 
 let test_codex () =
@@ -70,19 +95,17 @@ let test_muse_code () =
     no_operator_token "Muse Code" (Runtime_muse_serve.login_environment ~account_home))
 ;;
 
-let test_antigravity () =
-  on_a_person_home (fun home_dir ->
-    no_operator_token "Antigravity" (Runtime_antigravity.official_client_environment ~home_dir ()))
-;;
-
 let () =
   Alcotest.run
     "person_child_environment"
     [ ( "the child of an official client on the home of a person"
       , [ Alcotest.test_case "Claude Code gets no token of the operator" `Quick test_claude_code
+        ; Alcotest.test_case
+            "Claude Code on an API key gets no token of the operator"
+            `Quick
+            test_claude_code_on_a_key
         ; Alcotest.test_case "Codex gets no token of the operator" `Quick test_codex
         ; Alcotest.test_case "Muse Code gets no token of the operator" `Quick test_muse_code
-        ; Alcotest.test_case "Antigravity gets no token of the operator" `Quick test_antigravity
         ] )
     ]
 ;;

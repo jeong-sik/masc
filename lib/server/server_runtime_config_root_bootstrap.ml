@@ -587,13 +587,13 @@ let bootstrap_initial_config_root ~base_path ~created =
     if backfilled_prompts > 0
     then
       Log.Server.info
-        "backfilled %d missing prompt seed file(s) into existing base-path config root: %s"
+        "backfilled %d missing prompt seed file(s) into base-path config root: %s"
         backfilled_prompts
         config_root;
     if backfilled_from_embedded > 0
     then
       Log.Server.info
-        "backfilled %d startup-required config file(s) from binary-embedded assets into existing base-path config root: %s"
+        "backfilled %d startup-required config file(s) from binary-embedded assets into base-path config root: %s"
         backfilled_from_embedded
         config_root;
     if backfilled_prompts + backfilled_from_embedded > 0

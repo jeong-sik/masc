@@ -904,7 +904,9 @@ let test_created_root_populated_before_lock_is_not_fresh_seeded () =
 (* The boot of a multi-account installation asks for [Refilled]: a root it
    made gets what a root that was there gets, and no Keeper definition. The
    same seed gives a single-user boot its default roster, so the absence
-   below is of the request and not of the seed. *)
+   below is of the request and not of the seed. The refilled directory of
+   definitions is empty: a definition under any name, the default roster
+   this build embeds among them, fails the case. *)
 let test_fresh_config_root_is_filled_as_asked () =
   with_temp_dir "startup-fresh-root-as-asked" (fun dir ->
     let repo = Filename.concat dir "repo" in
@@ -914,7 +916,7 @@ let test_fresh_config_root_is_filled_as_asked () =
     write_file (Filename.concat seed "keepers-default/default-imp.toml") "[keeper]";
     with_env "MASC_CONFIG_DIR" None @@ fun () ->
     with_cwd repo @@ fun () ->
-    let default_roster_after fresh_root name =
+    let definitions_after fresh_root name =
       let base_path = Filename.concat dir name in
       mkdir_p base_path;
       (match Server_bootstrap_maintenance.with_initial_configuration ~base_path ~fresh_root
@@ -925,12 +927,14 @@ let test_fresh_config_root_is_filled_as_asked () =
         (Sys.file_exists (Filename.concat config_root "keepers"));
       Alcotest.(check bool) (name ^ ": the prompt of the seed is there") true
         (Sys.file_exists (Filename.concat config_root "prompts/keeper.md"));
-      Sys.file_exists (Filename.concat config_root "keepers/default-imp.toml")
+      List.sort String.compare
+        (Array.to_list (Sys.readdir (Filename.concat config_root "keepers")))
     in
     Alcotest.(check bool) "a seeded root receives the default roster" true
-      (default_roster_after Server_bootstrap_maintenance.Seeded "seeded");
-    Alcotest.(check bool) "a refilled root receives no Keeper definition" false
-      (default_roster_after Server_bootstrap_maintenance.Refilled "refilled"))
+      (List.mem "default-imp.toml"
+         (definitions_after Server_bootstrap_maintenance.Seeded "seeded"));
+    Alcotest.(check (list string)) "a refilled root receives no Keeper definition" []
+      (definitions_after Server_bootstrap_maintenance.Refilled "refilled"))
 
 let test_bootstrap_base_path_config_root_backfills_missing_prompts () =
   with_temp_dir "startup-config-preserve" (fun dir ->

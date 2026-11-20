@@ -29,7 +29,8 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
   | S.Codex ->
     let config : Runtime_execution.codex_app_server =
       { cli_path; account_home = Masc_test_deps.codex_account (); model = None; timeout_s = 1. } in
-    let outcome = Keeper_codex_runtime.run ~read_retained_media:None ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    let { Keeper_codex_runtime.outcome; successful_tool_completion = _ } =
+      Keeper_codex_runtime.run ~read_retained_media:None ~outbox_viewer:Keeper_client_tool_outbox.Unowned_only ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
         ~context_window:None
         ~configured_reasoning_effort:None ~turn_timeout_s:None
         ~accepts_image_input:false ~runtime_id ~keeper_name

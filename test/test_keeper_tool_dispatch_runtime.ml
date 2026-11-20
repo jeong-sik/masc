@@ -10134,8 +10134,8 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
         | None -> ()
         | Some (run, _, executions) ->
           let actual = run ~goal:"Finish the original research" ~on_transmitted:(fun _ -> ()) () in
-          native_settlement := actual.Masc.Keeper_codex_runtime.settled_session;
-          (match actual.Masc.Keeper_codex_runtime.result with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
+          native_settlement := actual.Masc.Keeper_codex_runtime.outcome.settled_session;
+          (match actual.Masc.Keeper_codex_runtime.outcome.result with Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
           check int "native tool receives the actual deferred Gate receipt once" 1 !executions in
       let session_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       let root = Masc.Keeper_fs.session_base_dir config in
@@ -10435,7 +10435,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
          let before = Fs_compat.load_file capture in
          let changed = {continuation with tool_surface_sha256=String.make 64 'f'} in
          let refused = run ~continuation:changed ~on_runtime_ready:check_runtime_selection ~goal:model.text ~on_transmitted:(fun _ -> fail "changed contract transmitted") () in
-         (match refused.Masc.Keeper_codex_runtime.result with
+         (match refused.Masc.Keeper_codex_runtime.outcome.result with
           | Error e ->
             (match Keeper_official_client_session_refusal.of_core_error e with
              | Some Keeper_official_client_session_refusal.Gate_continuation_unresumable -> ()
@@ -10498,7 +10498,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
            (* The app-server refuses the resumed Gate input for size (#50398).
               Nothing can carry the continuation, so the operation ends with
               that refusal, not as a Gate that failed to persist. *)
-           let failure = match resumed.Masc.Keeper_codex_runtime.result with
+           let failure = match resumed.Masc.Keeper_codex_runtime.outcome.result with
              | Error (Agent_core.Error.Api (Agent_core.Retry.InvalidRequest
                  {reason=Agent_core.Retry.Request_body_refused_by_provider {status=413}; _}) as failure) -> failure
              | Error e -> fail ("resume refusal lost its typed size: " ^ Agent_core.Error.to_string e)
@@ -10521,7 +10521,7 @@ let test_direct_gate_current_history_resume ?(failed_producer=false) ?(source_un
            | Some _ -> fail "a refused Gate continuation ended with another cause than its refusal"
            | None -> fail "a refused official-client Gate continuation was suspended again")
          else (
-         (match resumed.Masc.Keeper_codex_runtime.result with Ok _ -> () | Error e -> fail (Agent_core.Error.to_string e));
+         (match resumed.Masc.Keeper_codex_runtime.outcome.result with Ok _ -> () | Error e -> fail (Agent_core.Error.to_string e));
          if native_output_rejected then (
            let rejected = Error (Agent_core.Error.Internal "fixture output rejected after native settlement") in
            check bool "output error survives durable Gate input settlement" true

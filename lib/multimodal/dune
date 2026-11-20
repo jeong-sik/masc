@@ -3,7 +3,7 @@
 (library
  (name multimodal)
  (public_name masc.multimodal)
- ; RFC-0071 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
+ ; Warning 4 (fragile pattern match), 33 (unused open) and 37 (unused constructor) on.
  (flags
   (:standard -w +4 -w +33 -w +37))
  (libraries unix yojson fs_compat masc.agent_core.digest eio masc_log masc_string_util))

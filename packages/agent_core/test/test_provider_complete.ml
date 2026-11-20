@@ -2349,17 +2349,17 @@ let test_anthropic_reference_projection_precedes_prefix_digest () =
   let body messages = BA.build_request ~config ~messages ~tools () in
   Alcotest.(check string)
     "stale reference and its text fallback have the same wire body"
-    (body fallback)
-    (body stale);
+    (body [ fallback ])
+    (body [ stale ]);
   let response_content = [ Thinking { content = "stable"; signature = Some "signature" } ] in
   let prefix messages =
     BA.transmitted_reasoning_prefix ~config ~messages ~tools ~response_content ()
   in
-  Alcotest.(check bool) "the digest has a signed reasoning prefix" true (Option.is_some (prefix stale));
+  Alcotest.(check bool) "the digest has a signed reasoning prefix" true (Option.is_some (prefix [ stale ]));
   Alcotest.(check bool)
     "the digest covers the same sanitized messages that are transmitted"
     true
-    (prefix stale = prefix fallback)
+    (prefix [ stale ] = prefix [ fallback ])
 ;;
 
 let () =

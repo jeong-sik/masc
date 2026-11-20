@@ -1,36 +1,5 @@
-let frozen_librarian_position point : Masc.Keeper_turn_driver_try_provider.librarian_position =
-  let snapshot=match point with
-    | Masc.Keeper_turn_driver_try_provider.Librarian_snapshot snapshot -> snapshot.unread_messages
-    | Masc.Keeper_turn_driver_try_provider.Librarian_progress _ | Masc.Keeper_turn_driver_try_provider.No_position -> [] in
-  {point;unread=Masc.Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot) ~memory:(Ok [])}
-;;
-
 open Alcotest
 open Masc
-
-let unavailable_native_unread = Keeper_librarian_request_unread.of_results
-    ~snapshot:(Error "fixture has no snapshot reader")
-    ~memory:(Error "fixture has no Memory reader")
-;;
-
-(* Native clients retain an explicit frozen observation even when it is empty
-   or unavailable. Check that pinned carrier before comparing durable history. *)
-let attach_native_unread
-    ?(unread = unavailable_native_unread) messages =
-  Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System
-    unread messages
-;;
-
-let without_native_unread
-    ?(unread = unavailable_native_unread) messages =
-  let carriers = List.filter Runtime_model_input_tail_window.is_unread_context messages in
-  let encode = List.map Keeper_official_client_host.encode_history_message in
-  check (list string) "native request carries exactly its frozen unread observation"
-    (encode (attach_native_unread ~unread [])) (encode carriers);
-  check int "the unread observation adds no durable atom" 0
-    (snd (Runtime_model_input_tail_window.annotate carriers));
-  List.filter (fun message -> not (Runtime_model_input_tail_window.is_unread_context message)) messages
-;;
 
 let require_ok to_string = function
   | Ok value -> value
@@ -2010,22 +1979,22 @@ let test_keeper_shrinks_history_after_statusless_context_error
   Fun.protect
     ~finally:(fun () -> cleanup_tree base_path)
     (fun () ->
-       let official_client_continuation, gate_seed_held_context =
-         if not native_gate then None, [] else (
+       let official_client_continuation =
+         if not native_gate then None else (
          with_fixture
            [ Emit (assistant ~turn_id:"turn-gated" "GATE_WAIT")
            ; Emit (result ~turn_id:"turn-gated" "GATE_WAIT") ]
            (fun cli_path -> match run_keeper_turn ~base_path ~cli_path ~goal:"GATE" () with
              | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error));
          let stored = load_state base_path in
-         let held = match stored.context_frontier with
-           | Some frontier -> frontier.held_context
-           | None -> fail "native Gate seed did not record its exact context frontier" in
+         (match stored.context_frontier with
+          | Some _ -> ()
+          | None -> fail "native Gate seed did not record its exact context frontier");
          match stored.phase with
          | Settled {session_id; turn_id} ->
            Some ({ client_kind=stored.client_kind; runtime_id=stored.runtime_id;
              session_id; turn_id; tool_surface_sha256=stored.tool_surface_sha256;
-             frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint), held
+             frame=Keeper_repetition_snapshot.empty } : Keeper_semantic_execution.official_client_checkpoint)
          | _ -> fail "native Gate seed did not settle") in
        with_fixture_sequence
          ~first_system_marker ~second_system_marker
@@ -2065,19 +2034,7 @@ let test_keeper_shrinks_history_after_statusless_context_error
          (match raw with
           | None -> fail "native Gate fixture did not capture its resume input"
           | Some raw ->
-            (* Both dispatches read the same known-empty unread state. Bind
-               the omitted carrier to the actual seed frontier before
-               asserting that Resume sends only the new owner input. *)
-            let expected = attach_native_unread
-                ~unread:Keeper_librarian_request_unread.empty []
-              |> List.map Keeper_official_client_host.encode_history_message
-            in
-            List.iter (fun encoded ->
-              let digest = Agent_core_sha256.(digest_string encoded |> to_hex) in
-              check bool "same known-empty unread observation is already held" true
-                (List.exists (fun (item : Keeper_official_client_session_store.held_context) ->
-                  item.context = Librarian_unread && item.sha256 = digest) gate_seed_held_context)) expected;
-            check string "a Gate resume omits already-held unread and sends new input only"
+            check string "a Gate resume sends new input only"
               "SHRINK_HISTORY"
               (content_of_wire_message raw));
          check bool "resume system file carries no canonical snapshot" false
@@ -2672,12 +2629,11 @@ let test_keeper_settles_and_resumes () =
           check int "frontier counts the canonical history, not the composed context"
             (List.length native_history) message_count
         | Some _ | None -> fail "a resume did not record that the vendor session holds the context");
-       check bool "the session holds exactly the turn context, working state and unread observation" true
+       check bool "the session holds exactly the turn context and working state" true
          (List.sort Stdlib.compare (held_contexts second)
           = List.sort Stdlib.compare
             [ Keeper_official_client_session_store.Context_carrier
             ; Keeper_official_client_session_store.Librarian_working_state
-            ; Keeper_official_client_session_store.Librarian_unread
             ]);
        check int "durable cumulative turns" 2 second.turn_count;
        (match second.phase with
@@ -3409,9 +3365,7 @@ let test_start_authority_is_user_context_not_standing_system () =
   let module Host = Keeper_official_client_host in
   let base_path = temp_workspace () in
   Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
-    let unread = Keeper_librarian_request_unread.empty in
-    let librarian_front _ = Ok
-      {Keeper_turn_driver_try_provider.point=No_position; unread} in
+    let librarian_front _ = Ok Keeper_turn_driver_try_provider.No_position in
     let goal_text = "GOAL revision-current measurement=1/4" in
     let first_event = "Approved task-first vrf-first human_operator operator-first" in
     let new_event = "Rejected task-other vrf-new human_operator operator-second" in
@@ -3450,12 +3404,8 @@ let test_start_authority_is_user_context_not_standing_system () =
       let raw = In_channel.with_open_bin prompt_marker input_line in
       let user = content_of_wire_message raw in
       let standing = "BASE\n\n" ^ goal_text in
-      let expected_system = if index = 0 then
-          String.concat "\n\n" (standing :: List.map Host.encode_history_message
-            (attach_native_unread ~unread []))
-        else standing in
-      check string "complete System keeps the native unread contract and excludes authority"
-        expected_system system;
+      check string "complete System is the standing prompt and excludes authority"
+        standing system;
       let expected = match event with
         | None -> "OWNER"
         | Some text ->
@@ -6289,7 +6239,7 @@ let test_a_start_seed_begins_at_the_carried_front () =
   | Ok carried ->
     check (list string) "the same range the Agent Core path composes"
       (encoded (agent_core_range ~front:seed_read.Keeper_carried_front.seed messages))
-      (encoded (without_native_unread carried));
+      (encoded carried);
     (match !observed with
      | None -> fail "the projection reported no window"
      | Some observation ->
@@ -6321,7 +6271,7 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
     match
       Runtime_model_input_tail_window.minimum_capacity_bytes
         (Runtime_model_input_tail_window.measure_history
-           ~measure_message_bytes:measure (attach_native_unread messages))
+           ~measure_message_bytes:measure messages)
     with
     | Some floor_bytes -> floor_bytes + newest_two
     | None -> fail "a history this long has a framed floor"
@@ -6333,7 +6283,7 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
         ~measure_message_bytes:Keeper_official_client_host.measure_message_bytes
         ~capacity_bytes
         ~reserved_bytes:0
-        (attach_native_unread messages)
+        messages
     with
     | Ok projection -> projection
     | Error error ->
@@ -6356,8 +6306,8 @@ let test_the_declared_ceiling_wins_when_it_cuts_deeper () =
     check bool "and still carries the turn" true
       (ceiling_only.Runtime_model_input_tail_window.dropped_atoms < 120);
     check (list string) "so the ceiling decides the range"
-      (encoded (without_native_unread ceiling_only.Runtime_model_input_tail_window.messages))
-      (encoded (without_native_unread carried));
+      (encoded ceiling_only.Runtime_model_input_tail_window.messages)
+      (encoded carried);
     (match !observed with
      | None -> fail "the projection reported no window"
      | Some observation ->
@@ -6385,7 +6335,7 @@ let test_a_cold_start_with_no_completed_turn_carries_everything () =
   | Ok carried ->
     check (list string) "the same range the Agent Core path composes"
       (encoded (agent_core_range ~front:None messages))
-      (encoded (without_native_unread carried));
+      (encoded carried);
     (match !observed with
      | None -> fail "the projection reported no window"
      | Some observation ->
@@ -6414,7 +6364,7 @@ let test_a_cold_start_begins_at_the_turn_start () =
   | Ok carried ->
     check (list string) "the same range the Agent Core path composes"
       (encoded (agent_core_range ~turn_start:112 ~front:None messages))
-      (encoded (without_native_unread carried));
+      (encoded carried);
     (match !observed with
      | None -> fail "the projection reported no window"
      | Some observation ->
@@ -6476,12 +6426,12 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
       ~runtime_id:"claude_code.claude-sonnet-5"
       messages
   in
-  (match project (fun _ -> Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 100 }))) with
+  (match project (fun _ -> Ok ((Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 100 }))) with
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok carried ->
      check (list string) "the range starts at the read position"
        (encoded (List.filteri (fun i _ -> i >= 100) messages))
-       (encoded (without_native_unread ~unread:Keeper_librarian_request_unread.empty carried)));
+       (encoded carried));
   (match !seen_front with
    | Some (Keeper_official_client_host.Librarian_progress { end_atom = 100 }, bytes) ->
      check bool "the front is reported with the range's bytes" true (bytes > 0)
@@ -6490,10 +6440,10 @@ let test_the_librarian_front_reaches_the_list_and_its_error_refuses () =
   let snapshot =
     snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
   in
-  (match project (fun _ -> Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))) with
+  (match project (fun _ -> Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))) with
    | Error error -> fail (Agent_core.Error.to_string error)
    | Ok carried ->
-     (match without_native_unread ~unread:Keeper_librarian_request_unread.empty carried with
+     (match carried with
       | working :: rest ->
         check string "the working state leads the list"
           (Keeper_turn_driver_try_provider.working_state_text snapshot)
@@ -6536,19 +6486,19 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
       0
       (List.filteri (fun i _ -> i >= lo && i < hi) messages)
   in
-  (* Charge the omission preamble and the native known-empty unread carrier
-     together; only the conversation atoms may be displaced by a summary. *)
+  (* Charge the omission preamble; only the conversation atoms may be
+     displaced by a summary. *)
   let preamble_bytes =
     match
       Runtime_model_input_tail_window.minimum_capacity_bytes
         (Runtime_model_input_tail_window.measure_history
-           ~measure_message_bytes:measure (attach_native_unread ~unread:Keeper_librarian_request_unread.empty messages))
+           ~measure_message_bytes:measure messages)
     with
     | Some bytes -> bytes
     | None -> fail "the fixture history has no shrinkable atom"
   in
-  (* Room for the carrier, preamble and twenty messages from atom 100, where
-     the Librarian read to, and nothing for a working state on top. *)
+  (* Room for the preamble and twenty messages from atom 100, where the
+     Librarian read to, and nothing for a working state on top. *)
   let capacity_bytes = preamble_bytes + bytes 100 120 in
   let observed = ref None in
   let project snapshot =
@@ -6556,7 +6506,7 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ~librarian_front:(fun _ ->
-        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+        Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~on_model_input_window_observation:(fun o -> observed := Some o)
       ~keeper_name:"alpha"
@@ -6572,7 +6522,6 @@ let test_a_working_state_that_would_displace_atoms_stays_out () =
     match project snapshot with
     | Error error -> fail (Agent_core.Error.to_string error)
     | Ok sent ->
-      ignore (without_native_unread ~unread:Keeper_librarian_request_unread.empty sent);
       let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
       check int "the working state stays out" 0
         (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
@@ -6614,13 +6563,13 @@ let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check ()
     snapshot_through ~messages ~end_atom:100 ~working_state:"Fifty asks answered so far."
   in
   let capacity_bytes =
-    List.fold_left (fun total message -> total + measure message) 0 (attach_native_unread ~unread:Keeper_librarian_request_unread.empty messages) * 2
+    List.fold_left (fun total message -> total + measure message) 0 messages * 2
   in
   match
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ~librarian_front:(fun _ ->
-        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+        Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -6628,7 +6577,6 @@ let test_a_working_state_beside_the_turn_carrier_passes_the_composition_check ()
   with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
-    ignore (without_native_unread ~unread:Keeper_librarian_request_unread.empty sent);
     let working_state = Keeper_turn_driver_try_provider.working_state_text snapshot in
     check int "the working state is sent" 1
       (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
@@ -6682,12 +6630,6 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
   let observed = ref None in
   let project ?librarian_front () =
     observed := None;
-    let unread = match librarian_front with
-      | None -> unavailable_native_unread
-      | Some _ -> Keeper_librarian_request_unread.empty in
-    let capacity_bytes = capacity_bytes
-      + List.fold_left (fun total message -> total + measure message) 0
-          (attach_native_unread ~unread []) in
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ?librarian_front
@@ -6697,8 +6639,8 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
       ~runtime_id:"claude_code.claude-sonnet-5"
       messages
   in
-  let goes_as_cut ~unread label sent =
-    (match without_native_unread ~unread sent with
+  let goes_as_cut label sent =
+    (match sent with
      | head :: rest ->
        check bool (label ^ ": the range opens with the preamble") true
          (Runtime_model_input_tail_window.is_synthetic_preamble head);
@@ -6717,22 +6659,21 @@ let test_a_range_the_ceiling_fits_goes_as_cut () =
   in
   (match project () with
    | Error error -> fail (Agent_core.Error.to_string error)
-   | Ok sent -> goes_as_cut ~unread:unavailable_native_unread "no Librarian position" sent);
+   | Ok sent -> goes_as_cut "no Librarian position" sent);
   (* A snapshot behind the cut does not win the range: the same range goes,
-     only the unread observation is pinned, and no working state is counted
-     as left out. *)
+     and no working state is counted as left out. *)
   let before = working_state_not_carried ~reason:"displaces_atoms" in
   match
     project
       ~librarian_front:(fun _ ->
         Ok
-          (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot
+          ((Keeper_turn_driver_try_provider.Librarian_snapshot
              (snapshot_through ~messages ~end_atom:50 ~working_state:"Twenty-five asks."))))
       ()
   with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
-    goes_as_cut ~unread:Keeper_librarian_request_unread.empty "a snapshot behind the cut" sent;
+    goes_as_cut "a snapshot behind the cut" sent;
     check (float 0.) "and no working state is counted as left out" before
       (working_state_not_carried ~reason:"displaces_atoms")
 ;;
@@ -6753,13 +6694,12 @@ let test_a_working_state_that_displaces_nothing_goes () =
     ; metadata = Runtime_model_input_tail_window.working_state_metadata
     }
   in
-  (* Exactly the unread carrier, working state, preamble and twenty atoms
-     from 100. *)
+  (* Exactly the working state, preamble and twenty atoms from 100. *)
   let capacity_bytes =
     (match
        Runtime_model_input_tail_window.minimum_capacity_bytes
          (Runtime_model_input_tail_window.measure_history
-            ~measure_message_bytes:measure (attach_native_unread ~unread:Keeper_librarian_request_unread.empty (pinned :: messages)))
+            ~measure_message_bytes:measure (pinned :: messages))
      with
      | Some bytes -> bytes
      | None -> fail "the fixture history has no shrinkable atom")
@@ -6773,7 +6713,7 @@ let test_a_working_state_that_displaces_nothing_goes () =
     Keeper_claude_code_runtime.For_testing.start_seed_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "alpha" })
       ~capacity_bytes
       ~librarian_front:(fun _ ->
-        Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
+        Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot)))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ~keeper_name:"alpha"
       ~runtime_id:"claude_code.claude-sonnet-5"
@@ -6781,7 +6721,6 @@ let test_a_working_state_that_displaces_nothing_goes () =
   with
   | Error error -> fail (Agent_core.Error.to_string error)
   | Ok sent ->
-    ignore (without_native_unread ~unread:Keeper_librarian_request_unread.empty sent);
     check int "the working state goes, once" 1
       (List.length (List.filter (fun m -> String.equal (text_of m) working_state) sent));
     check (list string) "with every atom it abuts"
@@ -6816,8 +6755,7 @@ module Argument_start_fixture = struct
     Host.create_argument_source ~base_path ~keeper_name
       ~seed:(Some seed) ~replay_prefix:Keeper_replay_prefix.unchanged ~turn_start:(boundary seed)
   let librarian_front _ : (Host.librarian_position, Agent_core.Error.t) result = Ok
-      {point=Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1};
-       unread=Keeper_librarian_request_unread.empty}
+      (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})
   let snapshot () = List.map Agent_core.Checkpoint.message_to_json history
   let reader base_path =
     let schema = Keeper_runtime_schemas_toml.artifact_read in

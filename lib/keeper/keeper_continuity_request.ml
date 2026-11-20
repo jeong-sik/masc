@@ -46,7 +46,7 @@ let origin_to_json = function
     | Librarian_snapshot _ | Librarian_progress _ | Past_librarian_point _
     | Turn_start _) as origin -> Keeper_carried_front.origin_to_json origin
 
-let to_json ~keeper ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
+let to_json ~keeper ~turn_ref ~runtime_id ~selection ~range ~wire =
   let associated_range =
     match turn_ref, wire.Llm_provider.Request_wire_observer.capture_id, range with
     | Some _, Some _, Some range -> Some range
@@ -62,7 +62,6 @@ let to_json ~keeper ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
     ; "binding", `String (match wire.Llm_provider.Request_wire_observer.capture_id with
         | Some _ -> "capture_identified" | None -> "unbound")
     ; "wire", Llm_provider.Request_wire_observer.observation_to_yojson wire
-    ; "unread", Keeper_librarian_request_unread.to_json unread
     ; "selection", selection_to_json selection
     ; "bounded_range", (match associated_range with None -> `Null | Some (range : range) -> `Assoc
         [ "origin", origin_to_json range.origin
@@ -72,7 +71,7 @@ let to_json ~keeper ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
         ])
     ]
 
-let record_best_effort ~config ~keeper_name ~turn_ref ~unread ~runtime_id ~selection ~range ~wire =
+let record_best_effort ~config ~keeper_name ~turn_ref ~runtime_id ~selection ~range ~wire =
   let append () =
     let location =
       Dated_jsonl.Store.keeper
@@ -81,7 +80,7 @@ let record_best_effort ~config ~keeper_name ~turn_ref ~unread ~runtime_id ~selec
         Dated_jsonl.Store.Keeper.Continuity_requests
     in
     Dated_jsonl.append (Dated_jsonl.open_store location)
-      (to_json ~keeper:keeper_name ~turn_ref ~unread ~runtime_id ~selection ~range ~wire)
+      (to_json ~keeper:keeper_name ~turn_ref ~runtime_id ~selection ~range ~wire)
   in
   match append () with
   | () -> ()

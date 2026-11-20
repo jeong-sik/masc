@@ -1,19 +1,8 @@
-let frozen_librarian_position point : Masc.Keeper_turn_driver_try_provider.librarian_position =
-  let snapshot=match point with
-    | Masc.Keeper_turn_driver_try_provider.Librarian_snapshot snapshot -> snapshot.unread_messages
-    | Masc.Keeper_turn_driver_try_provider.Librarian_progress _ | Masc.Keeper_turn_driver_try_provider.No_position -> [] in
-  {point;unread=Masc.Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot) ~memory:(Ok [])}
-;;
-
 (* Drive the production Keeper adapter through fresh and resumed native
    requests. The fixture observes transport input, not model understanding. *)
 open Alcotest
 open Masc
 
-let unavailable_native_unread = Keeper_librarian_request_unread.of_results
-    ~snapshot:(Error "fixture has no snapshot reader")
-    ~memory:(Error "fixture has no Memory reader")
-;;
 
 let write path value = Out_channel.with_open_bin path (fun out -> output_string out value)
 let member = Yojson.Safe.Util.member
@@ -861,16 +850,16 @@ let test_recall_lifecycle_across_native_ticks () =
      let module Store = Keeper_official_client_session_store in
      (* The first resume refreshes the standing System (#47580) and its
         receipt is retained once across the following ticks. *)
-     check int "repeated ticks retain one receipt per context identity" 4
+     check int "repeated ticks retain one receipt per context identity" 3
        (List.length frontier.held_context);
      check bool
-       "delivery receipts contain the standing system, the two blocks and frozen unread identity"
+       "delivery receipts contain the standing system and the two blocks"
        true
        (List.sort_uniq Stdlib.compare contexts =
         List.sort Stdlib.compare
           [Store.Codex_system_prompt;
            Store.Context_block Prompt_block_id.Memory_os_recall;
-           Store.Context_block Prompt_block_id.Temporal_summary; Store.Librarian_unread])
+           Store.Context_block Prompt_block_id.Temporal_summary])
    | Ok _ | Error _ -> fail "settled native session lost its context frontier")
 
 let test_rejected_context_never_submits_turn () =
@@ -1041,63 +1030,6 @@ let params_of method_ rows =
 
 let turn_input params = params |> member "input" |> items |> List.hd |> member "text" |> text
 
-(* Frozen unread observations replace the session's earlier observation by
-   identity. A clear is an explicit carrier, and an unchanged clear is held. *)
-let test_frozen_unread_changes_and_clears_across_native_requests () =
-  with_fixture @@ fun ~run ~capture ~reports:_ ->
-  let module Frozen = Keeper_librarian_request_unread in
-  let module Store = Keeper_official_client_session_store in
-  let history = [Agent_core.Types.user_msg "Unread original A";
-                 Agent_core.Types.user_msg "Unread original B"] in
-  let hole atom = Keeper_librarian_unread.for_atom ~trace_id:"native-unread"
-    ~history_start_boundary_line:1 ~atom ~message_in_atom:0 ~messages:history
-    ~reasons:[Keeper_librarian_input_refusal.Input_capacity] |> require in
-  let initial = Frozen.of_results ~snapshot:(Ok [hole 0]) ~memory:(Ok []) in
-  let changed = Frozen.of_results ~snapshot:(Ok [hole 0]) ~memory:(Ok [hole 1]) in
-  let unavailable = Frozen.of_results ~snapshot:(Ok []) ~memory:(Error "ledger unreadable") in
-  let carrier unread = match Frozen.attach ~include_empty:true
-      ~role:Agent_core.Types.System unread [] with
-    | [message] -> message
-    | [] | _ :: _ :: _ -> fail "native observation must have one carrier" in
-  let encoded unread = Keeper_official_client_host.encode_history_message (carrier unread) in
-  let previous = ref None in
-  List.iteri (fun index (unread, delivered) ->
-    let before = List.length (read_requests capture) in
-    let librarian_front _ = Ok
-      {Keeper_turn_driver_try_provider.point=No_position; unread} in
-    successful (run ~librarian_front ~initial_messages:history
-      ~instructions:"Keeper instructions" ~world:"Stable native world" ());
-    let rows = read_requests capture |> List.filteri (fun i _ -> i >= before) in
-    let sent = if index = 0 then
-        match params_of "thread/start" rows with
-        | [params] -> params |> member "developerInstructions" |> text
-        | _ -> fail "first unread observation did not start one thread"
-      else (
-        check int "later observation resumes the existing native thread" 1
-          (List.length (params_of "thread/resume" rows));
-        check int "resume carries no persistent history injection" 0
-          (List.length (params_of "thread/inject_items" rows));
-        turn_text rows) in
-    check bool "transport delivers frozen unread exactly when its observation changes"
-      delivered (String_util.contains_substring sent (encoded unread));
-    Option.iter (fun prior ->
-      if prior <> unread then
-        check bool "a changed observation never replays the earlier unread carrier" false
-          (String_util.contains_substring sent (encoded prior))) !previous;
-    previous := Some unread;
-    match Store.load ~base_path:(Filename.dirname capture) ~keeper_name:"context-fixture" |> Result.map_error Store.read_error_to_string with
-    | Ok (Some {context_frontier=Some frontier;_}) ->
-      let held = List.filter
-        (fun (item : Store.held_context) -> item.context=Store.Librarian_unread)
-        frontier.held_context in
-      (match held with
-       | [receipt] -> check string "session holds the latest frozen unread bytes"
-           Agent_core_sha256.(digest_string (encoded unread) |> to_hex) receipt.sha256
-       | [] | _ :: _ :: _ -> fail "native session lost its single unread receipt")
-    | Ok _ | Error _ -> fail "native session lost its acknowledged context frontier")
-    [initial,true;initial,false;changed,true;Frozen.empty,true;Frozen.empty,false;
-     unavailable,true;unavailable,false;Frozen.empty,true]
-
 (* Two fixtures live under different temporary roots; anything that names the
    root is compared with the root taken out. *)
 let without_root ~capture value =
@@ -1177,25 +1109,14 @@ let carried_indices messages =
        | _ -> None)
     messages
 
-let native_unread_messages
-    ?(unread = unavailable_native_unread) messages =
-  Keeper_librarian_request_unread.attach ~include_empty:true ~role:Agent_core.Types.System unread messages
-
 let carried ?carried_front_seed ?librarian_front
-    ?(unread = unavailable_native_unread) ?(capacity_bytes = Keeper_codex_runtime.For_testing.unbounded_capacity_bytes) turn_start =
+    ?(capacity_bytes = Keeper_codex_runtime.For_testing.unbounded_capacity_bytes) turn_start =
   match
     Keeper_codex_runtime.For_testing.carried_projection ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "context-fixture" })
       ~capacity_bytes ?carried_front_seed ?librarian_front ~turn_start
       ~keeper_name:"context-fixture" ~runtime_id:"codex.context" large_history
   with
-  | Ok messages ->
-    let carriers = List.filter Runtime_model_input_tail_window.is_unread_context messages in
-    let encoded = List.map Keeper_official_client_host.encode_history_message in
-    check (list string) "native range contains its exact frozen unread observation"
-      (encoded (native_unread_messages ~unread [])) (encoded carriers);
-    check int "native unread carrier is pinned" 0
-      (snd (Runtime_model_input_tail_window.annotate carriers));
-    carried_indices messages
+  | Ok messages -> carried_indices messages
   | Error error -> fail (Agent_core.Error.to_string error)
 
 let seed_at first_atom () =
@@ -1288,9 +1209,8 @@ let test_the_seed_decides_the_range () =
 let test_a_later_librarian_position_decides_the_range () =
   check (list int) "the Librarian's read position is past the seed" (from 62)
     (carried ~carried_front_seed:(seed_at 50)
-       ~unread:Keeper_librarian_request_unread.empty
        ~librarian_front:(fun _ ->
-         Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 62 })))
+         Ok ((Keeper_turn_driver_try_provider.Librarian_progress { end_atom = 62 })))
        (Keeper_carried_front.Turn_boundary { end_atom = 60 }))
 
 (* A response accepted no prior history, but the next request can retain the
@@ -1317,7 +1237,7 @@ let test_empty_history_keeps_a_fitting_summary () =
     (match Librarian_continuity_snapshot.restore ~trace_id ~lines ~messages snapshot with
      | Ok _ -> ()
      | Error error -> fail (Librarian_continuity_snapshot.error_to_string error));
-    Ok (frozen_librarian_position (Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
+    Ok ((Keeper_turn_driver_try_provider.Librarian_snapshot snapshot))
   in
   let seed : Keeper_carried_front.seed =
     { first_atom = 64
@@ -1354,7 +1274,7 @@ let test_a_ceiling_cuts_inside_the_range () =
   let framing =
     match Runtime_model_input_tail_window.minimum_capacity_bytes
       (Runtime_model_input_tail_window.measure_history
-         ~measure_message_bytes:measure (native_unread_messages large_history)) with
+         ~measure_message_bytes:measure large_history) with
     | Some bytes -> bytes
     | None -> fail "a history this long has a framed floor"
   in
@@ -1375,7 +1295,7 @@ let test_the_overflow_floor_does_not_restore_the_newest_atom () =
     match
       Runtime_model_input_tail_window.minimum_capacity_bytes
         (Runtime_model_input_tail_window.measure_history
-           ~measure_message_bytes:measure (native_unread_messages large_history))
+           ~measure_message_bytes:measure large_history)
     with
     | Some bytes -> bytes
     | None -> fail "the rejected history must have a smaller floor"
@@ -1390,11 +1310,7 @@ let test_an_unknown_turn_start_carries_the_newest_atom () =
 
 let test_completion_evidence_without_a_keeper_boundary_keeps_every_atom () =
   let seed_reads = ref 0 and librarian_reads = ref 0 in
-  (* The review owns even an unread-tagged message: it is submitted evidence,
-     not a current Keeper observation to be replaced by this dispatch. *)
-  let evidence = large_history @
-    Keeper_librarian_request_unread.attach ~include_empty:true
-      ~role:Agent_core.Types.System Keeper_librarian_request_unread.empty [] in
+  let evidence = large_history in
   let sent = Keeper_codex_runtime.For_testing.carried_projection
       ~input_source:Masc.Keeper_request_source.Completion_review ~capacity_bytes:1
       ~carried_front_seed:(fun () -> incr seed_reads; (seed_at 60) ())
@@ -1442,11 +1358,8 @@ let test_completion_evidence_reaches_native_writer ~custom_projection () =
     projected_texts actual_texts;
   check int "explicit source projection runs once" (if custom_projection then 1 else 0)
     !projection_calls;
-  let start = match params_of "thread/start" rows with
-    | [params] -> params | _ -> fail "expected one fresh completion thread" in
-  check bool "the native request invents no Keeper unread observation" false
-    (String_util.contains_substring (start |> member "developerInstructions" |> text)
-      "[Librarian unread evidence:");
+  check int "completion evidence opens one fresh thread" 1
+    (List.length (params_of "thread/start" rows));
   check int "completion evidence is submitted once" 1
     (List.length (params_of "turn/start" rows));
   check bool "the source evidence remains unchanged" true
@@ -1524,8 +1437,7 @@ let argument_fixture capture =
   let source () = Keeper_official_client_host.create_argument_source
     ~base_path ~keeper_name:"context-fixture"
     ~seed:(Some seed) ~replay_prefix ~turn_start:boundary in
-  let librarian_front _ = Ok (frozen_librarian_position
-    (Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})) in
+  let librarian_front _ = Ok ((Keeper_turn_driver_try_provider.Librarian_progress {end_atom=1})) in
   old,current,history,boundary,source,librarian_front,argument_reader base_path
 
 let test_completed_arguments_cross_start_resume_and_reseed ~overflow_resume () =
@@ -1846,8 +1758,6 @@ let () =
   test_case "rejected System snapshot is not settled or dispatched" `Quick
     test_rejected_system_snapshot_is_not_settled;
   test_case "fresh overflow retry receives and remembers recall" `Quick test_context_blocks_survive_fresh_retry;
-  test_case "frozen unread changes, clears and stays held across native requests" `Quick
-    test_frozen_unread_changes_and_clears_across_native_requests;
   test_case "memory changes, clears, fails and recovers across native ticks" `Quick test_recall_lifecycle_across_native_ticks;
   test_case "operator interruption preserves previous Codex settlement" `Quick test_operator_interrupt_preserves_previous_native_settlement;
   test_case "a Start carries the range, not the whole history" `Quick test_start_carries_the_range_not_the_whole_history;
@@ -1869,7 +1779,7 @@ let () =
   "completion evidence",[
     test_case "completion evidence without a Keeper boundary keeps every atom" `Quick
       test_completion_evidence_without_a_keeper_boundary_keeps_every_atom;
-    test_case "native Start preserves evidence without Keeper unread state" `Quick
+    test_case "native Start preserves the completion evidence" `Quick
       (test_completion_evidence_reaches_native_writer ~custom_projection:false);
     test_case "native Start preserves an explicit completion projection" `Quick
       (test_completion_evidence_reaches_native_writer ~custom_projection:true);

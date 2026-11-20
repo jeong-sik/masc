@@ -549,8 +549,7 @@ let test_continuity_export_keeps_every_attributed_request_and_exact_boundary () 
     let range : C.range = { origin = Keeper_carried_front.Turn_start { end_atom = 0 };
       first_atom = 0; total_atoms = 1; custom_projection_changed = false } in
     let record_request ?(turn_ref = Some reference) ~range wire =
-      C.record_best_effort ~config ~keeper_name:keeper ~turn_ref
-        ~unread:Keeper_librarian_request_unread.empty ~runtime_id:"local"
+      C.record_best_effort ~config ~keeper_name:keeper ~turn_ref ~runtime_id:"local"
         ~selection:C.Without_snapshot ~range ~wire in
     record_request ~range:(Some range) { wire with capture_id = Some "first-wire" };
     record_request ~range:None wire;

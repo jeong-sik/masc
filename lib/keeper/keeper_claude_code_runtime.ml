@@ -130,7 +130,7 @@ let model_input_projection_for_capacity ~input_source
         Runtime_model_input_tail_window.minimum_capacity_bytes
           measured)
   in
-  Host.project_source ~input_source ~unread:frozen.Keeper_turn_driver_try_provider.unread source_projection windowed
+  Host.project_source source_projection windowed
 ;;
 
 (* Keep the account scope selected at turn start. Config may be reloaded while

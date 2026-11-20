@@ -373,13 +373,9 @@ flowchart TD
 
   화면 관측은 `keeper.memory_os.current_health.v8`의 필수 `context_cycle.unread`로 전달한다. `snapshot`과 `memory`는 각기 `available`과 원문 좌표·SHA-256·명명된 크기 거절 원인 목록, 또는 `unavailable`이다. 두 저장소의 기록은 겹칠 수 있으며 한쪽 읽기 실패로 다른 쪽 기록을 숨기지 않는다. 원문 내용과 working state 본문은 보내지 않는다. Memory 항목은 이미 저장된 누적 원장을 관측할 뿐, 그 조회 자체가 영수증을 확정하거나 원장을 쓰지는 않는다. 따라서 0은 그 저장소에서 관측한 기록 수이지 전체 이력·요청을 전부 읽었다는 증명이 아니다. 기존 health 경로의 별도 Memory 복구 동작은 유지한다.
 
-  요청 조립은 같은 두 관측을 `Keeper_librarian_request_unread`의 불변 값으로 턴마다 한 번 고정한다. 먼저 실제 cursor를 선택하고, 그 뒤 누적 Memory unread 원장을 읽는다. writer가 구멍을 보존한 뒤 cursor를 옮기는 순서와 짝을 이뤄, 새 cursor와 그보다 이른 원장을 조합하지 않는다. 스냅숏 복원이 실패하거나 더 늦은 Memory 진행 위치·accepted seed가 앞머리를 정해도 raw 스냅숏에서 읽은 구멍과 누적 원장의 관측은 별개로 보존한다. 조회 실패는 해당 출처의 `unavailable`이며, 원장의 수동 복구·소비·게시를 요청 경로에서 실행하지 않는다.
-
-  이 기록은 atom을 열지 않는 독립 pinned carrier로 입력 크기 계산 전에 붙인다. working state를 용량 때문에 빼거나 이력을 하나도 싣지 않는 바닥에 도달해도 유지하며, custom projection 뒤에는 같은 고정 값을 다시 붙인다. candidate별 미디어 표현을 바꿔도 원문 좌표·해시는 다시 계산하지 않는다. Agent Core의 forecast와 `masc.continuity-request.v3` 진단도 같은 관측을 사용한다. 진단의 실제 body 해시·바이트는 전송 직렬화 경계의 관측이지 모델 이해나 저장 성공 증거가 아니다.
+  `masc.continuity-request.v3` 진단의 실제 body 해시·바이트는 전송 직렬화 경계의 관측이지 모델 이해나 저장 성공 증거가 아니다.
 
   진단은 각 직렬화의 Keeper·정확한 턴 ID·wire capture ID를 남긴다. 해당 직렬화와 짝지은 projection이 없으면 `bounded_range: null`이며 이전 범위를 대신 쓰지 않는다. 관리자용 `provider-input/continuity?turn_ref=...`는 기존 정본에서 그 턴의 모든 귀속된 직렬화, 같은 이력 세대의 실제 완료 경계, 현재 W의 준비 관측을 읽는다. 현재 W 관측은 검사 대기에만 쓰며 실제 probe 입력을 대신하지 않는다. 실측의 원문 범위 제외 주장은 완료 턴의 exclusive end를 W가 실제로 덮고, unread가 없고, 모든 준비 요청의 범위가 그 뒤에서 시작하며, custom projection이 바꾸지 않았고, exact turn record의 모든 serialized body SHA·bytes와 맞을 때만 남긴다. 더 큰 covering boundary나 마지막 요청 하나로 대신하지 않는다. 이 관측은 원문 퇴역 허가·원격 수신·의미 보존 판정이 아니다.
-
-  공식 클라이언트는 System 경로로 정상 빈 관측까지 명시적으로 보낸다. reader가 없으면 빈 목록 대신 두 출처 모두 `unavailable`이다. resume은 `Librarian_unread`라는 별도 held identity로 같은 바이트는 생략하고, 내용 변경·정상 빈 관측·조회 불가 전이는 새 기록으로 보낸다. 실제 턴이 정산된 뒤에만 이 identity를 저장한다. 빈 관측은 이전 unread가 실제로 읽혔다는 뜻이 아니며, 새 관측을 보냈다는 뜻이다. Agent Core의 새 요청은 두 출처가 정상 빈 목록이면 carrier를 생략한다.
 
   Memory가 아직 처리하지 않은 메시지는 context-only 상태로 대신하지 않는다. context-only 프롬프트는 Memory 처리가 끝났다고 전제하고 `previous_working_state`를 Memory의 근거로 쓰지 않는다. `Keeper_librarian_runtime.infer_memory_step`은 일반 Memory 프롬프트·엄격 파서·흡수/복제 판정 gate로 정확한 입력을 판단하되 저장 전에 반환한다. 반환값은 원 입력과 실행 ID, gate 원증거, 파서가 만든 사실의 시각·출처·근거, gate를 통과한 흡수, 교정·삭제 및 별도의 이어갈 상태를 보존한다. live 큐는 정리하지 않으며 Memory·continuity·영수증·읽은 위치를 게시하지 않는다. 실패·취소 관측도 Memory 조회/실패 저널을 호출하지 않으므로 별도로 남은 publication을 복구하지 않는다. 실행 원장과 typed 실패 반환에 결과를 남기며 TUI는 이 상태를 실제 저장과 구별한다.
 

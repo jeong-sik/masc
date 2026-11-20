@@ -14,11 +14,11 @@ type range =
   }
 
 val to_json : keeper:string -> turn_ref:Ids.Turn_ref.t option ->
-  unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range option ->
+  runtime_id:string -> selection:selection -> range:range option ->
   wire:Llm_provider.Request_wire_observer.observation -> Yojson.Safe.t
 
 val record_best_effort : config:Workspace.config -> keeper_name:string -> turn_ref:Ids.Turn_ref.t option ->
-  unread:Keeper_librarian_request_unread.t -> runtime_id:string -> selection:selection -> range:range option ->
+  runtime_id:string -> selection:selection -> range:range option ->
   wire:Llm_provider.Request_wire_observer.observation -> unit
 (** Append each serialization's turn identity and selection/range metadata at
     the existing pre-dispatch boundary. Missing turn/capture identity or a

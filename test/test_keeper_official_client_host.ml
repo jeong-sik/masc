@@ -1,10 +1,3 @@
-let frozen_librarian_position point : Masc.Keeper_turn_driver_try_provider.librarian_position =
-  let snapshot=match point with
-    | Masc.Keeper_turn_driver_try_provider.Librarian_snapshot snapshot -> snapshot.unread_messages
-    | Masc.Keeper_turn_driver_try_provider.Librarian_progress _ | Masc.Keeper_turn_driver_try_provider.No_position -> [] in
-  {point;unread=Masc.Keeper_librarian_request_unread.of_results ~snapshot:(Ok snapshot) ~memory:(Ok [])}
-;;
-
 open Alcotest
 open Masc
 
@@ -2316,7 +2309,7 @@ let absorbed_boundary () : Boundaries.record =
   }
 ;;
 
-let absorbed_snapshot () =
+let absorbed_snapshot ?(working_state = working_state) () =
   match
     Snapshot.capture ~unread_messages:[]
       ~trace_id:start_seed_trace
@@ -2331,7 +2324,7 @@ let absorbed_snapshot () =
 let start_range_runtime = "claude_code.claude-sonnet-5"
 
 let start_range
-      ?(librarian_front = frozen_librarian_position Choice.No_position)
+      ?(librarian_front = Choice.No_position)
       ?(own_first_atom = 0)
       ?(turn_start = Keeper_carried_front.Turn_boundary { end_atom = 0 })
       ?carried_front_seed
@@ -2360,7 +2353,7 @@ let texts messages =
    after them and carries the working state in their place. *)
 let test_a_start_seed_begins_at_the_librarian_position () =
   let snapshot = absorbed_snapshot () in
-  let carried = start_range ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot)) start_seed_messages in
+  let carried = start_range ~librarian_front:((Choice.Librarian_snapshot snapshot)) start_seed_messages in
   check int "the first atom is the one the Librarian did not read"
     snapshot.Snapshot.end_atom carried.Host.first_atom;
   check bool "the front says so" true
@@ -2383,6 +2376,60 @@ let test_a_start_seed_begins_at_the_librarian_position () =
     (List.exists (String.equal "The build passed.") carried_texts);
   check bool "the atom the keeper is still on is" true
     (List.exists (String.equal "Now review it.") carried_texts)
+;;
+
+(* A working state the window cannot carry beside the atoms after it is
+   left out, and the range goes from the Librarian position alone with the
+   same atoms. The budget fits the position's range exactly. *)
+let test_a_working_state_the_window_cannot_carry_is_left_out () =
+  let module Window = Runtime_model_input_tail_window in
+  let snapshot = absorbed_snapshot ~working_state:(String.make 10_000 's') () in
+  let position = Choice.Librarian_progress { end_atom = snapshot.Snapshot.end_atom } in
+  let range librarian_front = start_range ~librarian_front start_seed_messages in
+  let alone = range position in
+  let labelled, atom_count = Window.annotate alone.Host.messages in
+  let _, floor_bytes =
+    Window.project_from_atom ~allow_empty_history:true
+      ~measure_message_bytes:Host.measure_message_bytes ~first_atom:atom_count
+      alone.Host.messages
+  in
+  let atom_bytes =
+    List.fold_left
+      (fun bytes (message, label) ->
+         match label with
+         | Window.Pinned -> bytes
+         | Window.Atom (_ : int) -> bytes + Host.measure_message_bytes message)
+      0 labelled
+  in
+  let compose librarian_front =
+    let carried = range librarian_front in
+    Window.project_with_drop ~measure_message_bytes:Host.measure_message_bytes
+      ~capacity_bytes:(floor_bytes + atom_bytes) ~reserved_bytes:0 carried.Host.messages
+    |> Result.map_error Window.budget_error_to_core_error
+    |> Result.map (fun (projection : Window.projection) ->
+      { Host.carried
+      ; sent = projection.Window.messages
+      ; atoms_kept = projection.Window.atom_count - projection.Window.dropped_atoms
+      })
+  in
+  let require = function
+    | Ok value -> value
+    | Error error -> fail (Agent_core.Error.to_string error)
+  in
+  let position_alone = compose position |> require in
+  check int "the budget keeps every atom of the position's range" atom_count
+    position_alone.Host.atoms_kept;
+  check bool "the same budget cannot carry the working state" true
+    (Result.is_error (compose (Choice.Librarian_snapshot snapshot)));
+  let composed =
+    Host.compose_librarian_range ~keeper_name:"alpha" ~runtime_id:start_range_runtime ~compose
+      (Choice.Librarian_snapshot snapshot)
+    |> require
+  in
+  check bool "the working state is left out" false
+    (List.exists Window.is_working_state composed.Host.sent);
+  check int "the atoms are the ones the position alone keeps" position_alone.Host.atoms_kept
+    composed.Host.atoms_kept
 ;;
 
 (* A reading that does not describe these messages leaves the lane's own
@@ -2423,7 +2470,7 @@ let range_after_refusal ?(boundary = 4) refused =
   let snapshot = absorbed_snapshot () in
   ( snapshot.Snapshot.end_atom
   , start_range
-      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot))
+      ~librarian_front:((Choice.Librarian_snapshot snapshot))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = boundary })
       ~carried_front_seed:(fun () -> refused)
       refused_seed_messages )
@@ -2510,7 +2557,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
     (warnings_for ~keeper_name:"alpha" ~since_seq:before_sending);
   let decided =
     start_range
-      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot (absorbed_snapshot ())))
+      ~librarian_front:((Choice.Librarian_snapshot (absorbed_snapshot ())))
       ~turn_start:unknown start_seed_messages
   in
   check bool "the Librarian position chose the start" true
@@ -2531,7 +2578,7 @@ let test_an_unknown_turn_start_is_reported_by_the_range_sent () =
    provider refuses. *)
 let test_a_fully_absorbed_history_still_carries_its_newest_atom () =
   let snapshot = absorbed_snapshot () in
-  let carried = start_range ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot)) absorbed_messages in
+  let carried = start_range ~librarian_front:((Choice.Librarian_snapshot snapshot)) absorbed_messages in
   check int "the range starts one atom before the position"
     (snapshot.Snapshot.end_atom - 1) carried.Host.first_atom;
   check bool "and still says the Librarian named the front" true
@@ -2551,7 +2598,7 @@ let test_a_later_lane_cut_wins () =
   let snapshot = absorbed_snapshot () in
   let carried =
     start_range
-      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot))
+      ~librarian_front:((Choice.Librarian_snapshot snapshot))
       ~own_first_atom:(snapshot.Snapshot.end_atom + 1)
       start_seed_messages
   in
@@ -2570,7 +2617,7 @@ let test_a_librarian_position_behind_the_turn_start_still_wins () =
   let snapshot = absorbed_snapshot () in
   let carried =
     start_range
-      ~librarian_front:(frozen_librarian_position (Choice.Librarian_snapshot snapshot))
+      ~librarian_front:((Choice.Librarian_snapshot snapshot))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = snapshot.Snapshot.end_atom + 1 })
       start_seed_messages
   in
@@ -2592,7 +2639,7 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
   let end_atom = 2 in
   let carried =
     start_range
-      ~librarian_front:(frozen_librarian_position (Choice.Librarian_progress { end_atom }))
+      ~librarian_front:((Choice.Librarian_progress { end_atom }))
       ~turn_start:(Keeper_carried_front.Turn_boundary { end_atom = 0 })
       start_seed_messages
   in
@@ -2620,7 +2667,7 @@ let test_a_read_position_alone_starts_the_range_without_a_working_state () =
 let test_a_read_position_behind_the_lane_cut_loses () =
   let carried =
     start_range
-      ~librarian_front:(frozen_librarian_position (Choice.Librarian_progress { end_atom = 1 }))
+      ~librarian_front:((Choice.Librarian_progress { end_atom = 1 }))
       ~own_first_atom:2
       start_seed_messages
   in
@@ -3670,7 +3717,7 @@ let test_every_world_state_section_goes_out_when_the_session_may_not_hold_it () 
           match held.context with
           | Keeper_official_client_session_store.(Context_section _ | Context_section_row _) -> false
           | Keeper_official_client_session_store.(
-              Context_block _ | Context_carrier | Librarian_working_state | Librarian_unread
+              Context_block _ | Context_carrier | Librarian_working_state
               | Historical_task_reference | Tool_result_receipts | Codex_system_prompt) -> true)
        whole.held_context);
   let after_whole = resume ~held:whole.held_context (world_state_turn (world_state ())) in
@@ -3709,7 +3756,7 @@ let held_row_count (delivery : Host.resume_delivery) =
           | Keeper_official_client_session_store.Context_section_row _ -> true
           | Keeper_official_client_session_store.(
               Context_block _ | Context_section _ | Context_carrier | Librarian_working_state
-              | Librarian_unread | Historical_task_reference | Tool_result_receipts
+              | Historical_task_reference | Tool_result_receipts
               | Codex_system_prompt) -> false)
        delivery.held_context)
 ;;
@@ -3831,7 +3878,7 @@ let test_a_rows_only_omission_is_named_as_rows () =
          | Keeper_official_client_session_store.Context_section section ->
            section = Layers.Layer Layers.Own_recent_actions
          | Keeper_official_client_session_store.(
-             Context_block _ | Context_carrier | Librarian_working_state | Librarian_unread
+             Context_block _ | Context_carrier | Librarian_working_state
              | Historical_task_reference | Tool_result_receipts | Codex_system_prompt) -> false)
       (start_holding first)
   in
@@ -4302,6 +4349,8 @@ let () =
             "it begins at the Librarian position"
             `Quick
             test_a_start_seed_begins_at_the_librarian_position
+        ; test_case "a working state the window cannot carry is left out" `Quick
+            test_a_working_state_the_window_cannot_carry_is_left_out
         ; test_case
             "without one the lane's own front stands"
             `Quick

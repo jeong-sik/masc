@@ -21,10 +21,7 @@
     이라 원문이 그대로 나가는 경우. 라이브 Keeper 관측(event-queue-v12.json
     last_settlement, 2026-07-25T10:44Z, ``Invalid token '```json``)은 Yojson 이
     펜스를 봤다는 뜻이므로 이 둘 중 하나이며, 어느 쪽인지는 tier 기록이 없어
-    settlement 만으로는 가려지지 않는다.
-
-    심판 출력 계약과 설계 근거는
-    docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 에 있다. *)
+    settlement 만으로는 가려지지 않는다. *)
 
 (** 질문 + 패널 답들로 심판 프롬프트를 구성한다. JSON 지침은 등록된
     [fusion.judge.output] asset, 필드·타입 schema는 {!Fusion_judge_parse.output_schema}에서 온다. *)
@@ -43,7 +40,7 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
     preset은 그 위에 얹는 요청 단위 override지 두 번째 SSOT가 아니다.
     빌드/실행/빈응답/파싱 실패는 [Error (msg, usage)]. [Masc_agent_core_bridge.run_safe]는
     예외/취소만 관측한다. 성공 시 종합 + 소비
-    토큰 [usage]를 반환하고(panel과 대칭, 비용 회계 RFC §10),
+    토큰 [usage]를 반환하고(panel과 대칭),
     실패 시에도 usage를 동반한다 — 응답을 받은 뒤 실패(빈 응답/파싱 실패)는 소비분을,
     토큰 소비 전 실패(빌드/실행/provider 에러)는 [Fusion_types.zero_usage]를 싣는다. 이로써
     호출자(refine degrade 경로)가 파싱 실패한 심판의 비용을 0으로 버리지 않는다.

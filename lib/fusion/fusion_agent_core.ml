@@ -1,5 +1,5 @@
 (* Fusion — AGENT_CORE 호출 공유 글루 (구현).
-   계약/문서: fusion_agent_core.mli, docs/rfc/RFC-0252 §7
+   계약: fusion_agent_core.mli
 
    AGENT_CORE 범용 함수만 소비: Runtime_agent_core_runner(id→provider) → Runtime_agent(build).
    fusion 개념은 AGENT_CORE에 노출하지 않는다. *)

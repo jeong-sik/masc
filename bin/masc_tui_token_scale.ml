@@ -84,45 +84,77 @@ let estimate scale bytes =
 let format_estimate scale bytes =
   "\xe2\x89\x88" ^ Masc_tui_context_inspector.format_tokens (estimate scale bytes)
 
-let own_sentence = function
-  | No_body -> "this turn carried no serialized body"
-  | No_count -> "this turn reported no input count"
+let own_sentence ~ko = function
+  | No_body ->
+      if ko then "이 턴은 직렬화된 본문을 포함하지 않았습니다"
+      else "this turn carried no serialized body"
+  | No_count ->
+      if ko then "이 턴은 입력 토큰 수를 보고하지 않았습니다"
+      else "this turn reported no input count"
   | Turn_total_count ->
-      "this count is the client turn's total over requests, so it is not divided"
+      if ko then "이 수치는 여러 요청을 합산한 클라이언트 턴 총합이라 나눌 수 없습니다"
+      else "this count is the client turn's total over requests, so it is not divided"
   | Cumulative_count ->
-      "this turn's count covers the whole conversation, which one request's \
-       bytes cannot divide"
+      if ko then "이 수치는 전체 대화 누적값이라 단일 요청 바이트로 나눌 수 없습니다"
+      else "this turn's count covers the whole conversation, which one request's \
+            bytes cannot divide"
   | Unknown_scope ->
-      "this turn's count is of unknown scope, so it is not divided"
+      if ko then "이 수치는 집계 범위가 불명확해 나눌 수 없습니다"
+      else "this turn's count is of unknown scope, so it is not divided"
 
-let turns n = if n = 1 then "1 turn" else Printf.sprintf "%d turns" n
+let turns ~ko n =
+  if ko then Printf.sprintf "%d개 턴" n
+  else if n = 1 then "1 turn"
+  else Printf.sprintf "%d turns" n
 
-let note scale =
+let note ?(ko = false) scale =
   match scale.basis with
   | This_turn { wire_bytes; tokens } ->
-      Printf.sprintf
-        "\xe2\x89\x88 tok is bytes at this turn's %.2f bytes per \
-         provider-counted token (%s tokens over %s on the wire): an \
-         estimate, not a count."
-        (1. /. scale.tokens_per_byte)
-        (Masc_tui_context_inspector.format_tokens tokens)
-        (Masc_tui_context_inspector.format_bytes wire_bytes)
+      if ko then
+        Printf.sprintf
+          "\xe2\x89\x88 tok은 이 턴의 공급자 집계 기준(전송 본문 %s당 %s 토큰, 토큰당 %.2f바이트)으로 환산한 추정치이며 실제 집계가 아닙니다."
+          (Masc_tui_context_inspector.format_bytes wire_bytes)
+          (Masc_tui_context_inspector.format_tokens tokens)
+          (1. /. scale.tokens_per_byte)
+      else
+        Printf.sprintf
+          "\xe2\x89\x88 tok is bytes at this turn's %.2f bytes per \
+           provider-counted token (%s tokens over %s on the wire): an \
+           estimate, not a count."
+          (1. /. scale.tokens_per_byte)
+          (Masc_tui_context_inspector.format_tokens tokens)
+          (Masc_tui_context_inspector.format_bytes wire_bytes)
   | Keeper_page { samples; own } ->
-      Printf.sprintf
-        "\xe2\x89\x88 tok is bytes at %.2f bytes per provider-counted token, \
-         the median of %s on this page that carried a wire body beside a \
-         per-request count; %s. An estimate, not a count."
-        (1. /. scale.tokens_per_byte)
-        (turns samples) (own_sentence own)
+      if ko then
+        Printf.sprintf
+          "\xe2\x89\x88 tok은 이 페이지에서 전송 본문과 요청별 집계를 모두 기록한 %s의 중앙값(토큰당 %.2f바이트) 기준 환산치입니다(%s). 실제 집계가 아닌 추정치입니다."
+          (turns ~ko samples) (1. /. scale.tokens_per_byte) (own_sentence ~ko own)
+      else
+        Printf.sprintf
+          "\xe2\x89\x88 tok is bytes at %.2f bytes per provider-counted token, \
+           the median of %s on this page that carried a wire body beside a \
+           per-request count; %s. An estimate, not a count."
+          (1. /. scale.tokens_per_byte)
+          (turns ~ko samples) (own_sentence ~ko own)
   | Fleet_measured { own } ->
-      Printf.sprintf
-        "\xe2\x89\x88 tok is bytes at %.2f bytes per provider-counted token, \
-         the fleet median measured 2026-09-13..15; %s. An estimate, not a \
-         count."
-        fleet_bytes_per_token
-        (match own with
-         | Some own ->
-             own_sentence own
-             ^ ", and no turn on this page carried a wire body beside a \
-                per-request count"
-         | None -> "this screen has no turn record to take a ratio from")
+      if ko then
+        Printf.sprintf
+          "\xe2\x89\x88 tok은 전체 플릿 중앙값(2026-09-13..15 측정, 토큰당 %.2f바이트) 기준 환산치입니다(%s). 실제 집계가 아닌 추정치입니다."
+          fleet_bytes_per_token
+          (match own with
+           | Some own ->
+               own_sentence ~ko own
+               ^ ", 이 페이지에 전송 본문과 요청별 집계를 함께 기록한 턴이 없습니다"
+           | None -> "비율을 구할 턴 기록이 이 화면에 없습니다")
+      else
+        Printf.sprintf
+          "\xe2\x89\x88 tok is bytes at %.2f bytes per provider-counted token, \
+           the fleet median measured 2026-09-13..15; %s. An estimate, not a \
+           count."
+          fleet_bytes_per_token
+          (match own with
+           | Some own ->
+               own_sentence ~ko own
+               ^ ", and no turn on this page carried a wire body beside a \
+                  per-request count"
+           | None -> "this screen has no turn record to take a ratio from")

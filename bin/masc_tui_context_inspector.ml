@@ -749,50 +749,54 @@ let same_part_key left right =
   && Ids.Turn_ref.equal left.part_turn_ref right.part_turn_ref
   && left.part_item = right.part_item
 
-let prompt_block_label = function
-  | Prompt_block_id.Keeper_instructions -> "Keeper instructions"
-  | Prompt_block_id.Dynamic_context -> "Dynamic context"
-  | Prompt_block_id.Active_goals -> "Active Goals"
-  | Prompt_block_id.Direct_input_source -> "Admitted request source"
-  | Prompt_block_id.Completion_authority -> "Task completion decisions"
-  | Prompt_block_id.Goals_awaiting_proof -> "Goals awaiting proof"
-  | Prompt_block_id.Constitution_amendments -> "Constitution amendments"
-  | Prompt_block_id.Temporal_summary -> "Temporal summary"
-  | Prompt_block_id.Memory_os_recall -> "Recall block"
-  | Prompt_block_id.Librarian_working_context -> "Librarian working context"
-  | Prompt_block_id.Recalled_memory -> "Recalled memory"
-  | Prompt_block_id.Recalled_memory_status -> "Recall status line"
-  | Prompt_block_id.Operator_note -> "Operator note"
-  | Prompt_block_id.Skill_compositions -> "Skill compositions"
-  | Prompt_block_id.Arrived_stimuli -> "Arrived stimuli"
+let prompt_block_label ~ko =
+  let say korean english = if ko then korean else english in
+  function
+  | Prompt_block_id.Keeper_instructions -> say "키퍼 지시문" "Keeper instructions"
+  | Prompt_block_id.Dynamic_context -> say "동적 컨텍스트" "Dynamic context"
+  | Prompt_block_id.Active_goals -> say "활성 목표" "Active Goals"
+  | Prompt_block_id.Direct_input_source -> say "접수된 요청 원문" "Admitted request source"
+  | Prompt_block_id.Completion_authority -> say "작업 완료 판정" "Task completion decisions"
+  | Prompt_block_id.Goals_awaiting_proof -> say "증명 대기 목표" "Goals awaiting proof"
+  | Prompt_block_id.Constitution_amendments -> say "헌법 개정 사항" "Constitution amendments"
+  | Prompt_block_id.Temporal_summary -> say "시간 요약" "Temporal summary"
+  | Prompt_block_id.Memory_os_recall -> say "회상 블록" "Recall block"
+  | Prompt_block_id.Librarian_working_context -> say "사서 작업 컨텍스트" "Librarian working context"
+  | Prompt_block_id.Recalled_memory -> say "불러온 기억" "Recalled memory"
+  | Prompt_block_id.Recalled_memory_status -> say "회상 상태 줄" "Recall status line"
+  | Prompt_block_id.Operator_note -> say "운영자 메모" "Operator note"
+  | Prompt_block_id.Skill_compositions -> say "스킬 조합" "Skill compositions"
+  | Prompt_block_id.Arrived_stimuli -> say "도착한 자극" "Arrived stimuli"
 
-let input_component_label = function
-  | Turn_record.Prompt_block block -> prompt_block_label block
-  | Turn_record.Tool_schemas -> "Tool schemas"
-  | Turn_record.Message_user -> "User messages"
-  | Turn_record.Message_system -> "System messages"
-  | Turn_record.Message_assistant_text -> "Assistant text"
-  | Turn_record.Message_thinking -> "Thinking"
-  | Turn_record.Message_redacted_thinking -> "Redacted thinking"
-  | Turn_record.Message_tool_use -> "Tool calls"
-  | Turn_record.Message_tool_result -> "Tool results"
-  | Turn_record.Message_image -> "Images"
-  | Turn_record.Message_document -> "Documents"
-  | Turn_record.Message_audio -> "Audio"
+let input_component_label ?(ko = false) =
+  let say korean english = if ko then korean else english in
+  function
+  | Turn_record.Prompt_block block -> prompt_block_label ~ko block
+  | Turn_record.Tool_schemas -> say "도구 스키마" "Tool schemas"
+  | Turn_record.Message_user -> say "사용자 메시지" "User messages"
+  | Turn_record.Message_system -> say "시스템 메시지" "System messages"
+  | Turn_record.Message_assistant_text -> say "어시스턴트 텍스트" "Assistant text"
+  | Turn_record.Message_thinking -> say "사고 과정" "Thinking"
+  | Turn_record.Message_redacted_thinking -> say "비공개 사고" "Redacted thinking"
+  | Turn_record.Message_tool_use -> say "도구 호출" "Tool calls"
+  | Turn_record.Message_tool_result -> say "도구 결과" "Tool results"
+  | Turn_record.Message_image -> say "이미지" "Images"
+  | Turn_record.Message_document -> say "문서" "Documents"
+  | Turn_record.Message_audio -> say "오디오" "Audio"
 
 (* The kind an item is grouped under. Not [exact_input_label]: that names a
    tool schema after its tool, which would put every schema in a group of one
    and hide that the schemas together are the second-largest thing in the
    request. *)
-let exact_input_category = function
-  | System_prompt -> "System prompt"
-  | Message { role } -> "Message · " ^ role
-  | Tool_schema _ -> "Tool schemas"
+let exact_input_category ?(ko = false) = function
+  | System_prompt -> if ko then "시스템 프롬프트" else "System prompt"
+  | Message { role } -> (if ko then "메시지 · " else "Message · ") ^ role
+  | Tool_schema _ -> if ko then "도구 스키마" else "Tool schemas"
 
-let exact_input_label = function
-  | System_prompt -> "System prompt"
-  | Message { role } -> "Message · " ^ role
-  | Tool_schema { name } -> "Tool schema · " ^ name
+let exact_input_label ?(ko = false) = function
+  | System_prompt -> if ko then "시스템 프롬프트" else "System prompt"
+  | Message { role } -> (if ko then "메시지 · " else "Message · ") ^ role
+  | Tool_schema { name } -> (if ko then "도구 스키마 · " else "Tool schema · ") ^ name
 
 let exact_input_items input = input.items
 
@@ -846,19 +850,19 @@ let exact_input_source = function
 let input_sources =
   [ Turn_prompt_assembly; Effective_tool_surface; Provider_message_list ]
 
-let input_source_label = function
-  | Turn_prompt_assembly -> "turn prompt assembly"
-  | Effective_tool_surface -> "effective tool surface"
-  | Provider_message_list -> "provider message list"
+let input_source_label ?(ko = false) = function
+  | Turn_prompt_assembly -> if ko then "프롬프트 조립" else "turn prompt assembly"
+  | Effective_tool_surface -> if ko then "도구 표면" else "effective tool surface"
+  | Provider_message_list -> if ko then "대화 메시지" else "provider message list"
 
-let input_evidence_label = function
-  | Verified_exact_text -> "VERIFIED"
-  | Serialized_turn_snapshot -> "SERIALIZED"
-  | Producer_digest_only -> "DIGEST ONLY"
-  | Byte_count_only -> "BYTES ONLY"
+let input_evidence_label ?(ko = false) = function
+  | Verified_exact_text -> if ko then "원문 검증" else "VERIFIED"
+  | Serialized_turn_snapshot -> if ko then "직렬화 스냅샷" else "SERIALIZED"
+  | Producer_digest_only -> if ko then "다이제스트만" else "DIGEST ONLY"
+  | Byte_count_only -> if ko then "바이트 수만" else "BYTES ONLY"
 
-let input_evidence_badge_cells evidence =
-  String.length (input_evidence_label evidence) + 4
+let input_evidence_badge_cells ?(ko = false) evidence =
+  Masc_tui_message_layout.display_width (input_evidence_label ~ko evidence) + 4
 
 let verified_system_prompt
     (record : Turn_record.t)
@@ -1315,37 +1319,46 @@ let client_context_tokens ~scope ~provenance ~input_tokens ~output_tokens =
   | (Turn_total | Conversation_cumulative | Usage_scope_unavailable), _, _ -> None
 ;;
 
-let provider_usage_summary (usage : Turn_record.usage) =
+let provider_usage_summary ?(ko = false) (usage : Turn_record.usage) =
   (* A count the provider left out is the 6.4 unreported mark of RFC
      tui-one-screen-grammar; the words around it say what kind of count. *)
   let unreported = Masc_tui_value.Unknown.glyph Masc_tui_value.Unknown.Unreported in
   let count = Option.fold ~none:unreported ~some:format_tokens usage.input_tokens in
   match usage.scope, usage.input_provenance with
   | Runtime_usage_scope.Per_request, Some Turn_input_provenance.Context_estimate ->
-      Printf.sprintf "Context estimate · %s tokens; not a dispatched request" count
+      if ko then Printf.sprintf "컨텍스트 추정치 · %s 토큰 (실제 전송 요청 아님)" count
+      else Printf.sprintf "Context estimate · %s tokens; not a dispatched request" count
   | Runtime_usage_scope.Per_request, None ->
-      Printf.sprintf "Input count · %s tokens; provenance not reported, request input not measured" count
+      if ko then Printf.sprintf "입력 수치 · %s 토큰 (출처 미보고 · 요청 입력 미측정)" count
+      else Printf.sprintf "Input count · %s tokens; provenance not reported, request input not measured" count
   | Runtime_usage_scope.Per_request, Some Turn_input_provenance.Measured_request
   | (Runtime_usage_scope.Turn_total | Runtime_usage_scope.Conversation_cumulative
     | Runtime_usage_scope.Usage_scope_unavailable),
     (Some (Turn_input_provenance.Measured_request | Turn_input_provenance.Context_estimate) | None) ->
   let scope =
     match usage.scope with
-    | Runtime_usage_scope.Per_request -> "last reported request in this turn"
-    | Runtime_usage_scope.Turn_total -> "client turn total"
-    | Runtime_usage_scope.Conversation_cumulative -> "conversation cumulative"
-    | Runtime_usage_scope.Usage_scope_unavailable -> "scope not reported"
+    | Runtime_usage_scope.Per_request ->
+        if ko then "이 턴의 마지막 보고 요청" else "last reported request in this turn"
+    | Runtime_usage_scope.Turn_total ->
+        if ko then "클라이언트 턴 총합" else "client turn total"
+    | Runtime_usage_scope.Conversation_cumulative ->
+        if ko then "대화 전체 누적" else "conversation cumulative"
+    | Runtime_usage_scope.Usage_scope_unavailable ->
+        if ko then "범위 미보고" else "scope not reported"
   in
   let read =
+    let prefix = if ko then "캐시 읽기 " else "cache read " in
     match usage.cache_read_input_tokens with
-    | None -> "cache read " ^ unreported
-    | Some n -> "cache read " ^ format_tokens n
+    | None -> prefix ^ unreported
+    | Some n -> prefix ^ format_tokens n
   in
   let ratio =
     match usage.scope, usage.input_tokens, usage.cache_read_input_tokens with
     | Runtime_usage_scope.Per_request, Some input, Some read
       when input > 0 && read >= 0 && read <= input ->
-        Printf.sprintf " (%.1f%% of input)" (float read /. float input *. 100.)
+        Printf.sprintf
+          (if ko then " (입력의 %.1f%%)" else " (%.1f%% of input)")
+          (float read /. float input *. 100.)
     | ( Runtime_usage_scope.Per_request
       | Runtime_usage_scope.Turn_total
       | Runtime_usage_scope.Conversation_cumulative
@@ -1354,14 +1367,18 @@ let provider_usage_summary (usage : Turn_record.usage) =
   let parts =
     List.filter_map
       Fun.id
-      [ Option.map (fun n -> "input " ^ format_tokens n) usage.input_tokens
+      [ Option.map
+          (fun n -> (if ko then "입력 " else "input ") ^ format_tokens n)
+          usage.input_tokens
       ; Some (read ^ ratio)
       ; Option.map
-          (fun n -> "cache created " ^ format_tokens n)
+          (fun n -> (if ko then "캐시 생성 " else "cache created ") ^ format_tokens n)
           usage.cache_creation_input_tokens
       ]
   in
-  Printf.sprintf "Provider usage (%s) · %s" scope (String.concat " · " parts)
+  Printf.sprintf
+    (if ko then "공급자 사용량 (%s) · %s" else "Provider usage (%s) · %s")
+    scope (String.concat " · " parts)
 ;;
 
 (* The part a pane shows. On the request tab: the opened item, or with none

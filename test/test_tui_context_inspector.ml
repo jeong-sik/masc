@@ -1040,6 +1040,28 @@ let test_provider_usage_distinguishes_unreported_cache_from_reported_zero () =
        (fun (c : Runtime_observation.request_cache) -> c.cache_read_input_tokens)
        claude_pos_ctx.cache)
 
+let test_korean_context_labels_and_badge_width () =
+  check string "korean message label" "메시지 · tool"
+    (Inspector.exact_input_label ~ko:true (Inspector.Message { role = "tool" }));
+  check string "korean tool schema label" "도구 스키마 · masc_execute"
+    (Inspector.exact_input_label ~ko:true
+       (Inspector.Tool_schema { name = "masc_execute" }));
+  (* "원문 검증" is 4 CJK chars (8 cells) + 1 ASCII space = 9 cells, plus 4 for "[ " and " ]". *)
+  check int "korean evidence badge counts display cells, not UTF-8 bytes" 13
+    (Inspector.input_evidence_badge_cells ~ko:true Inspector.Verified_exact_text);
+  let measured : Turn_record.usage =
+    { input_tokens = Some 100
+    ; output_tokens = Some 20
+    ; cache_creation_input_tokens = None
+    ; cache_read_input_tokens = Some 50
+    ; scope = Runtime_usage_scope.Per_request
+    ; input_provenance = Some Turn_input_provenance.Measured_request
+    }
+  in
+  check string "korean measured provider usage summary"
+    "공급자 사용량 (이 턴의 마지막 보고 요청) · 입력 100 · 캐시 읽기 50 (입력의 50.0%)"
+    (Inspector.provider_usage_summary ~ko:true measured)
+
 let () =
   run "tui_context_inspector"
     [ ( "decode"
@@ -1098,5 +1120,8 @@ let () =
         ; test_case "provider usage distinguishes unreported cache from reported zero"
             `Quick
             test_provider_usage_distinguishes_unreported_cache_from_reported_zero
+        ; test_case "korean labels and evidence badge display width"
+            `Quick
+            test_korean_context_labels_and_badge_width
         ] )
     ]

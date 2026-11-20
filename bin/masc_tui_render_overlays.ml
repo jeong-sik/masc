@@ -75,7 +75,10 @@ let render_keeper_navigation (state : state) =
 
 let context_split_lines ~cols ~left_width ~left ~right =
   let inner = framed_inner_width cols in
-  let divider = Theme.recede () ^ " │ " ^ Ansi.reset in
+  let divider =
+    let style = Theme.border_muted () in
+    if String.equal style "" then " │ " else style ^ " │ " ^ Ansi.reset
+  in
   let right_width = max 1 (inner - left_width - 3) in
   let count = max (List.length left) (List.length right) in
   List.init count (fun index ->
@@ -185,9 +188,9 @@ let render_context_inspector state =
         (match state.context_inspector_reading, state.context_inspector_read_at with
          | Some _, Some read_at ->
              let ago = Masc_tui_value.Ongoing.since ~now read_at in
-             Ansi.dim
-             ^ (if ko then "  " ^ ago ^ " 전 조회" else "  read " ^ ago ^ " ago")
-             ^ Ansi.reset
+             let text = if ko then "  " ^ ago ^ " 전 조회" else "  read " ^ ago ^ " ago" in
+             let style = Theme.recede () in
+             if String.equal style "" then text else style ^ text ^ Ansi.reset
          | Some _, None | None, (Some _ | None) -> "")
   in
   (* The search query, drawn where the typing lands: the Keepers strip's

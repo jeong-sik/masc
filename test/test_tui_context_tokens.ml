@@ -63,7 +63,13 @@ let test_this_turn_outranks_the_page () =
   let turn = record ~wire:(Some 560_513) ~scope:per_request () in
   let other = record ~tokens:(Some 100_000) ~wire:(Some 300_000) ~scope:per_request () in
   match Masc_tui_token_scale.of_turn ~rows:[ turn; other ] turn with
-  | { Masc_tui_token_scale.basis = This_turn { wire_bytes = 560_513; tokens = 18_000 }; _ } -> ()
+  | { Masc_tui_token_scale.basis = This_turn { wire_bytes = 560_513; tokens = 18_000 }; _ } as scale ->
+      let en_note = Masc_tui_token_scale.note scale in
+      let ko_note = Masc_tui_token_scale.note ~ko:true scale in
+      Alcotest.(check bool) "english note mentions estimate" true
+        (String.starts_with ~prefix:"\xe2\x89\x88 tok is bytes" en_note);
+      Alcotest.(check bool) "korean note localizes basis" true
+        (String.starts_with ~prefix:"\xe2\x89\x88 tok은 이 턴의 공급자 집계 기준" ko_note)
   | { basis = This_turn _ | Keeper_page _ | Fleet_measured _; _ } ->
       Alcotest.fail "the record's own body and count set the scale"
 

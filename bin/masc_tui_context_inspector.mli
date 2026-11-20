@@ -441,13 +441,13 @@ val decode_part : part_key -> Yojson.Safe.t -> (string, string) result
 
 val same_part_key : part_key -> part_key -> bool
 
-val exact_input_category : exact_input_kind -> string
+val exact_input_category : ?ko:bool -> exact_input_kind -> string
 (** The group an item is counted under on the input tab. A tool schema is
     grouped with the other schemas rather than named after its own tool, so
     the summary can say what the schemas cost together. *)
 
-val input_component_label : Turn_record.input_component_id -> string
-val exact_input_label : exact_input_kind -> string
+val input_component_label : ?ko:bool -> Turn_record.input_component_id -> string
+val exact_input_label : ?ko:bool -> exact_input_kind -> string
 val input_source : Turn_record.input_component_id -> input_source
 (** Which producer a component entered the turn by. *)
 
@@ -458,12 +458,11 @@ val exact_input_source : exact_input_kind -> input_source
 val input_sources : input_source list
 (** The three producers in the order a turn assembles them. *)
 
-val input_source_label : input_source -> string
-val input_evidence_label : input_evidence -> string
-val input_evidence_badge_cells : input_evidence -> int
-(** Display cells occupied by ["[ LABEL ]"]. Evidence labels are ASCII, so
-    this is also the byte width; renderers use it before allocating the
-    component-name column. *)
+val input_source_label : ?ko:bool -> input_source -> string
+val input_evidence_label : ?ko:bool -> input_evidence -> string
+val input_evidence_badge_cells : ?ko:bool -> input_evidence -> int
+(** Display cells occupied by ["[ LABEL ]"], measured in Unicode display width;
+    renderers use it before allocating the component-name column. *)
 
 val input_map_rows :
   Turn_record.t ->
@@ -482,7 +481,7 @@ val format_bytes : int -> string
     sizes; [format_bytes] keeps its rounded storage form. *)
 val exact_bytes : int -> string
 val format_tokens : int -> string
-val provider_usage_summary : Turn_record.usage -> string
+val provider_usage_summary : ?ko:bool -> Turn_record.usage -> string
 (** Format the exact-input header's usage observation. A per-request count
     is provider usage only with explicit [Measured_request] provenance;
     estimates and unknown provenance instead name their non-measurement.

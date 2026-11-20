@@ -202,8 +202,9 @@ let candidate_lines ~ko ~runtime_details ~prose ~fact ~detail ~safe ~safe_detail
     | Some _ when candidate.place.walks_at > 0 -> []
     | Some slots ->
         let row index label bytes detail =
+          let tok_cell = Masc_tui_message_layout.pad_left (approx bytes) 8 in
           fact
-            (Printf.sprintf "%d  %s %8s tok%s" (index + 1) (pad_label ~cells:16 label) (approx bytes)
+            (Printf.sprintf "%d  %s %s tok%s" (index + 1) (pad_label ~cells:16 label) tok_cell
                (if String.equal detail "" then "" else "  \xc2\xb7  " ^ detail))
         in
         prose (say "요청에 실리는 순서:" "In the order the request carries them:")

@@ -217,16 +217,12 @@ let carried_model_input_projection ~input_source
 let codex_dynamic_tool ~observe_effect_attempted ~observe_successful_tool_completion
     (tool : Host.dynamic_tool) :
     Runtime_codex_app_server.dynamic_tool =
+  let tool =
+    Keeper_official_client_attempt.fence_effect_capable_call ~observe_effect_attempted tool
+  in
   { tool with
     call =
       (fun ~call_id input ->
-        (* Close the outer same-turn retry boundary before entering user/tool
-           code. The handler may commit and then raise or be cancelled, so
-           observing only its returned value would reopen a duplicate-effect
-           window. *)
-        (match tool.call_effect input with
-         | Agent_core.Tool.Read_only -> ()
-         | Agent_core.Tool.Effect_possible -> observe_effect_attempted ());
         let result = tool.call ~call_id input in
         (* This is evidence that the handler returned a successful tool result,
            which is sufficient to accept a tool-only provider terminal. It is

@@ -141,20 +141,6 @@ let tool_result (result : Host.dynamic_tool_result) =
   }
 ;;
 
-let antigravity_dynamic_tool ~observe_effect_attempted (tool : Host.dynamic_tool) =
-  { tool with
-    call =
-      (fun ~call_id input ->
-        (* Close the outer same-turn retry boundary before entering user/tool
-           code. The handler may commit and then raise or be cancelled, so
-           observing only its returned value would reopen a duplicate-effect
-           window. Process spawn and provider generation alone do not produce
-           a MASC product effect. *)
-        observe_effect_attempted ();
-        tool.call ~call_id input)
-  }
-;;
-
 let find_tool tools name =
   List.find_opt (fun (tool : Host.dynamic_tool) -> String.equal tool.name name) tools
 ;;
@@ -859,7 +845,9 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     in
     let natural_completion = ref false in
     let dynamic_tools =
-      List.map (antigravity_dynamic_tool ~observe_effect_attempted) dynamic_tools
+      List.map
+        (Keeper_official_client_attempt.fence_effect_capable_call ~observe_effect_attempted)
+        dynamic_tools
     in
     let* claimed_session =
       match

@@ -772,22 +772,9 @@ let resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id 
         }) -> ()
 ;;
 
-(* The client reaches MASC tools through this handler, so entering it for an
-   input its producer declares [Effect_possible] is the observed fact that an
-   effect was attempted. A [Read_only] input cannot mutate the work, so it
-   leaves the disposition alone, as the Codex and Muse lanes do. Record it
-   before the call: the handler may commit and then raise or be cancelled, and
-   observing only its return would reopen a duplicate-effect window. *)
-let recording_effect_attempt ~effect_cell (tool : Host.dynamic_tool) =
-  { tool with
-    Host.call =
-      (fun ~call_id input ->
-        (match tool.call_effect input with
-         | Agent_core.Tool.Read_only -> ()
-         | Agent_core.Tool.Effect_possible ->
-           Effect_cell.attempted effect_cell);
-        tool.call ~call_id input)
-  }
+let recording_effect_attempt ~effect_cell =
+  Keeper_official_client_attempt.fence_effect_capable_call
+    ~observe_effect_attempted:(fun () -> Effect_cell.attempted effect_cell)
 ;;
 
 (* RFC-0390 under [none] and [read]: the CLI may run only the built-ins its

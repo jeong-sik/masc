@@ -1,8 +1,7 @@
-(** Wire-shape assertions for [error_body] — the RFC-0098 SSOT.
+(** Wire-shape assertions for [error_body] — the error-envelope SSOT.
 
     The tests pin the standalone JSON-RPC error-body contract and the
-    JSON-RPC 2.0 §5.1 [["id": null]] compliance fix introduced in
-    PR-2. *)
+    JSON-RPC 2.0 §5.1 [["id": null]] default. *)
 
 open Alcotest
 module R = Server_mcp_transport_http_respond

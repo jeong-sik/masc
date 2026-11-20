@@ -1,6 +1,6 @@
-(* RFC play-link-for-the-shared-machine §2.5 through the real router: a
-   person's press, type, step and pass reach the same DOS tools a Keeper
-   calls, under the credential's name, and wait for their turn like one. *)
+(* Through the real router: a person's press, type, step and pass reach the
+   same DOS tools a Keeper calls, under the credential's name, and wait for
+   their turn like one. *)
 
 open Alcotest
 

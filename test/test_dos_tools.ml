@@ -1391,9 +1391,9 @@ let keeper_pass ~base_path who target =
   keeper_call ~base_path who "masc_dos_pass" (`Assoc ["to", `String target])
 ;;
 
-(* RFC play-link-for-the-shared-machine §2.8 on a Keeper's own call: a pass
-   goes only to someone at the machine. A name nobody sits under would leave
-   the controller with no one who can move the machine. *)
+(* On a Keeper's own call, a pass goes only to someone at the machine. A name
+   nobody sits under would leave the controller with no one who can move the
+   machine. *)
 let test_a_keeper_passes_only_to_someone_at_the_machine () =
   with_attached_workspace (fun base_path ->
     install_program ~base_path "hello.com" hello_com;

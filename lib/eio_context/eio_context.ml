@@ -50,12 +50,11 @@ let current_env : Eio_unix.Stdenv.base option Atomic.t = Atomic.make None
 let net_initialized : bool Atomic.t = Atomic.make false
 let with_test_env_lock = Eio.Mutex.create ()
 
-(* RFC-0107 §3.3 / audit §10.5 — fiber-local turn switch.
-   Phase C.1 wiring: [keeper_agent_run.run_turn] wraps its body with
-   [with_turn_switch turn_sw]; reads of [get_switch_opt] from within
+(* Fiber-local turn switch. [keeper_agent_run.run_turn] wraps its body
+   with [with_turn_switch turn_sw]; reads of [get_switch_opt] from within
    that scope (and forked children) return turn_sw, while reads from
-   outside (server/dashboard fibers — see audit §2.1, §10.2) fall
-   through to the global atomic [current_sw] = server root_sw.
+   outside (server/dashboard fibers) fall through to the global atomic
+   [current_sw] = server root_sw.
 
    Created once at module init via [Eio.Fiber.create_key]; the key
    identity is what [with_binding] / [get] use to look up the value. *)
@@ -249,9 +248,9 @@ let set_env env =
 let get_env_opt () : Eio_unix.Stdenv.base option =
   Atomic.get current_env
 
-(* RFC-0107 §3.3 wiring — bind a turn-scoped switch on the *current fiber*
-   (and all children forked inside [f]). On exit the binding is removed,
-   so subsequent fibers in the parent see the previous binding (or [None]).
+(* Bind a turn-scoped switch on the *current fiber* (and all children
+   forked inside [f]). On exit the binding is removed, so subsequent
+   fibers in the parent see the previous binding (or [None]).
 
    Distinct from [set_switch] which writes the global atomic: this one is
    fiber-local and *propagates with fork* (Eio.Fiber.with_binding contract),
@@ -285,13 +284,13 @@ let get_clock_opt () =
   Atomic.get current_clock
 
 let get_switch_opt () =
-  (* RFC-0107 §3.3 / audit §10.5 — fiber-local first, then atomic fallback.
+  (* Fiber-local first, then atomic fallback.
 
      - Inside [with_turn_switch] (keeper_agent_run.run_turn body): returns
        the turn_sw → resources opened during the turn attach to turn_sw
        and are released when the turn ends.
-     - Outside any binding (server/dashboard fibers, bootstrap path —
-       audit §10.2, §10.6): returns the global atomic = server root_sw
+     - Outside any binding (server/dashboard fibers, bootstrap path):
+       returns the global atomic = server root_sw
        → long-lived resources (gRPC heartbeat, dashboard fibers) survive
        turn boundaries as intended.
 

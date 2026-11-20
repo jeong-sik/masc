@@ -106,8 +106,8 @@ sweep may collect payloads no other journal names. Preserve the old journal,
 sidecars and dependent session/checkpoint evidence together before choosing
 fresh state; payloads left on disk do not restore the removed ownership or
 authorize continuation. A separate fresh base path keeps the old workspace
-and its ownership records intact. See the
-[#50583 fresh-state entry](../../changelog.d/50583.md) for this format change.
+and its ownership records intact. The #53680 **Fresh state required** entry
+in `CHANGELOG.md` or `changelog.d/` describes this format change.
 
 ### Keeper turn records
 

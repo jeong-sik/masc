@@ -55,10 +55,9 @@ export function DialogOverlay({
     initialFocus: () => initialFocusRef?.current ?? panelRef.current,
   })
 
-  // Scroll lock + ESC-to-close are out of scope for FocusScope (RFC 0001
-  // §"out of scope" — only focus management). Kept inline in the
-  // consumer so each dialog can opt in/out of body-overflow behavior
-  // independently in the future.
+  // Scroll lock + ESC-to-close are out of scope for FocusScope (it only
+  // manages focus). Kept inline in the consumer so each dialog can opt
+  // in/out of body-overflow behavior independently in the future.
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
     document.body.style.overflow = 'hidden'

@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 //
 // jest-axe coverage for the cmdk palette dialog. The palette is first-party
-// markup now (prototype palette.jsx DOM), so the dialog itself — not a web
-// component wrapper — is what must axe-clean.
+// markup now, so the dialog itself — not a web component wrapper — is what
+// must axe-clean.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'

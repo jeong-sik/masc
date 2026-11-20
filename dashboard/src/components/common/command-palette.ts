@@ -1,7 +1,7 @@
-// MASC v2 — command palette (⌘K), rebuilt on the design's cmdk-* markup
-// (prototype palette.jsx). The cmdk-* classes it emits are styled by the
-// loaded v2 stylesheets; the vendored ds-dashboard-kit sheet that once
-// carried them was never imported and has been removed.
+// MASC v2 — command palette (⌘K) on cmdk-* markup. The cmdk-* classes it
+// emits are styled by the loaded v2 stylesheets; the vendored
+// ds-dashboard-kit sheet that once carried them was never imported and has
+// been removed.
 //
 // With a query the palette merges the deep index — goals, tasks, Gate
 // approvals, fusion runs, board posts, connectors — over the live signals
@@ -207,7 +207,7 @@ export function CommandPalette({ openOnMount = false }: CommandPaletteProps = {}
     return cmds
   })
 
-  // deep index — 쿼리가 있을 때만 base 에 합쳐 보인다 (prototype palette.jsx).
+  // deep index — 쿼리가 있을 때만 base 에 합쳐 보인다.
   const deep = useComputed<PaletteEntry[]>(() => {
     const cmds: PaletteEntry[] = []
 

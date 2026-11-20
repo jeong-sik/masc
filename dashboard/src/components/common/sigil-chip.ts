@@ -1,9 +1,8 @@
 // Sigil / SigilChip — keeper identity monogram primitive.
 //
-// Ported from keeper-v2 primitives.jsx. Slot colors are resolved through
-// the --kp1..--kp12 bridge aliases defined in variables.css, so the
-// component stays visually compatible with the source while using the
-// dashboard's generated keeper palette.
+// Slot colors are resolved through the --kp1..--kp12 bridge aliases
+// defined in variables.css, which map onto the dashboard's generated
+// keeper palette.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren, JSX, VNode } from 'preact'

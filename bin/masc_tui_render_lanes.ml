@@ -103,9 +103,9 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
   | Tui_decode.Lane_off, _ | _, Tui_decode.Standalone_off ->
     if lane.sl_running_count > 0 then
       Printf.sprintf
-        (if ko then "꺼짐 (진행 중 %d건 마무리 중) · %s"
-         else "Off (%d running, finishing) · %s")
-        lane.sl_running_count last_run
+        (if ko then "꺼짐 (진행 중 %s건 마무리 중) · %s"
+         else "Off (%s running, finishing) · %s")
+        (Masc_tui_value.Count.grouped lane.sl_running_count) last_run
     else
       Printf.sprintf
         (if ko then "꺼짐 (신규 실행 중지) · %s" else "Off (no new runs) · %s")
@@ -117,13 +117,13 @@ let standalone_lane_headline_state ~ko ~now (lane : Tui_decode.standalone_lane) 
       match lane.sl_last_started_at with
       | Some started ->
         Printf.sprintf
-          (if ko then "%d건 진행 중 (최근 %s 전 시작)"
-           else "%d running (latest started %s ago)")
-          lane.sl_running_count
+          (if ko then "%s건 진행 중 (최근 %s 전 시작)"
+           else "%s running (latest started %s ago)")
+          (Masc_tui_value.Count.grouped lane.sl_running_count)
           (Masc_tui_value.Ongoing.since ~now started)
       | None ->
-        Printf.sprintf (if ko then "%d건 진행 중" else "%d running")
-          lane.sl_running_count
+        Printf.sprintf (if ko then "%s건 진행 중" else "%s running")
+          (Masc_tui_value.Count.grouped lane.sl_running_count)
     in
     Printf.sprintf (if ko then "실행 중 · %s · %s" else "Running · %s · %s")
       started_note last_run
@@ -142,10 +142,10 @@ let standalone_lane_run_score_summary ~ko (lane : Tui_decode.standalone_lane) =
       float_of_int lane.sl_succeeded_count /. float_of_int total *. 100.0
     in
     Printf.sprintf
-      (if ko then "%.1f%% 성공 (%d성공 / %d실패 / %d취소 · 총 %d건)"
-       else "%.1f%% succeeded (%d succeeded / %d failed / %d cancelled · %d in all)")
-      rate lane.sl_succeeded_count lane.sl_failed_count
-      lane.sl_cancelled_count total
+      (if ko then "%.1f%% 성공 (%s성공 / %s실패 / %s취소 · 총 %s건)"
+       else "%.1f%% succeeded (%s succeeded / %s failed / %s cancelled · %s in all)")
+      rate (Masc_tui_value.Count.grouped lane.sl_succeeded_count) (Masc_tui_value.Count.grouped lane.sl_failed_count)
+      (Masc_tui_value.Count.grouped lane.sl_cancelled_count) (Masc_tui_value.Count.grouped total)
   else if ko then "집계된 실행 기록 없음"
   else "no run counted"
 
@@ -220,7 +220,7 @@ let standalone_lane_summary_lines state ~width ~standing
     | Lane_unconfigured -> text "실행 후보 미설정" "No candidates configured"
     | Lane_registry_unavailable -> text "레지스트리 조회 실패" "Registry unreadable" in
   let current = if lane.sl_running_count = 0 then text "보고된 실행 없음" "No runs reported"
-    else Printf.sprintf (if state.ui_language = Lang_ko then "%d건 실행 관측" else "%d runs observed") lane.sl_running_count in
+    else Printf.sprintf (if state.ui_language = Lang_ko then "%s건 실행 관측" else "%s runs observed") (Masc_tui_value.Count.grouped lane.sl_running_count) in
   let notices = Option.to_list (Option.map (fun error -> Theme.bad (),
       text "실행 준비 오류 · " "Admission error · " ^ error) lane.sl_admission_error) in
   let fields =
@@ -308,7 +308,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
         let current = match live with
           | [] -> text "현재 서버 워커 기록 없음" "No current-server worker record"
           | items ->
-              Printf.sprintf (if state.ui_language = Lang_ko then "현재 서버 기록 %d개" else "%d current-server records") (List.length items)
+              Printf.sprintf (if state.ui_language = Lang_ko then "현재 서버 기록 %s개" else "%s current-server records") (Masc_tui_value.Count.grouped (List.length items))
               ^ " · " ^ String.concat ", " (List.map (fun (item : instance) -> phase_label item.phase) items) in
         let failures = List.filter_map (fun (item : instance) ->
           let prefix = match item.presence with Live -> text "현재 워커 실패 · " "Current worker failed · " | Retained -> text "보존 워커 실패 · " "Retained worker failed · " in
@@ -342,19 +342,19 @@ let standalone_lane_without_slot_rows ~ko (lane : Tui_decode.standalone_lane) =
   let without = lane.sl_runs_without_slot in
   let counted label count =
     if count <= 0 then []
-    else [ Printf.sprintf (if ko then "• %s: %d건" else "• %s: %d") label count ]
+    else [ Printf.sprintf (if ko then "• %s: %s건" else "• %s: %s") label (Masc_tui_value.Count.grouped count) ]
   in
   let gap =
     match standalone_lane_slot_history_gap lane with
     | 0 -> []
     | gap when gap > 0 ->
       [ Printf.sprintf
-          (if ko then "• 슬롯 집계 누락: %d건" else "• missing from the slot count: %d")
-          gap ]
+          (if ko then "• 슬롯 집계 누락: %s건" else "• missing from the slot count: %s")
+          (Masc_tui_value.Count.grouped gap) ]
     | gap ->
       [ Printf.sprintf
-          (if ko then "• 슬롯 집계 초과: %d건" else "• over the slot count: %d")
-          (-gap) ]
+          (if ko then "• 슬롯 집계 초과: %s건" else "• over the slot count: %s")
+          (Masc_tui_value.Count.grouped (-gap)) ]
   in
   counted
     (t "Vendor System One (외부 직접 응답)" "Vendor System One (direct external answer)")
@@ -432,8 +432,8 @@ let standalone_lane_detail_lines ~ko ~now ~width (lane : Tui_decode.standalone_l
                   else float_of_int sc.slsc_count /. float_of_int total_hits *. 100.
                 in
                 let count_text =
-                  if ko then Printf.sprintf "%d회 (%.0f%%)" sc.slsc_count pct
-                  else Printf.sprintf "%d (%.0f%%)" sc.slsc_count pct
+                  if ko then Printf.sprintf "%s회 (%.0f%%)" (Masc_tui_value.Count.grouped sc.slsc_count) pct
+                  else Printf.sprintf "%s (%.0f%%)" (Masc_tui_value.Count.grouped sc.slsc_count) pct
                 in
                 ( ""
                 , Printf.sprintf "%s%s  %s  %s"
@@ -447,8 +447,8 @@ let standalone_lane_detail_lines ~ko ~now ~width (lane : Tui_decode.standalone_l
               (List.map
                  (fun (sc : Tui_decode.standalone_lane_slot_count) ->
                    Page_line.note
-                     (Printf.sprintf (if ko then "• %s: %d회" else "• %s: %d")
-                        (Terminal_text.single_line sc.slsc_slot_id) sc.slsc_count))
+                     (Printf.sprintf (if ko then "• %s: %s회" else "• %s: %s")
+                        (Terminal_text.single_line sc.slsc_slot_id) (Masc_tui_value.Count.grouped sc.slsc_count)))
                  slots)
         in
         let without_rendered =
@@ -1752,8 +1752,8 @@ let lane_run_tool_summary ~ko = function
       |> String.concat "  ·  "
     in
     let call_count =
-      if ko then Printf.sprintf "%d회 호출" calls
-      else Printf.sprintf "%d %s" calls (if calls = 1 then "call" else "calls")
+      if ko then Printf.sprintf "%s회 호출" (Masc_tui_value.Count.grouped calls)
+      else Printf.sprintf "%s %s" (Masc_tui_value.Count.grouped calls) (if calls = 1 then "call" else "calls")
     in
     let overview =
       if String.equal counts "" then call_count else counts ^ "  ──  " ^ call_count
@@ -1946,9 +1946,9 @@ let lane_run_panel_titles ~ko (detail : Tui_decode.lane_run_detail) =
   | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
     Tui_decode.Lane_run_tools_observed tools ->
     ( t "입력 · 검증 요청" "Input · Verification request"
-    , if ko then Printf.sprintf "출력 · 판정 + 도구 증거 (%d회 호출)" (List.length tools)
-      else Printf.sprintf "Output · Verdict + tool evidence (%d %s)"
-        (List.length tools)
+    , if ko then Printf.sprintf "출력 · 판정 + 도구 증거 (%s회 호출)" (Masc_tui_value.Count.grouped (List.length tools))
+      else Printf.sprintf "Output · Verdict + tool evidence (%s %s)"
+        (Masc_tui_value.Count.grouped (List.length tools))
         (if List.length tools = 1 then "call" else "calls") )
   | (Tui_decode.Lane_run_task_verification | Tui_decode.Lane_run_goal_verification),
     (Tui_decode.Lane_run_tools_pending | Tui_decode.Lane_run_no_tools_by_contract

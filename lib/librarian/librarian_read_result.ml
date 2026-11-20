@@ -41,5 +41,6 @@ type t =
       { expected : Digest.digest
       ; observed : Digest.digest
       }
+  | Snapshot_fault of Librarian_snapshot_fault.t
   | Input_fault of Librarian_unit.input_fault
   | Ask_failed of failed

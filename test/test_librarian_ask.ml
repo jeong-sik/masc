@@ -301,6 +301,12 @@ let failed_text : Read_result.failed -> string = function
 
 let hex (digest : Digest.digest) = (digest :> string)
 
+let fault_text : Librarian_snapshot_fault.t -> string = function
+  | Absent -> "absent"
+  | Not_a_snapshot_file -> "not a snapshot file"
+  | Not_read -> "not read"
+;;
+
 let result_text : Read_result.t -> string = function
   | Answered { slot; answer; question = _ } ->
     Printf.sprintf "answered by %s with %d ops" slot (List.length answer.ops)
@@ -315,6 +321,7 @@ let result_text : Read_result.t -> string = function
   | Span_unknown _ -> "span unknown"
   | Memory_diverged { expected; observed } ->
     Printf.sprintf "memory diverged: the log names %s, the file is %s" (hex expected) (hex observed)
+  | Snapshot_fault fault -> "snapshot fault: " ^ fault_text fault
   | Input_fault _ -> "input fault"
   | Ask_failed failed -> "ask failed: " ^ failed_text failed
 ;;
@@ -322,7 +329,7 @@ let result_text : Read_result.t -> string = function
 let question_of : Read_result.t -> Read_result.question = function
   | Answered { question; _ } -> question
   | ( Nothing_to_ask | No_answer _ | Nothing_readable _ | Span_unknown _ | Memory_diverged _
-    | Input_fault _ | Ask_failed _ ) as result ->
+    | Snapshot_fault _ | Input_fault _ | Ask_failed _ ) as result ->
     failf "no question was answered: %s" (result_text result)
 ;;
 
@@ -386,6 +393,26 @@ let test_other_bytes_end_the_ask_before_a_call () =
     (Printf.sprintf "memory diverged: the log names %s, the file is %s" (hex named)
        (hex (Digest.digest_of_bytes other)))
     (result_text (Ask.run fixture.env (input fixture (tail_of state))));
+  check int "no request" 0 (Fixture.post_count fixture.server)
+;;
+
+(* A snapshot the store would not open ends the ask with the store's fault
+   and before a call. The writer stops for it as boot does (§8.6); it does
+   not rest and ask again on every pulse. *)
+let test_a_snapshot_the_store_would_not_open () =
+  with_fixture echo
+  @@ fun fixture ->
+  let state = boot fixture in
+  let path = snapshot_path fixture.place in
+  let ask () = result_text (Ask.run fixture.env (input fixture (tail_of state))) in
+  Sys.remove path;
+  check string "no file" "snapshot fault: absent" (ask ());
+  Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "{");
+  check string "bytes that do not decode" "snapshot fault: not a snapshot file" (ask ());
+  Sys.remove path;
+  Sys.mkdir path 0o700;
+  check string "a directory" "snapshot fault: not a snapshot file" (ask ());
+  Sys.rmdir path;
   check int "no request" 0 (Fixture.post_count fixture.server)
 ;;
 
@@ -491,6 +518,8 @@ let () =
         ] )
     ; ( "memory"
       , [ test_case "other bytes end the ask before a call" `Quick test_other_bytes_end_the_ask_before_a_call
+        ; test_case "a snapshot the store would not open" `Quick
+            test_a_snapshot_the_store_would_not_open
         ; test_case "a direct write during the read is read again" `Quick
             test_a_direct_write_during_the_read_is_read_again
         ] )

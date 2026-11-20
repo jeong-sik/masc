@@ -45,30 +45,16 @@ let same_line a b =
 
 let not_open = Failed (Flow_stopped, "the writer is no longer open")
 
-(* The digest is of the bytes the file holds, as the store reads it, and it
-   is compared before the bytes are decoded. *)
-let memory_of_bytes tail read =
-  match read with
-  | Error error ->
-    Error (Failed (Read_failed, "snapshot: " ^ Fs_compat.regular_file_read_error_to_string error))
-  | Ok None -> Error (Failed (Read_failed, "snapshot: no file"))
-  | Ok (Some bytes) ->
+(* The file is read as the store reads it at boot. A file the store does not
+   open ends the ask with the fault, and the writer stops for it as the store
+   does; a snapshot whose bytes are not the ones the tail names diverged. *)
+let memory_of_snapshot tail = function
+  | Error fault -> Error (Ended (Snapshot_fault fault))
+  | Ok (memory, observed) ->
     let expected = named tail in
-    let observed = Digest.digest_of_bytes bytes in
-    if not (same_digest expected observed)
-    then Error (Ended (Memory_diverged { expected; observed }))
-    else (
-      match Yojson.Safe.from_string bytes with
-      | exception Yojson.Json_error detail -> Error (Failed (Read_failed, "snapshot: " ^ detail))
-      | json ->
-        (match Keeper_memory_os_snapshot_codec.of_json json with
-         | Error rejection ->
-           Error
-             (Failed
-                ( Read_failed
-                , "snapshot: " ^ Keeper_memory_os_snapshot_codec.snapshot_rejection_to_string rejection
-                ))
-         | Ok memory -> Ok (tail, memory)))
+    if same_digest expected observed
+    then Ok (tail, memory)
+    else Error (Ended (Memory_diverged { expected; observed }))
 ;;
 
 (* The tail is read on both sides of the bytes. A direct write that commits
@@ -78,11 +64,11 @@ let rec read_memory input ~snapshot_path =
   match input.tail () with
   | None -> Error not_open
   | Some tail ->
-    let read = Fs_compat.load_regular_file_opt snapshot_path in
+    let read = Librarian_store.read_snapshot snapshot_path in
     (match input.tail () with
      | None -> Error not_open
      | Some again when not (same_line tail again) -> read_memory input ~snapshot_path
-     | Some (_ : Librarian_log.line) -> memory_of_bytes tail read)
+     | Some (_ : Librarian_log.line) -> memory_of_snapshot tail read)
 ;;
 
 (* --- The units and the question (§7.1 step 3) --- *)
